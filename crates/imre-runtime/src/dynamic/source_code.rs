@@ -16,6 +16,7 @@ pub(super) struct Program {
     pub filename: Rc<str>,
     pub name: String,
     qualname: String,
+    nested_global: bool,
     class_attributes: Option<BTreeSet<String>>,
     class_cell: bool,
     class_nonlocal: bool,
@@ -163,7 +164,7 @@ struct Definition {
 }
 
 enum DefinitionKind {
-    TypeAlias,
+    TypeAlias(Vec<String>),
     Function(Box<ast::Parameters>),
     Class(Option<Box<ast::Arguments>>),
 }
@@ -351,16 +352,16 @@ impl NamedBindings {
                     "assignment expression within a comprehension cannot be used in a class body",
                 ));
             }
-            if let Some((kind, directive)) = program.directives.get(&name) {
-                if offset < *directive {
-                    return Err(Error::new(
-                        "SyntaxError",
-                        format!(
-                            "name '{name}' is assigned to before {} declaration",
-                            kind.keyword()
-                        ),
-                    ));
-                }
+            if let Some((kind, directive)) = program.directives.get(&name)
+                && offset < *directive
+            {
+                return Err(Error::new(
+                    "SyntaxError",
+                    format!(
+                        "name '{name}' is assigned to before {} declaration",
+                        kind.keyword()
+                    ),
+                ));
             }
             if name == "__debug__" {
                 return Err(Error::new("SyntaxError", "cannot assign to __debug__"));
@@ -1138,7 +1139,7 @@ impl Program {
                             strings.visit_parameters(parameters)
                         }
                         DefinitionKind::Class(Some(args)) => strings.visit_arguments(args),
-                        DefinitionKind::Class(None) | DefinitionKind::TypeAlias => {}
+                        DefinitionKind::Class(None) | DefinitionKind::TypeAlias(_) => {}
                     }
                 }
                 Instruction::ClassStart
@@ -1438,6 +1439,7 @@ impl Program {
             filename,
             name: name.to_owned(),
             qualname: name.to_owned(),
+            nested_global: false,
             class_attributes: None,
             class_cell: false,
             class_nonlocal: false,
@@ -1514,8 +1516,15 @@ impl Program {
             .as_ref()
             .map_or(name.as_str(), |p| p.definition(name));
         let mut child = self.nested_program(original);
-        child.qualname =
-            Self::qualified_name(&self.qualname, self.class_attributes.is_some(), original);
+        child.nested_global = self.name != "<module>"
+            && matches!(
+                self.directives.get(name.as_str()),
+                Some((ScopeDirective::Global, _))
+            );
+        if !child.nested_global {
+            child.qualname =
+                Self::qualified_name(&self.qualname, self.class_attributes.is_some(), original);
+        }
         child.method_imports = self.method_imports.clone();
         child.private_names = self.private_names.clone();
         child.template_expressions = self.template_expressions.clone();
@@ -1744,9 +1753,21 @@ impl Program {
                     }
                     Instruction::From(module.to_owned(), s.level, names)
                 }
-                Stmt::TypeAlias(s)
-                    if !function && self.class_attributes.is_none() && s.type_params.is_none() =>
-                {
+                Stmt::TypeAlias(s) if !function && self.class_attributes.is_none() => {
+                    let mut parameters = Vec::new();
+                    if let Some(params) = s.type_params {
+                        for param in &*params {
+                            let ast::TypeParam::TypeVar(var) = param else {
+                                return Err(unsupported("variadic type alias parameters"));
+                            };
+                            if var.bound.is_some() || var.default.is_some() {
+                                return Err(unsupported(
+                                    "type alias parameter bounds and defaults",
+                                ));
+                            }
+                            parameters.push(var.name.to_string());
+                        }
+                    }
                     let ast::Expr::Name(name) = *s.name else {
                         return Err(unsupported("type alias target"));
                     };
@@ -1766,7 +1787,7 @@ impl Program {
                         binding: name.to_string(),
                         decorators: Vec::new(),
                         body: Rc::new(child),
-                        kind: DefinitionKind::TypeAlias,
+                        kind: DefinitionKind::TypeAlias(parameters),
                         annotate: None,
                     })
                 }
@@ -2549,7 +2570,7 @@ impl Context {
             doc,
             filename,
             first_line: program.first_line,
-            module_definition: program.name == program.qualname,
+            module_definition: !program.nested_global && program.name == program.qualname,
             coroutine: program.kind == FunctionKind::Coroutine,
             body: Body::Source(program),
             flags: None,
@@ -4288,9 +4309,29 @@ impl Context {
         }
         let child = &definition.body;
         let defaults = self.dict(vec![]);
+        let frame = self.scope_data(scope);
+        let mut defining_scope = if frame.exec_locals.is_some() {
+            frame.parent.expect("exec locals have a global frame")
+        } else {
+            scope
+        };
+        let mut alias_parameters = NONE;
         let mut bases = None;
         let sig = match &definition.kind {
-            DefinitionKind::TypeAlias => {
+            DefinitionKind::TypeAlias(names) => {
+                if !names.is_empty() {
+                    let entries = names
+                        .iter()
+                        .map(|name| {
+                            let id = self.heap.code_name(name);
+                            (id, id)
+                        })
+                        .collect();
+                    let names = self.dict(entries);
+                    defining_scope =
+                        super::typing::parameter_scope(self, defining_scope, names, false)?;
+                    alias_parameters = self.lookup(defining_scope, ".type_params")?;
+                }
                 let format = self.text(".format");
                 let value_format = self.int(1);
                 self.put_item(defaults, format, value_format)?;
@@ -4356,8 +4397,9 @@ impl Context {
             *existing
         } else {
             let parameters = self.text(sig.to_string());
-            let freevars = if (code.name != "<module>"
-                || self.scope_data(scope).comprehension.is_some())
+            let freevars = if alias_parameters != NONE {
+                self.enclosing_freevars(defining_scope, child.reads.iter().map(String::as_str))
+            } else if (code.name != "<module>" || self.scope_data(scope).comprehension.is_some())
                 && child.class_attributes.is_none()
                 && !child.class_cell
             {
@@ -4387,16 +4429,10 @@ impl Context {
             parent.nested.push((site, id));
             id
         };
-        let frame = self.scope_data(scope);
-        let defining_scope = if frame.exec_locals.is_some() {
-            frame.parent.expect("exec locals have a global frame")
-        } else {
-            scope
-        };
         let mut value = self.source_function(code, defining_scope, defaults);
-        if matches!(definition.kind, DefinitionKind::TypeAlias) {
+        if matches!(definition.kind, DefinitionKind::TypeAlias(_)) {
             let name = self.code_object(code).name;
-            return self.op("type_alias", name, value, NONE);
+            return self.op("type_alias", name, value, alias_parameters);
         }
         if let Some(provider) = &definition.annotate {
             let annotate = self.source_annotator(provider, code, defining_scope)?;

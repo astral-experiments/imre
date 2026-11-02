@@ -1299,6 +1299,12 @@ impl Context {
         let class = match self.heap.get(id) {
             Value::Instance { class, .. } => *class,
             Value::Raised(error) => error.class()?,
+            value
+                if name == "__repr__"
+                    && value.native_io_class_name() == Some("_io.BufferedReader") =>
+            {
+                *self.builtins.get("_io.BufferedReader")?
+            }
             _ => return None,
         };
         self.class_attr(class, name).map(|slot| (class, slot))
@@ -1414,8 +1420,7 @@ impl Context {
         sequence_words: Option<usize>,
     ) -> Result<Option<String>> {
         let calendar_repr = matches!(lookup, FormatLookup::Repr)
-            && matches!(self.heap.get(id), Value::Calendar { .. })
-            && super::stdlib::datetime::render::custom_zone(self, id).is_some();
+            && super::stdlib::datetime::render::python_repr(self, id);
         if !matches!(lookup, FormatLookup::MethodName)
             && !calendar_repr
             && self.format_slot(id, "__repr__").is_none()
@@ -1967,6 +1972,10 @@ impl Context {
                         ));
                     }
                     match ctx.heap.get(storage) {
+                        Value::RegexMatch(m) => {
+                            append_rendered_text(&mut output, &m.repr(&ctx)?)?;
+                            continue;
+                        }
                         Value::Method {
                             callable,
                             receiver,
@@ -2041,12 +2050,17 @@ impl Context {
                             work.try_reserve(args.len().saturating_mul(2).saturating_add(6))
                                 .map_err(render_allocation)?;
                             work.push(Part::TypeEnd(id, "]", python));
-                            let callable =
-                                matches!(alias.kind, AliasKind::Callable | AliasKind::AbcCallable)
-                                    && args.first().is_some_and(|&arg| {
-                                        !matches!(ctx.heap.get(arg), Value::Ellipsis)
-                                    });
+                            let callable = matches!(
+                                alias.kind,
+                                AliasKind::Callable | AliasKind::AbcCallable
+                            ) && !matches!(args.as_slice(), [arg, _] if typing::is_param_expr(&ctx, *arg));
                             if args.is_empty() {
+                                if callable {
+                                    return Err(Error::new(
+                                        "IndexError",
+                                        "tuple index out of range",
+                                    ));
+                                }
                                 work.push(Part::Text("()"));
                             }
                             for (index, &arg) in args.iter().enumerate().rev() {
@@ -2070,6 +2084,9 @@ impl Context {
                                     AliasKind::Literal(_) => Part::Text("typing.Literal"),
                                     _ => Part::TypeArgument(alias.origin, false),
                                 });
+                            }
+                            if alias.unpacked {
+                                work.push(Part::Text("*"));
                             }
                             continue;
                         }
@@ -2628,6 +2645,9 @@ impl Context {
             Value::SurrogateStr(points) => surrogate_repr(points),
             Value::Str(s) if repr => crate::objects::exceptions::string_repr(s).into_string(),
             Value::Str(s) => s.clone(),
+            Value::Instance { class, .. } if let Some(name) = self.heap.get(*class).hash_type() => {
+                format!("<{name} object at {id:#x}>")
+            }
             Value::Instance {
                 scalar: Some(payload),
                 ..
@@ -2761,6 +2781,16 @@ impl Context {
                 && let Some((_, leaf)) = symbol.rsplit_once('.') =>
             {
                 format!("<built-in function {leaf}>")
+            }
+            Value::HashMethod { name, .. } => format!("<method '{name}' of '_md5.md5' objects>"),
+            Value::Method {
+                callable, receiver, ..
+            } if let Value::HashMethod { name, .. } = self.heap.get(*callable) => {
+                if matches!(self.heap.get(*receiver), Value::Module { .. }) {
+                    format!("<built-in function {name}>")
+                } else {
+                    format!("<built-in method {name} of _md5.md5 object at {receiver:#x}>")
+                }
             }
             Value::Native(name)
                 if matches!(name.as_str(), "binascii.a2b_hex" | "binascii.unhexlify") =>
@@ -3915,8 +3945,33 @@ impl Context {
         self.checked_equal(actual, expected)
     }
 
-    /// View equality iterates the view and probes the other operand, including its Python hooks.
-    fn equal_view(&mut self, view: Id, other: Id) -> Result<bool> {
+    /// Probe a view from a live native set cursor. Hashing an element can resize the iterated set.
+    fn set_contained_in_view(&mut self, set: Id, view: (Id, DictViewKind)) -> Result<bool> {
+        let size = self.stored_entries(set).len();
+        let step = self.heap.temporary_mark();
+        let mut position = 0;
+        loop {
+            if self.stored_entries(set).len() != size {
+                return Err(Error::new(
+                    "RuntimeError",
+                    "Set changed size during iteration",
+                ));
+            }
+            let Some((at, item, _, _)) = self.dictionary_pair(set, position) else {
+                return Ok(true);
+            };
+            self.heap.keep(item);
+            let found = self.view_member(view, item, None)?;
+            self.discard_truth(step);
+            if !found {
+                return Ok(false);
+            }
+            position = at + 1;
+        }
+    }
+
+    /// Compare a key or item view using the subset operand's iterator and the superset's membership.
+    fn compare_view(&mut self, slot: &str, view: Id, other: Id) -> Result<bool> {
         let roots = self.heap.temporary_mark();
         // A comparison callback can remove either view from its enclosing container.
         self.heap.keep(view);
@@ -3933,27 +3988,40 @@ impl Context {
                 self.stored_entries(self.scalar_value(other)).len()
             };
             self.discard_truth(length_roots);
-            if size != other_size {
-                return Ok(false);
+            let (subset, superset) = match slot {
+                "__eq__" | "__ne__" if size == other_size => (view, other),
+                "__lt__" if size < other_size => (view, other),
+                "__le__" if size <= other_size => (view, other),
+                "__gt__" if size > other_size => (other, view),
+                "__ge__" if size >= other_size => (other, view),
+                _ => return Ok(slot == "__ne__"),
+            };
+            let target = self.set_view(superset);
+            let storage = self.scalar_value(subset);
+            if let Some(target) = target
+                && matches!(self.heap.get(storage), Value::Set { .. })
+                && !self.overrides_set_slot(subset, "__iter__")
+            {
+                return self.set_contained_in_view(storage, target);
             }
-            let it = self.iterator(view)?;
+            let it = self.iterator(subset)?;
             self.heap.keep(it);
             let step = self.heap.temporary_mark();
             while let Some(item) = self.next_item(it)? {
                 self.heap.keep(item);
                 let found = if let Some(target) = target {
                     self.view_member(target, item, None)?
-                } else if self.overrides_set_slot(other, "__contains__") {
-                    self.contains(item, other)?
+                } else if self.overrides_set_slot(superset, "__contains__") {
+                    self.contains(item, superset)?
                 } else {
-                    builtins::set_member(self, other, item, true)?
+                    builtins::set_member(self, superset, item, true)?
                 };
                 self.discard_truth(step);
                 if !found {
-                    return Ok(false);
+                    return Ok(slot == "__ne__");
                 }
             }
-            Ok(true)
+            Ok(slot != "__ne__")
         })();
         let collect = self.heap.discard_truth_operands(roots, self.modules);
         if let Err(error) = &result {
@@ -4476,6 +4544,21 @@ impl Context {
                 }
             }
         }
+        if op == "%"
+            && [left, right]
+                .into_iter()
+                .any(|id| self.calendar_slot_class(id, false).is_some())
+        {
+            return Err(Error::new(
+                "TypeError",
+                format!(
+                    "unsupported operand type(s) for %{}: '{}' and '{}'",
+                    if inplace { "=" } else { "" },
+                    stdlib::datetime::type_name(self, a),
+                    stdlib::datetime::type_name(self, b)
+                ),
+            ));
+        }
         if op == "**"
             && [left, right]
                 .into_iter()
@@ -4606,6 +4689,10 @@ impl Context {
                 | "__rtruediv__"
                 | "__floordiv__"
                 | "__rfloordiv__"
+                | "__mod__"
+                | "__rmod__"
+                | "__divmod__"
+                | "__rdivmod__"
         ) && self
             .calendar_slot_class(
                 obj,
@@ -4665,14 +4752,20 @@ impl Context {
     /// Try divmod's numeric slots in order, including the inherited slot of integer subclasses.
     pub(super) fn divmod(&mut self, a: Id, b: Id) -> Result<Id> {
         let class = |value| {
-            self.heap.get(value).instance_class().or_else(|| {
-                self.builtin_type_name(value)
-                    .and_then(|name| self.builtins.get(name).copied())
-            })
+            self.heap
+                .get(value)
+                .instance_class()
+                .or_else(|| self.calendar_slot_class(value, false))
+                .or_else(|| {
+                    self.builtin_type_name(value)
+                        .and_then(|name| self.builtins.get(name).copied())
+                })
         };
         let (left, right) = (class(a), class(b));
         let python_slot = |value| {
-            self.slot(value, "__divmod__").is_some() || self.slot(value, "__rdivmod__").is_some()
+            self.calendar_slot_class(value, false).is_some()
+                || self.slot(value, "__divmod__").is_some()
+                || self.slot(value, "__rdivmod__").is_some()
         };
         let reflected_first = match (left, right) {
             (Some(left), Some(right))
@@ -4691,7 +4784,9 @@ impl Context {
             } else {
                 (a, "__divmod__", b)
             };
-            if self.slot(receiver, hook).is_some() {
+            if self.calendar_slot_class(receiver, false).is_some()
+                || self.slot(receiver, hook).is_some()
+            {
                 if let Some(result) = self.operator_slot(receiver, hook, other)? {
                     return Ok(result);
                 }
@@ -4701,12 +4796,16 @@ impl Context {
                 return Ok(self.alloc(Value::Tuple(vec![quotient, remainder])));
             }
         }
+        let type_name = |id| match self.heap.get(id) {
+            Value::Calendar { .. } => stdlib::datetime::type_name(self, id),
+            _ => self.type_name(id).into(),
+        };
         Err(Error::new(
             "TypeError",
             format!(
                 "unsupported operand type(s) for divmod(): '{}' and '{}'",
-                self.type_name(a),
-                self.type_name(b)
+                type_name(a),
+                type_name(b)
             ),
         ))
     }
@@ -4867,19 +4966,19 @@ impl Context {
         let Some((left, right, inplace)) = binary_slots(op) else {
             return Ok(None);
         };
-        if matches!(op, "==" | "!=") {
+        if matches!(op, "==" | "!=" | "<" | "<=" | ">" | ">=") {
             let set = |id| matches!(self.heap.get(self.scalar_value(id)), Value::Set { .. });
             let operands = if self.set_view(a).is_some() && self.set_view(b).is_some() {
                 let left_type = self.exact_type(a)?;
                 let right_type = self.exact_type(b)?;
                 // A right-hand OrderedDict view inherits the ordinary view's reflected slot.
                 if left_type != right_type && self.direct_subclass(right_type, left_type) {
-                    Some((b, a))
+                    Some((b, a, right))
                 } else {
-                    Some((a, b))
+                    Some((a, b, left))
                 }
             } else if self.set_view(a).is_some() && set(b) {
-                Some((a, b))
+                Some((a, b, left))
             } else if self.set_view(b).is_some() && set(a) {
                 // A set subclass can handle the comparison before the view's reflected slot.
                 if self.overrides_set_slot(a, left)
@@ -4887,21 +4986,21 @@ impl Context {
                 {
                     return Ok(Some(result));
                 }
-                Some((b, a))
+                Some((b, a, right))
             } else {
                 None
             };
-            if let Some((view, other)) = operands {
-                let equal = self
+            if let Some((view, other, slot)) = operands {
+                let result = self
                     .with_slot_depth("maximum recursion depth exceeded in comparison", |ctx| {
-                        ctx.equal_view(view, other)
+                        ctx.compare_view(slot, view, other)
                     })?;
-                return Ok(Some(builtins::boolean(equal == (op == "=="))));
+                return Ok(Some(builtins::boolean(result)));
             }
         }
         let class = |id| {
             self.heap.get(id).instance_class().or_else(|| {
-                if matches!(op, "+" | "-" | "*" | "/" | "//") {
+                if matches!(op, "+" | "-" | "*" | "/" | "//" | "%") {
                     self.calendar_slot_class(id, matches!(op, "+" | "-"))
                 } else {
                     None

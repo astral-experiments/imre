@@ -184,13 +184,22 @@ impl Reader {
                 - extra,
         ))
     }
+    pub(super) fn save_tail(&mut self, tail: &[u8]) -> Result<()> {
+        self.tail
+            .try_reserve(tail.len().saturating_sub(self.tail.len()))
+            .map_err(|_| crate::Error::allocation())?;
+        self.tail.clear();
+        self.tail.extend_from_slice(tail);
+        Ok(())
+    }
+
     pub(super) fn chunk(
         &mut self,
         bytes: &[u8],
         codec: StreamCodec,
         end: bool,
     ) -> Result<(StreamCodec, Vec<u8>)> {
-        if let StreamCodec::Utf16(order) = codec {
+        if matches!(codec, StreamCodec::Utf16(_) | StreamCodec::Utf32 { .. }) {
             let mut raw = Vec::new();
             raw.try_reserve(
                 self.tail
@@ -201,6 +210,9 @@ impl Reader {
             .map_err(|_| crate::Error::allocation())?;
             raw.extend_from_slice(&self.tail);
             raw.extend_from_slice(bytes);
+            let StreamCodec::Utf16(order) = codec else {
+                return Ok((codec, raw));
+            };
             let order = if order != 0 || self.beginning {
                 order
             } else if self.order != 0 {
@@ -306,11 +318,26 @@ impl Reader {
                     })
                     .eq(raw.iter().copied())
             }
+            StreamCodec::Utf32 { little } => decoded
+                .chars()
+                .flat_map(|c| {
+                    let point = u32::from(c);
+                    if little {
+                        point.to_le_bytes()
+                    } else {
+                        point.to_be_bytes()
+                    }
+                })
+                .eq(raw.iter().copied()),
             _ => false,
         };
         let width = |c: char| {
             if wide {
-                c.len_utf16() * 2
+                if matches!(codec, StreamCodec::Utf32 { .. }) {
+                    4
+                } else {
+                    c.len_utf16() * 2
+                }
             } else if single_byte {
                 1
             } else {

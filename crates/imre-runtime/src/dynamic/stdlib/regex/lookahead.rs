@@ -1,30 +1,69 @@
-//! Match translated text lookaheads with their ordinary numbered capture slots.
+//! Backtrack over Python assertions and capture references while preserving the public slots.
+use std::borrow::Cow;
 use std::cell::OnceCell;
 
-use fancy_regex::{CompileError, Error, Regex, RegexBuilder};
+use fancy_regex::{BytesMode, CompileError, Error, Regex, RegexBuilder};
 use regex_automata::util::captures::{Captures, GroupInfo};
 use regex_automata::util::primitives::NonMaxUsize;
 use regex_automata::{Anchored, Input, PatternID};
 
-use super::{ASCII, DOTALL, IGNORECASE, MULTILINE, Matcher, VERBOSE, alphabet, group_names};
+use super::{
+    ASCII, DOTALL, IGNORECASE, MULTILINE, Matcher, VERBOSE, alphabet, group_names, locale_dependent,
+};
 
 /// Compile only grammar accepted by the Python lexer. Flags apply to assertions and their suffix.
 pub(super) fn compile(
     pattern: &str,
     flags: i64,
+    bytes: bool,
     original: String,
 ) -> Result<(String, Matcher), String> {
-    if !(pattern.contains("(?") || pattern.contains(r"\b") || pattern.contains(r"\B")) {
+    let ascii = bytes || flags & ASCII != 0;
+    let locale_case = locale_dependent(pattern, flags);
+    let fold = if locale_case {
+        #[cfg(target_os = "linux")]
+        {
+            // CPython tests a negated locale set separately against lower and upper.
+            // Word membership and boundaries also need the locale's own classifier.
+            if !bytes
+                || flags & IGNORECASE == 0
+                || pattern.contains("[^")
+                || locale_dependent(pattern, super::LOCALE)
+            {
+                return Err(original);
+            }
+            ByteFold::Locale
+        }
+        #[cfg(not(target_os = "linux"))]
         return Err(original);
-    }
-    let ascii = flags & ASCII != 0;
-    let (mut source, groups) = imre_regex::lookahead_or_scoped_source(
+    } else if bytes && flags & IGNORECASE != 0 {
+        ByteFold::Ascii
+    } else {
+        ByteFold::None
+    };
+    let Ok((mut source, groups)) = imre_regex::backtracking_source(
         pattern,
         flags & VERBOSE != 0,
-        alphabet(false, ascii, flags),
+        alphabet(bytes, ascii, flags),
         flags & DOTALL != 0,
-    )
-    .map_err(|_| original)?;
+    ) else {
+        return Err(original);
+    };
+    // The Python tokenizer emits \k<N> only for a real reference. Literal
+    // backslashes are hex-escaped, including within assertions or classes.
+    if locale_case && !source.contains(r"\k<") {
+        return Err(original);
+    }
+    // Raw, octal, and hex high-byte literals all translate to \xNN. Even in
+    // bytes mode the VM encodes these literals as UTF-8.
+    if bytes
+        && source
+            .split(r"\x")
+            .skip(1)
+            .any(|tail| matches!(tail.as_bytes().first(), Some(b'8'..=b'9' | b'a'..=b'f')))
+    {
+        return Err(original);
+    }
     let dollar = if flags & MULTILINE != 0 {
         r"(?=\n|\z)"
     } else {
@@ -32,7 +71,7 @@ pub(super) fn compile(
     };
     source = source.replace('$', dollar);
     let mut modes = String::new();
-    if flags & IGNORECASE != 0 && !ascii {
+    if flags & IGNORECASE != 0 && (bytes || !ascii) {
         modes.push('i');
     }
     if flags & MULTILINE != 0 {
@@ -47,34 +86,138 @@ pub(super) fn compile(
     if let Some(name) = groups
         .iter()
         .flatten()
-        .find(|name| !group_names::valid(name, false))
+        .find(|name| !group_names::valid(name, bytes))
     {
-        return Err(group_names::bad_name(name, false));
+        return Err(group_names::bad_name(name, bytes));
     }
     let groups = GroupInfo::new([groups]).map_err(|e| e.to_string())?;
-    let matcher = Lookahead::new(&source, groups)?;
+    let mode = if bytes {
+        BytesMode::Ascii
+    } else {
+        BytesMode::Unicode
+    };
+    let matcher = Lookahead::new(&source, groups, mode, fold)?;
     Ok((source, Matcher::Lookahead(Box::new(matcher))))
+}
+
+#[derive(Clone, Copy)]
+enum ByteFold {
+    None,
+    Ascii,
+    #[cfg(target_os = "linux")]
+    Locale,
+}
+
+impl ByteFold {
+    fn subject(self, input: &[u8]) -> Result<Cow<'_, [u8]>, String> {
+        match self {
+            #[cfg(target_os = "linux")]
+            Self::Locale => {
+                // The compiled expression contains ASCII literals and classes. They
+                // retain their meaning as long as locale folding never crosses the
+                // ASCII boundary. Backreferences compare the real locale lowercase.
+                let lower = crate::sys::with_process_locale(|| {
+                    let mut table = [0u8; 256];
+                    for byte in 0..=u8::MAX {
+                        // SAFETY: both ctype calls accept an unsigned char promoted to int.
+                        let (lo, hi) = unsafe {
+                            (
+                                libc::tolower(i32::from(byte)) as u8,
+                                libc::toupper(i32::from(byte)) as u8,
+                            )
+                        };
+                        if byte.is_ascii() {
+                            if lo != byte.to_ascii_lowercase() || hi != byte.to_ascii_uppercase() {
+                                return None;
+                            }
+                        } else if lo.is_ascii() || hi.is_ascii() {
+                            return None;
+                        }
+                        table[usize::from(byte)] = lo;
+                    }
+                    Some(table)
+                })
+                .ok_or("unsupported case mapping for byte backreferences in the current locale")?;
+                if input.iter().any(|&b| lower[usize::from(b)] != b) {
+                    Ok(Cow::Owned(
+                        input.iter().map(|&b| lower[usize::from(b)]).collect(),
+                    ))
+                } else {
+                    Ok(Cow::Borrowed(input))
+                }
+            }
+            Self::Ascii if input.iter().any(u8::is_ascii_uppercase) => {
+                Ok(Cow::Owned(input.to_ascii_lowercase()))
+            }
+            _ => Ok(Cow::Borrowed(input)),
+        }
+    }
 }
 
 pub(super) struct Lookahead {
     search: Regex,
+    mode: BytesMode,
+    fold: ByteFold,
     anchored: OnceCell<Result<Regex, Error>>,
     nonempty: OnceCell<Result<Regex, Error>>,
     pub(super) groups: GroupInfo,
 }
 
 impl Lookahead {
-    pub(super) fn new(source: &str, groups: GroupInfo) -> Result<Self, String> {
-        let search = Regex::new(source).map_err(|e| e.to_string())?;
+    fn new(
+        source: &str,
+        groups: GroupInfo,
+        mode: BytesMode,
+        fold: ByteFold,
+    ) -> Result<Self, String> {
+        let search = RegexBuilder::new(source)
+            .bytes_mode(mode)
+            .build()
+            .map_err(|e| e.to_string())?;
         if search.captures_len() != groups.group_len(PatternID::ZERO) {
-            return Err("lookahead would change the Python capture groups".into());
+            return Err("backtracking would change the Python capture groups".into());
         }
         Ok(Self {
             search,
+            mode,
+            fold,
             groups,
             anchored: OnceCell::new(),
             nonempty: OnceCell::new(),
         })
+    }
+
+    pub(super) fn with_source(&self, source: &str) -> Result<Self, String> {
+        Self::new(source, self.groups.clone(), self.mode, self.fold)
+    }
+
+    /// On a winning path without re-entry, participating captures close in
+    /// syntax-tree postorder, even when a lookaround crosses a sibling's span.
+    pub(super) fn close_order(&self) -> Option<Vec<usize>> {
+        use fancy_regex::Expr;
+        fn visit(expr: &Expr, count: &mut usize, order: &mut Vec<usize>) -> Option<()> {
+            let before = *count;
+            let group = matches!(expr, Expr::Group(_)).then(|| {
+                *count += 1;
+                *count
+            });
+            for child in expr.children_iter() {
+                visit(child, count, order)?;
+            }
+            if *count != before && matches!(expr, Expr::Repeat { hi, .. } if *hi > 1) {
+                return None;
+            }
+            order.extend(group);
+            Some(())
+        }
+        let tree = Expr::parse_tree(self.search.as_str()).ok()?;
+        if tree.contains_subroutines {
+            return None;
+        }
+        let mut order = Vec::new();
+        let mut count = 0;
+        visit(&tree.expr, &mut count, &mut order)?;
+        (count + 1 == self.search.captures_len()).then_some(order)
     }
 
     /// Preserve the prefix for anchors, and make endpos the assertion's end of input.
@@ -85,6 +228,8 @@ impl Lookahead {
         captures: &mut Captures,
     ) -> Result<(), String> {
         captures.clear();
+        // Captures still index the original subject one byte per folded byte.
+        let haystack = self.fold.subject(&input.haystack()[..input.end()])?;
         let regex = if nonempty || input.get_anchored() == Anchored::Yes {
             let cache = if nonempty {
                 &self.nonempty
@@ -93,6 +238,7 @@ impl Lookahead {
             };
             match cache.get_or_init(|| {
                 RegexBuilder::new(&format!(r"\G(?:{})", self.search.as_str()))
+                    .bytes_mode(self.mode)
                     .find_not_empty(nonempty)
                     .build()
             }) {
@@ -107,14 +253,13 @@ impl Lookahead {
         } else {
             &self.search
         };
-        let text = std::str::from_utf8(&input.haystack()[..input.end()])
-            .expect("lookahead is only compiled for text patterns");
         if let Some(found) = regex
-            .captures_from_pos(text, input.start())
+            .captures_from_pos(haystack.as_ref(), input.start())
             .map_err(|e| e.to_string())?
         {
             captures.set_pattern(Some(PatternID::ZERO));
-            for (slot, group) in captures.slots_mut().chunks_exact_mut(2).zip(found.iter()) {
+            let (slots, _) = captures.slots_mut().as_chunks_mut::<2>();
+            for (slot, group) in slots.iter_mut().zip(found.iter()) {
                 if let Some(m) = group {
                     slot[0] = NonMaxUsize::new(m.start());
                     slot[1] = NonMaxUsize::new(m.end());

@@ -121,7 +121,7 @@ pub(crate) fn emit(
                 .map(|(offset, _)| offset)
                 .collect(),
         };
-        let code = output.code(&location, String::new(), Body::Namespace(&body));
+        let code = output.code(&location, String::new(), Body::Namespace(&body), false);
         writeln!(
             main,
             "  call void @imre_dyn_register(ptr %ctx, ptr {name}, ptr {file}, ptr {code})"
@@ -212,9 +212,10 @@ impl Output {
         prefix: String,
         body: Body<'_>,
         start: ruff_text_size::TextSize,
+        in_function: bool,
     ) -> String {
         let site = format!("@code_site{}", self.count);
-        let code = self.code(source, prefix, body);
+        let code = self.code(source, prefix, body, in_function);
         writeln!(
             self.constants,
             "{site} = private constant {{ ptr, ptr, i32 }} {{ ptr {code}, ptr {}, i32 {} }}",
@@ -257,7 +258,13 @@ impl Output {
         format!("@pos{index}")
     }
 
-    fn code(&mut self, source: &SourceMap<'_>, prefix: String, body: Body<'_>) -> String {
+    fn code(
+        &mut self,
+        source: &SourceMap<'_>,
+        prefix: String,
+        body: Body<'_>,
+        in_function: bool,
+    ) -> String {
         let name = format!("@code{}", self.count);
         self.count += 1;
         let module = matches!(body, Body::Namespace(_)) && prefix.is_empty();
@@ -265,6 +272,8 @@ impl Output {
             output: self,
             source,
             class_sites: None,
+            in_function,
+            declared_globals: Default::default(),
             annotation_lookup: false,
             class_locals: match &body {
                 Body::Namespace(stmts) if !prefix.is_empty() => {
@@ -364,6 +373,8 @@ struct Function<'a, 'p> {
     output: &'a mut Output,
     source: &'p SourceMap<'p>,
     prefix: String,
+    declared_globals: std::collections::BTreeSet<String>,
+    in_function: bool,
     class_sites: Option<statements::class_annotations::ClassSites>,
     class_locals: Option<statements::ClassBindings>,
     annotation_lookup: bool,

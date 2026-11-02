@@ -4,9 +4,27 @@ use crate::classes::ForwardingInitializer;
 use ruff_python_stdlib::identifiers::is_mangled_private;
 use std::borrow::Cow;
 
-struct Bound {
-    names: HashMap<String, Expr>,
-    tail: Vec<Expr>,
+struct Bound<T> {
+    names: HashMap<String, T>,
+    tail: Vec<T>,
+}
+
+struct Formals<'a, T> {
+    receiver: &'a str,
+    parameters: &'a [(String, Option<T>)],
+    positional: usize,
+    variadic: bool,
+}
+
+impl<'a> From<&'a ForwardingInitializer> for Formals<'a, Expr> {
+    fn from(plan: &'a ForwardingInitializer) -> Self {
+        Self {
+            receiver: &plan.receiver,
+            parameters: &plan.parameters,
+            positional: plan.positional,
+            variadic: plan.variadic.is_some(),
+        }
+    }
 }
 
 enum BindFailure {
@@ -116,13 +134,13 @@ impl Checker<'_> {
         }
     }
 
-    fn bind_forwarder(
+    fn bind_forwarder<T: Clone>(
         &self,
-        plan: &ForwardingInitializer,
+        plan: Formals<'_, T>,
         name: &str,
-        positional: Vec<Expr>,
-        named: Vec<(String, Expr)>,
-    ) -> Result<Bound, BindFailure> {
+        positional: Vec<T>,
+        named: Vec<(String, T)>,
+    ) -> Result<Bound<T>, BindFailure> {
         let supplied = positional.len();
         let mut names = HashMap::new();
         let mut tail = Vec::new();
@@ -134,7 +152,7 @@ impl Checker<'_> {
             }
         }
         for (keyword, value) in named {
-            if keyword == parameter_name(name, &plan.receiver) {
+            if keyword == parameter_name(name, plan.receiver) {
                 return Err(BindFailure::Argument(format!(
                     "{name}.__init__() got multiple values for argument '{keyword}'"
                 )));
@@ -155,7 +173,7 @@ impl Checker<'_> {
                 )));
             }
         }
-        if plan.variadic.is_none() && !tail.is_empty() {
+        if !plan.variadic && !tail.is_empty() {
             let count = plan.positional + 1;
             let minimum = 1 + plan.parameters[..plan.positional]
                 .iter()
@@ -211,6 +229,101 @@ impl Checker<'_> {
         Ok(Bound { names, tail })
     }
 
+    fn binding_message<T>(
+        &self,
+        failure: BindFailure,
+        owner: &str,
+        receiver: &str,
+        parameters: &[(String, Option<T>)],
+    ) -> Expr {
+        match failure {
+            BindFailure::Argument(s) => unpacking::string(s),
+            BindFailure::Unknown(s, k) => {
+                let candidates: Vec<_> = std::iter::once(receiver)
+                    .chain(parameters.iter().map(|(name, _)| name.as_str()))
+                    .map(|name| unpacking::string(parameter_name(owner, name)))
+                    .collect();
+                self.keyword_error_message(s, k, candidates)
+            }
+        }
+    }
+
+    /// The wrapper accepts all operands. A binding error comes from its first
+    /// base call, after all caller expressions have been evaluated in order.
+    pub(super) fn forwarded_init_error(
+        &mut self,
+        class: usize,
+        parent: DefinitionId,
+        call: &ast::ExprCall,
+        signature: &Signature,
+    ) -> Result<Option<Expr>, String> {
+        if calls::starred(call) || call.arguments.keywords.iter().any(|kw| kw.arg.is_none()) {
+            return Ok(None);
+        }
+        let params = &signature.params[1..];
+        let keywords = call
+            .arguments
+            .keywords
+            .iter()
+            .map(|kw| (kw.arg.as_ref().unwrap().to_string(), ()))
+            .collect();
+        // Bind only argument positions here. The ordinary binder still checks valid calls.
+        let slots: Vec<_> = params
+            .iter()
+            .map(|p| (p.name.clone(), p.default.as_ref().map(|_| ())))
+            .collect();
+        let classes = &self.classes.declarations;
+        let base = &classes.definitions[classes.ids[&parent]];
+        let receiver = base.methods[base.initializer.unwrap()].parameters.args[0]
+            .name()
+            .to_string();
+        let wrapper_receiver = &signature.params[0].name;
+        let failure = if let Some(kw) = call.arguments.keywords.iter().find(|kw| {
+            kw.arg
+                .as_ref()
+                .is_some_and(|name| name.as_str() == wrapper_receiver)
+        }) {
+            self.graph.checked_repeated_keyword(self.module, kw.range());
+            let method = signature
+                .method
+                .expect("forwarding initializer is a method");
+            let origin = classes.definitions[method.class].method_origins[method.index];
+            let wrapper = &classes.definitions[classes.ids[&origin]].name;
+            BindFailure::Argument(format!(
+                "{wrapper}.__init__() got multiple values for argument '{wrapper_receiver}'"
+            ))
+        } else {
+            let formals = Formals {
+                receiver: &receiver,
+                parameters: &slots,
+                positional: slots.len(),
+                variadic: false,
+            };
+            let Err(failure) = self.bind_forwarder(
+                formals,
+                &base.name,
+                vec![(); call.arguments.args.len()],
+                keywords,
+            ) else {
+                return Ok(None);
+            };
+            failure
+        };
+        let message = self.binding_message(failure, &base.name, &receiver, &slots);
+        let mut operands = Vec::new();
+        for arg in &call.arguments.args {
+            operands.push(self.expr(arg)?);
+        }
+        for kw in &call.arguments.keywords {
+            operands.push(self.expr(&kw.value)?);
+        }
+        Ok(Some(calls::type_error_message(
+            Type::Class(class),
+            operands,
+            message,
+        )))
+    }
+
     /// Each operand stays rooted and is evaluated before Python argument binding can raise.
     pub(super) fn forwarding_exception(
         &mut self,
@@ -261,19 +374,11 @@ impl Checker<'_> {
             let lexical = self.classes.declarations.ids[&plan.owner];
             let decl = &self.classes.declarations.definitions[lexical];
             self.checked_forwarding_call(source_module, plan, source_call, args.len());
-            let bound = match self.bind_forwarder(plan, &decl.name, args, kwargs) {
+            let bound = match self.bind_forwarder(plan.into(), &decl.name, args, kwargs) {
                 Ok(bound) => bound,
                 Err(failure) => {
-                    let message = match failure {
-                        BindFailure::Argument(s) => unpacking::string(s),
-                        BindFailure::Unknown(s, k) => {
-                            let candidates: Vec<_> = std::iter::once(&plan.receiver)
-                                .chain(plan.parameters.iter().map(|(name, _)| name))
-                                .map(|name| unpacking::string(parameter_name(&decl.name, name)))
-                                .collect();
-                            self.keyword_error_message(s, k, candidates)
-                        }
-                    };
+                    let message =
+                        self.binding_message(failure, &decl.name, &plan.receiver, &plan.parameters);
                     let error = Expr {
                         ty: Type::Exception,
                         kind: ExprKind::Exception {

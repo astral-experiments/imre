@@ -154,8 +154,6 @@ pub(crate) struct Context {
     enum_scopes: HashMap<Id, Id>,
     signal_handlers: Vec<Id>,
     typing: typing::Registry,
-    // Python wrappers retain their registered logger for the lifetime of this heap.
-    logger_wrappers: HashMap<*const crate::objects::logging::Logger, Id>,
     builtins: HashMap<String, Id>,
     native_type_dicts: HashMap<Id, Id>,
     sources: HashMap<String, Vec<SourceModule>>,
@@ -273,6 +271,7 @@ impl Context {
             ("bool", Value::Bool(_))
             | ("int", Value::Int(_) | Value::Bool(_))
             | ("float", Value::Float(_))
+            | ("complex", Value::Complex(_))
             | ("str", Value::Str(_) | Value::SurrogateStr(_))
             | ("bytes", Value::Bytes(_))
             | ("bytearray", Value::ByteArray(_))
@@ -483,15 +482,7 @@ impl Context {
             Value::BytesIoBuffer { .. } => {
                 let len = self.view_element_count(object)?;
                 self.invalidate_stream_snapshot(object);
-                (
-                    object,
-                    false,
-                    Some(memoryview::ViewLayout {
-                        start: 0,
-                        len,
-                        stride: 1,
-                    }),
-                )
+                (object, false, Some(memoryview::ViewLayout::full(len)))
             }
             Value::Array(ref a) if a.view_layout().0 != "w" => (object, false, None),
             Value::Array(_) => {
@@ -651,6 +642,7 @@ impl Context {
             Value::Iterator { .. }
                 | Value::TemplateIter { .. }
                 | Value::RangeIterator(_)
+                | Value::GenericAliasIterator(_)
                 | Value::SequenceIterator { .. }
                 | Value::ReverseSequence { .. }
                 | Value::DequeIterator { .. }
@@ -708,6 +700,9 @@ impl Context {
             Value::Deque(ref ring) => {
                 let cursor = deque::iterator(id, ring, false);
                 return Ok(self.alloc(cursor));
+            }
+            Value::GenericAlias(ref alias) if alias.is_builtin_alias() => {
+                return Ok(self.alloc(Value::GenericAliasIterator(Some(id))));
             }
             Value::TypeVarTuple { .. } => {
                 let unpacked = typing::unpack_parameter(self, id)?;
@@ -802,6 +797,7 @@ impl Context {
         if matches!(
             value,
             Value::TemplateIter { .. }
+                | Value::GenericAliasIterator(_)
                 | Value::SequenceIterator { .. }
                 | Value::ReverseSequence { .. }
                 | Value::DequeIterator { .. }
@@ -1110,6 +1106,15 @@ impl Context {
         if let Value::Scandir(scan) = self.heap.get(id) {
             return stdlib::os::scandir::advance(self, scan.clone());
         }
+        if let Value::GenericAliasIterator(source) = self.heap.get_mut(id) {
+            let source = source.take();
+            return Ok(source.map(|source| {
+                let Value::GenericAlias(alias) = self.heap.get(source) else {
+                    unreachable!()
+                };
+                self.alloc(Value::GenericAlias(alias.unpacked_copy()))
+            }));
+        }
         if let Value::SequenceIterator { source, index } = *self.heap.get(id) {
             return self.next_sequence_item(id, source, index);
         }
@@ -1379,6 +1384,7 @@ impl Context {
             Value::AstWalk { .. }
                 | Value::Template { .. }
                 | Value::TemplateIter { .. }
+                | Value::GenericAliasIterator(_)
                 | Value::SequenceIterator { .. }
                 | Value::ReverseSequence { .. }
                 | Value::DequeIterator { .. }
@@ -1396,7 +1402,8 @@ impl Context {
                 | Value::Count { .. }
                 | Value::Repeat(_)
                 | Value::Enumerate { .. }
-        ) || self.slot(id, "__iter__").is_some()
+        ) || matches!(self.heap.get(id), Value::GenericAlias(alias) if alias.is_builtin_alias())
+            || self.slot(id, "__iter__").is_some()
             || self.slot(id, "__getitem__").is_some()
         {
             let iter = self.iterator(id)?;
@@ -2087,10 +2094,8 @@ impl Context {
         } else if matches!(name, "datetime.timezone" | stdlib::datetime::TZINFO) {
             stdlib::datetime::install_members(self, name);
         }
-        if name == "typing.TypeVar" {
-            for field in typing::VARIANCE_FIELDS {
-                self.readonly_member("typing.TypeVar", field);
-            }
+        if let Some(class) = typing::ParameterClass::lookup(name) {
+            class.install(self, value);
         }
         if builtins::is_exception(name) {
             self.builtin(&format!("{}.__new__", builtins::exception_new_owner(name)));
@@ -2116,8 +2121,8 @@ impl Context {
                 defaultdict::METHODS
             }
             "list" => builtins::LIST_METHODS,
-            "method_descriptor" => &["__get__"],
-            "tuple" => &["__repr__", "__getitem__", "index"],
+            "method_descriptor" | "wrapper_descriptor" => &["__get__"],
+            "tuple" => &["__repr__", "__getitem__", "count", "index"],
             "set" => &[
                 "__repr__",
                 "__reduce__",
@@ -2169,6 +2174,7 @@ impl Context {
                 "as_integer_ratio",
                 "__repr__",
             ],
+            "complex" => &["__complex__"],
             "bytes" => {
                 self.builtin("bytes.fromhex");
                 builtins::BYTES_METHODS
@@ -2182,7 +2188,11 @@ impl Context {
             weakref::REFERENCE_TYPE => weakref::REFERENCE_METHODS,
             _ => &[],
         };
-        for method in methods.iter().chain(builtins::set_operators(name)) {
+        for method in methods
+            .iter()
+            .chain(builtins::set_operators(name))
+            .chain(builtins::real_methods(name))
+        {
             self.builtin(&format!("{name}.{method}"));
         }
         value
@@ -2464,7 +2474,10 @@ impl Context {
             self.bind_import_child(name, source_globals, module)?;
             return Ok(Some(module));
         }
-        self.load_bootstrap_module(name, parent, source_globals)
+        // Bootstrap initializers and live sys.modules hooks can reenter Python.
+        stacker::maybe_grow(1024 * 1024, 4 * 1024 * 1024, || {
+            self.load_bootstrap_module(name, parent, source_globals)
+        })
     }
 
     /// Before installing the registry, execute its dependencies and the script's explicit entry.
@@ -2722,7 +2735,7 @@ impl Context {
                     "_filterfalse_allocate",
                     "_filterfalse_state",
                     "_chain_allocate",
-                    "_chain_get",
+                    "_chain_next",
                     "_chain_set",
                 ] {
                     let value = self.builtin(&format!("{name}.{attr}"));
@@ -2754,10 +2767,17 @@ impl Context {
                 self.bind(scope, "get_cache_token", token);
             }
             #[cfg(target_os = "linux")]
+            "fcntl" if source.is_none() => {
+                let value = self.int(i64::from(libc::FD_CLOEXEC));
+                self.bind(scope, "FD_CLOEXEC", value);
+            }
+            #[cfg(target_os = "linux")]
             "posix" if source.is_none() => {
                 stdlib::os::scheduler::initialize(self, scope);
-                let tmpfile = self.int(i64::from(libc::O_TMPFILE));
-                self.bind(scope, "O_TMPFILE", tmpfile);
+                for (attr, flag) in [("O_PATH", libc::O_PATH), ("O_TMPFILE", libc::O_TMPFILE)] {
+                    let value = self.int(i64::from(flag));
+                    self.bind(scope, attr, value);
+                }
                 #[cfg(any(target_env = "gnu", target_env = "musl"))]
                 for (attr, flag) in [
                     ("RTLD_LAZY", libc::RTLD_LAZY),
@@ -2845,6 +2865,7 @@ impl Context {
                 let native_new = self.builtin("hashlib.new");
                 self.bind(scope, "_native_new", native_new);
             }
+            "_md5" => stdlib::hashlib::md5::install(self, module, scope)?,
             "_sha3" => {
                 for name in [
                     "sha3_224",
@@ -2901,14 +2922,8 @@ impl Context {
                     self.bind(scope, name, value);
                 }
             }
-            "operator" if source.is_none() => {
-                for name in [
-                    "lt", "le", "eq", "ne", "ge", "gt", "and_", "or_", "sub", "xor",
-                ] {
-                    let function = self.builtin(&format!("operator.{name}"));
-                    let alias = format!("__{}__", name.trim_end_matches('_'));
-                    self.bind(scope, &alias, function);
-                }
+            "operator" | "_operator" if source.is_none() => {
+                stdlib::operator::install(self, scope, name);
             }
             "errno" => stdlib::install_errno(self, scope)?,
             "atexit" => atexit::install(self, scope),
@@ -3140,11 +3155,6 @@ impl Context {
                 let name = self.text("_batched_state");
                 let member = self.alloc(Value::SlotMember { owner, name });
                 self.bind(scope, "_batched_state", member);
-            }
-            if name == "codecs"
-                && let Some(class) = self.scope_name(scope, "CodecInfo")
-            {
-                self.classes.insert("codecs.CodecInfo".into(), class);
             }
             if name == "re"
                 && let Some(class) = self.scope_name(scope, "PatternError")

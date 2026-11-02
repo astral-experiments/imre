@@ -29,6 +29,8 @@ def current():
     print(typing.TYPE_CHECKING is False, typing.Protocol is Protocol)
     print(Protocol.__bases__ == (typing.Generic,), HasHTML.__mro__[1:3] == (Protocol, typing.Generic))
     assert is_protocol(HasHTML) and typing.is_protocol(Abstract)
+    for arg in (int, typing.TypeVar("T")):
+        assert typing.get_args(typing.SupportsAbs[arg]) == (arg,)
     # The base ABC check can recognize a declared non-runtime protocol;
     # the public isinstance operation below still enforces @runtime_checkable.
     assert ABCMeta.__subclasscheck__(HasHTML, Concrete)

@@ -185,61 +185,20 @@ fn boxed_unittest_cleanup(name: &str) -> bool {
 }
 
 fn boxed_operator(name: &str) -> bool {
-    matches!(
-        name,
-        "attrgetter"
-            | "__lt__"
-            | "__le__"
-            | "__eq__"
-            | "__ne__"
-            | "__ge__"
-            | "__gt__"
-            | "__and__"
-            | "__or__"
-            | "__sub__"
-            | "__xor__"
-            | "itemgetter"
-            | "lt"
-            | "le"
-            | "eq"
-            | "ne"
-            | "gt"
-            | "ge"
-            | "add"
-            | "sub"
-            | "mul"
-            | "matmul"
-            | "truediv"
-            | "floordiv"
-            | "mod"
-            | "lshift"
-            | "rshift"
-            | "and_"
-            | "xor"
-            | "or_"
-            | "iadd"
-            | "isub"
-            | "imul"
-            | "imatmul"
-            | "itruediv"
-            | "ifloordiv"
-            | "imod"
-            | "ipow"
-            | "ilshift"
-            | "irshift"
-            | "iand"
-            | "ixor"
-            | "ior"
-            | "neg"
-            | "pos"
-            | "invert"
-            | "contains"
-            | "getitem"
-            | "setitem"
-            | "delitem"
-            | "index"
-            | "length_hint"
-    )
+    macro_rules! operator_functions {
+        ($($function:literal => $operation:expr),* $(,)?) => { &[$($function),*] };
+    }
+    const FUNCTIONS: &[&str] = include!("../../../imre-runtime/native/operator-functions.rs");
+    matches!(name, "attrgetter" | "itemgetter")
+        || FUNCTIONS.contains(&name)
+        || name
+            .strip_prefix("__")
+            .and_then(|name| name.strip_suffix("__"))
+            .is_some_and(|alias| {
+                FUNCTIONS
+                    .iter()
+                    .any(|&name| name != "length_hint" && name.trim_end_matches('_') == alias)
+            })
 }
 
 impl<'a> Visitor<'a> for Imports {
@@ -249,7 +208,7 @@ impl<'a> Visitor<'a> for Imports {
                 for alias in &imp.names {
                     let name = alias.name.as_str();
                     let bound = alias.asname.as_ref().unwrap_or(&alias.name);
-                    if name == "__future__" {
+                    if matches!(name, "__future__" | "_operator") {
                         self.runtime_imports = true;
                     }
                     match name {
@@ -276,7 +235,8 @@ impl<'a> Visitor<'a> for Imports {
                 for a in &imp.names {
                     let suffix = a.name.as_str();
                     if imp.level == 0
-                        && (name == "unittest" && boxed_unittest_cleanup(suffix)
+                        && (name == "_operator"
+                            || name == "unittest" && boxed_unittest_cleanup(suffix)
                             || name == "hashlib" && (boxed_hashlib_kdf(suffix) || suffix == "*")
                             || name == "weakref" && suffix == "finalize"
                             || boxed_signal_export(name, suffix))
@@ -430,6 +390,53 @@ impl<'a> Visitor<'a> for Imports {
     }
 }
 
+/// A module-level synchronous function can close over unbounded TypeVars in a single body scope.
+pub(crate) fn function_type_params(function: &ast::StmtFunctionDef) -> Option<&ast::TypeParams> {
+    use ast::AnyNodeRef::*;
+    use ast::visitor::source_order::{SourceOrderVisitor, TraversalSignal};
+
+    let params = function.type_params.as_deref()?;
+    let mut names = HashSet::new();
+    if function.is_async
+        || !params.iter().all(|p| {
+            matches!(p, ast::TypeParam::TypeVar(v)
+        if v.bound.is_none() && v.default.is_none()
+            && !matches!(v.name.as_str(), "__classdict__" | "__debug__")
+            && names.insert(v.name.as_str()))
+        })
+    {
+        return None;
+    }
+
+    struct BodyScope(bool);
+    impl<'a> SourceOrderVisitor<'a> for BodyScope {
+        fn enter_node(&mut self, node: ast::AnyNodeRef<'a>) -> TraversalSignal {
+            self.0 |= matches!(
+                node,
+                StmtFunctionDef(_)
+                    | StmtClassDef(_)
+                    | StmtTypeAlias(_)
+                    | StmtNonlocal(_)
+                    | ExprLambda(_)
+                    | ExprGenerator(_)
+                    | ExprListComp(_)
+                    | ExprSetComp(_)
+                    | ExprDictComp(_)
+                    | ExprYield(_)
+                    | ExprYieldFrom(_)
+            );
+            if self.0 {
+                TraversalSignal::Skip
+            } else {
+                TraversalSignal::Traverse
+            }
+        }
+    }
+    let mut body = BodyScope(false);
+    body.visit_body(&function.body);
+    (!body.0).then_some(params)
+}
+
 fn imports(source: &str, kind: SourceKind) -> Result<Imports, String> {
     let normalized = crate::normalize_source(source, kind)?;
     crate::analysis::check_source_complexity(&normalized).map_err(str::to_owned)?;
@@ -438,6 +445,9 @@ fn imports(source: &str, kind: SourceKind) -> Result<Imports, String> {
     let mut imports = Imports::default();
     let mut body = parsed.into_syntax().body;
     imre_ast::lower(&mut body);
+    imports.runtime_imports = body.iter().any(|stmt| {
+        matches!(stmt, Stmt::FunctionDef(function) if function_type_params(function).is_some())
+    });
     imports.visit_body(&body);
     Ok(imports)
 }
@@ -492,7 +502,8 @@ pub(crate) fn compile(
     // An ordinary entry can import a package that uses the object runtime without
     // accessing sys.path or installation metadata in the entry itself.
     if !runtime_imports
-        && !(startup.is_some() && (src.contains("urllib") || src.contains("ftplib")))
+        && !(startup.is_some()
+            && (src.contains("urllib") || src.contains("ftplib") || src.contains("argparse")))
         && !(src.contains("class") && src.contains('='))
         && !(cfg!(unix) && src.contains("signal"))
         && ![
@@ -538,24 +549,25 @@ pub(crate) fn compile(
     ) else {
         return Ok(None);
     };
-    // Python scripts load the URL opener and FTP client as boxed modules.
-    let imports_transport = |transport: &str| {
+    // Python entries can import these bundled sources when static lowering cannot handle the entry.
+    let imports_provider = |provider: &str| {
         startup.is_some()
             && !options.runtime_imports
             && first
                 .names
                 .iter()
-                .any(|(level, name)| *level == 0 && name == transport)
+                .any(|(level, name)| *level == 0 && name == provider)
     };
-    let request_script = imports_transport("urllib.request");
-    let ftp_script = imports_transport("ftplib");
-    let transport_script = request_script || ftp_script;
+    let request_script = imports_provider("urllib.request");
+    let ftp_script = imports_provider("ftplib");
+    let argparse_script = imports_provider("argparse");
+    let provider_script = request_script || ftp_script || argparse_script;
     if !(module_entry.is_some()
         || first.runtime_imports
         || operation.is_some()
         || (runtime_imports && !first.names.is_empty())
         || (first.uses_import_builtin && (startup.is_some() || options.runtime_imports))
-        || transport_script)
+        || provider_script)
     {
         return Ok(None);
     }
@@ -599,7 +611,11 @@ pub(crate) fn compile(
         .unwrap_or(root);
     let mut initial = Vec::new();
     let safe_path = startup.is_some_and(|(flags, _)| flags.safe_path);
-    if !safe_path {
+    if options.path_entry {
+        // CPython preserves the directory spelling, including symlinks, and searches
+        // an explicitly requested entry even when isolated startup omits the cwd.
+        initial.push(entry.clone());
+    } else if !safe_path {
         initial.push(root);
     }
     initial.extend(options.extension_paths.iter().map(|p| cwd.join(p)));
@@ -662,7 +678,7 @@ pub(crate) fn compile(
         if module_entry.is_none()
             && !options.runtime_imports
             && !registered_imports.called
-            && (!transport_script || owner == "__main__")
+            && (!provider_script || owner == "__main__")
             && imports.needs_typed_machinery()
             // Enforce the checked-file machinery contract on the original graph.
             // A module discovered only by boxed imports has no typed layout to preserve.
@@ -790,10 +806,11 @@ pub(crate) fn compile(
                         }
                         continue;
                     };
-                    // Bundled transports cannot stand in for earlier project modules.
+                    // Bundled providers cannot stand in for earlier project modules.
                     if initial.contains(root)
                         && ((request_script && prefix == "urllib")
-                            || (ftp_script && prefix == "ftplib"))
+                            || (ftp_script && prefix == "ftplib")
+                            || (argparse_script && prefix == "argparse"))
                     {
                         return Ok(None);
                     }
@@ -856,6 +873,13 @@ pub(crate) fn compile(
         "copyreg",
         "datetime",
         "encodings",
+        "encodings.ascii",
+        "encodings.latin_1",
+        "encodings.utf_8",
+        "encodings.utf_8_sig",
+        "encodings.cp1251",
+        "encodings.cp424",
+        "encodings.cp437",
         "enum",
         "genericpath",
         "hashlib",
@@ -905,11 +929,12 @@ pub(crate) fn compile(
         "warnoptions":startup.map(|(flags, _)| &flags.warnoptions),
         "xoptions":startup.map(|(flags, _)| &flags.xoptions),
         "faulthandler":startup.map(|(flags, _)| flags.faulthandler),
+        "unbuffered":startup.is_some_and(|(flags, _)| flags.unbuffered),
         "warn_default_encoding":startup.map(|(flags, _)| flags.warn_default_encoding),
         "optimize":startup.map_or(0, |(flags, _)| flags.optimize),
         "dont_write_bytecode":startup.is_some_and(|(flags, _)| flags.dont_write_bytecode),
         "executable":startup.map(|(_, executable)| executable),
-        "command":in_memory,"module_entry":module_entry,"paths":paths,
+        "command":in_memory,"module_entry":module_entry,"path_entry":options.path_entry,"paths":paths,
     });
     check_returns()?;
     let llvm_ir = emit::emit(

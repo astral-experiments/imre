@@ -299,7 +299,7 @@ pub(in super::super) fn update(
                 // PySequence_Fast replaces TypeError only while obtaining the iterator.
                 let iterator = ctx.iterator(pair).map_err(|error| {
                     let class = ctx.builtin("TypeError");
-                    if ctx.error_matches(&error.kind, class) {
+                    if ctx.raised_error_matches(&error, class) {
                         type_error("object is not iterable")
                     } else {
                         error
@@ -340,6 +340,7 @@ fn unhashable_part(ctx: &Context, value: Id) -> Option<Id> {
         | Value::Deque(_)
         | Value::List(_)
         | Value::ByteArray(_)
+        | Value::Array(_)
         | Value::Context(_)
         | Value::ContextToken { .. }
         | Value::Set { frozen: false, .. }
@@ -743,7 +744,8 @@ pub(super) fn method(
         return fromkeys(ctx, args, kwargs);
     }
     if let Some((owner, method)) = name.split_once('.')
-        && ((owner == "list" && LIST_METHODS.contains(&method)) || name == "tuple.index")
+        && ((owner == "list" && LIST_METHODS.contains(&method))
+            || matches!(name, "tuple.count" | "tuple.index"))
     {
         let Some((&receiver, args)) = args.split_first() else {
             return Err(type_error(format!(
@@ -1407,7 +1409,10 @@ pub(super) fn builtin_slot(
         list_extend(ctx, storage, *value)?;
         return Ok(object);
     }
-    if matches!(method, "__repr__" | "__str__" | "__index__") {
+    if matches!(
+        method,
+        "__repr__" | "__str__" | "__index__" | "__abs__" | "__int__" | "__float__"
+    ) {
         if !kwargs.is_empty() {
             return Err(type_error(format!(
                 "wrapper {method}() takes no keyword arguments"
@@ -1418,6 +1423,23 @@ pub(super) fn builtin_slot(
                 "expected 0 arguments, got {}",
                 rest.len()
             )));
+        }
+        if method == "__abs__" {
+            return super::absolute_value(ctx, object);
+        }
+        if method == "__int__" {
+            return integer::truncate_real(ctx, object);
+        }
+        if method == "__float__" {
+            if let Value::Float(number) = *ctx.heap.get(storage) {
+                return Ok(if storage == object {
+                    object
+                } else {
+                    ctx.alloc(Value::Float(number))
+                });
+            }
+            let number = crate::floats::int_to_float(&ctx.as_int(storage)?)?;
+            return Ok(ctx.alloc(Value::Float(number)));
         }
         if method == "__index__" {
             return Ok(integer::exact_value(ctx, object));

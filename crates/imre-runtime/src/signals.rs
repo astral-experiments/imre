@@ -48,6 +48,7 @@ pub(crate) fn disposition(number: i32) -> io::Result<Option<Disposition>> {
 pub(crate) fn install(number: i32, handler: Disposition) -> io::Result<()> {
     // SAFETY: initialize the mask and handler before passing the action to POSIX.
     let mut action: libc::sigaction = unsafe { std::mem::zeroed() };
+    // SAFETY: sigemptyset initializes the writable mask field of this local action.
     unsafe { libc::sigemptyset(&mut action.sa_mask) };
     // Let C embedders supply an alternate signal stack, as CPython does.
     action.sa_flags = libc::SA_ONSTACK;

@@ -819,7 +819,7 @@ impl BufferedFd {
                     ),
                 ));
             }
-            super::argument_count(&ctx.type_name(receiver), name, args.len())?;
+            super::argument_count(ctx.type_name(receiver), name, args.len())?;
             let target = args[0];
             let whence = files::buffered_whence(ctx, args.get(1).copied())?;
             if self.closed() {

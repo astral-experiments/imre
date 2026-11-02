@@ -11,6 +11,7 @@ pub(super) struct ParamSpec {
     pub covariant: bool,
     pub contravariant: bool,
     pub infer_variance: bool,
+    pub declared: bool,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -124,7 +125,24 @@ pub(super) fn construct(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)])
         covariant,
         contravariant,
         infer_variance,
+        declared: false,
     })))
+}
+
+/// A declaration has no bound or default evaluator and inherits its module from the type.
+pub(super) fn declared(ctx: &mut Context, name: Id) -> Id {
+    let default = typing::no_default(ctx);
+    let namespace = ctx.dict(Vec::new());
+    ctx.alloc(Value::ParamSpec(ParamSpec {
+        name,
+        bound: NONE,
+        default,
+        namespace,
+        covariant: false,
+        contravariant: false,
+        infer_variance: true,
+        declared: true,
+    }))
 }
 
 pub(super) fn construct_marker(
@@ -161,6 +179,8 @@ pub(super) fn names() -> impl Iterator<Item = &'static str> {
     READONLY.iter().chain(PROPERTIES).copied().chain([
         "__module__",
         "__reduce__",
+        "__typing_subst__",
+        "__typing_prepare_subst__",
         "has_default",
         "__mro_entries__",
     ])
@@ -186,10 +206,13 @@ pub(super) fn attribute(ctx: &mut Context, value: Id, name: &str) -> Option<Resu
             "__infer_variance__" => builtins::boolean(p.infer_variance),
             "args" => ctx.alloc(Value::ParamSpecMarker(Marker::Args, value)),
             "kwargs" => ctx.alloc(Value::ParamSpecMarker(Marker::Kwargs, value)),
+            "evaluate_default" if p.declared => NONE,
             "evaluate_default" => ctx.alloc(Value::ConstEvaluator(p.default)),
             _ if let Some(item) = ctx.dict_named_item(p.namespace, name) => item,
             "__module__" => ctx.text("typing"),
-            "has_default" | "__reduce__" => method(ctx, value, &format!("typing.ParamSpec.{name}")),
+            "has_default" | "__reduce__" | "__typing_subst__" | "__typing_prepare_subst__" => {
+                method(ctx, value, &format!("typing.ParamSpec.{name}"))
+            }
             _ => return None,
         },
         Value::ParamSpecMarker(kind, origin) => match name {
@@ -198,18 +221,6 @@ pub(super) fn attribute(ctx: &mut Context, value: Id, name: &str) -> Option<Resu
             "__hash__" => NONE,
             _ => return None,
         },
-        Value::Native(ref class)
-            if matches!(
-                class.as_str(),
-                "typing.ParamSpecArgs" | "typing.ParamSpecKwargs"
-            ) && matches!(name, "__eq__" | "__ne__" | "__hash__") =>
-        {
-            if name == "__hash__" {
-                NONE
-            } else {
-                ctx.builtin(&format!("{class}.{name}"))
-            }
-        }
         _ => return None,
     };
     Some(Ok(result))

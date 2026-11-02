@@ -73,6 +73,24 @@ def test_class_constants():
         assert (cls.min, cls.max, cls.resolution) == (smallest, largest, step)
         assert smallest.min is cls.min and largest.max is cls.max
         assert smallest.resolution is cls.resolution
+    limit = timedelta(hours=23, minutes=59)
+    for edge, offset in [(timezone.min, -limit), (timezone.max, limit)]:
+        assert type(edge) is timezone and edge == timezone(offset)
+        assert edge.min is timezone.min and edge.max is timezone.max and edge.utc is UTC
+    assert UTC.utc is UTC is timezone.utc
+    for constant in ("min", "max", "utc"):
+        try:
+            setattr(timezone, constant, None)
+        except TypeError:
+            pass
+        else:
+            raise AssertionError(constant)
+        try:
+            delattr(UTC, constant)
+        except AttributeError:
+            pass
+        else:
+            raise AssertionError(constant)
     assert dt.resolution is not time.resolution
     assert time.resolution is not timedelta.resolution
 
@@ -405,6 +423,26 @@ def test_timedelta_negation():
     assert timedelta.__neg__(custom) == timedelta(days=-1)
 
 
+def test_timedelta_remainder():
+    unit = timedelta(microseconds=3)
+    for left, right, quotient, remainder in ((7, 3, 2, 1), (-7, 3, -3, 2),
+                                             (7, -3, -3, -2), (-7, -3, 2, -1)):
+        a = timedelta(microseconds=left)
+        b = timedelta(microseconds=right)
+        assert a % b == timedelta(microseconds=remainder)
+        assert divmod(a, b) == (quotient, a % b)
+        assert b.__rdivmod__(a) == divmod(a, b)
+    assert divmod(timedelta.max, timedelta.resolution) == (86399999999999999999, timedelta(0))
+    assert timezone(unit).utcoffset(None) % timedelta(minutes=1) == unit
+    assert unit.__mod__(5) is NotImplemented
+    try:
+        divmod(unit, timedelta(0))
+    except ZeroDivisionError:
+        pass
+    else:
+        raise AssertionError("accepted zero timedelta divisor")
+
+
 def test_timedelta_positive_and_absolute():
     zero = timedelta()
     assert +zero is zero and abs(zero) is zero
@@ -530,7 +568,8 @@ def test_fixed_timezone_methods():
         pass
 
     class Name(str):
-        pass
+        def __repr__(self):
+            return "Name()"
 
     class Stamp(dt):
         pass
@@ -540,6 +579,13 @@ def test_fixed_timezone_methods():
     zone = timezone(offset, name)
     foreign = Stamp(2020, 1, 1, tzinfo=UTC)
     assert zone.utcoffset(foreign) is offset and zone.tzname(None) is name
+    assert str(zone) is name
+    assert repr(zone) == f"datetime.timezone({offset!r}, Name())"
+    assert repr(time(tzinfo=zone, fold=1)) == f"datetime.time(0, 0, tzinfo={zone!r}, fold=1)"
+    lone = timezone(timedelta(), "\ud800")
+    assert lone is not UTC and lone.tzname(None) == str(lone) == "\ud800"
+    assert repr(lone) == r"datetime.timezone(datetime.timedelta(0), '\ud800')"
+    assert lone.__getinitargs__()[1] is lone.tzname(None)
     assert timezone.dst(zone, foreign) is None
     assert timezone(offset).tzname(foreign) == "UTC-01:59:59.999999"
     assert UTC.tzname(None) == "UTC"
@@ -717,6 +763,7 @@ def current():
     test_calendar_format()
     test_timedelta_negation()
     test_timedelta_positive_and_absolute()
+    test_timedelta_remainder()
     test_subclass_construction()
     test_now()
     test_time_fromisoformat()

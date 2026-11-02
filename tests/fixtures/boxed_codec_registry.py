@@ -1,6 +1,7 @@
 import _codecs
 import codecs
 import encodings
+import io
 
 
 def decode(value):
@@ -47,6 +48,33 @@ assert codecs.register is _codecs.register
 assert codecs.unregister is _codecs.unregister
 assert codecs.lookup is _codecs.lookup
 
+writer_class = codecs.getwriter(encoding="windows-1251")
+assert writer_class is codecs.lookup("cp1251").streamwriter
+stream = io.BytesIO()
+writer = writer_class(stream)
+writer.write("до свидания\n")
+expected = b"\xe4\xee \xf1\xe2\xe8\xe4\xe0\xed\xe8\xff\n"
+assert stream.getvalue() == expected
+try:
+    writer.write("x☃")
+except UnicodeEncodeError as error:
+    assert (error.object, error.start, error.end) == ("x☃", 1, 2)
+    assert stream.getvalue() == expected
+else:
+    raise AssertionError("strict writer accepted an unencodable character")
+
+
+def replace_snowman(error):
+    assert (error.object, error.start, error.end) == ("ё☃!", 1, 2)
+    return b"<snow>", error.end
+
+
+codecs.register_error("boxed_writer_snowman", replace_snowman)
+writer.errors = "boxed_writer_snowman"
+writer.write("ё☃!")
+assert stream.getvalue() == expected + b"\xb8<snow>!"
+
+
 calls = []
 views = []
 enabled = False
@@ -67,6 +95,9 @@ try:
     info = codecs.lookup("USER test")
     assert calls == ["miss:user_test", "user_test"] * 2
     assert info.name == "user_test"
+    assert codecs.getwriter("user-test") is None
+    info.streamwriter = writer_class
+    assert codecs.getwriter("user-test") is writer_class
     assert codecs.lookup("user-test") is info
     assert codecs.encode("abc", "User-Test") == b"cba"
     assert codecs.decode(b"cba", "user test") == "abc"

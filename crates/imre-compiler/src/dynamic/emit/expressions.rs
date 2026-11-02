@@ -126,7 +126,9 @@ impl Function<'_, '_> {
             ast::Expr::Lambda(v) => self.define(
                 v.start(),
                 "<lambda>",
+                false,
                 v.parameters.as_deref(),
+                None,
                 None,
                 match v.body.as_ref() {
                     ast::Expr::Yield(_) => Body::YieldingLambda(&v.body),
@@ -159,6 +161,8 @@ impl Function<'_, '_> {
                 let step = self.define(
                     v.start(),
                     "<genexpr>",
+                    false,
+                    None,
                     None,
                     None,
                     Body::Generator(&v.generators, &v.elt),

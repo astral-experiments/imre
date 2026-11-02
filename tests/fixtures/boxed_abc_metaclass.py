@@ -162,6 +162,19 @@ def current():
         raise AssertionError("recursive metaclass call returned")
 
 
+    class Registered: pass
+    class Warm(Registered): pass
+    class Cold(Registered): pass
+    Abstract.register(Registered)
+    assert issubclass(Registered, Abstract) and issubclass(Warm, Abstract)
+    token = abc.get_cache_token()
+    assert Abstract._abc_registry_clear() is None
+    assert abc.get_cache_token() == token
+    assert not issubclass(Registered, Abstract) and not issubclass(Cold, Abstract)
+    assert issubclass(Warm, Abstract)
+    Abstract._abc_caches_clear()
+    assert not issubclass(Warm, Abstract)
+
     check_namespace_constructor()
 
 

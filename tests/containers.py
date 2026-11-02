@@ -409,6 +409,8 @@ REJECTED = {
     "dict_bool_int_get_default": 'values = {"one": 1}\nprint(values.get("one", True))\n',
     "dict_none_get_wrong_default": 'values: dict[str, None] = {"none": None}\nvalues.get("none", 1)\n',
     "dict_get_wrong_key": 'values = {"one": 1}\nvalues.get(1)\n',
+    "dict_popitem_with_arg": 'values = {"x": 1}\nvalues.popitem(1)\n',
+    "dict_popitem_keyword": 'values = {"x": 1}\nvalues.popitem(last=True)\n',
     "dict_get_wrong_arity": 'values = {"one": 1}\nvalues.get("one", 2, 3)\n',
     "dict_get_keyword": 'values = {"one": 1}\nvalues.get("one", default=2)\n',
     "dict_get_without_narrowing": 'values = {"one": 1}\nrequired: int = values.get("one")\n',

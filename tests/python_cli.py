@@ -1364,6 +1364,27 @@ def main():
         )
         compare("-Bm", "module_pkg.child", "-m", "tail")
         compare("-B", "-mmodule_pkg", "tail")
+        entry = root / "entry"
+        entry.mkdir()
+        (entry / "__main__.py").write_text(
+            "import sys, sibling\n"
+            "assert sys.modules['__main__'].__dict__ is globals()\n"
+            "assert __spec__.name == '__main__' and __loader__ is __spec__.loader\n"
+            "print(sys.argv, sys.path[0], __file__, __package__, sibling.marker)\n"
+        )
+        sibling = entry / "sibling.py"
+        sibling.write_text("marker = 'first'\n")
+        compare("entry", "tail")
+        (root / "alias").symlink_to(entry, target_is_directory=True)
+        compare("-I", "./alias/", "-h")
+        sibling.write_text("marker = 'second'\n")
+        compare("-I", "./alias/", "-h")
+        (root / "empty_entry").mkdir()
+        for exe in (sys.executable, imre):
+            missing = run(exe, "-I", "empty_entry")
+            message = f"can't find '__main__' module in '{root / 'empty_entry'}'"
+            assert missing.returncode == 1 and missing.stderr.decode().rstrip().endswith(message)
+
         # An ordinary module under the first root wins over a package in a later root.
         (root / "preferred.py").write_text("print('file wins')\n")
         (root / "preferred").mkdir()
@@ -1382,6 +1403,16 @@ def main():
             "print(request.Request('data:,ok').type, spec.name)\n"
         )
         compare("-B", request_script)
+
+        parser_script = root / "parser_entry.py"
+        parser_script.write_text(
+            "from argparse import ArgumentParser\n"
+            "parser = ArgumentParser()\n"
+            "parser.add_argument('value', type=int)\n"
+            "print(parser.parse_args().value + 1)\n"
+        )
+        compare("-I", parser_script, "-h")
+        compare("-B", parser_script, "41")
 
         ftp_script = root / "ftp_entry.py"
         ftp_script.write_text("import ftplib\nprint(ftplib.FTP().encoding, ftplib.parse257('257 \"home\"'))\n")
@@ -1457,6 +1488,40 @@ def main():
                 "    except TypeError as e: print(str(e))",
                 "os", "posix",
             )
+
+            compare(
+                "-Xwarn_default_encoding", "-c",
+                "from subprocess import *\n"
+                "import warnings\n"
+                "with warnings.catch_warnings(record=True) as caught:\n"
+                "    Popen(['/bin/true'], text=True).wait()\n"
+                "    run(['/bin/true'], text=True)\n"
+                "    check_output(['/bin/true'], text=True)\n"
+                "    run(['/bin/true'], encoding='ascii')\n"
+                "    run(['/bin/true'])\n"
+                "for w in caught: print(w.filename, w.lineno, w.category.__name__, str(w.message))",
+            )
+
+            for statement, connect in (
+                ("import socket as net", "net.create_connection"),
+                ("from socket import create_connection as dial", "dial"),
+            ):
+                compare(
+                    "-c", f"{statement}\n"
+                    "import socket\n"
+                    "with socket.socket() as listener:\n"
+                    "    listener.bind(('127.0.0.1', 0))\n"
+                    "    address = listener.getsockname()\n"
+                    f"    try: {connect}(address, timeout=2)\n"
+                    "    except ConnectionRefusedError: pass\n"
+                    "    else: raise AssertionError('unopened listener accepted a connection')\n"
+                    "    listener.listen()\n"
+                    f"    with {connect}(address, timeout=2) as client:\n"
+                    "        peer, _ = listener.accept()\n"
+                    "        with peer:\n"
+                    "            client.sendall(b'x')\n"
+                    "            assert peer.recv(1) == b'x'\n",
+                )
 
         for mode in ("0", "1"):
             compare(
@@ -1640,6 +1705,7 @@ def main():
         inspect_entry.write_text("import view_inspection\n")
         compare("-B", inspect_entry, native_args=("run", inspect_entry, "--runtime-imports", "--quiet"))
         compare("-IB", Path(__file__).with_name("fixtures") / "boxed_proxy_operators.py")
+        compare("-IB", "-c", "from operator import __getitem__; print(__getitem__((11,), 0))")
         compare("-IB", Path(__file__).with_name("fixtures") / "boxed_update_wrapper.py")
         compare("-IB", Path(__file__).with_name("fixtures") / "boxed_tracebacks.py")
         compare("-IB", Path(__file__).with_name("fixtures") / "boxed_print_traceback.py")
@@ -1663,6 +1729,23 @@ def main():
         )
         compare("-I", "-c", scoped_import, "match", extra={"IMREFLAGS": "--bogus"})
         compare("-I", "-c", scoped_import, "inverse", extra={"IMREFLAGS": "--bogus"})
+        stream_flags = (
+            "import sys\n"
+            "for f in (sys.stdin, sys.stdout, sys.stderr):\n"
+            "    print(f.write_through, f.line_buffering, type(f.buffer).__name__)"
+        )
+        for option, value in (("-uc", ""), ("-c", "1"), ("-c", "0"), ("-Ec", "1"), ("-Iuc", "0")):
+            extra = {"PYTHONUNBUFFERED": value}
+            expected = run(sys.executable, option, stream_flags, extra=extra, stdin=b"")
+            actual = run(imre, option, stream_flags, extra=extra, stdin=b"")
+            assert (actual.returncode, actual.stdout, actual.stderr) == (0, expected.stdout, b"")
+        mixed_writes = (
+            "import os, sys\n"
+            "sys.stdout.write('a'); os.write(1, b'b'); sys.stdout.buffer.write(b'\\xff')\n"
+            "sys.stderr.write('c'); os.write(2, b'd'); sys.stderr.buffer.write(b'\\xfe')"
+        )
+        mixed = run(imre, "-uc", mixed_writes)
+        assert (mixed.returncode, mixed.stdout, mixed.stderr) == (0, b"ab\xff", b"cd\xfe")
         compare("-IBc" + flags_code)
         compare("-c", flags_code, extra={"PYTHONDONTWRITEBYTECODE": "1"})
         compare(
@@ -2073,6 +2156,7 @@ def report(text):
         compare("-B", "-c", "from typing import Protocol as P; print(P.__name__)")
         compare("-B", fixtures / "typing_protocol_import.py")
         compare("-IB", fixtures / "boxed_pickle_writer.py")
+        compare("-IB", "-c", "import io, logging; print(repr(logging.StreamHandler(io.StringIO())))")
         compare("-IB", "-c", "import io; b = io.BytesIO(b'abc'); print(bytes(b.getbuffer()))")
         compare(
             "-IB", "-c",
@@ -2091,6 +2175,16 @@ def report(text):
         compare("-IB", override_fixture, native_args=("run", override_fixture, "--runtime-imports", "--quiet"))
         reader_fixture = fixtures / "io_buffered_reader_type.py"
         compare("-IB", reader_fixture, native_args=("run", reader_fixture, "--quiet"))
+        compare(
+            "-IB", "-c",
+            "import codecs, io; choose = codecs.getwriter; sink = io.BytesIO(); "
+            "choose('cp1251')(sink).write('до'); print(sink.getvalue())",
+        )
+        compare(
+            "-IB", "-c",
+            "import codecs\nclass Sink:\n    def write(self, data: bytes) -> None: print(data)\n"
+            "codecs.getwriter('cp1251')(Sink()).write('до')",
+        )
         reinit_writer = fixtures / "io_buffered_writer_reinitialize.py"
         reinit_path = root / "reinitialized-writer.bin"
         compare("-IB", reinit_writer, reinit_path, native_args=("run", reinit_writer, "--quiet", "--", reinit_path))
@@ -2129,8 +2223,21 @@ def report(text):
         ):
             thread_fixture = fixtures / name
             compare("-IB", thread_fixture, native_args=("run", thread_fixture, "--runtime-imports", "--quiet"))
+        metaclass_new = fixtures / "ordinary_metaclass_new.py"
+        compare("-IB", metaclass_new, native_args=("run", metaclass_new, "--runtime-imports", "--quiet"))
         class_locals = fixtures / "boxed_class_locals.py"
         compare("-IB", class_locals, native_args=("run", class_locals, "--runtime-imports", "--quiet"))
+        generic = fixtures / "module_generic_function.py"
+        compare("-IB", generic, native_args=("run", generic, "--quiet"))
+        compare("-IB", generic, native_args=("run", generic, "--runtime-imports", "--quiet"))
+        reveal = fixtures / "typing_reveal_type.py"
+        for command in ((sys.executable, "-IB", reveal),
+                        (imre, "run", reveal, "--quiet"),
+                        (imre, "run", reveal, "--runtime-imports", "--quiet")):
+            result = run(*command)
+            assert (result.returncode, result.stdout, result.stderr) == (
+                0, b"", b"Runtime type is 'Marker'\nRuntime type is 'type'\n",
+            ), result
         hints_fixture = fixtures / "boxed_typing_get_type_hints.py"
         compare("-IB", hints_fixture, native_args=("run", hints_fixture, "--runtime-imports", "--quiet"))
         if sys.platform == "linux":
@@ -2223,6 +2330,7 @@ def report(text):
             "boxed_ast_literal_eval.py",
             "boxed_code_objects.py",
             "boxed_inspect_getmodule.py",
+            "boxed_inspect_isroutine.py",
             "boxed_numeric_repr.py",
             "boxed_recursive_repr.py",
             "boxed_bound_method_repr.py",
@@ -2297,6 +2405,7 @@ def report(text):
             "boxed_typing_no_type_check.py",
             "boxed_typing_no_type_check_decorator.py",
             "boxed_typing_assert_type.py",
+            "boxed_typing_type_predicates.py",
             "boxed_typing_new_type.py",
             "boxed_typing_typeddict.py",
             "boxed_typing_dataclass_transform.py",
@@ -2307,6 +2416,7 @@ def report(text):
             "boxed_typing_variadic.py",
             "boxed_typing_tuple.py",
             "boxed_typing_async_collection_aliases.py",
+            "boxed_typing_alias_defaults.py",
             "boxed_typing_type.py",
             "boxed_type_alias_statements.py",
             "boxed_typing_mapping.py",
@@ -2515,6 +2625,7 @@ def report(text):
             "boxed_itertools_chain.py",
             "boxed_itertools_cycle.py",
             "boxed_itertools_batched.py",
+            "boxed_itertools_tee.py",
             "boxed_itertools_combinations.py",
             "boxed_itertools_permutations.py",
             "boxed_itertools_product.py",
@@ -2574,6 +2685,7 @@ def report(text):
             "boxed_binascii.py",
             "boxed_zlib.py",
             "boxed_hashlib_names.py",
+            "bytes/hashlib_md5_provider.py",
             "bytes/hashlib_sha3_provider.py",
             "bytes/hashlib_kdf.py",
             "boxed_hashlib_file_digest.py",
@@ -2686,7 +2798,7 @@ def report(text):
         invalid = run(imre, "build", source, "--runtime-imports", "-o", root / "invalid-nonlocal")
         assert invalid.returncode and b"SyntaxError: nonlocal binding not allowed for type parameter 'T'" in invalid.stderr, invalid
 
-        for fixture in ("boxed_typing_generics.py", "boxed_typing_list.py"):
+        for fixture in ("boxed_typing_generics.py", "boxed_typing_list.py", "boxed_typing_concatenate.py"):
             plugin.write_bytes((fixtures / fixture).read_bytes())
             compare("-IB", "-c", imports)
         if sys.platform.startswith("linux"):

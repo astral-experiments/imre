@@ -37,10 +37,10 @@ pub(crate) struct OsErrorArgs {
     pub(crate) text_paths: Option<[Option<String>; 2]>,
 }
 
-/// Borrow the five arguments retained by a native decoder for its Python exception.
-pub(crate) struct DecodeErrorArgs<'a> {
+/// Borrow the codec name, input and half-open range retained by a native Unicode error.
+pub(crate) struct CodecErrorArgs<'a, T> {
     pub(crate) encoding: &'a str,
-    pub(crate) object: &'a [u8],
+    pub(crate) object: T,
     pub(crate) start: i64,
     pub(crate) end: i64,
     pub(crate) reason: &'a str,
@@ -656,23 +656,40 @@ impl Error {
         Self::new(Kind::IndexError, "list index out of range")
     }
 
-    pub(crate) fn decode_args(&self) -> Option<DecodeErrorArgs<'_>> {
+    pub(crate) fn decode_args(&self) -> Option<CodecErrorArgs<'_, &[u8]>> {
+        self.codec_args(Kind::UnicodeDecodeError, 8, |word| {
+            // SAFETY: codec_args checked the bytes tag and self retains the object.
+            unsafe { (&*(word as *const crate::Bytes)).as_slice() }
+        })
+    }
+
+    // The boxed encoder already has the original Python string, including its subclass.
+    pub(crate) fn encode_args(&self) -> Option<CodecErrorArgs<'_, ()>> {
+        self.codec_args(Kind::UnicodeEncodeError, 3, |_| ())
+    }
+
+    fn codec_args<T>(
+        &self,
+        kind: Kind,
+        tag: u32,
+        input: impl FnOnce(usize) -> T,
+    ) -> Option<CodecErrorArgs<'_, T>> {
         let Some(Payload::Arguments(arguments)) = &self.payload else {
             return None;
         };
         let [encoding, object, start, end, reason] = arguments.args.as_slice() else {
             return None;
         };
-        if self.kind != Kind::UnicodeDecodeError
-            || [encoding, object, start, end, reason].map(|arg| arg.kind.raw()) != [3, 8, 2, 2, 3]
+        if self.kind != kind
+            || [encoding, object, start, end, reason].map(|arg| arg.kind.raw()) != [3, tag, 2, 2, 3]
         {
             return None;
         }
         // SAFETY: the checked tags and owned arguments root these borrows for the life of self.
         unsafe {
-            Some(DecodeErrorArgs {
+            Some(CodecErrorArgs {
                 encoding: (&*(encoding.word as *const Str)).as_str(),
-                object: (&*(object.word as *const crate::Bytes)).as_slice(),
+                object: input(object.word),
                 start: crate::Int::borrow(start.word).to_i64()?,
                 end: crate::Int::borrow(end.word).to_i64()?,
                 reason: (&*(reason.word as *const Str)).as_str(),
@@ -1137,12 +1154,19 @@ pub(super) fn raise_timeout(error: super::processes::TimeoutError) {
 
 /// Return the visible parent and whether it was installed as an explicit cause.
 fn display_parent(owner: &crate::ObjectOwner) -> Option<(crate::ObjectOwner, bool)> {
+    exception_parent(owner, false)
+}
+
+fn exception_parent(
+    owner: &crate::ObjectOwner,
+    include_hidden: bool,
+) -> Option<(crate::ObjectOwner, bool)> {
     // SAFETY: the owner roots the exception and this borrow cannot call Python.
     unsafe {
         owner.0.with(|s| {
             let e = s.exception();
             e.cause().cloned().map(|cause| (cause, true)).or_else(|| {
-                if e.suppress_context {
+                if e.suppress_context && !include_hidden {
                     None
                 } else {
                     e.details.as_deref()?.display_context.clone()
@@ -1291,7 +1315,8 @@ fn attach_display_context(value: &crate::ObjectOwner, active: crate::ObjectOwner
         if !detach {
             detach = group_owns_exception(&node, value)?;
         }
-        let Some((next, explicit)) = display_parent(&node) else {
+        // Even suppressed contexts own their parents and can participate in a cycle.
+        let Some((next, explicit)) = exception_parent(&node, true) else {
             break;
         };
         if crate::ObjectOwner::ptr_eq(&next, value) {
@@ -1329,6 +1354,27 @@ fn attach_display_context(value: &crate::ObjectOwner, active: crate::ObjectOwner
             Ok(())
         })
     }
+}
+
+/// Re-raise a missing encoded key with its original spelling, as in os._Environ.
+pub(super) fn raise_key_from_none(key: OwnedWord, encoded: OwnedWord) {
+    let missing = new_exception(Kind::KeyError, Payload::Key(encoded));
+    if let Some(active) = active_exception()
+        && let Err(error) = attach_display_context(&missing, active)
+    {
+        error.raise();
+        return;
+    }
+    let error = crate::ObjectOwner::new(Object(StorageCell::new(Storage::Exception(Exception {
+        kind: Kind::KeyError,
+        payload: Payload::Key(key),
+        suppress_context: true,
+        details: Some(crate::Shared::new(ExceptionDetails {
+            display_context: Some((missing, false)),
+            ..Default::default()
+        })),
+    }))));
+    replace_pending(Some(error));
 }
 
 fn publish_raised(value: crate::ObjectOwner) {
@@ -2795,6 +2841,34 @@ mod tests {
         assert_eq!(*message(&error), expected);
         drop(error);
         assert!(weak.upgrade().is_none());
+    }
+
+    #[test]
+    fn translated_environment_key_keeps_its_hidden_bytes_context() {
+        let key = StrOwner::new(Str::from("missing"));
+        let encoded = crate::BytesOwner::new(b"missing".to_vec());
+        // SAFETY: each owner remains live for the acquisition of its exact word kind.
+        unsafe {
+            raise_key_from_none(
+                WordKind::new(3).acquire(StrOwner::as_ptr(&key) as usize),
+                WordKind::new(8).acquire(crate::BytesOwner::as_ptr(&encoded) as usize),
+            );
+        }
+        let raised = take_error(Kind::KeyError);
+        assert!(display_parent(&raised).is_none());
+        // SAFETY: the exception is rooted while copying its hidden context owner.
+        let context = unsafe {
+            raised.0.with(|s| {
+                let error = s.exception();
+                assert!(error.suppress_context && error.cause().is_none());
+                error.display_context().unwrap().0.clone()
+            })
+        };
+        assert_eq!(kind_of(&context), Kind::KeyError);
+        assert_eq!(message(&context).as_str(), "b'missing'");
+        // Reversing the chain cuts the original implicit link, even when hidden.
+        assert!(attach_display_context(&context, raised.clone()).is_ok());
+        assert!(exception_parent(&raised, true).is_none());
     }
 
     #[test]

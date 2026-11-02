@@ -473,7 +473,6 @@ impl Context {
             Value::Poll(_) => "select.poll",
             Value::Count { .. } => "count",
             Value::Repeat(_) => "repeat",
-            Value::CodecInfo { .. } => "CodecInfo",
             Value::Struct { .. } => "Struct",
             Value::NamedFileCloser(_) => "tempfile._TemporaryFileCloser",
             Value::BufferedRandom(..) => "_io.BufferedRandom",
@@ -534,36 +533,46 @@ impl Context {
         error
     }
 
-    /// Keep the decoder's original object and offsets when crossing into boxed Python.
-    pub(super) fn decode_error(&mut self, native: crate::Error) -> Error {
-        let decoded = native.decode_args().map(|args| {
-            let encoding = self.text(args.encoding);
-            let object = self.alloc(Value::Bytes(args.object.to_vec()));
-            let reason = self.text(args.reason);
-            let values = vec![
-                encoding,
-                object,
-                self.int(args.start),
-                self.int(args.end),
-                reason,
-            ];
-            let state = DecodeState {
-                encoding,
-                object,
-                start: args.start,
-                end: args.end,
-                reason,
-            };
-            (self.alloc(Value::Tuple(values)), state)
-        });
+    /// Preserve a native Unicode error's original arguments and its mutable member fields.
+    fn codec_exception(&mut self, native: crate::Error, state: Option<DecodeState>) -> Error {
         let mut error = Error::from(native);
-        if error.kind == "UnicodeDecodeError"
-            && let Some((values, state)) = decoded
+        if matches!(&*error.kind, "UnicodeDecodeError" | "UnicodeEncodeError")
+            && let Some(state) = state
         {
-            error.args = Some(values);
+            let start = self.int(state.start);
+            let end = self.int(state.end);
+            error.args = Some(self.alloc(Value::Tuple(vec![
+                state.encoding,
+                state.object,
+                start,
+                end,
+                state.reason,
+            ])));
             error.decode = Some(Box::new(state));
         }
         error
+    }
+
+    pub(super) fn decode_error(&mut self, native: crate::Error) -> Error {
+        let state = native.decode_args().map(|args| DecodeState {
+            encoding: self.text(args.encoding),
+            object: self.alloc(Value::Bytes(args.object.to_vec())),
+            start: args.start,
+            end: args.end,
+            reason: self.text(args.reason),
+        });
+        self.codec_exception(native, state)
+    }
+
+    pub(super) fn encode_error(&mut self, native: crate::Error, input: Id) -> Error {
+        let state = native.encode_args().map(|args| DecodeState {
+            encoding: self.text(args.encoding),
+            object: input,
+            start: args.start,
+            end: args.end,
+            reason: self.text(args.reason),
+        });
+        self.codec_exception(native, state)
     }
 
     /// A subsequent failure on the same decode updates only the byte range and reason.
@@ -667,7 +676,7 @@ pub(super) struct ClassNamespace {
     /// Scratch field dictionary used while a class body is executing.
     pub annotation_scratch: Option<Id>,
     /// Executed deferred sites in source order, including repeated field names.
-    pub annotation_sites: Option<Box<std::collections::BTreeMap<u32, (Id, Id)>>>,
+    pub annotation_sites: Option<std::collections::BTreeMap<u32, (Id, Id)>>,
     /// Class annotation attributes are served by the installed provider.
     pub provider_annotations: bool,
     /// Slot names consumed when the class is created, independent of later namespace mutations.
@@ -732,6 +741,7 @@ pub(super) struct ExecGlobals {
 #[derive(Clone)]
 pub(super) struct BoxedTextFile {
     pub(super) file: crate::objects::TextFile,
+    pub(super) line_buffering: bool,
     pub(super) buffer: Option<Id>,
 }
 
@@ -803,13 +813,6 @@ pub(super) enum Value {
         hash: Option<i64>,
     },
     ByteArray(Vec<u8>),
-    CodecInfo {
-        class: Id,
-        encode: Id,
-        entry: crate::objects::CodecInfo,
-        decode: Id,
-        text_encoding_override: Option<Id>,
-    },
     CodecEncoder(crate::objects::Codec),
     CodecDecoder(crate::objects::Codec),
     Hash(super::stdlib::hashlib::digest::SharedHash),
@@ -818,11 +821,11 @@ pub(super) enum Value {
         format: String,
         layout: std::rc::Rc<crate::objects::interpreter_stdlib::StructFormat>,
     },
-    LoggerHandle(std::rc::Rc<crate::objects::logging::Logger>),
     MetadataArchive(std::rc::Rc<crate::objects::ZipArchive>),
     HandlerLock(std::sync::Arc<crate::objects::logging::HandlerLock>),
     Socket(crate::ObjectOwner),
     Deque(Box<crate::objects::DequeRing<Id>>),
+    GenericAliasIterator(Option<Id>),
     SequenceIterator {
         source: Option<Id>,
         index: i64,
@@ -904,6 +907,8 @@ pub(super) enum Value {
     Class {
         /// Private layout tag for native I/O class generations.
         io_kind: Option<super::stdlib::io::NativeClass>,
+        /// Qualified name of a non-instantiable digest implementation type.
+        hash_type: Option<&'static str>,
         metaclass: Option<Id>,
         name: String,
         scope: Id,
@@ -913,17 +918,16 @@ pub(super) enum Value {
     ParamSpec(super::paramspec::ParamSpec),
     ParamSpecMarker(super::paramspec::Marker, Id),
     ConstEvaluator(Id),
-    /// A statement-defined alias retains its evaluator even after caching a successful value.
     TypeAlias {
         name: Id,
-        evaluator: Id,
-        cached: Option<Id>,
+        definition: super::typing::AliasDefinition,
     },
     TypeVar(super::typing::TypeVariable),
     TypeVarTuple {
         name: Id,
         module: Id,
         default: Id,
+        declared: bool,
     },
     NoDefault,
     GenericAlias(super::typing::Alias),
@@ -932,7 +936,7 @@ pub(super) enum Value {
         class: Id,
         fields: indexmap::IndexMap<String, Id>,
         /// Storage addressed by the declaring member, independent of the instance dictionary.
-        member_values: Option<Box<HashMap<Id, Id>>>,
+        member_values: Option<HashMap<Id, Id>>,
         /// Exact ordinary instance dictionary once exposed or replaced.
         namespace: Option<Id>,
         dictionary: Option<Id>,
@@ -1078,6 +1082,10 @@ pub(super) enum Value {
         random: Id,
         unsupported: Id,
     },
+    HashMethod {
+        owner: Id,
+        name: &'static str,
+    },
     IoMethod {
         owner: Id,
         name: &'static str,
@@ -1089,6 +1097,7 @@ pub(super) enum Value {
     RegexScanner {
         pattern: Id,
         subject: Id,
+        buffer_view: Option<Id>,
         start: Option<usize>,
         end: usize,
         retry: bool,
@@ -1168,6 +1177,7 @@ impl Value {
             Self::Map { .. } => "map",
             Self::Filter { .. } => "filter",
             Self::Hash(state) => state.lock().class_name(),
+            Self::HashMethod { .. } => "method_descriptor",
             Self::Zip { .. } => "zip",
             Self::Array(_) => "array.array",
             Self::Bytes(_) => "bytes",
@@ -1179,6 +1189,7 @@ impl Value {
             Self::File(_) | Self::TextFile(_) => return self.native_io_class_name(),
             Self::ProcessHandle(_) => "_imre_subprocess.Handle",
             Self::BufferedRandom(..) => "_io.BufferedRandom",
+            Self::GenericAliasIterator(_) => "generic_alias_iterator",
             Self::SequenceIterator { .. } => "iterator",
             Self::ReverseSequence { .. } => "reversed",
             Self::Deque(_) => super::deque::CLASS,
@@ -1244,6 +1255,13 @@ impl Value {
         })
     }
 
+    pub(super) fn hash_type(&self) -> Option<&'static str> {
+        match self {
+            Self::Class { hash_type, .. } => *hash_type,
+            _ => None,
+        }
+    }
+
     pub(super) fn io_kind(&self) -> Option<&'static str> {
         match self {
             Self::Class {
@@ -1260,7 +1278,7 @@ impl Value {
 
     pub(super) fn instance_class(&self) -> Option<Id> {
         match self {
-            Self::Instance { class, .. } | Self::CodecInfo { class, .. } => Some(*class),
+            Self::Instance { class, .. } => Some(*class),
             Self::Class { metaclass, .. } => *metaclass,
             Self::Module { constructor, .. } => *constructor,
             Self::Raised(error) => error.class(),
@@ -1307,9 +1325,9 @@ impl Value {
     fn children(&self, visit: &mut MarkQueue<'_>) {
         match self {
             Self::Deque(ring) => visit.extend(&ring.items),
-            Self::SequenceIterator { source, .. } | Self::ReverseSequence { source, .. } => {
-                visit.extend(*source)
-            }
+            Self::SequenceIterator { source, .. }
+            | Self::ReverseSequence { source, .. }
+            | Self::GenericAliasIterator(source) => visit.extend(*source),
             Self::DequeIterator { deque, .. } => visit.push(*deque),
             Self::List(v) | Self::Tuple(v) => visit.extend(v.iter().rev()),
             Self::Set { entries, .. } => visit.extend(entries.iter().map(|&(key, _)| key)),
@@ -1352,7 +1370,8 @@ impl Value {
             Self::Dict(entries) => {
                 visit.extend(entries.ordered_nodes().iter().map(|&(key, _)| key));
                 for (key, value) in entries {
-                    visit.extend([*value, *key]);
+                    visit.push(*value);
+                    visit.push(*key);
                 }
             }
             Self::DictView { dict, .. } | Self::MappingProxy(dict) => visit.push(*dict),
@@ -1471,18 +1490,20 @@ impl Value {
                 fields,
                 ..
             } => {
-                visit.extend([*scope, *code, *defaults, *kwdefaults, *closure]);
+                visit.push(*scope);
+                visit.push(*code);
+                visit.push(*defaults);
+                visit.push(*kwdefaults);
+                visit.push(*closure);
                 visit.extend(class_cell);
                 fields.children(visit);
             }
             Self::Code(code) => {
-                visit.extend([
-                    code.name,
-                    code.qualname,
-                    code.doc,
-                    code.filename,
-                    code.parameters,
-                ]);
+                visit.push(code.name);
+                visit.push(code.qualname);
+                visit.push(code.doc);
+                visit.push(code.filename);
+                visit.push(code.parameters);
                 visit.extend(code.nested.iter().map(|&(_, id)| id));
                 if let Body::Source(program) = &code.body {
                     visit.push(program.string_roots);
@@ -1524,16 +1545,25 @@ impl Value {
                 name,
                 module,
                 default,
+                ..
             } => visit.extend([*name, *module, *default]),
             Self::ParamSpec(p) => visit.extend([p.name, p.bound, p.default, p.namespace]),
             Self::ParamSpecMarker(_, origin) | Self::ConstEvaluator(origin) => visit.push(*origin),
-            Self::TypeAlias {
-                name,
-                evaluator,
-                cached,
-            } => {
-                visit.extend([*name, *evaluator]);
-                visit.extend(*cached);
+            Self::TypeAlias { name, definition } => {
+                visit.push(*name);
+                match *definition {
+                    super::typing::AliasDefinition::Lazy {
+                        parameters,
+                        evaluator,
+                        cached,
+                    } => {
+                        visit.extend([parameters, evaluator]);
+                        visit.extend(cached);
+                    }
+                    super::typing::AliasDefinition::Eager { value, module } => {
+                        visit.extend([value, module]);
+                    }
+                }
             }
             Self::TypeVar(var) => visit.extend([var.name, var.module, var.bound, var.constraints]),
             Self::GenericAlias(alias) => {
@@ -1671,19 +1701,16 @@ impl Value {
             Self::IoMethod {
                 owner, unsupported, ..
             } => visit.extend([*owner, *unsupported]),
-            Self::CodecInfo {
-                class,
-                encode,
-                decode,
-                text_encoding_override,
+            Self::HashMethod { owner, .. } => visit.push(*owner),
+            Self::RegexScanner {
+                pattern,
+                subject,
+                buffer_view,
                 ..
             } => {
-                visit.extend([*class, *encode, *decode]);
-                visit.extend(*text_encoding_override);
+                visit.extend([*pattern, *subject]);
+                visit.extend(*buffer_view);
             }
-            Self::RegexScanner {
-                pattern, subject, ..
-            } => visit.extend([*pattern, *subject]),
             Self::RegexPattern(pattern) => visit.push(pattern.source),
             Self::RegexMatch(m) => visit.extend([m.pattern, m.subject]),
             Self::File(file) => {
@@ -1709,7 +1736,6 @@ impl Value {
             | Self::CodecDecoder(_)
             | Self::Struct { .. }
             | Self::Hash(_)
-            | Self::LoggerHandle(_)
             | Self::MetadataArchive(_)
             | Self::HandlerLock(_)
             | Self::ThreadHandle(_)
@@ -2052,7 +2078,7 @@ pub(super) struct MarkQueue<'a> {
 }
 
 impl MarkQueue<'_> {
-    fn push(&mut self, id: Id) {
+    pub(super) fn push(&mut self, id: Id) {
         let slot = &self.slots[id as usize];
         if !slot.marked() {
             if let Some(order) = &mut self.ordered {
@@ -2130,15 +2156,13 @@ pub(super) struct Heap {
     interned: HashMap<crate::StrOwner, InternedString>,
     // ABC registrations are weak edges. Sweep them before recycling a dead class's slot.
     pub(super) abc_registrations: Vec<[Id; 2]>,
-    // Protocol subclass results use weak keys just like ABC registrations.
-    pub(super) protocol_subclass_cache: HashMap<[Id; 2], bool>,
+    // ABC subclass results use weak keys just like ABC registrations.
+    pub(super) abc_subclass_cache: HashMap<[Id; 2], bool>,
     // Collecting weak registration pairs must not roll back the invalidation counter.
     pub(super) abc_cache_token: u64,
     free_head: usize,
     free_count: usize,
     pub(super) immutable_hashes: HashMap<Id, i64>,
-    // Call-history markers belong to list storage and expire when it is collected.
-    pub(super) mock_call_lists: HashSet<Id>,
     frames: Vec<Frame>,
     fault_generation: Cell<Option<u32>>,
     fault_workers: RefCell<Option<Weak<()>>>,
@@ -2224,12 +2248,11 @@ impl Heap {
             linked_string_constants: HashMap::new(),
             interned: HashMap::new(),
             abc_registrations: Vec::new(),
-            protocol_subclass_cache: HashMap::new(),
+            abc_subclass_cache: HashMap::new(),
             abc_cache_token: 0,
             free_head: END,
             free_count: 0,
             immutable_hashes: HashMap::new(),
-            mock_call_lists: HashSet::new(),
             frames: vec![Frame::new(NONE, NONE, FrameOwner::Module(NONE), NONE)],
             fault_generation: Cell::new(None),
             fault_workers: RefCell::new(None),
@@ -2694,28 +2717,79 @@ impl Heap {
         self.frames.last().unwrap().live.len()
     }
 
+    fn finalizer_free_scalar(&self, id: Id) -> bool {
+        matches!(
+            self.get(id),
+            Value::None
+                | Value::Bool(_)
+                | Value::Int(_)
+                | Value::Float(_)
+                | Value::Complex(_)
+                | Value::Str(_)
+                | Value::SurrogateStr(_)
+                | Value::Bytes(_)
+                | Value::ByteArray(_)
+                | Value::Native(_)
+        )
+    }
+
+    /// Release a private argument list containing scalar tuples at its original call boundary.
+    pub(super) fn discard_scalar_call(&mut self, mark: usize, result: Id, arguments: Id) -> bool {
+        if !self.tracks_finalizers() {
+            return false;
+        }
+        let Value::List(args) = self.get(arguments) else {
+            return false;
+        };
+        let weak = |id| self.has_weak_values && self.weak_edge(id);
+        let scalar = |id| self.finalizer_free_scalar(id) && !weak(id);
+        let flat = |items: &[Id]| items.len() <= 8 && items.iter().copied().all(scalar);
+        // Without a nested tuple the original discard need not truncate these temporaries.
+        if !(2..=8).contains(&args.len())
+            || !args
+                .iter()
+                .any(|&id| matches!(self.get(id), Value::Tuple(_)))
+            || weak(arguments)
+            || !args.iter().all(|&id| match self.get(id) {
+                Value::Tuple(items) => !weak(id) && flat(items),
+                _ => scalar(id),
+            })
+        {
+            return false;
+        }
+        let Some(dropped) = self.frames.last().unwrap().live.get(mark..) else {
+            return false;
+        };
+        if dropped.len() > 64 || !dropped.contains(&arguments) {
+            return false;
+        }
+        // Other operands may own resources or weak targets. Leave uncertain cases to the collector.
+        if !dropped.iter().all(|&id| {
+            id == arguments
+                || match self.get(id) {
+                    Value::Tuple(items) | Value::List(items) => !weak(id) && flat(items),
+                    Value::Dict(items) => !weak(id) && items.is_empty(),
+                    _ => scalar(id),
+                }
+        }) {
+            return false;
+        }
+        self.release_temporaries_since(mark);
+        if result != NONE {
+            self.keep(result);
+        }
+        true
+    }
+
     /// A scalar and a container of scalars cannot hold an output file.
     pub(super) fn could_own_finalizer(&self, id: Id, skip_bound: bool) -> bool {
-        let scalar = |id| {
-            matches!(
-                self.get(id),
-                Value::None
-                    | Value::Bool(_)
-                    | Value::Int(_)
-                    | Value::Float(_)
-                    | Value::Complex(_)
-                    | Value::Str(_)
-                    | Value::SurrogateStr(_)
-                    | Value::Bytes(_)
-                    | Value::ByteArray(_)
-                    | Value::Native(_)
-            )
-        };
-        if scalar(id) || (skip_bound && self.bound_in_active_frame(id)) {
+        if self.finalizer_free_scalar(id) || (skip_bound && self.bound_in_active_frame(id)) {
             return false;
         }
         match self.get(id) {
-            Value::List(values) | Value::Tuple(values) => values.iter().any(|&item| !scalar(item)),
+            Value::List(values) | Value::Tuple(values) => {
+                values.iter().any(|&item| !self.finalizer_free_scalar(item))
+            }
             Value::Dict(entries) => !entries.is_empty(),
             _ => true,
         }
@@ -3716,12 +3790,10 @@ impl Heap {
         self.interned
             .retain(|_, entry| self.slots[entry.id as usize].marked());
         let callbacks = self.clear_weak_targets(None, None);
-        self.mock_call_lists
-            .retain(|&list| self.slots[list as usize].marked());
         self.abc_registrations.retain(|&[owner, member]| {
             self.slots[owner as usize].marked() && self.slots[member as usize].marked()
         });
-        self.protocol_subclass_cache.retain(|&[owner, member], _| {
+        self.abc_subclass_cache.retain(|&[owner, member], _| {
             self.slots[owner as usize].marked() && self.slots[member as usize].marked()
         });
         // Vacant slots supply their own free-list links. A sweep can therefore
@@ -3798,6 +3870,34 @@ mod tests {
         heap.collect([child].into_iter());
         assert!(matches!(heap.get(parent), Value::Tuple(items) if items == &[keep]));
         assert_eq!(heap.free_count, 0);
+    }
+
+    #[test]
+    fn scalar_call_releases_peers_and_preserves_uncertain_owners() {
+        let mut heap = Heap::new();
+        let owner = heap.alloc(Value::List(Vec::new()));
+        heap.register_finalizer(owner);
+        let int_type = heap.alloc(Value::Native("int".into()));
+        let types = heap.alloc(Value::Tuple(vec![int_type]));
+        let owning = heap.alloc(Value::Tuple(vec![owner]));
+        let arguments = heap.alloc(Value::List(vec![TRUE, types]));
+        let mark = heap.temporary_mark();
+        assert!(!heap.discard_scalar_call(mark, TRUE, arguments));
+        heap.keep(arguments);
+        heap.keep(owning);
+        assert!(!heap.discard_scalar_call(mark, TRUE, arguments));
+        heap.release_temporaries_since(mark);
+        heap.keep(arguments);
+        heap.keep(types);
+        assert!(heap.discard_scalar_call(mark, TRUE, arguments));
+        assert_eq!(&heap.frames.last().unwrap().live[mark..], &[TRUE]);
+
+        let Value::List(items) = heap.get_mut(arguments) else {
+            unreachable!()
+        };
+        items[1] = owning;
+        heap.keep(arguments);
+        assert!(!heap.discard_scalar_call(mark, NONE, arguments));
     }
 
     #[test]
@@ -3880,21 +3980,6 @@ mod tests {
         heap.collect(std::iter::empty());
         assert!(heap.slots[owner as usize].value.is_none());
         assert!(heap.slots[child as usize].value.is_none());
-    }
-
-    #[test]
-    fn collected_mock_call_list_does_not_mark_a_reused_list_slot() {
-        let mut heap = Heap::new();
-        let list = heap.alloc(Value::List(Vec::new()));
-        heap.mock_call_lists.insert(list);
-        heap.frames.last_mut().unwrap().live.clear();
-
-        heap.collect([list].into_iter());
-        assert!(heap.mock_call_lists.contains(&list));
-        heap.collect(std::iter::empty());
-        let ordinary = heap.alloc(Value::List(Vec::new()));
-        assert_eq!(ordinary, list);
-        assert!(!heap.mock_call_lists.contains(&ordinary));
     }
 
     #[test]

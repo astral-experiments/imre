@@ -22,7 +22,9 @@ impl Context {
         let args = self.items(arguments)?;
         let kwargs = self.keyword_args(keywords)?;
         let result = self.call_in_scope(scope, callable, args, kwargs)?;
-        self.finish_call_operands(mark, result);
+        if !self.heap.discard_scalar_call(mark, result, arguments) {
+            self.finish_call_operands(mark, result);
+        }
         Ok(result)
     }
 
@@ -153,11 +155,21 @@ impl Context {
                     Ok(NONE)
                 }
             }
-            "type_alias" => Ok(self.alloc(Value::TypeAlias {
-                name: a,
-                evaluator: b,
-                cached: None,
-            })),
+            "type_alias" => {
+                let parameters = if c == NONE {
+                    self.heap.packed_tuple(Vec::new(), false)
+                } else {
+                    c
+                };
+                Ok(self.alloc(Value::TypeAlias {
+                    name: a,
+                    definition: typing::AliasDefinition::Lazy {
+                        parameters,
+                        evaluator: b,
+                        cached: None,
+                    },
+                }))
+            }
             "template_interpolation" => {
                 let (Value::List(meta) | Value::Tuple(meta)) = self.heap.get(c) else {
                     unreachable!("compiled interpolation metadata");
@@ -385,7 +397,11 @@ impl Context {
                 Ok(std::mem::replace(&mut items[index], NONE))
             }
             "slice_object" => Ok(self.alloc(Value::Slice([a, b, c]))),
-            "class_parameter_scope" => super::typing::class_parameter_scope(self, a, b),
+            "class_typevartuple" => Ok(super::typing::declared_pack(self, a)),
+            "class_paramspec" => Ok(super::paramspec::declared(self, a)),
+            "class_parameter_scope" | "function_parameter_scope" => {
+                super::typing::parameter_scope(self, a, b, op == "class_parameter_scope")
+            }
             "class_annotation_environment" => self.class_annotation_environment(a, b),
             "class_annotation_locals" => {
                 let parent = self.scope_data(a).parent.expect("annotation globals");
@@ -655,6 +671,9 @@ pub(super) unsafe extern "C" fn imre_dyn_new(
     let options: Vec<String> =
         serde_json::from_value(config["warnoptions"].take()).unwrap_or_default();
     config["warnoptions"] = crate::sys::startup_warning_options(ignore_environment, options).into();
+    if config["unbuffered"].as_bool() == Some(true) {
+        crate::imre_stdio_unbuffered_init();
+    }
     crate::sys::initialize_encoding(ignore_environment, config["utf8_mode"].as_bool());
     config["utf8_mode"] = crate::sys::imre_sys_utf8_mode().into();
     config["warn_default_encoding"] = config["warn_default_encoding"]
@@ -735,7 +754,6 @@ pub(super) fn new_context<S: Into<String>>(
         enum_scopes: HashMap::new(),
         signal_handlers: Vec::new(),
         typing: super::typing::Registry::default(),
-        logger_wrappers: HashMap::new(),
         builtins: HashMap::new(),
         native_type_dicts: HashMap::new(),
         sources: HashMap::new(),
@@ -1557,7 +1575,6 @@ impl Context {
                 .values()
                 .chain(self.enum_scopes.values())
                 .chain(self.signal_handlers.iter())
-                .chain(self.logger_wrappers.values())
                 .chain(self.typing.roots())
                 .chain(self.builtins.values())
                 .chain(self.native_type_dicts.values())

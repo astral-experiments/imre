@@ -7,7 +7,7 @@ pub(super) fn type_error(ty: Type, values: Vec<Expr>, message: String) -> Expr {
     type_error_message(ty, values, unpacking::string(message))
 }
 
-fn type_error_message(ty: Type, mut values: Vec<Expr>, message: Expr) -> Expr {
+pub(super) fn type_error_message(ty: Type, mut values: Vec<Expr>, message: Expr) -> Expr {
     values.push(Expr {
         ty: Type::Exception,
         kind: ExprKind::Exception {

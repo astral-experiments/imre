@@ -21,6 +21,7 @@ class Broken:
 
 # Inherited lookup must work before any direct tuple.index access has warmed it.
 assert Payload.index(Payload((4,)), 4) == 0
+assert Payload.count(Payload((4, 3, 4)), 4) == 2
 
 
 class Foreign:
@@ -54,3 +55,25 @@ for call, error, message in (
         assert str(exc) == message
     else:
         raise AssertionError("index search unexpectedly succeeded")
+
+
+assert (1, 2, 1).count(1) == 2
+assert ().count(1) == 0
+assert tuple.count(Payload((needle, needle)), needle) == 2
+assert namedtuple("Pair", "x y")(5, 5).count(5) == 2
+assert tuple.count.__objclass__ is tuple
+assert tuple.count.__doc__ == "Return number of occurrences of value."
+assert tuple.count.__text_signature__ == "($self, value, /)"
+for call, error in (
+    (lambda: (needle,).count(object()), RuntimeError),
+    (lambda: tuple.count([], 1), TypeError),
+    (lambda: values.count(), TypeError),
+    (lambda: values.count(1, 2), TypeError),
+    (lambda: values.count(value=1), TypeError),
+):
+    try:
+        call()
+    except error:
+        pass
+    else:
+        raise AssertionError("count unexpectedly succeeded")

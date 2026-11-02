@@ -215,7 +215,7 @@ pub(super) fn constructor_owner(name: &str) -> Option<&str> {
     let owner = name.strip_suffix(".__new__")?;
     (matches!(
         owner,
-        "object" | "dict" | "float" | "function" | "int" | "str" | super::thread_local::CLASS
+        "object" | "dict" | "float" | "function" | "int" | "str" | "type" | super::thread_local::CLASS
     ) || super::stdlib::itertools::cursor_type(owner).is_some()
         || is_exception(owner)
         || owner == super::stdlib::fixed_structseq::SCHED_PARAM
@@ -299,6 +299,7 @@ pub(super) fn is_final_iterator_type(name: &str) -> bool {
             | "list_iterator"
             | "list_reverseiterator"
             | "tuple_iterator"
+            | "generic_alias_iterator"
             | "bytes_iterator"
             | "bytearray_iterator"
             | "range_iterator"
@@ -360,6 +361,14 @@ const SET_OPERATORS: &[&str] = &[
     "__iand__", "__ior__", "__isub__", "__ixor__",
 ];
 
+/// Methods shared by the two native real number classes.
+pub(super) fn real_methods(owner: &str) -> &'static [&'static str] {
+    match owner {
+        "int" | "float" => &["__abs__", "__float__", "__int__", "__round__", "__trunc__"],
+        _ => &[],
+    }
+}
+
 pub(super) fn set_operators(owner: &str) -> &'static [&'static str] {
     match owner {
         "set" => SET_OPERATORS,
@@ -379,6 +388,7 @@ pub(super) fn set_operator(method: &str) -> Option<&'static str> {
 }
 
 pub(super) const MEMORYVIEW_METHODS: &[&str] = &[
+    "cast",
     "__enter__",
     "__exit__",
     "release",
@@ -406,6 +416,7 @@ pub(super) const BYTEARRAY_METHODS: &[&str] = &[
 ];
 
 pub(super) const BYTES_METHODS: &[&str] = &[
+    "__bytes__",
     "__mod__",
     "__repr__",
     "count",
@@ -427,14 +438,18 @@ pub(super) const BYTES_METHODS: &[&str] = &[
 pub(super) const STR_METHODS: &[&str] = &[
     "__str__",
     "__format__",
+    "__mod__",
     "__repr__",
+    "__rmod__",
     "capitalize",
+    "center",
     "count",
     "encode",
     "endswith",
     "expandtabs",
     "find",
     "format",
+    "format_map",
     "index",
     "isalnum",
     "isascii",
@@ -445,6 +460,7 @@ pub(super) const STR_METHODS: &[&str] = &[
     "istitle",
     "isupper",
     "join",
+    "ljust",
     "lower",
     "lstrip",
     "partition",
@@ -452,6 +468,7 @@ pub(super) const STR_METHODS: &[&str] = &[
     "removesuffix",
     "replace",
     "rfind",
+    "rjust",
     "rpartition",
     "rsplit",
     "rstrip",
@@ -490,11 +507,17 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         Value::Bool(_) if attr == "__repr__" => "bool",
         Value::Int(_) if attr == "__repr__" => "int",
         Value::Int(_) | Value::Bool(_)
-            if matches!(attr, "__add__" | "__index__" | "bit_length" | "to_bytes") =>
+            if real_methods("int").contains(&attr)
+                || matches!(attr, "__add__" | "__index__" | "bit_length" | "to_bytes") =>
         {
             "int"
         }
-        Value::Float(_) if matches!(attr, "__repr__" | "as_integer_ratio") => "float",
+        Value::Float(_)
+            if real_methods("float").contains(&attr)
+                || matches!(attr, "__repr__" | "as_integer_ratio") =>
+        {
+            "float"
+        }
         Value::Str(_) | Value::SurrogateStr(_) if STR_METHODS.contains(&attr) => "str",
         Value::Range(_) if super::range::METHODS.contains(&attr) => "range",
         Value::DictIterator(iter) if DictIterator::methods(iter.class_name()).contains(&attr) => {
@@ -534,6 +557,7 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         }
         Value::MemoryView { .. } if MEMORYVIEW_METHODS.contains(&attr) => "memoryview",
         Value::Bytes(_) if BYTES_METHODS.contains(&attr) => "bytes",
+        Value::Complex(_) if attr == "__complex__" => "complex",
         Value::ByteArray(_)
             if BYTEARRAY_METHODS.contains(&attr) || matches!(attr, "decode" | "translate") =>
         {
@@ -560,10 +584,12 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
                     | "fileno"
                     | "close"
                     | "recv"
+                    | "recvfrom"
                     | "recv_into"
                     | "makefile"
                     | "send"
                     | "sendall"
+                    | "sendto"
                     | "shutdown"
                     | "getsockopt"
                     | "setsockopt"
@@ -599,7 +625,7 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
             "TextIOWrapper"
         }
         Value::List(_) if LIST_METHODS.contains(&attr) => "list",
-        Value::Tuple(_) | Value::NamedTuple { .. } if attr == "index" => "tuple",
+        Value::Tuple(_) | Value::NamedTuple { .. } if matches!(attr, "count" | "index") => "tuple",
         Value::Tuple(_) if matches!(attr, "__getitem__" | "__repr__") => "tuple",
         Value::Set { frozen: false, .. } if SET_OPERATORS.contains(&attr) => "set",
         Value::Set { frozen: true, .. } if FROZENSET_OPERATORS.contains(&attr) => "frozenset",
@@ -718,7 +744,7 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         Value::RegexMatch(_)
             if matches!(
                 attr,
-                "group" | "groups" | "groupdict" | "start" | "end" | "span"
+                "group" | "groups" | "groupdict" | "expand" | "start" | "end" | "span"
             ) =>
         {
             "match"
@@ -1052,6 +1078,86 @@ impl Context {
     }
 }
 
+/// Validate the receiver and keywords of a positional-only native method.
+fn method_receiver_args<'a>(
+    ctx: &Context,
+    owner: &str,
+    method: &str,
+    args: &'a [Id],
+    kwargs: &[(String, Id)],
+) -> Result<(Id, &'a [Id])> {
+    let Some((&receiver, rest)) = args.split_first() else {
+        return Err(type_error(format!(
+            "unbound method {owner}.{method}() needs an argument"
+        )));
+    };
+    if !ctx.builtin_slot_accepts(receiver, owner) {
+        let actual = ctx
+            .builtin_type_name(receiver)
+            .unwrap_or_else(|| ctx.type_name(receiver));
+        return Err(type_error(format!(
+            "descriptor '{method}' for '{owner}' objects doesn't apply to a '{actual}' object"
+        )));
+    }
+    if !kwargs.is_empty() {
+        return Err(type_error(format!(
+            "{owner}.{method}() takes no keyword arguments"
+        )));
+    }
+    Ok((receiver, rest))
+}
+
+fn noargs_method_receiver(
+    ctx: &Context,
+    owner: &str,
+    method: &str,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Id> {
+    let (receiver, rest) = method_receiver_args(ctx, owner, method, args, kwargs)?;
+    if !rest.is_empty() {
+        return Err(type_error(format!(
+            "{owner}.{method}() takes no arguments ({} given)",
+            rest.len()
+        )));
+    }
+    Ok(receiver)
+}
+
+/// Apply the native absolute-value implementation without invoking an override.
+fn absolute_value(ctx: &mut Context, value: Id) -> Result<Id> {
+    let scalar = ctx.scalar_value(value);
+    match ctx.heap.get(scalar) {
+        Value::Calendar {
+            value: duration, ..
+        } if duration.class() == "timedelta" => {
+            super::stdlib::call(ctx, "datetime.timedelta.__abs__", &[value], &[])
+        }
+        Value::Float(number) => Ok(ctx.alloc(Value::Float(number.abs()))),
+        Value::Complex(number) => {
+            let magnitude = number.real.hypot(number.imag);
+            if magnitude.is_infinite() && number.real.is_finite() && number.imag.is_finite() {
+                return Err(Error::new("OverflowError", "absolute value too large"));
+            }
+            Ok(ctx.alloc(Value::Float(magnitude)))
+        }
+        Value::Bool(value) => Ok(ctx.int(i64::from(*value))),
+        Value::Int(number) => {
+            let zero = crate::Int::from(0);
+            if number.cmp(&zero).is_lt() {
+                let magnitude = crate::integer_binary(&zero, number, 1)?;
+                Ok(ctx.alloc(Value::Int(magnitude)))
+            } else {
+                Ok(integer::exact_value(ctx, value))
+            }
+        }
+        _ => Err(type_error(format!(
+            "bad operand type for abs(): '{}'",
+            ctx.type_name(value)
+        ))),
+    }
+}
+
 pub(super) fn call(
     ctx: &mut Context,
     name: &str,
@@ -1266,6 +1372,26 @@ pub(super) fn call(
         && !is_exception(name)
     {
         return match owner {
+            "type" if method == "__init__" => {
+                let Some((&class, args)) = args.split_first() else {
+                    return Err(type_error(
+                        "descriptor '__init__' of 'type' object needs an argument",
+                    ));
+                };
+                if !ctx.is_type_object(class) {
+                    return Err(type_error(format!(
+                        "descriptor '__init__' requires a 'type' object but received a '{}'",
+                        ctx.type_name(class)
+                    )));
+                }
+                match args.len() {
+                    1 if !kwargs.is_empty() => {
+                        Err(type_error("type.__init__() takes no keyword arguments"))
+                    }
+                    1 | 3 => Ok(NONE),
+                    _ => Err(type_error("type.__init__() takes 1 or 3 arguments")),
+                }
+            }
             "coroutine" | "coroutine_wrapper" => {
                 positional(name, kwargs)?;
                 let (min, max) = match method {
@@ -1310,6 +1436,27 @@ pub(super) fn call(
             }
             "module" => ctx.module_method(method, args, kwargs),
             "float" if method == "__getformat__" => float::getformat(ctx, args, kwargs),
+            "int" | "float" if matches!(method, "__abs__" | "__int__" | "__float__") => {
+                collections::builtin_slot(ctx, name, args, kwargs)
+            }
+            "int" | "float" if method == "__round__" => {
+                let (receiver, rest) = method_receiver_args(ctx, owner, method, args, kwargs)?;
+                if rest.len() > 1 {
+                    return Err(type_error(format!(
+                        "__round__ expected at most 1 argument, got {}",
+                        rest.len()
+                    )));
+                }
+                round::native(
+                    ctx,
+                    receiver,
+                    rest.first().copied().filter(|&id| id != NONE),
+                )
+            }
+            "int" | "float" if method == "__trunc__" => {
+                let receiver = noargs_method_receiver(ctx, owner, method, args, kwargs)?;
+                integer::truncate_real(ctx, receiver)
+            }
             "float" if method == "as_integer_ratio" => float::as_integer_ratio(ctx, args, kwargs),
             "getset_descriptor" if matches!(method, "__set__" | "__delete__") => {
                 if !kwargs.is_empty() {
@@ -1329,12 +1476,18 @@ pub(super) fn call(
                     return Err(type_error(format!("{message}, got {}", values.len())));
                 }
                 let Value::GetSetDescriptor {
-                    owner, name: field, ..
+                    get,
+                    owner,
+                    name: field,
+                    ..
                 } = *ctx.heap.get(descriptor)
                 else {
                     return Err(type_error("expected a getset descriptor"));
                 };
-                let accepts = if owner == "int" {
+                let accepts = if let Value::HashMethod { owner: class, .. } = *ctx.heap.get(get) {
+                    super::stdlib::hashlib::md5::check_receiver(ctx, class, field, values[0])?;
+                    true
+                } else if owner == "int" {
                     ctx.builtin_slot_accepts(values[0], owner)
                 } else if owner == "typing.Union" {
                     matches!(ctx.heap.get(values[0]), Value::Union(_))
@@ -1358,6 +1511,24 @@ pub(super) fn call(
             "int" if method == "bit_length" => integer::bit_length(ctx, args, kwargs),
             "int" if method == "from_bytes" => integer::from_bytes(ctx, args, kwargs),
             "int" if method == "to_bytes" => integer::to_bytes(ctx, args, kwargs),
+            _ if matches!(
+                (owner, method),
+                ("bytes", "__bytes__") | ("complex", "__complex__")
+            ) =>
+            {
+                let receiver = noargs_method_receiver(ctx, owner, method, args, kwargs)?;
+                let storage = ctx.scalar_value(receiver);
+                if storage == receiver {
+                    return Ok(receiver);
+                }
+                let value = match ctx.heap.get(storage) {
+                    Value::Bytes(bytes) if bytes.len() <= 1 => return Ok(storage),
+                    Value::Bytes(bytes) => Value::Bytes(super::copy_ids(bytes)?),
+                    Value::Complex(number) => Value::Complex(*number),
+                    _ => unreachable!("descriptor receiver has checked native layout"),
+                };
+                Ok(ctx.alloc(value))
+            }
             "bytes" | "bytearray" if method == "maketrans" => {
                 translation::maketrans(ctx, name, args, kwargs)
             }
@@ -1423,6 +1594,7 @@ pub(super) fn call(
             "memoryview" if matches!(method, "__getitem__" | "__setitem__" | "__delitem__") => {
                 ctx.memoryview_item_method(method, args, kwargs)
             }
+            "memoryview" if method == "cast" => ctx.cast_memoryview(args, kwargs),
             "memoryview" if MEMORYVIEW_METHODS.contains(&method) => {
                 if method == "tobytes" {
                     if args.is_empty() {
@@ -1564,7 +1736,10 @@ pub(super) fn call(
             [object] if kwargs.is_empty() => ctx.exact_type(*object),
             [_] => Err(type_error("type() takes no keyword arguments")),
             [name, bases, namespace] => {
-                ctx.type_from_namespace(None, *name, *bases, *namespace, kwargs)
+                let class =
+                    ctx.type_from_namespace(None, *name, *bases, *namespace, kwargs, false)?;
+                let caller = ctx.builtin("type");
+                ctx.finish_type_call(caller, class, args.to_vec(), kwargs.to_vec())
             }
             _ => Err(type_error("type() takes 1 or 3 arguments")),
         },
@@ -1603,37 +1778,7 @@ pub(super) fn call(
             if let Some(method) = ctx.bound_slot(value, "__abs__")? {
                 return ctx.call(method, vec![], vec![]);
             }
-            let scalar = ctx.scalar_value(value);
-            match ctx.heap.get(scalar) {
-                Value::Calendar {
-                    value: duration, ..
-                } if duration.class() == "timedelta" => {
-                    super::stdlib::call(ctx, "datetime.timedelta.__abs__", &[value], &[])
-                }
-                Value::Float(number) => Ok(ctx.alloc(Value::Float(number.abs()))),
-                Value::Complex(number) => {
-                    let magnitude = number.real.hypot(number.imag);
-                    if magnitude.is_infinite() && number.real.is_finite() && number.imag.is_finite()
-                    {
-                        return Err(Error::new("OverflowError", "absolute value too large"));
-                    }
-                    Ok(ctx.alloc(Value::Float(magnitude)))
-                }
-                Value::Bool(value) => Ok(ctx.int(i64::from(*value))),
-                Value::Int(number) => {
-                    let zero = crate::Int::from(0);
-                    if number.cmp(&zero).is_lt() {
-                        let magnitude = crate::integer_binary(&zero, number, 1)?;
-                        Ok(ctx.alloc(Value::Int(magnitude)))
-                    } else {
-                        Ok(scalar)
-                    }
-                }
-                _ => Err(type_error(format!(
-                    "bad operand type for abs(): '{}'",
-                    ctx.type_name(value)
-                ))),
-            }
+            absolute_value(ctx, value)
         }
         "round" => round::call(ctx, args, kwargs),
         "id" => {

@@ -83,6 +83,9 @@ pub(super) fn symbol(name: &str) -> Option<Intrinsic> {
         "kill" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.kill"),
         "getsid" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.getsid"),
         "waitpid" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.waitpid"),
+        "waitstatus_to_exitcode" if cfg!(unix) => {
+            Intrinsic::ObjectRuntimeExport("posix.waitstatus_to_exitcode")
+        }
         "WNOHANG" if cfg!(unix) => Intrinsic::DescriptorConstant("wnohang"),
         "getpid" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.getpid"),
         "scandir" if cfg!(any(target_os = "linux", target_os = "macos")) => {
@@ -122,6 +125,7 @@ pub(super) fn symbol(name: &str) -> Option<Intrinsic> {
         "O_DIRECTORY" => Intrinsic::DescriptorConstant("o_directory"),
         "O_NOFOLLOW" => Intrinsic::DescriptorConstant("o_nofollow"),
         "O_NONBLOCK" => Intrinsic::DescriptorConstant("o_nonblock"),
+        "O_PATH" if cfg!(target_os = "linux") => Intrinsic::DescriptorConstant("o_path"),
         "O_TMPFILE" if cfg!(target_os = "linux") => Intrinsic::DescriptorConstant("o_tmpfile"),
         "SEEK_SET" => Intrinsic::DescriptorConstant("seek_set"),
         "SEEK_CUR" => Intrinsic::DescriptorConstant("seek_cur"),

@@ -45,45 +45,25 @@ fn substitute(
     let pattern = Rc::clone(pattern);
     if ctx.callable(repl) {
         return ctx.with_buffer_export(string, |ctx| {
-            expanded_sub(ctx, &pattern, receiver, string, limit, |ctx, m| {
+            expanded_sub(ctx, &pattern, receiver, string, limit, true, |ctx, m| {
                 let matched = ctx.alloc(Value::RegexMatch(Rc::new(m)));
                 ctx.call(repl, vec![matched], Vec::new())
             })
         });
     }
-    let (replacement, replacement_is_bytes) = match ctx.heap.get(ctx.scalar_value(repl)) {
-        Value::Str(s) => (s.as_bytes(), false),
-        Value::Bytes(_) | Value::ByteArray(_) | Value::MemoryView { .. } => {
-            (ctx.bytes_like(repl)?, true)
-        }
-        Value::SurrogateStr(_) => {
-            return Err(Error::new(
-                "NotImplementedError",
-                "regex replacement strings containing surrogates are unsupported",
-            ));
-        }
-        _ => {
-            // CPython attempts to cache a nonliteral template before parsing it.
-            ctx.dictionary_hash(repl)?;
-            return Err(Error::new(
-                "TypeError",
-                format!(
-                    "decoding to str: need a bytes-like object, {} found",
-                    ctx.type_name(repl)
-                ),
-            ));
-        }
+    let replacement_is_bytes = replacement_is_bytes(ctx, repl)?;
+    let replacement = if replacement_is_bytes {
+        ctx.native_buffer_bytes(repl)?
+    } else {
+        ctx.str_value(ctx.scalar_value(repl))?.as_bytes()
     };
     if replacement.contains(&b'\\') {
-        return template_sub(
-            ctx,
-            &pattern,
-            receiver,
-            repl,
-            string,
-            limit,
-            replacement_is_bytes,
-        );
+        let template = compile_template(ctx, receiver, repl, replacement_is_bytes)?;
+        return ctx.with_buffer_export(string, |ctx| {
+            expanded_sub(ctx, &pattern, receiver, string, limit, false, |ctx, m| {
+                template.expand(ctx, &m)
+            })
+        });
     }
     let text = subject_bytes(ctx, string, pattern.bytes)?;
     let mut output = Vec::new();
@@ -140,16 +120,64 @@ fn substitute(
     Ok((value, substitutions))
 }
 
-/// Parse the template before searching; unmatched captures contribute no text to the expansion.
-fn template_sub(
+fn replacement_is_bytes(ctx: &mut Context, repl: Id) -> Result<bool> {
+    match ctx.heap.get(ctx.scalar_value(repl)) {
+        Value::Str(_) => Ok(false),
+        Value::Bytes(_)
+        | Value::ByteArray(_)
+        | Value::MemoryView { .. }
+        | Value::Array(_)
+        | Value::BytesIoBuffer { .. } => Ok(true),
+        Value::SurrogateStr(_) => Err(Error::new(
+            "NotImplementedError",
+            "regex replacement strings containing surrogates are unsupported",
+        )),
+        _ => {
+            // CPython attempts to cache a nonliteral template before parsing it.
+            ctx.dictionary_hash(repl)?;
+            Err(Error::new(
+                "TypeError",
+                format!(
+                    "decoding to str: need a bytes-like object, {} found",
+                    ctx.type_name(repl)
+                ),
+            ))
+        }
+    }
+}
+
+pub(in crate::dynamic::stdlib) fn match_expand(
     ctx: &mut Context,
-    pattern: &Pattern,
-    receiver: Id,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Id> {
+    let m = matched(ctx, argument(args, 0)?)?;
+    let [Some(repl)] = crate::dynamic::builtins::bind_builtin_arguments(
+        "expand",
+        &args[1..],
+        kwargs,
+        ["template"],
+        1,
+    )?
+    else {
+        unreachable!("the template was bound above")
+    };
+    let is_bytes = replacement_is_bytes(ctx, repl)?;
+    compile_template(ctx, m.pattern, repl, is_bytes)?.expand(ctx, &m)
+}
+
+struct Template {
+    parts: Vec<ReplacementPart<Id>>,
+    join: Id,
+}
+
+/// Compile a replacement once, before searching or expanding an existing match.
+fn compile_template(
+    ctx: &mut Context,
+    pattern_id: Id,
     repl: Id,
-    string: Id,
-    limit: isize,
     replacement_is_bytes: bool,
-) -> Result<(Id, isize)> {
+) -> Result<Template> {
     // CPython's template cache retries unhashable buffers, but propagates invalid memoryview hashes.
     if matches!(ctx.heap.get(repl), Value::MemoryView { .. })
         && let Err(error) = ctx.dictionary_hash(repl)
@@ -166,12 +194,15 @@ fn template_sub(
         ));
     }
     let source = if replacement_is_bytes {
-        ctx.bytes_like(repl)?
+        ctx.native_buffer_bytes(repl)?
             .iter()
             .map(|&b| char::from(b))
             .collect()
     } else {
         ctx.str_value(ctx.scalar_value(repl))?.to_owned()
+    };
+    let Value::RegexPattern(pattern) = ctx.heap.get(pattern_id) else {
+        unreachable!("a match owns its compiled pattern")
     };
     let info = pattern.regex.group_info();
     let limit_digits = crate::integer_text::decimal_digit_limit();
@@ -210,7 +241,7 @@ fn template_sub(
                 }
             };
             let source = if replacement_is_bytes && !matches!(ctx.heap.get(repl), Value::Bytes(_)) {
-                ctx.alloc(Value::Bytes(ctx.bytes_like(repl)?.to_vec()))
+                ctx.alloc(Value::Bytes(ctx.native_buffer_bytes(repl)?.to_vec()))
             } else {
                 repl
             };
@@ -237,9 +268,13 @@ fn template_sub(
         ctx.text("")
     };
     let join = ctx.lookup_attr(empty, "join")?;
-    let expand = |ctx: &mut Context, m: Match| {
+    Ok(Template { parts, join })
+}
+
+impl Template {
+    fn expand(&self, ctx: &mut Context, m: &Match) -> Result<Id> {
         let mut pieces = Vec::new();
-        for part in &parts {
+        for part in &self.parts {
             match *part {
                 ReplacementPart::Literal(id) => pieces.push(id),
                 ReplacementPart::Group(index) => {
@@ -251,11 +286,8 @@ fn template_sub(
             }
         }
         let pieces = ctx.alloc(Value::List(pieces));
-        ctx.call(join, vec![pieces], Vec::new())
-    };
-    ctx.with_buffer_export(string, |ctx| {
-        expanded_sub(ctx, pattern, receiver, string, limit, expand)
-    })
+        ctx.call(self.join, vec![pieces], Vec::new())
+    }
 }
 
 /// Capture each intervening slice before the callback can change the subject. Keep
@@ -266,6 +298,7 @@ fn expanded_sub(
     receiver: Id,
     string: Id,
     limit: isize,
+    exposes_match: bool,
     mut expand: impl FnMut(&mut Context, Match) -> Result<Id>,
 ) -> Result<(Id, isize)> {
     let length = subject_bytes(ctx, string, pattern.bytes)?.len();
@@ -293,7 +326,13 @@ fn expanded_sub(
             add(ctx.alloc(gap))?;
         }
         let mark = ctx.heap.temporary_mark();
+        let last = if exposes_match {
+            pattern.last_capture(subject_bytes(ctx, string, pattern.bytes)?, &caps)
+        } else {
+            LastCapture::Unavailable
+        };
         let matched = Match {
+            last,
             pattern: receiver,
             subject: string,
             spans: group_spans(&caps).collect(),

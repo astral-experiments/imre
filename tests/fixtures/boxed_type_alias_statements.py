@@ -6,6 +6,14 @@ type Recursive = tuple[Forward, list[Recursive]]
 
 
 def current():
+    value = []
+    eager = TypeAliasType("Eager", value)
+    assert type(eager) is TypeAliasType and eager.__value__ is value
+    assert eager.__module__ == __name__ and eager.__name__ == "Eager"
+    assert eager.__type_params__ == eager.__parameters__ == ()
+    assert eager.evaluate_value(1) is value and eager.__reduce__() == "Eager"
+    assert TypeAliasType(name="N", value=None, type_params=()).__value__ is None
+
     assert type(Forward) is TypeAliasType
     assert Forward.__module__ == __name__ and Forward.__name__ == "Forward"
     assert Forward.__type_params__ == Forward.__parameters__ == ()
@@ -45,4 +53,34 @@ def current():
         assert exc.filename == "alias.py" and exc.lineno == 2
     else:
         raise AssertionError("accepted a named expression in an alias")
+    def make_alias():
+        later = int
+        type Pair[K, V] = tuple[V, K, later]
+        type Local = Pair
+        later = bytes
+        return Local.__value__
+
+    pair = make_alias()
+    k, v = pair.__type_params__
+    assert pair.__parameters__ is pair.__type_params__
+    assert pair.__value__.__args__ == (v, k, bytes)
+    assert pair.__value__[str, int] == tuple[str, int, bytes]
+    assert pair[int].__origin__ is pair and pair[int].__args__ == (int,)
+    assert list[pair].__parameters__ == (k, v)
+    assert make_alias().__type_params__[0] is not k
+    # Separate exec locals receive the declaration; the evaluator sees parameters and globals.
+    namespace = {"__name__": "other", "Key": str, "late": int}
+    bindings = {"late": float}
+    code = compile("type Pair[Key, Value] = tuple[Value, Key, late]", "generic.py", "exec")
+    exec(code, namespace, bindings)
+    first = bindings["Pair"]
+    key, value = first.__type_params__
+    assert first.__module__ == "other" and first.__parameters__ is first.__type_params__
+    assert "Pair" not in namespace and "Key" not in bindings and namespace["Key"] is str
+    namespace["late"] = bytes
+    assert first.__value__.__args__ == (value, key, bytes)
+    namespace["late"] = bool
+    assert first.__value__.__args__[2] is bytes and first.evaluate_value().__args__[2] is bool
+    exec(code, namespace, bindings)
+    assert bindings["Pair"].__type_params__[0] is not key
     print("lazy type aliases")

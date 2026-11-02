@@ -34,6 +34,37 @@ impl Context {
                 let Value::Native(kind) = self.heap.get(base) else {
                     return None;
                 };
+                if name == "__call__" {
+                    return matches!(
+                        kind.as_str(),
+                        "type"
+                            | "function"
+                            | "method"
+                            | "builtin_function_or_method"
+                            | "method_descriptor"
+                            | "classmethod_descriptor"
+                            | "wrapper_descriptor"
+                            | "method-wrapper"
+                            | "staticmethod"
+                            | "types.GenericAlias"
+                            | "typing._AnyMeta"
+                            | "typing._GenericAlias"
+                            | "typing._CallableType"
+                            | "typing._CallableGenericAlias"
+                            | "typing._LiteralGenericAlias"
+                            | "typing._UnpackGenericAlias"
+                            | "collections.abc._CallableGenericAlias"
+                            | "operator.attrgetter"
+                            | "operator.itemgetter"
+                            | "functools.partial"
+                            | "functools._lru_cache_wrapper"
+                            | "functools.KeyWrapper"
+                            | "weakref.ReferenceType"
+                            | "weakref.CallableProxyType"
+                            | "constevaluator"
+                    )
+                    .then_some(true);
+                }
                 if name == "__hash__" {
                     // Builtin classes may supply a hash slot directly or inherit it
                     // later in the MRO. Looking up the slot must never hash a value.
@@ -103,6 +134,9 @@ impl Context {
                         matches!(name, "__iter__" | "__len__" | "__reversed__")
                     }
                     "memoryview" => matches!(name, "__iter__" | "__len__"),
+                    "coroutine" | "coroutine_wrapper" => {
+                        super::generator_protocol::coroutine_method(kind, name)
+                    }
                     _ => {
                         super::builtins::is_iterator_type(kind)
                             && matches!(name, "__iter__" | "__next__")
@@ -136,7 +170,12 @@ impl Context {
         self.bind(scope, "__new__", new);
         let register = self.builtin("abc.register");
         self.bind(scope, "register", register);
-        for name in ["__instancecheck__", "__subclasscheck__"] {
+        for name in [
+            "__instancecheck__",
+            "__subclasscheck__",
+            "_abc_registry_clear",
+            "_abc_caches_clear",
+        ] {
             let check = self.builtin(&format!("abc.{name}"));
             self.bind(scope, name, check);
         }

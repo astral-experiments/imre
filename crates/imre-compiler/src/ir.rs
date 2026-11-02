@@ -1602,6 +1602,7 @@ pub(crate) enum Builtin {
     DictTryGet(Type),
     /// Removes a key or raises KeyError; an optional third operand is an exact default.
     DictPop,
+    DictPopItem,
     /// Transfers the removed value into an optional result, or returns the supplied default.
     DictTryPop(Type),
     /// Arguments are key then dictionary, matching membership evaluation order.
@@ -2300,8 +2301,21 @@ pub(crate) enum ProcessOperation {
     Semaphore,
     Acquire,
     Release,
-    EnvironCopy,
+    EnvironCopy {
+        bytes: bool,
+    },
+    EnvironClear,
+    EnvironUpdate {
+        bytes: bool,
+    },
     EnvironGet,
+    EnvironIndex,
+    EnvironDelete {
+        bytes: bool,
+    },
+    EnvironSet {
+        bytes: bool,
+    },
     GetCwd,
     Fd(FdOperation),
     Credential(&'static str),

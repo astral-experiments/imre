@@ -13,6 +13,14 @@ def current():
     finally:
         json.__doc__ = original
 
+    for name in ("dump", "dumps", "loads", "JSONDecodeError"):
+        exported = getattr(json, name)
+        try:
+            delattr(json, name)
+            assert not hasattr(json, name)
+        finally:
+            setattr(json, name, exported)
+
 
 if __name__ == "__main__":
     current()

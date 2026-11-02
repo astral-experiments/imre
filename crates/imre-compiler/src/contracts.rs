@@ -365,7 +365,12 @@ impl Builtin {
                 | ProcessOperation::TaskResult
                 | ProcessOperation::Semaphore
                 | ProcessOperation::Release
-                | ProcessOperation::EnvironCopy
+                | ProcessOperation::EnvironCopy { .. }
+                | ProcessOperation::EnvironIndex
+                | ProcessOperation::EnvironDelete { .. }
+                | ProcessOperation::EnvironSet { .. }
+                | ProcessOperation::EnvironClear
+                | ProcessOperation::EnvironUpdate { .. }
                 | ProcessOperation::EnvironGet
                 | ProcessOperation::GetCwd
                 | ProcessOperation::Fd(_)
@@ -624,6 +629,7 @@ impl Builtin {
             | Self::ChainMapSetItem
             | Self::ChainMapGet(_)
             | Self::DictPop
+            | Self::DictPopItem
             | Self::DictSetDefault
             | Self::DefaultDictMissing
             | Self::DictTryPop(_)
@@ -1095,12 +1101,16 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "int_lshift"
                 | "int_rshift"
                 | "imre_flush_stdout"
+                | "imre_environ_clear"
+                | "imre_environ_update"
                 | "imre_environ_get"
+                | "imre_environ_index"
                 | "imre_getcwd"
                 | "imre_os_linesep"
                 | "imre_os_pathsep"
                 | "imre_shutil_which"
                 | "imre_environ_copy"
+                | "imre_environb_copy"
                 | "imre_subprocess_check"
                 | "imre_subprocess_error_field"
                 | "imre_print_int"
@@ -1365,6 +1375,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_str_list_sorted_suffix"
                 | "imre_dict_delete"
                 | "imre_dict_pop"
+                | "imre_dict_popitem"
                 | "imre_cursor_length_hint"
                 | "imre_mapping_iter_next"
                 | "imre_exception_raise"

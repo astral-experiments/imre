@@ -119,7 +119,14 @@ impl Matcher {
         }
     }
 
-    /// Return the original pattern's numbered and named capture groups.
+    /// Share the assertion guards and public capture-slot mapping with a replay.
+    pub(super) fn asserted_nfa(&self) -> Option<(&NFA, &[AssertionSlot])> {
+        match self {
+            Self::Asserted(matcher) => Some((&matcher.nfa, &matcher.slots)),
+            _ => None,
+        }
+    }
+
     pub(super) fn group_info(&self) -> &GroupInfo {
         match self {
             Self::Standard(regex) => regex.group_info(),
