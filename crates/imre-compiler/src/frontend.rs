@@ -9234,7 +9234,11 @@ impl<'a> Checker<'a> {
             }
         }
         if let Some(class) = self.class_reference(&call.func) {
-            return self.construct(call, class);
+            let result = self.construct(call, class);
+            if result.is_err() && self.native_mock(class) && !call.arguments.keywords.is_empty() {
+                return Err(self.object_runtime_export("configured unittest.mock.Mock", call));
+            }
+            return result;
         }
         if let Some(Binding::Intrinsic(Intrinsic::PosixPath(operation))) = self.resolve(&call.func)
         {

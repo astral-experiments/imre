@@ -96,6 +96,9 @@ impl Checker<'_> {
         attr: &ast::ExprAttribute,
     ) -> Result<Expr, String> {
         let name = attr.attr.as_str();
+        if name == "configure_mock" {
+            return Err(self.object_runtime_export("unittest.mock.Mock.configure_mock", attr));
+        }
         // An unimplemented real member must never become a successful child mock.
         if name.starts_with('_')
             || Self::mock_state_member(name)
@@ -106,7 +109,6 @@ impl Checker<'_> {
                     | "assert_called_once_with"
                     | "assert_called_with"
                     | "attach_mock"
-                    | "configure_mock"
                     | "mock_add_spec"
                     | "mock_calls"
                     | "method_calls"

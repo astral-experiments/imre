@@ -991,7 +991,7 @@ impl Checker<'_> {
         Ok(self.evaluated_receiver(receiver, value))
     }
 
-    /// Route inherited boxed assertions to the object runtime when a typed class lacks the member.
+    /// Route live unittest state to the object runtime when a typed class lacks the member.
     pub(super) fn missing_class_member(
         &self,
         class: usize,
@@ -999,6 +999,9 @@ impl Checker<'_> {
         node: &impl Ranged,
         diagnostic: &str,
     ) -> String {
+        if self.native_mock(class) && !name.starts_with('_') {
+            return self.object_runtime_export("live unittest.mock.Mock attributes", node);
+        }
         if matches!(
             name,
             "assertIsInstance"
