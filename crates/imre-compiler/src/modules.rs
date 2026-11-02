@@ -399,6 +399,8 @@ pub(crate) enum IntrinsicModule {
     ContextVars,
     ContextVarsNative,
     Importlib,
+    ImportlibAbc,
+    ImportlibLoaderAbc,
     ImportlibMachinery,
     ImportlibBootstrapExternal,
     ImportlibMetadata,
@@ -949,6 +951,8 @@ impl IntrinsicModule {
             "urllib" => Some(Self::Urllib),
             "urllib.parse" => Some(Self::UrllibParse),
             "importlib" => Some(Self::Importlib),
+            "importlib.abc" => Some(Self::ImportlibAbc),
+            "importlib._abc" => Some(Self::ImportlibLoaderAbc),
             "importlib.machinery" => Some(Self::ImportlibMachinery),
             "_frozen_importlib_external" | "importlib._bootstrap_external" => {
                 Some(Self::ImportlibBootstrapExternal)
@@ -1060,6 +1064,9 @@ impl IntrinsicModule {
         }
         if self == Self::Urllib && name == "parse" {
             return Some(Binding::IntrinsicModule(Self::UrllibParse));
+        }
+        if self == Self::ImportlibAbc && name == "machinery" {
+            return Some(Binding::IntrinsicModule(Self::ImportlibMachinery));
         }
         if self == Self::ImportlibResources && name == "abc" {
             return Some(Binding::IntrinsicModule(Self::ImportlibResourcesAbc));
@@ -1195,6 +1202,33 @@ impl IntrinsicModule {
             }
             (Self::Importlib, "invalidate_caches") => {
                 Intrinsic::ObjectRuntimeExport("importlib.invalidate_caches")
+            }
+            (Self::ImportlibAbc, "Loader") => {
+                Intrinsic::ObjectRuntimeExport("importlib.abc.Loader")
+            }
+            (Self::ImportlibAbc, "MetaPathFinder") => {
+                Intrinsic::ObjectRuntimeExport("importlib.abc.MetaPathFinder")
+            }
+            (Self::ImportlibAbc, "PathEntryFinder") => {
+                Intrinsic::ObjectRuntimeExport("importlib.abc.PathEntryFinder")
+            }
+            (Self::ImportlibAbc, "ResourceLoader") => {
+                Intrinsic::ObjectRuntimeExport("importlib.abc.ResourceLoader")
+            }
+            (Self::ImportlibAbc, "InspectLoader") => {
+                Intrinsic::ObjectRuntimeExport("importlib.abc.InspectLoader")
+            }
+            (Self::ImportlibAbc, "ExecutionLoader") => {
+                Intrinsic::ObjectRuntimeExport("importlib.abc.ExecutionLoader")
+            }
+            (Self::ImportlibAbc, "FileLoader") => {
+                Intrinsic::ObjectRuntimeExport("importlib.abc.FileLoader")
+            }
+            (Self::ImportlibLoaderAbc, "Loader") => {
+                Intrinsic::ObjectRuntimeExport("importlib._abc.Loader")
+            }
+            (Self::ImportlibUtil, "Loader") => {
+                Intrinsic::ObjectRuntimeExport("importlib.util.Loader")
             }
             (Self::ImportlibResourcesAbc, "ResourceReader") => {
                 Intrinsic::ObjectRuntimeExport("importlib.resources.abc.ResourceReader")
@@ -3282,6 +3316,8 @@ fn static_import_scopes(f: &ast::StmtFunctionDef, imports: &mut Vec<LocalStaticI
 
 fn importlib_child(name: &str) -> Option<IntrinsicModule> {
     match name {
+        "abc" => Some(IntrinsicModule::ImportlibAbc),
+        "_abc" => Some(IntrinsicModule::ImportlibLoaderAbc),
         "machinery" => Some(IntrinsicModule::ImportlibMachinery),
         "_bootstrap_external" => Some(IntrinsicModule::ImportlibBootstrapExternal),
         "metadata" => Some(IntrinsicModule::ImportlibMetadata),
@@ -3293,6 +3329,8 @@ fn importlib_child(name: &str) -> Option<IntrinsicModule> {
 
 fn importlib_child_name(module: IntrinsicModule) -> Option<&'static str> {
     match module {
+        IntrinsicModule::ImportlibAbc => Some("abc"),
+        IntrinsicModule::ImportlibLoaderAbc => Some("_abc"),
         IntrinsicModule::ImportlibMachinery => Some("machinery"),
         IntrinsicModule::ImportlibBootstrapExternal => Some("_bootstrap_external"),
         IntrinsicModule::ImportlibMetadata => Some("metadata"),
@@ -4335,6 +4373,8 @@ impl<'a> Loader<'a> {
                     | IntrinsicModule::Atexit
                     | IntrinsicModule::SocketNative
                     | IntrinsicModule::Imp
+                    | IntrinsicModule::ImportlibAbc
+                    | IntrinsicModule::ImportlibLoaderAbc
                     | IntrinsicModule::ImportlibBootstrapExternal
                     | IntrinsicModule::ImportlibResourcesAbc
             );

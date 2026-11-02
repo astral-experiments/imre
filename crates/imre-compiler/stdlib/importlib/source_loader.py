@@ -93,7 +93,41 @@ def _get_cached(origin):
     return origin if origin.endswith(".pyc") else None
 
 
-class SourceFileLoader:
+class _LoaderBasics:
+    def is_package(self, fullname):
+        filename = self.get_filename(fullname).rpartition(sep)[2]
+        return filename.rsplit(".", 1)[0] == "__init__" and fullname.rpartition(".")[2] != "__init__"
+
+    def create_module(self, spec):
+        return None
+
+    def exec_module(self, module):
+        code = self.get_code(module.__name__)
+        if code is None:
+            raise ImportError(f"cannot load module {module.__name__!r} when get_code() returns None")
+        exec(code, module.__dict__)
+
+    def load_module(self, fullname):
+        return _bootstrap._load_module_shim(self, fullname)
+
+
+def _check_name(method):
+    def checked(self, name=None, *args, **kwargs):
+        if name is None:
+            name = self.name
+        elif self.name != name:
+            raise ImportError("loader for %s cannot handle %s" % (self.name, name), name=name)
+        return method(self, name, *args, **kwargs)
+
+    # The external module is initialized before the bootstrap namespace is complete.
+    for attr in ("__module__", "__name__", "__qualname__", "__doc__"):
+        if hasattr(method, attr):
+            setattr(checked, attr, getattr(method, attr))
+    checked.__dict__.update(method.__dict__)
+    return checked
+
+
+class FileLoader:
     def __init__(self, fullname, path):
         self.name = fullname
         self.path = path
@@ -104,37 +138,27 @@ class SourceFileLoader:
     def __hash__(self):
         return hash(self.name) ^ hash(self.path)
 
-    def create_module(self, spec):
-        return None
+    @_check_name
+    def load_module(self, fullname):
+        return super(FileLoader, self).load_module(fullname)
 
-    def load_module(self, name=None, *args, **kwargs):
-        if name is None:
-            name = self.name
-        elif self.name != name:
-            raise ImportError(f"loader for {self.name} cannot handle {name}", name=name)
-        return _bootstrap._load_module_shim(self, name, *args, **kwargs)
-
-    def get_filename(self, fullname=None):
-        if fullname is not None and fullname != self.name:
-            raise ImportError(f"loader for {self.name} cannot handle {fullname}", name=fullname)
+    @_check_name
+    def get_filename(self, fullname):
         return self.path
-
-    def is_package(self, fullname):
-        filename = self.get_filename(fullname).rpartition(sep)[2]
-        return filename.rsplit(".", 1)[0] == "__init__" and fullname.rpartition(".")[2] != "__init__"
-
-    def get_resource_reader(self, name=None):
-        if name is not None and self.name != name:
-            raise ImportError(f"loader for {self.name} cannot handle {name}", name=name)
-        from importlib.resources._filesystem import FileReader
-        return FileReader(self)
-
-    def path_stats(self, path):
-        return _path_stats(path)
 
     def get_data(self, path):
         with open(path, "rb") as file:
             return file.read()
+
+    @_check_name
+    def get_resource_reader(self, module):
+        from importlib.resources._filesystem import FileReader
+        return FileReader(self)
+
+
+class SourceFileLoader(FileLoader, _LoaderBasics):
+    def path_stats(self, path):
+        return _path_stats(path)
 
     def source_to_code(self, data, path, *, _optimize=-1):
         from operator import index
@@ -161,9 +185,3 @@ class SourceFileLoader:
             return code
         source = self.get_data(path)
         return self.source_to_code(source, path)
-
-    def exec_module(self, module):
-        code = self.get_code(module.__name__)
-        if code is None:
-            raise ImportError(f"cannot load module {module.__name__!r} when get_code() returns None")
-        exec(code, module.__dict__)

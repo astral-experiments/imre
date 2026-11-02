@@ -592,6 +592,20 @@ ACCEPTED = {
             "after.__module__ is None)\n"
         ),
     },
+    "nested_importlib_abc": {
+        "main.py": "import helper\nhelper.check()\n",
+        "helper.py": (
+            "from importlib import abc\n"
+            "import importlib.abc as protocols\n"
+            "from importlib.abc import FileLoader\n"
+            "from importlib._abc import Loader\n"
+            "from importlib.util import Loader as UtilLoader\n"
+            "def check():\n"
+            "    assert abc is protocols and FileLoader is abc.FileLoader\n"
+            "    assert Loader is UtilLoader is abc.Loader\n"
+            "    assert abc.MetaPathFinder().invalidate_caches() is None\n"
+        ),
+    },
     "unregistered_source_loader": {
         "main.py": (
             "from importlib.machinery import SourceFileLoader\n"
