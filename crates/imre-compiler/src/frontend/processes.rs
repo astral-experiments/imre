@@ -1413,6 +1413,14 @@ impl Checker<'_> {
         ))
     }
 
+    pub(super) fn environ_item_type(&self, receiver: &ast::Expr) -> Option<Type> {
+        match self.resolve(receiver) {
+            Some(Binding::Intrinsic(Intrinsic::Environ)) => Some(Type::Str),
+            Some(Binding::Intrinsic(Intrinsic::EnvironBytes)) => Some(Type::Bytes),
+            _ => None,
+        }
+    }
+
     pub(super) fn environ_method(
         &mut self,
         attribute: &ast::ExprAttribute,

@@ -2308,6 +2308,10 @@ pub(crate) enum ProcessOperation {
         bytes: bool,
     },
     EnvironGet,
+    EnvironIndex,
+    EnvironDelete {
+        bytes: bool,
+    },
     EnvironSet {
         bytes: bool,
     },

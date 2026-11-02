@@ -4898,6 +4898,19 @@ impl<'a> Checker<'a> {
                             "deletion requires a dictionary subscript",
                         ));
                     };
+                    if let Some(ty) = self.environ_item_type(&target.value) {
+                        let key = self.expr_expected(&target.slice, ty)?;
+                        statements.push(Statement::Expr(Expr {
+                            ty: Type::None,
+                            kind: ExprKind::Builtin(
+                                Builtin::Process(ir::ProcessOperation::EnvironDelete {
+                                    bytes: ty == Type::Bytes,
+                                }),
+                                vec![key],
+                            ),
+                        }));
+                        continue;
+                    }
                     let receiver = self.expr(&target.value)?;
                     if matches!(receiver.ty, Type::Deque(_)) {
                         let index = self.integer_index(&target.slice)?;
@@ -7404,6 +7417,16 @@ impl<'a> Checker<'a> {
                 (Type::Bool, ExprKind::Compare(values, ops))
             }
             ast::Expr::Subscript(subscript) => {
+                if self.environ_item_type(&subscript.value) == Some(Type::Str) {
+                    let key = self.expr_expected(&subscript.slice, Type::Str)?;
+                    return Ok(Expr {
+                        ty: Type::Str,
+                        kind: ExprKind::Builtin(
+                            Builtin::Process(ir::ProcessOperation::EnvironIndex),
+                            vec![key],
+                        ),
+                    });
+                }
                 if let Some(member) = self.enum_name_lookup(subscript)? {
                     return Ok(member);
                 }

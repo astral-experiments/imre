@@ -26,6 +26,7 @@ use super::{Bytes, Int, Object, Storage, Str, fail, object};
 
 mod argv;
 mod asynchronous;
+mod environ_item;
 mod launch_error;
 mod pass_fds;
 mod pipe_size;
@@ -1015,7 +1016,15 @@ pub(super) fn with_environment_value<T>(key: &[u8], inspect: impl FnOnce(&[u8]) 
 
 /// Update the same process environment inherited by newly spawned children.
 pub(crate) fn change_environment(key: &CStr, value: Option<&CStr>) -> Result<()> {
-    let _guard = ENVIRONMENT.lock().unwrap();
+    let guard = ENVIRONMENT.lock().unwrap();
+    change_environment_locked(key, value, &guard)
+}
+
+fn change_environment_locked(
+    key: &CStr,
+    value: Option<&CStr>,
+    _guard: &std::sync::MutexGuard<'_, ()>,
+) -> Result<()> {
     let status = if let Some(value) = value {
         if key.to_bytes().contains(&b'=') {
             return Err(Error::new(
