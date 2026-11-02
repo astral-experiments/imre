@@ -436,7 +436,7 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         {
             "socket.socket"
         }
-        Value::BufferedRandom(_) if super::stdlib::tempfile::METHODS.contains(&attr) => {
+        Value::BufferedRandom(..) if super::stdlib::tempfile::METHODS.contains(&attr) => {
             "BufferedRandom"
         }
         Value::TextFile(_)

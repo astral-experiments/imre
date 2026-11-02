@@ -5,7 +5,7 @@ from errno import EEXIST as _EEXIST
 
 from _imre_tempfile import abspath as _abspath, default_directory as _default_directory
 from _imre_tempfile import finish_named as _finish_named, keep_named as _keep_named, open_named as _open_named
-from _imre_tempfile import mkdir as _mkdir, random_name as _random_name
+from _imre_tempfile import mkdir as _mkdir, open_file as _open_file, random_name as _random_name
 
 TMP_MAX = 20
 template = "tmp"
@@ -204,3 +204,12 @@ def NamedTemporaryFile(mode="w+b", buffering=-1, encoding=None, newline=None,
     except BaseException:
         _finish_named(closer, name, True)
         raise
+
+
+def TemporaryFile(mode="w+b", buffering=-1, encoding=None, newline=None,
+                  suffix=None, prefix=None, dir=None, *, errors=None):
+    if buffering != -1:
+        raise NotImplementedError("TemporaryFile supports default buffering")
+    prefix, suffix, dir, _ = _sanitize_params(prefix, suffix, dir)
+    return _open_file(mode, dir=_os.fspath(dir), prefix=prefix, suffix=suffix,
+                      encoding=encoding, errors=errors, newline=newline)

@@ -1617,6 +1617,7 @@ def report(text):
             "boxed_bytes_octal.py",
             "boxed_contextvars.py",
             "boxed_temporary_file.py",
+            "boxed_spooled_temporary_file.py",
             "boxed_named_temporary_file.py",
             "boxed_random.py",
             "boxed_secrets.py",

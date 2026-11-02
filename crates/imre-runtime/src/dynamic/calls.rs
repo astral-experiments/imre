@@ -2414,7 +2414,9 @@ impl Context {
             Value::Socket(ref socket) if name == "type" => {
                 return Ok(self.int(i64::from(crate::objects::socket::kind(socket))));
             }
-            Value::BufferedRandom(ref file) if name == "closed" => {
+            Value::BufferedRandom(_, file_name) if name == "name" => return Ok(file_name),
+            Value::BufferedRandom(..) if name == "mode" => return Ok(self.text("rb+")),
+            Value::BufferedRandom(ref file, _) if name == "closed" => {
                 return Ok(if file.borrow().closed() { TRUE } else { FALSE });
             }
             Value::TextFile(ref file) if name == "closed" => {
