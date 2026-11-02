@@ -1946,6 +1946,7 @@ def report(text):
             "boxed_standard_base64.py",
             "boxed_csv.py",
             "boxed_bytes_separators.py",
+            "boxed_bytes_join.py",
             "boxed_bytes_fromhex.py",
             "boxed_binary_endswith.py",
             "boxed_struct.py",
