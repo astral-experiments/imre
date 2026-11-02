@@ -629,6 +629,7 @@ impl Builtin {
             | Self::ChainMapSetItem
             | Self::ChainMapGet(_)
             | Self::DictPop
+            | Self::DictPopItem
             | Self::DictSetDefault
             | Self::DefaultDictMissing
             | Self::DictTryPop(_)
@@ -1374,6 +1375,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_str_list_sorted_suffix"
                 | "imre_dict_delete"
                 | "imre_dict_pop"
+                | "imre_dict_popitem"
                 | "imre_cursor_length_hint"
                 | "imre_mapping_iter_next"
                 | "imre_exception_raise"

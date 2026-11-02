@@ -7462,6 +7462,18 @@ impl Emitter<'_, '_> {
                 Type::ListInt,
                 &[&args[0].value, &args[1].value],
             ),
+            Builtin::DictPopItem => {
+                // Allocate the result before removing the entry. Each tuple field
+                // occupies a full word and takes the dictionary's existing owner.
+                let pair = self.record(returns);
+                let key = self.field_pointer(&pair, 0);
+                let value = self.field_pointer(&pair, 1);
+                self.checked_line(format!(
+                    "call void @imre_dict_popitem(ptr {}, ptr {key}, ptr {value})",
+                    args[0].value.operand
+                ));
+                pair
+            }
             Builtin::DictGetDefault | Builtin::DictSetDefault | Builtin::DictPop => {
                 let key = self.mapping_read_key(args[0].value.ty, &args[1].value);
                 let default = args.get(2).map(|arg| self.word(&arg.value));
@@ -9482,6 +9494,7 @@ declare ptr @imre_dict_gather_bytes_int(ptr, ptr)
 declare i32 @imre_dict_try_get(ptr, i64, ptr)
 declare i32 @imre_dict_try_pop(ptr, i64, ptr)
 declare i64 @imre_dict_pop(ptr, i64, i64, i32)
+declare void @imre_dict_popitem(ptr, ptr, ptr)
 declare i64 @imre_dict_get_default(ptr, i64, i64)
 declare i64 @imre_dict_setdefault(ptr, i64, i64)
 declare i64 @imre_defaultdict_missing(ptr, i64)
