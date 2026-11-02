@@ -43,6 +43,7 @@ def current():
             raise AssertionError('query parsing must read the buffer')
 
     assert module.unquote_to_bytes(Buffer(b'%41+')) == b'A+'
+    assert module.parse_qsl(memoryview(b'x=%ff')) == [(b'x', b'\xff')]
 
     class Limited(str):
         def split(self, sep):
