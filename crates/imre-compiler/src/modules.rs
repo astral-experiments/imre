@@ -1883,6 +1883,9 @@ impl IntrinsicModule {
             (Self::Sys, "__stdout__") => Intrinsic::OriginalStdout,
             (Self::Sys, "stderr" | "__stderr__") => Intrinsic::Stderr,
             (Self::Sys, "exception") => Intrinsic::SysException,
+            (Self::Traceback, "extract_tb") => {
+                Intrinsic::ObjectRuntimeExport("traceback.extract_tb")
+            }
             (Self::Traceback, "print_stack") => {
                 Intrinsic::ObjectRuntimeExport("traceback.print_stack")
             }
