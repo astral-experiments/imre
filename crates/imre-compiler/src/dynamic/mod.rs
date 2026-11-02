@@ -763,7 +763,7 @@ pub(crate) fn compile(
                         continue;
                     };
                     // The boxed urllib transport cannot stand in for an earlier project package.
-                    if request_script && prefix == "urllib" {
+                    if request_script && prefix == "urllib" && initial.contains(root) {
                         return Ok(None);
                     }
                     let src = std::fs::read_to_string(&path)
