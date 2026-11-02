@@ -105,12 +105,14 @@ def exercise(path):
 
     target_path = path + ".output"
     with open(target_path, "wb") as output:
+        assert output.name is target_path and output.mode == "wb"
         alias = output
         print(output.write(b"\x00\xff"), alias.closed)
         with open(target_path, "rb") as reader:
             print(reader.read())
         alias.flush()
         with open(target_path, "rb") as reader:
+            assert reader.name is target_path and reader.mode == "rb"
             print(reader.read())
     with open(target_path, "ab") as output:
         print(output.write(bytearray(b"x")))
@@ -124,6 +126,7 @@ def exercise(path):
                 print(error.args)
             else:
                 raise AssertionError("flush accepted extra arguments")
+    assert alias.name is target_path and alias.mode == "wb"
     try:
         open(target_path, "xb")
     except FileExistsError:

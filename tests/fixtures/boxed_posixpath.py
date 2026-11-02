@@ -126,6 +126,11 @@ def current():
         os.putenv(key, "native only")
         assert os.getenv(key, missing) == ""
         assert posix.environ[key.encode()] == b""
+        snapshot = os.environ.copy()
+        assert type(snapshot) is dict
+        assert snapshot[key] == ""
+        snapshot[key] = "copy only"
+        assert os.environ[key] == ""
         try:
             os.getenv(key.encode())
         except TypeError as error:

@@ -234,9 +234,10 @@ impl Checker<'_> {
         Ok(self.ordered_builtin(Builtin::Calendar(op), ty, args))
     }
     pub(super) fn calendar_now(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
+        let zone = self.types.optional(Type::Calendar(C::Zone));
         let args = self.arguments(
             call,
-            &[parameter("tz", Type::Calendar(C::Zone), None)],
+            &[parameter("tz", zone, Some(Expr::absent(zone)))],
             None,
         )?;
         Ok(self.ordered_builtin(

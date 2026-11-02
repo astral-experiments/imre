@@ -43,7 +43,7 @@ pub(super) fn module_function(symbol: &str) -> Option<(&str, &str)> {
         "_signal" if function == "sigpending" => Some((module, function)),
         "_contextvars" if function == "copy_context" => Some((module, function)),
         "_io" if function == "text_encoding" => Some((module, function)),
-        "zlib" if function == "adler32" => Some((module, function)),
+        "zlib" if matches!(function, "adler32" | "crc32") => Some((module, function)),
         "hashlib"
             if matches!(function, "new" | "file_digest")
                 || crate::objects::HashState::algorithms().any(|name| name == function) =>
@@ -970,6 +970,7 @@ impl Context {
                             | stdlib::os::scandir::ITER
                             | super::thread_rlock::CLASS
                             | super::thread_lock::CLASS
+                            | value::REGEX_PATTERN_TYPE
                             | value::TEMPLATE_TYPE
                             | value::TEMPLATE_ITER_TYPE
                             | value::INTERPOLATION_TYPE
@@ -2051,6 +2052,9 @@ impl Context {
                             "__text_signature__" if method == "sys._getframe" => {
                                 Some("($module, depth=0, /)")
                             }
+                            "__text_signature__" if method == "sys._getframemodulename" => {
+                                Some("($module, /, depth=0)")
+                            }
                             "__text_signature__" if method == "sys.audit" => {
                                 Some("($module, event, /, *args)")
                             }
@@ -2128,7 +2132,8 @@ impl Context {
                 _ => {}
             },
             Value::Native(ref class)
-                if class == "datetime.datetime" && matches!(name, "fromtimestamp" | "combine") =>
+                if class == "datetime.datetime"
+                    && matches!(name, "now" | "fromtimestamp" | "combine") =>
             {
                 return Ok(self.builtin(&format!("datetime.datetime.{name}")));
             }
@@ -2200,6 +2205,7 @@ impl Context {
                 if matches!(
                     class.as_str(),
                     "array.array"
+                        | value::REGEX_PATTERN_TYPE
                         | "_contextvars.Context"
                         | "_contextvars.ContextVar"
                         | "_contextvars.Token"
@@ -2232,7 +2238,11 @@ impl Context {
                     "__hash__" | "__doc__" | "__text_signature__" if class == KEY_WRAPPER => {
                         return Ok(NONE);
                     }
-                    "__new__" if class == KEY_WRAPPER => return Ok(self.builtin("object.__new__")),
+                    "__new__"
+                        if matches!(class.as_str(), KEY_WRAPPER | value::REGEX_PATTERN_TYPE) =>
+                    {
+                        return Ok(self.builtin("object.__new__"));
+                    }
                     _ if class == KEY_WRAPPER
                         && BuiltinDescriptor::lookup(&format!("{class}.{name}")).is_some() =>
                     {
@@ -2404,6 +2414,16 @@ impl Context {
                 };
             }
             Value::File(ref handle)
+                if matches!(name, "name" | "mode")
+                    && let Some((path, mode)) = handle.path_metadata() =>
+            {
+                return Ok(if name == "name" {
+                    path
+                } else {
+                    self.text(mode)
+                });
+            }
+            Value::File(ref handle)
                 if name == "name"
                     && let Some(fd) = handle.socket_reader_name() =>
             {
@@ -2421,7 +2441,9 @@ impl Context {
             Value::Socket(ref socket) if name == "type" => {
                 return Ok(self.int(i64::from(crate::objects::socket::kind(socket))));
             }
-            Value::BufferedRandom(ref file) if name == "closed" => {
+            Value::BufferedRandom(_, file_name) if name == "name" => return Ok(file_name),
+            Value::BufferedRandom(..) if name == "mode" => return Ok(self.text("rb+")),
+            Value::BufferedRandom(ref file, _) if name == "closed" => {
                 return Ok(if file.borrow().closed() { TRUE } else { FALSE });
             }
             Value::TextFile(ref file) if name == "closed" => {
@@ -2817,6 +2839,11 @@ impl Context {
             } => {
                 if name == "__dict__" {
                     return Ok(self.class_dictionary(scope));
+                }
+                if matches!(name, "__annotations__" | "__annotate__")
+                    && self.has_class_annotation_provider(scope)
+                {
+                    return self.class_annotation_attr(obj, scope, name);
                 }
                 if name == "__annotations__"
                     && let Some(thunks) = self
@@ -3224,6 +3251,11 @@ impl Context {
                 }
             }
             Value::Class { scope, .. } => {
+                if matches!(name, "__annotations__" | "__annotate__")
+                    && self.has_class_annotation_provider(scope)
+                {
+                    return self.update_class_annotation_attr(scope, name, None);
+                }
                 let error = match name {
                     "__name__" | "__qualname__" | "__bases__" | "__type_params__"
                     | "__module__" | "__doc__" => Error::new(
@@ -3616,7 +3648,11 @@ impl Context {
                 || HashState::is_provider_class(class)
                 || matches!(
                     class.as_str(),
-                    HashState::CLASS | HashState::XOF_CLASS | KEY_WRAPPER | stdlib::flags::TYPE
+                    HashState::CLASS
+                        | HashState::XOF_CLASS
+                        | KEY_WRAPPER
+                        | stdlib::flags::TYPE
+                        | value::REGEX_PATTERN_TYPE
                 ))
         {
             return Err(Error::new(
@@ -3946,6 +3982,11 @@ impl Context {
                     ));
                 }
                 let scope = *scope;
+                if matches!(name, "__annotations__" | "__annotate__")
+                    && self.has_class_annotation_provider(scope)
+                {
+                    return self.update_class_annotation_attr(scope, name, Some(value));
+                }
                 if name == "__annotations__"
                     && let Value::Scope(data) = self.heap.get_mut(scope)
                     && let Some(namespace) = &mut data.class_namespace
@@ -4028,10 +4069,12 @@ impl Context {
             ));
         }
         let object = self.builtin("object");
-        if matches!(self.heap.get(class), Value::Native(name) if name == KEY_WRAPPER) {
+        if let Value::Native(name) = self.heap.get(class)
+            && matches!(name.as_str(), KEY_WRAPPER | value::REGEX_PATTERN_TYPE)
+        {
             return Err(Error::new(
                 "TypeError",
-                format!("cannot create '{KEY_WRAPPER}' instances"),
+                format!("cannot create '{name}' instances"),
             ));
         }
         let base = self.allocation_base(class).unwrap_or(class);
@@ -4345,7 +4388,10 @@ impl Context {
             Value::Native(name)
                 if matches!(
                     name.as_str(),
-                    HashState::CLASS | HashState::XOF_CLASS | KEY_WRAPPER
+                    HashState::CLASS
+                        | HashState::XOF_CLASS
+                        | KEY_WRAPPER
+                        | value::REGEX_PATTERN_TYPE
                 ) =>
             {
                 Err(Error::new(
@@ -5020,7 +5066,18 @@ impl Context {
                 "subclassing ABCMeta is unsupported",
             ));
         }
-        let enum_namespace = self.enum_namespace(&bases);
+        let typed_dict_meta = self
+            .module_value("typing", "_TypedDictMeta")
+            .filter(|meta| {
+                bases
+                    .iter()
+                    .any(|&base| self.heap.get(base).instance_class() == Some(*meta))
+            });
+        let enum_namespace = if typed_dict_meta.is_some() {
+            None
+        } else {
+            self.enum_namespace(&bases)
+        };
         let abc_meta = if explicit_metaclass.is_some()
             || bases.iter().any(|&base| self.is_bundled_abc(base))
         {
@@ -5064,31 +5121,6 @@ impl Context {
         } else {
             None
         };
-        let mut typed_dict_meta = None;
-        if let Some(meta) = self.module_value("typing", "_TypedDictMeta")
-            && bases
-                .iter()
-                .any(|&base| self.heap.get(base).instance_class() == Some(meta))
-        {
-            let root = self.module_value("typing", "_TypedDict");
-            if bases.iter().any(|&base| {
-                self.heap.get(base).instance_class() != Some(meta)
-                    && self.classes.get("typing.Generic") != Some(&base)
-            }) {
-                return Err(Error::new(
-                    "TypeError",
-                    "cannot inherit from both a TypedDict type and a non-TypedDict base class",
-                ));
-            }
-            if parameterized || bases.len() != 1 || Some(bases[0]) != root {
-                return Err(Error::new(
-                    "NotImplementedError",
-                    "inherited and generic TypedDict declarations are unsupported",
-                ));
-            }
-            bases = vec![self.builtin("dict")];
-            typed_dict_meta = Some(meta);
-        }
         let Value::Function {
             scope: parent,
             code,
@@ -5162,6 +5194,30 @@ impl Context {
                 if declaration { TRUE } else { FALSE },
             );
         }
+        let typed_dict_fields = if let Some(meta) = typed_dict_meta {
+            let generic = self.classes.get("typing.Generic").copied();
+            if bases.iter().any(|&base| {
+                self.heap.get(base).instance_class() != Some(meta) && generic != Some(base)
+            }) {
+                return Err(Error::new(
+                    "TypeError",
+                    "cannot inherit from both a TypedDict type and a non-TypedDict base class",
+                ));
+            }
+            if parameterized || generic.is_some_and(|generic| bases.contains(&generic)) {
+                return Err(Error::new(
+                    "NotImplementedError",
+                    "generic TypedDict declarations are unsupported",
+                ));
+            }
+            let dict = self.builtin("dict");
+            let parents = std::mem::replace(&mut bases, vec![dict]);
+            let parents = self.alloc(Value::Tuple(parents));
+            let (fields, thunks) = self.prepare_typeddict_namespace(scope, annotations)?;
+            Some((parents, fields, thunks))
+        } else {
+            None
+        };
         super::typing::class_parameters(self, scope, original, &bases)?;
         // type.__new__ implicitly wraps only plain functions stored under this name.
         if let Some(function) = self.scope_name(scope, "__init_subclass__")
@@ -5239,24 +5295,13 @@ impl Context {
                 .insert(format!("collections.abc.{name}"), class);
         }
         self.init_abstract_class(class, scope)?;
-        if typed_dict_meta.is_some() {
-            // The class tracks unevaluated fields in its own namespace. Reading
-            // __annotations__ here would cache their values before user code can rebind names.
-            let fields = self
-                .own_class_attr(class, "__annotations__")
-                .ok_or_else(|| Error::new("TypeError", "missing TypedDict annotations"))?;
-            let thunks = self
-                .scope_data(scope)
-                .class_namespace
-                .as_ref()
-                .and_then(|ns| ns.annotation_thunks)
-                .unwrap_or(NONE);
+        if let Some((parents, fields, thunks)) = typed_dict_fields {
             let configure = self
                 .module_value("typing", "_configure_typeddict")
                 .ok_or_else(|| Error::new("RuntimeError", "missing TypedDict initializer"))?;
             self.call(
                 configure,
-                vec![class, fields, total.unwrap_or(TRUE), TRUE, thunks],
+                vec![class, fields, total.unwrap_or(TRUE), thunks, parents],
                 Vec::new(),
             )?;
         }

@@ -424,7 +424,12 @@ pub(super) fn subscribe(ctx: &mut Context, target: Id, index: Id) -> Option<Resu
             AliasKind::AbcCallable
         }
         Value::Native(n) if n == "typing.Callable" => AliasKind::Callable,
-        Value::Native(n) if matches!(n.as_str(), "dict" | "list" | "tuple" | "set" | "type") => {
+        Value::Native(n)
+            if matches!(
+                n.as_str(),
+                "dict" | "list" | "tuple" | "set" | "type" | super::value::REGEX_PATTERN_TYPE
+            ) =>
+        {
             AliasKind::Builtin
         }
         Value::Class { ancestors, .. } => {
@@ -1015,6 +1020,7 @@ pub(super) fn call(
             unreachable!()
         };
         *metaclass = Some(meta);
+        ctx.enable_class_annotation_provider(scope);
         return Ok(class);
     }
     if operation == "TypeVarTuple" {
@@ -1449,6 +1455,7 @@ impl Context {
                             | "NoneType"
                             | "NotImplementedType"
                             | "ellipsis"
+                            | super::value::REGEX_PATTERN_TYPE
                             | super::value::TEMPLATE_ITER_TYPE
                             | super::value::TEMPLATE_TYPE
                             | super::value::INTERPOLATION_TYPE

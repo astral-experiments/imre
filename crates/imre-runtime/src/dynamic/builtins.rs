@@ -21,85 +21,15 @@ pub(super) use text::{
     bytes_from_iterable, bytes_percent, format_conversion, format_value, percent, zeroed_bytes,
 };
 
-macro_rules! exception_kinds {
-    ($($kind:ident),* $(,)?) => {
-        const EXCEPTIONS: &[&str] = &[$(stringify!($kind)),*];
-        pub(super) fn exception_kind(name: &str) -> Option<crate::objects::exceptions::Kind> {
-            use crate::objects::exceptions::Kind;
-            match name {
-                $(stringify!($kind) => Some(Kind::$kind),)*
-                "UnsupportedOperation" => Some(Kind::UnsupportedOperation),
-                "binascii.Error" => Some(Kind::BinasciiError),
-                "binascii.Incomplete" => Some(Kind::BinasciiIncomplete),
-                _ => None,
-            }
-        }
-    };
+pub(super) fn exception_kind(name: &str) -> Option<crate::objects::exceptions::Kind> {
+    use crate::objects::exceptions::Kind;
+    match name {
+        "UnsupportedOperation" => Some(Kind::UnsupportedOperation),
+        "binascii.Error" => Some(Kind::BinasciiError),
+        "binascii.Incomplete" => Some(Kind::BinasciiIncomplete),
+        _ => imre_ast::exceptions::boxed_builtin_kind(name),
+    }
 }
-
-exception_kinds!(
-    BaseException,
-    Exception,
-    RuntimeError,
-    RecursionError,
-    NotImplementedError,
-    TypeError,
-    ValueError,
-    EOFError,
-    SyntaxError,
-    IndentationError,
-    UnicodeError,
-    UnicodeDecodeError,
-    UnicodeEncodeError,
-    ArithmeticError,
-    OverflowError,
-    ZeroDivisionError,
-    LookupError,
-    IndexError,
-    KeyError,
-    NameError,
-    UnboundLocalError,
-    AttributeError,
-    ImportError,
-    ModuleNotFoundError,
-    OSError,
-    InterruptedError,
-    ChildProcessError,
-    ProcessLookupError,
-    ConnectionError,
-    ConnectionRefusedError,
-    ConnectionResetError,
-    ConnectionAbortedError,
-    BrokenPipeError,
-    BlockingIOError,
-    TimeoutError,
-    FileNotFoundError,
-    FileExistsError,
-    IsADirectoryError,
-    NotADirectoryError,
-    PermissionError,
-    AssertionError,
-    MemoryError,
-    BufferError,
-    ReferenceError,
-    SystemExit,
-    GeneratorExit,
-    KeyboardInterrupt,
-    StopIteration,
-    StopAsyncIteration,
-    Warning,
-    RuntimeWarning,
-    DeprecationWarning,
-    EncodingWarning,
-    UserWarning,
-    PendingDeprecationWarning,
-    SyntaxWarning,
-    FutureWarning,
-    ImportWarning,
-    UnicodeWarning,
-    BytesWarning,
-    ResourceWarning,
-);
 
 const FUNCTIONS: &[&str] = &[
     "len",
@@ -169,7 +99,11 @@ const TYPES: &[&str] = &[
 ];
 
 pub(super) fn names() -> impl Iterator<Item = &'static str> {
-    FUNCTIONS.iter().chain(TYPES).chain(EXCEPTIONS).copied()
+    FUNCTIONS
+        .iter()
+        .chain(TYPES)
+        .chain(imre_ast::exceptions::BOXED_BUILTINS)
+        .copied()
 }
 
 pub(super) fn is_exception(name: &str) -> bool {
@@ -245,7 +179,7 @@ pub(super) fn is_builtin_type(name: &str) -> bool {
 pub(super) fn is_static_gc_type(name: &str) -> bool {
     TYPES.contains(&name)
         || name == super::stdlib::flags::TYPE
-        || EXCEPTIONS.contains(&name)
+        || imre_ast::exceptions::boxed_builtin_kind(name).is_some()
         || (is_iterator_type(name) && !name.contains('.'))
         || matches!(
             name,
@@ -502,7 +436,7 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         {
             "socket.socket"
         }
-        Value::BufferedRandom(_) if super::stdlib::tempfile::METHODS.contains(&attr) => {
+        Value::BufferedRandom(..) if super::stdlib::tempfile::METHODS.contains(&attr) => {
             "BufferedRandom"
         }
         Value::TextFile(_)

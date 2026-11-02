@@ -2,7 +2,7 @@
 
 macro_rules! exception_kinds {
     (
-        checked_builtins { $($builtin:ident = $builtin_id:literal,)* }
+        boxed_builtins { $($builtin:ident = $builtin_id:literal,)* }
         other { $($other:ident = $other_id:literal => $display:literal,)* }
     ) => {
         /// Stable identifiers passed across the generated-code ABI.
@@ -31,10 +31,13 @@ macro_rules! exception_kinds {
             }
         }
 
-        /// Resolves an unqualified exception name accepted by the checked frontend.
-        pub fn builtin_id(name: &str) -> Option<u32> {
+        /// Names installed in the boxed builtins dictionary, in insertion order.
+        pub const BOXED_BUILTINS: &[&str] = &[$(stringify!($builtin)),*];
+
+        /// Resolves an exception exposed by the boxed builtins module.
+        pub fn boxed_builtin_kind(name: &str) -> Option<Kind> {
             match name {
-                $(stringify!($builtin) => Some($builtin_id),)*
+                $(stringify!($builtin) => Some(Kind::$builtin),)*
                 _ => None,
             }
         }
@@ -42,56 +45,56 @@ macro_rules! exception_kinds {
 }
 
 exception_kinds! {
-    checked_builtins {
+    boxed_builtins {
         BaseException = 0,
         Exception = 1,
+        RuntimeError = 10,
+        RecursionError = 43,
+        NotImplementedError = 37,
+        TypeError = 13,
+        ValueError = 8,
+        EOFError = 11,
+        SyntaxError = 55,
+        IndentationError = 56,
+        UnicodeError = 17,
+        UnicodeDecodeError = 18,
+        UnicodeEncodeError = 38,
         ArithmeticError = 2,
-        ZeroDivisionError = 3,
         OverflowError = 4,
+        ZeroDivisionError = 3,
         LookupError = 5,
         IndexError = 6,
         KeyError = 7,
-        ValueError = 8,
-        AssertionError = 9,
-        RuntimeError = 10,
-        EOFError = 11,
-        OSError = 12,
-        TypeError = 13,
-        AttributeError = 14,
-        MemoryError = 15,
-        SystemError = 16,
-        UnicodeError = 17,
-        UnicodeDecodeError = 18,
-        FileNotFoundError = 20,
-        PermissionError = 21,
-        IsADirectoryError = 22,
-        NotADirectoryError = 23,
-        FileExistsError = 24,
-        SystemExit = 32,
-        ExceptionGroup = 34,
-        StopIteration = 35,
-        NotImplementedError = 37,
-        UnicodeEncodeError = 38,
         NameError = 39,
         UnboundLocalError = 40,
+        AttributeError = 14,
         ImportError = 41,
         ModuleNotFoundError = 42,
-        RecursionError = 43,
-        BlockingIOError = 44,
+        OSError = 12,
+        InterruptedError = 50,
+        ChildProcessError = 57,
+        ProcessLookupError = 58,
         ConnectionError = 45,
-        BrokenPipeError = 46,
-        ConnectionAbortedError = 47,
         ConnectionRefusedError = 48,
         ConnectionResetError = 49,
-        InterruptedError = 50,
+        ConnectionAbortedError = 47,
+        BrokenPipeError = 46,
+        BlockingIOError = 44,
         TimeoutError = 51,
-        ReferenceError = 53,
+        FileNotFoundError = 20,
+        FileExistsError = 24,
+        IsADirectoryError = 22,
+        NotADirectoryError = 23,
+        PermissionError = 21,
+        AssertionError = 9,
+        MemoryError = 15,
         BufferError = 54,
-        SyntaxError = 55,
-        IndentationError = 56,
+        ReferenceError = 53,
+        SystemExit = 32,
         GeneratorExit = 59,
-        StopAsyncIteration = 60,
         KeyboardInterrupt = 61,
+        StopIteration = 35,
+        StopAsyncIteration = 60,
         Warning = 80,
         RuntimeWarning = 81,
         DeprecationWarning = 82,
@@ -106,6 +109,7 @@ exception_kinds! {
         ResourceWarning = 91,
     }
     other {
+        SystemError = 16 => "SystemError",
         UnsupportedOperation = 19 => "UnsupportedOperation",
         SubprocessError = 25 => "SubprocessError",
         CalledProcessError = 26 => "CalledProcessError",
@@ -115,10 +119,9 @@ exception_kinds! {
         TomlDecodeError = 30 => "TOMLDecodeError",
         JsonDecodeError = 31 => "JSONDecodeError",
         CancelledError = 33 => "CancelledError",
+        ExceptionGroup = 34 => "ExceptionGroup",
         BadZipFile = 36 => "BadZipFile",
         UnidiffParseError = 52 => "UnidiffParseError",
-        ChildProcessError = 57 => "ChildProcessError",
-        ProcessLookupError = 58 => "ProcessLookupError",
         ShutilError = 64 => "Error",
         SameFileError = 65 => "SameFileError",
         SpecialFileError = 66 => "SpecialFileError",
@@ -130,26 +133,41 @@ exception_kinds! {
     }
 }
 
+/// Resolves an unqualified exception name accepted by the checked frontend.
+pub fn builtin_id(name: &str) -> Option<u32> {
+    let kind = match name {
+        "SystemError" => Kind::SystemError,
+        "ExceptionGroup" => Kind::ExceptionGroup,
+        _ => match boxed_builtin_kind(name)? {
+            Kind::ChildProcessError | Kind::ProcessLookupError => return None,
+            kind => kind,
+        },
+    };
+    Some(kind as u32)
+}
+
+/// Indices used by typed warning filters and by the runtime's -W option.
+pub const WARNING_CATEGORIES: &[Kind] = &[
+    Kind::Warning,
+    Kind::ResourceWarning,
+    Kind::RuntimeWarning,
+    Kind::UserWarning,
+    Kind::DeprecationWarning,
+    Kind::PendingDeprecationWarning,
+    Kind::SyntaxWarning,
+    Kind::FutureWarning,
+    Kind::ImportWarning,
+    Kind::UnicodeWarning,
+    Kind::BytesWarning,
+    Kind::EncodingWarning,
+];
+
 impl Kind {
     /// Tests a builtin handler against this exception's class.
     pub fn matches(self, expected: Self) -> bool {
         match expected {
             Self::BaseException => true,
-            Self::Warning => matches!(
-                self,
-                Self::Warning
-                    | Self::RuntimeWarning
-                    | Self::DeprecationWarning
-                    | Self::EncodingWarning
-                    | Self::UserWarning
-                    | Self::PendingDeprecationWarning
-                    | Self::SyntaxWarning
-                    | Self::FutureWarning
-                    | Self::ImportWarning
-                    | Self::UnicodeWarning
-                    | Self::BytesWarning
-                    | Self::ResourceWarning
-            ),
+            Self::Warning => WARNING_CATEGORIES.contains(&self),
             Self::NameError => matches!(self, Self::NameError | Self::UnboundLocalError),
             Self::SyntaxError => matches!(self, Self::SyntaxError | Self::IndentationError),
             Self::Exception => !matches!(

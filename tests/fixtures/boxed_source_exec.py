@@ -235,13 +235,19 @@ def source_name_deletion():
 
 def relative_import_hooks():
     import sys
+    import types
 
+    exports = types.ModuleType("base_events")
+    exports.flag = object()
+    exports._hidden = True
     calls = []
     missing = ImportError("relative hook failed")
 
     def importer(name, globals_, locals_, fromlist, level):
         assert globals_ is namespace and locals_ is local
         calls.append((name, fromlist, level))
+        if name == "base_events":
+            return exports
         if name == "missing":
             raise missing
         return sys
@@ -257,8 +263,39 @@ def relative_import_hooks():
         assert error is missing
     else:
         raise AssertionError("relative import hook exception was lost")
+    exec("from .base_events import *", namespace, local)
+    assert local["flag"] is exports.flag and "_hidden" not in local
     assert calls == [("sys", ("argv",), 0), ("", ("argv",), 1),
-                     ("helper", ("argv",), 2), ("missing", ("attr",), 1)]
+                     ("helper", ("argv",), 2), ("missing", ("attr",), 1),
+                     ("base_events", ("*",), 1)]
+    # The locals dictionary receives the original key even if the exported
+    # attribute removes the last reference to it during lookup.
+    import gc
+    import _weakref
+
+    class Key(str):
+        pass
+
+    class Exports:
+        @property
+        def export(self):
+            self.__all__.clear()
+            gc.collect()
+            return 42
+
+    exports = Exports()
+    exports.__all__ = [Key("export")]
+    original = _weakref.ref(exports.__all__[0])
+    exec("from .base_events import *", namespace, local)
+    assert local["export"] == 42
+    assert any(key is original() for key in local)
+    for scope in ("class Case:", "def case():"):
+        try:
+            compile(scope + "\n    from .base_events import *", "case.py", "exec")
+        except SyntaxError as error:
+            assert "import * only allowed at module level" in str(error)
+        else:
+            raise AssertionError("wildcard import accepted in a nested scope")
 
 
 def source_match():

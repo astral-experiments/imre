@@ -966,6 +966,8 @@ impl IntrinsicModule {
             (Self::Ast, "iter_fields") => Intrinsic::ObjectRuntimeExport("ast.iter_fields"),
             (Self::Ast, "NodeVisitor") => Intrinsic::ObjectRuntimeExport("ast.NodeVisitor"),
             (Self::Ast, "NodeTransformer") => Intrinsic::ObjectRuntimeExport("ast.NodeTransformer"),
+            (Self::Ast, "TemplateStr") => Intrinsic::ObjectRuntimeExport("ast.TemplateStr"),
+            (Self::Ast, "Interpolation") => Intrinsic::ObjectRuntimeExport("ast.Interpolation"),
             (Self::Ast, "literal_eval") => Intrinsic::ObjectRuntimeExport("ast.literal_eval"),
             (Self::Gc, "collect") => Intrinsic::ObjectRuntimeExport("gc.collect"),
             (Self::Marshal, "loads") => Intrinsic::ObjectRuntimeExport("marshal.loads"),
@@ -1357,6 +1359,7 @@ impl IntrinsicModule {
             (Self::Typing, "Tuple") => Intrinsic::ObjectRuntimeExport("typing.Tuple"),
             (Self::Typing, "Dict") => Intrinsic::ObjectRuntimeExport("typing.Dict"),
             (Self::Typing, "DefaultDict") => Intrinsic::ObjectRuntimeExport("typing.DefaultDict"),
+            (Self::Typing, "Mapping") => Intrinsic::ObjectRuntimeExport("typing.Mapping"),
             (Self::Typing, "MutableMapping") => {
                 Intrinsic::ObjectRuntimeExport("typing.MutableMapping")
             }
@@ -1439,7 +1442,9 @@ impl IntrinsicModule {
             (Self::Threading, "local") | (Self::Thread, "_local") => {
                 Intrinsic::ObjectRuntimeExport("_thread._local")
             }
-            (Self::Thread, "RLock") => Intrinsic::ObjectRuntimeExport("_thread.RLock"),
+            (Self::Thread | Self::Functools, "RLock") => {
+                Intrinsic::ObjectRuntimeExport("_thread.RLock")
+            }
             (Self::WeakRef, "WeakKeyDictionary") => {
                 Intrinsic::ObjectRuntimeExport("weakref.WeakKeyDictionary")
             }
@@ -1587,6 +1592,7 @@ impl IntrinsicModule {
             }
             (Self::Csv, "Error") => Intrinsic::CsvError,
             (Self::Gzip, "BadGzipFile") => Intrinsic::BadGzipFile,
+            (Self::Re, "escape") => Intrinsic::ObjectRuntimeExport("re.escape"),
             (Self::Re, "compile") => Intrinsic::RegexCompile,
             (Self::Re, "search") => Intrinsic::RegexSearch,
             (Self::Re, "match") => Intrinsic::RegexMatchStart,
@@ -1649,6 +1655,7 @@ impl IntrinsicModule {
             (Self::Textwrap, "dedent") => Intrinsic::Dedent,
             (Self::Zlib, "error") => Intrinsic::ZlibError,
             (Self::Zlib, "adler32") => Intrinsic::Adler32,
+            (Self::Zlib, "crc32") => Intrinsic::ObjectRuntimeExport("zlib.crc32"),
             (Self::ImreJson, "decode") => Intrinsic::JsonDecode,
             (Self::Json, "loads") => Intrinsic::JsonLoads,
             (Self::Json | Self::JsonDecoder, "JSONDecoder") => Intrinsic::JsonDecoderClass,

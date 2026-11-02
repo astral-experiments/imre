@@ -5,6 +5,7 @@ mod abstract_class;
 mod array;
 mod builtins;
 mod calls;
+mod class_annotations;
 mod complex;
 mod deque;
 mod dictionary;
@@ -2107,7 +2108,7 @@ impl Context {
             }
             "sys" => {
                 self.bind(scope, "modules", self.modules);
-                for name in ["audit", "addaudithook", "_getframe"] {
+                for name in ["audit", "addaudithook", "_getframe", "_getframemodulename"] {
                     let callable = self.builtin(&format!("sys.{name}"));
                     let function = self.alloc(Value::Method {
                         callable,
@@ -2131,6 +2132,10 @@ impl Context {
                 }
                 let jit = stdlib::jit_module(self)?;
                 self.bind(scope, "_jit", jit);
+            }
+            "re" => {
+                let pattern = self.builtin(value::REGEX_PATTERN_TYPE);
+                self.bind(scope, "Pattern", pattern);
             }
             "array" => {
                 let array = self.builtin("array.array");
