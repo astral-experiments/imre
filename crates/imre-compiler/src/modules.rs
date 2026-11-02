@@ -186,6 +186,7 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
         )),
         "inspect" => Some(("inspect.py", include_str!("../stdlib/inspect.py"))),
         "itertools" => Some(("itertools.py", include_str!("../stdlib/itertools.py"))),
+        "signal" if cfg!(unix) => Some(("signal.py", include_str!("../stdlib/signal.py"))),
         "typing" => Some(("typing.py", include_str!("../stdlib/typing.py"))),
         "logging" => Some((
             "logging/__init__.py",

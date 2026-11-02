@@ -1599,6 +1599,7 @@ def report(text):
             "boxed_unittest_class_cleanup.py",
             "boxed_posixpath.py",
             "boxed_stat.py",
+            "boxed_signal.py",
             "boxed_itertools_count.py",
             "boxed_enum_descriptors.py",
             "boxed_enum_auto.py",

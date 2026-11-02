@@ -76,7 +76,7 @@ pub(super) fn is_module(name: &str) -> bool {
 /// These providers synthesize attributes on lookup. Their module dictionaries
 /// alone do not enumerate their exports.
 pub(super) fn has_lazy_attributes(name: &str) -> bool {
-    if cfg!(unix) && matches!(name, "zipimport" | "_imre_zipimport") {
+    if cfg!(unix) && matches!(name, "zipimport" | "_imre_zipimport" | "_signal") {
         return true;
     }
     matches!(
@@ -359,6 +359,14 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         return Ok(ctx.int(i64::from(value)));
     }
     let id = match (module, name) {
+        #[cfg(unix)]
+        ("_signal", "SIGINT") => ctx.int(i64::from(libc::SIGINT)),
+        #[cfg(unix)]
+        ("_signal", "SIGALRM") => ctx.int(i64::from(libc::SIGALRM)),
+        #[cfg(unix)]
+        ("_signal", "SIGTERM") => ctx.int(i64::from(libc::SIGTERM)),
+        #[cfg(unix)]
+        ("_signal", "alarm") => ctx.builtin("_signal.alarm"),
         ("io" | "_io", "open_code") => ctx.builtin("io.open_code"),
         ("math", "trunc" | "floor" | "ceil") => ctx.builtin(&format!("math.{name}")),
         ("enum", "auto") => ctx.enum_auto_class()?,
@@ -815,6 +823,28 @@ pub(super) fn call(
     }
     if let Some(slot) = name.strip_prefix("functools.KeyWrapper.") {
         return functools::key_method(ctx, slot, args, kwargs);
+    }
+    #[cfg(unix)]
+    if name == "_signal.alarm" {
+        if !kwargs.is_empty() {
+            return Err(Error::new(
+                "TypeError",
+                "_signal.alarm() takes no keyword arguments",
+            ));
+        }
+        let &[seconds] = args else {
+            return Err(Error::new(
+                "TypeError",
+                format!(
+                    "_signal.alarm() takes exactly one argument ({} given)",
+                    args.len()
+                ),
+            ));
+        };
+        let seconds = os::c_int(ctx, seconds)?;
+        // SAFETY: alarm takes a value only. POSIX interprets the C int as unsigned.
+        let remaining = unsafe { libc::alarm(seconds as libc::c_uint) };
+        return Ok(ctx.int(i64::from(remaining)));
     }
     if name == "io.open_code" {
         return io::open_code(ctx, args, kwargs);
