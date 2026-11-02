@@ -260,8 +260,8 @@ def Optional(self, parameters):
     return _typing.Union[arg, type(None)]
 
 
-def _alias_type_arg(arg):
-    arg = _type_check(arg, "Parameters to generic types must be types.")
+def _alias_type_arg(arg, message="Parameters to generic types must be types."):
+    arg = _type_check(arg, message)
     if isinstance(arg, str):
         raise NotImplementedError("string alias arguments require typing.ForwardRef")
     return type(None) if arg is None else arg
@@ -382,6 +382,19 @@ class _SpecialGenericAlias(_NotIterable):
         return _typing.Union[other, self]
 
 
+class _TupleType(_SpecialGenericAlias):
+    __module__ = __name__
+
+    def _getitem(self, params):
+        if not isinstance(params, tuple):
+            params = (params,)
+        message = "Tuple[t0, t1, ...]: each t must be a type."
+        if len(params) >= 2 and params[-1] is ...:
+            message = "Tuple[t, ...]: t must be a type."
+        return self.copy_with(tuple(_alias_type_arg(p, message) for p in params))
+
+
+Tuple = _TupleType(tuple, -1, name="Tuple")
 List = _SpecialGenericAlias(list, 1, name="List")
 
 
@@ -406,6 +419,8 @@ def _specialize_named_alias_uncached(alias, args):
         raise TypeError(f"{alias} is not a generic class")
     if not isinstance(args, tuple):
         args = (args,)
+    if any(isinstance(p, _typing.TypeVarTuple) for p in parameters):
+        raise NotImplementedError("specializing a variadic typing alias requires parameter-pack substitution")
     args = tuple(_alias_type_arg(arg) for arg in args)
     if len(args) != len(parameters):
         which = "few" if len(args) < len(parameters) else "many"
