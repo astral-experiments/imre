@@ -94,6 +94,19 @@ pub(super) fn symbol(name: &str) -> Option<Intrinsic> {
         "DirEntry" if cfg!(any(target_os = "linux", target_os = "macos")) => {
             Intrinsic::ObjectRuntimeExport("posix.DirEntry")
         }
+        #[cfg(target_os = "linux")]
+        "EFD_CLOEXEC" => Intrinsic::IntConstant(i64::from(libc::EFD_CLOEXEC)),
+        #[cfg(target_os = "linux")]
+        "EFD_NONBLOCK" => Intrinsic::IntConstant(i64::from(libc::EFD_NONBLOCK)),
+        #[cfg(target_os = "linux")]
+        "EFD_SEMAPHORE" => Intrinsic::IntConstant(i64::from(libc::EFD_SEMAPHORE)),
+        "eventfd" if cfg!(target_os = "linux") => Intrinsic::ObjectRuntimeExport("posix.eventfd"),
+        "eventfd_read" if cfg!(target_os = "linux") => {
+            Intrinsic::ObjectRuntimeExport("posix.eventfd_read")
+        }
+        "eventfd_write" if cfg!(target_os = "linux") => {
+            Intrinsic::ObjectRuntimeExport("posix.eventfd_write")
+        }
         "strerror" => Intrinsic::Strerror,
         "stat_result" => Intrinsic::StatResult,
         "statvfs" if cfg!(target_os = "linux") => Intrinsic::ObjectRuntimeExport("posix.statvfs"),

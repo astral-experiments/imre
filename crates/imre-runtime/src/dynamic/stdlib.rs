@@ -1585,6 +1585,10 @@ pub(super) fn call(
     if name == "posix.sched_getscheduler" {
         return os::scheduler::get_policy(ctx, args, kwargs);
     }
+    #[cfg(target_os = "linux")]
+    if let Some(op @ ("eventfd" | "eventfd_read" | "eventfd_write")) = name.strip_prefix("posix.") {
+        return os::eventfd::call(ctx, op, args, kwargs);
+    }
     if name == "posix.strerror" {
         if !kwargs.is_empty() {
             return Err(Error::new(

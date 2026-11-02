@@ -2758,6 +2758,7 @@ impl Context {
             }
             #[cfg(target_os = "linux")]
             "posix" if source.is_none() => {
+                stdlib::os::eventfd::initialize(self, scope);
                 stdlib::os::scheduler::initialize(self, scope);
                 let tmpfile = self.int(i64::from(libc::O_TMPFILE));
                 self.bind(scope, "O_TMPFILE", tmpfile);
