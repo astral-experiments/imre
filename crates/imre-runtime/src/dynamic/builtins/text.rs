@@ -604,7 +604,10 @@ fn format_string(
                     .iter()
                     .find(|(k, _)| k == &key)
                     .map(|(_, id)| *id)
-                    .ok_or_else(|| Error::new("KeyError", key))?,
+                    .ok_or_else(|| {
+                        let key = ctx.text(key);
+                        ctx.lookup_error("KeyError", key)
+                    })?,
             };
             for access in field.parts {
                 value = match access {
