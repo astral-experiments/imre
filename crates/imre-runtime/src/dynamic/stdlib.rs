@@ -454,6 +454,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("unicodedata", "normalize" | "decomposition") => {
             ctx.builtin(&format!("unicodedata.{name}"))
         }
+        ("_imp", "pyc_magic_number_token") => ctx.int(i64::from(imre_ast::PYC_MAGIC_NUMBER_TOKEN)),
         (
             "_imp",
             "is_frozen"

@@ -99,4 +99,4 @@ class FileLoader(_bootstrap_external.FileLoader, ResourceLoader, ExecutionLoader
     pass
 
 
-_register(FileLoader, machinery.SourceFileLoader)
+_register(FileLoader, machinery.SourceFileLoader, machinery.SourcelessFileLoader)

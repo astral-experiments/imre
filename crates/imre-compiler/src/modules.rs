@@ -1245,6 +1245,9 @@ impl IntrinsicModule {
             (Self::Imp, "extension_suffixes") => {
                 Intrinsic::ObjectRuntimeExport("_imp.extension_suffixes")
             }
+            (Self::Imp, "pyc_magic_number_token") => {
+                Intrinsic::ObjectRuntimeExport("_imp.pyc_magic_number_token")
+            }
             (Self::Imp, "is_frozen") => Intrinsic::ObjectRuntimeExport("_imp.is_frozen"),
             (Self::Imp, "_override_frozen_modules_for_tests") => {
                 Intrinsic::ObjectRuntimeExport("_imp._override_frozen_modules_for_tests")
@@ -1528,6 +1531,12 @@ impl IntrinsicModule {
             }
             (Self::ImportlibBootstrapExternal, "SourceFileLoader") => {
                 Intrinsic::ObjectRuntimeExport("_frozen_importlib_external.SourceFileLoader")
+            }
+            (Self::ImportlibMachinery | Self::ImportlibBootstrapExternal, "SourcelessFileLoader") => {
+                Intrinsic::ObjectRuntimeExport("_frozen_importlib_external.SourcelessFileLoader")
+            }
+            (Self::ImportlibUtil, "MAGIC_NUMBER") => {
+                Intrinsic::ObjectRuntimeExport("importlib.util.MAGIC_NUMBER")
             }
             (Self::ImportlibUtil, "module_from_spec") => {
                 Intrinsic::ObjectRuntimeExport("importlib.util.module_from_spec")
