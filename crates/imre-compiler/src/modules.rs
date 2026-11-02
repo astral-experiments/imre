@@ -1139,6 +1139,9 @@ impl IntrinsicModule {
             (Self::Fnmatch, "_translate") => Intrinsic::Fnmatch(FnmatchOperation::Parts),
             (Self::Functools, "cached_property") => Intrinsic::CachedProperty,
             (Self::Functools, "partial") => Intrinsic::Partial,
+            (Self::Functools, "partialmethod") => {
+                Intrinsic::ObjectRuntimeExport("functools.partialmethod")
+            }
             (Self::Functools, "Placeholder") => Intrinsic::Placeholder,
             (Self::Functools, "reduce") => Intrinsic::Reduce,
             (Self::Functools, "cmp_to_key") => Intrinsic::CmpToKey,

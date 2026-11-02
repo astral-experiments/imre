@@ -417,6 +417,7 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         }
         Value::ItemGetter(_) if attr == "__reduce__" => "operator.itemgetter",
         Value::Property(_) if super::property::METHODS.contains(&attr) => "property",
+        Value::ClassMethod(_) if attr == "__get__" => "classmethod",
         Value::StaticMethod { .. } if attr == "__get__" => "staticmethod",
         Value::Generator { .. } if matches!(attr, "send" | "throw" | "close") => "generator",
         Value::Bytes(_) if BYTES_METHODS.contains(&attr) => "bytes",

@@ -1619,7 +1619,7 @@ pub(super) fn call(
                 function,
                 args,
                 keywords,
-                ..
+                dictionary: None,
             } => {
                 let Value::Dict(entries) = ctx.heap.get(keywords) else {
                     unreachable!()
@@ -1653,7 +1653,7 @@ pub(super) fn call(
             function,
             args,
             keywords,
-            coroutine_marker: None,
+            dictionary: None,
         }));
     }
     if let Some(method @ ("digest" | "hexdigest")) = name.strip_prefix("hash.") {
