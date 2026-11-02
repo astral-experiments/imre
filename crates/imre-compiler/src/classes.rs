@@ -339,7 +339,33 @@ fn collect_class(
             .any(|arg| mapping_base(graph, definition.module, arg))
     });
     let mapping = direct_mapping || base.is_some_and(|(_, parent)| parent.mapping);
-    let abc = mapping
+    let keywords = node
+        .arguments
+        .as_ref()
+        .map_or(&[][..], |args| args.keywords.as_ref());
+    let abc_meta = match keywords {
+        [] => false,
+        [key]
+            if key.arg.as_deref() == Some("metaclass")
+                && graph.resolve(definition.module, &key.value)
+                    == Some(Binding::Intrinsic(Intrinsic::AbcMeta))
+                && graph.session.is_known_class(
+                    definition.module,
+                    &key.value,
+                    ty_python_semantic::types::KnownClass::ABCMeta,
+                ) =>
+        {
+            true
+        }
+        _ => {
+            return Err(module.error(
+                node,
+                "class metaclasses and keyword arguments are unsupported",
+            ));
+        }
+    };
+    let abc = abc_meta
+        || mapping
         || base.is_some_and(|(_, parent)| parent.abc)
         || node.arguments.as_ref().is_some_and(|args| {
             args.args.iter().any(|arg| {
@@ -498,6 +524,7 @@ fn collect_class(
                 if !names.insert(name.id.to_string()) {
                     return Err(module.error(name, "duplicate class binding"));
                 }
+                abstract_methods.remove(name.id.as_str());
                 class_bindings.insert(name.id.to_string());
                 exception_aliases.insert(name.id.to_string(), target);
             }
@@ -535,6 +562,18 @@ fn collect_class(
                     dataclass.as_ref(),
                     &class_bindings,
                 )?;
+                // A scalar default remains on the class. A default factory initializes
+                // only the instance, so it cannot implement an inherited abstract method.
+                if matches!(declared_field.default, Some(FieldDefault::Scalar(_))) {
+                    abstract_methods.remove(name);
+                } else if dataclass.is_some_and(|options| options.slots)
+                    && abstract_methods.contains(name)
+                {
+                    return Err(module.error(
+                        field,
+                        "a slot replacing an abstract method requires native class construction",
+                    ));
+                }
                 if let Some(index) = fields.iter().position(|inherited| inherited.name == name) {
                     if dataclass.is_none() {
                         return Err(module.error(node, "an inherited field cannot be redeclared"));
@@ -572,6 +611,16 @@ fn collect_class(
                     );
                 }
                 if abstract_method {
+                    if name.starts_with("__") && !name.ends_with("__") {
+                        return Err(module
+                            .error(method, "a private abstract method requires name mangling"));
+                    }
+                    if crate::modules::definition_effect(graph, definition.module, method) {
+                        return Err(module.error(
+                            method,
+                            "an abstract method default requires executable initialization",
+                        ));
+                    }
                     if !abc || !method.body.iter().all(|stmt| matches!(stmt, ast::Stmt::Pass(_))
                         || matches!(stmt, ast::Stmt::Expr(value) if matches!(&*value.value, ast::Expr::StringLiteral(_) | ast::Expr::EllipsisLiteral(_)))) {
                         return Err(module.error(method, "an abstract record method must be a declaration on an ABC"));
@@ -812,7 +861,6 @@ fn collect_class(
                 {
                     return Err(module.error(name, "duplicate or reserved static class binding"));
                 }
-                abstract_methods.remove(member);
                 class_bindings.insert(member.to_owned());
                 static_bindings.insert(name.id.to_string(), binding);
             }
@@ -865,6 +913,30 @@ fn collect_class(
                 ));
             }
         }
+        // Every accepted plain assignment binds a concrete class attribute,
+        // including property() and exception constructor aliases.
+        if matches!(statement, ast::Stmt::Assign(_))
+            && let Some(name) = member
+        {
+            abstract_methods.remove(name);
+        }
+    }
+    // A dataclass updates abstract methods after installing its generated attributes.
+    if let Some(options) = dataclass
+        && abstract_methods.iter().any(|name| match name.as_str() {
+            "__init__" => options.init,
+            "__repr__" => options.repr,
+            "__eq__" | "__hash__" => options.eq,
+            "__setattr__" | "__delattr__" => options.frozen,
+            "__slots__" => options.slots,
+            "__getstate__" | "__setstate__" => options.frozen && options.slots,
+            "__match_args__" | "__replace__" | "__dataclass_fields__" | "__dataclass_params__" => {
+                true
+            }
+            _ => false,
+        })
+    {
+        return Err(module.error(node, "a dataclass-generated override of an abstract method requires native class construction"));
     }
     let mut method_origins = vec![definition; methods.len()];
     if let Some(method) = hash
@@ -982,6 +1054,24 @@ fn collect_class(
                 method_origins.push(base.method_origins[index]);
             }
         }
+    }
+    // ABCMeta initializes a fresh registry, shadowing even an inherited class binding.
+    if abc
+        && (class_bindings.contains("_abc_impl")
+            || static_bindings.contains_key("_abc_impl")
+            || exception_aliases.contains_key("_abc_impl")
+            || methods
+                .iter()
+                .any(|method| method.name.as_str() == "_abc_impl")
+            || abstract_methods.contains("_abc_impl")
+            || fields.iter().any(|field| {
+                field.name == "_abc_impl" && matches!(field.default, Some(FieldDefault::Scalar(_)))
+            }))
+    {
+        return Err(module.error(
+            node,
+            "the ABCMeta registry shadows the _abc_impl class binding",
+        ));
     }
     let mut init_hooks = base
         .map(|(_, parent)| parent.init_hooks.clone())

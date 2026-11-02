@@ -23,7 +23,7 @@ mod ordered_imports;
 mod os;
 pub(crate) use os::credential_arity;
 mod reachability;
-pub(crate) use reachability::http_command_key;
+pub(crate) use reachability::{definition_effect, http_command_key};
 mod type_aliases;
 
 pub(crate) type ModuleId = usize;
@@ -474,6 +474,7 @@ pub(crate) enum Intrinsic {
     FileConfig,
     LogLevel(i64),
     Abc,
+    AbcMeta,
     AbstractMethod,
     CreateSubprocessExec,
     RunLoop,
@@ -1076,6 +1077,7 @@ impl IntrinsicModule {
             (Self::Logging, "DEBUG") => Intrinsic::LogLevel(10),
             (Self::Logging, "INFO") => Intrinsic::LogLevel(20),
             (Self::Abc, "ABC") => Intrinsic::Abc,
+            (Self::Abc, "ABCMeta") => Intrinsic::AbcMeta,
             (Self::Abc, "abstractmethod") => Intrinsic::AbstractMethod,
             (Self::Asyncio, "create_subprocess_exec") => Intrinsic::CreateSubprocessExec,
             (Self::Asyncio, "run") => Intrinsic::RunLoop,
