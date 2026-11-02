@@ -1,5 +1,7 @@
 //! Deliver externally requested faults to the native Python image while its launcher waits.
 use std::io;
+use std::os::unix::process::CommandExt;
+use std::process::Command;
 use std::sync::atomic::{AtomicI32, AtomicU32, Ordering::SeqCst};
 
 const SIGNALS: [i32; 5] = [
@@ -33,6 +35,46 @@ unsafe extern "C" fn forward(sig: i32, info: *mut libc::siginfo_t, _: *mut libc:
             libc::raise(sig);
         }
         *errno = saved;
+    }
+}
+
+/// Keep a waitable child even if the caller requested automatic reaping. The
+/// compiled Python process still inherits the caller's original disposition.
+pub(super) struct WaitableChild(libc::sigaction);
+
+impl WaitableChild {
+    pub(super) fn prepare(command: &mut Command) -> io::Result<Option<Self>> {
+        // SAFETY: this launcher has not spawned its payload yet. sigaction also
+        // permits restoring the original action in the child between fork/exec.
+        unsafe {
+            let mut old = std::mem::zeroed();
+            if libc::sigaction(libc::SIGCHLD, std::ptr::null(), &mut old) != 0 {
+                return Err(io::Error::last_os_error());
+            }
+            if old.sa_sigaction != libc::SIG_IGN && old.sa_flags & libc::SA_NOCLDWAIT == 0 {
+                return Ok(None);
+            }
+            let mut waitable: libc::sigaction = std::mem::zeroed();
+            waitable.sa_sigaction = libc::SIG_DFL;
+            libc::sigemptyset(&mut waitable.sa_mask);
+            if libc::sigaction(libc::SIGCHLD, &waitable, std::ptr::null_mut()) != 0 {
+                return Err(io::Error::last_os_error());
+            }
+            command.pre_exec(move || {
+                if libc::sigaction(libc::SIGCHLD, &old, std::ptr::null_mut()) != 0 {
+                    return Err(io::Error::last_os_error());
+                }
+                Ok(())
+            });
+            Ok(Some(Self(old)))
+        }
+    }
+}
+
+impl Drop for WaitableChild {
+    fn drop(&mut self) {
+        // SAFETY: prepare saved the disposition before changing it in this process.
+        unsafe { libc::sigaction(libc::SIGCHLD, &self.0, std::ptr::null_mut()) };
     }
 }
 

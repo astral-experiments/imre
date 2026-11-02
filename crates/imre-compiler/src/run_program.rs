@@ -32,6 +32,12 @@ pub(super) fn launch(
 
     let mut program = Command::new(executable);
     program.arg0(source).args(args);
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    let _waitable = if _report_faults {
+        fatal_signals::WaitableChild::prepare(&mut program)?
+    } else {
+        None
+    };
     // SAFETY: the peer is live through spawn. fcntl is async-signal-safe and
     // changes only the forked child's descriptor flags.
     unsafe {
