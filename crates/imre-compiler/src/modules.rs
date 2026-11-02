@@ -943,7 +943,7 @@ pub(crate) enum Intrinsic {
 }
 
 impl Intrinsic {
-    pub(crate) const SOCKETSERVER_CLASS: Self = Self::ObjectRuntimeExport("socketserver classes");
+    pub(crate) const SOCKETSERVER_CLASS: Self = Self::ScopedObjectExport("socketserver classes");
     pub(crate) const PICKLER: Self = Self::ObjectRuntimeExport("pickle.Pickler");
     pub(crate) const IO_BASE: Self = Self::ObjectRuntimeExport("io.IOBase");
     pub(crate) const RAW_IO_BASE: Self = Self::ObjectRuntimeExport("io.RawIOBase");
@@ -2822,7 +2822,11 @@ impl SourceModule {
         if self.is_bundled("socketserver")
             && matches!(
                 name,
-                "DatagramRequestHandler" | "UDPServer" | "ThreadingMixIn" | "ThreadingTCPServer" | "ThreadingUDPServer"
+                "DatagramRequestHandler"
+                    | "UDPServer"
+                    | "ThreadingMixIn"
+                    | "ThreadingTCPServer"
+                    | "ThreadingUDPServer"
             )
         {
             return Some(Binding::Intrinsic(Intrinsic::SOCKETSERVER_CLASS));

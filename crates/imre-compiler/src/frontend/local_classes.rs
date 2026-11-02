@@ -139,6 +139,12 @@ impl Checker<'_> {
                     ) {
                         return Err(self.object_runtime_export("pickle.Pickler", base));
                     }
+                    if matches!(
+                        self.resolve(base),
+                        Some(crate::modules::Binding::Intrinsic(Intrinsic::SOCKETSERVER_CLASS))
+                    ) {
+                        return Err(self.scoped_builtin_error("socketserver base class", base));
+                    }
                     if self.graph.is_protocol_base(self.module, base) {
                         return Err(self.object_runtime_export("typing.Protocol", base));
                     }

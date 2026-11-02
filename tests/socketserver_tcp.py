@@ -8,6 +8,13 @@ import tempfile
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures/socketserver"
 REJECT = {
+    "runtime_server_keeps_argument_checks": (
+        "from socketserver import ThreadingTCPServer\n"
+        "print(ThreadingTCPServer)\n"
+        "def identity(value: int) -> int: return value\n"
+        "identity('wrong')\n",
+        "invalid-argument-type",
+    ),
     "timed_listener_subclass": (
         "from socketserver import TCPServer, BaseRequestHandler\n"
         "class Timed(TCPServer):\n"

@@ -53,7 +53,8 @@ pub(super) fn resolve(
                 };
                 match graph.resolve(definition.module, origin) {
                     Some(Binding::Intrinsic(Intrinsic::SOCKETSERVER_CLASS)) => {
-                        let error = module.error(argument, "socketserver base class requires object lowering");
+                        let error =
+                            module.error(argument, "socketserver base class requires object lowering");
                         graph.object_builtin_errors.borrow_mut().insert(error.clone());
                         return Err(error);
                     }
