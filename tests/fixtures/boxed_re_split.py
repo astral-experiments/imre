@@ -31,3 +31,9 @@ def current():
         pattern.split("value", 1 << 100)
     except OverflowError as error:
         print(type(error).__name__, str(error))
+
+    assert re.compile(r"((?:\n)??)$").sub("!", "a\n") == "a!!!"
+    assert re.compile("|x+").sub(repl="東", string="xxé", count=3) == "東東東é"
+    assert re.compile(b"(.)").sub(b"\xff", bytearray(b"ab"), 1) == b"\xffb"
+    assert re.compile("(?P<name>x)").sub("$1", "xx") == "$1$1"
+    assert re.compile(b"x").sub(memoryview(b"z"), b"xx") == b"zz"
