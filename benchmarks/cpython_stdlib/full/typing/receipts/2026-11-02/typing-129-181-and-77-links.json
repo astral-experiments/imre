@@ -1,0 +1,42 @@
+{
+  "upstream": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "denominator": 712,
+  "stock_skips": 0,
+  "receipts": {
+    "129_to_148": {
+      "url": "https://raw.githubusercontent.com/astral-experiments/imre/f3d0ee1254cc758d2605eae42f194b92c6471c68/benchmarks/cpython_stdlib/full/typing/receipts/2026-11-02/typing-129-to-148-final-public-2dc9357e.tgz",
+      "sha256": "c865ac991ac53c0ab159111510f017c9bf4b6763cb5edf3e19af09becc6654f5",
+      "bytes": 282453
+    },
+    "148_to_180": {
+      "url": "https://raw.githubusercontent.com/astral-experiments/imre/79a604c5a7d5420c0edbf368ef17eedc95aa14c3/benchmarks/cpython_stdlib/full/typing/receipts/2026-11-02/typing-148-to-180-original-receipts.tgz",
+      "sha256": "186c83d536123c9eea8555670943495be13e819646d2a987c17ae79374f10604",
+      "bytes": 245080
+    },
+    "ordinal_54_adds_181": {
+      "url": "https://raw.githubusercontent.com/astral-experiments/imre/fb766c97e5b823f04c45c7e96057b6324ed49357/benchmarks/cpython_stdlib/full/typing/receipts/2026-11-02/original-54-bytestring-76e56136.tgz",
+      "sha256": "c8bf27a15f04ba70bd6e7e00fe5f0283be10d4e06b7170909b302485a4a35b12",
+      "bytes": 65441
+    },
+    "ledger_181": {
+      "url": "https://raw.githubusercontent.com/astral-experiments/imre/fb766c97e5b823f04c45c7e96057b6324ed49357/benchmarks/cpython_stdlib/full/typing/receipts/2026-11-02/ledger-typing-intact-worker-181.json",
+      "sha256": "d49a61403fdc6a6d2bba6552d5924ac7d7304e3dc36b425aeed137fbf16a32e9",
+      "bytes": 35384
+    },
+    "167_to_181": {
+      "url": "https://raw.githubusercontent.com/astral-experiments/imre/fb766c97e5b823f04c45c7e96057b6324ed49357/benchmarks/cpython_stdlib/full/typing/receipts/2026-11-02/typing-post-167-to-181-abc-bytestring-reconciliation.tgz",
+      "sha256": "c093aa5f8d4805014b3ef33ca9fc694eb49d0b90f4a54d7c5e1b91fcea5aef52",
+      "bytes": 86871
+    },
+    "ordinal_77_separate_paired": {
+      "url": "https://raw.githubusercontent.com/astral-experiments/imre/e184a8a750319a78a065f56b14f248e0ca0c8c2d/benchmarks/cpython_stdlib/full/typing/receipts/2026-11-02/typing-iterator-77-8eeae94-O0-O3.tgz",
+      "sha256": "14fffee27f2a84b29c49448ea1a7e077b05ecd877e43a0344e6df42e53dd4314",
+      "bytes": 9044
+    },
+    "ordinal_77_separate_rebase_O0": {
+      "url": "https://raw.githubusercontent.com/astral-experiments/imre/79a604c5a7d5420c0edbf368ef17eedc95aa14c3/benchmarks/cpython_stdlib/full/typing/receipts/2026-11-02/typing-iterator-77-b92de59-O0.tgz",
+      "sha256": "f53ab635a67111e9ce6e41f135f9df4dfae6826f77e545086873bb9ac373766f",
+      "bytes": 6466
+    }
+  }
+}
