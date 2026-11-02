@@ -595,10 +595,10 @@ impl Function<'_, '_> {
             Body::Statements(stmts) | Body::GeneratorFunction(stmts)
                 if self.output.keep_docstrings =>
             {
-                crate::frontend::docstring(stmts)
+                self.source.docstring(&qualname, stmts)
             }
             Body::Unsupported(ast::Stmt::FunctionDef(f), _) if self.output.keep_docstrings => {
-                crate::frontend::docstring(&f.body)
+                self.source.docstring(&qualname, &f.body)
             }
             _ => None,
         };

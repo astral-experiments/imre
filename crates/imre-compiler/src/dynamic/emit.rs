@@ -37,6 +37,7 @@ pub(crate) fn emit(
     modules: &[(String, PathBuf, String)],
     config: &str,
     keep_docstrings: bool,
+    bundled_root: &std::path::Path,
 ) -> Result<String, String> {
     let mut output = Output {
         keep_docstrings,
@@ -67,6 +68,11 @@ pub(crate) fn emit(
         } else {
             name.rsplit_once('.').map_or("", |(parent, _)| parent)
         };
+        let docs = if keep_docstrings && name == "collections" && path.starts_with(bundled_root) {
+            crate::modules::doctest::sealed(crate::modules::IntrinsicModule::Collections)
+        } else {
+            None
+        };
         let name = output.data(name.as_bytes());
         let file = output.data(path.to_str().ok_or("module path must be UTF-8")?.as_bytes());
         let has_templates = parsed
@@ -88,6 +94,7 @@ pub(crate) fn emit(
             return Err(format!("{}:{error}", path.display()));
         }
         let location = SourceMap {
+            docs,
             unit,
             has_templates,
             template_expressions,
@@ -141,6 +148,7 @@ enum Body<'a> {
 }
 
 struct SourceMap<'a> {
+    docs: Option<crate::modules::doctest::SealedDocs>,
     unit: usize,
     has_templates: bool,
     template_expressions: HashMap<ruff_text_size::TextSize, String>,
@@ -156,6 +164,16 @@ struct SourceMap<'a> {
 }
 
 impl SourceMap<'_> {
+    /// Keep documentation attached to the bundled definition, even when callers rebind its name.
+    fn docstring(&self, qualname: &str, body: &[ast::Stmt]) -> Option<String> {
+        crate::frontend::docstring(body).or_else(|| {
+            self.docs
+                .as_ref()?
+                .object_docstring(qualname)
+                .map(str::to_owned)
+        })
+    }
+
     fn line(&self, offset: ruff_text_size::TextSize) -> usize {
         self.newlines.partition_point(|&n| n < usize::from(offset)) + 1
     }
@@ -264,7 +282,7 @@ impl Output {
         match body {
             Body::Namespace(stmts) => {
                 if f.output.keep_docstrings
-                    && let Some(doc) = crate::frontend::docstring(stmts)
+                    && let Some(doc) = f.source.docstring(f.prefix.trim_end_matches('.'), stmts)
                 {
                     let value = f.text(&doc);
                     f.bind("__doc__", &value);

@@ -66,6 +66,14 @@ pub(crate) struct SealedDocs {
 }
 
 impl SealedDocs {
+    /// The original Python docstring of a definition within this module.
+    pub(crate) fn object_docstring(&self, qualname: &str) -> Option<&'static str> {
+        self.entries.iter().find_map(|&(name, text)| {
+            let relative = name.strip_prefix(self.module)?.strip_prefix('.')?;
+            (relative == qualname).then_some(text)
+        })
+    }
+
     pub(crate) fn append_to(&self, docs: &mut Vec<(String, String)>) {
         docs.extend(
             self.entries
