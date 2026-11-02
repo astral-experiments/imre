@@ -2054,6 +2054,20 @@ impl Context {
             self.bind(scope, "BlockingIOError", error);
         }
         match name {
+            "itertools" => {
+                for attr in [
+                    "count",
+                    "repeat",
+                    "_cycle_allocate",
+                    "_cycle_next",
+                    "_chain_allocate",
+                    "_chain_get",
+                    "_chain_set",
+                ] {
+                    let value = self.builtin(&format!("itertools.{attr}"));
+                    self.bind(scope, attr, value);
+                }
+            }
             "inspect" => {
                 for &(name, flag) in imre_ast::code_flags::INSPECT_FLAGS {
                     let value = self.int(i64::from(flag));

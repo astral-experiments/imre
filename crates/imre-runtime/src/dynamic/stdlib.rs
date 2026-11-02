@@ -76,7 +76,7 @@ pub(super) fn jit_module(ctx: &mut Context) -> Result<Id> {
 }
 
 pub(super) fn is_module(name: &str) -> bool {
-    matches!(name, "builtins" | "errno" | "genericpath")
+    matches!(name, "builtins" | "errno" | "genericpath" | "itertools")
         || (cfg!(target_os = "linux") && matches!(name, "_signal" | "_imre_signal"))
         || has_lazy_attributes(name)
 }
@@ -120,7 +120,6 @@ pub(super) fn has_lazy_attributes(name: &str) -> bool {
             | "_imre_tokenize"
             | "_imre_pkgutil"
             | "fnmatch"
-            | "itertools"
             | "operator"
             | "platform"
             | "site"
@@ -449,13 +448,6 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("types", "EllipsisType") => ctx.builtin("ellipsis"),
         ("types", "NoneType" | "NotImplementedType") => ctx.builtin(name),
         ("types", "CodeType") => ctx.builtin("code"),
-        ("itertools", "count") => ctx.builtin("itertools.count"),
-        ("itertools", "repeat") => ctx.builtin("itertools.repeat"),
-        ("itertools", "_cycle_allocate" | "_cycle_next") => {
-            ctx.builtin(&format!("itertools.{name}"))
-        }
-        ("itertools", "_chain_allocate") => ctx.builtin("itertools._chain_allocate"),
-        ("itertools", "_chain_get" | "_chain_set") => ctx.builtin(&format!("itertools.{name}")),
         (
             "_collections",
             "_count_elements"
