@@ -2026,6 +2026,7 @@ def report(text):
         compare("-B", "-c", "from typing import Protocol as P; print(P.__name__)")
         compare("-B", fixtures / "typing_protocol_import.py")
         compare("-IB", fixtures / "boxed_pickle_writer.py")
+        compare("-IB", "-c", "import io; b = io.BytesIO(b'abc'); v = b.getbuffer(); v[1] = 90; print(b.getvalue())")
         compare(
             "-B", "-c",
             "import typing as t\ndef build():\n    class P(t.Protocol): pass\n"

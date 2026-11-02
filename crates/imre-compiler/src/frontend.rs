@@ -10054,6 +10054,9 @@ impl<'a> Checker<'a> {
                     (_, method) => method,
                 };
                 let (builtin, ty) = match (method, call.arguments.args.len()) {
+                    ("getbuffer", _) if receiver.ty == Type::BytesIO => {
+                        return Err(self.object_builtin_error("BytesIO.getbuffer", call));
+                    }
                     ("readinto", _) if binary => {
                         return Err(self.object_builtin_error("binary readinto", call));
                     }
