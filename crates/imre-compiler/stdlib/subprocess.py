@@ -2,6 +2,7 @@
 import _imre_subprocess as _process
 from _weakref import ref as _ref
 from time import monotonic as _time
+from types import GenericAlias as _GenericAlias
 from warnings import warn as _warn
 import io
 import selectors
@@ -153,6 +154,7 @@ def _fork_fds(pass_fds):
 
 
 class Popen:
+    __class_getitem__ = classmethod(_GenericAlias)
     _handle = None
 
     def __init__(self, args, bufsize=-1, executable=None, stdin=None, stdout=None,
@@ -578,6 +580,8 @@ def getoutput(cmd, *, encoding=None, errors=None):
 
 
 class CompletedProcess:
+    __class_getitem__ = classmethod(_GenericAlias)
+
     def __init__(self, args, returncode, stdout=None, stderr=None):
         self.args = args
         self.returncode = returncode

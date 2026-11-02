@@ -6518,6 +6518,9 @@ impl<'a> Checker<'a> {
                 Intrinsic::CodecGetWriter => {
                     return Err(self.object_builtin_error("codecs.getwriter", expression));
                 }
+                Intrinsic::Popen | Intrinsic::CompletedProcess if cfg!(unix) => {
+                    return Err(self.scoped_builtin_error("subprocess process class", expression));
+                }
                 Intrinsic::SplitResult { .. } => {
                     return Err(self.scoped_builtin_error("urllib.parse result class", expression));
                 }
