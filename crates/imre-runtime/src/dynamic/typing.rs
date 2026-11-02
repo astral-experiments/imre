@@ -12,6 +12,13 @@ pub(super) enum ClassLayout {
     TypeNamespace,
 }
 
+/// Statements retain a callable evaluator. The constructor receives an already evaluated value.
+#[derive(Clone, Copy)]
+pub(super) enum AliasDefinition {
+    Lazy { evaluator: Id, cached: Option<Id> },
+    Eager { value: Id, module: Id },
+}
+
 #[derive(Clone)]
 pub(super) struct TypeVariable {
     pub name: Id,
@@ -917,28 +924,43 @@ pub(super) fn attribute(ctx: &mut Context, value: Id, name: &str) -> Option<Resu
         },
         Value::TypeAlias {
             name: label,
-            evaluator,
-            cached,
-        } => match name {
-            "__name__" => *label,
-            "__parameters__" | "__type_params__" => ctx.heap.packed_tuple(Vec::new(), false),
-            "__module__" => return Some(ctx.lookup_attr(*evaluator, "__module__")),
-            "evaluate_value" => *evaluator,
-            "__value__" if let Some(result) = cached => *result,
-            "__value__" => {
-                let evaluator = *evaluator;
+            definition,
+        } => match (name, *definition) {
+            ("__name__", _) => *label,
+            ("__parameters__" | "__type_params__", _) => ctx.heap.packed_tuple(Vec::new(), false),
+            ("__module__", AliasDefinition::Eager { module, .. }) => module,
+            ("__module__", AliasDefinition::Lazy { evaluator, .. }) => {
+                return Some(ctx.lookup_attr(evaluator, "__module__"));
+            }
+            ("evaluate_value", AliasDefinition::Eager { value, .. }) => {
+                ctx.alloc(Value::ConstEvaluator(value))
+            }
+            ("evaluate_value", AliasDefinition::Lazy { evaluator, .. }) => evaluator,
+            (
+                "__value__",
+                AliasDefinition::Eager { value, .. }
+                | AliasDefinition::Lazy {
+                    cached: Some(value),
+                    ..
+                },
+            ) => value,
+            ("__value__", AliasDefinition::Lazy { evaluator, .. }) => {
                 ctx.heap.keep(value);
                 return Some(
                     ctx.call(evaluator, Vec::new(), Vec::new())
                         .inspect(|&result| {
-                            let Value::TypeAlias { cached, .. } = ctx.heap.get_mut(value) else {
+                            let Value::TypeAlias {
+                                definition: AliasDefinition::Lazy { cached, .. },
+                                ..
+                            } = ctx.heap.get_mut(value)
+                            else {
                                 unreachable!()
                             };
                             *cached = Some(result);
                         }),
                 );
             }
-            "__reduce__" => {
+            ("__reduce__", _) => {
                 let callable = ctx.builtin("typing.TypeAliasType.__reduce__");
                 ctx.alloc(Value::Method {
                     callable,
@@ -1513,10 +1535,53 @@ pub(super) fn call(
         return Ok(allocate_alias(ctx, kind, origin, args, name, instantiable));
     }
     if operation == "TypeAliasType" {
-        return Err(Error::new(
-            "NotImplementedError",
-            "explicit TypeAliasType construction",
-        ));
+        let [name, value, params] = super::builtins::bind_method_arguments(
+            "typealias",
+            args,
+            kwargs,
+            ["name", "value", "type_params"],
+            2,
+        )?;
+        let name = name.ok_or_else(|| {
+            Error::new(
+                "TypeError",
+                "typealias() missing required argument 'name' (pos 1)",
+            )
+        })?;
+        let value = value.ok_or_else(|| {
+            Error::new(
+                "TypeError",
+                "typealias() missing required argument 'value' (pos 2)",
+            )
+        })?;
+        if ctx.string_storage(name).is_none() {
+            let kind = if name == NONE {
+                "None"
+            } else {
+                ctx.builtin_type_name(name)
+                    .unwrap_or_else(|| ctx.type_name(name))
+            };
+            return Err(Error::new(
+                "TypeError",
+                format!("typealias() argument 'name' must be str, not {kind}"),
+            ));
+        }
+        if let Some(params) = params {
+            let Value::Tuple(items) = ctx.heap.get(ctx.scalar_value(params)) else {
+                return Err(Error::new("TypeError", "type_params must be a tuple"));
+            };
+            if !items.is_empty() {
+                return Err(Error::new(
+                    "NotImplementedError",
+                    "generic TypeAliasType construction",
+                ));
+            }
+        }
+        let module = ctx.heap.caller_module();
+        return Ok(ctx.alloc(Value::TypeAlias {
+            name,
+            definition: AliasDefinition::Eager { value, module },
+        }));
     }
     if !kwargs.is_empty() {
         return Err(Error::new(
