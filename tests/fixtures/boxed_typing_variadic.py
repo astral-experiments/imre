@@ -108,6 +108,34 @@ def current():
 
     from typing import Generic
     class Pack(Generic[*ts]): pass
+
+    import typing
+    from types import GeneratorType
+    from typing import Concatenate, Literal
+    from collections.abc import Iterable
+
+    for alias in (Pack[int, str], List[int], Literal[1], Concatenate[int, p], unpacked):
+        assert isinstance(alias, Iterable)
+        it = alias.__iter__()
+        assert type(it) is GeneratorType and iter(it) is it
+        assert next(it) is Unpack[alias] and next(it, None) is None
+        assert (*alias,) == (Unpack[alias],)
+    method = type(Pack[int]).__iter__
+    assert method.__name__ == method.__code__.co_name == "__iter__"
+    assert method.__qualname__ == method.__code__.co_qualname == "_GenericAlias.__iter__"
+    assert iter(Pack[int]).gi_code is method.__code__
+    assert vararg_annotation(Pack[int, str]) is Unpack[Pack[int, str]]
+    assert Callable[[int], str].__iter__ is None and not isinstance(Callable[[int], str], Iterable)
+    it = iter(Pack[int, str])
+    try:
+        retained = Pack[int, str]
+        sys.modules["typing"] = ModuleType("replacement")
+        typing.Unpack = {retained: "late lookup"}
+        assert next(it) == next(iter(retained)) == "late lookup"
+    finally:
+        typing.Unpack = Unpack
+        sys.modules["typing"] = typing
+
     u = TypeVar("U")
     class Mixed(Generic[t, *ts, u]): pass
     class Fixed(Generic[t, u]): pass
