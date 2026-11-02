@@ -179,7 +179,19 @@ impl Checker<'_> {
                 Some(Expr::absent(self.types.optional(Type::Str))),
             ),
         ];
-        let args = self.arguments(call, &parameters, None)?;
+        let args = self.arguments_with(call, &parameters, None, |checker, index, node| {
+            let expected = parameters[index].ty;
+            // A defaults literal can mix value types. Check its entries as a document.
+            if index == 1 && matches!(node, ast::Expr::Dict(_)) {
+                checker.expr_expected(node, documents::MAP)?;
+                return Err(checker.scoped_builtin_error("logging.config.fileConfig", node));
+            }
+            // Keep operand diagnostics; only an incompatible argument needs the configurator.
+            let value = checker.expr_expected_if(node, expected, |_, _| true)?;
+            checker
+                .coerce(value, expected, node)
+                .map_err(|_| checker.scoped_builtin_error("logging.config.fileConfig", node))
+        })?;
         Ok(self.ordered_builtin(Builtin::Logging(Log::FileConfig), Type::None, args))
     }
 

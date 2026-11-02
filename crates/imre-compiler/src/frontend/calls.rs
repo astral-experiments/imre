@@ -264,20 +264,19 @@ impl ArgumentScope {
         }
     }
 }
-/// Every dispatch route uses a closed signature, including methods reached
-/// through iterable consumers before ordinary call-expression lowering.
-pub(super) fn reject_unpacking(call: &ast::ExprCall, source: &str) -> Result<(), String> {
-    if call
-        .arguments
-        .args
-        .iter()
-        .any(|argument| matches!(argument, ast::Expr::Starred(_)))
+pub(super) fn has_unpacking(call: &ast::ExprCall) -> bool {
+    starred(call)
         || call
             .arguments
             .keywords
             .iter()
             .any(|keyword| keyword.arg.is_none())
-    {
+}
+
+/// Every dispatch route uses a closed signature, including methods reached
+/// through iterable consumers before ordinary call-expression lowering.
+pub(super) fn reject_unpacking(call: &ast::ExprCall, source: &str) -> Result<(), String> {
+    if has_unpacking(call) {
         return Err(error(source, call, "argument unpacking is unsupported"));
     }
     Ok(())

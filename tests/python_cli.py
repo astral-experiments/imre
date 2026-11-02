@@ -2415,6 +2415,22 @@ def report(text):
         )
         final_fixture = fixtures / "boxed_typing_final.py"
         compare("-IB", final_fixture, native_args=("run", final_fixture, "--runtime-imports", "--quiet"))
+        # Check each call in its own module so one object input cannot mask another.
+        ini = "[formatters]\nkeys=\n[handlers]\nkeys=\n[loggers]\nkeys=root\n[logger_root]\nlevel=INFO\nhandlers=\n"
+        config_path = root / "logging.ini"
+        config_path.write_text(ini.replace("INFO", "%(threshold)s"))
+        config_call = root / "file_config_call.py"
+        for setup, call in (
+            ("from io import StringIO", f"configure(fname=StringIO({ini!r}))"),
+            ("", f"configure(defaults={{'threshold': 'ERROR', 'retries': 3}}, fname={str(config_path)!r})"),
+            ("options = {'defaults': {'threshold': 'WARNING'}}",
+             f"configure({str(config_path)!r}, **options)"),
+        ):
+            config_call.write_text(
+                "from logging.config import fileConfig as configure\nfrom logging import getLogger\n"
+                f"{setup}\n{call}\nprint(getLogger().level)\n"
+            )
+            compare("-IB", config_call, native_args=("run", config_call, "--quiet"), native_timeout=600)
         io_registration = fixtures / "io_abc_registration.py"
         compare("-IB", io_registration, native_args=("run", io_registration, "--quiet"))
         override_fixture = fixtures / "boxed_typing_override.py"
