@@ -17,6 +17,7 @@ use crate::ir::{
 use crate::ranges::{IntRange, RangeFacts};
 use crate::types::Types;
 
+mod affine;
 mod asyncio;
 mod byte_outputs;
 mod calendar;
@@ -2436,6 +2437,11 @@ impl Emitter<'_, '_> {
                 // This proof includes the final increment and the hidden cursor,
                 // independently of reassignment of the visible loop target.
                 let small_cursor = self.ranges.range_cursor(statement).is_some();
+                let unit_step = match args.as_slice() {
+                    [_] | [_, _] => true,
+                    [_, _, step] => matches!(&step.kind, ExprKind::Int(n) if n == "1"),
+                    _ => false,
+                };
                 let mut args = args.iter().map(|arg| self.expr(arg)).collect::<Vec<_>>();
                 if args.len() == 1 {
                     args.insert(0, small(0));
@@ -2481,6 +2487,9 @@ impl Emitter<'_, '_> {
                 ));
                 self.branch(&test, &body_label, &exhausted);
                 self.start(&body_label);
+                if unit_step {
+                    self.advance_affine(body, *target, *cursor, *stop);
+                }
                 let current = self.load(*cursor, small_cursor);
                 self.store(*target, &current);
                 self.loops.push(LoopTarget {
@@ -9351,6 +9360,47 @@ define internal i64 @imre_struct_uniform_end(ptr %span, i64 %next) alwaysinline 
   %repeat = icmp eq i64 %mask, 0
   %selected = select i1 %repeat, i64 %end, i64 %next
   ret i64 %selected
+}
+
+; Skip 1,023 additions, leaving the last iteration in the ordinary loop body.
+; Nonnegative i32 ordinals and coefficients keep each scalar expression small.
+; The chunk subtotal is computed in i128 before narrowing to a tagged integer.
+define internal {i64,i64} @imre_affine_range_prefix(i64 %at, i64 %end, i64 %total, i32 %scale, i32 %offset) noinline nounwind memory(none) {
+  %tags0 = and i64 %at, %end
+  %tags = and i64 %tags0, %total
+  %small = trunc i64 %tags to i1
+  %i = ashr i64 %at, 1
+  %stop = ashr i64 %end, 1
+  %sum = ashr i64 %total, 1
+  %bounded = icmp ule i64 %i, 2147482624
+  %last = add i64 %i, 1023
+  %within = icmp slt i64 %last, %stop
+  %valid = and i1 %small, %bounded
+  %chunk = and i1 %valid, %within
+  br i1 %chunk, label %check_sum, label %fallback
+check_sum:
+  %a = zext i32 %scale to i128
+  %b = zext i32 %offset to i128
+  %x = zext i64 %i to i128
+  %base = mul i128 %x, 1023
+  %ordinals = add i128 %base, 522753
+  %linear = mul i128 %a, %ordinals
+  %constant = mul i128 %b, 1023
+  %delta = add i128 %linear, %constant
+  %initial = sext i64 %sum to i128
+  %partial = add i128 %initial, %delta
+  %fits = icmp sle i128 %partial, 4611686018427387903
+  br i1 %fits, label %success, label %fallback
+success:
+  %new_at = add i64 %at, 2046
+  %n = trunc i128 %partial to i64
+  %shift = shl i64 %n, 1
+  %new_total = or i64 %shift, 1
+  %r0 = insertvalue {i64,i64} zeroinitializer, i64 %new_at, 0
+  %r = insertvalue {i64,i64} %r0, i64 %new_total, 1
+  ret {i64,i64} %r
+fallback:
+  ret {i64,i64} zeroinitializer
 }
 
 ; Bound the absolute value of every partial sum for an integral projection.
