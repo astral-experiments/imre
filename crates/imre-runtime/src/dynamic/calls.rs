@@ -3624,7 +3624,7 @@ impl Context {
                 Value::Str(_) | Value::SurrogateStr(_) => return Ok(self.builtin("str.__new__")),
                 Value::Class { .. } | Value::Instance { .. } => {
                     let class = self.heap.get(base).instance_class().unwrap_or(base);
-                    if self.allocation_base(class) == self.builtins.get("object").copied() {
+                    if self.uses_object_new(self.allocation_base(class)) {
                         return Ok(self.builtin("object.__new__"));
                     }
                 }
@@ -4827,7 +4827,7 @@ impl Context {
                 Ok(builtins::boolean(!self.truth(equal)?))
             };
         }
-        if self.allocation_base(class) == self.builtins.get("object").copied() {
+        if self.uses_object_new(self.allocation_base(class)) {
             return Ok(if object == other {
                 FALSE
             } else {
@@ -4841,6 +4841,14 @@ impl Context {
                 self.type_name(object)
             ),
         ))
+    }
+
+    /// The decoder owns its native layout but inherits object.__new__.
+    fn uses_object_new(&self, base: Option<Id>) -> bool {
+        base == self.builtins.get("object").copied()
+            || base.is_some_and(|base| {
+                self.heap.get(base).io_kind() == Some(stdlib::io::NEWLINE_DECODER)
+            })
     }
 
     /// Allocate a plain instance without invoking its constructor or initializer.
@@ -4886,7 +4894,7 @@ impl Context {
             base
         };
         let new = self.class_attr(class, "__new__");
-        if base != object {
+        if !self.uses_object_new(Some(base)) {
             let name = self.class_name(class);
             let owner = if new.is_some_and(|new| !matches!(self.heap.get(new), Value::Native(_))) {
                 self.class_name(base)
