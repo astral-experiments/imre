@@ -724,6 +724,8 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         }
         ("os" | "posix", "listdir") if cfg!(unix) => ctx.builtin("posix.listdir"),
         ("os" | "posix", "fspath") => ctx.builtin("posix.fspath"),
+        #[cfg(target_os = "linux")]
+        ("posix", "_spawn_exec") => ctx.builtin("posix._spawn_exec"),
         ("os" | "posix", name)
             if os::is_descriptor_function(name) || os::is_process_function(name) =>
         {
@@ -1702,6 +1704,10 @@ pub(super) fn call(
     }
     if let Some(op @ ("stat" | "lstat" | "fstat")) = name.strip_prefix("posix.") {
         return os::stat::call(ctx, op, args, kwargs);
+    }
+    #[cfg(target_os = "linux")]
+    if name == "posix._spawn_exec" {
+        return os::spawn_exec(ctx, args, kwargs);
     }
     if let Some(op) = name.strip_prefix("posix.")
         && (os::is_descriptor_function(op) || os::is_process_function(op))

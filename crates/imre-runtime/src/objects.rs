@@ -86,6 +86,8 @@ pub(crate) use processes::{
     BoxedPipe, BoxedPopen, CStrings, change_environment, initial_environment,
 };
 mod random;
+#[cfg(target_os = "linux")]
+pub(crate) use random::reseed_after_fork;
 pub(crate) use random::{choice_index, imre_random_float, random_below, shuffle_swaps};
 pub(crate) mod readiness;
 pub(crate) mod records;

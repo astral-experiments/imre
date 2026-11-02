@@ -1,6 +1,10 @@
 #[cfg(target_os = "linux")]
 pub(in crate::dynamic) mod eventfd;
 pub(in crate::dynamic) mod scandir;
+#[cfg(target_os = "linux")]
+mod spawn_child;
+#[cfg(target_os = "linux")]
+mod spawn_plain;
 pub(in crate::dynamic) mod stat;
 #[cfg(target_os = "linux")]
 pub(super) mod statvfs;
@@ -145,6 +149,28 @@ pub(super) fn memfd_create(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id
 
 pub(super) fn is_process_function(name: &str) -> bool {
     cfg!(unix) && matches!(name, "execv" | "WIFSTOPPED")
+}
+
+/// Spawn directly for plain arguments, or let the child run the captured Python callable.
+#[cfg(target_os = "linux")]
+pub(super) fn spawn_exec(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    let [Some(path), Some(argv), Some(exec)] =
+        builtins::bind_builtin_arguments("_spawn_exec", args, kwargs, ["path", "args", "exec"], 3)?
+    else {
+        unreachable!("all three arguments are required")
+    };
+    if ctx.finalizing.load(std::sync::atomic::Ordering::Acquire) {
+        return Err(Error::new(
+            "PythonFinalizationError",
+            "can't fork at interpreter shutdown",
+        ));
+    }
+    super::audit::event(ctx, "os.fork", &[])?;
+    let pid = match spawn_plain::try_spawn(ctx, path, argv, exec)? {
+        Some(pid) => pid,
+        None => spawn_child::fork_for_child_callbacks(ctx)?,
+    };
+    Ok(ctx.int(i64::from(pid)))
 }
 
 /// Resolve arguments before auditing, then replace this process using the captured bytes.

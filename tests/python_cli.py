@@ -3014,6 +3014,10 @@ def report(text):
             plugin.write_bytes((fixtures / "boxed_pwd.py").read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")
         if sys.platform == "linux":
+            plugin.write_bytes((fixtures / "boxed_os_spawn.py").read_bytes())
+            libc, version = platform.libc_ver()
+            child_callbacks = libc == "glibc" and tuple(map(int, version.split(".")[:2])) >= (2, 32)
+            compare("-IB", "-c", imports + f"arithmetic.current({child_callbacks})")
             plugin.write_bytes((fixtures / "boxed_posix_fadvise.py").read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")
             plugin.write_bytes((fixtures / "boxed_posix_fallocate.py").read_bytes())
