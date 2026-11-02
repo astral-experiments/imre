@@ -71,8 +71,54 @@ def check_comparison_nodes():
         raise AssertionError("accepted a comparison as a literal")
 
 
+def check_template_nodes():
+    from ast import Interpolation, TemplateStr
+
+    assert TemplateStr is ast.TemplateStr and Interpolation is ast.Interpolation
+    source = '(\n  t"é" t"x{ (ζ) !r:>4}z"\n)'
+    node = ast.parse(source, mode="eval").body
+    assert type(node) is ast.TemplateStr and isinstance(node, ast.expr)
+    assert node._fields == ("values",)
+    literal, field, tail = node.values
+    assert (literal.value, tail.value) == ("éx", "z")
+    assert type(field) is ast.Interpolation and isinstance(field, ast.expr)
+    assert field._fields == ("value", "str", "conversion", "format_spec")
+    assert (field.value.id, field.str, field.conversion) == ("ζ", " (ζ)", ord("r"))
+    assert type(field.format_spec) is ast.JoinedStr
+    assert field.format_spec.values[0].value == ">4"
+    for child, start, end in ((node, 2, 26), (literal, 4, 11), (field, 11, 24),
+                              (field.value, 14, 16), (field.format_spec, 20, 23),
+                              (field.format_spec.values[0], 21, 23), (tail, 24, 25)):
+        assert (child.lineno, child.col_offset, child.end_lineno, child.end_col_offset) == (2, start, 2, end)
+    constructed = ast.Interpolation(field.value, str=None, conversion=-1)
+    plain = ast.TemplateStr()
+    assert plain.values == [] and plain.values is not ast.TemplateStr().values
+    assert constructed.value is field.value and constructed.format_spec is constructed.str is None
+    assert ast.TemplateStr([constructed]).values[0] is constructed
+    newlines = ast.parse('t"""a\rb\r\nc{value}"""', mode="eval").body.values
+    assert newlines[0].value == "a\nb\nc" and newlines[1].lineno == 3
+    escaped = ast.parse(r't"�{{\ud800" t"\udfff}}�{x:�\ud800�}"', mode="eval").body.values
+    assert [ord(c) for c in escaped[0].value] == [0xfffd, 123, 0xd800, 0xdfff, 125, 0xfffd]
+    assert [ord(c) for c in escaped[1].format_spec.values[0].value] == [0xfffd, 0xd800, 0xfffd]
+    # A parser that cannot recover CPython's middle-token boundary must reject it.
+    continued = 't"""{{' + chr(92) + chr(10) + '"""'
+    try:
+        literal = ast.parse(continued, mode="eval").body.values[0]
+    except NotImplementedError as error:
+        assert str(error) == "ast.parse: continued t-string brace literal"
+    else:
+        assert (literal.value, literal.end_lineno, literal.end_col_offset) == ("{", 1, 6)
+    try:
+        field = ast.parse(r't"{x:\N{LATIN SMALL LETTER A}x}"', mode="eval").body.values[0]
+    except NotImplementedError as error:
+        assert str(error) == "ast.parse: named Unicode escape in t-string format spec"
+    else:
+        assert type(field.format_spec) is ast.Constant and field.format_spec.value == "ax"
+
+
 def current():
     check_comparison_nodes()
+    check_template_nodes()
     decorated_source = (
         "if ready:\n"
         "    @first\n"
