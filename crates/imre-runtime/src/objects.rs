@@ -62,7 +62,7 @@ pub(crate) use json::{
     write_fragment as write_json_fragment, write_string as write_json_string,
 };
 mod linecache;
-pub(crate) use linecache::{SourceDecodeError, decode_compile_source};
+pub(crate) use linecache::{SourceDecodeError, decode_compile_source, decode_source_lines};
 pub(crate) mod locks;
 pub(crate) mod logging;
 pub(crate) use logging::record::{brace_integer_field, percent_float_field, percent_integer_field};
