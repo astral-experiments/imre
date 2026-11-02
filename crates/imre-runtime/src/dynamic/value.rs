@@ -3130,13 +3130,19 @@ impl Heap {
                 "cannot clear an executing frame",
             ));
         }
-        if let Some((id, offset)) = self.slots.iter().enumerate().find_map(|(id, slot)| {
-            match &slot.value {
-                Some(Value::Generator { frame: Some(frame), offset: Some(offset), .. })
-                    if *frame == value => Some((id as Id, *offset)),
+        if let Some((id, offset)) = self
+            .slots
+            .iter()
+            .enumerate()
+            .find_map(|(id, slot)| match &slot.value {
+                Some(Value::Generator {
+                    frame: Some(frame),
+                    offset: Some(offset),
+                    ..
+                }) if *frame == value => Some((id as Id, *offset)),
                 _ => None,
-            }
-        }) {
+            })
+        {
             if offset != 0 {
                 return Err(Error::new("RuntimeError", "cannot clear a suspended frame"));
             }
