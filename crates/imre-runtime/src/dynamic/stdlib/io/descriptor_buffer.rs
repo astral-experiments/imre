@@ -493,7 +493,7 @@ impl BufferedFd {
                 "BufferedReader",
                 match name {
                     "read" => &["read", "readall", "readinto"],
-                    "read1" | "readline" | "readinto" => &["readinto"],
+                    "read1" | "readline" | "readinto" | "peek" => &["readinto"],
                     "seek" => &["seek", "seekable", "tell"],
                     "close" => &["flush", "close"],
                     _ => std::slice::from_ref(&name),
@@ -629,6 +629,7 @@ impl BufferedFd {
                 match name {
                     "read" | "read1" => "read of closed file",
                     "readline" => "readline of closed file",
+                    "peek" => "peek of closed file",
                     "readinto" => "readinto of closed file",
                     "truncate" => "truncate of closed file",
                     "seek" => "seek of closed file",
@@ -732,6 +733,15 @@ impl BufferedFd {
                     .seek(seek.expect("validated seek"))
                     .map_err(|err| buffer_error(ctx, err))?;
                 Ok(ctx.int(pos as i64))
+            }
+            "peek" => {
+                let data = match buffer {
+                    Buffer::Reader(reader) => crate::objects::peek_bytes(reader)?,
+                    Buffer::Random(reader) => crate::objects::peek_bytes(reader)?,
+                    Buffer::Pipe(pipe) => pipe.peek()?,
+                    Buffer::Writer(_) => unreachable!("peek requires a buffered reader"),
+                };
+                Ok(ctx.alloc(Value::Bytes(data)))
             }
             "read" | "read1" | "readline" => {
                 if !self.reading {

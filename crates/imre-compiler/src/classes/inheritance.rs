@@ -70,6 +70,8 @@ pub(super) fn resolve(
                             | "_io.BufferedReader"
                             | "io.BufferedWriter"
                             | "_io.BufferedWriter"
+                            | "io.BufferedRWPair"
+                            | "_io.BufferedRWPair"
                             | "_io._IOBase"
                             | "_io._RawIOBase"
                             | "_io._BufferedIOBase"
