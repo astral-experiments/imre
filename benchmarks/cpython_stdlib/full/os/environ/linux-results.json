@@ -1,0 +1,336 @@
+{
+  "suite": "test.test_os.EnvironTests",
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "platform": "Linux x86_64",
+  "hostname": "467500b21de3",
+  "toolchain": {
+    "rust": "1.98.0",
+    "clang": "19.1.7",
+    "architecture": "x86_64"
+  },
+  "stock": {
+    "source_layout": "full",
+    "entry_sha256": "8e33681185f2e0f7df50061505761f67017e39ae94b9859fb6d4a8fe862f7437",
+    "test_os_sha256": "c9be9407fb40107940a25b6d781fd3b07c92338369959e15e9e12d1def1afc9c",
+    "report_sha256": "b0bef97fbc7e8992304799ddeb7ddf75154837c905a5b4bbb731790cdbacf7f7",
+    "python_sha256": "c27397da5541f67655be462e128ca3d3eb6e0a8eb0d39036896c9042529f4304",
+    "discovered": 32,
+    "passed": 32,
+    "skipped": 0
+  },
+  "ordinary": {
+    "imre_commit": "a6edd3ae3b12ece7ed81aab01bb07cbd2208c4b6",
+    "O0": {
+      "source_layout": "retained-class",
+      "entry_sha256": "8e33681185f2e0f7df50061505761f67017e39ae94b9859fb6d4a8fe862f7437",
+      "test_os_sha256": "377eb46b69697bdd144c2028edd85c28d3b057c419a018eef070fbeb59876dd5",
+      "report_sha256": "311aae7db652eb730522708da80c41c8920bf997eedc1b0ad972f9e8d546d14a",
+      "imre_sha256": "10580efa65046effb994b4048741b0321f523dc125fce5b60c56f4569b4fdbaf",
+      "runtime_sha256": "baec863698b4b170b7ab142a5dcb3da619632ac84169bcba22d0fe77a2321044",
+      "clang_sha256": "0a3c55936ac43954fbe4914e6e73b577ca9e35e75d89ef13d3e28c187f41ca1a",
+      "build_exit": 1,
+      "diagnostic": "test/mapping_tests.py:31:9: Imre: __init__ must contain only straight-line local and self.field assignments, assertions, docstrings, or pass",
+      "executed": 0,
+      "verified": 0
+    },
+    "O3": {
+      "source_layout": "retained-class",
+      "entry_sha256": "8e33681185f2e0f7df50061505761f67017e39ae94b9859fb6d4a8fe862f7437",
+      "test_os_sha256": "377eb46b69697bdd144c2028edd85c28d3b057c419a018eef070fbeb59876dd5",
+      "report_sha256": "baef2a586589f6085930c3dbf4a27580c1eb9b7fd723715d71e9b80ccdb2f0c0",
+      "imre_sha256": "10580efa65046effb994b4048741b0321f523dc125fce5b60c56f4569b4fdbaf",
+      "runtime_sha256": "baec863698b4b170b7ab142a5dcb3da619632ac84169bcba22d0fe77a2321044",
+      "clang_sha256": "0a3c55936ac43954fbe4914e6e73b577ca9e35e75d89ef13d3e28c187f41ca1a",
+      "build_exit": 1,
+      "diagnostic": "test/mapping_tests.py:31:9: Imre: __init__ must contain only straight-line local and self.field assignments, assertions, docstrings, or pass",
+      "executed": 0,
+      "verified": 0
+    }
+  },
+  "boxed": {
+    "imre_commit": "d50795c92e37cffd43fd0c2360c4c2dcfbe67d7c",
+    "O0": {
+      "source_layout": "retained-class",
+      "entry_sha256": "8e33681185f2e0f7df50061505761f67017e39ae94b9859fb6d4a8fe862f7437",
+      "test_os_sha256": "377eb46b69697bdd144c2028edd85c28d3b057c419a018eef070fbeb59876dd5",
+      "report_sha256": "67a6babda042b72bf858a126cf6fe0ef5d4c0e6bb719697c7943ff7ee39c2070",
+      "imre_sha256": "03ddbe630d2aaec9f4e59b623c7de12eb16f280bddad2543d9d177a77b21f4a6",
+      "runtime_sha256": "78618da504329c2e5fe6b29839eb160d3e9835b32e3936e7954c30315b376da4",
+      "clang_sha256": "0a3c55936ac43954fbe4914e6e73b577ca9e35e75d89ef13d3e28c187f41ca1a",
+      "elf_sha256": "94a27cfce08b763e734b4cc49ed43be0b04da6869ed1b472137301fb39efe377",
+      "executed": 32,
+      "verified": 32,
+      "skipped": 0,
+      "text_mapping_restored": 32,
+      "bytes_mapping_restored": 32,
+      "process_environment_restored": 32,
+      "supervisor_environment_unchanged": 32,
+      "negative_control": {
+        "id": "test.test_os.EnvironTests.test_items",
+        "outcome": "expected assertion failure",
+        "cleanup_verified": true,
+        "report_sha256": "a37453b3766b65f5a5aa48044ff68142ecb83e254f108dd4fd7ab1b414483ddd"
+      }
+    },
+    "O3": {
+      "source_layout": "retained-class",
+      "entry_sha256": "8e33681185f2e0f7df50061505761f67017e39ae94b9859fb6d4a8fe862f7437",
+      "test_os_sha256": "377eb46b69697bdd144c2028edd85c28d3b057c419a018eef070fbeb59876dd5",
+      "report_sha256": "7c4afc864c4940a443add83eb32603c12d52933e1a828d71483bfeacde821581",
+      "imre_sha256": "03ddbe630d2aaec9f4e59b623c7de12eb16f280bddad2543d9d177a77b21f4a6",
+      "runtime_sha256": "78618da504329c2e5fe6b29839eb160d3e9835b32e3936e7954c30315b376da4",
+      "clang_sha256": "0a3c55936ac43954fbe4914e6e73b577ca9e35e75d89ef13d3e28c187f41ca1a",
+      "elf_sha256": "b81061cccba22fe6580916cb5791a3c2737a332679b0efbb5578ceb7c10f17ed",
+      "executed": 32,
+      "verified": 32,
+      "skipped": 0,
+      "text_mapping_restored": 32,
+      "bytes_mapping_restored": 32,
+      "process_environment_restored": 32,
+      "supervisor_environment_unchanged": 32,
+      "negative_control_initial_build": {
+        "timed_out": true,
+        "report_sha256": "0b6a1d2e868d4e026d94923c0c088cbdd7e70160ca0e4c7d7f843f823d613640"
+      },
+      "negative_control": {
+        "id": "test.test_os.EnvironTests.test_items",
+        "outcome": "expected assertion failure",
+        "cleanup_verified": true,
+        "report_sha256": "dd13336abe470ec43150cc6cfaf26eb4f7873eeb87803dd08484f282b76e1b18"
+      }
+    }
+  },
+  "columns": [
+    "stock",
+    "ordinary_O0",
+    "ordinary_O3",
+    "boxed_O0",
+    "boxed_O3"
+  ],
+  "cases": {
+    "test.test_os.EnvironTests.test___repr__": [
+      "pass",
+      "blocked before discovery",
+      "blocked before discovery",
+      "pass",
+      "pass"
+    ],
+    "test.test_os.EnvironTests.test_bool": [
+      "pass",
+      "blocked before discovery",
+      "blocked before discovery",
+      "pass",
+      "pass"
+    ],
+    "test.test_os.EnvironTests.test_constructor": [
+      "pass",
+      "blocked before discovery",
+      "blocked before discovery",
+      "pass",
+      "pass"
+    ],
+    "test.test_os.EnvironTests.test_environb": [
+      "pass",
+      "blocked before discovery",
+      "blocked before discovery",
+      "pass",
+      "pass"
+    ],
+    "test.test_os.EnvironTests.test_get": [
+      "pass",
+      "blocked before discovery",
+      "blocked before discovery",
+      "pass",
+      "pass"
+    ],
+    "test.test_os.EnvironTests.test_get_exec_path": [
+      "pass",
+      "blocked before discovery",
+      "blocked before discovery",
+      "pass",
+      "pass"
+    ],
+    "test.test_os.EnvironTests.test_getitem": [
+      "pass",
+      "blocked before discovery",
+      "blocked before discovery",
+      "pass",
+      "pass"
+    ],
+    "test.test_os.EnvironTests.test_ior_operator": [
+      "pass",
+      "blocked before discovery",
+      "blocked before discovery",
+      "pass",
+      "pass"
+    ],
+    "test.test_os.EnvironTests.test_ior_operator_invalid_dicts": [
+      "pass",
+      "blocked before discovery",
+      "blocked before discovery",
+      "pass",
+      "pass"
+    ],
+    "test.test_os.EnvironTests.test_ior_operator_key_value_iterable": [
+      "pass",
+      "blocked before discovery",
+      "blocked before discovery",
+      "pass",
+      "pass"
+    ],
+    "test.test_os.EnvironTests.test_items": [
+      "pass",
+      "blocked before discovery",
+      "blocked before discovery",
+      "pass",
+      "pass"
+    ],
+    "test.test_os.EnvironTests.test_iter_error_when_changing_os_environ": [
+      "pass",
+      "blocked before discovery",
+      "blocked before discovery",
+      "pass",
+      "pass"
+    ],
+    "test.test_os.EnvironTests.test_iter_error_when_changing_os_environ_items": [
+      "pass",
+      "blocked before discovery",
+      "blocked before discovery",
+      "pass",
+      "pass"
+    ],
+    "test.test_os.EnvironTests.test_iter_error_when_changing_os_environ_values": [
+      "pass",
+      "blocked before discovery",
+      "blocked before discovery",
+      "pass",
+      "pass"
+    ],
+    "test.test_os.EnvironTests.test_key_type": [
+      "pass",
+      "blocked before discovery",
+      "blocked before discovery",
+      "pass",
+      "pass"
+    ],
+    "test.test_os.EnvironTests.test_keys": [
+      "pass",
+      "blocked before discovery",
+      "blocked before discovery",
+      "pass",
+      "pass"
+    ],
+    "test.test_os.EnvironTests.test_keyvalue_types": [
+      "pass",
+      "blocked before discovery",
+      "blocked before discovery",
+      "pass",
+      "pass"
+    ],
+    "test.test_os.EnvironTests.test_len": [
+      "pass",
+      "blocked before discovery",
+      "blocked before discovery",
+      "pass",
+      "pass"
+    ],
+    "test.test_os.EnvironTests.test_or_operator": [
+      "pass",
+      "blocked before discovery",
+      "blocked before discovery",
+      "pass",
+      "pass"
+    ],
+    "test.test_os.EnvironTests.test_os_popen_iter": [
+      "pass",
+      "blocked before discovery",
+      "blocked before discovery",
+      "pass",
+      "pass"
+    ],
+    "test.test_os.EnvironTests.test_pop": [
+      "pass",
+      "blocked before discovery",
+      "blocked before discovery",
+      "pass",
+      "pass"
+    ],
+    "test.test_os.EnvironTests.test_popitem": [
+      "pass",
+      "blocked before discovery",
+      "blocked before discovery",
+      "pass",
+      "pass"
+    ],
+    "test.test_os.EnvironTests.test_putenv_unsetenv": [
+      "pass",
+      "blocked before discovery",
+      "blocked before discovery",
+      "pass",
+      "pass"
+    ],
+    "test.test_os.EnvironTests.test_putenv_unsetenv_error": [
+      "pass",
+      "blocked before discovery",
+      "blocked before discovery",
+      "pass",
+      "pass"
+    ],
+    "test.test_os.EnvironTests.test_read": [
+      "pass",
+      "blocked before discovery",
+      "blocked before discovery",
+      "pass",
+      "pass"
+    ],
+    "test.test_os.EnvironTests.test_reload_environ": [
+      "pass",
+      "blocked before discovery",
+      "blocked before discovery",
+      "pass",
+      "pass"
+    ],
+    "test.test_os.EnvironTests.test_ror_operator": [
+      "pass",
+      "blocked before discovery",
+      "blocked before discovery",
+      "pass",
+      "pass"
+    ],
+    "test.test_os.EnvironTests.test_setdefault": [
+      "pass",
+      "blocked before discovery",
+      "blocked before discovery",
+      "pass",
+      "pass"
+    ],
+    "test.test_os.EnvironTests.test_update": [
+      "pass",
+      "blocked before discovery",
+      "blocked before discovery",
+      "pass",
+      "pass"
+    ],
+    "test.test_os.EnvironTests.test_update2": [
+      "pass",
+      "blocked before discovery",
+      "blocked before discovery",
+      "pass",
+      "pass"
+    ],
+    "test.test_os.EnvironTests.test_values": [
+      "pass",
+      "blocked before discovery",
+      "blocked before discovery",
+      "pass",
+      "pass"
+    ],
+    "test.test_os.EnvironTests.test_write": [
+      "pass",
+      "blocked before discovery",
+      "blocked before discovery",
+      "pass",
+      "pass"
+    ]
+  }
+}
