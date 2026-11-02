@@ -43,7 +43,7 @@ pub(in crate::dynamic::stdlib) fn scanner_next(
     let retry_match = retry
         && match split::nonempty(&re, text, start, &mut caps) {
             Ok(found) => found,
-            Err(message) => return Err(pattern_error(ctx, re.source, re.flags, message)),
+            Err(message) => return Err(re.match_error(ctx, message)),
         }
         && group_spans(&caps)
             .next()
@@ -56,14 +56,16 @@ pub(in crate::dynamic::stdlib) fn scanner_next(
                 start += 1;
             }
         }
-        re.regex.captures(
-            Input::new(text).range(start..end).anchored(if anchored {
-                Anchored::Yes
-            } else {
-                Anchored::No
-            }),
-            &mut caps,
-        );
+        re.regex
+            .captures(
+                Input::new(text).range(start..end).anchored(if anchored {
+                    Anchored::Yes
+                } else {
+                    Anchored::No
+                }),
+                &mut caps,
+            )
+            .map_err(|message| re.match_error(ctx, message))?;
     } else if !retry_match {
         caps.set_pattern(None);
     }
