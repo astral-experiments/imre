@@ -2,6 +2,26 @@
 use ruff_python_ast as ast;
 use ruff_python_codegen::{Generator, Mode};
 
+/// A postponed-annotation dictionary is initialized if the suite contains an
+/// annotated assignment, even on an unreachable or non-name target.
+pub fn has_variable_annotation(body: &[ast::Stmt]) -> bool {
+    use ast::statement_visitor::{StatementVisitor, walk_stmt};
+    struct Finder(bool);
+    impl<'a> StatementVisitor<'a> for Finder {
+        fn visit_stmt(&mut self, stmt: &'a ast::Stmt) {
+            match stmt {
+                ast::Stmt::AnnAssign(_) => self.0 = true,
+                ast::Stmt::ClassDef(_) | ast::Stmt::FunctionDef(_) => {}
+                _ if !self.0 => walk_stmt(self, stmt),
+                _ => {}
+            }
+        }
+    }
+    let mut finder = Finder(false);
+    finder.visit_body(body);
+    finder.0
+}
+
 /// Return the expression spelling used in Python annotation dictionaries.
 pub fn spelling(annotation: &ast::Expr) -> String {
     fn items(items: &[ast::Expr]) -> String {

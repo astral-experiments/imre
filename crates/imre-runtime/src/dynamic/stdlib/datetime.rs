@@ -8,6 +8,7 @@ use crate::objects::{Calendar, CalendarNumber};
 
 pub(in crate::dynamic) mod comparison;
 mod fromutc;
+mod iso_time;
 mod reduction;
 pub(in crate::dynamic) mod render;
 mod strftime;
@@ -44,7 +45,8 @@ pub(in crate::dynamic) const TZINFO: &str = "datetime.tzinfo";
 pub(in crate::dynamic) fn clock_classmethod(symbol: &str) -> bool {
     matches!(
         symbol,
-        "datetime.datetime.now"
+        "datetime.time.fromisoformat"
+            | "datetime.datetime.now"
             | "datetime.datetime.fromtimestamp"
             | "datetime.datetime.utcnow"
             | "datetime.datetime.utcfromtimestamp"
@@ -128,6 +130,7 @@ pub(in crate::dynamic) fn members(class: &str) -> Option<Members> {
             &[
                 "__format__",
                 "__replace__",
+                "fromisoformat",
                 "isoformat",
                 "replace",
                 "__reduce__",
@@ -536,7 +539,9 @@ fn datetime_arithmetic(
             };
             return Err(Error::new(
                 "TypeError",
-                format!("descriptor '{name}' requires a 'datetime.datetime' object but received a '{kind}'"),
+                format!(
+                    "descriptor '{name}' requires a 'datetime.datetime' object but received a '{kind}'"
+                ),
             ));
         }
     };
@@ -840,6 +845,7 @@ pub(super) fn call(
         "date.strftime" => strftime::format(ctx, "date", args, kwargs),
         "time.strftime" => strftime::format(ctx, "time", args, kwargs),
         "time" => time(ctx, args, kwargs),
+        "time.fromisoformat" => time_fromisoformat(ctx, args, kwargs),
         "datetime.date"
         | "datetime.time"
         | "datetime.timetz"
@@ -1244,6 +1250,74 @@ fn new_time(ctx: &mut Context, fields: [i32; 5], tz: Id) -> Result<Id> {
     ))
 }
 
+fn time_fromisoformat(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    let Some((&class, args)) = args.split_first() else {
+        return Err(Error::new(
+            "TypeError",
+            "descriptor 'fromisoformat' of 'datetime.time' object needs an argument",
+        ));
+    };
+    let base = ctx.builtin("datetime.time");
+    if !ctx.is_type_object(class) {
+        let kind = ctx.exact_type(class)?;
+        return Err(Error::new(
+            "TypeError",
+            format!(
+                "descriptor 'fromisoformat' for type 'datetime.time' needs a type, not a '{}' as arg 2",
+                ctx.class_name(kind)
+            ),
+        ));
+    }
+    if !ctx.direct_subclass(class, base) {
+        return Err(Error::new(
+            "TypeError",
+            format!(
+                "descriptor 'fromisoformat' requires a subtype of 'datetime.time' but received '{}'",
+                ctx.class_name(class)
+            ),
+        ));
+    }
+    let name = ctx.class_qualname(class);
+    let input = crate::dynamic::builtins::one_positional_arg(
+        &format!("{name}.fromisoformat"),
+        args,
+        kwargs,
+    )?;
+    let Some(storage) = ctx.string_storage(input) else {
+        return Err(Error::new(
+            "TypeError",
+            "fromisoformat: argument must be str",
+        ));
+    };
+    let Some(([mut hour, minute, second, micros], offset)) =
+        ctx.str_value(storage).ok().and_then(iso_time::parse)
+    else {
+        let repr = crate::dynamic::builtins::call(ctx, "repr", &[input], &[])?;
+        return Err(Error::new(
+            "ValueError",
+            format!("Invalid isoformat string: {}", ctx.str_value(repr)?),
+        ));
+    };
+    if hour == 24 {
+        if (minute, second, micros) != (0, 0, 0) {
+            return Err(Error::new(
+                "ValueError",
+                "minute, second, and microsecond must be 0 when hour is 24",
+            ));
+        }
+        hour = 0;
+    }
+    let zone = match offset {
+        None => NONE,
+        Some(0) => utc(ctx),
+        Some(us) => {
+            let offset = Calendar::from_delta_microseconds(&crate::Int::from(us))?;
+            store(ctx, Calendar::zone(&offset, None)?, NONE)
+        }
+    };
+    time_for_class(ctx, class, [hour, minute, second, micros, 0], zone)
+}
+
 /// Read native civil fields even when the receiver overrides their descriptors.
 fn clock_method(
     ctx: &mut Context,
@@ -1353,6 +1427,10 @@ fn clock_method(
     }
     let tz = tzinfo.unwrap_or(tz);
     let class = ctx.exact_type(receiver)?;
+    time_for_class(ctx, class, fields, tz)
+}
+
+fn time_for_class(ctx: &mut Context, class: Id, fields: [i32; 5], tz: Id) -> Result<Id> {
     if class == ctx.builtin("datetime.time") {
         return new_time(ctx, fields, tz);
     }

@@ -352,10 +352,12 @@ pub(super) const LIST_METHODS: &[&str] = &[
     "index", "insert", "pop", "remove", "reverse", "sort",
 ];
 
-const FROZENSET_OPERATORS: &[&str] = &["__and__", "__rand__", "__or__", "__ror__", "__sub__", "__rsub__"];
-const SET_OPERATORS: &[&str] = &[
+const FROZENSET_OPERATORS: &[&str] = &[
     "__and__", "__rand__", "__or__", "__ror__", "__sub__", "__rsub__",
-    "__iand__", "__ior__", "__isub__",
+];
+const SET_OPERATORS: &[&str] = &[
+    "__and__", "__rand__", "__or__", "__ror__", "__sub__", "__rsub__", "__iand__", "__ior__",
+    "__isub__",
 ];
 
 pub(super) fn set_operators(owner: &str) -> &'static [&'static str] {
@@ -477,7 +479,11 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         Value::PrimitiveLock(_) if super::thread_lock::is_method(attr) => super::thread_lock::CLASS,
         Value::Bool(_) if attr == "__repr__" => "bool",
         Value::Int(_) if attr == "__repr__" => "int",
-        Value::Int(_) | Value::Bool(_) if matches!(attr, "__add__" | "__index__" | "bit_length" | "to_bytes") => "int",
+        Value::Int(_) | Value::Bool(_)
+            if matches!(attr, "__add__" | "__index__" | "bit_length" | "to_bytes") =>
+        {
+            "int"
+        }
         Value::Float(_) if matches!(attr, "__repr__" | "as_integer_ratio") => "float",
         Value::Str(_) | Value::SurrogateStr(_) if STR_METHODS.contains(&attr) => "str",
         Value::Range(_) if super::range::METHODS.contains(&attr) => "range",
@@ -683,7 +689,15 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         Value::RegexPattern(_)
             if matches!(
                 attr,
-                "findall" | "finditer" | "match" | "fullmatch" | "search" | "split" | "sub" | "subn" | "scanner"
+                "findall"
+                    | "finditer"
+                    | "match"
+                    | "fullmatch"
+                    | "search"
+                    | "split"
+                    | "sub"
+                    | "subn"
+                    | "scanner"
             ) =>
         {
             "pattern"
@@ -828,11 +842,14 @@ pub(super) fn bind_method_arguments<const N: usize>(
     }
     let mut values = std::array::from_fn(|i| args.get(i).copied());
     for (key, value) in kwargs {
-        let index = names.iter().position(|&arg| !arg.is_empty() && arg == key).ok_or_else(|| {
-            type_error(format!(
-                "{name}() got an unexpected keyword argument '{key}'"
-            ))
-        })?;
+        let index = names
+            .iter()
+            .position(|&arg| !arg.is_empty() && arg == key)
+            .ok_or_else(|| {
+                type_error(format!(
+                    "{name}() got an unexpected keyword argument '{key}'"
+                ))
+            })?;
         values[index] = Some(*value);
     }
     Ok(values)
@@ -999,7 +1016,9 @@ impl Context {
         args: Vec<Id>,
         kwargs: Vec<(String, Id)>,
     ) -> Result<Id> {
-        if scope != NONE && let Value::Native(name) = self.heap.get(callable) {
+        if scope != NONE
+            && let Value::Native(name) = self.heap.get(callable)
+        {
             match name.as_str() {
                 "eval" => return self.eval_source(scope, &args, &kwargs),
                 "locals" | "vars" if args.is_empty() && kwargs.is_empty() => {
@@ -1049,7 +1068,9 @@ pub(super) fn call(
         && MAPPING_PROXY_METHODS.contains(&method)
     {
         let Some((&proxy, rest)) = args.split_first() else {
-            return Err(type_error(format!("unbound method {name}() needs an argument")));
+            return Err(type_error(format!(
+                "unbound method {name}() needs an argument"
+            )));
         };
         let Value::MappingProxy(mapping) = *ctx.heap.get(proxy) else {
             return Err(type_error(format!(
@@ -1064,9 +1085,19 @@ pub(super) fn call(
             ("get", [key]) => vec![*key, NONE],
             ("get", [key, default]) => vec![*key, *default],
             ("get", []) => return Err(type_error("get expected at least 1 argument, got 0")),
-            ("get", _) => return Err(type_error(format!("get expected at most 2 arguments, got {}", rest.len()))),
+            ("get", _) => {
+                return Err(type_error(format!(
+                    "get expected at most 2 arguments, got {}",
+                    rest.len()
+                )));
+            }
             (_, []) => Vec::new(),
-            _ => return Err(type_error(format!("{name}() takes no arguments ({} given)", rest.len()))),
+            _ => {
+                return Err(type_error(format!(
+                    "{name}() takes no arguments ({} given)",
+                    rest.len()
+                )));
+            }
         };
         let bound = ctx.lookup_attr(mapping, method)?;
         return ctx.call(bound, forwarded, Vec::new());
@@ -1110,8 +1141,12 @@ pub(super) fn call(
     }
     if matches!(
         name,
-        "object.__hash__" | "object.__repr__" | "object.__str__" | "object.__ne__"
-            | "mappingproxy.__repr__" | "mappingproxy.__str__"
+        "object.__hash__"
+            | "object.__repr__"
+            | "object.__str__"
+            | "object.__ne__"
+            | "mappingproxy.__repr__"
+            | "mappingproxy.__str__"
     ) {
         let (owner, method) = name.split_once('.').unwrap();
         let Some((&receiver, rest)) = args.split_first() else {
@@ -1266,7 +1301,9 @@ pub(super) fn call(
             "float" if method == "as_integer_ratio" => float::as_integer_ratio(ctx, args, kwargs),
             "getset_descriptor" if matches!(method, "__set__" | "__delete__") => {
                 if !kwargs.is_empty() {
-                    return Err(type_error(format!("wrapper {method}() takes no keyword arguments")));
+                    return Err(type_error(format!(
+                        "wrapper {method}() takes no keyword arguments"
+                    )));
                 }
                 let (required, message) = if method == "__set__" {
                     (2, "__set__ expected 2 arguments")
@@ -1287,6 +1324,8 @@ pub(super) fn call(
                 };
                 let accepts = if owner == "int" {
                     ctx.builtin_slot_accepts(values[0], owner)
+                } else if owner == "typing.Union" {
+                    matches!(ctx.heap.get(values[0]), Value::Union(_))
                 } else if crate::objects::HashState::is_provider_class(owner) {
                     ctx.type_name(values[0]) == owner
                 } else {

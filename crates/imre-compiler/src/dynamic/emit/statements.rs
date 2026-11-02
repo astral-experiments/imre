@@ -48,9 +48,14 @@ impl<'a> Visitor<'a> for ClosureNames {
                 self.incomplete = true;
                 if self.include_nested_reads {
                     // A name used only by a nested function can be free in this function too.
-                    let mut child = Self { include_nested_reads: true, ..Self::default() };
+                    let mut child = Self {
+                        include_nested_reads: true,
+                        ..Self::default()
+                    };
                     child.visit_body(&f.body);
-                    child.locals.extend(f.parameters.iter().map(|param| param.name().to_string()));
+                    child
+                        .locals
+                        .extend(f.parameters.iter().map(|param| param.name().to_string()));
                     self.reads.extend(child.nonlocals);
                     self.reads.extend(child.reads.into_iter().filter(|name| {
                         !child.locals.contains(name) && !child.globals.contains(name)
@@ -238,6 +243,22 @@ impl Function<'_, '_> {
                     }
                 }
                 ast::Stmt::Pass(_) | ast::Stmt::Global(_) | ast::Stmt::Nonlocal(_) => {}
+                ast::Stmt::TypeAlias(v)
+                    if self.prefix.is_empty()
+                        && v.type_params.is_none()
+                        && let Some(name) = v.name.as_name_expr() =>
+                {
+                    let evaluator = self.define(
+                        v.start(),
+                        name.id.as_str(),
+                        None,
+                        None,
+                        Body::TypeAlias(&v.value),
+                    );
+                    let label = self.code_name(name.id.as_str());
+                    let alias = self.op("type_alias", &[&label, &evaluator]);
+                    self.bind(name.id.as_str(), &alias);
+                }
                 ast::Stmt::Assign(v) => {
                     let value = self.expr(&v.value);
                     let chained = v.targets.len() > 1;
@@ -701,12 +722,22 @@ impl Function<'_, '_> {
             signature["code_flags"] = json!(flags);
         }
         if let Body::Namespace(stmts) = &body {
-            signature["needs_class_cell"] =
-                json!(imre_ast::class_cell::needed(stmts, self.source.string_annotations));
-            signature["needs_dict_cell"] =
-                json!(imre_ast::class_cell::dict_needed(stmts, self.source.string_annotations));
-            signature["static_attributes"] =
-                json!(imre_ast::class_attributes::static_attributes(stmts, &self.source.private_names));
+            signature["postponed_annotations"] = json!(
+                self.source.string_annotations
+                    && imre_ast::annotations::has_variable_annotation(stmts)
+            );
+            signature["needs_class_cell"] = json!(imre_ast::class_cell::needed(
+                stmts,
+                self.source.string_annotations
+            ));
+            signature["needs_dict_cell"] = json!(imre_ast::class_cell::dict_needed(
+                stmts,
+                self.source.string_annotations
+            ));
+            signature["static_attributes"] = json!(imre_ast::class_attributes::static_attributes(
+                stmts,
+                &self.source.private_names
+            ));
         }
         if params.is_some() && uses_class_cell(&body) {
             signature["class_cell"] = json!(true);
@@ -750,7 +781,7 @@ impl Function<'_, '_> {
                 // Methods and nested classes can still capture the enclosing frame.
                 closure_names.incomplete = true;
             }
-            Body::Expression(expr) => closure_names.visit_expr(expr),
+            Body::Expression(expr) | Body::TypeAlias(expr) => closure_names.visit_expr(expr),
             _ => closure_names.incomplete = true,
         }
         if let (Body::Statements(stmts), Some(params), None) = (&body, params, returns) {
@@ -765,8 +796,14 @@ impl Function<'_, '_> {
                 signature["thread_bound_lock_field"] = json!(field);
             }
         }
-        let code = self.output.definition(self.source, prefix, body, start);
         let defaults = self.op("dict", &[]);
+        if matches!(body, Body::TypeAlias(_)) {
+            signature["posonly"] = json!([".format"]);
+            let format = self.text(".format");
+            let value_format = self.integer(1);
+            self.op("put", &[&defaults, &format, &value_format]);
+        }
+        let code = self.output.definition(self.source, prefix, body, start);
         signature["types"] = json!({});
         // A generator call returns a suspended frame, before it yields or returns a value.
         if generator.is_none() {
@@ -1285,7 +1322,7 @@ fn uses_class_cell(body: &Body<'_>) -> bool {
     let mut captures = ClassCell(false);
     match body {
         Body::Statements(stmts) | Body::GeneratorFunction((stmts, _)) => captures.visit_body(stmts),
-        Body::Expression(expr) => captures.visit_expr(expr),
+        Body::Expression(expr) | Body::TypeAlias(expr) => captures.visit_expr(expr),
         Body::Generator(generators, element) => {
             for (index, generator) in generators.iter().enumerate() {
                 if index != 0 {

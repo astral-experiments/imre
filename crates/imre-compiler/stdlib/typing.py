@@ -610,7 +610,9 @@ def _call_annotate(annotate, format, owner=None):
 _sentinel = object()
 
 
-def _make_eager_annotate(types):
+def _make_eager_annotate(types=_sentinel):
+    if types is _sentinel:
+        return lambda format: {}
     checked = {key: _type_check(value, f"field {key} annotation must be a type")
                for key, value in types.items()}
 
@@ -702,6 +704,31 @@ def _namedtuple_mro_entries(bases):
 
 
 NamedTuple.__mro_entries__ = _namedtuple_mro_entries
+
+
+def _namedtuple_set_names(cls, namespace):
+    typename = cls.__name__
+    for name, value in namespace.items():
+        if name in ('__new__', '__init__', '__slots__', '__getnewargs__',
+                    '_fields', '_field_defaults', '_make', '_replace', '_asdict', '_source'):
+            raise AttributeError('Cannot overwrite NamedTuple attribute ' + name)
+        if name in ('__module__', '__name__', '__annotations__', '__annotate__',
+                    '__annotate_func__', '__annotations_cache__'):
+            continue
+        if name not in cls._fields:
+            setattr(cls, name, value)
+        try:
+            set_name = type(value).__set_name__
+        except AttributeError:
+            continue
+        try:
+            set_name(value, cls, name)
+        except BaseException as exc:
+            exc.add_note(
+                f"Error calling __set_name__ on {type(value).__name__!r} "
+                f"instance {name!r} in {typename!r}"
+            )
+            raise
 
 
 def _namedtuple_generic_getitem(cls, args):
@@ -1586,6 +1613,8 @@ def _specialize_generic_alias_uncached(alias, args):
             raise TypeError(f"{arg} is not valid as type argument")
         replacements[parameter] = arg
     args = tuple(_substitute_alias_argument(arg, replacements) for arg in alias.__args__)
+    if isinstance(alias, _typing.Union):
+        return _typing.Union[args]
     if isinstance(alias, _AnnotatedAlias):
         return alias.copy_with(args)
     return _typing._GenericAlias(alias.__origin__, args, name=alias._name, inst=alias._inst)

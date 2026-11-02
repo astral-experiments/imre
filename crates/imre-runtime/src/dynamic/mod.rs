@@ -639,10 +639,10 @@ impl Context {
             dict,
             kind,
             entries.len(),
-            ordered.then(|| entries.order_state()),
+            ordered.then(|| (entries.order_state(), entries.ordered_nodes().len())),
             reverse.then(|| {
                 if ordered {
-                    entries.len()
+                    entries.ordered_nodes().len()
                 } else {
                     entries.insertion_end()
                 }
@@ -1921,6 +1921,11 @@ impl Context {
         if let Some(&value) = self.builtins.get(name) {
             return value;
         }
+        if name == "UnsupportedOperation" {
+            let class = stdlib::io::unsupported_operation(self);
+            self.builtins.insert(name.to_owned(), class);
+            return class;
+        }
         let value = self.alloc(Value::Native(name.to_owned()));
         self.builtins.insert(name.to_owned(), value);
         if let Some(owner) = stdlib::itertools::cursor_type(name) {
@@ -2312,7 +2317,10 @@ impl Context {
 
     /// Before installing the registry, execute its dependencies and the script's explicit entry.
     fn load_bootstrap_module(
-        &mut self, name: &str, parent: Option<(Id, &str)>, source_globals: Id,
+        &mut self,
+        name: &str,
+        parent: Option<(Id, &str)>,
+        source_globals: Id,
     ) -> Result<Option<Id>> {
         let mut locations = Vec::new();
         let source = if name == "__main__" {
@@ -2575,7 +2583,10 @@ impl Context {
                 let meta = self.abc_meta();
                 // ABCMeta.__new__ supplies type.__new__'s caller globals even after
                 // sys.modules is replaced. Keep the metaclass's defining module alive.
-                let Value::Class { scope: meta_scope, .. } = *self.heap.get(meta) else {
+                let Value::Class {
+                    scope: meta_scope, ..
+                } = *self.heap.get(meta)
+                else {
                     unreachable!()
                 };
                 let Value::Scope(frame) = self.heap.get_mut(meta_scope) else {

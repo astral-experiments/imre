@@ -21,6 +21,7 @@ pub(super) struct Program {
     class_nonlocal: bool,
     needs_class_cell: bool,
     needs_dict_cell: bool,
+    postponed_annotations: bool,
     has_named_bindings: bool,
     doc: Option<ruff_text_size::TextRange>,
     strip_docstrings: bool,
@@ -37,7 +38,7 @@ pub(super) struct Program {
     template_expressions: Rc<HashMap<ruff_text_size::TextSize, String>>,
     instructions: Vec<(u32, Instruction)>,
     expression_functions: HashMap<ruff_text_size::TextRange, (usize, Definition)>,
-    set_comprehension_targets: HashMap<ruff_text_size::TextRange, HashSet<String>>,
+    eager_comprehension_targets: HashMap<ruff_text_size::TextRange, HashSet<String>>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -81,6 +82,7 @@ enum Instruction {
     },
     From(String, u32, Vec<(String, String)>),
     Define(Definition),
+    CheckAnnotationFormat,
     Annotations {
         entries: Vec<(String, ast::Expr)>,
         class: bool,
@@ -160,6 +162,7 @@ struct Definition {
 }
 
 enum DefinitionKind {
+    TypeAlias,
     Function(Box<ast::Parameters>),
     Class(Option<Box<ast::Arguments>>),
 }
@@ -272,10 +275,16 @@ impl<'a> ast::visitor::Visitor<'a> for NamedBindings {
             }
             return;
         }
-        if let ast::Expr::SetComp(comp) = expr {
+        if let ast::Expr::SetComp(ast::ExprSetComp {
+            elt, generators, ..
+        })
+        | ast::Expr::ListComp(ast::ExprListComp {
+            elt, generators, ..
+        }) = expr
+        {
             self.comprehensions.push(ComprehensionBindings::default());
             stacker::maybe_grow(128 * 1024, 2 * 1024 * 1024, || {
-                for clause in &comp.generators {
+                for clause in generators {
                     let frame = self
                         .comprehensions
                         .last_mut()
@@ -303,7 +312,7 @@ impl<'a> ast::visitor::Visitor<'a> for NamedBindings {
                     self.visit_expr(&clause.target);
                     self.visit_comprehension(clause);
                 }
-                self.visit_expr(&comp.elt);
+                self.visit_expr(elt);
             });
             self.comprehensions.pop();
             return;
@@ -514,7 +523,7 @@ struct CompiledStrings<'a, 'ctx> {
     pending: Vec<ScopedExpression<'a>>,
     bound: Option<Rc<HashSet<String>>>,
     comprehension_reads: BTreeSet<String>,
-    set_comprehension_targets: &'ctx mut HashMap<ruff_text_size::TextRange, HashSet<String>>,
+    eager_comprehension_targets: &'ctx mut HashMap<ruff_text_size::TextRange, HashSet<String>>,
     reads: &'ctx mut BTreeSet<String>,
     directives: &'ctx HashMap<String, (ScopeDirective, ruff_text_size::TextSize)>,
     exhausted: bool,
@@ -782,21 +791,26 @@ impl<'a> CompiledStrings<'a, '_> {
                     self.visit_expr(&genexpr.generators[0].iter);
                     continue;
                 }
-                ast::Expr::SetComp(comp) => {
-                    self.visit_expr(&comp.generators[0].iter);
+                ast::Expr::SetComp(ast::ExprSetComp {
+                    elt, generators, ..
+                })
+                | ast::Expr::ListComp(ast::ExprListComp {
+                    elt, generators, ..
+                }) => {
+                    self.visit_expr(&generators[0].iter);
                     let mut names = HashSet::new();
-                    for clause in &comp.generators {
+                    for clause in generators {
                         Program::collect_target_names(&clause.target, &mut names)?;
                     }
-                    if synchronous_comprehension(&comp.elt, &comp.generators, false) {
-                        self.set_comprehension_targets
-                            .insert(comp.range(), names.clone());
+                    if synchronous_comprehension(elt, generators, false) {
+                        self.eager_comprehension_targets
+                            .insert(expr.range(), names.clone());
                     }
                     if let Some(enclosing) = &self.bound {
                         names.extend(enclosing.iter().cloned());
                     }
                     self.bound = Some(Rc::new(names));
-                    for (index, clause) in comp.generators.iter().enumerate() {
+                    for (index, clause) in generators.iter().enumerate() {
                         self.visit_expr(&clause.target);
                         if index != 0 {
                             self.visit_expr(&clause.iter);
@@ -805,7 +819,7 @@ impl<'a> CompiledStrings<'a, '_> {
                             self.visit_expr(predicate);
                         }
                     }
-                    self.visit_expr(&comp.elt);
+                    self.visit_expr(elt);
                     continue;
                 }
                 ast::Expr::StringLiteral(literal) => {
@@ -1002,7 +1016,7 @@ impl Program {
             pending: Vec::new(),
             bound: None,
             comprehension_reads: BTreeSet::new(),
-            set_comprehension_targets: &mut self.set_comprehension_targets,
+            eager_comprehension_targets: &mut self.eager_comprehension_targets,
             exhausted: false,
         };
         for (_, op) in &mut self.instructions {
@@ -1123,10 +1137,12 @@ impl Program {
                             strings.visit_parameters(parameters)
                         }
                         DefinitionKind::Class(Some(args)) => strings.visit_arguments(args),
-                        DefinitionKind::Class(None) => {}
+                        DefinitionKind::Class(None) | DefinitionKind::TypeAlias => {}
                     }
                 }
-                Instruction::ClassStart | Instruction::ClassEnd => {}
+                Instruction::ClassStart
+                | Instruction::ClassEnd
+                | Instruction::CheckAnnotationFormat => {}
                 Instruction::Yield(e) | Instruction::Return(e) | Instruction::Next(e, _) => {
                     if let Some(e) = e {
                         strings.visit_expr(e);
@@ -1423,6 +1439,7 @@ impl Program {
             class_nonlocal: false,
             needs_class_cell: false,
             needs_dict_cell: false,
+            postponed_annotations: false,
             has_named_bindings,
             doc: None,
             strip_docstrings: false,
@@ -1439,7 +1456,7 @@ impl Program {
             template_expressions: Rc::default(),
             instructions: Vec::new(),
             expression_functions: HashMap::new(),
-            set_comprehension_targets: HashMap::new(),
+            eager_comprehension_targets: HashMap::new(),
         }
     }
 
@@ -1528,9 +1545,13 @@ impl Program {
         }
         let mut fields = Vec::new();
         let class = self.class_attributes.is_some();
+        self.postponed_annotations = class
+            && self.string_annotations()
+            && imre_ast::annotations::has_variable_annotation(&body);
         self.needs_class_cell =
             class && imre_ast::class_cell::needed(&body, self.string_annotations());
-        self.needs_dict_cell = class && imre_ast::class_cell::dict_needed(&body, self.string_annotations());
+        self.needs_dict_cell =
+            class && imre_ast::class_cell::dict_needed(&body, self.string_annotations());
         self.lower_with_fields(body, lines, function, None, class.then_some(&mut fields))?;
         if !fields.is_empty() {
             let provider = self.annotation_provider(fields, &self.qualname, self.first_line);
@@ -1719,6 +1740,32 @@ impl Program {
                     }
                     Instruction::From(module.to_owned(), s.level, names)
                 }
+                Stmt::TypeAlias(s)
+                    if !function && self.class_attributes.is_none() && s.type_params.is_none() =>
+                {
+                    let ast::Expr::Name(name) = *s.name else {
+                        return Err(unsupported("type alias target"));
+                    };
+                    let name = ast::Identifier::new(name.id, name.range);
+                    let mut child = self.definition_body(&name, &[], line, lines);
+                    child.locals.insert(".format".to_owned());
+                    child
+                        .instructions
+                        .push((line, Instruction::CheckAnnotationFormat));
+                    let rhs_line =
+                        lines.partition_point(|n| *n <= s.value.start().to_usize()) as u32;
+                    child
+                        .instructions
+                        .push((rhs_line, Instruction::Return(Some(*s.value))));
+                    self.locals.insert(name.to_string());
+                    Instruction::Define(Definition {
+                        binding: name.to_string(),
+                        decorators: Vec::new(),
+                        body: Rc::new(child),
+                        kind: DefinitionKind::TypeAlias,
+                        annotate: None,
+                    })
+                }
                 Stmt::FunctionDef(mut s) if s.type_params.is_none() => {
                     let mut child = self.definition_body(&s.name, &s.decorator_list, line, lines);
                     let annotate = self.annotation_program(&mut s, &child, line)?;
@@ -1759,7 +1806,9 @@ impl Program {
                     let spellings = child.private_names.get_or_insert_with(|| {
                         Rc::new(imre_ast::lower_in(&mut s.body, &child.name, false))
                     });
-                    child.class_attributes = Some(imre_ast::class_attributes::static_attributes(&s.body, spellings));
+                    child.class_attributes = Some(imre_ast::class_attributes::static_attributes(
+                        &s.body, spellings,
+                    ));
                     child.instructions.push((line, Instruction::ClassStart));
                     child.lower_namespace(s.body, lines, false)?;
                     child.instructions.push((line, Instruction::ClassEnd));
@@ -2343,6 +2392,31 @@ impl Context {
             self.retain_syntax_fields(&mut error, self.syntax_fields(&args))?;
             return Err(error);
         }
+        if let ast::Mod::Module(module) = parsed.syntax()
+            && let Some((expr, message)) = imre_ast::type_alias_error(&module.body)
+        {
+            let position = |offset: ruff_text_size::TextSize| {
+                let offset = offset.to_usize();
+                let line = lines.partition_point(|start| *start <= offset);
+                (line as i64, (offset - lines[line - 1] + 1) as i64)
+            };
+            let (line, column) = position(expr.start());
+            let (end_line, end_column) = position(expr.end());
+            let msg = self.text(message);
+            let line = self.int(line);
+            let mut fields = self.syntax_fields(&[msg]);
+            fields[1] = filename_id;
+            fields[2] = line;
+            fields[3] = self.int(column);
+            fields[5] = self.int(end_line);
+            fields[6] = self.int(end_column);
+            let mut error = self.exception("SyntaxError", &[msg]);
+            error
+                .message
+                .push_str(&self.syntax_suffix(filename_id, line)?);
+            self.retain_syntax_fields(&mut error, fields)?;
+            return Err(error);
+        }
         let mut code = Program::new(Rc::from(filename), "<module>", source.contains(":="));
         code.strip_docstrings = self.config["optimize"].as_i64().unwrap_or(0) >= 2;
         code.interactive = interactive;
@@ -2809,9 +2883,13 @@ impl Context {
                 }
                 let reads: Reads = serde_json::from_str(signature)
                     .map_err(|err| Error::new("SystemError", err.to_string()))?;
-                names.extend(reads.scope_reads.into_iter()
-                    .filter(|name| self.is_enclosing_freevar(parent, name) == Some(true))
-                    .map(str::to_owned));
+                names.extend(
+                    reads
+                        .scope_reads
+                        .into_iter()
+                        .filter(|name| self.is_enclosing_freevar(parent, name) == Some(true))
+                        .map(str::to_owned),
+                );
             }
         }
         let mut bindings = Vec::new();
@@ -4139,15 +4217,14 @@ impl Context {
                 let annotate = self.source_annotator(provider, owner, scope)?;
                 self.bind_source_name(scope, "__annotate_func__", annotate)?;
             }
+            Instruction::CheckAnnotationFormat => {
+                let format = self.lookup(scope, ".format")?;
+                self.op("annotation_format", format, NONE, NONE)?;
+            }
             Instruction::ClassStart => {
                 self.enable_class_annotation_provider(scope);
                 // Only postponed annotations need a visible mapping from the start of the suite.
-                if !code.string_annotations()
-                    || !code
-                        .instructions
-                        .iter()
-                        .any(|(_, op)| matches!(op, Instruction::StringAnnotation(..)))
-                {
+                if !code.postponed_annotations {
                     let key = self.heap.code_name("__annotations__");
                     self.remove_binding(scope, "__annotations__", key)?;
                 }
@@ -4196,6 +4273,16 @@ impl Context {
         let defaults = self.dict(vec![]);
         let mut bases = None;
         let sig = match &definition.kind {
+            DefinitionKind::TypeAlias => {
+                let format = self.text(".format");
+                let value_format = self.int(1);
+                self.put_item(defaults, format, value_format)?;
+                serde_json::json!({
+                    "posonly": [".format"],
+                    "scope_locals": [".format"],
+                    "scope_locals_complete": true,
+                })
+            }
             DefinitionKind::Class(args) => {
                 let mut values = Vec::new();
                 let mut keywords = Vec::new();
@@ -4213,7 +4300,11 @@ impl Context {
                     }
                 }
                 bases = Some((self.alloc(Value::List(values)), keywords));
-                serde_json::json!({"needs_class_cell": child.needs_class_cell, "needs_dict_cell": child.needs_dict_cell})
+                serde_json::json!({
+                    "needs_class_cell": child.needs_class_cell,
+                    "needs_dict_cell": child.needs_dict_cell,
+                    "postponed_annotations": child.postponed_annotations,
+                })
             }
             DefinitionKind::Function(p) => {
                 let mut sig = serde_json::json!({"posonly":[],"positional":[],"kwonly":[],"varargs":p.vararg.as_ref().map(|x|x.name.as_str()),"kwargs":p.kwarg.as_ref().map(|x|x.name.as_str())});
@@ -4286,6 +4377,10 @@ impl Context {
             scope
         };
         let mut value = self.source_function(code, defining_scope, defaults);
+        if matches!(definition.kind, DefinitionKind::TypeAlias) {
+            let name = self.code_object(code).name;
+            return self.op("type_alias", name, value, NONE);
+        }
         if let Some(provider) = &definition.annotate {
             let annotate = self.source_annotator(provider, code, defining_scope)?;
             self.set_function_attr(value, "__annotate__", annotate)?;
@@ -4617,27 +4712,25 @@ impl Context {
         self.keep_source_result(mark, iterator)
     }
 
-    /// Run the clauses inline, hashing each element before advancing its innermost iterator.
-    fn source_set_comprehension(
+    /// Append each element to the result before advancing its innermost iterator.
+    fn source_eager_comprehension(
         &mut self,
         code: &Program,
         parent: Id,
-        comp: &ast::ExprSetComp,
+        element: &ast::Expr,
+        clauses: &[ast::Comprehension],
+        kind: &str,
         targets: &HashSet<String>,
     ) -> Result<Id> {
         let mark = self.heap.temporary_mark();
         let result = (|| -> Result<Id> {
-            let first =
-                self.source_comprehension_iterator(code, parent, &comp.generators[0].iter)?;
+            let first = self.source_comprehension_iterator(code, parent, &clauses[0].iter)?;
             let scope = self.comprehension_scope_with_targets(parent, targets.clone());
-            let set = self.alloc(Value::Set {
-                entries: Default::default(),
-                frozen: false,
-            });
+            let collection = self.op(kind, NONE, NONE, NONE)?;
             // Each mark preserves the iterator and persistent roots of all outer clauses.
             let mut levels = Vec::new();
             levels
-                .try_reserve_exact(comp.generators.len())
+                .try_reserve_exact(clauses.len())
                 .map_err(|_| crate::Error::memory_error())?;
             levels.push((first, self.heap.temporary_mark()));
             'advance: while let Some(&(iterator, step)) = levels.last() {
@@ -4647,25 +4740,25 @@ impl Context {
                     continue;
                 };
                 self.heap.keep(item);
-                let clause = &comp.generators[levels.len() - 1];
+                let clause = &clauses[levels.len() - 1];
                 self.bind_target(code, scope, &clause.target, item)?;
                 for test in &clause.ifs {
                     if !self.source_condition(code, scope, test)? {
                         continue 'advance;
                     }
                 }
-                if let Some(next) = comp.generators.get(levels.len()) {
+                if let Some(next) = clauses.get(levels.len()) {
                     let inner = self.source_comprehension_iterator(code, scope, &next.iter)?;
                     levels.push((inner, self.heap.temporary_mark()));
                 } else {
-                    let element = self.source_expr(code, scope, &comp.elt)?;
-                    builtins::set_add(self, set, element)?;
+                    let element = self.source_expr(code, scope, element)?;
+                    self.op("append", collection, element, NONE)?;
                 }
             }
-            Ok(set)
+            Ok(collection)
         })();
         match result {
-            Ok(set) => self.keep_source_result(mark, set),
+            Ok(collection) => self.keep_source_result(mark, collection),
             Err(error) => {
                 let collect = self.heap.discard_truth_operands(mark, self.modules);
                 for root in error.roots() {
@@ -4828,8 +4921,9 @@ impl Context {
                     if let Expr::Starred(star) = item {
                         let mark = self.heap.temporary_mark();
                         let first = items.len();
-                        let expanded = eval(self, &star.value)
-                            .and_then(|iterable| self.extend_source_items(&mut items, iterable, None));
+                        let expanded = eval(self, &star.value).and_then(|iterable| {
+                            self.extend_source_items(&mut items, iterable, None)
+                        });
                         // Only yielded values outlive this operand. Release the iterator before
                         // evaluating the next tuple element or dispatching a weakref callback.
                         let collect = self.heap.discard_truth_operands(mark, self.modules);
@@ -4857,10 +4951,18 @@ impl Context {
                     .heap
                     .packed_tuple(items, v.elts.iter().all(imre_ast::literal_tuple_element)))
             }
-            Expr::SetComp(comp)
-                if let Some(targets) = code.set_comprehension_targets.get(&comp.range()) =>
-            {
-                self.source_set_comprehension(code, scope, comp, targets)
+            ast::Expr::SetComp(ast::ExprSetComp {
+                elt, generators, ..
+            })
+            | ast::Expr::ListComp(ast::ExprListComp {
+                elt, generators, ..
+            }) if let Some(targets) = code.eager_comprehension_targets.get(&expr.range()) => {
+                let kind = if matches!(expr, Expr::ListComp(_)) {
+                    "list"
+                } else {
+                    "set"
+                };
+                self.source_eager_comprehension(code, scope, elt, generators, kind, targets)
             }
             Expr::Set(display) => {
                 let items = display

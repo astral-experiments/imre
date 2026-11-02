@@ -143,6 +143,21 @@ impl Context {
 
     pub(super) fn op(&mut self, op: &str, a: Id, b: Id, c: Id) -> Result<Id> {
         match op {
+            "annotation_format" => {
+                let limit = self.int(2);
+                let unsupported = self.binary(">", a, limit)?;
+                if self.truth(unsupported)? {
+                    let error = self.builtin("NotImplementedError");
+                    self.op("raise", error, NONE, FALSE)
+                } else {
+                    Ok(NONE)
+                }
+            }
+            "type_alias" => Ok(self.alloc(Value::TypeAlias {
+                name: a,
+                evaluator: b,
+                cached: None,
+            })),
             "template_interpolation" => {
                 let (Value::List(meta) | Value::Tuple(meta)) = self.heap.get(c) else {
                     unreachable!("compiled interpolation metadata");
@@ -786,7 +801,8 @@ pub(super) unsafe extern "C" fn imre_dyn_finish(ctx: *mut Context) -> i32 {
         // keep replaced streams alive throughout the main module's execution.
         ctx.heap.release_temporaries_since(mark);
         ctx.install_import_registry()?;
-        let main = ctx.load_bootstrap_module("__main__", None, NONE)?
+        let main = ctx
+            .load_bootstrap_module("__main__", None, NONE)?
             .ok_or_else(|| Context::missing_module("__main__"))?;
         if let Some(name) = ctx.config["module_entry"].as_str().map(str::to_owned) {
             ctx.run_module_as_main(name)
@@ -837,7 +853,8 @@ pub(super) unsafe extern "C" fn imre_dyn_finish(ctx: *mut Context) -> i32 {
     if status == 0 && stdlib::io::has_pending_callback_write(&ctx) {
         use std::io::Write;
 
-        let _ = writeln!(std::io::stderr().lock(),
+        let _ = writeln!(
+            std::io::stderr().lock(),
             "NotImplementedError: BufferedWriter has unflushed bytes at shutdown; explicitly flush or close Python-backed writers"
         );
         return 1;
@@ -868,7 +885,12 @@ fn report_system_exit(ctx: &mut Context, error: Error) -> i32 {
         return integer.to_i64().unwrap_or(-1) as i32;
     }
     ctx.heap.keep(code);
-    if let Some(file) = ctx.sys_binding("stderr").ok().flatten().filter(|&f| f != NONE) {
+    if let Some(file) = ctx
+        .sys_binding("stderr")
+        .ok()
+        .flatten()
+        .filter(|&f| f != NONE)
+    {
         ctx.heap.keep(file);
         if let Ok(writer) = ctx.lookup_attr(file, "write") {
             ctx.heap.keep(writer);
@@ -1762,7 +1784,11 @@ mod tests {
         let quote_via = ctx.lookup_attr(template, "format").unwrap();
         let safe = ctx.text("");
         let encoded = ctx
-            .call(encode, vec![query, TRUE, safe, NONE, NONE, quote_via], Vec::new())
+            .call(
+                encode,
+                vec![query, TRUE, safe, NONE, NONE, quote_via],
+                Vec::new(),
+            )
             .unwrap();
         let encoded = ctx.str_value(encoded).unwrap();
         assert!(encoded.starts_with("k=0&k=1&"));

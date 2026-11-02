@@ -23,8 +23,8 @@ mod text_memory;
 use seekable::Memory;
 pub(super) use seekable::disk_offset;
 
-use buffered::{Input, Output};
 pub(crate) use buffered::peek_bytes;
+use buffered::{Input, Output};
 
 pub(super) type BoxedFile = allocator_api2::boxed::Box<FileState>;
 

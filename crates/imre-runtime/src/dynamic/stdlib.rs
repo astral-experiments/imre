@@ -43,9 +43,9 @@ mod marshal;
 mod math;
 mod metadata;
 pub(super) mod monitoring;
+pub(super) mod opcode;
 mod operator;
 mod ordered_dict;
-pub(super) mod opcode;
 pub(super) mod os;
 pub(super) mod pickle;
 mod pkgutil;
@@ -471,7 +471,9 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             ctx.builtin("tempfile.TemporaryFile")
         }
         ("gc", "enable" | "disable" | "isenabled") => ctx.builtin(&format!("gc.{name}")),
-        ("unicodedata", "normalize" | "decomposition") => ctx.builtin(&format!("unicodedata.{name}")),
+        ("unicodedata", "normalize" | "decomposition") => {
+            ctx.builtin(&format!("unicodedata.{name}"))
+        }
         (
             "_imp",
             "is_frozen"
@@ -546,6 +548,9 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             "_count_elements"
             | "_ordered_dict_equal"
             | "_ordered_dict_move_to_end"
+            | "_ordered_dict_clear"
+            | "_ordered_dict_delitem"
+            | "_ordered_dict_setitem"
             | "_ordered_dict_pop"
             | "_ordered_dict_popitem"
             | "_ordered_dict_repr"
@@ -575,6 +580,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             | "ParamSpecArgs"
             | "ParamSpecKwargs"
             | "TypeVarTuple"
+            | "TypeAliasType"
             | "_new_typeddict"
             | "_UnpackGenericAlias"
             | "_eval_type_expression"
@@ -637,7 +643,9 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             let items = options.into_iter().map(|option| ctx.text(option)).collect();
             ctx.alloc(Value::List(items))
         }
-        ("zlib", "adler32" | "crc32" | "compress" | "decompress" | "error") => ctx.builtin(&format!("zlib.{name}")),
+        ("zlib", "adler32" | "crc32" | "compress" | "decompress" | "error") => {
+            ctx.builtin(&format!("zlib.{name}"))
+        }
         (
             "binascii",
             "Error" | "Incomplete" | "a2b_base64" | "b2a_base64" | "a2b_hex" | "unhexlify",
@@ -1240,12 +1248,18 @@ pub(super) fn call(
     }
     if name == "sys.getrecursionlimit" {
         if !kwargs.is_empty() {
-            return Err(Error::new("TypeError", "sys.getrecursionlimit() takes no keyword arguments"));
+            return Err(Error::new(
+                "TypeError",
+                "sys.getrecursionlimit() takes no keyword arguments",
+            ));
         }
         if !args[1..].is_empty() {
             return Err(Error::new(
                 "TypeError",
-                format!("sys.getrecursionlimit() takes no arguments ({} given)", args.len() - 1),
+                format!(
+                    "sys.getrecursionlimit() takes no arguments ({} given)",
+                    args.len() - 1
+                ),
             ));
         }
         return Ok(ctx.int(i64::from(crate::sys::recursion_limit())));
@@ -1974,7 +1988,10 @@ pub(super) fn call(
             ("members", [class], []) => {
                 if let Value::Class { scope, .. } = *ctx.heap.get(*class) {
                     let dictionary = ctx.class_namespace_dict(scope, false);
-                    let members = ctx.dict_entries(dictionary).expect("class dictionary").to_vec();
+                    let members = ctx
+                        .dict_entries(dictionary)
+                        .expect("class dictionary")
+                        .to_vec();
                     return Ok(ctx.dict(members));
                 }
             }
@@ -2045,7 +2062,10 @@ pub(super) fn call(
     if matches!(name, "enum.auto.__init__" | "enum.auto.__repr__") {
         return ctx.auto_method(name, args, kwargs);
     }
-    if matches!(name, "enum.Enum.__repr__" | "enum.Flag.__repr__" | "enum.Enum.__str__" | "enum.Enum.__format__") {
+    if matches!(
+        name,
+        "enum.Enum.__repr__" | "enum.Flag.__repr__" | "enum.Enum.__str__" | "enum.Enum.__format__"
+    ) {
         return ctx.float_enum_display(name, args, kwargs);
     }
     if name == "enum.Enum.__copy__" {

@@ -122,6 +122,34 @@ def test_cookie_timestamp():
     print(str(before), str(shifted), int(lifetime.total_seconds()))
 
 
+def test_time_fromisoformat():
+    parse = time.fromisoformat
+    assert parse("T24:00:00.0000000Z").tzinfo is UTC
+    assert parse("12-00:00:00.123").tzinfo is UTC
+    assert parse("123456,1234567-01:02:03.4") == time(
+        12, 34, 56, 123456, timezone(-timedelta(hours=1, minutes=2, seconds=3, microseconds=400000))
+    )
+
+    class Clock(time):
+        pass
+
+    assert type(Clock().fromisoformat("07:59")) is Clock
+    assert Clock.fromisoformat("07:59") == time(7, 59)
+
+    class Capture(time):
+        def __new__(cls, *args):
+            return args
+
+    assert Capture.fromisoformat("25:01+00") == (25, 1, 0, 0, UTC)
+    for text in ("12:30:00.", "12:00+24", "24:00:01", "12\ud80000"):
+        try:
+            parse(text)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError(text)
+
+
 def test_time_of_day():
     midnight = time()
     assert type(midnight) is time and isinstance(midnight, time)
@@ -583,6 +611,30 @@ def test_explicit_zone_conversion():
             return type(value), value.tzinfo is self, value.hour
 
     assert Child.fromtimestamp(0, Hook()) == (Child, True, 0)
+    child = Child(2000, 1, 2)
+    assert child.fromtimestamp(0, Hook()) == (Child, True, 0)
+    assert type(child.combine(child, time())) is Child
+
+
+def test_astimezone_subtype():
+    constructed = []
+
+    class Child(dt):
+        def __new__(cls, *args, **kwargs):
+            value = dt.__new__(cls, *args, **kwargs)
+            constructed.append((value, value.tzinfo))
+            return value
+
+    class Target(tzinfo):
+        def fromutc(self, value):
+            return value
+
+    source = timezone(timedelta(hours=1))
+    target = Target()
+    result = Child(2000, 1, 1, 6, tzinfo=source, fold=1).astimezone(target)
+    intermediate, constructor_zone = constructed[1]
+    assert constructor_zone is source and result is intermediate
+    assert result.tzinfo is target and (result.hour, result.fold) == (5, 0)
 
 
 def test_tzinfo_reduction():
@@ -660,12 +712,14 @@ def current():
     test_fixed_timezone_methods()
     test_custom_tzinfo()
     test_explicit_zone_conversion()
+    test_astimezone_subtype()
     test_tzinfo_reduction()
     test_calendar_format()
     test_timedelta_negation()
     test_timedelta_positive_and_absolute()
     test_subclass_construction()
     test_now()
+    test_time_fromisoformat()
     test_time_of_day()
     test_http_date()
     test_module_exports()
