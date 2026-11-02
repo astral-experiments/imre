@@ -125,24 +125,14 @@ impl Context {
                 format!("<flag '{name}'> has no members; specify `names=()` if you meant to create a new, empty, enum"),
             ));
         }
-        let entries = match self.heap.get(names) {
-            Value::Dict(entries) => entries.iter().copied().collect(),
-            _ => {
-                // A formatter can install a mapping with its own items() protocol.
-                let items = self.lookup_attr(names, "items")?;
-                let pairs = self.call(items, Vec::new(), Vec::new())?;
-                let mut entries = Vec::new();
-                for pair in self.items(pairs)? {
-                    let pair = self.unpack_items(pair, 2, None)?;
-                    entries.push((pair[0], pair[1]));
-                }
-                entries
-            }
-        };
+        // populate_enum retains the original declarations in __members__. The
+        // single-bit mask and order do not depend on a later name-map replacement.
+        let declared = self.lookup_attr(class, "__members__")?;
+        let declared = self.dict_entries(self.mapping_proxy_target(declared))
+            .ok_or_else(|| Error::new("TypeError", "expected enum member dictionary"))?;
         let mut singles = Vec::new();
-        let mut composites = Vec::new();
         let mut mask = BigInt::zero();
-        for (key, member) in entries {
+        for &(key, member) in declared {
             let Some((_, canonical, value)) = self.enum_member(member) else {
                 continue;
             };
@@ -152,9 +142,7 @@ impl Context {
             let bit = self.as_int(value)?.big().into_owned();
             mask |= &bit;
             if bit.is_positive() && (&bit & (&bit - 1u8)).is_zero() {
-                singles.push((key, bit));
-            } else if !bit.is_zero() {
-                composites.push((key, bit));
+                singles.push((member, bit));
             }
         }
         let mut value = bits.big().into_owned();
@@ -173,27 +161,50 @@ impl Context {
         let key = self.alloc(Value::Int(crate::Int::new(value.clone())));
         let member = self.new_int(&[class, key], &[])?;
         self.default_set_attr(member, "_value_", key)?;
-        let mut names = Vec::new();
+        let mut members = Vec::new();
         let mut combined = BigInt::zero();
-        for (name, bit) in singles {
+        for (member, bit) in singles {
             if (&value & &bit) == bit {
                 combined |= bit;
-                names.push(self.str_value(name)?);
+                members.push(member);
             }
         }
-        // Flag._missing_ includes declared composites in definition order when
-        // the value has bits outside the single-bit members.
+        // Flag._missing_ consults the live name map only for bits outside the
+        // single-bit members. Its items method may itself be overridden.
         if combined != value {
-            for (name, bits) in composites {
-                if (&value & &bits) == bits {
+            let names = self.lookup_attr(class, "_member_map_")?;
+            let entries = match self.heap.get(names) {
+                Value::Dict(entries) => entries.iter().map(|&(_, member)| member).collect(),
+                _ => {
+                    let items = self.lookup_attr(names, "items")?;
+                    let pairs = self.call(items, Vec::new(), Vec::new())?;
+                    let mut entries = Vec::new();
+                    for pair in self.items(pairs)? {
+                        entries.push(self.unpack_items(pair, 2, None)?[1]);
+                    }
+                    entries
+                }
+            };
+            for member in entries {
+                if members.contains(&member) {
+                    continue;
+                }
+                let bits = self.lookup_attr(member, "_value_")?;
+                let bits = self.as_int(bits)?.big().into_owned();
+                if !bits.is_zero() && (&value & &bits) == bits {
                     combined |= bits;
-                    names.push(self.str_value(name)?);
+                    members.push(member);
                 }
             }
         }
-        let name = if names.is_empty() {
+        let name = if members.is_empty() {
             NONE
         } else {
+            let mut names = Vec::new();
+            for member in members {
+                let name = self.lookup_attr(member, "_name_")?;
+                names.push(self.str_value(name)?.to_owned());
+            }
             let prefix = self.text(names.join("|"));
             let unknown = value ^ combined;
             if unknown.is_zero() {

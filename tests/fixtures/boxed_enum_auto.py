@@ -122,10 +122,15 @@ def current():
         def items(self):
             raise RuntimeError("name map items")
 
-    Flags._value2member_map_ = old_map
-    Flags._member_map_ = BrokenNames(Flags._member_map_)
+    class Names(IntFlag):
+        ONE = 1
+        TWO = 2
+
+    Names._member_map_ = BrokenNames(Names._member_map_)
+    assert Names(0).name is None
+    assert Names(3).name == "ONE|TWO"
     try:
-        Flags(9)
+        Names(5)
     except RuntimeError as exc:
         assert exc.args == ("name map items",)
     else:
