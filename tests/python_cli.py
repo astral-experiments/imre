@@ -1861,6 +1861,7 @@ def report(text):
             "boxed_os_stat.py",
             "boxed_os_terminal_size.py",
             "boxed_os_makedirs.py",
+            "boxed_os_walk.py",
             "boxed_select.py",
             "boxed_urlsplit.py",
             "boxed_unicodedata.py",
