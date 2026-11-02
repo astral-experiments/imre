@@ -1091,6 +1091,30 @@ pub extern "C" fn imre_environ_copy() -> *const Object {
     finish(result.map(crate::ObjectOwner::into_raw), std::ptr::null())
 }
 
+/// Copies the POSIX byte mapping without passing keys or values through a text codec.
+#[unsafe(no_mangle)]
+pub extern "C" fn imre_environb_copy() -> *const Object {
+    // SAFETY: the dictionary owns exact bytes keys and values (word kind 8).
+    let dict = unsafe { crate::ObjectOwner::from_raw(imre_dict_new(8, 8)) };
+    for (name, value) in initial_environment() {
+        let key = crate::BytesOwner::new(name);
+        let value = crate::BytesOwner::new(value);
+        // SAFETY: the rooted bytes owners live through insertion, which retains each.
+        let result = unsafe {
+            super::mappings::dict_set(
+                crate::ObjectOwner::as_ptr(&dict),
+                crate::BytesOwner::as_ptr(&key) as usize,
+                crate::BytesOwner::as_ptr(&value) as usize,
+            )
+        };
+        if let Err(error) = result {
+            error.raise();
+            return std::ptr::null();
+        }
+    }
+    crate::ObjectOwner::into_raw(dict)
+}
+
 fn copy_argv(words: &[usize], copy: impl Fn(usize) -> Result<CString>) -> Result<Vec<CString>> {
     let mut argv = Vec::new();
     argv.try_reserve_exact(words.len())

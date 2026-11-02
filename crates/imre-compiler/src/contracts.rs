@@ -365,7 +365,7 @@ impl Builtin {
                 | ProcessOperation::TaskResult
                 | ProcessOperation::Semaphore
                 | ProcessOperation::Release
-                | ProcessOperation::EnvironCopy
+                | ProcessOperation::EnvironCopy { .. }
                 | ProcessOperation::EnvironGet
                 | ProcessOperation::GetCwd
                 | ProcessOperation::Fd(_)
@@ -1101,6 +1101,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_os_pathsep"
                 | "imre_shutil_which"
                 | "imre_environ_copy"
+                | "imre_environb_copy"
                 | "imre_subprocess_check"
                 | "imre_subprocess_error_field"
                 | "imre_print_int"

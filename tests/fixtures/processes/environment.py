@@ -36,8 +36,12 @@ print(os.fspath("directory/"))
 command = [argv[1], "-I", argv[2], "environment"]
 inherited = subprocess.run(command, capture_output=True, encoding="utf-8")
 print(inherited.stdout)
-first = os.environ.copy()
+first = dict(os.environ)
 second = os.environ.copy()
+if os.supports_bytes_environ:
+    snapshot = dict(os.environb)
+    snapshot[b"IMRE_PROCESS_OVERRIDE"] = b"copy only"
+    assert dict(os.environb)[b"IMRE_PROCESS_OVERRIDE"] == b"parent"
 print(first[""])
 first["IMRE_PROCESS_OVERRIDE"] = "changed λ"
 first["IMRE_PROCESS_EMPTY"] = ""

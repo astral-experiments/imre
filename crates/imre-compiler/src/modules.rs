@@ -912,6 +912,8 @@ pub(crate) enum Intrinsic {
     TimeoutExpired,
     AccessMode(u8),
     Environ,
+    EnvironBytes,
+    BoolConstant(bool),
     GetEnv,
     GetCwd,
     Chdir,
@@ -2525,6 +2527,8 @@ impl IntrinsicModule {
                 Intrinsic::ObjectRuntimeExport("os.supports_effective_ids")
             }
             (Self::Os, "environ") => Intrinsic::Environ,
+            (Self::Os, "environb") if cfg!(unix) => Intrinsic::EnvironBytes,
+            (Self::Os, "supports_bytes_environ") => Intrinsic::BoolConstant(cfg!(unix)),
             (Self::Os, "getenv") => Intrinsic::GetEnv,
             (Self::Os, "getcwd") => Intrinsic::GetCwd,
             (Self::Os, "fspath") => Intrinsic::FsPath,
