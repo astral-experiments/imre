@@ -598,9 +598,10 @@ impl Launch {
         if close_fds {
             // SAFETY: the forked child owns its descriptor table.
             unsafe { self.descriptors.apply()? };
-            // SAFETY: this runs only after fork. No allocator or callback is used.
-            unsafe { pass_fds::inherit(&attributes.keep)? };
         }
+        // A false-valued pass_fds iterable on the fork path can still yield descriptors.
+        // SAFETY: this runs only after fork. No allocator or callback is used.
+        unsafe { pass_fds::inherit(&attributes.keep)? };
         let mut saved_error = None;
         let mut last_error = libc::ENOENT;
         let mut attempt = |executable| {

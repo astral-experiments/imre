@@ -108,6 +108,7 @@ fn launch(ctx: &mut Context, values: &[Id]) -> Result<Id> {
         errors,
         shell,
         start_new_session,
+        pass_fds,
     ] = values
     else {
         return Err(Error::new("TypeError", "invalid Popen launch operands"));
@@ -123,7 +124,8 @@ fn launch(ctx: &mut Context, values: &[Id]) -> Result<Id> {
     }
     let pipesize = ctx.as_int(pipesize)?;
     // A session argument can run Python during both spawn selection and fork conversion.
-    let handles = (executable != NONE || start_new_session != FALSE)
+    let default_fds = matches!(ctx.heap.get(pass_fds), Value::Tuple(fds) if fds.is_empty());
+    let handles = (executable != NONE || start_new_session != FALSE || !default_fds)
         .then(|| BoxedPopen::prepare_handles(&streams, &pipesize))
         .transpose()?;
     let shell = ctx.truth(shell)?;
@@ -186,10 +188,18 @@ fn launch(ctx: &mut Context, values: &[Id]) -> Result<Id> {
     };
     let close_fds_flag = handles.as_ref().map(|_| ctx.truth(close_fds)).transpose()?;
     let direct = match handles.as_ref().zip(close_fds_flag) {
-        Some((handles, close_fds)) => Some(
-            handles.uses_posix_spawn(probed_directory, cwd != NONE, close_fds, &streams)
-                && !ctx.truth(start_new_session)?,
-        ),
+        Some((handles, close_fds)) => {
+            // CPython tests pass_fds before cwd, redirected handles and session settings.
+            let passing_fds = !default_fds
+                && probed_directory
+                && (!close_fds || BoxedPopen::spawn_closes_fds())
+                && ctx.truth(pass_fds)?;
+            Some(
+                !passing_fds
+                    && handles.uses_posix_spawn(probed_directory, cwd != NONE, close_fds, &streams)
+                    && !ctx.truth(start_new_session)?,
+            )
+        }
         None => None,
     };
     // Fork snapshots environ before encoding the executable; posix_spawn packs it after argv.
@@ -214,6 +224,15 @@ fn launch(ctx: &mut Context, values: &[Id]) -> Result<Id> {
     } else {
         None
     };
+    let mut keep = Vec::new();
+    if !default_fds && direct != Some(true) {
+        let subprocess = ctx.module("subprocess")?;
+        let normalize = ctx.lookup_attr(subprocess, "_fork_fds")?;
+        let fds = ctx.call(normalize, vec![pass_fds], Vec::new())?;
+        for fd in ctx.items(fds)? {
+            BoxedPopen::push_pass_fd(&mut keep, &ctx.as_int(fd)?)?;
+        }
+    }
     let close_fds = match close_fds_flag {
         Some(value) => value,
         None => ctx.truth(close_fds)?,
@@ -249,6 +268,7 @@ fn launch(ctx: &mut Context, values: &[Id]) -> Result<Id> {
         ctx.as_int(bufsize)?,
         pipesize,
         new_session,
+        keep,
         &mut || {
             let result = (|| -> Result<()> {
                 let warnings = ctx.module("warnings")?;

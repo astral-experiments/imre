@@ -74,11 +74,15 @@ def _exec_search_path(env):
     return b":".join(fsencode(part) for part in path.split(":"))
 
 
+def _fork_fds(pass_fds):
+    return sorted(map(int, set(pass_fds)))
+
+
 class Popen:
     _handle = None
 
     def __init__(self, args, bufsize=-1, executable=None, stdin=None, stdout=None,
-                 stderr=None, *, close_fds=True, shell=False, cwd=None, env=None, restore_signals=True,
+                 stderr=None, *, close_fds=True, shell=False, cwd=None, env=None, restore_signals=True, pass_fds=(),
                  universal_newlines=None, encoding=None, errors=None, text=None, start_new_session=False, pipesize=-1):
         if bufsize is None:
             bufsize = -1
@@ -91,6 +95,10 @@ class Popen:
             pipesize = -1
         if not isinstance(pipesize, int):
             raise TypeError("pipesize must be an integer")
+        if pass_fds and not close_fds:
+            import warnings
+            warnings.warn("pass_fds overriding close_fds.", RuntimeWarning)
+            close_fds = True
         if (text is not None and universal_newlines is not None
                 and bool(text) != bool(universal_newlines)):
             raise SubprocessError("Cannot disambiguate when both text and universal_newlines "
@@ -111,7 +119,7 @@ class Popen:
         self._handle = _process.launch(args, executable, stdin, stdout, stderr, close_fds,
                                        restore_signals, cwd, env, bufsize, pipesize,
                                        encoding if self.text_mode else None,
-                                       errors if self.text_mode else None, shell, start_new_session)
+                                       errors if self.text_mode else None, shell, start_new_session, pass_fds)
         try:
             self.stdin = _process.pipe(self._handle, 0)
             self.stdout = _process.pipe(self._handle, 1)
