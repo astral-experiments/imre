@@ -2607,6 +2607,7 @@ impl IntrinsicModule {
                 Intrinsic::ObjectRuntimeExport("resource.RLIM_INFINITY")
             }
             (Self::Random, "shuffle") => Intrinsic::Random(crate::ir::RandomOperation::Shuffle),
+            (Self::Random, "choices") => Intrinsic::ObjectRuntimeExport("random.choices"),
             (Self::Random, "choice") => Intrinsic::RandomChoice { secure: false },
             (Self::Secrets, "choice") => Intrinsic::RandomChoice { secure: true },
             (Self::Random, "seed") => Intrinsic::Random(crate::ir::RandomOperation::Seed),
