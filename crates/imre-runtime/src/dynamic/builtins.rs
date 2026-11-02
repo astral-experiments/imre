@@ -1170,7 +1170,7 @@ fn reduce_builtin_method(ctx: &mut Context, method: Id) -> Result<Id> {
     };
     let name = match ctx.heap.get(callable) {
         Value::Native(symbol) => symbol.rsplit('.').next().unwrap(),
-        Value::HashMethod { name, .. } | Value::IoMethod { name, .. } => name,
+        Value::HeapTypeMethod { name, .. } | Value::IoMethod { name, .. } => name,
         Value::IoOpen { .. } => "open",
         _ => unreachable!("validated native callable"),
     }
