@@ -3362,21 +3362,31 @@ impl Context {
         })
     }
 
-    /// Union of set operands preserves mutable left-hand storage for augmented assignment.
-    fn set_union(&mut self, a: Id, b: Id, inplace: bool) -> Result<Id> {
-        let Value::Set { entries, frozen } = self.heap.get(a) else {
+    /// Apply a native binary operator to two set payloads without invoking subclass overrides.
+    pub(super) fn set_binary(
+        &mut self,
+        op: &str,
+        left: Id,
+        right: Id,
+        inplace: bool,
+    ) -> Result<Id> {
+        // Both union and self-intersection start from the left set's native table.
+        if op != "|" && !(op == "&" && left == right) {
+            return self.set_algebra(op, left, right, inplace);
+        }
+        let Value::Set { entries, frozen } = self.heap.get(left) else {
             unreachable!()
         };
         let result = if inplace && !frozen {
-            a
+            left
         } else {
             self.alloc(Value::Set {
                 entries: entries.try_clone()?,
                 frozen: *frozen,
             })
         };
-        if a != b {
-            builtins::update_set(self, result, b)?;
+        if left != right {
+            builtins::update_set(self, result, right)?;
         }
         Ok(result)
     }
@@ -3466,6 +3476,22 @@ impl Context {
             })
         };
         if op == "-" {
+            // For comparable sizes CPython probes the right set with each left key.
+            // Copy-and-discard reverses the equality callback, and is only used
+            // for a much larger left operand or for mutable difference updates.
+            if sets
+                && !mutate
+                && self.stored_entries(left).len() >> 2 <= self.stored_entries(right).len()
+            {
+                self.visit_set_operand(left, |ctx, key, hash| {
+                    ctx.heap.keep(key);
+                    if ctx.find_dictionary_key(right, key, hash)?.1.is_none() {
+                        ctx.set_dictionary_key(result, key, NONE, hash, false)?;
+                    }
+                    Ok(())
+                })?;
+                return Ok(result);
+            }
             if let Value::DictView {
                 dict,
                 kind: value::DictViewKind::Keys,
@@ -3742,11 +3768,7 @@ impl Context {
                     (self.heap.get(a), self.heap.get(b)),
                     (Value::Set { .. }, Value::Set { .. })
                 ) {
-                    return if op == "|" {
-                        self.set_union(a, b, inplace)
-                    } else {
-                        self.set_algebra(op, a, b, inplace)
-                    };
+                    return self.set_binary(op, a, b, inplace);
                 }
                 return Err(Error::new(
                     "TypeError",
@@ -4463,6 +4485,14 @@ impl Context {
             && let Some(result) = self.operator_slot(a, slot, b)?
         {
             return Ok(result);
+        }
+        // A mutable set's in-place slot runs before the right operand's reflected slot.
+        if matches!(op, "|" | "-" | "&")
+            && matches!(self.heap.get(a), Value::Set { frozen: false, .. })
+            && let right = self.scalar_value(b)
+            && matches!(self.heap.get(right), Value::Set { .. })
+        {
+            return self.set_binary(op, a, right, true);
         }
         if op == "+"
             && let Value::ByteArray(left) = self.heap.get(a)

@@ -1846,6 +1846,10 @@ impl Context {
                 builtins::BYTEARRAY_METHODS
             }
             "property" => property::METHODS,
+            "enum.IntEnum" | "enum.IntFlag" => {
+                self.builtin("int.__repr__");
+                &[]
+            }
             "memoryview" => builtins::MEMORYVIEW_METHODS,
             "bool" => &["__repr__"],
             "int" => {
@@ -1873,7 +1877,7 @@ impl Context {
             weakref::REFERENCE_TYPE => weakref::REFERENCE_METHODS,
             _ => &[],
         };
-        for method in methods {
+        for method in methods.iter().chain(builtins::set_operators(name)) {
             self.builtin(&format!("{name}.{method}"));
         }
         value

@@ -33,6 +33,12 @@ impl BuiltinDescriptor {
                 attr,
                 stdlib::os::scandir::ITER_METHODS,
             )),
+            Some(("set", attr)) if builtins::set_operators("set").contains(&attr) => {
+                Some(("set", attr, builtins::set_operators("set")))
+            }
+            Some(("frozenset", attr)) if builtins::set_operators("frozenset").contains(&attr) => {
+                Some(("frozenset", attr, builtins::set_operators("frozenset")))
+            }
             Some(("functools.KeyWrapper", attr)) => Some((
                 "functools.KeyWrapper",
                 attr,
@@ -255,6 +261,20 @@ impl BuiltinDescriptor {
         receiver: Option<Id>,
     ) -> Option<Id> {
         Some(match name {
+            "__doc__" | "__text_signature__"
+                if matches!(self.owner, "set" | "frozenset")
+                    && let Some(op) = builtins::set_operator(self.name) =>
+            {
+                if name == "__text_signature__" {
+                    ctx.text("($self, value, /)")
+                } else if self.name.starts_with("__r") {
+                    ctx.text(format!("Return value{op}self."))
+                } else if self.name.starts_with("__i") {
+                    ctx.text(format!("Return self{op}=value."))
+                } else {
+                    ctx.text(format!("Return self{op}value."))
+                }
+            }
             "__name__" => ctx.text(self.name),
             "__qualname__" => {
                 let owner = if self.method

@@ -445,7 +445,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         (
             "_imre_tempfile",
             "abspath" | "mkdir" | "cleanup_directory" | "random_name" | "default_directory"
-            | "open_named" | "finish_named" | "keep_named",
+            | "check_text_options" | "open_named" | "finish_named" | "keep_named",
         ) => ctx.builtin(&format!("{module}.{name}")),
         ("_locale", "getencoding") => ctx.builtin("_locale.getencoding"),
         ("_locale", "LC_ALL") => ctx.int(libc::LC_ALL.into()),
@@ -476,7 +476,8 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             | "cache_name"
             | "source_name"
             | "warn_debug_override"
-            | "warn_loader_deprecation",
+            | "warn_loader_deprecation"
+            | "warn_legacy_load",
         )
         | ("_imre_mock", "is_call_list" | "mark_call_list")
         | (
@@ -538,11 +539,9 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("typing", "TYPE_CHECKING") => FALSE,
         ("typing", "Union") | ("types", "UnionType") => super::union::class(ctx),
         ("typing", "Generic" | "Protocol") => super::typing::named_class(ctx, "typing", name),
-        (
-            "_collections_abc",
-            abc
-            @ ("Sized" | "Iterable" | "Container" | "Collection" | "Mapping" | "MutableMapping"),
-        ) => super::mapping_abc::class(ctx, abc)?,
+        ("_collections_abc", abc) if super::mapping_abc::bootstrapped(abc) => {
+            super::mapping_abc::class(ctx, abc)?
+        }
         ("_collections_abc", "_check_methods") => ctx.builtin("_collections_abc._check_methods"),
         ("_collections_abc", "Callable") => {
             super::typing::named_class(ctx, "collections.abc", "Callable")
@@ -1672,6 +1671,10 @@ pub(super) fn call(
                     .transpose()?;
                 let path = crate::objects::cache_paths::source_name(ctx.str_value(*path)?, prefix)?;
                 return Ok(ctx.text(path.to_string()));
+            }
+            ("warn_legacy_load", [], []) => {
+                ctx.warn_legacy_load()?;
+                return Ok(NONE);
             }
             ("warn_loader_deprecation", [globals, mismatch], []) => {
                 let (line, message) = if ctx.truth(*mismatch)? {

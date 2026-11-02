@@ -202,6 +202,9 @@ impl Context {
                 "__init_subclass__" => self.builtins.get("object.__init_subclass__").copied(),
                 _ => None,
             },
+            Value::Native(owner) if builtins::set_operators(owner).contains(&name) => {
+                self.builtins.get(&format!("{owner}.{name}")).copied()
+            }
             Value::Native(kind) if kind == "collections.defaultdict" => {
                 let owner = match name {
                     "__init__" | "__missing__" | "__repr__" | "copy" | "__copy__"
@@ -209,6 +212,12 @@ impl Context {
                     _ => "dict",
                 };
                 self.builtins.get(&format!("{owner}.{name}")).copied()
+            }
+            // ReprEnum keeps int.__repr__ for str(), independently of __repr__ on the enum.
+            Value::Native(kind)
+                if name == "__str__" && matches!(kind.as_str(), "enum.IntEnum" | "enum.IntFlag") =>
+            {
+                self.builtins.get("int.__repr__").copied()
             }
             Value::Native(kind) if builtins::is_enum_base(kind) => {
                 self.builtins.get(&format!("enum.Enum.{name}")).copied()
@@ -3157,6 +3166,9 @@ impl Context {
                 let method = self.builtin("dict.fromkeys");
                 return Ok(self.bind_native_classmethod(method, owner));
             }
+            Value::Native(ref owner) if builtins::set_operators(owner).contains(&name) => {
+                return Ok(self.builtin(&format!("{owner}.{name}")));
+            }
             Value::Native(ref class) if class == "set" && name == "copy" => {
                 return Ok(self.builtin("set.copy"));
             }
@@ -4589,9 +4601,12 @@ impl Context {
     fn owns_allocation(&self, base: Id) -> bool {
         match self.heap.get(base) {
             Value::Native(_) => true,
-            // Generic and Protocol inherit object.__new__ without native storage.
-            Value::Class { scope, .. } => {
+            // These bootstrapped classes inherit their allocator from the next base.
+            Value::Class { name, scope, .. } => {
+                let mapping_abc = super::mapping_abc::bootstrapped(name)
+                    && self.classes.get(&format!("collections.abc.{name}")) == Some(&base);
                 self.scope_data(*scope).class_cell.is_none()
+                    && !mapping_abc
                     && self.classes.get("typing.Generic") != Some(&base)
                     && self.classes.get("typing.Protocol") != Some(&base)
             }

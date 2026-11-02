@@ -1,16 +1,22 @@
 from io import BytesIO
 from importlib import resources
+from importlib.resources import contents, is_resource
+import warnings
 from importlib.resources.abc import ResourceReader, Traversable, TraversableResources, TraversalError
-import data
+import data.child
 
 
 class Loader:
+    def __init__(self, name, root):
+        self.name = name
+        self.root = root
+
     def get_resource_reader(self, name):
-        assert name == 'data'
+        assert name == self.name
         return self
 
     def files(self):
-        return sentinel
+        return self.root
 
 
 class Reader(TraversableResources):
@@ -52,6 +58,13 @@ assert target.is_file() and target.read_bytes() == b'hello\n'
 # The source loader owns the location even if the module changes its metadata.
 data.__file__ = 'wrong/__init__.py'
 assert resources.read_text('data', 'nested/message.txt') == 'hello\n'
+assert is_resource(data, 'nested', 'message.txt')
+assert not is_resource('data', 'nested') and not is_resource('data', 'absent')
+with warnings.catch_warnings(record=True) as caught:
+    warnings.simplefilter('always')
+    children = contents('data', 'nested')
+    assert len(caught) == 1 and caught[0].category is DeprecationWarning
+assert iter(children) is children and set(children) == {'message.txt'}
 assert resources.read_binary(data, 'nested', 'message.txt') == b'hello\n'
 assert resources.read_binary('data', 'nested/message.txt') == b'hello\n'
 with resources.path('data', 'nested', 'message.txt') as existing:
@@ -90,8 +103,14 @@ else:
 
 
 sentinel = object()
-data.__spec__.loader = Loader()
+data.__spec__.loader = Loader('data', sentinel)
+child_root = object()
+data.child.__spec__.loader = Loader('data.child', child_root)
 assert resources.files(data) is sentinel
+assert resources.files('data.child') is child_root
+assert data.child.call(resources.files) is child_root
+assert data.child.call(data.wrapper) is child_root
+assert data.child.call(data.regular) is sentinel
 
 
 data.__spec__.loader = LegacyReader()

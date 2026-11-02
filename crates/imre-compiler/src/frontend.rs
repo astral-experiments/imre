@@ -2564,7 +2564,13 @@ impl<'a> Checker<'a> {
         attribute: &ast::ExprAttribute,
         receiver: Option<Type>,
     ) -> Option<&'static str> {
+        let operation = matches!(
+            attribute.attr.as_str(),
+            "__and__" | "__rand__" | "__or__" | "__ror__" | "__sub__" | "__rsub__"
+        );
         let name = match attribute.attr.as_str() {
+            _ if operation => "set binary operator",
+            "__iand__" | "__ior__" | "__isub__" => "set in-place operator",
             "difference_update" => "set.difference_update",
             "update" => "set.update",
             "issubset" => "set.issubset",
@@ -2575,11 +2581,15 @@ impl<'a> Checker<'a> {
         {
             return Some(name);
         }
-        if attribute.attr.as_str() == "issubset"
+        if (operation || attribute.attr.as_str() == "issubset")
             && (receiver == Some(Type::FrozenStrings)
                 || self.unshadowed_builtin(&attribute.value, "frozenset"))
         {
-            return Some("frozenset.issubset");
+            return Some(if operation {
+                name
+            } else {
+                "frozenset.issubset"
+            });
         }
         None
     }

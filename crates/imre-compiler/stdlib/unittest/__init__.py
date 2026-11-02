@@ -1047,17 +1047,20 @@ class _MainRunner(TextTestResult):
         finally:
             self.stopTestRun()
 
+    def _setOption(self, flag: str) -> None:
+        if flag == "-v" or flag == "--verbose":
+            self.verbose = 2
+        elif flag == "-q" or flag == "--quiet":
+            self.verbose = 0
+        elif flag == "-f" or flag == "--failfast":
+            self.failfast = True
+        else:
+            print("unsupported unittest argument: " + flag, file=sys.stderr)
+            sys.exit(2)
+
     def _start(self) -> None:
         for flag in sys.argv[1:]:
-            if flag == "-v" or flag == "--verbose":
-                self.verbose = 2
-            elif flag == "-q" or flag == "--quiet":
-                self.verbose = 0
-            elif flag == "-f" or flag == "--failfast":
-                self.failfast = True
-            else:
-                print("unsupported unittest argument: " + flag, file=sys.stderr)
-                sys.exit(2)
+            self._setOption(flag)
 
     def _finish(self) -> None:
         self._report()

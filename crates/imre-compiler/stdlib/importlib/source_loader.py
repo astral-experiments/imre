@@ -1,6 +1,7 @@
 """Load Python modules from registered code or filesystem source."""
 
 import sys
+import _frozen_importlib as _bootstrap
 
 from _imre_importlib import (
     cache_name as _cache_name,
@@ -103,6 +104,16 @@ class SourceFileLoader:
     def __hash__(self):
         return hash(self.name) ^ hash(self.path)
 
+    def create_module(self, spec):
+        return None
+
+    def load_module(self, name=None, *args, **kwargs):
+        if name is None:
+            name = self.name
+        elif self.name != name:
+            raise ImportError(f"loader for {self.name} cannot handle {name}", name=name)
+        return _bootstrap._load_module_shim(self, name, *args, **kwargs)
+
     def get_filename(self, fullname=None):
         if fullname is not None and fullname != self.name:
             raise ImportError(f"loader for {self.name} cannot handle {fullname}", name=fullname)
@@ -152,4 +163,7 @@ class SourceFileLoader:
         return self.source_to_code(source, path)
 
     def exec_module(self, module):
-        exec(self.get_code(module.__name__), module.__dict__)
+        code = self.get_code(module.__name__)
+        if code is None:
+            raise ImportError(f"cannot load module {module.__name__!r} when get_code() returns None")
+        exec(code, module.__dict__)
