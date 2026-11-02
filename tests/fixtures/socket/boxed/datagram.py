@@ -1,4 +1,4 @@
-"""Exchange connected UDP datagrams and preserve socket type after close."""
+"""Exchange UDP datagrams and preserve socket type after close."""
 import errno
 import socket
 
@@ -7,6 +7,24 @@ def check(family, host):
     with socket.socket(family, socket.SOCK_DGRAM) as sender, socket.socket(family, socket.SOCK_DGRAM) as receiver:
         sender.bind((host, 0))
         receiver.bind((host, 0))
+        source = sender.getsockname()
+        target = receiver.getsockname()
+        assert sender.sendto(memoryview(b"first"), target) == 5
+        assert sender.sendto(b"", 0, target) == 0
+        assert sender.sendto(bytearray(b"discard"), target) == 7
+        assert sender.sendto(b"last", target) == 4
+        assert receiver.recvfrom(2) == (b"fi", source)
+        assert receiver.recvfrom(16) == (b"", source)
+        # A zero-size recvfrom consumes a datagram and still returns the sender.
+        assert receiver.recvfrom(0) == (b"", source)
+        assert receiver.recvfrom(16, 0) == (b"last", source)
+        receiver.setblocking(False)
+        try:
+            receiver.recvfrom(16)
+        except BlockingIOError:
+            pass
+        else:
+            raise AssertionError("recvfrom unexpectedly returned an empty packet")
         sender.connect(receiver.getsockname())
         receiver.connect(sender.getsockname())
         assert sender.type == receiver.type == socket.SOCK_DGRAM

@@ -224,6 +224,14 @@ fn pack_address(ctx: &mut Context, addr: &native::InternetAddress) -> Result<Id>
     Ok(ctx.alloc(Value::Tuple(fields)))
 }
 
+fn pack_socket_name(ctx: &mut Context, name: native::SocketName) -> Result<Id> {
+    match name {
+        native::SocketName::Internet(addr) => pack_address(ctx, &addr),
+        native::SocketName::UnnamedUnix => Ok(ctx.text("")),
+        native::SocketName::NoAddress => Ok(NONE),
+    }
+}
+
 fn address(
     ctx: &mut Context,
     family: i32,
@@ -923,8 +931,8 @@ pub(super) fn call(
     }
     let max = match method {
         "bind" | "connect" | "listen" | "setblocking" | "settimeout" | "shutdown" => 1,
-        "recv" | "send" | "sendall" => 2,
-        "setsockopt" | "__exit__" | "recv_into" => 3,
+        "recv" | "recvfrom" | "send" | "sendall" => 2,
+        "setsockopt" | "__exit__" | "recv_into" | "sendto" => 3,
         _ => 0,
     };
     check_args(method, args, kwargs, max, &[])?;
@@ -955,11 +963,7 @@ pub(super) fn call(
             return Ok(ctx.alloc(Value::Tuple(vec![child, peer])));
         }
         "getsockname" | "getpeername" => {
-            return match native::socket_name(&s, method == "getpeername")? {
-                native::SocketName::Internet(addr) => pack_address(ctx, &addr),
-                native::SocketName::UnnamedUnix => Ok(ctx.text("")),
-                native::SocketName::NoAddress => Ok(NONE),
-            };
+            return pack_socket_name(ctx, native::socket_name(&s, method == "getpeername")?);
         }
         "setblocking" => native::set_blocking_mode(&s, ctx.as_integer(argument(args, 0)?)? != 0)?,
         "gettimeout" => {
@@ -1021,6 +1025,54 @@ pub(super) fn call(
                 .get_mut(..n)
                 .ok_or_else(|| Error::new("ValueError", "buffer too small for requested bytes"))?;
             let count = native::recv_into(&s, target, flags)?;
+            return Ok(ctx.int(count as i64));
+        }
+        "recvfrom" => {
+            let n =
+                crate::signed_index(&ctx.index_integer(argument(args, 0)?)?).ok_or_else(|| {
+                    Error::new(
+                        "OverflowError",
+                        "Python int too large to convert to C ssize_t",
+                    )
+                })?;
+            let flags = args
+                .get(1)
+                .map(|&id| ctx.index_c_int(id))
+                .transpose()?
+                .unwrap_or(0);
+            let size = usize::try_from(n)
+                .map_err(|_| Error::new("ValueError", "negative buffersize in recvfrom"))?;
+            let (data, peer) = native::recv_from(&s, size, flags)?;
+            let data = ctx.alloc(Value::Bytes(data));
+            let peer = pack_socket_name(ctx, peer)?;
+            return Ok(ctx.alloc(Value::Tuple(vec![data, peer])));
+        }
+        "sendto" => {
+            let (data, flags, peer) = match *args {
+                [data, peer] => (data, None, peer),
+                [data, flags, peer] => (data, Some(flags), peer),
+                _ => {
+                    return Err(Error::new(
+                        "TypeError",
+                        format!("sendto() takes 2 or 3 arguments ({} given)", args.len()),
+                    ));
+                }
+            };
+            ctx.native_buffer_bytes(data)?;
+            let count = ctx.with_buffer_export(data, |ctx| {
+                let flags = flags
+                    .map(|id| ctx.index_c_int(id))
+                    .transpose()?
+                    .unwrap_or(0);
+                let addr = address(ctx, native::family(&s), peer, method)?;
+                super::audit::event(ctx, "socket.sendto", &[*receiver, peer])?;
+                Ok(native::send_to(
+                    &s,
+                    ctx.native_buffer_bytes(data)?,
+                    flags,
+                    &addr,
+                )?)
+            })?;
             return Ok(ctx.int(count as i64));
         }
         "recv" => {
