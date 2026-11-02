@@ -1777,6 +1777,16 @@ def report(text):
             "decoder = __import__(''.join(('co', 'decs'))).IncrementalDecoder\n"
             "print(decoder.__module__, decoder('replace').errors, decoder().getstate())",
         )
+        compare(
+            "-IB", "-c",
+            "import sys\n"
+            "print(2 | 4, 'typing' in sys.modules)\n"
+            "union = int\n"
+            "union |= str\n"
+            "union |= 'C'\n"
+            "reference = union.__args__[-1]\n"
+            "print(type(reference).__name__, reference.__forward_arg__)",
+        )
         compare("-IB", fixtures / "boxed_unittest_named_loader.py")
         compare("-IB", fixtures / "boxed_unittest_patch.py")
         call_args = fixtures / "unittest_mock_call_args.py"

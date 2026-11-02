@@ -94,20 +94,27 @@ fn accepts(ctx: &Context, id: Id) -> bool {
 pub(super) fn make(ctx: &mut Context, inputs: &[Id]) -> Result<Id> {
     let mut flattened = Vec::new();
     for &input in inputs {
-        if matches!(ctx.heap.get(input), Value::Instance { .. })
+        let input = if ctx.string_storage(input).is_some() {
+            // Use typing's shared syntax check and its real annotationlib.ForwardRef.
+            let mark = ctx.heap.temporary_mark();
+            let module = ctx.module("annotationlib")?;
+            let convert = ctx.lookup_attr(module, "_make_forward_ref")?;
+            let reference = ctx.call(convert, super::copy_ids(&[input])?, Vec::new())?;
+            // Later conversions, hashing and equality can trigger Python collection.
+            ctx.heap.release_temporaries_since(mark);
+            ctx.heap.keep(reference);
+            reference
+        } else if matches!(ctx.heap.get(input), Value::Instance { .. })
             && let Some(typing) = ctx.dict_named_item(ctx.modules, "typing")
             && let Value::Module { scope, .. } = *ctx.heap.get(typing)
             && let Some(check) = ctx.scope_name(scope, "_type_check")
         {
             let message = ctx.text("Union[arg, ...]: each arg must be a type.");
             ctx.call(check, vec![input, message], Vec::new())?;
-        }
-        if matches!(ctx.heap.get(input), Value::Str(_)) {
-            return Err(Error::new(
-                "NotImplementedError",
-                "string Union arguments require typing.ForwardRef",
-            ));
-        }
+            input
+        } else {
+            input
+        };
         let input = if input == NONE {
             ctx.builtin("NoneType")
         } else {
