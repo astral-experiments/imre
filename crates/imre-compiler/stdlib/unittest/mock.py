@@ -161,26 +161,36 @@ class _Node:
         self._history = []
         self._ancestors = []
 
+    def _reset_state(self, reset_return: bool, reset_effect: bool) -> None:
+        self.called = False
+        self.call_count = 0
+        self.call_args = None
+        self.call_args_list = _new_call_list()
+        # Children retain this private list to report subsequent ancestor calls.
+        while len(self._history):
+            self._history.pop()
+        if reset_effect:
+            self.side_effect = None
+        if reset_return:
+            self._result = -1
+
     def _reset(self, nodes: list[_Node], reset_return: bool, reset_effect: bool) -> None:
         pending: list[tuple[_Node, bool, bool]] = [(self, reset_return, reset_effect)]
         while len(pending):
             node, clear_return, clear_effect = pending.pop()
-            node.called = False
-            node.call_count = 0
-            node.call_args = None
-            node.call_args_list = _new_call_list()
-            # Children retain this private list to report subsequent ancestor calls.
-            while len(node._history):
-                node._history.pop()
-            if clear_effect:
-                node.side_effect = None
-            if clear_return:
-                node._result = -1
+            node._reset_state(clear_return, clear_effect)
             for name in node._children:
                 pending.append((nodes[node._children[name]], clear_return, clear_effect))
             if node._result != -1:
                 # A retained return value resets its calls, but keeps its configuration.
                 pending.append((nodes[node._result], False, False))
+
+
+def _check_child_name(name: str) -> None:
+    if (name.startswith("assert") or name.startswith("assret") or name.startswith("asert")
+            or name.startswith("aseert") or name.startswith("assrt")
+            or name in {"called_with", "called_once", "called_once_with", "any_call", "has_calls", "not_called"}):
+        raise AttributeError(f"{name!r} is not a valid assertion. Use a spec for the mock if {name!r} is meant to be an attribute.")
 
 
 class Mock:
@@ -198,10 +208,7 @@ class Mock:
         return result
 
     def _child(self, name: str) -> Mock:
-        if (name.startswith("assert") or name.startswith("assret") or name.startswith("asert")
-                or name.startswith("aseert") or name.startswith("assrt")
-                or name in {"called_with", "called_once", "called_once_with", "any_call", "has_calls", "not_called"}):
-            raise AttributeError(f"{name!r} is not a valid assertion. Use a spec for the mock if {name!r} is meant to be an attribute.")
+        _check_child_name(name)
         node = self._node
         if name not in node._children:
             index = len(self._nodes)

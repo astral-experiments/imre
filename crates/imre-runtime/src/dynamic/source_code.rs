@@ -19,6 +19,7 @@ pub(super) struct Program {
     class_attributes: Option<BTreeSet<String>>,
     class_cell: bool,
     class_nonlocal: bool,
+    has_named_bindings: bool,
     doc: Option<ruff_text_size::TextRange>,
     literals: HashMap<ruff_text_size::TextRange, Id>,
     pub(super) string_roots: Id,
@@ -185,6 +186,82 @@ fn synchronous_genexpr(genexpr: &ast::ExprGenerator) -> bool {
         }
     }
     true
+}
+
+/// Assignment expressions bind in the containing code unit, including unexecuted branches.
+#[derive(Default)]
+struct NamedBindings {
+    targets: Vec<(String, ruff_text_size::TextSize)>,
+    in_iterable: bool,
+    invalid_iterable: bool,
+}
+
+impl<'a> ast::visitor::Visitor<'a> for NamedBindings {
+    // Compound statements lower their nested suites in their own source order.
+    fn visit_body(&mut self, _body: &'a [ast::Stmt]) {}
+
+    fn visit_annotation(&mut self, _expr: &'a ast::Expr) {}
+
+    fn visit_expr(&mut self, expr: &'a ast::Expr) {
+        if let ast::Expr::Named(named) = expr
+            && let ast::Expr::Name(name) = named.target.as_ref()
+        {
+            if self.in_iterable {
+                self.invalid_iterable = true;
+            } else {
+                self.targets.push((name.id.to_string(), name.start()));
+            }
+        }
+        if !self.in_iterable
+            && let ast::Expr::Lambda(lambda) = expr
+        {
+            if let Some(params) = &lambda.parameters {
+                self.visit_parameters(params);
+            }
+            return;
+        }
+        stacker::maybe_grow(128 * 1024, 2 * 1024 * 1024, || {
+            ast::visitor::walk_expr(self, expr)
+        });
+    }
+
+    fn visit_comprehension(&mut self, clause: &'a ast::Comprehension) {
+        let previous = std::mem::replace(&mut self.in_iterable, true);
+        self.visit_expr(&clause.iter);
+        self.in_iterable = previous;
+        for test in &clause.ifs {
+            self.visit_expr(test);
+        }
+    }
+}
+
+impl NamedBindings {
+    fn declare(self, program: &mut Program) -> Result<()> {
+        if self.invalid_iterable {
+            return Err(Error::new(
+                "SyntaxError",
+                "assignment expression cannot be used in a comprehension iterable expression",
+            ));
+        }
+        for (name, offset) in self.targets {
+            if let Some((kind, directive)) = program.directives.get(&name) {
+                if offset < *directive {
+                    return Err(Error::new(
+                        "SyntaxError",
+                        format!(
+                            "name '{name}' is assigned to before {} declaration",
+                            kind.keyword()
+                        ),
+                    ));
+                }
+            }
+            if name == "__debug__" {
+                return Err(Error::new("SyntaxError", "cannot assign to __debug__"));
+            }
+            program.locals.insert(name);
+        }
+        Ok(())
+    }
 }
 
 /// CPython records self.X stores from code units immediately enclosed by a class.
@@ -936,7 +1013,7 @@ impl Program {
             } else {
                 "<genexpr>"
             };
-            let mut child = Self::new(self.filename.clone(), name);
+            let mut child = Self::new(self.filename.clone(), name, self.has_named_bindings);
             child.qualname =
                 Self::qualified_name(&self.qualname, self.class_attributes.is_some(), name);
             child.method_imports = self.method_imports.clone();
@@ -945,6 +1022,11 @@ impl Program {
             child.first_line = line_at(expr.start().to_usize());
             let params = match expr {
                 ast::Expr::Lambda(lambda) => {
+                    if self.has_named_bindings {
+                        let mut named = NamedBindings::default();
+                        named.visit_expr(&lambda.body);
+                        named.declare(&mut child)?;
+                    }
                     let params = lambda.parameters.clone().unwrap_or_default();
                     let line = child.first_line;
                     let end = match child.lower_suspension(*lambda.body.clone(), line, true)? {
@@ -1154,7 +1236,7 @@ impl Program {
         Ok(())
     }
 
-    fn new(filename: Rc<str>, name: &str) -> Self {
+    fn new(filename: Rc<str>, name: &str, has_named_bindings: bool) -> Self {
         Self {
             filename,
             name: name.to_owned(),
@@ -1162,6 +1244,7 @@ impl Program {
             class_attributes: None,
             class_cell: false,
             class_nonlocal: false,
+            has_named_bindings,
             doc: None,
             literals: HashMap::new(),
             string_roots: NONE,
@@ -1228,7 +1311,7 @@ impl Program {
             .private_names
             .as_ref()
             .map_or(name.as_str(), |p| p.definition(name));
-        let mut child = Self::new(self.filename.clone(), original);
+        let mut child = Self::new(self.filename.clone(), original, self.has_named_bindings);
         child.qualname =
             Self::qualified_name(&self.qualname, self.class_attributes.is_some(), original);
         child.method_imports = self.method_imports.clone();
@@ -1248,7 +1331,15 @@ impl Program {
         active: Option<&mut LoopJumps>,
     ) -> Result<()> {
         stacker::maybe_grow(128 * 1024, 2 * 1024 * 1024, || {
-            self.lower_suite(body, lines, function, active)
+            use ast::visitor::Visitor;
+            let mut named = NamedBindings::default();
+            if self.has_named_bindings {
+                for stmt in &body {
+                    named.visit_stmt(stmt);
+                }
+            }
+            self.lower_suite(body, lines, function, active)?;
+            named.declare(self)
         })
     }
 
@@ -1897,7 +1988,7 @@ impl Context {
         }
         let spellings = check_runtime_strings(&source, parsed.tokens())?;
         let lines = line_starts(source.match_indices('\n').map(|(offset, _)| offset + 1))?;
-        let mut code = Program::new(Rc::from(filename), "<module>");
+        let mut code = Program::new(Rc::from(filename), "<module>", source.contains(":="));
         code.interactive = interactive;
         code.method_imports = Rc::new(imre_ast::module_imports(&parsed.syntax().body));
         code.template_expressions = Rc::new(imre_ast::strings::template_expressions(
@@ -2265,7 +2356,8 @@ impl Context {
             return Err(Self::undefined_source_name(self.str_value(text)?, text));
         }
         let lines = line_starts(source.match_indices('\n').map(|(offset, _)| offset + 1))?;
-        let mut program = Program::new(Rc::from("<string>"), "<module>");
+        // Forward references use the caller's lookup namespace without compiling assignment targets.
+        let mut program = Program::new(Rc::from("<string>"), "<module>", false);
         program.template_expressions = Rc::new(imre_ast::strings::template_expressions(
             source,
             parsed.tokens(),
@@ -2479,6 +2571,7 @@ impl Context {
         let mut program = Program::new(
             self.str_value(code.filename)?.into(),
             self.str_value(code.name)?,
+            source.contains(":="),
         );
         program.method_imports = Rc::new(signature.method_imports);
         program.template_expressions = Rc::new(template_expressions);
@@ -3756,6 +3849,55 @@ impl Context {
         Ok(())
     }
 
+    fn join_source_format(&mut self, parts: Vec<Id>) -> Result<Id> {
+        // A lone field preserves the exact object returned by __format__.
+        if let [part] = parts.as_slice() {
+            return Ok(*part);
+        }
+        let empty = self.text("");
+        let items = self.alloc(Value::List(parts));
+        builtins::call(self, "str.join", &[empty, items], &[])
+    }
+
+    fn source_format_elements(
+        &mut self,
+        code: &Program,
+        scope: Id,
+        elements: &[ast::InterpolatedStringElement],
+        parts: &mut Vec<Id>,
+    ) -> Result<()> {
+        for element in elements {
+            let part = match element {
+                ast::InterpolatedStringElement::Literal(lit) if lit.value.is_empty() => continue,
+                ast::InterpolatedStringElement::Literal(lit) => self.text(&*lit.value),
+                ast::InterpolatedStringElement::Interpolation(field) => {
+                    if let Some(debug) = &field.debug_text {
+                        parts.push(self.text(debug.as_str()));
+                    }
+                    let mut value = self.source_expr(code, scope, &field.expression)?;
+                    let conversion = field.conversion.to_char().or_else(|| {
+                        (field.debug_text.is_some() && field.format_spec.is_none()).then_some('r')
+                    });
+                    if let Some(conversion) = conversion {
+                        value = builtins::format_conversion(self, value, conversion)?;
+                        self.heap.keep(value);
+                    }
+                    let spec = if let Some(spec) = &field.format_spec {
+                        let mut nested = Vec::new();
+                        self.source_format_elements(code, scope, &spec.elements, &mut nested)?;
+                        Some(self.join_source_format(nested)?)
+                    } else {
+                        None
+                    };
+                    builtins::format_value(self, value, spec)?
+                }
+            };
+            self.heap.keep(part);
+            parts.push(part);
+        }
+        Ok(())
+    }
+
     fn source_expr_inner(&mut self, code: &Program, scope: Id, expr: &ast::Expr) -> Result<Id> {
         use ast::Expr;
         let eval = |ctx: &mut Self, e: &Expr| ctx.source_expr(code, scope, e);
@@ -3796,7 +3938,36 @@ impl Context {
                 self.check_source_local(code, scope, name)?;
                 self.lookup(scope, name)
             }
+            Expr::Named(named) if code.has_named_bindings => {
+                let Expr::Name(name) = named.target.as_ref() else {
+                    return Err(unsupported("assignment expression target"));
+                };
+                let mark = self.heap.temporary_mark();
+                let value = eval(self, &named.value)?;
+                if self.store_source_name(scope, name.id.as_str(), value)?
+                    && self.heap.named_assignment(mark, value)
+                {
+                    self.collect_unreachable();
+                    self.heap.release_unbound_finalizers();
+                }
+                Ok(value)
+            }
             Expr::StringLiteral(_) | Expr::BytesLiteral(_) => Ok(code.literals[&expr.range()]),
+            Expr::FString(fstring) => {
+                let mut parts = Vec::new();
+                for part in fstring.value.iter() {
+                    match part {
+                        ast::FStringPartRef::Literal(lit) if !lit.value.is_empty() => {
+                            parts.push(self.text(&*lit.value));
+                        }
+                        ast::FStringPartRef::Literal(_) => {}
+                        ast::FStringPartRef::FString(part) => {
+                            self.source_format_elements(code, scope, &part.elements, &mut parts)?;
+                        }
+                    }
+                }
+                self.join_source_format(parts)
+            }
             Expr::TString(template) => {
                 let strings = code.literals[&expr.range()];
                 let mut interpolations = Vec::new();

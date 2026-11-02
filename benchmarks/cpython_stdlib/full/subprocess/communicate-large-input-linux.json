@@ -1,0 +1,118 @@
+{
+  "method": "test.test_subprocess.ProcessTestCase.test_communicate_timeout_large_input",
+  "ordinal": 131,
+  "discovered": 353,
+  "source": {
+    "cpython": "3.14.5",
+    "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+    "test_subprocess_sha256": "f616fdc01e845d6a74012db6e4bb64216a850bed9d74721b4bd3a5fd2cfd66a7",
+    "method_sha256": "9e8dba814868bdce9a6a3ee7aa9b612e86cb703a400c64ece6f15fc7682aa11f",
+    "imre_base": "922324dcc86ed7f313cc6eca7b6f4d3f2b599bca",
+    "base_host_popen_sha256": "7af31e920bff782638acb5518098a1be48960e5b6bf7e4104a6bf9a7ceb6cb85",
+    "tested_host_popen_sha256": "ad30a72039157b067bcc3c046a45d5106ac6266339db5de126f90d9a55796774",
+    "compiler_sha256": "17221ccbd04f1b0813130f326c00104687f83ec133d20bdf0d95966fd625c921",
+    "runtime_archive_sha256": "5b2d8fde18cb824164207a26e5b8892ef7123ec4d22032f0bfe792e178a04669"
+  },
+  "scope": "CPython ran the original method. The corrected host-driven-native adapter ran the original socket fixture on CPython and delegated Popen operations to an Imre actor. Both used a CPython child.",
+  "base_host_adapter": {
+    "O0": {
+      "status": "blocked",
+      "reason": "Unsupported: combined nonliteral timeout and communication input"
+    },
+    "O3": {
+      "status": "blocked",
+      "reason": "Unsupported: combined nonliteral timeout and communication input"
+    }
+  },
+  "base_typed_whole_method": {
+    "O0": {
+      "compile_exit": 0,
+      "root_exit": 1,
+      "child_starts": 0,
+      "diagnostic": "AttributeError: 'object' object has no attribute 'settimeout'",
+      "image_sha256": "3cc644e0d678f7ba7d5e385d8bc67ff8013f708e04741019ee2386cb320e030b"
+    },
+    "O3": {
+      "compile_exit": 0,
+      "root_exit": 1,
+      "child_starts": 0,
+      "diagnostic": "AttributeError: 'object' object has no attribute 'settimeout'",
+      "image_sha256": "ce17a91a0bd609a01a97db1819ef22368ade2d96a7e1e5f4a045a087524e26eb"
+    }
+  },
+  "shared_api_observations": {
+    "first_call": {
+      "timeout_seconds": 0.2,
+      "outcome": "TimeoutExpired",
+      "input_bytes": 131072,
+      "stdout": null,
+      "stderr": null
+    },
+    "retry": {
+      "input": null,
+      "timeout": null,
+      "outcome": "returned",
+      "stdout_bytes": 131072,
+      "stderr_bytes": 0
+    },
+    "input_and_echo_sha256": "15601535eca4a38b7e31ad6494861121cb9f84ccf55d4beb6a707d4f7a87813d",
+    "empty_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stdin_verification": "Matched the original x-byte input on both pipe endpoints by device and inode, counting writes in each communicate call."
+  },
+  "cpython_reference": {
+    "parent_pid": 39785,
+    "parent_image_sha256": "c27397da5541f67655be462e128ca3d3eb6e0a8eb0d39036896c9042529f4304",
+    "child_pid": 39788,
+    "child_image_sha256": "c27397da5541f67655be462e128ca3d3eb6e0a8eb0d39036896c9042529f4304",
+    "timeout_elapsed_ms": 200.899,
+    "stdin_written_before_timeout": 65536,
+    "stdin_written_on_retry": 65536,
+    "child_read_stdin_bytes": 131072,
+    "child_read_stdin_eof": true,
+    "direct_wait": {
+      "during": "retry",
+      "call": "waitpid",
+      "pid": 39788,
+      "raw_status": 0
+    },
+    "watchdog_final": "ECHILD"
+  },
+  "host_driven_native": {
+    "O0": {
+      "parent_pid": 40791,
+      "parent_image_sha256": "80c3a9296e98321c27025bfa818ea97b1bd58daf74625ca5a3be198574b5deaf",
+      "child_pid": 40792,
+      "child_image_sha256": "c27397da5541f67655be462e128ca3d3eb6e0a8eb0d39036896c9042529f4304",
+      "timeout_elapsed_ms": 200.553,
+      "stdin_written_before_timeout": 65536,
+      "stdin_written_on_retry": 65536,
+      "child_read_stdin_bytes": 131072,
+      "child_read_stdin_eof": true,
+      "direct_wait": {
+        "during": "retry",
+        "call": "waitpid",
+        "pid": 40792,
+        "raw_status": 0
+      },
+      "watchdog_final": "ECHILD"
+    },
+    "O3": {
+      "parent_pid": 40871,
+      "parent_image_sha256": "50b8794608a7f2807600cc2ab483793edc8ab9a4220b006e260b0024b121c696",
+      "child_pid": 40872,
+      "child_image_sha256": "c27397da5541f67655be462e128ca3d3eb6e0a8eb0d39036896c9042529f4304",
+      "timeout_elapsed_ms": 200.695,
+      "stdin_written_before_timeout": 65536,
+      "stdin_written_on_retry": 65536,
+      "child_read_stdin_bytes": 131072,
+      "child_read_stdin_eof": true,
+      "direct_wait": {
+        "during": "retry",
+        "call": "waitpid",
+        "pid": 40872,
+        "raw_status": 0
+      },
+      "watchdog_final": "ECHILD"
+    }
+  }
+}

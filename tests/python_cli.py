@@ -1330,6 +1330,15 @@ def main():
             "print(sys.flags.dont_write_bytecode)\nprint(sys.dont_write_bytecode)\n"
         )
         compare("-I", "-B", "-c", args_code, "--help", "--", "two words", "π")
+        scoped_import = (
+            "import sys\nif sys.argv[1] == 'match':\n"
+            "    import os as operating_system\n    from os import sep\n"
+            "    print(operating_system.sep == sep)\n"
+            "else:\n    try:\n        import _missing_scoped_import_test\n"
+            "    except ModuleNotFoundError as error:\n        print(error.name)\n"
+        )
+        compare("-I", "-c", scoped_import, "match", extra={"IMREFLAGS": "--bogus"})
+        compare("-I", "-c", scoped_import, "inverse", extra={"IMREFLAGS": "--bogus"})
         compare("-IBc" + flags_code)
         compare("-c", flags_code, extra={"PYTHONDONTWRITEBYTECODE": "1"})
         compare(
@@ -1714,7 +1723,7 @@ def report(text):
         for name in (
             "boxed_threading_deprecated_accessors.py",
             "boxed_lowlevel_thread.py", "boxed_lowlevel_thread_roots.py",
-            "boxed_thread_dangling.py", "boxed_threading_rlock.py",
+            "boxed_thread_dangling.py", "boxed_threading_rlock.py", "boxed_indirect_threading_rlock.py",
             "boxed_threading_condition_event.py",
         ):
             thread_fixture = fixtures / name
@@ -1795,6 +1804,7 @@ def report(text):
             "boxed_named_temporary_file.py",
             "boxed_tempfile_default_directory.py",
             "boxed_tempfile_mktemp.py",
+            "boxed_tempfile_wrapper.py",
             "boxed_random.py",
             "boxed_secrets.py",
             "boxed_pkgutil.py",
@@ -1835,6 +1845,7 @@ def report(text):
             "boxed_datetime.py",
             "boxed_timedelta_multiply.py",
             "boxed_timedelta_scale.py",
+            "boxed_timedelta_floordiv.py",
             "boxed_dataclasses.py",
             "boxed_make_dataclass.py",
             "boxed_dataclass_slots.py",
@@ -1850,6 +1861,7 @@ def report(text):
             "boxed_io_text_encoding.py",
             "boxed_io_protocols.py",
             "boxed_io_abc_registration.py",
+            "boxed_logging_handler_list.py",
             "boxed_selector_wide_fds.py",
             "boxed_select_selector.py",
             "boxed_pipe_flags.py",
@@ -1859,8 +1871,10 @@ def report(text):
             "boxed_os_stat.py",
             "boxed_os_terminal_size.py",
             "boxed_os_makedirs.py",
+            "boxed_os_walk.py",
             "boxed_select.py",
             "boxed_urlsplit.py",
+            "boxed_urllib_request.py",
             "boxed_unicodedata.py",
             "boxed_descriptors.py",
             "boxed_exception_repr.py",
@@ -1905,6 +1919,7 @@ def report(text):
             "boxed_unittest_assert_regex.py",
             "boxed_unittest_identity.py",
             "boxed_unittest_skip.py",
+            "boxed_unittest_seal.py",
             "boxed_frozenset.py",
             "boxed_attribute_deletion.py",
             "boxed_recursion.py",
@@ -1917,6 +1932,7 @@ def report(text):
             "boxed_weakref.py",
             "boxed_public_weakref.py",
             "boxed_gc_collect.py",
+            "boxed_gc_controls.py",
             "boxed_gc_finalizers.py",
             "boxed_weakref_subclass.py",
             "boxed_proxy_truth.py",
@@ -1972,7 +1988,9 @@ def report(text):
             "boxed_sequence_repeat.py",
             "boxed_sequence_order.py",
             "boxed_json_containers.py",
+            "boxed_json_decoder.py",
             "boxed_json_module_doc.py",
+            "boxed_json_quote.py",
             "boxed_deque.py",
             "boxed_deque_deep_equal.py",
             "boxed_deque_cycle_callbacks.py",
