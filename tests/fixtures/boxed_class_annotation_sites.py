@@ -107,6 +107,26 @@ def current():
     assert ns["Empty"].__annotations__ == {}
     assert ns["Strings"].__annotations__ == {"x": "Missing"}
 
+    class NewMeta(type):
+        def __new__(mcls, name, bases, namespace):
+            if name == "Unreached":
+                assert namespace["__annotations__"] == {}
+            return super().__new__(mcls, name, bases, namespace)
+
+    class CustomParent(metaclass=NewMeta):
+        def __annotate__(format):
+            return {"value": int}
+
+    class CustomChild(CustomParent):
+        pass
+
+    assert CustomParent.__annotations__ == {"value": int}
+    assert CustomChild.__annotate__ is None
+    assert CustomChild.__annotations__ == {}
+    ns = {"NewMeta": NewMeta}
+    exec("from __future__ import annotations\nclass Unreached(metaclass=NewMeta):\n if False: field: int", ns)
+    assert ns["Unreached"].__annotations__ == {}
+
     print("class annotation sites")
 
     from types import FunctionType
