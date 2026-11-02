@@ -1226,7 +1226,9 @@ def main() -> None:
                 if args.sanitize:
                     command.append("--sanitize")
                 # Optimizing these bundled-module integration cases can take several minutes.
-                slow_optimized = name in {"email_address_parsers", "record_warnings", "warn_named_helper", "zip_source_spec"}
+                slow_optimized = name in {
+                    "email_address_parsers", "filesystem_resources", "record_warnings", "warn_named_helper", "zip_source_spec",
+                }
                 timeout = 300 if slow_optimized and level > 0 else build_timeout
                 require_success(run(command, temporary, timeout=timeout))
                 result = run([str(executable)], temporary)
