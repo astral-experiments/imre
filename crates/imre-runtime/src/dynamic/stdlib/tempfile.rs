@@ -20,6 +20,7 @@ pub(in crate::dynamic) const METHODS: &[&str] = &[
     "write",
     "seek",
     "tell",
+    "truncate",
     "fileno",
     "flush",
     "close",
@@ -63,7 +64,9 @@ impl NamedCloser {
 
 impl Drop for NamedCloser {
     fn drop(&mut self) {
-        let _ = self.file.borrow_mut().close();
+        if !self.file.borrow().random_truncating() {
+            let _ = self.file.borrow_mut().close();
+        }
         let _ = self.unlink();
     }
 }
@@ -173,14 +176,18 @@ pub(super) fn path_operation(
                 ));
             };
             let mut closer = closer.borrow_mut();
-            let closed = closer.file.borrow_mut().close();
+            let closed = {
+                let mut file = closer.file.borrow_mut();
+                file.check_random_reentry()
+                    .and_then(|()| file.close().map_err(errno_error))
+            };
             if (exiting || closer.on_close)
                 && let Err(error) = closer.unlink()
             {
                 drop(closer);
                 return Err(ctx.with_errno_filename(errno_error(error).into(), name)?);
             }
-            closed.map_err(errno_error)?;
+            closed?;
             Ok(NONE)
         }
         ("random_name", []) => Ok(ctx.text(tempdirs::random_name().map_err(errno_error)?)),
@@ -338,12 +345,12 @@ pub(super) fn method(
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
     let receiver = argument(args, 0)?;
-    let Value::BufferedRandom(owner, _) = ctx.heap.get(receiver).clone() else {
+    let Value::BufferedRandom(owner, file_name) = ctx.heap.get(receiver).clone() else {
         return Err(Error::new("TypeError", "expected a buffered random file"));
     };
     let args = &args[1..];
     let arity = match name {
-        "read" => 0..=1,
+        "read" | "truncate" => 0..=1,
         "write" | "readinto" => 1..=1,
         "seek" => 1..=2,
         "__exit__" => 3..=3,
@@ -361,6 +368,12 @@ pub(super) fn method(
             _ => format!("unsupported arguments to BufferedRandom.{name}"),
         };
         return Err(Error::new("TypeError", message));
+    }
+    if matches!(
+        name,
+        "readline" | "truncate" | "flush" | "close" | "__exit__"
+    ) {
+        owner.borrow().check_random_reentry()?;
     }
     match name {
         "read" => {
@@ -389,6 +402,7 @@ pub(super) fn method(
             if file.closed() {
                 return Err(Error::new("ValueError", "readinto of closed file"));
             }
+            file.check_random_reentry()?;
             let count = file.read_into(bytes)?;
             Ok(ctx.int(count as i64))
         }
@@ -398,28 +412,43 @@ pub(super) fn method(
         }
         "write" => {
             let bytes = ctx.bytes_like(args[0])?;
-            owner.borrow_mut().write_bytes(bytes)?;
+            let mut file = owner.borrow_mut();
+            file.check_random_reentry()?;
+            file.write_bytes(bytes)?;
             let length = crate::Int::from_usize(bytes.len());
             Ok(ctx.alloc(Value::Int(length)))
         }
         "seek" => {
+            let whence = super::files::buffered_whence(ctx, args.get(1).copied())?;
             let offset = ctx.index_integer(args[0])?;
-            let whence = if let Some(&value) = args.get(1) {
-                ctx.index_integer(value)?
-                    .to_i64()
-                    .and_then(|n| i32::try_from(n).ok())
-                    .ok_or_else(|| {
-                        Error::new("OverflowError", "Python int too large to convert to C int")
-                    })?
-            } else {
-                0
-            };
             let position = owner.borrow_mut().seek_disk(&offset, i64::from(whence))?;
             Ok(ctx.int(position as i64))
         }
         "readable" | "writable" | "seekable" | "isatty" => {
             owner.borrow().fileno()?;
             Ok(crate::dynamic::builtins::boolean(name != "isatty"))
+        }
+        "truncate" => {
+            let supplied = args.first().copied().filter(|&id| id != NONE);
+            let busy = supplied
+                .filter(|&id| !matches!(ctx.heap.get(id), Value::Int(_) | Value::Bool(_)))
+                .map(|_| ctx.repr(file_name));
+            owner.borrow_mut().begin_random_truncate(busy)?;
+            let requested: Result<(i64, Id)> = (|| {
+                if let Some(id) = supplied {
+                    let size = ctx.index_integer(id)?.to_i64().ok_or_else(|| {
+                        Error::new("OverflowError", "Python int too large to convert to C long")
+                    })?;
+                    Ok((size, id))
+                } else {
+                    let size = owner.borrow_mut().tell()? as i64;
+                    Ok((size, ctx.int(size)))
+                }
+            })();
+            owner
+                .borrow_mut()
+                .finish_random_truncate(requested.as_ref().ok().map(|&(size, _)| size))?;
+            requested.map(|(_, original)| original)
         }
         "tell" => Ok(ctx.int(owner.borrow_mut().tell()? as i64)),
         "fileno" => Ok(ctx.int(i64::from(owner.borrow().fileno()?))),
