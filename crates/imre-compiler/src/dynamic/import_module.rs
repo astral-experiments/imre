@@ -3,6 +3,9 @@ use crate::modules::{Binding, Intrinsic, IntrinsicModule, SourceGraph};
 
 /// Prefer boxed module implementations over the common bundled sources.
 pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
+    if let Some(source) = asyncio_source(name) {
+        return Some(source);
+    }
     match name {
         "reprlib" => Some(("reprlib.py", include_str!("../../stdlib/reprlib.py"))),
         "datetime" => Some(("datetime.py", include_str!("../../stdlib/datetime.py"))),
@@ -303,6 +306,59 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
             })))
         }
         _ => crate::modules::bundled_runtime_source(name),
+    }
+}
+
+/// CPython 3.14.5 sources for asyncio and its concurrent.futures dependency.
+fn asyncio_source(name: &str) -> Option<(&'static str, &'static str)> {
+    macro_rules! source {
+        ($file:literal) => {
+            Some(($file, include_str!(concat!("../../stdlib/", $file))))
+        };
+    }
+    match name {
+        "asyncio" => source!("asyncio/__init__.py"),
+        "asyncio.__main__" => source!("asyncio/__main__.py"),
+        "asyncio.base_events" => source!("asyncio/base_events.py"),
+        "asyncio.base_futures" => source!("asyncio/base_futures.py"),
+        "asyncio.base_subprocess" => source!("asyncio/base_subprocess.py"),
+        "asyncio.base_tasks" => source!("asyncio/base_tasks.py"),
+        "asyncio.constants" => source!("asyncio/constants.py"),
+        "asyncio.coroutines" => source!("asyncio/coroutines.py"),
+        "asyncio.events" => source!("asyncio/events.py"),
+        "asyncio.exceptions" => source!("asyncio/exceptions.py"),
+        "asyncio.format_helpers" => source!("asyncio/format_helpers.py"),
+        "asyncio.futures" => source!("asyncio/futures.py"),
+        "asyncio.graph" => source!("asyncio/graph.py"),
+        "asyncio.locks" => source!("asyncio/locks.py"),
+        "asyncio.log" => source!("asyncio/log.py"),
+        "asyncio.mixins" => source!("asyncio/mixins.py"),
+        "asyncio.proactor_events" => source!("asyncio/proactor_events.py"),
+        "asyncio.protocols" => source!("asyncio/protocols.py"),
+        "asyncio.queues" => source!("asyncio/queues.py"),
+        "asyncio.runners" => source!("asyncio/runners.py"),
+        "asyncio.selector_events" => source!("asyncio/selector_events.py"),
+        "asyncio.sslproto" => source!("asyncio/sslproto.py"),
+        "asyncio.staggered" => source!("asyncio/staggered.py"),
+        "asyncio.streams" => source!("asyncio/streams.py"),
+        "asyncio.subprocess" => source!("asyncio/subprocess.py"),
+        "asyncio.taskgroups" => source!("asyncio/taskgroups.py"),
+        "asyncio.tasks" => source!("asyncio/tasks.py"),
+        "asyncio.threads" => source!("asyncio/threads.py"),
+        "asyncio.timeouts" => source!("asyncio/timeouts.py"),
+        "asyncio.tools" => source!("asyncio/tools.py"),
+        "asyncio.transports" => source!("asyncio/transports.py"),
+        "asyncio.trsock" => source!("asyncio/trsock.py"),
+        "asyncio.unix_events" => source!("asyncio/unix_events.py"),
+        "asyncio.windows_events" => source!("asyncio/windows_events.py"),
+        "asyncio.windows_utils" => source!("asyncio/windows_utils.py"),
+        "concurrent" => source!("concurrent/__init__.py"),
+        "concurrent.futures" => source!("concurrent/futures/__init__.py"),
+        "concurrent.futures._base" => source!("concurrent/futures/_base.py"),
+        "concurrent.futures.interpreter" => source!("concurrent/futures/interpreter.py"),
+        "concurrent.futures.process" => source!("concurrent/futures/process.py"),
+        "concurrent.futures.thread" => source!("concurrent/futures/thread.py"),
+        _ => None,
     }
 }
 
