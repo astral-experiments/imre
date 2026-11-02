@@ -97,6 +97,29 @@ REJECTED = {
         "main.py": "from helper import bad\nprint(bad())\n",
         "helper.py": "from traceback import format_exc\ndef bad() -> int:\n    return 'wrong'\n",
     }, "expected int, got str"),
+    "contextmanager_wrong_generator_return": ({
+        "main.py": "import helper\nimport sys\nsys.exit(0)\n",
+        "helper.py": (
+            "import collections.abc\nfrom contextlib import contextmanager\n"
+            "@contextmanager\ndef values() -> collections.abc.Generator[int, None, int]:\n"
+            "    yield 1\n    return 'wrong'\n"
+        ),
+    }, 'expected `int`, found `Literal["wrong"]`'),
+    "contextmanager_generator_missing_return": ({
+        "main.py": "import helper\nimport sys\nsys.exit(0)\n",
+        "helper.py": (
+            "from collections.abc import Generator\nfrom contextlib import contextmanager\n"
+            "@contextmanager\ndef values() -> Generator[int, None, int]:\n    yield 1\n"
+        ),
+    }, "always implicitly returns `None`"),
+    "contextmanager_generator_can_fall_through": ({
+        "main.py": "import helper\nimport sys\nsys.exit(0)\n",
+        "helper.py": (
+            "from collections.abc import Generator as Gen\nfrom contextlib import contextmanager as cm\n"
+            "@cm\ndef values(flag: bool) -> Gen[int, None, int]:\n"
+            "    yield 1\n    if flag:\n        return 2\n"
+        ),
+    }, "can implicitly return `None`"),
     "live_traceback_and_invalid_return": ({
         "main.py": "from helper import bad, render\nprint(render())\nprint(bad())\n",
         "helper.py": "import traceback as tb\ndef render():\n    return tb.format_exc()\ndef bad() -> int:\n    return 'wrong'\n",
@@ -234,6 +257,21 @@ ACCEPTED = {
             "def initialize():\n    print('initialized')\n    return [41]\n"
             "if t.TYPE_CHECKING:\n    from unavailable_at_runtime import token\n"
             "else:\n    token = initialize()\n"
+        ),
+    },
+    "contextmanager_generator_annotation": {
+        "helper.py": (
+            "from contextlib import contextmanager as manager\n"
+            "@manager\ndef values(value: int) -> str:\n"
+            "    yield str(value)\n    return 'done'\n"
+        ),
+        "main.py": (
+            "import sys\nfrom helper import values\n"
+            "raw = sys.modules[values.__module__].values.__wrapped__\n"
+            "assert raw.__annotations__ == {'value': int, 'return': str}\n"
+            "with values(3) as value:\n    print(value)\n"
+            "generator = raw(4)\nprint(next(generator))\n"
+            "try:\n    next(generator)\nexcept StopIteration as exc:\n    print(exc.value)\n"
         ),
     },
     "weak_method_export": {
