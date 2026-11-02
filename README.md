@@ -208,6 +208,10 @@ cargo build --workspace --release --locked
 ./target/release/imre --version
 ```
 
+Imre defaults to native optimization level 3. Set `IMRE_DEFAULT_NATIVE_OPT_LEVEL`
+to 0, 1, 2, or 3 when building the compiler to choose a different default.
+The compiled-in default also applies to isolated Python invocations (`-I`).
+
 ## Getting started
 
 Given `totals.py`:
