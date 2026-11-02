@@ -49,6 +49,29 @@ REJECTED = {
             "with patch.object(Owner, 'value', replacement('wrong')):\n    pass\n"
         ),
     }, "expected int, got str"),
+    "unused_chdir_preserves_checked_calls": ({
+        "main.py": "from os import chdir\ndef path(n: int) -> int:\n    return n\npath('wrong')\n",
+    }, "expected int, got str"),
+    "posix_chdir_checks_path": ({
+        "main.py": "from posix import chdir as cd\ndef path(n: int) -> int:\n    return n\ncd(path=path('wrong'))\n",
+    }, "expected int, got str"),
+    "captured_chdir_keeps_callback_checks": ({
+        "main.py": (
+            "from os import chdir\ndef path(n: int) -> int:\n    return n\n"
+            "move = chdir\nmove('.')\npath('wrong')\n"
+        ),
+    }, "invalid-argument-type"),
+    "captured_chdir_preserves_callable_parameter": ({
+        "main.py": (
+            "from os import chdir\nfrom typing import Callable\n"
+            "def invoke(cb: Callable[[int], int]) -> int:\n"
+            "    move = chdir\n    move('.')\n    return cb('wrong')\n"
+            "def identity(n: int) -> int:\n    return n\nprint(invoke(identity))\n"
+        ),
+    }, "invalid-argument-type"),
+    "chdir_keeps_subsequent_checks": ({
+        "main.py": "import os\ndef path(n: int) -> int:\n    return n\nos.chdir('.')\npath('wrong')\n",
+    }, "expected int, got str"),
     "unused_struct_keeps_return_checks": ({
         "main.py": "from struct import Struct as Format\ndef wrong() -> int:\n    return 'bad'\nwrong()\n",
     }, "expected int, got str"),
