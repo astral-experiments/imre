@@ -435,6 +435,7 @@ pub(crate) enum IntrinsicModule {
     Enum,
     Zlib,
     Json,
+    JsonNative,
     JsonEncoder,
     JsonDecoder,
     Imre,
@@ -911,6 +912,7 @@ impl IntrinsicModule {
             "enum" => Some(Self::Enum),
             "zlib" => Some(Self::Zlib),
             "json" => Some(Self::Json),
+            "_json" => Some(Self::JsonNative),
             "json.encoder" => Some(Self::JsonEncoder),
             "json.decoder" => Some(Self::JsonDecoder),
             "imre" => Some(Self::Imre),
@@ -1806,6 +1808,12 @@ impl IntrinsicModule {
             (Self::Zlib, "adler32") => Intrinsic::Adler32,
             (Self::Zlib, "crc32") => Intrinsic::ObjectRuntimeExport("zlib.crc32"),
             (Self::ImreJson, "decode") => Intrinsic::JsonDecode,
+            (Self::JsonNative, "encode_basestring") => {
+                Intrinsic::ObjectRuntimeExport("_json.encode_basestring")
+            }
+            (Self::JsonNative, "encode_basestring_ascii") => {
+                Intrinsic::ObjectRuntimeExport("_json.encode_basestring_ascii")
+            }
             (Self::Json, "loads") => Intrinsic::JsonLoads,
             (Self::Json | Self::JsonDecoder, "JSONDecoder") => Intrinsic::JsonDecoderClass,
             (Self::Json | Self::JsonEncoder, "JSONEncoder") => Intrinsic::JsonEncoderClass,

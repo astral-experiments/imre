@@ -78,6 +78,17 @@ struct Output {
 }
 
 impl Output {
+    fn quote(&mut self, value: &Value, ascii: bool) -> Result<()> {
+        match value {
+            Value::Str(text) => write_json_string(&mut self.text, text, ascii)?,
+            Value::SurrogateStr(points) => {
+                write_json_codepoints(&mut self.text, &mut self.surrogates, points, ascii)?;
+            }
+            _ => unreachable!("validated string storage"),
+        }
+        Ok(())
+    }
+
     fn finish(self, ctx: &mut Context) -> Result<Id> {
         if self.surrogates.is_empty() {
             return Ok(ctx.text(self.text));
@@ -100,6 +111,38 @@ impl Output {
         points.extend(self.text[previous..].chars().map(u32::from));
         Ok(ctx.alloc(Value::SurrogateStr(points)))
     }
+}
+
+/// Quote a Python string with the native JSON encoder's escaping rules.
+pub(super) fn encode_basestring(
+    ctx: &mut Context,
+    name: &str,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Id> {
+    if !kwargs.is_empty() {
+        return Err(Error::new(
+            "TypeError",
+            format!("{name}() takes no keyword arguments"),
+        ));
+    }
+    let [input] = args else {
+        return Err(Error::new(
+            "TypeError",
+            format!("{name}() takes exactly one argument ({} given)", args.len()),
+        ));
+    };
+    let storage = ctx.string_storage(*input).ok_or_else(|| {
+        let name = ctx.type_name(*input);
+        let name = &name[..name.floor_char_boundary(80)];
+        Error::new("TypeError", format!("first argument must be a string, not {name}"))
+    })?;
+    let mut output = Output::default();
+    output.quote(
+        ctx.heap.get(storage),
+        name == "_json.encode_basestring_ascii",
+    )?;
+    output.finish(ctx)
 }
 
 struct Encoder {
@@ -241,13 +284,9 @@ impl Encoder {
                 &mut self.output.text,
                 &float_text(ctx, id, *value, self.allow_nan)?,
             )?,
-            Value::Str(value) => write_json_string(&mut self.output.text, value, self.ascii)?,
-            Value::SurrogateStr(points) => write_json_codepoints(
-                &mut self.output.text,
-                &mut self.output.surrogates,
-                points,
-                self.ascii,
-            )?,
+            value @ (Value::Str(_) | Value::SurrogateStr(_)) => {
+                self.output.quote(value, self.ascii)?
+            }
             _ => {
                 if self.active.len() >= 512 {
                     return Err(Error::new(

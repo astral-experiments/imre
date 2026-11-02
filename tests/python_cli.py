@@ -1922,6 +1922,7 @@ def report(text):
             "boxed_sequence_order.py",
             "boxed_json_containers.py",
             "boxed_json_module_doc.py",
+            "boxed_json_quote.py",
             "boxed_deque.py",
             "boxed_deque_deep_equal.py",
             "boxed_deque_cycle_callbacks.py",
