@@ -6443,6 +6443,14 @@ impl Context {
             frame.class_namespace.get_or_insert_with(Default::default).annotation_scratch = Some(annotations);
         }
         self.execute(code, scope, FrameOwner::Function(body))?;
+        if (bindings.needs_class_cell || self.scope_name(scope, "__classcell__").is_some())
+            && self.namedtuple_base(&bases).is_some()
+        {
+            return Err(Error::new(
+                "TypeError",
+                "uses of super() and __class__ are unsupported in methods of NamedTuple subclasses",
+            ));
+        }
         if let Some(names) = bindings.static_attributes {
             let names = names.iter().map(|name| self.heap.code_name(name)).collect();
             let attrs = self.alloc(Value::Tuple(names));
