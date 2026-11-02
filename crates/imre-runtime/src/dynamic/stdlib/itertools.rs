@@ -441,25 +441,64 @@ pub(super) fn count(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> 
     let step = step.unwrap_or_else(|| ctx.int(1));
     number(ctx, current)?;
     number(ctx, step)?;
-    if !matches!(ctx.heap.get(current), Value::Int(_))
-        && machine_integer(ctx, step) == Some(1)
-        && let Some(start) = machine_integer(ctx, current)
+    let fast = if machine_integer(ctx, step) == Some(1)
+        && let Some(n) = machine_integer(ctx, current).and_then(|n| isize::try_from(n).ok())
     {
-        current = ctx.int(start);
-    }
-    Ok(ctx.alloc(Value::Count { current, step }))
+        // CPython produces an exact int from its machine counter. A cached
+        // small int has the same identity as the original exact argument.
+        if !matches!(ctx.heap.get(current), Value::Int(_)) || !(-5..=256).contains(&n) {
+            current = ctx.int(n as i64);
+        }
+        true
+    } else {
+        false
+    };
+    Ok(ctx.alloc(Value::Count {
+        current,
+        step,
+        fast,
+    }))
 }
 
-/// Commit the next value only after the shared numeric progression succeeds.
+/// Advance unit integer strides directly. Slow Python addition may reenter this cursor.
 pub(in crate::dynamic) fn advance(ctx: &mut Context, id: Id) -> Result<Id> {
-    let Value::Count { current, step } = *ctx.heap.get(id) else {
+    let Value::Count {
+        current,
+        step,
+        fast,
+    } = *ctx.heap.get(id)
+    else {
         unreachable!("count cursor")
     };
-    let following = ctx.binary("+", current, step)?;
-    let Value::Count { current, .. } = ctx.heap.get_mut(id) else {
+    let position = fast.then(|| machine_integer(ctx, current).expect("machine position"));
+    let (item, following, fast) = if let Some(n) = position
+        && n < isize::MAX as i64
+    {
+        (current, ctx.int(n + 1), true)
+    } else {
+        // CPython materializes maxsize when it first attempts the slow addition.
+        // A failing callback may inspect that argument again on a subsequent attempt.
+        let item = if fast {
+            ctx.int(isize::MAX as i64)
+        } else {
+            current
+        };
+        // A nested next() can replace the cursor's reference to the value we owe.
+        ctx.heap.reserve_temporaries(1)?;
+        ctx.heap.keep(item);
+        (item, ctx.binary("+", item, step)?, false)
+    };
+    let Value::Count {
+        current: slot,
+        fast: mode,
+        ..
+    } = ctx.heap.get_mut(id)
+    else {
         unreachable!("count cursor")
     };
-    Ok(std::mem::replace(current, following))
+    *slot = following;
+    *mode = fast;
+    Ok(item)
 }
 
 pub(super) fn method(
