@@ -515,6 +515,7 @@ pub(crate) fn exception_kind(name: &str) -> Option<u32> {
         "Warning" => return Some(80),
         "RuntimeWarning" => return Some(81),
         "DeprecationWarning" => return Some(82),
+        "EncodingWarning" => return Some(83),
         _ => {}
     }
     if name == "ImportError" {
