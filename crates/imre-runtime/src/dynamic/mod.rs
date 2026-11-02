@@ -2125,6 +2125,7 @@ impl Context {
             ],
             "dict" => builtins::DICT_METHODS,
             "function" => &["__call__"],
+            "builtin_function_or_method" => &["__reduce__"],
             defaultdict::CLASS => {
                 self.builtin("dict");
                 defaultdict::METHODS

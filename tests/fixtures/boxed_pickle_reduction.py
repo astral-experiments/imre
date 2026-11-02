@@ -278,6 +278,38 @@ class Outer:
             pass
 
 
+def check_bound_builtin(protocol):
+    import io
+
+    mapping = {"answer": 42}
+    getitem = mapping.__getitem__
+    assert getitem.__reduce__() == (getattr, (mapping, "__getitem__"))
+    assert getitem.__reduce_ex__(protocol) == getitem.__reduce__()
+    assert len.__reduce__() == "len"
+    assert dict.__new__.__reduce__() == (getattr, (dict, "__new__"))
+    assert pickle.loads(pickle.dumps(dict.__new__, protocol)) is dict.__new__
+    # Restoring the receiver can itself restore a reference to the same bound method.
+    mapping["lookup"] = getitem
+    value = (getitem, mapping, getitem)
+
+    def check(restored):
+        call, owner, alias = restored
+        assert call is alias is owner["lookup"]
+        assert call.__self__ is owner and call("answer") == 42
+
+    check(pickle.loads(pickle.dumps(value, protocol)))
+    stream = io.BytesIO()
+    pickle.Pickler(stream, protocol).dump(value)
+    check(pickle.loads(stream.getvalue()))
+
+    method_type = type(getitem)
+    copyreg.pickle(method_type, registered_reducer)
+    try:
+        assert pickle.loads(pickle.dumps(getitem, protocol)) == "registered"
+    finally:
+        del copyreg.dispatch_table[method_type]
+
+
 def check_global_names(protocol):
     import _operator
     import operator
@@ -353,6 +385,7 @@ def produce():
     assert _codecs.encode is codecs.encode and codecs.encode.__module__ == "_codecs"
     for protocol in range(pickle.HIGHEST_PROTOCOL + 1):
         check_global_names(protocol)
+        check_bound_builtin(protocol)
         check_registered_reducer(protocol)
         check_reduction_state(protocol)
         check_floats(protocol)
