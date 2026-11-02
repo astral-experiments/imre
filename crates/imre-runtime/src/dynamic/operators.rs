@@ -312,9 +312,9 @@ impl Context {
 
     /// Convert an index to the signed C long used by Python's native argument parser.
     pub(super) fn index_c_long(&mut self, value: Id) -> Result<i64> {
-        self.index_integer(value)?.to_i64().ok_or_else(|| {
-            Error::new("OverflowError", "Python int too large to convert to C long")
-        })
+        self.index_integer(value)?
+            .to_i64()
+            .ok_or_else(|| Error::new("OverflowError", "Python int too large to convert to C long"))
     }
 
     /// Convert an index to the signed C int used by Python's native argument parser.
