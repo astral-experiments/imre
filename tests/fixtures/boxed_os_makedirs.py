@@ -1,11 +1,16 @@
 def current():
     import os
+    import posix
     import shutil
     import tempfile
 
     root = tempfile.mkdtemp()
+    previous = os.umask(0o027)
     try:
+        assert os.umask is posix.umask
+        assert posix.umask(0o027) == 0o027
         os.mkdir(root + '/default')
+        assert os.stat(root + '/default').st_mode & 0o777 == 0o750
         os.mkdir(root + '/leaf-mode', 0o700)
         name = os.fsencode(root) + b'/parent/leaf'
         assert os.path.split(name) == (os.fsencode(root) + b'/parent', b'leaf')
@@ -20,5 +25,6 @@ def current():
         else:
             raise AssertionError('existing directory accepted')
     finally:
+        os.umask(previous)
         shutil.rmtree(root)
     print('makedirs')
