@@ -17,15 +17,21 @@ pub(in crate::dynamic) fn install_capabilities(
     for (capability, functions) in [
         (
             "supports_dir_fd",
-            &["chmod", "lstat", "mkdir", "open", "rmdir", "stat", "unlink"][..],
+            &[
+                "chmod", "lstat", "mkdir", "open", "rmdir", "stat", "unlink", "utime",
+            ][..],
         ),
-        ("supports_fd", &["chmod", "listdir", "scandir", "stat"][..]),
+        (
+            "supports_fd",
+            &["chmod", "listdir", "scandir", "stat", "utime"][..],
+        ),
         (
             "supports_follow_symlinks",
             &[
                 #[cfg(target_os = "macos")]
                 "chmod",
                 "stat",
+                "utime",
             ][..],
         ),
         ("supports_effective_ids", &[][..]),
@@ -315,6 +321,7 @@ pub(super) fn change_environment(
 
 mod chmod;
 mod unlink;
+mod utime;
 
 /// POSIX functions exported as the same builtins by both os and posix.
 pub(super) fn is_descriptor_function(name: &str) -> bool {
@@ -327,6 +334,7 @@ pub(super) fn is_descriptor_function(name: &str) -> bool {
             | "rmdir"
             | "mkdir"
             | "chmod"
+            | "utime"
             | "dup"
             | "dup2"
             | "isatty"
@@ -488,6 +496,9 @@ pub(super) fn descriptor(
     }
     if matches!(name, "remove" | "unlink" | "rmdir") {
         return unlink::call(ctx, name, args, kwargs);
+    }
+    if name == "utime" {
+        return utime::call(ctx, args, kwargs);
     }
     if name == "chmod" {
         return chmod::call(ctx, args, kwargs);
