@@ -760,7 +760,7 @@ impl Context {
     }
 
     pub(super) fn bind_attribute(&mut self, value: Id, receiver: Id, owner: Id) -> Result<Id> {
-        if matches!(self.heap.get(value), Value::Native(name) if matches!(name.as_str(), "dict.fromkeys" | "int.from_bytes" | "float.__getformat__" | "bytes.fromhex" | "bytearray.fromhex"))
+        if matches!(self.heap.get(value), Value::Native(name) if matches!(name.as_str(), "datetime.time.fromisoformat" | "dict.fromkeys" | "int.from_bytes" | "float.__getformat__" | "bytes.fromhex" | "bytearray.fromhex"))
         {
             return Ok(self.bind_native_classmethod(value, owner));
         }
@@ -1832,7 +1832,7 @@ impl Context {
             && stdlib::datetime::members(kind).is_some()
             && let Some(value) = self.class_attr(obj, name)
         {
-            return Ok(value);
+            return self.bind_attribute(value, NONE, obj);
         }
         if let Value::Union(union) = *self.heap.get(obj) {
             match name {

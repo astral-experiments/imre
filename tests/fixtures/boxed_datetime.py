@@ -122,6 +122,34 @@ def test_cookie_timestamp():
     print(str(before), str(shifted), int(lifetime.total_seconds()))
 
 
+def test_time_fromisoformat():
+    parse = time.fromisoformat
+    assert parse("T24:00:00.0000000Z").tzinfo is UTC
+    assert parse("12-00:00:00.123").tzinfo is UTC
+    assert parse("123456,1234567-01:02:03.4") == time(
+        12, 34, 56, 123456, timezone(-timedelta(hours=1, minutes=2, seconds=3, microseconds=400000))
+    )
+
+    class Clock(time):
+        pass
+
+    assert type(Clock().fromisoformat("07:59")) is Clock
+    assert Clock.fromisoformat("07:59") == time(7, 59)
+
+    class Capture(time):
+        def __new__(cls, *args):
+            return args
+
+    assert Capture.fromisoformat("25:01+00") == (25, 1, 0, 0, UTC)
+    for text in ("12:30:00.", "12:00+24", "24:00:01", "12\ud80000"):
+        try:
+            parse(text)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError(text)
+
+
 def test_time_of_day():
     midnight = time()
     assert type(midnight) is time and isinstance(midnight, time)
@@ -606,6 +634,7 @@ def current():
     test_timedelta_positive_and_absolute()
     test_subclass_construction()
     test_now()
+    test_time_fromisoformat()
     test_time_of_day()
     test_http_date()
     test_module_exports()
