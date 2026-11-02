@@ -4,6 +4,12 @@ import _socket
 from _socket import SOCK_DGRAM, SOCK_RAW, SOCK_RDM, SOCK_SEQPACKET
 from _socket import SOCK_STREAM, close, error, has_ipv6, socket
 
+for _name in ("NI_DGRAM", "NI_NAMEREQD", "NI_NOFQDN", "NI_NUMERICHOST", "NI_NUMERICSERV",
+              "gaierror", "getnameinfo", "if_indextoname", "if_nameindex", "if_nametoindex"):
+    if hasattr(_socket, _name):
+        globals()[_name] = getattr(_socket, _name)
+del _name
+
 if hasattr(_socket, "SocketType"):
     SocketType = _socket.SocketType
 if hasattr(_socket, "AF_INET6"):
