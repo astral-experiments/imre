@@ -1476,6 +1476,14 @@ def main():
         )
         compare("-IB", decorated)
 
+        tuple_dir = root / "tuple_dir.py"
+        for source in (
+            "print(dir((1, 2)))",
+            "from collections import namedtuple\nT = namedtuple('T', 'x')\nprint('x' in dir(T(1)))",
+        ):
+            tuple_dir.write_text(source + "\n")
+            compare("-B", tuple_dir, native_args=("run", tuple_dir, "--quiet"))
+
         unrelated = root / "unrelated_asdict.py"
         unrelated.write_text(
             "from collections import namedtuple\n"
