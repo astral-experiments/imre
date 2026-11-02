@@ -123,7 +123,11 @@ pub(crate) struct Context {
     zip_directories: HashMap<String, crate::objects::ZipArchive>,
     codec_entries: stdlib::codecs::Registry,
     frozen_override: i32,
+    // The interpreter keeps its original dictionary even when Python reassigns sys.modules.
     modules: Id,
+    import_missing: Id,
+    // The running frozen bootstrap keeps its globals even if its registry entry is replaced.
+    bootstrap_globals: Id,
     classes: HashMap<String, Id>,
     typing: typing::Registry,
     // Python wrappers retain their registered logger for the lifetime of this heap.
@@ -1904,9 +1908,56 @@ impl Context {
         Ok(index.map(|i| self.stored_entries(self.modules)[i].1))
     }
 
+    fn public_modules(&mut self) -> Result<Id> {
+        match self.threads.system_module {
+            Some(sys) => self.lookup_attr(sys, "modules"),
+            None => Ok(self.modules),
+        }
+    }
+
+    fn public_module_get(&mut self, name: Id, default: Option<Id>) -> Result<Id> {
+        let modules = self.public_modules()?;
+        if matches!(self.heap.get(modules), Value::Dict(_)) {
+            let (_, index) = self.find_dictionary_key(modules, name, None)?;
+            return Ok(index.map_or(default.unwrap_or(NONE), |i| self.stored_entries(modules)[i].1));
+        }
+        let get = self.lookup_attr(modules, "get")?;
+        let args = match default {
+            Some(default) => vec![name, default],
+            None => vec![name],
+        };
+        self.call(get, args, Vec::new())
+    }
+
+    fn public_registered_module(&mut self, name: Id) -> Result<Option<Id>> {
+        let value = self.public_module_get(name, Some(self.import_missing))?;
+        Ok((value != self.import_missing).then_some(value))
+    }
+
     fn cached_import(&mut self, name: &str) -> Result<Option<Id>> {
         let key = self.text(name);
-        match self.registered_module(key)? {
+        let mut retries = 0;
+        let module = loop {
+            let Some(module) = self.public_registered_module(key)? else {
+                break self.public_registered_module(key)?;
+            };
+            self.heap.reserve_temporaries(1)?;
+            self.heap.keep(module);
+            let initializing = self.lookup_attr(module, "__spec__")
+                .and_then(|spec| self.lookup_attr(spec, "_initializing"));
+            match initializing {
+                Ok(flag) if self.truth(flag)? => break self.public_registered_module(key)?,
+                Err(error) if !self.is_attribute_error(&error) => return Err(error),
+                _ => {}
+            }
+            if self.public_module_get(key, None)? == module {
+                break Some(module);
+            }
+            // A callback can replace the entry while _find_and_load checks its spec.
+            retries += 1;
+            self.check_call_depth(retries)?;
+        };
+        match module {
             Some(NONE) => Err(Error::new(
                 "ModuleNotFoundError",
                 format!("import of {name} halted; None in sys.modules"),
@@ -1918,10 +1969,17 @@ impl Context {
 
     fn publish_module(&mut self, name: &str, module: Id) -> Result<()> {
         let key = self.text(name);
-        self.put_item(self.modules, key, module)
+        let modules = self.public_modules()?;
+        self.put_item(modules, key, module)
     }
 
     fn module(&mut self, name: &str) -> Result<Id> {
+        let key = self.text(name);
+        if let Some(module) = self.registered_module(key)?
+            && module != NONE
+        {
+            return Ok(module);
+        }
         self.find_module(name)?
             .ok_or_else(|| Self::missing_module(name))
     }
@@ -1953,8 +2011,12 @@ impl Context {
 
     /// Run a module initializer after its parent has been resolved.
     fn load_module(&mut self, name: &str, parent: Option<(Id, &str)>) -> Result<Option<Id>> {
-        if let Some(id) = self.cached_import(name)? {
-            return Ok(Some(id));
+        if parent.is_some() {
+            let key = self.text(name);
+            let child = self.public_module_get(key, None)?;
+            if child != NONE {
+                return Ok(Some(child));
+            }
         }
         let mut locations = Vec::new();
         let source = if name == "__main__" {
@@ -2071,14 +2133,22 @@ impl Context {
             constructor: None,
         });
         let key = self.text(name);
-        self.put_item(self.modules, key, module)?;
-        if let Err(e) = self.run_initializer(name, module, scope, name_id, origin, source) {
-            // The executing script remains importable during interpreter shutdown,
-            // including after SystemExit or an uncaught exception.
-            if name != "__main__" {
-                builtins::remove_dict_item(self, self.modules, key)?;
+        let modules = self.public_modules()?;
+        self.put_item(modules, key, module)?;
+        if let Err(error) = self.run_initializer(name, module, scope, name_id, origin, source) {
+            // The executing script remains importable during interpreter shutdown.
+            if name == "__main__" {
+                return Err(error);
             }
-            return Err(e);
+            let exception = self.raised_instance(error);
+            self.with_import_exception(exception, |ctx| {
+                let modules = ctx.public_modules()?;
+                match ctx.delete_item(modules, key) {
+                    Err(error) if ctx.is_builtin_error(&error, "KeyError") => Ok(()),
+                    result => result,
+                }
+            })?;
+            return self.op("reraise", exception, NONE, NONE).map(Some);
         }
         // A script can delete its own __main__ binding. Its exit status is determined by the script.
         if name == "__main__" {
@@ -2086,13 +2156,52 @@ impl Context {
         }
         // An initializer can replace its own registry entry. The successful import
         // returns that value and moves its binding after the dependencies it imported.
-        let loaded = self.get_item(self.modules, key)?;
-        self.delete_item(self.modules, key)?;
-        self.put_item(self.modules, key, loaded)?;
-        if let Some((parent, child)) = parent {
-            self.set_attr(parent, child, loaded)?;
+        let modules = self.public_modules()?;
+        let pop = self.lookup_attr(modules, "pop")?;
+        let loaded = self.call(pop, vec![key], Vec::new())?;
+        self.heap.keep(loaded);
+        let modules = self.public_modules()?;
+        self.put_item(modules, key, loaded)?;
+        if let Some((parent_name, child)) = name.rsplit_once('.') {
+            let modules = self.public_modules()?;
+            let parent_key = self.text(parent_name);
+            let parent = self.get_item(modules, parent_key)?;
+            if let Err(error) = self.set_attr(parent, child, loaded) {
+                if !self.is_attribute_error(&error) {
+                    return Err(error);
+                }
+                let exception = self.raised_instance(error);
+                self.with_import_exception(exception, |ctx| {
+                    ctx.warn_child_binding(&format!(
+                        "Cannot set an attribute on {} for child module {}",
+                        string_repr(parent_name),
+                        string_repr(child)
+                    ))
+                })?;
+            }
         }
         Ok(Some(loaded))
+    }
+
+    /// Run an importlib exception handler with its caught exception visible to Python callbacks.
+    fn with_import_exception(
+        &mut self,
+        exception: Id,
+        handler: impl FnOnce(&mut Self) -> Result<()>,
+    ) -> Result<()> {
+        self.heap.reserve_temporaries(1)?;
+        let previous = self.heap.replace_active(exception);
+        self.heap.keep(previous);
+        let result = handler(self);
+        self.heap.replace_active(previous);
+        result.map_err(|mut error| {
+            if error.context == NONE
+                && error.trace.as_ref().and_then(|t| t.instance) != Some(exception)
+            {
+                error.context = exception;
+            }
+            error
+        })
     }
 
     fn run_initializer(
@@ -2213,6 +2322,9 @@ impl Context {
                 self.bind(scope, "ENABLE_SPECIALIZATION_FT", disabled);
             }
             "_frozen_importlib" => {
+                if self.bootstrap_globals == NONE {
+                    self.bootstrap_globals = self.module_globals(scope)?;
+                }
                 let external = self.module("_frozen_importlib_external")?;
                 self.bind(scope, "_bootstrap_external", external);
             }
@@ -2226,7 +2338,9 @@ impl Context {
                 stdlib::readiness::initialize(self, scope)?;
             }
             "sys" => {
-                self.bind(scope, "modules", self.modules);
+                if self.threads.system_module.is_none() {
+                    self.bind(scope, "modules", self.modules);
+                }
                 for name in [
                     "audit",
                     "addaudithook",

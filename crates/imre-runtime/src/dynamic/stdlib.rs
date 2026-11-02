@@ -464,6 +464,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         | (
             "_imre_importlib",
             "find_spec"
+            | "import_module"
             | "get_code"
             | "loader_fields"
             | "path_stats"
@@ -1667,6 +1668,12 @@ pub(super) fn call(
                 crate::objects::cache_paths::warn_debug_override()?;
                 return Ok(NONE);
             }
+            ("import_module", [name], []) => {
+                let name = ctx.str_value(*name)?.to_owned();
+                return ctx
+                    .find_module(&name)?
+                    .ok_or_else(|| Context::missing_module(&name));
+            }
             ("find_spec", [fullname, original], []) => {
                 let fullname = ctx.str_value(*fullname)?.to_owned();
                 let original = ctx.str_value(*original)?.to_owned();
@@ -1752,7 +1759,7 @@ pub(super) fn call(
                 return ctx.lookup(scope, &name);
             }
             ("loaded_module", [name], []) => {
-                return Ok(ctx.registered_module(*name)?.unwrap_or(NONE));
+                return Ok(ctx.public_registered_module(*name)?.unwrap_or(NONE));
             }
             ("retarget_class_cell", [method, old, new], []) => {
                 // Compiled methods keep the implicit __class__ cell apart from ordinary freevars.
