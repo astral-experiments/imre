@@ -11,8 +11,9 @@ Each entry uses the byte-identical pinned file, SHA-256 `28d17772f523800f02a5bf1
 | Integrated `8c8ec31c` | — | O0 stops in mod_generics_cache.py at line 24 | 0 |
 | Integrated `4c4f4a6f` | O0 stops in ann_module.py at line 43 | O0 same | 0 |
 | Public `c72390b1`, after #3872, #4095, #4097 and #4102 | O0 stops in ann_module.py at line 43 | — | 0 |
+| Integrated `1086af67`, including #4112 | O0 imports the entire module, then load_tests registers one _FailedTest at line 10979 | O0 same | 0 |
 
-[First public baseline](https://github.com/astral-experiments/imre/pull/4077) · [Public reveal_type replay](public-fe7af98c-intact.tgz) · [Earlier intermediate imports](import-barriers.md) · [Later ordinary traceback](ann-module-ordinary-intact.tgz)
+[First public baseline](https://github.com/astral-experiments/imre/pull/4077) · [Public reveal_type replay](public-fe7af98c-intact.tgz) · [Earlier intermediate imports](import-barriers.md) · [Later ordinary traceback](ann-module-ordinary-intact.tgz) · [Full import and load_tests tracebacks](intact-load-tests-1086af67.tgz)
 
 ### Named native runs
 
