@@ -57,6 +57,11 @@ enum Instruction {
     Raise(ast::StmtRaise),
     Assert(ast::StmtAssert),
     Unless(ast::Expr, usize),
+    Match {
+        subject: ast::Expr,
+        cases: Vec<SourceCase>,
+        end: usize,
+    },
     Iter(ast::Expr),
     Await(ast::Expr),
     Next(Option<ast::Expr>, usize),
@@ -75,6 +80,19 @@ enum Instruction {
     EndFinally,
     Delegate,
     BindSent(Vec<ast::Expr>),
+}
+
+struct SourceCase {
+    pattern: SourcePattern,
+    line_offset: u32,
+    guard: Option<(u32, Box<ast::Expr>)>,
+    body: usize,
+}
+
+enum SourcePattern {
+    Value(Box<ast::Expr>),
+    Class(Box<ast::Expr>),
+    Wildcard,
 }
 
 struct Definition {
@@ -558,6 +576,20 @@ impl Program {
                 | Instruction::Unless(e, _)
                 | Instruction::Iter(e)
                 | Instruction::Await(e) => strings.visit_expr(e),
+                Instruction::Match { subject, cases, .. } => {
+                    strings.visit_expr(subject);
+                    for case in cases {
+                        match &case.pattern {
+                            SourcePattern::Value(expr) | SourcePattern::Class(expr) => {
+                                strings.visit_expr(expr)
+                            }
+                            SourcePattern::Wildcard => {}
+                        }
+                        if let Some((_, guard)) = &case.guard {
+                            strings.visit_expr(guard);
+                        }
+                    }
+                }
                 Instruction::EnterWith { item, .. } => {
                     strings.visit_expr(&item.context_expr);
                     if let Some(target) = &item.optional_vars {
@@ -1017,6 +1049,57 @@ impl Program {
                     self.instructions.push((line, Instruction::EndFinally));
                     let end = self.instructions.len();
                     self.instructions[enter].1 = Instruction::EnterFinally { handler, end };
+                    continue;
+                }
+                Stmt::Match(s) => {
+                    let dispatch = self.instructions.len();
+                    self.instructions.push((line, Instruction::Jump(0)));
+                    let mut cases = Vec::new();
+                    let mut ends = Vec::new();
+                    let count = s.cases.len();
+                    let line_offset = |offset: ruff_text_size::TextSize| {
+                        lines.partition_point(|n| *n <= offset.to_usize()) as u32 - line
+                    };
+                    for case in s.cases {
+                        let case_line = line_offset(case.pattern.start());
+                        let pattern = match case.pattern {
+                            ast::Pattern::MatchValue(p) => SourcePattern::Value(p.value),
+                            ast::Pattern::MatchClass(p)
+                                if p.arguments.patterns.is_empty()
+                                    && p.arguments.keywords.is_empty() =>
+                            {
+                                SourcePattern::Class(p.cls)
+                            }
+                            ast::Pattern::MatchAs(p) if p.pattern.is_none() && p.name.is_none() => {
+                                if case.guard.is_none() && cases.len() + 1 < count {
+                                    return Err(Error::new(
+                                        "SyntaxError",
+                                        "wildcard makes remaining patterns unreachable",
+                                    ));
+                                }
+                                SourcePattern::Wildcard
+                            }
+                            _ => return Err(unsupported("match pattern")),
+                        };
+                        cases.push(SourceCase {
+                            pattern,
+                            line_offset: case_line,
+                            guard: case.guard.map(|expr| (line_offset(expr.start()), expr)),
+                            body: self.instructions.len(),
+                        });
+                        self.lower(case.body, lines, function, active.as_deref_mut())?;
+                        ends.push(self.instructions.len());
+                        self.instructions.push((line, Instruction::Jump(0)));
+                    }
+                    let end = self.instructions.len();
+                    self.instructions[dispatch].1 = Instruction::Match {
+                        subject: *s.subject,
+                        cases,
+                        end,
+                    };
+                    for i in ends {
+                        self.instructions[i].1 = Instruction::Jump(end);
+                    }
                     continue;
                 }
                 Stmt::If(s) => {
@@ -2480,6 +2563,72 @@ impl Context {
                     }
                     _ => unreachable!("validated augmented assignment target"),
                 }
+            }
+            Instruction::Match {
+                subject,
+                cases,
+                end,
+            } => {
+                let match_line = code.instructions[*ip - 1].0;
+                let mark = self.heap.temporary_mark();
+                let subject = eval(self, subject)?;
+                self.heap.release_temporaries_since(mark);
+                self.heap.keep(subject);
+                let subject_mark = self.heap.temporary_mark();
+                let mut target = *end;
+                // CPython compiles a single trailing wildcard as the default suite.
+                let default = cases
+                    .last()
+                    .is_some_and(|case| matches!(case.pattern, SourcePattern::Wildcard));
+                let subject_cases = cases.len() - usize::from(default);
+                for (index, case) in cases.iter().enumerate() {
+                    self.heap.set_statement_line(match_line + case.line_offset);
+                    let matched = match &case.pattern {
+                        SourcePattern::Value(expr) => {
+                            let pattern = eval(self, expr)?;
+                            let comparison = self.binary("==", subject, pattern)?;
+                            self.truth(comparison)?
+                        }
+                        SourcePattern::Class(expr) => {
+                            let class = eval(self, expr)?;
+                            if !matches!(self.heap.get(class), Value::Class { .. })
+                                && !matches!(
+                                    self.builtin_type_name(class),
+                                    Some("type" | "typing._AnyMeta")
+                                )
+                            {
+                                return Err(Error::new(
+                                    "TypeError",
+                                    "called match pattern must be a class",
+                                ));
+                            }
+                            self.heap.get(subject).instance_class() == Some(class)
+                                || self.python_instance_check(subject, class)?
+                        }
+                        SourcePattern::Wildcard => true,
+                    };
+                    // Only later cases need the subject while a guard executes.
+                    let live = if index + 1 < subject_cases {
+                        subject_mark
+                    } else {
+                        mark
+                    };
+                    self.heap.release_temporaries_since(live);
+                    if matched {
+                        if let Some((offset, guard)) = &case.guard {
+                            self.heap.set_statement_line(match_line + *offset);
+                            let accept = self.source_condition(code, scope, guard)?;
+                            self.heap.release_temporaries_since(live);
+                            if !accept {
+                                continue;
+                            }
+                        }
+                        target = case.body;
+                        break;
+                    }
+                }
+                self.heap.release_temporaries_since(mark);
+                *ip = target;
             }
             Instruction::Unless(e, destination) => {
                 if !self.source_condition(code, scope, e)? {
