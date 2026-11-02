@@ -26,6 +26,7 @@ pub(super) fn module_function(symbol: &str) -> Option<(&str, &str)> {
     }
     let (module, function) = symbol.split_once('.')?;
     match module {
+        "_typing" if function == "_idfunc" => Some((module, function)),
         "posix"
             if !function.contains('.')
                 && !matches!(
@@ -2163,6 +2164,10 @@ impl Context {
             }
             Value::Native(ref symbol) if let Some((module, function)) = module_function(symbol) => {
                 match name {
+                    "__text_signature__" if symbol == "_typing._idfunc" => {
+                        return Ok(self.text("($module, x, /)"));
+                    }
+                    "__doc__" if symbol == "_typing._idfunc" => return Ok(NONE),
                     "__name__" | "__qualname__" => return Ok(self.text(function.to_owned())),
                     "__module__" => return Ok(self.text(module.to_owned())),
                     "__doc__" if symbol == "_signal.default_int_handler" => {

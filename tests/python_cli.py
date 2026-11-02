@@ -2084,6 +2084,7 @@ def report(text):
             "boxed_typing_no_type_check.py",
             "boxed_typing_no_type_check_decorator.py",
             "boxed_typing_assert_type.py",
+            "boxed_typing_new_type.py",
             "boxed_typing_typeddict.py",
             "boxed_typing_dataclass_transform.py",
             "boxed_typing_optional.py",
