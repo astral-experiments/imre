@@ -1331,7 +1331,7 @@ impl Context {
                 let _ = self.collect_full();
                 return;
             }
-            if self.heap.has_unbound_finalizer(NONE) {
+            if !self.heap.caller_keeps_only_finalizer() && self.heap.has_unbound_finalizer(NONE) {
                 match self.drain_acyclic_finalizers() {
                     Ok(true) => {
                         // Dropping a finalized instance releases its remaining strong edges,
