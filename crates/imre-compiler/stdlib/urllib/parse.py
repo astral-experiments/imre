@@ -1,9 +1,19 @@
 # URL helpers from CPython 3.14.5 Lib/urllib/parse.py (PSF-2.0).
 
 from collections import namedtuple
+import functools
 import re
 import warnings
 from urllib.parse import unquote
+
+
+@functools.lru_cache(typed=True)
+def urlsplit(url, scheme='', allow_fragments=True):
+    return _imre_urlsplit(url, scheme, allow_fragments)
+
+
+def urlparse(url, scheme='', allow_fragments=True):
+    return _imre_urlparse(url, scheme, allow_fragments)
 
 
 class _ResultMixinStr(object):
