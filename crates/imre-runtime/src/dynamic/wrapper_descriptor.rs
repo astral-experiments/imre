@@ -239,8 +239,10 @@ impl BuiltinDescriptor {
             "__doc__" if self.name == "__neg__" => ctx.text("-self"),
             "__text_signature__" if self.name == "__neg__" => ctx.text("($self, /)"),
             "__doc__" if self.name == "__add__" => ctx.text("Return self+value."),
+            "__doc__" if self.name == "__mul__" => ctx.text("Return self*value."),
+            "__doc__" if self.name == "__rmul__" => ctx.text("Return value*self."),
             "__doc__" if self.name == "__iadd__" => ctx.text("Implement self+=value."),
-            "__text_signature__" if matches!(self.name, "__add__" | "__iadd__") => {
+            "__text_signature__" if matches!(self.name, "__add__" | "__iadd__" | "__mul__" | "__rmul__") => {
                 ctx.text("($self, value, /)")
             }
             "__text_signature__" if self.name == "endswith" => {
