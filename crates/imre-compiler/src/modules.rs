@@ -318,6 +318,7 @@ pub(crate) enum IntrinsicModule {
     ImportlibMachinery,
     ImportlibBootstrapExternal,
     ImportlibMetadata,
+    ImportlibResources,
     ImportlibUtil,
     Array,
     Imp,
@@ -839,6 +840,7 @@ impl IntrinsicModule {
                 Some(Self::ImportlibBootstrapExternal)
             }
             "importlib.metadata" => Some(Self::ImportlibMetadata),
+            "importlib.resources" => Some(Self::ImportlibResources),
             "importlib.util" => Some(Self::ImportlibUtil),
             "collections" => Some(Self::Collections),
             "_collections" => Some(Self::CollectionsNative),
@@ -1040,6 +1042,12 @@ impl IntrinsicModule {
             }
             (Self::Importlib, "invalidate_caches") => {
                 Intrinsic::ObjectRuntimeExport("importlib.invalidate_caches")
+            }
+            (Self::ImportlibResources, "files") => {
+                Intrinsic::ObjectRuntimeExport("importlib.resources.files")
+            }
+            (Self::ImportlibResources, "read_text") => {
+                Intrinsic::ObjectRuntimeExport("importlib.resources.read_text")
             }
             (Self::ImportlibMetadata, "PackageNotFoundError") => Intrinsic::PackageNotFoundError,
             (Self::ImportlibMetadata, "entry_points") => {
@@ -2714,6 +2722,7 @@ fn importlib_child(name: &str) -> Option<IntrinsicModule> {
         "machinery" => Some(IntrinsicModule::ImportlibMachinery),
         "_bootstrap_external" => Some(IntrinsicModule::ImportlibBootstrapExternal),
         "metadata" => Some(IntrinsicModule::ImportlibMetadata),
+        "resources" => Some(IntrinsicModule::ImportlibResources),
         "util" => Some(IntrinsicModule::ImportlibUtil),
         _ => None,
     }
@@ -2724,6 +2733,7 @@ fn importlib_child_name(module: IntrinsicModule) -> Option<&'static str> {
         IntrinsicModule::ImportlibMachinery => Some("machinery"),
         IntrinsicModule::ImportlibBootstrapExternal => Some("_bootstrap_external"),
         IntrinsicModule::ImportlibMetadata => Some("metadata"),
+        IntrinsicModule::ImportlibResources => Some("resources"),
         IntrinsicModule::ImportlibUtil => Some("util"),
         _ => None,
     }
@@ -3640,6 +3650,7 @@ impl<'a> Loader<'a> {
                             IntrinsicModule::Marshal
                                 | IntrinsicModule::Pickle
                                 | IntrinsicModule::Struct
+                                | IntrinsicModule::ImportlibResources
                         ) && matches!(
                             binding,
                             Binding::Intrinsic(
