@@ -264,7 +264,14 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
                 "../../../benchmarks/cpython_stdlib/full/mimetypes/upstream/Lib/mimetypes.py"
             ),
         )),
-        "socketserver" => Some(("socketserver.py", include_str!("../stdlib/socketserver.py"))),
+        "socketserver" => Some((
+            "socketserver.py",
+            concat!(
+                include_str!("../stdlib/socketserver.py"),
+                "\n",
+                include_str!("../stdlib/socketserver_threading.py"),
+            ),
+        )),
         // CPython 3.14.5 Lib/string/__init__.py, blob eab5067c9b133ea1210efacd92eb5f69c2336236.
         "string" => Some((
             "string/__init__.py",
@@ -4362,6 +4369,7 @@ impl<'a> Loader<'a> {
                 "<imre stdlib>/dataclasses.py",
                 include_str!("../stdlib/dataclasses_missing.py"),
             )),
+            "socketserver" => Some(("socketserver.py", include_str!("../stdlib/socketserver.py"))),
             "_imre_socketserver_reader" => Some((
                 "_imre_socketserver_reader.py",
                 include_str!("../stdlib/_socketserver_reader_typed.py"),
