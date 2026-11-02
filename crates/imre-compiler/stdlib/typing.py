@@ -809,6 +809,8 @@ MutableMapping = _SpecialGenericAlias(_MutableMapping, 2, name="MutableMapping")
 
 
 def _substitute_alias_argument(arg, replacements):
+    if isinstance(arg, type):
+        return arg
     for parameter, value in replacements.items():
         if arg is parameter:
             return value
@@ -820,35 +822,50 @@ def _substitute_alias_argument(arg, replacements):
         return GenericAlias(arg.__origin__, tuple(
             _substitute_alias_argument(item, replacements) for item in arg.__args__
         ))
+    if _typing.get_origin(arg) is _typing.Union:
+        return _typing.Union[tuple(_substitute_alias_argument(item, replacements) for item in arg.__args__)]
     return arg[tuple(replacements[p] for p in parameters)]
 
 
-def _specialize_named_alias_uncached(alias, args):
+def _specialize_generic_alias_uncached(alias, args):
+    if alias.__origin__ is Generic or alias.__origin__ is Protocol:
+        raise TypeError(f"Cannot subscript already-subscripted {alias}")
     parameters = alias.__parameters__
     if not parameters:
         raise TypeError(f"{alias} is not a generic class")
     if not isinstance(args, tuple):
         args = (args,)
-    if alias._name == "Tuple" and any(isinstance(p, _typing.TypeVarTuple) for p in parameters):
-        raise NotImplementedError("specializing a variadic typing.Tuple requires parameter-pack substitution")
-    args = tuple(_alias_type_arg(arg) for arg in args)
-    if len(args) != len(parameters):
-        which = "few" if len(args) < len(parameters) else "many"
-        expected = f"at least {len(parameters)}" if which == "few" else str(len(parameters))
-        raise TypeError(f"Too {which} arguments for {alias}; actual {len(args)}, expected {expected}")
-    replacements = dict(zip(parameters, args))
+    if any(isinstance(p, _typing.TypeVarTuple) for p in parameters):
+        raise NotImplementedError("specializing a variadic alias requires parameter-pack substitution")
+    expanded = []
+    for arg in args:
+        unpacked = getattr(arg, "__typing_unpacked_tuple_args__", None)
+        if unpacked is not None and not (unpacked and unpacked[-1] is ...):
+            expanded.extend(unpacked)
+        else:
+            expanded.append(arg)
+    if len(expanded) != len(parameters):
+        which = "few" if len(expanded) < len(parameters) else "many"
+        expected = f"at least {len(expanded) + 1}" if which == "few" else str(len(parameters))
+        raise TypeError(f"Too {which} arguments for {alias}; actual {len(expanded)}, expected {expected}")
+    replacements = {}
+    for parameter, arg in zip(parameters, expanded):
+        arg = _alias_type_arg(arg)
+        if _typing.get_origin(arg) is Unpack:
+            raise TypeError(f"{arg} is not valid as type argument")
+        replacements[parameter] = arg
     args = tuple(_substitute_alias_argument(arg, replacements) for arg in alias.__args__)
     return _typing._GenericAlias(alias.__origin__, args, name=alias._name, inst=alias._inst)
 
 
-_cached_named_specialization = lru_cache(_specialize_named_alias_uncached)
+_cached_generic_specialization = lru_cache(_specialize_generic_alias_uncached)
 
 
-def _specialize_named_alias(alias, args):
+def _specialize_generic_alias(alias, args):
     try:
-        return _cached_named_specialization(alias, args)
+        return _cached_generic_specialization(alias, args)
     except TypeError:
-        return _specialize_named_alias_uncached(alias, args)
+        return _specialize_generic_alias_uncached(alias, args)
 
 
 class _TypedCacheSpecialForm(_SpecialForm):
