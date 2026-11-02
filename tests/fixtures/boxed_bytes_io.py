@@ -1,5 +1,6 @@
 import _io
 import io
+import os
 
 
 def current():
@@ -162,4 +163,157 @@ def current():
         raise AssertionError("reader resized the exported bytearray")
     dest.clear()
     assert io.StringIO("π").getvalue() == "π"
+
+    # Retry an interrupted raw callback with the same writable destination.
+    class Interrupted(io.RawIOBase):
+        def readable(self):
+            return True
+
+        def readinto(self, dest):
+            import errno
+            self.dest = dest
+            self.readinto = self.finish
+            raise InterruptedError(errno.EINTR, "interrupted")
+
+        def finish(self, dest):
+            assert dest is self.dest
+            dest[0] = 88
+            return 1
+
+
+    with io.BufferedReader(Interrupted()) as stream:
+        assert stream.read1(1) == b"X"
+
+    class Raw(io.RawIOBase):
+        def readable(self):
+            return True
+
+        def readinto(self, target):
+            assert type(target) is memoryview and target.obj is None
+            self.view = target
+            target[:4] = b"abcd"
+            return 4
+
+    class Reader(io.BufferedReader):
+        def read(self, size=-1):
+            return b"seen:" + super().read(size)
+
+    raw = Raw()
+    reader = Reader(raw, buffer_size=4)
+    assert reader.raw is raw and reader.peek() == b"abcd"
+    raw.view[1:3] = b"xy"
+    assert reader.read(4) == b"seen:axyd"
+    reader.close()
+    assert reader.closed and raw.closed
+
+    class DelegatingRaw(Raw):
+        def readinto(self, target):
+            target[:] = b"[..]"
+            assert self.source.readinto(target[1:3]) == 2
+            return 4
+
+    # Delegate reads must only write the middle of the raw callback's target.
+    read_fd, write_fd = os.pipe()
+    try:
+        assert os.write(write_fd, b"fd") == 2
+    finally:
+        os.close(write_fd)
+    with io.FileIO(read_fd, "rb") as file_source, io.BytesIO(b"io") as memory_source:
+        for source, expected in ((file_source, b"fd]"), (memory_source, b"io]")):
+            raw = DelegatingRaw()
+            raw.source = source
+            with io.BufferedReader(raw, 4) as reader:
+                assert reader.read(1) == b"["
+                assert reader.read1(3) == expected
+
+    first = io.BytesIO(b"first")
+    second = io.BytesIO(b"second")
+    reader = io.BufferedReader(first, 4)
+    assert reader.read(2) == b"fi"
+    try:
+        reader.__init__(second, 0)
+    except ValueError:
+        assert reader.raw is second and not first.closed
+    else:
+        raise AssertionError("invalid buffer size accepted")
+    try:
+        reader.readable()
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("failed initialization left a usable reader")
+    reader.__init__(second, 4)
+    assert reader.read(2) == b"se"
+
+    calls = []
+    class SeekOffset:
+        def __index__(self):
+            calls.append("offset")
+            assert seek_reader.read(1) == b"a"
+            return 1
+
+    with io.BufferedReader(io.BytesIO(b"abc"), 2) as seek_reader:
+        assert seek_reader.seek(SeekOffset(), 1) == 2
+        assert seek_reader.read() == b"c"
+    for whence, message in ((0, "seek of closed file"), (9, "whence value 9 unsupported")):
+        try:
+            seek_reader.seek(SeekOffset(), whence)
+        except ValueError as error:
+            assert str(error) == message
+        else:
+            raise AssertionError("closed reader accepted seek")
+    with io.BufferedReader(Raw()) as unseekable:
+        try:
+            unseekable.seek(SeekOffset())
+        except io.UnsupportedOperation:
+            pass
+        else:
+            raise AssertionError("nonseekable reader accepted seek")
+    assert calls == ["offset"]
+
+    class Uninitialized(io.BufferedReader):
+        def __init__(self):
+            pass
+
+    try:
+        Uninitialized().detach()
+    except ValueError as error:
+        assert "uninitialized" in str(error)
+    else:
+        raise AssertionError("uninitialized reader detached")
+
+    assert reader.detach() is second
+    assert reader.raw is None and not second.closed
+    # Releasing the wrapper never closes or rewinds its raw stream.
+    assert second.read() == b"nd"
+    for operation in (reader.detach, reader.read, reader.flush):
+        try:
+            operation()
+        except ValueError as error:
+            assert "detached" in str(error)
+        else:
+            raise AssertionError("operation on detached reader")
+
+    # The destination is exported before a raw property can run Python.
+    dest = bytearray(2)
+
+    class ResizingRaw(io.BytesIO):
+        @property
+        def closed(self):
+            if self.check_export:
+                try:
+                    dest.append(0)
+                except BufferError:
+                    pass
+                else:
+                    raise AssertionError("resized the destination during readinto")
+            return super().closed
+
+    raw = ResizingRaw(b"xy")
+    raw.check_export = True
+    reader = io.BufferedReader(raw, 2)
+    assert reader.readinto1(dest) == 2
+    assert dest == b"xy"
+    raw.check_export = False
+    reader.close()
     print("BytesIO retains native stream position and immutable snapshots")

@@ -812,6 +812,13 @@ impl Context {
             }
             (Value::MemoryView { .. }, _) | (_, Value::MemoryView { .. }) => {
                 match (self.buffer_storage(a), self.buffer_storage(b)) {
+                    (Ok(Value::RawReadWindow(w)), Ok(Value::Array(array)))
+                    | (Ok(Value::Array(array)), Ok(Value::RawReadWindow(w))) => {
+                        self.window_bytes(*w).is_ok_and(|bytes| array.equals_unsigned_bytes(bytes))
+                    }
+                    (Ok(Value::RawReadWindow(_)), _) | (_, Ok(Value::RawReadWindow(_))) => {
+                        matches!((self.bytes_like(a), self.bytes_like(b)), (Ok(a), Ok(b)) if a == b)
+                    }
                     (Ok(Value::Array(a)), Ok(Value::Array(b))) => a.equals_numeric_array(b),
                     (
                         Ok(Value::Array(array)),
@@ -2825,6 +2832,9 @@ impl Context {
     }
 
     pub(super) fn get_item(&mut self, obj: Id, key: Id) -> Result<Id> {
+        if self.raw_read_window(obj).is_some() {
+            return self.raw_view_get(obj, key);
+        }
         let target = self.weak_proxy_target(obj)?;
         if target != obj {
             return self.proxy_subscript(target, |ctx| ctx.get_item(target, key));
@@ -3049,6 +3059,9 @@ impl Context {
     }
 
     pub(super) fn put_item(&mut self, obj: Id, key: Id, val: Id) -> Result<()> {
+        if self.raw_read_window(obj).is_some() {
+            return self.raw_view_set(obj, key, val);
+        }
         let target = self.weak_proxy_target(obj)?;
         if target != obj {
             return self.proxy_subscript(target, |ctx| ctx.put_item(target, key, val));

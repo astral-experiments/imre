@@ -293,16 +293,9 @@ pub(super) fn read_length(ctx: &mut Context, size: Option<Id>) -> Result<i64> {
 
 /// Validate a writable native destination before the file consumes any input.
 pub(super) fn readinto_target(ctx: &Context, object: Id) -> Result<Id> {
-    ctx.check_buffer_exporter(object)?;
-    let owner = match ctx.heap.get(object) {
-        Value::MemoryView {
-            owner: Some(owner), ..
-        } => *owner,
-        _ => object,
-    };
-    let target = ctx.scalar_value(owner);
-    if matches!(ctx.heap.get(target), Value::ByteArray(_) | Value::Array(_)) {
-        return Ok(target);
+    if let Some((storage, _)) = ctx.writable_byte_span(object)? {
+        // Some paths validate before delegating. Keep a callback's byte window intact.
+        return Ok(if ctx.raw_read_window(object).is_some() { object } else { storage });
     }
     let kind = if object == NONE {
         "None"
@@ -316,12 +309,14 @@ pub(super) fn readinto_target(ctx: &Context, object: Id) -> Result<Id> {
 }
 
 pub(super) fn readinto_bytes(ctx: &mut Context, object: Id) -> Result<&mut [u8]> {
-    let target = readinto_target(ctx, object)?;
-    match ctx.heap.get_mut(target) {
-        Value::ByteArray(data) => Ok(data),
-        Value::Array(array) => array.as_bytes_mut(),
+    let object = readinto_target(ctx, object)?;
+    let (target, range) = ctx.writable_byte_span(object)?.expect("validated writable buffer");
+    let bytes = match ctx.heap.get_mut(target) {
+        Value::ByteArray(data) => data.as_mut_slice(),
+        Value::Array(array) => array.as_bytes_mut()?,
         _ => unreachable!("validated writable buffer"),
-    }
+    };
+    Ok(&mut bytes[range])
 }
 
 /// A buffered read encountering EAGAIN returns its copied prefix count, or None if still empty.
@@ -586,17 +581,20 @@ pub(super) fn call(
     }
 }
 
-pub(super) fn buffered_whence(ctx: &mut Context, value: Option<Id>) -> Result<i32> {
-    let whence = match value {
-        None => 0,
+pub(super) fn whence_argument(ctx: &mut Context, value: Option<Id>) -> Result<i32> {
+    match value {
+        None => Ok(0),
         Some(value) => ctx
             .index_integer(value)?
             .to_i64()
             .and_then(|n| i32::try_from(n).ok())
             .ok_or_else(|| {
                 Error::new("OverflowError", "Python int too large to convert to C int")
-            })?,
-    };
+            }),
+    }
+}
+
+pub(super) fn check_buffered_whence(whence: i32) -> Result<i32> {
     if !matches!(
         whence,
         libc::SEEK_SET | libc::SEEK_CUR | libc::SEEK_END | libc::SEEK_DATA | libc::SEEK_HOLE
@@ -607,6 +605,10 @@ pub(super) fn buffered_whence(ctx: &mut Context, value: Option<Id>) -> Result<i3
         ));
     }
     Ok(whence)
+}
+
+pub(super) fn buffered_whence(ctx: &mut Context, value: Option<Id>) -> Result<i32> {
+    check_buffered_whence(whence_argument(ctx, value)?)
 }
 
 pub(super) fn buffered_offset(ctx: &mut Context, target: Id) -> Result<i64> {

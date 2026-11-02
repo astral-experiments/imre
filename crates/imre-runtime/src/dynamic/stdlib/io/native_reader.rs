@@ -6,8 +6,27 @@ use super::{Context, Error, FALSE, Id, NONE, Result, Value};
 use files::{BinaryFile, ReadSource};
 
 pub(super) const METHODS: &[&str] = &[
-    "__init__", "raw", "closed", "name", "mode", "readable", "seekable", "isatty", "fileno",
-    "flush", "close", "tell", "seek", "read", "read1", "readinto", "readline", "peek",
+    "__init__",
+    "raw",
+    "closed",
+    "name",
+    "mode",
+    "readable",
+    "seekable",
+    "isatty",
+    "fileno",
+    "flush",
+    "close",
+    "tell",
+    "seek",
+    "read",
+    "read1",
+    "readinto",
+    "readinto1",
+    "truncate",
+    "detach",
+    "readline",
+    "peek",
 ];
 
 fn validate(owner: &str, name: &str, count: usize, kwargs: &[(String, Id)]) -> Result<()> {
@@ -18,15 +37,18 @@ fn validate(owner: &str, name: &str, count: usize, kwargs: &[(String, Id)]) -> R
         ));
     }
     let message = match name {
-        "read" | "read1" | "readline" | "peek" if count > 1 => {
+        "read" | "read1" | "readline" | "peek" | "truncate" if count > 1 => {
             format!("{name} expected at most 1 argument, got {count}")
         }
-        "readinto" if count != 1 => {
+        "readinto" | "readinto1" if count != 1 => {
             format!("{owner}.{name}() takes exactly one argument ({count} given)")
         }
         "seek" if count == 0 => "seek expected at least 1 argument, got 0".into(),
         "seek" if count > 2 => format!("seek expected at most 2 arguments, got {count}"),
-        "read" | "read1" | "readline" | "peek" | "readinto" | "seek" | "__exit__" => return Ok(()),
+        "read" | "read1" | "readline" | "peek" | "readinto" | "readinto1" | "truncate" | "seek"
+        | "__exit__" => {
+            return Ok(());
+        }
         _ if count != 0 => format!("{owner}.{name}() takes no arguments ({count} given)"),
         _ => return Ok(()),
     };
@@ -50,15 +72,21 @@ pub(super) fn call(
     {
         ssize(ctx, size)?;
     }
+    if name == "writable" {
+        return Ok(FALSE);
+    }
+    if super::buffered_reader::has_state(ctx, receiver) {
+        return super::buffered_reader::call(ctx, receiver, name, args);
+    }
+    if name == "readinto1" {
+        return super::buffered_io::call(ctx, receiver, name, args, kwargs);
+    }
     let target = if name == "readinto" {
         Some(files::readinto_target(ctx, args[0])?)
     } else {
         None
     };
     let args = target.as_ref().map_or(args, std::slice::from_ref);
-    if name == "writable" {
-        return Ok(FALSE);
-    }
     if name == "__exit__" {
         let close = ctx.lookup_attr(receiver, "close")?;
         return ctx.call(close, Vec::new(), Vec::new());
@@ -73,12 +101,22 @@ pub(super) fn call(
             ))
         };
     };
+    if name == "detach" {
+        return Err(Error::new("UnsupportedOperation", "detach"));
+    }
     let Value::File(handle) = ctx.heap.get(buffer) else {
         unreachable!("BufferedReader backing must be a binary file")
     };
     let handle = handle.clone();
     if name == "closed" {
         return Ok(builtins::boolean(handle.closed()));
+    }
+    if name == "truncate" {
+        return Err(if handle.closed() {
+            Error::new("ValueError", "truncate of closed file")
+        } else {
+            Error::new("UnsupportedOperation", "truncate")
+        });
     }
     if let BinaryFile::Descriptor(fd) = handle.as_ref() {
         if name == "raw" {
