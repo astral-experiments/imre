@@ -44,7 +44,10 @@ def current():
     assert vars(replaced) == {"default": "new", "items": [], 1: "non-string key", "changed": True}
     assert replaced.items is original.items
     assert not hasattr(original, "changed")
-    assert SimpleNamespace.__replace__.__objclass__ is SimpleNamespace
+    descriptor = SimpleNamespace.__replace__
+    assert descriptor.__objclass__ is SimpleNamespace
+    assert descriptor.__text_signature__ == "($self, /, **changes)"
+    assert descriptor.__doc__ == "Return a copy of the namespace object with new values for the specified attributes."
     try:
         original.__replace__(1)
     except TypeError as error:
