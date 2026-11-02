@@ -1452,8 +1452,10 @@ pub(super) fn call(
                     ..
                 } => bindings.len(),
                 Value::Dict(v) | Value::DefaultDict { entries: v, .. } => v.len(),
-                Value::DictView { dict, .. } | Value::MappingProxy(dict) => {
-                    collections::entries(ctx, *dict)?.len()
+                Value::DictView { dict, .. } => collections::entries(ctx, *dict)?.len(),
+                Value::MappingProxy(_) => {
+                    let mapping = ctx.mapping_proxy_target(args[0]);
+                    return call(ctx, "len", &[mapping], &[]);
                 }
                 Value::Class { .. } => {
                     let values = ctx.enum_values(args[0]).ok_or_else(|| no_length(ctx))?;

@@ -2426,10 +2426,10 @@ impl Context {
             Value::Native(ref class) if class == "datetime.timezone" && name == "utc" => {
                 return Ok(stdlib::datetime::utc(self));
             }
-            Value::MappingProxy(dict)
+            Value::MappingProxy(_)
                 if matches!(name, "keys" | "items" | "values" | "get" | "copy") =>
             {
-                return self.lookup_attr(dict, name);
+                return self.lookup_attr(self.mapping_proxy_target(obj), name);
             }
             Value::Native(ref symbol)
                 if name == "__self__"

@@ -1197,8 +1197,8 @@ impl Context {
             };
             return Ok(entries.iter().map(|&(_, member)| member).collect());
         }
-        if let Value::MappingProxy(dict) = *self.heap.get(id) {
-            return self.items(dict);
+        if matches!(self.heap.get(id), Value::MappingProxy(_)) {
+            return self.items(self.mapping_proxy_target(id));
         }
         if let Some(storage) = self.string_storage(id)
             && storage != id
