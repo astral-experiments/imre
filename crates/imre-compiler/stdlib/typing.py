@@ -5,6 +5,7 @@ import functools
 import typing as _typing
 from _collections_abc import Mapping as _Mapping, MutableMapping as _MutableMapping, Sequence as _Sequence
 from collections import defaultdict as _defaultdict
+from _collections_abc import AsyncIterator as _AsyncIterator, Awaitable as _Awaitable
 from annotationlib import ForwardRef, _make_forward_ref
 from functools import lru_cache
 from typing import Any, Callable, Generic, Protocol, TypeVar
@@ -1327,6 +1328,8 @@ Tuple.__doc__ = \
 
     To specify a variable-length tuple of homogeneous type, use Tuple[T, ...].
     """
+Awaitable = _SpecialGenericAlias(_Awaitable, 1)
+AsyncIterator = _SpecialGenericAlias(_AsyncIterator, 1)
 List = _SpecialGenericAlias(list, 1, name="List", inst=False)
 Dict = _SpecialGenericAlias(dict, 2, name="Dict", inst=False)
 Type = _SpecialGenericAlias(type, 1, name="Type", inst=False)
