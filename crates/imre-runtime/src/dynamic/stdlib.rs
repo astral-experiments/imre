@@ -28,6 +28,7 @@ mod inspect;
 pub(super) mod itertools;
 pub(super) mod tempfile;
 mod time;
+mod tokenize;
 pub(super) use files::{BinaryFile, ReadSource};
 pub(super) use socket::install_lowlevel_socket;
 pub(super) mod io;
@@ -108,6 +109,7 @@ pub(super) fn has_lazy_attributes(name: &str) -> bool {
             | "_imre_posixpath"
             | "_imre_metadata"
             | "_imre_csv"
+            | "_imre_tokenize"
             | "_imre_pkgutil"
             | "fnmatch"
             | "itertools"
@@ -637,6 +639,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         | ("os", "confstr" | "uname")
         | ("_imre_pkgutil", "filenames" | "isdir" | "find_module" | "find_spec")
         | ("_imre_csv", "read_row")
+        | ("_imre_tokenize", "scan")
         | ("_imre_metadata", "filenames" | "dedent" | "exists" | "read_text")
         | (
             "_imre_posixpath",
@@ -1279,6 +1282,9 @@ pub(super) fn call(
     }
     if let Some(operation) = name.strip_prefix("_imre_pkgutil.") {
         return pkgutil::call(ctx, operation, args, kwargs);
+    }
+    if name == "_imre_tokenize.scan" {
+        return tokenize::scan(ctx, args, kwargs);
     }
     if name == "_imre_csv.read_row" {
         return csv::read_row(ctx, args, kwargs);
