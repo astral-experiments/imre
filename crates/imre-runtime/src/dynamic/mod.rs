@@ -2905,14 +2905,8 @@ impl Context {
                     self.bind(scope, name, value);
                 }
             }
-            "operator" if source.is_none() => {
-                for name in [
-                    "lt", "le", "eq", "ne", "ge", "gt", "and_", "or_", "sub", "xor",
-                ] {
-                    let function = self.builtin(&format!("operator.{name}"));
-                    let alias = format!("__{}__", name.trim_end_matches('_'));
-                    self.bind(scope, &alias, function);
-                }
+            "operator" | "_operator" if source.is_none() => {
+                stdlib::operator::install(self, scope, name);
             }
             "errno" => stdlib::install_errno(self, scope)?,
             "atexit" => atexit::install(self, scope),

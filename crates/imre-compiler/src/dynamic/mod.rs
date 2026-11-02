@@ -249,7 +249,7 @@ impl<'a> Visitor<'a> for Imports {
                 for alias in &imp.names {
                     let name = alias.name.as_str();
                     let bound = alias.asname.as_ref().unwrap_or(&alias.name);
-                    if name == "__future__" {
+                    if matches!(name, "__future__" | "_operator") {
                         self.runtime_imports = true;
                     }
                     match name {
@@ -276,7 +276,8 @@ impl<'a> Visitor<'a> for Imports {
                 for a in &imp.names {
                     let suffix = a.name.as_str();
                     if imp.level == 0
-                        && (name == "unittest" && boxed_unittest_cleanup(suffix)
+                        && (name == "_operator"
+                            || name == "unittest" && boxed_unittest_cleanup(suffix)
                             || name == "hashlib" && (boxed_hashlib_kdf(suffix) || suffix == "*")
                             || name == "weakref" && suffix == "finalize"
                             || boxed_signal_export(name, suffix))

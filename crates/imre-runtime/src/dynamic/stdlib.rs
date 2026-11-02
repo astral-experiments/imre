@@ -44,7 +44,7 @@ mod math;
 mod metadata;
 pub(super) mod monitoring;
 pub(super) mod opcode;
-mod operator;
+pub(super) mod operator;
 mod ordered_dict;
 pub(super) mod os;
 pub(super) mod pickle;
@@ -117,6 +117,8 @@ pub(super) fn is_module(name: &str) -> bool {
             | "_datetime"
             | "_imre_itertools"
             | "_imre_ordered_dict"
+            | "operator"
+            | "_operator"
             | "_opcode"
             | "atexit"
             | "builtins"
@@ -174,7 +176,6 @@ pub(super) fn has_lazy_attributes(name: &str) -> bool {
             | "_imre_tokenize"
             | "_imre_pkgutil"
             | "fnmatch"
-            | "operator"
             | "platform"
             | "site"
             | "select"
@@ -713,12 +714,6 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("os", "name") => ctx.text("posix"),
         ("posixpath", "sep") => ctx.text("/"),
         ("posixpath", "altsep") => NONE,
-        ("operator", name)
-            if matches!(name, "attrgetter" | "itemgetter")
-                || operator::Operation::named(name).is_some() =>
-        {
-            ctx.builtin(&format!("operator.{name}"))
-        }
         ("contextvars" | "_contextvars", "ContextVar" | "Context" | "Token" | "copy_context") => {
             ctx.builtin(&format!("_contextvars.{name}"))
         }

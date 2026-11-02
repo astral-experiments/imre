@@ -156,7 +156,7 @@ use super::super::{builtins, value::NONE};
 /// Operations captured by Werkzeug's LocalProxy descriptor declarations.
 /// Binary and item operations share the boxed expression dispatch.
 #[derive(Clone, Copy)]
-pub(super) enum Operation {
+pub(in crate::dynamic) enum Operation {
     Binary(&'static str),
     InPlace(&'static str),
     Unary(&'static str),
@@ -168,52 +168,78 @@ pub(super) enum Operation {
     LengthHint,
 }
 
+// Keep the module exports and native call dispatch in sync.
+macro_rules! operations {
+    ($($name:literal => $operation:expr),* $(,)?) => {
+        const NAMES: &[&str] = &[$($name),*];
+
+        pub(in crate::dynamic) fn named(name: &str) -> Option<Self> {
+            Some(match name {
+                $($name => $operation,)*
+                _ => return None,
+            })
+        }
+    };
+}
+
+/// Install the same callable objects in the private extension and its public wrapper.
+pub(in crate::dynamic) fn install(ctx: &mut Context, scope: Id, module: &str) {
+    for &name in Operation::NAMES {
+        let function = ctx.builtin(&format!("operator.{name}"));
+        ctx.bind(scope, name, function);
+        if module == "operator" && name != "length_hint" {
+            let alias = format!("__{}__", name.trim_end_matches('_'));
+            ctx.bind(scope, &alias, function);
+        }
+    }
+    for name in ["attrgetter", "itemgetter"] {
+        let class = ctx.builtin(&format!("operator.{name}"));
+        ctx.bind(scope, name, class);
+    }
+}
+
 impl Operation {
-    pub(super) fn named(name: &str) -> Option<Self> {
-        use Operation::{Binary, InPlace, Unary};
-        Some(match name {
-            "lt" => Binary("<"),
-            "le" => Binary("<="),
-            "eq" => Binary("=="),
-            "ne" => Binary("!="),
-            "gt" => Binary(">"),
-            "ge" => Binary(">="),
-            "add" => Binary("+"),
-            "sub" => Binary("-"),
-            "mul" => Binary("*"),
-            "matmul" => Binary("@"),
-            "truediv" => Binary("/"),
-            "floordiv" => Binary("//"),
-            "mod" => Binary("%"),
-            "lshift" => Binary("<<"),
-            "rshift" => Binary(">>"),
-            "and_" => Binary("&"),
-            "xor" => Binary("^"),
-            "or_" => Binary("|"),
-            "iadd" => InPlace("+"),
-            "isub" => InPlace("-"),
-            "imul" => InPlace("*"),
-            "imatmul" => InPlace("@"),
-            "itruediv" => InPlace("/"),
-            "ifloordiv" => InPlace("//"),
-            "imod" => InPlace("%"),
-            "ipow" => InPlace("**"),
-            "ilshift" => InPlace("<<"),
-            "irshift" => InPlace(">>"),
-            "iand" => InPlace("&"),
-            "ixor" => InPlace("^"),
-            "ior" => InPlace("|"),
-            "neg" => Unary("neg"),
-            "pos" => Unary("pos"),
-            "invert" => Unary("~"),
-            "contains" => Self::Contains,
-            "getitem" => Self::GetItem,
-            "setitem" => Self::SetItem,
-            "delitem" => Self::DelItem,
-            "index" => Self::Index,
-            "length_hint" => Self::LengthHint,
-            _ => return None,
-        })
+    operations! {
+        "lt" => Self::Binary("<"),
+        "le" => Self::Binary("<="),
+        "eq" => Self::Binary("=="),
+        "ne" => Self::Binary("!="),
+        "gt" => Self::Binary(">"),
+        "ge" => Self::Binary(">="),
+        "add" => Self::Binary("+"),
+        "sub" => Self::Binary("-"),
+        "mul" => Self::Binary("*"),
+        "matmul" => Self::Binary("@"),
+        "truediv" => Self::Binary("/"),
+        "floordiv" => Self::Binary("//"),
+        "mod" => Self::Binary("%"),
+        "lshift" => Self::Binary("<<"),
+        "rshift" => Self::Binary(">>"),
+        "and_" => Self::Binary("&"),
+        "xor" => Self::Binary("^"),
+        "or_" => Self::Binary("|"),
+        "iadd" => Self::InPlace("+"),
+        "isub" => Self::InPlace("-"),
+        "imul" => Self::InPlace("*"),
+        "imatmul" => Self::InPlace("@"),
+        "itruediv" => Self::InPlace("/"),
+        "ifloordiv" => Self::InPlace("//"),
+        "imod" => Self::InPlace("%"),
+        "ipow" => Self::InPlace("**"),
+        "ilshift" => Self::InPlace("<<"),
+        "irshift" => Self::InPlace(">>"),
+        "iand" => Self::InPlace("&"),
+        "ixor" => Self::InPlace("^"),
+        "ior" => Self::InPlace("|"),
+        "neg" => Self::Unary("neg"),
+        "pos" => Self::Unary("pos"),
+        "invert" => Self::Unary("~"),
+        "contains" => Self::Contains,
+        "getitem" => Self::GetItem,
+        "setitem" => Self::SetItem,
+        "delitem" => Self::DelItem,
+        "index" => Self::Index,
+        "length_hint" => Self::LengthHint,
     }
 
     pub(super) fn call(

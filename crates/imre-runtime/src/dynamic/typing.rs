@@ -167,6 +167,25 @@ pub(super) fn forwards_to_origin(name: &str) -> bool {
     !(name.starts_with("__") && name.ends_with("__"))
 }
 
+/// Resolve ordinary attributes of parameterized typing generics on their origin.
+pub(super) fn generic_attr_target(ctx: &Context, mut obj: Id, name: &str, writing: bool) -> Result<Id> {
+    let mut depth = 0;
+    while let Value::GenericAlias(alias) = ctx.heap.get(obj)
+        && alias.kind == AliasKind::Generic
+        && match name {
+            "_name" | "_inst" => false,
+            "_nparams" | "_defaults" => !writing,
+            "copy_with" | "_determine_new_args" | "_make_substitution" => writing,
+            _ => forwards_to_origin(name),
+        }
+    {
+        depth += 1;
+        ctx.check_call_depth(depth)?;
+        obj = alias.origin;
+    }
+    Ok(obj)
+}
+
 #[derive(Default)]
 pub(super) struct Registry {
     alias_caches: [Option<Id>; 2],
@@ -850,6 +869,17 @@ pub(super) fn attribute(ctx: &mut Context, value: Id, name: &str) -> Option<Resu
         return Some(Ok(member));
     }
     let attr = match ctx.heap.get(value) {
+        Value::Native(class) if class == "typing._GenericAlias" && name == "copy_with" => {
+            ctx.class_attr(ctx.module_value("typing", "_SpecialGenericAlias")?, name)?
+        }
+        Value::GenericAlias(alias) if alias.kind == AliasKind::Generic && name == "copy_with" => {
+            let callable = ctx.class_attr(ctx.module_value("typing", "_SpecialGenericAlias")?, name)?;
+            ctx.alloc(Value::Method {
+                callable,
+                receiver: value,
+                explicit: false,
+            })
+        }
         Value::TypeVar(_)
         | Value::ParamSpec(_)
         | Value::ParamSpecMarker(_, _)
@@ -885,6 +915,22 @@ pub(super) fn attribute(ctx: &mut Context, value: Id, name: &str) -> Option<Resu
         {
             let module = class.rsplit_once('.').unwrap().0.to_owned();
             ctx.text(module)
+        }
+        Value::Native(class) if name == "__reduce__" && class == "typing._GenericAlias" => {
+            ctx.module_value("typing", "_reduce_generic_alias")?
+        }
+        Value::Native(class) if name == "__reduce__" && class == "typing._CallableGenericAlias" => {
+            ctx.module_value("typing", "_reduce_callable_alias")?
+        }
+        Value::GenericAlias(alias)
+            if name == "__reduce__"
+                && matches!(alias.kind, AliasKind::Generic | AliasKind::Callable) =>
+        {
+            let class = ctx.builtin(alias.kind.class());
+            return Some(
+                ctx.lookup_attr(class, name)
+                    .and_then(|reducer| ctx.bind_attribute(reducer, value, class)),
+            );
         }
         Value::NoDefault if name == "__reduce__" => {
             let callable = ctx.builtin("typing.NoDefault.__reduce__");
@@ -1033,7 +1079,7 @@ pub(super) fn attribute(ctx: &mut Context, value: Id, name: &str) -> Option<Resu
             "__args__" => a.args,
             "__origin__" => a.origin,
             "__parameters__" => a.parameters,
-            attr if a.name.is_some() && forwards_to_origin(attr) => {
+            attr if a.kind != AliasKind::Generic && a.name.is_some() && forwards_to_origin(attr) => {
                 return Some(ctx.lookup_attr(a.origin, attr));
             }
             _ => return None,
