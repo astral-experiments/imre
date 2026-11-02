@@ -1,0 +1,121 @@
+{
+  "suite": "test.test_getopt",
+  "python": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "public_baseline": "35eb40f271c75546bec3e500436ce95b18495c2d",
+  "tested_head": "b8ddfffb1ff622d7fca2c7ec4ce7936772632108",
+  "tested_tree": "80d9c73e80b8ea0a35d03d53d8fb8fe4244b93c4",
+  "merged_product": "f049456e8c732073c0f4e8c0e72b79d57a2d69e5",
+  "fixture": "Full original CPython module with source-backed shipped getopt.py; default unittest module discovery includes the registered doctest.",
+  "columns": [
+    "stock_3_14_5",
+    "native_parent_stock_child_O0",
+    "native_parent_stock_child_O3",
+    "native_parent_imre_child_O0",
+    "native_parent_imre_child_O3"
+  ],
+  "legend": {
+    "P": "pass",
+    "F": "assertion failure",
+    "E": "error"
+  },
+  "cases": {
+    "test.test_getopt.GetoptTests.test_do_longs": ["P","P","P","P","P"],
+    "test.test_getopt.GetoptTests.test_do_shorts": ["P","P","P","P","P"],
+    "test.test_getopt.GetoptTests.test_getopt": ["P","P","P","P","P"],
+    "test.test_getopt.GetoptTests.test_gnu_getopt": ["P","P","P","P","P"],
+    "test.test_getopt.GetoptTests.test_issue4629": ["P","P","P","P","P"],
+    "test.test_getopt.GetoptTests.test_long_has_args": ["P","P","P","P","P"],
+    "test.test_getopt.GetoptTests.test_short_has_arg": ["P","P","P","P","P"],
+    "test.test_getopt.TestTranslations.test_translations": ["P","P","P","F","F"],
+    "test.test_getopt.test_libref_examples": ["P","P","P","P","P"]
+  },
+  "native_totals": {
+    "O0": {
+      "registered": 9,
+      "passed": 8,
+      "failures": 1,
+      "errors": 0,
+      "skipped": 0,
+      "exit": 1
+    },
+    "O3": {
+      "registered": 9,
+      "passed": 8,
+      "failures": 1,
+      "errors": 0,
+      "skipped": 0,
+      "exit": 1
+    }
+  },
+  "host_assisted_totals": {
+    "O0": {
+      "registered": 9,
+      "passed": 9,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "exit": 0
+    },
+    "O3": {
+      "registered": 9,
+      "passed": 9,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "exit": 0
+    }
+  },
+  "controls": {
+    "wrong_argument": "Only test/support/i18n_helper.py in a separate copy substitutes --imre-invalid-location for --no-location. The original test_getopt assertions and translation snapshot retain their bytes.",
+    "stock": {
+      "registered": 9,
+      "passed": 8,
+      "failures": 1,
+      "exit": 1,
+      "id": "test.test_getopt.TestTranslations.test_translations",
+      "observed": "Line 51, AssertionError: 1 != 0."
+    },
+    "corrected_head": {
+      "failure_id": "test.test_getopt.TestTranslations.test_translations",
+      "passed": 8,
+      "failures": 1,
+      "errors": 0,
+      "skipped": 0,
+      "exit": 1,
+      "routes": [
+        "native_parent_stock_child_O0",
+        "native_parent_stock_child_O3",
+        "native_parent_imre_child_O0",
+        "native_parent_imre_child_O3"
+      ]
+    }
+  },
+  "discovery": "Nine IDs in CPython order. Parent compilations use --runtime-imports; each native child uses the same compiler and runtime at the parent's optimization level.",
+  "role_boundary": "The translation case starts a real subprocess. Passing with stock CPython as the child is host-assisted, outside native totals. Eight native passes are in the side lane only.",
+  "known_environment": "This measurement ran during a Linux process-exhaustion incident. Public-baseline requests produced native translation errors; the exact boxed-negative O0/O3 difference is not attributed to a product regression.",
+  "campaign": "Outside the fixed 25 modules. CSV unchanged.",
+  "public_installed": {
+    "id": "test.test_getopt.TestTranslations.test_translations",
+    "description": "Current public boxed module runner with the source-backed provider, before adding the list-specific assertion.",
+    "columns": [
+      "native_parent_stock_child_O0",
+      "native_parent_stock_child_O3",
+      "native_parent_imre_child_O0",
+      "native_parent_imre_child_O3"
+    ],
+    "correct": [
+      "E",
+      "E",
+      "E",
+      "E"
+    ],
+    "wrong": [
+      "F",
+      "F",
+      "E",
+      "F"
+    ],
+    "other_eight": "P",
+    "all_exits": 1
+  }
+}
