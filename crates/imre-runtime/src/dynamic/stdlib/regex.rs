@@ -11,6 +11,8 @@ use crate::dynamic::builtins::bind;
 mod assertions;
 mod flags;
 mod group_names;
+#[cfg(target_os = "linux")]
+mod locale;
 mod lookahead;
 mod named_escapes;
 mod progress;
@@ -321,6 +323,10 @@ impl Pattern {
                     .strip_suffix(imre_regex::FINAL_NEWLINE_ANCHOR)
                     .unwrap_or(&self.engine_source);
                 let full = format!(r"(?:{source})\z");
+                #[cfg(target_os = "linux")]
+                if let Matcher::Locale(matcher) = &self.regex {
+                    return Ok(Matcher::Locale(Box::new(matcher.full())));
+                }
                 if let Matcher::Lookahead(matcher) = &self.regex {
                     return matcher
                         .with_source(&full)
@@ -1272,6 +1278,15 @@ fn prepare(
             Ok((source, matcher))
         })
         .or_else(backtrack)?;
+    #[cfg(target_os = "linux")]
+    let regex = if bytes
+        && flags & (LOCALE | IGNORECASE) == LOCALE | IGNORECASE
+        && let Some(locale) = locale::LocaleMatcher::parse(&source, flags, regex.group_info())
+    {
+        Matcher::Locale(Box::new(locale))
+    } else {
+        regex
+    };
     Ok(Pattern {
         source: id,
         flags: if ascii { flags } else { flags | UNICODE },
