@@ -31,6 +31,7 @@ def generator_slots():
 
 def current():
     generator_slots()
+    exhausted_locals()
     seen = []
 
     def observe(value):
@@ -132,3 +133,23 @@ def current():
 
     captures = list(lambda: value for value in [3, 7])
     print(captures[0](), captures[1]())
+
+
+def exhausted_locals():
+    import gc
+    import weakref
+
+    class Item:
+        pass
+
+    item = Item()
+    item.cycle = item
+    observed = weakref.ref(item)
+    gen = (value is None for value in [item])
+    del item
+    assert next(gen) is False
+    gc.collect()
+    assert observed() is not None
+    assert next(gen, None) is None
+    gc.collect()
+    assert observed() is None
