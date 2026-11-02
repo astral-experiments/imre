@@ -204,6 +204,7 @@ impl BuiltinDescriptor {
             "str.isascii" => ("str", "isascii"),
             "str.isalpha" => ("str", "isalpha"),
             "str.isdigit" => ("str", "isdigit"),
+            "str.isidentifier" => ("str", "isidentifier"),
             "str.title" => ("str", "title"),
             "str.swapcase" => ("str", "swapcase"),
             "str.islower" => ("str", "islower"),
@@ -259,6 +260,7 @@ impl BuiltinDescriptor {
                     | "isascii"
                     | "isalpha"
                     | "isdigit"
+                    | "isidentifier"
                     | "islower"
                     | "istitle"
                     | "center"
@@ -538,6 +540,9 @@ impl BuiltinDescriptor {
                     ("isdigit", "__doc__") => {
                         "Return True if the string is a digit string, False otherwise.\n\nA string is a digit string if all characters in the string are digits and there\nis at least one character in the string."
                     }
+                    ("isidentifier", "__doc__") => {
+                        "Return True if the string is a valid Python identifier, False otherwise.\n\nCall keyword.iskeyword(s) to test whether string s is a reserved identifier,\nsuch as \"def\" or \"class\"."
+                    }
                     ("islower", "__doc__") => {
                         "Return True if the string is a lowercase string, False otherwise.\n\nA string is lowercase if all cased characters in the string are lowercase and\nthere is at least one cased character in the string."
                     }
@@ -565,7 +570,7 @@ impl BuiltinDescriptor {
                         "Convert uppercase characters to lowercase and lowercase characters to uppercase."
                     }
                     (
-                        "isascii" | "isalpha" | "isdigit" | "islower" | "istitle" | "title"
+                        "isascii" | "isalpha" | "isdigit" | "isidentifier" | "islower" | "istitle" | "title"
                         | "swapcase",
                         _,
                     ) => "($self, /)",
