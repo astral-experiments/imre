@@ -1278,6 +1278,19 @@ def main():
         ftp_script.write_text("import ftplib\nprint(ftplib.FTP().encoding, ftplib.parse257('257 \"home\"'))\n")
         compare("-B", ftp_script)
 
+        # A project FTP provider is loaded only if the opener actually uses FTP.
+        alternate = root / "ftp_provider"
+        alternate.mkdir()
+        (alternate / "ftplib.py").write_text("raise RuntimeError('project ftp provider')\n")
+        indirect = alternate / "opener.py"
+        indirect.write_text(
+            "from urllib import request\n"
+            "print(request.Request('data:,ok').type)\n"
+            "try: request.build_opener(request.ProxyHandler({})).open('ftp:///file')\n"
+            "except RuntimeError as error: print(str(error))\n"
+        )
+        compare("-B", indirect)
+
         decorated = root / "method_decorators.py"
         decorated.write_text(
             "def prefix(tag):\n"

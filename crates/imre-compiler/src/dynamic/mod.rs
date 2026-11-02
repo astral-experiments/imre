@@ -312,7 +312,10 @@ impl<'a> Visitor<'a> for Imports {
                     || crate::classes::defines_pickle_reducer(class)
                     || class.arguments.as_ref().is_some_and(|arguments| {
                         arguments.keywords.iter().any(|keyword| {
-                            keyword.arg.as_deref().is_some_and(|name| name != "metaclass")
+                            keyword
+                                .arg
+                                .as_deref()
+                                .is_some_and(|name| name != "metaclass")
                         })
                     }) =>
             {
@@ -522,11 +525,17 @@ pub(crate) fn compile(
         return Ok(None);
     };
     // Python scripts load the URL opener and FTP client as boxed modules.
-    let transport_script = startup.is_some()
-        && !options.runtime_imports
-        && first.names.iter().any(|(level, name)| {
-            *level == 0 && matches!(name.as_str(), "urllib.request" | "ftplib")
-        });
+    let imports_transport = |transport: &str| {
+        startup.is_some()
+            && !options.runtime_imports
+            && first
+                .names
+                .iter()
+                .any(|(level, name)| *level == 0 && name == transport)
+    };
+    let request_script = imports_transport("urllib.request");
+    let ftp_script = imports_transport("ftplib");
+    let transport_script = request_script || ftp_script;
     if !(module_entry.is_some()
         || first.runtime_imports
         || operation.is_some()
@@ -762,9 +771,9 @@ pub(crate) fn compile(
                         continue;
                     };
                     // Bundled transports cannot stand in for earlier project modules.
-                    if transport_script
-                        && matches!(prefix.as_str(), "urllib" | "ftplib")
-                        && initial.contains(root)
+                    if initial.contains(root)
+                        && ((request_script && prefix == "urllib")
+                            || (ftp_script && prefix == "ftplib"))
                     {
                         return Ok(None);
                     }
