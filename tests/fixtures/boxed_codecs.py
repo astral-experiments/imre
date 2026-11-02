@@ -49,7 +49,34 @@ def check_raw_unicode_escape():
     assert br"\u3".decode("raw_unicode_escape", "test.raw_change_input") == "Ä"
 
 
+
+def check_escape_decode():
+    from _codecs import escape_decode
+
+    assert codecs.escape_decode is escape_decode
+    payload = bytes(range(256))
+    literal = repr(payload)[2:-1].encode("ascii")
+    assert escape_decode(memoryview(literal)) == (payload, len(literal))
+    assert escape_decode("é\\n", None) == (b"\xc3\xa9\n", 4)
+    assert escape_decode(bytearray(br"\1\12\1234"), "unused") == (b"\x01\nS4", 10)
+    assert escape_decode(b"a\\\nb") == (b"ab", 4)
+    for policy, expected in [("ignore", b"z"), ("replace", b"?z")]:
+        assert escape_decode(br"\x4z", policy) == (expected, 4)
+    for data, policy, message in [
+        (br"a\x", "strict", r"invalid \x escape at position 1"),
+        (br"\xk", "nonexistent", "decoding error; unknown error handling code: nonexistent"),
+        (b"\\", "ignore", "Trailing \\ in string"),
+    ]:
+        try:
+            escape_decode(data, policy)
+        except ValueError as error:
+            assert str(error) == message
+        else:
+            raise AssertionError("expected invalid escape to raise")
+
+
 def current():
+    check_escape_decode()
     utf16_encoders()
     check_raw_unicode_escape()
     decoder = codecs.IncrementalDecoder(errors="replace")

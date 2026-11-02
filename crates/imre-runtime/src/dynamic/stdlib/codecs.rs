@@ -1,6 +1,7 @@
 //! Box the entries and stateless decoders of the native codec registry.
 use std::collections::HashMap;
 
+mod bytes_escape;
 mod raw_unicode_escape;
 mod surrogate_utf8;
 
@@ -576,6 +577,38 @@ fn resume_decode(
     }
 }
 
+fn positional_decoder_args(
+    function: &str,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<(Id, Option<Id>)> {
+    if !kwargs.is_empty() {
+        return Err(type_error(format!(
+            "_codecs.{function}() takes no keyword arguments"
+        )));
+    }
+    Ok(match args {
+        [input] => (*input, None),
+        [input, errors] => (*input, Some(*errors)),
+        [] => {
+            return Err(type_error(format!(
+                "{function} expected at least 1 argument, got 0"
+            )));
+        }
+        _ => {
+            return Err(type_error(format!(
+                "{function} expected at most 2 arguments, got {}",
+                args.len()
+            )));
+        }
+    })
+}
+
+pub(super) fn escape_decode(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    let (input, errors) = positional_decoder_args("escape_decode", args, kwargs)?;
+    ctx.with_buffer_export(input, |ctx| bytes_escape::decode(ctx, input, errors))
+}
+
 pub(in crate::dynamic) fn decode(
     ctx: &mut Context,
     codec: Codec,
@@ -589,28 +622,7 @@ pub(in crate::dynamic) fn decode(
         Codec::CodePage(_) => "charmap_decode",
     };
     let (input, errors) = match codec {
-        Codec::Latin1 | Codec::Ascii => {
-            if !kwargs.is_empty() {
-                return Err(type_error(format!(
-                    "_codecs.{function}() takes no keyword arguments"
-                )));
-            }
-            match args {
-                [input] => (*input, None),
-                [input, errors] => (*input, Some(*errors)),
-                [] => {
-                    return Err(type_error(format!(
-                        "{function} expected at least 1 argument, got 0"
-                    )));
-                }
-                _ => {
-                    return Err(type_error(format!(
-                        "{function} expected at most 2 arguments, got {}",
-                        args.len()
-                    )));
-                }
-            }
-        }
+        Codec::Latin1 | Codec::Ascii => positional_decoder_args(function, args, kwargs)?,
         _ => {
             let bound = matches!(codec, Codec::CodePage(_));
             let wrapper = if bound { "Codec.decode" } else { "decode" };
