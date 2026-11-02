@@ -1554,6 +1554,16 @@ def main():
             tuple_dir.write_text(source + "\n")
             compare("-B", tuple_dir, native_args=("run", tuple_dir, "--quiet"))
 
+        descriptor = root / "namedtuple_descriptor.py"
+        descriptor.write_text(
+            "from collections import namedtuple\n"
+            "Point = namedtuple('Point', 'x y')\n"
+            "field = Point.y\n"
+            "assert field is Point.y and field.__get__(None, Point) is field\n"
+            "print(field.__get__(Point(11, 22)), field.__get__((31, 32)))\n"
+        )
+        compare("-B", descriptor, native_args=("run", descriptor, "--quiet"))
+
         unrelated = root / "unrelated_asdict.py"
         unrelated.write_text(
             "from collections import namedtuple\n"

@@ -7842,7 +7842,17 @@ impl<'a> Checker<'a> {
                         self.scoped_builtin_error("urllib.parse result counterpart", attribute)
                     );
                 }
-                if let Some((_, declaration)) = self.namedtuple_factory(&attribute.value) {
+                if let Some((origin, declaration)) = self.namedtuple_factory(&attribute.value) {
+                    if matches!(origin, crate::types::TupleOrigin::Declaration(_))
+                        && declaration
+                            .fields
+                            .iter()
+                            .any(|field| field == attribute.attr.as_str())
+                    {
+                        return Err(
+                            self.scoped_builtin_error("namedtuple field descriptor", attribute)
+                        );
+                    }
                     return self.namedtuple_class_attribute(attribute, &declaration);
                 }
                 if let Some(method) = ir::StrDescriptor::named(attribute.attr.as_str())
