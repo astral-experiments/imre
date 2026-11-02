@@ -337,6 +337,8 @@ pub(super) const STR_METHODS: &[&str] = &[
     "splitlines",
     "startswith",
     "strip",
+    "swapcase",
+    "title",
     "translate",
     "upper",
     "zfill",

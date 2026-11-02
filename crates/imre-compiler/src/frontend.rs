@@ -7706,7 +7706,13 @@ impl<'a> Checker<'a> {
                     receiver.ty,
                     Type::Str | Type::StrLiteral(_) | Type::StrEnum(_)
                 ) && ir::StrDescriptor::named(attribute.attr.as_str()).is_some_and(|method| {
-                    method.is_predicate() || method == ir::StrDescriptor::ZFill
+                    method.is_predicate()
+                        || matches!(
+                            method,
+                            ir::StrDescriptor::ZFill
+                                | ir::StrDescriptor::Title
+                                | ir::StrDescriptor::SwapCase
+                        )
                 }) {
                     return Err(self.object_builtin_error(
                         &format!("bound str.{}", attribute.attr.as_str()),
@@ -9687,6 +9693,8 @@ impl<'a> Checker<'a> {
             if matches!(
                 attribute.attr.as_str(),
                 "splitlines"
+                    | "title"
+                    | "swapcase"
                     | "isalnum"
                     | "isascii"
                     | "isalpha"
@@ -9697,7 +9705,7 @@ impl<'a> Checker<'a> {
                     | "isupper"
             ) && matches!(receiver.ty, Type::Str | Type::StrLiteral(_))
             {
-                return self.splitlines_or_predicate(
+                return self.splitlines_or_unary_text(
                     Self::string_value(receiver),
                     attribute.attr.as_str(),
                     call,
