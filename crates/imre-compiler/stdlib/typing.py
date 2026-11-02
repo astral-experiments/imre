@@ -5,7 +5,7 @@ import builtins as _builtins
 import functools
 import sys as _sys
 import typing as _typing
-from _collections_abc import Generator as _Generator, Iterable as _Iterable
+from _collections_abc import Generator as _Generator, Iterable as _Iterable, Iterator as _Iterator
 from _collections_abc import Mapping as _Mapping, MutableMapping as _MutableMapping, Sequence as _Sequence
 from _collections_abc import Reversible as _Reversible, Sized as _Sized
 from collections.abc import ByteString as _ByteString
@@ -1956,6 +1956,7 @@ Sequence = _SpecialGenericAlias(_Sequence, 1)
 Mapping = _SpecialGenericAlias(_Mapping, 2, name="Mapping")
 MutableMapping = _SpecialGenericAlias(_MutableMapping, 2, name="MutableMapping")
 Iterable = _SpecialGenericAlias(_Iterable, 1, name="Iterable")
+Iterator = _SpecialGenericAlias(_Iterator, 1, name="Iterator")
 Reversible = _SpecialGenericAlias(_Reversible, 1)
 Sized = _SpecialGenericAlias(_Sized, 0)
 ByteString = _DeprecatedGenericAlias(_ByteString, 0, removal_version=(3, 17))

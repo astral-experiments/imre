@@ -1,6 +1,6 @@
-from collections.abc import Iterable as IterableABC
+from collections.abc import Iterable as IterableABC, Iterator as IteratorABC
 from collections.abc import Reversible as ReversibleABC, Sized as SizedABC
-from typing import Iterable, Reversible, Sized, get_args, get_origin
+from typing import Iterable, Iterator, Reversible, Sized, get_args, get_origin
 
 
 def current():
@@ -10,6 +10,10 @@ def current():
     assert specialized is Iterable[int]
     assert get_origin(specialized) is IterableABC and get_args(specialized) == (int,)
     assert repr(specialized) == "typing.Iterable[int]"
+
+    assert get_origin(Iterator) is IteratorABC and get_origin(Iterator[int]) is IteratorABC
+    assert get_args(Iterator[int]) == (int,)
+    assert isinstance(iter([]), Iterator) and not isinstance([], Iterator)
 
     class Items:
         def __iter__(self):
