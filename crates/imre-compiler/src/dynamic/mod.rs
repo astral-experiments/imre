@@ -105,6 +105,7 @@ impl Imports {
             && matches!(
                 name,
                 "_imp"
+                    | "atexit"
                     | "sysconfig"
                     | "platform"
                     | "keyword"
@@ -228,6 +229,7 @@ impl<'a> Visitor<'a> for Imports {
                     let suffix = a.name.as_str();
                     if imp.level == 0
                         && (name == "unittest" && boxed_unittest_cleanup(suffix)
+                            || name == "weakref" && suffix == "finalize"
                             || boxed_signal_export(name, suffix))
                     {
                         self.runtime_imports = true;
@@ -412,6 +414,8 @@ pub(crate) fn compile(
         && ![
             "__future__",
             "_imp",
+            "atexit",
+            "weakref",
             "sys",
             "platform",
             "keyword",
