@@ -21,6 +21,7 @@ mod mapping_abc;
 mod memoryview;
 mod module_type;
 mod namedtuple;
+mod slot_member;
 mod namespace;
 mod namespace_init;
 mod namespace_repr;
@@ -100,6 +101,7 @@ pub(crate) struct Context {
     heap: Heap,
     config: serde_json::Value,
     executable: PathBuf,
+    helper_executable: String,
     argv: Id,
     sys_path: Id,
     default_encoding: Id,
@@ -2043,7 +2045,17 @@ impl Context {
             let rlock = self.builtin(thread_rlock::CLASS);
             self.bind(scope, "RLock", rlock);
         }
+        if matches!(name, "io" | "_io") {
+            let error = self.builtin("BlockingIOError");
+            self.bind(scope, "BlockingIOError", error);
+        }
         match name {
+            "inspect" => {
+                for &(name, flag) in imre_ast::code_flags::INSPECT_FLAGS {
+                    let value = self.int(i64::from(flag));
+                    self.bind(scope, name, value);
+                }
+            }
             "abc" => {
                 let meta = self.abc_meta();
                 self.bind(scope, "ABCMeta", meta);
@@ -2096,9 +2108,22 @@ impl Context {
                 let devnull = self.text("/dev/null");
                 self.bind(scope, "devnull", devnull);
             }
+            "math" if source.is_none() => {
+                let pi = self.alloc(Value::Float(std::f64::consts::PI));
+                self.bind(scope, "pi", pi);
+            }
             "errno" => stdlib::install_errno(self, scope)?,
             "_socket" => stdlib::install_lowlevel_socket(self, scope)?,
-            "socket" if source.is_none() => stdlib::import_socket_constants(self, scope)?,
+            "socket"
+                if source.is_none()
+                    || source.as_ref().is_some_and(|(path, _)| {
+                        self.config["bundled_root"].as_str().is_some_and(|root| {
+                            path == &std::path::Path::new(root).join("socket.py")
+                        })
+                    }) =>
+            {
+                stdlib::import_socket_constants(self, scope)?
+            }
             "_opcode" => {
                 // Imre emits native code and has no adaptive bytecode interpreter.
                 let disabled = self.int(0);

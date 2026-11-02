@@ -39,7 +39,8 @@ pub(super) fn static_type(modules: &[SourceModule], module: ModuleId, value: &as
                             | Intrinsic::Iterator
                             | Intrinsic::Sequence
                             | Intrinsic::NominalClass("collections.abc.Sequence")
-                            | Intrinsic::Mapping { .. }
+                            | Intrinsic::Mapping
+                            | Intrinsic::TYPING_MAPPING
                             | Intrinsic::ObjectRuntimeExport("collections.abc.Collection")
                             | Intrinsic::Literal
                     )
@@ -61,7 +62,8 @@ pub(super) fn static_type(modules: &[SourceModule], module: ModuleId, value: &as
                         | Intrinsic::Iterator
                         | Intrinsic::Sequence
                         | Intrinsic::NominalClass("collections.abc.Sequence")
-                        | Intrinsic::Mapping { .. }
+                        | Intrinsic::Mapping
+                        | Intrinsic::TYPING_MAPPING
                         | Intrinsic::ObjectRuntimeExport("collections.abc.Collection")
                         | Intrinsic::Literal
                 ))

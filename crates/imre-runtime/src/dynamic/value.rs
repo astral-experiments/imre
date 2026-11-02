@@ -643,6 +643,8 @@ pub(super) struct ClassNamespace {
     pub provider_annotations: bool,
     /// Slot names consumed when the class is created, independent of later namespace mutations.
     pub slot_names: Option<std::rc::Rc<[String]>>,
+    /// Dynamic classes install real descriptors instead of using inline fields by spelling.
+    pub member_slots: bool,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -838,6 +840,8 @@ pub(super) enum Value {
     Instance {
         class: Id,
         fields: indexmap::IndexMap<String, Id>,
+        /// Storage addressed by the declaring member, independent of the instance dictionary.
+        member_values: Option<Box<HashMap<Id, Id>>>,
         /// Exact ordinary instance dictionary once exposed or replaced.
         namespace: Option<Id>,
         dictionary: Option<Id>,
@@ -857,6 +861,7 @@ pub(super) enum Value {
     /// The writable document member of the native tuple descriptor type.
     TupleGetterDoc,
     ReadOnlyMember(&'static str, &'static str),
+    SlotMember { owner: Id, name: Id },
     /// The original keys are held in a Python tuple, shared by multi-key reductions.
     ItemGetter(Id),
     ThreadLocal(super::thread_local::Dictionaries),
@@ -1084,7 +1089,7 @@ impl Value {
             Self::Dict(_) => "dict",
             Self::MappingProxy(_) => "mappingproxy",
             Self::Function { .. } => "function",
-            Self::TupleGetterDoc | Self::ReadOnlyMember(_, _) => "member_descriptor",
+            Self::TupleGetterDoc | Self::ReadOnlyMember(_, _) | Self::SlotMember { .. } => "member_descriptor",
             Self::ItemGetter(_) => "operator.itemgetter",
             Self::Code(_) => "code",
             Self::Cell(_) => "cell",
@@ -1383,9 +1388,11 @@ impl Value {
                 visit.extend([union.args, union.members, union.parameters]);
                 visit.extend(union.unhashable);
             }
+            Self::SlotMember { owner, name } => visit.extend([*owner, *name]),
             Self::Instance {
                 class,
                 fields,
+                member_values,
                 namespace,
                 dictionary,
                 scalar,
@@ -1421,6 +1428,11 @@ impl Value {
                 }
                 visit.push(*class);
                 visit.extend(dictionary);
+                if let Some(values) = member_values {
+                    for (&member, &value) in values.iter() {
+                        visit.extend([member, value]);
+                    }
+                }
                 visit.extend(fields.values());
                 visit.extend(namespace);
                 visit.extend(scalar);
@@ -2155,6 +2167,23 @@ impl Heap {
         let id = self.alloc_slot(Value::Tuple(items));
         self.slots[id as usize].untracked_tuple.set(untracked);
         id
+    }
+
+    /// Allocate a distinct string result even when its value is a cached Latin-1 character.
+    pub(super) fn fresh_string(&mut self, value: Value) -> Result<Id> {
+        debug_assert!(matches!(value, Value::Str(_) | Value::SurrogateStr(_)));
+        if self.free_head == END {
+            self.slots
+                .try_reserve(1)
+                .map_err(|_| Error::new("MemoryError", ""))?;
+        }
+        self.frames
+            .last_mut()
+            .unwrap()
+            .live
+            .try_reserve(1)
+            .map_err(|_| Error::new("MemoryError", ""))?;
+        Ok(self.alloc_slot(value))
     }
 
     fn alloc_slot(&mut self, value: Value) -> Id {

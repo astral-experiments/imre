@@ -1288,6 +1288,24 @@ pub(super) fn method(
             Ok(ctx.alloc(Value::Bytes(b)))
         };
     }
+    if name == "zfill" {
+        let width = one_positional_arg("str.zfill", args, kwargs)?;
+        let width = crate::objects::zfill::width(&ctx.index_integer(width)?)?;
+        let storage = ctx.string_storage(receiver).unwrap();
+        let copy = storage != receiver;
+        let result = match ctx.heap.get(storage) {
+            Value::Str(text) => crate::objects::zfill::text(text, width, copy)?.map(Value::Str),
+            Value::SurrogateStr(points) => {
+                crate::objects::zfill::units(points, points.len(), width, copy)?
+                    .map(Value::SurrogateStr)
+            }
+            _ => unreachable!(),
+        };
+        return match result {
+            Some(value) => ctx.heap.fresh_string(value),
+            None => Ok(storage),
+        };
+    }
     if name == "expandtabs" {
         let [tabsize] = bind_method_arguments(name, args, kwargs, ["tabsize"], 1)?;
         let width = match tabsize {
@@ -1497,6 +1515,7 @@ pub(super) fn method(
         "isdigit" => Some(crate::objects::python_isdigit),
         "islower" => Some(|text| crate::objects::python_islower(text.chars())),
         "isspace" => Some(crate::objects::python_isspace),
+        "istitle" => Some(|text| crate::objects::python_istitle(text.chars())),
         "isupper" => Some(crate::objects::python_isupper),
         _ => None,
     };
@@ -1528,6 +1547,14 @@ pub(super) fn method(
             return Ok(boolean(crate::objects::python_islower(
                 points.iter().copied().filter_map(char::from_u32),
             )));
+        }
+        if name == "istitle"
+            && let Value::SurrogateStr(points) = ctx.heap.get(ctx.scalar_value(receiver))
+        {
+            // A surrogate ends a cased run, just like the uncased replacement character.
+            return Ok(boolean(crate::objects::python_istitle(points.iter().map(
+                |&cp| char::from_u32(cp).unwrap_or(char::REPLACEMENT_CHARACTER),
+            ))));
         }
         return Ok(boolean(predicate(ctx.str_value(receiver)?)));
     }

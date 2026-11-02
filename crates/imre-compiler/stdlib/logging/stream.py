@@ -130,17 +130,3 @@ class StreamHandler(Handler):
             old = self.stream
             self.stream = stream
         return old
-
-
-def _deliver(logger: Logger, level: int, record: LogRecord) -> None:
-    current: Logger | None = logger
-    found = False
-    while current is not None:
-        for handler in current.handlers:
-            found = True
-            if level >= handler.level:
-                handler.handle(record)
-        if not current.propagate:
-            break
-        current = current.parent
-    _fallback(logger, level, record, found)
