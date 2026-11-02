@@ -1611,7 +1611,7 @@ impl Context {
     }
 
     /// Invoke pending callbacks after the heap has cleared every dead reference.
-    fn run_weak_callbacks(&mut self, callbacks: impl IntoIterator<Item = (Id, Id)>) {
+    pub(super) fn run_weak_callbacks(&mut self, callbacks: impl IntoIterator<Item = (Id, Id)>) {
         for (callback, reference) in callbacks {
             if let Err(error) = self.call(callback, vec![reference], Vec::new()) {
                 // clear_weak_targets retains __callback__ for cyclic GC, but clears it

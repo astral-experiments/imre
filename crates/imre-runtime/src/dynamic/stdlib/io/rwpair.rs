@@ -41,6 +41,74 @@ fn store(ctx: &mut Context, receiver: Id, pair: Pair) {
     *memory_stream = Some(MemoryStream::Pair(pair));
 }
 
+fn release_child(ctx: &mut Context, child: Option<Id>) -> Result<()> {
+    if let Some(child) = child {
+        let (heap, roots) = ctx.heap_and_roots();
+        if heap.released_last_finalizer_ref(child, roots)? {
+            ctx.dispatch_finalizer(child);
+        }
+    }
+    Ok(())
+}
+
+/// CPython's exact pair deallocator clears its weakrefs, reader, then writer.
+/// Subclasses and cyclic isolates use the inherited IOBase finalizer instead.
+pub(in crate::dynamic) fn deallocate_exact_pair(ctx: &mut Context, owner: Id) -> Result<bool> {
+    let Value::Instance { class, .. } = ctx.heap.get(owner) else {
+        return Ok(false);
+    };
+    if !matches!(
+        ctx.heap.get(*class),
+        Value::Class {
+            io_kind: Some(NativeClass::Pair { .. }),
+            ..
+        }
+    ) {
+        return Ok(false);
+    }
+    ctx.heap.take_finalizer(owner, true);
+    let mark = ctx.heap.temporary_mark();
+    ctx.heap.keep(owner);
+    let pending = ctx.pending.take();
+    if let Some(error) = &pending {
+        for root in error.roots() {
+            ctx.heap.keep(root);
+        }
+    }
+    let result = (|| {
+        let callback_roots = ctx.heap.temporary_mark();
+        let (heap, roots) = ctx.heap_and_roots();
+        let callbacks = heap.clear_dealloc_weakrefs(owner, roots)?;
+        ctx.run_weak_callbacks(callbacks);
+        ctx.heap.release_temporaries_since(callback_roots);
+
+        let pair = state(ctx, owner);
+        store(
+            ctx,
+            owner,
+            Pair {
+                reader: None,
+                ..pair
+            },
+        );
+        release_child(ctx, pair.reader)?;
+        // A reader finalizer can run Python; keep the writer and owner alive until now.
+        let pair = state(ctx, owner);
+        store(
+            ctx,
+            owner,
+            Pair {
+                writer: None,
+                ..pair
+            },
+        );
+        release_child(ctx, pair.writer)
+    })();
+    ctx.pending = pending;
+    ctx.heap.release_temporaries_since(mark);
+    result.map(|()| true)
+}
+
 fn initialize(ctx: &mut Context, owner: Id, receiver: Id, args: &[Id]) -> Result<Id> {
     if !(2..=3).contains(&args.len()) {
         let bound = if args.len() < 2 {

@@ -3,6 +3,7 @@ import _io
 import io
 import os
 import sys
+import weakref
 from _io import BufferedRWPair as NativePair
 
 class Pair(io.BufferedRWPair):
@@ -126,6 +127,39 @@ try:
     assert pair.close() is None
     with io.open(dst, "rb") as check:
         assert check.read() == b"foo!"
+    class ObserveReader(io.FileIO):
+        def close(self):
+            events.append(("writer", reader.closed))
+            return super().close()
+
+    for kind, cyclic, reader_closed in ((NativePair, False, True), (Pair, False, False),
+                                        (NativePair, True, False)):
+        reader = io.FileIO(src, "r")
+        writer = ObserveReader(dst, "w")
+        pair = kind(reader, writer, 8)
+        events = []
+        assert pair.write(b"x") == 1
+        def gone(ref):
+            assert ref() is None
+            events.append(("weak", reader.closed, writer.closed))
+        ref = weakref.ref(pair, gone)
+        if cyclic:
+            pair.loop = pair
+        retained_method = pair.write
+        del pair
+        assert not events and ref() is not None
+        del retained_method
+        if cyclic:
+            assert not events
+        gc.collect()
+        # A Python subtype runs IOBase's finalizer before ordinary weakref clearing.
+        if kind is Pair:
+            assert events == [("writer", False), ("weak", True, True)]
+        else:
+            assert events == [("weak", False, False), ("writer", reader_closed)]
+        assert reader.closed and writer.closed
+        with io.FileIO(dst, "r") as check:
+            assert check.read() == b"x"
     del sys.modules["_io"]
     try:
         fresh = __import__("_io")

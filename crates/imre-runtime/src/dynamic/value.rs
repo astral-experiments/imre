@@ -2873,7 +2873,7 @@ impl Heap {
         roots: impl Iterator<Item = Id>,
     ) -> Result<bool> {
         let mut cycles = CycleSet::new(self.slots.len())?;
-        self.mark_reference_survivors(roots, &mut cycles);
+        self.mark_reference_survivors(roots, &mut cycles, None);
         let live = self.slots.iter().any(|slot| {
             slot.marked()
                 && matches!(slot.value, Some(Value::MemoryView { owner: Some(owner), .. })
@@ -3213,20 +3213,46 @@ impl Heap {
             self.collect_next_statement = true;
             return None;
         };
-        self.mark_reference_survivors(globals, &mut cycles);
+        self.mark_reference_survivors(globals, &mut cycles, None);
         self.sweep()
     }
 
-    fn mark_reference_survivors(&self, globals: impl Iterator<Item = Id>, cycles: &mut CycleSet) {
+    fn mark_reference_survivors(
+        &self,
+        globals: impl Iterator<Item = Id>,
+        cycles: &mut CycleSet,
+        releasing: Option<Id>,
+    ) {
         // A weakref callback can drop an unrelated owner. Keep its graph intact
         // for Python dispatch when this sweep releases temporary callback roots.
-        self.mark(globals.chain(self.ordinary_finalizers.iter().copied()));
+        self.mark(globals.chain(
+            self.ordinary_finalizers.iter().copied().filter(|id| Some(*id) != releasing),
+        ));
         self.identify_cycles(cycles);
         // Peeling leaves both cycles and their unreachable descendants. Every
         // strong child of a member is therefore already live or itself a member.
         for id in cycles.members() {
             self.slots[id as usize].trace.set(END);
         }
+    }
+
+    /// Test a single just-released strong edge. Other pending finalizers, roots and
+    /// uncollected cycles can still retain the child or return it to Python.
+    pub(super) fn released_last_finalizer_ref(
+        &self,
+        child: Id,
+        roots: impl Iterator<Item = Id>,
+    ) -> Result<bool> {
+        if self.slots[child as usize].finalization != Finalization::Pending {
+            return Ok(false);
+        }
+        let mut cycles = CycleSet::new(self.slots.len())?;
+        self.mark_reference_survivors(roots, &mut cycles, Some(child));
+        let last = !self.slots[child as usize].marked();
+        for slot in &self.slots {
+            slot.trace.set(UNMARKED);
+        }
+        Ok(last)
     }
 
     pub(super) fn full_collection_active(&self) -> bool {
@@ -3349,7 +3375,7 @@ impl Heap {
         let mut cycles = CycleSet::new(self.slots.len())?;
         self.mark_full(globals, &mut cycles.work);
         self.identify_cycles(&mut cycles);
-        let mut callbacks = self.clear_weak_targets(Some(&cycles.incoming));
+        let mut callbacks = self.clear_weak_targets(Some(&cycles.incoming), None);
         cycles.cyclic_callbacks = callbacks.len();
         self.mark(cycles.members());
         if let Some(acyclic) = self.sweep() {
@@ -3359,12 +3385,34 @@ impl Heap {
         Ok(callbacks)
     }
 
-    fn clear_weak_targets(&mut self, cyclic: Option<&[usize]>) -> Vec<(Id, Id)> {
+    /// Expire one native deallocator's weakrefs before it releases any children.
+    /// The caller roots the owner, including weakrefs stored only in its own dict.
+    pub(super) fn clear_dealloc_weakrefs(
+        &mut self,
+        owner: Id,
+        roots: impl Iterator<Item = Id>,
+    ) -> Result<WeakCallbacks> {
+        if !self.weak.contains_key(&owner) {
+            return Ok(Vec::new());
+        }
+        let mut cycles = CycleSet::new(self.slots.len())?;
+        self.mark_reference_survivors(roots, &mut cycles, None);
+        let callbacks = self.clear_weak_targets(None, Some(owner));
+        for slot in &self.slots {
+            slot.trace.set(UNMARKED);
+        }
+        Ok(callbacks)
+    }
+
+    fn clear_weak_targets(&mut self, cyclic: Option<&[usize]>, dealloc: Option<Id>) -> WeakCallbacks {
         // Clear non-owning handles before any dead target slot can be reused. Dead wrappers
         // never receive callbacks, and every live wrapper is cleared before any callback runs.
         let mut callbacks = Vec::new();
         let live = &mut self.frames.last_mut().unwrap().live;
         self.weak.retain(|&target, refs| {
+            if dealloc.is_some_and(|owner| owner != target) {
+                return true;
+            }
             if let Some(cyclic) = cyclic {
                 if cyclic[target as usize] == 0 {
                     // A weakref in the isolate must lose even a live referent. A
@@ -3386,7 +3434,7 @@ impl Heap {
                 }
             } else {
                 refs.retain(|&id| self.slots[id as usize].marked());
-                if self.slots[target as usize].marked() {
+                if dealloc.is_none() && self.slots[target as usize].marked() {
                     return !refs.is_empty();
                 }
             }
@@ -3502,7 +3550,7 @@ impl Heap {
         });
         self.interned
             .retain(|_, entry| self.slots[entry.id as usize].marked());
-        let callbacks = self.clear_weak_targets(None);
+        let callbacks = self.clear_weak_targets(None, None);
         self.mock_call_lists
             .retain(|&list| self.slots[list as usize].marked());
         self.abc_registrations.retain(|&[owner, member]| {
@@ -3606,6 +3654,24 @@ mod tests {
         assert!(!heap.discard_operands(mark, NONE, modules));
         *heap.get_mut(modules) = Value::Dict(Default::default());
         assert!(heap.discard_operands(mark, NONE, modules));
+    }
+
+    #[test]
+    fn released_child_stays_live_through_external_owners_and_cycles() {
+        let mut heap = Heap::new();
+        let mark = heap.temporary_mark();
+        let child = heap.alloc(Value::List(Vec::new()));
+        let owner = heap.alloc(Value::List(vec![child]));
+        heap.register_finalizer(child);
+        heap.release_temporaries_since(mark);
+        assert!(!heap.released_last_finalizer_ref(child, [owner].into_iter()).unwrap());
+        heap.register_finalizer(owner);
+        assert!(!heap.released_last_finalizer_ref(child, [].into_iter()).unwrap());
+        heap.take_finalizer(owner, false);
+        *heap.get_mut(owner) = Value::List(vec![owner, child]);
+        assert!(!heap.released_last_finalizer_ref(child, [].into_iter()).unwrap());
+        *heap.get_mut(owner) = Value::List(Vec::new());
+        assert!(heap.released_last_finalizer_ref(child, [].into_iter()).unwrap());
     }
 
     #[test]

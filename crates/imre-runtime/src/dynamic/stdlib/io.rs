@@ -10,6 +10,7 @@ mod descriptor_buffer;
 mod native_reader;
 mod native_writer;
 mod rwpair;
+pub(in crate::dynamic) use rwpair::deallocate_exact_pair;
 pub(in crate::dynamic) use descriptor_buffer::{
     BufferedFd, note_writer_finalizer, prepare_writer_shutdown,
 };
