@@ -26,6 +26,7 @@ struct Imports {
     operator_names: HashSet<String>,
     signal_names: HashMap<String, String>,
     unittest_names: HashSet<String>,
+    boxed_mock_names: HashSet<String>,
     pkgutil_names: HashSet<String>,
     get_data_names: HashSet<String>,
     machinery_names: HashSet<String>,
@@ -105,6 +106,7 @@ impl Imports {
             && matches!(
                 name,
                 "_imp"
+                    | "atexit"
                     | "sysconfig"
                     | "platform"
                     | "keyword"
@@ -228,9 +230,17 @@ impl<'a> Visitor<'a> for Imports {
                     let suffix = a.name.as_str();
                     if imp.level == 0
                         && (name == "unittest" && boxed_unittest_cleanup(suffix)
+                            || name == "weakref" && suffix == "finalize"
                             || boxed_signal_export(name, suffix))
                     {
                         self.runtime_imports = true;
+                    }
+                    if imp.level == 0
+                        && name == "unittest.mock"
+                        && crate::modules::boxed_mock_export(suffix)
+                    {
+                        self.boxed_mock_names
+                            .insert(a.asname.as_ref().unwrap_or(&a.name).to_string());
                     }
                     if imp.level == 0 && name == "pkgutil" && suffix == "get_data" {
                         self.get_data_names
@@ -274,9 +284,16 @@ impl<'a> Visitor<'a> for Imports {
         visitor::walk_stmt(self, s);
     }
     fn visit_expr(&mut self, e: &'a Expr) {
-        if matches!(e, Expr::Name(n) if n.id == "__import__" && n.ctx == ast::ExprContext::Load) {
-            self.uses_import_builtin = true;
-            self.add(0, "importlib");
+        if let Expr::Name(name) = e
+            && name.ctx == ast::ExprContext::Load
+        {
+            if name.id == "__import__" {
+                self.uses_import_builtin = true;
+                self.add(0, "importlib");
+            }
+            if self.boxed_mock_names.contains(name.id.as_str()) {
+                self.runtime_imports = true;
+            }
         }
         // A resource lookup can be the first operation to load its package.
         if let Expr::Call(call) = e
@@ -326,7 +343,7 @@ impl<'a> Visitor<'a> for Imports {
         {
             self.runtime_imports = true;
         }
-        if matches!(e, Expr::Attribute(a) if matches!(a.attr.as_str(), "__reduce__" | "__reduce_ex__"))
+        if matches!(e, Expr::Attribute(a) if matches!(a.attr.as_str(), "__reduce__" | "__reduce_ex__" | "__getstate__"))
             || matches!(e, Expr::Name(n) if n.id.as_str() == "SystemExit")
             || matches!(e, Expr::Attribute(a) if boxed_sys_export(a.attr.as_str()) && matches!(&*a.value, Expr::Name(n) if self.sys_names.contains(n.id.as_str())))
         {
@@ -412,6 +429,8 @@ pub(crate) fn compile(
         && ![
             "__future__",
             "_imp",
+            "atexit",
+            "weakref",
             "sys",
             "platform",
             "keyword",
@@ -424,6 +443,7 @@ pub(crate) fn compile(
             "SystemExit",
             "__import__",
             "__reduce",
+            "__getstate__",
             "templatelib",
         ]
         .iter()
@@ -659,6 +679,7 @@ pub(crate) fn compile(
         "__hello__",
         "_tokenize",
         "abc",
+        "annotationlib",
         "ast",
         "codecs",
         "copyreg",

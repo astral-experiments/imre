@@ -217,6 +217,19 @@ for base in (K, t.TypeVar):
         print(str(error))
 
 
+class Subscription:
+    def __class_getitem__(cls, item):
+        return cls, item
+
+
+class InheritedSubscription(Subscription):
+    pass
+
+
+assert isinstance(Subscription.__dict__["__class_getitem__"], classmethod)
+assert InheritedSubscription[int] == (InheritedSubscription, int)
+
+
 class Parameterize:
     def __get__(self, instance, owner):
         def bind(args):

@@ -1146,6 +1146,56 @@ fn validate_forward_ref(source: &str) -> Result<()> {
     Ok(())
 }
 
+/// Finalize a temporary annotation name in place, including references retained by
+/// a user callback or inside a previously constructed typing alias.
+fn finish_field_ref(ctx: &mut Context, value: Id) -> Result<Id> {
+    let invalid = || Error::new("TypeError", "expected a TypedDict annotation symbol");
+    let Some(source) = ctx.module_value("typing", "_TypedDictSymbol") else {
+        return Err(invalid());
+    };
+    let target = ctx
+        .module_value("annotationlib", "ForwardRef")
+        .ok_or_else(invalid)?;
+    if !matches!(ctx.heap.get(value), Value::Instance { class, .. } if *class == source) {
+        return Err(invalid());
+    }
+    // Module attributes can be rebound. Only the two ordinary, equally slotted
+    // layouts can exchange their class pointer without moving any field storage.
+    let object = ctx.builtin("object");
+    let slots = |class, expected_name| {
+        let Value::Class {
+            name,
+            scope,
+            ancestors,
+            io_kind: None,
+            namedtuple_fields: None,
+            ..
+        } = ctx.heap.get(class)
+        else {
+            return None;
+        };
+        let layout = ctx.scope_data(*scope).class_namespace.as_ref()?;
+        if name != expected_name
+            || ancestors.as_slice() != [object]
+            || layout.member_slots
+            || ctx.class_attr(class, "__del__").is_some()
+        {
+            return None;
+        }
+        layout.slot_names.as_deref()
+    };
+    let source_slots = slots(source, "_TypedDictSymbol").ok_or_else(invalid)?;
+    if slots(target, "ForwardRef") != Some(source_slots) {
+        return Err(invalid());
+    }
+    let Value::Instance { class, .. } = ctx.heap.get_mut(value) else {
+        unreachable!()
+    };
+    *class = target;
+    ctx.heap.weak_edge_removed(source);
+    Ok(value)
+}
+
 pub(super) fn call(
     ctx: &mut Context,
     operation: &str,
@@ -1333,6 +1383,7 @@ pub(super) fn call(
             "TypeError",
             "_GenericAlias.__init__() requires an origin and arguments",
         )),
+        ("_finish_field_ref", [value]) => finish_field_ref(ctx, *value),
         ("_validate_forward_ref", [text]) => {
             validate_forward_ref(ctx.str_value(*text)?)?;
             Ok(NONE)
@@ -1707,6 +1758,15 @@ impl Context {
             Vec::new()
         };
         let namedtuple_fields = self.namedtuple_layout(&name, &bases, &ancestors, scope)?;
+        // type.__new__ wraps plain functions only, before the class becomes observable.
+        for name in ["__init_subclass__", "__class_getitem__"] {
+            if let Some(&function) = self.scope_data(scope).names.get(name)
+                && matches!(self.heap.get(function), Value::Function { .. })
+            {
+                let method = self.alloc(Value::ClassMethod(function));
+                self.bind_local(scope, name, method);
+            }
+        }
         let class = self.alloc(Value::Class {
             io_kind: None,
             metaclass: None,

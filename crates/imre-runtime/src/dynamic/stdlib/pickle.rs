@@ -35,6 +35,25 @@ fn unsupported_reducer(ctx: &Context, obj: Id) -> Error {
     )
 }
 
+fn default_reduction(ctx: &mut Context, obj: Id, protocol: i32) -> Result<Id> {
+    if !matches!(ctx.heap.get(obj), Value::DirEntry(_)) {
+        return Err(unsupported_reducer(ctx, obj));
+    }
+    if protocol >= 2 {
+        return Err(Error::new(
+            "TypeError",
+            format!("cannot pickle '{}' object", ctx.type_name(obj)),
+        ));
+    }
+    // copyreg's legacy reducer records the class even when its instances cannot be created.
+    let copyreg = ctx.module("copyreg")?;
+    let reconstructor = ctx.lookup_attr(copyreg, "_reconstructor")?;
+    let class = ctx.exact_type(obj)?;
+    let base = ctx.builtin("object");
+    let args = ctx.alloc(Value::Tuple(vec![class, base, NONE]));
+    Ok(ctx.alloc(Value::Tuple(vec![reconstructor, args])))
+}
+
 /// Delegate to the instance hook only when its class overrides object's reducer.
 pub(in crate::dynamic) fn object_reduce(
     ctx: &mut Context,
@@ -48,7 +67,11 @@ pub(in crate::dynamic) fn object_reduce(
             format!("unbound method object.{name}() needs an argument"),
         ));
     };
-    let class = ctx.type_name(receiver);
+    let class = if matches!(ctx.heap.get(receiver), Value::DirEntry(_)) {
+        "DirEntry"
+    } else {
+        ctx.type_name(receiver)
+    };
     if !kwargs.is_empty() {
         return Err(Error::new(
             "TypeError",
@@ -62,7 +85,7 @@ pub(in crate::dynamic) fn object_reduce(
                 format!("{class}.{name}() takes no arguments ({} given)", rest.len()),
             ));
         }
-        return Err(unsupported_reducer(ctx, receiver));
+        return default_reduction(ctx, receiver, 0);
     }
     let [protocol] = rest else {
         return Err(Error::new(
@@ -73,7 +96,8 @@ pub(in crate::dynamic) fn object_reduce(
             ),
         ));
     };
-    ctx.index_integer(*protocol)?
+    let protocol = ctx
+        .index_integer(*protocol)?
         .to_i64()
         .and_then(|n| i32::try_from(n).ok())
         .ok_or_else(|| Error::new("OverflowError", "Python int too large to convert to C int"))?;
@@ -86,7 +110,7 @@ pub(in crate::dynamic) fn object_reduce(
     };
     let class = ctx.exact_type(receiver)?;
     if ctx.lookup_attr(class, "__reduce__")? == ctx.builtin("object.__reduce__") {
-        return Err(unsupported_reducer(ctx, receiver));
+        return default_reduction(ctx, receiver, protocol);
     }
     ctx.call(reducer, Vec::new(), Vec::new())
 }
@@ -189,7 +213,7 @@ impl Pickler {
             (ctx.builtin("codecs.encode"), vec![text, latin1])
         };
         let args = ctx.alloc(Value::Tuple(args));
-        self.save_reduce(ctx, obj, func, args)
+        self.save_reduce(ctx, obj, func, args, NONE)
     }
 
     fn save_dict(&mut self, ctx: &mut Context, obj: Id) -> Result<()> {
@@ -365,16 +389,24 @@ impl Pickler {
                 "second item of the tuple returned by __reduce__ must be a tuple",
             ));
         }
-        if fields[2..].iter().any(|&field| field != NONE) {
+        if fields.iter().skip(3).any(|&field| field != NONE) {
             return Err(Error::new(
                 "NotImplementedError",
-                "native pickle does not yet support reduction state, items or state setters",
+                "native pickle does not yet support reduction items or state setters",
             ));
         }
-        self.save_reduce(ctx, obj, fields[0], fields[1])
+        let state = fields.get(2).copied().unwrap_or(NONE);
+        self.save_reduce(ctx, obj, fields[0], fields[1], state)
     }
 
-    fn save_reduce(&mut self, ctx: &mut Context, obj: Id, func: Id, args: Id) -> Result<()> {
+    fn save_reduce(
+        &mut self,
+        ctx: &mut Context,
+        obj: Id,
+        func: Id,
+        args: Id,
+        state: Id,
+    ) -> Result<()> {
         self.save(ctx, func)?;
         self.save(ctx, args)?;
         self.out.push(b'R');
@@ -384,7 +416,12 @@ impl Pickler {
             encoding::memo_get(&mut self.out, self.protocol, index);
             return Ok(());
         }
-        self.remember(ctx, obj)
+        self.remember(ctx, obj)?;
+        if state != NONE {
+            self.save(ctx, state)?;
+            self.out.push(b'b'); // BUILD
+        }
+        Ok(())
     }
 }
 

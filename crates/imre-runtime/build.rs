@@ -73,5 +73,9 @@ fn main() {
     }
     let path = out_dir.join("errno.c");
     std::fs::write(&path, c).unwrap();
-    cc::Build::new().file(path).compile("imre_errno_headers");
+    println!("cargo:rerun-if-changed=native/locale_decode.c");
+    cc::Build::new()
+        .file(path)
+        .file("native/locale_decode.c")
+        .compile("imre_errno_headers");
 }

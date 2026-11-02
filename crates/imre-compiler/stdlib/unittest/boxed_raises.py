@@ -157,10 +157,26 @@ def assertRegex(self, text, expected_regex, msg=None):
         msg = self._formatMessage(msg, standardMsg)
         raise self.failureException(msg)
 
+
+def assertNotRegex(self, text, unexpected_regex, msg=None):
+    """Fail the test if the text matches the regular expression."""
+    if isinstance(unexpected_regex, (str, bytes)):
+        unexpected_regex = re.compile(unexpected_regex)
+    match = unexpected_regex.search(text)
+    if match:
+        standardMsg = 'Regex matched: %r matches %r in %r' % (
+            text[match.start() : match.end()],
+            unexpected_regex.pattern,
+            text)
+        # _formatMessage ensures the longMessage option is respected
+        msg = self._formatMessage(msg, standardMsg)
+        raise self.failureException(msg)
+
 TestCase.assertRegex = assertRegex
+TestCase.assertNotRegex = assertNotRegex
 TestCase.assertRaisesRegex = assertRaisesRegex
 TestCase._formatMessage = _boxed_format_message
 TestCase.assertRaises = assertRaises
 TestCase.assertWarns = assertWarns
 TestCase.assertWarnsRegex = assertWarnsRegex
-del assertRegex, assertRaises, assertRaisesRegex, assertWarns, assertWarnsRegex
+del assertRegex, assertNotRegex, assertRaises, assertRaisesRegex, assertWarns, assertWarnsRegex

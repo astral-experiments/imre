@@ -164,6 +164,12 @@ REJECTED = {
     }, "import before its binding is available"),
     "imports_after_execution": ({"main.py": "print(1)\nimport helper\n", "helper.py": HELPER}, "imports must precede"),
     "guard_reads_later_import": ({"main.py": "import helper\n", "helper.py": 'if __name__ == "helper":\n    raise ValueError(message)\nfrom child import message\n', "child.py": 'message = "late"\n'}, "imports must precede"),
+    "module_computed_before_import": ({
+        "main.py": "import helper\n", "helper.py": "labels = str(7)\nimport os\n",
+    }, "imports must precede"),
+    "module_rebound_before_import": ({
+        "main.py": "import helper\n", "helper.py": "labels = [1]\nlabels = [2]\nimport os\n",
+    }, "imports must precede"),
     "library_computed_before_import": ({"main.py": "import package\n", "package/__init__.py": "metadata = str(7)\nfrom .child import f\n", "package/child.py": HELPER}, "imports must precede"),
     "definition_after_execution": ({"main.py": "print(1)\n" + HELPER}, "definitions must precede"),
     "missing_namespace_child": ({"main.py": "import package.missing\n", "package/child.py": HELPER}, "cannot resolve first-party module"),
@@ -189,6 +195,27 @@ REJECTED = {
 }
 
 ACCEPTED = {
+    "atexit_in_dependency": {
+        "main.py": "from cleanup import prepare\nprepare()\n",
+        "cleanup.py": (
+            "from atexit import register, unregister\n"
+            "def removed(): print('unexpected')\n"
+            "def prepare():\n"
+            "    register(print, 'shutdown')\n"
+            "    register(removed)\n"
+            "    unregister(removed)\n"
+        ),
+    },
+    "weakref_finalize_import": {
+        "main.py": (
+            "from weakref import finalize\n"
+            "class Owner: pass\n"
+            "owner = Owner()\n"
+            "cleanup = finalize(owner, print, 'finalized')\n"
+            "cleanup()\n"
+            "assert not cleanup.alive\n"
+        ),
+    },
     "patch_object_as_value": {
         "main.py": (
             "from unittest.mock import patch\nclass Owner:\n    value = 1\n"
@@ -633,6 +660,14 @@ ACCEPTED = {
     "library_state": {"main.py": "from helper import f, values\nprint(f(values[0]))\n", "helper.py": "values = [1]\n" + HELPER},
     "package_effect": {"main.py": "import package\n", "package/__init__.py": "print(1)\n"},
     "active_library_else": {"main.py": IMPORT, "helper.py": HELPER + 'if __name__ == "__main__":\n    print(1)\nelse:\n    print(2)\n'},
+    "module_literal_before_import": {
+        "main.py": ('from parentlib import labels\nfrom visitorlib import shared\n'
+                    'print(labels is shared)\nprint(labels[-1])\n'),
+        "parentlib.py": ('labels = ["one", "two", "three", "four"]\n'
+                         'def expose() -> list[str]:\n    return labels\nimport visitorlib\n'),
+        "visitorlib.py": ('from parentlib import expose\nshared = expose()\n'
+                          'shared.append("visited")\n'),
+    },
     "ordered_library_effects": {
         "main.py": "from pkg.parent import value\nprint(value)\n", "pkg/__init__.py": "",
         "pkg/parent.py": 'print("parent prefix")\nfrom . import child\nprint("parent suffix")\nvalue = child.value\n',

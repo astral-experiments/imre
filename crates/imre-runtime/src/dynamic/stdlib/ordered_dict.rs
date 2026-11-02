@@ -36,6 +36,15 @@ pub(super) fn call(
             ctx.move_dictionary_key(storage, *key, last)?;
             Ok(NONE)
         }
+        ("setdefault", [key, default]) => {
+            let (_, found) = ctx.find_dictionary_key(storage, *key, None)?;
+            if let Some(index) = found {
+                return Ok(ctx.stored_entries(storage)[index].1);
+            }
+            ctx.set_dictionary_key(storage, *key, *default, None, true)?;
+            Ok(*default)
+        }
+        ("pop", [key] | [key, _]) => pop_key(ctx, storage, *key, None, args.get(1).copied()),
         ("popitem", [last]) => {
             let last = ctx.truth(*last)?;
             let entries = ctx.stored_entries(storage);
@@ -46,22 +55,7 @@ pub(super) fn call(
             let dense = entries.ordered_dense(if last { end } else { 0 });
             let key = entries[dense].0;
             let cached = entries.stored_hash(dense);
-            let (hash, found) = ctx.find_dictionary_key(storage, key, cached)?;
-            if found.is_none() {
-                return Err(ctx.lookup_error("KeyError", key));
-            }
-            // Finding the order node, unlinking it, and removing the mapping entry
-            // each resolve colliding keys. A callback may change the mapping.
-            if ctx
-                .find_dictionary_key(storage, key, Some(hash))?
-                .1
-                .is_none()
-            {
-                return Err(ctx.lookup_error("KeyError", key));
-            }
-            let value =
-                super::super::builtins::remove_dict_item_hashed(ctx, storage, key, Some(hash))?
-                    .ok_or_else(|| ctx.lookup_error("KeyError", key))?;
+            let value = pop_key(ctx, storage, key, cached, None)?;
             Ok(ctx.alloc(Value::Tuple(vec![key, value])))
         }
         ("repr", []) => {
@@ -95,6 +89,31 @@ pub(super) fn call(
             "invalid ordered dictionary operation",
         )),
     }
+}
+
+fn pop_key(
+    ctx: &mut Context,
+    storage: Id,
+    key: Id,
+    cached: Option<i64>,
+    default: Option<Id>,
+) -> Result<Id> {
+    let (hash, found) = ctx.find_dictionary_key(storage, key, cached)?;
+    if found.is_none() {
+        return default.ok_or_else(|| ctx.lookup_error("KeyError", key));
+    }
+    // Finding the order node, unlinking it, and removing the mapping entry
+    // each resolve colliding keys. A callback may change the mapping.
+    if ctx
+        .find_dictionary_key(storage, key, Some(hash))?
+        .1
+        .is_none()
+    {
+        return Err(ctx.lookup_error("KeyError", key));
+    }
+    super::super::builtins::remove_dict_item_hashed(ctx, storage, key, Some(hash))?
+        .or(default)
+        .ok_or_else(|| ctx.lookup_error("KeyError", key))
 }
 
 /// Stop if comparing two keys changes the order of either dictionary.

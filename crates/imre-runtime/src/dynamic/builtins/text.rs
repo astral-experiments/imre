@@ -1409,7 +1409,7 @@ pub(super) fn method(
     }
     if matches!(
         (owner, name),
-        ("str", "find" | "rfind" | "count")
+        ("str", "find" | "rfind" | "count" | "index")
             | ("bytes", "rfind")
             | ("bytes" | "bytearray", "startswith" | "endswith")
     ) {
@@ -1430,7 +1430,7 @@ pub(super) fn method(
             )));
         }
         let invalid_needle = match (owner, name) {
-            ("str", "count") => ctx.string_storage(needle).is_none(),
+            ("str", "count" | "index") => ctx.string_storage(needle).is_none(),
             ("str", _) => ctx.str_value(needle).is_err(),
             _ => false,
         };
@@ -1532,13 +1532,29 @@ pub(super) fn method(
             };
             return Ok(ctx.alloc(Value::Int(value)));
         }
-        let found = crate::objects::find_text(
-            ctx.str_value(receiver)?,
-            ctx.str_value(needle)?,
-            start.as_ref(),
-            end.as_ref(),
-            name == "rfind",
-        );
+        let found = if name == "index"
+            && [receiver, needle]
+                .iter()
+                .any(|&id| matches!(ctx.heap.get(ctx.scalar_value(id)), Value::SurrogateStr(_)))
+        {
+            crate::objects::find_codepoints(
+                &ctx.string_codepoints(receiver)?,
+                &ctx.string_codepoints(needle)?,
+                start.as_ref(),
+                end.as_ref(),
+            )
+        } else {
+            crate::objects::find_text(
+                ctx.str_value(receiver)?,
+                ctx.str_value(needle)?,
+                start.as_ref(),
+                end.as_ref(),
+                name == "rfind",
+            )
+        };
+        if name == "index" && found.as_small() == Some(-1) {
+            return Err(Error::new("ValueError", "substring not found"));
+        }
         return Ok(ctx.alloc(Value::Int(found)));
     }
     if matches!(owner, "bytes" | "bytearray") && matches!(name, "strip" | "lstrip" | "rstrip") {

@@ -641,14 +641,13 @@ pub(super) struct ClassNamespace {
     pub name_override: Option<Id>,
     /// Backing dictionary shared by live class namespace proxies.
     pub dictionary: Option<Id>,
-    pub annotation_thunks: Option<Id>,
     /// Closure cell shared by runtime-source method annotation providers.
     pub annotation_dict_cell: Option<Id>,
-    /// Scratch field dictionary used only while an ordinary class body is executing.
+    /// Scratch field dictionary used while a class body is executing.
     pub annotation_scratch: Option<Id>,
     /// Executed deferred sites in source order, including repeated field names.
     pub annotation_sites: Option<Box<std::collections::BTreeMap<u32, (Id, Id)>>>,
-    /// TypedDict installs a class-wide annotation function in place of its field thunks.
+    /// Class annotation attributes are served by the installed provider.
     pub provider_annotations: bool,
     /// Slot names consumed when the class is created, independent of later namespace mutations.
     pub slot_names: Option<std::rc::Rc<[String]>>,
@@ -1311,7 +1310,6 @@ impl Value {
                 if let Some(class) = &scope.class_namespace {
                     visit.extend([class.bases, class.mro]);
                     visit.extend(class.name_override);
-                    visit.extend(class.annotation_thunks);
                     visit.extend(class.annotation_dict_cell);
                     visit.extend(class.annotation_scratch);
                     if let Some(sites) = &class.annotation_sites {
@@ -2768,7 +2766,20 @@ impl Heap {
         };
     }
 
-    pub(super) fn acyclic_finalizer(&self, roots: impl Iterator<Item = Id>) -> Result<Option<Id>> {
+    pub(super) fn acyclic_finalizer(
+        &self,
+        roots: impl Iterator<Item = Id>,
+        stdin: Option<&[Id; 3]>,
+    ) -> Result<Option<Id>> {
+        // Input's wrapper and raw file usually survive every allocation checkpoint.
+        if let Some(chain) = stdin
+            && self
+                .ordinary_finalizers
+                .iter()
+                .all(|owner| chain.contains(owner))
+        {
+            return Ok(None);
+        }
         // A suspended caller keeps earlier operands live across a nested call.
         // Scan the callers once when only one finalizer needs a reachability check.
         if let [owner] = self.ordinary_finalizers.as_slice()

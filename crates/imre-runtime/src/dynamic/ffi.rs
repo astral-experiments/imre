@@ -387,32 +387,9 @@ impl Context {
                 code.coroutine = true;
                 Ok(a)
             }
-            "annotate" | "annotate_deferred" => {
+            "annotate" => {
                 if let Some(mapping) = self.scope_name(a, "__annotations__") {
-                    if op == "annotate_deferred" {
-                        let thunks = if let Some(dict) = self
-                            .scope_data(a)
-                            .class_namespace
-                            .as_ref()
-                            .and_then(|c| c.annotation_thunks)
-                        {
-                            dict
-                        } else {
-                            let dict = self.dict(Vec::new());
-                            let Value::Scope(scope) = self.heap.get_mut(a) else {
-                                unreachable!()
-                            };
-                            scope
-                                .class_namespace
-                                .get_or_insert_with(Default::default)
-                                .annotation_thunks = Some(dict);
-                            dict
-                        };
-                        self.put_item(thunks, b, c)?;
-                        self.put_item(mapping, b, NONE)?;
-                    } else {
-                        self.put_item(mapping, b, c)?;
-                    }
+                    self.put_item(mapping, b, c)?;
                 }
                 Ok(NONE)
             }
@@ -435,8 +412,14 @@ impl Context {
                 .next_item(a)?
                 .ok_or_else(|| Error::new("StopIteration", "")),
             "not" => Ok(flag(!self.truth(a)?)),
-            "neg" if matches!(self.heap.get(a), Value::Calendar { value, .. } if value.class() == "timedelta") => {
-                stdlib::call(self, "datetime.timedelta.__neg__", &[a], &[])
+            "neg" | "pos" if matches!(self.heap.get(a), Value::Calendar { value, .. } if value.class() == "timedelta") =>
+            {
+                let method = if op == "neg" {
+                    "datetime.timedelta.__neg__"
+                } else {
+                    "datetime.timedelta.__pos__"
+                };
+                stdlib::call(self, method, &[a], &[])
             }
             "neg" | "pos" if let Value::Float(f) = self.heap.get(a) => {
                 Ok(self.alloc(Value::Float(if op == "neg" { -*f } else { *f })))

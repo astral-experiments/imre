@@ -15,8 +15,9 @@ impl Context {
     pub(super) fn drain_acyclic_finalizers(&mut self) -> Result<bool> {
         let mut finalized = false;
         while self.heap.has_ordinary_finalizers() {
+            let stdin = super::stdlib::io::rooted_input_chain(self);
             let (heap, roots) = self.heap_and_roots();
-            let Some(owner) = heap.acyclic_finalizer(roots)? else {
+            let Some(owner) = heap.acyclic_finalizer(roots, stdin.as_ref())? else {
                 break;
             };
             self.dispatch_finalizer(owner);

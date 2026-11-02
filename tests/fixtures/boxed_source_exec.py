@@ -478,7 +478,25 @@ def annotated(arg: (lambda: (shadowed, (shadowed := 4)))):
             raise AssertionError(text)
 
 
+def source_eval():
+    make = tuple
+    assert eval("make([2, 1])") == (2, 1)
+    assert eval("(make := 3)") == 3 and make is tuple
+    supplied = {"a": 9}
+    code = compile("a * 2", "<expr>", "eval")
+    assert eval(code, supplied) == 18
+    assert eval(code, globals=supplied, locals={"a": 1}) == 2
+    assert eval("len([])", {"__builtins__": {"len": lambda value: 17}}) == 17
+    try:
+        eval("a = 3")
+    except SyntaxError:
+        pass
+    else:
+        raise AssertionError("eval accepted a statement")
+
+
 def current():
+    source_eval()
     named_bindings()
     source_annotations()
     source_genexpr()

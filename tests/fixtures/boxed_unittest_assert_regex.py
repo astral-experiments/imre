@@ -29,3 +29,9 @@ def current():
     with case.assertRaises(Failure) as caught:
         case.assertRegex("abc", "x", msg="detail")
     assert str(caught.exception) == "detail"
+
+    assert case.assertNotRegex("abc", "z") is None
+    case.longMessage = True
+    with case.assertRaises(Failure) as caught:
+        case.assertNotRegex(b"abc", re.compile(b"B", re.I), "detail")
+    assert str(caught.exception) == "Regex matched: b'b' matches b'B' in b'abc' : detail"

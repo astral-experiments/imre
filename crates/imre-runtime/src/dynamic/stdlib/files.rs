@@ -282,6 +282,9 @@ pub(super) fn call(
     let Value::File(handle) = ctx.heap.get(first) else {
         return Err(Error::new("TypeError", "expected a file"));
     };
+    if name == "file.readlines" {
+        return super::io::lines(ctx, first, "readlines", &args[1..], kwargs);
+    }
     let handle = handle.clone();
     let (slot, socket) = match handle.as_ref() {
         BinaryFile::Descriptor(file) => return file.call(ctx, first, name, &args[1..], kwargs),
