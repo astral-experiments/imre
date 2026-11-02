@@ -1,8 +1,91 @@
-//! Deliver externally requested faults to the native Python image while its launcher waits.
-use std::io;
+//! Exec the Python image in the caller's process. Its short-lived helper owns
+//! only the temporary image and the startup handshake.
+use std::ffi::{CStr, CString};
+use std::io::{self, Write};
+use std::os::fd::{AsRawFd, RawFd};
+use std::os::unix::ffi::OsStrExt;
+use std::os::unix::net::UnixStream;
 use std::os::unix::process::CommandExt;
-use std::process::Command;
-use std::sync::atomic::{AtomicI32, AtomicU32, Ordering::SeqCst};
+use std::process::{Command, ExitStatus};
+
+use tempfile::TempDir;
+
+pub(super) fn exec(
+    mut program: Command,
+    directory: TempDir,
+    name: String,
+    mut control: UnixStream,
+    peer: UnixStream,
+) -> io::Result<ExitStatus> {
+    let image = CString::new(program.get_program().as_bytes())?;
+    let dir = CString::new(directory.path().as_os_str().as_bytes())?;
+    let mut argv = Vec::new();
+    for arg in std::env::args_os() {
+        argv.extend_from_slice(arg.as_bytes());
+        argv.push(0);
+    }
+    let fd = control.as_raw_fd();
+    let peer_fd = peer.as_raw_fd();
+    // SAFETY: the child uses only the inherited buffers and async-signal-safe
+    // syscalls before _exit. No allocation, locks or destructors after fork.
+    let pid = unsafe { libc::fork() };
+    if pid < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    if pid == 0 {
+        // SAFETY: the child owns its descriptor table and never returns.
+        unsafe {
+            libc::close(peer_fd);
+            // Group signals directed at the Python process must not prevent cleanup.
+            libc::setpgid(0, 0);
+        }
+        cleanup(fd, &image, &dir, &argv);
+    }
+
+    // The helper unlinks exactly our image and removes the directory if empty,
+    // even when exec fails or the parent disappears before acknowledgment.
+    let _ = directory.keep();
+    let mut challenge = name.into_bytes();
+    challenge.extend_from_slice(&pid.to_ne_bytes());
+    let sent = control.write_all(&challenge);
+    drop(control);
+    let error = match sent {
+        Ok(()) => program.exec(),
+        Err(e) => e,
+    };
+    drop(peer);
+    // Failed exec. Closing the socket above lets the helper finish before we return.
+    while unsafe { libc::waitpid(pid, std::ptr::null_mut(), 0) } < 0
+        && io::Error::last_os_error().kind() == io::ErrorKind::Interrupted
+    {}
+    Err(error)
+}
+
+fn cleanup(fd: RawFd, image: &CStr, dir: &CStr, mut argv: &[u8]) -> ! {
+    let mut ready = 0u8;
+    // SAFETY: the pointers and slices were prepared before fork. The image is
+    // no longer needed once its runtime acknowledges loading or closes its fd.
+    unsafe {
+        while libc::read(fd, (&raw mut ready).cast(), 1) < 0
+            && io::Error::last_os_error().kind() == io::ErrorKind::Interrupted
+        {}
+        let image_removed = libc::unlink(image.as_ptr()) == 0;
+        let dir_removed = libc::rmdir(dir.as_ptr()) == 0;
+        if ready == 2 {
+            while !argv.is_empty() {
+                let n = libc::send(fd, argv.as_ptr().cast(), argv.len(), libc::MSG_NOSIGNAL);
+                if n < 0 && io::Error::last_os_error().kind() == io::ErrorKind::Interrupted {
+                    continue;
+                }
+                if n <= 0 {
+                    libc::_exit(1);
+                }
+                argv = &argv[n as usize..];
+            }
+        }
+        libc::_exit(i32::from(!image_removed || !dir_removed));
+    }
+}
 
 const SIGNALS: [i32; 5] = [
     libc::SIGABRT,
@@ -11,128 +94,6 @@ const SIGNALS: [i32; 5] = [
     libc::SIGILL,
     libc::SIGSEGV,
 ];
-static CHILD: AtomicI32 = AtomicI32::new(0);
-static HANDLERS: AtomicU32 = AtomicU32::new(0);
-
-unsafe extern "C" fn forward(sig: i32, info: *mut libc::siginfo_t, _: *mut libc::c_void) {
-    // SAFETY: SA_SIGINFO supplies signal metadata. Only externally generated
-    // signals belong to the child. A hardware fault in the launcher stays here.
-    unsafe {
-        #[cfg(target_os = "linux")]
-        let (external, errno) = ((*info).si_code <= 0, libc::__errno_location());
-        #[cfg(target_os = "macos")]
-        let (external, errno) = ((*info).si_pid != 0, libc::__error());
-        let saved = *errno;
-        if external {
-            HANDLERS.fetch_add(1, SeqCst);
-            let pid = CHILD.load(SeqCst);
-            if pid > 0 {
-                libc::kill(pid, sig);
-            }
-            HANDLERS.fetch_sub(1, SeqCst);
-        } else {
-            libc::signal(sig, libc::SIG_DFL);
-            libc::raise(sig);
-        }
-        *errno = saved;
-    }
-}
-
-/// Keep a waitable child even if the caller requested automatic reaping. The
-/// compiled Python process still inherits the caller's original disposition.
-pub(super) struct WaitableChild(libc::sigaction);
-
-impl WaitableChild {
-    pub(super) fn prepare(command: &mut Command) -> io::Result<Option<Self>> {
-        // SAFETY: this launcher has not spawned its payload yet. sigaction also
-        // permits restoring the original action in the child between fork/exec.
-        unsafe {
-            let mut old = std::mem::zeroed();
-            if libc::sigaction(libc::SIGCHLD, std::ptr::null(), &mut old) != 0 {
-                return Err(io::Error::last_os_error());
-            }
-            if old.sa_sigaction != libc::SIG_IGN && old.sa_flags & libc::SA_NOCLDWAIT == 0 {
-                return Ok(None);
-            }
-            let mut waitable: libc::sigaction = std::mem::zeroed();
-            waitable.sa_sigaction = libc::SIG_DFL;
-            libc::sigemptyset(&mut waitable.sa_mask);
-            if libc::sigaction(libc::SIGCHLD, &waitable, std::ptr::null_mut()) != 0 {
-                return Err(io::Error::last_os_error());
-            }
-            command.pre_exec(move || {
-                if libc::sigaction(libc::SIGCHLD, &old, std::ptr::null_mut()) != 0 {
-                    return Err(io::Error::last_os_error());
-                }
-                Ok(())
-            });
-            Ok(Some(Self(old)))
-        }
-    }
-}
-
-impl Drop for WaitableChild {
-    fn drop(&mut self) {
-        // SAFETY: prepare saved the disposition before changing it in this process.
-        unsafe { libc::sigaction(libc::SIGCHLD, &self.0, std::ptr::null_mut()) };
-    }
-}
-
-pub(super) struct Relay(Vec<(i32, libc::sigaction)>);
-
-impl Relay {
-    pub(super) fn install(pid: u32) -> io::Result<Self> {
-        let mut relay = Self(Vec::with_capacity(SIGNALS.len()));
-        CHILD.store(pid as i32, SeqCst);
-        // SAFETY: the handler is signal-safe and every replaced disposition is
-        // restored by Drop, including when installation stops partway through.
-        unsafe {
-            let mut action: libc::sigaction = std::mem::zeroed();
-            action.sa_sigaction = forward as *const () as usize;
-            action.sa_flags = libc::SA_SIGINFO | libc::SA_RESTART | libc::SA_ONSTACK;
-            libc::sigemptyset(&mut action.sa_mask);
-            for sig in SIGNALS {
-                let mut old = std::mem::zeroed();
-                if libc::sigaction(sig, &action, &mut old) != 0 {
-                    return Err(io::Error::last_os_error());
-                }
-                relay.0.push((sig, old));
-            }
-        }
-        Ok(relay)
-    }
-
-    pub(super) fn wait_for_exit(&self, pid: u32) -> io::Result<()> {
-        loop {
-            // SAFETY: waitid initializes info. WNOWAIT leaves this specific child
-            // waitable so its PID cannot be reused while signals are forwarded.
-            let rc = unsafe {
-                let mut info = std::mem::zeroed();
-                libc::waitid(libc::P_PID, pid, &mut info, libc::WEXITED | libc::WNOWAIT)
-            };
-            if rc == 0 {
-                return Ok(());
-            }
-            let error = io::Error::last_os_error();
-            if error.kind() != io::ErrorKind::Interrupted {
-                return Err(error);
-            }
-        }
-    }
-}
-
-impl Drop for Relay {
-    fn drop(&mut self) {
-        CHILD.store(0, SeqCst);
-        for (sig, action) in &self.0 {
-            // SAFETY: each action was initialized by a successful sigaction.
-            unsafe { libc::sigaction(*sig, action, std::ptr::null_mut()) };
-        }
-        while HANDLERS.load(SeqCst) != 0 {
-            std::thread::yield_now();
-        }
-    }
-}
 
 pub(crate) fn propagate(sig: i32) {
     if SIGNALS.contains(&sig) {

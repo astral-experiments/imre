@@ -2,10 +2,11 @@
 
 use std::ffi::CStr;
 use std::io::{self, Read};
-use std::os::fd::{FromRawFd, RawFd};
+use std::os::fd::{AsRawFd, FromRawFd, RawFd};
 use std::os::unix::net::UnixStream;
 
-const PREFIX: &[u8] = b".imre-run-fd-";
+const RUN_PREFIX: &[u8] = b".imre-run-fd-";
+const EXEC_PREFIX: &[u8] = b".imre-exec-fd-";
 
 pub(crate) fn wait_for_cleanup(want_original: bool) -> io::Result<Option<Vec<u8>>> {
     #[cfg(target_os = "linux")]
@@ -20,7 +21,11 @@ pub(crate) fn wait_for_cleanup(want_original: bool) -> io::Result<Option<Vec<u8>
     // SAFETY: the loader owns this NUL-terminated string throughout startup.
     let path = unsafe { CStr::from_ptr(path) }.to_bytes();
     let name = path.rsplit(|&byte| byte == b'/').next().unwrap_or_default();
-    let Some(digits) = name.strip_prefix(PREFIX) else {
+    let (digits, exec) = if let Some(digits) = name.strip_prefix(RUN_PREFIX) {
+        (digits, false)
+    } else if let Some(digits) = name.strip_prefix(EXEC_PREFIX) {
+        (digits, true)
+    } else {
         return Ok(None);
     };
     if digits.len() > 10 || !digits.iter().all(u8::is_ascii_digit) {
@@ -39,7 +44,9 @@ pub(crate) fn wait_for_cleanup(want_original: bool) -> io::Result<Option<Vec<u8>
     // A standalone program can have this basename and unrelated inherited
     // descriptors. Peek one byte beyond the longest valid challenge so a
     // longer message sharing its prefix cannot authenticate.
-    let mut challenge = [0; PREFIX.len() + 10 + 1];
+    let mut pid_bytes = [0; size_of::<libc::pid_t>()];
+    let expected = name.len() + if exec { pid_bytes.len() } else { 0 };
+    let mut challenge = [0; EXEC_PREFIX.len() + 10 + size_of::<libc::pid_t>() + 1];
     // SAFETY: recv checks the descriptor and writes only into this buffer.
     let received = retry_interrupted(|| unsafe {
         libc::recv(
@@ -49,14 +56,55 @@ pub(crate) fn wait_for_cleanup(want_original: bool) -> io::Result<Option<Vec<u8>
             libc::MSG_PEEK | libc::MSG_DONTWAIT,
         )
     });
-    if received != Some(name.len()) || &challenge[..name.len()] != name || !is_unix_stream(fd) {
+    if received != Some(expected) || &challenge[..name.len()] != name || !is_unix_stream(fd) {
         return Ok(None);
     }
 
+    let helper = if exec {
+        pid_bytes.copy_from_slice(&challenge[name.len()..expected]);
+        let pid = libc::pid_t::from_ne_bytes(pid_bytes);
+        if pid <= 0 {
+            return Ok(None);
+        }
+        Some(pid)
+    } else {
+        None
+    };
     // SAFETY: the matching launcher challenge transfers this connected Unix
     // stream to us. Dropping it closes the inherited fd before user code runs.
-    let mut stream = unsafe { UnixStream::from_raw_fd(fd) };
-    if stream.read_exact(&mut challenge[..name.len()]).is_err() {
+    let stream = unsafe { UnixStream::from_raw_fd(fd) };
+    let result = acknowledge(stream, &mut challenge[..expected], want_original);
+    if let Some(pid) = helper {
+        // The socket has been closed even on error, so the helper can always
+        // exit. Reap this exact child before user code observes its children.
+        loop {
+            let mut status = 0;
+            // SAFETY: pid is positive and status is writable.
+            if unsafe { libc::waitpid(pid, &mut status, 0) } >= 0 {
+                if status != 0 {
+                    return Err(io::Error::other("could not clean up the temporary image"));
+                }
+                break;
+            }
+            let error = io::Error::last_os_error();
+            if error.raw_os_error() == Some(libc::ECHILD) {
+                break; // Automatically reaped with inherited SIGCHLD=SIG_IGN.
+            }
+            if error.kind() != io::ErrorKind::Interrupted {
+                return Err(error);
+            }
+        }
+    }
+    result
+}
+
+fn acknowledge(
+    mut stream: UnixStream,
+    challenge: &mut [u8],
+    want_original: bool,
+) -> io::Result<Option<Vec<u8>>> {
+    let fd = stream.as_raw_fd();
+    if stream.read_exact(challenge).is_err() {
         return Ok(None);
     }
     // SAFETY: the ready byte is readable, the stream owns fd, and NOSIGNAL

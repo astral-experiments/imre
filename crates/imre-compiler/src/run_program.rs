@@ -19,27 +19,24 @@ pub(super) fn launch(
     directory: TempDir,
     source: &Path,
     args: impl Iterator<Item = OsString>,
-    _report_faults: bool,
+    direct: bool,
 ) -> io::Result<ExitStatus> {
     let (mut control, peer) = UnixStream::pair()?;
     let fd = peer.as_raw_fd();
     // The runtime reads the kernel's executable name. argv[0] remains the source.
-    let name = format!(".imre-run-fd-{fd}");
+    let direct = direct && cfg!(any(target_os = "linux", target_os = "macos"));
+    let name = if direct {
+        format!(".imre-exec-fd-{fd}")
+    } else {
+        format!(".imre-run-fd-{fd}")
+    };
     let executable = directory.path().join(&name);
     std::fs::rename(output, &executable)?;
-    control.write_all(name.as_bytes())?;
-    control.set_read_timeout(Some(Duration::from_millis(100)))?;
 
     let mut program = Command::new(executable);
     program.arg0(source).args(args);
-    #[cfg(any(target_os = "linux", target_os = "macos"))]
-    let _waitable = if _report_faults {
-        fatal_signals::WaitableChild::prepare(&mut program)?
-    } else {
-        None
-    };
-    // SAFETY: the peer is live through spawn. fcntl is async-signal-safe and
-    // changes only the forked child's descriptor flags.
+    // SAFETY: the peer is live through exec. fcntl only makes this descriptor
+    // inheritable in the process about to become the compiled program.
     unsafe {
         program.pre_exec(move || {
             if libc::fcntl(fd, libc::F_SETFD, 0) < 0 {
@@ -48,6 +45,13 @@ pub(super) fn launch(
             Ok(())
         })
     };
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    if direct {
+        return fatal_signals::exec(program, directory, name, control, peer);
+    }
+
+    control.write_all(name.as_bytes())?;
+    control.set_read_timeout(Some(Duration::from_millis(100)))?;
     let mut child = program.spawn()?;
     drop(peer);
     let started = wait_for_start(&mut control, &mut child);
@@ -70,32 +74,7 @@ pub(super) fn launch(
     } else {
         Ok(())
     };
-    // Install before releasing the running image. Signals sent to the interpreter
-    // PID should reach the Python frame that is actually executing the program.
-    #[cfg(any(target_os = "linux", target_os = "macos"))]
-    let relay = if _report_faults && matches!(started, Ok(Some(_))) {
-        match fatal_signals::Relay::install(child.id()) {
-            Ok(relay) => Some(relay),
-            Err(error) => {
-                let _ = child.kill();
-                let _ = child.wait();
-                return Err(error);
-            }
-        }
-    } else {
-        None
-    };
     drop(control); // EOF releases the runtime after removal.
-    #[cfg(any(target_os = "linux", target_os = "macos"))]
-    if let Some(relay) = relay {
-        // Keep the PID reserved until all forwarding handlers have retired.
-        let observed = relay.wait_for_exit(child.id());
-        drop(relay);
-        if let Err(error) = observed {
-            let _ = child.wait();
-            return Err(error);
-        }
-    }
     let status = child.wait();
     cleanup?;
     started?;

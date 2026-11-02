@@ -5400,11 +5400,7 @@ impl<'a> Checker<'a> {
     }
 
     fn source_line(&self, start: TextSize) -> u32 {
-        self.source[..usize::from(start)]
-            .bytes()
-            .filter(|&b| b == b'\n')
-            .count() as u32
-            + 1
+        self.graph.session.source_line(self.module, start)
     }
 
     fn fault_line(&self, site: &impl Ranged) -> Statement {
