@@ -1322,6 +1322,15 @@ def main():
             "print(sys.flags.dont_write_bytecode)\nprint(sys.dont_write_bytecode)\n"
         )
         compare("-I", "-B", "-c", args_code, "--help", "--", "two words", "π")
+        scoped_import = (
+            "import sys\nif sys.argv[1] == 'match':\n"
+            "    import os as operating_system\n    from os import sep\n"
+            "    print(operating_system.sep == sep)\n"
+            "else:\n    try:\n        import _missing_scoped_import_test\n"
+            "    except ModuleNotFoundError as error:\n        print(error.name)\n"
+        )
+        compare("-I", "-c", scoped_import, "match", extra={"IMREFLAGS": "--bogus"})
+        compare("-I", "-c", scoped_import, "inverse", extra={"IMREFLAGS": "--bogus"})
         compare("-IBc" + flags_code)
         compare("-c", flags_code, extra={"PYTHONDONTWRITEBYTECODE": "1"})
         compare(

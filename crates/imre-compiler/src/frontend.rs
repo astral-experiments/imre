@@ -5016,6 +5016,11 @@ impl<'a> Checker<'a> {
                 let value = value.map(|exception| self.exception_origin(exception, raise));
                 return Ok((vec![Statement::Raise(value)], false));
             }
+            ast::Stmt::Import(_) | ast::Stmt::ImportFrom(_)
+                if self.graph.command_startup.is_some() =>
+            {
+                return Err(self.object_runtime_export("a conditional or local import", statement));
+            }
             ast::Stmt::Pass(_) => None,
             _ => {
                 return Err(error(
