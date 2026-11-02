@@ -2523,10 +2523,12 @@ impl Context {
                     self.bootstrap_globals = self.module_globals(scope)?;
                 }
                 let key = self.text("_frozen_importlib_external");
-                let external = if self.registered_module(key)? == Some(NONE) {
-                    NONE
+                let cached = self.public_module_get(key, Some(self.import_missing))?;
+                let external = if cached == self.import_missing {
+                    self.find_module("_frozen_importlib_external")?
+                        .ok_or_else(|| Self::missing_module("_frozen_importlib_external"))?
                 } else {
-                    self.module("_frozen_importlib_external")?
+                    cached
                 };
                 self.bind(scope, "_bootstrap_external", external);
             }
