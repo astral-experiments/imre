@@ -51,7 +51,7 @@ pub(super) fn check_class_write(ctx: &Context, obj: Id, name: &str) -> Result<()
 /// A namespace descriptor requires real namespace storage, including on a subclass.
 pub(super) fn instance_class(ctx: &Context, object: Id) -> Option<Id> {
     match *ctx.heap.get(object) {
-        Value::Instance { class, .. } if ctx.subclass(class, ctx.classes[CLASS]) => Some(class),
+        Value::Instance { class, .. } if ctx.direct_subclass(class, ctx.classes[CLASS]) => Some(class),
         _ => None,
     }
 }

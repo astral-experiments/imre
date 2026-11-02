@@ -1,5 +1,6 @@
 """Exercise the boxed SimpleNamespace descriptor used by pprint's dispatch table."""
 
+from abc import ABC
 from copy import replace
 from types import SimpleNamespace
 
@@ -54,4 +55,15 @@ def current():
         assert str(error) == "__replace__() takes no positional arguments"
     else:
         raise AssertionError("accepted a positional change")
+    class NamespaceABC(SimpleNamespace, ABC):
+        pass
+    class Virtual:
+        pass
+    NamespaceABC.register(Virtual)
+    try:
+        descriptor(Virtual())
+    except TypeError:
+        pass
+    else:
+        raise AssertionError("accepted a virtual subclass as a namespace")
     print("passed")
