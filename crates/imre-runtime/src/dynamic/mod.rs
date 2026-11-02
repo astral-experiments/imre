@@ -1766,7 +1766,7 @@ impl Context {
             weakref::REFERENCE_TYPE => weakref::REFERENCE_METHODS,
             _ => &[],
         };
-        for method in methods {
+        for method in methods.iter().chain(builtins::set_operators(name)) {
             self.builtin(&format!("{name}.{method}"));
         }
         value

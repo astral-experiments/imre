@@ -1244,6 +1244,15 @@ def main():
             subset_method.write_text(statement + "\n")
             compare("-B", subset_method, native_args=("run", subset_method, "--quiet"))
 
+        set_operator = root / "set_operator.py"
+        for statement in (
+            "print(set.__sub__({1, 2}, {2}) == {1})",
+            "intersection = frozenset.__rand__\nprint(intersection(frozenset(['a']), {'a'}))",
+            "items = {1}\nmerge = items.__ior__\nprint(merge({2}) is items)",
+        ):
+            set_operator.write_text(statement + "\n")
+            compare("-B", set_operator, native_args=("run", set_operator, "--quiet"))
+
         set_method = root / "set_difference_update.py"
         for statement in (
             "items.difference_update([2])",
@@ -2055,6 +2064,7 @@ def report(text):
             "boxed_textwrap.py",
             "boxed_set_ordering.py",
             "boxed_set_issubset.py",
+            "boxed_set_operator_descriptors.py",
             "boxed_set_union.py",
             "boxed_set_difference_update.py",
             "boxed_weakref.py",
