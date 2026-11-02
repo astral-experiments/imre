@@ -24,6 +24,43 @@ def current():
     assert rendered["text"] is text and annotations["type"] is int
     assert module.type_repr(module.type_repr) == "annotationlib.type_repr"
 
+    from string.templatelib import Interpolation, Template
+
+    class Token(str):
+        def __radd__(self, other):
+            raise AssertionError("template formatting concatenated user values")
+
+    rendered_values = []
+
+    class Value:
+        @property
+        def __class__(self):
+            assert not rendered_values
+            return Value
+
+        def __repr__(self):
+            rendered_values.append(self)
+            return Token("shown")
+
+    class Literal(str):
+        def replace(self, old, new):
+            return self
+
+        def __iter__(self):
+            raise AssertionError("iterated a buffered string subclass")
+
+    literal = Template("a{", Interpolation(1, "{x: y}", "r", "{spec}"))
+    assert module.type_repr(literal) == "t'a{{{ {x: y}!r:{{spec}}}'"
+    assert module.type_repr(Template(Interpolation(0, Token("await v"), Token("s")))) == "t'{await v!s}'"
+    assert module.type_repr(Template(Interpolation((Value(),), ""))) == (
+        "Template(Interpolation((shown,), '', None, ''))"
+    )
+    assert module.type_repr(Template(Literal("text"))) == "t'text'"
+    fallback = Template(Interpolation(..., "ok"), Interpolation(1, "x +"))
+    assert module.annotations_to_string({"a": fallback}) == {
+        "a": "Template(Interpolation(..., 'ok', None, ''), Interpolation(1, 'x +', None, ''))"
+    }
+
     ref = module.ForwardRef("Thing", module="models", is_class=True)
     same = module.ForwardRef("Thing", module="models", is_class=True, is_argument=False)
     print(repr(ref), ref.__forward_arg__, ref.__forward_module__, ref.__forward_is_class__)
