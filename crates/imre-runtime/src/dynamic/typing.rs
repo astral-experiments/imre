@@ -1758,6 +1758,15 @@ impl Context {
             Vec::new()
         };
         let namedtuple_fields = self.namedtuple_layout(&name, &bases, &ancestors, scope)?;
+        // type.__new__ wraps plain functions only, before the class becomes observable.
+        for name in ["__init_subclass__", "__class_getitem__"] {
+            if let Some(&function) = self.scope_data(scope).names.get(name)
+                && matches!(self.heap.get(function), Value::Function { .. })
+            {
+                let method = self.alloc(Value::ClassMethod(function));
+                self.bind_local(scope, name, method);
+            }
+        }
         let class = self.alloc(Value::Class {
             io_kind: None,
             metaclass: None,
