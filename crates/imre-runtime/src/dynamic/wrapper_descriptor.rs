@@ -228,6 +228,7 @@ impl BuiltinDescriptor {
             "str.zfill" => ("str", "zfill"),
             "str.istitle" => ("str", "istitle"),
             "float.__format__" => ("float", "__format__"),
+            "collections._tuplegetter.__repr__" => (super::namedtuple::GETTER, "__repr__"),
             "object.__hash__" => ("object", "__hash__"),
             "object.__ne__" => ("object", "__ne__"),
             "object.__repr__" => ("object", "__repr__"),
@@ -344,6 +345,7 @@ impl BuiltinDescriptor {
             }
             "typing.TypeAliasType" => matches!(ctx.heap.get(receiver), Value::TypeAlias { .. }),
             "typing.Union" => matches!(ctx.heap.get(receiver), Value::Union(_)),
+            super::namedtuple::GETTER => matches!(ctx.heap.get(receiver), Value::TupleGetter { .. }),
             "object" => true,
             "type" => ctx.is_type_object(receiver),
             "function" => matches!(ctx.heap.get(receiver), Value::Function { .. }),
