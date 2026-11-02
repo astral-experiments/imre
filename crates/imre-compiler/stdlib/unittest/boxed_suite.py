@@ -8,6 +8,7 @@ def _validateCaseMethod(case, methodName):
         case._testMethodDoc = "No test"
     else:
         case._testMethodDoc = getattr(method, "__doc__", None)
+    case._cleanups = []
 
 
 def _boxedCheckFixtures(cls):

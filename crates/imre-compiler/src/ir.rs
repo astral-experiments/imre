@@ -160,6 +160,7 @@ pub(crate) enum Type {
     Hash,
     Poll,
     JsonDecoder,
+    JsonEncoder,
     /// An open or closed ZIP archive retains its ordered central directory.
     ZipFile,
     ZipInfo,
@@ -413,6 +414,7 @@ impl std::fmt::Display for Type {
             Self::TextOutput => "writable text stream",
             Self::Hash => "hashlib hash",
             Self::JsonDecoder => "json.decoder.JSONDecoder",
+            Self::JsonEncoder => "json.encoder.JSONEncoder",
             Self::ZipFile => "zipfile.ZipFile",
             Self::ZipInfo => "zipfile.ZipInfo",
             Self::CsvReader => "CSV reader",
@@ -1414,6 +1416,8 @@ pub(crate) enum Builtin {
     JsonDecoderNew,
     JsonDecoderMemo,
     JsonDecoderDecode,
+    JsonEncoderNew,
+    JsonEncoderEncode(Type),
     JsonEmptyObject,
     ModuleCache(usize),
     /// Capture and access an individual wrapper's independently owned cache.
@@ -1739,6 +1743,8 @@ pub(crate) enum StrDescriptor {
     IsAscii,
     IsAlpha,
     IsDigit,
+    ZFill,
+    IsTitle,
 }
 impl StrDescriptor {
     pub(crate) fn named(name: &str) -> Option<Self> {
@@ -1751,14 +1757,21 @@ impl StrDescriptor {
             "isascii" => Self::IsAscii,
             "isalpha" => Self::IsAlpha,
             "isdigit" => Self::IsDigit,
+            "istitle" => Self::IsTitle,
             "islower" => Self::IsLower,
+            "zfill" => Self::ZFill,
             _ => return None,
         })
     }
     pub(crate) fn is_predicate(self) -> bool {
         matches!(
             self,
-            Self::IsAlnum | Self::IsAscii | Self::IsAlpha | Self::IsDigit | Self::IsLower
+            Self::IsAlnum
+                | Self::IsAscii
+                | Self::IsAlpha
+                | Self::IsDigit
+                | Self::IsLower
+                | Self::IsTitle
         )
     }
     pub(crate) fn name(self) -> &'static str {
@@ -1771,7 +1784,9 @@ impl StrDescriptor {
             Self::IsAscii => "isascii",
             Self::IsAlpha => "isalpha",
             Self::IsDigit => "isdigit",
+            Self::IsTitle => "istitle",
             Self::IsLower => "islower",
+            Self::ZFill => "zfill",
         }
     }
 }
@@ -1802,6 +1817,9 @@ pub(crate) enum TextOperation {
     Predicate(TextPredicate),
     SplitLineEnds,
     ExpandTabs,
+    ZFill {
+        copy: bool,
+    },
     Normalize,
     Lower,
     Upper,
@@ -1849,6 +1867,7 @@ pub(crate) enum TextPredicate {
     Digit,
     Space,
     Lower,
+    Title,
     Upper,
 }
 

@@ -234,7 +234,7 @@ impl Context {
                 self.module(&name)
             }
             "from" => self.import_from(a, b),
-            "import_star" => self.import_star(a, b),
+            "import_star" => self.import_star(a, b, false),
             "lookup_enter" => self.context_method(a, "__enter__"),
             "lookup_exit" => self.context_method(a, "__exit__"),
             "attr" | "method" => {
@@ -348,8 +348,9 @@ impl Context {
             }
             "slice_object" => Ok(self.alloc(Value::Slice([a, b, c]))),
             "class" | "parameterized_class" => {
+                let metaclass = self.dict_named_item(a, "metaclass");
                 let total = self.dict_named_item(a, "total");
-                self.class(b, c, total, op == "parameterized_class")
+                self.class(b, c, metaclass, total, op == "parameterized_class")
             }
             "coroutine_function" => {
                 let Value::Function { code, .. } = *self.heap.get(a) else {
@@ -629,8 +630,10 @@ pub(super) fn new_context<S: Into<String>>(
     config: serde_json::Value,
     args: impl IntoIterator<Item = S>,
 ) -> Context {
-    let executable = config["executable"]
-        .as_str()
+    let launcher = config["executable"].as_str();
+    let helper_executable =
+        launcher.map_or_else(crate::objects::python_executable_text, str::to_owned);
+    let executable = launcher
         .map(PathBuf::from)
         .or_else(|| std::env::current_exe().ok())
         .unwrap_or_default();
@@ -640,6 +643,7 @@ pub(super) fn new_context<S: Into<String>>(
         workers: Default::default(),
         config,
         executable,
+        helper_executable,
         argv: NONE,
         sys_path: NONE,
         default_encoding: NONE,

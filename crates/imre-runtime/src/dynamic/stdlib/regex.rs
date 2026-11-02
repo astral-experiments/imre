@@ -791,7 +791,7 @@ pub(super) fn call(ctx: &mut Context, name: &str, args: &[Id]) -> Result<Id> {
         "re.match" | "re.fullmatch" => capture(ctx, first, regex, pattern.bytes, subject, |text| {
             Input::new(text).anchored(Anchored::Yes)
         }),
-        "pattern.findall" => {
+        "re.findall" | "pattern.findall" => {
             let text = subject_bytes(ctx, subject, pattern.bytes)?.to_vec();
             let mut found = Vec::new();
             let mut captures = regex.create_captures();

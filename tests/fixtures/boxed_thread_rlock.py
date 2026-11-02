@@ -1,4 +1,6 @@
+import os
 from _thread import RLock, allocate_lock, start_new_thread
+from functools import RLock as FunctoolsRLock
 from weakref import ref
 
 
@@ -81,7 +83,8 @@ def current():
     assert repr(tagged) == f"<unlocked Tagged object owner=0 count=0 at {id(tagged):#x}>"
     with tagged:
         assert tagged._recursion_count() == 1 and tagged.locked()
-    shared = RLock()
+    assert FunctoolsRLock is RLock
+    shared = FunctoolsRLock()
     started = allocate_lock()
     finished = allocate_lock()
     started.acquire()
@@ -90,6 +93,14 @@ def current():
         start_new_thread(acquire_on_worker, (shared, shared, started, finished))
         assert started.acquire(timeout=5) and shared._is_owned()
     assert finished.acquire(timeout=5) and not shared.locked()
+    if os.name == "posix":
+        tagged.acquire()
+        tagged.acquire()
+        reset = tagged._at_fork_reinit
+        assert reset() is None and tagged._recursion_count() == 0
+        assert not tagged.locked() and not tagged._is_owned()
+        assert tagged.acquire(False) and tagged._recursion_count() == 1
+        tagged.release()
     print("reentrant lock")
 
 

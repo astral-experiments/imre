@@ -19,6 +19,8 @@ def current():
     holder = [0, 1, 2, 3]
     exec("holder[::2] = [4, 5]", {"holder": holder})
     assert holder == [4, 1, 5, 3]
+    exec("del holder[:1], holder[::-2]", {"holder": holder})
+    assert holder == [5]
     exec("holder[:] = []", {"holder": holder})
     part = slice(holder)
     print(type(part) is slice, isinstance(part, slice), isinstance(slice, type))

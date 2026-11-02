@@ -10,6 +10,7 @@ use crate::StrOwner;
 mod annotations;
 mod argparse;
 mod args;
+pub(crate) use args::python_executable_text;
 mod asyncio;
 mod binascii;
 pub(crate) use binascii::{adler32, binascii_decode, binascii_encode, crc32, unhexlify};
@@ -59,7 +60,8 @@ mod joined_lines;
 mod json;
 pub(crate) use json::{
     DecodedJson, Indent as JsonIndent, JsonNumber, decode_json, decode_json_bytes, json_bom_error,
-    write_fragment as write_json_fragment, write_string as write_json_string,
+    write_codepoints as write_json_codepoints, write_fragment as write_json_fragment,
+    write_string as write_json_string,
 };
 mod linecache;
 pub(crate) use linecache::{SourceDecodeError, decode_compile_source, decode_source_lines};
@@ -94,14 +96,14 @@ mod string_enums;
 mod structs;
 pub(crate) mod tempdirs;
 mod text;
-pub(crate) use text::translate;
 pub(crate) use text::{dedent, hexadecimal};
+pub(crate) use text::{translate, zfill};
 pub(crate) mod time;
 pub(crate) use text::{UrlInput, capitalize, urlquote, urlsplit};
 pub(crate) use text::{
     count_codepoints, count_text, expand_tabs, find_text, normalize_unicode, ord_byte, ord_char,
     partition_text, python_alnum, python_isalpha, python_isdigit, python_islower, python_isspace,
-    python_isupper, split_parts,
+    python_istitle, python_isupper, split_parts,
 };
 mod typing;
 pub(crate) use text::{chr_scalar, short_string};
@@ -124,15 +126,13 @@ use super::{
 use num_traits::ToPrimitive;
 use std::rc::Rc;
 
-/// Methods inherited from the native object type.
+/// Methods in the native object dictionary, in insertion order.
 pub(crate) const OBJECT_METHODS: &[&str] = &[
     "__new__",
     "__repr__",
-    "__getattribute__",
-    "__init__",
-    "__dir__",
     "__hash__",
     "__str__",
+    "__getattribute__",
     "__setattr__",
     "__delattr__",
     "__lt__",
@@ -141,6 +141,7 @@ pub(crate) const OBJECT_METHODS: &[&str] = &[
     "__ne__",
     "__gt__",
     "__ge__",
+    "__init__",
     "__reduce_ex__",
     "__reduce__",
     "__getstate__",
@@ -148,6 +149,7 @@ pub(crate) const OBJECT_METHODS: &[&str] = &[
     "__init_subclass__",
     "__format__",
     "__sizeof__",
+    "__dir__",
 ];
 
 /// Literal constructors share the same empty and Latin-1 owners as chr and indexing.
@@ -257,6 +259,11 @@ enum Storage {
     LogFormatter(Box<logging::formatter::Formatter>),
     RegexMatch(regexes::Match),
     Json(json::readonly::View),
+    JsonEncoder {
+        ensure_ascii: bool,
+        allow_nan: bool,
+        sort_keys: bool,
+    },
     JsonDecoder(crate::ObjectOwner),
 }
 

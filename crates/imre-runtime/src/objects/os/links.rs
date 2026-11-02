@@ -45,6 +45,18 @@ pub(crate) fn readlink_at(path: &CStr, dir_fd: i32) -> io::Result<Vec<u8>> {
     Ok(target[..count].to_vec())
 }
 
+/// Create the link without following the destination. The source is stored verbatim.
+pub(crate) fn symlink_at(source: &CStr, dir_fd: i32, destination: &CStr) -> io::Result<()> {
+    if dir_fd == libc::AT_FDCWD {
+        return Ok(symlinkat(source, CWD, destination)?);
+    }
+    // SAFETY: both C strings remain valid throughout the call; the kernel checks the raw fd.
+    if unsafe { libc::symlinkat(source.as_ptr(), dir_fd, destination.as_ptr()) } < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(())
+}
+
 /// Convert both original filenames in order. CheckSymlink runs before a user flag's truth method.
 ///
 /// # Safety
@@ -66,7 +78,7 @@ pub(in crate::objects) unsafe fn link(
     // SAFETY: the destination remains rooted and tag 2 selects an exact Path.
     let (dst, destination) = unsafe { syscall_path(path.cast(), 2, function, "dst") }?;
     match kind {
-        0 => symlinkat(src.as_c_str(), CWD, dst.as_c_str()),
+        0 => symlink_at(&src, libc::AT_FDCWD, &dst),
         1 => return Ok(()),
         2 => linkat(
             CWD,
@@ -74,8 +86,9 @@ pub(in crate::objects) unsafe fn link(
             CWD,
             dst.as_c_str(),
             AtFlags::SYMLINK_FOLLOW,
-        ),
+        )
+        .map_err(io::Error::from),
         _ => unreachable!("unknown pathlib link operation"),
     }
-    .map_err(|e| errno_with_filenames(e.into(), Some(source), Some(destination)))
+    .map_err(|e| errno_with_filenames(e, Some(source), Some(destination)))
 }

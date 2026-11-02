@@ -74,6 +74,29 @@ fn normpath(ctx: &mut Context, path: Id) -> Result<Id> {
     Ok(ctx.alloc(result))
 }
 
+fn splitroot(ctx: &mut Context, path: Id) -> Result<Id> {
+    use crate::objects::posixpath::root_length;
+
+    let path = path_arg(
+        ctx,
+        path,
+        "_path_splitroot_ex: path should be string, bytes or os.PathLike",
+    )?;
+    let path = ctx.scalar_value(path);
+    let (cut, drive) = match ctx.heap.get(path) {
+        Value::Str(text) => (root_length(text.as_bytes()), ctx.text("")),
+        Value::SurrogateStr(points) => (root_length(points), ctx.text("")),
+        Value::Bytes(bytes) => (root_length(bytes), ctx.alloc(Value::Bytes(Vec::new()))),
+        _ => unreachable!("filesystem spelling"),
+    };
+    let cut = ctx.int(cut as i64);
+    let prefix = ctx.alloc(Value::Slice([NONE, cut, NONE]));
+    let suffix = ctx.alloc(Value::Slice([cut, NONE, NONE]));
+    let root = ctx.get_item(path, prefix)?;
+    let tail = ctx.get_item(path, suffix)?;
+    Ok(ctx.alloc(Value::Tuple(vec![drive, root, tail])))
+}
+
 fn stat_predicate(ctx: &mut Context, path: Id, operation: &str) -> Result<bool> {
     let lstat = operation == "islink";
     if !lstat
@@ -281,15 +304,21 @@ pub(super) fn call(
                 format!("{function}() takes at most 1 {kind}argument ({count} given)"),
             ));
         }
-        let path = super::option(args, 0, kwargs, "path")?.ok_or_else(|| {
+        let parameter = if function == "_path_splitroot_ex" {
+            "p"
+        } else {
+            "path"
+        };
+        let path = super::option(args, 0, kwargs, parameter)?.ok_or_else(|| {
             Error::new(
                 "TypeError",
-                format!("{function}() missing required argument 'path' (pos 1)"),
+                format!("{function}() missing required argument '{parameter}' (pos 1)"),
             )
         })?;
         return match function {
             "fspath" => fspath(ctx, path),
             "_path_normpath" => normpath(ctx, path),
+            "_path_splitroot_ex" => splitroot(ctx, path),
             _ => unreachable!("registered POSIX path builtin"),
         };
     }

@@ -371,7 +371,7 @@ pub(super) fn builtin_alias(ctx: &mut Context, origin: Id, args: Id) -> Id {
     allocate_alias(ctx, AliasKind::Builtin, origin, args, None, true)
 }
 
-fn named_alias_helper(ctx: &mut Context, name: &str, args: Vec<Id>) -> Result<Id> {
+fn typing_alias_helper(ctx: &mut Context, name: &str, args: Vec<Id>) -> Result<Id> {
     let method = ctx.module_value("typing", name).ok_or_else(|| {
         Error::new(
             "AttributeError",
@@ -387,10 +387,14 @@ pub(super) fn subscribe(ctx: &mut Context, target: Id, index: Id) -> Option<Resu
     if is_unpacked_pack(ctx, target) {
         return Some(Ok(index));
     }
-    if matches!(ctx.heap.get(target), Value::GenericAlias(alias) if alias.name.is_some()) {
-        return Some(named_alias_helper(
+    if let Value::GenericAlias(alias) = ctx.heap.get(target)
+        && (alias.name.is_some()
+            || (alias.kind == AliasKind::Generic
+                && matches!(ctx.heap.get(alias.origin), Value::Class { .. })))
+    {
+        return Some(typing_alias_helper(
             ctx,
-            "_specialize_named_alias",
+            "_specialize_generic_alias",
             vec![target, index],
         ));
     }
@@ -424,7 +428,12 @@ pub(super) fn subscribe(ctx: &mut Context, target: Id, index: Id) -> Option<Resu
             AliasKind::AbcCallable
         }
         Value::Native(n) if n == "typing.Callable" => AliasKind::Callable,
-        Value::Native(n) if matches!(n.as_str(), "dict" | "list" | "tuple" | "set" | "type") => {
+        Value::Native(n)
+            if matches!(
+                n.as_str(),
+                "dict" | "list" | "tuple" | "set" | "type" | super::value::REGEX_PATTERN_TYPE
+            ) =>
+        {
             AliasKind::Builtin
         }
         Value::Class { ancestors, .. } => {
@@ -645,7 +654,7 @@ fn alias_bases(ctx: &mut Context, id: Id, bases: Id) -> Result<Id> {
         return Ok(ctx.alloc(Value::Tuple(result)));
     }
     if matches!(ctx.heap.get(id), Value::GenericAlias(alias) if alias.name.is_some()) {
-        return named_alias_helper(ctx, "_named_alias_bases", vec![id, bases]);
+        return typing_alias_helper(ctx, "_named_alias_bases", vec![id, bases]);
     }
     let Value::GenericAlias(alias) = ctx.heap.get(id) else {
         unreachable!()
@@ -866,7 +875,8 @@ pub(super) fn attribute(ctx: &mut Context, value: Id, name: &str) -> Option<Resu
             }
             "__name__" | "__qualname__" | "_name" if let Some(label) = a.name => label,
             "__module__" if a.name.is_some() => ctx.text("typing"),
-            "_inst" if a.name.is_some() => {
+            "_name" if a.kind == AliasKind::Generic => NONE,
+            "_inst" if a.name.is_some() || a.kind == AliasKind::Generic => {
                 if a.instantiable {
                     TRUE
                 } else {
@@ -1015,6 +1025,7 @@ pub(super) fn call(
             unreachable!()
         };
         *metaclass = Some(meta);
+        ctx.enable_class_annotation_provider(scope);
         return Ok(class);
     }
     if operation == "TypeVarTuple" {
@@ -1449,6 +1460,7 @@ impl Context {
                             | "NoneType"
                             | "NotImplementedType"
                             | "ellipsis"
+                            | super::value::REGEX_PATTERN_TYPE
                             | super::value::TEMPLATE_ITER_TYPE
                             | super::value::TEMPLATE_TYPE
                             | super::value::INTERPOLATION_TYPE
@@ -1467,10 +1479,16 @@ impl Context {
             bases.push(self.builtin("object"));
         }
         let ancestors = self.linearized_bases(&bases)?;
+        self.check_member_slot_bases(&bases, &ancestors)?;
         let mut mro = Vec::with_capacity(ancestors.len() + 1);
         mro.push(NONE);
         mro.extend_from_slice(&ancestors);
         let slot_names = self.declared_slot_names(scope)?;
+        let members = if self.scope_data(scope).class_namespace.as_ref().is_some_and(|ns| ns.member_slots) {
+            self.prepare_slot_members(&name, scope, &bases, slot_names.as_deref().unwrap_or_default())?
+        } else {
+            Vec::new()
+        };
         let namedtuple_fields = self.namedtuple_layout(&name, &bases, &ancestors, scope)?;
         let class = self.alloc(Value::Class {
             metaclass: None,
@@ -1493,6 +1511,11 @@ impl Context {
         namespace.slot_names = slot_names;
         namespace.bases = bases;
         namespace.mro = mro;
+        for field in members {
+            let name = self.text(&field);
+            let descriptor = self.alloc(Value::SlotMember { owner: class, name });
+            self.bind_local(scope, &field, descriptor);
+        }
         Ok(class)
     }
 

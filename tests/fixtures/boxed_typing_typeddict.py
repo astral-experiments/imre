@@ -1,7 +1,66 @@
 from typing import TypedDict, is_typeddict
 
 
+def check_inheritance():
+    class Left(TypedDict):
+        left: bool
+        shared: int
+
+    Right = TypedDict("Right", {"shared": str}, total=False)
+
+    class Both(Left, Right):
+        pass
+
+    class Child(Both):
+        shared: bytes
+
+    assert Both.__bases__ == Child.__bases__ == (dict,)
+    assert Both.__orig_bases__ == (Left, Right) and Child.__orig_bases__ == (Both,)
+    assert Both.__required_keys__ == {"left"} and Both.__optional_keys__ == {"shared"}
+    assert Both.__annotate__(1) == {"left": bool, "shared": str}
+    assert Child.__required_keys__ == {"left", "shared"} and not Child.__optional_keys__
+    assert Child.__annotations__ == {"left": bool, "shared": bytes}
+
+    class ObserveNamespace:
+        def __set_name__(self, owner, name):
+            assert "__orig_bases__" not in owner.__dict__
+            assert "__annotations__" not in owner.__dict__
+            assert owner.__annotations__ == {"own": float}
+
+    class Observed(Both):
+        own: float
+        descriptor = ObserveNamespace()
+
+    assert Observed.__orig_bases__ == (Both,)
+    assert Observed.__annotations__ == {"left": bool, "shared": str, "own": float}
+
+    formats = []
+
+    def annotate(format):
+        formats.append(format)
+        if len(formats) == 1:
+            raise ValueError("try again")
+        return {"late": format}
+
+    Left.__annotate__ = annotate
+    try:
+        Both.__annotations__
+    except ValueError as exc:
+        assert str(exc) == "try again"
+    else:
+        raise AssertionError("ignored the parent annotator's error")
+
+    cached = Both.__annotations__
+    assert cached == {"late": 1, "shared": str}
+    assert Both.__annotate__(3) == {"late": 3, "shared": str}
+    assert Both.__annotate__(4) == {"late": 4, "shared": "str"}
+    assert Both.__annotations__ is cached
+    assert formats == [1, 1, 3, 4]
+
+
 def current():
+    check_inheritance()
+
     class Film(TypedDict):
         title: str
         year: int

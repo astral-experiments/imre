@@ -85,11 +85,25 @@ pub(super) fn utc() -> Expr {
 }
 
 impl Checker<'_> {
-    pub(super) fn calendar_class_attribute(&self, a: &ast::ExprAttribute) -> Option<Expr> {
-        if self.resolve(&a.value) != Some(Binding::Intrinsic(Intrinsic::Calendar(C::Zone))) {
-            return None;
+    pub(super) fn calendar_class_attribute(
+        &self,
+        a: &ast::ExprAttribute,
+    ) -> Result<Option<Expr>, String> {
+        let base = self.resolve(&a.value);
+        if matches!(a.attr.as_str(), "min" | "max" | "resolution")
+            && matches!(
+                base,
+                Some(Binding::Intrinsic(
+                    Intrinsic::Calendar(C::Date | C::DateTime | C::Delta) | Intrinsic::ClockTime
+                ))
+            )
+        {
+            return Err(self.object_runtime_export("datetime class constants", a));
         }
-        match a.attr.as_str() {
+        if base != Some(Binding::Intrinsic(Intrinsic::Calendar(C::Zone))) {
+            return Ok(None);
+        }
+        Ok(match a.attr.as_str() {
             "utc" => Some(utc()),
             "min" | "max" => Some(op(
                 Op::ZoneLimit,
@@ -97,7 +111,7 @@ impl Checker<'_> {
                 vec![Expr::boolean(a.attr.as_str() == "max")],
             )),
             _ => None,
-        }
+        })
     }
     pub(super) fn calendar_constructor(
         &mut self,

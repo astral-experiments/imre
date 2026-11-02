@@ -1,6 +1,11 @@
 """Native tab stops, identity, integer conversion and CPython's evaluation order."""
 
+from enum import StrEnum
 from http import HTTPStatus
+
+class ZFillMember(StrEnum):
+    VALUE = "member value"
+
 
 class Width:
     def __init__(self, value: int):
@@ -128,3 +133,23 @@ try: print(source("x").expandtabs(one=flag(1), two=flag(2)))
 except TypeError as e: print(e)
 try: print(source("x").expandtabs(other=flag(1)))
 except TypeError as e: print(e)
+
+print("".zfill(3))
+print("123".zfill(2))
+print("+123".zfill(5))
+print("-".zfill(3))
+saved_zfill = str.zfill
+print(source("é").zfill(flag(3)))
+print(saved_zfill("🦀-", 4))
+print("1".zfill(True))
+try: print("abc".zfill(1 << 100))
+except OverflowError as e: print(e)
+try: print("x".zfill(width=later()))
+except ArithmeticError as e: print(e)
+first_zfill = str.zfill(ZFillMember.VALUE, 0)
+second_zfill = str.zfill(ZFillMember.VALUE, 0)
+plain_zfill = ZFillMember.VALUE.value
+assert first_zfill == plain_zfill
+assert first_zfill is not second_zfill and first_zfill is not plain_zfill
+assert ZFillMember.VALUE.zfill(0) is not plain_zfill
+assert plain_zfill.zfill(0) is plain_zfill

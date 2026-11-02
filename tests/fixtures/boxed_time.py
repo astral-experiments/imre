@@ -4,7 +4,7 @@ import time
 
 def current():
     from select import select
-    from time import ctime, monotonic, perf_counter
+    from time import ctime, monotonic, perf_counter, time_ns
 
     first = monotonic()
     assert type(first) is float and time.monotonic is monotonic
@@ -12,7 +12,10 @@ def current():
     assert first <= second <= monotonic()
     select([], [], [], 0.02)
     assert time.perf_counter() - second >= 0.01
-    for clock in (monotonic, perf_counter):
+    ns = time_ns()
+    assert time.time_ns is time_ns and type(ns) is int
+    assert abs(ns / 1_000_000_000 - time.time()) < 60
+    for clock in (monotonic, perf_counter, time_ns):
         for args, kwargs in (((1,), {}), ((), {"x": 1})):
             try:
                 clock(*args, **kwargs)

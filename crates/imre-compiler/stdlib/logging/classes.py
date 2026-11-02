@@ -16,6 +16,16 @@ _default_formatter = Formatter()
 _config_lock = _Lock()
 
 
+def _set_handler_name(handler: Handler, name: str | None) -> None:
+    _rename_handler(handler, handler._name, name)
+    handler._name = name
+
+
+def _close_handler(handler: Handler) -> None:
+    handler._closed = True
+    _rename_handler(handler, handler._name, None)
+
+
 def _handle_error(record: LogRecord) -> None:
     if not logging.raiseExceptions:
         return
@@ -266,20 +276,6 @@ class FileHandler(StreamHandler):
                         stream.close()
             finally:
                 StreamHandler.close(self)
-
-
-class NullHandler(Handler):
-    def handle(self, record: LogRecord | None) -> LogRecord | bool | None:
-        pass
-
-    def emit(self, record: LogRecord | None) -> None:
-        pass
-
-    def createLock(self) -> None:
-        self.lock = None
-
-    def _at_fork_reinit(self) -> None:
-        pass
 
 
 class BufferingFormatter:

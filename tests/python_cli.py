@@ -850,8 +850,14 @@ def check_pickle_reductions(imre, root, run):
                     assert data.startswith(bytes([0x80, protocol])), data
                 value = pickle.loads(data)
                 shared = ("\0\n\r\\\x1aéĀ🍏", 1 << 2048, -2147483649, True, None)
-                assert value == (shared, shared, ("rebuilt", protocol), ("rebuilt", protocol), "37", ())
+                assert value[:6] == (shared, shared, ("rebuilt", protocol), ("rebuilt", protocol), "37", ())
                 assert value[0] is value[1] and value[2] is value[3]
+                graph, small, wide, replaced, recursive = value[6]
+                assert graph["self"] is graph and graph["left"] is graph["right"]
+                assert graph["distinct"] == graph["left"] == {} and graph["distinct"] is not graph["left"]
+                assert small[0]["back"] is small and wide[0]["back"] is wide
+                assert recursive[0]["back"] is recursive
+                assert list(replaced.items()) == [("first", 5), ("later", 37)]
     finally:
         sys.path.pop(0)
 
@@ -1324,6 +1330,19 @@ print(found.value)
 """,
         )
 
+        compare(
+            "-B", "-c",
+            """import sys
+from importlib import import_module
+import_members = import_module("import_members")
+import_members.__all__ = ["found"]
+assert "import_members.found" not in sys.modules
+namespace = {"__package__": "import_members"}
+exec("from . import *", namespace)
+assert namespace["found"] is import_members.found is sys.modules["import_members.found"]
+""",
+        )
+
         opcode = run(imre, "-B", "-c", 'op = __import__("".join(("_", "opcode")))\n'
                      'print(op.ENABLE_SPECIALIZATION, op.ENABLE_SPECIALIZATION_FT)')
         assert (opcode.returncode, opcode.stdout, opcode.stderr) == (0, b"0 0\n", b""), opcode
@@ -1404,6 +1423,34 @@ print(found.value)
             extra={"IMRE_PYTHON": "/wrong"},
         )
         assert executable.stdout.decode().strip() == str(imre), executable.stderr
+
+        source = root / "boxed_executable.py"
+        source.write_text(
+            "import subprocess, sys\n"
+            "sys.path.append('unused')\n"
+            "assert sys._base_executable == sys.executable\n"
+            "print(sys.executable)\n"
+            "print(sys.prefix)\n"
+            "if sys.argv[1:] == ['spawn']:\n"
+            "    child = subprocess.run([sys.executable, '-c', "
+            "\"import sys; print('child'); sys.exit(47)\"], capture_output=True)\n"
+            "    assert (child.stdout, child.stderr, child.returncode) == (b'child\\n', b'', 47)\n"
+        )
+        image = root / "boxed-executable"
+        built = run(imre, "build", "--runtime-imports", source, "-o", image)
+        assert built.returncode == 0, built.stderr
+        helper_dir = root / "python-helpers"
+        helper_dir.mkdir()
+        helper = helper_dir / "python3"
+        helper.symlink_to(imre)
+        for args, extra, expected in (
+            ((), {"PATH": ""}, ""),
+            ((), {"PATH": str(helper_dir)}, str(helper)),
+            (("spawn",), {"IMRE_PYTHON": str(helper.relative_to(root))}, str(helper_dir.resolve() / "python3")),
+        ):
+            result = run(image, *args, extra=extra)
+            assert result.returncode == 0, result.stderr
+            assert result.stdout.decode().splitlines() == [expected, str(root.resolve())]
 
         # An isolated command can add a package search root itself. Exercise its
         # normal Python code, including live dictionary views and descriptor errors.
@@ -1591,6 +1638,7 @@ def report(text):
             "boxed_slice_deep_repr.py",
             "boxed_slice_repr_cycles.py",
             "boxed_source_exec.py",
+            "boxed_relative_package_imports.py",
             "boxed_sys_getframe.py",
             "boxed_sys_audit.py",
             "boxed_sys_audit_recursion.py",
@@ -1619,6 +1667,7 @@ def report(text):
             "boxed_temporary_file.py",
             "boxed_spooled_temporary_file.py",
             "boxed_named_temporary_file.py",
+            "boxed_tempfile_default_directory.py",
             "boxed_random.py",
             "boxed_secrets.py",
             "boxed_pkgutil.py",
@@ -1654,6 +1703,7 @@ def report(text):
             "boxed_re_escape.py",
             "boxed_datetime.py",
             "boxed_dataclasses.py",
+            "boxed_dataclass_slots.py",
             "boxed_dataclass_init_annotations.py",
             "boxed_dataclass_classvars.py",
             "boxed_email_dates.py",
@@ -1686,6 +1736,7 @@ def report(text):
             "boxed_any_generator.py",
             "boxed_global.py",
             "boxed_logging.py",
+            "boxed_logging_file.py",
             "boxed_class_attribute.py",
             "boxed_request_strings.py",
             "boxed_str_maketrans.py",
@@ -1700,9 +1751,12 @@ def report(text):
             "boxed_unittest_subclass.py",
             "boxed_unittest_not_has_attr.py",
             "boxed_unittest_not_equal.py",
+            "boxed_unittest_less_equal.py",
             "boxed_unittest_assert_raises.py",
+            "boxed_unittest_assert_warns.py",
             "boxed_unittest_assert_regex.py",
             "boxed_unittest_patch.py",
+            "boxed_unittest_named_loader.py",
             "boxed_unittest_identity.py",
             "boxed_unittest_skip.py",
             "boxed_frozenset.py",
@@ -1731,6 +1785,7 @@ def report(text):
             "boxed_unittest_cleanup.py",
             "boxed_unittest_result_registry.py",
             "boxed_unittest_class_cleanup.py",
+            "boxed_pathlib.py",
             "boxed_posixpath.py",
             "boxed_linecache.py",
             "boxed_stat.py",
@@ -1754,6 +1809,7 @@ def report(text):
             "boxed_threading_lock.py",
             "boxed_import_depth.py",
             "boxed_dict_subclasses.py",
+            "boxed_abc_metaclass.py",
             "boxed_mapping_abc.py",
             "boxed_user_containers.py",
             "boxed_dict_pop.py",
@@ -1829,6 +1885,8 @@ def report(text):
             compare("-IB", "-c", imports + "arithmetic.current()")
             os.symlink(b"unresolved-\xff", root / "readlink-source")
             plugin.write_bytes((fixtures / "boxed_os_readlink.py").read_bytes())
+            compare("-IB", "-c", imports + "arithmetic.current()")
+            plugin.write_bytes((fixtures / "boxed_os_symlink.py").read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")
             plugin.write_bytes((fixtures / "boxed_os_scandir.py").read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")

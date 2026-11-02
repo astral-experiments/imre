@@ -108,6 +108,7 @@ pub(super) fn schemas(module: &Module, output: &mut Output) {
                 Builtin::JsonDecode(ty)
                 | Builtin::TomlDecode(ty)
                 | Builtin::JsonEncode(ty)
+                | Builtin::JsonEncoderEncode(ty)
                 | Builtin::JsonDumps(ty)
                 | Builtin::JsonDump(ty),
                 _,

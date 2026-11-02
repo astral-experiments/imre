@@ -156,6 +156,7 @@ impl Type {
             | Self::TextOutput
             | Self::Hash
             | Self::JsonDecoder
+            | Self::JsonEncoder
             | Self::ZipFile
             | Self::ZipInfo
             | Self::Context
@@ -3640,6 +3641,7 @@ impl Emitter<'_, '_> {
                 | Type::TextOutput
                 | Type::Hash
                 | Type::JsonDecoder
+                | Type::JsonEncoder
                 | Type::ZipFile
                 | Type::ZipInfo
                 | Type::Context
@@ -4843,6 +4845,30 @@ impl Emitter<'_, '_> {
                     ty: returns,
                     operand: self.checked_instruction(format!(
                         "call ptr @{function}(ptr {})",
+                        args[0].value.operand
+                    )),
+                    small_integer: false,
+                }
+            }
+            Builtin::JsonEncoderNew => {
+                let [ascii, nan, sort] = std::array::from_fn(|index| {
+                    self.instruction(format!("zext i1 {} to i32", args[index].value.operand))
+                });
+                Value {
+                    ty: returns,
+                    operand: self.instruction(format!(
+                        "call ptr @imre_json_encoder_new(i32 {ascii}, i32 {nan}, i32 {sort})"
+                    )),
+                    small_integer: false,
+                }
+            }
+            Builtin::JsonEncoderEncode(schema) => {
+                let schema = self.output.global_ref(json::schema_name(*schema));
+                let word = self.word(&args[1].value);
+                Value {
+                    ty: returns,
+                    operand: self.checked_instruction(format!(
+                        "call ptr @imre_json_encoder_encode(ptr {}, i64 {word}, ptr @{schema})",
                         args[0].value.operand
                     )),
                     small_integer: false,
@@ -9078,6 +9104,8 @@ declare ptr @imre_tuple_probe(ptr, ptr)
 declare ptr @imre_json_decode(ptr, ptr)
 declare ptr @imre_json_loads(ptr)
 declare ptr @imre_json_decoder_new()
+declare ptr @imre_json_encoder_new(i32, i32, i32)
+declare ptr @imre_json_encoder_encode(ptr, i64, ptr)
 declare ptr @imre_json_decoder_memo(ptr)
 declare ptr @imre_json_decoder_decode(ptr, ptr)
 declare ptr @imre_json_loads_bytes(ptr)
@@ -9383,6 +9411,7 @@ declare ptr @imre_str_rsplit_last(ptr, ptr)
 declare ptr @imre_str_unquote_rsplit_last(ptr, ptr)
 declare ptr @imre_str_strip(ptr, ptr, i32)
 declare ptr @imre_str_expandtabs(ptr, i64)
+declare ptr @imre_str_zfill(ptr, i64, i32)
 declare ptr @imre_unicode_normalize(ptr, ptr)
 declare ptr @imre_str_lower(ptr)
 declare ptr @imre_str_upper(ptr)
@@ -9490,6 +9519,7 @@ declare ptr @imre_frozenset_strings(ptr)
 declare ptr @imre_sys_stdlib_module_names()
 declare i32 @imre_str_is_ascii(ptr)
 declare i32 @imre_str_is_lower(ptr)
+declare i32 @imre_str_is_title(ptr)
 declare i32 @imre_str_is_upper(ptr)
 declare ptr @imre_errno_module()
 declare ptr @imre_errno_namespace(ptr)
