@@ -39,3 +39,12 @@ def _namedtuple_replace(typename, field_names):
     _replace.__doc__ = f'Return a new {typename} object replacing specified fields with new values'
     _replace.__qualname__ = f'{typename}._replace'
     return _replace
+
+
+def _namedtuple_getnewargs(typename):
+    def __getnewargs__(self):
+        'Return self as a plain tuple. Used by copy and pickle.'
+        return tuple(self)
+
+    __getnewargs__.__qualname__ = f'{typename}.__getnewargs__'
+    return __getnewargs__
