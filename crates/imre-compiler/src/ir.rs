@@ -160,6 +160,7 @@ pub(crate) enum Type {
     Hash,
     Poll,
     JsonDecoder,
+    JsonEncoder,
     /// An open or closed ZIP archive retains its ordered central directory.
     ZipFile,
     ZipInfo,
@@ -413,6 +414,7 @@ impl std::fmt::Display for Type {
             Self::TextOutput => "writable text stream",
             Self::Hash => "hashlib hash",
             Self::JsonDecoder => "json.decoder.JSONDecoder",
+            Self::JsonEncoder => "json.encoder.JSONEncoder",
             Self::ZipFile => "zipfile.ZipFile",
             Self::ZipInfo => "zipfile.ZipInfo",
             Self::CsvReader => "CSV reader",
@@ -1414,6 +1416,8 @@ pub(crate) enum Builtin {
     JsonDecoderNew,
     JsonDecoderMemo,
     JsonDecoderDecode,
+    JsonEncoderNew,
+    JsonEncoderEncode(Type),
     JsonEmptyObject,
     ModuleCache(usize),
     /// Capture and access an individual wrapper's independently owned cache.

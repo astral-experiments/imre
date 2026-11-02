@@ -757,6 +757,7 @@ impl Checker<'_> {
             || types == [Type::PathInfo; 2]
             || types == [Type::CodecInfo; 2]
             || types == [Type::JsonDecoder; 2]
+            || types == [Type::JsonEncoder; 2]
             || types == [Type::Poll; 2]
             || types == [Type::Socket; 2]
             || types == [Type::ProcessSelectorClass; 2]

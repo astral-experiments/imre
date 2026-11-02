@@ -342,6 +342,7 @@ impl Types {
             | Type::TextOutput
             | Type::Hash
             | Type::JsonDecoder
+            | Type::JsonEncoder
             | Type::ZipFile
             | Type::ZipInfo
             | Type::CsvReader
@@ -896,6 +897,7 @@ impl Types {
             | Type::TextOutput
             | Type::Hash
             | Type::JsonDecoder
+            | Type::JsonEncoder
             | Type::ZipFile
             | Type::ZipInfo
             | Type::CsvReader

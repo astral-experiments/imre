@@ -321,6 +321,7 @@ impl Verifier<'_> {
             ExprKind::Builtin(
                 Builtin::JsonDecode(ty)
                 | Builtin::JsonEncode(ty)
+                | Builtin::JsonEncoderEncode(ty)
                 | Builtin::JsonDumps(ty)
                 | Builtin::JsonDump(ty)
                 | Builtin::TomlDecode(ty)
