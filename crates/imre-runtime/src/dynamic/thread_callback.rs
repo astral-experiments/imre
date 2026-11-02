@@ -380,9 +380,14 @@ impl Callback {
             span: None,
         };
         let code = match self.entry {
-            Entry::Native(entry) => {
-                ctx.prelinked_code(entry, scope, name, signature, (qualname, NONE), location)
-            }
+            Entry::Native(entry) => ctx.prelinked_code(
+                Body::Native(entry),
+                scope,
+                name,
+                signature,
+                (qualname, NONE),
+                location,
+            ),
             Entry::Source(original) => {
                 original.load(&mut ctx, scope, name, signature, qualname, location)?
             }
