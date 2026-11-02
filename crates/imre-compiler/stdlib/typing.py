@@ -1759,6 +1759,15 @@ def _should_unflatten_callable_args(typ, args):
     )
 
 
+def _typevar_subst(self, arg):
+    from types import GenericAlias
+    arg = _type_check(arg, "Parameters to generic types must be types.")
+    if ((isinstance(arg, _typing._GenericAlias) and arg.__origin__ is Unpack)
+            or (isinstance(arg, GenericAlias) and getattr(arg, "__unpacked__", False))):
+        raise TypeError(f"{arg} is not valid as type argument")
+    return arg
+
+
 def _paramspec_subst(self, arg):
     if isinstance(arg, (list, tuple)):
         arg = tuple(_type_check(a, "Expected a type.") for a in arg)
