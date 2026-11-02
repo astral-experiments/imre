@@ -1144,6 +1144,13 @@ impl Context {
         })
     }
 
+    /// Attach the name at the failed lookup, leaving exceptions raised by Python code alone.
+    fn undefined_source_name(&mut self, name: &str) -> Error {
+        let mut error = Error::new("NameError", format!("name '{name}' is not defined"));
+        error.tracing().name_error_name = Some(self.text(name));
+        error
+    }
+
     pub(super) fn source_global(&mut self, globals: ExecGlobals, name: &str) -> Result<Id> {
         for mapping in [globals.dict, globals.builtins] {
             if matches!(self.heap.get(mapping), Value::Dict(_)) {
@@ -1157,10 +1164,7 @@ impl Context {
                 }
             }
         }
-        Err(Error::new(
-            "NameError",
-            format!("name '{name}' is not defined"),
-        ))
+        Err(self.undefined_source_name(name))
     }
 
     /// Construct a function whose globals are supplied by Python code.
@@ -1371,10 +1375,7 @@ impl Context {
                     return self.get_item(mapping, text);
                 }
             }
-            return Err(Error::new(
-                "NameError",
-                format!("name '{}' is not defined", ident.id),
-            ));
+            return Err(self.undefined_source_name(ident.id.as_str()));
         }
         let mut program = Program::new(Rc::from("<string>"), "<module>");
         program
