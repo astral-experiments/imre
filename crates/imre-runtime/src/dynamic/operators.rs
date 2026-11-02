@@ -2056,7 +2056,10 @@ impl Context {
                             ) && !matches!(args.as_slice(), [arg, _] if typing::is_param_expr(&ctx, *arg));
                             if args.is_empty() {
                                 if callable {
-                                    return Err(Error::new("IndexError", "tuple index out of range"));
+                                    return Err(Error::new(
+                                        "IndexError",
+                                        "tuple index out of range",
+                                    ));
                                 }
                                 work.push(Part::Text("()"));
                             }
@@ -2081,6 +2084,9 @@ impl Context {
                                     AliasKind::Literal(_) => Part::Text("typing.Literal"),
                                     _ => Part::TypeArgument(alias.origin, false),
                                 });
+                            }
+                            if alias.unpacked {
+                                work.push(Part::Text("*"));
                             }
                             continue;
                         }

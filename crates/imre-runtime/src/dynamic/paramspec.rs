@@ -215,30 +215,12 @@ pub(super) fn attribute(ctx: &mut Context, value: Id, name: &str) -> Option<Resu
             }
             _ => return None,
         },
-        Value::Native(ref class)
-            if class == "typing.ParamSpec"
-                && matches!(name, "__typing_subst__" | "__typing_prepare_subst__") =>
-        {
-            ctx.builtin(&format!("typing.ParamSpec.{name}"))
-        }
         Value::ParamSpecMarker(kind, origin) => match name {
             "__origin__" => origin,
             "__eq__" | "__ne__" => method(ctx, value, &format!("{}.{name}", kind.class())),
             "__hash__" => NONE,
             _ => return None,
         },
-        Value::Native(ref class)
-            if matches!(
-                class.as_str(),
-                "typing.ParamSpecArgs" | "typing.ParamSpecKwargs"
-            ) && matches!(name, "__eq__" | "__ne__" | "__hash__") =>
-        {
-            if name == "__hash__" {
-                NONE
-            } else {
-                ctx.builtin(&format!("{class}.{name}"))
-            }
-        }
         _ => return None,
     };
     Some(Ok(result))

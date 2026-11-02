@@ -155,13 +155,21 @@ impl Context {
                     Ok(NONE)
                 }
             }
-            "type_alias" => Ok(self.alloc(Value::TypeAlias {
-                name: a,
-                definition: typing::AliasDefinition::Lazy {
-                    evaluator: b,
-                    cached: None,
-                },
-            })),
+            "type_alias" => {
+                let parameters = if c == NONE {
+                    self.heap.packed_tuple(Vec::new(), false)
+                } else {
+                    c
+                };
+                Ok(self.alloc(Value::TypeAlias {
+                    name: a,
+                    definition: typing::AliasDefinition::Lazy {
+                        parameters,
+                        evaluator: b,
+                        cached: None,
+                    },
+                }))
+            }
             "template_interpolation" => {
                 let (Value::List(meta) | Value::Tuple(meta)) = self.heap.get(c) else {
                     unreachable!("compiled interpolation metadata");

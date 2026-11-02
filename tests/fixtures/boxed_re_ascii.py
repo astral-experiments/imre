@@ -208,6 +208,18 @@ def current():
         assert pattern.fullmatch(word + word).group(name) == word
         assert pattern.fullmatch(word) is None
 
+    import sys
+    if sys.platform.startswith("linux"):
+        import _locale
+        saved = _locale.setlocale(_locale.LC_CTYPE)
+        try:
+            _locale.setlocale(_locale.LC_CTYPE, "C")
+            locale_ref = re.compile(rb"([a-c]*)\1", re.L | re.I)
+            assert locale_ref.fullmatch(b"AbCaBc").group(1) == b"AbC"
+            assert locale_ref.fullmatch(b"AbCac") is None
+        finally:
+            _locale.setlocale(_locale.LC_CTYPE, saved)
+
     for spelling, flags, word, repeated, wrong in (
         ("(?P<name>ab)(?P=name)", re.I, "Ab", "aB", "ac"),
         (r"(k)\1", re.I, "K", "K", "x"),

@@ -41,6 +41,16 @@ impl BuiltinDescriptor {
                 method: member.is_method(),
             });
         }
+        if let Some((owner, attr)) = symbol.rsplit_once('.')
+            && let Some(class) = typing::ParameterClass::lookup(owner)
+            && let Some(&name) = class.methods.iter().find(|&&name| name == attr)
+        {
+            return Some(Self {
+                owner: class.owner,
+                name,
+                method: !matches!(name, "__eq__" | "__ne__" | "__iter__"),
+            });
+        }
         if symbol == "typing.Union.__mro_entries__" {
             return Some(Self {
                 owner: "typing.Union",
@@ -89,6 +99,7 @@ impl BuiltinDescriptor {
             Some(("int", attr)) => Some(("int", attr, &["__trunc__"][..])),
             Some(("float", attr)) => Some(("float", attr, &["__trunc__", "as_integer_ratio"][..])),
             Some(("bytes", attr)) => Some(("bytes", attr, builtins::BYTES_METHODS)),
+            Some(("complex", attr)) => Some(("complex", attr, &["__complex__"][..])),
             Some(("bytearray", attr)) => Some(("bytearray", attr, builtins::BYTEARRAY_METHODS)),
             Some(("memoryview", attr)) => Some(("memoryview", attr, builtins::MEMORYVIEW_METHODS)),
             Some(("BaseException", attr)) => {
@@ -150,6 +161,8 @@ impl BuiltinDescriptor {
                             | "__reduce__"
                             | "__reduce_ex__"
                             | "__replace__"
+                            | "__bytes__"
+                            | "__complex__"
                             | "__fspath__"
                             | "__format__"
                             | "__enter__"
@@ -158,6 +171,7 @@ impl BuiltinDescriptor {
             });
         }
         let (owner, name) = match symbol {
+            "type.__init__" => ("type", "__init__"),
             "object.__format__" => ("object", "__format__"),
             "object.__getstate__" => ("object", "__getstate__"),
             "object.__reduce__" => ("object", "__reduce__"),
@@ -207,6 +221,7 @@ impl BuiltinDescriptor {
             "types.SimpleNamespace.__eq__" => (super::namespace::CLASS, "__eq__"),
             "types.SimpleNamespace.__ne__" => (super::namespace::CLASS, "__ne__"),
             "tuple.__getitem__" => ("tuple", "__getitem__"),
+            "tuple.count" => ("tuple", "count"),
             "tuple.index" => ("tuple", "index"),
             "_thread._local.__getattribute__" => (thread_local::CLASS, "__getattribute__"),
             "_thread._local.__setattr__" => (thread_local::CLASS, "__setattr__"),
@@ -222,6 +237,7 @@ impl BuiltinDescriptor {
                     | "__getstate__"
                     | "__reduce__"
                     | "__reduce_ex__"
+                    | "count"
                     | "index"
                     | "isascii"
                     | "isalpha"
@@ -284,6 +300,9 @@ impl BuiltinDescriptor {
                 matches!(ctx.heap.get(receiver), Value::DictIterator(iter) if iter.class_name() == owner)
             }
             "generator" => matches!(ctx.heap.get(receiver), Value::Generator { .. }),
+            owner if typing::ParameterClass::lookup(owner).is_some() => {
+                ctx.builtin_type_name(receiver) == Some(owner)
+            }
             "typing.Union" => matches!(ctx.heap.get(receiver), Value::Union(_)),
             "object" => true,
             "type" => ctx.is_type_object(receiver),
@@ -473,12 +492,17 @@ impl BuiltinDescriptor {
                     ("__reduce_ex__", _) if self.owner == "object" => "($self, protocol, /)",
                     ("__reduce__", "__doc__") if stdlib::os::stat::layout(self.owner).is_some() => return Some(NONE),
                     ("__reduce__", _) if stdlib::os::stat::layout(self.owner).is_some() => "($self, /)",
+                    ("count", "__doc__") if self.owner == "tuple" => "Return number of occurrences of value.",
+                    ("count", _) if self.owner == "tuple" => "($self, value, /)",
                     ("count", "__doc__") if self.owner == "bytes" => {
                         "Return the number of non-overlapping occurrences of subsection 'sub' in bytes B[start:end].\n\n  start\n    Optional start position. Default: start of the bytes.\n  end\n    Optional stop position. Default: end of the bytes."
                     }
                     ("find", "__doc__") if self.owner == "bytes" => {
                         "Return the lowest index in B where subsection 'sub' is found, such that 'sub' is contained within B[start,end].\n\n  start\n    Optional start position. Default: start of the bytes.\n  end\n    Optional stop position. Default: end of the bytes.\n\nReturn -1 on failure."
                     }
+                    ("__bytes__", "__doc__") => "Convert this value to exact type bytes.",
+                    ("__complex__", "__doc__") => "Convert this value to exact type complex.",
+                    ("__bytes__" | "__complex__", _) => "($self, /)",
                     ("count" | "find", _) if self.owner == "bytes" => "($self, sub[, start[, end]], /)",
                     ("isascii", "__doc__") => {
                         "Return True if all characters in the string are ASCII, False otherwise.\n\nASCII characters have code points in the range U+0000-U+007F.\nEmpty string is ASCII too."

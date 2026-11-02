@@ -95,6 +95,7 @@ pub(in crate::dynamic) struct Pattern {
     regex: Matcher,
     assertions: Vec<(String, Guard)>,
     full: OnceCell<std::result::Result<Matcher, String>>,
+    close_order: OnceCell<Option<Vec<usize>>>,
     split_retry: OnceCell<std::result::Result<regex_automata::nfa::thompson::NFA, String>>,
 }
 
@@ -147,6 +148,34 @@ impl Pattern {
         }
         let mapping = ctx.dict(fields);
         ctx.mapping_proxy(mapping)
+    }
+
+    fn last_capture(&self, text: &[u8], caps: &Captures) -> LastCapture {
+        let mut groups = (1..=self.group_count()).filter(|&i| caps.get_group(i).is_some());
+        let first = groups.next();
+        if groups.next().is_none() {
+            return LastCapture::Known(first);
+        }
+        let order = self.close_order.get_or_init(|| match &self.regex {
+            Matcher::Lookahead(matcher) => matcher.close_order(),
+            Matcher::Asserted(_) => None, // The NFA maps assertion slots to public groups.
+            _ => split::single_visit_order(self),
+        });
+        let winner = if let Some(order) = order {
+            order
+                .iter()
+                .rev()
+                .copied()
+                .find(|&i| caps.get_group(i).is_some())
+        } else if matches!(&self.regex, Matcher::Lookahead(_)) {
+            None
+        } else {
+            split::last_close(self, text, caps)
+        };
+        match winner {
+            Some(index) => LastCapture::Known(Some(index)),
+            None => LastCapture::Unavailable,
+        }
     }
 
     fn match_error(&self, ctx: &mut Context, message: String) -> Error {
@@ -427,6 +456,9 @@ fn syntax_diagnostic(ctx: &Context, source: Id, flags: i64) -> Option<(String, u
     ) {
         return Some(error);
     }
+    if let Some((msg, at)) = imre_regex::repeat_diagnostic(&text, flags & VERBOSE != 0) {
+        return Some((msg.to_owned(), text[..at].chars().count()));
+    }
     let error = parsed.err()?;
     let message = match error.kind() {
         ErrorKind::ClassUnclosed => "unterminated character set",
@@ -565,6 +597,26 @@ fn alphabet(bytes: bool, ascii: bool, flags: i64) -> imre_regex::Alphabet {
     }
 }
 
+/// Consume complete leading global matching flags before choosing the matcher and lowering anchors.
+fn leading_match_flags(mut pattern: &[u8], mut flags: i64) -> (&[u8], i64) {
+    while let Some(rest) = pattern.strip_prefix(b"(?") {
+        let mut added = 0;
+        let mut chars = rest.iter();
+        loop {
+            match chars.next() {
+                Some(b'i') => added |= IGNORECASE,
+                Some(b'm') => added |= MULTILINE,
+                Some(b's') => added |= DOTALL,
+                Some(b')') if added != 0 => break,
+                _ => return (pattern, flags),
+            }
+        }
+        flags |= added;
+        pattern = chars.as_slice();
+    }
+    (pattern, flags)
+}
+
 fn compiled(ctx: &mut Context, id: Id, flags: Option<Id>) -> Result<Id> {
     let flags = flags
         .map(|value| ctx.as_integer(value))
@@ -614,6 +666,7 @@ fn compiled(ctx: &mut Context, id: Id, flags: Option<Id>) -> Result<Id> {
         Value::Bytes(value) => value.as_slice(),
         _ => ctx.str_value(id)?.as_bytes(),
     };
+    let (spelling, flags) = leading_match_flags(spelling, flags);
     let repeated = repeated_literal_capture(spelling, flags, bytes);
     let spelling = repeated.as_deref().unwrap_or(spelling);
     let source = if bytes {
@@ -646,6 +699,9 @@ fn compiled(ctx: &mut Context, id: Id, flags: Option<Id>) -> Result<Id> {
     let global_verbose = source.starts_with("(?x)");
     let prepared = if let Some((raw, prefer_translation)) = raw_pattern(&source, ascii, flags) {
         let original = || {
+            if let Some((msg, _)) = imre_regex::repeat_diagnostic(&source, false) {
+                return Err(msg.to_owned());
+            }
             let raw = imre_regex::preserve_zero_repeat_groups(raw)?;
             if flags & IGNORECASE != 0 && !bytes {
                 build(imre_regex::expand_case(&raw, ascii)?)
@@ -800,6 +856,7 @@ fn compiled(ctx: &mut Context, id: Id, flags: Option<Id>) -> Result<Id> {
         regex,
         assertions,
         full: OnceCell::new(),
+        close_order: OnceCell::new(),
         split_retry: OnceCell::new(),
     }))))
 }
@@ -862,7 +919,13 @@ fn group_spans(caps: &Captures) -> impl Iterator<Item = Option<Span>> + '_ {
     })
 }
 
+enum LastCapture {
+    Known(Option<usize>),
+    Unavailable,
+}
+
 pub(in crate::dynamic) struct Match {
+    last: LastCapture,
     pub(in crate::dynamic) pattern: Id,
     pub(in crate::dynamic) subject: Id,
     spans: Vec<Option<Span>>,
@@ -876,15 +939,28 @@ impl Match {
         pattern
     }
 
-    /// A Scanner lexicon has exactly one participating token group in each match.
-    pub(in crate::dynamic) fn lexicon_branch(&self, ctx: &Context) -> Option<usize> {
-        if self.pattern(ctx).source != NONE {
-            return None;
+    pub(in crate::dynamic) fn last_attribute(&self, ctx: &mut Context, named: bool) -> Result<Id> {
+        let index = match self.last {
+            LastCapture::Known(index) => index,
+            LastCapture::Unavailable => {
+                return Err(Error::new(
+                    "NotImplementedError",
+                    "capture close order is unavailable for this regular expression",
+                ));
+            }
+        };
+        let Some(index) = index else { return Ok(NONE) };
+        if named {
+            let name = self
+                .pattern(ctx)
+                .regex
+                .group_info()
+                .to_name(PatternID::ZERO, index)
+                .map(str::to_owned);
+            Ok(name.map_or(NONE, |name| ctx.text(name)))
+        } else {
+            Ok(ctx.int(index as i64))
         }
-        self.spans[1..]
-            .iter()
-            .position(Option::is_some)
-            .map(|i| i + 1)
     }
 
     fn group_index(&self, ctx: &mut Context, group: Id) -> Result<usize> {
@@ -1015,9 +1091,12 @@ fn subject_bytes(ctx: &Context, id: Id, bytes: bool) -> Result<&[u8]> {
         ctx.check_buffer_exporter(id)?;
     }
     match value {
-        Value::Bytes(_) | Value::ByteArray(_) | Value::MemoryView { owner: Some(_), .. } => {
+        Value::Bytes(_)
+        | Value::ByteArray(_)
+        | Value::Array(_)
+        | Value::MemoryView { owner: Some(_), .. } => {
             if bytes {
-                return ctx.bytes_like(id);
+                return ctx.native_buffer_bytes(id);
             }
             Err(Error::new(
                 "TypeError",
@@ -1120,7 +1199,7 @@ pub(super) fn search(
     if matches!(method, "scanner" | "finditer") {
         let buffer_view = match ctx.heap.get(ctx.scalar_value(string)) {
             // Keep the export alive for the scanner's lifetime. A Match keeps only the subject.
-            Value::ByteArray(_) => Some(ctx.new_memoryview(string)?),
+            Value::ByteArray(_) | Value::Array(_) => Some(ctx.new_memoryview(string)?),
             Value::MemoryView { .. } => {
                 return Err(Error::new(
                     "NotImplementedError",
@@ -1168,10 +1247,12 @@ pub(super) fn search(
     if !captures.is_match() {
         return Ok(NONE);
     }
+    let last = pattern.last_capture(&text[..end], &captures);
     let spans = group_spans(&captures)
         .map(|span| span.map(|s| projection.as_ref().map_or(s, |p| p.original(s))))
         .collect();
     Ok(ctx.alloc(Value::RegexMatch(Rc::new(Match {
+        last,
         pattern: receiver,
         subject: string,
         spans,

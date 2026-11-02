@@ -45,7 +45,7 @@ fn substitute(
     let pattern = Rc::clone(pattern);
     if ctx.callable(repl) {
         return ctx.with_buffer_export(string, |ctx| {
-            expanded_sub(ctx, &pattern, receiver, string, limit, |ctx, m| {
+            expanded_sub(ctx, &pattern, receiver, string, limit, true, |ctx, m| {
                 let matched = ctx.alloc(Value::RegexMatch(Rc::new(m)));
                 ctx.call(repl, vec![matched], Vec::new())
             })
@@ -60,7 +60,7 @@ fn substitute(
     if replacement.contains(&b'\\') {
         let template = compile_template(ctx, receiver, repl, replacement_is_bytes)?;
         return ctx.with_buffer_export(string, |ctx| {
-            expanded_sub(ctx, &pattern, receiver, string, limit, |ctx, m| {
+            expanded_sub(ctx, &pattern, receiver, string, limit, false, |ctx, m| {
                 template.expand(ctx, &m)
             })
         });
@@ -298,6 +298,7 @@ fn expanded_sub(
     receiver: Id,
     string: Id,
     limit: isize,
+    exposes_match: bool,
     mut expand: impl FnMut(&mut Context, Match) -> Result<Id>,
 ) -> Result<(Id, isize)> {
     let length = subject_bytes(ctx, string, pattern.bytes)?.len();
@@ -325,7 +326,13 @@ fn expanded_sub(
             add(ctx.alloc(gap))?;
         }
         let mark = ctx.heap.temporary_mark();
+        let last = if exposes_match {
+            pattern.last_capture(subject_bytes(ctx, string, pattern.bytes)?, &caps)
+        } else {
+            LastCapture::Unavailable
+        };
         let matched = Match {
+            last,
             pattern: receiver,
             subject: string,
             spans: group_spans(&caps).collect(),

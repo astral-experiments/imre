@@ -6,6 +6,11 @@ from facade import Count as FacadeCounter
 from facade import passthrough
 
 
+class ExplicitCounter(Original):
+    def __init__(self, super: int) -> None:
+        definitions.Counter.__init__(self, total=super)
+
+
 def use_qualified(value: "definitions.Counter") -> "package.ExportedCounter":
     return value
 
@@ -23,6 +28,7 @@ def main() -> None:
     print(package.create(17).total)
     print(Reexport(4).bump(2))
     print(definitions.Counter(5).total)
+    print(ExplicitCounter(11).total)
 
 
 main()

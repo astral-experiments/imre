@@ -245,10 +245,23 @@ impl Function<'_, '_> {
                 }
                 ast::Stmt::Pass(_) | ast::Stmt::Global(_) | ast::Stmt::Nonlocal(_) => {}
                 ast::Stmt::TypeAlias(v)
-                    if self.prefix.is_empty()
-                        && v.type_params.is_none()
+                    if self.class_locals.is_none()
                         && let Some(name) = v.name.as_name_expr() =>
                 {
+                    let outer = self.scope.clone();
+                    let params = if let Some(params) = v.type_params.as_deref() {
+                        if params
+                            .iter()
+                            .any(|param| !matches!(param, ast::TypeParam::TypeVar(_)))
+                        {
+                            self.unsupported("variadic type alias parameters");
+                        }
+                        self.scope = self.parameter_scope(&outer, params, false);
+                        let key = self.code_name(".type_params");
+                        self.op("lookup", &[&self.scope.clone(), &key])
+                    } else {
+                        "0".into()
+                    };
                     let evaluator = self.define(
                         v.start(),
                         name.id.as_str(),
@@ -259,7 +272,8 @@ impl Function<'_, '_> {
                         Body::TypeAlias(&v.value),
                     );
                     let label = self.code_name(name.id.as_str());
-                    let alias = self.op("type_alias", &[&label, &evaluator]);
+                    let alias = self.op("type_alias", &[&label, &evaluator, &params]);
+                    self.scope = outer;
                     self.bind(name.id.as_str(), &alias);
                 }
                 ast::Stmt::Assign(v) => {

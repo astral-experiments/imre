@@ -20,7 +20,7 @@ pub(crate) use constants::ClassValue;
 pub(crate) use dataclasses::{ContainerFactory, DataclassOptions, FieldDefault};
 pub(crate) use exception_forwarders::ForwardingInitializer;
 pub(crate) use exceptions::explicit_message_initializer;
-pub(crate) use inheritance::{super_init, super_method};
+pub(crate) use inheritance::{direct_base_init, super_init, super_method};
 
 pub(crate) const EXCEPTION_ARGS_SLOT: &str = "<exception arguments>";
 
@@ -1158,6 +1158,17 @@ fn collect_class(
             },
             exception_layout,
             &mut init_hooks,
+            |call| {
+                base.is_some_and(|(_, parent)| {
+                    direct_base_init(
+                        graph,
+                        definition.module,
+                        parent.definition,
+                        &methods[initializer],
+                        call,
+                    )
+                })
+            },
             |name| hook_writes(name, None),
         )?;
     }
@@ -1354,6 +1365,7 @@ fn check_initializer(
     layout: InitializerFields<'_>,
     exception_layout: bool,
     hooks: &mut init_hooks::Hooks,
+    direct_base: impl Fn(&ast::ExprCall) -> bool,
     lookup: impl Fn(&str) -> Option<Result<Vec<String>, String>>,
 ) -> Result<bool, String> {
     let InitializerFields {
@@ -1463,7 +1475,7 @@ fn check_initializer(
             }
             ast::Stmt::Expr(value)
                 if let ast::Expr::Call(call) = &*value.value
-                    && super_init(call) =>
+                    && (super_init(call) || direct_base(call)) =>
             {
                 if called_super
                     || inherited
@@ -1486,6 +1498,7 @@ fn check_initializer(
                     .arguments
                     .args
                     .iter()
+                    .skip(usize::from(!super_init(call)))
                     .chain(call.arguments.keywords.iter().map(|kw| &kw.value))
                 {
                     let mut use_self = SelfUse(receiver, None, &initialized);

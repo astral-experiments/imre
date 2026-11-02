@@ -340,6 +340,7 @@ fn unhashable_part(ctx: &Context, value: Id) -> Option<Id> {
         | Value::Deque(_)
         | Value::List(_)
         | Value::ByteArray(_)
+        | Value::Array(_)
         | Value::Context(_)
         | Value::ContextToken { .. }
         | Value::Set { frozen: false, .. }
@@ -743,7 +744,8 @@ pub(super) fn method(
         return fromkeys(ctx, args, kwargs);
     }
     if let Some((owner, method)) = name.split_once('.')
-        && ((owner == "list" && LIST_METHODS.contains(&method)) || name == "tuple.index")
+        && ((owner == "list" && LIST_METHODS.contains(&method))
+            || matches!(name, "tuple.count" | "tuple.index"))
     {
         let Some((&receiver, args)) = args.split_first() else {
             return Err(type_error(format!(

@@ -309,15 +309,10 @@ impl Context {
                 if name == "__hash__"
                     && matches!(
                         kind.as_str(),
-                        "list" | "dict" | "set" | "bytearray" | KEY_WRAPPER
+                        "list" | "dict" | "set" | "bytearray" | "array.array" | KEY_WRAPPER
                     ) =>
             {
                 Some(NONE)
-            }
-            Value::Native(kind)
-                if kind == "typing.TypeVar" && super::typing::VARIANCE_FIELDS.contains(&name) =>
-            {
-                self.builtins.get(&format!("{kind}.{name}")).copied()
             }
             Value::Native(kind) if builtins::is_exception(kind) => match name {
                 name if kind == "BaseException"
@@ -344,6 +339,7 @@ impl Context {
                         | "bool"
                         | "int"
                         | "float"
+                        | "complex"
                         | "bytes"
                         | "bytearray"
                         | "memoryview"
@@ -992,6 +988,10 @@ impl Context {
             }
             return Ok(false);
         }
+        if matches!(self.heap.get(parent), Value::Native(name) if name == "typing.Callable") {
+            let origin = super::mapping_abc::class(self, "Callable")?;
+            return self.python_subclass_check(child, origin);
+        }
         if let Value::GenericAlias(alias) = self.heap.get(parent) {
             return Err(alias.kind.class_check_error("issubclass"));
         }
@@ -1415,9 +1415,6 @@ impl Context {
     pub(super) fn instance_of(&self, value: Id, class: Id) -> bool {
         if self.classes.get("typing.Union") == Some(&class) {
             return matches!(self.heap.get(value), Value::Union(_));
-        }
-        if self.classes.get("collections.abc.Callable") == Some(&class) {
-            return self.callable(value);
         }
         if let Value::Tuple(classes) = self.heap.get(class) {
             return classes.iter().any(|&c| self.instance_of(value, c));
@@ -1849,6 +1846,11 @@ impl Context {
 
     /// Keep non-data wrapper receiver checks at call time for direct method calls.
     fn default_attr_for_call(&mut self, obj: Id, name: &str, for_call: bool) -> Result<Id> {
+        if name == "__dict__"
+            && let Some(&dictionary) = self.native_type_dicts.get(&obj)
+        {
+            return Ok(self.alloc(Value::MappingProxy(dictionary)));
+        }
         if name == "__new__" {
             let class = self.heap.get(obj).instance_class().unwrap_or(obj);
             if self.heap.get(class).hash_type().is_some() {
@@ -2205,10 +2207,7 @@ impl Context {
                 let owner = Self::memoryview_owner(owner)?;
                 let view = self.view_layout(obj)?;
                 let len = view.len;
-                let (format, width) = match self.heap.get(self.view_storage_id(owner)) {
-                    Value::Array(array) => array.view_layout(),
-                    _ => ("B", 1),
-                };
+                let (format, width) = self.view_format_width(owner, view);
                 return Ok(match name {
                     "obj" => {
                         if anonymous {
@@ -2225,7 +2224,7 @@ impl Context {
                     }
                     "suboffsets" => self.alloc(Value::Tuple(vec![])),
                     "contiguous" | "c_contiguous" | "f_contiguous" => {
-                        builtins::boolean(len <= 1 || view.stride == 1)
+                        builtins::boolean(view.is_contiguous())
                     }
                     "nbytes" => self.int((len * width) as i64),
                     "itemsize" => self.int(width as i64),
@@ -2716,10 +2715,8 @@ impl Context {
             Value::RegexScanner { pattern, .. } if name == "pattern" => return Ok(pattern),
             Value::RegexMatch(ref m) if name == "re" => return Ok(m.pattern),
             Value::RegexMatch(ref m) if name == "string" => return Ok(m.subject),
-            Value::RegexMatch(ref m) if name == "lastindex" => {
-                if let Some(branch) = m.lexicon_branch(self) {
-                    return Ok(self.int(branch as i64));
-                }
+            Value::RegexMatch(ref m) if matches!(name, "lastindex" | "lastgroup") => {
+                return std::rc::Rc::clone(m).last_attribute(self, name == "lastgroup");
             }
             Value::RegexPattern(ref pattern) if name == "flags" => {
                 return Ok(self.int(pattern.flags));
@@ -2936,7 +2933,8 @@ impl Context {
                 }
             }
             Value::Native(ref class)
-                if class == "tuple" && matches!(name, "__new__" | "__getitem__" | "index") =>
+                if class == "tuple"
+                    && matches!(name, "__new__" | "__getitem__" | "count" | "index") =>
             {
                 return Ok(self.builtin(&format!("tuple.{name}")));
             }
@@ -3059,10 +3057,6 @@ impl Context {
                 match name {
                     "__name__" | "__qualname__" => {
                         return Ok(self.text(class.trim_start_matches("itertools.").to_owned()));
-                    }
-                    "__dict__" => {
-                        let dictionary = self.native_type_dicts[&obj];
-                        return Ok(self.alloc(Value::MappingProxy(dictionary)));
                     }
                     "__text_signature__" => {
                         return Ok(if class == "itertools.count" {
@@ -3609,6 +3603,7 @@ impl Context {
                         ))
                     || (class == "memoryview" && builtins::MEMORYVIEW_METHODS.contains(&name))
                     || (class == "bytes" && builtins::BYTES_METHODS.contains(&name))
+                    || (class == "complex" && name == "__complex__")
                     || (class == "bytearray" && builtins::BYTEARRAY_METHODS.contains(&name))
                     || (name == "__repr__"
                         && matches!(class.as_str(), "bool" | "int" | "float"))
@@ -3769,6 +3764,9 @@ impl Context {
                 if let Some(value) = self.class_attr(obj, name) {
                     return self.bind_attribute(value, NONE, obj);
                 }
+                if name == "__init__" && self.has_base(obj, "type") {
+                    return Ok(self.builtin("type.__init__"));
+                }
                 if matches!(name, "_abc_caches_clear" | "_abc_registry_clear")
                     && metaclass_member.is_none()
                     && self.is_bundled_abc(obj)
@@ -3891,6 +3889,9 @@ impl Context {
             return self.bind_attribute(hook, NONE, class);
         }
         if name == "__init__" {
+            if matches!(self.heap.get(obj), Value::Native(owner) if owner == "type") {
+                return Ok(self.builtin("type.__init__"));
+            }
             let tuple = self.builtin("tuple");
             if self.direct_subclass(obj, tuple) {
                 return Ok(self.builtin("object.__init__"));
@@ -5369,7 +5370,7 @@ impl Context {
     }
 
     /// Allocate the immutable string or bytes payload while retaining the Python class.
-    pub(super) fn new_string(
+    pub(super) fn new_immutable_scalar(
         &mut self,
         kind: &str,
         class: Id,
@@ -5380,23 +5381,40 @@ impl Context {
         if !self.subclass(class, base) {
             return Err(self.invalid_new_subtype(kind, class));
         }
-        let text = builtins::call(self, kind, args, kwargs)?;
+        let value = builtins::call(self, kind, args, kwargs)?;
         if class == base {
-            return Ok(text);
+            return Ok(value);
         }
-        let text = self.scalar_value(text);
+        let storage = self.scalar_value(value);
         Ok(self.alloc(Value::Instance {
             namespace: None,
             class,
             fields: Default::default(),
             dictionary: None,
-            scalar: Some(text),
+            scalar: Some(storage),
             property: None,
             weak_reference: None,
             cycle: None,
             member_values: None,
             memory_stream: None,
         }))
+    }
+
+    /// Initialize a class returned by __new__ when it is an instance of the called metaclass.
+    pub(super) fn finish_type_call(
+        &mut self,
+        caller: Id,
+        result: Id,
+        args: Vec<Id>,
+        kwargs: Vec<(String, Id)>,
+    ) -> Result<Id> {
+        let actual = self.exact_type(result)?;
+        if self.direct_subclass(actual, caller)
+            && let Some(init) = self.class_attr(actual, "__init__")
+        {
+            self.call_initializer(init, result, actual, args, kwargs)?;
+        }
+        Ok(result)
     }
 
     /// Invoke the initializer found on the type, including its descriptor binding.
@@ -5613,12 +5631,14 @@ impl Context {
                         .is_some_and(|owner| !HashState::is_provider_class(owner))
                     || matches!(
                         name.as_str(),
-                        "BaseException.__init__"
+                        "type.__init__"
+                            | "BaseException.__init__"
                             | "BaseException.add_note"
                             | "ImportError.__init__"
                             | "OSError.__init__"
                             | "StopIteration.__init__"
                             | "SystemExit.__init__"
+                            | "complex.__complex__"
                             | "float.__format__"
                             | "float.__getformat__"
                             | "bool.__repr__"
@@ -5974,12 +5994,6 @@ impl Context {
                 {
                     return Err(Error::new("TypeError", "Protocols cannot be instantiated"));
                 }
-                if self.classes.get("collections.abc.Callable") == Some(&callable) {
-                    return Err(Error::new(
-                        "TypeError",
-                        "Can't instantiate abstract class Callable without an implementation for abstract method '__call__'",
-                    ));
-                }
                 if self.classes.get("typing.Generic") == Some(&callable) {
                     return Err(Error::new(
                         "TypeError",
@@ -6013,12 +6027,16 @@ impl Context {
                     constructor
                 }
                 .or_else(|| {
-                    [("int", "int.__new__"), ("tuple", "tuple.__new__")]
-                        .into_iter()
-                        .find(|(base, _)| self.has_base(callable, base))
-                        .map(|(_, new)| self.builtin(new))
+                    [
+                        ("int", "int.__new__"),
+                        ("tuple", "tuple.__new__"),
+                        ("type", "type.__new__"),
+                    ]
+                    .into_iter()
+                    .find(|(base, _)| self.has_base(callable, base))
+                    .map(|(_, new)| self.builtin(new))
                 });
-                let string_base = ["str", "bytes"]
+                let scalar_base = ["str", "bytes", "complex"]
                     .into_iter()
                     .find(|kind| self.has_base(callable, kind));
                 let float_subclass = self.has_base(callable, "float");
@@ -6032,19 +6050,17 @@ impl Context {
                         .chain(args.iter().copied())
                         .collect();
                     let instance = self.call(allocate, positional, kwargs.clone())?;
+                    if self.has_base(callable, "type") {
+                        return self.finish_type_call(callable, instance, args, kwargs);
+                    }
                     if !self.instance_of(instance, callable) {
                         return Ok(instance);
                     }
                     instance
-                } else if self.has_base(callable, "type") {
-                    return Err(Error::new(
-                        "NotImplementedError",
-                        "direct metaclass construction is unsupported",
-                    ));
                 } else if self.has_base(callable, "module") {
                     self.allocate_module(callable)
-                } else if let Some(kind) = string_base {
-                    self.new_string(kind, callable, &args, &kwargs)?
+                } else if let Some(kind) = scalar_base {
+                    self.new_immutable_scalar(kind, callable, &args, &kwargs)?
                 } else if float_subclass {
                     let positional = std::iter::once(callable)
                         .chain(args.iter().copied())
@@ -6078,7 +6094,7 @@ impl Context {
                     self.call_initializer(init, instance, actual, args, kwargs)?;
                 } else if new.is_none()
                     && !native_tzinfo_new
-                    && string_base.is_none()
+                    && scalar_base.is_none()
                     && !rlock_subclass
                     && !float_subclass
                     && collection_kind.is_none()
@@ -6583,9 +6599,8 @@ impl Context {
         // Metaclasses can define __new__ while inheriting namespace preparation and MRO.
         if !is_abc
             && Some(winner) != typed_dict_meta
-            && (["__prepare__", "__init__"]
-                .iter()
-                .any(|name| self.class_attr(winner, name).is_some())
+            && (self.class_attr(winner, "__prepare__").is_some()
+                || (self.is_abc_metaclass(winner) && self.class_attr(winner, "__init__").is_some())
                 || self
                     .class_attr(winner, "mro")
                     .is_some_and(|method| Some(&method) != self.builtins.get("type.mro"))
@@ -6727,7 +6742,8 @@ impl Context {
         if let Some(meta) = class_meta
             && Some(meta) != typed_dict_meta
             && self.builtins.get("abc.ABCMeta") != Some(&meta)
-            && self.class_attr(meta, "__new__").is_some()
+            && (self.class_attr(meta, "__new__").is_some()
+                || self.class_attr(meta, "__init__").is_some())
         {
             let namespace = self.active_class_namespace(scope);
             // A deferred class annotator owns these fields. Its scratch entries are placeholders.
@@ -6757,7 +6773,7 @@ impl Context {
             }
             let class_name = self.text(&name);
             let bases = self.alloc(Value::Tuple(bases));
-            let class = self.call_metaclass_new(meta, class_name, bases, namespace, keywords)?;
+            let class = self.call(meta, vec![class_name, bases, namespace], keywords)?;
             if bindings.needs_class_cell && matches!(self.heap.get(class), Value::Class { .. }) {
                 match self.heap.get(cell) {
                     Value::Cell(Some(contents)) if *contents == class => {}
