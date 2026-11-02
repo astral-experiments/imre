@@ -1999,6 +1999,8 @@ def report(text):
             "boxed_urlsplit.py",
             "boxed_urllib_request.py",
             "boxed_urllib_file.py",
+            "boxed_urllib_cleanup.py",
+            "boxed_urllib_retrieve.py",
             "boxed_unicodedata.py",
             "boxed_descriptors.py",
             "boxed_exception_repr.py",
