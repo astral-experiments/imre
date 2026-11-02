@@ -14,11 +14,13 @@ struct State {
     status: Option<ReturnCode>,
 }
 
-/// Kernel statuses fit a C int. Users may assign any Python integer to returncode.
+/// Kernel statuses fit a C int; Python may replace or clear the cached status.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(super) enum ReturnCode {
     Small(i32),
     Large(BigInt),
+    /// Its value is traced by the boxed handle in its owning Python heap.
+    BoxedAssignment,
 }
 
 impl ReturnCode {
@@ -33,6 +35,7 @@ impl ReturnCode {
         match self {
             Self::Small(value) => exit_word(value),
             Self::Large(value) => Int::new(value).into_raw(),
+            Self::BoxedAssignment => unreachable!("typed handles own their own returncode"),
         }
     }
 
