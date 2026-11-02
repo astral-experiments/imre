@@ -3559,6 +3559,14 @@ impl Context {
         }
         let truth = |v| if v { TRUE } else { FALSE };
         match op {
+            "|" if !inplace
+                && matches!(self.heap.get(a), Value::Dict(_))
+                && matches!(self.heap.get(b), Value::Dict(_)) =>
+            {
+                let merged = builtins::copy_dict(self, a, a)?;
+                builtins::update_dict(self, merged, Some(b), &[])?;
+                return Ok(merged);
+            }
             "|" | "&" | "-"
                 if [a, b].into_iter().any(|id| {
                     matches!(
