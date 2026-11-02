@@ -894,6 +894,7 @@ pub(crate) enum Intrinsic {
 }
 
 impl Intrinsic {
+    pub(crate) const PICKLER: Self = Self::ObjectRuntimeExport("pickle.Pickler");
     pub(crate) const IO_BASE: Self = Self::ObjectRuntimeExport("io.IOBase");
     pub(crate) const RAW_IO_BASE: Self = Self::ObjectRuntimeExport("io.RawIOBase");
     pub(crate) const BUFFERED_IO_BASE: Self = Self::ObjectRuntimeExport("io.BufferedIOBase");
@@ -1177,7 +1178,7 @@ impl IntrinsicModule {
                 Intrinsic::ObjectRuntimeExport("_codecs.escape_decode")
             }
             (Self::CodecsNative, "encode") => Intrinsic::ObjectRuntimeExport("_codecs.encode"),
-            (Self::Pickle, "Pickler") => Intrinsic::ObjectRuntimeExport("pickle.Pickler"),
+            (Self::Pickle, "Pickler") => Intrinsic::PICKLER,
             (Self::Pickle, "dumps") => Intrinsic::ObjectRuntimeExport("pickle.dumps"),
             (Self::Pickle, "loads") => Intrinsic::ObjectRuntimeExport("pickle.loads"),
             (Self::Pickle, "_loads") => Intrinsic::ObjectRuntimeExport("pickle._loads"),

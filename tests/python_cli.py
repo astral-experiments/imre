@@ -1914,6 +1914,7 @@ def report(text):
         fixtures = Path(__file__).with_name("fixtures")
         compare("-B", "-c", "from typing import Protocol as P; print(P.__name__)")
         compare("-B", fixtures / "typing_protocol_import.py")
+        compare("-IB", fixtures / "boxed_pickle_writer.py")
         compare(
             "-B", "-c",
             "import typing as t\ndef build():\n    class P(t.Protocol): pass\n"

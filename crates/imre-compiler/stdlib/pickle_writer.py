@@ -26,7 +26,6 @@ class _Framer:
     def __init__(self, file_write):
         self.file_write = file_write
         self.current_frame = None
-        self._exporting = None
 
     def start_framing(self):
         self.current_frame = bytearray()
@@ -42,22 +41,17 @@ class _Framer:
             if len(f) >= self._FRAME_SIZE_TARGET or force:
                 data = memoryview(f)
                 write = self.file_write
-                previous = self._exporting
-                self._exporting = f
-                try:
-                    if len(data) >= self._FRAME_SIZE_MIN:
-                        # Issue a single call to the write method of the underlying
-                        # file object for the frame opcode with the size of the
-                        # frame. The concatenation is expected to be less expensive
-                        # than issuing an additional call to write.
-                        write(FRAME + pack("<Q", len(data)))
+                if len(data) >= self._FRAME_SIZE_MIN:
+                    # Issue a single call to the write method of the underlying
+                    # file object for the frame opcode with the size of the
+                    # frame. The concatenation is expected to be less expensive
+                    # than issuing an additional call to write.
+                    write(FRAME + pack("<Q", len(data)))
 
-                    # Issue a separate call to write to append the frame
-                    # contents without concatenation to the above to avoid a
-                    # memory copy.
-                    write(data)
-                finally:
-                    self._exporting = previous
+                # Issue a separate call to write to append the frame
+                # contents without concatenation to the above to avoid a
+                # memory copy.
+                write(data)
 
                 # Start the new frame with a new buffer so that
                 # the file object can have delayed access to the previous frame
@@ -68,14 +62,17 @@ class _Framer:
         frame = self.current_frame
         if frame is None:
             return self.file_write(data)
-        if self._exporting is frame:
-            raise BufferError("Existing exports of data: object cannot be re-sized")
         if type(data) is not bytes:
             # Preserve BytesIO.write's buffer conversion for non-opcode inputs.
             stream = io.BytesIO()
             stream.write(data)
             data = stream.getvalue()
-        frame.extend(data)
+        if data:
+            frame.extend(data)
+        else:
+            # BytesIO checks for outstanding exports even on an empty write.
+            frame.append(0)
+            del frame[-1]
         return len(data)
 
     def write_large_bytes(self, header, payload):

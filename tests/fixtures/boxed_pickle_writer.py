@@ -44,4 +44,22 @@ def current():
         pass
     else:
         raise AssertionError("accepted a buffer callback with protocol 4")
+    class ReentrantSink:
+        def __init__(self):
+            self.nested = False
+
+        def write(self, data):
+            if isinstance(data, memoryview) and not self.nested:
+                self.nested = True
+                data.release()
+                self.writer.dump(None)
+
+    out = ReentrantSink()
+    out.writer = pickle._Pickler(out, 5)
+    out.writer.dump([1, 2])
+    assert out.nested
     print("pickle writer")
+
+
+if __name__ == "__main__":
+    current()

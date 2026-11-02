@@ -52,6 +52,12 @@ pub(super) fn resolve(
                     other => other,
                 };
                 match graph.resolve(definition.module, origin) {
+                    Some(Binding::Intrinsic(Intrinsic::PICKLER)) => {
+                        graph.needs_object_runtime.set(true);
+                        return Err(
+                            module.error(argument, "pickle.Pickler requires object lowering")
+                        );
+                    }
                     Some(Binding::Intrinsic(Intrinsic::ObjectRuntimeExport(
                         "codecs.IncrementalDecoder",
                     ))) => {
