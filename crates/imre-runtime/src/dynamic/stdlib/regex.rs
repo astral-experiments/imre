@@ -92,6 +92,7 @@ pub(in crate::dynamic) struct Pattern {
     pub(in crate::dynamic) flags: i64,
     bytes: bool,
     engine_source: String,
+    surrogate_literals: Option<Box<Pattern>>,
     regex: Matcher,
     assertions: Vec<(String, Guard)>,
     full: OnceCell<std::result::Result<Matcher, String>>,
@@ -442,7 +443,14 @@ fn syntax_diagnostic(ctx: &Context, source: Id, flags: i64) -> Option<(String, u
     use regex_syntax::ast::{ErrorKind, parse::ParserBuilder};
     use std::borrow::Cow;
 
-    let text: Cow<'_, str> = match ctx.heap.get(source) {
+    let text: Cow<'_, str> = match ctx.heap.get(ctx.scalar_value(source)) {
+        // Preserve one parser position per original Python code point.
+        Value::SurrogateStr(points) => Cow::Owned(
+            points
+                .iter()
+                .map(|&p| char::from_u32(p).unwrap_or('\u{fffd}'))
+                .collect(),
+        ),
         Value::Bytes(bytes) => Cow::Owned(bytes.iter().copied().map(char::from).collect()),
         _ => Cow::Borrowed(ctx.str_value(source).ok()?),
     };
@@ -453,6 +461,10 @@ fn syntax_diagnostic(ctx: &Context, source: Id, flags: i64) -> Option<(String, u
     if let Some(error) = group_names::diagnostic(
         &text,
         matches!(ctx.heap.get(source), Value::Bytes(_)),
+        match ctx.heap.get(ctx.scalar_value(source)) {
+            Value::SurrogateStr(points) => Some(points),
+            _ => None,
+        },
         &parsed,
     ) {
         return Some(error);
@@ -663,20 +675,44 @@ fn compiled(ctx: &mut Context, id: Id, flags: Option<Id>) -> Result<Id> {
             "unsupported native regular expression flags",
         ));
     }
+    let prepare = |spelling: &[u8]| {
+        let (spelling, flags) = leading_match_flags(spelling, flags);
+        let repeated = repeated_literal_capture(spelling, flags, bytes);
+        let spelling = repeated.as_deref().unwrap_or(spelling);
+        let source = if bytes {
+            byte_pattern(spelling)
+        } else {
+            std::str::from_utf8(spelling)
+                .expect("text pattern")
+                .to_owned()
+        };
+        (flags, source)
+    };
+    if let Value::SurrogateStr(points) = ctx.heap.get(ctx.scalar_value(id)) {
+        let (plain, encoded) = surrogate::literal_patterns(points)?;
+        let (flags, source) = prepare(encoded.as_bytes());
+        let encoded = compile_source(ctx, id, false, flags, source)?;
+        let (flags, source) = prepare(plain.as_bytes());
+        let mut pattern = compile_source(ctx, id, false, flags, source)?;
+        pattern.surrogate_literals = Some(Box::new(encoded));
+        return Ok(ctx.alloc(Value::RegexPattern(Rc::new(pattern))));
+    }
     let spelling = match ctx.heap.get(id) {
         Value::Bytes(value) => value.as_slice(),
         _ => ctx.str_value(id)?.as_bytes(),
     };
-    let (spelling, flags) = leading_match_flags(spelling, flags);
-    let repeated = repeated_literal_capture(spelling, flags, bytes);
-    let spelling = repeated.as_deref().unwrap_or(spelling);
-    let source = if bytes {
-        byte_pattern(spelling)
-    } else {
-        std::str::from_utf8(spelling)
-            .expect("text pattern")
-            .to_owned()
-    };
+    let (flags, source) = prepare(spelling);
+    let pattern = compile_source(ctx, id, bytes, flags, source)?;
+    Ok(ctx.alloc(Value::RegexPattern(Rc::new(pattern))))
+}
+
+fn compile_source(
+    ctx: &mut Context,
+    id: Id,
+    bytes: bool,
+    flags: i64,
+    source: String,
+) -> Result<Pattern> {
     let ascii = bytes || flags & ASCII != 0;
     // Byte escapes have a separate grammar. Unicode IGNORECASE must fold
     // the literal guard without extending Python's word-category membership.
@@ -849,17 +885,18 @@ fn compiled(ctx: &mut Context, id: Id, flags: Option<Id>) -> Result<Id> {
     } else {
         flags
     };
-    Ok(ctx.alloc(Value::RegexPattern(Rc::new(Pattern {
+    Ok(Pattern {
         source: id,
         flags: if ascii { flags } else { flags | UNICODE },
         bytes,
         engine_source,
+        surrogate_literals: None,
         regex,
         assertions,
         full: OnceCell::new(),
         close_order: OnceCell::new(),
         split_retry: OnceCell::new(),
-    }))))
+    })
 }
 
 pub(super) fn module_call(
@@ -1130,6 +1167,11 @@ struct SearchSubject {
 impl SearchSubject {
     fn new(ctx: &Context, pattern: &Pattern, id: Id, method: &str) -> Result<Self> {
         let projection = match ctx.heap.get(ctx.scalar_value(id)) {
+            Value::SurrogateStr(points)
+                if matches!(ctx.heap.get(ctx.scalar_value(pattern.source)), Value::SurrogateStr(_)) =>
+            {
+                Some(surrogate::Projection::for_literals(method, points)?)
+            }
             Value::SurrogateStr(points) if !pattern.bytes => Some(surrogate::Projection::new(
                 ctx.str_value(pattern.source).ok(),
                 &pattern.regex,
@@ -1212,7 +1254,12 @@ pub(super) fn search(
             ));
         }
     };
-    let subject = SearchSubject::new(ctx, &pattern, string, method)?;
+    let pattern = if matches!(ctx.heap.get(ctx.scalar_value(string)), Value::SurrogateStr(_)) {
+        pattern.surrogate_literals.as_deref().unwrap_or(&pattern)
+    } else {
+        &pattern
+    };
+    let subject = SearchSubject::new(ctx, pattern, string, method)?;
     let text = subject.bytes(ctx)?;
     let byte = |i: usize| {
         if pattern.bytes || i >= text.len() {
@@ -1231,7 +1278,7 @@ pub(super) fn search(
     if method == "findall" {
         // Keep the prefix for anchors and word boundaries before pos.
         let text = text[..end].to_vec();
-        return findall(ctx, &pattern, &text, start);
+        return findall(ctx, pattern, &text, start);
     }
     if matches!(method, "scanner" | "finditer") {
         let buffer_view = match ctx.heap.get(ctx.scalar_value(string)) {
