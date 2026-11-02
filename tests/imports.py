@@ -174,6 +174,19 @@ REJECTED = {
             "with patch.object(Owner, 'value', replacement('wrong')):\n    pass\n"
         ),
     }, "expected int, got str"),
+    "unused_queue_listener_preserves_assignment": ({
+        "main.py": (
+            "from logging.handlers import QueueListener\ndef run() -> None:\n"
+            "    value: int = 'wrong'\n    print(value)\nrun()\n"
+        ),
+    }, "expected int, got str"),
+    "saved_queue_handler_preserves_checked_calls": ({
+        "main.py": (
+            "from logging.handlers import QueueHandler as Handler\ndef take(n: int) -> None:\n    print(n)\n"
+            "def run() -> None:\n    constructor = Handler\n    print(constructor.__name__)\n"
+            "    take('wrong')\nrun()\n"
+        ),
+    }, "invalid-argument-type"),
     "unused_chdir_preserves_checked_calls": ({
         "main.py": "from os import chdir\ndef path(n: int) -> int:\n    return n\npath('wrong')\n",
     }, "expected int, got str"),
