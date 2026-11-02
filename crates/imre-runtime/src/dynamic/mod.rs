@@ -2926,7 +2926,25 @@ impl Context {
                 let pi = self.alloc(Value::Float(std::f64::consts::PI));
                 self.bind(scope, "pi", pi);
             }
-            "_hashlib" if source.is_none() => stdlib::hashlib::install_openssl(self, scope)?,
+            "_hashlib" if source.is_none() => {
+                stdlib::hashlib::install_openssl(self, module, scope)?
+            }
+            "hmac" if source.is_none() => {
+                let provider = match self.find_module("_hashlib") {
+                    Err(err) if self.is_builtin_error(&err, "ImportError") => None,
+                    result => result?,
+                };
+                let (module, attr) = if let Some(provider) = provider {
+                    (provider, "compare_digest")
+                } else {
+                    let operator = self
+                        .find_module("_operator")?
+                        .ok_or_else(|| Self::missing_module("_operator"))?;
+                    (operator, "_compare_digest")
+                };
+                let compare = self.lookup_attr(module, attr)?;
+                self.bind(scope, "compare_digest", compare);
+            }
             "hashlib" => {
                 let native_new = self.builtin("hashlib.new");
                 self.bind(scope, "_native_new", native_new);
@@ -2992,7 +3010,7 @@ impl Context {
                 }
             }
             "operator" | "_operator" if source.is_none() => {
-                stdlib::operator::install(self, scope, name);
+                stdlib::operator::install(self, module, scope, name);
             }
             "errno" => stdlib::install_errno(self, scope)?,
             "atexit" => atexit::install(self, scope),

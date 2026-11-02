@@ -800,7 +800,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         | ("marshal", "loads")
         | ("pickle", "dumps")
         | ("hashlib", "file_digest")
-        | ("hmac", "new" | "HMAC" | "compare_digest")
+        | ("hmac", "new" | "HMAC")
         | (
             "re",
             "match" | "fullmatch" | "search" | "compile" | "_compile_scanner" | "split" | "findall"
@@ -2233,6 +2233,12 @@ pub(super) fn call(
     if let Some(class) = crate::objects::HashState::provider_class(name) {
         return hashlib::hash(ctx, class.rsplit_once('.').unwrap().1, args, kwargs);
     }
+    if matches!(
+        name,
+        "_operator._compare_digest" | "_hashlib.compare_digest"
+    ) {
+        return hmac::compare(ctx, name, args, kwargs);
+    }
     if let Some(function) = name.strip_prefix("_hashlib.") {
         return hashlib::call_openssl(ctx, function, args, kwargs);
     }
@@ -2437,7 +2443,7 @@ pub(super) fn call(
         "_imre_json.is_constants_lookup" => (2, &[]),
         "_imre_json.scan_once" => (3, &[]),
         "hmac.new" | "hmac.HMAC" => (3, &["key", "msg", "digestmod"]),
-        "hmac.compare_digest" | "hmac.HMAC.update" => (2, &[]),
+        "hmac.HMAC.update" => (2, &[]),
         "hmac.HMAC.digest" | "hmac.HMAC.hexdigest" | "hmac.HMAC.copy" => (1, &[]),
         "hash.update" => (2, &[]),
         "hash.copy" => (1, &[]),
@@ -2563,7 +2569,6 @@ pub(super) fn call(
             ctx.alloc(Value::Bytes(result))
         }
         "hmac.new" | "hmac.HMAC" => return hmac::new(ctx, args, kwargs),
-        "hmac.compare_digest" => return hmac::compare(ctx, args),
         method if method.starts_with("hmac.HMAC.") => return hmac::method(ctx, method, args),
         "hash.update" | "hash.copy" => {
             return hashlib::method(ctx, name, args);

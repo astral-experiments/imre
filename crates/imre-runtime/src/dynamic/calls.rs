@@ -2773,6 +2773,31 @@ impl Context {
                             "__module__" if module_bound => {
                                 method.rsplit_once('.').map(|(module, _)| module)
                             }
+                            "__text_signature__"
+                                if matches!(
+                                    method.as_str(),
+                                    "_operator._compare_digest" | "_hashlib.compare_digest"
+                                ) =>
+                            {
+                                Some("($module, a, b, /)")
+                            }
+                            "__doc__"
+                                if matches!(
+                                    method.as_str(),
+                                    "_operator._compare_digest" | "_hashlib.compare_digest"
+                                ) =>
+                            {
+                                Some(concat!(
+                                    "Return 'a == b'.\n\n",
+                                    "This function uses an approach designed to prevent\n",
+                                    "timing analysis, making it appropriate for cryptography.\n\n",
+                                    "a and b must both be of the same type: either str (ASCII only),\n",
+                                    "or any bytes-like object.\n\n",
+                                    "Note: If a and b are of different lengths, or if an error occurs,\n",
+                                    "a timing attack could theoretically reveal information about the\n",
+                                    "types and lengths of a and b--but not their values."
+                                ))
+                            }
                             "__text_signature__" if method == "sys._getframe" => {
                                 Some("($module, depth=0, /)")
                             }
