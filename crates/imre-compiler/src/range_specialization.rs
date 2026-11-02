@@ -4,82 +4,25 @@
 //! slots keep the fast loop's ownership proof independent of the fallback, while
 //! both versions preserve the original visible target and Python control flow.
 
-use std::collections::HashMap;
+use std::collections::HashSet;
 
-use crate::ir::{self, ChildMut, Compare, Expr, ExprKind, Module, Statement, Type};
+use crate::ir::{self, Compare, Expr, ExprKind, Module, Statement, Type};
 use crate::ranges;
 
 const MAX_SMALL: i64 = (1_i64 << 62) - 1;
 
-struct Plan {
-    stop_argument: usize,
-    step: i64,
-}
-
 /// Adds a checked fast branch only when existing analysis cannot prove the loop
 /// small. Nested body/else loops are excluded to keep cloning linear in code size.
 pub(crate) fn specialize(module: &mut Module) {
-    let plans = {
-        let facts = ranges::analyze(module);
-        module
-            .functions
-            .iter()
-            .chain([&module.entry])
-            .map(|function| {
-                let mut plans = HashMap::new();
-                // Range analysis deliberately skips functions with expression
-                // rebindings, so adding a guard there would not enable a proof.
-                if function.expression_rebound().into_iter().any(|value| value) {
-                    return plans;
-                }
-                ir::walk_statements(&function.body, &mut |statement| {
-                    let Statement::For {
-                        args, body, orelse, ..
-                    } = statement
-                    else {
-                        return;
-                    };
-                    if facts.range_cursor(statement).is_some()
-                        || ir::contains_loop(body)
-                        || ir::contains_loop(orelse)
-                    {
-                        return;
-                    }
-                    let (stop_argument, step) = match args.as_slice() {
-                        [_] => (0, 1),
-                        [start, _] if literal(start) == Some(0) => (1, 1),
-                        [start, _, step] if literal(start) == Some(0) => {
-                            let Some(step) =
-                                literal(step).filter(|step| (1..=MAX_SMALL).contains(step))
-                            else {
-                                return;
-                            };
-                            (1, step)
-                        }
-                        _ => return,
-                    };
-                    plans.insert(
-                        std::ptr::from_ref(statement),
-                        Plan {
-                            stop_argument,
-                            step,
-                        },
-                    );
-                });
-                plans
-            })
-            .collect::<Vec<_>>()
-    };
-    for (function, mut plans) in module
-        .functions
-        .iter_mut()
-        .chain([&mut module.entry])
-        .zip(plans)
-    {
-        if !plans.is_empty() {
-            rewrite_block(&mut function.body, &mut function.locals, &mut plans);
-            debug_assert!(plans.is_empty());
+    let small_cursors = ranges::analyze(module).into_small_cursors();
+    for function in module.functions.iter_mut().chain([&mut module.entry]) {
+        // Range analysis skips functions with expression rebindings.
+        if function.expression_rebound().into_iter().any(|value| value) {
+            continue;
         }
+        ir::rewrite_statements(&mut function.body, &mut |statement| {
+            rewrite_loop(statement, &mut function.locals, &small_cursors);
+        });
     }
 }
 
@@ -91,51 +34,42 @@ fn literal(expression: &Expr) -> Option<i64> {
     }
 }
 
-/// Statement addresses identify the immutable analysis plan; they are never
-/// dereferenced. Replacing entries in place preserves unvisited sibling addresses.
-/// Children are rewritten first, so an effectful stop scope is moved intact.
-fn rewrite_block(
-    body: &mut [Statement],
-    locals: &mut Vec<Type>,
-    plans: &mut HashMap<*const Statement, Plan>,
-) {
-    for statement in body {
-        ir::statement_children_mut(statement, |child| match child {
-            ChildMut::Expression(value) => rewrite_expression(value, locals, plans),
-            ChildMut::Suite(body) => rewrite_block(body, locals, plans),
-        });
-        if let Some(plan) = plans.remove(&std::ptr::from_ref(statement)) {
-            rewrite_loop(statement, locals, plan);
-        }
-    }
-}
-
-fn rewrite_expression(
-    expression: &mut Expr,
-    locals: &mut Vec<Type>,
-    plans: &mut HashMap<*const Statement, Plan>,
-) {
-    if let ExprKind::Scope { body, value, .. } = &mut expression.kind {
-        rewrite_block(body, locals, plans);
-        rewrite_expression(value, locals, plans);
-    } else {
-        ir::children_mut(expression, |child| rewrite_expression(child, locals, plans));
-    }
-}
-
 /// A stop at most MAX_SMALL-step keeps even the final cursor increment small.
 /// The captured stop cannot be rebound by user code. Its scope releases it on
 /// every exit, while branch-private control owners preserve early else cleanup.
-fn rewrite_loop(statement: &mut Statement, locals: &mut Vec<Type>, plan: Plan) {
+fn rewrite_loop(
+    statement: &mut Statement,
+    locals: &mut Vec<Type>,
+    small_cursors: &HashSet<*const Statement>,
+) {
+    let id = std::ptr::from_ref(statement);
+    let Statement::For {
+        args, body, orelse, ..
+    } = statement
+    else {
+        return;
+    };
+    // A rewritten child keeps its original loop in the fallback.
+    if small_cursors.contains(&id) || ir::contains_loop(body) || ir::contains_loop(orelse) {
+        return;
+    }
+    let (stop_argument, stride) = match args.as_slice() {
+        [_] => (0, 1),
+        [start, _] if literal(start) == Some(0) => (1, 1),
+        [start, _, step] if literal(start) == Some(0) => {
+            let Some(step) = literal(step).filter(|step| (1..=MAX_SMALL).contains(step)) else {
+                return;
+            };
+            (1, step)
+        }
+        _ => return,
+    };
     let captured = locals.len();
     locals.push(Type::Int);
-    let Statement::For { args, .. } = statement else {
-        unreachable!()
-    };
     // Transfer the captured owner into range initialization before the body or
     // else suite runs. In particular, a BigInt stop must not stay rooted past the
     // original loop's early control-slot cleanup on normal exhaustion.
-    let stop_argument = Expr {
+    let captured_stop = Expr {
         ty: Type::Int,
         kind: ExprKind::Scope {
             body: Vec::new(),
@@ -143,7 +77,7 @@ fn rewrite_loop(statement: &mut Statement, locals: &mut Vec<Type>, plan: Plan) {
             clear: vec![captured],
         },
     };
-    let stop_value = std::mem::replace(&mut args[plan.stop_argument], stop_argument);
+    let stop_value = std::mem::replace(&mut args[stop_argument], captured_stop);
     let mut fast = statement.clone();
     let Statement::For {
         cursor,
@@ -175,7 +109,7 @@ fn rewrite_loop(statement: &mut Statement, locals: &mut Vec<Type>, plan: Plan) {
             vec![
                 Expr::integer(0),
                 local(captured),
-                Expr::integer(MAX_SMALL - plan.step),
+                Expr::integer(MAX_SMALL - stride),
             ],
             vec![Compare::LessEqual, Compare::LessEqual],
         ),
