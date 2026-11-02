@@ -765,7 +765,7 @@ pub(super) unsafe extern "C" fn imre_dyn_finish(ctx: *mut Context) -> i32 {
     // SAFETY: main transfers its unique allocation from imre_dyn_new exactly once.
     let mut ctx = unsafe { Box::from_raw(ctx) };
     let mark = ctx.heap.temporary_mark();
-    let result = ctx.module("sys").and_then(|_| {
+    let result = ctx.startup_sys().and_then(|_| {
         if ctx.config["faulthandler"].as_bool() == Some(true) {
             let handler = ctx.module("faulthandler")?;
             let enable = ctx.lookup_attr(handler, "enable")?;

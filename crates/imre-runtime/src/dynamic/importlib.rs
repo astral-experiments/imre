@@ -27,13 +27,20 @@ impl SourceBody {
 }
 
 impl Context {
-    /// Enter the selected module in the startup __main__ namespace via the frozen runpy.
-    pub(super) fn run_module_as_main(&mut self, name: String) -> Result<Id> {
-        let mark = self.heap.temporary_mark();
+    /// Receive the launcher's argument vector before imports can run Python code.
+    pub(super) fn startup_sys(&mut self) -> Result<Id> {
         #[cfg(any(target_os = "linux", target_os = "macos"))]
-        if let Some(bytes) =
-            crate::run_start::wait_for_cleanup(true).map_err(crate::objects::errno_error)?
+        let arguments = if self.config["module_entry"].is_string()
+            || (self.config["executable"].is_string()
+                && self.config["faulthandler"].as_bool() == Some(true))
         {
+            crate::run_start::wait_for_cleanup(true).map_err(crate::objects::errno_error)?
+        } else {
+            None
+        };
+        let sys = self.module("sys")?;
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
+        if let Some(bytes) = arguments {
             let codec = crate::objects::Codec::lookup(crate::sys::filesystem_encoding()?.as_str())?;
             let mut original = Vec::new();
             for arg in bytes
@@ -44,9 +51,14 @@ impl Context {
                 original.push(self.text_codepoints(codec.decode_filesystem(arg)?));
             }
             let original = self.alloc(Value::List(original));
-            let sys = self.module("sys")?;
             self.set_attr(sys, "orig_argv", original)?;
         }
+        Ok(sys)
+    }
+
+    /// Enter the selected module in the startup __main__ namespace via the frozen runpy.
+    pub(super) fn run_module_as_main(&mut self, name: String) -> Result<Id> {
+        let mark = self.heap.temporary_mark();
         let requested = self.text(&name);
         stdlib::audit::event(self, "cpython.run_module", &[requested])?;
         let runpy = self.module("runpy")?;

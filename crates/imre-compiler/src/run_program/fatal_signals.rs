@@ -26,12 +26,24 @@ pub(super) fn exec(
     }
     let fd = control.as_raw_fd();
     let peer_fd = peer.as_raw_fd();
+    // A fatal signal to the process group immediately after fork must not
+    // kill the cleanup child. Only the execing thread restores its old mask.
+    // SAFETY: all three signal sets are initialized before they are read.
+    let mut previous = unsafe { std::mem::zeroed() };
+    let blocked = unsafe {
+        let mut mask = std::mem::zeroed();
+        libc::sigemptyset(&mut mask);
+        for sig in SIGNALS {
+            libc::sigaddset(&mut mask, sig);
+        }
+        libc::pthread_sigmask(libc::SIG_BLOCK, &mask, &mut previous)
+    };
+    if blocked != 0 {
+        return Err(io::Error::from_raw_os_error(blocked));
+    }
     // SAFETY: the child uses only the inherited buffers and async-signal-safe
     // syscalls before _exit. No allocation, locks or destructors after fork.
     let pid = unsafe { libc::fork() };
-    if pid < 0 {
-        return Err(io::Error::last_os_error());
-    }
     if pid == 0 {
         // SAFETY: the child owns its descriptor table and never returns.
         unsafe {
@@ -42,12 +54,24 @@ pub(super) fn exec(
         cleanup(fd, &image, &dir, &argv);
     }
 
+    let fork_error = (pid < 0).then(io::Error::last_os_error);
+    // SAFETY: previous is the mask saved by the successful pthread_sigmask.
+    let restored =
+        unsafe { libc::pthread_sigmask(libc::SIG_SETMASK, &previous, std::ptr::null_mut()) };
+    if let Some(error) = fork_error {
+        return Err(error);
+    }
+
     // The helper unlinks exactly our image and removes the directory if empty,
     // even when exec fails or the parent disappears before acknowledgment.
     let _ = directory.keep();
     let mut challenge = name.into_bytes();
     challenge.extend_from_slice(&pid.to_ne_bytes());
-    let sent = control.write_all(&challenge);
+    let sent = if restored == 0 {
+        control.write_all(&challenge)
+    } else {
+        Err(io::Error::from_raw_os_error(restored))
+    };
     drop(control);
     let error = match sent {
         Ok(()) => program.exec(),
@@ -61,7 +85,7 @@ pub(super) fn exec(
     Err(error)
 }
 
-fn cleanup(fd: RawFd, image: &CStr, dir: &CStr, mut argv: &[u8]) -> ! {
+fn cleanup(fd: RawFd, image: &CStr, dir: &CStr, argv: &[u8]) -> ! {
     let mut ready = 0u8;
     // SAFETY: the pointers and slices were prepared before fork. The image is
     // no longer needed once its runtime acknowledges loading or closes its fd.
@@ -69,21 +93,40 @@ fn cleanup(fd: RawFd, image: &CStr, dir: &CStr, mut argv: &[u8]) -> ! {
         while libc::read(fd, (&raw mut ready).cast(), 1) < 0
             && io::Error::last_os_error().kind() == io::ErrorKind::Interrupted
         {}
-        let image_removed = libc::unlink(image.as_ptr()) == 0;
-        let dir_removed = libc::rmdir(dir.as_ptr()) == 0;
-        if ready == 2 {
-            while !argv.is_empty() {
-                let n = libc::send(fd, argv.as_ptr().cast(), argv.len(), libc::MSG_NOSIGNAL);
-                if n < 0 && io::Error::last_os_error().kind() == io::ErrorKind::Interrupted {
-                    continue;
-                }
-                if n <= 0 {
-                    libc::_exit(1);
-                }
-                argv = &argv[n as usize..];
+        let mut errno: libc::c_int = 0;
+        if libc::unlink(image.as_ptr()) != 0 {
+            errno = io::Error::last_os_error()
+                .raw_os_error()
+                .unwrap_or(libc::EIO);
+        }
+        if libc::rmdir(dir.as_ptr()) != 0 && errno == 0 {
+            errno = io::Error::last_os_error()
+                .raw_os_error()
+                .unwrap_or(libc::EIO);
+        }
+        if matches!(ready, 1 | 2) {
+            send_all(fd, &errno.to_ne_bytes());
+            if errno == 0 && ready == 2 {
+                send_all(fd, &(argv.len() as u64).to_ne_bytes());
+                send_all(fd, argv);
             }
         }
-        libc::_exit(i32::from(!image_removed || !dir_removed));
+        libc::_exit(i32::from(errno != 0));
+    }
+}
+
+// Called only in the helper, where _exit closes the socket on error.
+fn send_all(fd: RawFd, mut bytes: &[u8]) {
+    while !bytes.is_empty() {
+        // SAFETY: the slice stays live throughout send, including retries.
+        let n = unsafe { libc::send(fd, bytes.as_ptr().cast(), bytes.len(), libc::MSG_NOSIGNAL) };
+        if n < 0 && io::Error::last_os_error().kind() == io::ErrorKind::Interrupted {
+            continue;
+        }
+        if n <= 0 {
+            unsafe { libc::_exit(1) };
+        }
+        bytes = &bytes[n as usize..];
     }
 }
 
