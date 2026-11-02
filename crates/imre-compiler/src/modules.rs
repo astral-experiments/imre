@@ -1858,6 +1858,66 @@ impl IntrinsicModule {
             (Self::EmailUtils, "formatdate") => Intrinsic::EmailFormatDate,
             (Self::UrllibParse, "urljoin") => Intrinsic::UrlJoin,
             (Self::UrllibParse, "parse_qsl") => Intrinsic::ParseQsl,
+            (Self::UrllibParse, "splittype") => {
+                Intrinsic::ObjectRuntimeExport("urllib.parse.splittype")
+            }
+            (Self::UrllibParse, "_splittype") => {
+                Intrinsic::ObjectRuntimeExport("urllib.parse._splittype")
+            }
+            (Self::UrllibParse, "splithost") => {
+                Intrinsic::ObjectRuntimeExport("urllib.parse.splithost")
+            }
+            (Self::UrllibParse, "_splithost") => {
+                Intrinsic::ObjectRuntimeExport("urllib.parse._splithost")
+            }
+            (Self::UrllibParse, "splituser") => {
+                Intrinsic::ObjectRuntimeExport("urllib.parse.splituser")
+            }
+            (Self::UrllibParse, "_splituser") => {
+                Intrinsic::ObjectRuntimeExport("urllib.parse._splituser")
+            }
+            (Self::UrllibParse, "splitpasswd") => {
+                Intrinsic::ObjectRuntimeExport("urllib.parse.splitpasswd")
+            }
+            (Self::UrllibParse, "_splitpasswd") => {
+                Intrinsic::ObjectRuntimeExport("urllib.parse._splitpasswd")
+            }
+            (Self::UrllibParse, "splitport") => {
+                Intrinsic::ObjectRuntimeExport("urllib.parse.splitport")
+            }
+            (Self::UrllibParse, "_splitport") => {
+                Intrinsic::ObjectRuntimeExport("urllib.parse._splitport")
+            }
+            (Self::UrllibParse, "splitnport") => {
+                Intrinsic::ObjectRuntimeExport("urllib.parse.splitnport")
+            }
+            (Self::UrllibParse, "_splitnport") => {
+                Intrinsic::ObjectRuntimeExport("urllib.parse._splitnport")
+            }
+            (Self::UrllibParse, "splitquery") => {
+                Intrinsic::ObjectRuntimeExport("urllib.parse.splitquery")
+            }
+            (Self::UrllibParse, "_splitquery") => {
+                Intrinsic::ObjectRuntimeExport("urllib.parse._splitquery")
+            }
+            (Self::UrllibParse, "splittag") => {
+                Intrinsic::ObjectRuntimeExport("urllib.parse.splittag")
+            }
+            (Self::UrllibParse, "_splittag") => {
+                Intrinsic::ObjectRuntimeExport("urllib.parse._splittag")
+            }
+            (Self::UrllibParse, "splitattr") => {
+                Intrinsic::ObjectRuntimeExport("urllib.parse.splitattr")
+            }
+            (Self::UrllibParse, "_splitattr") => {
+                Intrinsic::ObjectRuntimeExport("urllib.parse._splitattr")
+            }
+            (Self::UrllibParse, "splitvalue") => {
+                Intrinsic::ObjectRuntimeExport("urllib.parse.splitvalue")
+            }
+            (Self::UrllibParse, "_splitvalue") => {
+                Intrinsic::ObjectRuntimeExport("urllib.parse._splitvalue")
+            }
             (Self::UrllibParse, "unwrap") => Intrinsic::ObjectRuntimeExport("urllib.parse.unwrap"),
             (Self::UrllibParse, "urldefrag") => {
                 Intrinsic::ObjectRuntimeExport("urllib.parse.urldefrag")
