@@ -2609,16 +2609,37 @@ impl<'a> Checker<'a> {
         self.field_value(attribute, receiver)
     }
 
+    fn boxed_set_method(
+        &self,
+        attribute: &ast::ExprAttribute,
+        receiver: Option<Type>,
+    ) -> Option<&'static str> {
+        let name = match attribute.attr.as_str() {
+            "difference_update" => "set.difference_update",
+            "issubset" => "set.issubset",
+            _ => return None,
+        };
+        if matches!(receiver, Some(Type::Set(_)))
+            || self.unshadowed_builtin(&attribute.value, "set")
+        {
+            return Some(name);
+        }
+        if attribute.attr.as_str() == "issubset"
+            && (receiver == Some(Type::FrozenStrings)
+                || self.unshadowed_builtin(&attribute.value, "frozenset"))
+        {
+            return Some("frozenset.issubset");
+        }
+        None
+    }
+
     fn field_value(
         &self,
         attribute: &ast::ExprAttribute,
         receiver: Expr,
     ) -> Result<(Expr, usize, Type), String> {
-        if attribute.attr.as_str() == "difference_update"
-            && (self.types.set_element(receiver.ty).is_some()
-                || self.unshadowed_builtin(&attribute.value, "set"))
-        {
-            return Err(self.object_builtin_error("set.difference_update", attribute));
+        if let Some(method) = self.boxed_set_method(attribute, Some(receiver.ty)) {
+            return Err(self.object_builtin_error(method, attribute));
         }
         if attribute.attr.as_str() == "readinto"
             && matches!(receiver.ty, Type::BinaryIO | Type::BytesIO)
@@ -8295,10 +8316,9 @@ impl<'a> Checker<'a> {
         }
         if receiver.is_none()
             && let ast::Expr::Attribute(method) = call.func.as_ref()
-            && method.attr.as_str() == "difference_update"
-            && self.unshadowed_builtin(&method.value, "set")
+            && let Some(name) = self.boxed_set_method(method, None)
         {
-            return Err(self.object_builtin_error("set.difference_update", call));
+            return Err(self.object_builtin_error(name, call));
         }
         if receiver.is_none()
             && let Some(result) = self.fromkeys_call(call, None)?
@@ -8685,13 +8705,7 @@ impl<'a> Checker<'a> {
                 let cursor = self.prepare_cursor(source, element);
                 return self.collect_set(cursor, input);
             }
-            let key = key.ok_or_else(|| {
-                error(
-                    self.source,
-                    input,
-                    "set() requires a dictionary key view or a typed set",
-                )
-            })?;
+            let key = key.ok_or_else(|| self.object_builtin_error("set", call))?;
             return Ok(Expr {
                 ty: self.types.set(key),
                 kind: ExprKind::Builtin(Builtin::KeySet, vec![source]),
@@ -9995,13 +10009,13 @@ impl<'a> Checker<'a> {
                     kind: ExprKind::Builtin(builtin, args),
                 });
             }
+            if let Some(method) = self.boxed_set_method(attribute, Some(receiver.ty)) {
+                return Err(self.object_builtin_error(method, call));
+            }
             if let Some(element) = self.types.set_element(receiver.ty) {
                 let builtin = match attribute.attr.as_str() {
                     "add" if call.arguments.args.len() == 1 => Builtin::SetAdd,
                     "discard" if call.arguments.args.len() == 1 => Builtin::SetDiscard,
-                    "difference_update" => {
-                        return Err(self.object_builtin_error("set.difference_update", call));
-                    }
                     _ => {
                         return Err(error(
                             self.source,
@@ -10807,6 +10821,9 @@ impl<'a> Checker<'a> {
                     ) =>
             {
                 (Builtin::Print, Type::None)
+            }
+            "set" | "frozenset" if self.unshadowed_builtin(&call.func, name.id.as_str()) => {
+                return Err(self.object_builtin_error(name.id.as_str(), call));
             }
             _ => {
                 return Err(error(

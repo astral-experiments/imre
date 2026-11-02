@@ -437,6 +437,71 @@ pub(in super::super) fn update_set(ctx: &mut Context, target: Id, source: Id) ->
     Ok(())
 }
 
+fn set_issubset(ctx: &mut Context, receiver: Id, other: Id) -> Result<Id> {
+    let storage = ctx.scalar_value(other);
+    if matches!(ctx.heap.get(storage), Value::Set { .. }) {
+        return ctx.order_sets("<=", receiver, storage);
+    }
+
+    // CPython intersects the iterable with the receiver, stopping once all
+    // members match. An empty receiver still consumes and hashes each item.
+    let roots = ctx.heap.temporary_mark();
+    let found = ctx.alloc(Value::Set {
+        entries: Default::default(),
+        frozen: false,
+    });
+    let iterator = ctx.iterator(other)?;
+    ctx.heap.keep(iterator);
+    let step = ctx.heap.temporary_mark();
+    let mut failed_key = None;
+    let scan: Result<()> = (|| {
+        let mut limit = ctx.heap.streaming_collection_limit();
+        loop {
+            ctx.collect_streaming_garbage(&mut limit);
+            let Some(key) = ctx.next_item(iterator)? else {
+                return Ok(());
+            };
+            ctx.heap.keep(key);
+            failed_key = Some(key);
+            let hash = ctx.dictionary_hash(key)?;
+            let (_, member) = ctx.find_dictionary_key(receiver, key, Some(hash))?;
+            let mut done = false;
+            if member.is_some() {
+                ctx.set_dictionary_key(found, key, NONE, Some(hash), false)?;
+                done = ctx.stored_entries(found).len() >= ctx.stored_entries(receiver).len();
+            }
+            failed_key = None;
+            ctx.discard_truth(step);
+            if done {
+                return Ok(());
+            }
+        }
+    })();
+
+    // Rebuild the temporary roots without running Python. Dropping the iterator
+    // can mutate the receiver in __del__ or a generator's finally clause.
+    ctx.heap.release_temporaries_since(roots);
+    if let Err(error) = &scan {
+        for id in error.roots() {
+            ctx.heap.keep(id);
+        }
+    }
+    let key_mark = ctx.heap.temporary_mark();
+    if let Some(key) = failed_key {
+        ctx.heap.keep(key);
+    }
+    let found_mark = ctx.heap.temporary_mark();
+    ctx.heap.keep(found);
+    let iterator_mark = ctx.heap.temporary_mark();
+    ctx.heap.keep(iterator);
+    ctx.discard_truth(iterator_mark);
+    let subset =
+        scan.map(|()| ctx.stored_entries(found).len() == ctx.stored_entries(receiver).len());
+    ctx.discard_truth(found_mark);
+    ctx.discard_truth(key_mark);
+    subset.map(boolean)
+}
+
 fn merge_set(ctx: &mut Context, target: Id, source: Id) -> Result<()> {
     if target == source {
         return Ok(());
@@ -744,12 +809,22 @@ pub(super) fn method(
                 "descriptor '{method}' of 'dict' object needs an argument"
             )),
             Some(_) => type_error(format!("unbound method {name}() needs an argument")),
-            None if name == "set.difference_update" => {
+            None if name == "set.difference_update" || name.ends_with(".issubset") => {
                 type_error(format!("unbound method {name}() needs an argument"))
             }
             None => type_error("missing collection receiver"),
         })?;
-    let receiver = if let Some(method) = name.strip_prefix("dict.") {
+    let receiver = if let Some(kind) = name.strip_suffix(".issubset") {
+        let storage = ctx.scalar_value(object);
+        if !matches!(ctx.heap.get(storage), Value::Set { frozen, .. } if *frozen == (kind == "frozenset"))
+        {
+            return Err(type_error(format!(
+                "descriptor 'issubset' for '{kind}' objects doesn't apply to a '{}' object",
+                ctx.type_name(object)
+            )));
+        }
+        storage
+    } else if let Some(method) = name.strip_prefix("dict.") {
         ctx.dict_storage(object).ok_or_else(|| {
             let kind = ctx.type_name(object);
             if slot {
@@ -807,6 +882,8 @@ pub(super) fn method(
     if matches!(
         name,
         "dict.pop"
+            | "set.issubset"
+            | "frozenset.issubset"
             | "set.issuperset"
             | "frozenset.issuperset"
             | "set.discard"
@@ -944,13 +1021,16 @@ pub(super) fn method(
                 frozen: false,
             }))
         }
-        "set.issuperset" | "frozenset.issuperset" => {
+        "set.issuperset" | "frozenset.issuperset" | "set.issubset" | "frozenset.issubset" => {
             let [source] = args else {
                 return Err(type_error(format!(
                     "{name}() takes exactly one argument ({} given)",
                     args.len()
                 )));
             };
+            if name.ends_with(".issubset") {
+                return set_issubset(ctx, receiver, *source);
+            }
             let iterator = ctx.iterator(*source)?;
             while let Some(item) = ctx.next_item(iterator)? {
                 if !set_member(ctx, receiver, item, false)? {
