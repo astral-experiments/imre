@@ -2871,21 +2871,40 @@ pub(crate) fn statement_children_mut(
     }
 }
 
+/// Visits original statements child-first, including those in expression scopes.
+/// A replacement installed by the visitor is not revisited.
+pub(crate) fn rewrite_statements(body: &mut [Statement], visit: &mut impl FnMut(&mut Statement)) {
+    walk_mut(body, &mut |_| {}, visit);
+}
+
 /// Rewrites every checked expression, including expressions inside eager scopes.
 pub(crate) fn walk_expressions_mut(body: &mut [Statement], visit: &mut impl FnMut(&mut Expr)) {
-    fn expression(value: &mut Expr, visit: &mut impl FnMut(&mut Expr)) {
-        visit(value);
+    walk_mut(body, visit, &mut |_| {});
+}
+
+fn walk_mut(
+    body: &mut [Statement],
+    enter_expr: &mut impl FnMut(&mut Expr),
+    leave_stmt: &mut impl FnMut(&mut Statement),
+) {
+    fn expression(
+        value: &mut Expr,
+        enter_expr: &mut impl FnMut(&mut Expr),
+        leave_stmt: &mut impl FnMut(&mut Statement),
+    ) {
+        enter_expr(value);
         if let ExprKind::Scope { body, value, .. } = &mut value.kind {
-            walk_expressions_mut(body, visit);
-            expression(value, visit);
+            walk_mut(body, enter_expr, leave_stmt);
+            expression(value, enter_expr, leave_stmt);
         } else {
-            children_mut(value, |child| expression(child, visit));
+            children_mut(value, |child| expression(child, enter_expr, leave_stmt));
         }
     }
     for statement in body {
         statement_children_mut(statement, |child| match child {
-            ChildMut::Expression(value) => expression(value, visit),
-            ChildMut::Suite(body) => walk_expressions_mut(body, visit),
+            ChildMut::Expression(value) => expression(value, enter_expr, leave_stmt),
+            ChildMut::Suite(body) => walk_mut(body, enter_expr, leave_stmt),
         });
+        leave_stmt(statement);
     }
 }
