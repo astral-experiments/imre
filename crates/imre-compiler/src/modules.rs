@@ -1687,6 +1687,8 @@ impl IntrinsicModule {
             (Self::Io | Self::IoNative, "BlockingIOError") => {
                 Intrinsic::ObjectRuntimeExport("io.BlockingIOError")
             }
+            (Self::Io, "Reader") => Intrinsic::ObjectRuntimeExport("io.Reader"),
+            (Self::Io, "Writer") => Intrinsic::ObjectRuntimeExport("io.Writer"),
             (Self::Io, "SEEK_SET") => Intrinsic::IntConstant(0),
             (Self::Io, "SEEK_CUR") => Intrinsic::IntConstant(1),
             (Self::Io, "SEEK_END") => Intrinsic::IntConstant(2),
