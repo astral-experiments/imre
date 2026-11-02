@@ -271,6 +271,48 @@ impl Context {
     }
 }
 
+pub(super) fn accumulate_allocate(
+    ctx: &mut Context,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Id> {
+    if let [base, class, state] = args
+        && kwargs.is_empty()
+        && ctx.itertools_layout(*base) == Some("itertools.accumulate")
+        && matches!(ctx.heap.get(*class), Value::Class { ancestors, .. }
+            if ancestors.iter().all(|&a| !matches!(ctx.heap.get(a), Value::Native(name) if name != "object")))
+        && ctx.allocation_base(*class) == Some(*base)
+    {
+        return Ok(instance_with_state(ctx, *base, *class, *state));
+    }
+    Err(Error::new(
+        "TypeError",
+        "expected an accumulate subclass with compatible layout",
+    ))
+}
+
+pub(super) fn accumulate_state(
+    ctx: &mut Context,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Id> {
+    if let [base, receiver] = args
+        && kwargs.is_empty()
+        && ctx.itertools_layout(*base) == Some("itertools.accumulate")
+        && let Value::Instance {
+            member_values: Some(values),
+            ..
+        } = ctx.heap.get(*receiver)
+        && let Some(&state) = values.get(base)
+    {
+        return Ok(state);
+    }
+    Err(Error::new(
+        "TypeError",
+        "expected an initialized accumulate",
+    ))
+}
+
 fn compatible_cursor_class(ctx: &Context, base: Id, class: Id, layout: &str) -> bool {
     ctx.itertools_layout(base) == Some(layout)
         && matches!(ctx.heap.get(class), Value::Class { ancestors, .. }
