@@ -1,4 +1,4 @@
-from unittest import mock
+from unittest import TestCase, mock
 from unittest.mock import ANY, Mock, call
 
 assert mock.call is call
@@ -43,3 +43,27 @@ assert [item[0] for item in unusual.method_calls] == ["branch..leaf", "branch.()
 history = client.mock_calls
 client.reset_mock()
 assert len(history) == 3 and client.mock_calls == []
+
+
+class HintedHistory:
+    def __init__(self, items, on_length):
+        self.items = items
+        self.on_length = on_length
+
+    def __iter__(self):
+        return iter(self.items)
+
+    def __len__(self):
+        self.on_length()
+        return len(self.items)
+
+
+unused = Mock()
+check = TestCase()
+with check.assertRaises(AssertionError):
+    unused.assert_has_calls(HintedHistory([call(7)], lambda: unused(7)))
+
+history_items = []
+unused.call_args_list = HintedHistory(history_items, lambda: history_items.append(((7,), {})))
+with check.assertRaises(AssertionError):
+    unused.assert_any_call(7)

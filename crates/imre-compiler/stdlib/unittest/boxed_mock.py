@@ -363,9 +363,10 @@ class Mock(_FixedMock):
         self._assert_called_once_with(args, kwargs)
 
     def assert_has_calls(self, calls, any_order=False):
-        expected = list(calls)
+        # Iterate without consulting user length hints; they may record calls.
+        expected = [item for item in calls]
         cause = next((item for item in expected if isinstance(item, Exception)), None)
-        actual = _CallList(self.mock_calls)
+        actual = _CallList(item for item in self.mock_calls)
         if not any_order:
             if expected not in actual:
                 problem = "Calls not found."
@@ -388,7 +389,7 @@ class Mock(_FixedMock):
     def assert_any_call(self, /, *args, **kwargs):
         expected = _new_call(args, kwargs)
         # Equality hooks may record more calls. Check only the history at entry.
-        for actual in list(self._node.call_args_list):
+        for actual in [item for item in self._node.call_args_list]:
             assert len(expected) == len(actual)
             if all([left == right for left, right in zip(expected, actual)]):
                 return
