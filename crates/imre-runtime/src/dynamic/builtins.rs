@@ -25,6 +25,7 @@ pub(super) fn exception_kind(name: &str) -> Option<crate::objects::exceptions::K
     use crate::objects::exceptions::Kind;
     match name {
         "UnsupportedOperation" => Some(Kind::UnsupportedOperation),
+        "socket.gaierror" => Some(Kind::GaiError),
         "binascii.Error" => Some(Kind::BinasciiError),
         "binascii.Incomplete" => Some(Kind::BinasciiIncomplete),
         _ => imre_ast::exceptions::boxed_builtin_kind(name),

@@ -2090,7 +2090,16 @@ impl Context {
             }
             "errno" => stdlib::install_errno(self, scope)?,
             "_socket" => stdlib::install_lowlevel_socket(self, scope)?,
-            "socket" if source.is_none() => stdlib::import_socket_constants(self, scope)?,
+            "socket"
+                if source.is_none()
+                    || source.as_ref().is_some_and(|(path, _)| {
+                        self.config["bundled_root"].as_str().is_some_and(|root| {
+                            path == &std::path::Path::new(root).join("socket.py")
+                        })
+                    }) =>
+            {
+                stdlib::import_socket_constants(self, scope)?
+            }
             "_opcode" => {
                 // Imre emits native code and has no adaptive bytecode interpreter.
                 let disabled = self.int(0);
