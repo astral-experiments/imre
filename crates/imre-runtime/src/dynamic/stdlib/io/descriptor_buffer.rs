@@ -183,6 +183,14 @@ impl BufferedFd {
         let closed = || Error::new("ValueError", "I/O operation on closed file.");
         let size = if matches!(name, "read" | "readline") {
             Some(files::read_length(ctx, args.first().copied())?)
+        } else if matches!(name, "peek" | "read1") {
+            args.first()
+                .map(|arg| {
+                    ctx.index_integer(*arg)?
+                        .to_i64()
+                        .ok_or_else(|| Error::new("OverflowError", "size too large"))
+                })
+                .transpose()?
         } else {
             None
         };
@@ -259,16 +267,43 @@ impl BufferedFd {
                 .map_err(os_error)?;
                 Ok(ctx.alloc(Value::Bytes(data)))
             }
-            "readinto" if args.len() == 1 => {
+            "peek" | "read1" => {
+                let Buffer::Reader(reader) = buffer else {
+                    return Err(Error::new("UnsupportedOperation", "read"));
+                };
+                if name == "peek" {
+                    return Ok(
+                        ctx.alloc(Value::Bytes(reader.fill_buf().map_err(os_error)?.to_vec()))
+                    );
+                }
+                let size = size
+                    .filter(|&n| n >= 0)
+                    .map_or(reader.capacity(), |n| n as usize);
+                if !reader.buffer().is_empty() {
+                    let n = size.min(reader.buffer().len());
+                    let data = reader.buffer()[..n].to_vec();
+                    reader.consume(n);
+                    return Ok(ctx.alloc(Value::Bytes(data)));
+                }
+                let mut data = super::zeroed_bytes(size as i64)?;
+                let n = reader.get_mut().read(&mut data).map_err(os_error)?;
+                data.truncate(n);
+                Ok(ctx.alloc(Value::Bytes(data)))
+            }
+            "readinto" | "readinto1" if args.len() == 1 => {
                 let Buffer::Reader(r) = buffer else {
                     return Err(Error::new("UnsupportedOperation", "readinto"));
                 };
-                let Value::ByteArray(bytes) = ctx.heap.get_mut(args[0]) else {
+                let Some((target, range)) = ctx.writable_byte_span(args[0]) else {
                     return Err(Error::new(
                         "TypeError",
                         "readinto requires a writable buffer",
                     ));
                 };
+                let Value::ByteArray(bytes) = ctx.heap.get_mut(target) else {
+                    unreachable!()
+                };
+                let bytes = &mut bytes[range];
                 let mut total = 0;
                 while total < bytes.len() {
                     let n = r.read(&mut bytes[total..]).map_err(os_error)?;
@@ -276,6 +311,9 @@ impl BufferedFd {
                         break;
                     }
                     total += n;
+                    if name == "readinto1" {
+                        break;
+                    }
                 }
                 Ok(ctx.int(total as i64))
             }

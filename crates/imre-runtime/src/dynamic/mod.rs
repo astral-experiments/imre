@@ -18,6 +18,7 @@ mod importlib;
 mod iterators;
 mod lowlevel_threads;
 mod mapping_abc;
+mod memoryview;
 mod module_type;
 mod namedtuple;
 mod slot_member;
@@ -294,6 +295,7 @@ impl Context {
 
     fn bytes_like(&self, id: Id) -> Result<&[u8]> {
         match self.heap.get(self.scalar_value(id)) {
+            Value::MemoryView(_) => self.view_contiguous_bytes(id),
             Value::Bytes(data) | Value::ByteArray(data) => Ok(data),
             _ => Err(Error::new(
                 "TypeError",
@@ -305,19 +307,24 @@ impl Context {
         }
     }
 
-    /// Keep the underlying bytearray exported while an argument conversion runs Python.
+    /// Keep a mutable buffer exported while an argument conversion runs Python.
     fn with_buffer_export<T>(
         &mut self,
         input: Id,
         convert: impl FnOnce(&mut Self) -> Result<T>,
     ) -> Result<T> {
         let input = self.scalar_value(input);
-        if !matches!(self.heap.get(input), Value::ByteArray(_)) {
-            return convert(self);
+        let depth = self.bytearray_exports.len();
+        match self.heap.get(input) {
+            Value::ByteArray(_) => self.bytearray_exports.push(input),
+            Value::MemoryView(Some(view)) => {
+                self.bytearray_exports.push(view.backing);
+                self.bytearray_exports.push(input);
+            }
+            _ => return convert(self),
         }
-        self.bytearray_exports.push(input);
         let result = convert(self);
-        self.bytearray_exports.pop();
+        self.bytearray_exports.truncate(depth);
         result
     }
 
@@ -457,6 +464,13 @@ impl Context {
                 interpolations,
             } => {
                 return self.template_iterator(strings, interpolations);
+            }
+            Value::MemoryView(_) => {
+                self.byte_view(id)?;
+                return Ok(self.alloc(Value::SequenceIterator {
+                    source: Some(id),
+                    index: 0,
+                }));
             }
             Value::Context(_) => return Ok(self.context_iterator(id, "Context.keys")),
             Value::Deque(ref ring) => {
@@ -2129,7 +2143,13 @@ impl Context {
                 self.bind(scope, "open", open);
                 let text_encoding = self.builtin("_io.text_encoding");
                 self.bind(scope, "text_encoding", text_encoding);
-                for name in ["BytesIO", "StringIO", "TextIOWrapper", "FileIO"] {
+                for name in [
+                    "BytesIO",
+                    "StringIO",
+                    "TextIOWrapper",
+                    "FileIO",
+                    "BufferedReader",
+                ] {
                     let class = self.builtins[&format!("_io.{name}")];
                     self.bind(scope, name, class);
                 }

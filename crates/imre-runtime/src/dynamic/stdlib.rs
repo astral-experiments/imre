@@ -1953,7 +1953,7 @@ pub(super) fn call(
         "file.seek" => (3, &["whence"]),
         "file.__exit__" => (4, &[]),
         "struct.unpack" | "pattern.findall" | "file.read" | "file.readline" | "file.readinto"
-        | "file.write" | "warnings.warn" => (2, &[]),
+        | "file.peek" | "file.read1" | "file.readinto1" | "file.write" | "warnings.warn" => (2, &[]),
         "match.group" | "os.path.join" => (usize::MAX, &[]),
         "collections.defaultdict.__missing__" => (2, &[]),
         "match.groups" | "match.groupdict" => (2, &["default"]),

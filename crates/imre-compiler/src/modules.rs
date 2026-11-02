@@ -1669,6 +1669,9 @@ impl IntrinsicModule {
             (Self::Io | Self::IoNative, "open_code") => {
                 Intrinsic::ObjectRuntimeExport("io.open_code")
             }
+            (Self::Io | Self::IoNative, "BufferedReader") => {
+                Intrinsic::ObjectRuntimeExport("io.BufferedReader")
+            }
             (Self::Io, "BytesIO") => Intrinsic::BytesIo,
             (Self::Io | Self::IoNative, "FileIO") => Intrinsic::ObjectRuntimeExport("io.FileIO"),
             (Self::Io, "IOBase") => Intrinsic::IoBase(crate::ir::IoBase::Any),

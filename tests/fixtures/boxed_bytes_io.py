@@ -162,4 +162,70 @@ def current():
         raise AssertionError("reader resized the exported bytearray")
     dest.clear()
     assert io.StringIO("π").getvalue() == "π"
+    class Raw(io.RawIOBase):
+        def readable(self):
+            return True
+
+        def readinto(self, target):
+            assert type(target) is memoryview and target.obj is None
+            self.view = target
+            target[:4] = b"abcd"
+            return 4
+
+    class Reader(io.BufferedReader):
+        def read(self, size=-1):
+            return b"seen:" + super().read(size)
+
+    raw = Raw()
+    reader = Reader(raw, buffer_size=4)
+    assert reader.raw is raw and reader.peek() == b"abcd"
+    raw.view[1:3] = b"xy"
+    assert reader.read(4) == b"seen:axyd"
+    reader.close()
+    assert reader.closed and raw.closed
+
+    # Failed size validation installs the new raw member but leaves I/O uninitialized.
+    first = io.BytesIO(b"first")
+    second = io.BytesIO(b"second")
+    reader = io.BufferedReader(first, 4)
+    assert reader.read(2) == b"fi"
+    try:
+        reader.__init__(second, 0)
+    except ValueError:
+        assert reader.raw is second and not first.closed
+    else:
+        raise AssertionError("invalid buffer size accepted")
+    try:
+        reader.readable()
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("failed initialization left a usable reader")
+    reader.__init__(second, 4)
+    assert reader.read(2) == b"se"
+
+    # The destination is already exported when the raw.closed getter runs Python.
+    dest = bytearray(2)
+
+    class ResizingRaw(io.BytesIO):
+        @property
+        def closed(self):
+            if not self.check_export:
+                return super().closed
+            try:
+                dest.append(0)
+            except BufferError:
+                pass
+            else:
+                raise AssertionError("readinto destination resized during callback")
+            return super().closed
+
+    raw = ResizingRaw(b"xy")
+    raw.check_export = True
+    reader = io.BufferedReader(raw, 2)
+    assert reader.readinto1(dest) == 2
+    assert dest == b"xy"
+    raw.check_export = False
+    reader.close()
+
     print("BytesIO retains native stream position and immutable snapshots")
