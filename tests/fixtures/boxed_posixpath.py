@@ -102,6 +102,14 @@ def current():
     assert os.path.lexists is posixpath.lexists is genericpath.lexists
     assert os.path.lexists(Path(__file__)) and not os.path.lexists(missing)
     assert os.path.isfile is posixpath.isfile is genericpath.isfile
+    assert os.path.isjunction is posixpath.isjunction is genericpath.isjunction
+    assert not os.path.isjunction(Path(missing))
+    try:
+        os.path.isjunction(42)
+    except TypeError:
+        pass
+    else:
+        raise AssertionError("isjunction accepted an invalid path")
     assert os.listdir is posix.listdir
     module_dir = os.path.dirname(__file__) or "."
     module_file = os.path.basename(__file__)

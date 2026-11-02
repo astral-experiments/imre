@@ -13,6 +13,45 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 pub(crate) use super::stdlib::imre_wall_time as wall_time;
 
+/// Suspend the calling thread for a checked Python timeout in nanoseconds.
+pub(crate) fn sleep_ns(nanos: i64) -> Result<(), Error> {
+    if nanos < 0 {
+        return Err(Error::new(
+            Kind::ValueError,
+            "sleep length must be non-negative",
+        ));
+    }
+    if nanos == 0 {
+        std::thread::yield_now();
+    } else {
+        std::thread::sleep(std::time::Duration::from_nanos(nanos as u64));
+    }
+    Ok(())
+}
+
+/// CPython rounds a positive floating-point timeout up to a whole nanosecond.
+pub(crate) fn sleep_float(seconds: f64) -> Result<(), Error> {
+    if seconds.is_nan() {
+        return Err(Error::new(
+            Kind::ValueError,
+            "Invalid value NaN (not a number)",
+        ));
+    }
+    let nanos = seconds * 1e9;
+    if !((i64::MIN as f64)..-(i64::MIN as f64)).contains(&nanos) {
+        return Err(Error::new(
+            Kind::OverflowError,
+            "timestamp out of range for platform time_t",
+        ));
+    }
+    let rounded = if nanos < 0.0 {
+        nanos.floor()
+    } else {
+        nanos.ceil()
+    };
+    sleep_ns(rounded as i64)
+}
+
 /// Signed nanoseconds since the Unix epoch, without rounding through floating point.
 pub(crate) fn wall_time_ns() -> i128 {
     match SystemTime::now().duration_since(UNIX_EPOCH) {
@@ -39,6 +78,33 @@ pub(crate) fn monotonic_time() -> std::io::Result<std::time::Duration> {
         stamp.tv_sec as u64,
         stamp.tv_nsec as u32,
     ))
+}
+
+/// Sample local time half a year apart, as CPython does on Unix with tm_gmtoff.
+pub(crate) fn timezone_samples() -> Result<[(i64, String); 2], Error> {
+    const YEAR: i64 = (365 * 24 + 6) * 3600;
+    let january = wall_time() as i64 / YEAR * YEAR;
+    let sample = |stamp| -> Result<_, Error> {
+        let tm = timed::civil(stamp, false)?;
+        if !(-48 * 3600..=48 * 3600).contains(&tm.tm_gmtoff) {
+            return Err(Error::new(Kind::RuntimeError, "invalid GMT offset"));
+        }
+        let name: &[u8] = if tm.tm_zone.is_null() {
+            b"   "
+        } else {
+            // SAFETY: libc supplies the NUL-terminated abbreviation for this conversion.
+            unsafe { CStr::from_ptr(tm.tm_zone) }.to_bytes()
+        };
+        // CPython copies at most nine bytes of each abbreviation before decoding.
+        let name = super::codecs::Codec::Utf8 { signature: false }
+            .decode(&name[..name.len().min(9)], None)?;
+        Ok((-tm.tm_gmtoff, name))
+    };
+    let mut zones = [sample(january)?, sample(january + YEAR / 2)?];
+    if zones[0].0 < zones[1].0 {
+        zones.swap(0, 1);
+    }
+    Ok(zones)
 }
 
 /// The nine sequence fields and two named timezone attributes of a civil time.

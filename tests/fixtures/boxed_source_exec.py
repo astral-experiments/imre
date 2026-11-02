@@ -105,8 +105,10 @@ class Case(Base):
     events.append(('body', value))
     value = 'class'
     def label(self):
-        self.__seen = value
-        return super().label(), self.__seen
+        self.__seen: UnusedAnnotation = value
+        seen = {}
+        seen[0]: UnusedAnnotation = self.__seen
+        return super().label(), seen[0]
     def increment(self):
         self.previous += 1
     def nested(self):
@@ -221,13 +223,40 @@ def source_annotations():
     future = ns["F"].f
     assert future.__annotate__.__closure__ is None
     assert future.__annotations__ == {"n": "Missing", "obj": "'A'", "return": "tuple[int]"}
+    fallback = {"__annotations__": {}}
+    exec("""from __future__ import annotations
+def fields():
+    __annotations__ = {}
+    class Fields:
+        first: int
+        del __annotations__
+        second: Missing
+    return Fields, __annotations__
+""", fallback)
+    fields, outer = fallback["fields"]()
+    assert not outer and fallback["__annotations__"] == {"second": "Missing"}
+    assert fields.__annotate__ is None
+    exec("""class Declared:
+    try:
+        __annotations__
+    except NameError:
+        pass
+    else:
+        raise AssertionError("deferred fields exposed an annotation mapping during construction")
+    field: int
+class Empty(Declared): pass
+""", ns)
+    assert ns["Empty"].__annotate__ is None and ns["Empty"].__annotations__ == {}
     for expr in ("(tmp := int)", "(yield int)", "(await T)"):
-        try:
-            compile("def f(arg: " + expr + "): pass", "<annotations>", "exec")
-        except SyntaxError:
-            pass
-        else:
-            raise AssertionError("invalid annotation expression compiled")
+        for source in ("def f(arg: " + expr + "): pass",
+                       "def f(obj): obj.field: " + expr + " = 1",
+                       "def f(obj): obj[0]: " + expr + " = 1"):
+            try:
+                compile(source, "<annotations>", "exec")
+            except SyntaxError:
+                pass
+            else:
+                raise AssertionError("invalid annotation expression compiled")
 
 
 def source_test_cases():
@@ -416,6 +445,57 @@ def make(events):
     assert events == ["outer", 1, 3]
 
 
+def source_listcomp():
+    item = []
+    local = {"groups": [[item, item], []], "item": "outside"}
+    result = eval("[item for group in groups for item in group if item is not None]", {}, local)
+    assert len(result) == 2 and result[0] is result[1] is item
+    assert local["item"] == "outside" and "group" not in local
+
+
+def source_setcomp():
+    namespace = {}
+    exec("""
+def collect(values):
+    label = 'outer'
+    picked = {(label, n) for label, items in values if label for n in items if n % 2}
+    return picked, label
+
+def capture(items):
+    item = "outer"
+    functions = {(lambda: item) for item in items if (last := item)}
+    return item, last, tuple(f() for f in functions)
+""", namespace)
+    assert namespace["capture"]([1, 2]) == ("outer", 2, (2, 2))
+    assert namespace["collect"]([("a", [1, 2, 1]), ("", None), ("b", [3])]) == (
+        {("a", 1), ("b", 3)}, "outer"
+    )
+    local = {"label": "local", "items": [1, 2]}
+    assert eval("{(x, label) for x in items}", {"label": "global"}, local) == {
+        (1, "local"), (2, "local")
+    }
+    assert "x" not in local
+
+    functions = eval("{(lambda: (x, label)) for x in items}", {"label": "global"}, local)
+    assert len(functions) == 2
+    for function in functions:
+        assert function() == (2, "global")
+        assert function.__code__.co_freevars == ("x",)
+
+    events = []
+    def keys():
+        for value in [1, [], "too late"]:
+            events.append(value)
+            yield value
+
+    try:
+        eval("{value for value in keys()}", {"keys": keys})
+    except TypeError:
+        assert events == [1, []]
+    else:
+        raise AssertionError("an unhashable element must stop the comprehension")
+
+
 def named_bindings():
     namespace = {}
     exec("""def recipe(values):
@@ -478,10 +558,245 @@ def annotated(arg: (lambda: (shadowed, (shadowed := 4)))):
             raise AssertionError(text)
 
 
+def method_argument_lifetime():
+    import gc
+
+    events = []
+
+    class Target:
+        def __call__(self, value):
+            events.append(value)
+
+        def __del__(self):
+            events.append("released")
+
+    class Holder:
+        pass
+
+    holder = Holder()
+
+    def argument():
+        del holder.method
+        gc.collect()
+        events.append("argument")
+        return "called"
+
+    for source in ("holder.method(argument())", "holder.method(value=argument())"):
+        holder.method = Target()
+        exec(source, {"holder": holder, "argument": argument})
+        assert events == ["argument", "called", "released"], events
+        events.clear()
+
+
+def source_eval():
+    make = tuple
+    assert eval("make([2, 1])") == (2, 1)
+    assert eval("(make := 3)") == 3 and make is tuple
+    supplied = {"a": 9}
+    code = compile("a * 2", "<expr>", "eval")
+    assert eval(code, supplied) == 18
+    assert eval(code, globals=supplied, locals={"a": 1}) == 2
+    assert eval("len([])", {"__builtins__": {"len": lambda value: 17}}) == 17
+    try:
+        eval("a = 3")
+    except SyntaxError:
+        pass
+    else:
+        raise AssertionError("eval accepted a statement")
+
+
+def starred_calls():
+    events = []
+
+    def mark(value):
+        events.append(value)
+        return value
+
+    def spread():
+        mark("iter")
+        yield 2
+
+    def collect(*values, label):
+        return values, label
+
+    scope = {"collect": collect, "mark": mark, "spread": spread}
+    exec("answer = collect(*spread(), label=mark(3))", scope)
+    assert scope["answer"] == ((2,), 3) and events == [3, "iter"]
+    events.clear()
+    exec("answer = collect(mark(1), *spread(), *(), label=mark(3))", scope)
+    assert scope["answer"] == ((1, 2), 3) and events == [1, "iter", 3]
+    events.clear()
+    exec("answer = (mark(1), *spread(), *(), mark(3))", scope)
+    assert scope["answer"] == (1, 2, 3) and events == [1, "iter", 3]
+
+    import gc
+    import weakref
+
+    cursor_refs = []
+
+    class Empty:
+        def __next__(self):
+            raise StopIteration
+
+    class Source:
+        def __iter__(self):
+            cursor = Empty()
+            cursor_refs.append(weakref.ref(cursor))
+            return cursor
+
+    def released():
+        gc.collect()
+        return cursor_refs[0]() is None
+
+    assert eval("(*source, released())", {"source": Source(), "released": released}) == (True,)
+
+    for source in ("collect(**{}, label=1, label=2)", "collect(label=1, **{}, label=2)"):
+        events.clear()
+        try:
+            exec("mark(0)\n" + source, scope)
+        except SyntaxError as error:
+            assert error.msg == "keyword argument repeated: label" and not events
+            assert error.filename == "<string>" and (error.lineno, error.end_lineno) == (2, 2)
+            assert (error.offset, error.end_offset) == (24, 31)
+        else:
+            raise AssertionError("duplicate explicit keyword compiled")
+
+    try:
+        compile("x=1\rcollect(a=1, a=2)(b=1, b=2)", "<caller>", "exec")
+    except SyntaxError as error:
+        assert error.msg == "keyword argument repeated: b"
+        assert (error.lineno, error.offset, error.end_lineno, error.end_offset) == (2, 24, 2, 27)
+    else:
+        raise AssertionError("invalid outer call accepted")
+
+    class Options:
+        def keys(self):
+            return ["label"]
+
+        def __getitem__(self, key):
+            return mark(4)
+
+    scope["options"] = Options()
+    events.clear()
+    exec("answer = collect(*spread(), **options)", scope)
+    assert scope["answer"] == ((2,), 4) and events == [4, "iter"]
+
+    events.clear()
+    try:
+        exec("collect(*spread(), **options, label=mark(5), other=mark(6), **mark(7))", scope)
+    except TypeError as error:
+        assert "got multiple values for keyword argument 'label'" in str(error)
+        assert events == [4, 5, 6]
+    else:
+        raise AssertionError("duplicate keyword was accepted")
+
+    events.clear()
+    try:
+        exec("collect(*spread(), **{1: mark(5)})", scope)
+    except TypeError as error:
+        assert error.args == ("keywords must be strings",) and events == [5, "iter"]
+    else:
+        raise AssertionError("non-string keyword was accepted")
+
+    class NoIter:
+        __iter__ = None
+
+    class BrokenIter:
+        def __iter__(self):
+            raise TypeError("from iterator")
+
+    scope["no_iter"] = NoIter()
+    scope["broken_iter"] = BrokenIter()
+    for source, message in (
+        ("collect(*42)", f"{collect.__module__}.{collect.__qualname__}() argument after * must be an iterable, not int"),
+        ("collect(1, *42)", "Value after * must be an iterable, not int"),
+        ("collect(*no_iter)", "'NoIter' object is not iterable"),
+        ("collect(1, *broken_iter)", "from iterator"),
+    ):
+        try:
+            exec(source, scope)
+        except TypeError as error:
+            assert str(error) == message
+        else:
+            raise AssertionError("invalid positional unpack was accepted")
+
+    class BadHint:
+        def __iter__(self):
+            return iter(())
+
+        def __length_hint__(self):
+            raise LookupError("bad hint")
+
+    scope["bad_hint"] = BadHint()
+    exec("answer = collect(*bad_hint, label=0)", scope)
+    assert scope["answer"] == ((), 0)
+    try:
+        exec("collect(1, *bad_hint, label=0)", scope)
+    except LookupError as error:
+        assert error.args == ("bad hint",)
+    else:
+        raise AssertionError("starred length hint failure was lost")
+
+    def broken():
+        yield 0
+        raise ValueError("broken iterator")
+
+    scope["broken"] = broken
+    try:
+        exec("collect(*broken(), label=0)", scope)
+    except ValueError as error:
+        assert error.args == ("broken iterator",)
+    else:
+        raise AssertionError("starred iterator failure was lost")
+
+
+def caller_namespaces(argument):
+    snapshot = locals()
+    assert snapshot == {"argument": argument}
+    snapshot["argument"] = None
+    assert vars()["argument"] is argument
+
+    class Namespace:
+        mapping = locals()
+        mapping["name"] = "in class"
+        assert vars() is mapping
+        assert eval("name") == "in class"
+
+    Namespace.mapping["name"] = "later"
+    assert Namespace.name == "in class"
+    mapping = {}
+    assert eval("locals()", {}, mapping) is mapping
+    exec("class Loaded:\n    raw = locals()\n    raw['flag'] = 11\n    assert raw is vars()", mapping)
+    loaded = mapping["Loaded"]
+    loaded.raw["flag"] = 12
+    assert loaded.flag == 11
+
+    class WithMethod:
+        __classcell__ = None
+        def owner(self, value: int):
+            return __class__
+
+    assert WithMethod().owner(3) is WithMethod
+
+    def with_child():
+        before = eval("argument")
+        def nested():
+            return argument
+        return before, nested()
+
+    assert with_child() == (argument, argument)
+
+
 def current():
+    starred_calls()
+    caller_namespaces(3)
+    source_eval()
+    method_argument_lifetime()
     named_bindings()
     source_annotations()
     source_genexpr()
+    source_listcomp()
+    source_setcomp()
     source_match()
     check_scope_directives()
     relative_import_hooks()

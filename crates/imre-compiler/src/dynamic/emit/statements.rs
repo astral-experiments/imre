@@ -17,17 +17,27 @@ struct ClosureNames {
     globals: std::collections::BTreeSet<String>,
     nonlocals: std::collections::BTreeSet<String>,
     in_comprehension: bool,
+    include_nested_reads: bool,
     incomplete: bool,
     locals_incomplete: bool,
 }
 
-pub(super) fn class_locals(body: &[ast::Stmt]) -> std::collections::BTreeSet<String> {
+#[derive(Clone)]
+pub(super) struct ClassBindings {
+    pub(super) locals: std::collections::BTreeSet<String>,
+    pub(super) globals: std::collections::BTreeSet<String>,
+}
+
+pub(super) fn class_locals(body: &[ast::Stmt]) -> ClassBindings {
     let mut names = ClosureNames::default();
     names.visit_body(body);
     names
         .locals
         .retain(|name| !names.globals.contains(name) && !names.nonlocals.contains(name));
-    names.locals
+    ClassBindings {
+        locals: names.locals,
+        globals: names.globals,
+    }
 }
 
 impl<'a> Visitor<'a> for ClosureNames {
@@ -36,6 +46,21 @@ impl<'a> Visitor<'a> for ClosureNames {
             ast::Stmt::FunctionDef(f) => {
                 self.locals.insert(f.name.to_string());
                 self.incomplete = true;
+                if self.include_nested_reads {
+                    // A name used only by a nested function can be free in this function too.
+                    let mut child = Self {
+                        include_nested_reads: true,
+                        ..Self::default()
+                    };
+                    child.visit_body(&f.body);
+                    child
+                        .locals
+                        .extend(f.parameters.iter().map(|param| param.name().to_string()));
+                    self.reads.extend(child.nonlocals);
+                    self.reads.extend(child.reads.into_iter().filter(|name| {
+                        !child.locals.contains(name) && !child.globals.contains(name)
+                    }));
+                }
                 // Loading a name or a literal cannot introduce a binding in the
                 // defining frame. Keep the conservative fallback for other expressions.
                 for decorator in &f.decorator_list {
@@ -53,13 +78,13 @@ impl<'a> Visitor<'a> for ClosureNames {
             ast::Stmt::ClassDef(c) => {
                 self.locals.insert(c.name.to_string());
                 self.incomplete = true;
+                // Only class header expressions can introduce names in this enclosing function.
                 for decorator in &c.decorator_list {
                     self.visit_decorator(decorator);
                 }
                 if let Some(args) = &c.arguments {
                     self.visit_arguments(args);
                 }
-                self.locals_incomplete |= c.type_params.is_some();
             }
             ast::Stmt::Global(g) => {
                 self.globals.extend(g.names.iter().map(ToString::to_string));
@@ -218,6 +243,22 @@ impl Function<'_, '_> {
                     }
                 }
                 ast::Stmt::Pass(_) | ast::Stmt::Global(_) | ast::Stmt::Nonlocal(_) => {}
+                ast::Stmt::TypeAlias(v)
+                    if self.prefix.is_empty()
+                        && v.type_params.is_none()
+                        && let Some(name) = v.name.as_name_expr() =>
+                {
+                    let evaluator = self.define(
+                        v.start(),
+                        name.id.as_str(),
+                        None,
+                        None,
+                        Body::TypeAlias(&v.value),
+                    );
+                    let label = self.code_name(name.id.as_str());
+                    let alias = self.op("type_alias", &[&label, &evaluator]);
+                    self.bind(name.id.as_str(), &alias);
+                }
                 ast::Stmt::Assign(v) => {
                     let value = self.expr(&v.value);
                     let chained = v.targets.len() > 1;
@@ -307,10 +348,10 @@ impl Function<'_, '_> {
                         .map(|d| self.expr(&d.expression))
                         .collect::<Vec<_>>();
                     let generator = imre_ast::code_flags::is_generator(&v.body);
-                    let body = if v.is_async {
+                    let body = if v.is_async && generator {
                         Body::Unsupported(stmt, "async function")
-                    } else if generator {
-                        Body::GeneratorFunction(&v.body)
+                    } else if v.is_async || generator {
+                        Body::GeneratorFunction((&v.body, v.is_async))
                     } else {
                         Body::Statements(&v.body)
                     };
@@ -358,13 +399,8 @@ impl Function<'_, '_> {
                     });
                     let bases = self.op("list", &[]);
                     let kwargs = if let Some(args) = v.arguments.as_deref() {
-                        if args
-                            .keywords
-                            .iter()
-                            .any(|kw| !matches!(kw.arg.as_deref(), Some("total" | "metaclass")))
-                            || args.keywords.len() > 1
-                        {
-                            self.unsupported("class keyword arguments");
+                        if args.keywords.iter().any(|kw| kw.arg.is_none()) {
+                            self.unsupported("expanded class keyword arguments");
                         }
                         self.arguments(&bases, args, "0")
                     } else {
@@ -376,7 +412,7 @@ impl Function<'_, '_> {
                         self.op("append", &[&bases, &generic]);
                     }
                     let init = self.define(
-                        v.start(),
+                        v.decorator_list.first().map_or(v.start(), Ranged::start),
                         self.source.private_names.definition(&v.name),
                         None,
                         None,
@@ -577,18 +613,18 @@ impl Function<'_, '_> {
             format!("{qualname}.<locals>.")
         };
         let doc = match &body {
-            Body::Statements(stmts) | Body::GeneratorFunction(stmts)
+            Body::Statements(stmts) | Body::GeneratorFunction((stmts, _))
                 if self.output.keep_docstrings =>
             {
-                crate::frontend::docstring(stmts)
+                self.source.docstring(&qualname, stmts)
             }
             Body::Unsupported(ast::Stmt::FunctionDef(f), _) if self.output.keep_docstrings => {
-                crate::frontend::docstring(&f.body)
+                self.source.docstring(&qualname, &f.body)
             }
             _ => None,
         };
         let flags = match (&body, params) {
-            (Body::Namespace(_) | Body::Annotations(_) | Body::ClassAnnotations(..), _) => None,
+            (Body::Namespace(_) | Body::Annotations(..) | Body::ClassAnnotations(..), _) => None,
             _ => {
                 use imre_ast::code_flags::*;
                 let mut flags = OPTIMIZED | NEWLOCALS;
@@ -614,7 +650,8 @@ impl Function<'_, '_> {
                     flags |= HAS_DOCSTRING;
                 }
                 let kind = match &body {
-                    Body::GeneratorFunction(_) | Body::Generator(..) => GENERATOR,
+                    Body::GeneratorFunction((_, true)) => COROUTINE,
+                    Body::GeneratorFunction((_, false)) | Body::Generator(..) => GENERATOR,
                     Body::Expression(expr) if yields_in_expression(expr) => GENERATOR,
                     Body::Unsupported(ast::Stmt::FunctionDef(f), _) if f.is_async => {
                         if is_generator(&f.body) {
@@ -635,15 +672,46 @@ impl Function<'_, '_> {
         let annotate = if entries.is_empty() {
             "0".into()
         } else {
+            let class = self
+                .class_locals
+                .as_ref()
+                .filter(|_| !self.source.string_annotations)
+                .cloned();
+            let reads = class_metadata::annotation_reads(
+                &entries,
+                class.as_ref(),
+                self.source.string_annotations,
+            );
+            use imre_ast::code_flags::*;
+            let mut annotation_flags = OPTIMIZED | NEWLOCALS;
+            if self.prefix.contains(".<locals>.") {
+                annotation_flags |= NESTED;
+            }
+            if self.source.string_annotations {
+                annotation_flags |= FUTURE_ANNOTATIONS;
+            }
+            if self.source.barry_as_flufl {
+                annotation_flags |= FUTURE_BARRY_AS_BDFL;
+            }
+            let sig = self.text(
+                &json!({
+                    "posonly": ["format"],
+                    "code_flags": annotation_flags,
+                    "scope_reads": reads,
+                    "scope_complete": true,
+                    "scope_locals_complete": true,
+                    "annotation_class": class.is_some(),
+                })
+                .to_string(),
+            );
             let code = self.output.definition(
                 self.source,
                 String::new(),
-                Body::Annotations(entries),
+                Body::Annotations(entries, class),
                 params.map_or(start, Ranged::start),
             );
             let aname = self.text("__annotate__");
             let aqname = self.text(&format!("{qualname}.__annotate__"));
-            let sig = self.text(r#"{"posonly":["format"]}"#);
             let defaults = self.op("dict", &[]);
             self.checked(&format!("call i64 @imre_dyn_def_from_site(ptr %ctx, ptr {code}, i64 {}, i64 {aname}, i64 {sig}, i64 {defaults}, i64 {aqname}, i64 0, i64 0, i1 true)", self.scope))
         };
@@ -653,10 +721,28 @@ impl Function<'_, '_> {
         if let Some(flags) = flags {
             signature["code_flags"] = json!(flags);
         }
+        if let Body::Namespace(stmts) = &body {
+            signature["postponed_annotations"] = json!(
+                self.source.string_annotations
+                    && imre_ast::annotations::has_variable_annotation(stmts)
+            );
+            signature["needs_class_cell"] = json!(imre_ast::class_cell::needed(
+                stmts,
+                self.source.string_annotations
+            ));
+            signature["needs_dict_cell"] = json!(imre_ast::class_cell::dict_needed(
+                stmts,
+                self.source.string_annotations
+            ));
+            signature["static_attributes"] = json!(imre_ast::class_attributes::static_attributes(
+                stmts,
+                &self.source.private_names
+            ));
+        }
         if params.is_some() && uses_class_cell(&body) {
             signature["class_cell"] = json!(true);
         }
-        let generator = if let Body::GeneratorFunction(stmts) = &body {
+        let generator = if let Body::GeneratorFunction((stmts, is_async)) = &body {
             if !self.source.method_imports.is_empty() {
                 signature["method_imports"] = json!(self.source.method_imports);
             }
@@ -673,14 +759,18 @@ impl Function<'_, '_> {
                 " "
             };
             // Slice the suite as written so indentation inside multiline strings survives.
-            let text = format!("def _():\n{indent}{}", &self.source.text[start..end]);
+            let header = if *is_async { "async def" } else { "def" };
+            let text = format!("{header} _():\n{indent}{}", &self.source.text[start..end]);
             Some((self.output.data(text.as_bytes()), self.source.line(first)))
         } else {
             None
         };
-        let mut closure_names = ClosureNames::default();
+        let mut closure_names = ClosureNames {
+            include_nested_reads: matches!(&body, Body::Statements(_) | Body::GeneratorFunction(_)),
+            ..ClosureNames::default()
+        };
         match &body {
-            Body::Statements(stmts) | Body::GeneratorFunction(stmts) => {
+            Body::Statements(stmts) | Body::GeneratorFunction((stmts, _)) => {
                 closure_names.visit_body(stmts)
             }
             Body::Namespace(stmts) => {
@@ -691,19 +781,29 @@ impl Function<'_, '_> {
                 // Methods and nested classes can still capture the enclosing frame.
                 closure_names.incomplete = true;
             }
-            Body::Expression(expr) => closure_names.visit_expr(expr),
+            Body::Expression(expr) | Body::TypeAlias(expr) => closure_names.visit_expr(expr),
             _ => closure_names.incomplete = true,
         }
-        if let (Body::Statements(stmts), Some(params), None) = (&body, params, returns)
-            && let Some((names, lock_only)) = worker::parameters(stmts, params)
-        {
-            signature["thread_parameters"] = json!(names);
-            if lock_only {
-                signature["thread_worker_locks"] = json!(names);
+        if let (Body::Statements(stmts), Some(params), None) = (&body, params, returns) {
+            if let Some((names, lock_only)) = worker::parameters(stmts, params) {
+                signature["thread_parameters"] = json!(names);
+                if lock_only {
+                    signature["thread_worker_locks"] = json!(names);
+                }
+            } else if let Some(names) = worker::captured_locks(stmts, params) {
+                signature["thread_captured_locks"] = json!(names);
+            } else if let Some(field) = worker::bound_lock_field(stmts, params) {
+                signature["thread_bound_lock_field"] = json!(field);
             }
         }
-        let code = self.output.definition(self.source, prefix, body, start);
         let defaults = self.op("dict", &[]);
+        if matches!(body, Body::TypeAlias(_)) {
+            signature["posonly"] = json!([".format"]);
+            let format = self.text(".format");
+            let value_format = self.integer(1);
+            self.op("put", &[&defaults, &format, &value_format]);
+        }
+        let code = self.output.definition(self.source, prefix, body, start);
         signature["types"] = json!({});
         // A generator call returns a suspended frame, before it yields or returns a value.
         if generator.is_none() {
@@ -786,14 +886,23 @@ impl Function<'_, '_> {
         let condition = self.truth(&unsupported);
         self.branch(&condition, &bad, &good);
         self.label(&bad);
-        let error = self.lookup("NotImplementedError");
+        let name = self.code_name("NotImplementedError");
+        let error = self.op("builtin", &[&name]);
         self.raise(&error, None, false);
         self.label(&good);
     }
 
-    pub(super) fn annotations(&mut self, entries: &[(&str, &ast::Expr)]) {
+    pub(super) fn annotations(
+        &mut self,
+        entries: &[(&str, &ast::Expr)],
+        class: Option<ClassBindings>,
+    ) {
         self.check_annotation_format();
         let values = self.op("dict", &[]);
+        // The public format parameter is outside the annotation expressions' lexical scope.
+        self.scope = self.op("annotation_scope", &[&self.scope.clone()]);
+        self.annotation_lookup = true;
+        self.class_locals = class;
         for &(name, expression) in entries {
             let key = self.code_name(name);
             let value = if self.source.string_annotations {
@@ -1212,8 +1321,8 @@ fn uses_class_cell(body: &Body<'_>) -> bool {
     }
     let mut captures = ClassCell(false);
     match body {
-        Body::Statements(stmts) | Body::GeneratorFunction(stmts) => captures.visit_body(stmts),
-        Body::Expression(expr) => captures.visit_expr(expr),
+        Body::Statements(stmts) | Body::GeneratorFunction((stmts, _)) => captures.visit_body(stmts),
+        Body::Expression(expr) | Body::TypeAlias(expr) => captures.visit_expr(expr),
         Body::Generator(generators, element) => {
             for (index, generator) in generators.iter().enumerate() {
                 if index != 0 {
@@ -1226,7 +1335,7 @@ fn uses_class_cell(body: &Body<'_>) -> bool {
             captures.visit_expr(element);
         }
         Body::Namespace(_)
-        | Body::Annotations(_)
+        | Body::Annotations(..)
         | Body::ClassAnnotations(..)
         | Body::AnnotationThunk(..)
         | Body::AnnotationValue(_)

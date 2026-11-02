@@ -24,8 +24,11 @@ struct Imports {
     uses_import_builtin: bool,
     sys_names: HashSet<String>,
     operator_names: HashSet<String>,
+    opcode_names: HashSet<String>,
+    hashlib_names: HashSet<String>,
     signal_names: HashMap<String, String>,
     unittest_names: HashSet<String>,
+    boxed_mock_names: HashSet<String>,
     pkgutil_names: HashSet<String>,
     get_data_names: HashSet<String>,
     machinery_names: HashSet<String>,
@@ -63,9 +66,7 @@ fn literal_path(expr: &Expr) -> Option<PathBuf> {
 // Ordinary files keep their typed ModuleSpec diagnostics unless the graph
 // requests the source importer. Explicit runtime imports can use the boxed class.
 fn typed_machinery_export(name: &str) -> bool {
-    crate::modules::IntrinsicModule::ImportlibMachinery
-        .symbol(name)
-        .is_some()
+    name == "ModuleSpec"
 }
 
 impl Imports {
@@ -105,14 +106,27 @@ impl Imports {
             && matches!(
                 name,
                 "_imp"
+                    | "_hashlib"
+                    | "atexit"
+                    | "faulthandler"
+                    | "code"
+                    | "codeop"
+                    | "json"
+                    | "json.encoder"
+                    | "opcode"
+                    | "_opcode_metadata"
                     | "sysconfig"
+                    | "pathlib._local"
+                    | "pathlib.types"
                     | "platform"
                     | "keyword"
                     | "site"
+                    | "importlib.abc"
                     | "importlib.machinery"
                     | "traceback"
                     | "unittest.case"
                     | "string.templatelib"
+                    | "runpy"
             )
         {
             self.runtime_imports = true;
@@ -120,10 +134,29 @@ impl Imports {
     }
 }
 
+// Keep the two typed specialization constants on their existing route.
+fn boxed_opcode(name: &str) -> bool {
+    use crate::modules::{Binding, Intrinsic, IntrinsicModule};
+    matches!(
+        IntrinsicModule::Opcode.symbol(name),
+        Some(Binding::Intrinsic(Intrinsic::ObjectRuntimeExport(_)))
+    )
+}
+
 fn boxed_sys_export(name: &str) -> bool {
     matches!(
         name,
-        "path" | "modules" | "version_info" | "implementation" | "exit" | "exc_info" | "exception"
+        "path"
+            | "meta_path"
+            | "path_hooks"
+            | "path_importer_cache"
+            | "modules"
+            | "_xoptions"
+            | "version_info"
+            | "implementation"
+            | "exit"
+            | "exc_info"
+            | "exception"
     )
 }
 
@@ -140,6 +173,10 @@ fn boxed_signal_export(module: &str, name: &str) -> bool {
     )
 }
 
+fn boxed_hashlib_kdf(name: &str) -> bool {
+    matches!(name, "pbkdf2_hmac" | "scrypt")
+}
+
 fn boxed_unittest_cleanup(name: &str) -> bool {
     matches!(
         name,
@@ -151,6 +188,16 @@ fn boxed_operator(name: &str) -> bool {
     matches!(
         name,
         "attrgetter"
+            | "__lt__"
+            | "__le__"
+            | "__eq__"
+            | "__ne__"
+            | "__ge__"
+            | "__gt__"
+            | "__and__"
+            | "__or__"
+            | "__sub__"
+            | "__xor__"
             | "itemgetter"
             | "lt"
             | "le"
@@ -208,6 +255,8 @@ impl<'a> Visitor<'a> for Imports {
                     match name {
                         "sys" => self.sys_names.insert(bound.to_string()),
                         "operator" => self.operator_names.insert(bound.to_string()),
+                        "_opcode" => self.opcode_names.insert(bound.to_string()),
+                        "hashlib" => self.hashlib_names.insert(bound.to_string()),
                         "signal" | "_signal" if cfg!(unix) => self
                             .signal_names
                             .insert(bound.to_string(), name.to_owned())
@@ -228,9 +277,18 @@ impl<'a> Visitor<'a> for Imports {
                     let suffix = a.name.as_str();
                     if imp.level == 0
                         && (name == "unittest" && boxed_unittest_cleanup(suffix)
+                            || name == "hashlib" && (boxed_hashlib_kdf(suffix) || suffix == "*")
+                            || name == "weakref" && suffix == "finalize"
                             || boxed_signal_export(name, suffix))
                     {
                         self.runtime_imports = true;
+                    }
+                    if imp.level == 0
+                        && name == "unittest.mock"
+                        && crate::modules::boxed_mock_export(suffix)
+                    {
+                        self.boxed_mock_names
+                            .insert(a.asname.as_ref().unwrap_or(&a.name).to_string());
                     }
                     if imp.level == 0 && name == "pkgutil" && suffix == "get_data" {
                         self.get_data_names
@@ -243,8 +301,10 @@ impl<'a> Visitor<'a> for Imports {
                     }
                     if imp.level == 0
                         && ((name == "operator" && boxed_operator(suffix))
+                            || (name == "_opcode" && (boxed_opcode(suffix) || suffix == "*"))
                             || (name == "sys" && boxed_sys_export(suffix))
-                            || (name == "string" && suffix == "templatelib"))
+                            || (name == "string" && suffix == "templatelib")
+                            || (name == "pathlib" && matches!(suffix, "_local" | "types")))
                     {
                         self.runtime_imports = true;
                     }
@@ -261,7 +321,16 @@ impl<'a> Visitor<'a> for Imports {
                 }
             }
             Stmt::ClassDef(class)
-                if class.type_params.is_some() || crate::classes::defines_pickle_reducer(class) =>
+                if class.type_params.is_some()
+                    || crate::classes::defines_pickle_reducer(class)
+                    || class.arguments.as_ref().is_some_and(|arguments| {
+                        arguments.keywords.iter().any(|keyword| {
+                            keyword
+                                .arg
+                                .as_deref()
+                                .is_some_and(|name| name != "metaclass")
+                        })
+                    }) =>
             {
                 self.runtime_imports = true;
             }
@@ -274,9 +343,16 @@ impl<'a> Visitor<'a> for Imports {
         visitor::walk_stmt(self, s);
     }
     fn visit_expr(&mut self, e: &'a Expr) {
-        if matches!(e, Expr::Name(n) if n.id == "__import__" && n.ctx == ast::ExprContext::Load) {
-            self.uses_import_builtin = true;
-            self.add(0, "importlib");
+        if let Expr::Name(name) = e
+            && name.ctx == ast::ExprContext::Load
+        {
+            if name.id == "__import__" {
+                self.uses_import_builtin = true;
+                self.add(0, "importlib");
+            }
+            if self.boxed_mock_names.contains(name.id.as_str()) {
+                self.runtime_imports = true;
+            }
         }
         // A resource lookup can be the first operation to load its package.
         if let Expr::Call(call) = e
@@ -317,6 +393,10 @@ impl<'a> Visitor<'a> for Imports {
             && let Expr::Name(module) = &*attr.value
             && ((boxed_operator(attr.attr.as_str())
                 && self.operator_names.contains(module.id.as_str()))
+                || (boxed_hashlib_kdf(attr.attr.as_str())
+                    && self.hashlib_names.contains(module.id.as_str()))
+                || (boxed_opcode(attr.attr.as_str())
+                    && self.opcode_names.contains(module.id.as_str()))
                 || self
                     .signal_names
                     .get(module.id.as_str())
@@ -326,7 +406,7 @@ impl<'a> Visitor<'a> for Imports {
         {
             self.runtime_imports = true;
         }
-        if matches!(e, Expr::Attribute(a) if matches!(a.attr.as_str(), "__reduce__" | "__reduce_ex__"))
+        if matches!(e, Expr::Attribute(a) if matches!(a.attr.as_str(), "__reduce__" | "__reduce_ex__" | "__getstate__" | "__getinitargs__"))
             || matches!(e, Expr::Name(n) if n.id.as_str() == "SystemExit")
             || matches!(e, Expr::Attribute(a) if boxed_sys_export(a.attr.as_str()) && matches!(&*a.value, Expr::Name(n) if self.sys_names.contains(n.id.as_str())))
         {
@@ -397,7 +477,11 @@ pub(crate) fn compile(
     let invocation = options.command.as_ref();
     let startup = options.python_startup();
     let command = invocation.map(|i| &i.source);
-    let src = if let Some(command) = command {
+    let module_entry = options.module_entry.as_deref();
+    let in_memory = command.is_some() || module_entry.is_some();
+    let src = if module_entry.is_some() {
+        String::new()
+    } else if let Some(command) = command {
         command.to_owned()
     } else {
         let Ok(source) = std::fs::read_to_string(path) else {
@@ -408,15 +492,26 @@ pub(crate) fn compile(
     // An ordinary entry can import a package that uses the object runtime without
     // accessing sys.path or installation metadata in the entry itself.
     if !runtime_imports
+        && !(startup.is_some() && (src.contains("urllib") || src.contains("ftplib")))
+        && !(src.contains("class") && src.contains('='))
         && !(cfg!(unix) && src.contains("signal"))
         && ![
             "__future__",
+            "hashlib",
             "_imp",
+            "atexit",
+            "faulthandler",
+            "code",
+            "weakref",
+            "pathlib",
             "sys",
             "platform",
             "keyword",
             "site",
             "importlib",
+            "runpy",
+            "json",
+            "opcode",
             "operator",
             "struct",
             "traceback",
@@ -424,6 +519,8 @@ pub(crate) fn compile(
             "SystemExit",
             "__import__",
             "__reduce",
+            "__getstate__",
+            "__getinitargs__",
             "templatelib",
         ]
         .iter()
@@ -431,34 +528,55 @@ pub(crate) fn compile(
     {
         return Ok(None);
     }
-    let mut first = match imports(
+    let Ok(mut first) = imports(
         &src,
         if command.is_some() {
             SourceKind::Command
         } else {
             SourceKind::File
         },
-    ) {
-        // A checked operation can require the object ABI even in a file without imports.
-        Ok(i)
-            if i.runtime_imports
-                || operation.is_some()
-                || (runtime_imports && !i.names.is_empty()) =>
-        {
-            i
-        }
-        // Closed file builds still require a statically resolved import graph.
-        Ok(i) if i.uses_import_builtin && (startup.is_some() || options.runtime_imports) => i,
-        _ => return Ok(None),
+    ) else {
+        return Ok(None);
     };
+    // Python scripts load the URL opener and FTP client as boxed modules.
+    let imports_transport = |transport: &str| {
+        startup.is_some()
+            && !options.runtime_imports
+            && first
+                .names
+                .iter()
+                .any(|(level, name)| *level == 0 && name == transport)
+    };
+    let request_script = imports_transport("urllib.request");
+    let ftp_script = imports_transport("ftplib");
+    let transport_script = request_script || ftp_script;
+    if !(module_entry.is_some()
+        || first.runtime_imports
+        || operation.is_some()
+        || (runtime_imports && !first.names.is_empty())
+        || (first.uses_import_builtin && (startup.is_some() || options.runtime_imports))
+        || transport_script)
+    {
+        return Ok(None);
+    }
+    if let Some(name) = module_entry {
+        first.add(0, "runpy");
+        // Register source candidates without interpreting a module operand as a filesystem path.
+        // runpy and the normal finder decide which one can actually execute.
+        if name.split('.').all(|part| {
+            !part.is_empty() && Path::new(part).file_name().is_some_and(|file| file == part)
+        }) {
+            first.add(0, name);
+            first.add(0, &format!("{name}.__main__"));
+        }
+    }
     first
         .names
         .extend(registered_imports.targets.into_iter().map(|name| (0, name)));
     let cwd = std::env::current_dir().map_err(|e| e.to_string())?;
     let isolated = startup.is_some_and(|(flags, _)| flags.isolated);
     let entry = cwd.join(path);
-    let entry_identity = command
-        .is_none()
+    let entry_identity = (!in_memory)
         .then(|| entry.canonicalize())
         .transpose()
         .map_err(|e| e.to_string())?;
@@ -493,7 +611,7 @@ pub(crate) fn compile(
     let bundled_root = "<imre stdlib>";
     let mut sources = vec![(
         "__main__".to_owned(),
-        if command.is_some() {
+        if in_memory {
             PathBuf::from("<string>")
         } else {
             entry
@@ -509,11 +627,42 @@ pub(crate) fn compile(
         ));
     }
     let mut seen = HashSet::new();
+    // Keep source hints on the winning regular package's path. The runtime finder
+    // can still load a different child if a parent changes its __path__.
+    let mut entry_sources: HashMap<String, Option<PathBuf>> = HashMap::new();
     let mut frozen_imports = Imports::default();
     let mut work = VecDeque::from([("__main__".to_owned(), false, first)]);
-    while let Some((owner, package, imports)) = work.pop_front() {
-        if !options.runtime_imports
+    let mut late_pprint = false;
+    let mut bundled_only = false;
+    loop {
+        let (owner, package, imports) = if let Some(next) = work.pop_front() {
+            next
+        } else {
+            // Collect late imports and their bundled dependencies after the explicit
+            // file graph, without parsing unrelated modules in project directories.
+            let mut imports = Imports::default();
+            if late_pprint && !seen.contains("pprint") {
+                imports.names.push((0, "pprint".to_owned()));
+            }
+            // Python 3.13 path pickles name this module even when the reader never imports pathlib.
+            if (seen.contains("pickle") || seen.contains("pathlib"))
+                && !seen.contains("pathlib._local")
+            {
+                imports.names.push((0, "pathlib._local".to_owned()));
+            }
+            if seen.contains("pathlib") && !seen.contains("pathlib.types") {
+                imports.names.push((0, "pathlib.types".to_owned()));
+            }
+            if imports.names.is_empty() {
+                break;
+            }
+            bundled_only = true;
+            (String::new(), false, imports)
+        };
+        if module_entry.is_none()
+            && !options.runtime_imports
             && !registered_imports.called
+            && (!transport_script || owner == "__main__")
             && imports.needs_typed_machinery()
             // Enforce the checked-file machinery contract on the original graph.
             // A module discovered only by boxed imports has no typed layout to preserve.
@@ -526,8 +675,14 @@ pub(crate) fn compile(
             return Ok(None);
         }
         let mut names = imports.names;
+        if owner == "importlib" {
+            // Filesystem modules can import the loader protocols through either public module.
+            names.push((0, "importlib.abc".to_owned()));
+            names.push((0, "importlib.util".to_owned()));
+        }
         // A late import of native pickle also needs its bundled reader and dependencies.
         if imports.uses_import_builtin {
+            late_pprint = true;
             names.push((0, "pickle".to_owned()));
         }
         // Importing array registers its type with MutableSequence. A runtime
@@ -538,6 +693,13 @@ pub(crate) fn compile(
             })
         {
             names.push((0, "_collections_abc".to_owned()));
+        }
+        // The native string scanner imports the decoder's exception on a syntax error.
+        if names
+            .iter()
+            .any(|(level, name)| *level == 0 && name == "_json")
+        {
+            names.push((0, "json.decoder".to_owned()));
         }
         for (level, requested) in names {
             let Some(name) = resolve(&owner, package, level, &requested) else {
@@ -593,7 +755,20 @@ pub(crate) fn compile(
                     sources.push((prefix.clone(), path, source.to_owned()));
                     work.push_back((prefix.clone(), package, imports));
                 }
+                if bundled_only {
+                    continue;
+                }
+                // The interpreter bootstraps runpy from its frozen copy before executing the target.
+                if prefix == "runpy" {
+                    continue;
+                }
                 for root in &roots {
+                    if let Some((parent, _)) = prefix.rsplit_once('.')
+                        && let Some(selected) = entry_sources.get(parent)
+                        && selected.as_ref() != Some(root)
+                    {
+                        continue;
+                    }
                     let stem = root.join(prefix.replace('.', "/"));
                     let file = stem.with_extension("py");
                     let init = stem.join("__init__.py");
@@ -615,6 +790,13 @@ pub(crate) fn compile(
                         }
                         continue;
                     };
+                    // Bundled transports cannot stand in for earlier project modules.
+                    if initial.contains(root)
+                        && ((request_script && prefix == "urllib")
+                            || (ftp_script && prefix == "ftplib"))
+                    {
+                        return Ok(None);
+                    }
                     let src = std::fs::read_to_string(&path)
                         .map_err(|e| format!("{}: {e}", path.display()))?;
                     let imports = imports_for_module(&path, &src)?;
@@ -625,6 +807,10 @@ pub(crate) fn compile(
                     ));
                     sources.push((prefix.clone(), path, src));
                     work.push_back((prefix.clone(), package, imports));
+                    if module_entry.is_some() {
+                        entry_sources.insert(prefix.clone(), package.then(|| root.clone()));
+                        break;
+                    }
                 }
             }
         }
@@ -653,24 +839,41 @@ pub(crate) fn compile(
         Path::new(bundled_root).join("io.py"),
         include_str!("../../stdlib/io.py").into(),
     ));
-    // The fixed list has only native dependencies and may be selected by name at runtime.
+    // These modules and their dependencies must be available when selected by name at runtime.
     for name in [
         "__future__",
         "__hello__",
+        "_frozen_importlib",
+        "_frozen_importlib_external",
+        "_opcode_metadata",
         "_tokenize",
         "abc",
+        "annotationlib",
         "ast",
+        "code",
         "codecs",
+        "codeop",
         "copyreg",
+        "datetime",
+        "encodings",
+        "enum",
         "genericpath",
         "hashlib",
         "itertools",
+        "json",
+        "json.decoder",
+        "json.encoder",
+        "json.scanner",
+        "opcode",
         "platform",
         "re",
         "signal",
         "stat",
         "string",
         "string.templatelib",
+        "subprocess",
+        "token",
+        "types",
         "zipimport",
     ]
     .into_iter()
@@ -700,14 +903,21 @@ pub(crate) fn compile(
         "context_aware_warnings":startup.map(|(flags, _)| flags.context_aware_warnings),
         "utf8_mode":startup.and_then(|(flags, _)| flags.utf8_mode),
         "warnoptions":startup.map(|(flags, _)| &flags.warnoptions),
+        "xoptions":startup.map(|(flags, _)| &flags.xoptions),
+        "faulthandler":startup.map(|(flags, _)| flags.faulthandler),
         "warn_default_encoding":startup.map(|(flags, _)| flags.warn_default_encoding),
         "optimize":startup.map_or(0, |(flags, _)| flags.optimize),
         "dont_write_bytecode":startup.is_some_and(|(flags, _)| flags.dont_write_bytecode),
         "executable":startup.map(|(_, executable)| executable),
-        "command":command.is_some(),"paths":paths,
+        "command":in_memory,"module_entry":module_entry,"paths":paths,
     });
     check_returns()?;
-    let llvm_ir = emit::emit(&sources, &config.to_string(), keep_docstrings)?;
+    let llvm_ir = emit::emit(
+        &sources,
+        &config.to_string(),
+        keep_docstrings,
+        Path::new(bundled_root),
+    )?;
     Ok(Some(Compilation {
         llvm_ir,
         input_paths: inputs.files.iter().map(|(p, _, _)| p.clone()).collect(),

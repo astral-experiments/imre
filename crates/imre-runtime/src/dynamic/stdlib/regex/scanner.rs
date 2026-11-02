@@ -43,7 +43,7 @@ pub(in crate::dynamic::stdlib) fn scanner_next(
     let retry_match = retry
         && match split::nonempty(&re, text, start, &mut caps) {
             Ok(found) => found,
-            Err(message) => return Err(pattern_error(ctx, re.source, re.flags, message)),
+            Err(message) => return Err(re.match_error(ctx, message)),
         }
         && group_spans(&caps)
             .next()
@@ -56,14 +56,16 @@ pub(in crate::dynamic::stdlib) fn scanner_next(
                 start += 1;
             }
         }
-        re.regex.captures(
-            Input::new(text).range(start..end).anchored(if anchored {
-                Anchored::Yes
-            } else {
-                Anchored::No
-            }),
-            &mut caps,
-        );
+        re.regex
+            .captures(
+                Input::new(text).range(start..end).anchored(if anchored {
+                    Anchored::Yes
+                } else {
+                    Anchored::No
+                }),
+                &mut caps,
+            )
+            .map_err(|message| re.match_error(ctx, message))?;
     } else if !retry_match {
         caps.set_pattern(None);
     }
@@ -119,12 +121,13 @@ pub(super) fn compile_lexicon(ctx: &mut Context, lexicon: Id, flags: Option<Id>)
         // The Python translator validates the phrase before alternation. Passing
         // raw source to the backend can change token priority (e.g. x$|z) or
         // interpret Python literals inside a set as Rust class operations.
-        let parsed = imre_regex::translate_pattern(
+        let parsed = imre_regex::translate_pattern_with_line_mode(
             ctx.str_value(phrase)?,
             flags & VERBOSE != 0,
             super::alphabet(false, ascii, flags),
             flags & DOTALL != 0,
             flags & IGNORECASE == 0 || ascii,
+            flags & MULTILINE != 0,
         )
         .map_err(|message| {
             if syntax_diagnostic(ctx, phrase, flags).is_some() {
@@ -142,20 +145,12 @@ pub(super) fn compile_lexicon(ctx: &mut Context, lexicon: Id, flags: Option<Id>)
                 "scanner phrases with captures are unsupported",
             ));
         }
-        let mut source = parsed.source;
+        let source = parsed.source;
         if source.ends_with(imre_regex::FINAL_NEWLINE_ANCHOR) {
-            if flags & MULTILINE == 0 {
-                return Err(Error::new(
-                    "NotImplementedError",
-                    "terminal dollar in scanner phrases is unsupported",
-                ));
-            }
-            source.truncate(source.len() - imre_regex::FINAL_NEWLINE_ANCHOR.len());
-            source.push('$');
-        }
-        if flags & IGNORECASE != 0 {
-            source = casefold::expand(&source, ascii)
-                .map_err(|message| pattern_error(ctx, phrase, flags, message))?;
+            return Err(Error::new(
+                "NotImplementedError",
+                "terminal dollar in scanner phrases is unsupported",
+            ));
         }
         branches.push(format!("({source})"));
     }
@@ -163,13 +158,14 @@ pub(super) fn compile_lexicon(ctx: &mut Context, lexicon: Id, flags: Option<Id>)
         return Err(Error::new("RuntimeError", "invalid SRE code"));
     }
     let source = branches.join("|");
-    let regex =
-        build_regex(&source, false, effective).map_err(|e| Error::new("re.PatternError", e))?;
+    let regex = build_regex(&source, false, effective, &[])
+        .map_err(|e| Error::new("re.PatternError", e))?;
     Ok(ctx.alloc(Value::RegexPattern(Rc::new(Pattern {
         source: NONE,
         flags,
         bytes: false,
         engine_source: source,
+        assertions: Vec::new(),
         regex,
         full: OnceCell::new(),
         split_retry: OnceCell::new(),

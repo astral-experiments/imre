@@ -8,6 +8,19 @@ def current():
 
     first = monotonic()
     assert type(first) is float and time.monotonic is monotonic
+    sleep = time.sleep
+    assert sleep(0) is None
+    before_sleep = monotonic()
+    assert sleep(0.01) is None
+    assert monotonic() - before_sleep >= 0.009
+    for arg, expected in ((-1, ValueError), (None, TypeError), (10**50, OverflowError)):
+        try:
+            sleep(arg)
+        except expected:
+            pass
+        else:
+            raise AssertionError("invalid sleep duration accepted")
+
     second = perf_counter()
     assert first <= second <= monotonic()
     select([], [], [], 0.02)

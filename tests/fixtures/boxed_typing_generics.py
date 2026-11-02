@@ -1,6 +1,9 @@
 from sys import path
 from types import GenericAlias
 import typing as t
+
+rendered_spec = t.ParamSpec("P")
+assert repr((rendered_spec, rendered_spec.args, rendered_spec.kwargs)) == "(~P, P.args, P.kwargs)"
 from typing import BinaryIO, KT, TextIO, VT
 from typing import T as typing_T
 
@@ -217,6 +220,19 @@ for base in (K, t.TypeVar):
         print(str(error))
 
 
+class Subscription:
+    def __class_getitem__(cls, item):
+        return cls, item
+
+
+class InheritedSubscription(Subscription):
+    pass
+
+
+assert isinstance(Subscription.__dict__["__class_getitem__"], classmethod)
+assert InheritedSubscription[int] == (InheritedSubscription, int)
+
+
 class Parameterize:
     def __get__(self, instance, owner):
         def bind(args):
@@ -314,3 +330,18 @@ class Hidden[__P]:
 
 
 assert Hidden.value is Hidden.__type_params__[0] and Hidden.value.__name__ == "__P"
+
+
+P = t.ParamSpec("P", bound="Hidden", default=(int, str))
+assert P.__module__ == __name__ and P.__bound__.__forward_arg__ == "Hidden"
+assert P.has_default() and P.__default__ == (int, str)
+assert P.args.__origin__ is P and P.kwargs.__origin__ is P
+assert P.args == t.ParamSpecArgs(P) and P.kwargs == t.ParamSpecKwargs(P)
+assert P.args is not P.args and P.args != P.kwargs
+assert P != t.ParamSpec("P") and repr(P.args) == "P.args"
+try:
+    P.args.__origin__ = None
+except AttributeError as error:
+    assert str(error) == "readonly attribute"
+else:
+    raise AssertionError("ParamSpecArgs origin was writable")

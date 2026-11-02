@@ -127,8 +127,19 @@ impl Context {
         self.bind(scope, "__module__", module);
         let qualname = self.text("ABCMeta");
         self.bind(scope, "__qualname__", qualname);
+        let callable = self.builtin("abc.ABCMeta.__new__");
+        let dictionary = self.dict(Vec::new());
+        let new = self.alloc(Value::StaticMethod {
+            callable,
+            dictionary,
+        });
+        self.bind(scope, "__new__", new);
         let register = self.builtin("abc.register");
         self.bind(scope, "register", register);
+        for name in ["__instancecheck__", "__subclasscheck__"] {
+            let check = self.builtin(&format!("abc.{name}"));
+            self.bind(scope, name, check);
+        }
         let base = self.builtin("type");
         let meta = self
             .allocate_class("ABCMeta".into(), scope, vec![base])
@@ -137,10 +148,13 @@ impl Context {
         meta
     }
 
+    pub(super) fn is_abc_metaclass(&self, class: Id) -> bool {
+        self.builtins
+            .get("abc.ABCMeta")
+            .is_some_and(|&abc| self.direct_subclass(class, abc))
+    }
+
     pub(super) fn is_bundled_abc(&self, class: Id) -> bool {
-        let Some(&abc_meta) = self.builtins.get("abc.ABCMeta") else {
-            return false;
-        };
         let Value::Class {
             metaclass,
             ancestors,
@@ -149,12 +163,10 @@ impl Context {
         else {
             return false;
         };
-        *metaclass == Some(abc_meta)
-            // Protocol uses a synthetic layout, but an inherited ABC still supplies
-            // subclass hooks and registration even when Protocol wins metaclass selection.
+        metaclass.is_some_and(|meta| self.is_abc_metaclass(meta))
+            // Protocol's synthetic layout still inherits ABCMeta's hooks and registry.
             || (metaclass.is_none()
-                && self.classes.get("typing.Protocol").is_some_and(|p| ancestors.contains(p))
-                && ancestors.iter().any(|&base| self.heap.get(base).instance_class() == Some(abc_meta)))
+                && self.classes.get("typing.Protocol").is_some_and(|p| ancestors.contains(p)))
     }
 
     /// Only ABC classes use a Python subclass hook for public instance and subclass checks.
@@ -206,7 +218,10 @@ impl Context {
         {
             return Ok(());
         }
-        let mut names: BTreeSet<String> = self.scope_data(scope).names.keys().cloned().collect();
+        let mut names: BTreeSet<String> = self
+            .scope_bindings(scope)
+            .map(|(name, _)| name.to_owned())
+            .collect();
         let bases = self
             .scope_data(scope)
             .class_namespace

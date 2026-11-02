@@ -493,6 +493,12 @@ impl Default for ChildAttributes {
     }
 }
 
+const DEFAULT_SHELL: &std::ffi::CStr = if cfg!(target_os = "android") {
+    c"/system/bin/sh"
+} else {
+    c"/bin/sh"
+};
+
 struct Launch {
     argv: CStrings,
     executable: Option<CString>,
@@ -505,20 +511,28 @@ impl Launch {
     /// Prepares native launch data after validating nonempty argv and env names.
     #[cfg(test)]
     fn new(argv: Vec<CString>, env: Option<StringPairs>) -> Result<Self> {
-        Self::with_executable(argv, env.map(CStrings::from_environment).transpose()?, None)
+        Self::with_executable(
+            argv,
+            env.map(CStrings::from_environment).transpose()?,
+            None,
+            None,
+        )
     }
 
     fn with_executable(
         argv: Vec<CString>,
         env: Option<CStrings>,
         executable: Option<CString>,
+        search_path: Option<&[u8]>,
     ) -> Result<Self> {
         let program = executable.as_ref().unwrap_or_else(|| &argv[0]);
         let search = if program.as_bytes().contains(&b'/') {
             None
         } else {
             let inherited;
-            let path = if let Some(env) = &env {
+            let path = if search_path.is_some() {
+                search_path
+            } else if let Some(env) = &env {
                 env.strings
                     .iter()
                     .find_map(|entry| entry.to_bytes().strip_prefix(b"PATH="))
@@ -1100,7 +1114,7 @@ unsafe fn prepare_process(
     let (launch, cwd, _) = unsafe {
         let cmd = WordKind::new(5).acquire(args as usize);
         validate_command_shape(&cmd, &config)?;
-        prepare_command(&cmd, &config, None, || Ok(ChildAttributes::default()))?
+        prepare_command(&cmd, &config, None, None, || Ok(ChildAttributes::default()))?
     };
     Ok((launch, cwd))
 }
@@ -1146,6 +1160,7 @@ unsafe fn prepare_command(
     cmd: &OwnedWord,
     config: &popen::LaunchConfig,
     byte_env: Option<ByteEnvironment>,
+    search_path: Option<&[u8]>,
     child_attributes: impl FnOnce() -> Result<ChildAttributes>,
 ) -> Result<(Launch, Option<CString>, ChildAttributes)> {
     // SAFETY: the caller roots the exact argv, optional directory and environment.
@@ -1177,15 +1192,10 @@ unsafe fn prepare_command(
         let executable = argv::optional_path(config.executable, config.executable_kind)?;
         let mut argv = argv::copy(cmd)?;
         if config.shell {
-            let default = if cfg!(target_os = "android") {
-                c"/system/bin/sh"
-            } else {
-                c"/bin/sh"
-            };
             let shell = executable
                 .as_deref()
                 .filter(|p| !p.to_bytes().is_empty())
-                .unwrap_or(default);
+                .unwrap_or(DEFAULT_SHELL);
             argv.try_reserve(2).map_err(|_| Error::allocation())?;
             argv.splice(..0, [shell.to_owned(), c"-c".to_owned()]);
         }
@@ -1197,7 +1207,7 @@ unsafe fn prepare_command(
             None => env.map(CStrings::from_environment).transpose()?,
         };
         Ok((
-            Launch::with_executable(argv, env, executable)?,
+            Launch::with_executable(argv, env, executable, search_path)?,
             cwd,
             attributes,
         ))

@@ -121,19 +121,26 @@ impl Array {
         self.bytes.as_slice()
     }
 
+    /// Detach a copied array before mutating its fixed-size native representation.
+    pub(super) fn as_bytes_mut(&mut self) -> Result<&mut [u8]> {
+        Ok(self.writable_bytes(0)?.as_mut_slice())
+    }
+
+    pub(super) fn view_layout(&self) -> (&'static str, usize) {
+        (self.format.code(), self.format.width())
+    }
+
     pub(super) fn len(&self) -> usize {
         self.bytes.len() / self.format.width()
     }
 
-    /// Compare one-dimensional buffer values across formats, independently of element width.
-    pub(super) fn equals_unsigned_bytes(&self, bytes: &[u8]) -> bool {
-        self.format != Format::Wide
-            && self.len() == bytes.len()
-            && bytes.iter().enumerate().all(|(i, &byte)| match self.at(i) {
-                Ok(Value::Int(value)) => value.as_small() == Some(i64::from(byte)),
-                Ok(Value::Float(value)) => value == f64::from(byte),
-                _ => false,
-            })
+    // Every supported integral element fits exactly in a double.
+    pub(super) fn numeric_item(&self, i: usize) -> Option<f64> {
+        match self.at(i).ok()? {
+            Value::Int(n) => n.as_small().map(|n| n as f64),
+            Value::Float(f) => Some(f),
+            _ => None,
+        }
     }
 
     pub(super) fn at(&self, index: usize) -> Result<Value> {
@@ -196,15 +203,16 @@ fn append_item(ctx: &mut Context, receiver: Id, item: Id) -> Result<()> {
     let format = array.format;
     let offset = array.bytes.len();
     format.encode(ctx, item)?;
-    if ctx.buffer_exports.contains(&receiver) {
+    let end = offset
+        .checked_add(format.width())
+        .ok_or_else(|| Error::new("MemoryError", ""))?;
+    // __index__ may already have grown the array to the requested size.
+    if array_mut(ctx, receiver).bytes.len() != end && ctx.buffer_is_exported(receiver)? {
         return Err(Error::new(
             "BufferError",
             "cannot resize an array that is exporting buffers",
         ));
     }
-    let end = offset
-        .checked_add(format.width())
-        .ok_or_else(|| Error::new("MemoryError", ""))?;
     let array = array_mut(ctx, receiver);
     let additional = end.saturating_sub(array.bytes.len());
     array.writable_bytes(additional)?.resize(end, 0);

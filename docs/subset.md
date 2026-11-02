@@ -441,8 +441,13 @@ greedy or lazy repetition. `\s` and `\S` use Python's Unicode whitespace.
 Verbose patterns ignore ASCII layout and comments outside character classes.
 Use `\A` or `^` for the start and `\Z` or `\z` for the strict end of the
 string. A terminal `$` also matches just before a final newline.
-The checker rejects dynamic patterns, bytes, additional flags,
-backreferences, lookaround, interior `$`, word shorthands, and repetitions
+Supported literal text lookaheads and fixed-width lookbehinds use the boxed matcher.
+Lookbehind alternatives must consume the same number of characters, and
+references inside a lookbehind can only use captures closed before it. Case-sensitive patterns on this path can
+refer to a closed capture by number or name. A conditional can also test
+a numbered capture defined later in the pattern.
+The fixed matcher rejects dynamic patterns, bytes, additional flags,
+backreferences, lookbehind, interior `$`, word shorthands, and repetitions
 whose capture or empty-match behavior falls outside this dialect.
 
 ## Bounded unions and codec primitives

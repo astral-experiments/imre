@@ -16,6 +16,23 @@ pub(crate) fn credential_arity(name: &str) -> usize {
 }
 
 pub(super) fn symbol(name: &str) -> Option<Intrinsic> {
+    #[cfg(target_os = "linux")]
+    {
+        let policy = match name {
+            "SCHED_OTHER" => Some(libc::SCHED_OTHER),
+            "SCHED_NORMAL" => Some(libc::SCHED_NORMAL),
+            "SCHED_FIFO" => Some(libc::SCHED_FIFO),
+            "SCHED_RR" => Some(libc::SCHED_RR),
+            "SCHED_BATCH" => Some(libc::SCHED_BATCH),
+            "SCHED_IDLE" => Some(libc::SCHED_IDLE),
+            "SCHED_DEADLINE" => Some(libc::SCHED_DEADLINE),
+            "SCHED_RESET_ON_FORK" => Some(libc::SCHED_RESET_ON_FORK),
+            _ => None,
+        };
+        if let Some(policy) = policy {
+            return Some(Intrinsic::IntConstant(i64::from(policy)));
+        }
+    }
     if cfg!(unix) {
         let common = [
             "getuid", "geteuid", "getgid", "getegid", "setuid", "seteuid", "setgid", "setegid",
@@ -30,15 +47,39 @@ pub(super) fn symbol(name: &str) -> Option<Intrinsic> {
             return Some(Intrinsic::Credential(known));
         }
     }
+    #[cfg(all(target_os = "linux", any(target_env = "gnu", target_env = "musl")))]
+    if name.starts_with("RTLD_") {
+        let flag = match name {
+            "RTLD_LAZY" => libc::RTLD_LAZY,
+            "RTLD_NOW" => libc::RTLD_NOW,
+            "RTLD_GLOBAL" => libc::RTLD_GLOBAL,
+            "RTLD_LOCAL" => libc::RTLD_LOCAL,
+            "RTLD_NODELETE" => libc::RTLD_NODELETE,
+            "RTLD_NOLOAD" => libc::RTLD_NOLOAD,
+            #[cfg(target_env = "gnu")]
+            "RTLD_DEEPBIND" => libc::RTLD_DEEPBIND,
+            _ => return None,
+        };
+        return Some(Intrinsic::IntConstant(i64::from(flag)));
+    }
     Some(match name {
         "access" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.access"),
         "urandom" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.urandom"),
         "utime" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.utime"),
+        "chdir" if cfg!(unix) => Intrinsic::Chdir,
         "chmod" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.chmod"),
+        "fchmod" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.fchmod"),
         "mkdir" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.mkdir"),
         "mkfifo" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.mkfifo"),
+        "sched_param" if cfg!(target_os = "linux") => {
+            Intrinsic::ObjectRuntimeExport("posix.sched_param")
+        }
+        "sched_getscheduler" if cfg!(target_os = "linux") => {
+            Intrinsic::ObjectRuntimeExport("posix.sched_getscheduler")
+        }
         "sendfile" if cfg!(target_os = "linux") => Intrinsic::ObjectRuntimeExport("posix.sendfile"),
         "readlink" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.readlink"),
+        "getsid" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.getsid"),
         "waitpid" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.waitpid"),
         "WNOHANG" if cfg!(unix) => Intrinsic::DescriptorConstant("wnohang"),
         "getpid" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.getpid"),
@@ -50,16 +91,24 @@ pub(super) fn symbol(name: &str) -> Option<Intrinsic> {
         }
         "strerror" => Intrinsic::Strerror,
         "stat_result" => Intrinsic::StatResult,
+        "statvfs" if cfg!(target_os = "linux") => Intrinsic::ObjectRuntimeExport("posix.statvfs"),
+        "fstatvfs" if cfg!(target_os = "linux") => Intrinsic::ObjectRuntimeExport("posix.fstatvfs"),
+        "statvfs_result" if cfg!(target_os = "linux") => {
+            Intrinsic::ObjectRuntimeExport("os.statvfs_result")
+        }
         "terminal_size" => Intrinsic::ObjectRuntimeExport("os.terminal_size"),
         "close" => Intrinsic::Fd(FdOperation::Close),
         "read" => Intrinsic::Fd(FdOperation::Read),
         "write" => Intrinsic::Fd(FdOperation::Write),
         "open" => Intrinsic::Fd(FdOperation::Open),
         "unlink" => Intrinsic::Fd(FdOperation::Unlink),
+        "rename" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.rename"),
+        "replace" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.replace"),
         "link" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.link"),
         "symlink" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.symlink"),
         "remove" => Intrinsic::Fd(FdOperation::Remove),
         "lseek" => Intrinsic::Fd(FdOperation::Seek),
+        "ftruncate" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.ftruncate"),
         "O_RDONLY" => Intrinsic::DescriptorConstant("o_rdonly"),
         "O_WRONLY" => Intrinsic::DescriptorConstant("o_wronly"),
         "O_RDWR" => Intrinsic::DescriptorConstant("o_rdwr"),
@@ -71,6 +120,7 @@ pub(super) fn symbol(name: &str) -> Option<Intrinsic> {
         "O_DIRECTORY" => Intrinsic::DescriptorConstant("o_directory"),
         "O_NOFOLLOW" => Intrinsic::DescriptorConstant("o_nofollow"),
         "O_NONBLOCK" => Intrinsic::DescriptorConstant("o_nonblock"),
+        "O_TMPFILE" if cfg!(target_os = "linux") => Intrinsic::DescriptorConstant("o_tmpfile"),
         "SEEK_SET" => Intrinsic::DescriptorConstant("seek_set"),
         "SEEK_CUR" => Intrinsic::DescriptorConstant("seek_cur"),
         "SEEK_END" => Intrinsic::DescriptorConstant("seek_end"),

@@ -169,6 +169,11 @@ def current():
 
     backing = {"code": 7}
     view = field(metadata=backing).metadata
+    from types import MappingProxyType
+    assert type(view) is MappingProxyType
+    assert MappingProxyType(mapping=backing) == view
+    import re
+    assert MappingProxyType(re.match('x', 'x'))[0] == 'x'
     assert view == {"code": 7} and {"code": 7} == view
     backing["code"] = 9
     assert view != {"code": 7} and view["code"] == 9

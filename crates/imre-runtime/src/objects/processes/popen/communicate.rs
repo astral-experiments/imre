@@ -400,7 +400,7 @@ fn deadline_capture_drains_both_full_pipes_before_expiry() {
     let mut ready = [0];
     std::fs::File::from(stdout).read_exact(&mut ready).unwrap();
     assert_eq!(ready, [b'!']);
-    let result = child.communicate(&[], Some(&Deadline::Float(1.0)), false);
+    let result = child.communicate(&[], Some(&Deadline::Float(1.0)), false, selector::current());
     assert!(child.signal(|| Ok(libc::SIGKILL)).is_ok());
     assert!(child.close_wait().is_ok());
     let Ok(Exchange::Timeout([Some(stdout), Some(stderr)], None)) = result else {

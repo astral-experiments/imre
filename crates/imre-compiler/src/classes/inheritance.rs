@@ -30,6 +30,10 @@ pub(super) fn resolve(
         let mut base: Option<usize> = None;
         if let Some(args) = &node.arguments {
             for argument in &args.args {
+                if graph.is_protocol_base(definition.module, argument) {
+                    graph.needs_object_runtime.set(true);
+                    return Err(module.error(argument, "Protocol bases require object lowering"));
+                }
                 if mapping_base(graph, definition.module, argument)
                     || (args.args.len() == 1
                         && graph
@@ -48,8 +52,14 @@ pub(super) fn resolve(
                     other => other,
                 };
                 match graph.resolve(definition.module, origin) {
+                    Some(Binding::Intrinsic(Intrinsic::PICKLER)) => {
+                        graph.needs_object_runtime.set(true);
+                        return Err(
+                            module.error(argument, "pickle.Pickler requires object lowering")
+                        );
+                    }
                     Some(Binding::Intrinsic(Intrinsic::ObjectRuntimeExport(
-                        "codecs.IncrementalDecoder",
+                        "codecs.IncrementalDecoder" | "codecs.CodecInfo",
                     ))) => {
                         graph.needs_object_runtime.set(true);
                         return Err(
@@ -62,7 +72,15 @@ pub(super) fn resolve(
                         | Intrinsic::BUFFERED_IO_BASE
                         | Intrinsic::TEXT_IO_BASE
                         | Intrinsic::ObjectRuntimeExport(
-                            "_io._IOBase"
+                            "io.BufferedReader"
+                            | "_io.BufferedReader"
+                            | "io.BufferedRandom"
+                            | "_io.BufferedRandom"
+                            | "io.BufferedWriter"
+                            | "_io.BufferedWriter"
+                            | "io.BufferedRWPair"
+                            | "_io.BufferedRWPair"
+                            | "_io._IOBase"
                             | "_io._RawIOBase"
                             | "_io._BufferedIOBase"
                             | "_io._TextIOBase",

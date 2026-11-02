@@ -56,7 +56,31 @@ def current():
         else:
             raise AssertionError("suffix mismatch succeeded")
     assert tail.calls == ["match", "miss"]
+    not_ends = case.assertNotEndsWith
+    assert not_ends("prefix:end", "prefix") is None
+    assert not_ends("prefix:end", ()) is None
+    assert not_ends(bytearray(b"prefix:end"), (b"prefix", b"miss")) is None
+    assert case.assertNotStartsWith("prefix:end", "end") is None
+    for check, value, affix, expected in (
+        (not_ends, tail, "match", "<tail> ends with 'match'"),
+        (not_ends, "abc", ("x", "bc", "c", 3), "'abc' ends with 'bc'"),
+        (not_ends, b"abc", "c", "Expected str, not bytes"),
+        (not_ends, "abc", (b"c",), "Expected bytes, not str"),
+        (not_ends, [], "c", "Expected str, not list"),
+        (case.assertNotStartsWith, "abc", ("x", "ab", "a"), "'abc' starts with 'ab'"),
+    ):
+        with case.assertRaises(Failure) as caught:
+            check(value, affix, msg="detail")
+        assert str(caught.exception) == expected + " : detail", str(caught.exception)
+    with case.assertRaises(TypeError) as caught:
+        not_ends("abc", 4)
+    assert str(caught.exception) == "endswith first arg must be str or a tuple of str, not int"
+
     case.longMessage = False
+    marker = ["custom message"]
+    with case.assertRaises(Failure) as caught:
+        not_ends("abc", "c", marker)
+    assert caught.exception.args[0] is marker
     try:
         case.assertEndsWith("abc", "x", "override")
     except Failure as error:

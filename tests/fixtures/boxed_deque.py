@@ -1,4 +1,5 @@
 from collections import deque
+from types import MappingProxyType
 
 
 def current():
@@ -6,6 +7,37 @@ def current():
     queue = deque((item for item in (marker, "middle", 3)))
     assert type(queue) is deque and isinstance(queue, deque)
     assert deque.__module__ == "collections"
+    namespace = deque.__dict__
+    assert type(namespace) is MappingProxyType and namespace is not deque.__dict__
+    assert "__name__" not in namespace and "__str__" not in namespace
+    for name in ("__repr__", "__contains__", "append", "__module__"):
+        assert namespace[name] is getattr(deque, name)
+    assert namespace["__repr__"].__objclass__ is deque
+    assert namespace["__contains__"](queue, marker)
+    for name in ("__len__", "append", "__copy__", "__reversed__"):
+        descriptor = namespace[name]
+        assert descriptor.__objclass__ is deque and descriptor.__qualname__ == "deque." + name
+        assert descriptor.__get__(None, deque) is descriptor
+        bound = descriptor.__get__(queue)
+        assert bound.__self__ is queue and bound.__qualname__ == descriptor.__qualname__
+        if name == "__len__":
+            assert type(descriptor).__name__ == "wrapper_descriptor"
+            assert type(bound).__name__ == "method-wrapper" and bound() == 3
+        else:
+            assert type(descriptor).__name__ == "method_descriptor"
+            assert type(bound).__name__ == "builtin_function_or_method"
+        try:
+            descriptor.__get__([])
+        except TypeError as error:
+            assert name in str(error)
+        else:
+            raise AssertionError("bound deque descriptor to a list")
+    try:
+        namespace["append"] = None
+    except TypeError:
+        assert namespace["append"] is deque.append
+    else:
+        raise AssertionError("writable deque namespace")
     assert queue and len(queue) == 3
     assert queue.popleft() is marker and queue.pop() == 3
     assert tuple(queue) == ("middle",) and list(queue) == ["middle"]
@@ -213,4 +245,27 @@ def current():
     assert alias.clear() is None and not alias and alias.maxlen == 3
     alias.append(marker)
     assert alias.__init__(alias) is None and not alias and alias.maxlen is None
+    describe = deque.__repr__
+    assert type(describe).__name__ == "wrapper_descriptor" and describe.__objclass__ is deque
+    assert describe.__doc__ == "Return repr(self)." and describe.__text_signature__ == "($self, /)"
+    assert describe(deque()) == "deque([])"
+    recursive = deque(["tag"], maxlen=2)
+    recursive.append(recursive)
+    assert repr(recursive) == recursive.__repr__() == describe(recursive) == "deque(['tag', [...]], maxlen=2)"
+
+    class ClearsOnRepr:
+        def __repr__(self):
+            recursive.clear()
+            return "cleared"
+
+    recursive.extend([ClearsOnRepr(), "last"])
+    assert describe(recursive) == "deque([cleared, 'last'], maxlen=2)"
+    assert not recursive
+    try:
+        describe([])
+    except TypeError as error:
+        assert str(error) == "descriptor '__repr__' requires a 'collections.deque' object but received a 'list'"
+    else:
+        raise AssertionError("deque repr accepted a list")
+
     print("deque passed")

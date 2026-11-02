@@ -1,9 +1,13 @@
-//! Real-number decomposition and integer rounding for boxed math callables.
+//! Real-number and integer operations for boxed math callables.
+
+use num_bigint::BigInt;
+use num_integer::Integer;
+use num_traits::One;
 
 use super::{Context, Error, Id, Result, Value};
 use crate::dynamic::builtins;
 
-/// These functions share the positional-only, single-argument math calling convention.
+/// Dispatch the positional-only boxed math functions.
 pub(super) fn call(
     ctx: &mut Context,
     operation: &str,
@@ -16,6 +20,16 @@ pub(super) fn call(
             format!("math.{operation}() takes no keyword arguments"),
         ));
     }
+    if operation == "gcd" {
+        let mut gcd = BigInt::default();
+        for &arg in args {
+            let integer = ctx.index_integer(arg)?;
+            if !gcd.is_one() {
+                gcd = gcd.gcd(&integer.big());
+            }
+        }
+        return Ok(ctx.alloc(Value::Int(crate::Int::new(gcd))));
+    }
     let &[value] = args else {
         return Err(Error::new(
             "TypeError",
@@ -25,6 +39,19 @@ pub(super) fn call(
             ),
         ));
     };
+    if operation == "isqrt" {
+        let n = ctx.index_integer(value)?;
+        if n.big().sign() == num_bigint::Sign::Minus {
+            return Err(Error::new(
+                "ValueError",
+                "isqrt() argument must be nonnegative",
+            ));
+        }
+        return Ok(ctx.alloc(Value::Int(crate::Int::new(n.big().sqrt()))));
+    }
+    if operation == "isnan" {
+        return Ok(builtins::boolean(as_double(ctx, value)?.is_nan()));
+    }
     if operation == "modf" {
         return modf(ctx, value);
     }
@@ -75,11 +102,10 @@ pub(super) fn call(
     ))))
 }
 
-/// Split at the integer toward zero, preserving the sign and payload of either nonfinite case.
-fn modf(ctx: &mut Context, value: Id) -> Result<Id> {
-    // PyFloat_AsDouble reads the stored double of a float subclass without calling its override.
-    let x = match *ctx.heap.get(ctx.scalar_value(value)) {
-        Value::Float(x) => x,
+/// Read a float subclass's stored double before trying the numeric conversion protocol.
+fn as_double(ctx: &mut Context, value: Id) -> Result<f64> {
+    match *ctx.heap.get(ctx.scalar_value(value)) {
+        Value::Float(x) => Ok(x),
         _ => {
             let converted = builtins::from_numeric(ctx, value)?.ok_or_else(|| {
                 let name = ctx.type_name(value);
@@ -89,9 +115,14 @@ fn modf(ctx: &mut Context, value: Id) -> Result<Id> {
             let Value::Float(x) = *ctx.heap.get(converted) else {
                 unreachable!()
             };
-            x
+            Ok(x)
         }
-    };
+    }
+}
+
+/// Split at the integer toward zero, preserving the sign and payload of either nonfinite case.
+fn modf(ctx: &mut Context, value: Id) -> Result<Id> {
+    let x = as_double(ctx, value)?;
     let (fraction, integral) = if x.is_nan() {
         (x, x)
     } else if x.is_infinite() {

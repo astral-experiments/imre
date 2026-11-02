@@ -1,0 +1,43 @@
+product	revision	mode	profile	state	build_exit	build_timeout	import_ok	registered	ran	passed	skipped	failed	errors	other	subtests_seen	returncode	run_timeout	complete	raw_ran	raw_footer	detail
+cpython	5607950ef232dad16d75c0cf53101d9649d89115	reference	full-module-class	class-completed			1	15	15	15	0	0	0	0	3	0	0	1	Ran 15 tests in 0.002s	OK	-
+cpython	5607950ef232dad16d75c0cf53101d9649d89115	reference	isolated-class	class-completed			1	15	15	15	0	0	0	0	3	0	0	1	Ran 15 tests in 0.001s	OK	-
+cpython	5607950ef232dad16d75c0cf53101d9649d89115	reference	repr-positive	control-matched												0	0				LITERAL_CONTROL typing.Literal[0, False]
+cpython	5607950ef232dad16d75c0cf53101d9649d89115	reference	repr-wrong	control-matched												1	0				AssertionError: ('literal.repr', 'typing.Literal[0, False]', 'typing.Literal[0]')
+cpython	5607950ef232dad16d75c0cf53101d9649d89115	reference	dir-positive	control-matched												0	0				LITERAL_DIR (True, True, True)
+cpython	5607950ef232dad16d75c0cf53101d9649d89115	reference	dir-wrong	control-matched												1	0				AssertionError: ('literal.dir', (True, True, True), (True, True, False))
+base	d172f0924e55464677f57d3cfa5d056939862248	boxed-O0	full-module-class	import-error	0	0	0	0								1	0	0			ImportError: cannot import name 'reveal_type' from 'typing' (<imre stdlib>/typing.py)
+base	d172f0924e55464677f57d3cfa5d056939862248	boxed-O0	isolated-class	class-completed	0	0	1	15	15	14	0	0	1	0	0	1	0	1	Ran 15 tests in 2.487s	FAILED (errors=1)	NotImplementedError: dir() cannot enumerate the native namespace of '_LiteralGenericAlias'
+base	d172f0924e55464677f57d3cfa5d056939862248	boxed-O0	repr-positive	control-matched	0	0										0	0				LITERAL_CONTROL typing.Literal[0, False]
+base	d172f0924e55464677f57d3cfa5d056939862248	boxed-O0	repr-wrong	control-matched	0	0										1	0				AssertionError: ('literal.repr', 'typing.Literal[0, False]', 'typing.Literal[0]')
+base	d172f0924e55464677f57d3cfa5d056939862248	boxed-O0	dir-positive	control-mismatch	0	0										1	0				NotImplementedError: dir() cannot enumerate the native namespace of '_LiteralGenericAlias'
+base	d172f0924e55464677f57d3cfa5d056939862248	boxed-O0	dir-wrong	control-mismatch	0	0										1	0				NotImplementedError: dir() cannot enumerate the native namespace of '_LiteralGenericAlias'
+base	d172f0924e55464677f57d3cfa5d056939862248	boxed-O3	full-module-class	import-error	0	0	0	0								1	0	0			ImportError: cannot import name 'reveal_type' from 'typing' (<imre stdlib>/typing.py)
+base	d172f0924e55464677f57d3cfa5d056939862248	boxed-O3	isolated-class	class-completed	0	0	1	15	15	14	0	0	1	0	0	1	0	1	Ran 15 tests in 3.072s	FAILED (errors=1)	NotImplementedError: dir() cannot enumerate the native namespace of '_LiteralGenericAlias'
+base	d172f0924e55464677f57d3cfa5d056939862248	boxed-O3	repr-positive	control-matched	0	0										0	0				LITERAL_CONTROL typing.Literal[0, False]
+base	d172f0924e55464677f57d3cfa5d056939862248	boxed-O3	repr-wrong	control-matched	0	0										1	0				AssertionError: ('literal.repr', 'typing.Literal[0, False]', 'typing.Literal[0]')
+base	d172f0924e55464677f57d3cfa5d056939862248	boxed-O3	dir-positive	control-mismatch	0	0										1	0				NotImplementedError: dir() cannot enumerate the native namespace of '_LiteralGenericAlias'
+base	d172f0924e55464677f57d3cfa5d056939862248	boxed-O3	dir-wrong	control-mismatch	0	0										1	0				NotImplementedError: dir() cannot enumerate the native namespace of '_LiteralGenericAlias'
+candidate	aaad9b9b8f7715deae1d309c0053f904ba6a73af	boxed-O0	full-module-class	not-run																	-
+candidate	aaad9b9b8f7715deae1d309c0053f904ba6a73af	boxed-O0	isolated-class	class-completed	0	0	1	15	15	15	0	0	0	0	3	0	0	1	Ran 15 tests in 2.801s	OK	-
+candidate	aaad9b9b8f7715deae1d309c0053f904ba6a73af	boxed-O0	repr-positive	control-matched	0	0										0	0				LITERAL_CONTROL typing.Literal[0, False]
+candidate	aaad9b9b8f7715deae1d309c0053f904ba6a73af	boxed-O0	repr-wrong	control-matched	0	0										1	0				AssertionError: ('literal.repr', 'typing.Literal[0, False]', 'typing.Literal[0]')
+candidate	aaad9b9b8f7715deae1d309c0053f904ba6a73af	boxed-O0	dir-positive	control-matched	0	0										0	0				LITERAL_DIR (True, True, True)
+candidate	aaad9b9b8f7715deae1d309c0053f904ba6a73af	boxed-O0	dir-wrong	control-matched	0	0										1	0				AssertionError: ('literal.dir', (True, True, True), (True, True, False))
+candidate	aaad9b9b8f7715deae1d309c0053f904ba6a73af	boxed-O3	full-module-class	not-run																	-
+candidate	aaad9b9b8f7715deae1d309c0053f904ba6a73af	boxed-O3	isolated-class	class-completed	0	0	1	15	15	15	0	0	0	0	3	0	0	1	Ran 15 tests in 1.518s	OK	-
+candidate	aaad9b9b8f7715deae1d309c0053f904ba6a73af	boxed-O3	repr-positive	control-matched	0	0										0	0				LITERAL_CONTROL typing.Literal[0, False]
+candidate	aaad9b9b8f7715deae1d309c0053f904ba6a73af	boxed-O3	repr-wrong	control-matched	0	0										1	0				AssertionError: ('literal.repr', 'typing.Literal[0, False]', 'typing.Literal[0]')
+candidate	aaad9b9b8f7715deae1d309c0053f904ba6a73af	boxed-O3	dir-positive	control-matched	0	0										0	0				LITERAL_DIR (True, True, True)
+candidate	aaad9b9b8f7715deae1d309c0053f904ba6a73af	boxed-O3	dir-wrong	control-matched	0	0										1	0				AssertionError: ('literal.dir', (True, True, True), (True, True, False))
+merged	e3ff3e595bcd5dc0a92048b18e49885d77fb0ee4	boxed-O0	full-module-class	import-error	0	0	0	0								1	0	0			ImportError: cannot import name 'reveal_type' from 'typing' (<imre stdlib>/typing.py)
+merged	e3ff3e595bcd5dc0a92048b18e49885d77fb0ee4	boxed-O0	isolated-class	class-completed	0	0	1	15	15	15	0	0	0	0	3	0	0	1	Ran 15 tests in 2.461s	OK	-
+merged	e3ff3e595bcd5dc0a92048b18e49885d77fb0ee4	boxed-O0	repr-positive	control-matched	0	0										0	0				LITERAL_CONTROL typing.Literal[0, False]
+merged	e3ff3e595bcd5dc0a92048b18e49885d77fb0ee4	boxed-O0	repr-wrong	control-matched	0	0										1	0				AssertionError: ('literal.repr', 'typing.Literal[0, False]', 'typing.Literal[0]')
+merged	e3ff3e595bcd5dc0a92048b18e49885d77fb0ee4	boxed-O0	dir-positive	control-matched	0	0										0	0				LITERAL_DIR (True, True, True)
+merged	e3ff3e595bcd5dc0a92048b18e49885d77fb0ee4	boxed-O0	dir-wrong	control-matched	0	0										1	0				AssertionError: ('literal.dir', (True, True, True), (True, True, False))
+merged	e3ff3e595bcd5dc0a92048b18e49885d77fb0ee4	boxed-O3	full-module-class	import-error	0	0	0	0								1	0	0			ImportError: cannot import name 'reveal_type' from 'typing' (<imre stdlib>/typing.py)
+merged	e3ff3e595bcd5dc0a92048b18e49885d77fb0ee4	boxed-O3	isolated-class	class-completed	0	0	1	15	15	15	0	0	0	0	3	0	0	1	Ran 15 tests in 2.260s	OK	-
+merged	e3ff3e595bcd5dc0a92048b18e49885d77fb0ee4	boxed-O3	repr-positive	control-matched	0	0										0	0				LITERAL_CONTROL typing.Literal[0, False]
+merged	e3ff3e595bcd5dc0a92048b18e49885d77fb0ee4	boxed-O3	repr-wrong	control-matched	0	0										1	0				AssertionError: ('literal.repr', 'typing.Literal[0, False]', 'typing.Literal[0]')
+merged	e3ff3e595bcd5dc0a92048b18e49885d77fb0ee4	boxed-O3	dir-positive	control-matched	0	0										0	0				LITERAL_DIR (True, True, True)
+merged	e3ff3e595bcd5dc0a92048b18e49885d77fb0ee4	boxed-O3	dir-wrong	control-matched	0	0										1	0				AssertionError: ('literal.dir', (True, True, True), (True, True, False))

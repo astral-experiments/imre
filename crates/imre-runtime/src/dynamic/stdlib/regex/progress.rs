@@ -1,5 +1,6 @@
 //! Compile the no-progress check used by Python's nullable repetitions into the NFA.
 //! Matching can then use the ordinary priority-ordered Pike VM, including for captures.
+use super::assertions::{Guard, Kind};
 use std::cell::RefCell;
 use std::collections::HashMap;
 
@@ -11,7 +12,9 @@ use regex_syntax::hir::{Capture, Hir, HirKind, Repetition};
 
 pub(super) enum Matcher {
     Standard(Regex),
+    Lookahead(Box<super::lookahead::Lookahead>),
     Guarded(Box<GuardedMatcher>),
+    Asserted(Box<AssertedMatcher>),
 }
 
 pub(super) struct GuardedMatcher {
@@ -19,22 +22,90 @@ pub(super) struct GuardedMatcher {
     cache: RefCell<pikevm::Cache>,
 }
 
+pub(super) struct AssertedMatcher {
+    nfa: NFA,
+    groups: GroupInfo,
+    slots: Vec<AssertionSlot>,
+}
+
+/// Internal capture instructions can also mark a zero-width assertion.
+pub(super) enum AssertionSlot {
+    Public(usize),
+    Guard(Guard),
+    Ignore,
+}
+
+impl AssertedMatcher {
+    fn new(nfa: NFA, guards: &[(String, Guard)]) -> Result<Self, String> {
+        let guards: HashMap<_, _> = guards
+            .iter()
+            .map(|(name, re)| (name.as_str(), re))
+            .collect();
+        let mut names = Vec::new();
+        let mut slots = Vec::new();
+        for name in nfa.group_info().pattern_names(PatternID::ZERO) {
+            if let Some(guard) = name.and_then(|name| guards.get(name)) {
+                if guard.kind == Kind::NegativeBehind {
+                    // A successful negative guard leaves its captures unset. Reserve the
+                    // public group numbers without mapping any NFA slots to those groups.
+                    names.extend(
+                        guard
+                            .regex
+                            .group_info()
+                            .pattern_names(PatternID::ZERO)
+                            .skip(1),
+                    );
+                }
+                slots.push(AssertionSlot::Guard((**guard).clone()));
+                slots.push(AssertionSlot::Ignore);
+            } else {
+                // Single-pattern NFAs have two consecutive slots per group, including group zero.
+                let start = names.len() * 2;
+                slots.push(AssertionSlot::Public(start));
+                slots.push(AssertionSlot::Public(start + 1));
+                names.push(name);
+            }
+        }
+        let groups = GroupInfo::new([names]).map_err(|err| err.to_string())?;
+        Ok(Self { nfa, slots, groups })
+    }
+}
+
 impl Matcher {
     /// Keep the usual matcher unless another optional iteration could start at the same offset.
-    pub(super) fn new(regex: Regex, hir: Hir, utf8: bool) -> Result<Self, String> {
-        if !needs_guard(&hir) {
+    pub(super) fn new(
+        regex: Regex,
+        hir: Hir,
+        utf8: bool,
+        assertions: &[(String, Guard)],
+    ) -> Result<Self, String> {
+        let progress = needs_guard(&hir);
+        if !progress && assertions.is_empty() {
             return Ok(Self::Standard(regex));
         }
-        let info = regex.group_info();
-        let mut next_marker = info.group_len(PatternID::ZERO) as u32;
         let size_limit = Regex::config().get_nfa_size_limit();
-        let mut budget = size_limit.unwrap_or(usize::MAX);
-        let marked = mark_repetitions(hir, &mut next_marker, &mut budget)?;
-        let source = NFA::compiler()
-            .configure(NFA::config().utf8(utf8).nfa_size_limit(size_limit))
-            .build_from_hir(&marked)
-            .map_err(|err| err.to_string())?;
-        let nfa = ProgressGraph::build(&source, info, size_limit).map_err(|err| err.to_string())?;
+        let config = NFA::config().utf8(utf8).nfa_size_limit(size_limit);
+        let nfa = if progress {
+            let info = regex.group_info();
+            let mut next_marker = info.group_len(PatternID::ZERO) as u32;
+            let mut budget = size_limit.unwrap_or(usize::MAX);
+            let marked = mark_repetitions(hir, &mut next_marker, &mut budget)?;
+            let source = NFA::compiler()
+                .configure(config)
+                .build_from_hir(&marked)
+                .map_err(|err| err.to_string())?;
+            ProgressGraph::build(&source, info, size_limit).map_err(|err| err.to_string())?
+        } else {
+            NFA::compiler()
+                .configure(config)
+                .build_from_hir(&hir)
+                .map_err(|err| err.to_string())?
+        };
+        if !assertions.is_empty() {
+            return Ok(Self::Asserted(Box::new(AssertedMatcher::new(
+                nfa, assertions,
+            )?)));
+        }
         let vm = pikevm::PikeVM::new_from_nfa(nfa).map_err(|err| err.to_string())?;
         let cache = RefCell::new(vm.create_cache());
         Ok(Self::Guarded(Box::new(GuardedMatcher { vm, cache })))
@@ -43,7 +114,7 @@ impl Matcher {
     /// Share the progress-aware automaton with the nonempty retry used by split and findall.
     pub(super) fn guarded_nfa(&self) -> Option<&NFA> {
         match self {
-            Self::Standard(_) => None,
+            Self::Standard(_) | Self::Asserted(_) | Self::Lookahead(_) => None,
             Self::Guarded(matcher) => Some(matcher.vm.get_nfa()),
         }
     }
@@ -52,6 +123,8 @@ impl Matcher {
     pub(super) fn group_info(&self) -> &GroupInfo {
         match self {
             Self::Standard(regex) => regex.group_info(),
+            Self::Asserted(matcher) => &matcher.groups,
+            Self::Lookahead(matcher) => &matcher.groups,
             Self::Guarded(matcher) => matcher.vm.get_nfa().group_info(),
         }
     }
@@ -61,16 +134,40 @@ impl Matcher {
         Captures::all(self.group_info().clone())
     }
 
+    /// Run the search directly when a zero-width instruction depends on the subject.
+    pub(super) fn asserted_search(
+        &self,
+        input: Input<'_>,
+        captures: &mut Captures,
+        nonempty: bool,
+    ) -> Result<Option<bool>, String> {
+        let found = match self {
+            Self::Asserted(matcher) => {
+                super::split::search_nfa(&matcher.nfa, &matcher.slots, input, captures, nonempty)
+            }
+            Self::Lookahead(matcher) => {
+                matcher.captures(input, nonempty, captures)?;
+                captures.is_match()
+            }
+            _ => return Ok(None),
+        };
+        Ok(Some(found))
+    }
+
     /// Store the preferred match and its capture spans for this search range.
-    pub(super) fn captures(&self, input: Input<'_>, captures: &mut Captures) {
+    pub(super) fn captures(&self, input: Input<'_>, captures: &mut Captures) -> Result<(), String> {
         match self {
             Self::Standard(regex) => regex.captures(input, captures),
+            Self::Asserted(_) | Self::Lookahead(_) => {
+                return self.asserted_search(input, captures, false).map(|_| ());
+            }
             Self::Guarded(matcher) => {
                 matcher
                     .vm
                     .captures(&mut matcher.cache.borrow_mut(), input, captures)
             }
         }
+        Ok(())
     }
 }
 

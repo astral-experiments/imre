@@ -49,6 +49,8 @@ const RESOLVER_NAMES: &[&str] = &[
     "gethostbyname",
     "gethostbyaddr",
     "getnameinfo",
+    "getservbyname",
+    "getservbyport",
     "if_nameindex",
     "if_nametoindex",
     "if_indextoname",
@@ -568,6 +570,90 @@ pub(super) fn getaddrinfo(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)
     Ok(ctx.alloc(Value::List(result)))
 }
 
+/// Parse a PyArg "s" argument as strict UTF-8 without calling str subclass methods.
+fn service_text(
+    ctx: &mut Context,
+    name: &str,
+    index: usize,
+    value: Id,
+) -> Result<std::ffi::CString> {
+    let storage = ctx.string_storage(value).ok_or_else(|| {
+        let ty = if value == NONE {
+            "None"
+        } else {
+            ctx.type_name(value)
+        };
+        Error::new(
+            "TypeError",
+            format!("{name}() argument {index} must be str, not {ty}"),
+        )
+    })?;
+    let text = match ctx.heap.get(storage) {
+        Value::Str(text) => std::ffi::CString::new(text.as_bytes()),
+        _ => std::ffi::CString::new(ctx.encode_utf8_codepoints(value, false, "strict")?),
+    };
+    text.map_err(|_| Error::new("ValueError", "embedded null character"))
+}
+
+fn lookup_service(
+    ctx: &mut Context,
+    name: &str,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Id> {
+    if !kwargs.is_empty() {
+        return Err(Error::new(
+            "TypeError",
+            format!("{name}() takes no keyword arguments"),
+        ));
+    }
+    if !(1..=2).contains(&args.len()) {
+        let bound = if args.is_empty() {
+            "at least 1 argument"
+        } else {
+            "at most 2 arguments"
+        };
+        return Err(Error::new(
+            "TypeError",
+            format!("{name}() takes {bound} ({} given)", args.len()),
+        ));
+    }
+    enum Query {
+        Name(std::ffi::CString),
+        Port(i32),
+    }
+    let query = if name == "getservbyname" {
+        Query::Name(service_text(ctx, name, 1, args[0])?)
+    } else {
+        Query::Port(ctx.index_c_int(args[0])?)
+    };
+    // Parse the optional protocol before checking the converted port's 16-bit range.
+    let proto = args
+        .get(1)
+        .map(|&v| service_text(ctx, name, 2, v))
+        .transpose()?;
+    let audit_proto = proto
+        .as_ref()
+        .map_or(NONE, |s| ctx.text(s.to_str().expect("parsed UTF-8")));
+    match query {
+        Query::Name(service) => {
+            let audit_name = ctx.text(service.to_str().expect("parsed UTF-8"));
+            super::audit::event(ctx, "socket.getservbyname", &[audit_name, audit_proto])?;
+            Ok(ctx.int(i64::from(native::service_by_name(
+                &service,
+                proto.as_deref(),
+            )?)))
+        }
+        Query::Port(port) => {
+            let port = u16::try_from(port)
+                .map_err(|_| Error::new("OverflowError", "getservbyport: port must be 0-65535."))?;
+            let audit_port = ctx.int(i64::from(port));
+            super::audit::event(ctx, "socket.getservbyport", &[audit_port, audit_proto])?;
+            Ok(ctx.text(native::service_by_port(port, proto.as_deref())?))
+        }
+    }
+}
+
 fn getnameinfo(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
     if !kwargs.is_empty() {
         return Err(Error::new(
@@ -715,6 +801,7 @@ pub(super) fn call(
         }
         "getaddrinfo" => return public_getaddrinfo(ctx, args, kwargs),
         "getnameinfo" => return getnameinfo(ctx, args, kwargs),
+        "getservbyname" | "getservbyport" => return lookup_service(ctx, name, args, kwargs),
         "gethostname" => {
             check_args(name, args, kwargs, 0, &[])?;
             super::audit::event(ctx, "socket.gethostname", args)?;
@@ -765,38 +852,77 @@ pub(super) fn call(
         return getsockopt(ctx, &s, args, kwargs);
     }
     if method == "makefile" {
-        check_args(method, args, kwargs, 2, &["mode", "buffering"])?;
-        let binary_reader = if let Some(mode) = option(args, 0, kwargs, "mode")? {
-            let storage = ctx
-                .string_storage(mode)
-                .ok_or_else(|| Error::new("TypeError", "expected str"))?;
-            match ctx.heap.get(storage) {
-                Value::Str(text) if text.bytes().all(|c| matches!(c, b'r' | b'w' | b'b')) => {
-                    text == "rb"
-                }
-                _ => {
-                    let repr = ctx.repr(mode);
-                    return Err(Error::new(
-                        "ValueError",
-                        format!("invalid mode {repr} (only r, w, b allowed)"),
-                    ));
-                }
+        check_args(
+            method,
+            args,
+            kwargs,
+            2,
+            &["mode", "buffering", "encoding", "errors", "newline"],
+        )?;
+        let mode = option(args, 0, kwargs, "mode")?.unwrap_or_else(|| ctx.text("r"));
+        let storage = ctx
+            .string_storage(mode)
+            .ok_or_else(|| Error::new("TypeError", "expected str"))?;
+        let text = match ctx.heap.get(storage) {
+            Value::Str(text) if text.bytes().all(|c| matches!(c, b'r' | b'w' | b'b')) => text,
+            _ => {
+                return Err(Error::new(
+                    "ValueError",
+                    format!("invalid mode {} (only r, w, b allowed)", ctx.repr(mode)),
+                ));
             }
-        } else {
-            false
         };
-        let buffering = int_option(ctx, args, kwargs, 1, "buffering", -1)?;
-        if !binary_reader || buffering != -1 {
+        let binary = text.contains('b');
+        let write = text.contains('w');
+        let buffering = match option(args, 1, kwargs, "buffering")? {
+            None | Some(NONE) => -1,
+            Some(value) => integer(ctx, value)?,
+        };
+        if !binary && buffering == 0 {
             return Err(Error::new(
-                "NotImplementedError",
-                "socket.makefile supports the default buffered binary reader",
+                "ValueError",
+                "unbuffered streams must be binary",
             ));
         }
+        if write || buffering >= 0 {
+            return Err(Error::new(
+                "NotImplementedError",
+                "socket.makefile supports default buffered readers",
+            ));
+        }
+        let wrapper = if binary {
+            None
+        } else {
+            let io = ctx.module("io")?;
+            Some(ctx.lookup_attr(io, "TextIOWrapper")?)
+        };
+        let roots = ctx.heap.temporary_mark();
         let reader = super::ReadSource::Socket(native::SocketInput::try_new(s)?);
-        return Ok(ctx.alloc(super::BinaryFile::reader(reader, None).into_value()?));
+        let buffer = ctx.alloc(super::BinaryFile::reader(reader, None).into_value()?);
+        let Some(cls) = wrapper else {
+            return Ok(buffer);
+        };
+        let encoding = option(&[], 0, kwargs, "encoding")?.unwrap_or(NONE);
+        let errors = option(&[], 0, kwargs, "errors")?.unwrap_or(NONE);
+        let newline = option(&[], 0, kwargs, "newline")?.unwrap_or(NONE);
+        let args = vec![buffer, encoding, errors, newline];
+        return ctx
+            .call(cls, args, Vec::new())
+            .and_then(|text| {
+                ctx.set_attr(text, "mode", mode)?;
+                Ok(text)
+            })
+            .inspect_err(|error| {
+                // A replacement text factory can retain the socket reader before raising.
+                ctx.heap.release_temporaries_since(roots);
+                for root in error.roots() {
+                    ctx.heap.keep(root);
+                }
+                ctx.collect_unreachable();
+            });
     }
     let max = match method {
-        "bind" | "connect" | "listen" | "setblocking" | "shutdown" => 1,
+        "bind" | "connect" | "listen" | "setblocking" | "settimeout" | "shutdown" => 1,
         "recv" | "send" | "sendall" => 2,
         "setsockopt" | "__exit__" | "recv_into" => 3,
         _ => 0,
@@ -836,6 +962,30 @@ pub(super) fn call(
             };
         }
         "setblocking" => native::set_blocking_mode(&s, ctx.as_integer(argument(args, 0)?)? != 0)?,
+        "gettimeout" => {
+            return Ok(native::get_timeout(&s).map_or(NONE, |duration| {
+                ctx.alloc(Value::Float(duration.as_secs_f64()))
+            }));
+        }
+        "settimeout" => {
+            let value = argument(args, 0)?;
+            let timeout = super::select::timeout(ctx, Some(&value), false).map_err(|error| {
+                if error.kind == "ValueError" && error.message == "timeout must be non-negative" {
+                    Error::new("ValueError", "Timeout value out of range")
+                } else if error.kind == "TypeError" {
+                    Error::new(
+                        "TypeError",
+                        format!(
+                            "'{}' object cannot be interpreted as an integer or float",
+                            ctx.type_name(value)
+                        ),
+                    )
+                } else {
+                    error
+                }
+            })?;
+            native::set_timeout(&s, timeout)?;
+        }
         "getblocking" => {
             return Ok(if native::imre_socket_getblocking(&s) {
                 super::TRUE
@@ -886,7 +1036,7 @@ pub(super) fn call(
             };
             let flags = int_option(ctx, args, kwargs, 1, "flags", 0)?;
             if method == "send" {
-                return Ok(ctx.int(native::send(native::fd(&s), bytes, flags)? as i64));
+                return Ok(ctx.int(native::send(&s, bytes, flags)? as i64));
             }
             native::send_all(&s, bytes, flags)?;
         }

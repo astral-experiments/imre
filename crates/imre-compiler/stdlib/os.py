@@ -2,10 +2,24 @@
 import abc
 import sys
 import posixpath as path
+import stat as st
 from _collections_abc import _check_methods
-from _collections_abc import MutableMapping as _MutableMapping
+from _collections_abc import Mapping as _Mapping, MutableMapping as _MutableMapping
 from posix import access, environ as _environ, fspath, getcwd, getcwdb, listdir, mkdir, putenv, read, scandir, terminal_size, unsetenv, waitpid, write, WNOHANG
 from types import GenericAlias
+from posix import O_NONBLOCK, O_RDONLY, chdir, close, open, stat
+
+if sys.platform == "linux":
+    import posix as _posix
+    for _name in vars(_posix):
+        if _name.startswith("RTLD_"):
+            globals()[_name] = getattr(_posix, _name)
+    del _name, _posix
+    from posix import O_TMPFILE, fstatvfs, statvfs, statvfs_result
+    from posix import (
+        sched_getscheduler, sched_param, SCHED_BATCH, SCHED_DEADLINE, SCHED_FIFO, SCHED_IDLE,
+        SCHED_NORMAL, SCHED_OTHER, SCHED_RESET_ON_FORK, SCHED_RR,
+    )
 
 
 curdir = path.curdir
@@ -13,6 +27,16 @@ extsep = path.extsep
 
 
 # From CPython 3.14.5, Lib/os.py. See stdlib/docstrings/LICENSE.
+def fdopen(fd, mode="r", buffering=-1, encoding=None, *args, **kwargs):
+    if not isinstance(fd, int):
+        raise TypeError("invalid fd type (%s, expected integer)" % type(fd))
+    import io
+    if "b" not in mode:
+        encoding = io.text_encoding(encoding)
+    return io.open(fd, mode, buffering, encoding, *args, **kwargs)
+
+
+
 _walk_symlinks_as_files = object()
 
 
@@ -204,6 +228,42 @@ def fsdecode(filename):
 
 
 # From CPython 3.14.5, Lib/os.py. See stdlib/docstrings/LICENSE.
+def _fspath(path):
+    """Return the path representation of a path-like object.
+
+    If str or bytes is passed in, it is returned unchanged. Otherwise the
+    os.PathLike interface is used to get the path representation. If the
+    path representation is not str or bytes, TypeError is raised. If the
+    provided path is not str, bytes, or os.PathLike, TypeError is raised.
+    """
+    if isinstance(path, (str, bytes)):
+        return path
+
+    # Work from the object's type to match method resolution of other magic
+    # methods.
+    path_type = type(path)
+    try:
+        path_repr = path_type.__fspath__(path)
+    except AttributeError:
+        if hasattr(path_type, '__fspath__'):
+            raise
+        else:
+            raise TypeError("expected str, bytes or os.PathLike object, "
+                            "not " + path_type.__name__)
+    except TypeError:
+        if path_type.__fspath__ is None:
+            raise TypeError("expected str, bytes or os.PathLike object, "
+                            "not " + path_type.__name__) from None
+        else:
+            raise
+    if isinstance(path_repr, (str, bytes)):
+        return path_repr
+    else:
+        raise TypeError("expected {}.__fspath__() to return str or bytes, "
+                        "not {}".format(path_type.__name__,
+                                        type(path_repr).__name__))
+
+
 class PathLike(abc.ABC):
 
     """Abstract base class for implementing the file system path protocol."""
@@ -224,31 +284,46 @@ class PathLike(abc.ABC):
     __class_getitem__ = classmethod(GenericAlias)
 
 
+_env_encoding = sys.getfilesystemencoding()
+
+
 def _encode_env(value):
     if not isinstance(value, str):
         raise TypeError("str expected, not %s" % type(value).__name__)
-    return value.encode("utf-8", "surrogateescape")
+    return value.encode(_env_encoding, "surrogateescape")
+
+
+def _decode_env(value):
+    return value.decode(_env_encoding, "surrogateescape")
+
+
+def _check_bytes(value):
+    if not isinstance(value, bytes):
+        raise TypeError("bytes expected, not %s" % type(value).__name__)
+    return value
 
 
 class _Environ(_MutableMapping):
-    def __init__(self, data):
+    def __init__(self, data, encode, decode):
         self._data = data
+        self._encode = encode
+        self._decode = decode
 
     def __getitem__(self, key):
         try:
-            value = self._data[_encode_env(key)]
+            value = self._data[self._encode(key)]
         except KeyError:
             raise KeyError(key) from None
-        return value.decode("utf-8", "surrogateescape")
+        return self._decode(value)
 
     def __setitem__(self, key, value):
-        key = _encode_env(key)
-        value = _encode_env(value)
+        key = self._encode(key)
+        value = self._encode(value)
         putenv(key, value)
         self._data[key] = value
 
     def __delitem__(self, key):
-        encoded = _encode_env(key)
+        encoded = self._encode(key)
         unsetenv(encoded)
         try:
             del self._data[encoded]
@@ -257,17 +332,183 @@ class _Environ(_MutableMapping):
 
     def __iter__(self):
         for key in list(self._data):
-            yield key.decode("utf-8", "surrogateescape")
+            yield self._decode(key)
 
     def __len__(self):
         return len(self._data)
 
+    def __repr__(self):
+        formatted_items = ", ".join(
+            f"{self._decode(key)!r}: {self._decode(value)!r}"
+            for key, value in self._data.items()
+        )
+        return f"environ({{{formatted_items}}})"
+
     def copy(self):
         return dict(self)
 
+    def setdefault(self, key, value):
+        if key not in self:
+            self[key] = value
+        return self[key]
 
-environ = _Environ(_environ)
+    def __ior__(self, other):
+        self.update(other)
+        return self
+
+    def __or__(self, other):
+        if not isinstance(other, _Mapping):
+            return NotImplemented
+        new = dict(self)
+        new.update(other)
+        return new
+
+    def __ror__(self, other):
+        if not isinstance(other, _Mapping):
+            return NotImplemented
+        new = dict(other)
+        new.update(self)
+        return new
+
+
+environ = _Environ(_environ, _encode_env, _decode_env)
+supports_bytes_environ = True
+environb = _Environ(_environ, _check_bytes, bytes)
 
 
 def getenv(key, default=None):
     return environ.get(key, default)
+
+
+def getenvb(key, default=None):
+    return environb.get(key, default)
+
+
+# From CPython 3.14.5, Lib/os.py. See stdlib/docstrings/LICENSE.
+if {open, stat} <= supports_dir_fd and {scandir, stat} <= supports_fd:
+
+    def fwalk(top=".", topdown=True, onerror=None, *, follow_symlinks=False, dir_fd=None):
+        """Directory tree generator.
+
+        This behaves exactly like walk(), except that it yields a 4-tuple
+
+            dirpath, dirnames, filenames, dirfd
+
+        `dirpath`, `dirnames` and `filenames` are identical to walk() output,
+        and `dirfd` is a file descriptor referring to the directory `dirpath`.
+
+        The advantage of fwalk() over walk() is that it's safe against symlink
+        races (when follow_symlinks is False).
+
+        If dir_fd is not None, it should be a file descriptor open to a directory,
+          and top should be relative; top will then be relative to that directory.
+          (dir_fd is always supported for fwalk.)
+
+        Caution:
+        Since fwalk() yields file descriptors, those are only valid until the
+        next iteration step, so you should dup() them if you want to keep them
+        for a longer period.
+
+        Example:
+
+        import os
+        for root, dirs, files, rootfd in os.fwalk('python/Lib/xml'):
+            print(root, "consumes", end="")
+            print(sum(os.stat(name, dir_fd=rootfd).st_size for name in files),
+                  end="")
+            print("bytes in", len(files), "non-directory files")
+            if '__pycache__' in dirs:
+                dirs.remove('__pycache__')  # don't visit __pycache__ directories
+        """
+        sys.audit("os.fwalk", top, topdown, onerror, follow_symlinks, dir_fd)
+        top = fspath(top)
+        stack = [(_fwalk_walk, (True, dir_fd, top, top, None))]
+        isbytes = isinstance(top, bytes)
+        try:
+            while stack:
+                yield from _fwalk(stack, isbytes, topdown, onerror, follow_symlinks)
+        finally:
+            # Close any file descriptors still on the stack.
+            while stack:
+                action, value = stack.pop()
+                if action == _fwalk_close:
+                    close(value)
+
+    # Each item in the _fwalk() stack is a pair (action, args).
+    _fwalk_walk = 0  # args: (isroot, dirfd, toppath, topname, entry)
+    _fwalk_yield = 1  # args: (toppath, dirnames, filenames, topfd)
+    _fwalk_close = 2  # args: dirfd
+
+    def _fwalk(stack, isbytes, topdown, onerror, follow_symlinks):
+        # Note: This uses O(depth of the directory tree) file descriptors: if
+        # necessary, it can be adapted to only require O(1) FDs, see issue
+        # #13734.
+
+        action, value = stack.pop()
+        if action == _fwalk_close:
+            close(value)
+            return
+        elif action == _fwalk_yield:
+            yield value
+            return
+        assert action == _fwalk_walk
+        isroot, dirfd, toppath, topname, entry = value
+        try:
+            if not follow_symlinks:
+                # Note: To guard against symlink races, we use the standard
+                # lstat()/open()/fstat() trick.
+                if entry is None:
+                    orig_st = stat(topname, follow_symlinks=False, dir_fd=dirfd)
+                else:
+                    orig_st = entry.stat(follow_symlinks=False)
+            topfd = open(topname, O_RDONLY | O_NONBLOCK, dir_fd=dirfd)
+        except OSError as err:
+            if isroot:
+                raise
+            if onerror is not None:
+                onerror(err)
+            return
+        stack.append((_fwalk_close, topfd))
+        if not follow_symlinks:
+            if isroot and not st.S_ISDIR(orig_st.st_mode):
+                return
+            if not path.samestat(orig_st, stat(topfd)):
+                return
+
+        scandir_it = scandir(topfd)
+        dirs = []
+        nondirs = []
+        entries = None if topdown or follow_symlinks else []
+        for entry in scandir_it:
+            name = entry.name
+            if isbytes:
+                name = fsencode(name)
+            try:
+                if entry.is_dir():
+                    dirs.append(name)
+                    if entries is not None:
+                        entries.append(entry)
+                else:
+                    nondirs.append(name)
+            except OSError:
+                try:
+                    # Add dangling symlinks, ignore disappeared files
+                    if entry.is_symlink():
+                        nondirs.append(name)
+                except OSError:
+                    pass
+
+        if topdown:
+            yield toppath, dirs, nondirs, topfd
+        else:
+            stack.append((_fwalk_yield, (toppath, dirs, nondirs, topfd)))
+
+        toppath = path.join(toppath, toppath[:0])  # Add trailing slash.
+        if entries is None:
+            stack.extend(
+                (_fwalk_walk, (False, topfd, toppath + name, name, None))
+                for name in dirs[::-1])
+        else:
+            stack.extend(
+                (_fwalk_walk, (False, topfd, toppath + name, name, entry))
+                for name, entry in zip(dirs[::-1], entries[::-1]))

@@ -2,6 +2,19 @@ import re
 
 
 def current():
+    for flags in (0, re.X):
+        assert re.fullmatch(r"([\1])\078", "\x01\x078", flags).group(1) == "\x01"
+        assert re.fullmatch(rb"[\200-\377]", b"\xff", flags)
+        assert re.fullmatch(rb"[\200-\377]", b"\x7f", flags) is None
+        assert re.fullmatch(r"(?=\141)a", "a", flags)
+    for invalid in (r"\1", r"[\8]", rb"[\400]", rb"\777", "(?x)# [\n" + r"\1"):
+        try:
+            re.compile(invalid)
+        except re.PatternError:
+            pass
+        else:
+            raise AssertionError(invalid)
+
     tokens = re.compile(
         r"""
         ([\w#-]*)'  # encoding, possibly empty

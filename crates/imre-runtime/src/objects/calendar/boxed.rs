@@ -121,13 +121,32 @@ impl Calendar {
         make_delta(mask, words).map(Self)
     }
 
-    pub(crate) fn shift_duration(&self, other: &Self, subtract: bool) -> Result<Self, Error> {
-        shift_delta(
-            self.delta_microseconds(),
-            other.delta_microseconds(),
-            subtract,
-        )
-        .map(Self)
+    /// Shift the receiver by a duration using the typed calendar's range and fold rules.
+    pub(crate) fn shift(&self, duration: &Self, subtract: bool) -> Result<Self, Error> {
+        shift(&self.0, duration.delta_microseconds(), subtract).map(Self)
+    }
+
+    /// Subtract two datetimes backed by naive or fixed-offset wall times.
+    pub(crate) fn datetime_difference(&self, other: &Self) -> Result<Self, Error> {
+        let parts = |dt: &Self| {
+            with(&dt.0, |v| match v {
+                Value::Date { local, zone, .. } => (*local, zone.as_ref().map(|z| offset(z))),
+                _ => unreachable!(),
+            })
+        };
+        let (a, az) = parts(self);
+        let (b, bz) = parts(other);
+        let difference = match (az, bz) {
+            (None, None) => a - b,
+            (Some(x), Some(y)) => (a - x) - (b - y),
+            _ => {
+                return Err(Error::new(
+                    Kind::TypeError,
+                    "can't subtract offset-naive and offset-aware datetimes",
+                ));
+            }
+        };
+        try_owner(Value::Delta(difference)).map(Self)
     }
 
     pub(crate) fn negate_delta(&self) -> Result<Self, Error> {
@@ -142,9 +161,20 @@ impl Calendar {
         make_zone(offset.0.clone(), name.map(text::owned_string)).map(Self)
     }
 
+    pub(crate) fn zone_offset(&self) -> Option<Self> {
+        with(&self.0, |value| match value {
+            Value::Zone { offset, .. } => Some(Self(offset.clone())),
+            _ => None,
+        })
+    }
+
     /// Format the stored fixed UTC offset for %z or %:z.
     pub(crate) fn strftime_offset(&self, colon: bool) -> String {
-        let text = offset_text(offset(&self.0));
+        Self::format_utc_offset(offset(&self.0), colon)
+    }
+
+    pub(crate) fn format_utc_offset(micros: i128, colon: bool) -> String {
+        let text = offset_text(micros);
         if colon { text } else { text.replace(':', "") }
     }
 
@@ -169,6 +199,21 @@ impl Calendar {
         .map(Self)
     }
 
+    /// Return the datetime's local clock and fold without carrying over its timezone.
+    pub(crate) fn time_of_day(&self) -> Result<Self, Error> {
+        with(&self.0, |value| match value {
+            Value::Date { local, fold, .. } => Self::time(local.rem_euclid(DAY), *fold, None),
+            _ => unreachable!(),
+        })
+    }
+
+    pub(crate) fn wall_microseconds(&self) -> i128 {
+        with(&self.0, |value| match value {
+            Value::Date { local, .. } | Value::Time { local, .. } => *local,
+            _ => unreachable!(),
+        })
+    }
+
     pub(crate) fn clock_parts(&self) -> [i64; 5] {
         clock_parts(&self.0)
     }
@@ -184,6 +229,39 @@ impl Calendar {
 
     pub(crate) fn datetime(fields: [i32; 8], zone: Option<&Self>) -> Result<Self, Error> {
         datetime_from_fields(fields, zone.map(|z| z.0.clone())).map(Self)
+    }
+
+    /// Preserve the civil fields while replacing their native fixed timezone.
+    pub(crate) fn with_datetime_zone(&self, zone: Option<&Self>) -> Result<Self, Error> {
+        with(&self.0, |value| match value {
+            Value::Date { local, fold, .. } => try_owner(Value::Date {
+                local: *local,
+                fold: *fold,
+                zone: zone.map(|zone| zone.0.clone()),
+            })
+            .map(Self),
+            _ => unreachable!(),
+        })
+    }
+
+    pub(crate) fn timestamp_with_offset(&self, offset: i128) -> f64 {
+        total_seconds(self.wall_microseconds() - (EPOCH_ORD - 1) * DAY - offset)
+    }
+
+    pub(crate) fn timestamp(&self) -> Result<f64, Error> {
+        with(&self.0, |value| {
+            let Value::Date { local, zone, fold } = value else {
+                unreachable!()
+            };
+            let micros = *local - (EPOCH_ORD - 1) * DAY;
+            if let Some(zone) = zone {
+                return Ok(total_seconds(micros - offset(zone)));
+            }
+            let seconds =
+                conversion::local_candidate(micros.div_euclid(1_000_000) as i64, *fold != 0)?;
+            // CPython adds the fractional second after resolving the local wall time.
+            Ok(seconds as f64 + micros.rem_euclid(1_000_000) as f64 / 1_000_000.0)
+        })
     }
 
     pub(crate) fn from_timestamp(
@@ -279,11 +357,22 @@ impl Calendar {
         parts(delta(&self.0))
     }
 
+    /// CPython hashes an aware clock as a duration, counting January 1 of year 1 as day one.
+    pub(crate) fn clock_hash_parts(&self, offset: i128) -> (i128, i128, i128) {
+        let origin = if self.class() == "datetime" { DAY } else { 0 };
+        parts(self.wall_microseconds() + origin - offset)
+    }
+
     /// Timedeltas, zones and aware datetimes hash as their normalized duration.
     pub(crate) fn hash_delta_parts(&self) -> Option<(i128, i128, i128)> {
         with(&self.0, |v| match v {
             Value::Delta(n) => Some(parts(*n)),
             Value::Zone { offset, .. } => Some(parts(delta(offset))),
+            Value::Time {
+                local,
+                zone: Some(zone),
+                ..
+            } => Some(parts(local - offset(zone))),
             Value::Date {
                 local,
                 zone: Some(zone),

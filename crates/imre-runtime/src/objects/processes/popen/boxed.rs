@@ -31,16 +31,57 @@ pub(crate) struct BoxedCommunication {
     pub(crate) wait_budget: Option<f64>,
 }
 
+impl PreparedHandles {
+    pub(crate) fn uses_posix_spawn(
+        &self,
+        directory: bool,
+        cwd: bool,
+        close_fds: bool,
+        streams: &[(u32, Option<Int>); 3],
+    ) -> bool {
+        let modes = streams.each_ref().map(|(mode, _)| *mode);
+        launch_error::uses_posix_spawn(directory, cwd, modes, self.child_fds, close_fds)
+    }
+}
+
 impl BoxedPopen {
+    pub(crate) fn default_shell() -> &'static str {
+        DEFAULT_SHELL.to_str().expect("ASCII shell path")
+    }
+
+    pub(crate) fn probes_executable() -> bool {
+        launch_error::posix_spawn_capabilities().0
+    }
+
+    /// Reserve the actual child and parent fds before any executable-path callbacks.
+    pub(crate) fn prepare_handles(
+        streams: &[(u32, Option<Int>); 3],
+        pipesize: &Int,
+    ) -> Result<PreparedHandles> {
+        let modes = streams.each_ref().map(|(mode, _)| *mode);
+        let fds = streams
+            .each_ref()
+            .map(|(_, fd)| fd.as_ref().map_or(-1, |fd| redirect_number(fd).0));
+        // SAFETY: pipesize is the live Python int designated by kind 2.
+        let capacity = unsafe { super::pipe_size::capacity(pipesize.0, WordKind::new(2)) }?;
+        ChildPipes::open(&modes, fds, capacity).map_err(errno_error)
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn launch(
         argv: Vec<Vec<u8>>,
+        executable: Option<Vec<u8>>,
+        direct: Option<bool>,
+        search_path: Option<Vec<u8>>,
         streams: [(u32, Option<Int>); 3],
+        handles: Option<PreparedHandles>,
         close_fds: bool,
         restore_signals: bool,
         cwd: Option<Vec<u8>>,
         env: Option<ByteEnvironment>,
         bufsize: Int,
+        pipesize: Int,
+        start_new_session: bool,
         warn_line_buffering: &mut dyn FnMut() -> Result<()>,
     ) -> std::result::Result<Self, BoxedLaunchError> {
         let mut words = Words::new(8);
@@ -54,7 +95,12 @@ impl BoxedPopen {
                 .values
                 .push(crate::BytesOwner::into_raw(owner) as usize);
         }
-        let argv = crate::ObjectOwner::try_new(Object(crate::StorageCell::new(words.into_storage())))
+        let argv =
+            crate::ObjectOwner::try_new(Object(crate::StorageCell::new(words.into_storage())))
+                .map_err(|_| Error::allocation())?;
+        let executable = executable
+            .map(crate::BytesOwner::try_new)
+            .transpose()
             .map_err(|_| Error::allocation())?;
         let cwd = cwd
             .map(crate::BytesOwner::try_new)
@@ -69,15 +115,25 @@ impl BoxedPopen {
             bufsize.0,
         );
         config.close_fds = close_fds;
+        if let Some(program) = &executable {
+            config.executable = crate::BytesOwner::as_ptr(program).cast();
+            config.executable_kind = 8;
+        }
         if let Some(path) = &cwd {
             config.cwd = crate::BytesOwner::as_ptr(path).cast();
             config.cwd_kind = 8;
         }
         let mut site = None;
         let mut extras = LaunchExtras {
+            pipe_size: handles.is_none().then_some((pipesize.0, 2)),
+            prepared: handles,
             failure_site: Some(&mut site),
+            direct,
+            search_path,
             warn_line_buffering: Some(warn_line_buffering),
             environment: env,
+            // A new session uses the ordinary child-settings path with no group or umask change.
+            child: start_new_session.then_some((0, Int::small(-1).unwrap().0, true)),
             ..Default::default()
         };
         for (i, ((mode, fd), shift)) in streams.iter().zip([12, 0, 4]).enumerate() {
@@ -96,7 +152,7 @@ impl BoxedPopen {
         }
         // Reserve the public handle before a successful spawn can leave a child to reap.
         let mut owner = triomphe::UniqueArc::try_new_uninit().map_err(|_| Error::allocation())?;
-        // SAFETY: argv, cwd, buffer size and descriptor integers stay rooted through spawn.
+        // SAFETY: argv, executable, cwd, sizes and descriptor integers stay rooted through spawn.
         let process = unsafe { spawn(&config, extras) }.map_err(|error| BoxedLaunchError {
             error,
             directory: site.map(|(site, _)| matches!(site, launch_error::Site::Directory)),
@@ -104,7 +160,9 @@ impl BoxedPopen {
         })?;
         owner.write(RefCell::new(process));
         // SAFETY: write initialized the unique allocation; sharing it performs no allocation.
-        Ok(Self(unsafe { triomphe::UniqueArc::assume_init(owner) }.shareable()))
+        Ok(Self(
+            unsafe { triomphe::UniqueArc::assume_init(owner) }.shareable(),
+        ))
     }
 
     pub(crate) fn pipe(&self, index: usize) -> Option<crate::ObjectOwner> {
@@ -204,6 +262,10 @@ impl BoxedPipe {
                 file.read_bytes(size)
             }
         })
+    }
+
+    pub(crate) fn peek(&self) -> Result<Vec<u8>> {
+        self.with_file(|file| file.peek_pipe())
     }
 
     pub(crate) fn read1(&self, size: Option<usize>) -> Result<Vec<u8>> {

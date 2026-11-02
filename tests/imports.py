@@ -16,9 +16,34 @@ IMPORT = "from helper import f\nprint(f(2))\n"
 
 
 REJECTED = {
+    "urlopen_keeps_typed_call_check": ({
+        "main.py": (
+            "from urllib.request import urlopen\n"
+            "def typed(n: int) -> int: return n\n"
+            "print(urlopen('data:,hello').read())\n"
+            "print(typed('wrong'))\n"
+        ),
+    }, "expected int, got str"),
+    "unused_warn_preserves_typed_arguments": ({
+        "main.py": (
+            "from warnings import warn\n"
+            "def identity(n: int) -> int: return n\n"
+            "identity('wrong')\n"
+        ),
+    }, "expected int, got str"),
+    "codeop_import_keeps_return_check": ({
+        "main.py": 'import codeop\ndef wrong() -> int:\n    return "invalid return"\nwrong()\n',
+    }, "invalid-return-type"),
     "function_wildcard": ({
         "main.py": "def invalid():\n    from helper import *\n", "helper.py": HELPER,
     }, "SyntaxError: import * only allowed at module level"),
+    "warning_scope_keeps_call_contracts": ({
+        "main.py": (
+            "import warnings\n"
+            "def identity(n: int) -> int: return n\n"
+            "with warnings.catch_warnings(record=True):\n    identity('wrong')\n"
+        ),
+    }, "invalid-argument-type"),
     "class_wildcard": ({
         "main.py": "class Invalid:\n    from helper import *\n", "helper.py": HELPER,
     }, "SyntaxError: import * only allowed at module level"),
@@ -27,6 +52,9 @@ REJECTED = {
                    "def identity(value: int) -> int: return value\n"
                    "m = Mock(custom=identity('wrong'))\n",
     }, "expected int, got str"),
+    "unused_resource_reader_keeps_return_check": ({
+        "main.py": "from importlib.readers import MultiplexedPath\ndef wrong() -> int: return 'bad'\nwrong()\n",
+    }, "int"),
     "wildcard_keeps_return_check": ({
         "main.py": "from helper import *\ndef wrong() -> int:\n    return 'bad'\nwrong()\n",
         "helper.py": HELPER,
@@ -42,12 +70,68 @@ REJECTED = {
         "records.py": "from imre import struct as layout\n@layout\nclass Point:\n    x: float\n",
         "main.py": "from records import Point\nfrom weakref import ref\nref(Point(1.0))\n",
     }, "weakref.ref requires native Python object operations"),
+    "deque_repr_checks_receiver_expression": ({
+        "main.py": (
+            "from collections import deque\ndef queue(n: int) -> int:\n    return n\n"
+            "deque.__repr__(queue('wrong'))\n"
+        ),
+    }, "expected int, got str"),
+    "saved_deque_repr_keeps_checked_calls": ({
+        "main.py": (
+            "from collections import deque\ndef identity(n: int) -> int:\n    return n\n"
+            "render = deque.__repr__\nrender(deque([1]))\nidentity('wrong')\n"
+        ),
+    }, "invalid-argument-type"),
     "patch_object_checks_replacement": ({
         "main.py": (
             "from unittest.mock import patch\nclass Owner:\n    value = 0\n"
             "def replacement(number: int) -> int:\n    return number\n"
             "with patch.object(Owner, 'value', replacement('wrong')):\n    pass\n"
         ),
+    }, "expected int, got str"),
+    "unused_chdir_preserves_checked_calls": ({
+        "main.py": "from os import chdir\ndef path(n: int) -> int:\n    return n\npath('wrong')\n",
+    }, "expected int, got str"),
+    "posix_chdir_checks_path": ({
+        "main.py": "from posix import chdir as cd\ndef path(n: int) -> int:\n    return n\ncd(path=path('wrong'))\n",
+    }, "expected int, got str"),
+    "captured_chdir_keeps_callback_checks": ({
+        "main.py": (
+            "from os import chdir\ndef path(n: int) -> int:\n    return n\n"
+            "move = chdir\nmove('.')\npath('wrong')\n"
+        ),
+    }, "invalid-argument-type"),
+    "captured_chdir_checks_nested_missing_argument": ({
+        "main.py": (
+            "from os import chdir\ndef path(n: int) -> str:\n    return '.'\n"
+            "move = chdir\nmove(path())\n"
+        ),
+    }, "missing-argument"),
+    "captured_chdir_checks_user_overload": ({
+        "main.py": (
+            "from os import chdir\nfrom typing import overload\n"
+            "@overload\ndef path(n: int) -> str: return '.'\n"
+            "@overload\ndef path(n: int, m: int) -> str: return '.'\n"
+            "def path(n: int, m: int = 0) -> str: return '.'\n"
+            "move = chdir\nmove(path())\n"
+        ),
+    }, "no-matching-overload"),
+    "captured_chdir_checks_user_keyword": ({
+        "main.py": (
+            "from os import chdir\ndef path(n: int = 0) -> int:\n    return n\n"
+            "move = chdir\nmove('.')\npath(typo=1)\n"
+        ),
+    }, "unknown-argument"),
+    "captured_chdir_preserves_callable_parameter": ({
+        "main.py": (
+            "from os import chdir\nfrom typing import Callable\n"
+            "def invoke(cb: Callable[[int], int]) -> int:\n"
+            "    move = chdir\n    move('.')\n    return cb('wrong')\n"
+            "def identity(n: int) -> int:\n    return n\nprint(invoke(identity))\n"
+        ),
+    }, "invalid-argument-type"),
+    "chdir_keeps_subsequent_checks": ({
+        "main.py": "import os\ndef path(n: int) -> int:\n    return n\nos.chdir('.')\npath('wrong')\n",
     }, "expected int, got str"),
     "unused_struct_keeps_return_checks": ({
         "main.py": "from struct import Struct as Format\ndef wrong() -> int:\n    return 'bad'\nwrong()\n",
@@ -164,6 +248,12 @@ REJECTED = {
     }, "import before its binding is available"),
     "imports_after_execution": ({"main.py": "print(1)\nimport helper\n", "helper.py": HELPER}, "imports must precede"),
     "guard_reads_later_import": ({"main.py": "import helper\n", "helper.py": 'if __name__ == "helper":\n    raise ValueError(message)\nfrom child import message\n', "child.py": 'message = "late"\n'}, "imports must precede"),
+    "module_computed_before_import": ({
+        "main.py": "import helper\n", "helper.py": "labels = str(7)\nimport os\n",
+    }, "imports must precede"),
+    "module_rebound_before_import": ({
+        "main.py": "import helper\n", "helper.py": "labels = [1]\nlabels = [2]\nimport os\n",
+    }, "imports must precede"),
     "library_computed_before_import": ({"main.py": "import package\n", "package/__init__.py": "metadata = str(7)\nfrom .child import f\n", "package/child.py": HELPER}, "imports must precede"),
     "definition_after_execution": ({"main.py": "print(1)\n" + HELPER}, "definitions must precede"),
     "missing_namespace_child": ({"main.py": "import package.missing\n", "package/child.py": HELPER}, "cannot resolve first-party module"),
@@ -178,8 +268,16 @@ REJECTED = {
     "normalized_reserved_alias": ({"main.py": "from helper import f as ℕone\n", "helper.py": HELPER}, "reserved"),
     "stdlib_shadow": ({"main.py": "import sys\n", "sys.py": HELPER}, "standard-library"),
     "py_compile_shadow": ({"main.py": "import py_compile\n", "py_compile.py": HELPER}, 'shadowing is unsupported: "py_compile"'),
+    "token_shadow": ({"main.py": "import token\n", "token.py": HELPER}, 'shadowing is unsupported: "token"'),
+    "email_address_parser_unknown_name": ({
+        "main.py": "from email._header_value_parser import missing_parser\n",
+    }, "unsupported sealed standard-library export"),
+    "unused_email_address_parser_keeps_types": ({
+        "main.py": "from email._header_value_parser import get_addr_spec\n"
+                   "def identity(n: int) -> int: return n\nidentity('wrong')\n",
+    }, "expected int, got str"),
     "opcode_shadow": ({"main.py": "import _opcode\n", "_opcode.py": HELPER}, "shadowing"),
-    "opcode_bytecode_operation": ({"main.py": "from _opcode import stack_effect\n"}, "stack_effect"),
+    "opcode_unknown_operation": ({"main.py": "from _opcode import not_an_opcode_operation\n"}, "not_an_opcode_operation"),
     "opcode_typed_argument": ({"main.py": "import _opcode as op\ndef text(x: str) -> None:\n    print(x)\ntext(op.ENABLE_SPECIALIZATION)\n"}, "expected str, got int"),
     "unstubbed_builtin_shadow": ({"main.py": "import _types\n", "_types.py": HELPER}, "standard-library"),
     "frozen_shadow": ({"main.py": "import __hello__\n", "__hello__.py": HELPER}, "standard-library"),
@@ -189,12 +287,106 @@ REJECTED = {
 }
 
 ACCEPTED = {
+    "urllib_request_and_error": {
+        "main.py": (
+            "import urllib.request\n"
+            "from urllib.error import URLError\n"
+            "from urllib.request import Request\n"
+            "with urllib.request.urlopen(Request('data:,one%20two')) as response:\n"
+            "    print(response.geturl(), response.read())\n"
+            "try: urllib.request.urlopen('nohandler://host')\n"
+            "except URLError as error: print(error.reason)\n"
+        ),
+    },
+    "token_named_helper": {
+        "main.py": "from helper import read\nprint(read())\n",
+        "helper.py": "from token import EXACT_TOKEN_TYPES, tok_name\ndef read():\n    return tok_name[EXACT_TOKEN_TYPES[':=']]\n",
+    },
+    "token_qualified_helper": {
+        "main.py": "from helper import read\nprint(read())\n",
+        "helper.py": "import token\ndef read():\n    return token.tok_name[token.EXACT_TOKEN_TYPES[':=']]\n",
+    },
+    "codeop_module": {
+        "main.py": (
+            "import codeop\n"
+            "from codeop import Compile, CommandCompiler\n"
+            "assert codeop.Compile is Compile\n"
+            "compiler = CommandCompiler().compiler\n"
+            "assert type(compiler) is Compile\n"
+            "assert compiler.flags == codeop.PyCF_DONT_IMPLY_DEDENT | codeop.PyCF_ALLOW_INCOMPLETE_INPUT\n"
+        ),
+    },
+    "warn_named_helper": {
+        "main.py": "from helper import current\ncurrent()\n",
+        "helper.py": (FIXTURES.parent / "boxed_warnings.py").read_text(),
+    },
+    "codeop_named_helper": {
+        "main.py": "from helper import flags\nprint(flags())\n",
+        "helper.py": (
+            "from codeop import Compile, CommandCompiler\n"
+            "def flags():\n"
+            "    compiler = CommandCompiler().compiler\n"
+            "    assert type(compiler) is Compile\n"
+            "    return compiler.flags\n"
+        ),
+    },
+    "opcode_named_helper": {
+        "main.py": "from helper import effect\nprint(effect())\n",
+        "helper.py": "from _opcode import stack_effect\ndef effect():\n    return stack_effect(31)\n",
+    },
+    "opcode_qualified_helper": {
+        "main.py": "from helper import effect\nprint(effect())\n",
+        "helper.py": "import _opcode\ndef effect():\n    return _opcode.stack_effect(31)\n",
+    },
+    "opcode_star_helper": {
+        "main.py": "from helper import effect\nprint(effect())\n",
+        "helper.py": "from _opcode import *\ndef effect():\n    return stack_effect(31)\n",
+    },
+    "atexit_in_dependency": {
+        "main.py": "from cleanup import prepare\nprepare()\n",
+        "cleanup.py": (
+            "from atexit import register, unregister\n"
+            "def removed(): print('unexpected')\n"
+            "def prepare():\n"
+            "    register(print, 'shutdown')\n"
+            "    register(removed)\n"
+            "    unregister(removed)\n"
+        ),
+    },
+    "weakref_finalize_import": {
+        "main.py": (
+            "from weakref import finalize\n"
+            "class Owner: pass\n"
+            "owner = Owner()\n"
+            "cleanup = finalize(owner, print, 'finalized')\n"
+            "cleanup()\n"
+            "assert not cleanup.alive\n"
+        ),
+    },
     "patch_object_as_value": {
         "main.py": (
             "from unittest.mock import patch\nclass Owner:\n    value = 1\n"
             "patcher = patch.object\nwith patcher(Owner, 'value', 2):\n    assert Owner.value == 2\n"
             "assert Owner.value == 1\n"
         ),
+    },
+    "optional_import_error_alternatives": {
+        "main.py": "from pkg.adapter import chosen, available, recovered\nprint(chosen, available, recovered)\n",
+        "pkg/__init__.py": "",
+        "pkg/adapter.py": (
+            "try:\n    import absent.plugin as chosen\n"
+            "except ImportError:\n    from .fallback import value as chosen\n"
+            "try:\n    from .preferred import value as available\n"
+            "except ImportError:\n    from .unexpected import value as available\n"
+            "try:\n    from .broken import value as recovered\n"
+            "except ImportError:\n    from .fallback import value as recovered\n"
+            "from . import after\n"
+        ),
+        "pkg/preferred.py": "print('preferred')\nvalue = 23\n",
+        "pkg/broken.py": "print('broken')\nraise ImportError('provider unavailable')\n",
+        "pkg/fallback.py": "print('fallback')\nvalue = 17\n",
+        "pkg/unexpected.py": "raise AssertionError('unselected fallback executed')\n",
+        "pkg/after.py": "print('after')\n",
     },
     "optional_platform_import": {
         "main.py": "import configure\nfrom adapter import present, absent\nprint(present, absent)\n",
@@ -279,6 +471,12 @@ ACCEPTED = {
             "def initialize():\n    print('initialized')\n    return [41]\n"
             "if t.TYPE_CHECKING:\n    from unavailable_at_runtime import token\n"
             "else:\n    token = initialize()\n"
+        ),
+    },
+    "record_warnings": {
+        "main.py": (
+            "import warnings\n"
+            "with warnings.catch_warnings(record=True) as caught:\n    assert caught == []\n"
         ),
     },
     "contextmanager_generator_annotation": {
@@ -418,6 +616,16 @@ ACCEPTED = {
         "stat/__init__.py": "invalid shadow package!\n",
         "stat/S_IRWXU.py": "invalid shadow member!\n",
     },
+    "email_address_parsers": {
+        "main.py": (
+            "from email._header_value_parser import get_addr_spec, get_angle_addr as angle\n"
+            "import email._header_value_parser as parser\n"
+            "assert angle is parser.get_angle_addr\n"
+            "for parse, value in ((get_addr_spec, 'user@example.org SIZE=32'), (angle, '<>')):\n"
+            "    address, rest = parse(value)\n"
+            "    print(address.addr_spec, rest)\n"
+        ),
+    },
     "zip_source_spec": {
         "main.py": (
             "import sys\nimport zipimport\nfrom importlib import import_module, invalidate_caches\n"
@@ -442,10 +650,20 @@ ACCEPTED = {
             "    with open(finder.archive, \"wb\") as archive:\n"
             "        archive.write(replacement)\n"
             "    assert finder.find_spec(\"stored\") is None\n"
-            "    assert invalidate_caches() is None\n"
+            "    names = ('importlib', 'importlib._bootstrap', 'importlib._bootstrap_external',\n"
+            "             '_frozen_importlib', '_frozen_importlib_external')\n"
+            "    saved = {key: sys.modules.pop(key) for key in names}\n"
+            "    sys.modules['_frozen_importlib'] = sys.modules['_frozen_importlib_external'] = None\n"
+            "    try:\n"
+            "        source = import_module('importlib')\n"
+            "        assert source._bootstrap_external is not saved['_frozen_importlib_external']\n"
+            "        assert source.invalidate_caches() is None\n"
+            "    finally:\n"
+            "        sys.modules.update(saved)\n"
             "    assert finder.find_spec(\"deflated\") is None\n"
             "    assert finder.find_spec(\"stored\").loader is finder\n"
             "    assert finder.get_data(\"stored/message.txt\") == b\"hello\"\n"
+            "    assert invalidate_caches() is None\n"
             "finally:\n"
             "    del finder.invalidate_caches\n"
             "    with open(finder.archive, \"wb\") as archive:\n"
@@ -470,6 +688,33 @@ ACCEPTED = {
             "after.__module__ is None)\n"
         ),
     },
+    "nested_importlib_abc": {
+        "main.py": "import helper\nhelper.check()\n",
+        "helper.py": (
+            "from importlib import abc\n"
+            "import importlib.abc as protocols\n"
+            "from importlib.abc import FileLoader\n"
+            "from importlib._abc import Loader\n"
+            "from importlib.util import Loader as UtilLoader\n"
+            "def check():\n"
+            "    assert abc is protocols and FileLoader is abc.FileLoader\n"
+            "    assert Loader is UtilLoader is abc.Loader\n"
+            "    assert abc.MetaPathFinder().invalidate_caches() is None\n"
+        ),
+    },
+    "late_importlib_abc": {
+        "main.py": (
+            "import importlib\nimport os\n"
+            "name = 'installed_loader_plugin'\n"
+            "path = os.path.join(os.path.dirname(__file__), name + '.py')\n"
+            "with open(path, 'w') as file:\n"
+            "    file.write('def check():\\n    from importlib import abc, util\\n'\n"
+            "               '    from importlib._abc import Loader\\n'\n"
+            "               '    assert abc.Loader is util.Loader is Loader\\n')\n"
+            "try:\n    importlib.import_module(name).check()\n"
+            "finally:\n    os.remove(path)\n"
+        ),
+    },
     "unregistered_source_loader": {
         "main.py": (
             "from importlib.machinery import SourceFileLoader\n"
@@ -484,9 +729,29 @@ ACCEPTED = {
             "except FileNotFoundError as exc:\n    print(exc.filename == path + '.missing')\n"
         ),
     },
+    "namespace_resource_spec": {
+        "main.py": (FIXTURES.parent / "boxed_namespace_resource_spec.py").read_text(),
+        "first/acme/data.txt": "first",
+        "second/acme/data.txt": "second",
+        "second/acme/only.txt": "second",
+    },
+    "multiplexed_resources": {
+        "main.py": (FIXTURES.parent / "boxed_multiplexed_resources.py").read_text(),
+        "first/same.txt": "first",
+        "first/shared/one": "1",
+        "first/mixed/one": "1",
+        "second/same.txt": "second",
+        "second/shared/two": "2",
+        "second/mixed": "file",
+    },
     "filesystem_resources": {
         "main.py": (FIXTURES.parent / "boxed_filesystem_resources.py").read_text(),
-        "data/__init__.py": "",
+        "data/__init__.py": (
+            "from importlib.resources import files\n"
+            "def wrapper(): return files(None)\n"
+            "def regular(): return files(None)\n"
+        ),
+        "data/child.py": "def call(function): return function()\n",
         "data/nested/message.txt": "hello\n",
     },
     "materialize_resources": {
@@ -494,6 +759,26 @@ ACCEPTED = {
         "data/__init__.py": "",
         "data/message.txt": "hello\n",
         "data/directory-payload.txt": "directory payload\n",
+    },
+    "source_loader_compile_override": {
+        "main.py": (
+            "from importlib.machinery import SourceFileLoader\n"
+            "from types import ModuleType\n"
+            "class PluginLoader(SourceFileLoader):\n"
+            "    def get_data(self, path):\n"
+            "        data = super().get_data(path)\n"
+            "        self.source_to_code = self.compile_plugin\n"
+            "        return data\n"
+            "    def compile_plugin(self, data, path):\n"
+            "        assert data == b'value = 1' and path == self.path\n"
+            "        return compile('value = 2', path, 'exec')\n"
+            "path = __file__ + '.plugin.py'\n"
+            "with open(path, 'wb') as out:\n"
+            "    out.write(b'value = 1')\n"
+            "module = ModuleType('plugin')\n"
+            "PluginLoader('plugin', path).exec_module(module)\n"
+            "assert module.value == 2\n"
+        ),
     },
     "source_loader_path_stats": {
         "main.py": (
@@ -633,6 +918,14 @@ ACCEPTED = {
     "library_state": {"main.py": "from helper import f, values\nprint(f(values[0]))\n", "helper.py": "values = [1]\n" + HELPER},
     "package_effect": {"main.py": "import package\n", "package/__init__.py": "print(1)\n"},
     "active_library_else": {"main.py": IMPORT, "helper.py": HELPER + 'if __name__ == "__main__":\n    print(1)\nelse:\n    print(2)\n'},
+    "module_literal_before_import": {
+        "main.py": ('from parentlib import labels\nfrom visitorlib import shared\n'
+                    'print(labels is shared)\nprint(labels[-1])\n'),
+        "parentlib.py": ('labels = ["one", "two", "three", "four"]\n'
+                         'def expose() -> list[str]:\n    return labels\nimport visitorlib\n'),
+        "visitorlib.py": ('from parentlib import expose\nshared = expose()\n'
+                          'shared.append("visited")\n'),
+    },
     "ordered_library_effects": {
         "main.py": "from pkg.parent import value\nprint(value)\n", "pkg/__init__.py": "",
         "pkg/parent.py": 'print("parent prefix")\nfrom . import child\nprint("parent suffix")\nvalue = child.value\n',
@@ -718,6 +1011,10 @@ def main() -> None:
                 continue
             case = temporary / name
             write_files(case, files)
+            if name == "namespace_resource_spec" and os.name == "posix":
+                with ZipFile(case / "portions.zip", "w") as archive:
+                    archive.writestr("acme/", b"")
+                    archive.writestr("only_archive/", b"")
             if name == "zip_source_spec":
                 if os.name != "posix":
                     continue
@@ -727,6 +1024,11 @@ def main() -> None:
                         archive.writestr(f"{pkg}/message.txt", b"hello")
             baseline = run([args.python, "-E", "-m", "main"], case)
             require_success(baseline)
+            if name in {"codeop_module", "codeop_named_helper"}:
+                # Run these checked modules with the late-import executable below.
+                require_success(run([compiler, "check", str(case / "main.py")], temporary))
+                checks += 1
+                continue
             for level in args.opt_levels:
                 executable = temporary / f"accepted-{name}-{level}"
                 command = [compiler, "build", str(case / "main.py"), "-o", str(executable),
@@ -734,25 +1036,76 @@ def main() -> None:
                            *build_flags]
                 if args.sanitize:
                     command.append("--sanitize")
-                require_success(run(command, temporary, timeout=build_timeout))
+                # Optimizing the bundled address parser and warnings modules can take several minutes.
+                slow_optimized = name in {"email_address_parsers", "record_warnings", "warn_named_helper"}
+                timeout = 300 if slow_optimized and level > 0 else build_timeout
+                require_success(run(command, temporary, timeout=timeout))
                 result = run([str(executable)], temporary)
                 require_success(result)
                 assert result.stdout == baseline.stdout, (name, level, result.stdout, baseline.stdout)
                 checks += 1
 
-        # These are build capabilities: CPython's flags depend on its build; Imre emits native code.
-        source = root / "opcode_flags.py"
+        late_import = temporary / "late_import.py"
+        late_import.write_text("import importlib, sys\nimportlib.import_module(sys.argv[1]).run()\n")
         for level in args.opt_levels:
-            executable = temporary / f"opcode-flags-{level}"
-            command = [compiler, "build", str(source), "-o", str(executable), "--runtime", runtime,
-                       "--clang", args.clang, "--opt-level", str(level), *build_flags]
+            executable = temporary / f"late-import-{level}"
+            command = [compiler, "build", str(late_import), "-o", str(executable),
+                       "--runtime", runtime, "--clang", args.clang, "--opt-level", str(level),
+                       *build_flags, "--runtime-imports", "--no-cache"]
             if args.sanitize:
                 command.append("--sanitize")
-            require_success(run(command, temporary))
-            result = run([str(executable)], temporary)
-            require_success(result)
-            assert result.stdout == "0\n0\nno bytecode specialization\n", result
+            require_success(run(command, temporary, timeout=build_timeout))
+            # Load the probe from disk so the executable cannot resolve its imports at build time.
+            probe = temporary / f"late_import_probe_{level}.py"
+            probe.write_text(
+                "import builtins, sys\n"
+                "def run():\n"
+                "    sys.path.insert(0, sys.argv[4])\n"
+                "    module = builtins.__import__(sys.argv[2])\n"
+                "    if sys.argv[3] == 'flags':\n"
+                "        print(module.CommandCompiler().compiler.flags)\n"
+                "    elif sys.argv[3] == 'lookup':\n"
+                "        print(module.opmap['POP_TOP'])\n"
+                "    elif sys.argv[3] == 'current':\n"
+                "        module.current()\n"
+            )
+            for module, operation, path, expected in [
+                ("opcode", "lookup", temporary, "31\n"), ("_opcode_metadata", "lookup", temporary, "31\n"),
+                ("code", "flags", temporary, "16896\n"), ("codeop", "flags", temporary, "16896\n"),
+                ("main", "import", temporary / "codeop_module", ""),
+                ("main", "import", temporary / "codeop_named_helper", "16896\n"),
+                ("boxed_interactive_interpreter", "current", FIXTURES.parent, ""),
+            ]:
+                result = run([str(executable), probe.stem, module, operation, str(path)], temporary)
+                require_success(result)
+                assert result.stdout == expected, (module, level, result.stdout)
+                checks += 1
+
+            absent = "no_such_console_guard_module"
+            result = run([str(executable), probe.stem, absent, "flags", str(temporary)], temporary)
+            assert result.returncode == 1 and f"ModuleNotFoundError: No module named '{absent}'" in result.stderr, result
             checks += 1
+
+        # These are build capabilities: CPython's flags depend on its build; Imre emits native code.
+        for level in args.opt_levels:
+            for fixture, route, output in [
+                ("opcode_flags", [], "0\n0\nno bytecode specialization\n"),
+                ("opcode_stack_effect", [], "-1\n"),
+                ("opcode_module", [], "opcode module OK\n"),
+                ("opcode_operations", [], "opcode operations OK\n"),
+                ("opcode_operations", ["--runtime-imports"], "opcode operations OK\n"),
+            ]:
+                executable = temporary / f"{fixture}-{level}"
+                command = [compiler, "build", str(root / f"{fixture}.py"), "-o", str(executable),
+                           "--runtime", runtime, "--clang", args.clang, "--opt-level", str(level),
+                           *build_flags, *route]
+                if args.sanitize:
+                    command.append("--sanitize")
+                require_success(run(command, temporary))
+                result = run([str(executable)], temporary)
+                require_success(result)
+                assert result.stdout == output, result
+                checks += 1
 
         # A failing guard must run before the next import initializes its child.
         guarded = temporary / "wrong_name"

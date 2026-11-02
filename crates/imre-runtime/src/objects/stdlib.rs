@@ -952,31 +952,9 @@ pub(crate) fn format_fixed_float(
 /// Suspend the current native thread, rounding a positive timeout up to nanoseconds.
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_time_sleep(seconds: f64) {
-    let error = if seconds.is_nan() {
-        Some(Error::new(
-            Kind::ValueError,
-            "Invalid value NaN (not a number)",
-        ))
-    } else if !seconds.is_finite() || seconds.abs() >= i64::MAX as f64 / 1e9 {
-        Some(Error::new(
-            Kind::OverflowError,
-            "timestamp out of range for platform time_t",
-        ))
-    } else if seconds < 0.0 {
-        Some(Error::new(
-            Kind::ValueError,
-            "sleep length must be non-negative",
-        ))
-    } else {
-        None
-    };
-    if let Some(e) = error {
-        e.raise();
-        return;
+    if let Err(error) = super::time::sleep_float(seconds) {
+        error.raise();
     }
-    let duration = std::time::Duration::from_secs(seconds.trunc() as u64)
-        + std::time::Duration::from_nanos((seconds.fract() * 1e9).ceil() as u64);
-    std::thread::sleep(duration);
 }
 
 /// Seconds since the Unix epoch, including the subsecond fraction.

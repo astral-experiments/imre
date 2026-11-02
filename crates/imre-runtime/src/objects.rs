@@ -31,8 +31,8 @@ mod chainmap;
 mod charmaps;
 mod codecs;
 pub(crate) use codecs::{
-    Codec, CodecInfo, StrEncoder, Utf16Order, decoding_error, normalize as normalize_codec,
-    unknown_handler, utf8_prefix,
+    Codec, CodecInfo, FixedUnicode, StrEncoder, Utf16Order, decoding_error,
+    normalize as normalize_codec, unknown_handler, utf8_prefix,
 };
 mod contexts;
 mod contextvars;
@@ -46,14 +46,14 @@ mod difflib;
 mod errno;
 pub(crate) mod exceptions;
 mod files;
-pub(crate) use files::read_path_text;
+pub(crate) use files::{peek_bytes, read_path_text};
 mod text_file;
 pub(crate) use text_file::{MemoryText, TextFile};
 pub(crate) mod fnmatch;
 mod format_cursors;
 mod functools;
 mod hashlib;
-pub(crate) use hashlib::State as HashState;
+pub(crate) use hashlib::{State as HashState, hex_text as hash_hex};
 pub(crate) mod hmac;
 mod inspect;
 pub(crate) mod interpreter_stdlib;
@@ -63,9 +63,9 @@ mod join_buffer;
 mod joined_lines;
 mod json;
 pub(crate) use json::{
-    DecodedJson, Indent as JsonIndent, JsonNumber, decode_json, decode_json_bytes, json_bom_error,
-    write_codepoints as write_json_codepoints, write_fragment as write_json_fragment,
-    write_string as write_json_string,
+    DecodedJson, Indent as JsonIndent, JsonNumber, decode_json_tokens, decode_json_bytes, json_bom_error,
+    string_end as json_string_end, write_codepoints as write_json_codepoints,
+    write_fragment as write_json_fragment, write_string as write_json_string,
 };
 mod linecache;
 pub(crate) use linecache::{SourceDecodeError, decode_compile_source, decode_source_lines};
@@ -85,7 +85,7 @@ pub(crate) mod posixpath;
 mod processes;
 pub(crate) use processes::{BoxedPipe, BoxedPopen, initial_environment};
 mod random;
-pub(crate) use random::{choice_index, imre_random_float};
+pub(crate) use random::{choice_index, imre_random_float, random_below, shuffle_swaps};
 pub(crate) mod readiness;
 pub(crate) mod records;
 mod regexes;
@@ -106,9 +106,9 @@ pub(crate) use text::{translate, zfill};
 pub(crate) mod time;
 pub(crate) use text::{UrlInput, capitalize, case_map, case_map_points, urlquote, urlsplit};
 pub(crate) use text::{
-    count_codepoints, count_text, expand_tabs, find_text, normalize_unicode, ord_byte, ord_char,
-    partition_text, python_alnum, python_isalpha, python_isdigit, python_islower, python_isspace,
-    python_istitle, python_isupper, split_parts,
+    count_codepoints, count_text, expand_tabs, find_codepoints, find_text, normalize_unicode,
+    ord_byte, ord_char, partition_text, python_alnum, python_isalpha, python_isdigit,
+    python_islower, python_isspace, python_istitle, python_isupper, split_parts,
 };
 mod typing;
 pub(crate) use text::{chr_scalar, short_string};
@@ -116,13 +116,13 @@ pub(crate) use typing::{OVERLOAD_DUMMY_ERROR, register_overload};
 mod unions;
 mod values;
 pub(crate) mod warnings;
-pub(crate) use warnings::{runtime_warning, unclosed_scandir};
+pub(crate) use warnings::runtime_warning;
 mod words;
 mod zipfile;
 pub(crate) use zipfile::Archive as ZipArchive;
 
 pub(crate) use errno::{DOC as ERRNO_DOC, platform_entries as errno_entries};
-pub(crate) use files::{FileState, errno_error, open_file, open_raw_file};
+pub(crate) use files::{FileState, Memory, Random, errno_error, open_file, open_raw_file};
 
 use super::{
     Bytes, Error, Int, Kind, List, MAX_LIST_LEN, StorageCell, Str, decode_index, fail, finish,

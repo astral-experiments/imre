@@ -40,6 +40,13 @@ pub(super) fn surrogate_repr(points: &[u32]) -> String {
     result
 }
 
+/// Leave CPython's two native-stack margins available for exception handling.
+pub(super) fn remaining_repr_words() -> Option<usize> {
+    const STACK_MARGIN_WORDS: usize = 2048;
+    stacker::remaining_stack()
+        .map(|bytes| (bytes / size_of::<usize>()).saturating_sub(2 * STACK_MARGIN_WORDS))
+}
+
 fn render_allocation(_: std::collections::TryReserveError) -> Error {
     Error::new("MemoryError", "")
 }
@@ -108,6 +115,7 @@ fn close_parens(out: &mut String, count: usize) -> Result<()> {
 
 enum RenderRoot<'a> {
     Object(Id),
+    Cursor(Id),
     BuiltinContainer {
         object: Id,
         storage: Id,
@@ -116,8 +124,17 @@ enum RenderRoot<'a> {
     Exception(&'a Error),
 }
 
+#[derive(Clone, Copy)]
+enum FormatLookup {
+    Repr,
+    Str,
+    MethodName,
+}
+
 enum FormatPart {
     Value(Id, bool),
+    Cursor(Id),
+    CursorEnd,
     TypeArgument(Id, bool),
     TypeList(Id, usize, usize),
     TypeEnd(Id, &'static str, bool),
@@ -131,7 +148,7 @@ enum FormatPart {
     DefaultDictFactory(Id, usize),
     DefaultDictName(Id, usize),
     DefaultDictEnd(String),
-    SetMembers(Vec<Id>, usize),
+    SnapshotMembers(Vec<Id>, usize),
     Fields(Id, usize),
     Leave(Id, &'static str),
     ContextEnd(Id),
@@ -140,20 +157,21 @@ enum FormatPart {
 }
 
 impl FormatPart {
-    /// Snapshot the member identities before any element repr can mutate the set.
-    fn set_members(entries: &[(Id, Id)]) -> Result<Self> {
+    /// Snapshot members before an element's repr can mutate the container.
+    fn snapshot(items: impl ExactSizeIterator<Item = Id>) -> Result<Self> {
         let mut members = Vec::new();
         members
-            .try_reserve_exact(entries.len())
-            .map_err(|_| Error::new("MemoryError", ""))?;
-        members.extend(entries.iter().map(|&(key, _)| key));
-        Ok(Self::SetMembers(members, 0))
+            .try_reserve_exact(items.len())
+            .map_err(render_allocation)?;
+        members.extend(items);
+        Ok(Self::SnapshotMembers(members, 0))
     }
 
     /// Values a suspended renderer will read after a Python callback returns.
     fn keep_alive(&mut self, heap: &mut Heap) {
         match self {
             Self::Value(id, _)
+            | Self::Cursor(id)
             | Self::TypeArgument(id, _)
             | Self::TypeList(id, _, _)
             | Self::TypeEnd(id, _, _)
@@ -166,7 +184,7 @@ impl FormatPart {
             | Self::Fields(id, _)
             | Self::Leave(id, _)
             | Self::ContextEnd(id) => heap.keep(*id),
-            Self::SetMembers(members, index) => {
+            Self::SnapshotMembers(members, index) => {
                 // One traced owner keeps the snapshot alive across every following callback.
                 let tuple = heap.alloc(Value::Tuple(std::mem::take(members)));
                 *self = Self::Sequence(tuple, *index);
@@ -174,6 +192,7 @@ impl FormatPart {
             Self::Suffix(_)
             | Self::Text(_)
             | Self::Closing(_)
+            | Self::CursorEnd
             | Self::SliceEnd
             | Self::NamedTupleEnd
             | Self::DefaultDictEnd(_) => {}
@@ -256,7 +275,7 @@ impl Context {
             _ => None,
         }
     }
-    fn sequence_at(&self, id: Id, index: usize) -> Option<(usize, Option<Id>)> {
+    pub(super) fn sequence_at(&self, id: Id, index: usize) -> Option<(usize, Option<Id>)> {
         match self.tuple_backing(id) {
             Value::List(v) | Value::Tuple(v) | Value::NamedTuple { values: v, .. } => {
                 Some((v.len(), v.get(index).copied()))
@@ -278,7 +297,7 @@ impl Context {
     }
 
     /// Preserve the integer object returned by the index protocol for type-sensitive errors.
-    fn index_result(&mut self, value: Id) -> Result<Option<(Id, crate::Int)>> {
+    pub(super) fn index_result(&mut self, value: Id) -> Result<Option<(Id, crate::Int)>> {
         if let Ok(integer) = self.as_int(value) {
             return Ok(Some((value, integer)));
         }
@@ -286,7 +305,7 @@ impl Context {
             return Ok(None);
         };
         let result = self.call(index, Vec::new(), Vec::new())?;
-        self.as_int(result).map(|n| Some((result, n))).map_err(|_| {
+        let number = self.as_int(result).map_err(|_| {
             Error::new(
                 "TypeError",
                 format!(
@@ -294,7 +313,18 @@ impl Context {
                     self.type_name(result)
                 ),
             )
-        })
+        })?;
+        if !matches!(self.heap.get(result), Value::Int(_)) {
+            self.emit_builtin_warning(
+                crate::objects::exceptions::Kind::DeprecationWarning,
+                &format!(
+                    "__index__ returned non-int (type {}).  The ability to return an instance of a strict subclass of int is deprecated, and may be removed in a future version of Python.",
+                    self.type_name(result)
+                ),
+                1,
+            )?;
+        }
+        Ok(Some((result, number)))
     }
 
     /// Convert a bytearray element using the index protocol and the inclusive byte bounds.
@@ -396,7 +426,7 @@ impl Context {
             Value::Str(s) => !s.is_empty(),
             Value::SurrogateStr(points) => !points.is_empty(),
             Value::Bytes(b) | Value::ByteArray(b) => !b.is_empty(),
-            Value::MemoryView { .. } => !self.bytes_like(id)?.is_empty(),
+            Value::MemoryView { .. } => self.view_layout(id)?.len != 0,
             Value::List(v) | Value::Tuple(v) | Value::NamedTuple { values: v, .. } => !v.is_empty(),
             Value::Set { entries: v, .. }
             | Value::Dict(v)
@@ -469,6 +499,43 @@ impl Context {
         self.equal_inner(a, b, usize::MAX, &mut false)
     }
 
+    pub(super) fn mapping_proxy(&mut self, mapping: Id) -> Result<Id> {
+        // Like mappingproxy_new, require mapping subscription and exclude lists and tuples.
+        let supported = match self.heap.get(self.scalar_value(mapping)) {
+            Value::List(_) | Value::Tuple(_) | Value::NamedTuple { .. } => false,
+            Value::Instance { class, .. } if self.namedtuple_fields(*class).is_some() => false,
+            Value::Dict(_)
+            | Value::DefaultDict { .. }
+            | Value::MappingProxy(_)
+            | Value::Str(_)
+            | Value::SurrogateStr(_)
+            | Value::Bytes(_)
+            | Value::ByteArray(_)
+            | Value::Array(_)
+            | Value::Range(_)
+            | Value::MemoryView { .. }
+            | Value::Context(_)
+            | Value::RegexMatch(_)
+            | Value::GenericAlias(_)
+            | Value::Union(_) => true,
+            _ => {
+                self.dict_storage(mapping).is_some()
+                    || self.slot(mapping, "__getitem__").is_some()
+                    || self.enum_values(mapping).is_some()
+            }
+        };
+        if !supported {
+            return Err(Error::new(
+                "TypeError",
+                format!(
+                    "mappingproxy() argument must be a mapping, not {}",
+                    self.type_name(mapping)
+                ),
+            ));
+        }
+        Ok(self.alloc(Value::MappingProxy(mapping)))
+    }
+
     /// Return the wrapped object without recursing through nested read-only views.
     pub(super) fn mapping_proxy_target(&self, mut value: Id) -> Id {
         while let Value::MappingProxy(mapping) = *self.heap.get(value) {
@@ -514,6 +581,9 @@ impl Context {
                 }
                 if check_special && let Some(result) = self.binary_special("==", a, b)? {
                     break 'current self.truth(result)?;
+                }
+                if let Some(equal) = stdlib::datetime::comparison::compare(self, a, b, "==")? {
+                    break 'current equal;
                 }
                 if matches!(self.heap.get(a), Value::Method { .. })
                     && matches!(self.heap.get(b), Value::Method { .. })
@@ -743,17 +813,8 @@ impl Context {
             (Value::Int(_) | Value::Bool(_), Value::Float(f)) => {
                 crate::floats::compare(&self.as_int(a).unwrap(), *f) == 0
             }
-            (Value::MemoryView { .. }, Value::Array(array)) => self
-                .bytes_like(a)
-                .is_ok_and(|bytes| array.equals_unsigned_bytes(bytes)),
-            (Value::Array(array), Value::MemoryView { .. }) => self
-                .bytes_like(b)
-                .is_ok_and(|bytes| array.equals_unsigned_bytes(bytes)),
             (Value::MemoryView { .. }, _) | (_, Value::MemoryView { .. }) => {
-                match (self.bytes_like(a), self.bytes_like(b)) {
-                    (Ok(left), Ok(right)) => left == right,
-                    _ => false,
-                }
+                self.memoryview_equal(a, b)
             }
             (Value::Str(a), Value::Str(b)) => a == b,
             (Value::SurrogateStr(a), Value::SurrogateStr(b)) => a == b,
@@ -1005,6 +1066,11 @@ impl Context {
 
     /// Return the scalar ordering or the comparison result of the first unequal elements.
     fn order(&mut self, op: &str, original_a: Id, original_b: Id) -> Result<Id> {
+        if let Some(result) =
+            stdlib::datetime::comparison::compare(self, original_a, original_b, op)?
+        {
+            return Ok(builtins::boolean(result));
+        }
         let (a, b) = (self.scalar_value(original_a), self.scalar_value(original_b));
         let int_float = |integer, float| -> Result<Option<Ordering>> {
             let order = crate::floats::compare(&self.as_int(integer)?, float);
@@ -1088,7 +1154,7 @@ impl Context {
             RenderRoot::Object(id),
             false,
             false,
-            |_, _, _, _, _| Ok(None),
+            |_, _, _, _, _, _| Ok(None),
         )
         .unwrap_or_else(|_| "<exception str() failed>".to_owned())
     }
@@ -1122,7 +1188,7 @@ impl Context {
             RenderRoot::Object(id),
             true,
             false,
-            |_, _, _, _, _| Ok(None),
+            |_, _, _, _, _, _| Ok(None),
         )
         .unwrap_or_else(|_| "<exception repr() failed>".to_owned())
     }
@@ -1170,6 +1236,9 @@ impl Context {
 
     /// Render container ancestors iteratively so recursive values do not consume the native stack.
     pub(super) fn checked_format(&mut self, root: Id, quoted: bool) -> Result<String> {
+        if !quoted && let Some(text) = super::stdlib::datetime::render::exact(self, root, false)? {
+            return self.str_value(text).map(str::to_owned);
+        }
         if !quoted && let Some(value) = self.single_exception_str(root)? {
             return self.str_value(value).map(str::to_owned);
         }
@@ -1190,6 +1259,11 @@ impl Context {
             },
             true,
         )
+    }
+
+    /// Bypass the receiver's override for an explicit count or repeat descriptor call.
+    pub(super) fn checked_cursor_slot_repr(&mut self, object: Id) -> Result<String> {
+        self.checked_render(RenderRoot::Cursor(object), true)
     }
 
     /// Render the native defaultdict slot while looking up hooks on its live children.
@@ -1214,7 +1288,9 @@ impl Context {
             root,
             quoted,
             true,
-            |ctx, id, quoted, work, ancestors| ctx.element_format(id, quoted, work, ancestors),
+            |ctx, id, lookup, work, ancestors, remaining| {
+                ctx.element_format(id, lookup, work, ancestors, remaining)
+            },
         )
     }
 
@@ -1261,6 +1337,15 @@ impl Context {
                 .dict_storage(object)
                 .filter(|&storage| matches!(self.heap.get(storage), Value::DefaultDict { .. }))
                 .map(|storage| (storage, true)),
+            "itertools.count.__repr__" | "itertools.repeat.__repr__" => {
+                let storage = self.scalar_value(object);
+                matches!(
+                    (name.as_str(), self.heap.get(storage)),
+                    ("itertools.count.__repr__", Value::Count { .. })
+                        | ("itertools.repeat.__repr__", Value::Repeat(_))
+                )
+                .then_some((storage, false))
+            }
             "list.__repr__" | "tuple.__repr__" | "set.__repr__" | "frozenset.__repr__" => {
                 let storage = self.scalar_value(object);
                 matches!(
@@ -1278,6 +1363,12 @@ impl Context {
 
     /// Invoke the special method once and preserve an accepted string subclass.
     pub(super) fn repr_override(&mut self, id: Id) -> Result<Option<Id>> {
+        if let Some(text) = super::stdlib::datetime::render::exact(self, id, true)? {
+            return Ok(Some(text));
+        }
+        if let Some(result) = super::paramspec::repr(self, id) {
+            return result.map(Some);
+        }
         let Some((class, slot)) = self.format_slot(id, "__repr__") else {
             return Ok(None);
         };
@@ -1301,18 +1392,38 @@ impl Context {
         Ok(Some(result))
     }
 
+    /// Look up a method's live qualified name, falling back only when that attribute is absent.
+    fn bound_method_name(&mut self, callable: Id) -> Result<Option<Id>> {
+        for attribute in ["__qualname__", "__name__"] {
+            match self.lookup_attr(callable, attribute) {
+                Ok(name) => return Ok(self.string_storage(name)),
+                Err(error) if self.is_attribute_error(&error) => {}
+                Err(error) => return Err(error),
+            }
+        }
+        Ok(None)
+    }
+
     /// Keep pending children alive while a hook mutates and reenters its container.
     fn element_format(
         &mut self,
         id: Id,
-        quoted: bool,
+        lookup: FormatLookup,
         work: &mut [FormatPart],
         ancestors: &[Id],
+        sequence_words: Option<usize>,
     ) -> Result<Option<String>> {
-        if self.format_slot(id, "__repr__").is_none()
-            && (quoted || self.format_slot(id, "__str__").is_none())
+        let calendar_repr = matches!(lookup, FormatLookup::Repr)
+            && matches!(self.heap.get(id), Value::Calendar { .. })
+            && super::stdlib::datetime::render::custom_zone(self, id).is_some();
+        if !matches!(lookup, FormatLookup::MethodName)
+            && !calendar_repr
+            && self.format_slot(id, "__repr__").is_none()
+            && (matches!(lookup, FormatLookup::Repr) || self.format_slot(id, "__str__").is_none())
         {
-            return Ok(None);
+            let (Value::ParamSpec(_) | Value::ParamSpecMarker(_, _)) = self.heap.get(id) else {
+                return Ok(None);
+            };
         }
         self.repr_ancestors
             .try_reserve(ancestors.len())
@@ -1326,11 +1437,13 @@ impl Context {
             part.keep_alive(&mut self.heap);
         }
         self.repr_ancestors.extend_from_slice(ancestors);
-        let converted = if quoted {
-            self.repr_override(id)
-        } else {
-            builtins::call(self, "str", &[id], &[]).map(Some)
+        let previous = std::mem::replace(&mut self.repr_sequence_words, sequence_words);
+        let converted = match lookup {
+            FormatLookup::Repr => self.repr_override(id),
+            FormatLookup::Str => builtins::call(self, "str", &[id], &[]).map(Some),
+            FormatLookup::MethodName => self.bound_method_name(id),
         };
+        self.repr_sequence_words = previous;
         let result = converted.and_then(|value| {
             value
                 .map(|s| {
@@ -1485,9 +1598,10 @@ impl Context {
         mut element_repr: impl FnMut(
             &mut C,
             Id,
-            bool,
+            FormatLookup,
             &mut [FormatPart],
             &[Id],
+            Option<usize>,
         ) -> Result<Option<String>>,
     ) -> Result<String> {
         use FormatPart as Part;
@@ -1504,6 +1618,7 @@ impl Context {
         }
         match root {
             RenderRoot::Object(id) => push_frame(&mut work, Part::Value(id, quoted))?,
+            RenderRoot::Cursor(id) => push_frame(&mut work, Part::Cursor(id))?,
             RenderRoot::BuiltinContainer {
                 object,
                 storage,
@@ -1521,7 +1636,12 @@ impl Context {
                         else {
                             return Ok(output);
                         };
-                        ("{", end, "set(...)", Part::set_members(entries)?)
+                        (
+                            "{",
+                            end,
+                            "set(...)",
+                            Part::snapshot(entries.iter().map(|&(key, _)| key))?,
+                        )
                     }
                     Value::List(_) => ("[", "]", "[...]", Part::Sequence(storage, 0)),
                     Value::Tuple(items) => (
@@ -1557,13 +1677,22 @@ impl Context {
         const SLICE_FRAME_WORDS: usize = 78;
         // Nested list and tuple repr use 128 bytes per level in CPython 3.14 on x86-64.
         const SEQUENCE_FRAME_WORDS: usize = 16;
-        const STACK_MARGIN_WORDS: usize = 2048;
-        let stack_words = checked
-            .then(stacker::remaining_stack)
-            .flatten()
-            .map(|bytes| (bytes / size_of::<usize>()).saturating_sub(2 * STACK_MARGIN_WORDS));
+        // A pinned x86-64 CPython deque also formats a temporary list; each
+        // nested deque uses 832 bytes, including its ordinary sequence frame.
+        const EXTRA_DEQUE_FRAME_WORDS: usize = 104 - SEQUENCE_FRAME_WORDS;
+        let stack_words = checked.then(remaining_repr_words).flatten();
         let slice_budget = stack_words.map(|words| words / SLICE_FRAME_WORDS);
-        let sequence_budget = stack_words.map(|words| words / SEQUENCE_FRAME_WORDS);
+        // A Python callback may run on a new stack segment. Its renderer
+        // still shares the logical space left by the suspended containers.
+        let sequence_stack_words = if checked {
+            ctx.repr_sequence_words.or(stack_words)
+        } else {
+            None
+        };
+        let mut extra_deque_words = 0usize;
+        // Stock count and repeat consume 1,088 native stack bytes per nested repr on x86-64.
+        const CURSOR_FRAME_WORDS: usize = 136;
+        let mut cursor_words = 0usize;
         let mut slice_depth = 0usize;
         let mut namedtuple_depth = 0usize;
         // Pinned CPython 3.14 uses 192 native bytes per nested builtin alias with
@@ -1573,8 +1702,49 @@ impl Context {
         let mut type_words = 0usize;
         let mut typing_frames = 0usize;
         while let Some(part) = work.pop() {
+            let remaining_sequence_words = sequence_stack_words.map(|limit| {
+                limit.saturating_sub(
+                    active.len() * SEQUENCE_FRAME_WORDS + extra_deque_words + cursor_words,
+                )
+            });
             match part {
                 Part::Closing(count) => close_parens(&mut output, count)?,
+                Part::Cursor(id) => {
+                    if remaining_sequence_words
+                        .map_or(cursor_words >= 1024 * 1024, |n| n < CURSOR_FRAME_WORDS)
+                    {
+                        return Err(Error::new(
+                            "RecursionError",
+                            "maximum recursion depth exceeded while getting the repr of an object",
+                        ));
+                    }
+                    cursor_words += CURSOR_FRAME_WORDS;
+                    push_frame(&mut work, Part::CursorEnd)?;
+                    append_rendered_text(&mut output, ctx.type_name(id))?;
+                    append_rendered_text(&mut output, "(")?;
+                    // Snapshot both operands before a Python repr hook can advance the cursor.
+                    let first = match ctx.heap.get(ctx.scalar_value(id)) {
+                        Value::Count { current, step } => {
+                            if stdlib::itertools::machine_integer(&ctx, *step) != Some(1) {
+                                push_frame(&mut work, Part::Value(*step, true))?;
+                                push_frame(&mut work, Part::Text(", "))?;
+                            }
+                            *current
+                        }
+                        Value::Repeat(repeat) => {
+                            if let Some(count) = repeat.remaining {
+                                push_frame(&mut work, Part::Suffix(format!(", {count}")))?;
+                            }
+                            repeat.value
+                        }
+                        _ => unreachable!("native count or repeat repr slot"),
+                    };
+                    push_frame(&mut work, Part::Value(first, true))?;
+                }
+                Part::CursorEnd => {
+                    cursor_words -= CURSOR_FRAME_WORDS;
+                    append_rendered_text(&mut output, ")")?;
+                }
                 Part::Text(text) => append_rendered_text(&mut output, text)?,
                 Part::ContextEnd(id) => {
                     use std::fmt::Write;
@@ -1596,6 +1766,16 @@ impl Context {
                         append_rendered_text(&mut output, "[")?;
                         push_frame(&mut work, Part::Text("]"))?;
                         push_frame(&mut work, Part::TypeList(id, 0, items.len()))?;
+                    } else if let Value::Function { fields, .. } = ctx.heap.get(id)
+                        && fields.module != NONE
+                        && (ctx.dict_named_item(fields.dict, "__origin__").is_none()
+                            || ctx.dict_named_item(fields.dict, "__args__").is_none())
+                    {
+                        push_frame(&mut work, Part::Value(fields.qualname, false))?;
+                        if ctx.str_value(fields.module).ok() != Some("builtins") {
+                            push_frame(&mut work, Part::Text("."))?;
+                            push_frame(&mut work, Part::Value(fields.module, false))?;
+                        }
                     } else if !typing::append_type_label(&ctx, id, &mut output)? {
                         push_frame(&mut work, Part::Value(id, true))?;
                     }
@@ -1624,6 +1804,9 @@ impl Context {
                     append_rendered_text(&mut output, ")")?;
                 }
                 Part::Leave(id, end) => {
+                    if matches!(ctx.heap.get(id), Value::Deque(_)) {
+                        extra_deque_words -= EXTRA_DEQUE_FRAME_WORDS;
+                    }
                     ancestors.remove(&id);
                     let last = active.pop();
                     debug_assert_eq!(last, Some(id));
@@ -1668,12 +1851,12 @@ impl Context {
                         )?;
                     }
                 }
-                Part::SetMembers(members, index) => {
+                Part::SnapshotMembers(members, index) => {
                     if let Some(&member) = members.get(index) {
                         if index != 0 {
                             append_rendered_text(&mut output, ", ")?;
                         }
-                        push_frame(&mut work, Part::SetMembers(members, index + 1))?;
+                        push_frame(&mut work, Part::SnapshotMembers(members, index + 1))?;
                         push_frame(&mut work, Part::Value(member, true))?;
                     }
                 }
@@ -1729,7 +1912,14 @@ impl Context {
                     }
                 }
                 Part::SyntaxMessage(id) => {
-                    if let Some(text) = element_repr(&mut ctx, id, false, &mut work, &active)? {
+                    if let Some(text) = element_repr(
+                        &mut ctx,
+                        id,
+                        FormatLookup::Str,
+                        &mut work,
+                        &active,
+                        remaining_sequence_words,
+                    )? {
                         append_rendered_text(&mut output, &text)?;
                     } else if let Some(storage) = ctx.string_storage(id) {
                         append_rendered_text(&mut output, ctx.str_value(storage)?)?;
@@ -1750,7 +1940,14 @@ impl Context {
                     if checked
                         && repr
                         && native_storage.is_none()
-                        && let Some(text) = element_repr(&mut ctx, id, true, &mut work, &active)?
+                        && let Some(text) = element_repr(
+                            &mut ctx,
+                            id,
+                            FormatLookup::Repr,
+                            &mut work,
+                            &active,
+                            remaining_sequence_words,
+                        )?
                     {
                         append_rendered_text(&mut output, &text)?;
                         continue;
@@ -1770,6 +1967,33 @@ impl Context {
                         ));
                     }
                     match ctx.heap.get(storage) {
+                        Value::Method {
+                            callable,
+                            receiver,
+                            explicit,
+                        } if *explicit
+                            || matches!(ctx.heap.get(*callable), Value::Function { .. }) =>
+                        {
+                            let (callable, receiver) = (*callable, *receiver);
+                            append_rendered_text(&mut output, "<bound method ")?;
+                            push_frame(&mut work, Part::Text(">"))?;
+                            push_frame(&mut work, Part::Value(receiver, true))?;
+                            if let Value::Function { fields, .. } = ctx.heap.get(callable) {
+                                append_rendered_text(&mut output, ctx.str_value(fields.qualname)?)?;
+                            } else {
+                                let name = element_repr(
+                                    &mut ctx,
+                                    callable,
+                                    FormatLookup::MethodName,
+                                    &mut work,
+                                    &active,
+                                    remaining_sequence_words,
+                                )?;
+                                append_rendered_text(&mut output, name.as_deref().unwrap_or("?"))?;
+                            }
+                            append_rendered_text(&mut output, " of ")?;
+                            continue;
+                        }
                         Value::Union(union) => {
                             type_words += 24;
                             if type_words > type_budget {
@@ -2024,6 +2248,13 @@ impl Context {
                         }
                         _ => {}
                     }
+                    if matches!(
+                        ctx.heap.get(ctx.scalar_value(storage)),
+                        Value::Count { .. } | Value::Repeat(_)
+                    ) {
+                        push_frame(&mut work, Part::Cursor(id))?;
+                        continue;
+                    }
                     let (start, end, placeholder, contents) = match ctx.heap.get(storage) {
                         Value::Int(value) => {
                             let text = rendered_integer(value)?;
@@ -2041,6 +2272,24 @@ impl Context {
                             }
                             append_rendered_text(&mut output, ")")?;
                             continue;
+                        }
+                        Value::Deque(ring) => {
+                            if ancestors.contains(&id) {
+                                append_rendered_text(&mut output, "[...]")?;
+                                continue;
+                            }
+                            let end = if let Some(maxlen) = ring.maxlen {
+                                push_frame(&mut work, Part::Suffix(format!(", maxlen={maxlen})")))?;
+                                "]"
+                            } else {
+                                "])"
+                            };
+                            (
+                                "deque([",
+                                end,
+                                "[...]",
+                                Part::snapshot(ring.items.iter().copied())?,
+                            )
                         }
                         Value::List(_) => ("[", "]", "[...]", Part::Sequence(storage, 0)),
                         Value::Tuple(items) => (
@@ -2136,13 +2385,18 @@ impl Context {
                         append_rendered_text(&mut output, placeholder)?;
                         continue;
                     }
-                    if matches!(ctx.heap.get(storage), Value::List(_) | Value::Tuple(_))
-                        && sequence_budget.is_some_and(|limit| active.len() >= limit)
+                    if matches!(
+                        ctx.heap.get(storage),
+                        Value::List(_) | Value::Tuple(_) | Value::Deque(_)
+                    ) && remaining_sequence_words == Some(0)
                     {
                         return Err(Error::new(
                             "RecursionError",
                             "maximum recursion depth exceeded while getting the repr of an object",
                         ));
+                    }
+                    if matches!(ctx.heap.get(storage), Value::Deque(_)) {
+                        extra_deque_words += EXTRA_DEQUE_FRAME_WORDS;
                     }
                     push_frame(&mut active, id)?;
                     append_rendered_text(&mut output, start)?;
@@ -2153,7 +2407,10 @@ impl Context {
                             let Value::Set { entries, .. } = ctx.heap.get(storage) else {
                                 unreachable!()
                             };
-                            push_frame(&mut work, Part::set_members(entries)?)?;
+                            push_frame(
+                                &mut work,
+                                Part::snapshot(entries.iter().map(|&(key, _)| key))?,
+                            )?;
                         }
                         part => push_frame(&mut work, part)?,
                     }
@@ -2178,7 +2435,7 @@ impl Context {
             RenderRoot::Exception(error),
             false,
             false,
-            |_, _, _, _, _| Ok(None),
+            |_, _, _, _, _, _| Ok(None),
         )
         .unwrap_or_else(|_| "<exception str() failed>".to_owned())
     }
@@ -2200,19 +2457,17 @@ impl Context {
     }
 
     fn qualified_class_name(&self, class: Id, scope: Id) -> String {
-        let scope = self.scope_data(scope);
-        let module = match scope.names.get("__module__") {
-            Some(&value) => self.str_value(value).ok(),
-            None => Some(scope.module.as_str()),
+        let module = match self.namespace_binding(self.scope_data(scope), "__module__") {
+            Some(value) => self.str_value(value).ok(),
+            None => Some(self.scope_data(scope).module.as_str()),
         };
         let name = self.class_name(class);
         match module {
             None | Some("builtins") => name.to_owned(),
             Some(module) => {
-                let qualname = scope
-                    .names
-                    .get("__qualname__")
-                    .and_then(|&value| self.str_value(value).ok())
+                let qualname = self
+                    .namespace_binding(self.scope_data(scope), "__qualname__")
+                    .and_then(|value| self.str_value(value).ok())
                     .unwrap_or(name);
                 format!("{module}.{qualname}")
             }
@@ -2242,6 +2497,12 @@ impl Context {
     /// Keeps recursive container arguments on the same formatting stack.
     fn format_value(&self, id: Id, repr: bool, active: &mut Vec<Id>) -> String {
         let value = self.heap.get(id);
+        if matches!(
+            self.heap.get(self.scalar_value(id)),
+            Value::Count { .. } | Value::Repeat(_)
+        ) {
+            return self.repr(id);
+        }
         if let Value::HandlerLock(lock) = self.heap.get(self.scalar_value(id)) {
             let (state, owner, depth) = match lock.state() {
                 Some((owner, depth)) => ("locked", owner, depth),
@@ -2335,7 +2596,7 @@ impl Context {
                 let state = if lock.locked() { "locked" } else { "unlocked" };
                 format!("<{state} _thread.lock object at {id:#x}>")
             }
-            Value::Hash(state) => state.borrow().repr(id as usize).to_string(),
+            Value::Hash(state) => state.lock().repr(id as usize).to_string(),
             Value::Context(_) => format!("<_contextvars.Context object at {id:#x}>"),
             Value::TokenMissing => "<Token.MISSING>".to_owned(),
             Value::PartialPlaceholder => "Placeholder".to_owned(),
@@ -2348,23 +2609,6 @@ impl Context {
             Value::RegexPattern(pattern) => pattern.repr(self),
             Value::Float(n) => crate::floats::render(*n).to_string(),
             Value::Complex(z) => z.repr(),
-            Value::Repeat(repeat) => {
-                let value = self.format_value(repeat.value, true, active);
-                match repeat.remaining {
-                    Some(n) => format!("repeat({value}, {n})"),
-                    None => format!("repeat({value})"),
-                }
-            }
-            Value::Count { current, step } => {
-                let current = self.repr(*current);
-                if matches!(self.heap.get(*step), Value::Bool(true))
-                    || matches!(self.heap.get(*step), Value::Int(n) if n.as_small() == Some(1))
-                {
-                    format!("count({current})")
-                } else {
-                    format!("count({current}, {})", self.repr(*step))
-                }
-            }
             Value::Calendar { value, .. } if repr => value.repr(),
             Value::Calendar { value, .. } => value.text(),
             Value::NamedTuple {
@@ -2443,7 +2687,7 @@ impl Context {
                 RenderRoot::Exception(error),
                 repr,
                 false,
-                |_, _, _, _, _| Ok(None),
+                |_, _, _, _, _, _| Ok(None),
             )
             .unwrap_or_else(|_| {
                 if repr {
@@ -2468,7 +2712,7 @@ impl Context {
             Value::Native(name) if matches!(name.as_str(), "typing.Any" | "typing.Callable") => {
                 name.clone()
             }
-            Value::TypeVarTuple { name, .. } => self.display(*name),
+            Value::TypeVarTuple { name, .. } | Value::TypeAlias { name, .. } => self.display(*name),
             Value::NoDefault => "typing.NoDefault".to_owned(),
             Value::TypeVar(var) => {
                 let variance = if var.covariant {
@@ -2483,7 +2727,8 @@ impl Context {
                 format!("{variance}{}", self.display(var.name))
             }
             Value::GetSetDescriptor { owner, name, .. }
-                if crate::objects::HashState::is_provider_class(owner)
+                if *owner == "int"
+                    || crate::objects::HashState::is_provider_class(owner)
                     || *owner == super::value::TEMPLATE_TYPE
                     || stdlib::datetime::members(owner).is_some() =>
             {
@@ -2527,6 +2772,12 @@ impl Context {
             {
                 format!("<built-in function {function}>")
             }
+            Value::Native(name)
+                if let Some(owner) = builtins::constructor_owner(name)
+                    && let Some(target) = self.builtins.get(owner) =>
+            {
+                format!("<built-in method __new__ of type object at {target:#x}>")
+            }
             Value::Native(name) => super::wrapper_descriptor::BuiltinDescriptor::lookup(name)
                 .map(|slot| slot.repr())
                 .unwrap_or_else(|| format!("<class '{name}'>")),
@@ -2541,9 +2792,10 @@ impl Context {
                     self.format_value(*callable, true, active)
                 )
             }
+            Value::Cached { .. } => format!("<functools._lru_cache_wrapper object at {id:#x}>"),
             Value::Function { fields, .. } => {
                 format!(
-                    "<function {}>",
+                    "<function {} at {id:#x}>",
                     self.format_value(fields.qualname, false, active)
                 )
             }
@@ -2590,6 +2842,12 @@ impl Context {
     }
 
     pub(super) fn get_item(&mut self, obj: Id, key: Id) -> Result<Id> {
+        if self.raw_read_window(obj).is_some() {
+            return self.raw_view_get(obj, key);
+        }
+        if matches!(self.heap.get(obj), Value::MemoryView { .. }) {
+            return self.memoryview_get(obj, key);
+        }
         let target = self.weak_proxy_target(obj)?;
         if target != obj {
             return self.proxy_subscript(target, |ctx| ctx.get_item(target, key));
@@ -2814,6 +3072,12 @@ impl Context {
     }
 
     pub(super) fn put_item(&mut self, obj: Id, key: Id, val: Id) -> Result<()> {
+        if self.raw_read_window(obj).is_some() {
+            return self.raw_view_set(obj, key, val);
+        }
+        if matches!(self.heap.get(obj), Value::MemoryView { .. }) {
+            return self.memoryview_set(obj, key, val);
+        }
         let target = self.weak_proxy_target(obj)?;
         if target != obj {
             return self.proxy_subscript(target, |ctx| ctx.put_item(target, key, val));
@@ -2915,6 +3179,11 @@ impl Context {
                 )
             })?;
             return Ok(hay.contains(needle));
+        }
+        if let Value::ByteArray(data) = self.heap.get(scalar)
+            && matches!(self.heap.get(item), Value::MemoryView { .. })
+        {
+            return Ok(crate::objects::bytes_contains(data, self.bytes_like(item)?));
         }
         if matches!(self.heap.get(scalar), Value::Bytes(_)) {
             // CPython falls back to the buffer protocol when integer conversion fails.
@@ -3250,22 +3519,89 @@ impl Context {
         })
     }
 
-    /// Union of set operands preserves mutable left-hand storage for augmented assignment.
-    fn set_union(&mut self, a: Id, b: Id, inplace: bool) -> Result<Id> {
-        let Value::Set { entries, frozen } = self.heap.get(a) else {
+    /// Apply a native binary operator to two set payloads without invoking subclass overrides.
+    pub(super) fn set_binary(
+        &mut self,
+        op: &str,
+        left: Id,
+        right: Id,
+        inplace: bool,
+    ) -> Result<Id> {
+        if op == "^" {
+            return self.set_xor(left, right, inplace);
+        }
+        // Both union and self-intersection start from the left set's native table.
+        if op != "|" && !(op == "&" && left == right) {
+            return self.set_algebra(op, left, right, inplace);
+        }
+        let Value::Set { entries, frozen } = self.heap.get(left) else {
             unreachable!()
         };
         let result = if inplace && !frozen {
-            a
+            left
         } else {
             self.alloc(Value::Set {
                 entries: entries.try_clone()?,
                 frozen: *frozen,
             })
         };
-        if a != b {
-            builtins::update_set(self, result, b)?;
+        if left != right {
+            builtins::update_set(self, result, right)?;
         }
+        Ok(result)
+    }
+
+    /// Binary XOR starts with the right table and toggles left keys, so its right
+    /// residents get the first comparison. In-place XOR toggles the left table.
+    fn set_xor(&mut self, left: Id, right: Id, inplace: bool) -> Result<Id> {
+        let frozen = matches!(self.heap.get(left), Value::Set { frozen: true, .. });
+        let (result, source) = if inplace && !frozen {
+            if left == right {
+                self.set_difference_update(left, right)?;
+                return Ok(left);
+            }
+            (left, right)
+        } else {
+            let Value::Set { entries, .. } = self.heap.get(right) else {
+                unreachable!()
+            };
+            let entries = entries.try_clone()?;
+            (self.alloc(Value::Set { entries, frozen }), left)
+        };
+        self.visit_set_operand(source, |ctx, key, hash| {
+            let roots = ctx.heap.temporary_mark();
+            ctx.heap.keep(key);
+            let toggle = ctx
+                .find_dictionary_key(result, key, hash)
+                .and_then(|(hash, found)| {
+                    if let Some(index) = found {
+                        let Value::Set { entries, .. } = ctx.heap.get_mut(result) else {
+                            unreachable!()
+                        };
+                        let (resident, _) = entries.remove(index)?;
+                        let mark = ctx.heap.temporary_mark();
+                        ctx.heap.keep(resident);
+                        ctx.heap.weak_edge_removed(resident);
+                        ctx.discard_truth(mark);
+                    } else {
+                        // Insertion probes again: a collision callback may change its answer.
+                        ctx.set_dictionary_key(result, key, NONE, Some(hash), false)?;
+                    }
+                    Ok(())
+                });
+            // Comparison can clear the source. Release our key before advancing
+            // the live cursor, and preserve any active exception during finalization.
+            ctx.heap.release_temporaries_since(roots);
+            if let Err(error) = &toggle {
+                for id in error.roots() {
+                    ctx.heap.keep(id);
+                }
+            }
+            let mark = ctx.heap.temporary_mark();
+            ctx.heap.keep(key);
+            ctx.discard_truth(mark);
+            toggle
+        })?;
         Ok(result)
     }
 
@@ -3326,15 +3662,104 @@ impl Context {
             source
         };
         self.visit_set_operand(source, |ctx, key, hash| {
-            if let Some(index) = ctx.find_dictionary_key(target, key, hash)?.1 {
-                let Value::Set { entries, .. } = ctx.heap.get_mut(target) else {
-                    unreachable!()
-                };
-                let (removed, _) = entries.remove(index)?;
-                ctx.heap.weak_edge_removed(removed);
+            ctx.discard_difference_key(target, key, hash)
+        })
+    }
+
+    fn discard_difference_key(&mut self, target: Id, key: Id, hash: Option<i64>) -> Result<()> {
+        if let Some(index) = self.find_dictionary_key(target, key, hash)?.1 {
+            let Value::Set { entries, .. } = self.heap.get_mut(target) else {
+                unreachable!()
+            };
+            let (removed, _) = entries.remove(index)?;
+            self.heap.weak_edge_removed(removed);
+        }
+        Ok(())
+    }
+
+    fn filter_difference(&mut self, result: Id, left: Id, right: Id) -> Result<()> {
+        self.visit_set_operand(left, |ctx, key, hash| {
+            ctx.heap.keep(key);
+            if ctx.find_dictionary_key(right, key, hash)?.1.is_none() {
+                ctx.set_dictionary_key(result, key, NONE, hash, false)?;
             }
             Ok(())
         })
+    }
+
+    /// Return a fresh base set, preserving stored hashes and comparison direction
+    /// for a first set or exact dictionary. Later operands are discarded in order.
+    pub(super) fn set_difference(&mut self, receiver: Id, mut operands: &[Id]) -> Result<Id> {
+        let frozen = matches!(self.heap.get(receiver), Value::Set { frozen: true, .. });
+        let result = self.alloc(Value::Set {
+            entries: Default::default(),
+            frozen,
+        });
+        let indexed = operands.first().and_then(|&other| {
+            let storage = self.scalar_value(other);
+            if matches!(self.heap.get(storage), Value::Set { .. }) {
+                Some(storage)
+            } else if matches!(self.heap.get(other), Value::Dict(_)) {
+                Some(other)
+            } else {
+                None
+            }
+        });
+        if let Some(right) = indexed
+            && self.stored_entries(receiver).len() >> 2 <= self.stored_entries(right).len()
+        {
+            self.filter_difference(result, receiver, right)?;
+            operands = &operands[1..];
+        } else {
+            builtins::update_set(self, result, receiver)?;
+        }
+        for &source in operands {
+            if matches!(self.heap.get(self.scalar_value(source)), Value::Set { .. }) {
+                self.set_difference_update(result, source)?;
+            } else {
+                self.subtract_iterable(result, source)?;
+            }
+        }
+        Ok(result)
+    }
+
+    /// Release temporary iterators before the next operand. A finalizer or a
+    /// generator's finally clause may mutate that operand.
+    fn subtract_iterable(&mut self, result: Id, source: Id) -> Result<()> {
+        let roots = self.heap.temporary_mark();
+        let iterator = self.iterator(source)?;
+        self.heap.keep(iterator);
+        let step = self.heap.temporary_mark();
+        let mut failed_key = None;
+        let scan: Result<()> = (|| {
+            let mut limit = self.heap.streaming_collection_limit();
+            loop {
+                self.collect_streaming_garbage(&mut limit);
+                let Some(key) = self.next_item(iterator)? else {
+                    return Ok(());
+                };
+                self.heap.keep(key);
+                failed_key = Some(key);
+                self.discard_difference_key(result, key, None)?;
+                failed_key = None;
+                self.discard_truth(step);
+            }
+        })();
+        self.heap.release_temporaries_since(roots);
+        if let Err(error) = &scan {
+            for id in error.roots() {
+                self.heap.keep(id);
+            }
+        }
+        let key_mark = self.heap.temporary_mark();
+        if let Some(key) = failed_key {
+            self.heap.keep(key);
+        }
+        let iterator_mark = self.heap.temporary_mark();
+        self.heap.keep(iterator);
+        self.discard_truth(iterator_mark);
+        self.discard_truth(key_mark);
+        scan
     }
 
     /// Compute set difference or intersection, including reflected dictionary-view operands.
@@ -3354,6 +3779,16 @@ impl Context {
             })
         };
         if op == "-" {
+            // For comparable sizes CPython probes the right set with each left key.
+            // Copy-and-discard reverses the equality callback, and is only used
+            // for a much larger left operand or for mutable difference updates.
+            if sets
+                && !mutate
+                && self.stored_entries(left).len() >> 2 <= self.stored_entries(right).len()
+            {
+                self.filter_difference(result, left, right)?;
+                return Ok(result);
+            }
             if let Value::DictView {
                 dict,
                 kind: value::DictViewKind::Keys,
@@ -3379,17 +3814,9 @@ impl Context {
                 (left, right)
             }
         } else {
-            let view_len = |id| match self.heap.get(id) {
-                Value::DictView {
-                    dict,
-                    kind: value::DictViewKind::Keys | value::DictViewKind::Items,
-                    ..
-                } => Some(
-                    self.dict_entries(*dict)
-                        .expect("dictionary view backing")
-                        .len(),
-                ),
-                _ => None,
+            let view_len = |id| {
+                self.set_view(id)
+                    .map(|(dict, _)| self.stored_entries(dict).len())
             };
             let (view, size, other) = if let Some(size) = view_len(left) {
                 (left, size, right)
@@ -3414,35 +3841,10 @@ impl Context {
             }
         };
         self.visit_set_operand(source, |ctx, key, hash| {
-            let present = match ctx.heap.get(container) {
-                Value::Set { .. } => ctx.find_dictionary_key(container, key, hash)?.1.is_some(),
-                Value::DictView {
-                    dict,
-                    kind: value::DictViewKind::Keys,
-                    ..
-                } => {
-                    let storage = ctx.dict_storage(*dict).expect("dictionary view backing");
-                    ctx.find_dictionary_key(storage, key, hash)?.1.is_some()
-                }
-                Value::DictView {
-                    dict,
-                    kind: value::DictViewKind::Items,
-                    ..
-                } => {
-                    let storage = ctx.dict_storage(*dict).expect("dictionary view backing");
-                    let Value::Tuple(parts) = ctx.heap.get(key) else {
-                        return Ok(());
-                    };
-                    let &[lookup, expected] = parts.as_slice() else {
-                        return Ok(());
-                    };
-                    let Some(index) = ctx.find_dictionary_key(storage, lookup, None)?.1 else {
-                        return Ok(());
-                    };
-                    let actual = ctx.stored_entries(storage)[index].1;
-                    actual == expected || ctx.checked_equal(actual, expected)?
-                }
-                _ => unreachable!("intersection with a set or dictionary view"),
+            let present = if let Some(view) = ctx.set_view(container) {
+                ctx.view_member(view, key, hash)?
+            } else {
+                ctx.find_dictionary_key(container, key, hash)?.1.is_some()
             };
             if present {
                 ctx.set_dictionary_key(result, key, NONE, hash, false)?;
@@ -3463,6 +3865,106 @@ impl Context {
             return Ok(left);
         }
         Ok(result)
+    }
+
+    /// Identify the dictionary views with set-like membership and comparison slots.
+    fn set_view(&self, id: Id) -> Option<(Id, DictViewKind)> {
+        match *self.heap.get(id) {
+            Value::DictView {
+                dict,
+                kind: kind @ (DictViewKind::Keys | DictViewKind::Items),
+                ..
+            } => Some((
+                self.dict_storage(dict).expect("dictionary view backing"),
+                kind,
+            )),
+            _ => None,
+        }
+    }
+
+    /// A set's native slots precede Python mixins appearing later in the MRO.
+    fn overrides_set_slot(&self, id: Id, name: &str) -> bool {
+        self.heap.get(id).instance_class().and_then(|class| {
+            self.find_in_mro(class, |base| match self.heap.get(base) {
+                Value::Native(kind) if matches!(kind.as_str(), "set" | "frozenset") => Some(false),
+                _ => self.own_class_attr(base, name).map(|_| true),
+            })
+        }) == Some(true)
+    }
+
+    fn view_member(
+        &mut self,
+        (dict, kind): (Id, DictViewKind),
+        item: Id,
+        hash: Option<i64>,
+    ) -> Result<bool> {
+        if matches!(kind, DictViewKind::Keys) {
+            return Ok(self.find_dictionary_key(dict, item, hash)?.1.is_some());
+        }
+        let Some(parts) = self.tuple_items(item)? else {
+            return Ok(false);
+        };
+        let &[key, expected] = parts.as_slice() else {
+            return Ok(false);
+        };
+        let Some(index) = self.find_dictionary_key(dict, key, None)?.1 else {
+            return Ok(false);
+        };
+        let actual = self.stored_entries(dict)[index].1;
+        self.heap.keep(actual);
+        self.checked_equal(actual, expected)
+    }
+
+    /// View equality iterates the view and probes the other operand, including its Python hooks.
+    fn equal_view(&mut self, view: Id, other: Id) -> Result<bool> {
+        let roots = self.heap.temporary_mark();
+        // A comparison callback can remove either view from its enclosing container.
+        self.heap.keep(view);
+        self.heap.keep(other);
+        let result: Result<bool> = (|| {
+            let size = self.stored_entries(self.set_view(view).unwrap().0).len();
+            let target = self.set_view(other);
+            let length_roots = self.heap.temporary_mark();
+            let other_size = if let Some((dict, _)) = target {
+                self.stored_entries(dict).len()
+            } else if self.overrides_set_slot(other, "__len__") {
+                self.instance_len(other)?.expect("set subclass length slot")
+            } else {
+                self.stored_entries(self.scalar_value(other)).len()
+            };
+            self.discard_truth(length_roots);
+            if size != other_size {
+                return Ok(false);
+            }
+            let it = self.iterator(view)?;
+            self.heap.keep(it);
+            let step = self.heap.temporary_mark();
+            while let Some(item) = self.next_item(it)? {
+                self.heap.keep(item);
+                let found = if let Some(target) = target {
+                    self.view_member(target, item, None)?
+                } else if self.overrides_set_slot(other, "__contains__") {
+                    self.contains(item, other)?
+                } else {
+                    builtins::set_member(self, other, item, true)?
+                };
+                self.discard_truth(step);
+                if !found {
+                    return Ok(false);
+                }
+            }
+            Ok(true)
+        })();
+        let collect = self.heap.discard_truth_operands(roots, self.modules);
+        if let Err(error) = &result {
+            for id in error.roots() {
+                self.heap.keep(id);
+            }
+        }
+        if collect {
+            self.collect_unreachable();
+        }
+        result
     }
 
     /// Return the original storage of an exact list or a list subclass.
@@ -3559,7 +4061,79 @@ impl Context {
         result
     }
 
+    /// Dispatch one mapping proxy slot at a time. Left operands inspect the original
+    /// right operand before a reflected proxy slot unwraps it.
+    fn mapping_proxy_union(&mut self, mut left: Id, mut right: Id) -> Result<Id> {
+        loop {
+            if let Value::MappingProxy(mapping) = *self.heap.get(left) {
+                left = mapping;
+                if let Value::MappingProxy(mapping) = *self.heap.get(right) {
+                    right = mapping;
+                }
+                continue;
+            }
+            if matches!(self.heap.get(left), Value::Weak(wr) if wr.kind != weakref::Kind::Reference)
+            {
+                return self.binary("|", left, right);
+            }
+            let next_right = match self.heap.get(right) {
+                Value::MappingProxy(mapping) => Some(*mapping),
+                Value::Weak(wr) if wr.kind != weakref::Kind::Reference => None,
+                _ => return self.binary("|", left, right),
+            };
+            match self.heap.get(left) {
+                Value::Union(_) | Value::TypeVar(_) => {
+                    return super::union::make(self, &[left, right]);
+                }
+                Value::GenericAlias(alias)
+                    if alias.kind.is_typing_alias()
+                        || matches!(alias.kind, super::typing::AliasKind::Literal(_)) =>
+                {
+                    return super::union::make(self, &[left, right]);
+                }
+                Value::DictView {
+                    kind: value::DictViewKind::Keys | value::DictViewKind::Items,
+                    ..
+                } => {
+                    return self.dict_view_union(left, right);
+                }
+                _ => {}
+            }
+            if let Some(result) = self.operator_slot(left, "__or__", right)? {
+                return Ok(result);
+            }
+            // Upgrade weak references only when their reflected slot actually wins.
+            right = match next_right {
+                Some(mapping) => mapping,
+                None => {
+                    let target = self.weak_proxy_target(right)?;
+                    self.heap.keep(target);
+                    target
+                }
+            };
+        }
+    }
+
+    /// Dictionary keys and items accept any iterable on either side of a binary union.
+    fn dict_view_union(&mut self, left: Id, right: Id) -> Result<Id> {
+        let result = self.alloc(Value::Set {
+            entries: Default::default(),
+            frozen: false,
+        });
+        builtins::update_set(self, result, left)?;
+        builtins::update_set(self, result, right)?;
+        Ok(result)
+    }
+
     fn binary_operation(&mut self, op: &str, a: Id, b: Id, inplace: bool) -> Result<Id> {
+        if !inplace
+            && op == "|"
+            && (matches!(self.heap.get(a), Value::MappingProxy(_))
+                || matches!(self.heap.get(b), Value::MappingProxy(_))
+                    && !matches!(self.heap.get(a), Value::Weak(wr) if wr.kind != weakref::Kind::Reference))
+        {
+            return self.with_proxy_operands(a, b, |ctx| ctx.mapping_proxy_union(a, b));
+        }
         if self.heap.has_weak_values && !matches!(op, "is" | "is not") {
             let left = self.weak_proxy_target(a)?;
             let right = self.weak_proxy_target(b)?;
@@ -3569,7 +4143,12 @@ impl Context {
                 });
             }
         }
-        if op == "|" && matches!(self.heap.get(a), Value::Union(_) | Value::TypeVar(_)) {
+        if op == "|"
+            && matches!(
+                self.heap.get(a),
+                Value::Union(_) | Value::TypeVar(_) | Value::ParamSpec(_)
+            )
+        {
             return super::union::make(self, &[a, b]);
         }
         if let Some(result) = self.binary_special(op, a, b)? {
@@ -3613,28 +4192,23 @@ impl Context {
                 if op != "|" {
                     return self.set_algebra(op, a, b, false);
                 }
-                // Dictionary keys and items implement reflected union, returning a fresh set.
-                let result = self.alloc(Value::Set {
-                    entries: Default::default(),
-                    frozen: false,
-                });
-                builtins::update_set(self, result, a)?;
-                builtins::update_set(self, result, b)?;
-                return Ok(result);
+                return self.dict_view_union(a, b);
             }
-            "|" | "&" | "-"
-                if matches!(self.heap.get(a), Value::Set { .. })
-                    || matches!(self.heap.get(b), Value::Set { .. }) =>
+            "|" | "&" | "-" | "^"
+                if [a, b].into_iter().any(|value| {
+                    let storage = if op == "^" {
+                        self.scalar_value(value)
+                    } else {
+                        value
+                    };
+                    matches!(self.heap.get(storage), Value::Set { .. })
+                }) =>
             {
                 if matches!(
                     (self.heap.get(a), self.heap.get(b)),
                     (Value::Set { .. }, Value::Set { .. })
                 ) {
-                    return if op == "|" {
-                        self.set_union(a, b, inplace)
-                    } else {
-                        self.set_algebra(op, a, b, inplace)
-                    };
+                    return self.set_binary(op, a, b, inplace);
                 }
                 return Err(Error::new(
                     "TypeError",
@@ -3983,14 +4557,23 @@ fn binary_slots(op: &str) -> Option<(&'static str, &'static str, &'static str)> 
 }
 
 impl Context {
-    /// Native timedelta participates in the same reflected arithmetic ordering as a Python class.
-    fn timedelta_slot_class(&self, value: Id) -> Option<Id> {
-        match self.heap.get(value) {
-            Value::Calendar { value, .. } if value.class() == "timedelta" => {
-                self.builtins.get("datetime.timedelta").copied()
-            }
-            _ => None,
-        }
+    /// Exact native calendar operands participate in Python's reflected numeric slot ordering.
+    fn calendar_slot_class(&self, value: Id, add_or_subtract: bool) -> Option<Id> {
+        let Value::Calendar { value, .. } = self.heap.get(value) else {
+            return None;
+        };
+        let class = match value.class() {
+            "timedelta" => "datetime.timedelta",
+            "datetime" if add_or_subtract => "datetime.datetime",
+            _ => return None,
+        };
+        self.builtins.get(class).copied()
+    }
+
+    /// An inherited object.__ne__ leaves ordinary comparison to the equality fallback.
+    fn has_custom_ne(&self, value: Id) -> bool {
+        self.slot(value, "__ne__")
+            .is_some_and(|slot| Some(&slot) != self.builtins.get("object.__ne__"))
     }
 
     fn operator_slot(&mut self, obj: Id, name: &str, other: Id) -> Result<Option<Id>> {
@@ -4005,7 +4588,13 @@ impl Context {
         {
             return Ok(None);
         }
-        let method = if matches!(
+        let method = if matches!(name, "__xor__" | "__rxor__")
+            && matches!(self.heap.get(obj), Value::Set { .. })
+        {
+            Some(self.lookup_attr(obj, name)?)
+        } else if name == "__ne__" && !self.has_custom_ne(obj) {
+            None
+        } else if matches!(
             name,
             "__add__"
                 | "__radd__"
@@ -4017,7 +4606,12 @@ impl Context {
                 | "__rtruediv__"
                 | "__floordiv__"
                 | "__rfloordiv__"
-        ) && self.timedelta_slot_class(obj).is_some()
+        ) && self
+            .calendar_slot_class(
+                obj,
+                matches!(name, "__add__" | "__radd__" | "__sub__" | "__rsub__"),
+            )
+            .is_some()
         {
             Some(self.lookup_attr(obj, name)?)
         } else {
@@ -4035,6 +4629,26 @@ impl Context {
                 return self
                     .repeat_sequence(obj, storage, other, RepeatMode::Wrapper)
                     .map(Some);
+            }
+
+            // A float subtype inherits float's comparison slots independently. In particular,
+            // float.__ne__ need not call an overridden __eq__, and NaN is unequal to itself.
+            if matches!(name, "__eq__" | "__ne__")
+                && let Value::Instance {
+                    scalar: Some(scalar),
+                    ..
+                } = self.heap.get(obj)
+                && let Value::Float(number) = self.heap.get(*scalar)
+            {
+                let other = self.scalar_value(other);
+                let equal = match self.heap.get(other) {
+                    Value::Float(right) => number == right,
+                    Value::Int(_) | Value::Bool(_) => {
+                        crate::floats::compare(&self.as_int(other)?, *number) == 0
+                    }
+                    _ => return Ok(None),
+                };
+                return Ok(Some(builtins::boolean(equal == (name == "__eq__"))));
             }
 
             if name == "__ne__"
@@ -4167,6 +4781,24 @@ impl Context {
     }
 
     pub(super) fn binary_special(&mut self, op: &str, a: Id, b: Id) -> Result<Option<Id>> {
+        // Keep inherited dict comparisons on the iterative container walk, including cycles.
+        if op == "=="
+            && [a, b].into_iter().all(|value| {
+                self.dict_storage(value).is_some()
+                    && self
+                        .slot(value, "__eq__")
+                        .is_none_or(|slot| Some(&slot) == self.builtins.get("dict.__eq__"))
+            })
+        {
+            return Ok(None);
+        }
+        if matches!(op, "==" | "!=")
+            && let (Value::ParamSpecMarker(left, _), Value::ParamSpecMarker(right, _)) =
+                (self.heap.get(a), self.heap.get(b))
+            && left == right
+        {
+            return super::paramspec::compare(self, op, a, b).map(Some);
+        }
         if matches!(op, "==" | "!=")
             && let Value::MemoryView { owner, .. } = self.heap.get(a)
         {
@@ -4182,7 +4814,10 @@ impl Context {
                         | Value::Array(_)
                 )
             {
-                return Ok(Some(builtins::boolean(self.equal(a, b) == (op == "=="))));
+                // A live floating-point view compares its elements even with itself:
+                // a NaN is unequal. Container identity shortcuts still apply separately.
+                let equal = self.memoryview_equal(a, b);
+                return Ok(Some(builtins::boolean(equal == (op == "=="))));
             }
         }
         if matches!(op, "==" | "!=")
@@ -4223,10 +4858,7 @@ impl Context {
         {
             self.heap.keep(left);
             self.heap.keep(right);
-            if op == "!="
-                && self.slot(left, "__ne__").is_none()
-                && self.slot(right, "__ne__").is_none()
-            {
+            if op == "!=" && !self.has_custom_ne(left) && !self.has_custom_ne(right) {
                 let equal = self.binary("==", left, right)?;
                 return Ok(Some(if self.truth(equal)? { FALSE } else { TRUE }));
             }
@@ -4235,16 +4867,59 @@ impl Context {
         let Some((left, right, inplace)) = binary_slots(op) else {
             return Ok(None);
         };
+        if matches!(op, "==" | "!=") {
+            let set = |id| matches!(self.heap.get(self.scalar_value(id)), Value::Set { .. });
+            let operands = if self.set_view(a).is_some() && self.set_view(b).is_some() {
+                let left_type = self.exact_type(a)?;
+                let right_type = self.exact_type(b)?;
+                // A right-hand OrderedDict view inherits the ordinary view's reflected slot.
+                if left_type != right_type && self.direct_subclass(right_type, left_type) {
+                    Some((b, a))
+                } else {
+                    Some((a, b))
+                }
+            } else if self.set_view(a).is_some() && set(b) {
+                Some((a, b))
+            } else if self.set_view(b).is_some() && set(a) {
+                // A set subclass can handle the comparison before the view's reflected slot.
+                if self.overrides_set_slot(a, left)
+                    && let Some(result) = self.operator_slot(a, left, b)?
+                {
+                    return Ok(Some(result));
+                }
+                Some((b, a))
+            } else {
+                None
+            };
+            if let Some((view, other)) = operands {
+                let equal = self
+                    .with_slot_depth("maximum recursion depth exceeded in comparison", |ctx| {
+                        ctx.equal_view(view, other)
+                    })?;
+                return Ok(Some(builtins::boolean(equal == (op == "=="))));
+            }
+        }
         let class = |id| {
             self.heap.get(id).instance_class().or_else(|| {
                 if matches!(op, "+" | "-" | "*" | "/" | "//") {
-                    self.timedelta_slot_class(id)
+                    self.calendar_slot_class(id, matches!(op, "+" | "-"))
                 } else {
                     None
                 }
             })
         };
-        let (ac, bc) = (class(a), class(b));
+        let (mut ac, mut bc) = (class(a), class(b));
+        let set_xor = op == "^"
+            && [a, b]
+                .into_iter()
+                .any(|id| matches!(self.heap.get(self.scalar_value(id)), Value::Set { .. }));
+        if set_xor {
+            for (value, class) in [(a, &mut ac), (b, &mut bc)] {
+                if matches!(self.heap.get(value), Value::Set { .. }) {
+                    *class = Some(self.exact_type(value)?);
+                }
+            }
+        }
         if ac.is_none()
             && bc.is_none()
             && !(inplace.is_empty()
@@ -4292,8 +4967,13 @@ impl Context {
             ));
         }
         let reflected_first = if let (Some(ac), Some(bc)) = (ac, bc) {
-            ac != bc
-                && self.subclass(bc, ac)
+            let strict_subclass = ac != bc
+                && if set_xor {
+                    self.direct_subclass(bc, ac)
+                } else {
+                    self.subclass(bc, ac)
+                };
+            strict_subclass
                 && (inplace.is_empty() || self.class_attr(bc, right) != self.class_attr(ac, right))
         } else {
             false
@@ -4326,8 +5006,16 @@ impl Context {
         {
             return Ok(result);
         }
+        // A mutable set's in-place slot runs before the right operand's reflected slot.
+        if matches!(op, "|" | "-" | "&" | "^")
+            && matches!(self.heap.get(a), Value::Set { frozen: false, .. })
+            && let right = self.scalar_value(b)
+            && matches!(self.heap.get(right), Value::Set { .. })
+        {
+            return self.set_binary(op, a, right, true);
+        }
         if op == "+"
-            && let Value::ByteArray(left) = self.heap.get(a)
+            && matches!(self.heap.get(a), Value::ByteArray(_))
             && let Value::Bytes(right) | Value::ByteArray(right) = self.heap.get(b)
         {
             if right.is_empty() {
@@ -4338,17 +5026,33 @@ impl Context {
                 return Err(Self::exported_bytearray_error());
             }
             self.check_bytearray_resize(a)?;
-            let bytes = crate::objects::concat_bytes(left, right)?;
+            let bytes = crate::objects::concat_bytes(self.bytes_like(a)?, self.bytes_like(b)?)?;
             let Value::ByteArray(left) = self.heap.get_mut(a) else {
                 unreachable!()
             };
             *left = bytes;
             return Ok(a);
         }
+        if op == "|" && matches!(self.heap.get(a), Value::Dict(_) | Value::DefaultDict { .. }) {
+            builtins::update_dict(self, a, Some(b), &[])?;
+            return Ok(a);
+        }
         self.binary_operation(op, a, b, true)
     }
 
+    pub(super) fn finalize_removed_dict_value(&mut self, removed: Id) {
+        if self.heap.tracks_finalizers()
+            && self.heap.could_own_finalizer(removed, true)
+            && self.heap.has_unbound_finalizer(NONE)
+        {
+            self.collect_unreachable();
+        }
+    }
+
     pub(super) fn delete_item(&mut self, obj: Id, key: Id) -> Result<()> {
+        if matches!(self.heap.get(obj), Value::MemoryView { .. }) {
+            return self.memoryview_delete(obj);
+        }
         let target = self.weak_proxy_target(obj)?;
         if target != obj {
             return self.proxy_subscript(target, |ctx| ctx.delete_item(target, key));
@@ -4368,12 +5072,7 @@ impl Context {
         if let Some(dict) = self.dict_storage(obj) {
             let removed = builtins::remove_dict_item(self, dict, key)?
                 .ok_or_else(|| self.lookup_error("KeyError", key))?;
-            if self.heap.tracks_finalizers()
-                && self.heap.could_own_finalizer(removed, true)
-                && self.heap.has_unbound_finalizer(NONE)
-            {
-                self.collect_unreachable();
-            }
+            self.finalize_removed_dict_value(removed);
             return Ok(());
         }
         match self.heap.get(obj) {

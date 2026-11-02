@@ -17,6 +17,18 @@ from suite_inventory import cases, load_suite, verify_files, verify_interpreter_
 # A completed method earns native operation credit only after inspecting what
 # its original assertions (or, in CONTROL, its retry loop) actually observe.
 OPERATIONS = {
+    "test.test_subprocess.ProcessTestCase.test_communicate_epipe":
+        "attempt to write 1 MiB to an exiting child and return without propagating EPIPE",
+    "test.test_subprocess.ProcessTestCase.test_communicate_epipe_only_stdin":
+        "reap the child and attempt to write 1 MiB to its stdin pipe without propagating EPIPE",
+    "test.test_subprocess.ProcessTestCase.test_communicate_pipe_buf":
+        "communicate across three pipes under backpressure and compare all echoed stdout bytes",
+    "test.test_subprocess.ProcessTestCase.test_communicate_pipe_fd_leak":
+        "communicate on seven pipe configurations and check each redirected stream is closed",
+    "test.test_subprocess.ProcessTestCase.test_communicate_memoryview_input":
+        "send a byte memoryview to the child, compare stdout bytes and check that stderr is None",
+    "test.test_subprocess.ProcessTestCase.test_communicate_memoryview_input_nonbyte":
+        "send an integer array memoryview and compare the child's binary echo with the array bytes",
     "test.test_subprocess.ProcessTestCase.test_post_timeout_communicate_sends_input":
         "retry communication after a zero timeout, check the child's exit status and the returned text",
     "test.test_subprocess.ProcessTestCase.test_communicate_timeout":
@@ -222,7 +234,7 @@ def report(args, level, discovered, reference):
             )
             loc = roles(
                 body="imre",
-                assertions="none" if name == CONTROL else "imre",
+                assertions="none" if name == CONTROL or body.get("assertions") == "none" else "imre",
                 operation="imre",
                 fixture="mixed",
             )

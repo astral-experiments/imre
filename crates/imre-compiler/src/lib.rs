@@ -58,6 +58,9 @@ pub struct CommandFlags {
     pub warn_default_encoding: bool,
     /// Warning options supplied on the command line.
     pub warnoptions: Vec<String>,
+    /// Ordered command-line operands used to construct sys._xoptions.
+    pub xoptions: Vec<String>,
+    pub faulthandler: bool,
 }
 
 /// The in-memory entry and launcher used by a Python-style `-c` invocation.
@@ -71,6 +74,8 @@ pub struct PythonCommand {
 pub struct CompileOptions {
     /// Compile the supplied command without creating a script in the caller's working directory.
     pub command: Option<PythonCommand>,
+    /// Canonical import name requested by the interpreter's `-m` entry.
+    pub module_entry: Option<String>,
     /// Flags and executable for a file launched through the Python command line.
     pub script_startup: Option<(CommandFlags, String)>,
     /// A file describing the branches to include in a closed executable.
@@ -229,6 +234,19 @@ fn object_fallback<T>(
     lower: impl FnOnce(&mut modules::SourceGraph) -> Result<T, String>,
     boxed: impl FnOnce(Compilation) -> T,
 ) -> Result<T, String> {
+    if options.module_entry.is_some() {
+        return dynamic::compile(
+            path,
+            module_root,
+            options,
+            true,
+            None,
+            Default::default(),
+            || Ok(()),
+        )?
+        .map(boxed)
+        .ok_or_else(|| "could not compile the module entry".to_owned());
+    }
     let (error, graph) = match options.load_graph(path, module_root, filesystem) {
         Ok(mut graph) => match lower(&mut graph) {
             Ok(value) => return Ok(value),
@@ -270,10 +288,12 @@ fn object_fallback<T>(
     let check_returns = || {
         if checked_file && let Some(graph) = &graph {
             let (skipped, overloads) = graph.diagnostic_scopes();
-            graph
-                .session
-                .diagnostic_copy()?
-                .check_return_types(skipped.as_deref(), &overloads)?;
+            graph.session.diagnostic_copy()?.check_fallback_contracts(
+                skipped.as_deref(),
+                &overloads,
+                !graph.needs_object_runtime.get()
+                    && graph.object_builtin_errors.borrow().contains(&error),
+            )?;
         }
         Ok(())
     };

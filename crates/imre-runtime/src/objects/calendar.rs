@@ -788,8 +788,11 @@ pub unsafe extern "C" fn imre_calendar_shift(
 ) -> *const Object {
     // SAFETY: both typed operands remain rooted until the new calendar value is built.
     let (dt, d) = unsafe { (object(dt), object(d)) };
-    let n = delta(d);
-    rc_result(with(dt, |dt| match dt {
+    rc_result(shift(dt, delta(d), sub))
+}
+
+fn shift(dt: &Object, n: i128, sub: bool) -> Result<crate::ObjectOwner, Error> {
+    with(dt, |dt| match dt {
         Value::DateOnly(ord) => {
             // date arithmetic uses timedelta.days, even when the fractional day is negative.
             let days = n.div_euclid(DAY);
@@ -804,7 +807,7 @@ pub unsafe extern "C" fn imre_calendar_shift(
         }
         Value::Delta(left) => shift_delta(*left, n, sub),
         _ => unreachable!(),
-    }))
+    })
 }
 /// Negating the minimum representable day is valid, but a fractional maximum day can overflow.
 fn negate_delta(value: &Object) -> Result<crate::ObjectOwner, Error> {

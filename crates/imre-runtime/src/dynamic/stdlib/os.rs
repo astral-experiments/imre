@@ -1,5 +1,7 @@
 pub(in crate::dynamic) mod scandir;
 pub(in crate::dynamic) mod stat;
+#[cfg(target_os = "linux")]
+pub(super) mod statvfs;
 
 use std::ffi::CString;
 
@@ -18,13 +20,22 @@ pub(in crate::dynamic) fn install_capabilities(
         (
             "supports_dir_fd",
             &[
-                "access", "chmod", "link", "lstat", "mkdir", "mkfifo", "open", "readlink", "rmdir",
-                "stat", "symlink", "unlink", "utime",
+                "access", "chmod", "link", "lstat", "mkdir", "mkfifo", "open", "readlink",
+                "rename", "rmdir", "stat", "symlink", "unlink", "utime",
             ][..],
         ),
         (
             "supports_fd",
-            &["chmod", "listdir", "scandir", "stat", "utime"][..],
+            &[
+                "chdir",
+                "chmod",
+                "listdir",
+                "scandir",
+                "stat",
+                #[cfg(target_os = "linux")]
+                "statvfs",
+                "utime",
+            ][..],
         ),
         (
             "supports_follow_symlinks",
@@ -328,6 +339,8 @@ pub(super) fn change_environment(
 mod chmod;
 mod links;
 mod mkfifo;
+#[cfg(target_os = "linux")]
+pub(in crate::dynamic) mod scheduler;
 mod unlink;
 mod utime;
 
@@ -337,7 +350,10 @@ pub(super) fn is_descriptor_function(name: &str) -> bool {
         name,
         "access"
             | "open"
+            | "getsid"
             | "waitpid"
+            | "rename"
+            | "replace"
             | "readlink"
             | "scandir"
             | "remove"
@@ -346,11 +362,14 @@ pub(super) fn is_descriptor_function(name: &str) -> bool {
             | "mkdir"
             | "mkfifo"
             | "chmod"
+            | "fchmod"
+            | "chdir"
             | "utime"
             | "dup"
             | "dup2"
             | "isatty"
             | "lseek"
+            | "ftruncate"
             | "pipe"
             | "read"
             | "write"
@@ -398,7 +417,7 @@ fn path_or_fd(
     name: &str,
     path: Id,
     allow_fd: bool,
-    warn_bool_fd: fn(&Context, Id) -> Result<()>,
+    warn_bool_fd: fn(&mut Context, Id) -> Result<()>,
 ) -> Result<(PathArg, Id)> {
     let spelling = matches!(
         ctx.heap.get(ctx.scalar_value(path)),
@@ -443,6 +462,10 @@ fn directory_fd(ctx: &mut Context, value: Option<Id>) -> Result<i32> {
     Ok(native::directory_fd_number(&fd)?)
 }
 
+fn audit_fd(ctx: &mut Context, fd: i32) -> Id {
+    ctx.int(i64::from(if fd == libc::AT_FDCWD { -1 } else { fd }))
+}
+
 /// Bind the path and keyword-only directory descriptor in Argument Clinic order.
 fn path_and_dir_fd(
     ctx: &mut Context,
@@ -476,6 +499,33 @@ fn path_and_dir_fd(
     )?;
     let dir_fd = directory_fd(ctx, dir_fd)?;
     Ok((path, pathname, dir_fd))
+}
+
+/// Change the process working directory after converting and auditing the supplied path or fd.
+fn chdir(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    let [Some(path)] = builtins::bind_builtin_arguments("chdir", args, kwargs, ["path"], 1)? else {
+        unreachable!("chdir requires a path")
+    };
+    let (path, filename) = path_or_fd(ctx, "chdir", path, true, stat::warn_bool_fd)?;
+    super::audit::event(ctx, "os.chdir", &[filename])?;
+    let rc = match path {
+        // CPython reserves -1 for a missing fd and has no pathname in this case.
+        PathArg::Fd(-1) => {
+            let error = std::io::Error::from_raw_os_error(libc::EFAULT);
+            return Err(
+                ctx.with_errno_filename(crate::objects::errno_error(error).into(), filename)?
+            );
+        }
+        // SAFETY: fchdir checks the caller-supplied descriptor without taking ownership.
+        PathArg::Fd(fd) => unsafe { libc::fchdir(fd) },
+        // SAFETY: the converted, NUL-terminated pathname lives through the call.
+        PathArg::Name(name) => unsafe { libc::chdir(name.as_ptr()) },
+    };
+    if rc < 0 {
+        let error = crate::objects::errno_error(std::io::Error::last_os_error());
+        return Err(ctx.with_errno_filename(error.into(), filename)?);
+    }
+    Ok(NONE)
 }
 
 /// Return the link contents with the string type of its converted path.
@@ -618,6 +668,10 @@ fn open(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
     } else {
         libc::AT_FDCWD
     };
+    if !ctx.audit_hooks.is_empty() {
+        let audit_flags = ctx.int(i64::from(flags | libc::O_CLOEXEC));
+        super::audit::event(ctx, "open", &[path, NONE, audit_flags])?;
+    }
     match native::open_at(&pathname, flags, mode, dir_fd) {
         Ok(fd) => Ok(ctx.int(i64::from(fd))),
         Err(error) => {
@@ -636,6 +690,9 @@ pub(super) fn descriptor(
     if name == "access" {
         return access(ctx, args, kwargs);
     }
+    if matches!(name, "rename" | "replace") {
+        return links::rename(ctx, name, args, kwargs);
+    }
     if name == "symlink" {
         return links::symlink(ctx, args, kwargs);
     }
@@ -651,8 +708,14 @@ pub(super) fn descriptor(
     if name == "utime" {
         return utime::call(ctx, args, kwargs);
     }
+    if name == "chdir" {
+        return chdir(ctx, args, kwargs);
+    }
     if name == "chmod" {
         return chmod::call(ctx, args, kwargs);
+    }
+    if name == "fchmod" {
+        return chmod::fchmod(ctx, args, kwargs);
     }
     if matches!(name, "mkdir" | "mkfifo") {
         return create_node(ctx, name, args, kwargs);
@@ -721,6 +784,19 @@ pub(super) fn descriptor(
             format!("posix.{name}() takes no keyword arguments"),
         ));
     }
+    if name == "getsid" {
+        let [pid] = args else {
+            return Err(Error::new(
+                "TypeError",
+                format!(
+                    "posix.getsid() takes exactly one argument ({} given)",
+                    args.len()
+                ),
+            ));
+        };
+        let sid = native::getsid(c_int(ctx, *pid)?)?;
+        return Ok(ctx.int(i64::from(sid)));
+    }
     if name == "waitpid" {
         let [pid, options] = args else {
             return Err(Error::new(
@@ -777,6 +853,26 @@ pub(super) fn descriptor(
             let count = native::write(fd, bytes)?;
             Ok(ctx.int(count as i64))
         };
+    }
+    if name == "ftruncate" {
+        let [fd, length] = args else {
+            return Err(Error::new(
+                "TypeError",
+                format!("ftruncate expected 2 arguments, got {}", args.len()),
+            ));
+        };
+        let fd = c_int(ctx, *fd)?;
+        let length = file_offset(ctx, *length)?;
+        let audit_fd = ctx.int(i64::from(fd));
+        let audit_length = ctx.int(length);
+        super::audit::event(ctx, "os.truncate", &[audit_fd, audit_length])?;
+        loop {
+            match native::truncate(fd, length) {
+                Ok(()) => return Ok(NONE),
+                Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+                Err(error) => return Err(super::os_error(error)),
+            }
+        }
     }
     if name == "lseek" {
         let [fd, position, whence] = args else {

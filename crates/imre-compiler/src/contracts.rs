@@ -63,6 +63,7 @@ impl Builtin {
             Self::StringListNonempty | Self::StringListContains | Self::StringListFilter(_) => {
                 Contract::new(true, PreservesLists)
             }
+            Self::Random(crate::ir::RandomOperation::Shuffle) => Contract::new(true, Unknown),
             Self::ListReverse => Contract::new(args.first().is_some_and(|e| matches!(e.ty, Type::List(_))), Unknown),
             Self::ListExtendBuffer | Self::ListExtendSnapshot | Self::ListExtendUnhinted | Self::SortDetach => Contract::new(true, Unknown),
             Self::FunctionWrappedSet => Contract::new(false, Unknown),
@@ -538,6 +539,8 @@ impl Builtin {
             | Self::CanElideMapperFrames(_)
             | Self::SysGetRecursionLimit
             | Self::SysContextAwareWarnings
+            | Self::FaultFrame { .. }
+            | Self::FaultLine(_)
             | Self::GeneratorFrameLeave
             | Self::IntSignAsFloat
             | Self::IsInstance(_)

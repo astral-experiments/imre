@@ -60,6 +60,34 @@ def byte_chunks():
         yield b'a\x00' b'\xff', br'\n', b''
 
 
+def formatted_lifetime():
+    events = []
+    class Result(str):
+        def __del__(self):
+            events.append("release result")
+
+    class Operand:
+        def __format__(self, spec):
+            return Result("value")
+        def __del__(self):
+            events.append("release operand")
+
+    def observe(label):
+        events.append(label)
+        return ""
+
+    def fields():
+        yield f"{Operand()}{observe('second field')}", observe("after join")
+        yield f"{Operand()}"
+
+    stream = fields()
+    assert next(stream) == ("value", "")
+    assert events == ["release operand", "second field", "release result", "after join"]
+    result = next(stream)
+    assert type(result) is Result
+    assert events[-1] == "release operand"
+
+
 def formatted_field(value, width):
     yield f"{value = !a} {width:0{width}d}"
 
@@ -182,6 +210,7 @@ def delegate(child):
 
 
 def current():
+    formatted_lifetime()
     chain = iter([7, 8])
     for _ in range(96):
         chain = delegate(chain)

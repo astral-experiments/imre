@@ -12,6 +12,14 @@ fn structural_methods(name: &str) -> Option<&'static [&'static str]> {
     }
 }
 
+/// Class namespaces bootstrapped here provide ABC methods without native instance storage.
+pub(super) fn bootstrapped(name: &str) -> bool {
+    matches!(
+        name,
+        "Sized" | "Iterable" | "Container" | "Collection" | "Mapping" | "MutableMapping"
+    )
+}
+
 /// Allocate the real class objects with their CPython direct bases and C3 lineage.
 pub(super) fn class(ctx: &mut Context, name: &str) -> Result<Id> {
     let key = format!("collections.abc.{name}");
@@ -49,7 +57,7 @@ pub(super) fn class(ctx: &mut Context, name: &str) -> Result<Id> {
     }
     if structural_methods(name).is_some() {
         let function = ctx.builtin(&format!("abc.hook.{name}.__subclasshook__"));
-        let hook = ctx.alloc(Value::ClassMethod(function));
+        let hook = super::method_decorator::class_method(ctx, function)?;
         ctx.bind(scope, "__subclasshook__", hook);
     }
     for &method in abstract_methods {
@@ -60,7 +68,12 @@ pub(super) fn class(ctx: &mut Context, name: &str) -> Result<Id> {
         let function = ctx.builtin(&format!("abc.mapping.{method}"));
         ctx.bind(scope, method, function);
     }
+    let meta = ctx.abc_meta();
     let result = ctx.allocate_class(name.to_owned(), scope, bases)?;
+    let Value::Class { metaclass, .. } = ctx.heap.get_mut(result) else {
+        unreachable!()
+    };
+    *metaclass = Some(meta);
     ctx.classes.insert(key, result);
     ctx.init_abstract_class(result, scope)?;
     Ok(result)
@@ -104,6 +117,17 @@ pub(super) fn registered_subclass(ctx: &Context, cls: Id, parent: Id) -> bool {
         }
     }
     false
+}
+
+/// Resolve explicit registry overrides before using an ABC's native registry.
+pub(super) fn check_impl(ctx: &mut Context, class: Id) -> Result<()> {
+    if ctx.class_attr(class, "_abc_impl").is_some()
+        || (!ctx.is_bundled_abc(class) && !is_abc_class(ctx, class))
+    {
+        ctx.lookup_attr(class, "_abc_impl")?;
+        return Err(Error::new("TypeError", "_abc_impl is set to a wrong type"));
+    }
+    Ok(())
 }
 
 fn register(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
@@ -150,10 +174,17 @@ fn register(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<I
     if !matches!(ctx.builtin_type_name(cls), Some("type" | "typing._AnyMeta")) {
         return Err(Error::new("TypeError", "Can only register classes"));
     }
-    if ctx.python_subclass_check(cls, owner)? {
+    let subclass = |ctx: &mut Context, child, parent| {
+        if ctx.is_protocol_declaration(parent) {
+            ctx.abc_subclass_check(child, parent)
+        } else {
+            ctx.python_subclass_check(child, parent)
+        }
+    };
+    if subclass(ctx, cls, owner)? {
         return Ok(cls);
     }
-    if ctx.python_subclass_check(owner, cls)? {
+    if subclass(ctx, owner, cls)? {
         return Err(Error::new(
             "RuntimeError",
             "Refusing to create an inheritance cycle",
@@ -172,6 +203,9 @@ fn register(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<I
         ));
     }
     ctx.heap.abc_registrations.push([owner, cls]);
+    ctx.heap
+        .protocol_subclass_cache
+        .retain(|_, matched| *matched);
     ctx.heap.abc_cache_token = ctx.heap.abc_cache_token.wrapping_add(1);
     Ok(cls)
 }
@@ -182,6 +216,9 @@ pub(super) fn call(
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
+    if name == "ABCMeta.__new__" {
+        return ctx.abc_new(args, kwargs);
+    }
     if let Some(owner) = name
         .strip_prefix("hook.")
         .and_then(|n| n.strip_suffix(".__subclasshook__"))
@@ -209,6 +246,15 @@ pub(super) fn call(
         }
         return ctx.abc_check_methods(candidate, &names[..methods.len()]);
     }
+    if name == "_abc_caches_clear"
+        && let [owner] = args
+        && kwargs.is_empty()
+    {
+        ctx.heap
+            .protocol_subclass_cache
+            .retain(|pair, _| pair[0] != *owner);
+        return Ok(NONE);
+    }
     if name == "get_cache_token" {
         if !kwargs.is_empty() {
             return Err(Error::new(
@@ -226,6 +272,25 @@ pub(super) fn call(
             ));
         }
         return Ok(ctx.alloc(Value::Int(crate::Int::new(ctx.heap.abc_cache_token.into()))));
+    }
+    if matches!(name, "__instancecheck__" | "__subclasscheck__") {
+        let instance = name == "__instancecheck__";
+        let argument = if instance { "instance" } else { "subclass" };
+        let [Some(class), Some(object)] = super::builtins::bind_builtin_arguments(
+            &format!("ABCMeta.{name}"),
+            args,
+            kwargs,
+            ["cls", argument],
+            2,
+        )?
+        else {
+            unreachable!("both ABCMeta check arguments are required")
+        };
+        return if instance {
+            ctx.abc_meta_instance_check(object, class)
+        } else {
+            ctx.abc_meta_subclass_check(object, class)
+        };
     }
     if name == "register" {
         return register(ctx, args, kwargs);

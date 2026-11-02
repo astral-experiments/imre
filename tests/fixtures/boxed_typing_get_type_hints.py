@@ -1,4 +1,5 @@
-from typing import get_type_hints
+from annotationlib import Format, ForwardRef
+from typing import Annotated, ReadOnly, get_type_hints
 
 
 class Target:
@@ -56,6 +57,28 @@ def current():
     callback_error = error_for("callback()")
     assert type(callback_error) is NameError and callback_error.name == "callback_name"
     assert callback_error.args == ("user callback",)
+    assert get_type_hints(fn, format=Format.FORWARDREF) == {"a": Target, "return": type(None)}
+
+    def register(content: Target, path):
+        pass
+
+    assert get_type_hints(register, format=3) == {"content": Target}
+    marker = object()
+    register.__annotations__ = {"content": list[Annotated[ReadOnly["Target"], marker]]}
+    assert get_type_hints(register) == {"content": list[Target]}
+    assert get_type_hints(register, include_extras=True) == {
+        "content": list[Annotated[ReadOnly[Target], marker]]
+    }
+    register.__annotations__ = {"content": list["Undefined"]}
+    assert get_type_hints(register, format=Format.FORWARDREF) == {"content": list[ForwardRef("Undefined")]}
+
+    def provider(format):
+        if format == Format.FORWARDREF:
+            return {"content": Target}
+        raise NameError("unavailable")
+
+    register.__annotate__ = provider
+    assert get_type_hints(register, format=Format.FORWARDREF) == {"content": Target}
     print("resolved type hints")
 
 

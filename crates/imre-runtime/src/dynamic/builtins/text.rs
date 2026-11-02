@@ -11,7 +11,7 @@ use ruff_python_literal::format::{
 };
 
 use super::super::operators::append_rendered_text;
-use super::super::stdlib::codecs::{decode_named, encode_text};
+use super::super::stdlib::codecs::{decode_named, encode_text_object};
 use super::*;
 
 use crate::objects::{python_whitespace, split_parts, translate, visit_line_fields as split_lines};
@@ -175,15 +175,27 @@ pub(super) fn construct(
         "bytes" | "bytearray" => {
             let [value, encoding_id, errors] =
                 bind(name, args, kwargs, ["source", "encoding", "errors"])?;
+            if let ("bytes", Some(source), None, None) = (name, value, encoding_id, errors)
+                && let Some(result) = call_bytes_method(ctx, source)?
+            {
+                return Ok(result);
+            }
             let bytes = match value.map(|id| ctx.heap.get(id)) {
                 Some(_) if value.is_some_and(|id| ctx.string_storage(id).is_some()) => {
                     if encoding_id.is_none() {
                         return Err(type_error("string argument without an encoding"));
                     }
-                    encode_text(ctx, value.unwrap(), encoding_id, errors)?
+                    let result = encode_text_object(ctx, value.unwrap(), encoding_id, errors)?;
+                    if name == "bytes" {
+                        return Ok(result);
+                    }
+                    ctx.bytes_like(result)?.to_vec()
                 }
-                _ if encoding_id.is_some() || errors.is_some() => {
+                _ if encoding_id.is_some() => {
                     return Err(type_error("encoding without a string argument"));
+                }
+                _ if errors.is_some() => {
+                    return Err(type_error("errors without a string argument"));
                 }
                 None => Vec::new(),
                 Some(Value::Bytes(_)) if name == "bytes" => return Ok(value.unwrap()),
@@ -361,10 +373,29 @@ pub(super) fn bytearray_method(
     Ok(NONE)
 }
 
+/// Call the type's `__bytes__` hook and preserve the identity of its bytes result.
+pub(super) fn call_bytes_method(ctx: &mut Context, source: Id) -> Result<Option<Id>> {
+    let Some(method) = ctx.bound_slot(source, "__bytes__")? else {
+        return Ok(None);
+    };
+    let result = ctx.call(method, Vec::new(), Vec::new())?;
+    if !matches!(ctx.heap.get(ctx.scalar_value(result)), Value::Bytes(_)) {
+        let name = ctx.type_name(result);
+        return Err(type_error(format!(
+            "__bytes__ returned non-bytes (type {})",
+            &name[..name.floor_char_boundary(200)]
+        )));
+    }
+    Ok(Some(result))
+}
+
 pub(in super::super) fn bytes_from_iterable(ctx: &mut Context, obj: Id) -> Result<Vec<u8>> {
+    if matches!(ctx.heap.get(obj), Value::MemoryView { .. }) {
+        return ctx.memoryview_bytes(obj);
+    }
     if matches!(
         ctx.heap.get(ctx.scalar_value(obj)),
-        Value::Bytes(_) | Value::ByteArray(_) | Value::MemoryView { .. }
+        Value::Bytes(_) | Value::ByteArray(_) | Value::BytesIoBuffer { .. }
     ) {
         return super::super::copy_ids(ctx.bytes_like(obj)?);
     }
@@ -397,24 +428,75 @@ pub(in super::super) fn zeroed_bytes(size: i64) -> Result<Vec<u8>> {
     Ok(data)
 }
 
-/// Parse the sign and bounded precision of a fixed-point or percentage field.
-fn fixed_float_spec(spec: &str) -> Option<(u32, bool, u8)> {
-    let prefix = spec.strip_suffix(['f', '%'])?;
-    let (digits, sign) = match prefix.as_bytes().first() {
-        Some(&sign @ (b'+' | b' ')) => (&prefix[1..], sign),
-        Some(b'-') => (&prefix[1..], 0),
-        _ => (prefix, 0),
-    };
-    let precision = if digits.is_empty() {
-        6
-    } else {
-        let digits = digits.strip_prefix('.')?;
-        if !digits.bytes().all(|byte| byte.is_ascii_digit()) {
-            return None;
+struct FixedFloatSpec {
+    sign: u8,
+    width: usize,
+    zero: bool,
+    precision: u32,
+    percent: bool,
+}
+
+impl FixedFloatSpec {
+    /// Parse the supported sign, decimal width and bounded precision for f and %.
+    fn parse(spec: &str) -> Result<Option<Self>> {
+        let Some(prefix) = spec.strip_suffix(['f', '%']) else {
+            return Ok(None);
+        };
+        let (digits, sign) = match prefix.as_bytes().first() {
+            Some(&sign @ (b'+' | b' ')) => (&prefix[1..], sign),
+            Some(b'-') => (&prefix[1..], 0),
+            _ => (prefix, 0),
+        };
+        let (width, places) = digits.split_once('.').unwrap_or((digits, "6"));
+        let Ok(precision) = places.parse::<u32>() else {
+            return Ok(None);
+        };
+        if precision > 1000
+            || !width
+                .bytes()
+                .chain(places.bytes())
+                .all(|b| b.is_ascii_digit())
+        {
+            return Ok(None);
         }
-        digits.parse().ok()?
-    };
-    (precision <= 1000).then_some((precision, spec.ends_with('%'), sign))
+        let zero = width.starts_with('0');
+        let width = if width.is_empty() {
+            0
+        } else {
+            width
+                .parse::<isize>()
+                .map_err(|_| Error::new("ValueError", "Too many decimal digits in format string"))?
+                as usize
+        };
+        Ok(Some(Self {
+            sign,
+            width,
+            zero,
+            precision,
+            percent: spec.ends_with('%'),
+        }))
+    }
+
+    /// Pad the rounded ASCII result, keeping a numeric sign ahead of zero fill.
+    fn render(&self, number: f64) -> Result<String> {
+        let text =
+            crate::objects::format_fixed_float(number, self.precision, self.percent, self.sign)?;
+        if self.width <= text.len() {
+            return Ok(text.into_string());
+        }
+        let head = usize::from(self.zero && text.starts_with(['+', '-', ' ']));
+        let mut padded = String::new();
+        padded
+            .try_reserve_exact(self.width)
+            .map_err(|_| Error::new("MemoryError", ""))?;
+        padded.push_str(&text[..head]);
+        padded.extend(std::iter::repeat_n(
+            if self.zero { '0' } else { ' ' },
+            self.width - text.len(),
+        ));
+        padded.push_str(&text[head..]);
+        Ok(padded)
+    }
 }
 
 /// Convert a numeric formatting operand to binary64, checking large integers first.
@@ -438,9 +520,9 @@ pub(in super::super) fn format_value(ctx: &mut Context, value: Id, spec: Option<
         )));
     }
     let method = match ctx.heap.get(value) {
-        Value::Calendar { value: calendar, .. }
-            if matches!(calendar.class(), "date" | "datetime" | "time") =>
-        {
+        Value::Calendar {
+            value: calendar, ..
+        } if matches!(calendar.class(), "date" | "datetime" | "time") => {
             Some(ctx.lookup_attr(value, "__format__")?)
         }
         _ => ctx.bound_slot(value, "__format__")?,
@@ -493,12 +575,10 @@ pub(super) fn builtin_format(
     if ctx.string_storage(value).is_some() && spec == "s" {
         return Ok(value);
     }
-    if let Some((precision, percent, sign)) = fixed_float_spec(spec) {
+    if let Some(field) = FixedFloatSpec::parse(spec)? {
         let number = float_operand(ctx, value)?
             .ok_or_else(|| type_error(format!("unsupported format string {spec:?}")))?;
-        return Ok(ctx.text(
-            crate::objects::format_fixed_float(number, precision, percent, sign)?.into_string(),
-        ));
+        return Ok(ctx.text(field.render(number)?));
     }
     if matches!(
         ctx.heap.get(ctx.scalar_value(value)),
@@ -1284,6 +1364,47 @@ fn bytes_join(ctx: &mut Context, receiver: Id, iterable: Id) -> Result<Id> {
     Ok(ctx.alloc(Value::Bytes(result)))
 }
 
+// Rust strings cannot hold lone surrogates. Match these inputs in Python code points.
+fn replace_points(ctx: &mut Context, receiver: Id, old: Id, new: Id, limit: usize) -> Result<Id> {
+    let value = ctx.string_codepoints(receiver)?;
+    let needle = ctx.string_codepoints(old)?;
+    let replacement = ctx.string_codepoints(new)?;
+    let (value, needle, replacement) = (value.as_ref(), needle.as_ref(), replacement.as_ref());
+    let matches = || {
+        let mut next = 0;
+        (0..=value.len())
+            .filter(move |&i| {
+                if i < next || !value[i..].starts_with(needle) {
+                    return false;
+                }
+                next = i + needle.len();
+                true
+            })
+            .take(limit)
+    };
+    let count = matches().count();
+    if count == 0 || old == new || (needle.is_empty() && replacement.is_empty()) {
+        return Ok(ctx.string_storage(receiver).unwrap());
+    }
+    let retained = value.len() - count * needle.len();
+    let memory_error = || Error::new("MemoryError", "");
+    let size = replacement
+        .len()
+        .checked_mul(count)
+        .and_then(|extra| retained.checked_add(extra))
+        .ok_or_else(memory_error)?;
+    let mut result = Vec::new();
+    result.try_reserve_exact(size).map_err(|_| memory_error())?;
+    let mut copied = 0;
+    for i in matches() {
+        result.extend_from_slice(&value[copied..i]);
+        result.extend_from_slice(replacement);
+        copied = i + needle.len();
+    }
+    result.extend_from_slice(&value[copied..]);
+    Ok(ctx.text_codepoints(result))
+}
+
 pub(super) fn method(
     ctx: &mut Context,
     owner: &str,
@@ -1332,7 +1453,7 @@ pub(super) fn method(
         || (owner == "bytearray"
             && matches!(
                 name,
-                "endswith" | "lstrip" | "rstrip" | "split" | "startswith" | "strip"
+                "endswith" | "lstrip" | "rstrip" | "split" | "splitlines" | "startswith" | "strip"
             )) {
         let storage = ctx.scalar_value(receiver);
         if !matches!(
@@ -1359,8 +1480,7 @@ pub(super) fn method(
         return if name == "decode" {
             decode_named(ctx, ctx.scalar_value(receiver), encoding, errors)
         } else {
-            let b = encode_text(ctx, receiver, encoding, errors)?;
-            Ok(ctx.alloc(Value::Bytes(b)))
+            encode_text_object(ctx, receiver, encoding, errors)
         };
     }
     if name == "zfill" {
@@ -1409,8 +1529,8 @@ pub(super) fn method(
     }
     if matches!(
         (owner, name),
-        ("str", "find" | "rfind" | "count")
-            | ("bytes", "rfind")
+        ("str", "find" | "rfind" | "count" | "index")
+            | ("bytes", "count" | "find" | "rfind")
             | ("bytes" | "bytearray", "startswith" | "endswith")
     ) {
         if !kwargs.is_empty() {
@@ -1429,12 +1549,7 @@ pub(super) fn method(
                 args.len()
             )));
         }
-        let invalid_needle = match (owner, name) {
-            ("str", "count") => ctx.string_storage(needle).is_none(),
-            ("str", _) => ctx.str_value(needle).is_err(),
-            _ => false,
-        };
-        if invalid_needle {
+        if owner == "str" && ctx.string_storage(needle).is_none() {
             let kind = if needle == NONE {
                 "None"
             } else {
@@ -1466,7 +1581,7 @@ pub(super) fn method(
                     n
                 }
             };
-            let start = start.as_ref().map_or(0, index) as usize;
+            let start = usize::try_from(start.as_ref().map_or(0, index)).unwrap_or(usize::MAX);
             let end = end.as_ref().map_or(len, index).min(len) as usize;
             if matches!(name, "startswith" | "endswith") {
                 let tuple = ctx.tuple_items(needle)?;
@@ -1499,20 +1614,44 @@ pub(super) fn method(
                 }
                 return Ok(FALSE);
             }
-            let needle = if let Some(index) = ctx.index_value(needle)? {
-                vec![
-                    index
+            ctx.check_buffer_exporter(needle)?;
+            let byte;
+            let needle = match ctx.heap.get(ctx.scalar_value(needle)) {
+                Value::Bytes(_)
+                | Value::ByteArray(_)
+                | Value::MemoryView { .. }
+                | Value::BytesIoBuffer { .. }
+                | Value::Array(_) => ctx.native_buffer_bytes(needle)?,
+                _ => {
+                    let index = ctx.index_value(needle)?.ok_or_else(|| {
+                        type_error(format!(
+                            "argument should be integer or bytes-like object, not '{}'",
+                            ctx.type_name(needle)
+                        ))
+                    })?;
+                    byte = index
                         .to_i64()
                         .and_then(|n| u8::try_from(n).ok())
-                        .ok_or_else(|| Error::new("ValueError", "byte must be in range(0, 256)"))?,
-                ]
-            } else {
-                ctx.bytes_like(needle)?.to_vec()
+                        .ok_or_else(|| Error::new("ValueError", "byte must be in range(0, 256)"))?;
+                    std::slice::from_ref(&byte)
+                }
             };
-            let value = ctx.bytes_like(receiver)?;
-            let offset = value
-                .get(start..end)
-                .and_then(|v| memchr::memmem::rfind(v, &needle));
+            let window = ctx.bytes_like(receiver)?.get(start..end);
+            if name == "count" {
+                let count = window.map_or(0, |v| match needle {
+                    [] => v.len() + 1,
+                    [byte] => memchr::memchr_iter(*byte, v).count(),
+                    _ => memchr::memmem::find_iter(v, needle).count(),
+                });
+                return Ok(ctx.int(count as i64));
+            }
+            let offset = window.and_then(|v| {
+                if name == "find" {
+                    memchr::memmem::find(v, needle)
+                } else {
+                    memchr::memmem::rfind(v, needle)
+                }
+            });
             return Ok(ctx.int(offset.map_or(-1, |at| (start + at) as i64)));
         }
         if name == "count" {
@@ -1532,13 +1671,29 @@ pub(super) fn method(
             };
             return Ok(ctx.alloc(Value::Int(value)));
         }
-        let found = crate::objects::find_text(
-            ctx.str_value(receiver)?,
-            ctx.str_value(needle)?,
-            start.as_ref(),
-            end.as_ref(),
-            name == "rfind",
-        );
+        let found = if [receiver, needle]
+            .iter()
+            .any(|&id| matches!(ctx.heap.get(ctx.scalar_value(id)), Value::SurrogateStr(_)))
+        {
+            crate::objects::find_codepoints(
+                &ctx.string_codepoints(receiver)?,
+                &ctx.string_codepoints(needle)?,
+                start.as_ref(),
+                end.as_ref(),
+                name == "rfind",
+            )
+        } else {
+            crate::objects::find_text(
+                ctx.str_value(receiver)?,
+                ctx.str_value(needle)?,
+                start.as_ref(),
+                end.as_ref(),
+                name == "rfind",
+            )
+        };
+        if name == "index" && found.as_small() == Some(-1) {
+            return Err(Error::new("ValueError", "substring not found"));
+        }
         return Ok(ctx.alloc(Value::Int(found)));
     }
     if matches!(owner, "bytes" | "bytearray") && matches!(name, "strip" | "lstrip" | "rstrip") {
@@ -1577,6 +1732,44 @@ pub(super) fn method(
             Some(data) => ctx.alloc(Value::ByteArray(data)),
             None => receiver,
         });
+    }
+    if matches!(owner, "bytes" | "bytearray") && name == "splitlines" {
+        let [keepends] = bind_method_arguments(name, args, kwargs, ["keepends"], 1)?;
+        // Truth conversion can mutate a bytearray receiver before it is split.
+        let keep = ctx.optional_truth(keepends, false)?;
+        let mut fields = Vec::new();
+        let mut start = 0;
+        loop {
+            let data = ctx.bytes_like(receiver)?;
+            let rest = &data[start..];
+            if rest.is_empty() {
+                break;
+            }
+            let end = memchr::memchr2(b'\r', b'\n', rest).unwrap_or(rest.len());
+            let boundary = match &rest[end..] {
+                [b'\r', b'\n', ..] => 2,
+                [] => 0,
+                _ => 1,
+            };
+            let field = &rest[..if keep { end + boundary } else { end }];
+            let line =
+                if owner == "bytes" && original_receiver == receiver && field.len() == data.len() {
+                    receiver
+                } else {
+                    let copy = super::super::copy_ids(field)?;
+                    ctx.alloc(if owner == "bytes" {
+                        Value::Bytes(copy)
+                    } else {
+                        Value::ByteArray(copy)
+                    })
+                };
+            fields
+                .try_reserve(1)
+                .map_err(|_| Error::new("MemoryError", ""))?;
+            fields.push(line);
+            start += end + boundary;
+        }
+        return Ok(ctx.alloc(Value::List(fields)));
     }
     if matches!(owner, "bytes" | "bytearray") && matches!(name, "split" | "rsplit") {
         let [sep, max] = super::bind_method_arguments(name, args, kwargs, ["sep", "maxsplit"], 2)?;
@@ -1721,13 +1914,25 @@ pub(super) fn method(
                 &collected
             }
         };
-        if let [item] = values {
-            return ctx
-                .string_storage(*item)
-                .ok_or_else(|| type_error("expected str"));
+        let mut surrogate = matches!(
+            ctx.heap.get(ctx.scalar_value(receiver)),
+            Value::SurrogateStr(_)
+        );
+        for (index, &item) in values.iter().enumerate() {
+            let Some(storage) = ctx.string_storage(item) else {
+                let class = ctx.exact_type(item)?;
+                let name = ctx.class_name(class);
+                return Err(type_error(format!(
+                    "sequence item {index}: expected str instance, {} found",
+                    &name[..name.floor_char_boundary(80)]
+                )));
+            };
+            if values.len() == 1 {
+                return Ok(storage);
+            }
+            surrogate |= matches!(ctx.heap.get(storage), Value::SurrogateStr(_));
         }
-        let surrogate = |id| matches!(ctx.heap.get(ctx.scalar_value(id)), Value::SurrogateStr(_));
-        if surrogate(receiver) || values.iter().copied().any(surrogate) {
+        if surrogate {
             let sep = ctx.string_codepoints(receiver)?;
             let mut output = Vec::new();
             for (index, &item) in values.iter().enumerate() {
@@ -1861,6 +2066,12 @@ pub(super) fn method(
             }
         }
         let limit = split_limit(ctx, count)?;
+        if [receiver, args[0], args[1]]
+            .iter()
+            .any(|&id| matches!(ctx.heap.get(ctx.scalar_value(id)), Value::SurrogateStr(_)))
+        {
+            return replace_points(ctx, receiver, args[0], args[1], limit);
+        }
         let value = crate::objects::replace_text(
             ctx.str_value(receiver)?,
             ctx.str_value(args[0])?,

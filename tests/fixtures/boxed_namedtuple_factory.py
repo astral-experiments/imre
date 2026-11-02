@@ -1,4 +1,4 @@
-from collections import namedtuple
+from collections import Counter, namedtuple
 
 
 class BrokenBlock:
@@ -31,6 +31,40 @@ def layout_read_allocation():
 
 
 def current():
+    from annotationlib import Format
+    from typing import NamedTuple
+
+    Typed = NamedTuple("Typed", [("x", int), ("tag", None)])
+    assert Typed.__module__ == __name__
+    assert Typed.__orig_bases__ == (NamedTuple,)
+    assert Typed.__annotations__ is Typed.__new__.__annotations__
+    assert Typed.__annotate__(Format.STRING) == {"x": "int", "tag": "NoneType"}
+    assert Typed(tag=None, x=3) == (3, None)
+
+    class Declared(NamedTuple):
+        label: str
+
+    assert Declared.__orig_bases__ == (NamedTuple,)
+    assert Declared("kept").label == "kept"
+
+    Point = namedtuple('Point', 'self y')
+    class Pixel(Point):
+        pass
+    before = Pixel(1, 2)
+    after = before._replace(self=3)
+    assert type(after) is Pixel and tuple(after) == (3, 2) and tuple(before) == (1, 2)
+    assert Point.__replace__ is Point._replace
+    try:
+        before._replace(y=4, width=5)
+    except TypeError as error:
+        assert str(error) == "Got unexpected field names: ['width']"
+    else:
+        raise AssertionError("unknown field name accepted")
+
+    assert namedtuple.__module__ == "collections" and namedtuple.__name__ == "namedtuple"
+    assert type(namedtuple) is type(current)
+    assert ">>> Point =" in namedtuple.__doc__
+    assert ">>> c = Counter(" in Counter.__doc__ and ">>> Counter(" in Counter.most_common.__doc__
     Fields = namedtuple("Fields", "left right")
     getter = Fields.right
     assert getter.__get__((2, 3), tuple) == 3

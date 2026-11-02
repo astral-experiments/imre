@@ -16,7 +16,11 @@ pub(super) fn coroutine_method(owner: &str, name: &str) -> bool {
 
 impl Context {
     /// A coroutine is awaitable but does not implement the iterator protocol itself.
-    pub(super) fn await_iterator(&mut self, awaitable: Id) -> Result<Id> {
+    pub(super) fn await_iterator(
+        &mut self,
+        awaitable: Id,
+        context_method: Option<&str>,
+    ) -> Result<Id> {
         if let Value::Coroutine(frame) = *self.heap.get(awaitable) {
             if matches!(self.heap.get(frame), Value::Generator { running: false, offset: Some(ip), .. } if *ip != 0)
             {
@@ -31,10 +35,14 @@ impl Context {
             return Ok(awaitable);
         }
         let Some(method) = self.bound_slot(awaitable, "__await__")? else {
-            return Err(Error::new(
-                "TypeError",
-                format!("'{}' object can't be awaited", self.type_name(awaitable)),
-            ));
+            let kind = self.type_name(awaitable);
+            let message = match context_method {
+                Some(method) => format!(
+                    "'async with' received an object from {method} that does not implement __await__: {kind:.100}"
+                ),
+                None => format!("'{kind}' object can't be awaited"),
+            };
+            return Err(Error::new("TypeError", message));
         };
         let iter = self.call(method, Vec::new(), Vec::new())?;
         if matches!(self.heap.get(iter), Value::Coroutine(_)) || self.is_generator_coroutine(iter) {

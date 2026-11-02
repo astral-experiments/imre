@@ -1,7 +1,7 @@
+use super::progress::AssertionSlot;
 use super::*;
 use regex_automata::nfa::thompson::{NFA, State};
-use regex_automata::util::primitives::{NonMaxUsize, StateID};
-use std::collections::HashSet;
+use regex_automata::util::primitives::NonMaxUsize;
 
 pub(in crate::dynamic::stdlib) fn pattern_split(
     ctx: &mut Context,
@@ -50,7 +50,7 @@ pub(super) fn split(
         let span = match next_span(&pattern, text, 0, previous, &mut caps) {
             Ok(Some(span)) => span,
             Ok(None) => break,
-            Err(message) => return Err(pattern_error(ctx, pattern.source, pattern.flags, message)),
+            Err(message) => return Err(pattern.match_error(ctx, message)),
         };
         let eol = caps.group_info().to_index(PatternID::ZERO, "imre.eol");
         pieces.push(Some(cursor..span.start));
@@ -123,7 +123,7 @@ pub(super) fn next_span(
     }
     pattern
         .regex
-        .captures(Input::new(text).range(start..text.len()), caps);
+        .captures(Input::new(text).range(start..text.len()), caps)?;
     Ok(group_spans(caps).next().flatten())
 }
 
@@ -137,6 +137,12 @@ pub(super) fn nonempty(
 ) -> std::result::Result<bool, String> {
     if start == text.len() {
         return Ok(false);
+    }
+    let input = Input::new(text)
+        .range(start..text.len())
+        .anchored(Anchored::Yes);
+    if let Some(found) = pattern.regex.asserted_search(input.clone(), caps, true)? {
+        return Ok(found);
     }
     let nfa = if let Some(nfa) = pattern.regex.guarded_nfa() {
         nfa
@@ -153,65 +159,114 @@ pub(super) fn nonempty(
             .as_ref()
             .map_err(Clone::clone)?
     };
-    enum Frame {
-        Visit(StateID, usize),
-        Restore(usize, Option<NonMaxUsize>),
+    Ok(search_nfa(nfa, &[], input, caps, true))
+}
+
+/// Explore each byte's NFA frontier in priority order. Capture-free guards depend
+/// only on the offset, so the first path reaching a state supplies its captures.
+pub(super) fn search_nfa(
+    nfa: &NFA,
+    assertions: &[AssertionSlot],
+    input: Input<'_>,
+    caps: &mut Captures,
+    nonempty: bool,
+) -> bool {
+    caps.clear();
+    if input.is_done() {
+        return false;
     }
-    use Frame::{Restore, Visit};
-    let groups = nfa.group_info();
+    let start = input.start();
+    let text = input.haystack();
+    let entry = match input.get_anchored() {
+        Anchored::Yes => nfa.start_anchored(),
+        Anchored::No => nfa.start_unanchored(),
+        Anchored::Pattern(pid) => match nfa.start_pattern(pid) {
+            Some(state) => state,
+            None => return false,
+        },
+    };
+    let groups = caps.group_info();
     let eol_start = groups
         .to_index(PatternID::ZERO, "imre.eol")
         .and_then(|group| groups.slot(PatternID::ZERO, group));
-    caps.clear();
-    let mut stack = vec![Visit(nfa.start_anchored(), start)];
-    let mut seen = HashSet::new();
-    while let Some(frame) = stack.pop() {
-        let (state, at) = match frame {
-            Visit(state, at) if seen.insert((state, at)) => (state, at),
-            Visit(..) => continue,
-            Restore(slot, value) => {
-                caps.slots_mut()[slot] = value;
+    let mut stack = vec![(entry, Rc::new(vec![None; caps.slots().len()]))];
+    let mut following = Vec::new();
+    let mut seen_at = vec![usize::MAX; nfa.states().len()];
+    let mut best = None;
+    for at in start..=input.end() {
+        while let Some((state, mut slots)) = stack.pop() {
+            if seen_at[state.as_usize()] == at {
                 continue;
             }
-        };
-        let next = match nfa.state(state) {
-            State::ByteRange { trans } => trans.matches(text, at).then_some(trans.next),
-            State::Sparse(trans) => trans.matches(text, at),
-            State::Dense(trans) => trans.matches(text, at),
-            State::Look { look, next } if nfa.look_matcher().matches(*look, text, at) => {
-                stack.push(Visit(*next, at));
-                continue;
-            }
-            State::Union { alternates } => {
-                stack.extend(alternates.iter().rev().map(|&s| Visit(s, at)));
-                continue;
-            }
-            State::BinaryUnion { alt1, alt2 } => {
-                stack.push(Visit(*alt2, at));
-                stack.push(Visit(*alt1, at));
-                continue;
-            }
-            State::Capture { slot, next, .. } => {
-                let slot = slot.as_usize();
-                // The synthetic final newline cannot make an empty match nonempty.
-                // Discard this path before it visits states a consuming path may need.
-                if at == start && Some(slot) == eol_start {
+            seen_at[state.as_usize()] = at;
+            let consume = match nfa.state(state) {
+                State::ByteRange { trans } => trans.matches(text, at).then_some(trans.next),
+                State::Sparse(trans) => trans.matches(text, at),
+                State::Dense(trans) => trans.matches(text, at),
+                State::Look { look, next } if nfa.look_matcher().matches(*look, text, at) => {
+                    stack.push((*next, slots));
                     continue;
                 }
-                stack.push(Restore(slot, caps.slots()[slot]));
-                caps.slots_mut()[slot] = NonMaxUsize::new(at);
-                stack.push(Visit(*next, at));
-                continue;
+                State::Union { alternates } => {
+                    stack.extend(alternates.iter().rev().map(|&s| (s, Rc::clone(&slots))));
+                    continue;
+                }
+                State::BinaryUnion { alt1, alt2 } => {
+                    stack.push((*alt2, Rc::clone(&slots)));
+                    stack.push((*alt1, slots));
+                    continue;
+                }
+                State::Capture { slot, next, .. } => {
+                    let slot = match assertions.get(slot.as_usize()) {
+                        Some(AssertionSlot::Guard(guard)) => {
+                            if guard.matches(&input, at) {
+                                stack.push((*next, slots));
+                            }
+                            continue;
+                        }
+                        Some(AssertionSlot::Ignore) => {
+                            stack.push((*next, slots));
+                            continue;
+                        }
+                        Some(AssertionSlot::Public(slot)) => *slot,
+                        None => slot.as_usize(),
+                    };
+                    // The unanchored prefix may visit the middle of a UTF-8 code point.
+                    if slot == 0 && nfa.is_utf8() && !input.is_char_boundary(at) {
+                        continue;
+                    }
+                    // A synthetic final newline cannot make the nonempty retry succeed.
+                    if nonempty && at == start && Some(slot) == eol_start {
+                        continue;
+                    }
+                    Rc::make_mut(&mut slots)[slot] = NonMaxUsize::new(at);
+                    stack.push((*next, slots));
+                    continue;
+                }
+                State::Match { pattern_id } if !nonempty || at > start => {
+                    // Only threads already in the next frontier outrank this match.
+                    best = Some((*pattern_id, slots));
+                    break;
+                }
+                _ => continue,
+            };
+            if let Some(next) = consume
+                && at < input.end()
+            {
+                following.push((next, slots));
             }
-            State::Match { pattern_id } if at > start => {
-                caps.set_pattern(Some(*pattern_id));
-                return Ok(true);
-            }
-            _ => continue,
-        };
-        if let Some(next) = next {
-            stack.push(Visit(next, at + 1));
         }
+        if following.is_empty() {
+            break;
+        }
+        stack.clear();
+        std::mem::swap(&mut stack, &mut following);
+        stack.reverse();
     }
-    Ok(false)
+    if let Some((id, slots)) = best {
+        caps.slots_mut().copy_from_slice(&slots);
+        caps.set_pattern(Some(id));
+        return true;
+    }
+    false
 }

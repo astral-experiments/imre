@@ -1,4 +1,4 @@
-//! Deferred annotations of functions defined by compile() or exec().
+//! Annotations of functions and classes defined by compile() or exec().
 
 use super::*;
 use ast::visitor::{self, Visitor};
@@ -6,17 +6,30 @@ use ast::visitor::{self, Visitor};
 /// A nested lambda body or comprehension has its own scope. Defaults and the outer
 /// iterable still execute in the annotation scope.
 #[derive(Default)]
-struct Restrictions(Option<&'static str>);
+struct Restrictions {
+    invalid: Option<&'static str>,
+    nested_scope: bool,
+}
 
 impl<'a> Visitor<'a> for Restrictions {
     fn visit_expr(&mut self, expr: &'a ast::Expr) {
-        if self.0.is_some() {
+        if self.invalid.is_some() {
             return;
         }
+        self.nested_scope |= matches!(
+            expr,
+            ast::Expr::Lambda(_)
+                | ast::Expr::ListComp(_)
+                | ast::Expr::SetComp(_)
+                | ast::Expr::DictComp(_)
+                | ast::Expr::Generator(_)
+        );
         match expr {
-            ast::Expr::Named(_) => self.0 = Some("named expression"),
-            ast::Expr::Yield(_) | ast::Expr::YieldFrom(_) => self.0 = Some("yield expression"),
-            ast::Expr::Await(_) => self.0 = Some("await expression"),
+            ast::Expr::Named(_) => self.invalid = Some("named expression"),
+            ast::Expr::Yield(_) | ast::Expr::YieldFrom(_) => {
+                self.invalid = Some("yield expression")
+            }
+            ast::Expr::Await(_) => self.invalid = Some("await expression"),
             ast::Expr::Lambda(l) => {
                 if let Some(params) = &l.parameters {
                     self.visit_parameters(params);
@@ -31,6 +44,41 @@ impl<'a> Visitor<'a> for Restrictions {
             }),
         }
     }
+}
+
+pub(super) fn validate(expr: &ast::Expr, allow_nested_scopes: bool) -> Result<()> {
+    let mut restrictions = Restrictions::default();
+    restrictions.visit_expr(expr);
+    if let Some(kind) = restrictions.invalid {
+        return Err(Error::new(
+            "SyntaxError",
+            format!("{kind} cannot be used within an annotation"),
+        ));
+    }
+    // This visitor checks the outer annotation scope. An attribute or item
+    // store must not accept unchecked syntax inside a lambda or comprehension.
+    if restrictions.nested_scope && !allow_nested_scopes {
+        return Err(unsupported(
+            "nested scope in an annotated assignment target",
+        ));
+    }
+    Ok(())
+}
+
+pub(super) fn string_literal(expr: &ast::Expr) -> ast::Expr {
+    let range = expr.range();
+    let literal = ast::StringLiteral {
+        range,
+        node_index: ast::AtomicNodeIndex::NONE,
+        value: imre_ast::annotations::spelling(expr).into_boxed_str(),
+        flags: ast::StringLiteralFlags::empty(),
+    };
+    ast::ExprStringLiteral {
+        range,
+        node_index: ast::AtomicNodeIndex::NONE,
+        value: ast::StringLiteralValue::single(literal),
+    }
+    .into()
 }
 
 impl Program {
@@ -61,53 +109,90 @@ impl Program {
         if entries.is_empty() {
             return Ok(None);
         }
-        let stringized = self
-            .private_names
-            .as_ref()
-            .is_some_and(|names| names.string_annotations);
+        let stringized = self.string_annotations();
         for (_, expr) in &mut entries {
-            let mut restrictions = Restrictions::default();
-            restrictions.visit_expr(expr);
-            if let Some(kind) = restrictions.0 {
-                return Err(Error::new(
-                    "SyntaxError",
-                    format!("{kind} cannot be used within an annotation"),
-                ));
-            }
+            validate(expr, true)?;
             if stringized {
-                let range = expr.range();
-                let literal = ast::StringLiteral {
-                    range,
-                    node_index: ast::AtomicNodeIndex::NONE,
-                    value: imre_ast::annotations::spelling(expr).into_boxed_str(),
-                    flags: ast::StringLiteralFlags::empty(),
-                };
-                *expr = ast::ExprStringLiteral {
-                    range,
-                    node_index: ast::AtomicNodeIndex::NONE,
-                    value: ast::StringLiteralValue::single(literal),
-                }
-                .into();
+                *expr = string_literal(expr);
             }
         }
-        let mut provider = Program::new(
-            self.filename.clone(),
-            "__annotate__",
-            self.has_named_bindings,
-        );
-        provider.qualname = format!("{}.__annotate__", body.qualname);
+        Ok(Some(self.annotation_provider(
+            entries,
+            &body.qualname,
+            line,
+        )))
+    }
+
+    pub(super) fn annotation_provider(
+        &self,
+        entries: Vec<(String, ast::Expr)>,
+        qualname: &str,
+        line: u32,
+    ) -> Rc<Program> {
+        let mut provider = self.nested_program("__annotate__");
+        provider.qualname = format!("{qualname}.__annotate__");
         provider.first_line = line;
         provider.method_imports = self.method_imports.clone();
         provider.private_names = self.private_names.clone();
         provider.template_expressions = self.template_expressions.clone();
-        let class = self.class_attributes.is_some() && !stringized;
+        let class = self.class_attributes.is_some() && !self.string_annotations();
         if class {
             provider.reads.insert("__classdict__".into());
         }
         provider
             .instructions
             .push((line, Instruction::Annotations { entries, class }));
-        Ok(Some(Rc::new(provider)))
+        Rc::new(provider)
+    }
+}
+
+impl<'a> CompiledStrings<'a, '_> {
+    pub(super) fn annotation(
+        &mut self,
+        name: &str,
+        expr: &'a ast::Expr,
+        stringized: bool,
+    ) -> Result<()> {
+        self.heap.code_name(name);
+        // The unparser cannot recover an escaped surrogate's original spelling.
+        if stringized
+            && self
+                .spellings
+                .range(expr.start()..expr.end())
+                .any(|(_, points)| points.iter().any(|&p| p != 0xfffd))
+        {
+            return Err(unsupported("surrogate escapes in postponed annotations"));
+        }
+        self.visit_expr(expr);
+        Ok(())
+    }
+
+    pub(super) fn annotation_code(
+        &mut self,
+        provider: &'a mut Rc<Program>,
+        class_locals: Option<&HashSet<String>>,
+        line_at: &impl Fn(usize) -> u32,
+    ) -> Result<&'a BTreeSet<String>> {
+        let provider = Rc::get_mut(provider).expect("new annotation code");
+        if class_locals.is_some() {
+            // A global declared by the class also bypasses its dictionary in the annotation scope.
+            for (name, (kind, _)) in self.directives {
+                if *kind == ScopeDirective::Global {
+                    provider.directives.insert(name.clone(), (*kind, 0.into()));
+                }
+            }
+        }
+        let (roots, reads) = provider.prepare_scope_strings(
+            self.heap,
+            self.shared,
+            self.spellings,
+            line_at,
+            class_locals,
+        )?;
+        if roots != NONE {
+            self.keep(roots)?;
+        }
+        Ok(reads)
     }
 }
 

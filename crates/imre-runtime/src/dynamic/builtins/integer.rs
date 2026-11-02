@@ -11,6 +11,33 @@ pub(super) fn add(ctx: &mut Context, receiver: Id, other: Id) -> Result<Id> {
     Ok(ctx.alloc(Value::Int(sum)))
 }
 
+/// Return an exact int from a validated integer receiver without invoking subclass conversions.
+pub(super) fn exact_value(ctx: &mut Context, receiver: Id) -> Id {
+    let value = ctx.scalar_value(receiver);
+    match ctx.heap.get(value) {
+        Value::Int(_) if value == receiver => value,
+        Value::Int(number) => ctx.alloc(Value::Int(number.clone())),
+        Value::Bool(bit) => ctx.int(i64::from(*bit)),
+        _ => unreachable!("validated integer receiver"),
+    }
+}
+
+/// Both read-only rational fields use the stored integer, bypassing subclass conversions.
+pub(super) fn rational_field(ctx: &mut Context, field: &str, args: &[Id]) -> Result<Id> {
+    let [receiver] = *args else {
+        return Err(type_error("expected one integer getset receiver"));
+    };
+    let value = ctx.scalar_value(receiver);
+    match ctx.heap.get(value) {
+        Value::Int(_) | Value::Bool(_) if field == "denominator" => Ok(ctx.int(1)),
+        Value::Int(_) | Value::Bool(_) => Ok(exact_value(ctx, receiver)),
+        _ => Err(type_error(format!(
+            "descriptor '{field}' for 'int' objects doesn't apply to a '{}' object",
+            ctx.type_name(receiver)
+        ))),
+    }
+}
+
 pub(super) fn bit_length(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
     let (&receiver, args) = args
         .split_first()
@@ -80,18 +107,10 @@ pub(super) fn from_bytes(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]
         ["bytes", "byteorder", "signed"],
         2,
     )?;
-    let mut source = source
+    let source = source
         .ok_or_else(|| type_error("from_bytes() missing required argument 'bytes' (pos 1)"))?;
     let (little, signed) = byte_options(ctx, "from_bytes", order, signed)?;
-    if let Some(method) = ctx.bound_slot(source, "__bytes__")? {
-        source = ctx.call(method, Vec::new(), Vec::new())?;
-        if !matches!(ctx.heap.get(ctx.scalar_value(source)), Value::Bytes(_)) {
-            return Err(type_error(format!(
-                "__bytes__ returned non-bytes (type {})",
-                ctx.type_name(source)
-            )));
-        }
-    }
+    let source = text::call_bytes_method(ctx, source)?.unwrap_or(source);
     let items;
     let bytes = match ctx.heap.get(ctx.scalar_value(source)) {
         Value::Bytes(data) | Value::ByteArray(data) => data.as_slice(),

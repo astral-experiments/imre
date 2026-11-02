@@ -133,6 +133,15 @@ impl Checker<'_> {
                     }
                     self.fixed_class_attributes(id)
                 } else {
+                    if matches!(
+                        self.resolve(base),
+                        Some(crate::modules::Binding::Intrinsic(Intrinsic::PICKLER))
+                    ) {
+                        return Err(self.object_runtime_export("pickle.Pickler", base));
+                    }
+                    if self.graph.is_protocol_base(self.module, base) {
+                        return Err(self.object_runtime_export("typing.Protocol", base));
+                    }
                     if let Some(crate::modules::Binding::Intrinsic(kind)) = self.resolve(base)
                         && kind.is_subclassable_calendar()
                     {

@@ -93,6 +93,45 @@ with patch('__main__.open', with_default):
 assert not hasattr(main_module, 'open')
 
 assert DEFAULT.name == "DEFAULT" and sentinel.alpha.name == "alpha"
+with patch('sys.exit', side_effect=ValueError) as failing:
+    try:
+        sys.exit(9)
+    except ValueError:
+        assert failing.call_args.args == (9,)
+    else:
+        raise AssertionError("missing mock side effect")
+assert sys.exit is original_exit
+
+with patch.object(sys, "exit", return_value=42, side_effect=lambda: DEFAULT) as returning:
+    assert sys.exit() == 42
+    returning.assert_called_once_with()
+assert sys.exit is original_exit
+
+@patch('sys.exit', return_value=13)
+class ConfiguredTests:
+    def test_outer(self, outer):
+        inner = self.test_inner()
+        assert sys.exit is outer and inner is not outer
+        outer.assert_not_called()
+        assert sys.exit(1) == 13
+
+    def test_inner(self, inner):
+        assert sys.exit(2) == 13
+        inner.assert_called_once_with(2)
+        return inner
+
+
+ConfiguredTests().test_outer()
+assert sys.exit is original_exit
+
+pending = patch('sys.exit', None, return_value=DEFAULT)
+try:
+    with pending:
+        raise AssertionError("explicit replacement accepted mock options")
+except TypeError as error:
+    assert str(error) == "Can't pass kwargs to a mock we aren't creating"
+assert sys.exit is original_exit
+
 configured = Mock(return_value=42, side_effect=lambda: DEFAULT)
 assert configured() == 42
 configured.return_value = DEFAULT
@@ -110,5 +149,40 @@ assert "value" not in owner.__dict__
 with patch.object(owner, "additional", create=True) as created:
     assert owner.additional is created
 assert not hasattr(owner, "additional")
+
+class PatchBase:
+    def test_inherited(self):
+        return sys.stdout
+
+
+class PatchTests(PatchBase):
+    test_builtin = getattr
+    test_data = 123
+
+    def test_nested(self):
+        return self.test_inherited()
+
+    def other(self):
+        return sys.stdout
+
+
+assert patch.object(sys, "stdout", original_stderr)(PatchTests) is PatchTests
+assert PatchTests.test_builtin(sys, "stdout") is original_stderr
+case = PatchTests()
+assert case.test_nested() is original_stderr and sys.stdout is original_stdout
+assert case.test_inherited() is original_stderr and case.other() is original_stdout
+assert case.test_data == 123 and PatchBase().test_inherited() is original_stdout
+assert patch.TEST_PREFIX == "test"
+patch.TEST_PREFIX = "check"
+try:
+    @patch("sys.stdout", original_stderr)
+    class CustomPrefix(PatchBase):
+        def check_output(self):
+            return sys.stdout
+
+    assert CustomPrefix().check_output() is original_stderr
+    assert CustomPrefix().test_inherited() is original_stdout
+finally:
+    patch.TEST_PREFIX = "test"
 
 print("patch restored")

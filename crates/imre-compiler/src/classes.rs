@@ -322,7 +322,7 @@ fn unittest_skip_decorator(
 }
 
 pub(crate) fn defines_pickle_reducer(node: &ast::StmtClassDef) -> bool {
-    let reducer = |name: &str| matches!(name, "__reduce__" | "__reduce_ex__");
+    let reducer = |name: &str| matches!(name, "__reduce__" | "__reduce_ex__" | "__getstate__");
     let binding = |target: &ast::Expr| {
         target
             .as_name_expr()
@@ -1272,11 +1272,17 @@ pub(crate) fn method_kind(
     class_names: &HashSet<String>,
 ) -> Result<MethodKind, String> {
     let module = &graph.modules[module_id];
+    let unsupported = |error: String| {
+        if graph.command_startup.is_some() {
+            graph.class_body_error.replace(Some(error.clone()));
+        }
+        Err(error)
+    };
     let [decorator] = method.decorator_list.as_slice() else {
         return if method.decorator_list.is_empty() {
             Ok(MethodKind::Instance)
         } else {
-            Err(module.error(method, "method decorators cannot be stacked"))
+            unsupported(module.error(method, "method decorators cannot be stacked"))
         };
     };
     if graph.resolve(module_id, &decorator.expression)
@@ -1310,7 +1316,7 @@ pub(crate) fn method_kind(
     {
         return Ok(MethodKind::PropertySetter);
     }
-    Err(module.error(
+    unsupported(module.error(
         decorator,
         "unsupported method decorator on a fixed-layout class",
     ))

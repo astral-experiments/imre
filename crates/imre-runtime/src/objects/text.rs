@@ -982,6 +982,44 @@ pub(crate) fn count_text(
     )
 }
 
+/// Resolve a slice of a Python string stored as code points, preserving the original offset.
+fn codepoint_search_window<'a>(
+    source: &'a [u32],
+    start: Option<&Int>,
+    end: Option<&Int>,
+) -> Option<(&'a [u32], usize)> {
+    let length = || source.len();
+    let end = end
+        .and_then(|n| search_offset(Some(n), length))
+        .unwrap_or(source.len())
+        .min(source.len());
+    let start = search_offset(start, length)?;
+    Some((source.get(start..end)?, start))
+}
+
+/// Find the first or last match when either string contains surrogate code points.
+pub(crate) fn find_codepoints(
+    source: &[u32],
+    needle: &[u32],
+    start: Option<&Int>,
+    end: Option<&Int>,
+    reverse: bool,
+) -> Int {
+    let found = codepoint_search_window(source, start, end).and_then(|(window, start)| {
+        if needle.is_empty() {
+            return Some(if reverse { start + window.len() } else { start });
+        }
+        let mut windows = window.windows(needle.len());
+        let offset = if reverse {
+            windows.rposition(|part| part == needle)
+        } else {
+            windows.position(|part| part == needle)
+        }?;
+        Some(start + offset)
+    });
+    found.map_or_else(|| Int::small(-1).unwrap(), Int::from_usize)
+}
+
 /// Count non-overlapping matches when either Python string contains surrogate code points.
 pub(crate) fn count_codepoints(
     source: &[u32],
@@ -989,13 +1027,7 @@ pub(crate) fn count_codepoints(
     start: Option<&Int>,
     end: Option<&Int>,
 ) -> Int {
-    let length = || source.len();
-    let end = end
-        .and_then(|n| search_offset(Some(n), length))
-        .unwrap_or(source.len())
-        .min(source.len());
-    let Some(mut window) = search_offset(start, length).and_then(|start| source.get(start..end))
-    else {
+    let Some((mut window, _)) = codepoint_search_window(source, start, end) else {
         return Int::from_usize(0);
     };
     if needle.is_empty() {

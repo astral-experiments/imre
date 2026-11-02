@@ -378,6 +378,9 @@ impl Checker<'_> {
                 op == ast::CmpOp::IsNot,
             ));
         }
+        if self.types.is_url_split_result(left.ty) || self.types.is_url_split_result(right.ty) {
+            return Err(self.scoped_builtin_error("urllib.parse.urlsplit result identity", node));
+        }
         let operands = [&left, &right];
         let tuple = |e: &Expr| {
             matches!(e.ty, Type::Tuple(_))

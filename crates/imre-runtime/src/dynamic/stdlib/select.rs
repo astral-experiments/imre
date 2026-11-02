@@ -8,7 +8,7 @@ use crate::objects::{
 use std::{io, time::Duration};
 
 /// Convert an integer or the integer returned by a file object's fileno method.
-fn fd(ctx: &mut Context, object: Id) -> Result<i32> {
+pub(super) fn fd(ctx: &mut Context, object: Id) -> Result<i32> {
     let number = if let Ok(n) = ctx.as_int(object) {
         n
     } else {

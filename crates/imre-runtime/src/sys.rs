@@ -2,6 +2,7 @@
 pub(crate) mod context_warnings;
 mod recursion;
 use super::{Int, LazyLock, Mutex, OUTPUT, Output, Str, flush_stdout, initialize_io};
+pub(crate) use recursion::{recursion_limit, set_recursion_limit};
 mod intern;
 use crate::StrOwner;
 use crate::objects::{Codec, errno_error};
@@ -9,7 +10,10 @@ pub(crate) use intern::{canonical, intern_owner, try_intern_owner};
 use std::io::{self, Write};
 mod encoding;
 mod warnoptions;
-pub(crate) use encoding::{file_encoding, imre_sys_utf8_mode, set_locale, with_process_locale};
+pub(crate) use encoding::{
+    file_encoding, imre_sys_utf8_mode, set_locale, strerror, with_errno_message,
+    with_process_locale,
+};
 pub(crate) use warnoptions::startup_warning_options;
 mod input;
 pub(super) use input::read_input_line;
@@ -21,7 +25,7 @@ pub(super) fn initialize_encoding(isolated: bool, utf8: Option<bool>) {
 }
 
 pub(super) struct StderrOutput {
-    stream: Output<io::Stderr>,
+    stream: Output,
     codec: Codec,
 }
 
@@ -57,7 +61,11 @@ impl Write for StderrOutput {
 static STDERR: LazyLock<Mutex<StderrOutput>> = LazyLock::new(|| {
     initialize_io();
     Mutex::new(StderrOutput {
-        stream: Output::with_stream(io::stderr(), super::STDIO_SETTINGS.stderr_capacity, true),
+        stream: Output::with_stream(
+            super::RawOutput::Stderr,
+            super::STDIO_SETTINGS.stderr_capacity,
+            true,
+        ),
         codec: encoding::settings(false, None).codec,
     })
 });
@@ -217,23 +225,53 @@ pub(crate) fn write_standard_encoded(
     .map_err(errno_error)
 }
 
-/// Write through the binary layer without flushing previously buffered text.
-pub(crate) fn write_standard_buffer(stderr: bool, bytes: &[u8]) -> super::Result<()> {
+fn with_standard_output<T>(stderr: bool, operation: impl FnOnce(&mut Output) -> T) -> T {
     if stderr {
-        STDERR
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .stream
-            .raw
-            .write_all(bytes)
+        operation(&mut stderr_writer().stream)
     } else {
-        OUTPUT
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .raw
-            .write_all(bytes)
+        operation(&mut OUTPUT.lock().unwrap_or_else(|p| p.into_inner()))
     }
-    .map_err(errno_error)
+}
+
+/// Write bytes without flushing the text that precedes them.
+pub(crate) fn write_standard_buffer(stderr: bool, bytes: &[u8]) -> super::Result<()> {
+    with_standard_output(stderr, |out| out.raw.write_all(bytes)).map_err(errno_error)
+}
+
+pub(crate) fn flush_standard_buffer(stderr: bool) -> io::Result<()> {
+    with_standard_output(stderr, |out| out.raw.flush())
+}
+
+/// Text close attempts both flushes; either view discards any bytes left after close.
+pub(crate) fn close_standard_output(stderr: bool, flush_text: bool) -> io::Result<()> {
+    with_standard_output(stderr, |out| {
+        let text = if flush_text { out.flush() } else { Ok(()) };
+        let binary = out.raw.flush();
+        out.text = Default::default();
+        out.raw.buffer.clear();
+        out.raw.written = 0;
+        binary.and(text)
+    })
+}
+
+/// Seek after draining binary writes, or report their logical position without flushing.
+pub(crate) fn standard_buffer_position(
+    stderr: bool,
+    seek: Option<(i64, i32)>,
+) -> super::Result<i64> {
+    let fd = if stderr { 2 } else { 1 };
+    with_standard_output(stderr, |out| {
+        if let Some((offset, whence)) = seek {
+            out.raw.flush().map_err(errno_error)?;
+            crate::objects::os::seek(fd, offset, whence)
+        } else {
+            let offset = crate::objects::os::seek(fd, 0, libc::SEEK_CUR)?;
+            let buffered = out.raw.buffer.len() - out.raw.written;
+            offset
+                .checked_add(buffered as i64)
+                .ok_or_else(|| errno_error(io::Error::from_raw_os_error(libc::EOVERFLOW)))
+        }
+    })
 }
 
 /// Escaped displayhook bytes go to stdout.buffer ahead of any previously buffered text.

@@ -95,9 +95,12 @@ pub(super) fn directory_entry_types(
 }
 
 macro_rules! descriptor_constants {
-    ($lookup:ident -> $ty:ty; $($name:ident = $flag:ident),* $(,)?) => {
+    ($($name:ident = $flag:ident),* $(,)?) => {
         $(#[unsafe(no_mangle)]
         pub static $name: usize = ((libc::$flag as usize) << 1) | 1;)*
+    };
+    ($lookup:ident -> $ty:ty; $($name:ident = $flag:ident),* $(,)?) => {
+        descriptor_constants! { $($name = $flag),* }
 
         /// Look up the platform constant exported by the corresponding boxed module.
         pub(crate) fn $lookup(name: &str) -> Option<$ty> {
@@ -118,6 +121,10 @@ descriptor_constants! { descriptor_constant -> i32;
     imre_os_seek_set = SEEK_SET, imre_os_seek_cur = SEEK_CUR, imre_os_seek_end = SEEK_END,
     imre_os_seek_data = SEEK_DATA, imre_os_seek_hole = SEEK_HOLE,
 }
+// The Linux posix initializer installs this flag in the live module dictionary.
+#[cfg(target_os = "linux")]
+descriptor_constants! { imre_os_o_tmpfile = O_TMPFILE }
+
 descriptor_constants! { poll_constant -> i16;
     imre_os_pollin = POLLIN, imre_os_pollpri = POLLPRI, imre_os_pollout = POLLOUT,
     imre_os_pollerr = POLLERR, imre_os_pollhup = POLLHUP, imre_os_pollnval = POLLNVAL,
@@ -268,17 +275,10 @@ fn checked(ret: libc::c_int) -> Result<libc::c_int> {
 pub extern "C" fn imre_os_strerror(code: usize) -> *const Str {
     finish(
         c_int(code).and_then(|code| {
-            // SAFETY: copy libc's terminated string before any further calls.
-            let message = unsafe { libc::strerror(code) };
-            if message.is_null() {
-                return Err(Error::new(
-                    Kind::ValueError,
-                    "strerror() argument out of range",
-                ));
-            }
-            // SAFETY: the non-null pointer returned above remains live during this copy.
-            let text = unsafe { std::ffi::CStr::from_ptr(message) }.to_string_lossy();
-            Ok(StrOwner::into_raw(StrOwner::new(Str::from(text.as_ref()))))
+            crate::sys::with_errno_message(code, |message| {
+                let text = message.to_string_lossy();
+                Ok(StrOwner::into_raw(StrOwner::new(Str::from(text.as_ref()))))
+            })
         }),
         std::ptr::null(),
     )
@@ -312,6 +312,16 @@ pub unsafe extern "C" fn imre_os_lseek(fd: usize, position: usize, whence: usize
     )
 }
 
+/// Set an open file's length without changing its offset or taking ownership.
+pub(crate) fn truncate(fd: i32, length: i64) -> io::Result<()> {
+    // SAFETY: ftruncate takes two integers and retains no pointers or descriptor ownership.
+    if unsafe { libc::ftruncate(fd, length) } < 0 {
+        Err(io::Error::last_os_error())
+    } else {
+        Ok(())
+    }
+}
+
 /// Seek on the open file description shared by the descriptor and its duplicates.
 pub(crate) fn seek(fd: i32, position: i64, whence: i32) -> Result<i64> {
     // SAFETY: lseek takes integer values and retains no pointers.
@@ -327,6 +337,12 @@ pub(crate) fn seek(fd: i32, position: i64, whence: i32) -> Result<i64> {
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_os_close(fd: usize) {
     finish(c_int(fd).and_then(close), ());
+}
+
+/// Read the kernel session ID without changing the caller's process state.
+pub(crate) fn getsid(pid: libc::pid_t) -> Result<libc::pid_t> {
+    // SAFETY: getsid accepts any pid_t and retains no pointers.
+    checked(unsafe { libc::getsid(pid) })
 }
 
 /// Wait for a child independently of Popen and return its unmodified POSIX status.
@@ -693,7 +709,10 @@ mod tests {
         let already_reaped = waitpid(pid, libc::WNOHANG).unwrap_err();
 
         assert_eq!(early.map_err(|error| error.into_parts().0).unwrap(), [0, 0]);
-        assert_eq!(exited.map_err(|error| error.into_parts().0).unwrap(), [pid, 37 << 8]);
+        assert_eq!(
+            exited.map_err(|error| error.into_parts().0).unwrap(),
+            [pid, 37 << 8]
+        );
         assert_eq!(already_reaped.into_parts().0, "ChildProcessError");
     }
 }

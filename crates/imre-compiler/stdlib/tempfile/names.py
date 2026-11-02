@@ -1,14 +1,16 @@
 """POSIX named temporary files and directories for runtime-loaded modules."""
 
 import functools as _functools
+import io as _io
+import sys as _sys
 import warnings as _warnings
 import os as _os
 import errno as _errno
 from _thread import allocate_lock as _allocate_lock
 
-from _imre_tempfile import abspath as _abspath
+from _imre_tempfile import abspath as _abspath, check_text_options as _check_text_options
 from _imre_tempfile import finish_named as _finish_named, keep_named as _keep_named, open_named as _open_named
-from _imre_tempfile import mkdir as _mkdir, open_file as _open_file, random_name as _random_name
+from _imre_tempfile import mkdir as _mkdir, random_name as _random_name
 
 TMP_MAX = 20
 template = "tmp"
@@ -188,7 +190,10 @@ def _candidate_path(directory, prefix, suffix, name, output_type):
 
 
 def _mkstemp_inner(dir, pre, suf, flags, output_type):
-    return _create_file(dir, pre, suf, output_type, _os.open, flags, 0o600)
+    def open_candidate(path):
+        return _os.open(path, flags, 0o600)
+
+    return _create_file(dir, pre, suf, output_type, open_candidate)
 
 
 def _create_file(dir, pre, suf, output_type, create, *args):
@@ -196,6 +201,7 @@ def _create_file(dir, pre, suf, output_type, create, *args):
     names = _get_candidate_names()
     for _ in range(TMP_MAX):
         path = _candidate_path(dir, pre, suf, next(names), output_type)
+        _sys.audit("tempfile.mkstemp", path)
         try:
             result = create(path, *args)
         except FileExistsError:
@@ -267,20 +273,6 @@ def mktemp(suffix="", prefix=template, dir=None):
                           "No usable temporary filename found")
 
 
-class _NamedFileCloser:
-    """Keep the runtime guard alive while the named file or its methods are in use."""
-
-    def __init__(self, guard, name):
-        self.guard = guard
-        self.name = name
-
-    def close(self):
-        _finish_named(self.guard, self.name, False)
-
-    def cleanup(self):
-        _finish_named(self.guard, self.name, True)
-
-
 # From CPython 3.14.5 Lib/tempfile.py. See ../docstrings/LICENSE.
 class _TemporaryFileCloser:
     """A separate object allowing proper closing of a temporary file's
@@ -289,6 +281,7 @@ class _TemporaryFileCloser:
 
     cleanup_called = False
     close_called = False
+    _native_guard = None
 
     def __init__(
         self,
@@ -307,6 +300,10 @@ class _TemporaryFileCloser:
     def cleanup(self, windows=(_os.name == 'nt'), unlink=_os.unlink):
         if not self.cleanup_called:
             self.cleanup_called = True
+            if self._native_guard is not None:
+                # The Python closer now owns unlinking. A later native guard drop
+                # must not unlink a replacement at the same path.
+                _keep_named(self._native_guard)
             try:
                 if not self.close_called:
                     self.close_called = True
@@ -354,14 +351,6 @@ class _TemporaryFileWrapper:
             delete_on_close,
             warn_message=f"Implicitly cleaning up {self!r}",
         )
-
-    @classmethod
-    def _from_named_file(cls, file, name, guard):
-        wrapper = cls.__new__(cls)
-        wrapper.file = file
-        wrapper.name = name
-        wrapper._closer = _NamedFileCloser(guard, name)
-        return wrapper
 
     def __repr__(self):
         file = self.__dict__['file']
@@ -422,7 +411,9 @@ def NamedTemporaryFile(mode="w+b", buffering=-1, encoding=None, newline=None,
     prefix, suffix, dir, output_type = _sanitize_params(prefix, suffix, dir)
     if not isinstance(mode, str):
         raise TypeError("mode must be a string")
-    if len(mode) != 3 or set(mode) not in ({"b", "+", "w"}, {"b", "+", "r"}):
+    text_write = mode in ("w", "wt", "tw")
+    write_only = text_write or mode in ("wb", "bw")
+    if not write_only and (len(mode) != 3 or set(mode) not in ({"b", "+", "w"}, {"b", "+", "r"})):
         if len(set(mode)) != len(mode) or any(c not in "xrwabt+" for c in mode):
             raise ValueError(f"invalid mode: {mode!r}")
         if "b" in mode and "t" in mode:
@@ -432,19 +423,38 @@ def NamedTemporaryFile(mode="w+b", buffering=-1, encoding=None, newline=None,
             raise ValueError("Must have exactly one of create/read/write/append mode and at most one plus")
         if kinds != 1:
             raise ValueError("must have exactly one of create/read/write/append mode")
-        raise NotImplementedError("NamedTemporaryFile supports binary update mode")
+        raise NotImplementedError("NamedTemporaryFile supports write mode and binary update mode")
     if buffering != -1:
         raise NotImplementedError("NamedTemporaryFile supports default buffering")
-    if encoding is not None:
-        raise ValueError("binary mode doesn't take an encoding argument")
-    if errors is not None:
-        raise ValueError("binary mode doesn't take an errors argument")
-    if newline is not None:
-        raise ValueError("binary mode doesn't take a newline argument")
+    if text_write:
+        encoding = _io.text_encoding(encoding)
+        _check_text_options(encoding, errors, newline)
+    else:
+        if encoding is not None:
+            raise ValueError("binary mode doesn't take an encoding argument")
+        if errors is not None:
+            raise ValueError("binary mode doesn't take an errors argument")
+        if newline is not None:
+            raise ValueError("binary mode doesn't take a newline argument")
+    if write_only:
+        file, name = _create_file(dir, prefix, suffix, output_type, _open_named, delete_on_close, True)
+        try:
+            if text_write:
+                file = _io.TextIOWrapper(file, encoding, errors, newline)
+                file.mode = mode
+            return _TemporaryFileWrapper(file, name, delete, delete_on_close)
+        except BaseException:
+            try:
+                file.close()
+            finally:
+                _os.unlink(name)
+            raise
     (file, closer), name = _create_file(dir, prefix, suffix, output_type, _open_named, delete_on_close)
     try:
-        wrapper = _TemporaryFileWrapper._from_named_file(file, name, closer)
-        if not delete:
+        keep = not delete
+        wrapper = _TemporaryFileWrapper(file, name, delete, delete_on_close)
+        wrapper._closer._native_guard = closer
+        if keep:
             _keep_named(closer)
         return wrapper
     except BaseException:
@@ -452,10 +462,89 @@ def NamedTemporaryFile(mode="w+b", buffering=-1, encoding=None, newline=None,
         raise
 
 
-def TemporaryFile(mode="w+b", buffering=-1, encoding=None, newline=None,
-                  suffix=None, prefix=None, dir=None, *, errors=None):
-    if buffering != -1:
-        raise NotImplementedError("TemporaryFile supports default buffering")
-    prefix, suffix, dir, _ = _sanitize_params(prefix, suffix, dir)
-    return _open_file(mode, dir=_os.fspath(dir), prefix=prefix, suffix=suffix,
-                      encoding=encoding, errors=errors, newline=newline)
+# From CPython 3.14.5 Lib/tempfile.py. See ../docstrings/LICENSE.
+if _os.name != 'posix' or _sys.platform == 'cygwin':
+    # On non-POSIX and Cygwin systems, assume that we cannot unlink a file
+    # while it is open.
+    TemporaryFile = NamedTemporaryFile
+
+else:
+    # Is the O_TMPFILE flag available and does it work?
+    # The flag is set to False if os.open(dir, os.O_TMPFILE) raises an
+    # IsADirectoryError exception
+    _O_TMPFILE_WORKS = hasattr(_os, 'O_TMPFILE')
+
+    def TemporaryFile(mode='w+b', buffering=-1, encoding=None,
+                      newline=None, suffix=None, prefix=None,
+                      dir=None, *, errors=None):
+        """Create and return a temporary file.
+        Arguments:
+        'prefix', 'suffix', 'dir' -- as for mkstemp.
+        'mode' -- the mode argument to io.open (default "w+b").
+        'buffering' -- the buffer size argument to io.open (default -1).
+        'encoding' -- the encoding argument to io.open (default None)
+        'newline' -- the newline argument to io.open (default None)
+        'errors' -- the errors argument to io.open (default None)
+        The file is created as mkstemp() would do it.
+
+        Returns an object with a file-like interface.  The file has no
+        name, and will cease to exist when it is closed.
+        """
+        global _O_TMPFILE_WORKS
+
+        if "b" not in mode:
+            encoding = _io.text_encoding(encoding)
+
+        prefix, suffix, dir, output_type = _sanitize_params(prefix, suffix, dir)
+
+        flags = _bin_openflags
+        if _O_TMPFILE_WORKS:
+            fd = None
+            def opener(*args):
+                nonlocal fd
+                flags2 = (flags | _os.O_TMPFILE) & ~_os.O_CREAT
+                fd = _os.open(dir, flags2, 0o600)
+                return fd
+            try:
+                file = _io.open(dir, mode, buffering=buffering,
+                                newline=newline, encoding=encoding,
+                                errors=errors, opener=opener)
+                raw = getattr(file, 'buffer', file)
+                raw = getattr(raw, 'raw', raw)
+                raw.name = fd
+                return file
+            except IsADirectoryError:
+                # Linux kernel older than 3.11 ignores the O_TMPFILE flag:
+                # O_TMPFILE is read as O_DIRECTORY. Trying to open a directory
+                # with O_RDWR|O_DIRECTORY fails with IsADirectoryError, a
+                # directory cannot be open to write. Set flag to False to not
+                # try again.
+                _O_TMPFILE_WORKS = False
+            except OSError:
+                # The filesystem of the directory does not support O_TMPFILE.
+                # For example, OSError(95, 'Operation not supported').
+                #
+                # On Linux kernel older than 3.11, trying to open a regular
+                # file (or a symbolic link to a regular file) with O_TMPFILE
+                # fails with NotADirectoryError, because O_TMPFILE is read as
+                # O_DIRECTORY.
+                pass
+            # Fallback to _mkstemp_inner().
+
+        fd = None
+        def opener(*args):
+            nonlocal fd
+            fd, name = _mkstemp_inner(dir, prefix, suffix, flags, output_type)
+            try:
+                _os.unlink(name)
+            except BaseException as e:
+                _os.close(fd)
+                raise
+            return fd
+        file = _io.open(dir, mode, buffering=buffering,
+                        newline=newline, encoding=encoding, errors=errors,
+                        opener=opener)
+        raw = getattr(file, 'buffer', file)
+        raw = getattr(raw, 'raw', raw)
+        raw.name = fd
+        return file
