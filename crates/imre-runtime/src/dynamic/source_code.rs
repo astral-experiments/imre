@@ -82,6 +82,8 @@ enum Instruction {
         entries: Vec<(String, ast::Expr)>,
         class: bool,
     },
+    StringAnnotation(String, ast::Expr),
+    ClassAnnotator(Rc<Program>),
     ClassStart,
     ClassEnd,
     Yield(Option<ast::Expr>),
@@ -956,6 +958,8 @@ impl Program {
     ) -> Result<(Id, &'a BTreeSet<String>)> {
         use ast::visitor::Visitor;
         let mut nested_reads = BTreeSet::new();
+        let stringized = self.string_annotations();
+        let class_locals = self.class_attributes.as_ref().map(|_| &self.locals);
         let mut strings = CompiledStrings {
             reads: &mut self.reads,
             directives: &self.directives,
@@ -1044,47 +1048,29 @@ impl Program {
                     }
                 }
                 Instruction::Annotations { entries, .. } => {
-                    for (name, expression) in entries.iter() {
-                        strings.heap.code_name(name);
-                        // Postponed annotations hold unparsed Python text. The
-                        // unparser cannot recover an escaped surrogate's spelling.
-                        if self
-                            .private_names
-                            .as_ref()
-                            .is_some_and(|names| names.string_annotations)
-                            && spellings
-                                .range(expression.start()..expression.end())
-                                .any(|(_, points)| points.iter().any(|&p| p != 0xfffd))
-                        {
-                            return Err(unsupported("surrogate escapes in postponed annotations"));
-                        }
-                        strings.visit_expr(expression);
+                    for (name, expr) in entries {
+                        strings.annotation(name, expr, stringized)?;
                     }
+                }
+                Instruction::StringAnnotation(name, expr) => {
+                    strings.annotation(name, expr, true)?
+                }
+                Instruction::ClassAnnotator(provider) => {
+                    nested_reads.extend(
+                        strings
+                            .annotation_code(provider, class_locals, line_at)?
+                            .iter()
+                            .cloned(),
+                    );
                 }
                 Instruction::Define(definition) => {
                     if let Some(provider) = &mut definition.annotate {
-                        let provider = Rc::get_mut(provider).expect("new annotation code");
-                        if self.class_attributes.is_some() {
-                            // A global declared by the class also bypasses its dictionary
-                            // when evaluated in an immediately enclosed annotation scope.
-                            for (name, (kind, _)) in &self.directives {
-                                if *kind == ScopeDirective::Global {
-                                    provider.directives.insert(name.clone(), (*kind, 0.into()));
-                                }
-                            }
-                        }
-                        let (roots, reads) = provider.prepare_scope_strings(
-                            strings.heap,
-                            strings.shared,
-                            spellings,
-                            line_at,
-                            self.class_attributes.is_some().then_some(&self.locals),
-                        )?;
-                        // The annotation scope is a sibling of the function body.
-                        nested_reads.extend(reads.iter().cloned());
-                        if roots != NONE {
-                            strings.keep(roots)?;
-                        }
+                        nested_reads.extend(
+                            strings
+                                .annotation_code(provider, class_locals, line_at)?
+                                .iter()
+                                .cloned(),
+                        );
                     }
                     let child =
                         Rc::get_mut(&mut definition.body).expect("newly lowered child code");
@@ -1472,6 +1458,12 @@ impl Program {
         child
     }
 
+    fn string_annotations(&self) -> bool {
+        self.private_names
+            .as_ref()
+            .is_some_and(|n| n.string_annotations)
+    }
+
     fn lower_namespace(
         &mut self,
         mut body: ast::Suite,
@@ -1488,7 +1480,15 @@ impl Program {
                 self.doc = Some(doc.range());
             }
         }
-        self.lower(body, lines, function, None)
+        let mut fields = Vec::new();
+        let class = self.class_attributes.is_some();
+        self.lower_with_fields(body, lines, function, None, class.then_some(&mut fields))?;
+        if !fields.is_empty() {
+            let provider = self.annotation_provider(fields, &self.qualname, self.first_line);
+            self.instructions
+                .push((self.first_line, Instruction::ClassAnnotator(provider)));
+        }
+        Ok(())
     }
 
     fn lower(
@@ -1498,6 +1498,17 @@ impl Program {
         function: bool,
         active: Option<&mut LoopJumps>,
     ) -> Result<()> {
+        self.lower_with_fields(body, lines, function, active, None)
+    }
+
+    fn lower_with_fields(
+        &mut self,
+        body: ast::Suite,
+        lines: &[usize],
+        function: bool,
+        active: Option<&mut LoopJumps>,
+        fields: Option<&mut Vec<(String, ast::Expr)>>,
+    ) -> Result<()> {
         stacker::maybe_grow(128 * 1024, 2 * 1024 * 1024, || {
             use ast::visitor::Visitor;
             let mut named = NamedBindings::default();
@@ -1506,7 +1517,7 @@ impl Program {
                     named.visit_stmt(stmt);
                 }
             }
-            self.lower_suite(body, lines, function, active)?;
+            self.lower_suite(body, lines, function, active, fields)?;
             named.declare(self)
         })
     }
@@ -1517,6 +1528,7 @@ impl Program {
         lines: &[usize],
         function: bool,
         mut active: Option<&mut LoopJumps>,
+        mut fields: Option<&mut Vec<(String, ast::Expr)>>,
     ) -> Result<()> {
         use ast::Stmt;
         for stmt in body {
@@ -1544,27 +1556,45 @@ impl Program {
                         None => Instruction::BindSent(s.targets),
                     }
                 }
-                Stmt::AnnAssign(s) if function => {
-                    if let ast::Expr::Name(name) = &*s.target {
-                        if let Some((kind, _)) = self.directives.get(name.id.as_str()) {
+                Stmt::AnnAssign(s) if function || (self.class_attributes.is_some() && s.simple) => {
+                    let name = s.target.as_name_expr().map(|name| name.id.to_string());
+                    if let Some(name) = &name {
+                        if name == "__debug__" {
+                            return Err(Error::new("SyntaxError", "cannot assign to __debug__"));
+                        }
+                        if let Some((kind, _)) = self.directives.get(name) {
                             return Err(Error::new(
                                 "SyntaxError",
-                                format!("annotated name '{}' can't be {}", name.id, kind.keyword()),
+                                format!("annotated name '{name}' can't be {}", kind.keyword()),
                             ));
                         }
-                        self.locals.insert(name.id.to_string());
+                        self.locals.insert(name.clone());
                     } else if s.value.is_none() {
                         return Err(unsupported("annotated assignment target"));
                     }
-                    annotations::validate(
-                        &s.annotation,
-                        matches!(s.target.as_ref(), ast::Expr::Name(_)),
-                    )?;
-                    // Function-local annotations don't evaluate the annotation expression.
-                    let Some(value) = s.value else { continue };
-                    match self.lower_suspension(*value, line, function)? {
-                        Some(value) => Instruction::Assign(vec![*s.target], value),
-                        None => Instruction::BindSent(vec![*s.target]),
+                    annotations::validate(&s.annotation, name.is_some())?;
+                    if let Some(value) = s.value {
+                        let op = match self.lower_suspension(*value, line, function)? {
+                            Some(value) => Instruction::Assign(vec![*s.target], value),
+                            None => Instruction::BindSent(vec![*s.target]),
+                        };
+                        self.instructions.push((line, op));
+                    }
+                    // Function-local annotations never evaluate the annotation expression.
+                    if function {
+                        continue;
+                    }
+                    let name = name.expect("simple class annotation");
+                    if self.string_annotations() {
+                        Instruction::StringAnnotation(
+                            name,
+                            annotations::string_literal(&s.annotation),
+                        )
+                    } else if let Some(entries) = &mut fields {
+                        entries.push((name, *s.annotation));
+                        continue;
+                    } else {
+                        return Err(unsupported("conditional class annotation"));
                     }
                 }
                 Stmt::Delete(s) => {
@@ -3996,7 +4026,32 @@ impl Context {
                     self.bind_source_name(scope, local, v)?;
                 }
             }
+            Instruction::StringAnnotation(name, expression) => {
+                let key = self.heap.code_name(name);
+                let spelling = self.source_expr(code, scope, expression)?;
+                // LOAD_NAME for this implicit store skips enclosing function locals.
+                let annotations = match self.scope_name(scope, "__annotations__") {
+                    Some(mapping) => mapping,
+                    None => self.lookup(self.root_scope(scope), "__annotations__")?,
+                };
+                self.put_item(annotations, key, spelling)?;
+            }
+            Instruction::ClassAnnotator(provider) => {
+                let annotate = self.source_annotator(provider, owner, scope)?;
+                self.bind(scope, "__annotate_func__", annotate);
+            }
             Instruction::ClassStart => {
+                self.enable_class_annotation_provider(scope);
+                // Only postponed annotations need a visible mapping from the start of the suite.
+                if !code.string_annotations()
+                    || !code
+                        .instructions
+                        .iter()
+                        .any(|(_, op)| matches!(op, Instruction::StringAnnotation(..)))
+                {
+                    let key = self.heap.code_name("__annotations__");
+                    self.remove_binding(scope, "__annotations__", key)?;
+                }
                 let first = self.int(i64::from(code.first_line));
                 self.bind(scope, "__firstlineno__", first);
                 if let Some(doc) = code.doc {
