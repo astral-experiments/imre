@@ -95,6 +95,7 @@ pub(in crate::dynamic) struct Pattern {
     regex: Matcher,
     assertions: Vec<(String, Guard)>,
     full: OnceCell<std::result::Result<Matcher, String>>,
+    close_order: OnceCell<Option<Vec<usize>>>,
     split_retry: OnceCell<std::result::Result<regex_automata::nfa::thompson::NFA, String>>,
 }
 
@@ -147,6 +148,34 @@ impl Pattern {
         }
         let mapping = ctx.dict(fields);
         ctx.mapping_proxy(mapping)
+    }
+
+    fn last_capture(&self, text: &[u8], caps: &Captures) -> LastCapture {
+        let mut groups = (1..=self.group_count()).filter(|&i| caps.get_group(i).is_some());
+        let first = groups.next();
+        if groups.next().is_none() {
+            return LastCapture::Known(first);
+        }
+        let order = self.close_order.get_or_init(|| match &self.regex {
+            Matcher::Lookahead(matcher) => matcher.close_order(),
+            Matcher::Asserted(_) => None, // The NFA maps assertion slots to public groups.
+            _ => split::single_visit_order(self),
+        });
+        let winner = if let Some(order) = order {
+            order
+                .iter()
+                .rev()
+                .copied()
+                .find(|&i| caps.get_group(i).is_some())
+        } else if matches!(&self.regex, Matcher::Lookahead(_)) {
+            None
+        } else {
+            split::last_close(self, text, caps)
+        };
+        match winner {
+            Some(index) => LastCapture::Known(Some(index)),
+            None => LastCapture::Unavailable,
+        }
     }
 
     fn match_error(&self, ctx: &mut Context, message: String) -> Error {
@@ -800,6 +829,7 @@ fn compiled(ctx: &mut Context, id: Id, flags: Option<Id>) -> Result<Id> {
         regex,
         assertions,
         full: OnceCell::new(),
+        close_order: OnceCell::new(),
         split_retry: OnceCell::new(),
     }))))
 }
@@ -862,7 +892,13 @@ fn group_spans(caps: &Captures) -> impl Iterator<Item = Option<Span>> + '_ {
     })
 }
 
+enum LastCapture {
+    Known(Option<usize>),
+    Unavailable,
+}
+
 pub(in crate::dynamic) struct Match {
+    last: LastCapture,
     pub(in crate::dynamic) pattern: Id,
     pub(in crate::dynamic) subject: Id,
     spans: Vec<Option<Span>>,
@@ -876,15 +912,28 @@ impl Match {
         pattern
     }
 
-    /// A Scanner lexicon has exactly one participating token group in each match.
-    pub(in crate::dynamic) fn lexicon_branch(&self, ctx: &Context) -> Option<usize> {
-        if self.pattern(ctx).source != NONE {
-            return None;
+    pub(in crate::dynamic) fn last_attribute(&self, ctx: &mut Context, named: bool) -> Result<Id> {
+        let index = match self.last {
+            LastCapture::Known(index) => index,
+            LastCapture::Unavailable => {
+                return Err(Error::new(
+                    "NotImplementedError",
+                    "capture close order is unavailable for this regular expression",
+                ));
+            }
+        };
+        let Some(index) = index else { return Ok(NONE) };
+        if named {
+            let name = self
+                .pattern(ctx)
+                .regex
+                .group_info()
+                .to_name(PatternID::ZERO, index)
+                .map(str::to_owned);
+            Ok(name.map_or(NONE, |name| ctx.text(name)))
+        } else {
+            Ok(ctx.int(index as i64))
         }
-        self.spans[1..]
-            .iter()
-            .position(Option::is_some)
-            .map(|i| i + 1)
     }
 
     fn group_index(&self, ctx: &mut Context, group: Id) -> Result<usize> {
@@ -1144,10 +1193,12 @@ pub(super) fn search(
     if !captures.is_match() {
         return Ok(NONE);
     }
+    let last = pattern.last_capture(&text[..end], &captures);
     let spans = group_spans(&captures)
         .map(|span| span.map(|s| projection.as_ref().map_or(s, |p| p.original(s))))
         .collect();
     Ok(ctx.alloc(Value::RegexMatch(Rc::new(Match {
+        last,
         pattern: receiver,
         subject: string,
         spans,
