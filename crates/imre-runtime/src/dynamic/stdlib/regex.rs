@@ -14,6 +14,7 @@ mod progress;
 mod scanner;
 mod split;
 mod sub;
+mod surrogate;
 
 pub(super) use scanner::scanner_next;
 
@@ -818,6 +819,10 @@ impl Match {
         let Some(span) = self.spans[index] else {
             return Ok(default);
         };
+        if let Value::SurrogateStr(points) = ctx.heap.get(ctx.scalar_value(self.subject)) {
+            let value = crate::dynamic::copy_ids(&points[span.range()])?;
+            return Ok(ctx.text_codepoints(value));
+        }
         let bytes = self.pattern(ctx).bytes;
         let text = subject_bytes(ctx, self.subject, bytes)?;
         // A bytearray may have changed size since the search.
@@ -830,7 +835,7 @@ impl Match {
         let Some(span) = self.spans[index] else {
             return Ok((-1, -1));
         };
-        if self.pattern(ctx).bytes {
+        if self.pattern(ctx).bytes || matches!(ctx.heap.get(ctx.scalar_value(self.subject)), Value::SurrogateStr(_)) {
             return Ok((span.start as i64, span.end as i64));
         }
         let text = ctx.str_value(self.subject)?;
@@ -881,29 +886,6 @@ fn group_value(data: &[u8], bytes: bool) -> Value {
             String::from_utf8(data.to_vec()).expect("text regex captures end at UTF-8 boundaries"),
         )
     }
-}
-
-fn capture(
-    ctx: &mut Context,
-    pattern: Id,
-    regex: &Matcher,
-    bytes: bool,
-    subject: Id,
-    input: impl FnOnce(&[u8]) -> Input<'_>,
-) -> Result<Id> {
-    let text = subject_bytes(ctx, subject, bytes)?;
-    let mut captures = regex.create_captures();
-    regex
-        .captures(input(text), &mut captures)
-        .map_err(|message| Error::new("RuntimeError", message))?;
-    if !captures.is_match() {
-        return Ok(NONE);
-    }
-    Ok(ctx.alloc(Value::RegexMatch(Rc::new(Match {
-        pattern,
-        subject,
-        spans: group_spans(&captures).collect(),
-    }))))
 }
 
 fn subject_bytes(ctx: &Context, id: Id, bytes: bool) -> Result<&[u8]> {
@@ -982,7 +964,16 @@ pub(super) fn search(
             ));
         }
     };
-    let text = subject_bytes(ctx, string, pattern.bytes)?;
+    let projection = match ctx.heap.get(ctx.scalar_value(string)) {
+        Value::SurrogateStr(points) if !pattern.bytes => Some(surrogate::Projection::new(
+            ctx.str_value(pattern.source).ok(), &pattern.regex, method, points,
+        )?),
+        _ => None,
+    };
+    let text = match &projection {
+        Some(p) => p.text.as_bytes(),
+        None => subject_bytes(ctx, string, pattern.bytes)?,
+    };
     let byte = |i: usize| {
         if pattern.bytes || i >= text.len() {
             i.min(text.len())
@@ -1035,19 +1026,22 @@ pub(super) fn search(
         }
         return Ok(NONE);
     }
-    let matcher = pattern
-        .matcher(method == "fullmatch")
-        .map_err(|message| pattern_error(ctx, pattern.source, pattern.flags, message))?;
-    let anchored = if method == "search" {
-        Anchored::No
-    } else {
-        Anchored::Yes
+    let matcher = match pattern.matcher(method == "fullmatch") {
+        Ok(matcher) => matcher,
+        Err(message) => return Err(pattern_error(ctx, pattern.source, pattern.flags, message)),
     };
-    capture(ctx, receiver, matcher, pattern.bytes, string, |text| {
-        Input::new(&text[..end])
-            .range(start..end)
-            .anchored(anchored)
-    })
+    let anchored = if method == "search" { Anchored::No } else { Anchored::Yes };
+    let input = Input::new(&text[..end]).range(start..end).anchored(anchored);
+    let mut captures = matcher.create_captures();
+    matcher.captures(input, &mut captures)
+        .map_err(|message| Error::new("RuntimeError", message))?;
+    if !captures.is_match() {
+        return Ok(NONE);
+    }
+    let spans = group_spans(&captures).map(|span|
+        span.map(|s| projection.as_ref().map_or(s, |p| p.original(s)))
+    ).collect();
+    Ok(ctx.alloc(Value::RegexMatch(Rc::new(Match { pattern: receiver, subject: string, spans }))))
 }
 
 pub(super) fn call(ctx: &mut Context, name: &str, args: &[Id]) -> Result<Id> {
@@ -1081,25 +1075,10 @@ pub(super) fn call(ctx: &mut Context, name: &str, args: &[Id]) -> Result<Id> {
             _ => unreachable!(),
         });
     }
-    let Value::RegexPattern(pattern) = ctx.heap.get(first) else {
-        return Err(Error::new(
-            "TypeError",
-            "expected compiled regular expression",
-        ));
-    };
-    let pattern = Rc::clone(pattern);
-    let regex = pattern
-        .matcher(name == "re.fullmatch")
-        .map_err(|message| pattern_error(ctx, pattern.source, pattern.flags, message))?;
-    let subject = argument(args, 1)?;
     match name {
-        "re.match" | "re.fullmatch" => capture(ctx, first, regex, pattern.bytes, subject, |text| {
-            Input::new(text).anchored(Anchored::Yes)
-        }),
-        _ => Err(Error::new(
-            "AttributeError",
-            format!("no regex operation {name}"),
-        )),
+        "re.match" => search(ctx, "match", args, &[]),
+        "re.fullmatch" => search(ctx, "fullmatch", args, &[]),
+        _ => Err(Error::new("AttributeError", format!("no regex operation {name}"))),
     }
 }
 
