@@ -426,9 +426,10 @@ def NamedTemporaryFile(mode="w+b", buffering=-1, encoding=None, newline=None,
         raise ValueError("binary mode doesn't take a newline argument")
     (file, closer), name = _create_file(dir, prefix, suffix, output_type, _open_named, delete_on_close)
     try:
+        keep = not delete
         wrapper = _TemporaryFileWrapper(file, name, delete, delete_on_close)
         wrapper._closer._native_guard = closer
-        if not delete:
+        if keep:
             _keep_named(closer)
         return wrapper
     except BaseException:
