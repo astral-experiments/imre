@@ -612,6 +612,7 @@ fn with_errno_description(error: io::Error, build: impl FnOnce(Kind, i32, &str) 
     let kind = match errno {
         libc::EINPROGRESS | libc::EALREADY => Kind::BlockingIOError,
         libc::ECHILD => Kind::ChildProcessError,
+        libc::ESRCH => Kind::ProcessLookupError,
         libc::ESHUTDOWN => Kind::BrokenPipeError,
         _ => os_error_kind(error.kind()),
     };

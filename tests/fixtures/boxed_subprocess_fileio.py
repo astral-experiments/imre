@@ -6,7 +6,20 @@ from pathlib import Path
 from subprocess import Popen
 
 
+def ignored_signals(restore):
+    with Popen(["cat", "/proc/self/status"], stdout=subprocess.PIPE,
+               restore_signals=restore) as child:
+        data, _ = child.communicate()
+        assert child.returncode == 0
+    return next(line for line in data.split(b"\n") if line.startswith(b"SigIgn:"))
+
+
 def current():
+    # Check before any writes initialize the runtime's standard streams.
+    if os.path.exists("/proc/self/status"):
+        inherited = ignored_signals(False)
+        assert ignored_signals(True) != inherited
+        assert ignored_signals(False) == inherited
     assert subprocess.Popen is Popen and Popen.__module__ == "subprocess"
     args = ["imre-argv-zero", "-c", 'printf "%s" "$0"']
     with Popen(args, executable=b"./sh", cwd="/bin", stdout=subprocess.PIPE) as child:
