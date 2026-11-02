@@ -521,6 +521,9 @@ impl Context {
         key: Id,
         parents: &mut SmallVec<[HashFrame; 2]>,
     ) -> Result<ControlFlow<i64, Id>> {
+        if let Value::MappingProxy(mapping) = *self.heap.get(key) {
+            return Ok(ControlFlow::Continue(mapping));
+        }
         if let Value::ParamSpecMarker(kind, _) = self.heap.get(key) {
             return Err(Error::new(
                 "TypeError",
