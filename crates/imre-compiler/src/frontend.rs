@@ -5129,6 +5129,9 @@ impl<'a> Checker<'a> {
         if let ast::Expr::Call(call) = &item.context_expr
             && self.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::CatchWarnings))
         {
+            if !call.arguments.keywords.is_empty() {
+                return Err(self.scoped_builtin_error("warnings.catch_warnings", call));
+            }
             self.arguments(call, &[], None)?;
             let mut protected = Vec::new();
             if let Some(target) = &item.optional_vars {
