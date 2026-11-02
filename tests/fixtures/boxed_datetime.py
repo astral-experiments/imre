@@ -450,6 +450,70 @@ def test_calendar_reduction():
     assert super(Mixed, item).__reduce_ex__(4) == 4
 
 
+def test_fixed_timezone_methods():
+    class Offset(timedelta):
+        pass
+
+    class Name(str):
+        pass
+
+    class Stamp(dt):
+        pass
+
+    offset = Offset(hours=-2, microseconds=1)
+    name = Name("")
+    zone = timezone(offset, name)
+    foreign = Stamp(2020, 1, 1, tzinfo=UTC)
+    assert zone.utcoffset(foreign) is offset and zone.tzname(None) is name
+    assert timezone.dst(zone, foreign) is None
+    assert timezone(offset).tzname(foreign) == "UTC-01:59:59.999999"
+    assert UTC.tzname(None) == "UTC"
+    for descriptor in (timezone.utcoffset, timezone.tzname, timezone.dst):
+        assert descriptor.__objclass__ is timezone
+        assert descriptor.__text_signature__ == "($self, object, /)"
+        try:
+            descriptor(zone, date(2020, 1, 1))
+        except TypeError as exc:
+            assert str(exc) == (descriptor.__name__
+                + "(dt) argument must be a datetime instance or None, not datetime.date")
+        else:
+            raise AssertionError("fixed timezone accepted a plain date")
+
+
+def test_tzinfo_reduction():
+    from datetime import tzinfo
+
+    assert timezone.__reduce__ is tzinfo.__reduce__
+    assert tzinfo().__reduce__() == (tzinfo, (), None)
+    assert UTC.__reduce__() == (timezone, (timedelta(0),), None)
+    offset = timedelta(minutes=7)
+    name = "east"
+    fixed = timezone(offset, name)
+    cls, args, state = fixed.__reduce__()
+    assert cls is timezone and args[0] is offset and args[1] is name and state is None
+
+    class Zone(tzinfo):
+        def __getinitargs__(self):
+            return self.arguments
+
+        def __getstate__(self):
+            return self.state
+
+    zone = Zone()
+    zone.arguments = []
+    zone.state = {}
+    cls, args, state = zone.__reduce_ex__(4)
+    assert cls is Zone and args is zone.arguments and state is zone.state
+
+    class Stateful(tzinfo):
+        pass
+
+    obj = Stateful()
+    obj.name = "east"
+    assert obj.__reduce__() == (Stateful, (), {"name": "east"})
+    assert obj.__reduce__()[2] is obj.__dict__
+
+
 def test_calendar_strftime():
     calls = []
 
@@ -488,6 +552,8 @@ def test_calendar_strftime():
 def current():
     test_calendar_strftime()
     test_calendar_reduction()
+    test_fixed_timezone_methods()
+    test_tzinfo_reduction()
     test_calendar_format()
     test_timedelta_negation()
     test_timedelta_positive_and_absolute()

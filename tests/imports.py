@@ -590,10 +590,20 @@ ACCEPTED = {
             "    with open(finder.archive, \"wb\") as archive:\n"
             "        archive.write(replacement)\n"
             "    assert finder.find_spec(\"stored\") is None\n"
-            "    assert invalidate_caches() is None\n"
+            "    names = ('importlib', 'importlib._bootstrap', 'importlib._bootstrap_external',\n"
+            "             '_frozen_importlib', '_frozen_importlib_external')\n"
+            "    saved = {key: sys.modules.pop(key) for key in names}\n"
+            "    sys.modules['_frozen_importlib'] = sys.modules['_frozen_importlib_external'] = None\n"
+            "    try:\n"
+            "        source = import_module('importlib')\n"
+            "        assert source._bootstrap_external is not saved['_frozen_importlib_external']\n"
+            "        assert source.invalidate_caches() is None\n"
+            "    finally:\n"
+            "        sys.modules.update(saved)\n"
             "    assert finder.find_spec(\"deflated\") is None\n"
             "    assert finder.find_spec(\"stored\").loader is finder\n"
             "    assert finder.get_data(\"stored/message.txt\") == b\"hello\"\n"
+            "    assert invalidate_caches() is None\n"
             "finally:\n"
             "    del finder.invalidate_caches\n"
             "    with open(finder.archive, \"wb\") as archive:\n"
@@ -658,6 +668,12 @@ ACCEPTED = {
             "try:\n    SourceFileLoader('other', path + '.missing').get_code('other')\n"
             "except FileNotFoundError as exc:\n    print(exc.filename == path + '.missing')\n"
         ),
+    },
+    "namespace_resource_spec": {
+        "main.py": (FIXTURES.parent / "boxed_namespace_resource_spec.py").read_text(),
+        "first/acme/data.txt": "first",
+        "second/acme/data.txt": "second",
+        "second/acme/only.txt": "second",
     },
     "multiplexed_resources": {
         "main.py": (FIXTURES.parent / "boxed_multiplexed_resources.py").read_text(),
@@ -935,6 +951,10 @@ def main() -> None:
                 continue
             case = temporary / name
             write_files(case, files)
+            if name == "namespace_resource_spec" and os.name == "posix":
+                with ZipFile(case / "portions.zip", "w") as archive:
+                    archive.writestr("acme/", b"")
+                    archive.writestr("only_archive/", b"")
             if name == "zip_source_spec":
                 if os.name != "posix":
                     continue

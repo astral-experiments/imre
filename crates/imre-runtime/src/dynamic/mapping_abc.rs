@@ -57,7 +57,7 @@ pub(super) fn class(ctx: &mut Context, name: &str) -> Result<Id> {
     }
     if structural_methods(name).is_some() {
         let function = ctx.builtin(&format!("abc.hook.{name}.__subclasshook__"));
-        let hook = ctx.alloc(Value::ClassMethod(function));
+        let hook = super::method_decorator::class_method(ctx, function)?;
         ctx.bind(scope, "__subclasshook__", hook);
     }
     for &method in abstract_methods {
@@ -112,6 +112,17 @@ pub(super) fn registered_subclass(ctx: &Context, cls: Id, parent: Id) -> bool {
         }
     }
     false
+}
+
+/// Resolve explicit registry overrides before using an ABC's native registry.
+pub(super) fn check_impl(ctx: &mut Context, class: Id) -> Result<()> {
+    if ctx.class_attr(class, "_abc_impl").is_some()
+        || (!ctx.is_bundled_abc(class) && !is_abc_class(ctx, class))
+    {
+        ctx.lookup_attr(class, "_abc_impl")?;
+        return Err(Error::new("TypeError", "_abc_impl is set to a wrong type"));
+    }
+    Ok(())
 }
 
 fn register(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
@@ -200,6 +211,9 @@ pub(super) fn call(
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
+    if name == "ABCMeta.__new__" {
+        return ctx.abc_new(args, kwargs);
+    }
     if let Some(owner) = name
         .strip_prefix("hook.")
         .and_then(|n| n.strip_suffix(".__subclasshook__"))
@@ -253,6 +267,25 @@ pub(super) fn call(
             ));
         }
         return Ok(ctx.alloc(Value::Int(crate::Int::new(ctx.heap.abc_cache_token.into()))));
+    }
+    if matches!(name, "__instancecheck__" | "__subclasscheck__") {
+        let instance = name == "__instancecheck__";
+        let argument = if instance { "instance" } else { "subclass" };
+        let [Some(class), Some(object)] = super::builtins::bind_builtin_arguments(
+            &format!("ABCMeta.{name}"),
+            args,
+            kwargs,
+            ["cls", argument],
+            2,
+        )?
+        else {
+            unreachable!("both ABCMeta check arguments are required")
+        };
+        return if instance {
+            ctx.abc_meta_instance_check(object, class)
+        } else {
+            ctx.abc_meta_subclass_check(object, class)
+        };
     }
     if name == "register" {
         return register(ctx, args, kwargs);

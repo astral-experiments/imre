@@ -459,8 +459,10 @@ def NamedTemporaryFile(mode="w+b", buffering=-1, encoding=None, newline=None,
 
 def TemporaryFile(mode="w+b", buffering=-1, encoding=None, newline=None,
                   suffix=None, prefix=None, dir=None, *, errors=None):
+    if "b" not in mode:
+        encoding = _io.text_encoding(encoding)
+    prefix, suffix, dir, _ = _sanitize_params(prefix, suffix, dir)
     if buffering != -1:
         raise NotImplementedError("TemporaryFile supports default buffering")
-    prefix, suffix, dir, _ = _sanitize_params(prefix, suffix, dir)
     return _open_file(mode, dir=_os.fspath(dir), prefix=prefix, suffix=suffix,
                       encoding=encoding, errors=errors, newline=newline)

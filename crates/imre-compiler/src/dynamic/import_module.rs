@@ -7,6 +7,20 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
         return Some(source);
     }
     match name {
+        "types" => {
+            // PEP 3115/560 class construction uses only builtins; native types remain module exports.
+            const UPSTREAM: &str = include_str!(
+                "../../../../benchmarks/cpython_stdlib/full/types/upstream/Lib/types.py"
+            );
+            let start = UPSTREAM.find("def new_class(").unwrap();
+            Some((
+                "types.py",
+                UPSTREAM[start..]
+                    .split_once("def get_original_bases(")
+                    .unwrap()
+                    .0,
+            ))
+        }
         "reprlib" => Some(("reprlib.py", include_str!("../../stdlib/reprlib.py"))),
         "datetime" => Some(("datetime.py", include_str!("../../stdlib/datetime.py"))),
         "enum" => Some(("enum.py", include_str!("../../stdlib/enum.py"))),
@@ -41,6 +55,7 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
             "_imre_ordered_dict.py",
             include_str!("../../stdlib/_imre_ordered_dict.py"),
         )),
+        "runpy" => Some(("runpy.py", include_str!("../../stdlib/runpy.py"))),
         "traceback" => Some((
             "traceback.py",
             include_str!("../../stdlib/traceback_stack.py"),
@@ -84,7 +99,11 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
                     [
                         include_str!("../../stdlib/inspect.py"),
                         include_str!("../../stdlib/inspect_signature.py"),
-                        section("def ismodule(object):", "def isclass(object):"),
+                        "import importlib.machinery\nimport linecache\nimport os\nimport sys",
+                        section("def ismodule(object):", "def ispackage(object):"),
+                        section("def isfunction(object):", "def _has_code_flag("),
+                        section("def istraceback(object):", "def isbuiltin(object):"),
+                        section("def getfile(object):", "class ClassFoundException("),
                         section("def _signature_bound_method(", "def _signature_is_builtin("),
                         section("class _void:", "class _ParameterKind("),
                         &classes,
@@ -275,9 +294,14 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
             "importlib/machinery.py",
             include_str!("../../stdlib/importlib/machinery.py"),
         )),
-        "_frozen_importlib" => {
+        "_frozen_importlib" | "importlib._bootstrap" => {
             static SOURCE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
-            Some(("_frozen_importlib.py", SOURCE.get_or_init(|| {
+            let file = if name == "_frozen_importlib" {
+                "_frozen_importlib.py"
+            } else {
+                "importlib/_bootstrap.py"
+            };
+            Some((file, SOURCE.get_or_init(|| {
                 const UPSTREAM: &str = include_str!(
                     "../../../../benchmarks/cpython_stdlib/full/importlib/upstream/Lib/importlib/_bootstrap.py"
                 );
@@ -285,25 +309,45 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
                     let begin = UPSTREAM.find(start).unwrap();
                     UPSTREAM[begin..].split_once(end).unwrap().0
                 };
+                // The native warning backend is the public warnings module; load it only on emission.
+                let imports = section("def _gcd_import(", "def _builtin_from_name(")
+                    .replace("_warnings.warn(", "_warning_module().warn(");
                 // Preserve CPython's module creation hooks and its fresh/reload attribute rules.
-                format!("{}\n{}\n{}\n{}",
+                [
                     include_str!("../../stdlib/importlib/legacy_source_loader.py"),
                     section("class ModuleSpec:", "def spec_from_loader("),
                     section("def _init_module_attrs(", "def _module_repr_from_spec("),
-                    section("def _verbose_message(", "def _requires_builtin("),
-                )
+                    section("def _call_with_frames_removed(", "def _requires_builtin("),
+                    section("def _resolve_name(", "def _find_spec("),
+                    section("def _sanity_check(", "_ERR_MSG_PREFIX ="),
+                    &imports,
+                ].join("\n")
             })))
         }
-        "_frozen_importlib_external" => {
+        "_frozen_importlib_external" | "importlib._bootstrap_external" => {
             static SOURCE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
             Some(("importlib/_bootstrap_external.py", SOURCE.get_or_init(|| {
                 // A create_module hook can convert a file package into a namespace spec.
                 const UPSTREAM: &str = include_str!(
                     "../../../../benchmarks/cpython_stdlib/full/importlib/upstream/Lib/importlib/_bootstrap_external.py"
                 );
-                let start = UPSTREAM.find("class _NamespacePath:").unwrap();
-                let (namespace, _) = UPSTREAM[start..].split_once("class PathFinder:").unwrap();
-                format!("{}\n{namespace}", include_str!("../../stdlib/importlib/source_loader.py"))
+                let section = |start, end| {
+                    let begin = UPSTREAM.find(start).unwrap();
+                    UPSTREAM[begin..].split_once(end).unwrap().0
+                };
+                // The native runtime loads source files directly. FileFinder can also use
+                // any loader supplied by its caller, with the original package and cache rules.
+                let spec = section("_POPULATE = object()", "def _bless_my_loader(")
+                    .replace("_get_supported_file_loaders()", "_file_loader_defaults(location)");
+                [
+                    include_str!("../../stdlib/importlib/source_loader.py"),
+                    section("_CASE_INSENSITIVE_PLATFORMS_STR_KEY =", "def _pack_uint32("),
+                    section("if _MS_WINDOWS:\n    def _path_join(", "def _write_atomic("),
+                    &spec,
+                    section("class _NamespacePath:", "class PathFinder:"),
+                    section("class FileFinder:", "class AppleFrameworkLoader("),
+                    section("def _set_bootstrap_module(", "def _install("),
+                ].join("\n")
             })))
         }
         _ => crate::modules::bundled_runtime_source(name),

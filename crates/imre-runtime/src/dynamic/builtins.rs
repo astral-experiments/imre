@@ -212,8 +212,9 @@ pub(super) fn constructor_owner(name: &str) -> Option<&str> {
     let owner = name.strip_suffix(".__new__")?;
     (matches!(
         owner,
-        "object" | "dict" | "float" | "int" | "str" | super::thread_local::CLASS
-    ) || is_exception(owner))
+        "object" | "dict" | "float" | "function" | "int" | "str" | super::thread_local::CLASS
+    ) || is_exception(owner)
+        || crate::objects::HashState::is_provider_class(owner))
     .then_some(owner)
 }
 
@@ -264,6 +265,24 @@ pub(super) fn is_static_gc_type(name: &str) -> bool {
 
 /// Native iterator classes implement both iterator slots in the runtime.
 pub(super) fn is_iterator_type(name: &str) -> bool {
+    is_final_iterator_type(name)
+        || matches!(
+            name,
+            "reversed"
+                | "enumerate"
+                | "map"
+                | "filter"
+                | "zip"
+                | "itertools.count"
+                | "itertools.repeat"
+                | "_io.BufferedRandom"
+                | "_io.BufferedReader"
+                | "_io.BufferedWriter"
+        )
+}
+
+/// Iterator implementations that CPython does not expose as subclassable types.
+pub(super) fn is_final_iterator_type(name: &str) -> bool {
     if DictIterator::class(name).is_some() {
         return true;
     }
@@ -285,16 +304,6 @@ pub(super) fn is_iterator_type(name: &str) -> bool {
             | "keys"
             | "values"
             | "items"
-            | "reversed"
-            | "enumerate"
-            | "map"
-            | "filter"
-            | "zip"
-            | "itertools.count"
-            | "itertools.repeat"
-            | "_io.BufferedRandom"
-            | "_io.BufferedReader"
-            | "_io.BufferedWriter"
             | super::deque::ITERATOR
             | super::deque::REVERSE_ITERATOR
     )
@@ -361,7 +370,7 @@ pub(super) fn set_operator(method: &str) -> Option<&'static str> {
     })
 }
 
-pub(super) const MEMORYVIEW_METHODS: &[&str] = &["release"];
+pub(super) const MEMORYVIEW_METHODS: &[&str] = &["__enter__", "__exit__", "release"];
 
 pub(super) const BYTEARRAY_METHODS: &[&str] = &[
     "__repr__",
@@ -374,6 +383,7 @@ pub(super) const BYTEARRAY_METHODS: &[&str] = &[
     "reverse",
     "rstrip",
     "split",
+    "splitlines",
     "startswith",
     "strip",
 ];
@@ -391,6 +401,7 @@ pub(super) const BYTES_METHODS: &[&str] = &[
     "rsplit",
     "rstrip",
     "split",
+    "splitlines",
     "startswith",
     "strip",
     "translate",
@@ -484,11 +495,12 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         }
         Value::ItemGetter(_) if attr == "__reduce__" => "operator.itemgetter",
         Value::NamedTuple {
-            class: Some(super::stdlib::os::stat::CLASS),
+            class:
+                Some(owner @ (super::stdlib::os::stat::CLASS | super::stdlib::os::stat::VFS_CLASS)),
             ..
-        } if attr == "__reduce__" => super::stdlib::os::stat::CLASS,
+        } if attr == "__reduce__" => owner,
         Value::Property(_) if super::property::METHODS.contains(&attr) => "property",
-        Value::ClassMethod(_) if attr == "__get__" => "classmethod",
+        Value::ClassMethod { .. } if attr == "__get__" => "classmethod",
         Value::StaticMethod { .. } if attr == "__get__" => "staticmethod",
         Value::Generator { .. } if super::generator_protocol::generator_method(attr) => "generator",
         Value::Coroutine(_) if super::generator_protocol::coroutine_method("coroutine", attr) => {
@@ -574,6 +586,7 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
             "TextIOWrapper"
         }
         Value::List(_) if LIST_METHODS.contains(&attr) => "list",
+        Value::Tuple(_) | Value::NamedTuple { .. } if attr == "index" => "tuple",
         Value::Tuple(_) if matches!(attr, "__getitem__" | "__repr__") => "tuple",
         Value::Set { frozen: false, .. } if SET_OPERATORS.contains(&attr) => "set",
         Value::Set { frozen: true, .. } if FROZENSET_OPERATORS.contains(&attr) => "frozenset",
@@ -583,6 +596,8 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
                 "add"
                     | "copy"
                     | "discard"
+                    | "difference"
+                    | "remove"
                     | "difference_update"
                     | "update"
                     | "issuperset"
@@ -597,7 +612,13 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         Value::Set { frozen: true, .. }
             if matches!(
                 attr,
-                "copy" | "issuperset" | "issubset" | "__contains__" | "__reduce__" | "__repr__"
+                "copy"
+                    | "difference"
+                    | "issuperset"
+                    | "issubset"
+                    | "__contains__"
+                    | "__reduce__"
+                    | "__repr__"
             ) =>
         {
             "frozenset"
@@ -662,7 +683,7 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         Value::RegexPattern(_)
             if matches!(
                 attr,
-                "findall" | "finditer" | "match" | "fullmatch" | "search" | "split" | "sub" | "scanner"
+                "findall" | "finditer" | "match" | "fullmatch" | "search" | "split" | "sub" | "subn" | "scanner"
             ) =>
         {
             "pattern"
@@ -1122,7 +1143,16 @@ pub(super) fn call(
         let [class, rest @ ..] = args else {
             return Err(type_error("missing class for __init_subclass__"));
         };
-        if !rest.is_empty() || !kwargs.is_empty() {
+        if !kwargs.is_empty() {
+            let name = ctx
+                .own_class_attr(*class, "__qualname__")
+                .and_then(|id| ctx.str_value(id).ok())
+                .unwrap_or_else(|| ctx.class_name(*class));
+            return Err(type_error(format!(
+                "{name}.__init_subclass__() takes no keyword arguments"
+            )));
+        }
+        if !rest.is_empty() {
             return Err(type_error(format!(
                 "{}.__init_subclass__() takes no arguments",
                 ctx.class_name(*class)
@@ -1221,18 +1251,28 @@ pub(super) fn call(
                 if values.len() != required {
                     return Err(type_error(format!("{message}, got {}", values.len())));
                 }
-                let Value::GetSetDescriptor { owner: "int", name: field, .. } = *ctx.heap.get(descriptor) else {
-                    return Err(type_error("expected an integer getset descriptor"));
+                let Value::GetSetDescriptor {
+                    owner, name: field, ..
+                } = *ctx.heap.get(descriptor)
+                else {
+                    return Err(type_error("expected a getset descriptor"));
                 };
-                if !ctx.builtin_slot_accepts(values[0], "int") {
+                let accepts = if owner == "int" {
+                    ctx.builtin_slot_accepts(values[0], owner)
+                } else if crate::objects::HashState::is_provider_class(owner) {
+                    ctx.type_name(values[0]) == owner
+                } else {
+                    return Err(type_error("expected a read-only getset descriptor"));
+                };
+                if !accepts {
                     return Err(type_error(format!(
-                        "descriptor '{field}' for 'int' objects doesn't apply to a '{}' object",
+                        "descriptor '{field}' for '{owner}' objects doesn't apply to a '{}' object",
                         ctx.type_name(values[0])
                     )));
                 }
                 Err(Error::new(
                     "AttributeError",
-                    format!("attribute '{field}' of 'int' objects is not writable"),
+                    format!("attribute '{field}' of '{owner}' objects is not writable"),
                 ))
             }
             "_int_getset" => integer::rational_field(ctx, method, args),
@@ -1254,7 +1294,14 @@ pub(super) fn call(
             "bytearray"
                 if matches!(
                     method,
-                    "decode" | "endswith" | "lstrip" | "rstrip" | "split" | "startswith" | "strip"
+                    "decode"
+                        | "endswith"
+                        | "lstrip"
+                        | "rstrip"
+                        | "split"
+                        | "splitlines"
+                        | "startswith"
+                        | "strip"
                 ) =>
             {
                 text::method(ctx, owner, method, args, kwargs)
@@ -1292,9 +1339,18 @@ pub(super) fn call(
             "list" | "tuple" | "dict" | "set" | "frozenset" => {
                 collections::method(ctx, name, args, kwargs)
             }
-            "memoryview" if method == "release" => {
+            "memoryview" if MEMORYVIEW_METHODS.contains(&method) => {
                 positional(name, kwargs)?;
-                arity(name, args, 1, 1)?;
+                // CPython's __exit__ ignores any positional exception information.
+                let max_args = if method == "__exit__" { usize::MAX } else { 1 };
+                arity(name, args, 1, max_args)?;
+                let Value::MemoryView { owner, .. } = ctx.heap.get_mut(args[0]) else {
+                    return Err(type_error("expected memoryview"));
+                };
+                if method == "__enter__" {
+                    Context::memoryview_owner(*owner)?;
+                    return Ok(args[0]);
+                }
                 let exports = ctx
                     .buffer_exports
                     .iter()
@@ -1307,9 +1363,6 @@ pub(super) fn call(
                         format!("memoryview has {exports} exported {unit}"),
                     ));
                 }
-                let Value::MemoryView { owner, .. } = ctx.heap.get_mut(args[0]) else {
-                    return Err(type_error("expected memoryview"));
-                };
                 *owner = None;
                 Ok(NONE)
             }
@@ -1319,6 +1372,15 @@ pub(super) fn call(
             }
             "map" | "filter" | "enumerate" => ctx.iterator_method(owner, method, args, kwargs),
             "property" => super::property::method(ctx, method, args, kwargs),
+            "function" if method == "__new__" => {
+                let Some((&class, args)) = args.split_first() else {
+                    return Err(type_error("function.__new__(): not enough arguments"));
+                };
+                if class != ctx.builtin("function") {
+                    return Err(ctx.invalid_new_subtype("function", class));
+                }
+                ctx.construct_function(args, kwargs)
+            }
             "function" | "staticmethod" if method == "__get__" => {
                 positional(name, kwargs)?;
                 arity(name, args, 2, 3)?;
@@ -1379,22 +1441,14 @@ pub(super) fn call(
             let [mapping] = bind_builtin_arguments(name, args, kwargs, ["mapping"], 1)?;
             ctx.mapping_proxy(mapping.expect("required mapping"))
         }
-        "type" => {
-            let [object] = args else {
-                return Err(if args.len() == 3 {
-                    Error::new(
-                        "NotImplementedError",
-                        "dynamic class construction with type() is unsupported",
-                    )
-                } else {
-                    type_error("type() takes 1 or 3 arguments")
-                });
-            };
-            if !kwargs.is_empty() {
-                return Err(type_error("type() takes no keyword arguments"));
+        "type" => match args {
+            [object] if kwargs.is_empty() => ctx.exact_type(*object),
+            [_] => Err(type_error("type() takes no keyword arguments")),
+            [name, bases, namespace] => {
+                ctx.type_from_namespace(None, *name, *bases, *namespace, kwargs)
             }
-            ctx.exact_type(*object)
-        }
+            _ => Err(type_error("type() takes 1 or 3 arguments")),
+        },
         "super" => {
             if !kwargs.is_empty() {
                 return Err(type_error("super() takes no keyword arguments"));
@@ -1788,10 +1842,10 @@ pub(super) fn call(
             })?;
             ctx.check_buffer_exporter(object)?;
             let owner = match ctx.heap.get(ctx.scalar_value(object)) {
-                Value::Bytes(_) => object,
+                Value::Bytes(_) | Value::ByteArray(_) => object,
                 Value::MemoryView { owner, .. } => Context::memoryview_owner(*owner)?,
                 Value::Array(array) if array.view_layout().0 != "w" => object,
-                Value::Array(_) | Value::ByteArray(_) => {
+                Value::Array(_) => {
                     return Err(Error::new(
                         "NotImplementedError",
                         "memoryview of a mutable buffer is unsupported",
@@ -1805,8 +1859,8 @@ pub(super) fn call(
                 }
             };
             let storage = ctx.scalar_value(owner);
-            if let Value::Array(array) = ctx.heap.get_mut(storage) {
-                array.viewed = true;
+            if matches!(ctx.heap.get(storage), Value::Array(_) | Value::ByteArray(_)) {
+                ctx.heap.note_buffer_view(storage);
             }
             Ok(ctx.alloc(Value::MemoryView {
                 owner: Some(owner),
@@ -1844,7 +1898,7 @@ pub(super) fn call(
         "classmethod" => {
             positional(name, kwargs)?;
             arity(name, args, 1, 1)?;
-            Ok(ctx.alloc(Value::ClassMethod(args[0])))
+            super::method_decorator::class_method(ctx, args[0])
         }
         "staticmethod" => {
             if !kwargs.is_empty() {
@@ -1856,7 +1910,7 @@ pub(super) fn call(
                     args.len()
                 )));
             };
-            super::static_method::construct(ctx, *callable)
+            super::method_decorator::static_method(ctx, *callable)
         }
         "property" => super::property::construct(ctx, args, kwargs),
         "open" => super::stdlib::io::open(ctx, args, kwargs),

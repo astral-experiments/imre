@@ -4,6 +4,14 @@ use std::collections::HashMap;
 
 use super::{Context, Error, FALSE, Id, NONE, Result, TRUE, Value};
 
+/// Namespace type calls validate native layouts before using ordinary member slots.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum ClassLayout {
+    Specialized,
+    OrdinarySlots,
+    TypeNamespace,
+}
+
 #[derive(Clone)]
 pub(super) struct TypeVariable {
     pub name: Id,
@@ -1685,7 +1693,17 @@ impl Context {
             )),
             Value::Native(name) if name == "typing.Callable" => Ok(self.callable(value)),
             _ => {
-                if let Some(check) = self.bound_slot(class, "__instancecheck__")? {
+                // An exact instance wins before the class's metaclass can intercept the check.
+                if self.heap.get(value).instance_class() == Some(class) {
+                    return Ok(true);
+                }
+                // A declared Protocol uses typing's stricter public check, even when it
+                // inherits ABCMeta's native implementation.
+                if let Some(check) = self.bound_slot(class, "__instancecheck__")?
+                    && !(self.is_protocol_declaration(class)
+                        && self.slot(class, "__instancecheck__")
+                            == self.builtins.get("abc.__instancecheck__").copied())
+                {
                     let result = self.call(check, vec![value], Vec::new())?;
                     return self.truth(result);
                 }
@@ -1728,6 +1746,43 @@ impl Context {
         }
     }
 
+    /// ABCMeta checks the instance's reported class first, then its actual type if different.
+    pub(super) fn abc_meta_instance_check(&mut self, value: Id, class: Id) -> Result<Id> {
+        super::mapping_abc::check_impl(self, class)?;
+        let reported = self.lookup_attr(value, "__class__")?;
+        self.heap.keep(reported);
+        let actual = self.exact_type(value)?;
+        let check = |ctx: &mut Self, child| {
+            if ctx.heap.get(class).instance_class().is_some()
+                || ctx.class_attr(class, "__subclasscheck__").is_some()
+            {
+                let method = ctx.lookup_attr(class, "__subclasscheck__")?;
+                return ctx.call(method, vec![child], Vec::new());
+            }
+            // Synthetic protocol declarations have no stored metaclass.
+            ctx.abc_meta_subclass_check(child, class)
+        };
+        let result = check(self, reported)?;
+        if reported != actual && !self.truth(result)? {
+            check(self, actual)
+        } else {
+            Ok(result)
+        }
+    }
+
+    /// The base ABC hook bypasses typing's public protocol guards and custom metaclass hooks.
+    pub(super) fn abc_meta_subclass_check(&mut self, child: Id, class: Id) -> Result<Id> {
+        if !self.is_type_object(child) {
+            return Err(Error::new(
+                "TypeError",
+                "issubclass() arg 1 must be a class",
+            ));
+        }
+        super::mapping_abc::check_impl(self, class)?;
+        self.abc_subclass_check(child, class)
+            .map(super::builtins::boolean)
+    }
+
     /// Freeze the declared field names or inherit the first named-tuple layout in the MRO.
     fn namedtuple_layout(
         &mut self,
@@ -1739,34 +1794,63 @@ impl Context {
         if bases.iter().any(|&base| {
             matches!(self.heap.get(base), Value::Native(name) if name == "typing.NamedTuple")
         }) {
-            let fields = self.scope_name(scope, "__annotations__")
-                .and_then(|annotations| self.dict_entries(annotations))
-                .unwrap_or_default();
-            let named_fields: std::rc::Rc<[String]> = fields
-                .iter()
-                .filter_map(|&(key, _)| self.str_value(key).ok().map(str::to_owned))
-                .collect();
-            let mut defaults = Vec::new();
-            for field in named_fields.iter() {
-                if !ruff_python_stdlib::identifiers::is_identifier(field) {
-                    return Err(Error::new("ValueError", format!("invalid named tuple field {field:?}")));
+            let fields = self.scope_name(scope, "__annotations__");
+            let (fields, provider) = if fields.is_none()
+                && let Some(original) = self.scope_name(scope, "__annotate_func__")
+            {
+                let annotate = self.call_typing_helper("_namedtuple_annotate", vec![original])?;
+                self.heap.keep(annotate);
+                let forwardref = self.int(3);
+                let fields = self.call(annotate, vec![forwardref], Vec::new())?;
+                (Some(fields), Some(annotate))
+            } else {
+                (fields, None)
+            };
+            let mut named_fields = Vec::new();
+            if let Some(fields) = fields {
+                self.heap.keep(fields);
+                let keys = self.items(fields)?;
+                for &key in &keys {
+                    self.heap.keep(key);
                 }
+                for key in keys {
+                    named_fields.push(super::namedtuple::string(self, key)?);
+                }
+            }
+            let mut defaults = Vec::new();
+            for field in &named_fields {
                 if let Some(value) = self.scope_name(scope, field) {
                     defaults.push(value);
                 } else if !defaults.is_empty() {
                     return Err(Error::new("TypeError", format!("non-default field {field} cannot follow default fields")));
                 }
             }
+            super::namedtuple::validate_fields(name, &named_fields, false)?;
+            if let Some(attr) = self.scope_data(scope).names.keys().find(|key| {
+                matches!(
+                    key.as_str(),
+                    "__new__" | "__init__" | "__slots__" | "__getnewargs__" |
+                    "_fields" | "_field_defaults" | "_make" | "_replace" | "_asdict" | "_source"
+                )
+            }) {
+                return Err(Error::new(
+                    "AttributeError",
+                    format!("Cannot overwrite NamedTuple attribute {attr}"),
+                ));
+            }
+            let fields = super::namedtuple::bind_field_metadata(self, scope, &named_fields, &defaults);
             let defaults = self.alloc(Value::Tuple(defaults));
-            super::namedtuple::bind_new(self, scope, name, &named_fields, Some(defaults))?;
+            let new = super::namedtuple::bind_new(self, scope, name, &named_fields, Some(defaults))?;
+            if let Some(annotate) = provider {
+                self.bind_local(scope, "__annotate_func__", annotate);
+                self.set_attr(new, "__annotate__", annotate)?;
+            }
             if self.scope_name(scope, "__repr__").is_none() {
-                let fields = named_fields.iter().map(|field| self.text(field)).collect();
-                let fields = self.alloc(Value::Tuple(fields));
                 let name = self.text(name);
                 super::namedtuple::bind_repr(self, scope, name, fields)?;
             }
             super::namedtuple::bind_fields(self, scope, &named_fields);
-            return Ok(Some(named_fields));
+            return Ok(Some(named_fields.into()));
         }
         Ok(ancestors
             .iter()
@@ -1778,48 +1862,52 @@ impl Context {
             }))
     }
 
-    fn declared_slot_names(&mut self, scope: Id) -> Result<Option<std::rc::Rc<[String]>>> {
-        let Some(slots) = self.scope_name(scope, "__slots__") else {
+    pub(super) fn declared_slot_names(
+        &mut self,
+        slots: Option<Id>,
+        base: Id,
+    ) -> Result<Option<std::rc::Rc<[String]>>> {
+        let Some(slots) = slots else {
             return Ok(None);
         };
-        if let Ok(name) = self.str_value(slots) {
-            return Ok(Some([name.to_owned()].into()));
-        }
-        let iterator = self.iterator(slots)?;
-        self.heap.keep(iterator);
         let mut items = Vec::new();
-        while let Some(slot) = self.next_item(iterator)? {
-            self.heap.keep(slot);
-            items.push(slot);
+        if self.string_storage(slots).is_some() {
+            items.push(slots);
+        } else {
+            let iterator = self.iterator(slots)?;
+            self.heap.keep(iterator);
+            while let Some(slot) = self.next_item(iterator)? {
+                self.heap.keep(slot);
+                items.push(slot);
+            }
         }
-        let mut names = Vec::with_capacity(items.len());
-        for slot in items {
-            let name = self.str_value(slot).map_err(|_| {
-                Error::new(
-                    "TypeError",
-                    format!(
-                        "__slots__ items must be strings, not '{}'",
-                        self.type_name(slot)
-                    ),
-                )
-            })?;
-            names.push(name.to_owned());
-        }
-        Ok(Some(names.into()))
+        Ok(Some(self.checked_slot_names(base, &items)?.into()))
     }
 
     /// Preserve the actual direct bases as well as the immutable C3 tuple exposed by type.
     pub(super) fn allocate_class(&mut self, name: String, scope: Id, bases: Vec<Id>) -> Result<Id> {
-        self.allocate_class_with_slots(name, scope, bases, false)
+        self.allocate_class_with_slots(name, scope, bases, ClassLayout::Specialized)
     }
 
     pub(super) fn allocate_class_with_slots(
         &mut self,
         name: String,
         scope: Id,
-        mut bases: Vec<Id>,
-        ordinary_slots: bool,
+        bases: Vec<Id>,
+        layout: ClassLayout,
     ) -> Result<Id> {
+        let bases = self.validate_class_bases(bases, layout)?;
+        let ancestors = self.linearized_bases(&bases, false)?;
+        let layout_base = self.member_layout_base(&bases)?;
+        let slots = self.declared_slot_names(self.scope_name(scope, "__slots__"), layout_base)?;
+        self.allocate_prepared_class(name, scope, bases, ancestors, layout, slots)
+    }
+
+    pub(super) fn validate_class_bases(
+        &mut self,
+        mut bases: Vec<Id>,
+        layout: ClassLayout,
+    ) -> Result<Vec<Id>> {
         for &base in &bases {
             if matches!(self.heap.get(base), Value::Native(name) if name == "typing._UnpackGenericAlias")
             {
@@ -1831,6 +1919,7 @@ impl Context {
             if let Value::Native(name) = self.heap.get(base)
                 && (super::stdlib::fixed_structseq::fixed_type(name).is_some()
                     || crate::objects::HashState::is_provider_class(name)
+                    || super::builtins::is_final_iterator_type(name)
                     || matches!(
                         name.as_str(),
                         "typing.TypeVar"
@@ -1842,7 +1931,31 @@ impl Context {
                             | "NoDefaultType"
                             | "datetime.timezone"
                             | super::stdlib::flags::TYPE
+                            | "bool"
+                            | "range"
+                            | "memoryview"
                             | "slice"
+                            | "function"
+                            | "builtin_function_or_method"
+                            | "method"
+                            | "method-wrapper"
+                            | "code"
+                            | "frame"
+                            | "traceback"
+                            | "cell"
+                            | "dict_keys"
+                            | "dict_values"
+                            | "dict_items"
+                            | "odict_keys"
+                            | "odict_values"
+                            | "odict_items"
+                            | "coroutine"
+                            | "async_generator"
+                            | "mappingproxy"
+                            | "classmethod_descriptor"
+                            | "getset_descriptor"
+                            | "method_descriptor"
+                            | "wrapper_descriptor"
                             | "NoneType"
                             | "NotImplementedType"
                             | "ellipsis"
@@ -1863,11 +1976,12 @@ impl Context {
                 ));
             }
         }
+        if layout == ClassLayout::TypeNamespace {
+            self.check_namespace_layouts(&bases)?;
+        }
         if bases.is_empty() {
             bases.push(self.builtin("object"));
         }
-        let ancestors = self.linearized_bases(&bases, false)?;
-        self.check_member_slot_bases(&bases, &ancestors)?;
         // A mixed layout needs CPython's solid-base check before choosing a native allocator.
         if bases.len() > 1
             && bases
@@ -1879,6 +1993,18 @@ impl Context {
                 "multiple bases for a thread-local subclass are unsupported",
             ));
         }
+        Ok(bases)
+    }
+
+    pub(super) fn allocate_prepared_class(
+        &mut self,
+        name: String,
+        scope: Id,
+        bases: Vec<Id>,
+        ancestors: Vec<Id>,
+        layout: ClassLayout,
+        slot_names: Option<std::rc::Rc<[String]>>,
+    ) -> Result<Id> {
         let mut mro = Vec::with_capacity(ancestors.len() + 1);
         mro.push(NONE);
         // Keep allocation and special-slot dispatch on their existing native layout.
@@ -1890,10 +2016,9 @@ impl Context {
         } else {
             mro.extend_from_slice(&ancestors);
         }
-        let slot_names = self.declared_slot_names(scope)?;
         // Other dunder names can replace special methods or class metadata. Keep
         // their existing layout until their type slots can be updated as well.
-        let ordinary_slots = ordinary_slots
+        let ordinary_slots = layout != ClassLayout::Specialized
             && slot_names.as_deref().is_some_and(|names| {
                 names.iter().all(|name| {
                     !name.starts_with("__")
@@ -1901,6 +2026,12 @@ impl Context {
                         || matches!(name.as_str(), "__dict__" | "__weakref__")
                 })
             });
+        if layout == ClassLayout::TypeNamespace && slot_names.is_some() && !ordinary_slots {
+            return Err(Error::new(
+                "NotImplementedError",
+                "dynamic type() does not support slots that replace special class attributes",
+            ));
+        }
         let member_slots = ordinary_slots
             || self
                 .scope_data(scope)
@@ -1911,7 +2042,6 @@ impl Context {
             self.prepare_slot_members(
                 &name,
                 scope,
-                &bases,
                 slot_names.as_deref().unwrap_or_default(),
                 ordinary_slots,
             )?
@@ -1924,7 +2054,11 @@ impl Context {
             if let Some(function) = self.namespace_binding(self.scope_data(scope), name)
                 && matches!(self.heap.get(function), Value::Function { .. })
             {
-                let method = self.alloc(Value::ClassMethod(function));
+                let dictionary = self.dict(Vec::new());
+                let method = self.alloc(Value::ClassMethod {
+                    callable: function,
+                    dictionary,
+                });
                 self.bind_local(scope, name, method);
             }
         }
@@ -1939,13 +2073,15 @@ impl Context {
         mro[0] = class;
         let bases = self.alloc(Value::Tuple(bases));
         let mro = self.alloc(Value::Tuple(mro));
+        // A class-body __eq__ suppresses inherited hashing at type creation.
+        if self.namespace_binding(self.scope_data(scope), "__eq__").is_some()
+            && self.namespace_binding(self.scope_data(scope), "__hash__").is_none()
+        {
+            self.bind_local(scope, "__hash__", NONE);
+        }
         let Value::Scope(fields) = self.heap.get_mut(scope) else {
             unreachable!()
         };
-        // A class-body __eq__ suppresses inherited hashing at type creation.
-        if fields.names.contains_key("__eq__") && !fields.names.contains_key("__hash__") {
-            fields.names.insert("__hash__".to_owned(), NONE);
-        }
         let namespace = fields.class_namespace.get_or_insert_with(Default::default);
         namespace.member_slots = member_slots;
         namespace.slot_names = slot_names;

@@ -2572,6 +2572,7 @@ impl<'a> Checker<'a> {
             _ if operation => "set binary operator",
             "__iand__" | "__ior__" | "__isub__" => "set in-place operator",
             "difference_update" => "set.difference_update",
+            "remove" => "set.remove",
             "update" => "set.update",
             "issubset" => "set.issubset",
             _ => return None,
@@ -6097,6 +6098,9 @@ impl<'a> Checker<'a> {
 
     /// Keep the large general frame off recursive left- and right-hand arithmetic.
     fn non_call_expr(&mut self, expression: &ast::Expr) -> Result<Expr, String> {
+        if self.unshadowed_builtin(expression, "hex") {
+            return Err(self.scoped_builtin_error("hex", expression));
+        }
         if self.unshadowed_len(expression) {
             return Ok(self.builtin_len());
         }
@@ -6317,6 +6321,9 @@ impl<'a> Checker<'a> {
                 Intrinsic::Fnmatch(ir::FnmatchOperation::Match { normcase }) => {
                     return Ok(fnmatch::function(self.types, normcase));
                 }
+                Intrinsic::BuiltinsHex => {
+                    return Err(self.scoped_builtin_error("builtins.hex", expression));
+                }
                 Intrinsic::BuiltinsLen => return Ok(self.builtin_len()),
                 Intrinsic::CodecBom(bytes) => {
                     return Ok(Expr {
@@ -6477,7 +6484,14 @@ impl<'a> Checker<'a> {
                 if matches!(
                     self.resolve(expression),
                     Some(Binding::Intrinsic(Intrinsic::NamedHash(
-                        "blake2b" | "blake2s"
+                        "blake2b"
+                            | "blake2s"
+                            | "sha3_224"
+                            | "sha3_256"
+                            | "sha3_384"
+                            | "sha3_512"
+                            | "shake_128"
+                            | "shake_256"
                     )))
                 ) =>
             {
@@ -6485,7 +6499,7 @@ impl<'a> Checker<'a> {
                 return Err(self.classified_error(
                     FailureKind::ObjectOperation,
                     expression,
-                    "a BLAKE2 constructor used as a type requires native object dispatch",
+                    "a hash constructor used as a type requires native object dispatch",
                 ));
             }
             ast::Expr::Name(name) if name.id == "__debug__" => (
@@ -8064,6 +8078,11 @@ impl<'a> Checker<'a> {
                 {
                     return Ok(value);
                 }
+                if attribute.attr.as_str() == "buffer"
+                    && self.types.payload(receiver.ty).unwrap_or(receiver.ty) == Type::TextIO
+                {
+                    return Err(self.scoped_builtin_error("text stream buffer", attribute));
+                }
                 if matches!(attribute.attr.as_str(), "encoding" | "errors")
                     && matches!(
                         self.types.payload(receiver.ty).unwrap_or(receiver.ty),
@@ -8256,6 +8275,9 @@ impl<'a> Checker<'a> {
             return Ok(method);
         }
 
+        if self.unshadowed_builtin(&call.func, "hex") {
+            return Err(self.scoped_builtin_error("hex", call));
+        }
         if self.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::BuiltinsAscii)) {
             return self.ascii_call(call);
         }
@@ -8978,6 +9000,9 @@ impl<'a> Checker<'a> {
             Some(Binding::Intrinsic(Intrinsic::CountElements)) => return self.count_elements(call),
             Some(Binding::Intrinsic(Intrinsic::TracebackFormatter(name))) => {
                 return Err(self.object_export_error(name, call));
+            }
+            Some(Binding::Intrinsic(Intrinsic::BuiltinsHex)) => {
+                return Err(self.scoped_builtin_error("builtins.hex", call));
             }
             Some(Binding::Intrinsic(Intrinsic::CachedProperty)) => {
                 return Err(self.object_runtime_export("functools.cached_property", call));
@@ -10940,6 +10965,12 @@ impl<'a> Checker<'a> {
     /// Text uses UTF-8 and defaults to reading; explicit modes stay literal.
     fn open(&mut self, call: &ast::ExprCall, gzip: bool) -> Result<Expr, String> {
         let args = &call.arguments;
+        if !gzip
+            && self.unshadowed_builtin(&call.func, "open")
+            && args.find_argument_value("opener", 7).is_some()
+        {
+            return Err(self.object_builtin_error("open with opener", call));
+        }
         // The typed BinaryIO ABI carries neither raw write results nor a buffer size.
         if !gzip
             && self.unshadowed_builtin(&call.func, "open")
@@ -10958,15 +10989,16 @@ impl<'a> Checker<'a> {
         if !gzip
             && self.unshadowed_builtin(&call.func, "open")
             && let Some(ast::Expr::StringLiteral(mode)) = args.find_argument_value("mode", 1)
-            && paths::is_text_update_open(args, mode.value.to_str())
+            && paths::is_update_open(args, mode.value.to_str())
             && let Some(path) = args.find_argument_value("file", 0)
         {
             let value = self.expr(path)?;
             if matches!(
                 value.ty,
                 Type::Str | Type::Bytes | Type::Path | Type::PurePath(_)
-            ) {
-                return Err(self.scoped_builtin_error("named text update open", call));
+            ) || (mode.value.to_str().contains('b') && value.ty == Type::Int)
+            {
+                return Err(self.scoped_builtin_error("buffered update open", call));
             }
             checked_path = Some(value);
         }

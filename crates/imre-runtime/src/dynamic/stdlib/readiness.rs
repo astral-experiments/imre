@@ -43,9 +43,7 @@ pub(in crate::dynamic) fn initialize(ctx: &mut Context, scope: Id) -> Result<()>
     ctx.bind(class_scope, "__module__", module_name);
     let names = ["fileobj", "fd", "events", "data"].map(|field| ctx.text(field));
     let annotations = ctx.dict(names.iter().map(|&id| (id, NONE)).collect());
-    let fields = ctx.alloc(Value::Tuple(names.to_vec()));
     ctx.bind(class_scope, "__annotations__", annotations);
-    ctx.bind(class_scope, "_fields", fields);
     let base = ctx.builtin("typing.NamedTuple");
     let key = ctx.allocate_class("SelectorKey".into(), class_scope, vec![base])?;
     ctx.bind(scope, "SelectorKey", key);

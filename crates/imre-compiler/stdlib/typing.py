@@ -3,7 +3,7 @@
 import builtins as _builtins
 import functools
 import typing as _typing
-from _collections_abc import Mapping as _Mapping, MutableMapping as _MutableMapping
+from _collections_abc import Mapping as _Mapping, MutableMapping as _MutableMapping, Sequence as _Sequence
 from collections import defaultdict as _defaultdict
 from annotationlib import ForwardRef, _make_forward_ref
 from functools import lru_cache
@@ -487,7 +487,7 @@ def _typeddict_replay(annotate, owner, allow_evaluation):
     return func, names
 
 
-def _typeddict_base_annotations(annotate, format, owner=None):
+def _call_annotate(annotate, format, owner=None):
     from annotationlib import Format
     if format == Format.VALUE_WITH_FAKE_GLOBALS:
         raise ValueError("The VALUE_WITH_FAKE_GLOBALS format is for internal use only")
@@ -528,12 +528,24 @@ def _typeddict_base_annotations(annotate, format, owner=None):
     return {key: value.evaluate(format=Format.FORWARDREF)
             if isinstance(value, ForwardRef) else value for key, value in result.items()}
 
+def _namedtuple_annotate(original):
+    # Check field types at declaration time, even if a name is still undefined.
+    def annotate(format):
+        values = _call_annotate(original, format)
+        if format == 4:
+            return values
+        return {name: _type_check(value, f"field {name} annotation must be a type")
+                for name, value in values.items()}
+
+    return annotate
+
+
 def _configure_typeddict(cls, fields, total, own_annotate=None, bases=()):
     if not hasattr(cls, "__orig_bases__"):
         cls.__orig_bases__ = bases
 
     if own_annotate is not None:
-        fields = _typeddict_base_annotations(own_annotate, 3, cls)
+        fields = _call_annotate(own_annotate, 3, cls)
     annotations = {key: _typeddict_field(tp, cls.__module__, cls)
                    for key, tp in fields.items()}
 
@@ -544,9 +556,9 @@ def _configure_typeddict(cls, fields, total, own_annotate=None, bases=()):
                 continue
             annotate = base.__annotate__
             if annotate is not None:
-                result.update(_typeddict_base_annotations(annotate, format, base))
+                result.update(_call_annotate(annotate, format, base))
         if own_annotate is not None:
-            own = _typeddict_base_annotations(own_annotate, format, cls)
+            own = _call_annotate(own_annotate, format, cls)
             if format != 4:
                 own = {key: _typeddict_field(tp, cls.__module__) for key, tp in own.items()}
         elif format == 4:
@@ -766,6 +778,41 @@ def final(f):
 
 
 # Based on CPython 3.14.5 Lib/typing.py. See stdlib/docstrings/LICENSE.
+def override(method, /):
+    """Indicate that a method is intended to override a method in a base class.
+
+    Usage::
+
+        class Base:
+            def method(self) -> None:
+                pass
+
+        class Child(Base):
+            @override
+            def method(self) -> None:
+                super().method()
+
+    When this decorator is applied to a method, the type checker will
+    validate that it overrides a method or attribute with the same name on a
+    base class.  This helps prevent bugs that may occur when a base class is
+    changed without an equivalent change to a child class.
+
+    There is no runtime checking of this property. The decorator attempts to
+    set the ``__override__`` attribute to ``True`` on the decorated object to
+    allow runtime introspection.
+
+    See PEP 698 for details.
+    """
+    try:
+        method.__override__ = True
+    except (AttributeError, TypeError):
+        # Skip the attribute silently if it is not writable.
+        # AttributeError happens if the object has __slots__ or a
+        # read-only property, TypeError if it's a builtin class.
+        pass
+    return method
+
+
 def no_type_check(arg):
     """Decorator to indicate that annotations are not type hints.
 
@@ -1307,6 +1354,7 @@ Type.__doc__ = \
     At this point the type checker knows that joe has type BasicUser.
     """
 DefaultDict = _SpecialGenericAlias(_defaultdict, 2, name="DefaultDict")
+Sequence = _SpecialGenericAlias(_Sequence, 1)
 Mapping = _SpecialGenericAlias(_Mapping, 2, name="Mapping")
 MutableMapping = _SpecialGenericAlias(_MutableMapping, 2, name="MutableMapping")
 
@@ -1509,6 +1557,10 @@ def _resolve_hint(value, globalns, localns, owner, seen, include_extras, forward
         return value
     args = getattr(value, '__args__', ())
     resolved = tuple(_resolve_hint(a, globalns, localns, owner, seen, include_extras, forwardrefs) for a in args)
+    if isinstance(value, _AnnotatedAlias):
+        if not include_extras:
+            return resolved[0]
+        return value if resolved == args else value.copy_with(resolved)
     if not include_extras:
         for name in ('Required', 'NotRequired', 'ReadOnly'):
             if origin is getattr(_typing, name, None):

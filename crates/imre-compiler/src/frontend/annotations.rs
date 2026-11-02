@@ -56,7 +56,7 @@ pub(super) fn sequence_annotation(binding: Option<Binding>) -> bool {
     matches!(
         binding,
         Some(Binding::Intrinsic(
-            Intrinsic::Sequence | Intrinsic::NominalClass("collections.abc.Sequence")
+            Intrinsic::TYPING_SEQUENCE | Intrinsic::NominalClass("collections.abc.Sequence")
         ))
     )
 }

@@ -270,7 +270,7 @@ impl Context {
             _ => None,
         }
     }
-    fn sequence_at(&self, id: Id, index: usize) -> Option<(usize, Option<Id>)> {
+    pub(super) fn sequence_at(&self, id: Id, index: usize) -> Option<(usize, Option<Id>)> {
         match self.tuple_backing(id) {
             Value::List(v) | Value::Tuple(v) | Value::NamedTuple { values: v, .. } => {
                 Some((v.len(), v.get(index).copied()))
@@ -300,7 +300,7 @@ impl Context {
             return Ok(None);
         };
         let result = self.call(index, Vec::new(), Vec::new())?;
-        self.as_int(result).map(|n| Some((result, n))).map_err(|_| {
+        let number = self.as_int(result).map_err(|_| {
             Error::new(
                 "TypeError",
                 format!(
@@ -308,7 +308,18 @@ impl Context {
                     self.type_name(result)
                 ),
             )
-        })
+        })?;
+        if !matches!(self.heap.get(result), Value::Int(_)) {
+            self.emit_builtin_warning(
+                crate::objects::exceptions::Kind::DeprecationWarning,
+                &format!(
+                    "__index__ returned non-int (type {}).  The ability to return an instance of a strict subclass of int is deprecated, and may be removed in a future version of Python.",
+                    self.type_name(result)
+                ),
+                1,
+            )?;
+        }
+        Ok(Some((result, number)))
     }
 
     /// Convert a bytearray element using the index protocol and the inclusive byte bounds.
@@ -1388,7 +1399,9 @@ impl Context {
             && self.format_slot(id, "__repr__").is_none()
             && (matches!(lookup, FormatLookup::Repr) || self.format_slot(id, "__str__").is_none())
         {
-            return Ok(None);
+            let (Value::ParamSpec(_) | Value::ParamSpecMarker(_, _)) = self.heap.get(id) else {
+                return Ok(None);
+            };
         }
         self.repr_ancestors
             .try_reserve(ancestors.len())
@@ -2685,6 +2698,12 @@ impl Context {
             {
                 format!("<built-in function {function}>")
             }
+            Value::Native(name)
+                if let Some(owner) = builtins::constructor_owner(name)
+                    && let Some(target) = self.builtins.get(owner) =>
+            {
+                format!("<built-in method __new__ of type object at {target:#x}>")
+            }
             Value::Native(name) => super::wrapper_descriptor::BuiltinDescriptor::lookup(name)
                 .map(|slot| slot.repr())
                 .unwrap_or_else(|| format!("<class '{name}'>")),
@@ -3073,6 +3092,11 @@ impl Context {
                 )
             })?;
             return Ok(hay.contains(needle));
+        }
+        if let Value::ByteArray(data) = self.heap.get(scalar)
+            && matches!(self.heap.get(item), Value::MemoryView { .. })
+        {
+            return Ok(crate::objects::bytes_contains(data, self.bytes_like(item)?));
         }
         if matches!(self.heap.get(scalar), Value::Bytes(_)) {
             // CPython falls back to the buffer protocol when integer conversion fails.
@@ -3494,15 +3518,104 @@ impl Context {
             source
         };
         self.visit_set_operand(source, |ctx, key, hash| {
-            if let Some(index) = ctx.find_dictionary_key(target, key, hash)?.1 {
-                let Value::Set { entries, .. } = ctx.heap.get_mut(target) else {
-                    unreachable!()
-                };
-                let (removed, _) = entries.remove(index)?;
-                ctx.heap.weak_edge_removed(removed);
+            ctx.discard_difference_key(target, key, hash)
+        })
+    }
+
+    fn discard_difference_key(&mut self, target: Id, key: Id, hash: Option<i64>) -> Result<()> {
+        if let Some(index) = self.find_dictionary_key(target, key, hash)?.1 {
+            let Value::Set { entries, .. } = self.heap.get_mut(target) else {
+                unreachable!()
+            };
+            let (removed, _) = entries.remove(index)?;
+            self.heap.weak_edge_removed(removed);
+        }
+        Ok(())
+    }
+
+    fn filter_difference(&mut self, result: Id, left: Id, right: Id) -> Result<()> {
+        self.visit_set_operand(left, |ctx, key, hash| {
+            ctx.heap.keep(key);
+            if ctx.find_dictionary_key(right, key, hash)?.1.is_none() {
+                ctx.set_dictionary_key(result, key, NONE, hash, false)?;
             }
             Ok(())
         })
+    }
+
+    /// Return a fresh base set, preserving stored hashes and comparison direction
+    /// for a first set or exact dictionary. Later operands are discarded in order.
+    pub(super) fn set_difference(&mut self, receiver: Id, mut operands: &[Id]) -> Result<Id> {
+        let frozen = matches!(self.heap.get(receiver), Value::Set { frozen: true, .. });
+        let result = self.alloc(Value::Set {
+            entries: Default::default(),
+            frozen,
+        });
+        let indexed = operands.first().and_then(|&other| {
+            let storage = self.scalar_value(other);
+            if matches!(self.heap.get(storage), Value::Set { .. }) {
+                Some(storage)
+            } else if matches!(self.heap.get(other), Value::Dict(_)) {
+                Some(other)
+            } else {
+                None
+            }
+        });
+        if let Some(right) = indexed
+            && self.stored_entries(receiver).len() >> 2 <= self.stored_entries(right).len()
+        {
+            self.filter_difference(result, receiver, right)?;
+            operands = &operands[1..];
+        } else {
+            builtins::update_set(self, result, receiver)?;
+        }
+        for &source in operands {
+            if matches!(self.heap.get(self.scalar_value(source)), Value::Set { .. }) {
+                self.set_difference_update(result, source)?;
+            } else {
+                self.subtract_iterable(result, source)?;
+            }
+        }
+        Ok(result)
+    }
+
+    /// Release temporary iterators before the next operand. A finalizer or a
+    /// generator's finally clause may mutate that operand.
+    fn subtract_iterable(&mut self, result: Id, source: Id) -> Result<()> {
+        let roots = self.heap.temporary_mark();
+        let iterator = self.iterator(source)?;
+        self.heap.keep(iterator);
+        let step = self.heap.temporary_mark();
+        let mut failed_key = None;
+        let scan: Result<()> = (|| {
+            let mut limit = self.heap.streaming_collection_limit();
+            loop {
+                self.collect_streaming_garbage(&mut limit);
+                let Some(key) = self.next_item(iterator)? else {
+                    return Ok(());
+                };
+                self.heap.keep(key);
+                failed_key = Some(key);
+                self.discard_difference_key(result, key, None)?;
+                failed_key = None;
+                self.discard_truth(step);
+            }
+        })();
+        self.heap.release_temporaries_since(roots);
+        if let Err(error) = &scan {
+            for id in error.roots() {
+                self.heap.keep(id);
+            }
+        }
+        let key_mark = self.heap.temporary_mark();
+        if let Some(key) = failed_key {
+            self.heap.keep(key);
+        }
+        let iterator_mark = self.heap.temporary_mark();
+        self.heap.keep(iterator);
+        self.discard_truth(iterator_mark);
+        self.discard_truth(key_mark);
+        scan
     }
 
     /// Compute set difference or intersection, including reflected dictionary-view operands.
@@ -3529,13 +3642,7 @@ impl Context {
                 && !mutate
                 && self.stored_entries(left).len() >> 2 <= self.stored_entries(right).len()
             {
-                self.visit_set_operand(left, |ctx, key, hash| {
-                    ctx.heap.keep(key);
-                    if ctx.find_dictionary_key(right, key, hash)?.1.is_none() {
-                        ctx.set_dictionary_key(result, key, NONE, hash, false)?;
-                    }
-                    Ok(())
-                })?;
+                self.filter_difference(result, left, right)?;
                 return Ok(result);
             }
             if let Value::DictView {
@@ -4632,7 +4739,7 @@ impl Context {
             return self.set_binary(op, a, right, true);
         }
         if op == "+"
-            && let Value::ByteArray(left) = self.heap.get(a)
+            && matches!(self.heap.get(a), Value::ByteArray(_))
             && let Value::Bytes(right) | Value::ByteArray(right) = self.heap.get(b)
         {
             if right.is_empty() {
@@ -4643,7 +4750,7 @@ impl Context {
                 return Err(Self::exported_bytearray_error());
             }
             self.check_bytearray_resize(a)?;
-            let bytes = crate::objects::concat_bytes(left, right)?;
+            let bytes = crate::objects::concat_bytes(self.bytes_like(a)?, self.bytes_like(b)?)?;
             let Value::ByteArray(left) = self.heap.get_mut(a) else {
                 unreachable!()
             };

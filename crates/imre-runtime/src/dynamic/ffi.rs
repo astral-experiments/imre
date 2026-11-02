@@ -208,23 +208,16 @@ impl Context {
             "lookup" | "lookup_class_local" => {
                 let name = copy_label(self.str_value(b)?)?;
                 if op == "lookup_class_local" {
-                    if let Some(value) = self.scope_name(a, &name) {
-                        return Ok(value);
-                    }
-                    return self.lookup(self.root_scope(a), &name);
+                    return self.lookup_class_local(a, &name);
                 }
                 self.lookup(a, &name)
             }
             "assign" | "assign_target" | "assign_named_target" => {
-                let mut scope = a;
-                if op == "assign_named_target" {
-                    while self.scope_data(scope).comprehension.is_some() {
-                        scope = self
-                            .scope_data(scope)
-                            .parent
-                            .expect("enclosing comprehension scope");
-                    }
-                }
+                let scope = if op == "assign_named_target" {
+                    self.named_expression_scope(a)
+                } else {
+                    a
+                };
                 let name = copy_label(self.str_value(b)?)?;
                 let replaced = self.store_source_name(scope, &name, c)?;
                 if matches!(op, "assign_target" | "assign_named_target") {
@@ -405,9 +398,12 @@ impl Context {
                 Ok(scope)
             }
             "class" | "parameterized_class" => {
-                let metaclass = self.dict_named_item(a, "metaclass");
-                let total = self.dict_named_item(a, "total");
-                self.class(b, c, metaclass, total, op == "parameterized_class")
+                let keywords = if a == NONE {
+                    Vec::new()
+                } else {
+                    self.keyword_args(a)?
+                };
+                self.class(b, c, keywords, op == "parameterized_class")
             }
             "coroutine_function" => {
                 let Value::Function { code, .. } = *self.heap.get(a) else {
@@ -420,7 +416,7 @@ impl Context {
                 Ok(a)
             }
             "annotate" => {
-                if let Some(mapping) = self.scope_name(a, "__annotations__") {
+                if let Some(mapping) = self.lookup_scope_name(a, "__annotations__")? {
                     self.put_item(mapping, b, c)?;
                 }
                 Ok(NONE)
@@ -623,6 +619,7 @@ pub(super) unsafe extern "C" fn imre_dyn_new(
     argv: *const *const c_char,
     config: *const c_char,
 ) -> *mut Context {
+    crate::initialize_io();
     // SAFETY: native main supplies argc/argv and a static JSON constant.
     let mut config: serde_json::Value =
         serde_json::from_str(unsafe { cstr(config) }).expect("compiler target metadata");
@@ -702,11 +699,14 @@ pub(super) fn new_context<S: Into<String>>(
         native_code_objects: HashMap::new(),
         source_builtins: None,
         zip_directories: HashMap::new(),
+        zip_path_importers: NONE,
         codec_entries: Default::default(),
         frozen_override: 0,
         modules: NONE,
         import_missing: NONE,
         bootstrap_globals: NONE,
+        bootstrap_file_spec: NONE,
+        finder_external: NONE,
         classes: HashMap::new(),
         enum_scopes: HashMap::new(),
         typing: super::typing::Registry::default(),
@@ -763,7 +763,12 @@ pub(super) unsafe extern "C" fn imre_dyn_finish(ctx: *mut Context) -> i32 {
         // The module registry now owns sys. Its startup temporaries must not
         // keep replaced streams alive throughout the main module's execution.
         ctx.heap.release_temporaries_since(mark);
-        ctx.module("__main__")
+        let main = ctx.module("__main__")?;
+        if let Some(name) = ctx.config["module_entry"].as_str().map(str::to_owned) {
+            ctx.run_module_as_main(name)
+        } else {
+            Ok(main)
+        }
     });
     let status = match result {
         Ok(_) => 0,
@@ -1107,6 +1112,10 @@ impl Context {
             let Some(parent) = frame.parent else {
                 return Some(false);
             };
+            // A separate exec/eval locals mapping supplies names to the module, never closure cells.
+            if frame.exec_locals.is_some() {
+                return Some(false);
+            }
             if frame.class_body.is_none() {
                 if frame.globals.contains(name) {
                     return Some(false);
@@ -1348,10 +1357,7 @@ pub(super) unsafe extern "C" fn imre_dyn_truth_mark(ctx: *const Context) -> usiz
 #[unsafe(no_mangle)]
 pub(super) unsafe extern "C" fn imre_dyn_comprehension_step(ctx: *mut Context, mark: usize) {
     // SAFETY: the generated caller owns the context and recorded this mark in its active frame.
-    let ctx = unsafe { &mut *ctx };
-    ctx.heap.release_temporaries_since(mark);
-    ctx.heap.reserve_slot_or_request_collection();
-    ctx.collect_garbage();
+    unsafe { (&mut *ctx).comprehension_step(mark) }
 }
 
 /// Release a consumed truth operand on the branch that no longer needs it.
@@ -1436,6 +1442,7 @@ impl Context {
         let data = self.scope_data(scope);
         data.exec_locals.is_some()
             || data.exec_globals.is_some()
+            || data.class_body_mapping().is_some()
             || self
                 .scope_name(scope, name)
                 .is_some_and(|old| old != value && self.heap.could_own_finalizer(old, false))
@@ -1466,9 +1473,12 @@ impl Context {
                 .chain([
                     self.argv,
                     self.sys_path,
+                    self.zip_path_importers,
                     self.modules,
                     self.import_missing,
                     self.bootstrap_globals,
+                    self.bootstrap_file_spec,
+                    self.finder_external,
                     self.default_encoding,
                     self.token_missing,
                 ]),

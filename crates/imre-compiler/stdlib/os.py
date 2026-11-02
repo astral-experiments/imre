@@ -9,6 +9,7 @@ from types import GenericAlias
 from posix import chdir
 
 if sys.platform == "linux":
+    from posix import fstatvfs, statvfs, statvfs_result
     from posix import (
         sched_getscheduler, SCHED_BATCH, SCHED_DEADLINE, SCHED_FIFO, SCHED_IDLE,
         SCHED_NORMAL, SCHED_OTHER, SCHED_RESET_ON_FORK, SCHED_RR,

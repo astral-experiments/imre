@@ -145,10 +145,13 @@ class LabeledTuple(tuple):
 
 
 def consume(streams):
+    assert pickle._loads is not pickle.loads
     for stream in streams:
-        obj, label = pickle.loads(stream)
-        assert type(obj) is LabeledTuple and obj == (3, 4)
-        assert obj.restored and obj.label is label and label["back"] is obj
+        for reader in (pickle.loads, pickle._loads):
+            obj, label = reader(stream)
+            assert type(obj) is LabeledTuple and obj == (3, 4)
+            assert obj.restored and obj.label is label and label["back"] is obj
+    assert pickle._loads(b"N.", encoding=None) is None
     for bad in (b".", b"!", b"h\x07.", b"N]b.", b"cbuiltins\nlist\n]\x81."):
         try:
             pickle.loads(bad)
@@ -256,6 +259,11 @@ class Outer:
 
 def check_global_names(protocol):
     from collections import OrderedDict, UserDict, UserList, UserString
+    from datetime import date, datetime, timedelta
+
+    for cls in (date, datetime, timedelta):
+        assert cls.__module__ == "datetime" and cls.__qualname__ == cls.__name__
+        assert pickle.loads(pickle.dumps(cls, protocol)) is cls
 
     for cls in (Outer.Middle, Outer.Middle.Inner, OrderedDict, UserDict, UserList, UserString):
         for fix_imports in (True, False):

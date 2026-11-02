@@ -4,6 +4,7 @@ import abc
 from _io import (BufferedRWPair, BufferedReader, BufferedWriter, BytesIO, DEFAULT_BUFFER_SIZE, FileIO,
                  StringIO, TextIOWrapper, UnsupportedOperation, open, open_code, text_encoding)
 from _collections_abc import _check_methods
+from _io import IncrementalNewlineDecoder
 
 class IOBase(_io._IOBase, metaclass=abc.ABCMeta):
     __doc__ = _io._IOBase.__doc__

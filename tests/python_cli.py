@@ -1126,6 +1126,17 @@ def main():
 
         check_command_stdin(imre, run)
 
+        # The binary buffer must work from an ordinary -c command on its own.
+        for stream in ("stdout", "stderr"):
+            command = (
+                f"import sys; output = sys.{stream}; buf = output.buffer;"
+                "buf.write(b'\\xff\\r\\n'); buf.flush()"
+            )
+            actual = run(imre, "-c", command)
+            expected = run(sys.executable, "-c", command)
+            assert actual.returncode == expected.returncode == 0, actual.stderr
+            assert (actual.stdout, actual.stderr) == (expected.stdout, expected.stderr)
+
         streams = root / "streams.py"
         streams.write_bytes((Path(__file__).with_name("fixtures") / "boxed_sys_output.py").read_bytes())
         expected = run(sys.executable, "-B", streams)
@@ -1203,6 +1214,35 @@ def main():
                 expected.stderr,
             )
 
+        module_pkg = root / "module_pkg"
+        module_pkg.mkdir()
+        (module_pkg / "__init__.py").write_text("import sys\nassert sys.argv[0] == '-m'\n")
+        (module_pkg / "child.py").write_text(
+            "import os, sys\n"
+            "from . import __path__\n"
+            "assert __package__ == 'module_pkg' and __spec__.name == 'module_pkg.child'\n"
+            "assert __file__ == sys.argv[0] == __spec__.origin and __loader__ is __spec__.loader\n"
+            "assert sys.path[0] == os.getcwd() and __spec__.name not in sys.modules\n"
+            "assert sys.modules['__main__'].__dict__ is globals()\n"
+            "print(sys.argv[1:], sys.orig_argv[1:])\n"
+        )
+        (module_pkg / "__main__.py").write_text(
+            "import sys\nassert __spec__.name == 'module_pkg.__main__'\n"
+            "assert __name__ == '__main__' and __file__ == sys.argv[0]\n"
+            "print(__package__, sys.argv[1:])\n"
+        )
+        compare("-Bm", "module_pkg.child", "-m", "tail")
+        compare("-B", "-mmodule_pkg", "tail")
+        # An ordinary module under the first root wins over a package in a later root.
+        (root / "preferred.py").write_text("print('file wins')\n")
+        (root / "preferred").mkdir()
+        (root / "preferred" / "__main__.py").write_text("invalid syntax!\n")
+        later = root / "later" / "preferred"
+        later.mkdir(parents=True)
+        (later / "__init__.py").write_text("invalid syntax!\n")
+        compare("-B", "-m", "preferred", extra={"PYTHONPATH": str(later.parent)})
+
+
         locale_script = root / "get_locale.py"
         locale_script.write_text(
             "from _locale import LC_ALL, setlocale\n"
@@ -1220,6 +1260,13 @@ def main():
             "assert datetime(MAXYEAR, 12, 31).year == 9999\n"
         )
         compare("-IB", years, native_args=("run", years, "--quiet"))
+
+        names = root / "calendar_type_names.py"
+        names.write_text(
+            "from datetime import date, datetime, timedelta\n"
+            "print(date.__module__, datetime.__qualname__, timedelta.__module__)\n"
+        )
+        compare("-IB", names, native_args=("run", names, "--quiet"))
 
         if os.name == "posix":
             compare(
@@ -1847,10 +1894,19 @@ def report(text):
         (resource_package / "__init__.py").write_text("print('resource package initialized')\n")
         (resource_package / "payload.bin").write_bytes(b"\x00\xff\r\n")
         fixtures = Path(__file__).with_name("fixtures")
+        compare("-B", "-c", "from typing import Protocol as P; print(P.__name__)")
+        compare("-B", fixtures / "typing_protocol_import.py")
+        compare(
+            "-B", "-c",
+            "import typing as t\ndef build():\n    class P(t.Protocol): pass\n"
+            "    return P._is_protocol\nprint(build())",
+        )
         final_fixture = fixtures / "boxed_typing_final.py"
         compare("-IB", final_fixture, native_args=("run", final_fixture, "--runtime-imports", "--quiet"))
         io_registration = fixtures / "io_abc_registration.py"
         compare("-IB", io_registration, native_args=("run", io_registration, "--quiet"))
+        override_fixture = fixtures / "boxed_typing_override.py"
+        compare("-IB", override_fixture, native_args=("run", override_fixture, "--runtime-imports", "--quiet"))
         reader_fixture = fixtures / "io_buffered_reader_type.py"
         compare("-IB", reader_fixture, native_args=("run", reader_fixture, "--quiet"))
         memory_writer = fixtures / "io_buffered_writer_bytesio.py"
@@ -1873,6 +1929,8 @@ def report(text):
         ):
             thread_fixture = fixtures / name
             compare("-IB", thread_fixture, native_args=("run", thread_fixture, "--runtime-imports", "--quiet"))
+        class_locals = fixtures / "boxed_class_locals.py"
+        compare("-IB", class_locals, native_args=("run", class_locals, "--runtime-imports", "--quiet"))
         hints_fixture = fixtures / "boxed_typing_get_type_hints.py"
         compare("-IB", hints_fixture, native_args=("run", hints_fixture, "--runtime-imports", "--quiet"))
         if sys.platform == "linux":
@@ -1910,6 +1968,18 @@ def report(text):
             "reference = union.__args__[-1]\n"
             "print(type(reference).__name__, reference.__forward_arg__)",
         )
+        hex_entry = root / "hex_entry.py"
+        for program in (
+            "class Offset:\n    def __index__(self): return -(1 << 100)\nprint(hex(Offset()))",
+            "formatter = hex\nprint(formatter(31))",
+            "import builtins\nprint(builtins.hex(31))",
+            "from builtins import hex as formatter\nprint(formatter(31))",
+            "import warnings\nclass Flag:\n    def __index__(self): return True\n"
+            "warnings.simplefilter('error', DeprecationWarning)\n"
+            "try: hex(Flag())\nexcept DeprecationWarning as warning: print(warning)",
+        ):
+            hex_entry.write_text(program)
+            compare("-IB", hex_entry, native_args=("run", hex_entry, "--quiet"))
         monitoring_entry = root / "monitoring_entry.py"
         (root / "monitoring_helper.py").write_text(
             "from sys import monitoring\ndef line_mask():\n    return monitoring.events.LINE\n"
@@ -1936,6 +2006,7 @@ def report(text):
             "boxed_ast_visitors.py",
             "boxed_ast_literal_eval.py",
             "boxed_code_objects.py",
+            "boxed_inspect_getmodule.py",
             "boxed_numeric_repr.py",
             "boxed_recursive_repr.py",
             "boxed_bound_method_repr.py",
@@ -1960,7 +2031,9 @@ def report(text):
             "boxed_bytes_add.py",
             "boxed_binary_iterators.py",
             "boxed_array.py",
+            "boxed_bytearray_memoryview.py",
             "boxed_bytes_io.py",
+            "boxed_io_newline_decoder.py",
             "boxed_text_io_wrapper.py",
             "boxed_platform_version.py",
             "boxed_int_to_bytes.py",
@@ -2021,12 +2094,14 @@ def report(text):
             "boxed_template_literals.py",
             "boxed_re_ascii.py",
             "boxed_re_verbose.py",
+            "boxed_re_multiline_dollar.py",
             "boxed_re_positive_lookahead.py",
             "boxed_re_lookahead.py",
             "boxed_re_split.py",
             "boxed_re_match_subscript.py",
             "boxed_re_sub.py",
             "boxed_re_findall_empty.py",
+            "boxed_memoryview_context.py",
             "boxed_re_scanner.py",
             "boxed_re_escape.py",
             "boxed_datetime.py",
@@ -2036,6 +2111,7 @@ def report(text):
             "boxed_timedelta_add_sub.py",
             "boxed_dataclasses.py",
             "boxed_mapping_proxy_type.py",
+            "boxed_types_new_class.py",
             "boxed_make_dataclass.py",
             "boxed_dataclass_slots.py",
             "boxed_dataclass_init_annotations.py",
@@ -2044,11 +2120,14 @@ def report(text):
             "boxed_email_addresses.py",
             "boxed_http_message.py",
             "boxed_time.py",
+            "boxed_time_timezone.py",
             "boxed_time_strftime.py",
             "boxed_codecs.py",
             "boxed_buffered_partial_write.py",
             "boxed_io_exports.py",
             "boxed_io_reimport.py",
+            "boxed_fileio_opener.py",
+            "boxed_open_opener.py",
             "boxed_io_text_encoding.py",
             "boxed_locale.py",
             "boxed_locale_error.py",
@@ -2069,9 +2148,12 @@ def report(text):
             "boxed_binary_bytes_paths.py",
             "boxed_buffered_readlines.py",
             "boxed_os_descriptor_io.py",
+            "boxed_os_ftruncate.py",
             "boxed_os_waitpid.py",
+            "boxed_posix_session.py",
             "boxed_os_stat.py",
             "boxed_os_terminal_size.py",
+            "boxed_os_fchmod.py",
             "boxed_os_makedirs.py",
             "boxed_os_walk.py",
             "boxed_select.py",
@@ -2081,6 +2163,7 @@ def report(text):
             "boxed_urllib_cleanup.py",
             "boxed_urllib_retrieve.py",
             "boxed_socket_timeout.py",
+            "boxed_socketserver_source.py",
             "boxed_urllib_data.py",
             "boxed_urllib_http_status.py",
             "boxed_urllib_http.py",
@@ -2094,6 +2177,8 @@ def report(text):
             "boxed_warnings.py",
             "boxed_oserror.py",
             "boxed_type_identity.py",
+            "boxed_type_namespace.py",
+            "boxed_abc_namespace.py",
             "boxed_singleton_types.py",
             "boxed_singleton_subclass.py",
             "boxed_function_closure_cells.py",
@@ -2114,6 +2199,7 @@ def report(text):
             "boxed_logging_filter.py",
             "boxed_logging_file_error.py",
             "boxed_class_attribute.py",
+            "boxed_class_locals.py",
             "boxed_missing_attribute_owners.py",
             "boxed_request_strings.py",
             "boxed_str_maketrans.py",
@@ -2123,6 +2209,7 @@ def report(text):
             "boxed_module_dir.py",
             "boxed_unittest_assert_almost_equal.py",
             "boxed_unittest_assert_count_equal.py",
+            "boxed_unittest_assert_set_equal.py",
             "boxed_unittest_membership.py",
             "boxed_unittest_endswith.py",
             "boxed_unittest_sequence_equal.py",
@@ -2150,6 +2237,8 @@ def report(text):
             "boxed_set_operator_descriptors.py",
             "boxed_set_union.py",
             "boxed_set_difference_update.py",
+            "boxed_set_difference.py",
+            "boxed_set_remove.py",
             "boxed_weakref.py",
             "boxed_public_weakref.py",
             "boxed_weakref_unraisable.py",
@@ -2163,6 +2252,7 @@ def report(text):
             "boxed_property_setter.py",
             "boxed_cached_property.py",
             "boxed_staticmethod.py",
+            "boxed_classmethod_attributes.py",
             "boxed_item_assignment.py",
             "boxed_bytecache.py",
             "boxed_fnmatch.py",
@@ -2215,6 +2305,7 @@ def report(text):
             "boxed_list_pop.py",
             "boxed_sequence_repeat.py",
             "boxed_sequence_order.py",
+            "boxed_tuple_index.py",
             "boxed_json_containers.py",
             "boxed_json_decoder.py",
             "boxed_json_module_doc.py",
@@ -2245,11 +2336,13 @@ def report(text):
             "boxed_binascii.py",
             "boxed_zlib.py",
             "boxed_hashlib_names.py",
+            "bytes/hashlib_sha3_provider.py",
             "boxed_hashlib_file_digest.py",
             "boxed_standard_base64.py",
             "boxed_csv.py",
             "boxed_bytes_count.py",
             "boxed_bytes_separators.py",
+            "boxed_binary_splitlines.py",
             "boxed_bytes_join.py",
             "boxed_bytes_fromhex.py",
             "boxed_binary_endswith.py",
@@ -2324,6 +2417,7 @@ def report(text):
             compare("-IB", "-c", imports + "arithmetic.current()")
             plugin.write_bytes((fixtures / "boxed_resource.py").read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")
+            compare("-IB", "-c", imports + "arithmetic.core_limits_child()")
             shim = root / "secrets_entropy.so"
             subprocess.run(["cc", "-shared", "-fPIC", fixtures / "secrets_entropy.c", "-ldl", "-o", shim], check=True)
             probe = root / "entropy.py"

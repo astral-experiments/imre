@@ -84,6 +84,10 @@ pub(super) fn utc() -> Expr {
     op(Op::Utc, Type::Calendar(C::Zone), vec![])
 }
 
+fn fixed_zone_method(name: &str) -> bool {
+    matches!(name, "utcoffset" | "tzname" | "dst")
+}
+
 pub(super) fn boxed_member(receiver: Type, name: &str) -> bool {
     match name {
         "min" | "max" | "resolution" | "__reduce__" | "__reduce_ex__" => {
@@ -112,7 +116,10 @@ impl Checker<'_> {
             Some(Binding::Intrinsic(Intrinsic::ClockTime)) => Type::ClockTime,
             _ => return Ok(None),
         };
-        if boxed_member(kind, a.attr.as_str()) {
+        if matches!(a.attr.as_str(), "__module__" | "__name__" | "__qualname__")
+            || (kind == Type::Calendar(C::Zone) && fixed_zone_method(a.attr.as_str()))
+            || boxed_member(kind, a.attr.as_str())
+        {
             return Err(self.object_runtime_export("datetime class member", a));
         }
         if base != Some(Binding::Intrinsic(Intrinsic::Calendar(C::Zone))) {
@@ -320,6 +327,9 @@ impl Checker<'_> {
         a: &ast::ExprAttribute,
     ) -> Result<Expr, String> {
         let name = a.attr.as_str();
+        if kind == C::Zone && fixed_zone_method(name) {
+            return Err(self.object_runtime_export("timezone method descriptor", a));
+        }
         if kind == C::DateTime && name == "tzinfo" {
             let ty = self.types.optional(Type::Calendar(C::Zone));
             return Ok(op(Op::TzInfo, ty, vec![recv]));
@@ -398,35 +408,22 @@ impl Checker<'_> {
                 args,
             ));
         }
-        if kind == C::Zone && matches!(name, "utcoffset" | "tzname") {
-            let [e] = call.arguments.args.as_ref() else {
-                return Err(error(
-                    self.source,
-                    call,
-                    "timezone method requires one positional datetime or None",
-                ));
-            };
-            if !call.arguments.keywords.is_empty() {
-                return Err(error(
-                    self.source,
-                    call,
-                    "timezone method takes a positional argument",
-                ));
+        if kind == C::Zone && fixed_zone_method(name) {
+            if name != "dst"
+                && let [value] = call.arguments.args.as_ref()
+                && call.arguments.keywords.is_empty()
+            {
+                let arg = self.expr(value)?;
+                if matches!(arg.ty, Type::None | Type::Calendar(C::DateTime)) {
+                    let (operation, ty) = if name == "utcoffset" {
+                        (Op::ZoneOffset, Type::Calendar(C::Delta))
+                    } else {
+                        (Op::ZoneName, Type::Str)
+                    };
+                    return Ok(op(operation, ty, vec![recv, arg]));
+                }
             }
-            let arg = self.expr(e)?;
-            if !matches!(arg.ty, Type::None | Type::Calendar(C::DateTime)) {
-                return Err(error(
-                    self.source,
-                    e,
-                    "timezone method requires a datetime or None",
-                ));
-            }
-            let (operation, ty) = if name == "utcoffset" {
-                (Op::ZoneOffset, Type::Calendar(C::Delta))
-            } else {
-                (Op::ZoneName, Type::Str)
-            };
-            return Ok(op(operation, ty, vec![recv, arg]));
+            return Err(self.object_runtime_export("timezone method call", call));
         }
         if !call.arguments.is_empty() {
             return Err(error(

@@ -1,5 +1,7 @@
 pub(in crate::dynamic) mod scandir;
 pub(in crate::dynamic) mod stat;
+#[cfg(target_os = "linux")]
+pub(super) mod statvfs;
 
 use std::ffi::CString;
 
@@ -24,7 +26,16 @@ pub(in crate::dynamic) fn install_capabilities(
         ),
         (
             "supports_fd",
-            &["chdir", "chmod", "listdir", "scandir", "stat", "utime"][..],
+            &[
+                "chdir",
+                "chmod",
+                "listdir",
+                "scandir",
+                "stat",
+                #[cfg(target_os = "linux")]
+                "statvfs",
+                "utime",
+            ][..],
         ),
         (
             "supports_follow_symlinks",
@@ -339,6 +350,7 @@ pub(super) fn is_descriptor_function(name: &str) -> bool {
         name,
         "access"
             | "open"
+            | "getsid"
             | "waitpid"
             | "rename"
             | "replace"
@@ -350,12 +362,14 @@ pub(super) fn is_descriptor_function(name: &str) -> bool {
             | "mkdir"
             | "mkfifo"
             | "chmod"
+            | "fchmod"
             | "chdir"
             | "utime"
             | "dup"
             | "dup2"
             | "isatty"
             | "lseek"
+            | "ftruncate"
             | "pipe"
             | "read"
             | "write"
@@ -692,6 +706,9 @@ pub(super) fn descriptor(
     if name == "chmod" {
         return chmod::call(ctx, args, kwargs);
     }
+    if name == "fchmod" {
+        return chmod::fchmod(ctx, args, kwargs);
+    }
     if matches!(name, "mkdir" | "mkfifo") {
         return create_node(ctx, name, args, kwargs);
     }
@@ -759,6 +776,19 @@ pub(super) fn descriptor(
             format!("posix.{name}() takes no keyword arguments"),
         ));
     }
+    if name == "getsid" {
+        let [pid] = args else {
+            return Err(Error::new(
+                "TypeError",
+                format!(
+                    "posix.getsid() takes exactly one argument ({} given)",
+                    args.len()
+                ),
+            ));
+        };
+        let sid = native::getsid(c_int(ctx, *pid)?)?;
+        return Ok(ctx.int(i64::from(sid)));
+    }
     if name == "waitpid" {
         let [pid, options] = args else {
             return Err(Error::new(
@@ -815,6 +845,26 @@ pub(super) fn descriptor(
             let count = native::write(fd, bytes)?;
             Ok(ctx.int(count as i64))
         };
+    }
+    if name == "ftruncate" {
+        let [fd, length] = args else {
+            return Err(Error::new(
+                "TypeError",
+                format!("ftruncate expected 2 arguments, got {}", args.len()),
+            ));
+        };
+        let fd = c_int(ctx, *fd)?;
+        let length = file_offset(ctx, *length)?;
+        let audit_fd = ctx.int(i64::from(fd));
+        let audit_length = ctx.int(length);
+        super::audit::event(ctx, "os.truncate", &[audit_fd, audit_length])?;
+        loop {
+            match native::truncate(fd, length) {
+                Ok(()) => return Ok(NONE),
+                Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+                Err(error) => return Err(super::os_error(error)),
+            }
+        }
     }
     if name == "lseek" {
         let [fd, position, whence] = args else {

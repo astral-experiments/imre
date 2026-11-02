@@ -502,7 +502,10 @@ impl Context {
                 return Ok(ControlFlow::Break(hash));
             }
             let owner = Self::memoryview_owner(owner)?;
-            if matches!(self.heap.get(self.scalar_value(owner)), Value::Array(_)) {
+            if matches!(
+                self.heap.get(self.scalar_value(owner)),
+                Value::Array(_) | Value::ByteArray(_)
+            ) {
                 return Err(Error::new(
                     "ValueError",
                     "cannot hash writable memoryview object",

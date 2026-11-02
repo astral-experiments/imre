@@ -445,6 +445,49 @@ def make(events):
     assert events == ["outer", 1, 3]
 
 
+def source_setcomp():
+    namespace = {}
+    exec("""
+def collect(values):
+    label = 'outer'
+    picked = {(label, n) for label, items in values if label for n in items if n % 2}
+    return picked, label
+
+def capture(items):
+    item = "outer"
+    functions = {(lambda: item) for item in items if (last := item)}
+    return item, last, tuple(f() for f in functions)
+""", namespace)
+    assert namespace["capture"]([1, 2]) == ("outer", 2, (2, 2))
+    assert namespace["collect"]([("a", [1, 2, 1]), ("", None), ("b", [3])]) == (
+        {("a", 1), ("b", 3)}, "outer"
+    )
+    local = {"label": "local", "items": [1, 2]}
+    assert eval("{(x, label) for x in items}", {"label": "global"}, local) == {
+        (1, "local"), (2, "local")
+    }
+    assert "x" not in local
+
+    functions = eval("{(lambda: (x, label)) for x in items}", {"label": "global"}, local)
+    assert len(functions) == 2
+    for function in functions:
+        assert function() == (2, "global")
+        assert function.__code__.co_freevars == ("x",)
+
+    events = []
+    def keys():
+        for value in [1, [], "too late"]:
+            events.append(value)
+            yield value
+
+    try:
+        eval("{value for value in keys()}", {"keys": keys})
+    except TypeError:
+        assert events == [1, []]
+    else:
+        raise AssertionError("an unhashable element must stop the comprehension")
+
+
 def named_bindings():
     namespace = {}
     exec("""def recipe(values):
@@ -574,6 +617,30 @@ def starred_calls():
     events.clear()
     exec("answer = collect(mark(1), *spread(), *(), label=mark(3))", scope)
     assert scope["answer"] == ((1, 2), 3) and events == [1, "iter", 3]
+    events.clear()
+    exec("answer = (mark(1), *spread(), *(), mark(3))", scope)
+    assert scope["answer"] == (1, 2, 3) and events == [1, "iter", 3]
+
+    import gc
+    import weakref
+
+    cursor_refs = []
+
+    class Empty:
+        def __next__(self):
+            raise StopIteration
+
+    class Source:
+        def __iter__(self):
+            cursor = Empty()
+            cursor_refs.append(weakref.ref(cursor))
+            return cursor
+
+    def released():
+        gc.collect()
+        return cursor_refs[0]() is None
+
+    assert eval("(*source, released())", {"source": Source(), "released": released}) == (True,)
 
     for source in ("collect(**{}, label=1, label=2)", "collect(label=1, **{}, label=2)"):
         events.clear()
@@ -720,6 +787,7 @@ def current():
     named_bindings()
     source_annotations()
     source_genexpr()
+    source_setcomp()
     source_match()
     check_scope_directives()
     relative_import_hooks()

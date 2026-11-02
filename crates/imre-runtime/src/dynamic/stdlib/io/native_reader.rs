@@ -50,19 +50,7 @@ pub(super) fn call(
         ssize(ctx, size)?;
     }
     let target = if name == "readinto" {
-        let id = ctx.scalar_value(args[0]);
-        if !matches!(ctx.heap.get(id), Value::ByteArray(_)) {
-            let kind = if args[0] == NONE {
-                "None"
-            } else {
-                ctx.type_name(args[0])
-            };
-            return Err(Error::new(
-                "TypeError",
-                format!("readinto() argument must be read-write bytes-like object, not {kind}"),
-            ));
-        }
-        Some(id)
+        Some(files::readinto_target(ctx, args[0])?)
     } else {
         None
     };

@@ -2,11 +2,12 @@
 
 use std::cell::RefCell;
 use std::ffi::{OsStr, OsString};
+use std::os::fd::AsRawFd;
 use std::os::unix::ffi::{OsStrExt, OsStringExt};
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 
-use super::{Context, Error, Id, NONE, Result, Value, argument, option};
+use super::{Context, Error, Id, NONE, Result, Value, argument};
 use crate::objects::{FileState, errno_error};
 
 pub(in crate::dynamic) const METHODS: &[&str] = &[
@@ -20,6 +21,7 @@ pub(in crate::dynamic) const METHODS: &[&str] = &[
     "write",
     "seek",
     "tell",
+    "truncate",
     "fileno",
     "flush",
     "close",
@@ -63,7 +65,9 @@ impl NamedCloser {
 
 impl Drop for NamedCloser {
     fn drop(&mut self) {
-        let _ = self.file.borrow_mut().close();
+        if !self.file.borrow().random_truncating() {
+            let _ = self.file.borrow_mut().close();
+        }
         let _ = self.unlink();
     }
 }
@@ -89,7 +93,7 @@ fn open_named(ctx: &mut Context, name: Id, on_close: Id, write_only: bool) -> Re
         Err(error) => return Err(ctx.with_errno_filename(errno_error(error).into(), name)?),
     };
     if write_only {
-        let writer = ctx.named_temporary_writer(file, name);
+        let writer = ctx.temporary_writer(file, name);
         if writer.is_err() {
             let _ = std::fs::remove_file(path);
         }
@@ -173,14 +177,18 @@ pub(super) fn path_operation(
                 ));
             };
             let mut closer = closer.borrow_mut();
-            let closed = closer.file.borrow_mut().close();
+            let closed = {
+                let mut file = closer.file.borrow_mut();
+                file.check_random_reentry()
+                    .and_then(|()| file.close().map_err(errno_error))
+            };
             if (exiting || closer.on_close)
                 && let Err(error) = closer.unlink()
             {
                 drop(closer);
                 return Err(ctx.with_errno_filename(errno_error(error).into(), name)?);
             }
-            closed.map_err(errno_error)?;
+            closed?;
             Ok(NONE)
         }
         ("random_name", []) => Ok(ctx.text(tempdirs::random_name().map_err(errno_error)?)),
@@ -245,58 +253,49 @@ pub(super) fn path_operation(
     }
 }
 
-/// Text update files wrap the same native anonymous binary handle as binary mode.
+/// Adopt an unnamed descriptor into the buffering and text layers requested by its mode.
 pub(super) fn open(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
-    if args.len() > 1
-        || kwargs.iter().any(|(key, _)| {
-            !matches!(
-                key.as_str(),
-                "mode" | "dir" | "prefix" | "suffix" | "encoding" | "errors" | "newline"
-            )
-        })
-    {
+    if args.len() > 1 {
         return Err(Error::new(
             "TypeError",
             "unsupported arguments to TemporaryFile",
         ));
     }
-    let mode = option(args, 0, kwargs, "mode")?;
-    let text = match mode
+    let [mode, directory, prefix, suffix, encoding, errors, newline] = super::builtins::bind(
+        "TemporaryFile",
+        args,
+        kwargs,
+        [
+            "mode", "dir", "prefix", "suffix", "encoding", "errors", "newline",
+        ],
+    )?;
+    if let Some(mode) = mode {
+        super::io::check_open_string(ctx, mode, "mode", "str")?;
+    }
+    let [encoding, errors, newline] =
+        [encoding, errors, newline].map(|value| value.filter(|&id| id != NONE));
+    super::io::check_text_options(ctx, encoding, errors, newline)?;
+    let mode_text = mode
         .map(|id| ctx.str_value(id))
         .transpose()?
-        .unwrap_or("w+b")
-    {
-        "w+b" | "wb+" | "r+b" | "rb+" => false,
-        "w+" | "w+t" | "wt+" => true,
-        _ => {
-            return Err(Error::new(
-                "NotImplementedError",
-                "TemporaryFile supports update mode",
-            ));
-        }
-    };
-    let mut options = Vec::new();
-    for (key, id) in kwargs {
-        if matches!(key.as_str(), "encoding" | "errors" | "newline") && *id != NONE {
-            if !text {
-                let article = if key == "newline" { "a" } else { "an" };
-                return Err(Error::new(
-                    "ValueError",
-                    format!("binary mode doesn't take {article} {key} argument"),
-                ));
-            }
-            options.push((key.clone(), *id));
-        }
+        .unwrap_or("w+b");
+    super::io::validate_open_mode(mode_text)?;
+    let binary = mode_text.contains('b');
+    if binary {
+        super::io::check_binary_options(encoding, errors, newline)?;
     }
-    if text {
+    let (_, raw_mode) = super::io::fileio_mode(&mode_text.replace('t', ""))?;
+    if !matches!(raw_mode, "wb" | "rb+") {
+        return Err(Error::new(
+            "NotImplementedError",
+            "TemporaryFile supports write and update modes",
+        ));
+    }
+    if !binary {
         ctx.module("io")?;
     }
-    let directory = option(args, 1, kwargs, "dir")?.filter(|&id| id != NONE);
-    let file = if let (Some(dir), Some(prefix), Some(suffix)) = (
-        directory,
-        option(args, 2, kwargs, "prefix")?,
-        option(args, 3, kwargs, "suffix")?,
-    ) {
+    let directory = directory.filter(|&id| id != NONE);
+    let file = if let (Some(dir), Some(prefix), Some(suffix)) = (directory, prefix, suffix) {
         let path = |ctx: &mut Context, value| {
             let value = super::posixpath::fspath(ctx, value)?;
             super::os::c_path(ctx, value, "embedded null byte")
@@ -304,28 +303,47 @@ pub(super) fn open(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> R
         let directory = path(ctx, dir)?;
         let prefix = path(ctx, prefix)?;
         let suffix = path(ctx, suffix)?;
-        FileState::buffered_random(crate::objects::tempdirs::anonymous_file_in(
+        crate::objects::tempdirs::anonymous_file_in(
             Path::new(OsStr::from_bytes(directory.as_bytes())),
             OsStr::from_bytes(prefix.as_bytes()),
             OsStr::from_bytes(suffix.as_bytes()),
-        )?)?
+        )?
     } else {
-        FileState::temporary(directory.map(|id| ctx.str_value(id)).transpose()?)?
+        crate::objects::tempdirs::anonymous_file(
+            directory.map(|id| ctx.str_value(id)).transpose()?,
+        )?
     };
-    let name = ctx.int(i64::from(file.fileno()?));
-    let owner =
-        crate::Shared::try_new(RefCell::new(file)).map_err(|_| crate::Error::allocation())?;
-    let buffer = ctx.alloc(Value::BufferedRandom(owner.clone(), name));
-    if !text {
+    let name = ctx.int(i64::from(file.as_raw_fd()));
+    let buffer = if raw_mode == "wb" {
+        ctx.temporary_writer(file, name)?
+    } else {
+        let owner = crate::Shared::try_new(RefCell::new(FileState::buffered_random(file)?))
+            .map_err(|_| crate::Error::allocation())?;
+        ctx.alloc(Value::BufferedRandom(owner, name))
+    };
+    if binary {
         return Ok(buffer);
     }
     let wrapper = ctx.builtins["_io.TextIOWrapper"];
-    let result = ctx.call(wrapper, vec![buffer], options).and_then(|stream| {
-        ctx.set_attr(stream, "mode", mode.unwrap())?;
-        Ok(stream)
-    });
+    let result = ctx
+        .call(
+            wrapper,
+            vec![
+                buffer,
+                encoding.unwrap_or(NONE),
+                errors.unwrap_or(NONE),
+                newline.unwrap_or(NONE),
+            ],
+            Vec::new(),
+        )
+        .and_then(|stream| {
+            ctx.set_attr(stream, "mode", ctx.scalar_value(mode.unwrap()))?;
+            Ok(stream)
+        });
     if result.is_err() {
-        let _ = owner.borrow_mut().close();
+        let _ = ctx
+            .lookup_attr(buffer, "close")
+            .and_then(|close| ctx.call(close, Vec::new(), Vec::new()));
     }
     result
 }
@@ -338,12 +356,12 @@ pub(super) fn method(
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
     let receiver = argument(args, 0)?;
-    let Value::BufferedRandom(owner, _) = ctx.heap.get(receiver).clone() else {
+    let Value::BufferedRandom(owner, file_name) = ctx.heap.get(receiver).clone() else {
         return Err(Error::new("TypeError", "expected a buffered random file"));
     };
     let args = &args[1..];
     let arity = match name {
-        "read" => 0..=1,
+        "read" | "truncate" => 0..=1,
         "write" | "readinto" => 1..=1,
         "seek" => 1..=2,
         "__exit__" => 3..=3,
@@ -361,6 +379,12 @@ pub(super) fn method(
             _ => format!("unsupported arguments to BufferedRandom.{name}"),
         };
         return Err(Error::new("TypeError", message));
+    }
+    if matches!(
+        name,
+        "readline" | "truncate" | "flush" | "close" | "__exit__"
+    ) {
+        owner.borrow().check_random_reentry()?;
     }
     match name {
         "read" => {
@@ -389,6 +413,7 @@ pub(super) fn method(
             if file.closed() {
                 return Err(Error::new("ValueError", "readinto of closed file"));
             }
+            file.check_random_reentry()?;
             let count = file.read_into(bytes)?;
             Ok(ctx.int(count as i64))
         }
@@ -398,28 +423,43 @@ pub(super) fn method(
         }
         "write" => {
             let bytes = ctx.bytes_like(args[0])?;
-            owner.borrow_mut().write_bytes(bytes)?;
+            let mut file = owner.borrow_mut();
+            file.check_random_reentry()?;
+            file.write_bytes(bytes)?;
             let length = crate::Int::from_usize(bytes.len());
             Ok(ctx.alloc(Value::Int(length)))
         }
         "seek" => {
+            let whence = super::files::buffered_whence(ctx, args.get(1).copied())?;
             let offset = ctx.index_integer(args[0])?;
-            let whence = if let Some(&value) = args.get(1) {
-                ctx.index_integer(value)?
-                    .to_i64()
-                    .and_then(|n| i32::try_from(n).ok())
-                    .ok_or_else(|| {
-                        Error::new("OverflowError", "Python int too large to convert to C int")
-                    })?
-            } else {
-                0
-            };
             let position = owner.borrow_mut().seek_disk(&offset, i64::from(whence))?;
             Ok(ctx.int(position as i64))
         }
         "readable" | "writable" | "seekable" | "isatty" => {
             owner.borrow().fileno()?;
             Ok(crate::dynamic::builtins::boolean(name != "isatty"))
+        }
+        "truncate" => {
+            let supplied = args.first().copied().filter(|&id| id != NONE);
+            let busy = supplied
+                .filter(|&id| !matches!(ctx.heap.get(id), Value::Int(_) | Value::Bool(_)))
+                .map(|_| ctx.repr(file_name));
+            owner.borrow_mut().begin_random_truncate(busy)?;
+            let requested: Result<(i64, Id)> = (|| {
+                if let Some(id) = supplied {
+                    let size = ctx.index_integer(id)?.to_i64().ok_or_else(|| {
+                        Error::new("OverflowError", "Python int too large to convert to C long")
+                    })?;
+                    Ok((size, id))
+                } else {
+                    let size = owner.borrow_mut().tell()? as i64;
+                    Ok((size, ctx.int(size)))
+                }
+            })();
+            owner
+                .borrow_mut()
+                .finish_random_truncate(requested.as_ref().ok().map(|&(size, _)| size))?;
+            requested.map(|(_, original)| original)
         }
         "tell" => Ok(ctx.int(owner.borrow_mut().tell()? as i64)),
         "fileno" => Ok(ctx.int(i64::from(owner.borrow().fileno()?))),

@@ -1,4 +1,5 @@
 import re
+import warnings
 
 
 def current():
@@ -19,6 +20,13 @@ def current():
         print(re.compile("k.", bits).fullmatch("Ké") is not None)
     print(re.compile(b"(A)|(B)", 2).split(b"\xffab"))
     print(re.split("(a)|(b)", "xab", maxsplit=2, flags=re.I))
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        assert re.split(":", "a:b:c", 1) == re.split(":", "a:b:c", maxsplit=1)
+    assert len(caught) == 1
+    assert caught[0].filename == __file__
+    assert caught[0].category is DeprecationWarning
+    assert str(caught[0].message) == "'maxsplit' is passed as positional argument"
     for source in ("", "x*", "|x+", "x*?", "(a*)|(b)", r"\b"):
         print(re.compile(source).split("xxaβb"), re.compile(source).split("xxaβb", -1))
     print(re.compile("$").split("a\n"), re.compile("$", re.X | re.M).split("a\nb\n"))

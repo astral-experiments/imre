@@ -71,6 +71,8 @@ pub struct PythonCommand {
 pub struct CompileOptions {
     /// Compile the supplied command without creating a script in the caller's working directory.
     pub command: Option<PythonCommand>,
+    /// Canonical import name requested by the interpreter's `-m` entry.
+    pub module_entry: Option<String>,
     /// Flags and executable for a file launched through the Python command line.
     pub script_startup: Option<(CommandFlags, String)>,
     /// A file describing the branches to include in a closed executable.
@@ -229,6 +231,19 @@ fn object_fallback<T>(
     lower: impl FnOnce(&mut modules::SourceGraph) -> Result<T, String>,
     boxed: impl FnOnce(Compilation) -> T,
 ) -> Result<T, String> {
+    if options.module_entry.is_some() {
+        return dynamic::compile(
+            path,
+            module_root,
+            options,
+            true,
+            None,
+            Default::default(),
+            || Ok(()),
+        )?
+        .map(boxed)
+        .ok_or_else(|| "could not compile the module entry".to_owned());
+    }
     let (error, graph) = match options.load_graph(path, module_root, filesystem) {
         Ok(mut graph) => match lower(&mut graph) {
             Ok(value) => return Ok(value),

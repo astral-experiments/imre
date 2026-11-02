@@ -3,6 +3,8 @@
 use super::super::builtins::zeroed_bytes;
 use super::{Context, Error, FALSE, Id, NONE, Result, TRUE, Value};
 
+mod newline_decoder;
+pub(in crate::dynamic) const NEWLINE_DECODER: &str = "IncrementalNewlineDecoder";
 mod buffered_io;
 mod descriptor_buffer;
 mod native_reader;
@@ -15,7 +17,10 @@ mod bytes_io;
 mod bytes_writer;
 mod docstrings;
 mod file_io;
-pub(super) use file_io::check_text_options;
+pub(super) use file_io::{
+    check_binary_options, check_open_string, check_text_options, mode as fileio_mode,
+    validate_open_mode,
+};
 pub(in crate::dynamic) use file_io::{open, popen_pipe};
 mod text_wrapper;
 pub(super) use text_wrapper::text_options;
@@ -35,6 +40,7 @@ pub(in crate::dynamic) enum MemoryStream {
     Bytes(std::rc::Rc<bytes_io::BytesIo>),
     Wrapper(std::rc::Rc<text_wrapper::Wrapper>),
     Raw(std::rc::Rc<file_io::RawFile>),
+    Decoder(newline_decoder::Decoder),
 }
 
 const DEFAULT_BUFFER_SIZE: i64 = 128 * 1024;
@@ -212,6 +218,8 @@ pub(in super::super) fn install(ctx: &mut Context, module: Id) {
         .collect();
     let exports = ctx.alloc(Value::List(names));
     ctx.bind(module, "__all__", exports);
+    let open_code = ctx.builtin("io.open_code");
+    ctx.bind(module, "open_code", open_code);
     for (name, origin) in [("SEEK_SET", 0), ("SEEK_CUR", 1), ("SEEK_END", 2)] {
         let value = ctx.int(origin);
         ctx.bind(module, name, value);
@@ -229,6 +237,13 @@ pub(in super::super) fn install_native(ctx: &mut Context, module: Id, module_obj
     let size = ctx.int(DEFAULT_BUFFER_SIZE);
     ctx.bind(module, "DEFAULT_BUFFER_SIZE", size);
     let object = ctx.builtin("object");
+    class(
+        ctx,
+        module,
+        NEWLINE_DECODER,
+        object,
+        newline_decoder::METHODS,
+    );
     let io = class(
         ctx,
         module,
@@ -368,6 +383,11 @@ fn class(
         unreachable!()
     };
     *io_kind = Some(NativeClass::Named(name.trim_start_matches('_')));
+    if name == NEWLINE_DECODER
+        && let Value::Scope(frame) = ctx.heap.get_mut(scope)
+    {
+        frame.class_namespace.as_mut().unwrap().slot_names = Some([].into());
+    }
     if let Some(doc) = docstrings::base(name) {
         let doc = ctx.text(doc);
         ctx.bind(scope, "__doc__", doc);
@@ -386,6 +406,7 @@ fn class(
         "BufferedWriter" => "_io.BufferedWriter",
         "BufferedRWPair" => "_io.BufferedRWPair",
         "BytesIO" => "_io.BytesIO",
+        NEWLINE_DECODER => newline_decoder::CLASS,
         _ => "_io._IOBase",
     };
     for &name in methods {
@@ -675,6 +696,9 @@ pub(in super::super) fn call(
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
     let owner_kind = ctx.heap.get(owner).io_kind();
+    if owner_kind == Some(NEWLINE_DECODER) {
+        return newline_decoder::call(ctx, owner, name, args, kwargs);
+    }
     let raw = owner_kind == Some("RawIOBase");
     let buffered = owner_kind == Some("BufferedIOBase");
     let text = owner_kind == Some("TextIOBase");
