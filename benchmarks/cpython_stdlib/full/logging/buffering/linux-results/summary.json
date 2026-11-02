@@ -1,0 +1,585 @@
+{
+  "phase": "public",
+  "imre_head": "8d3fe99e55c190cc72bfd78d2b5afe46de48e8ce",
+  "scope": "all",
+  "cpython": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "cpython_sha256": "30a3da42f5c021f375b20dbd966cd558864aff054a669f243c0cef1fac79ffd6",
+  "source_sha256": "529fb98e8a0890d562d8d8903c09700635ad8f67cef4bad6f749f89d3442a563",
+  "entry_sha256": "1732e198020be602188c1dfc9fd1ce6dfe762f830b333f274aaa292417a6bfd7",
+  "freeze_sha256": "cf81ef7cef591fb132d2a60e4be40c6ddf0ac078b50d35142b2d56446490cefb",
+  "builds": {
+    "O0": {
+      "receipt_sha256": "f38291c655e9b66ac63db8ce7a317c0e0aefa4030ded5d12ee545d64a26f334d",
+      "executable": "/dev/shm/imre-logging-filters-matrix/bin/buffering-8d3fe99e55c1-O0",
+      "executable_sha256": "a274a2e34328fa10759719a6132bcf1174ab41a6ad6582d28ae55944780167ed"
+    },
+    "O3": {
+      "receipt_sha256": "0efeac184bd4abe413b012e6e0399f66276bf598ff9b6b86b666d570a062915c",
+      "executable": "/dev/shm/imre-logging-filters-matrix/bin/buffering-8d3fe99e55c1-O3",
+      "executable_sha256": "c5a99884258dfcd016270fefbb1f9e353598a547908241bc5fc0bbb5e0d565a3"
+    }
+  },
+  "tools": {
+    "compiler": {
+      "sha256": "2976b377946522b3db9e54b80aca3da0fa9ad4b55b5f7961f8d79ae67f8c5bc7",
+      "path": "/workspace/scratch/imre-logging-buffering/public/bin-8d3fe99e55c190cc72bfd78d2b5afe46de48e8ce/imre"
+    },
+    "runtime": {
+      "sha256": "932f372198da45c715818d6e8cb00cddff6d19876eed55c9a4fed1bc60c4b471",
+      "path": "/workspace/scratch/imre-logging-buffering/public/bin-8d3fe99e55c190cc72bfd78d2b5afe46de48e8ce/libimre_runtime.a"
+    },
+    "clang": {
+      "sha256": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45",
+      "path": "/workspace/scratch/imre-logging-buffering/public/bin-8d3fe99e55c190cc72bfd78d2b5afe46de48e8ce/imre-toolchain/bin/clang"
+    }
+  },
+  "canonical": 272,
+  "selected_unique": 24,
+  "unrun": 248,
+  "paired_unique": 23,
+  "unpaired_unique": [
+    "test.test_logging.MemoryHandlerTest.test_race_between_set_target_and_flush"
+  ],
+  "paired_by_prior_evidence": {
+    "earlier-isolated-original; union-unresolved": 1,
+    "no-named-paired-proof; union-unresolved": 20,
+    "prior-paired": 2
+  },
+  "credit": "Net addition is pending the coordinator history join.",
+  "groups": {
+    "memory": {
+      "selected": 4,
+      "paired": [
+        "test.test_logging.MemoryHandlerTest.test_flush",
+        "test.test_logging.MemoryHandlerTest.test_flush_on_close"
+      ],
+      "unpaired": [
+        "test.test_logging.MemoryHandlerTest.test_race_between_set_target_and_flush",
+        "test.test_logging.MemoryHandlerTest.test_shutdown_flush_on_close"
+      ]
+    },
+    "memory-nonrace": {
+      "selected": 3,
+      "paired": [
+        "test.test_logging.MemoryHandlerTest.test_flush",
+        "test.test_logging.MemoryHandlerTest.test_flush_on_close",
+        "test.test_logging.MemoryHandlerTest.test_shutdown_flush_on_close"
+      ],
+      "unpaired": []
+    },
+    "followup": {
+      "selected": 18,
+      "paired": [
+        "test.test_logging.BufferingFormatterTest.test_custom",
+        "test.test_logging.BufferingFormatterTest.test_default",
+        "test.test_logging.ShutdownTest.test_no_failure",
+        "test.test_logging.ShutdownTest.test_with_ioerror_in_acquire",
+        "test.test_logging.ShutdownTest.test_with_ioerror_in_close",
+        "test.test_logging.ShutdownTest.test_with_ioerror_in_flush",
+        "test.test_logging.ShutdownTest.test_with_other_error_in_acquire_with_raise",
+        "test.test_logging.ShutdownTest.test_with_other_error_in_acquire_without_raise",
+        "test.test_logging.ShutdownTest.test_with_other_error_in_close_with_raise",
+        "test.test_logging.ShutdownTest.test_with_other_error_in_close_without_raise",
+        "test.test_logging.ShutdownTest.test_with_other_error_in_flush_with_raise",
+        "test.test_logging.ShutdownTest.test_with_other_error_in_flush_without_raise",
+        "test.test_logging.ShutdownTest.test_with_valueerror_in_acquire",
+        "test.test_logging.ShutdownTest.test_with_valueerror_in_close",
+        "test.test_logging.ShutdownTest.test_with_valueerror_in_flush",
+        "test.test_logging.StreamHandlerTest.test_can_represent_stream_with_int_name",
+        "test.test_logging.StreamHandlerTest.test_error_handling",
+        "test.test_logging.StreamHandlerTest.test_stream_setting"
+      ],
+      "unpaired": []
+    },
+    "next": {
+      "selected": 2,
+      "paired": [
+        "test.test_logging.HandlerTest.test_name",
+        "test.test_logging.QueueHandlerTest.test_formatting"
+      ],
+      "unpaired": []
+    }
+  },
+  "processes": {
+    "memory": {
+      "stock": {
+        "discovered": 272,
+        "registered": 4,
+        "inventory_matches_stock": true,
+        "starts": 4,
+        "stops": 4,
+        "actual_exit": 0,
+        "total": [
+          4,
+          0,
+          0,
+          0
+        ],
+        "callback_counts": {
+          "PASS": 4,
+          "FAIL": 0,
+          "ERROR": 0,
+          "SKIP": 0,
+          "XFAIL": 0,
+          "XPASS": 0,
+          "SUBPASS": 0,
+          "SUBERROR": 0,
+          "TRACE": 0,
+          "TRACE_UNAVAILABLE": 0,
+          "CHAIN": 0,
+          "CHAIN_UNAVAILABLE": 0
+        },
+        "external": [],
+        "complete": true,
+        "issues": [],
+        "receipt": "matrix/stock/memory/suite.json",
+        "receipt_sha256": "1e6f3807f0ac8788756157829bcd464ec3c9697d2c463420368cf14c81691fd6",
+        "executable": "/workspace/scratch/imre-resources/cpython/python",
+        "executable_sha256": "30a3da42f5c021f375b20dbd966cd558864aff054a669f243c0cef1fac79ffd6",
+        "stdout_sha256": "accab6893263134b87d6602647042040daf68bf7fc4326ccac1ade9dd0237603",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "O0": {
+        "discovered": 272,
+        "registered": 4,
+        "inventory_matches_stock": true,
+        "starts": 4,
+        "stops": 4,
+        "actual_exit": 1,
+        "total": [
+          4,
+          1,
+          2,
+          0
+        ],
+        "callback_counts": {
+          "PASS": 2,
+          "FAIL": 1,
+          "ERROR": 2,
+          "SKIP": 0,
+          "XFAIL": 0,
+          "XPASS": 0,
+          "SUBPASS": 0,
+          "SUBERROR": 0,
+          "TRACE": 3,
+          "TRACE_UNAVAILABLE": 0,
+          "CHAIN": 4,
+          "CHAIN_UNAVAILABLE": 0
+        },
+        "external": [],
+        "complete": true,
+        "issues": [],
+        "receipt": "matrix/public/8d3fe99e55c190cc72bfd78d2b5afe46de48e8ce/O0/memory/suite.json",
+        "receipt_sha256": "d5c79a32fa7cdbebac6551a88de14a35107ce4751b12acf568231378a52146fe",
+        "executable": "/dev/shm/imre-logging-filters-matrix/bin/buffering-8d3fe99e55c1-O0",
+        "executable_sha256": "a274a2e34328fa10759719a6132bcf1174ab41a6ad6582d28ae55944780167ed",
+        "stdout_sha256": "1c57720a6b25aeab456996f04462e23291e508a0fcbeb19c536007f7cd55ca77",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "build": "matrix/public/8d3fe99e55c190cc72bfd78d2b5afe46de48e8ce/O0/build.json",
+        "build_sha256": "f38291c655e9b66ac63db8ce7a317c0e0aefa4030ded5d12ee545d64a26f334d",
+        "freeze_sha256": "cf81ef7cef591fb132d2a60e4be40c6ddf0ac078b50d35142b2d56446490cefb"
+      },
+      "O3": {
+        "discovered": 272,
+        "registered": 4,
+        "inventory_matches_stock": true,
+        "starts": 4,
+        "stops": 4,
+        "actual_exit": 1,
+        "total": [
+          4,
+          1,
+          2,
+          0
+        ],
+        "callback_counts": {
+          "PASS": 2,
+          "FAIL": 1,
+          "ERROR": 2,
+          "SKIP": 0,
+          "XFAIL": 0,
+          "XPASS": 0,
+          "SUBPASS": 0,
+          "SUBERROR": 0,
+          "TRACE": 3,
+          "TRACE_UNAVAILABLE": 0,
+          "CHAIN": 4,
+          "CHAIN_UNAVAILABLE": 0
+        },
+        "external": [],
+        "complete": true,
+        "issues": [],
+        "receipt": "matrix/public/8d3fe99e55c190cc72bfd78d2b5afe46de48e8ce/O3/memory/suite.json",
+        "receipt_sha256": "3826b95e094784ffc78961b0c9c60264a44c05e89a6bade45cfb270d4b08b818",
+        "executable": "/dev/shm/imre-logging-filters-matrix/bin/buffering-8d3fe99e55c1-O3",
+        "executable_sha256": "c5a99884258dfcd016270fefbb1f9e353598a547908241bc5fc0bbb5e0d565a3",
+        "stdout_sha256": "1c57720a6b25aeab456996f04462e23291e508a0fcbeb19c536007f7cd55ca77",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "build": "matrix/public/8d3fe99e55c190cc72bfd78d2b5afe46de48e8ce/O3/build.json",
+        "build_sha256": "0efeac184bd4abe413b012e6e0399f66276bf598ff9b6b86b666d570a062915c",
+        "freeze_sha256": "cf81ef7cef591fb132d2a60e4be40c6ddf0ac078b50d35142b2d56446490cefb"
+      }
+    },
+    "memory-nonrace": {
+      "stock": {
+        "discovered": 272,
+        "registered": 3,
+        "inventory_matches_stock": true,
+        "starts": 3,
+        "stops": 3,
+        "actual_exit": 0,
+        "total": [
+          3,
+          0,
+          0,
+          0
+        ],
+        "callback_counts": {
+          "PASS": 3,
+          "FAIL": 0,
+          "ERROR": 0,
+          "SKIP": 0,
+          "XFAIL": 0,
+          "XPASS": 0,
+          "SUBPASS": 0,
+          "SUBERROR": 0,
+          "TRACE": 0,
+          "TRACE_UNAVAILABLE": 0,
+          "CHAIN": 0,
+          "CHAIN_UNAVAILABLE": 0
+        },
+        "external": [],
+        "complete": true,
+        "issues": [],
+        "receipt": "matrix/stock/memory-nonrace/suite.json",
+        "receipt_sha256": "089bbba308b764862423c8457c1092b24c827e8920f6c643e7ad0b57f51ea5e0",
+        "executable": "/workspace/scratch/imre-resources/cpython/python",
+        "executable_sha256": "30a3da42f5c021f375b20dbd966cd558864aff054a669f243c0cef1fac79ffd6",
+        "stdout_sha256": "4bcd37546511e6347d851a6f75fad53947f20b1db9e8a018add58ac36eb90ca6",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "O0": {
+        "discovered": 272,
+        "registered": 3,
+        "inventory_matches_stock": true,
+        "starts": 3,
+        "stops": 3,
+        "actual_exit": 0,
+        "total": [
+          3,
+          0,
+          0,
+          0
+        ],
+        "callback_counts": {
+          "PASS": 3,
+          "FAIL": 0,
+          "ERROR": 0,
+          "SKIP": 0,
+          "XFAIL": 0,
+          "XPASS": 0,
+          "SUBPASS": 0,
+          "SUBERROR": 0,
+          "TRACE": 0,
+          "TRACE_UNAVAILABLE": 0,
+          "CHAIN": 0,
+          "CHAIN_UNAVAILABLE": 0
+        },
+        "external": [],
+        "complete": true,
+        "issues": [],
+        "receipt": "matrix/public/8d3fe99e55c190cc72bfd78d2b5afe46de48e8ce/O0/memory-nonrace/suite.json",
+        "receipt_sha256": "7b7b4f1b8dc5cd73eaeb5389b12d40cf4a599e2ca15d15052088f0b894ded21f",
+        "executable": "/dev/shm/imre-logging-filters-matrix/bin/buffering-8d3fe99e55c1-O0",
+        "executable_sha256": "a274a2e34328fa10759719a6132bcf1174ab41a6ad6582d28ae55944780167ed",
+        "stdout_sha256": "4bcd37546511e6347d851a6f75fad53947f20b1db9e8a018add58ac36eb90ca6",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "build": "matrix/public/8d3fe99e55c190cc72bfd78d2b5afe46de48e8ce/O0/build.json",
+        "build_sha256": "f38291c655e9b66ac63db8ce7a317c0e0aefa4030ded5d12ee545d64a26f334d",
+        "freeze_sha256": "cf81ef7cef591fb132d2a60e4be40c6ddf0ac078b50d35142b2d56446490cefb"
+      },
+      "O3": {
+        "discovered": 272,
+        "registered": 3,
+        "inventory_matches_stock": true,
+        "starts": 3,
+        "stops": 3,
+        "actual_exit": 0,
+        "total": [
+          3,
+          0,
+          0,
+          0
+        ],
+        "callback_counts": {
+          "PASS": 3,
+          "FAIL": 0,
+          "ERROR": 0,
+          "SKIP": 0,
+          "XFAIL": 0,
+          "XPASS": 0,
+          "SUBPASS": 0,
+          "SUBERROR": 0,
+          "TRACE": 0,
+          "TRACE_UNAVAILABLE": 0,
+          "CHAIN": 0,
+          "CHAIN_UNAVAILABLE": 0
+        },
+        "external": [],
+        "complete": true,
+        "issues": [],
+        "receipt": "matrix/public/8d3fe99e55c190cc72bfd78d2b5afe46de48e8ce/O3/memory-nonrace/suite.json",
+        "receipt_sha256": "8a7e3382764688c0e2d2cfa500bc831ba6ec715e16299216af61c18880fed6c6",
+        "executable": "/dev/shm/imre-logging-filters-matrix/bin/buffering-8d3fe99e55c1-O3",
+        "executable_sha256": "c5a99884258dfcd016270fefbb1f9e353598a547908241bc5fc0bbb5e0d565a3",
+        "stdout_sha256": "4bcd37546511e6347d851a6f75fad53947f20b1db9e8a018add58ac36eb90ca6",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "build": "matrix/public/8d3fe99e55c190cc72bfd78d2b5afe46de48e8ce/O3/build.json",
+        "build_sha256": "0efeac184bd4abe413b012e6e0399f66276bf598ff9b6b86b666d570a062915c",
+        "freeze_sha256": "cf81ef7cef591fb132d2a60e4be40c6ddf0ac078b50d35142b2d56446490cefb"
+      }
+    },
+    "followup": {
+      "stock": {
+        "discovered": 272,
+        "registered": 18,
+        "inventory_matches_stock": true,
+        "starts": 18,
+        "stops": 18,
+        "actual_exit": 0,
+        "total": [
+          18,
+          0,
+          0,
+          0
+        ],
+        "callback_counts": {
+          "PASS": 18,
+          "FAIL": 0,
+          "ERROR": 0,
+          "SKIP": 0,
+          "XFAIL": 0,
+          "XPASS": 0,
+          "SUBPASS": 0,
+          "SUBERROR": 0,
+          "TRACE": 0,
+          "TRACE_UNAVAILABLE": 0,
+          "CHAIN": 0,
+          "CHAIN_UNAVAILABLE": 0
+        },
+        "external": [],
+        "complete": true,
+        "issues": [],
+        "receipt": "matrix/stock/followup/suite.json",
+        "receipt_sha256": "bb7ebd2c8e76c12617c97c3cf0c6e37bffed751700a923b33375b50eeebb1721",
+        "executable": "/workspace/scratch/imre-resources/cpython/python",
+        "executable_sha256": "30a3da42f5c021f375b20dbd966cd558864aff054a669f243c0cef1fac79ffd6",
+        "stdout_sha256": "ef018a448e8f1a07fe847fb8702efc598430630e71e971e0ae08bc795abba37f",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "O0": {
+        "discovered": 272,
+        "registered": 18,
+        "inventory_matches_stock": true,
+        "starts": 18,
+        "stops": 18,
+        "actual_exit": 0,
+        "total": [
+          18,
+          0,
+          0,
+          0
+        ],
+        "callback_counts": {
+          "PASS": 18,
+          "FAIL": 0,
+          "ERROR": 0,
+          "SKIP": 0,
+          "XFAIL": 0,
+          "XPASS": 0,
+          "SUBPASS": 0,
+          "SUBERROR": 0,
+          "TRACE": 0,
+          "TRACE_UNAVAILABLE": 0,
+          "CHAIN": 0,
+          "CHAIN_UNAVAILABLE": 0
+        },
+        "external": [],
+        "complete": true,
+        "issues": [],
+        "receipt": "matrix/public/8d3fe99e55c190cc72bfd78d2b5afe46de48e8ce/O0/followup/suite.json",
+        "receipt_sha256": "711c494ca3896d4b3e4f348363f3fa2710713417ce05f1f5e8d1c71681c4522a",
+        "executable": "/dev/shm/imre-logging-filters-matrix/bin/buffering-8d3fe99e55c1-O0",
+        "executable_sha256": "a274a2e34328fa10759719a6132bcf1174ab41a6ad6582d28ae55944780167ed",
+        "stdout_sha256": "ef018a448e8f1a07fe847fb8702efc598430630e71e971e0ae08bc795abba37f",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "build": "matrix/public/8d3fe99e55c190cc72bfd78d2b5afe46de48e8ce/O0/build.json",
+        "build_sha256": "f38291c655e9b66ac63db8ce7a317c0e0aefa4030ded5d12ee545d64a26f334d",
+        "freeze_sha256": "cf81ef7cef591fb132d2a60e4be40c6ddf0ac078b50d35142b2d56446490cefb"
+      },
+      "O3": {
+        "discovered": 272,
+        "registered": 18,
+        "inventory_matches_stock": true,
+        "starts": 18,
+        "stops": 18,
+        "actual_exit": 0,
+        "total": [
+          18,
+          0,
+          0,
+          0
+        ],
+        "callback_counts": {
+          "PASS": 18,
+          "FAIL": 0,
+          "ERROR": 0,
+          "SKIP": 0,
+          "XFAIL": 0,
+          "XPASS": 0,
+          "SUBPASS": 0,
+          "SUBERROR": 0,
+          "TRACE": 0,
+          "TRACE_UNAVAILABLE": 0,
+          "CHAIN": 0,
+          "CHAIN_UNAVAILABLE": 0
+        },
+        "external": [],
+        "complete": true,
+        "issues": [],
+        "receipt": "matrix/public/8d3fe99e55c190cc72bfd78d2b5afe46de48e8ce/O3/followup/suite.json",
+        "receipt_sha256": "3f3395aac71bb95e69a7df8a40cb5b980b848ad9ff35900b63346317668ee0f3",
+        "executable": "/dev/shm/imre-logging-filters-matrix/bin/buffering-8d3fe99e55c1-O3",
+        "executable_sha256": "c5a99884258dfcd016270fefbb1f9e353598a547908241bc5fc0bbb5e0d565a3",
+        "stdout_sha256": "ef018a448e8f1a07fe847fb8702efc598430630e71e971e0ae08bc795abba37f",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "build": "matrix/public/8d3fe99e55c190cc72bfd78d2b5afe46de48e8ce/O3/build.json",
+        "build_sha256": "0efeac184bd4abe413b012e6e0399f66276bf598ff9b6b86b666d570a062915c",
+        "freeze_sha256": "cf81ef7cef591fb132d2a60e4be40c6ddf0ac078b50d35142b2d56446490cefb"
+      }
+    },
+    "next": {
+      "stock": {
+        "discovered": 272,
+        "registered": 2,
+        "inventory_matches_stock": true,
+        "starts": 2,
+        "stops": 2,
+        "actual_exit": 0,
+        "total": [
+          2,
+          0,
+          0,
+          0
+        ],
+        "callback_counts": {
+          "PASS": 2,
+          "FAIL": 0,
+          "ERROR": 0,
+          "SKIP": 0,
+          "XFAIL": 0,
+          "XPASS": 0,
+          "SUBPASS": 0,
+          "SUBERROR": 0,
+          "TRACE": 0,
+          "TRACE_UNAVAILABLE": 0,
+          "CHAIN": 0,
+          "CHAIN_UNAVAILABLE": 0
+        },
+        "external": [],
+        "complete": true,
+        "issues": [],
+        "receipt": "matrix/stock/next/suite.json",
+        "receipt_sha256": "73c5590fb5a6bac79ab8d1c7b46ea7b30e43b71bc6a80f0b5bad72fe2f886b96",
+        "executable": "/workspace/scratch/imre-resources/cpython/python",
+        "executable_sha256": "30a3da42f5c021f375b20dbd966cd558864aff054a669f243c0cef1fac79ffd6",
+        "stdout_sha256": "e3591a459ea53eb122701429f8a0cdaf9fa4675688e42512c1e3d48b9ec54445",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "O0": {
+        "discovered": 272,
+        "registered": 2,
+        "inventory_matches_stock": true,
+        "starts": 2,
+        "stops": 2,
+        "actual_exit": 0,
+        "total": [
+          2,
+          0,
+          0,
+          0
+        ],
+        "callback_counts": {
+          "PASS": 2,
+          "FAIL": 0,
+          "ERROR": 0,
+          "SKIP": 0,
+          "XFAIL": 0,
+          "XPASS": 0,
+          "SUBPASS": 0,
+          "SUBERROR": 0,
+          "TRACE": 0,
+          "TRACE_UNAVAILABLE": 0,
+          "CHAIN": 0,
+          "CHAIN_UNAVAILABLE": 0
+        },
+        "external": [],
+        "complete": true,
+        "issues": [],
+        "receipt": "matrix/public/8d3fe99e55c190cc72bfd78d2b5afe46de48e8ce/O0/next/suite.json",
+        "receipt_sha256": "c560718301480da9ab455526244aca939115226dbf88448450f3c98b41894810",
+        "executable": "/dev/shm/imre-logging-filters-matrix/bin/buffering-8d3fe99e55c1-O0",
+        "executable_sha256": "a274a2e34328fa10759719a6132bcf1174ab41a6ad6582d28ae55944780167ed",
+        "stdout_sha256": "e3591a459ea53eb122701429f8a0cdaf9fa4675688e42512c1e3d48b9ec54445",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "build": "matrix/public/8d3fe99e55c190cc72bfd78d2b5afe46de48e8ce/O0/build.json",
+        "build_sha256": "f38291c655e9b66ac63db8ce7a317c0e0aefa4030ded5d12ee545d64a26f334d",
+        "freeze_sha256": "cf81ef7cef591fb132d2a60e4be40c6ddf0ac078b50d35142b2d56446490cefb"
+      },
+      "O3": {
+        "discovered": 272,
+        "registered": 2,
+        "inventory_matches_stock": true,
+        "starts": 2,
+        "stops": 2,
+        "actual_exit": 0,
+        "total": [
+          2,
+          0,
+          0,
+          0
+        ],
+        "callback_counts": {
+          "PASS": 2,
+          "FAIL": 0,
+          "ERROR": 0,
+          "SKIP": 0,
+          "XFAIL": 0,
+          "XPASS": 0,
+          "SUBPASS": 0,
+          "SUBERROR": 0,
+          "TRACE": 0,
+          "TRACE_UNAVAILABLE": 0,
+          "CHAIN": 0,
+          "CHAIN_UNAVAILABLE": 0
+        },
+        "external": [],
+        "complete": true,
+        "issues": [],
+        "receipt": "matrix/public/8d3fe99e55c190cc72bfd78d2b5afe46de48e8ce/O3/next/suite.json",
+        "receipt_sha256": "e2bbff43b05ca58bc4dea410039f8a6834f2344fa13840543b53928fde059648",
+        "executable": "/dev/shm/imre-logging-filters-matrix/bin/buffering-8d3fe99e55c1-O3",
+        "executable_sha256": "c5a99884258dfcd016270fefbb1f9e353598a547908241bc5fc0bbb5e0d565a3",
+        "stdout_sha256": "e3591a459ea53eb122701429f8a0cdaf9fa4675688e42512c1e3d48b9ec54445",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "build": "matrix/public/8d3fe99e55c190cc72bfd78d2b5afe46de48e8ce/O3/build.json",
+        "build_sha256": "0efeac184bd4abe413b012e6e0399f66276bf598ff9b6b86b666d570a062915c",
+        "freeze_sha256": "cf81ef7cef591fb132d2a60e4be40c6ddf0ac078b50d35142b2d56446490cefb"
+      }
+    }
+  },
+  "source_ledger_sha256": "6bddbd58f57a55300750e70aee851e1a22eddd00819a0e3a430906f13dc628bf",
+  "selected_ledger_sha256": "d583ffcd212d855164da5000ed3433e8f542de57bb51f3a62975d841b278e208",
+  "all_272_sha256": "3fb2dd2c37e97fd45ebc1278b73c8257469fe6ec51ef037be20978a7196502c2",
+  "selected_sha256": "c0fc050a984460a5f00eda88435c940f1a316fbfe54ea64c392f2ce7503a5a4b"
+}

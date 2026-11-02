@@ -1,0 +1,474 @@
+{
+  "imre_head": "8d3fe99e55c190cc72bfd78d2b5afe46de48e8ce",
+  "phase": "public",
+  "prior_ledger_sha256": "9ce9840ecd2bfecbd02e75aec00fce672cc8adcb73ac16454a88366ca627e319",
+  "core_summary_sha256": "0dd5895f85793e1302667a43647b65a525d9267ca35351e0150f9d10b853c085",
+  "prior_ledger_revision": "13625eb62e9d4603e4b96d7fadc86e44abf2f9c4",
+  "denominator": 272,
+  "previously_credited": 132,
+  "matched": 23,
+  "overlap": [
+    [
+      "test.test_logging.BufferingFormatterTest.test_custom",
+      1
+    ],
+    [
+      "test.test_logging.BufferingFormatterTest.test_default",
+      1
+    ],
+    [
+      "test.test_logging.QueueHandlerTest.test_formatting",
+      1
+    ]
+  ],
+  "new_ids": [
+    [
+      "test.test_logging.HandlerTest.test_name",
+      1
+    ],
+    [
+      "test.test_logging.MemoryHandlerTest.test_flush",
+      1
+    ],
+    [
+      "test.test_logging.MemoryHandlerTest.test_flush_on_close",
+      1
+    ],
+    [
+      "test.test_logging.MemoryHandlerTest.test_shutdown_flush_on_close",
+      1
+    ],
+    [
+      "test.test_logging.ShutdownTest.test_no_failure",
+      1
+    ],
+    [
+      "test.test_logging.ShutdownTest.test_with_ioerror_in_acquire",
+      1
+    ],
+    [
+      "test.test_logging.ShutdownTest.test_with_ioerror_in_close",
+      1
+    ],
+    [
+      "test.test_logging.ShutdownTest.test_with_ioerror_in_flush",
+      1
+    ],
+    [
+      "test.test_logging.ShutdownTest.test_with_other_error_in_acquire_with_raise",
+      1
+    ],
+    [
+      "test.test_logging.ShutdownTest.test_with_other_error_in_acquire_without_raise",
+      1
+    ],
+    [
+      "test.test_logging.ShutdownTest.test_with_other_error_in_close_with_raise",
+      1
+    ],
+    [
+      "test.test_logging.ShutdownTest.test_with_other_error_in_close_without_raise",
+      1
+    ],
+    [
+      "test.test_logging.ShutdownTest.test_with_other_error_in_flush_with_raise",
+      1
+    ],
+    [
+      "test.test_logging.ShutdownTest.test_with_other_error_in_flush_without_raise",
+      1
+    ],
+    [
+      "test.test_logging.ShutdownTest.test_with_valueerror_in_acquire",
+      1
+    ],
+    [
+      "test.test_logging.ShutdownTest.test_with_valueerror_in_close",
+      1
+    ],
+    [
+      "test.test_logging.ShutdownTest.test_with_valueerror_in_flush",
+      1
+    ],
+    [
+      "test.test_logging.StreamHandlerTest.test_can_represent_stream_with_int_name",
+      1
+    ],
+    [
+      "test.test_logging.StreamHandlerTest.test_error_handling",
+      1
+    ],
+    [
+      "test.test_logging.StreamHandlerTest.test_stream_setting",
+      1
+    ]
+  ],
+  "new_count": 20,
+  "resulting_union": 152,
+  "core_suites": {
+    "memory": {
+      "stock": {
+        "exit": 0,
+        "totals": [
+          4,
+          0,
+          0,
+          0
+        ],
+        "callbacks": {
+          "PASS": 4,
+          "FAIL": 0,
+          "ERROR": 0,
+          "SKIP": 0,
+          "XFAIL": 0,
+          "XPASS": 0,
+          "SUBPASS": 0,
+          "SUBERROR": 0,
+          "TRACE": 0,
+          "TRACE_UNAVAILABLE": 0,
+          "CHAIN": 0,
+          "CHAIN_UNAVAILABLE": 0
+        },
+        "complete": true
+      },
+      "O0": {
+        "exit": 1,
+        "totals": [
+          4,
+          1,
+          2,
+          0
+        ],
+        "callbacks": {
+          "PASS": 2,
+          "FAIL": 1,
+          "ERROR": 2,
+          "SKIP": 0,
+          "XFAIL": 0,
+          "XPASS": 0,
+          "SUBPASS": 0,
+          "SUBERROR": 0,
+          "TRACE": 3,
+          "TRACE_UNAVAILABLE": 0,
+          "CHAIN": 4,
+          "CHAIN_UNAVAILABLE": 0
+        },
+        "complete": true
+      },
+      "O3": {
+        "exit": 1,
+        "totals": [
+          4,
+          1,
+          2,
+          0
+        ],
+        "callbacks": {
+          "PASS": 2,
+          "FAIL": 1,
+          "ERROR": 2,
+          "SKIP": 0,
+          "XFAIL": 0,
+          "XPASS": 0,
+          "SUBPASS": 0,
+          "SUBERROR": 0,
+          "TRACE": 3,
+          "TRACE_UNAVAILABLE": 0,
+          "CHAIN": 4,
+          "CHAIN_UNAVAILABLE": 0
+        },
+        "complete": true
+      }
+    },
+    "memory-nonrace": {
+      "stock": {
+        "exit": 0,
+        "totals": [
+          3,
+          0,
+          0,
+          0
+        ],
+        "callbacks": {
+          "PASS": 3,
+          "FAIL": 0,
+          "ERROR": 0,
+          "SKIP": 0,
+          "XFAIL": 0,
+          "XPASS": 0,
+          "SUBPASS": 0,
+          "SUBERROR": 0,
+          "TRACE": 0,
+          "TRACE_UNAVAILABLE": 0,
+          "CHAIN": 0,
+          "CHAIN_UNAVAILABLE": 0
+        },
+        "complete": true
+      },
+      "O0": {
+        "exit": 0,
+        "totals": [
+          3,
+          0,
+          0,
+          0
+        ],
+        "callbacks": {
+          "PASS": 3,
+          "FAIL": 0,
+          "ERROR": 0,
+          "SKIP": 0,
+          "XFAIL": 0,
+          "XPASS": 0,
+          "SUBPASS": 0,
+          "SUBERROR": 0,
+          "TRACE": 0,
+          "TRACE_UNAVAILABLE": 0,
+          "CHAIN": 0,
+          "CHAIN_UNAVAILABLE": 0
+        },
+        "complete": true
+      },
+      "O3": {
+        "exit": 0,
+        "totals": [
+          3,
+          0,
+          0,
+          0
+        ],
+        "callbacks": {
+          "PASS": 3,
+          "FAIL": 0,
+          "ERROR": 0,
+          "SKIP": 0,
+          "XFAIL": 0,
+          "XPASS": 0,
+          "SUBPASS": 0,
+          "SUBERROR": 0,
+          "TRACE": 0,
+          "TRACE_UNAVAILABLE": 0,
+          "CHAIN": 0,
+          "CHAIN_UNAVAILABLE": 0
+        },
+        "complete": true
+      }
+    },
+    "followup": {
+      "stock": {
+        "exit": 0,
+        "totals": [
+          18,
+          0,
+          0,
+          0
+        ],
+        "callbacks": {
+          "PASS": 18,
+          "FAIL": 0,
+          "ERROR": 0,
+          "SKIP": 0,
+          "XFAIL": 0,
+          "XPASS": 0,
+          "SUBPASS": 0,
+          "SUBERROR": 0,
+          "TRACE": 0,
+          "TRACE_UNAVAILABLE": 0,
+          "CHAIN": 0,
+          "CHAIN_UNAVAILABLE": 0
+        },
+        "complete": true
+      },
+      "O0": {
+        "exit": 0,
+        "totals": [
+          18,
+          0,
+          0,
+          0
+        ],
+        "callbacks": {
+          "PASS": 18,
+          "FAIL": 0,
+          "ERROR": 0,
+          "SKIP": 0,
+          "XFAIL": 0,
+          "XPASS": 0,
+          "SUBPASS": 0,
+          "SUBERROR": 0,
+          "TRACE": 0,
+          "TRACE_UNAVAILABLE": 0,
+          "CHAIN": 0,
+          "CHAIN_UNAVAILABLE": 0
+        },
+        "complete": true
+      },
+      "O3": {
+        "exit": 0,
+        "totals": [
+          18,
+          0,
+          0,
+          0
+        ],
+        "callbacks": {
+          "PASS": 18,
+          "FAIL": 0,
+          "ERROR": 0,
+          "SKIP": 0,
+          "XFAIL": 0,
+          "XPASS": 0,
+          "SUBPASS": 0,
+          "SUBERROR": 0,
+          "TRACE": 0,
+          "TRACE_UNAVAILABLE": 0,
+          "CHAIN": 0,
+          "CHAIN_UNAVAILABLE": 0
+        },
+        "complete": true
+      }
+    },
+    "next": {
+      "stock": {
+        "exit": 0,
+        "totals": [
+          2,
+          0,
+          0,
+          0
+        ],
+        "callbacks": {
+          "PASS": 2,
+          "FAIL": 0,
+          "ERROR": 0,
+          "SKIP": 0,
+          "XFAIL": 0,
+          "XPASS": 0,
+          "SUBPASS": 0,
+          "SUBERROR": 0,
+          "TRACE": 0,
+          "TRACE_UNAVAILABLE": 0,
+          "CHAIN": 0,
+          "CHAIN_UNAVAILABLE": 0
+        },
+        "complete": true
+      },
+      "O0": {
+        "exit": 0,
+        "totals": [
+          2,
+          0,
+          0,
+          0
+        ],
+        "callbacks": {
+          "PASS": 2,
+          "FAIL": 0,
+          "ERROR": 0,
+          "SKIP": 0,
+          "XFAIL": 0,
+          "XPASS": 0,
+          "SUBPASS": 0,
+          "SUBERROR": 0,
+          "TRACE": 0,
+          "TRACE_UNAVAILABLE": 0,
+          "CHAIN": 0,
+          "CHAIN_UNAVAILABLE": 0
+        },
+        "complete": true
+      },
+      "O3": {
+        "exit": 0,
+        "totals": [
+          2,
+          0,
+          0,
+          0
+        ],
+        "callbacks": {
+          "PASS": 2,
+          "FAIL": 0,
+          "ERROR": 0,
+          "SKIP": 0,
+          "XFAIL": 0,
+          "XPASS": 0,
+          "SUBPASS": 0,
+          "SUBERROR": 0,
+          "TRACE": 0,
+          "TRACE_UNAVAILABLE": 0,
+          "CHAIN": 0,
+          "CHAIN_UNAVAILABLE": 0
+        },
+        "complete": true
+      }
+    }
+  },
+  "additional": {
+    "imre_head": "8d3fe99e55c190cc72bfd78d2b5afe46de48e8ce",
+    "selection": "WarningsTest",
+    "parents": [
+      {
+        "canonical_id": "test.test_logging.WarningsTest.test_warnings",
+        "stock": "PASS",
+        "O0": "ERROR",
+        "O3": "ERROR",
+        "paired": false
+      },
+      {
+        "canonical_id": "test.test_logging.WarningsTest.test_warnings_no_handlers",
+        "stock": "PASS",
+        "O0": "ERROR",
+        "O3": "ERROR",
+        "paired": false
+      }
+    ],
+    "suites": {
+      "stock": {
+        "exit": 0,
+        "totals": [
+          2,
+          0,
+          0,
+          0
+        ],
+        "parent_callbacks": {
+          "PASS": 2
+        },
+        "stdout_sha256": "c94c5036683e51e08593b03dd0f188938038021cdf12b81cff62adb1f06e88ca",
+        "raw": "warnings/stock/suite.out"
+      },
+      "O0": {
+        "exit": 1,
+        "totals": [
+          2,
+          0,
+          2,
+          0
+        ],
+        "parent_callbacks": {
+          "ERROR": 2
+        },
+        "stdout_sha256": "1ac35084bb612b466971a31018f2167145bf43be90805b05c9dc9677a493fd8f",
+        "raw": "warnings/public/8d3fe99e55c190cc72bfd78d2b5afe46de48e8ce/O0/suite.out"
+      },
+      "O3": {
+        "exit": 1,
+        "totals": [
+          2,
+          0,
+          2,
+          0
+        ],
+        "parent_callbacks": {
+          "ERROR": 2
+        },
+        "stdout_sha256": "1ac35084bb612b466971a31018f2167145bf43be90805b05c9dc9677a493fd8f",
+        "raw": "warnings/public/8d3fe99e55c190cc72bfd78d2b5afe46de48e8ce/O3/suite.out"
+      }
+    },
+    "source_summary_sha256": "51c065503d2d7f0478934322b334d78eed843775c0a7c7a547742644f8b0e436"
+  },
+  "intact_receipts": "intact/",
+  "scope": "Only selected suites contribute keys. Whole-module exits are recorded separately under intact/.",
+  "keys_sha256": "96d86dbfdc06f8062761f0f9d9a03e2752d67863ac68bf903758a2d9a7a9ae5e"
+}
