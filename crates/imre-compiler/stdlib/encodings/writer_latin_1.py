@@ -12,3 +12,8 @@ class Codec(codecs.Codec):
 
 class StreamWriter(Codec,codecs.StreamWriter):
     pass
+
+
+class IncrementalDecoder(codecs.IncrementalDecoder):
+    def decode(self, input, final=False):
+        return codecs.latin_1_decode(input,self.errors)[0]
