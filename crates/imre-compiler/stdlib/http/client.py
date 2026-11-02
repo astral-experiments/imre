@@ -22,6 +22,9 @@ class HTTPMessage(Message):
             if name:
                 self._headers.append((name, value.lstrip(" \t\r\n").rstrip("\r\n")))
                 name = ""
+            # The MIME parser separates Unix envelope lines from header fields.
+            if line.startswith("From "):
+                continue
             colon = line.find(":")
             if colon < 0:
                 break
