@@ -1,5 +1,5 @@
 from annotationlib import Format, ForwardRef
-from typing import get_type_hints
+from typing import Annotated, ReadOnly, get_type_hints
 
 
 class Target:
@@ -63,6 +63,12 @@ def current():
         pass
 
     assert get_type_hints(register, format=3) == {"content": Target}
+    marker = object()
+    register.__annotations__ = {"content": list[Annotated[ReadOnly["Target"], marker]]}
+    assert get_type_hints(register) == {"content": list[Target]}
+    assert get_type_hints(register, include_extras=True) == {
+        "content": list[Annotated[ReadOnly[Target], marker]]
+    }
     register.__annotations__ = {"content": list["Undefined"]}
     assert get_type_hints(register, format=Format.FORWARDREF) == {"content": list[ForwardRef("Undefined")]}
 
