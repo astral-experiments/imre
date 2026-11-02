@@ -214,6 +214,14 @@ impl Context {
                 .get(parent)
                 .and_then(|&base| self.class_attr(base, name));
         }
+        if attr.is_none() && name == "__sizeof__" {
+            let owner = match self.heap.get(class) {
+                Value::Native(kind) if kind == "bool" => "int",
+                Value::Native(kind) if kind == defaultdict::CLASS => "dict",
+                _ => "object",
+            };
+            return self.builtins.get(object_size::descriptor(owner)?).copied();
+        }
         if attr.is_none()
             && name == "__reduce_ex__"
             && self.own_class_attr(class, "__reduce__").is_some()
@@ -266,6 +274,7 @@ impl Context {
             return Some(value);
         }
         match self.heap.get(class) {
+            Value::Native(kind) if name == "__sizeof__" => self.builtins.get(object_size::descriptor(kind)?).copied(),
             Value::Class { scope, .. } => self.namespace_binding(self.scope_data(*scope), name),
             // The native generic alias inherits the same subclass hook as source special forms.
             Value::Native(kind) if kind == "typing._GenericAlias" && name == "__init_subclass__" => {
@@ -3907,6 +3916,23 @@ impl Context {
                 return self.bind_attribute(init, obj, tuple);
             }
         }
+        if name == "__sizeof__" {
+            let class = if self.builtin_type_name(obj) == Some("type") {
+                obj
+            } else {
+                self.exact_type(obj)?
+            };
+            if let Some(callable) = self.class_attr(class, name) {
+                if class == obj {
+                    return Ok(callable);
+                }
+                return Ok(self.alloc(Value::Method {
+                    callable,
+                    receiver: obj,
+                    explicit: false,
+                }));
+            }
+        }
         if name == "__getstate__" {
             let callable = self.builtin("object.__getstate__");
             if self.builtin_type_name(obj) == Some("type") {
@@ -5627,6 +5653,14 @@ impl Context {
                     return Err(Error::new("TypeError", "cannot create 'sys.flags' instances"));
                 }
                 super::namedtuple::allocate(self, &args, &kwargs)
+            }
+            Value::Native(name)
+                if name
+                    .strip_suffix(".__sizeof__")
+                    .and_then(object_size::descriptor)
+                    .is_some() =>
+            {
+                self.native_sizeof(name.trim_end_matches(".__sizeof__"), &args, &kwargs)
             }
             Value::Native(name) if name == "object.__getstate__" => {
                 self.object_getstate(&args, &kwargs)

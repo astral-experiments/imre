@@ -937,7 +937,7 @@ pub(super) enum Value {
         class: Id,
         fields: indexmap::IndexMap<String, Id>,
         /// Storage addressed by the declaring member, independent of the instance dictionary.
-        member_values: Option<HashMap<Id, Id>>,
+        member_values: Option<hashbrown::HashMap<Id, Id, std::collections::hash_map::RandomState>>,
         /// Exact ordinary instance dictionary once exposed or replaced.
         namespace: Option<Id>,
         dictionary: Option<Id>,
@@ -2232,6 +2232,11 @@ impl Frame {
 }
 
 impl Heap {
+    /// Bytes reserved beside each boxed value in a slab slot, including alignment.
+    pub(super) fn size_overhead() -> usize {
+        size_of::<Slot>() - size_of::<Value>()
+    }
+
     pub fn new() -> Self {
         let mut heap = Self {
             slots: vec![
