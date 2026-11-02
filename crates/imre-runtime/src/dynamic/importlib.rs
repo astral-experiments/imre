@@ -29,6 +29,7 @@ impl Context {
     /// Enter the selected module in the startup __main__ namespace via the frozen runpy.
     pub(super) fn run_module_as_main(&mut self, name: String) -> Result<Id> {
         let mark = self.heap.temporary_mark();
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
         if let Some(bytes) =
             crate::run_start::wait_for_cleanup(true).map_err(crate::objects::errno_error)?
         {
