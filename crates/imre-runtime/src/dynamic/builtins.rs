@@ -596,6 +596,7 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
                     | "copy"
                     | "discard"
                     | "difference"
+                    | "remove"
                     | "difference_update"
                     | "update"
                     | "issuperset"

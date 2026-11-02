@@ -816,8 +816,10 @@ pub(super) fn method(
                 "descriptor '{method}' of 'dict' object needs an argument"
             )),
             Some(_) => type_error(format!("unbound method {name}() needs an argument")),
-            None if matches!(name, "set.difference_update" | "set.update")
-                || name.ends_with(".issubset")
+            None if matches!(
+                name,
+                "set.discard" | "set.remove" | "set.difference_update" | "set.update"
+            ) || name.ends_with(".issubset")
                 || name.ends_with(".difference") =>
             {
                 type_error(format!("unbound method {name}() needs an argument"))
@@ -848,7 +850,10 @@ pub(super) fn method(
                 ))
             }
         })?
-    } else if matches!(name, "set.difference_update" | "set.update") {
+    } else if matches!(
+        name,
+        "set.discard" | "set.remove" | "set.difference_update" | "set.update"
+    ) {
         let storage = ctx.scalar_value(object);
         if !matches!(ctx.heap.get(storage), Value::Set { frozen: false, .. }) {
             return Err(type_error(format!(
@@ -924,6 +929,7 @@ pub(super) fn method(
             | "set.issuperset"
             | "frozenset.issuperset"
             | "set.discard"
+            | "set.remove"
             | "set.difference_update"
             | "set.update"
             | "frozenset.copy"
@@ -1098,30 +1104,39 @@ pub(super) fn method(
             }
             Ok(NONE)
         }
-        "set.discard" => {
-            arity(name, args, 1, 1)?;
-            if !matches!(ctx.heap.get(receiver), Value::Set { frozen: false, .. }) {
-                return Err(type_error("descriptor 'discard' requires a 'set' object"));
-            }
-            let key = if let Value::Set {
-                entries,
-                frozen: false,
-            } = ctx.heap.get(args[0])
-            {
-                ctx.alloc(Value::Set {
-                    entries: entries.clone(),
-                    frozen: true,
-                })
-            } else {
-                args[0]
+        "set.discard" | "set.remove" => {
+            let key = super::one_positional_arg(name, args, kwargs)?;
+            let index = match ctx.find_dictionary_key(receiver, key, None) {
+                Ok((_, index)) => index,
+                Err(error) if ctx.is_builtin_error(&error, "TypeError") => {
+                    let Value::Set {
+                        frozen: false,
+                        entries,
+                    } = ctx.heap.get(ctx.scalar_value(key))
+                    else {
+                        return Err(error);
+                    };
+                    // Retry a mutable set key with its equivalent frozenset's hash.
+                    // Equality callbacks and KeyError still receive the original key.
+                    let entries = entries.try_clone()?;
+                    let frozen = ctx.alloc(Value::Set {
+                        entries,
+                        frozen: true,
+                    });
+                    let hash = ctx.dictionary_hash(frozen)?;
+                    ctx.find_dictionary_key(receiver, key, Some(hash))?.1
+                }
+                Err(error) => return Err(error),
             };
-            if let Some(index) = ctx.find_dictionary_key(receiver, key, None)?.1 {
+            if let Some(index) = index {
                 let Value::Set { entries, .. } = ctx.heap.get_mut(receiver) else {
                     unreachable!()
                 };
                 let (key, value) = entries.remove(index)?;
                 ctx.heap.weak_edge_removed(key);
                 ctx.heap.weak_edge_removed(value);
+            } else if name == "set.remove" {
+                return Err(ctx.lookup_error("KeyError", key));
             }
             Ok(NONE)
         }

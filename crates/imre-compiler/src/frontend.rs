@@ -2572,6 +2572,7 @@ impl<'a> Checker<'a> {
             _ if operation => "set binary operator",
             "__iand__" | "__ior__" | "__isub__" => "set in-place operator",
             "difference_update" => "set.difference_update",
+            "remove" => "set.remove",
             "update" => "set.update",
             "issubset" => "set.issubset",
             _ => return None,
