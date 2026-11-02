@@ -45,6 +45,7 @@ pub(super) struct Program {
 enum FunctionKind {
     Plain,
     Generator,
+    GeneratorLambda,
     Coroutine,
 }
 
@@ -1213,7 +1214,10 @@ impl Program {
                     let line = child.first_line;
                     let end = match child.lower_suspension(*lambda.body.clone(), line, true)? {
                         Some(body) => Instruction::Return(Some(body)),
-                        None => Instruction::ReturnSent,
+                        None => {
+                            child.kind = FunctionKind::GeneratorLambda;
+                            Instruction::ReturnSent
+                        }
                     };
                     child.instructions.push((line, end));
                     params
@@ -3098,6 +3102,8 @@ impl Context {
             #[serde(borrow)]
             private_scope: Option<(&'a str, bool)>,
             #[serde(default)]
+            generator_lambda: bool,
+            #[serde(default)]
             method_imports: std::collections::BTreeSet<String>,
         }
         let signature: Signature<'_> = serde_json::from_str(self.str_value(code.parameters)?)
@@ -3125,6 +3131,9 @@ impl Context {
             FunctionKind::Generator
         };
         program.lower_namespace(std::mem::take(&mut def.body), &lines, true)?;
+        if signature.generator_lambda {
+            program.kind = FunctionKind::GeneratorLambda;
+        }
         for (line, _) in &mut program.instructions {
             *line = body_line + line.saturating_sub(2);
         }
@@ -3302,7 +3311,15 @@ impl Context {
                     && cursor.thrown.is_none();
                 self.run_source(code, frame_scope, FrameOwner::Generator(id), cursor)
             })
-            .map_err(|error| self.frame_error(error, code));
+            .map_err(|error| {
+                // CPython emits the StopIteration handler for generator defs and genexprs,
+                // but a lambda that yields lets the original exception escape.
+                if matches!(&self.code_object(code).body, Body::Source(p) if p.kind == FunctionKind::GeneratorLambda) {
+                    error
+                } else {
+                    self.frame_error(error, code)
+                }
+            });
         let suspended_at_delegate = matches!(&result, Ok(Step::Yield(_, ip))
             if matches!(&self.code_object(code).body, Body::Source(program)
                 if matches!(program.instructions.get(*ip), Some((_, Instruction::Delegate)))));

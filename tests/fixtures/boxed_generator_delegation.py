@@ -222,6 +222,16 @@ def current():
     else:
         raise AssertionError("lambda did not return the sent value")
 
+    original = StopIteration(19)
+    suspended = (lambda: (yield))()
+    next(suspended)
+    try:
+        suspended.throw(original)
+    except StopIteration as caught:
+        assert caught is original
+    else:
+        raise AssertionError("throw discarded the StopIteration")
+
     nested = lambda: (lambda: (yield from (3, 4)))
     assert list(nested()()) == [3, 4]
 

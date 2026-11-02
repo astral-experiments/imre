@@ -761,6 +761,7 @@ impl Function<'_, '_> {
                 Some((first, text))
             }
             Body::YieldingLambda(expr) => {
+                signature["generator_lambda"] = json!(true);
                 let text = &self.source.text[expr.start().to_usize()..expr.end().to_usize()];
                 Some((expr.start(), format!("def _():\n return ({text})")))
             }
