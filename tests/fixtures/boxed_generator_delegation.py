@@ -60,6 +60,10 @@ def byte_chunks():
         yield b'a\x00' b'\xff', br'\n', b''
 
 
+def formatted_field(value, width):
+    yield f"{value = !a} {width:0{width}d}"
+
+
 def removed(items, pairs):
     for first, second in pairs:
         del items[first], items[second]
@@ -208,6 +212,7 @@ def current():
     assert pulls == ["outer"]
     assert next(values) == 1 and pulls == ["outer", 1]
     print(list(byte_chunks()))
+    assert list(formatted_field("é", 3)) == [r"value = '\xe9' 003"]
     prefix, *tail, final = RestartTail()
     assert (prefix, tail, final) == (1, [7], 8)
     assert list(starred([RestartTail()])) == [(1, [7], 8)]

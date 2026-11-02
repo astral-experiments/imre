@@ -3714,6 +3714,55 @@ impl Context {
         Ok(())
     }
 
+    fn join_source_format(&mut self, parts: Vec<Id>) -> Result<Id> {
+        // A lone field preserves the exact object returned by __format__.
+        if let [part] = parts.as_slice() {
+            return Ok(*part);
+        }
+        let empty = self.text("");
+        let items = self.alloc(Value::List(parts));
+        builtins::call(self, "str.join", &[empty, items], &[])
+    }
+
+    fn source_format_elements(
+        &mut self,
+        code: &Program,
+        scope: Id,
+        elements: &[ast::InterpolatedStringElement],
+        parts: &mut Vec<Id>,
+    ) -> Result<()> {
+        for element in elements {
+            let part = match element {
+                ast::InterpolatedStringElement::Literal(lit) if lit.value.is_empty() => continue,
+                ast::InterpolatedStringElement::Literal(lit) => self.text(&*lit.value),
+                ast::InterpolatedStringElement::Interpolation(field) => {
+                    if let Some(debug) = &field.debug_text {
+                        parts.push(self.text(debug.as_str()));
+                    }
+                    let mut value = self.source_expr(code, scope, &field.expression)?;
+                    let conversion = field.conversion.to_char().or_else(|| {
+                        (field.debug_text.is_some() && field.format_spec.is_none()).then_some('r')
+                    });
+                    if let Some(conversion) = conversion {
+                        value = builtins::format_conversion(self, value, conversion)?;
+                        self.heap.keep(value);
+                    }
+                    let spec = if let Some(spec) = &field.format_spec {
+                        let mut nested = Vec::new();
+                        self.source_format_elements(code, scope, &spec.elements, &mut nested)?;
+                        Some(self.join_source_format(nested)?)
+                    } else {
+                        None
+                    };
+                    builtins::format_value(self, value, spec)?
+                }
+            };
+            self.heap.keep(part);
+            parts.push(part);
+        }
+        Ok(())
+    }
+
     fn source_expr_inner(&mut self, code: &Program, scope: Id, expr: &ast::Expr) -> Result<Id> {
         use ast::Expr;
         let eval = |ctx: &mut Self, e: &Expr| ctx.source_expr(code, scope, e);
@@ -3755,6 +3804,21 @@ impl Context {
                 self.lookup(scope, name)
             }
             Expr::StringLiteral(_) | Expr::BytesLiteral(_) => Ok(code.literals[&expr.range()]),
+            Expr::FString(fstring) => {
+                let mut parts = Vec::new();
+                for part in fstring.value.iter() {
+                    match part {
+                        ast::FStringPartRef::Literal(lit) if !lit.value.is_empty() => {
+                            parts.push(self.text(&*lit.value));
+                        }
+                        ast::FStringPartRef::Literal(_) => {}
+                        ast::FStringPartRef::FString(part) => {
+                            self.source_format_elements(code, scope, &part.elements, &mut parts)?;
+                        }
+                    }
+                }
+                self.join_source_format(parts)
+            }
             Expr::TString(template) => {
                 let strings = code.literals[&expr.range()];
                 let mut interpolations = Vec::new();
