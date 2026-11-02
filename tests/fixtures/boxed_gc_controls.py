@@ -30,13 +30,13 @@ def current():
         immediate = ref(node, events.append)
         del node
         assert events == [immediate] and immediate() is None
-        pressure = [[] for _ in range(12000)]
+        pressure = dict.fromkeys(zip(range(12000)))
         assert delayed() is not None and len(pressure) == 12000
         assert gc.collect() >= 1 and events == [immediate, delayed]
         assert delayed() is None and not gc.isenabled()
         pending = cycle(events)
         assert gc.enable() is None and gc.enable() is None and gc.isenabled() is True
-        more = [[] for _ in range(32000)]
+        more = dict.fromkeys(zip(range(32000)))
         assert pending() is None and events == [immediate, delayed, pending]
         assert len(more) == 32000
 
