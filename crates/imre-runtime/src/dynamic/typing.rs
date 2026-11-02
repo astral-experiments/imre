@@ -399,6 +399,12 @@ fn typing_alias_helper(ctx: &mut Context, name: &str, args: Vec<Id>) -> Result<I
 /// Apply the subscription protocol for a supported type. Ordinary instance indexing
 /// continues through the object runtime.
 pub(super) fn subscribe(ctx: &mut Context, target: Id, index: Id) -> Option<Result<Id>> {
+    if matches!(ctx.heap.get(target), Value::TypeAlias { .. }) {
+        return Some(Err(Error::new(
+            "TypeError",
+            "Only generic type aliases are subscriptable",
+        )));
+    }
     if is_unpacked_pack(ctx, target) {
         return Some(Ok(index));
     }
@@ -827,6 +833,11 @@ pub(super) fn attribute(ctx: &mut Context, value: Id, name: &str) -> Option<Resu
             })
         }
         Value::Native(class)
+            if class == "typing.TypeAliasType" && matches!(name, "__name__" | "__qualname__") =>
+        {
+            ctx.text("TypeAliasType")
+        }
+        Value::Native(class)
             if name == "__module__"
                 && (class.starts_with("typing.")
                     || class == "types.GenericAlias"
@@ -856,6 +867,39 @@ pub(super) fn attribute(ctx: &mut Context, value: Id, name: &str) -> Option<Resu
             "__default__" => *default,
             "has_default" | "__reduce__" | "__iter__" => {
                 let callable = ctx.builtin(&format!("typing.TypeVarTuple.{name}"));
+                ctx.alloc(Value::Method {
+                    callable,
+                    receiver: value,
+                    explicit: false,
+                })
+            }
+            _ => return None,
+        },
+        Value::TypeAlias {
+            name: label,
+            evaluator,
+            cached,
+        } => match name {
+            "__name__" => *label,
+            "__parameters__" | "__type_params__" => ctx.heap.packed_tuple(Vec::new(), false),
+            "__module__" => return Some(ctx.lookup_attr(*evaluator, "__module__")),
+            "evaluate_value" => *evaluator,
+            "__value__" if let Some(result) = cached => *result,
+            "__value__" => {
+                let evaluator = *evaluator;
+                ctx.heap.keep(value);
+                return Some(
+                    ctx.call(evaluator, Vec::new(), Vec::new())
+                        .inspect(|&result| {
+                            let Value::TypeAlias { cached, .. } = ctx.heap.get_mut(value) else {
+                                unreachable!()
+                            };
+                            *cached = Some(result);
+                        }),
+                );
+            }
+            "__reduce__" => {
+                let callable = ctx.builtin("typing.TypeAliasType.__reduce__");
                 ctx.alloc(Value::Method {
                     callable,
                     receiver: value,
@@ -1402,6 +1446,12 @@ pub(super) fn call(
         };
         return Ok(allocate_alias(ctx, kind, origin, args, name, instantiable));
     }
+    if operation == "TypeAliasType" {
+        return Err(Error::new(
+            "NotImplementedError",
+            "explicit TypeAliasType construction",
+        ));
+    }
     if !kwargs.is_empty() {
         return Err(Error::new(
             "TypeError",
@@ -1409,6 +1459,11 @@ pub(super) fn call(
         ));
     }
     match (operation, args) {
+        ("TypeAliasType.__reduce__", [alias])
+            if let Value::TypeAlias { name, .. } = ctx.heap.get(*alias) =>
+        {
+            Ok(*name)
+        }
         ("NoDefault.__reduce__", [value]) if matches!(ctx.heap.get(*value), Value::NoDefault) => {
             Ok(ctx.text("NoDefault"))
         }
@@ -1697,7 +1752,8 @@ impl Context {
                 }
                 Ok(false)
             }
-            Value::TypeVar(_)
+            Value::TypeAlias { .. }
+            | Value::TypeVar(_)
             | Value::ParamSpec(_)
             | Value::ParamSpecMarker(_, _)
             | Value::TypeVarTuple { .. }
@@ -1813,6 +1869,7 @@ impl Context {
         name: &str,
         bases: &mut [Id],
         scope: Id,
+        namespace: Option<Id>,
     ) -> Result<Option<std::rc::Rc<[String]>>> {
         if let Some(marker) = self.namedtuple_base(bases) {
             let generic = self.classes.get("typing.Generic").copied();
@@ -1827,13 +1884,6 @@ impl Context {
                 if *base == marker {
                     *base = tuple;
                 }
-            }
-            if generic.is_some_and(|g| bases.contains(&g))
-                && self.scope_name(scope, "__class_getitem__").is_none()
-            {
-                let getitem = self.module_value("typing", "_namedtuple_generic_getitem")
-                    .ok_or_else(|| Error::new("RuntimeError", "missing NamedTuple subscription hook"))?;
-                self.bind_local(scope, "__class_getitem__", getitem);
             }
             let fields = self.scope_name(scope, "__annotations__");
             let (fields, provider) = if fields.is_none()
@@ -1867,17 +1917,25 @@ impl Context {
                 }
             }
             super::namedtuple::validate_fields(name, &named_fields, false)?;
-            if let Some(attr) = self.scope_data(scope).names.keys().find(|key| {
-                matches!(
-                    key.as_str(),
-                    "__new__" | "__init__" | "__slots__" | "__getnewargs__" |
-                    "_fields" | "_field_defaults" | "_make" | "_replace" | "_asdict" | "_source"
-                )
-            }) {
-                return Err(Error::new(
-                    "AttributeError",
-                    format!("Cannot overwrite NamedTuple attribute {attr}"),
-                ));
+            if let Some(namespace) = namespace {
+                // The factory installs user members one at a time after creating its tuple type.
+                let entries = self.dict_entries(namespace).expect("NamedTuple declaration").to_vec();
+                for (key, _) in entries {
+                    if let Ok(attr) = self.str_value(key)
+                        && !matches!(attr, "__module__" | "__name__" | "__annotations__" |
+                            "__annotate__" | "__annotate_func__" | "__annotations_cache__")
+                    {
+                        let attr = attr.to_owned();
+                        self.remove_binding(scope, &attr, key)?;
+                    }
+                }
+            }
+            if generic.is_some_and(|g| bases.contains(&g))
+                && self.scope_name(scope, "__class_getitem__").is_none()
+            {
+                let getitem = self.module_value("typing", "_namedtuple_generic_getitem")
+                    .ok_or_else(|| Error::new("RuntimeError", "missing NamedTuple subscription hook"))?;
+                self.bind_local(scope, "__class_getitem__", getitem);
             }
             let fields = super::namedtuple::bind_field_metadata(self, scope, &named_fields, &defaults);
             let defaults = self.alloc(Value::Tuple(defaults));
@@ -1920,7 +1978,7 @@ impl Context {
 
     /// Preserve the actual direct bases as well as the immutable C3 tuple exposed by type.
     pub(super) fn allocate_class(&mut self, name: String, scope: Id, bases: Vec<Id>) -> Result<Id> {
-        self.allocate_class_with_slots(name, scope, bases, ClassLayout::Specialized)
+        self.allocate_class_with_slots(name, scope, bases, ClassLayout::Specialized, None)
     }
 
     pub(super) fn allocate_class_with_slots(
@@ -1929,9 +1987,10 @@ impl Context {
         scope: Id,
         bases: Vec<Id>,
         layout: ClassLayout,
+        namedtuple_namespace: Option<Id>,
     ) -> Result<Id> {
         let mut bases = self.validate_class_bases(bases, layout)?;
-        let declared_fields = self.namedtuple_layout(&name, &mut bases, scope)?;
+        let declared_fields = self.namedtuple_layout(&name, &mut bases, scope, namedtuple_namespace)?;
         let ancestors = self.linearized_bases(&bases, false)?;
         let layout_base = self.member_layout_base(&bases)?;
         let slots = self.declared_slot_names(self.scope_name(scope, "__slots__"), layout_base)?;
@@ -1976,6 +2035,7 @@ impl Context {
                             | "typing.ParamSpecKwargs"
                             | "constevaluator"
                             | "typing.TypeVarTuple"
+                            | "typing.TypeAliasType"
                             | "NoDefaultType"
                             | "datetime.timezone"
                             | super::stdlib::flags::TYPE

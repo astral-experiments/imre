@@ -636,10 +636,10 @@ impl Context {
             dict,
             kind,
             entries.len(),
-            ordered.then(|| entries.order_state()),
+            ordered.then(|| (entries.order_state(), entries.ordered_nodes().len())),
             reverse.then(|| {
                 if ordered {
-                    entries.len()
+                    entries.ordered_nodes().len()
                 } else {
                     entries.insertion_end()
                 }
@@ -1917,6 +1917,11 @@ impl Context {
     fn builtin(&mut self, name: &str) -> Id {
         if let Some(&value) = self.builtins.get(name) {
             return value;
+        }
+        if name == "UnsupportedOperation" {
+            let class = stdlib::io::unsupported_operation(self);
+            self.builtins.insert(name.to_owned(), class);
+            return class;
         }
         let value = self.alloc(Value::Native(name.to_owned()));
         self.builtins.insert(name.to_owned(), value);

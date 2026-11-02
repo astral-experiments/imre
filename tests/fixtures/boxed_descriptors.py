@@ -135,6 +135,21 @@ def current():
     late.saved = 42
     print(late.write)
 
+    failure = ValueError("descriptor failed")
+
+    class Broken:
+        def __set_name__(self, owner, name):
+            raise failure
+
+    try:
+        class Bad:
+            attr = Broken()
+    except ValueError as error:
+        assert error is failure
+        assert error.__notes__ == ["Error calling __set_name__ on 'Broken' instance 'attr' in 'Bad'"]
+    else:
+        raise AssertionError("descriptor exception was lost")
+
     class ReplaceNext:
         def __set_name__(self, owner, name):
             owner.later = None

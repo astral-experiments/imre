@@ -521,7 +521,10 @@ pub(crate) enum IntrinsicModule {
     PosixPath,
     Urllib,
     UrllibParse,
+    UrllibRequest,
+    UrllibError,
     Email,
+    EmailHeaderValueParser,
     EmailUtils,
     Collections,
     CollectionsNative,
@@ -766,6 +769,8 @@ pub(crate) enum Intrinsic {
     CodecInfoClass,
     UnicodeNormalize { check: bool },
     ObjectRuntimeExport(&'static str),
+    /// Bind the object provider when this export is used, after checking typed calls.
+    ScopedObjectExport(&'static str),
     WeakProxy,
     WeakProxyClass { callable: bool },
     CodecLookup,
@@ -1002,9 +1007,12 @@ impl IntrinsicModule {
             "genericpath" => Some(Self::GenericPath),
             "posixpath" => Some(Self::PosixPath),
             "email" => Some(Self::Email),
+            "email._header_value_parser" => Some(Self::EmailHeaderValueParser),
             "email.utils" => Some(Self::EmailUtils),
             "urllib" => Some(Self::Urllib),
             "urllib.parse" => Some(Self::UrllibParse),
+            "urllib.request" => Some(Self::UrllibRequest),
+            "urllib.error" => Some(Self::UrllibError),
             "importlib" => Some(Self::Importlib),
             "importlib.abc" => Some(Self::ImportlibAbc),
             "importlib._abc" => Some(Self::ImportlibLoaderAbc),
@@ -1118,11 +1126,20 @@ impl IntrinsicModule {
                 Self::JsonDecoder
             }));
         }
+        if self == Self::Email && name == "_header_value_parser" {
+            return Some(Binding::IntrinsicModule(Self::EmailHeaderValueParser));
+        }
         if self == Self::Email && name == "utils" {
             return Some(Binding::IntrinsicModule(Self::EmailUtils));
         }
-        if self == Self::Urllib && name == "parse" {
-            return Some(Binding::IntrinsicModule(Self::UrllibParse));
+        if self == Self::Urllib {
+            let child = match name {
+                "parse" => Self::UrllibParse,
+                "request" => Self::UrllibRequest,
+                "error" => Self::UrllibError,
+                _ => return None,
+            };
+            return Some(Binding::IntrinsicModule(child));
         }
         if self == Self::ImportlibAbc && name == "machinery" {
             return Some(Binding::IntrinsicModule(Self::ImportlibMachinery));
@@ -1800,6 +1817,9 @@ impl IntrinsicModule {
             }
             (Self::Typing, "ParamSpecKwargs") => {
                 Intrinsic::ObjectRuntimeExport("typing.ParamSpecKwargs")
+            }
+            (Self::Typing, "TypeAliasType") => {
+                Intrinsic::ObjectRuntimeExport("typing.TypeAliasType")
             }
             (Self::Typing, "TypeVarTuple") => Intrinsic::ObjectRuntimeExport("typing.TypeVarTuple"),
             (Self::Typing, "Unpack") => Intrinsic::ObjectRuntimeExport("typing.Unpack"),
@@ -2492,6 +2512,33 @@ impl IntrinsicModule {
             (Self::PosixPath, "splitext") => Intrinsic::PosixPath(PosixPathOperation::Splitext),
             (Self::PosixPath, "normpath") => Intrinsic::PosixPath(PosixPathOperation::Normpath),
             (Self::PosixPath, "abspath") => Intrinsic::PosixPath(PosixPathOperation::Abspath),
+            (Self::UrllibRequest, "Request") => {
+                Intrinsic::ScopedObjectExport("urllib.request.Request")
+            }
+            (Self::UrllibRequest, "urlopen") => {
+                Intrinsic::ScopedObjectExport("urllib.request.urlopen")
+            }
+            (Self::UrllibRequest, "urlretrieve") => {
+                Intrinsic::ScopedObjectExport("urllib.request.urlretrieve")
+            }
+            (Self::UrllibRequest, "urlcleanup") => {
+                Intrinsic::ScopedObjectExport("urllib.request.urlcleanup")
+            }
+            (Self::UrllibRequest, "build_opener") => {
+                Intrinsic::ScopedObjectExport("urllib.request.build_opener")
+            }
+            (Self::UrllibRequest, "install_opener") => {
+                Intrinsic::ScopedObjectExport("urllib.request.install_opener")
+            }
+            (Self::UrllibError, "URLError") => {
+                Intrinsic::ScopedObjectExport("urllib.error.URLError")
+            }
+            (Self::UrllibError, "HTTPError") => {
+                Intrinsic::ScopedObjectExport("urllib.error.HTTPError")
+            }
+            (Self::UrllibError, "ContentTooShortError") => {
+                Intrinsic::ScopedObjectExport("urllib.error.ContentTooShortError")
+            }
             (Self::UrllibParse, "uses_relative") => {
                 Intrinsic::ObjectRuntimeExport("urllib.parse.uses_relative")
             }
@@ -2511,6 +2558,12 @@ impl IntrinsicModule {
             }
             (Self::UrllibParse, "unquote_plus") => {
                 Intrinsic::ObjectRuntimeExport("urllib.parse.unquote_plus")
+            }
+            (Self::EmailHeaderValueParser, "get_addr_spec") => {
+                Intrinsic::ObjectRuntimeExport("email._header_value_parser.get_addr_spec")
+            }
+            (Self::EmailHeaderValueParser, "get_angle_addr") => {
+                Intrinsic::ObjectRuntimeExport("email._header_value_parser.get_angle_addr")
             }
             (Self::EmailUtils, "parsedate_to_datetime") => Intrinsic::EmailParseDate,
             (Self::EmailUtils, "format_datetime") => Intrinsic::EmailFormatDateTime,
@@ -4520,6 +4573,7 @@ impl<'a> Loader<'a> {
                         })?;
                         if binding
                             == Binding::Intrinsic(Intrinsic::Fnmatch(FnmatchOperation::Parts))
+                            || module == IntrinsicModule::EmailHeaderValueParser
                         {
                             self.checked_builtin_imports.push((id, alias.range()));
                         }
@@ -4548,7 +4602,8 @@ impl<'a> Loader<'a> {
                         // A Sequence annotation keeps its typed list contract; value uses request boxing.
                         self.needs_object_imports |= !matches!(
                             module,
-                            IntrinsicModule::Marshal
+                            IntrinsicModule::EmailHeaderValueParser
+                                | IntrinsicModule::Marshal
                                 | IntrinsicModule::Pickle
                                 | IntrinsicModule::Struct
                                 | IntrinsicModule::Warnings

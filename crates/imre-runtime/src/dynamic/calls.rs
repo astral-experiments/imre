@@ -872,6 +872,7 @@ impl Context {
                     Value::IoMethod {
                         owner: defining,
                         name: "writelines",
+                        ..
                     } if self.direct_subclass(owner, *defining) => self.builtin("file.writelines"),
                     _ => value,
                 };
@@ -1258,6 +1259,7 @@ impl Context {
                             | "typing.ParamSpecKwargs"
                             | "constevaluator"
                             | "typing.TypeVarTuple"
+                            | "typing.TypeAliasType"
                             | "typing._UnpackGenericAlias"
                             | "NoDefaultType"
                             | "typing._GenericAlias"
@@ -1510,6 +1512,11 @@ impl Context {
                     self.error_kind_matches(kind, class, builtin)
                 }
             }
+            // Native operations on intrinsic file objects belong to the first I/O module.
+            Value::Class { .. } if error.kind == "UnsupportedOperation" => self
+                .builtins
+                .get("UnsupportedOperation")
+                .is_some_and(|&initial| self.subclass(initial, class)),
             _ => false,
         }
     }
@@ -1899,7 +1906,10 @@ impl Context {
                 && field.is_none()
                 && let Some(member) = member
                 && match self.heap.get(member) {
-                    Value::Native(symbol) => BuiltinDescriptor::lookup(symbol).is_some(),
+                    Value::Native(symbol) => {
+                        !stdlib::datetime::clock_classmethod(symbol)
+                            && BuiltinDescriptor::lookup(symbol).is_some()
+                    }
                     Value::IoMethod {
                         name: "writelines", ..
                     } => true,
@@ -5471,7 +5481,8 @@ impl Context {
                     format!("cannot create '{name}' instances"),
                 ))
             }
-            Value::Native(name) => stdlib::call(self, &name, &args, &kwargs),
+            Value::Native(name) => stdlib::call(self, &name, &args, &kwargs)
+                .map_err(|error| stdlib::io::qualify_error(self, error, None)),
             Value::StaticMethod { callable, .. } => self.call(callable, args, kwargs),
             Value::KeyWrapper { comparator, .. } => {
                 let object = stdlib::functools::key_argument("K", "obj", &args, &kwargs)?;
@@ -5481,10 +5492,19 @@ impl Context {
                 }))
             }
             Value::CodecDecoder(codec) => stdlib::codecs::decode(self, codec, &args, &kwargs),
-            Value::IoOpen { reader, writer, random } => {
-                stdlib::io::open_from_module(self, reader, writer, random, &args, &kwargs)
-            }
-            Value::IoMethod { owner, name } => stdlib::io::call(self, owner, name, &args, &kwargs),
+            Value::IoOpen {
+                reader,
+                writer,
+                random,
+                unsupported,
+            } => stdlib::io::open_from_module(self, reader, writer, random, &args, &kwargs)
+                .map_err(|error| stdlib::io::qualify_error(self, error, Some(unsupported))),
+            Value::IoMethod {
+                owner,
+                name,
+                unsupported,
+            } => stdlib::io::call(self, owner, name, &args, &kwargs)
+                .map_err(|error| stdlib::io::qualify_error(self, error, Some(unsupported))),
             Value::Partial {
                 function,
                 args: bound,
@@ -6157,18 +6177,26 @@ impl Context {
     }
 
     /// Initialize descriptor names in class body insertion order, before subclass hooks run.
-    pub(super) fn initialize_class_members(&mut self, class: Id, scope: Id) -> Result<()> {
+    pub(super) fn initialize_class_members(
+        &mut self,
+        class: Id,
+        scope: Id,
+        namedtuple_namespace: Option<Id>,
+    ) -> Result<()> {
         let Value::Scope(class_scope) = self.heap.get_mut(scope) else {
             unreachable!()
         };
         let body = class_scope.class_body.take().unwrap();
-        if let Some(namespace) = class_scope.class_namespace.as_ref()
-            && let Some(dict) = namespace.dictionary
+        let dictionary = class_scope.class_namespace.as_ref().and_then(|ns| ns.dictionary);
+        if let Some(dictionary) = dictionary
+            && class_scope.class_namespace.as_ref().unwrap().annotation_dict_cell.is_some()
         {
-            if namespace.annotation_dict_cell.is_some() {
-                class_scope.namespace = Some(dict);
-                class_scope.names.retain(|name, _| name == "__qualname__");
-            }
+            class_scope.namespace = Some(dictionary);
+            class_scope.names.retain(|name, _| name == "__qualname__");
+        }
+        if let Some(namespace) = namedtuple_namespace {
+            self.call_typing_helper("_namedtuple_set_names", vec![class, namespace]).map(|_| ())
+        } else if let Some(dict) = dictionary {
             let members = self.dict_entries(dict).expect("class dictionary").to_vec();
             for &(key, _) in &members {
                 self.heap.keep(key);
@@ -6205,10 +6233,40 @@ impl Context {
                 property.name = Some(name);
             } else if let Some(set_name) = self.bound_slot(value, "__set_name__")? {
                 let name = key_object(self, key);
-                self.call(set_name, vec![class, name], Vec::new())?;
+                if let Err(error) = self.call(set_name, vec![class, name], Vec::new()) {
+                    return Err(self.descriptor_name_error(error, class, name, value));
+                }
             }
         }
         Ok(())
+    }
+
+    /// Attach type.__new__'s descriptor context while preserving the raised exception's identity.
+    fn descriptor_name_error(&mut self, error: Error, class: Id, key: Id, value: Id) -> Error {
+        let exception = self.raised_instance(error);
+        self.heap.keep(exception);
+        let result = self.checked_format(key, true).and_then(|key| {
+            let descriptor = self.type_name(value);
+            let descriptor = &descriptor[..descriptor.floor_char_boundary(100)];
+            let owner = self.class_name(class);
+            let owner = &owner[..owner.floor_char_boundary(100)];
+            let note = self.text(format!(
+                "Error calling __set_name__ on '{descriptor}' instance {key} in '{owner}'"
+            ));
+            self.add_exception_note(exception, note)
+        });
+        if let Err(mut error) = result {
+            if error.trace.as_ref().and_then(|trace| trace.instance) != Some(exception) {
+                error.context = exception;
+            }
+            return error;
+        }
+        let Value::Raised(error) = self.heap.get(exception) else {
+            unreachable!()
+        };
+        let mut error = error.clone();
+        error.tracing().instance = Some(exception);
+        error
     }
 
     /// Bind ABCMeta.__new__'s positional-only parameters for direct and cooperating calls.
@@ -6506,6 +6564,20 @@ impl Context {
         let explicit_annotations = self.scope_name(scope, "__annotations__")
             .is_some_and(|value| value != annotations);
         let exposed_body = self.finish_class_namespace(scope)?;
+        // NamedTupleMeta visits the original values, including defaults replaced by tuple getters.
+        let namedtuple_namespace = if self.namedtuple_base(&bases).is_some() {
+            let namespace = if let Some(body) = &exposed_body {
+                body.mapping
+            } else {
+                let bindings = self.scope_data(scope).names.clone();
+                let entries = bindings.into_iter().map(|(name, value)| (self.text(name), value)).collect();
+                self.dict(entries)
+            };
+            self.heap.keep(namespace);
+            Some(namespace)
+        } else {
+            None
+        };
         if let Value::Scope(frame) = self.heap.get_mut(scope) {
             if let Some(namespace) = &mut frame.class_namespace {
                 namespace.annotation_scratch = None;
@@ -6616,7 +6688,7 @@ impl Context {
         } else {
             super::typing::ClassLayout::Specialized
         };
-        let class = self.allocate_class_with_slots(name.clone(), scope, bases, layout)?;
+        let class = self.allocate_class_with_slots(name.clone(), scope, bases, layout, namedtuple_namespace)?;
         let Value::Class { metaclass, .. } = self.heap.get_mut(class) else {
             unreachable!()
         };
@@ -6649,10 +6721,12 @@ impl Context {
                 .copied()
                 .filter(|&(key, _)| self.string_storage(key).is_none())
                 .collect::<Vec<_>>();
-            if let Some(cell) = body.annotation_cell {
+            // NamedTuple's annotation provider closes over the declaration namespace,
+            // which remains distinct from the generated type's dictionary.
+            if namedtuple_namespace.is_none() && let Some(cell) = body.annotation_cell {
                 self.heap.replace_cell(cell, Some(dict));
             }
-            if !extras.is_empty() {
+            if namedtuple_namespace.is_none() && !extras.is_empty() {
                 for (key, value) in extras {
                     self.put_item(dict, key, value)?;
                 }
@@ -6663,7 +6737,7 @@ impl Context {
                 )?;
             }
         }
-        self.initialize_class_members(class, scope)?;
+        self.initialize_class_members(class, scope, namedtuple_namespace)?;
         if let Some(kind) = enum_kind {
             let scalar = if let Some((member_type, first_enum)) = float_enum {
                 self.bind(scope, "_member_type_", member_type);

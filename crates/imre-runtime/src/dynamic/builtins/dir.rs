@@ -41,7 +41,13 @@ fn object_names(ctx: &mut Context, object: Id) -> Result<Id> {
             ctx.builtin("object")
         }
         Value::Class { .. } | Value::Native(_) => object,
-        Value::Count { .. } | Value::Repeat(_) | Value::Union(_) => ctx.exact_type(object)?,
+        Value::Count { .. }
+        | Value::Repeat(_)
+        | Value::Union(_)
+        | Value::Dict(_)
+        | Value::List(_)
+        | Value::Str(_)
+        | Value::SurrogateStr(_) => ctx.exact_type(object)?,
         Value::NamedTuple {
             class: Some(class), ..
         } if crate::dynamic::stdlib::os::stat::layout(class).is_some()
@@ -119,6 +125,35 @@ fn class_names(ctx: &Context, class: Id, names: &mut BTreeSet<String>) -> Result
                     .map(|&name| name.to_owned()),
             );
             names.extend(["__class__".to_owned(), "__doc__".to_owned()]);
+        }
+        Value::Native(name) if matches!(name.as_str(), "dict" | "list" | "str") => {
+            class_names(ctx, ctx.builtins["object"], names)?;
+            let (methods, slots): (&[&str], &[&str]) = match name.as_str() {
+                "dict" => (
+                    super::DICT_METHODS,
+                    &["__class_getitem__", "__or__", "__reversed__", "__ror__"],
+                ),
+                "list" => (
+                    super::LIST_METHODS,
+                    &[
+                        "__class_getitem__", "__contains__", "__delitem__", "__getitem__", "__imul__",
+                        "__iter__", "__len__", "__mul__", "__reversed__", "__rmul__", "__setitem__",
+                    ],
+                ),
+                _ => {
+                    // Passive attribute lookup in the compiler uses the same public str names.
+                    names.extend(
+                        include_str!("../../../native/str-method-names.txt")
+                            .split_ascii_whitespace()
+                            .map(str::to_owned),
+                    );
+                    (&[], &[
+                        "__add__", "__contains__", "__getitem__", "__getnewargs__", "__iter__",
+                        "__len__", "__mod__", "__mul__", "__rmod__", "__rmul__",
+                    ])
+                }
+            };
+            names.extend(methods.iter().chain(slots).map(|&name| name.to_owned()));
         }
         Value::Class {
             name: owner, scope, ..
