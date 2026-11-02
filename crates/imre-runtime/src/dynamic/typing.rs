@@ -1803,6 +1803,7 @@ impl Context {
         name: &str,
         bases: &mut [Id],
         scope: Id,
+        namespace: Option<Id>,
     ) -> Result<Option<std::rc::Rc<[String]>>> {
         if let Some(marker) = self.namedtuple_base(bases) {
             let generic = self.classes.get("typing.Generic").copied();
@@ -1817,13 +1818,6 @@ impl Context {
                 if *base == marker {
                     *base = tuple;
                 }
-            }
-            if generic.is_some_and(|g| bases.contains(&g))
-                && self.scope_name(scope, "__class_getitem__").is_none()
-            {
-                let getitem = self.module_value("typing", "_namedtuple_generic_getitem")
-                    .ok_or_else(|| Error::new("RuntimeError", "missing NamedTuple subscription hook"))?;
-                self.bind_local(scope, "__class_getitem__", getitem);
             }
             let fields = self.scope_name(scope, "__annotations__");
             let (fields, provider) = if fields.is_none()
@@ -1857,17 +1851,25 @@ impl Context {
                 }
             }
             super::namedtuple::validate_fields(name, &named_fields, false)?;
-            if let Some(attr) = self.scope_data(scope).names.keys().find(|key| {
-                matches!(
-                    key.as_str(),
-                    "__new__" | "__init__" | "__slots__" | "__getnewargs__" |
-                    "_fields" | "_field_defaults" | "_make" | "_replace" | "_asdict" | "_source"
-                )
-            }) {
-                return Err(Error::new(
-                    "AttributeError",
-                    format!("Cannot overwrite NamedTuple attribute {attr}"),
-                ));
+            if let Some(namespace) = namespace {
+                // The factory installs user members one at a time after creating its tuple type.
+                let entries = self.dict_entries(namespace).expect("NamedTuple declaration").to_vec();
+                for (key, _) in entries {
+                    if let Ok(attr) = self.str_value(key)
+                        && !matches!(attr, "__module__" | "__name__" | "__annotations__" |
+                            "__annotate__" | "__annotate_func__" | "__annotations_cache__")
+                    {
+                        let attr = attr.to_owned();
+                        self.remove_binding(scope, &attr, key)?;
+                    }
+                }
+            }
+            if generic.is_some_and(|g| bases.contains(&g))
+                && self.scope_name(scope, "__class_getitem__").is_none()
+            {
+                let getitem = self.module_value("typing", "_namedtuple_generic_getitem")
+                    .ok_or_else(|| Error::new("RuntimeError", "missing NamedTuple subscription hook"))?;
+                self.bind_local(scope, "__class_getitem__", getitem);
             }
             let fields = super::namedtuple::bind_field_metadata(self, scope, &named_fields, &defaults);
             let defaults = self.alloc(Value::Tuple(defaults));
@@ -1910,7 +1912,7 @@ impl Context {
 
     /// Preserve the actual direct bases as well as the immutable C3 tuple exposed by type.
     pub(super) fn allocate_class(&mut self, name: String, scope: Id, bases: Vec<Id>) -> Result<Id> {
-        self.allocate_class_with_slots(name, scope, bases, ClassLayout::Specialized)
+        self.allocate_class_with_slots(name, scope, bases, ClassLayout::Specialized, None)
     }
 
     pub(super) fn allocate_class_with_slots(
@@ -1919,9 +1921,10 @@ impl Context {
         scope: Id,
         bases: Vec<Id>,
         layout: ClassLayout,
+        namedtuple_namespace: Option<Id>,
     ) -> Result<Id> {
         let mut bases = self.validate_class_bases(bases, layout)?;
-        let declared_fields = self.namedtuple_layout(&name, &mut bases, scope)?;
+        let declared_fields = self.namedtuple_layout(&name, &mut bases, scope, namedtuple_namespace)?;
         let ancestors = self.linearized_bases(&bases, false)?;
         let layout_base = self.member_layout_base(&bases)?;
         let slots = self.declared_slot_names(self.scope_name(scope, "__slots__"), layout_base)?;
