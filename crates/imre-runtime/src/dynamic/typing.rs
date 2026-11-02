@@ -371,6 +371,15 @@ fn unpack_arg(ctx: &Context, alias: &Alias) -> Option<Id> {
     args.first().copied()
 }
 
+fn unpacked_tuple_args(ctx: &Context, arg: Id) -> Result<Id> {
+    let Value::GenericAlias(inner) = ctx.heap.get(arg) else { return Ok(NONE); };
+    if ctx.builtins.get("tuple") == Some(&inner.origin) {
+        Ok(inner.args)
+    } else {
+        Err(Error::new("TypeError", "Unpack[...] must be used with a tuple type"))
+    }
+}
+
 fn is_unpacked_pack(ctx: &Context, arg: Id) -> bool {
     matches!(ctx.heap.get(arg), Value::GenericAlias(alias)
         if unpack_arg(ctx, alias).is_some_and(|id| matches!(ctx.heap.get(id), Value::TypeVarTuple { .. })))
@@ -989,19 +998,102 @@ impl ParameterClass {
     }
 }
 
+/// Expose the implemented members owned by each alias class through its mapping proxy.
+pub(super) fn install_alias_class(ctx: &mut Context, owner: &str, class: Id) {
+    let mut entries = Vec::new();
+    match owner {
+        "typing.TypeAliasType" => {
+            let owner = "typing.TypeAliasType";
+            for field in [
+                "__module__",
+                "__value__",
+                "__parameters__",
+                "__type_params__",
+                "evaluate_value",
+            ] {
+                let get = ctx.builtin(&format!("{owner}.{field}"));
+                let member = ctx.alloc(Value::GetSetDescriptor {
+                    get,
+                    set: None,
+                    owner,
+                    name: field,
+                });
+                entries.push((ctx.text(field), member));
+            }
+            let name = ctx.readonly_member(owner, "__name__");
+            entries.push((ctx.text("__name__"), name));
+            let reduce = ctx.builtin("typing.TypeAliasType.__reduce__");
+            entries.push((ctx.text("__reduce__"), reduce));
+            entries.push((
+                ctx.text("__doc__"),
+                ctx.text(include_str!("../../native/typing-TypeAliasType-doc.txt")),
+            ));
+        }
+        "typing._GenericAlias" | "typing._UnpackGenericAlias" => {
+            entries.push((ctx.text("__doc__"), NONE));
+            entries.push((ctx.text("__module__"), ctx.text("typing")));
+            if owner == "typing._UnpackGenericAlias" {
+                for name in [
+                    "__typing_unpacked_tuple_args__",
+                    "__typing_is_unpacked_typevartuple__",
+                ] {
+                    let getter = ctx.builtin(&format!("{owner}.{name}"));
+                    let key = ctx.text(name);
+                    let property = super::property::Property::readonly(getter, key);
+                    entries.push((key, ctx.alloc(Value::Property(property))));
+                }
+            }
+        }
+        _ => return,
+    }
+    let dictionary = ctx.dict(entries);
+    ctx.native_type_dicts.insert(class, dictionary);
+}
+
+/// These two functions are defined by the source typing module after its native classes exist.
+pub(super) fn include_generic_alias_methods(
+    ctx: &mut Context,
+    class: Id,
+    dictionary: Id,
+) -> Result<()> {
+    for name in ["copy_with", "__reduce__"] {
+        if ctx.own_class_attr(class, name).is_none()
+            && let Some(method) = generic_alias_method(ctx, name)
+        {
+            let key = ctx.text(name);
+            ctx.put_item(dictionary, key, method)?;
+        }
+    }
+    Ok(())
+}
+
+fn generic_alias_method(ctx: &Context, name: &str) -> Option<Id> {
+    match name {
+        "copy_with" => ctx.class_attr(ctx.module_value("typing", "_SpecialGenericAlias")?, name),
+        "__reduce__" => ctx.module_value("typing", "_reduce_generic_alias"),
+        _ => None,
+    }
+}
+
 pub(super) fn attribute(ctx: &mut Context, value: Id, name: &str) -> Option<Result<Id>> {
     if name != "__name__"
-        && matches!(ctx.heap.get(value), Value::Native(class) if class.starts_with("typing.") && ctx.native_type_dicts.contains_key(&value))
-        && let Some(member) = ctx.own_class_attr(value, name)
+        && matches!(ctx.heap.get(value), Value::Native(class) if class.starts_with("typing.") && !(class == "typing.TypeAliasType" && name == "__module__") )
+        && let Some(&dictionary) = ctx.native_type_dicts.get(&value)
+        && let Some(member) = ctx.dict_named_item(dictionary, name)
     {
         return Some(Ok(member));
     }
     let attr = match ctx.heap.get(value) {
-        Value::Native(class) if class == "typing._GenericAlias" && name == "copy_with" => {
-            ctx.class_attr(ctx.module_value("typing", "_SpecialGenericAlias")?, name)?
+        Value::Native(class)
+            if matches!(
+                class.as_str(),
+                "typing._GenericAlias" | "typing._UnpackGenericAlias"
+            ) && matches!(name, "copy_with" | "__reduce__") =>
+        {
+            generic_alias_method(ctx, name)?
         }
         Value::GenericAlias(alias) if alias.kind == AliasKind::Generic && name == "copy_with" => {
-            let callable = ctx.class_attr(ctx.module_value("typing", "_SpecialGenericAlias")?, name)?;
+            let callable = generic_alias_method(ctx, name)?;
             ctx.alloc(Value::Method {
                 callable,
                 receiver: value,
@@ -1053,9 +1145,6 @@ pub(super) fn attribute(ctx: &mut Context, value: Id, name: &str) -> Option<Resu
         {
             let module = class.rsplit_once('.').unwrap().0.to_owned();
             ctx.text(module)
-        }
-        Value::Native(class) if name == "__reduce__" && class == "typing._GenericAlias" => {
-            ctx.module_value("typing", "_reduce_generic_alias")?
         }
         Value::Native(class) if name == "__reduce__" && class == "typing._CallableGenericAlias" => {
             ctx.module_value("typing", "_reduce_callable_alias")?
@@ -1207,17 +1296,7 @@ pub(super) fn attribute(ctx: &mut Context, value: Id, name: &str) -> Option<Resu
                 }
             }
             "__typing_unpacked_tuple_args__" if let Some(arg) = unpack_arg(ctx, a) => {
-                if let Value::GenericAlias(inner) = ctx.heap.get(arg) {
-                    if ctx.builtins.get("tuple") != Some(&inner.origin) {
-                        return Some(Err(Error::new(
-                            "TypeError",
-                            "Unpack[...] must be used with a tuple type",
-                        )));
-                    }
-                    inner.args
-                } else {
-                    NONE
-                }
+                return Some(unpacked_tuple_args(ctx, arg));
             }
             "__name__" | "__qualname__" | "__module__" if a.kind == AliasKind::Unpack => {
                 return Some(ctx.lookup_attr(a.origin, name));
@@ -1846,6 +1925,43 @@ pub(super) fn call(
         ));
     }
     match (operation, args) {
+        (operation, [receiver])
+            if let Some(field) = operation.strip_prefix("TypeAliasType.")
+                && matches!(
+                    field,
+                    "__module__"
+                        | "__value__"
+                        | "__parameters__"
+                        | "__type_params__"
+                        | "evaluate_value"
+                ) =>
+        {
+            ctx.read_member("typing.TypeAliasType", field, *receiver)
+        }
+        (operation, [receiver])
+            if let Some(field) = operation.strip_prefix("_UnpackGenericAlias.")
+                && matches!(
+                    field,
+                    "__typing_unpacked_tuple_args__" | "__typing_is_unpacked_typevartuple__"
+                ) =>
+        {
+            let origin = ctx.lookup_attr(*receiver, "__origin__")?;
+            let args = ctx.lookup_attr(*receiver, "__args__")?;
+            if ctx.module_value("typing", "Unpack") != Some(origin)
+                || !matches!(ctx.heap.get(args), Value::Tuple(items) if items.len() == 1)
+            {
+                return Err(Error::new("AssertionError", ""));
+            }
+            let index = ctx.int(0);
+            let arg = ctx.get_item(args, index)?;
+            if field == "__typing_is_unpacked_typevartuple__" {
+                return Ok(super::builtins::boolean(matches!(
+                    ctx.heap.get(arg),
+                    Value::TypeVarTuple { .. }
+                )));
+            }
+            unpacked_tuple_args(ctx, arg)
+        }
         ("TypeAliasType.__reduce__", [alias])
             if let Value::TypeAlias { name, .. } = ctx.heap.get(*alias) =>
         {

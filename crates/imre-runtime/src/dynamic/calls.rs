@@ -260,13 +260,10 @@ impl Context {
     }
 
     pub(super) fn own_class_attr(&self, class: Id, name: &str) -> Option<Id> {
-        if let Some(&dictionary) = self.native_type_dicts.get(&class) {
-            return self
-                .dict_entries(dictionary)?
-                .iter()
-                .find_map(|&(key, value)| {
-                    (self.str_value(key).ok() == Some(name)).then_some(value)
-                });
+        if let Some(&dictionary) = self.native_type_dicts.get(&class)
+            && let Some(value) = self.dict_named_item(dictionary, name)
+        {
+            return Some(value);
         }
         match self.heap.get(class) {
             Value::Class { scope, .. } => self.namespace_binding(self.scope_data(*scope), name),
@@ -1847,6 +1844,10 @@ impl Context {
         if name == "__dict__"
             && let Some(&dictionary) = self.native_type_dicts.get(&obj)
         {
+            if matches!(self.heap.get(obj), Value::Native(symbol) if symbol == "typing._GenericAlias")
+            {
+                typing::include_generic_alias_methods(self, obj, dictionary)?;
+            }
             return Ok(self.alloc(Value::MappingProxy(dictionary)));
         }
         if name == "__new__" {
@@ -2791,7 +2792,7 @@ impl Context {
                 owner,
                 name: field,
                 ..
-            } if matches!(owner, "int" | "typing.Union" | stdlib::hashlib::md5::CLASS)
+            } if matches!(owner, "int" | "typing.Union" | "typing.TypeAliasType" | stdlib::hashlib::md5::CLASS)
                 || HashState::is_provider_class(owner)
                 || owner == value::TEMPLATE_TYPE
                 || stdlib::datetime::members(owner).is_some() =>
@@ -2816,7 +2817,10 @@ impl Context {
                     }
                     "__get__" | "__set__" | "__delete__"
                         if name == "__get__"
-                            || matches!(owner, "int" | "typing.Union" | stdlib::hashlib::md5::CLASS)
+                            || matches!(
+                                owner,
+                                "int" | "typing.Union" | "typing.TypeAliasType" | stdlib::hashlib::md5::CLASS
+                            )
                             || HashState::is_provider_class(owner) =>
                     {
                         let symbol = format!("getset_descriptor.{name}");
