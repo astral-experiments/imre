@@ -4,6 +4,13 @@ import re
 
 def current():
     pattern = re.compile("(?P<word>x*)|é")
+    assert re.sub(pattern, "_", "éx", count=1) == "_éx"
+    compile_pattern = re.compile
+    try:
+        re.compile = None
+        assert re.sub(b"a", lambda m: m.group() + b"!", b"aA", flags=re.I) == b"a!A!"
+    finally:
+        re.compile = compile_pattern
     subject = "éx"
     seen = []
 
