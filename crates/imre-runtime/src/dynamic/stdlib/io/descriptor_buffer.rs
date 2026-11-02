@@ -556,11 +556,11 @@ impl BufferedFd {
             self.close(Some(ctx), true)?;
             return Ok(NONE);
         }
-        if let ("readinto", [target]) = (name, args)
-            && !self.reading
-        {
+        if let ("readinto", [target]) = (name, args) {
             files::readinto_target(ctx, *target)?;
-            return Err(Error::new("UnsupportedOperation", "read"));
+            if !self.reading {
+                return Err(Error::new("UnsupportedOperation", "read"));
+            }
         }
         let closed = || {
             Error::new(
