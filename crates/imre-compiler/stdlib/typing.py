@@ -1918,7 +1918,7 @@ def _should_unflatten_callable_args(typ, args):
 def _typevar_subst(self, arg):
     from types import GenericAlias
     arg = _type_check(arg, "Parameters to generic types must be types.")
-    if ((isinstance(arg, _typing._GenericAlias) and arg.__origin__ is Unpack)
+    if ((_typing.get_origin(arg) is Unpack and isinstance(arg, _typing._GenericAlias))
             or (isinstance(arg, GenericAlias) and getattr(arg, "__unpacked__", False))):
         raise TypeError(f"{arg} is not valid as type argument")
     return arg
@@ -2257,6 +2257,8 @@ def _substitute_alias_argument(arg, replacements):
         return arg
     for parameter, value in replacements.items():
         if arg is parameter:
+            if isinstance(parameter, _typing.TypeVar):
+                return parameter.__typing_subst__(value)
             if isinstance(parameter, _typing.TypeVarTuple):
                 raise TypeError("Substitution of bare TypeVarTuple is not supported")
             return value
@@ -2390,7 +2392,7 @@ def _specialize_generic_alias_uncached(alias, args):
         raise TypeError(f"Too {which} arguments for {alias}; actual {len(expanded)}, expected {expected}")
     replacements = {}
     for parameter, arg in zip(parameters, expanded):
-        if isinstance(parameter, _typing.TypeVarTuple):
+        if isinstance(parameter, (_typing.TypeVar, _typing.TypeVarTuple)):
             replacements[parameter] = arg
             continue
         if isinstance(parameter, _typing.ParamSpec):
