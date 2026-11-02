@@ -413,7 +413,20 @@ pub(super) fn is_descriptor_function(name: &str) -> bool {
             | "link"
             | "symlink"
     ) || (cfg!(unix) && matches!(name, "kill" | "getppid" | "waitstatus_to_exitcode"))
-        || (cfg!(target_os = "linux") && matches!(name, "posix_fallocate" | "sendfile"))
+        || (cfg!(target_os = "linux")
+            && matches!(name, "posix_fadvise" | "posix_fallocate" | "sendfile"))
+}
+
+/// Retry a POSIX call that returns its error number directly instead of setting errno.
+#[cfg(target_os = "linux")]
+fn posix_file_call(ctx: &mut Context, mut call: impl FnMut() -> i32) -> Result<Id> {
+    loop {
+        match call() {
+            0 => return Ok(NONE),
+            libc::EINTR => ctx.dispatch_signals()?,
+            code => return Err(super::os_error(std::io::Error::from_raw_os_error(code))),
+        }
+    }
 }
 
 /// Convert an index argument before issuing the descriptor syscall.
@@ -855,6 +868,23 @@ pub(super) fn descriptor(
         ));
     }
     #[cfg(target_os = "linux")]
+    if name == "posix_fadvise" {
+        let [fd, offset, length, advice] = args else {
+            return Err(Error::new(
+                "TypeError",
+                format!("posix_fadvise expected 4 arguments, got {}", args.len()),
+            ));
+        };
+        let fd = c_int(ctx, *fd)?;
+        let offset = file_offset(ctx, *offset)?;
+        let length = file_offset(ctx, *length)?;
+        let advice = c_int(ctx, *advice)?;
+        // SAFETY: posix_fadvise borrows the fd and takes the range and advice by value.
+        return posix_file_call(ctx, || unsafe {
+            libc::posix_fadvise(fd, offset, length, advice)
+        });
+    }
+    #[cfg(target_os = "linux")]
     if name == "posix_fallocate" {
         let [fd, offset, length] = args else {
             return Err(Error::new(
@@ -865,14 +895,8 @@ pub(super) fn descriptor(
         let fd = c_int(ctx, *fd)?;
         let offset = file_offset(ctx, *offset)?;
         let length = file_offset(ctx, *length)?;
-        loop {
-            // SAFETY: posix_fallocate borrows the fd and takes signed offsets by value.
-            match unsafe { libc::posix_fallocate(fd, offset, length) } {
-                0 => return Ok(NONE),
-                libc::EINTR => ctx.dispatch_signals()?,
-                code => return Err(super::os_error(std::io::Error::from_raw_os_error(code))),
-            }
-        }
+        // SAFETY: posix_fallocate borrows the fd and takes signed offsets by value.
+        return posix_file_call(ctx, || unsafe { libc::posix_fallocate(fd, offset, length) });
     }
     if name == "getppid" {
         if !args.is_empty() {

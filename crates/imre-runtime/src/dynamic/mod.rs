@@ -2797,7 +2797,18 @@ impl Context {
             "posix" if source.is_none() => {
                 stdlib::os::scheduler::initialize(self, scope);
                 stdlib::os::sysconf::initialize(self, module, scope);
-                for (attr, flag) in [("O_PATH", libc::O_PATH), ("O_TMPFILE", libc::O_TMPFILE)] {
+                let fadvise = self.builtin("posix.posix_fadvise");
+                self.bind(scope, "posix_fadvise", fadvise);
+                for (attr, flag) in [
+                    ("O_PATH", libc::O_PATH),
+                    ("O_TMPFILE", libc::O_TMPFILE),
+                    ("POSIX_FADV_NORMAL", libc::POSIX_FADV_NORMAL),
+                    ("POSIX_FADV_SEQUENTIAL", libc::POSIX_FADV_SEQUENTIAL),
+                    ("POSIX_FADV_RANDOM", libc::POSIX_FADV_RANDOM),
+                    ("POSIX_FADV_WILLNEED", libc::POSIX_FADV_WILLNEED),
+                    ("POSIX_FADV_DONTNEED", libc::POSIX_FADV_DONTNEED),
+                    ("POSIX_FADV_NOREUSE", libc::POSIX_FADV_NOREUSE),
+                ] {
                     let value = self.int(i64::from(flag));
                     self.bind(scope, attr, value);
                 }

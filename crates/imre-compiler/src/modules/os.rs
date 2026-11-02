@@ -18,7 +18,13 @@ pub(crate) fn credential_arity(name: &str) -> usize {
 pub(super) fn symbol(name: &str) -> Option<Intrinsic> {
     #[cfg(target_os = "linux")]
     {
-        let policy = match name {
+        let constant = match name {
+            "POSIX_FADV_NORMAL" => Some(libc::POSIX_FADV_NORMAL),
+            "POSIX_FADV_SEQUENTIAL" => Some(libc::POSIX_FADV_SEQUENTIAL),
+            "POSIX_FADV_RANDOM" => Some(libc::POSIX_FADV_RANDOM),
+            "POSIX_FADV_WILLNEED" => Some(libc::POSIX_FADV_WILLNEED),
+            "POSIX_FADV_DONTNEED" => Some(libc::POSIX_FADV_DONTNEED),
+            "POSIX_FADV_NOREUSE" => Some(libc::POSIX_FADV_NOREUSE),
             "SCHED_OTHER" => Some(libc::SCHED_OTHER),
             "SCHED_NORMAL" => Some(libc::SCHED_NORMAL),
             "SCHED_FIFO" => Some(libc::SCHED_FIFO),
@@ -29,8 +35,8 @@ pub(super) fn symbol(name: &str) -> Option<Intrinsic> {
             "SCHED_RESET_ON_FORK" => Some(libc::SCHED_RESET_ON_FORK),
             _ => None,
         };
-        if let Some(policy) = policy {
-            return Some(Intrinsic::IntConstant(i64::from(policy)));
+        if let Some(constant) = constant {
+            return Some(Intrinsic::IntConstant(i64::from(constant)));
         }
     }
     if cfg!(unix) {
@@ -83,6 +89,9 @@ pub(super) fn symbol(name: &str) -> Option<Intrinsic> {
         }
         "sched_getscheduler" if cfg!(target_os = "linux") => {
             Intrinsic::ObjectRuntimeExport("posix.sched_getscheduler")
+        }
+        "posix_fadvise" if cfg!(target_os = "linux") => {
+            Intrinsic::ObjectRuntimeExport("posix.posix_fadvise")
         }
         "posix_fallocate" if cfg!(target_os = "linux") => {
             Intrinsic::ObjectRuntimeExport("posix.posix_fallocate")
