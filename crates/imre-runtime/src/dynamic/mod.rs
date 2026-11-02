@@ -2222,6 +2222,9 @@ impl Context {
                         self.threads.default_stderr = Some(stream);
                     }
                 }
+                let stdin = stdlib::io::standard_input(self)?;
+                self.bind(scope, "stdin", stdin);
+                self.bind(scope, "__stdin__", stdin);
                 let jit = stdlib::jit_module(self)?;
                 self.bind(scope, "_jit", jit);
             }
