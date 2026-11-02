@@ -8,7 +8,7 @@ use ruff_python_ast::visitor::{self, Visitor};
 use ruff_text_size::{Ranged, TextSize};
 use serde_json::json;
 
-use super::{Body, Cleanup, Function, LoopTarget};
+use super::{Body, Cleanup, DefinitionName, Function, LoopTarget};
 
 #[derive(Default)]
 struct ClosureNames {
@@ -251,8 +251,7 @@ impl Function<'_, '_> {
                 {
                     let evaluator = self.define(
                         v.start(),
-                        name.id.as_str(),
-                        false,
+                        DefinitionName::Plain(name.id.as_str()),
                         None,
                         None,
                         None,
@@ -362,8 +361,7 @@ impl Function<'_, '_> {
                     };
                     let function = self.define(
                         v.decorator_list.first().map_or(v.start(), Ranged::start),
-                        self.source.private_names.definition(&v.name),
-                        self.declared_globals.contains(v.name.as_str()),
+                        DefinitionName::Binding(&v.name),
                         Some(&v.parameters),
                         v.returns.as_deref(),
                         crate::dynamic::function_type_params(v).filter(|_| self.prefix.is_empty()),
@@ -406,8 +404,7 @@ impl Function<'_, '_> {
                     }
                     let init = self.define(
                         v.decorator_list.first().map_or(v.start(), Ranged::start),
-                        self.source.private_names.definition(&v.name),
-                        self.declared_globals.contains(v.name.as_str()),
+                        DefinitionName::Binding(&v.name),
                         None,
                         None,
                         None,
@@ -618,13 +615,19 @@ impl Function<'_, '_> {
     pub(super) fn define(
         &mut self,
         start: TextSize,
-        name: &str,
-        global: bool,
+        name: DefinitionName<'_>,
         params: Option<&ast::Parameters>,
         returns: Option<&ast::Expr>,
         type_params: Option<&ast::TypeParams>,
         body: Body<'_>,
     ) -> String {
+        let (name, global) = match name {
+            DefinitionName::Binding(identifier) => (
+                self.source.private_names.definition(identifier),
+                self.declared_globals.contains(identifier.as_str()),
+            ),
+            DefinitionName::Plain(name) => (name, false),
+        };
         let qualname = if global {
             name.to_owned()
         } else {
