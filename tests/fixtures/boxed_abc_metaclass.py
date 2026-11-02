@@ -65,7 +65,8 @@ def current():
         __call__ = dict
 
     class Refined(Factory):
-        pass
+        def __call__(cls, *, key):
+            return cls, key
 
     class Base(metaclass=Factory):
         pass
@@ -77,7 +78,8 @@ def current():
         pass
 
     assert type(Base) is Factory and type(Combined) is Refined
-    assert Combined(key=42) == {"key": 42}
+    assert Base(key=42) == {"key": 42}
+    assert Combined(key=42) == (Combined, 42)
 
     class Other(type):
         pass
