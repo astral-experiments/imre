@@ -94,7 +94,7 @@ impl Encoder {
             let name = ctx.lookup_attr(class, "__name__")?;
             builtins::format_value(ctx, name, None)?
         } else {
-            qualified_type(ctx, class)?
+            super::super::qualified_type(ctx, class)?
         };
         let prefix = ctx.text("when serializing ");
         let prefix = ctx.concat_strings(prefix, name)?;
@@ -121,24 +121,4 @@ impl Encoder {
             ctx.add_exception_note(exception, note)
         }
     }
-}
-
-/// CPython's one-shot encoder formats %T using the actual class qualname
-/// and omits the module for builtins and classes defined in __main__.
-fn qualified_type(ctx: &mut Context, class: Id) -> Result<Id> {
-    let name = match ctx.own_class_attr(class, "__qualname__") {
-        Some(name) => name,
-        None => ctx.text(ctx.class_name(class).to_owned()),
-    };
-    let Some(module) = ctx.own_class_attr(class, "__module__") else {
-        return Ok(name);
-    };
-    if ctx.string_storage(module).is_none()
-        || matches!(ctx.str_value(module), Ok("builtins" | "__main__"))
-    {
-        return Ok(name);
-    }
-    let dot = ctx.text(".");
-    let prefix = ctx.concat_strings(module, dot)?;
-    ctx.concat_strings(prefix, name)
 }
