@@ -312,6 +312,12 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
                 // The native warning backend is the public warnings module; load it only on emission.
                 let imports = section("def _gcd_import(", "def _builtin_from_name(")
                     .replace("_warnings.warn(", "_warning_module().warn(");
+                let find = section("def _find_spec(", "def _sanity_check(")
+                    .replace("with _ImportLockContext():", "with _import_lock:")
+                    .replace("_warnings.warn('sys.meta_path is empty', ImportWarning)",
+                             "_import_warning('sys.meta_path is empty', 1254)");
+                let load = section("def _load_backward_compatible(", "def _load(spec):")
+                    .replace("_warnings.warn(msg, ImportWarning)", "_import_warning(msg, 921)");
                 // Preserve CPython's module creation hooks and its fresh/reload attribute rules.
                 [
                     include_str!("../../stdlib/importlib/legacy_source_loader.py"),
@@ -320,6 +326,9 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
                     section("def _call_with_frames_removed(", "def _requires_builtin("),
                     section("def _resolve_name(", "def _find_spec("),
                     section("def _sanity_check(", "_ERR_MSG_PREFIX ="),
+                    section("def _object_name(", "# Bootstrap-related"),
+                    &find,
+                    &load,
                     &imports,
                 ].join("\n")
             })))
@@ -345,8 +354,11 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
                     section("if _MS_WINDOWS:\n    def _path_join(", "def _write_atomic("),
                     section("def _get_cached(", "def _calc_mode("),
                     &spec,
-                    section("class _NamespacePath:", "class PathFinder:"),
+                    &section("class _NamespacePath:", "class FileFinder:")
+                        .replace("_warnings.warn('sys.path_hooks is empty', ImportWarning)",
+                                 "_warn_import(globals(), 'sys.path_hooks is empty', 1224, _is_frozen)"),
                     section("class FileFinder:", "class AppleFrameworkLoader("),
+                    include_str!("../../stdlib/importlib/registered_finder.py"),
                     section("def _set_bootstrap_module(", "def _install("),
                 ].join("\n")
             })))

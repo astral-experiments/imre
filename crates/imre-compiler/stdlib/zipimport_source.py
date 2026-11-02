@@ -53,6 +53,10 @@ class zipimporter(_ZipResourceLoader):
                     offset = line.find(marker, offset)
         return compile(text, filename, 'exec')
 
+    def create_module(self, spec):
+        # Use the standard module object allocated by module_from_spec.
+        return None
+
     def exec_module(self, module):
         exec(self.get_code(module.__name__), module.__dict__)
 

@@ -198,13 +198,13 @@ class _Context:
 
 
 def _discover(context):
-    finders = getattr(sys, 'meta_path', None)
-    if finders is not None:
-        for finder in finders:
-            resolver = getattr(finder, 'find_distributions', None)
-            if resolver:
-                yield from resolver(context)
-        return
+    for finder in sys.meta_path:
+        resolver = getattr(finder, 'find_distributions', None)
+        if resolver:
+            yield from resolver(context)
+
+
+def _path_distributions(context=_Context()):
     name = context.name
     normalized = _normalize(name) if name else ''
     legacy = name.lower().replace('-', '_') if name else ''
@@ -225,6 +225,15 @@ def _discover(context):
                 yield _ZipDistribution(archive, directory, entry)
             else:
                 yield Distribution.at(_join(directory, entry))
+
+
+class MetadataPathFinder:
+    find_distributions = staticmethod(_path_distributions)
+
+    @staticmethod
+    def invalidate_caches():
+        # The directory and archive readers open a fresh index for each search.
+        pass
 
 
 def _unique(dists):

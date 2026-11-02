@@ -523,6 +523,7 @@ impl Context {
         fullname: &str,
         original: &str,
         for_resource: bool,
+        finder: Option<Id>,
     ) -> Result<Id> {
         let key = self.text(fullname);
         let modules = self.public_modules()?;
@@ -589,6 +590,15 @@ impl Context {
             } else {
                 (fullname, self.sys_path, true)
             };
+        if self.import_registry_installed {
+            let name = self.text(fullname);
+            let path = if top_level { NONE } else { search };
+            let args = vec![name, path];
+            return match finder {
+                Some(finder) => self.call(finder, args, vec![]),
+                None => self.meta_call(NONE, "_find_spec", args),
+            };
+        }
         if stdlib::is_module(fullname) || self.is_frozen(fullname) {
             if for_resource {
                 return Ok(NONE);

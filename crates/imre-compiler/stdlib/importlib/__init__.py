@@ -32,12 +32,7 @@ _ModuleSpec = _bootstrap.ModuleSpec
 
 def invalidate_caches():
     """Call each meta path finder's cache invalidation hook when present."""
-    default = object()
-    finders = getattr(sys, "meta_path", default)
-    if finders is default:
-        # The closed native resolver has no public default meta path.
-        return _bootstrap_external._invalidate_default_path_caches()
-    for finder in finders:
+    for finder in sys.meta_path:
         if hasattr(finder, "invalidate_caches"):
             finder.invalidate_caches()
 
