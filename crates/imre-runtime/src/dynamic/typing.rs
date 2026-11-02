@@ -1227,13 +1227,13 @@ pub(super) fn install_alias_class(ctx: &mut Context, owner: &str, class: Id) {
     ctx.native_type_dicts.insert(class, dictionary);
 }
 
-/// Attach the methods defined by the source typing module after its native classes exist.
+/// These two functions are defined by the source typing module after its native classes exist.
 pub(super) fn include_generic_alias_methods(
     ctx: &mut Context,
     class: Id,
     dictionary: Id,
 ) -> Result<()> {
-    for name in ["copy_with", "__reduce__", "__iter__"] {
+    for name in ["copy_with", "__reduce__"] {
         if ctx.own_class_attr(class, name).is_none()
             && let Some(method) = generic_alias_method(ctx, name)
         {
@@ -1248,7 +1248,6 @@ fn generic_alias_method(ctx: &Context, name: &str) -> Option<Id> {
     match name {
         "copy_with" => ctx.class_attr(ctx.module_value("typing", "_SpecialGenericAlias")?, name),
         "__reduce__" => ctx.module_value("typing", "_reduce_generic_alias"),
-        "__iter__" => ctx.module_value("typing", "_iter_generic_alias"),
         _ => None,
     }
 }
@@ -1266,13 +1265,13 @@ pub(super) fn attribute(ctx: &mut Context, value: Id, name: &str) -> Option<Resu
             if name == "__iter__"
                 && matches!(
                     class.as_str(),
-                    "typing._GenericAlias"
-                        | "typing._LiteralGenericAlias"
+                    "typing._LiteralGenericAlias"
                         | "typing._ConcatenateGenericAlias"
                         | "typing._UnpackGenericAlias"
                 ) =>
         {
-            generic_alias_method(ctx, name)?
+            let base = ctx.builtin("typing._GenericAlias");
+            ctx.own_class_attr(base, name)?
         }
         Value::Native(class) if name == "__iter__" && class == "typing._CallableGenericAlias" => {
             NONE
@@ -2419,6 +2418,15 @@ pub(super) fn call(
         },
         ("_eval_type_expression", [text, globals, locals]) => {
             ctx.eval_type_expression(*text, *globals, *locals)
+        }
+        // Keep the source method (and its defining globals) on the native alias class.
+        ("_install_generic_alias_iter", [methods]) => {
+            let class = ctx.builtin("typing._GenericAlias");
+            let method = ctx.lookup_attr(*methods, "__iter__")?;
+            let key = ctx.text("__iter__");
+            let dictionary = ctx.native_type_dicts[&class];
+            ctx.put_item(dictionary, key, method)?;
+            Ok(class)
         }
         ("_get_alias_kind", [value]) => Ok(match ctx.heap.get(*value) {
             Value::GenericAlias(alias) => {

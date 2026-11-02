@@ -118,14 +118,21 @@ def current():
         assert type(it) is GeneratorType and iter(it) is it
         assert next(it) is Unpack[alias] and next(it, None) is None
         assert (*alias,) == (Unpack[alias],)
+    method = type(Pack[int]).__iter__
+    assert method.__name__ == method.__code__.co_name == "__iter__"
+    assert method.__qualname__ == method.__code__.co_qualname == "_GenericAlias.__iter__"
+    assert iter(Pack[int]).gi_code is method.__code__
     assert vararg_annotation(Pack[int, str]) is Unpack[Pack[int, str]]
     assert Callable[[int], str].__iter__ is None
     it = iter(Pack[int, str])
     try:
-        typing.Unpack = {Pack[int, str]: "late lookup"}
-        assert next(it) == "late lookup"
+        retained = Pack[int, str]
+        sys.modules["typing"] = ModuleType("replacement")
+        typing.Unpack = {retained: "late lookup"}
+        assert next(it) == next(iter(retained)) == "late lookup"
     finally:
         typing.Unpack = Unpack
+        sys.modules["typing"] = typing
 
     u = TypeVar("U")
     class Mixed(Generic[t, *ts, u]): pass
