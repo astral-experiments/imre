@@ -34,6 +34,15 @@ def current():
     clone.__setstate__(obj.__getstate__())
     assert clone == obj
 
+    @dataclass(slots=True, init=False, repr=False, eq=False)
+    class KeywordField:
+        __annotations__ = {"class": str}
+
+    instance = KeywordField()
+    setattr(instance, "class", "value")
+    assert getattr(instance, "class") == "value"
+    assert KeywordField.__dict__["class"].__objclass__ is KeywordField
+
     class Marker:
         pass
     Marker.__wrapped__ = Marker
