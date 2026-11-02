@@ -1333,6 +1333,10 @@ pub(super) fn attribute(ctx: &mut Context, value: Id, name: &str) -> Option<Resu
                 ctx.alloc(Value::Tuple(vec![parent]))
             }
             "copy_with" => ctx.module_value("typing", "_concatenate_copy_with")?,
+            "__reduce__" => {
+                let base = ctx.builtin("typing._GenericAlias");
+                return Some(ctx.lookup_attr(base, name));
+            }
             "__module__" => ctx.text("typing"),
             _ => return None,
         },
@@ -1374,13 +1378,7 @@ pub(super) fn attribute(ctx: &mut Context, value: Id, name: &str) -> Option<Resu
         Value::Native(class) if name == "__reduce__" && class == "typing._CallableGenericAlias" => {
             ctx.module_value("typing", "_reduce_callable_alias")?
         }
-        Value::GenericAlias(alias)
-            if name == "__reduce__"
-                && matches!(
-                    alias.kind,
-                    AliasKind::Generic | AliasKind::Callable | AliasKind::Unpack
-                ) =>
-        {
+        Value::GenericAlias(alias) if name == "__reduce__" && alias.kind.is_typing_alias() => {
             let class = ctx.builtin(alias.kind.class());
             return Some(
                 ctx.lookup_attr(class, name)

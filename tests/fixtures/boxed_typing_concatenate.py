@@ -1,4 +1,5 @@
 from collections import abc
+from operator import getitem
 import typing
 
 
@@ -8,6 +9,10 @@ T = typing.TypeVar("T")
 prefix = typing.Concatenate[T, P]
 assert type(prefix).__bases__ == (typing._GenericAlias,)
 assert isinstance(prefix, typing._GenericAlias)
+assert type(prefix).__reduce__ is typing._GenericAlias.__reduce__
+rebuild, args = prefix.__reduce__()
+assert rebuild is getitem and args == (typing.Concatenate, (T, P))
+assert rebuild(*args) is prefix
 assert prefix.__name__ == prefix.__qualname__ == "Concatenate"
 assert {"copy_with", "__origin__", "__args__", "__parameters__"} <= set(dir(prefix))
 assert prefix.copy_with((int, [])) == (int,)
