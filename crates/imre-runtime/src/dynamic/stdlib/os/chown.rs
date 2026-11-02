@@ -102,6 +102,7 @@ pub(super) fn call(
         let error = io::Error::last_os_error();
         if name == "fchown" {
             if error.kind() == io::ErrorKind::Interrupted {
+                ctx.dispatch_signals()?;
                 continue;
             }
             return Err(crate::objects::errno_error(error).into());
