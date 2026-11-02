@@ -384,13 +384,17 @@ pub(in super::super) fn remove_dict_item_hashed(
     let Some(index) = ctx.find_dictionary_key(dict, key, hash)?.1 else {
         return Ok(None);
     };
+    Ok(Some(remove_dict_entry(ctx, dict, index)?.1))
+}
+
+fn remove_dict_entry(ctx: &mut Context, dict: Id, index: usize) -> Result<(Id, Id)> {
     let (Value::Dict(entries) | Value::DefaultDict { entries, .. }) = ctx.heap.get_mut(dict) else {
         unreachable!("dictionary payload")
     };
     let (key, value) = entries.remove(index)?;
     ctx.heap.weak_edge_removed(key);
     ctx.heap.weak_edge_removed(value);
-    Ok(Some(value))
+    Ok((key, value))
 }
 
 pub(in super::super) fn set_member(
@@ -882,6 +886,7 @@ pub(super) fn method(
     if matches!(
         name,
         "dict.pop"
+            | "dict.popitem"
             | "set.issubset"
             | "frozenset.issubset"
             | "set.issuperset"
@@ -900,6 +905,20 @@ pub(super) fn method(
         positional(name, kwargs)?;
     }
     match name {
+        "dict.popitem" => {
+            if !args.is_empty() {
+                return Err(type_error(format!(
+                    "dict.popitem() takes no arguments ({} given)",
+                    args.len()
+                )));
+            }
+            let Some(last) = ctx.stored_entries(receiver).len().checked_sub(1) else {
+                let message = ctx.text("popitem(): dictionary is empty");
+                return Err(ctx.lookup_error("KeyError", message));
+            };
+            let (key, value) = remove_dict_entry(ctx, receiver, last)?;
+            Ok(ctx.alloc(Value::Tuple(vec![key, value])))
+        }
         "dict.copy" => {
             arity(name, args, 0, 0)?;
             copy_dict(ctx, object, receiver)

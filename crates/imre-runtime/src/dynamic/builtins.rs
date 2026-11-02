@@ -335,6 +335,7 @@ pub(super) const DICT_METHODS: &[&str] = &[
     "items",
     "keys",
     "pop",
+    "popitem",
     "setdefault",
     "update",
     "values",
