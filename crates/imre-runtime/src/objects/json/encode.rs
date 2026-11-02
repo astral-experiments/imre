@@ -1022,6 +1022,70 @@ fn grow_output(output: &mut String, additional: usize) -> Result<(), Error> {
         .map_err(|_| Error::new(Kind::MemoryError, "JSON output allocation failed"))
 }
 
+fn escaped_len(character: char, ensure_ascii: bool) -> usize {
+    match character {
+        '"' | '\\' | '\u{8}' | '\u{c}' | '\n' | '\r' | '\t' => 2,
+        '\0'..='\u{1f}' => 6,
+        _ if ensure_ascii && !(' '..='~').contains(&character) => 6 * character.len_utf16(),
+        _ => character.len_utf8(),
+    }
+}
+
+fn push_escape(output: &mut String, unit: u16) {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    output.push_str("\\u");
+    for shift in [12, 8, 4, 0] {
+        output.push(char::from(HEX[usize::from((unit >> shift) & 15)]));
+    }
+}
+
+fn push_character(output: &mut String, character: char, ensure_ascii: bool) {
+    match character {
+        '"' => output.push_str("\\\""),
+        '\\' => output.push_str("\\\\"),
+        '\u{8}' => output.push_str("\\b"),
+        '\u{c}' => output.push_str("\\f"),
+        '\n' => output.push_str("\\n"),
+        '\r' => output.push_str("\\r"),
+        '\t' => output.push_str("\\t"),
+        '\0'..='\u{1f}' => {
+            push_escape(output, character as u16);
+        }
+        _ if ensure_ascii && !(' '..='~').contains(&character) => {
+            let mut buffer = [0; 2];
+            for &unit in character.encode_utf16(&mut buffer).iter() {
+                push_escape(output, unit);
+            }
+        }
+        _ => output.push(character),
+    }
+}
+
+/// Quote a Python string containing surrogate code points. UTF-8 cannot carry
+/// raw surrogates, so record their insertion positions until the boxed result
+/// or stream fragment is materialized.
+pub(crate) fn write_codepoints(
+    output: &mut String,
+    surrogates: &mut Vec<(usize, u32)>,
+    points: &[u32],
+    ensure_ascii: bool,
+) -> Result<(), Error> {
+    write_fragment(output, "\"")?;
+    for &point in points {
+        if let Some(character) = char::from_u32(point) {
+            reserve_output(output, escaped_len(character, ensure_ascii))?;
+            push_character(output, character, ensure_ascii);
+        } else if ensure_ascii {
+            reserve_output(output, 6)?;
+            push_escape(output, point as u16);
+        } else {
+            surrogates.try_reserve(1).map_err(|_| Error::allocation())?;
+            surrogates.push((output.len(), point));
+        }
+    }
+    write_fragment(output, "\"")
+}
+
 /// JSON's escapes differ from Python repr, including UTF-16 surrogate pairs
 /// for non-BMP characters when ensure_ascii is requested.
 pub(crate) fn write_string(
@@ -1029,7 +1093,6 @@ pub(crate) fn write_string(
     value: &str,
     ensure_ascii: bool,
 ) -> Result<(), Error> {
-    const HEX: &[u8; 16] = b"0123456789abcdef";
     if plain_ascii(value.as_bytes()) {
         reserve_output(output, value.len().saturating_add(2))?;
         output.push('"');
@@ -1048,43 +1111,12 @@ pub(crate) fn write_string(
             // A worst-case reservation can fail even when the escaped chunk fits.
             let needed = chunk
                 .chars()
-                .map(|character| match character {
-                    '"' | '\\' | '\u{8}' | '\u{c}' | '\n' | '\r' | '\t' => 2,
-                    '\0'..='\u{1f}' => 6,
-                    _ if ensure_ascii && !(' '..='~').contains(&character) => {
-                        6 * character.len_utf16()
-                    }
-                    _ => character.len_utf8(),
-                })
+                .map(|character| escaped_len(character, ensure_ascii))
                 .sum();
             reserve_output(output, needed)?;
         }
         for character in chunk.chars() {
-            match character {
-                '"' => output.push_str("\\\""),
-                '\\' => output.push_str("\\\\"),
-                '\u{8}' => output.push_str("\\b"),
-                '\u{c}' => output.push_str("\\f"),
-                '\n' => output.push_str("\\n"),
-                '\r' => output.push_str("\\r"),
-                '\t' => output.push_str("\\t"),
-                '\0'..='\u{1f}' => {
-                    let value = character as usize;
-                    output.push_str("\\u00");
-                    output.push(char::from(HEX[value >> 4]));
-                    output.push(char::from(HEX[value & 15]));
-                }
-                _ if ensure_ascii && !(' '..='~').contains(&character) => {
-                    let mut buffer = [0; 2];
-                    for &unit in character.encode_utf16(&mut buffer).iter() {
-                        output.push_str("\\u");
-                        for shift in [12, 8, 4, 0] {
-                            output.push(char::from(HEX[usize::from((unit >> shift) & 15)]));
-                        }
-                    }
-                }
-                _ => output.push(character),
-            }
+            push_character(output, character, ensure_ascii);
         }
         rest = tail;
     }
