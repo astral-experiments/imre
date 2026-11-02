@@ -2686,6 +2686,13 @@ impl Context {
             let rlock = self.builtin(thread_rlock::CLASS);
             self.bind(scope, "RLock", rlock);
         }
+        #[cfg(target_os = "linux")]
+        if source.is_none() && matches!(name, "os" | "posix") {
+            let memfd = self.builtin("posix.memfd_create");
+            self.bind(scope, "memfd_create", memfd);
+            let close_on_exec = self.int(i64::from(libc::MFD_CLOEXEC));
+            self.bind(scope, "MFD_CLOEXEC", close_on_exec);
+        }
         if matches!(name, "io" | "_io") {
             let error = self.builtin("BlockingIOError");
             self.bind(scope, "BlockingIOError", error);

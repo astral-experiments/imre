@@ -1607,6 +1607,10 @@ pub(super) fn call(
     if name == "posix.urandom" {
         return os::urandom(ctx, args, kwargs);
     }
+    #[cfg(target_os = "linux")]
+    if name == "posix.memfd_create" {
+        return os::memfd_create(ctx, args, kwargs);
+    }
     if name == "posix.listdir" {
         return os::listdir(ctx, args, kwargs);
     }

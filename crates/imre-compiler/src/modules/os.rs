@@ -64,6 +64,11 @@ pub(super) fn symbol(name: &str) -> Option<Intrinsic> {
     }
     Some(match name {
         "access" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.access"),
+        #[cfg(target_os = "linux")]
+        "MFD_CLOEXEC" => Intrinsic::IntConstant(i64::from(libc::MFD_CLOEXEC)),
+        "memfd_create" if cfg!(target_os = "linux") => {
+            Intrinsic::ObjectRuntimeExport("posix.memfd_create")
+        }
         "urandom" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.urandom"),
         "utime" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.utime"),
         "chdir" if cfg!(unix) => Intrinsic::Chdir,
