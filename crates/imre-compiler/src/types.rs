@@ -1231,6 +1231,18 @@ impl Types {
         )
     }
 
+    /// Tuple layouts whose directories are provided by the native tuple namespace.
+    pub(crate) fn is_plain_or_declared_tuple(&self, ty: Type) -> bool {
+        match ty {
+            Type::VarTuple(_) => true,
+            Type::Tuple(id) => matches!(
+                self.0.borrow().shapes[id],
+                Shape::Tuple(_) | Shape::NamedTuple(TupleOrigin::Declaration(_), _)
+            ),
+            _ => false,
+        }
+    }
+
     pub(crate) fn tuple_origin(&self, ty: Type) -> Option<TupleOrigin> {
         let Type::Tuple(id) = ty else { return None };
         match self.0.borrow().shapes[id] {

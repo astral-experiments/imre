@@ -61,8 +61,68 @@ class Mixed:
         return ['a', 1]
 
 
+def tuple_directories():
+    from collections import namedtuple
+
+    extra = ['__add__', '__class_getitem__', '__contains__', '__getitem__', '__getnewargs__',
+             '__iter__', '__len__', '__mul__', '__rmul__', 'count', 'index']
+    assert dir(()) == dir(tuple) == sorted(dir(object) + extra)
+    point = namedtuple('Point', 'x y')
+    value = point(1, 2)
+    assert point.__name__ == 'Point' and '__name__' not in dir(value)
+    assert '__weakref__' not in dir(value) and '__dict__' not in dir(value)
+    assert 'x' in dir(value)
+    del point.x
+    assert 'x' not in dir(value) and value[0] == 1
+
+    class Child(point):
+        pass
+
+    child = Child(3, 4)
+    child.local = True
+    assert 'local' in dir(child) and 'x' not in dir(child)
+    assert '__dict__' in dir(child) and '__weakref__' not in dir(child)
+
+    class Slotted(tuple):
+        __slots__ = ()
+        __weakref__ = 'visible class binding'
+
+    Slotted.__slots__ = ('phantom',)
+    assert 'phantom' not in dir(Slotted()) and '__weakref__' in dir(Slotted())
+    del Slotted.__slots__
+    del Slotted.__weakref__
+    assert '__weakref__' not in dir(Slotted()) and '__dict__' not in dir(Slotted())
+
+    class Reported(tuple):
+        @property
+        def __dict__(self):
+            return {'stored': 1}
+
+        @property
+        def __class__(self):
+            return Exposed
+
+    names = dir(Reported())
+    assert 'visible' in names and 'stored' in names and 'count' not in names
+
+    class Meta(type):
+        @property
+        def __dict__(cls):
+            return {'announced': True}
+
+        @property
+        def __bases__(cls):
+            return ()
+
+    class Published(tuple, metaclass=Meta):
+        hidden = 1
+
+    assert dir(Published) == dir(Published()) == ['announced']
+
+
 def current():
     import _io
+    tuple_directories()
     operation = dir
     names = operation(len)
     print(names)
