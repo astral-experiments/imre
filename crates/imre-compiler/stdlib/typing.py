@@ -8,6 +8,7 @@ import typing as _typing
 from _collections_abc import Generator as _Generator, Iterable as _Iterable
 from _collections_abc import Mapping as _Mapping, MutableMapping as _MutableMapping, Sequence as _Sequence
 from _collections_abc import Reversible as _Reversible, Sized as _Sized
+from collections.abc import ByteString as _ByteString
 from collections import Counter as _Counter, defaultdict as _defaultdict
 from collections.abc import Callable as _ABCCallable
 from _collections_abc import AsyncIterator as _AsyncIterator, Awaitable as _Awaitable
@@ -1876,6 +1877,21 @@ class _SpecialGenericAlias(_NotIterable):
         return _typing.Union[other, self]
 
 
+class _DeprecatedGenericAlias(_SpecialGenericAlias):
+    def __init__(
+        self, origin, nparams, *, removal_version, inst=True, name=None
+    ):
+        super().__init__(origin, nparams, inst=inst, name=name)
+        self._removal_version = removal_version
+
+    def __instancecheck__(self, inst):
+        import warnings
+        warnings._deprecated(
+            f"{self.__module__}.{self._name}", remove=self._removal_version
+        )
+        return super().__instancecheck__(inst)
+
+
 class _TupleType(_SpecialGenericAlias):
     __module__ = __name__
 
@@ -1937,6 +1953,7 @@ MutableMapping = _SpecialGenericAlias(_MutableMapping, 2, name="MutableMapping")
 Iterable = _SpecialGenericAlias(_Iterable, 1, name="Iterable")
 Reversible = _SpecialGenericAlias(_Reversible, 1)
 Sized = _SpecialGenericAlias(_Sized, 0)
+ByteString = _DeprecatedGenericAlias(_ByteString, 0, removal_version=(3, 17))
 
 
 # Reconstruction callables and arguments used by CPython's typing alias reducers.
