@@ -10,6 +10,8 @@ def current():
     first = importlib.import_module(name)
     setter = first.setlocale
     original_error = first.Error
+    assert original_error.__doc__ is None
+    assert "__weakref__" in vars(original_error)
     assert setter.__self__ is first
     assert (original_error.__module__, original_error.__name__) == ("locale", "Error")
     try:

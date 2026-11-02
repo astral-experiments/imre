@@ -9,8 +9,10 @@ pub(in super::super) fn install(ctx: &mut Context, module: Id, scope: Id) -> Res
     ctx.bind(fields, "__module__", module_name);
     let qualname = ctx.text("Error");
     ctx.bind(fields, "__qualname__", qualname);
+    ctx.bind(fields, "__doc__", NONE);
     let base = ctx.builtin("Exception");
     let class = ctx.allocate_class("Error".into(), fields, vec![base])?;
+    ctx.install_weakref_descriptor(class, fields);
     let Value::Module { locale_error, .. } = ctx.heap.get_mut(module) else {
         unreachable!()
     };
