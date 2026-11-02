@@ -7,6 +7,7 @@ use std::rc::Rc;
 use super::super::{builtins, files, os_error};
 use super::file_io::RawFile;
 use super::{Context, Error, Id, NONE, Result, Value};
+use crate::objects::BoxedPipe;
 
 struct Descriptor {
     handle: Rc<RawFile>,
@@ -17,8 +18,7 @@ struct Descriptor {
 impl Descriptor {
     fn fd(&self) -> io::Result<RawFd> {
         self.handle
-            .fd
-            .get()
+            .live_fd()
             .ok_or_else(|| io::Error::from_raw_os_error(libc::EBADF))
     }
 }
@@ -101,12 +101,15 @@ fn read_once(reader: &mut BufReader<Descriptor>, size: i64) -> Result<Vec<u8>> {
 enum Buffer {
     Reader(BufReader<Descriptor>),
     Writer(BufWriter<Descriptor>),
+    // The process engine allocated this buffer before launching the child.
+    Pipe(BoxedPipe),
 }
 
 impl Buffer {
     fn position(&mut self) -> io::Result<u64> {
         // The caller can reposition the descriptor through another handle.
         match self {
+            Self::Pipe(_) => Err(io::Error::from_raw_os_error(libc::ESPIPE)),
             Self::Reader(r) => Ok(r
                 .get_mut()
                 .stream_position()?
@@ -117,6 +120,7 @@ impl Buffer {
 
     fn seek(&mut self, position: SeekFrom) -> io::Result<u64> {
         let reader = match self {
+            Self::Pipe(_) => return Err(io::Error::from_raw_os_error(libc::ESPIPE)),
             Self::Reader(r) => r,
             Self::Writer(w) => return w.seek(position),
         };
@@ -173,12 +177,22 @@ impl BufferedFd {
         }
     }
 
+    pub(super) fn pipe(raw: Id, handle: Rc<RawFile>, reading: bool, pipe: BoxedPipe) -> Self {
+        Self {
+            raw,
+            handle,
+            reading,
+            buffer: RefCell::new(Some(Buffer::Pipe(pipe))),
+        }
+    }
+
     pub(in crate::dynamic) fn closed(&self) -> bool {
-        self.handle.fd.get().is_none()
+        self.handle.live_fd().is_none()
     }
 
     fn close(&self) -> Result<()> {
         let pending = match self.buffer.borrow_mut().take() {
+            Some(Buffer::Pipe(pipe)) => pipe.close().map_err(Into::into),
             Some(Buffer::Writer(mut writer)) => {
                 let flushed = if self.closed() {
                     Ok(())
@@ -242,7 +256,7 @@ impl BufferedFd {
         } else {
             None
         };
-        let fd = self.handle.fd.get().ok_or_else(closed)?;
+        let fd = self.handle.live_fd().ok_or_else(closed)?;
         let mut slot = self.buffer.borrow_mut();
         let buffer = slot.as_mut().ok_or_else(closed)?;
         match name {
@@ -257,8 +271,10 @@ impl BufferedFd {
                 unsafe { libc::lseek(fd, 0, libc::SEEK_CUR) } >= 0,
             )),
             "flush" => {
-                if let Buffer::Writer(w) = buffer {
-                    w.flush().map_err(os_error)?;
+                match buffer {
+                    Buffer::Writer(w) => w.flush().map_err(os_error)?,
+                    Buffer::Pipe(pipe) => pipe.flush()?,
+                    Buffer::Reader(_) => {}
                 }
                 Ok(NONE)
             }
@@ -269,12 +285,17 @@ impl BufferedFd {
                     .map_err(os_error)? as i64,
             )),
             "read" | "read1" | "readline" => {
-                let Buffer::Reader(r) = buffer else {
+                if !self.reading {
                     return Err(Error::new("UnsupportedOperation", "read"));
-                };
+                }
                 let size = size.unwrap_or(-1);
                 if name == "read1" {
-                    return Ok(ctx.alloc(Value::Bytes(read_once(r, size)?)));
+                    let bytes = match buffer {
+                        Buffer::Reader(r) => read_once(r, size)?,
+                        Buffer::Pipe(pipe) => pipe.read1(usize::try_from(size).ok())?,
+                        Buffer::Writer(_) => unreachable!(),
+                    };
+                    return Ok(ctx.alloc(Value::Bytes(bytes)));
                 }
                 if name == "read" && size < -1 {
                     return Err(Error::new(
@@ -285,6 +306,13 @@ impl BufferedFd {
                 if name == "read" && size > crate::MAX_BYTES_LEN as i64 {
                     return Err(Error::new("OverflowError", "byte string is too large"));
                 }
+                if let Buffer::Pipe(pipe) = buffer {
+                    let data = pipe.read(usize::try_from(size).ok(), name == "readline")?;
+                    return Ok(ctx.alloc(Value::Bytes(data)));
+                }
+                let Buffer::Reader(r) = buffer else {
+                    unreachable!()
+                };
                 let mut reader = r.take(if size < 0 { u64::MAX } else { size as u64 });
                 let mut data = Vec::new();
                 if name == "readline" {
@@ -296,14 +324,22 @@ impl BufferedFd {
                 Ok(ctx.alloc(Value::Bytes(data)))
             }
             "readinto" if args.len() == 1 => {
-                let Buffer::Reader(r) = buffer else {
+                if !self.reading {
                     return Err(Error::new("UnsupportedOperation", "readinto"));
-                };
+                }
                 let Value::ByteArray(bytes) = ctx.heap.get_mut(args[0]) else {
                     return Err(Error::new(
                         "TypeError",
                         "readinto requires a writable buffer",
                     ));
+                };
+                if let Buffer::Pipe(pipe) = buffer {
+                    let data = pipe.read(Some(bytes.len()), false)?;
+                    bytes[..data.len()].copy_from_slice(&data);
+                    return Ok(ctx.int(data.len() as i64));
+                }
+                let Buffer::Reader(r) = buffer else {
+                    unreachable!()
                 };
                 let mut total = 0;
                 while total < bytes.len() {
@@ -316,11 +352,15 @@ impl BufferedFd {
                 Ok(ctx.int(total as i64))
             }
             "write" if args.len() == 1 => {
-                let Buffer::Writer(w) = buffer else {
+                if self.reading {
                     return Err(Error::new("UnsupportedOperation", "write"));
-                };
+                }
                 let data = ctx.bytes_like(args[0])?;
-                w.write_all(data).map_err(os_error)?;
+                match buffer {
+                    Buffer::Pipe(pipe) => pipe.write(data)?,
+                    Buffer::Writer(w) => w.write_all(data).map_err(os_error)?,
+                    Buffer::Reader(_) => unreachable!(),
+                }
                 Ok(ctx.int(data.len() as i64))
             }
             _ => Err(Error::new(
