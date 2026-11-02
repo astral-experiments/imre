@@ -2154,7 +2154,6 @@ impl Context {
                 &[
                     "__add__",
                     "__index__",
-                    "__trunc__",
                     "bit_length",
                     "from_bytes",
                     "to_bytes",
@@ -2165,7 +2164,6 @@ impl Context {
             "float" => &[
                 "__format__",
                 "__getformat__",
-                "__trunc__",
                 "as_integer_ratio",
                 "__repr__",
             ],
@@ -2182,7 +2180,11 @@ impl Context {
             weakref::REFERENCE_TYPE => weakref::REFERENCE_METHODS,
             _ => &[],
         };
-        for method in methods.iter().chain(builtins::set_operators(name)) {
+        for method in methods
+            .iter()
+            .chain(builtins::set_operators(name))
+            .chain(builtins::real_methods(name))
+        {
             self.builtin(&format!("{name}.{method}"));
         }
         value

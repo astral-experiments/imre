@@ -22,6 +22,16 @@ pub(super) fn exact_value(ctx: &mut Context, receiver: Id) -> Id {
     }
 }
 
+/// Truncate an int or float receiver without invoking subclass conversions.
+pub(super) fn truncate_real(ctx: &mut Context, receiver: Id) -> Result<Id> {
+    if let Value::Float(value) = *ctx.heap.get(ctx.scalar_value(receiver)) {
+        let integer = crate::floats::float_to_integer(value)?;
+        Ok(ctx.alloc(Value::Int(crate::Int::new(integer))))
+    } else {
+        Ok(exact_value(ctx, receiver))
+    }
+}
+
 /// Both read-only rational fields use the stored integer, bypassing subclass conversions.
 pub(super) fn rational_field(ctx: &mut Context, field: &str, args: &[Id]) -> Result<Id> {
     let [receiver] = *args else {

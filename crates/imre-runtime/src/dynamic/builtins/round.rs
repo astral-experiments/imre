@@ -15,6 +15,11 @@ pub(super) fn call(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> R
     if let Some(method) = ctx.bound_numeric_slot(value, "__round__")? {
         return ctx.call(method, digits.into_iter().collect(), Vec::new());
     }
+    native(ctx, value, digits)
+}
+
+/// Round the receiver's stored value, bypassing subclass overrides.
+pub(super) fn native(ctx: &mut Context, value: Id, digits: Option<Id>) -> Result<Id> {
     let scalar = ctx.scalar_value(value);
     if !matches!(
         ctx.heap.get(scalar),
