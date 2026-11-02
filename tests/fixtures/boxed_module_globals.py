@@ -78,6 +78,20 @@ def captured_class_metadata():
 
 
 def current():
+    import sys
+    module = sys.modules[__name__]
+    try:
+        getattr(module, 'missing_name')
+    except AttributeError as error:
+        assert str(error) == "module '" + module.__name__ + "' has no attribute 'missing_name'"
+    else:
+        raise AssertionError('lookup accepted a missing module attribute')
+    module.__getattr__ = lambda name: ('from hook', name)
+    try:
+        assert module.missing_name == ('from hook', 'missing_name')
+    finally:
+        del module.__getattr__
+
     captured_class_metadata()
     print(mutate_from_class(False), mutate_from_class(True))
     for child in (False, True):
