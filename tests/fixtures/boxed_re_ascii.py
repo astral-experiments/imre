@@ -191,6 +191,16 @@ def current():
         assert match.group(1) == word and match.span(1) == (0, len(word))
         assert doubled.fullmatch(word + wrong) is None
 
+    numbered = re.compile(r"(x)" * 10 + r"(k)(l)\119", re.I)
+    prefix = "x" * 10 + "Kl"
+    match = numbered.fullmatch(prefix + "k9")
+    assert match.group(11, 12) == ("K", "l") and match.span(11) == (10, 11)
+    assert numbered.fullmatch(prefix + "l9") is None
+
+    high = re.compile(b"(\xff)(\xfeB)\\2Z")
+    assert high.fullmatch(b"\xff\xfeB\xfeBZ").group(2) == b"\xfeB"
+    assert high.fullmatch(b"\xff\xfeB\xffBZ") is None
+
     for letter, other in (("s", "ſ"), ("i", "ı")):
         try:
             doubled = re.compile("(" + letter + r")\1", re.I)
