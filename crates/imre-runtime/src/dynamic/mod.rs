@@ -2083,22 +2083,22 @@ impl Context {
                 let external = self.module("_frozen_importlib_external")?;
                 self.bind(scope, "_bootstrap_external", external);
             }
-            "io" => stdlib::io::install(self, scope),
+            "io" => {
+                stdlib::io::install(self, scope);
+                let native = self.module("_io")?;
+                let decoder = self.lookup_attr(native, "IncrementalNewlineDecoder")?;
+                self.bind(scope, "IncrementalNewlineDecoder", decoder);
+            }
             "pickle" => stdlib::pickle::install(self, scope)?,
             "urllib.parse" => stdlib::urllib::initialize(self, scope),
             "_io" => {
+                stdlib::io::install_newline_decoder(self, scope);
                 self.module("io")?;
                 let open = self.builtin("open");
                 self.bind(scope, "open", open);
                 let text_encoding = self.builtin("_io.text_encoding");
                 self.bind(scope, "text_encoding", text_encoding);
-                for name in [
-                    "BytesIO",
-                    "StringIO",
-                    "TextIOWrapper",
-                    "FileIO",
-                    "IncrementalNewlineDecoder",
-                ] {
+                for name in ["BytesIO", "StringIO", "TextIOWrapper", "FileIO"] {
                     let class = self.builtins[&format!("_io.{name}")];
                     self.bind(scope, name, class);
                 }

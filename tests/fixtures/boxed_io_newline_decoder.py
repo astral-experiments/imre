@@ -1,5 +1,6 @@
 import _io
 import io
+import sys
 from io import IncrementalNewlineDecoder
 
 
@@ -56,3 +57,17 @@ def current():
         assert str(exc) == "IncrementalNewlineDecoder.__init__() not called"
     else:
         raise AssertionError("expected uninitialized decoder")
+
+    try:
+        del sys.modules["io"]
+        public = __import__("io")
+        assert public.IncrementalNewlineDecoder is decoder
+        del sys.modules["_io"]
+        fresh = __import__("_io").IncrementalNewlineDecoder
+        assert fresh is not decoder and public.IncrementalNewlineDecoder is decoder
+        assert wrapped.decode("x") == "x" and fresh(None, False).decode("y") == "y"
+        del sys.modules["io"]
+        assert __import__("io").IncrementalNewlineDecoder is fresh
+    finally:
+        sys.modules["io"] = io
+        sys.modules["_io"] = _io

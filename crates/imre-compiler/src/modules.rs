@@ -1573,7 +1573,10 @@ impl IntrinsicModule {
                 Intrinsic::ObjectRuntimeExport("io.open_code")
             }
             (Self::Io, "BytesIO") => Intrinsic::BytesIo,
-            (Self::Io | Self::IoNative, "IncrementalNewlineDecoder") => {
+            (Self::IoNative, "IncrementalNewlineDecoder") => {
+                Intrinsic::ObjectRuntimeExport("_io.IncrementalNewlineDecoder")
+            }
+            (Self::Io, "IncrementalNewlineDecoder") => {
                 Intrinsic::ObjectRuntimeExport("io.IncrementalNewlineDecoder")
             }
             (Self::Io | Self::IoNative, "FileIO") => Intrinsic::ObjectRuntimeExport("io.FileIO"),

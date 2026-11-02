@@ -124,14 +124,6 @@ pub(in super::super) fn install(ctx: &mut Context, module: Id) {
         ctx.bind(module, name, value);
     }
     let object = ctx.builtin("object");
-    let decoder = class(
-        ctx,
-        module,
-        "IncrementalNewlineDecoder",
-        object,
-        newline_decoder::METHODS,
-    );
-    ctx.builtins.insert(NEWLINE_DECODER.into(), decoder);
     let io = class(
         ctx,
         module,
@@ -196,6 +188,19 @@ pub(in super::super) fn install(ctx: &mut Context, module: Id) {
         ],
     );
     ctx.builtins.insert("_io.StringIO".into(), string_io);
+}
+
+/// Each native module instance owns its decoder type, even when a previous
+/// instance of _io or the public io wrapper still references the old type.
+pub(in crate::dynamic) fn install_newline_decoder(ctx: &mut Context, module: Id) {
+    let object = ctx.builtin("object");
+    class(
+        ctx,
+        module,
+        "IncrementalNewlineDecoder",
+        object,
+        newline_decoder::METHODS,
+    );
 }
 
 fn class(ctx: &mut Context, module: Id, name: &str, base: Id, methods: &[&'static str]) -> Id {
@@ -358,9 +363,10 @@ pub(in super::super) fn call(
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
     let bytes_io = ctx.builtins.get("_io.BytesIO").copied();
+    let decoder = ctx.immutable_class_name(owner) == Some(NEWLINE_DECODER);
     let descr = if bytes_io == Some(owner) {
         Some("BytesIO")
-    } else if ctx.builtins.get(NEWLINE_DECODER) == Some(&owner) {
+    } else if decoder {
         Some("IncrementalNewlineDecoder")
     } else {
         None
@@ -394,7 +400,7 @@ pub(in super::super) fn call(
         };
         return Err(Error::new("TypeError", message));
     }
-    if ctx.builtins.get(NEWLINE_DECODER) == Some(&owner) {
+    if decoder {
         return newline_decoder::call(ctx, receiver, name, rest, kwargs);
     }
     if bytes_io != Some(owner)

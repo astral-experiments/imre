@@ -2997,15 +2997,21 @@ impl Context {
         }
     }
 
+    /// Identify the native descriptor owner by its class namespace, including
+    /// classes that outlive their original entry in the import registry.
+    pub(super) fn immutable_class_name(&self, class: Id) -> Option<&'static str> {
+        let Value::Class { scope, .. } = self.heap.get(class) else {
+            return None;
+        };
+        self.scope_data(*scope)
+            .class_namespace
+            .as_ref()?
+            .immutable_name
+    }
+
     /// Honor static type immutability without restricting writes to Python subclasses.
     fn check_class_write(&self, obj: Id, name: &str) -> Result<()> {
-        if let Value::Class { scope, .. } = self.heap.get(obj)
-            && let Some(class) = self
-                .scope_data(*scope)
-                .class_namespace
-                .as_ref()
-                .and_then(|ns| ns.immutable_name)
-        {
+        if let Some(class) = self.immutable_class_name(obj) {
             return Err(Error::new(
                 "TypeError",
                 format!("cannot set '{name}' attribute of immutable type '{class}'"),
@@ -3989,7 +3995,7 @@ impl Context {
             Value::Class { .. }
                 if self.classes.get("typing.Generic") == Some(&base)
                     || self.classes.get("typing.Protocol") == Some(&base)
-                    || self.builtins.get(stdlib::io::NEWLINE_DECODER) == Some(&base) =>
+                    || self.immutable_class_name(base) == Some(stdlib::io::NEWLINE_DECODER) =>
             {
                 None
             }
