@@ -1130,7 +1130,7 @@ impl Context {
                 reverse,
             } => {
                 let (deque, state, mut remaining, reverse) = (*deque, *state, *remaining, *reverse);
-                let Value::Deque(ring) = self.heap.get(deque) else {
+                let Value::Deque(ring) = self.heap.get(self.scalar_value(deque)) else {
                     unreachable!()
                 };
                 let item = ring
@@ -2080,6 +2080,9 @@ impl Context {
         }
         let value = self.alloc(Value::Native(name.to_owned()));
         self.builtins.insert(name.to_owned(), value);
+        if name == deque::CLASS {
+            deque::install(self);
+        }
         if let Some(owner) = stdlib::itertools::cursor_type(name) {
             stdlib::itertools::install_namespace(self, value, owner);
         }

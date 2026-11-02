@@ -268,4 +268,39 @@ def current():
     else:
         raise AssertionError("deque repr accepted a list")
 
+    class Recorded(deque):
+        def __new__(cls, *args, **kwargs):
+            result = super().__new__(cls, *args, **kwargs)
+            result.allocated = len(args)
+            return result
+
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self.source = args[0]
+
+    derived = Recorded([marker, 1, 2], maxlen=2)
+    derived.extra = 1
+    duplicate = derived.copy()
+    assert type(duplicate) is Recorded and duplicate is not derived
+    assert derived.allocated == 1 and duplicate.allocated == 2
+    assert duplicate.source is derived and not hasattr(duplicate, "extra")
+    assert derived.maxlen == duplicate.maxlen == 2 and list(duplicate) == [1, 2]
+    assert deque.pop.__get__(derived).__self__ is derived
+    assert deque.__iadd__(derived, derived) is derived and list(derived) == [1, 2]
+    try:
+        derived.maxlen = 20
+    except AttributeError:
+        assert derived.maxlen == 2
+    else:
+        raise AssertionError("writable deque maxlen")
+
+    class EmptyView(deque):
+        def __iter__(self):
+            return iter(())
+
+    derived = EmptyView([1, 2])
+    assert list(derived) == [] and list(deque.__iter__(derived)) == [1, 2]
+    assert type(derived.copy()) is EmptyView and len(derived.copy()) == 0
+    assert repr(derived) == "EmptyView([])"
+
     print("deque passed")

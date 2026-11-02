@@ -354,7 +354,8 @@ impl Context {
                         | "module"
                         | super::thread_local::CLASS
                         | weakref::REFERENCE_TYPE
-                ) || stdlib::datetime::members(kind)
+                ) || (kind == super::deque::CLASS && (super::deque::member(name).is_some() || matches!(name, "__new__" | "maxlen")))
+                    || stdlib::datetime::members(kind)
                     .is_some_and(|members| members.owns(name))
                     || (kind == stdlib::fixed_structseq::SCHED_PARAM
                         && matches!(name, "__reduce__" | "__replace__"))
@@ -2803,7 +2804,7 @@ impl Context {
                 owner,
                 name: field,
                 ..
-            } if matches!(owner, "int" | "typing.Union" | "typing.TypeAliasType" | stdlib::hashlib::md5::CLASS)
+            } if matches!(owner, "int" | super::deque::CLASS | "typing.Union" | "typing.TypeAliasType" | stdlib::hashlib::md5::CLASS)
                 || HashState::is_provider_class(owner)
                 || owner == value::TEMPLATE_TYPE
                 || stdlib::datetime::members(owner).is_some() =>
@@ -2944,7 +2945,7 @@ impl Context {
                     {
                         return Ok(self.builtin(&format!("{class}.{name}")));
                     }
-                    _ if class == super::deque::CLASS && super::deque::member(name).is_some() => {
+                    _ if class == super::deque::CLASS && (super::deque::member(name).is_some() || matches!(name, "__new__" | "maxlen")) => {
                         return Ok(self.builtin(&format!("{class}.{name}")));
                     }
                     _ => {}
