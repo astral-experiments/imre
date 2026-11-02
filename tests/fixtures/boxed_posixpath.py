@@ -76,6 +76,19 @@ def current():
         assert error.filename == missing
     else:
         raise AssertionError("missing file unexpectedly had a size")
+    result = os.stat(__file__)
+    for name, expected in (
+        ("getmtime", result.st_mtime), ("getatime", result.st_atime), ("getctime", result.st_ctime),
+    ):
+        function = getattr(genericpath, name)
+        assert function is getattr(posixpath, name) is getattr(os.path, name)
+        assert function(filename=Path(__file__)) == expected
+        try:
+            function(missing)
+        except FileNotFoundError as error:
+            assert error.filename == missing
+        else:
+            raise AssertionError("missing file unexpectedly had a timestamp")
     assert os.path.exists is posixpath.exists is genericpath.exists
     assert os.path.lexists is posixpath.lexists is genericpath.lexists
     assert os.path.lexists(Path(__file__)) and not os.path.lexists(missing)
