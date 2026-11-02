@@ -550,7 +550,12 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
             "pattern"
         }
         Value::RegexScanner { .. } if matches!(attr, "match" | "search") => "scanner",
-        Value::RegexMatch(_) if matches!(attr, "group" | "groups" | "start" | "end" | "span") => {
+        Value::RegexMatch(_)
+            if matches!(
+                attr,
+                "group" | "groups" | "groupdict" | "start" | "end" | "span"
+            ) =>
+        {
             "match"
         }
         Value::Map { .. } if matches!(attr, "__iter__" | "__next__") => "map",

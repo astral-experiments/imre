@@ -588,6 +588,23 @@ pub(super) fn match_groups(ctx: &mut Context, receiver: Id, default: Id) -> Resu
     Ok(ctx.alloc(Value::Tuple(groups)))
 }
 
+pub(super) fn match_groupdict(ctx: &mut Context, receiver: Id, default: Id) -> Result<Id> {
+    let m = matched(ctx, receiver)?;
+    let mut fields = Vec::new();
+    for index in 1..m.spans.len() {
+        if let Some(name) = m
+            .pattern(ctx)
+            .regex
+            .group_info()
+            .to_name(PatternID::ZERO, index)
+        {
+            let key = ctx.text(name.to_owned());
+            fields.push((key, m.group(ctx, index, default)?));
+        }
+    }
+    Ok(ctx.dict(fields))
+}
+
 fn group_value(data: &[u8], bytes: bool) -> Value {
     if bytes {
         Value::Bytes(data.to_vec())

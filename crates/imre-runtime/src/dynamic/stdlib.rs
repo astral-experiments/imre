@@ -1941,7 +1941,7 @@ pub(super) fn call(
         | "file.write" | "warnings.warn" => (2, &[]),
         "match.group" | "os.path.join" => (usize::MAX, &[]),
         "collections.defaultdict.__missing__" => (2, &[]),
-        "match.groups" => (2, &["default"]),
+        "match.groups" | "match.groupdict" => (2, &["default"]),
         "match.start" | "match.end" | "match.span" => (2, &[]),
         "scanner.match" | "scanner.search" => (1, &[]),
         "sys.exc_info" | "sys.exception" => (0, &[]),
@@ -2277,12 +2277,14 @@ pub(super) fn call(
         {
             return files::call(ctx, name, args, kwargs);
         }
-        "match.groups" => {
-            return regex::match_groups(
-                ctx,
-                argument(args, 0)?,
-                option(args, 1, kwargs, "default")?.unwrap_or(NONE),
-            );
+        "match.groups" | "match.groupdict" => {
+            let receiver = argument(args, 0)?;
+            let default = option(args, 1, kwargs, "default")?.unwrap_or(NONE);
+            return if name == "match.groupdict" {
+                regex::match_groupdict(ctx, receiver, default)
+            } else {
+                regex::match_groups(ctx, receiver, default)
+            };
         }
         name if name.starts_with("pattern.") || name.starts_with("match.") => {
             return regex::call(ctx, name, args);

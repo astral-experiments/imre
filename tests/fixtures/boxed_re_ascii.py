@@ -40,6 +40,14 @@ def current():
     grouped = re.compile("(?P<letter>β+)(x)?")
     print(grouped.search(string="αββ", pos=1, endpos=3).group(0, "letter", 2))
     print(re.search(grouped, "αβ").group("letter"))
+    names = re.match(rb"(?P<z>a)(b)?(?P<a>x)?$", b"a")
+    default = []
+    values = names.groupdict(default=default)
+    assert list(values) == ["z", "a"]
+    assert values["z"] == b"a" and values["a"] is default
+    values["z"] = None
+    assert names.groupdict() == {"z": b"a", "a": None}
+    assert re.match(r"(x)$", "x").groupdict(default) == {}
     print(re.search(r"\d", "٣2", flags=re.ASCII).group())
     print(re.compile("β$").search("αβx", 1, 2).group())
     print(re.compile("^β").search("αβ", 1) is None)
