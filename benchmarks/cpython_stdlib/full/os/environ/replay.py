@@ -230,11 +230,16 @@ def main():
                         and "VALUE1!" in execution.get("stderr", ""))
         else:
             expected = execution["exit"] == 0 and outcome == ["PASS"]
-        verified = one and restored and parent_ok and expected
+        text_view = fields(execution, "MAPPING_environ")
+        bytes_view = fields(execution, "MAPPING_environb")
+        verified = (one and restored and parent_ok and expected
+                    and text_view == ["same"] and bytes_view == ["same"])
         if identifier == PREFIX + "test_putenv_unsetenv":
             verified = verified and executable_ok
         results["rows"][identifier] = {
             "execution": execution, "fixture_process_environment_restored": restored,
+            "text_mapping": text_view[0] if len(text_view) == 1 else "unobserved",
+            "bytes_mapping": bytes_view[0] if len(bytes_view) == 1 else "unobserved",
             "parent_environment_unchanged": parent_ok, "expected_python_executable": executable_ok,
             "outcome": outcome[0] if len(outcome) == 1 else "UNOBSERVED", "verified": verified,
         }

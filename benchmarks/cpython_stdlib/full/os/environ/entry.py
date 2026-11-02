@@ -1,3 +1,4 @@
+import os
 import subprocess
 import sys
 import unittest
@@ -18,6 +19,25 @@ def audit_environment(label):
         print("AUDIT_ERROR " + label + " " + str(error))
 
 
+def mapping_snapshot(name, phase):
+    try:
+        return dict(getattr(os, name))
+    except Exception as error:
+        print("MAPPING_AUDIT_ERROR " + name + " " + phase + " " + type(error).__name__)
+        return None
+
+
+def report_mapping(name, original):
+    restored = mapping_snapshot(name, "after")
+    status = "unobserved"
+    if original is not None and restored is not None:
+        try:
+            status = "same" if original == restored else "different"
+        except Exception as error:
+            print("MAPPING_AUDIT_ERROR " + name + " comparison " + type(error).__name__)
+    print("MAPPING_" + name + " " + status)
+
+
 def main():
     tests = unittest.defaultTestLoader.loadTestsFromTestCase(test_os.EnvironTests)
     chosen = unittest.TestSuite()
@@ -32,10 +52,14 @@ def main():
         raise AssertionError("expected exactly one selected original")
     print("EXECUTABLE " + sys.executable)
     audit_environment("BEFORE")
+    original_text = mapping_snapshot("environ", "before")
+    original_bytes = mapping_snapshot("environb", "before")
     try:
         result = unittest.TextTestRunner(verbosity=2).run(chosen)
     finally:
         audit_environment("AFTER")
+        report_mapping("environ", original_text)
+        report_mapping("environb", original_bytes)
     print("RAN " + str(result.testsRun))
     if result.skipped:
         print("OUTCOME SKIP")
