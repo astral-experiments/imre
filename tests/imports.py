@@ -659,6 +659,12 @@ ACCEPTED = {
             "except FileNotFoundError as exc:\n    print(exc.filename == path + '.missing')\n"
         ),
     },
+    "namespace_resource_spec": {
+        "main.py": (FIXTURES.parent / "boxed_namespace_resource_spec.py").read_text(),
+        "first/acme/data.txt": "first",
+        "second/acme/data.txt": "second",
+        "second/acme/only.txt": "second",
+    },
     "multiplexed_resources": {
         "main.py": (FIXTURES.parent / "boxed_multiplexed_resources.py").read_text(),
         "first/same.txt": "first",
@@ -935,6 +941,10 @@ def main() -> None:
                 continue
             case = temporary / name
             write_files(case, files)
+            if name == "namespace_resource_spec" and os.name == "posix":
+                with ZipFile(case / "portions.zip", "w") as archive:
+                    archive.writestr("acme/", b"")
+                    archive.writestr("only_archive/", b"")
             if name == "zip_source_spec":
                 if os.name != "posix":
                     continue

@@ -471,6 +471,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             "_imre_importlib",
             "find_spec"
             | "import_module"
+            | "namespace_locations"
             | "get_code"
             | "loader_fields"
             | "path_stats"
@@ -1758,6 +1759,10 @@ pub(super) fn call(
                 let fullname = ctx.str_value(*fullname)?.to_owned();
                 let original = ctx.str_value(*original)?.to_owned();
                 return ctx.find_spec(&fullname, &original, false);
+            }
+            ("namespace_locations", [name, path], []) => {
+                let name = ctx.str_value(*name)?.to_owned();
+                return ctx.namespace_locations(&name, *path);
             }
             ("get_code", [name, path], []) => return ctx.registered_code(*name, *path),
             ("path_stats", [path], []) => return os::source_path_stats(ctx, *path),
