@@ -135,6 +135,37 @@ pub(super) struct Alias {
     pub instantiable: bool,
 }
 
+impl Alias {
+    /// Instance fields stored by the boxed Literal alias.
+    pub(super) fn literal_fields(&self) -> [(&'static str, Id); 5] {
+        [
+            ("__args__", self.args),
+            ("__origin__", self.origin),
+            ("__parameters__", self.parameters),
+            ("_name", self.name.unwrap_or(NONE)),
+            ("_inst", if self.instantiable { TRUE } else { FALSE }),
+        ]
+    }
+}
+
+/// Walk nested Literal origins without consuming native stack frames.
+pub(super) fn literal_origin(ctx: &Context, mut origin: Id) -> Result<(Id, usize)> {
+    let mut depth = 0;
+    while let Value::GenericAlias(alias) = ctx.heap.get(origin)
+        && matches!(alias.kind, AliasKind::Literal(_))
+    {
+        depth += 1;
+        ctx.check_call_depth(depth)?;
+        origin = alias.origin;
+    }
+    Ok((origin, depth))
+}
+
+/// Typing aliases delegate non-dunder attribute names to the origin.
+pub(super) fn forwards_to_origin(name: &str) -> bool {
+    !(name.starts_with("__") && name.ends_with("__"))
+}
+
 #[derive(Default)]
 pub(super) struct Registry {
     alias_caches: [Option<Id>; 2],
@@ -215,6 +246,17 @@ pub(super) fn variables(ctx: &Context, args: &[Id]) -> Vec<Id> {
                 match ctx.heap.get(*parameters) {
                     Value::Tuple(members) => members.as_slice(),
                     _ => unreachable!(),
+                }
+            }
+            Value::Instance { class, .. }
+                if ctx.module_value("typing", "_AnnotatedAlias") == Some(*class) =>
+            {
+                match ctx
+                    .raw_instance_field(arg, "__parameters__")
+                    .map(|id| ctx.heap.get(id))
+                {
+                    Some(Value::Tuple(members)) => members.as_slice(),
+                    _ => continue,
                 }
             }
             _ => continue,
@@ -439,9 +481,6 @@ pub(super) fn subscribe(ctx: &mut Context, target: Id, index: Id) -> Option<Resu
         );
     }
     let kind = match ctx.heap.get(target) {
-        Value::Class { .. } if super::mapping_abc::is_generic_abc(ctx, target) => {
-            AliasKind::Builtin
-        }
         Value::Class { .. } if ctx.classes.get("typing.Generic") == Some(&target) => {
             AliasKind::Generic
         }
@@ -945,6 +984,16 @@ pub(super) fn attribute(ctx: &mut Context, value: Id, name: &str) -> Option<Resu
             }
             _ => return None,
         },
+        Value::GenericAlias(a) if matches!(a.kind, AliasKind::Literal(_)) => {
+            if let Some((_, field)) = a.literal_fields().into_iter().find(|(key, _)| *key == name) {
+                field
+            } else if forwards_to_origin(name) {
+                let origin = literal_origin(ctx, a.origin);
+                return Some(origin.and_then(|(origin, _)| ctx.lookup_attr(origin, name)));
+            } else {
+                return None;
+            }
+        }
         Value::GenericAlias(a) => match name {
             "__typing_is_unpacked_typevartuple__" if a.kind == AliasKind::Unpack => {
                 if is_unpacked_pack(ctx, value) {
@@ -982,7 +1031,7 @@ pub(super) fn attribute(ctx: &mut Context, value: Id, name: &str) -> Option<Resu
             "__args__" => a.args,
             "__origin__" => a.origin,
             "__parameters__" => a.parameters,
-            attr if a.name.is_some() && !(attr.starts_with("__") && attr.ends_with("__")) => {
+            attr if a.name.is_some() && forwards_to_origin(attr) => {
                 return Some(ctx.lookup_attr(a.origin, attr));
             }
             _ => return None,
@@ -1614,6 +1663,18 @@ pub(super) fn call(
             Value::Union(u) => u.args,
             _ => ctx.alloc(Value::Tuple(vec![])),
         }),
+        ("Union.__origin__", [receiver]) => {
+            ctx.read_member("typing.Union", "__origin__", *receiver)
+        }
+        ("Union.__parameters__", [receiver]) => {
+            ctx.read_member("typing.Union", "__parameters__", *receiver)
+        }
+        ("Union.__mro_entries__", [id, _]) if matches!(ctx.heap.get(*id), Value::Union(_)) => {
+            Err(Error::new(
+                "TypeError",
+                format!("Cannot subclass {}", ctx.checked_format(*id, true)?),
+            ))
+        }
         ("alias_mro_entries", [id, bases]) => alias_bases(ctx, *id, *bases),
         ("overload", [v]) => {
             if let Some((key, line)) = ctx.overload_key(*v) {
@@ -1885,8 +1946,8 @@ impl Context {
                     *base = tuple;
                 }
             }
-            let fields = self.scope_name(scope, "__annotations__");
-            let (fields, provider) = if fields.is_none()
+            let explicit = self.scope_name(scope, "__annotations__");
+            let (fields, provider) = if explicit.is_none()
                 && let Some(original) = self.scope_name(scope, "__annotate_func__")
             {
                 let annotate = self.call_typing_helper("_namedtuple_annotate", vec![original])?;
@@ -1895,7 +1956,7 @@ impl Context {
                 let fields = self.call(annotate, vec![forwardref], Vec::new())?;
                 (Some(fields), Some(annotate))
             } else {
-                (fields, None)
+                (explicit, None)
             };
             let mut named_fields = Vec::new();
             if let Some(fields) = fields {
@@ -1908,6 +1969,19 @@ impl Context {
                     named_fields.push(super::namedtuple::string(self, key)?);
                 }
             }
+            let annotate = if let Some(provider) = provider {
+                provider
+            } else {
+                let annotate = self
+                    .call_typing_helper("_make_eager_annotate", explicit.into_iter().collect())?;
+                self.heap.keep(annotate);
+                if explicit.is_some() {
+                    let key = self.heap.code_name("__annotations__");
+                    self.remove_binding(scope, "__annotations__", key)?;
+                }
+                self.enable_class_annotation_provider(scope);
+                annotate
+            };
             let mut defaults = Vec::new();
             for field in &named_fields {
                 if let Some(value) = self.scope_name(scope, field) {
@@ -1958,10 +2032,8 @@ impl Context {
             let defaults = self.alloc(Value::Tuple(defaults));
             let new =
                 super::namedtuple::bind_new(self, scope, name, &named_fields, Some(defaults))?;
-            if let Some(annotate) = provider {
-                self.bind_local(scope, "__annotate_func__", annotate);
-                self.set_attr(new, "__annotate__", annotate)?;
-            }
+            self.bind_local(scope, "__annotate_func__", annotate);
+            self.set_attr(new, "__annotate__", annotate)?;
             if self.scope_name(scope, "__repr__").is_none() {
                 let name = self.text(name);
                 super::namedtuple::bind_repr(self, scope, name, fields)?;
@@ -2032,11 +2104,23 @@ impl Context {
         layout: ClassLayout,
     ) -> Result<Vec<Id>> {
         for &base in &bases {
+            if self.classes.get("typing.Union") == Some(&base) {
+                return Err(Error::new(
+                    "TypeError",
+                    "type 'typing.Union' is not an acceptable base type",
+                ));
+            }
             if matches!(self.heap.get(base), Value::Native(name) if name == "typing._UnpackGenericAlias")
             {
                 return Err(Error::new(
                     "TypeError",
                     "Cannot subclass special typing classes",
+                ));
+            }
+            if let Some(name) = self.heap.get(base).hash_type() {
+                return Err(Error::new(
+                    "TypeError",
+                    format!("type '{name}' is not an acceptable base type"),
                 ));
             }
             if let Value::Native(name) = self.heap.get(base)
@@ -2195,6 +2279,7 @@ impl Context {
         }
         let class = self.alloc(Value::Class {
             io_kind: None,
+            hash_type: None,
             metaclass: None,
             namedtuple_fields,
             name,

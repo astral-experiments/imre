@@ -2300,8 +2300,17 @@ pub(crate) enum ProcessOperation {
     Semaphore,
     Acquire,
     Release,
-    EnvironCopy,
+    EnvironCopy {
+        bytes: bool,
+    },
+    EnvironClear,
+    EnvironUpdate {
+        bytes: bool,
+    },
     EnvironGet,
+    EnvironSet {
+        bytes: bool,
+    },
     GetCwd,
     Fd(FdOperation),
     Credential(&'static str),

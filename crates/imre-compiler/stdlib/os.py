@@ -5,7 +5,7 @@ import posixpath as path
 import stat as st
 from _collections_abc import _check_methods
 from _collections_abc import Mapping as _Mapping, MutableMapping as _MutableMapping
-from posix import access, environ as _environ, fspath, getcwd, getcwdb, listdir, mkdir, putenv, read, scandir, terminal_size, unsetenv, waitpid, write, WNOHANG
+from posix import _create_environ, access, environ as _environ, fspath, getcwd, getcwdb, getppid, kill, listdir, mkdir, putenv, read, scandir, terminal_size, unsetenv, waitpid, write, WNOHANG
 from types import GenericAlias
 from posix import O_NONBLOCK, O_RDONLY, chdir, close, open, stat
 
@@ -23,7 +23,53 @@ if sys.platform == "linux":
 
 
 curdir = path.curdir
+defpath = path.defpath
 extsep = path.extsep
+
+
+# From CPython 3.14.5, Lib/os.py. See stdlib/docstrings/LICENSE.
+if sys.platform != 'vxworks':
+    # Supply os.popen()
+    def popen(cmd, mode="r", buffering=-1):
+        if not isinstance(cmd, str):
+            raise TypeError("invalid cmd type (%s, expected string)" % type(cmd))
+        if mode not in ("r", "w"):
+            raise ValueError("invalid mode %r" % mode)
+        if buffering == 0 or buffering is None:
+            raise ValueError("popen() does not support unbuffered streams")
+        import subprocess
+        if mode == "r":
+            proc = subprocess.Popen(cmd,
+                                    shell=True, text=True,
+                                    stdout=subprocess.PIPE,
+                                    bufsize=buffering)
+            return _wrap_close(proc.stdout, proc)
+        else:
+            proc = subprocess.Popen(cmd,
+                                    shell=True, text=True,
+                                    stdin=subprocess.PIPE,
+                                    bufsize=buffering)
+            return _wrap_close(proc.stdin, proc)
+
+    # Helper for popen() -- a proxy for a file whose close waits for the process
+    class _wrap_close:
+        def __init__(self, stream, proc):
+            self._stream = stream
+            self._proc = proc
+        def close(self):
+            self._stream.close()
+            returncode = self._proc.wait()
+            if returncode == 0:
+                return None
+            return returncode << 8  # POSIX wait status
+        def __enter__(self):
+            return self
+        def __exit__(self, *args):
+            self.close()
+        def __getattr__(self, name):
+            return getattr(self._stream, name)
+        def __iter__(self):
+            return iter(self._stream)
 
 
 # From CPython 3.14.5, Lib/os.py. See stdlib/docstrings/LICENSE.
@@ -213,6 +259,51 @@ def makedirs(name, mode=0o777, exist_ok=False):
             raise
 
 
+# From CPython 3.14.5, Lib/os.py. See stdlib/docstrings/LICENSE.
+def get_exec_path(env=None):
+    """Returns the sequence of directories that will be searched for the
+    named executable (similar to a shell) when launching a process.
+
+    *env* must be an environment variable dict or None.  If *env* is None,
+    os.environ will be used.
+    """
+    # Use a local import instead of a global import to limit the number of
+    # modules loaded at startup: the os module is always loaded at startup by
+    # Python. It may also avoid a bootstrap issue.
+    import warnings
+
+    if env is None:
+        env = environ
+
+    # {b'PATH': ...}.get('PATH') and {'PATH': ...}.get(b'PATH') emit a
+    # BytesWarning when using python -b or python -bb: ignore the warning
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", BytesWarning)
+
+        try:
+            path_list = env.get('PATH')
+        except TypeError:
+            path_list = None
+
+        if supports_bytes_environ:
+            try:
+                path_listb = env[b'PATH']
+            except (KeyError, TypeError):
+                pass
+            else:
+                if path_list is not None:
+                    raise ValueError(
+                        "env cannot contain 'PATH' and b'PATH' keys")
+                path_list = path_listb
+
+            if path_list is not None and isinstance(path_list, bytes):
+                path_list = fsdecode(path_list)
+
+    if path_list is None:
+        path_list = defpath
+    return path_list.split(pathsep)
+
+
 def fsencode(filename):
     filename = fspath(filename)
     if isinstance(filename, str):
@@ -374,6 +465,13 @@ class _Environ(_MutableMapping):
 environ = _Environ(_environ, _encode_env, _decode_env)
 supports_bytes_environ = True
 environb = _Environ(_environ, _check_bytes, bytes)
+
+
+def reload_environ():
+    data = _create_environ()
+    env_data = environ._data
+    env_data.clear()
+    env_data.update(data)
 
 
 def getenv(key, default=None):

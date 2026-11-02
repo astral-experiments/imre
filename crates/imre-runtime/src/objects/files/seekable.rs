@@ -3,7 +3,9 @@
 use super::super::{c_int, zipfile::Member};
 use super::*;
 
-pub(super) struct Memory {
+#[derive(Clone)]
+pub(crate) struct Memory {
+    size: usize,
     data: crate::BytesOwner,
     position: u64,
 }
@@ -18,11 +20,41 @@ fn copied(data: &[u8]) -> Result<Bytes> {
 }
 
 impl Memory {
-    fn remaining(&self) -> &[u8] {
-        self.data.get(self.position as usize..).unwrap_or(&[])
+    pub(crate) fn new(data: crate::BytesOwner) -> Self {
+        Self {
+            size: data.len(),
+            data,
+            position: 0,
+        }
     }
 
-    fn read(&mut self, size: Option<usize>) -> Result<Bytes> {
+    pub(crate) fn bytes(&self) -> &[u8] {
+        &self.data[..self.size]
+    }
+
+    // A failed __init__ resets the logical length while prior exports retain their full span.
+    pub(crate) fn reset_position_and_size(&mut self) {
+        self.position = 0;
+        self.size = 0;
+    }
+
+    pub(crate) fn storage(&self) -> &[u8] {
+        &self.data
+    }
+
+    pub(crate) fn storage_mut(&mut self) -> Result<&mut Vec<u8>> {
+        if crate::BytesOwner::get_mut(&mut self.data).is_none() {
+            self.data =
+                crate::BytesOwner::try_new(copied(&self.data)?).map_err(|_| Error::allocation())?;
+        }
+        Ok(crate::BytesOwner::get_mut(&mut self.data).unwrap())
+    }
+
+    fn remaining(&self) -> &[u8] {
+        self.bytes().get(self.position as usize..).unwrap_or(&[])
+    }
+
+    pub(crate) fn read(&mut self, size: Option<usize>) -> Result<Bytes> {
         let data = self.remaining();
         let end = size.unwrap_or(usize::MAX).min(data.len());
         let result = copied(&data[..end])?;
@@ -30,7 +62,7 @@ impl Memory {
         Ok(result)
     }
 
-    pub(super) fn write(&mut self, bytes: &[u8]) -> Result<()> {
+    pub(crate) fn write(&mut self, bytes: &[u8]) -> Result<()> {
         if bytes.is_empty() {
             return Ok(());
         }
@@ -38,31 +70,96 @@ impl Memory {
         let end = start
             .checked_add(bytes.len())
             .ok_or_else(Error::allocation)?;
-        if crate::BytesOwner::get_mut(&mut self.data).is_none() {
-            self.data = crate::BytesOwner::new(copied(&self.data)?);
-        }
-        let data = crate::BytesOwner::get_mut(&mut self.data).unwrap();
+        let old_size = self.size;
+        let data = self.storage_mut()?;
         if end > data.len() {
             data.try_reserve(end - data.len())
                 .map_err(|_| Error::allocation())?;
             data.resize(end, 0);
         }
+        if start > old_size {
+            data[old_size..start].fill(0);
+        }
         data[start..end].copy_from_slice(bytes);
+        self.size = old_size.max(end);
         self.position = end as u64;
         Ok(())
     }
 
-    fn seek(&mut self, at: SeekFrom) -> Result<u64> {
+    pub(crate) fn seek(&mut self, at: SeekFrom) -> Result<u64> {
         let position = match at {
             SeekFrom::Start(n) => n,
             SeekFrom::Current(n) => self.position.saturating_add_signed(n),
-            SeekFrom::End(n) => (self.data.len() as u64).saturating_add_signed(n),
+            SeekFrom::End(n) => (self.size as u64).saturating_add_signed(n),
         };
         if position > isize::MAX as u64 {
             return Err(Error::new(Kind::OverflowError, "new position too large"));
         }
         self.position = position;
         Ok(position)
+    }
+    pub(crate) fn seek_memory(&mut self, offset: i64, whence: i32) -> Result<u64> {
+        let at = match whence {
+            0 => SeekFrom::Start(u64::try_from(offset).map_err(|_| {
+                Error::new(Kind::ValueError, format!("negative seek value {offset}"))
+            })?),
+            1 => SeekFrom::Current(offset),
+            2 => SeekFrom::End(offset),
+            _ => {
+                return Err(Error::new(
+                    Kind::ValueError,
+                    format!("invalid whence ({whence}, should be 0, 1 or 2)"),
+                ));
+            }
+        };
+        self.seek(at)
+    }
+
+    /// An entire buffer can be shared with getvalue; its caller advances after acquiring the snapshot.
+    pub(crate) fn read_memory_bytes(
+        &mut self,
+        limit: Option<usize>,
+        line: bool,
+    ) -> Result<Option<Bytes>> {
+        let data = self.remaining();
+        let end = limit.unwrap_or(usize::MAX).min(data.len());
+        let end = if line {
+            memchr::memchr(b'\n', &data[..end]).map_or(end, |i| i + 1)
+        } else {
+            end
+        };
+        if self.position == 0 && end == data.len() {
+            Ok(None)
+        } else {
+            self.read(Some(end)).map(Some)
+        }
+    }
+
+    /// Shrink a memory buffer without changing its cursor. Larger sizes leave the contents intact.
+    pub(crate) fn truncate_memory(
+        &mut self,
+        size: Option<i64>,
+        retain_storage: bool,
+    ) -> Result<(u64, bool)> {
+        let size = match size {
+            None => self.position,
+            Some(n) => u64::try_from(n)
+                .map_err(|_| Error::new(Kind::ValueError, format!("negative size value {n}")))?,
+        };
+        let changed = size < self.size as u64;
+        if changed && !retain_storage {
+            let end = size as usize;
+            if let Some(data) = crate::BytesOwner::get_mut(&mut self.data) {
+                data.truncate(end);
+            } else {
+                self.data = crate::BytesOwner::try_new(copied(&self.data[..end])?)
+                    .map_err(|_| Error::allocation())?;
+            }
+        }
+        if changed {
+            self.size = size as usize;
+        }
+        Ok((size, changed))
     }
 }
 
@@ -96,7 +193,7 @@ impl FileState {
             encoding: None,
             errors: None,
             kind: FileKind::Memory,
-            stream: Some(Stream::Memory(Memory { data, position: 0 })),
+            stream: Some(Stream::Memory(Memory::new(data))),
         }
     }
 
@@ -148,67 +245,12 @@ impl FileState {
         }
     }
 
-    /// An entire buffer can be shared with getvalue; its caller advances after acquiring the snapshot.
-    pub(crate) fn read_memory_bytes(
-        &mut self,
-        limit: Option<usize>,
-        line: bool,
-    ) -> Result<Option<Bytes>> {
-        let Stream::Memory(memory) = self.stream()? else {
-            unreachable!()
-        };
-        let data = memory.remaining();
-        let end = limit.unwrap_or(usize::MAX).min(data.len());
-        let end = if line {
-            memchr::memchr(b'\n', &data[..end]).map_or(end, |i| i + 1)
-        } else {
-            end
-        };
-        if memory.position == 0 && end == data.len() {
-            Ok(None)
-        } else {
-            memory.read(Some(end)).map(Some)
-        }
-    }
-
-    /// Shrink a memory buffer without changing its cursor. Larger sizes leave the contents intact.
-    pub(crate) fn truncate_memory(&mut self, size: Option<i64>) -> Result<(u64, bool)> {
-        let Stream::Memory(memory) = self.stream()? else {
-            unreachable!()
-        };
-        let size = match size {
-            None => memory.position,
-            Some(n) => u64::try_from(n)
-                .map_err(|_| Error::new(Kind::ValueError, format!("negative size value {n}")))?,
-        };
-        let changed = size < memory.data.len() as u64;
-        if changed {
-            let end = size as usize;
-            if let Some(data) = crate::BytesOwner::get_mut(&mut memory.data) {
-                data.truncate(end);
-            } else {
-                memory.data = crate::BytesOwner::try_new(copied(&memory.data[..end])?)
-                    .map_err(|_| Error::allocation())?;
-            }
-        }
-        Ok((size, changed))
-    }
-
     /// Validate BytesIO's whence and apply it to the shared native cursor.
     pub(crate) fn seek_memory(&mut self, offset: i64, whence: i32) -> Result<u64> {
-        self.stream()?;
-        let at = match whence {
-            0 => SeekFrom::Start(self.absolute_offset(i128::from(offset))?),
-            1 => SeekFrom::Current(offset),
-            2 => SeekFrom::End(offset),
-            _ => {
-                return Err(Error::new(
-                    Kind::ValueError,
-                    format!("invalid whence ({whence}, should be 0, 1 or 2)"),
-                ));
-            }
+        let Stream::Memory(memory) = self.stream()? else {
+            unreachable!()
         };
-        self.seek(at)
+        memory.seek_memory(offset, whence)
     }
 
     pub(crate) fn read_line_bytes(&mut self) -> Result<Bytes> {

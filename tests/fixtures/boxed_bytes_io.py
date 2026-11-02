@@ -8,6 +8,30 @@ def current():
     assert _io.StringIO is io.StringIO
     assert (io.BytesIO.__module__, io.BytesIO.__name__) == ("_io", "BytesIO")
 
+    stream = io.BytesIO(b"abcd")
+    snapshot = stream.getvalue()
+    stream.seek(1)
+    view = stream.getbuffer()
+    other = stream.getbuffer()
+    assert type(view) is memoryview and not view.readonly
+    assert view.obj is not other.obj
+    child = view[1:3]
+    child[:] = b"XY"
+    assert bytes(other) == b"aXYd" and stream.tell() == 1
+    assert stream.read() == b"XYd" and snapshot == b"abcd"
+    view.release()
+    other.release()
+    for operation in (lambda: stream.write(b""), lambda: stream.truncate(4), stream.close):
+        try:
+            operation()
+        except BufferError:
+            pass
+        else:
+            raise AssertionError("modified a BytesIO with a live derived view")
+    child.release()
+    assert stream.write(b"!") == 1 and stream.getvalue() == b"aXYd!"
+    stream.close()
+
     class Stream(io.BytesIO):
         pass
 

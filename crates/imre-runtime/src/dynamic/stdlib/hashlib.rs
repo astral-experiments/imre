@@ -5,6 +5,7 @@ use digest::SharedHash;
 mod blake2;
 pub(crate) mod digest;
 mod kdf;
+pub(in crate::dynamic) mod md5;
 pub(crate) mod openssl;
 
 const UNSUPPORTED_DIGEST: &str = "_hashlib.UnsupportedDigestmodError";
@@ -85,9 +86,12 @@ pub(super) fn call_openssl(
 
 /// Borrows the bytes of a boxed hash input, including mutable buffers.
 pub(super) fn buffer(ctx: &Context, id: Id) -> Result<&[u8]> {
-    match ctx.buffer_storage(id)? {
-        Value::Bytes(data) | Value::ByteArray(data) => Ok(data),
-        Value::Array(array) => Ok(array.as_bytes()),
+    match ctx.heap.get(ctx.scalar_value(id)) {
+        Value::Bytes(_)
+        | Value::ByteArray(_)
+        | Value::MemoryView { .. }
+        | Value::BytesIoBuffer { .. }
+        | Value::Array(_) => ctx.native_buffer_bytes(id),
         Value::Str(_) => Err(Error::new(
             "TypeError",
             "Strings must be encoded before hashing",
@@ -132,7 +136,16 @@ pub(super) fn hash(
     if matches!(name, "blake2b" | "blake2s") {
         return blake2::new(ctx, name, args, kwargs);
     }
-    let class = HashState::public_constructor(name);
+    fixed_hash(ctx, name, HashState::public_constructor(name), args, kwargs)
+}
+
+fn fixed_hash(
+    ctx: &mut Context,
+    name: &str,
+    class: Option<&'static str>,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Id> {
     // The six SHA-3 types share CPython's sha3_224 Argument Clinic entry point.
     let constructor = if class.is_some_and(|c| c.starts_with("_sha3.")) {
         "sha3_224"
@@ -315,22 +328,8 @@ fn update_from_file(ctx: &mut Context, file: Id, factory: Id, size: Option<Id>) 
         ctx.call(update, vec![data], Vec::new())?;
         return Ok(digest);
     }
-    let native_hash = matches!(ctx.heap.get(digest), Value::Hash(_));
-    if let Some(class) = ctx.heap.get(file).instance_class()
-        && ctx.heap.get(class).io_kind() == Some("BytesIO")
-    {
-        // A native digest consumes this snapshot synchronously. A Python update
-        // callback can observe the exported view and must take the getbuffer path.
-        if !native_hash {
-            return Err(Error::new(
-                "NotImplementedError",
-                "BytesIO.getbuffer requires a writable memoryview",
-            ));
-        }
-        let data = super::io::call(ctx, class, "getvalue", &[file], &[])?;
-        method(ctx, "hash.update", &[digest, data])?;
-        return Ok(digest);
-    }
+    let storage = ctx.scalar_value(digest);
+    let native_hash = matches!(ctx.heap.get(storage), Value::Hash(_));
     let readable = if has_attr(ctx, file, "readinto")? && has_attr(ctx, file, "readable")? {
         let read = ctx.lookup_attr(file, "readable")?;
         let value = ctx.call(read, Vec::new(), Vec::new())?;
@@ -385,7 +384,7 @@ fn read_chunks(ctx: &mut Context, file: Id, digest: Id, buf: Id, view: Option<Id
             // __eq__ and __index__ above can run Python and change the contents.
             let bytes = buffer(ctx, buf)?;
             let [_, end, _] = super::super::slice::normalize(bounds, bytes.len() as i64);
-            let Value::Hash(state) = ctx.heap.get(digest) else {
+            let Value::Hash(state) = ctx.heap.get(ctx.scalar_value(digest)) else {
                 unreachable!()
             };
             state.lock().update(&bytes[..end as usize])?;

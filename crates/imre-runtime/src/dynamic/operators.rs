@@ -426,7 +426,7 @@ impl Context {
             Value::Str(s) => !s.is_empty(),
             Value::SurrogateStr(points) => !points.is_empty(),
             Value::Bytes(b) | Value::ByteArray(b) => !b.is_empty(),
-            Value::MemoryView { .. } => !self.bytes_like(id)?.is_empty(),
+            Value::MemoryView { .. } => self.view_layout(id)?.len != 0,
             Value::List(v) | Value::Tuple(v) | Value::NamedTuple { values: v, .. } => !v.is_empty(),
             Value::Set { entries: v, .. }
             | Value::Dict(v)
@@ -814,29 +814,7 @@ impl Context {
                 crate::floats::compare(&self.as_int(a).unwrap(), *f) == 0
             }
             (Value::MemoryView { .. }, _) | (_, Value::MemoryView { .. }) => {
-                match (self.buffer_storage(a), self.buffer_storage(b)) {
-                    (Ok(Value::RawReadWindow(w)), Ok(Value::Array(array)))
-                    | (Ok(Value::Array(array)), Ok(Value::RawReadWindow(w))) => self
-                        .window_bytes(*w)
-                        .is_ok_and(|bytes| array.equals_unsigned_bytes(bytes)),
-                    (Ok(Value::RawReadWindow(_)), _) | (_, Ok(Value::RawReadWindow(_))) => {
-                        matches!((self.bytes_like(a), self.bytes_like(b)), (Ok(a), Ok(b)) if a == b)
-                    }
-                    (Ok(Value::Array(a)), Ok(Value::Array(b))) => a.equals_numeric_array(b),
-                    (
-                        Ok(Value::Array(array)),
-                        Ok(Value::Bytes(bytes) | Value::ByteArray(bytes)),
-                    )
-                    | (
-                        Ok(Value::Bytes(bytes) | Value::ByteArray(bytes)),
-                        Ok(Value::Array(array)),
-                    ) => array.equals_unsigned_bytes(bytes),
-                    (
-                        Ok(Value::Bytes(a) | Value::ByteArray(a)),
-                        Ok(Value::Bytes(b) | Value::ByteArray(b)),
-                    ) => a == b,
-                    _ => false,
-                }
+                self.memoryview_equal(a, b)
             }
             (Value::Str(a), Value::Str(b)) => a == b,
             (Value::SurrogateStr(a), Value::SurrogateStr(b)) => a == b,
@@ -1788,6 +1766,16 @@ impl Context {
                         append_rendered_text(&mut output, "[")?;
                         push_frame(&mut work, Part::Text("]"))?;
                         push_frame(&mut work, Part::TypeList(id, 0, items.len()))?;
+                    } else if let Value::Function { fields, .. } = ctx.heap.get(id)
+                        && fields.module != NONE
+                        && (ctx.dict_named_item(fields.dict, "__origin__").is_none()
+                            || ctx.dict_named_item(fields.dict, "__args__").is_none())
+                    {
+                        push_frame(&mut work, Part::Value(fields.qualname, false))?;
+                        if ctx.str_value(fields.module).ok() != Some("builtins") {
+                            push_frame(&mut work, Part::Text("."))?;
+                            push_frame(&mut work, Part::Value(fields.module, false))?;
+                        }
                     } else if !typing::append_type_label(&ctx, id, &mut output)? {
                         push_frame(&mut work, Part::Value(id, true))?;
                     }
@@ -2640,6 +2628,9 @@ impl Context {
             Value::SurrogateStr(points) => surrogate_repr(points),
             Value::Str(s) if repr => crate::objects::exceptions::string_repr(s).into_string(),
             Value::Str(s) => s.clone(),
+            Value::Instance { class, .. } if let Some(name) = self.heap.get(*class).hash_type() => {
+                format!("<{name} object at {id:#x}>")
+            }
             Value::Instance {
                 scalar: Some(payload),
                 ..
@@ -2774,6 +2765,16 @@ impl Context {
             {
                 format!("<built-in function {leaf}>")
             }
+            Value::HashMethod { name, .. } => format!("<method '{name}' of '_md5.md5' objects>"),
+            Value::Method {
+                callable, receiver, ..
+            } if let Value::HashMethod { name, .. } = self.heap.get(*callable) => {
+                if matches!(self.heap.get(*receiver), Value::Module { .. }) {
+                    format!("<built-in function {name}>")
+                } else {
+                    format!("<built-in method {name} of _md5.md5 object at {receiver:#x}>")
+                }
+            }
             Value::Native(name)
                 if matches!(name.as_str(), "binascii.a2b_hex" | "binascii.unhexlify") =>
             {
@@ -2854,8 +2855,11 @@ impl Context {
     }
 
     pub(super) fn get_item(&mut self, obj: Id, key: Id) -> Result<Id> {
-        if self.raw_read_window(obj).is_some() {
+        if self.raw_read_window(obj).is_some() && !self.view_is_readonly(obj)? {
             return self.raw_view_get(obj, key);
+        }
+        if matches!(self.heap.get(obj), Value::MemoryView { .. }) {
+            return self.memoryview_get(obj, key);
         }
         let target = self.weak_proxy_target(obj)?;
         if target != obj {
@@ -3083,6 +3087,9 @@ impl Context {
     pub(super) fn put_item(&mut self, obj: Id, key: Id, val: Id) -> Result<()> {
         if self.raw_read_window(obj).is_some() {
             return self.raw_view_set(obj, key, val);
+        }
+        if matches!(self.heap.get(obj), Value::MemoryView { .. }) {
+            return self.memoryview_set(obj, key, val);
         }
         let target = self.weak_proxy_target(obj)?;
         if target != obj {
@@ -3533,6 +3540,9 @@ impl Context {
         right: Id,
         inplace: bool,
     ) -> Result<Id> {
+        if op == "^" {
+            return self.set_xor(left, right, inplace);
+        }
         // Both union and self-intersection start from the left set's native table.
         if op != "|" && !(op == "&" && left == right) {
             return self.set_algebra(op, left, right, inplace);
@@ -3551,6 +3561,60 @@ impl Context {
         if left != right {
             builtins::update_set(self, result, right)?;
         }
+        Ok(result)
+    }
+
+    /// Binary XOR starts with the right table and toggles left keys, so its right
+    /// residents get the first comparison. In-place XOR toggles the left table.
+    fn set_xor(&mut self, left: Id, right: Id, inplace: bool) -> Result<Id> {
+        let frozen = matches!(self.heap.get(left), Value::Set { frozen: true, .. });
+        let (result, source) = if inplace && !frozen {
+            if left == right {
+                self.set_difference_update(left, right)?;
+                return Ok(left);
+            }
+            (left, right)
+        } else {
+            let Value::Set { entries, .. } = self.heap.get(right) else {
+                unreachable!()
+            };
+            let entries = entries.try_clone()?;
+            (self.alloc(Value::Set { entries, frozen }), left)
+        };
+        self.visit_set_operand(source, |ctx, key, hash| {
+            let roots = ctx.heap.temporary_mark();
+            ctx.heap.keep(key);
+            let toggle = ctx
+                .find_dictionary_key(result, key, hash)
+                .and_then(|(hash, found)| {
+                    if let Some(index) = found {
+                        let Value::Set { entries, .. } = ctx.heap.get_mut(result) else {
+                            unreachable!()
+                        };
+                        let (resident, _) = entries.remove(index)?;
+                        let mark = ctx.heap.temporary_mark();
+                        ctx.heap.keep(resident);
+                        ctx.heap.weak_edge_removed(resident);
+                        ctx.discard_truth(mark);
+                    } else {
+                        // Insertion probes again: a collision callback may change its answer.
+                        ctx.set_dictionary_key(result, key, NONE, Some(hash), false)?;
+                    }
+                    Ok(())
+                });
+            // Comparison can clear the source. Release our key before advancing
+            // the live cursor, and preserve any active exception during finalization.
+            ctx.heap.release_temporaries_since(roots);
+            if let Err(error) = &toggle {
+                for id in error.roots() {
+                    ctx.heap.keep(id);
+                }
+            }
+            let mark = ctx.heap.temporary_mark();
+            ctx.heap.keep(key);
+            ctx.discard_truth(mark);
+            toggle
+        })?;
         Ok(result)
     }
 
@@ -4143,9 +4207,15 @@ impl Context {
                 }
                 return self.dict_view_union(a, b);
             }
-            "|" | "&" | "-"
-                if matches!(self.heap.get(a), Value::Set { .. })
-                    || matches!(self.heap.get(b), Value::Set { .. }) =>
+            "|" | "&" | "-" | "^"
+                if [a, b].into_iter().any(|value| {
+                    let storage = if op == "^" {
+                        self.scalar_value(value)
+                    } else {
+                        value
+                    };
+                    matches!(self.heap.get(storage), Value::Set { .. })
+                }) =>
             {
                 if matches!(
                     (self.heap.get(a), self.heap.get(b)),
@@ -4531,7 +4601,11 @@ impl Context {
         {
             return Ok(None);
         }
-        let method = if name == "__ne__" && !self.has_custom_ne(obj) {
+        let method = if matches!(name, "__xor__" | "__rxor__")
+            && matches!(self.heap.get(obj), Value::Set { .. })
+        {
+            Some(self.lookup_attr(obj, name)?)
+        } else if name == "__ne__" && !self.has_custom_ne(obj) {
             None
         } else if matches!(
             name,
@@ -4755,13 +4829,7 @@ impl Context {
             {
                 // A live floating-point view compares its elements even with itself:
                 // a NaN is unequal. Container identity shortcuts still apply separately.
-                let equal = if a == b
-                    && let Ok(Value::Array(array)) = self.buffer_storage(a)
-                {
-                    array.equals_numeric_array(array)
-                } else {
-                    self.equal(a, b)
-                };
+                let equal = self.memoryview_equal(a, b);
                 return Ok(Some(builtins::boolean(equal == (op == "=="))));
             }
         }
@@ -4853,7 +4921,18 @@ impl Context {
                 }
             })
         };
-        let (ac, bc) = (class(a), class(b));
+        let (mut ac, mut bc) = (class(a), class(b));
+        let set_xor = op == "^"
+            && [a, b]
+                .into_iter()
+                .any(|id| matches!(self.heap.get(self.scalar_value(id)), Value::Set { .. }));
+        if set_xor {
+            for (value, class) in [(a, &mut ac), (b, &mut bc)] {
+                if matches!(self.heap.get(value), Value::Set { .. }) {
+                    *class = Some(self.exact_type(value)?);
+                }
+            }
+        }
         if ac.is_none()
             && bc.is_none()
             && !(inplace.is_empty()
@@ -4901,8 +4980,13 @@ impl Context {
             ));
         }
         let reflected_first = if let (Some(ac), Some(bc)) = (ac, bc) {
-            ac != bc
-                && self.subclass(bc, ac)
+            let strict_subclass = ac != bc
+                && if set_xor {
+                    self.direct_subclass(bc, ac)
+                } else {
+                    self.subclass(bc, ac)
+                };
+            strict_subclass
                 && (inplace.is_empty() || self.class_attr(bc, right) != self.class_attr(ac, right))
         } else {
             false
@@ -4936,7 +5020,7 @@ impl Context {
             return Ok(result);
         }
         // A mutable set's in-place slot runs before the right operand's reflected slot.
-        if matches!(op, "|" | "-" | "&")
+        if matches!(op, "|" | "-" | "&" | "^")
             && matches!(self.heap.get(a), Value::Set { frozen: false, .. })
             && let right = self.scalar_value(b)
             && matches!(self.heap.get(right), Value::Set { .. })
@@ -4979,6 +5063,9 @@ impl Context {
     }
 
     pub(super) fn delete_item(&mut self, obj: Id, key: Id) -> Result<()> {
+        if matches!(self.heap.get(obj), Value::MemoryView { .. }) {
+            return self.memoryview_delete(obj);
+        }
         let target = self.weak_proxy_target(obj)?;
         if target != obj {
             return self.proxy_subscript(target, |ctx| ctx.delete_item(target, key));

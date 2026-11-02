@@ -477,12 +477,42 @@ fn set_issubset(ctx: &mut Context, receiver: Id, other: Id) -> Result<Id> {
         return ctx.order_sets("<=", receiver, storage);
     }
 
-    // CPython intersects the iterable with the receiver, stopping once all
-    // members match. An empty receiver still consumes and hashes each item.
+    let roots = ctx.heap.temporary_mark();
+    let found = intersect_iterable(ctx, receiver, other)?;
+    let subset = ctx.stored_entries(found).len() == ctx.stored_entries(receiver).len();
+    ctx.discard_truth(roots);
+    Ok(boolean(subset))
+}
+
+/// Intersect left to right, releasing each intermediate result before the next operand.
+fn set_intersection(ctx: &mut Context, receiver: Id, operands: &[Id]) -> Result<Id> {
+    if operands.is_empty() {
+        return ctx.set_binary("&", receiver, receiver, false);
+    }
+    let roots = ctx.heap.temporary_mark();
+    let mut result = receiver;
+    for &other in operands {
+        let storage = ctx.scalar_value(other);
+        result = if matches!(ctx.heap.get(storage), Value::Set { .. }) {
+            ctx.set_binary("&", result, storage, false)?
+        } else {
+            intersect_iterable(ctx, result, other)?
+        };
+        let collect = ctx.heap.discard_truth_operands(roots, ctx.modules);
+        ctx.heap.keep(result);
+        if collect {
+            ctx.collect_unreachable();
+        }
+    }
+    Ok(result)
+}
+
+/// Hash each yielded key once and stop on a match that completes the intersection.
+fn intersect_iterable(ctx: &mut Context, receiver: Id, other: Id) -> Result<Id> {
     let roots = ctx.heap.temporary_mark();
     let found = ctx.alloc(Value::Set {
         entries: Default::default(),
-        frozen: false,
+        frozen: matches!(ctx.heap.get(receiver), Value::Set { frozen: true, .. }),
     });
     let iterator = ctx.iterator(other)?;
     ctx.heap.keep(iterator);
@@ -529,11 +559,11 @@ fn set_issubset(ctx: &mut Context, receiver: Id, other: Id) -> Result<Id> {
     let iterator_mark = ctx.heap.temporary_mark();
     ctx.heap.keep(iterator);
     ctx.discard_truth(iterator_mark);
-    let subset =
-        scan.map(|()| ctx.stored_entries(found).len() == ctx.stored_entries(receiver).len());
-    ctx.discard_truth(found_mark);
-    ctx.discard_truth(key_mark);
-    subset.map(boolean)
+    if scan.is_err() {
+        ctx.discard_truth(found_mark);
+        ctx.discard_truth(key_mark);
+    }
+    scan.map(|()| found)
 }
 
 fn merge_set_entries(ctx: &mut Context, target: Id, source: Id) -> Result<()> {
@@ -849,6 +879,7 @@ pub(super) fn method(
                 name,
                 "set.discard" | "set.remove" | "set.difference_update" | "set.update"
             ) || name.ends_with(".issubset")
+                || name.ends_with(".intersection")
                 || name.ends_with(".difference")
                 || name.ends_with(".union") =>
             {
@@ -856,8 +887,10 @@ pub(super) fn method(
             }
             None => type_error("missing collection receiver"),
         })?;
-    let receiver = if let Some((kind, method @ ("difference" | "issubset" | "union"))) =
-        name.split_once('.')
+    let receiver = if let Some((
+        kind,
+        method @ ("difference" | "intersection" | "issubset" | "union"),
+    )) = name.split_once('.')
     {
         let storage = ctx.scalar_value(object);
         if !matches!(ctx.heap.get(storage), Value::Set { frozen, .. } if *frozen == (kind == "frozenset"))
@@ -961,6 +994,8 @@ pub(super) fn method(
             | "dict.popitem"
             | "set.difference"
             | "frozenset.difference"
+            | "set.intersection"
+            | "frozenset.intersection"
             | "set.union"
             | "frozenset.union"
             | "set.issubset"
@@ -1136,6 +1171,7 @@ pub(super) fn method(
             }
             Ok(TRUE)
         }
+        "set.intersection" | "frozenset.intersection" => set_intersection(ctx, receiver, args),
         "set.difference" | "frozenset.difference" => ctx.set_difference(receiver, args),
         "set.difference_update" => {
             for &source in args {

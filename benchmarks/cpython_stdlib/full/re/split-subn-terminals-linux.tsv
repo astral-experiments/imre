@@ -1,0 +1,19 @@
+product	revision	mode	profile	registered	selected	ran	passed	skipped	failed	errors	returncode	raw_ran	raw_footer
+cpython	5607950ef232dad16d75c0cf53101d9649d89115	reference	original	165	3	3	3	0	0	0	0	Ran 3 tests in 0.011s	OK
+cpython	5607950ef232dad16d75c0cf53101d9649d89115	reference	inverse	165	3	3	0	0	3	0	1	Ran 3 tests in 0.008s	FAILED (failures=3)
+base	f8c78c11180a164c759d5645283505e14513ed0c	ordinary-O0	original	165	3	3	3	0	0	0	0	Ran 3 tests in 15.233s	OK
+base	f8c78c11180a164c759d5645283505e14513ed0c	ordinary-O0	inverse	165	3	3	0	0	3	0	1	Ran 3 tests in 12.819s	FAILED (failures=3)
+base	f8c78c11180a164c759d5645283505e14513ed0c	boxed-O0	original	165	3	3	3	0	0	0	0	Ran 3 tests in 29.167s	OK
+base	f8c78c11180a164c759d5645283505e14513ed0c	boxed-O0	inverse	165	3	3	0	0	3	0	1	Ran 3 tests in 8.812s	FAILED (failures=3)
+base	f8c78c11180a164c759d5645283505e14513ed0c	ordinary-O3	original	165	3	3	3	0	0	0	0	Ran 3 tests in 12.144s	OK
+base	f8c78c11180a164c759d5645283505e14513ed0c	ordinary-O3	inverse	165	3	3	0	0	3	0	1	Ran 3 tests in 16.070s	FAILED (failures=3)
+base	f8c78c11180a164c759d5645283505e14513ed0c	boxed-O3	original	165	3	3	3	0	0	0	0	Ran 3 tests in 25.780s	OK
+base	f8c78c11180a164c759d5645283505e14513ed0c	boxed-O3	inverse	165	3	3	0	0	3	0	1	Ran 3 tests in 26.664s	FAILED (failures=3)
+merged	3172a8ffed7a39f108d6356e07fec301063b7cd4	ordinary-O0	original	165	3	3	3	0	0	0	0	Ran 3 tests in 45.746s	OK
+merged	3172a8ffed7a39f108d6356e07fec301063b7cd4	ordinary-O0	inverse	165	3	3	0	0	3	0	1	Ran 3 tests in 39.755s	FAILED (failures=3)
+merged	3172a8ffed7a39f108d6356e07fec301063b7cd4	boxed-O0	original	165	3	3	3	0	0	0	0	Ran 3 tests in 11.679s	OK
+merged	3172a8ffed7a39f108d6356e07fec301063b7cd4	boxed-O0	inverse	165	3	3	0	0	3	0	1	Ran 3 tests in 9.754s	FAILED (failures=3)
+merged	3172a8ffed7a39f108d6356e07fec301063b7cd4	ordinary-O3	original	165	3	3	3	0	0	0	0	Ran 3 tests in 18.629s	OK
+merged	3172a8ffed7a39f108d6356e07fec301063b7cd4	ordinary-O3	inverse	165	3	3	0	0	3	0	1	Ran 3 tests in 11.321s	FAILED (failures=3)
+merged	3172a8ffed7a39f108d6356e07fec301063b7cd4	boxed-O3	original	165	3	3	3	0	0	0	0	Ran 3 tests in 34.263s	OK
+merged	3172a8ffed7a39f108d6356e07fec301063b7cd4	boxed-O3	inverse	165	3	3	0	0	3	0	1	Ran 3 tests in 20.198s	FAILED (failures=3)

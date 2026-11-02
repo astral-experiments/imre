@@ -2600,11 +2600,18 @@ impl<'a> Checker<'a> {
     ) -> Option<&'static str> {
         let operation = matches!(
             attribute.attr.as_str(),
-            "__and__" | "__rand__" | "__or__" | "__ror__" | "__sub__" | "__rsub__"
+            "__and__"
+                | "__rand__"
+                | "__or__"
+                | "__ror__"
+                | "__sub__"
+                | "__rsub__"
+                | "__xor__"
+                | "__rxor__"
         );
         let name = match attribute.attr.as_str() {
             _ if operation => "set binary operator",
-            "__iand__" | "__ior__" | "__isub__" => "set in-place operator",
+            "__iand__" | "__ior__" | "__isub__" | "__ixor__" => "set in-place operator",
             "union" => "set.union",
             "difference_update" => "set.difference_update",
             "remove" => "set.remove",
@@ -2648,6 +2655,9 @@ impl<'a> Checker<'a> {
             && matches!(receiver.ty, Type::BinaryIO | Type::BytesIO)
         {
             return Err(self.object_builtin_error("binary readinto", attribute));
+        }
+        if receiver.ty == Type::BytesIO && attribute.attr.as_str() == "getbuffer" {
+            return Err(self.object_builtin_error("BytesIO.getbuffer", attribute));
         }
         if receiver.ty == Type::BinaryIO && attribute.attr.as_str() == "writelines" {
             return Err(self.object_builtin_error("binary writelines", attribute));
@@ -5129,6 +5139,9 @@ impl<'a> Checker<'a> {
         if let ast::Expr::Call(call) = &item.context_expr
             && self.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::CatchWarnings))
         {
+            if !call.arguments.keywords.is_empty() {
+                return Err(self.scoped_builtin_error("warnings.catch_warnings", call));
+            }
             self.arguments(call, &[], None)?;
             let mut protected = Vec::new();
             if let Some(target) = &item.optional_vars {
@@ -6029,6 +6042,13 @@ impl<'a> Checker<'a> {
         right: Type,
         node: &impl Ranged,
     ) -> Result<(Binary, Type), String> {
+        if op == ast::Operator::BitXor
+            && [left, right]
+                .into_iter()
+                .any(|ty| matches!(ty, Type::Set(_) | Type::FrozenStrings))
+        {
+            return Err(self.object_builtin_error("set binary operator", node));
+        }
         let bitwise = match op {
             ast::Operator::BitAnd => Some(Binary::BitAnd),
             ast::Operator::BitOr => Some(Binary::BitOr),
@@ -6480,6 +6500,7 @@ impl<'a> Checker<'a> {
                     });
                 }
                 Intrinsic::StringConstant(value) => return Ok(unpacking::string(value)),
+                Intrinsic::BoolConstant(value) => return Ok(Expr::boolean(value)),
                 Intrinsic::LogRecordFlag(mask) => {
                     return Ok(logging_records::op(
                         ir::LogRecordOperation::Flag,
@@ -9453,12 +9474,11 @@ impl<'a> Checker<'a> {
             return self.process_check_output(call);
         }
         if let ast::Expr::Attribute(attribute) = &*call.func
-            && matches!(
-                self.resolve(&attribute.value),
-                Some(Binding::Intrinsic(Intrinsic::Environ))
-            )
+            && let Some(Binding::Intrinsic(
+                mapping @ (Intrinsic::Environ | Intrinsic::EnvironBytes),
+            )) = self.resolve(&attribute.value)
         {
-            return self.environ_method(attribute, call);
+            return self.environ_method(attribute, call, mapping == Intrinsic::EnvironBytes);
         }
         if let ast::Expr::Attribute(attr) = call.func.as_ref() {
             self.calendar_class_attribute(attr)?;
@@ -10073,6 +10093,9 @@ impl<'a> Checker<'a> {
                     (_, method) => method,
                 };
                 let (builtin, ty) = match (method, call.arguments.args.len()) {
+                    ("getbuffer", _) if receiver.ty == Type::BytesIO => {
+                        return Err(self.object_builtin_error("BytesIO.getbuffer", call));
+                    }
                     ("readinto", _) if binary => {
                         return Err(self.object_builtin_error("binary readinto", call));
                     }

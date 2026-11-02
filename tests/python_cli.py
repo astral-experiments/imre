@@ -855,6 +855,52 @@ def check_class_metadata_allocation(imre, run, flags):
 
 
 
+def check_python_process_identity(imre, root, env):
+    import select
+    import signal
+
+    source = (
+        "import os, sys\n"
+        "assert sys.argv[-1] == 'tail' and sys.orig_argv[1] == '-B'\n"
+        "try: os.waitpid(-1, os.WNOHANG)\n"
+        "except ChildProcessError: pass\n"
+        "else: raise AssertionError('launcher left a child')\n"
+        "os.write(1, (str(os.getpid()) + '\\n').encode())\n"
+        "os.read(0, 1)\n"
+    )
+    script = root / "process_identity.py"
+    script.write_text(source)
+    for args, sig, disposition in (
+        (["-c", source], signal.SIGTERM, signal.SIG_IGN),
+        ([script], signal.SIGKILL, signal.SIG_DFL),
+        (["-c", source], signal.SIGINT, signal.SIG_DFL),
+    ):
+        def before_exec():
+            signal.signal(signal.SIGCHLD, disposition)
+
+        with subprocess.Popen(
+            [imre, "-B", *args, "tail"], env=env, cwd=root, start_new_session=True,
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, preexec_fn=before_exec,
+        ) as child:
+            try:
+                assert select.select([child.stdout], [], [], 600)[0], "payload did not report its PID"
+                got = child.stdout.readline()
+                assert got == f"{child.pid}\n".encode(), (got, child.poll())
+                if sys.platform.startswith("linux"):
+                    # The compiler temporarily needs waitable children for its linker.
+                    lines = Path(f"/proc/{child.pid}/status").read_text().splitlines()
+                    ignored = int(next(line.split()[1] for line in lines if line.startswith("SigIgn:")), 16)
+                    assert bool(ignored & (1 << (signal.SIGCHLD - 1))) == (disposition == signal.SIG_IGN)
+                child.send_signal(sig)
+                assert child.wait(timeout=10) == -sig
+            finally:
+                # Also release a payload left behind by a regressed wrapper.
+                try:
+                    os.killpg(child.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+
+
 def check_faulthandler(imre, root, env):
     import resource
     import select
@@ -1149,6 +1195,7 @@ def main():
 
         if sys.platform == "darwin" or sys.platform.startswith("linux"):
             check_faulthandler(imre, root, env)
+            check_python_process_identity(imre, root, env)
         if sys.platform.startswith("linux"):
             check_pending_signals(imre, root, env)
             marked_call_flags = marked_call_refusal_flags(root)
@@ -2026,6 +2073,11 @@ def report(text):
         compare("-B", "-c", "from typing import Protocol as P; print(P.__name__)")
         compare("-B", fixtures / "typing_protocol_import.py")
         compare("-IB", fixtures / "boxed_pickle_writer.py")
+        compare("-IB", "-c", "import io; b = io.BytesIO(b'abc'); print(bytes(b.getbuffer()))")
+        compare(
+            "-IB", "-c",
+            "import io; b = io.BytesIO(b'abc'); get = b.getbuffer; v = get(); v[1] = 90; print(b.getvalue())",
+        )
         compare(
             "-B", "-c",
             "import typing as t\ndef build():\n    class P(t.Protocol): pass\n"
@@ -2039,6 +2091,9 @@ def report(text):
         compare("-IB", override_fixture, native_args=("run", override_fixture, "--runtime-imports", "--quiet"))
         reader_fixture = fixtures / "io_buffered_reader_type.py"
         compare("-IB", reader_fixture, native_args=("run", reader_fixture, "--quiet"))
+        reinit_writer = fixtures / "io_buffered_writer_reinitialize.py"
+        reinit_path = root / "reinitialized-writer.bin"
+        compare("-IB", reinit_writer, reinit_path, native_args=("run", reinit_writer, "--quiet", "--", reinit_path))
         callback_writer = fixtures / "io_buffered_writer_callbacks.py"
         compare("-IB", callback_writer, native_args=("run", callback_writer, "--quiet"))
         shutdown_writer = fixtures / "io_buffered_writer_shutdown.py"
@@ -2291,6 +2346,7 @@ def report(text):
             "boxed_time_timezone.py",
             "boxed_time_strftime.py",
             "boxed_codecs.py",
+            "boxed_codec_registry.py",
             "boxed_wide_decode.py",
             "boxed_buffered_partial_write.py",
             "boxed_io_exports.py",
@@ -2320,6 +2376,7 @@ def report(text):
             "boxed_os_descriptor_io.py",
             "boxed_os_ftruncate.py",
             "boxed_os_waitpid.py",
+            "boxed_os_process_signal.py",
             "boxed_posix_session.py",
             "boxed_os_stat.py",
             "boxed_os_terminal_size.py",
@@ -2413,6 +2470,7 @@ def report(text):
             "boxed_set_union.py",
             "boxed_set_difference_update.py",
             "boxed_set_difference.py",
+            "boxed_set_intersection.py",
             "boxed_set_remove.py",
             "boxed_weakref.py",
             "boxed_public_weakref.py",
@@ -2457,6 +2515,7 @@ def report(text):
             "boxed_itertools_chain.py",
             "boxed_itertools_cycle.py",
             "boxed_itertools_batched.py",
+            "boxed_itertools_tee.py",
             "boxed_itertools_combinations.py",
             "boxed_itertools_permutations.py",
             "boxed_itertools_product.py",
@@ -2489,6 +2548,7 @@ def report(text):
             "boxed_json_decoder.py",
             "boxed_json_module_doc.py",
             "boxed_json_encoder.py",
+            "boxed_json_encoder_accelerator.py",
             "boxed_json_quote.py",
             "boxed_deque.py",
             "boxed_deque_deep_equal.py",
@@ -2515,6 +2575,7 @@ def report(text):
             "boxed_binascii.py",
             "boxed_zlib.py",
             "boxed_hashlib_names.py",
+            "bytes/hashlib_md5_provider.py",
             "bytes/hashlib_sha3_provider.py",
             "bytes/hashlib_kdf.py",
             "boxed_hashlib_file_digest.py",
@@ -2570,6 +2631,8 @@ def report(text):
             plugin.write_bytes((fixtures / "boxed_subprocess_fileio.py").read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")
             plugin.write_bytes((fixtures / "boxed_subprocess_exports.py").read_bytes())
+            compare("-IB", "-c", imports + "arithmetic.current()")
+            plugin.write_bytes((fixtures / "boxed_subprocess_interruptible_read.py").read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")
             plugin.write_bytes((fixtures / "boxed_subprocess_buffering.py").read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")

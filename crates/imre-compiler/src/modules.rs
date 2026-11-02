@@ -222,6 +222,10 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
         // CPython 3.14.5 Lib/code.py and Lib/codeop.py. See stdlib/docstrings/LICENSE.
         "code" => Some(("code.py", include_str!("../stdlib/code.py"))),
         "codecs" => Some(("codecs.py", include_str!("../stdlib/codecs.py"))),
+        "encodings" => Some((
+            "encodings/__init__.py",
+            include_str!("../stdlib/encodings/__init__.py"),
+        )),
         "codeop" => Some(("codeop.py", include_str!("../stdlib/codeop.py"))),
         "keyword" => Some(("keyword.py", KEYWORD_SOURCE)),
         "token" => Some(("token.py", include_str!("../stdlib/token.py"))),
@@ -263,6 +267,8 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
                 include_str!("../stdlib/contextlib_exitstack.py"),
                 "\n",
                 include_str!("../stdlib/contextlib_redirect.py"),
+                "\n",
+                include_str!("../stdlib/contextlib_closing.py"),
                 "\n",
                 include_str!("../stdlib/contextlib_contextmanager.py"),
                 "\n",
@@ -549,6 +555,7 @@ pub(crate) enum IntrinsicModule {
     Hashlib,
     Blake2,
     Sha3,
+    Md5,
     Hmac,
     Types,
     Base64,
@@ -787,7 +794,6 @@ pub(crate) enum Intrinsic {
     Sha1,
     Sha256,
     NamedHash(&'static str),
-    CodecInfoClass,
     UnicodeNormalize {
         check: bool,
     },
@@ -907,6 +913,8 @@ pub(crate) enum Intrinsic {
     TimeoutExpired,
     AccessMode(u8),
     Environ,
+    EnvironBytes,
+    BoolConstant(bool),
     GetEnv,
     GetCwd,
     Chdir,
@@ -1081,6 +1089,7 @@ impl IntrinsicModule {
             "hashlib" => Some(Self::Hashlib),
             "_blake2" => Some(Self::Blake2),
             "_sha3" => Some(Self::Sha3),
+            "_md5" => Some(Self::Md5),
             "hmac" => Some(Self::Hmac),
             "base64" => Some(Self::Base64),
             "binascii" => Some(Self::Binascii),
@@ -1234,6 +1243,16 @@ impl IntrinsicModule {
             }
             (Self::CodecsNative, "escape_decode") => {
                 Intrinsic::ObjectRuntimeExport("_codecs.escape_decode")
+            }
+            (Self::Codecs | Self::CodecsNative, "register") => {
+                Intrinsic::ObjectRuntimeExport("_codecs.register")
+            }
+            (Self::Codecs | Self::CodecsNative, "unregister") => {
+                Intrinsic::ObjectRuntimeExport("_codecs.unregister")
+            }
+            (Self::CodecsNative, "lookup") => Intrinsic::ObjectRuntimeExport("_codecs.lookup"),
+            (Self::CodecsNative, "_imre_native_search") => {
+                Intrinsic::ObjectRuntimeExport("_codecs._imre_native_search")
             }
             (Self::CodecsNative, "encode") => Intrinsic::ObjectRuntimeExport("_codecs.encode"),
             (Self::Pickle, "Pickler") => Intrinsic::PICKLER,
@@ -1565,6 +1584,7 @@ impl IntrinsicModule {
                 Intrinsic::ObjectRuntimeExport("contextlib.redirect_stderr")
             }
             (Self::Contextlib, "suppress") => Intrinsic::ObjectRuntimeExport("contextlib.suppress"),
+            (Self::Contextlib, "closing") => Intrinsic::ObjectRuntimeExport("contextlib.closing"),
             (Self::Contextlib, "nullcontext") => Intrinsic::NullContext,
             (Self::Warnings, "warn") => Intrinsic::ObjectRuntimeExport("warnings.warn"),
             (Self::Warnings, "simplefilter") => Intrinsic::WarningFilter { simple: true },
@@ -1575,6 +1595,21 @@ impl IntrinsicModule {
             (Self::Warnings, "showwarning") => Intrinsic::WarningDisplay { show: true },
             (Self::Time, "sleep") => Intrinsic::TimeSleep,
             (Self::Time, "time") => Intrinsic::WallTime,
+            (Self::Signal | Self::SignalNative, "signal") if cfg!(unix) => {
+                Intrinsic::ObjectRuntimeExport("_signal.signal")
+            }
+            (Self::Signal | Self::SignalNative, "getsignal") if cfg!(unix) => {
+                Intrinsic::ObjectRuntimeExport("_signal.getsignal")
+            }
+            (Self::Signal | Self::SignalNative, "default_int_handler") if cfg!(unix) => {
+                Intrinsic::ObjectRuntimeExport("_signal.default_int_handler")
+            }
+            (Self::Signal | Self::SignalNative, "SIG_DFL" | "SIG_IGN") if cfg!(unix) => {
+                Intrinsic::ObjectRuntimeExport("signal.Handlers")
+            }
+            (Self::Signal, "Handlers") if cfg!(unix) => {
+                Intrinsic::ObjectRuntimeExport("signal.Handlers")
+            }
             (Self::Signal, "SIGINT") => Intrinsic::IntConstant(2),
             (Self::Signal, "SIGTERM") => Intrinsic::IntConstant(15),
             (Self::SignalNative, "SIGINT") => Intrinsic::ObjectRuntimeExport("_signal.SIGINT"),
@@ -1867,6 +1902,7 @@ impl IntrinsicModule {
             }
             (Self::Typing, "Pattern") => Intrinsic::ObjectRuntimeExport("typing.Pattern"),
             (Self::Typing, "Match") => Intrinsic::ObjectRuntimeExport("typing.Match"),
+            (Self::Typing, "Counter") => Intrinsic::ObjectRuntimeExport("typing.Counter"),
             (Self::Typing, "DefaultDict") => Intrinsic::ObjectRuntimeExport("typing.DefaultDict"),
             (Self::Typing, "Mapping") => Intrinsic::TYPING_MAPPING,
             (Self::Typing, "MutableMapping") => {
@@ -1934,7 +1970,7 @@ impl IntrinsicModule {
             (Self::Codecs, "IncrementalDecoder") => {
                 Intrinsic::ObjectRuntimeExport("codecs.IncrementalDecoder")
             }
-            (Self::Codecs, "CodecInfo") => Intrinsic::CodecInfoClass,
+            (Self::Codecs, "CodecInfo") => Intrinsic::ObjectRuntimeExport("codecs.CodecInfo"),
             (Self::Threading, "_RLock") => Intrinsic::ObjectRuntimeExport("threading._RLock"),
             (Self::Threading, "_PyRLock") => Intrinsic::ObjectRuntimeExport("threading._PyRLock"),
             (Self::Threading, "_CRLock") => Intrinsic::ObjectRuntimeExport("threading._CRLock"),
@@ -2155,6 +2191,9 @@ impl IntrinsicModule {
                 _ => return None,
             }),
             (Self::Codecs, "getwriter") => Intrinsic::CodecGetWriter,
+            (Self::Md5, "md5") => Intrinsic::ObjectRuntimeExport("_md5.md5"),
+            (Self::Md5, "MD5Type") => Intrinsic::ObjectRuntimeExport("_md5.MD5Type"),
+            (Self::Md5, "_GIL_MINSIZE") => Intrinsic::ObjectRuntimeExport("_md5._GIL_MINSIZE"),
             (Self::Sha3, "sha3_224") => Intrinsic::ObjectRuntimeExport("_sha3.sha3_224"),
             (Self::Sha3, "sha3_256") => Intrinsic::ObjectRuntimeExport("_sha3.sha3_256"),
             (Self::Sha3, "sha3_384") => Intrinsic::ObjectRuntimeExport("_sha3.sha3_384"),
@@ -2194,7 +2233,7 @@ impl IntrinsicModule {
             (Self::Blake2, "BLAKE2S_MAX_DIGEST_SIZE") => {
                 Intrinsic::ObjectRuntimeExport("_blake2.BLAKE2S_MAX_DIGEST_SIZE")
             }
-            (Self::Hashlib, "md5") => Intrinsic::NamedHash("md5"),
+            (Self::Hashlib, "md5") => Intrinsic::ObjectRuntimeExport("hashlib.md5"),
             (Self::Hashlib, "sha1") => Intrinsic::Sha1,
             (Self::Hmac, "new") => Intrinsic::ObjectRuntimeExport("hmac.new"),
             (Self::Hmac, "HMAC") => Intrinsic::ObjectRuntimeExport("hmac.HMAC"),
@@ -2391,6 +2430,9 @@ impl IntrinsicModule {
             (Self::JsonNative, "make_scanner") => {
                 Intrinsic::ObjectRuntimeExport("_json.make_scanner")
             }
+            (Self::JsonNative, "make_encoder") => {
+                Intrinsic::ObjectRuntimeExport("_json.make_encoder")
+            }
             (Self::JsonNative, "scanstring") => Intrinsic::ObjectRuntimeExport("_json.scanstring"),
             (Self::JsonNative, "encode_basestring") => {
                 Intrinsic::ObjectRuntimeExport("_json.encode_basestring")
@@ -2506,6 +2548,8 @@ impl IntrinsicModule {
                 Intrinsic::ObjectRuntimeExport("os.supports_effective_ids")
             }
             (Self::Os, "environ") => Intrinsic::Environ,
+            (Self::Os, "environb") if cfg!(unix) => Intrinsic::EnvironBytes,
+            (Self::Os, "supports_bytes_environ") => Intrinsic::BoolConstant(cfg!(unix)),
             (Self::Os, "getenv") => Intrinsic::GetEnv,
             (Self::Os, "getcwd") => Intrinsic::GetCwd,
             (Self::Os, "fspath") => Intrinsic::FsPath,
@@ -4361,20 +4405,23 @@ impl<'a> Loader<'a> {
                             .last()
                             .is_some_and(|clause| clause.test.is_none())
                     {
-                        for function in guard
-                            .body
-                            .iter()
-                            .filter_map(ast::Stmt::as_function_def_stmt)
-                        {
-                            let name = function.name.as_str();
+                        for statement in &guard.body {
+                            let Some(name) = conditional_export_name(statement) else {
+                                continue;
+                            };
+                            // Assignments to existing globals retain their storage and write tracking.
+                            if module_value(statement).is_some()
+                                && self.modules[id].bindings.contains_key(name)
+                            {
+                                continue;
+                            }
                             if guard.elif_else_clauses.iter().all(|clause| {
                                 clause
                                     .body
                                     .iter()
-                                    .filter_map(ast::Stmt::as_function_def_stmt)
-                                    .any(|other| other.name.as_str() == name)
+                                    .any(|other| conditional_export_name(other) == Some(name))
                             }) {
-                                self.bind(id, name, Binding::ConditionalValue, function)?;
+                                self.bind(id, name, Binding::ConditionalValue, statement)?;
                                 self.needs_object_imports = true;
                             }
                         }
@@ -4775,6 +4822,7 @@ impl<'a> Loader<'a> {
                 IntrinsicModule::Ast
                     | IntrinsicModule::Blake2
                     | IntrinsicModule::Sha3
+                    | IntrinsicModule::Md5
                     | IntrinsicModule::Atexit
                     | IntrinsicModule::SocketNative
                     | IntrinsicModule::Imp
@@ -5480,6 +5528,16 @@ fn module_value(statement: &ast::Stmt) -> Option<&ast::Expr> {
         ast::Stmt::Assign(assignment) => Some(&assignment.value),
         ast::Stmt::AnnAssign(assignment) => assignment.value.as_deref(),
         _ => None,
+    }
+}
+
+/// A runtime binding introduced directly in a module-level conditional branch.
+fn conditional_export_name(statement: &ast::Stmt) -> Option<&str> {
+    if let ast::Stmt::FunctionDef(function) = statement {
+        Some(function.name.as_str())
+    } else {
+        module_value(statement)?;
+        value_name(statement)
     }
 }
 

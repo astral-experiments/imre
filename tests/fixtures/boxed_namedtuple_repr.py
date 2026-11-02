@@ -75,6 +75,30 @@ def current():
         else:
             raise AssertionError(f"accepted invalid field name {invalid!r}")
 
+    class Eager(NamedTuple):
+        __annotations__ = {"item": "Unavailable"}
+
+    assert Eager._fields == ("item",)
+    assert Eager.__annotations__ is Eager.__new__.__annotations__
+    assert Eager.__annotations__["item"].__forward_arg__ == "Unavailable"
+    assert Eager.__annotate__(4) == {"item": "Unavailable"}
+
+    class ExplicitEmpty(NamedTuple):
+        __annotations__ = {}
+
+    absent = Empty.__annotate__
+    assert absent is Empty.__new__.__annotate__
+    assert absent(1) is not absent(1) and absent(2) == {}
+    explicit = ExplicitEmpty.__annotate__
+    assert explicit is ExplicitEmpty.__new__.__annotate__
+    assert explicit(1) is explicit(1)
+    try:
+        explicit(2)
+    except NotImplementedError:
+        pass
+    else:
+        raise AssertionError("unexpected fake-globals format for eager annotations")
+
     row = Entry(label="eight", number=7)
     key = SelectorKey("fd", 3, 1, row)
     print(repr(row), str(row), [key, row])

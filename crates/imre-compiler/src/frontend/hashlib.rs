@@ -50,6 +50,31 @@ impl Checker<'_> {
         call: &ast::ExprCall,
         constructor: Intrinsic,
     ) -> Result<Expr, String> {
+        if constructor == Intrinsic::HashNew {
+            let name = call
+                .arguments
+                .args
+                .first()
+                .or_else(|| call.arguments.find_keyword("name").map(|kw| &kw.value));
+            // A runtime-selected digest can be MD5, whose provider depends on the
+            // imported hashlib module and the OpenSSL security policy.
+            if name.is_some_and(|expr| match expr {
+                ast::Expr::StringLiteral(lit) => {
+                    let name = lit.value.to_str();
+                    name.eq_ignore_ascii_case("md5")
+                        || name.eq_ignore_ascii_case("ssl3-md5")
+                        || name == "1.2.840.113549.2.5"
+                }
+                _ => true,
+            }) {
+                self.graph.needs_object_runtime.set(true);
+                return Err(self.classified_error(
+                    FailureKind::ObjectOperation,
+                    call,
+                    "runtime digest selection requires native object dispatch",
+                ));
+            }
+        }
         if matches!(
             constructor,
             Intrinsic::NamedHash("blake2b" | "blake2s") | Intrinsic::HashNew

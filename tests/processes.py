@@ -47,7 +47,7 @@ REJECTED = {
     "wrong_env_key": "run(['command'], capture_output=True, encoding='utf-8', env={1: 'value'})",
     "raw_environ": "run(['command'], capture_output=True, encoding='utf-8', env=os.environ)",
     "environ_index": "print(os.environ['KEY'])",
-    "environ_assignment": "os.environ['KEY'] = 'value'",
+    "environ_assignment_type": "os.environ['KEY'] = 42",
     "environ_copy_args": "os.environ.copy(1)",
     "environ_wrong_key": "print(os.getenv(1))",
     "stored_run": "callback = run\ncallback(['command'])",
@@ -105,9 +105,14 @@ except CalledProcessError:
         print(len(again.output))
 """
 
-INVALID_ENV = """import os
+INVALID_ENV = r"""import os
 import subprocess
 from sys import argv
+raw = dict(os.environb)
+if b'IMRE_INVALID' in raw:
+    assert raw[b'IMRE_INVALID'] == b'\xff'
+else:
+    assert raw[b'IMRE_\xff'] == b'value'
 for turn in range(2):
     try:
         os.environ.copy()
@@ -264,6 +269,7 @@ def main() -> None:
                     "limited": name in {"cleanup", "stdin_fds", "timeouts"},
                     "descriptor": descriptor if name == "stdin_fds" else None,
                     "empty_name": name == "environment",
+                    "invalid": (b"IMRE_RAW_BASELINE", b"\xff") if name == "environment_restore" else None,
                     "high_fds": name == "select_high_fds",
                 }
                 reference = run([python, "-E", "-B", str(source), *arguments], reference_dir, **options)

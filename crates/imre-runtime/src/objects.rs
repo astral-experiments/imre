@@ -63,7 +63,7 @@ mod join_buffer;
 mod joined_lines;
 mod json;
 pub(crate) use json::{
-    DecodedJson, Indent as JsonIndent, JsonNumber, decode_json, decode_json_bytes, json_bom_error,
+    DecodedJson, Indent as JsonIndent, JsonNumber, decode_json_tokens, decode_json_bytes, json_bom_error,
     string_end as json_string_end, write_codepoints as write_json_codepoints,
     write_fragment as write_json_fragment, write_string as write_json_string,
 };
@@ -83,7 +83,7 @@ mod paths;
 pub(crate) use paths::{directory_entries, exists, is_file, path_utf8};
 pub(crate) mod posixpath;
 mod processes;
-pub(crate) use processes::{BoxedPipe, BoxedPopen, initial_environment};
+pub(crate) use processes::{BoxedPipe, BoxedPopen, change_environment, initial_environment};
 mod random;
 pub(crate) use random::{choice_index, imre_random_float, random_below, shuffle_swaps};
 pub(crate) mod readiness;
@@ -122,7 +122,7 @@ mod zipfile;
 pub(crate) use zipfile::Archive as ZipArchive;
 
 pub(crate) use errno::{DOC as ERRNO_DOC, platform_entries as errno_entries};
-pub(crate) use files::{FileState, Random, errno_error, open_file, open_raw_file};
+pub(crate) use files::{FileState, Memory, Random, errno_error, open_file, open_raw_file};
 
 use super::{
     Bytes, Error, Int, Kind, List, MAX_LIST_LEN, StorageCell, Str, decode_index, fail, finish,

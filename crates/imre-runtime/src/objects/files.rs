@@ -20,7 +20,7 @@ mod random;
 pub(crate) use random::Random;
 mod seekable;
 mod text_memory;
-use seekable::Memory;
+pub(crate) use seekable::Memory;
 pub(super) use seekable::disk_offset;
 
 pub(crate) use buffered::peek_bytes;
@@ -145,6 +145,10 @@ impl FileState {
             Some(Stream::Write(writer)) => close_file(writer.into_file()),
             stream => stream.map_or(Ok(()), Stream::close),
         }
+    }
+
+    pub(super) fn take_pipe_read_ahead(&mut self) -> Result<Bytes> {
+        self.input()?.take_read_ahead()
     }
 
     pub(super) fn read_pipe_once(&mut self, size: Option<usize>) -> Result<Bytes> {

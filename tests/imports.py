@@ -37,6 +37,13 @@ REJECTED = {
     "function_wildcard": ({
         "main.py": "def invalid():\n    from helper import *\n", "helper.py": HELPER,
     }, "SyntaxError: import * only allowed at module level"),
+    "warning_scope_keeps_call_contracts": ({
+        "main.py": (
+            "import warnings\n"
+            "def identity(n: int) -> int: return n\n"
+            "with warnings.catch_warnings(record=True):\n    identity('wrong')\n"
+        ),
+    }, "invalid-argument-type"),
     "class_wildcard": ({
         "main.py": "class Invalid:\n    from helper import *\n", "helper.py": HELPER,
     }, "SyntaxError: import * only allowed at module level"),
@@ -176,6 +183,10 @@ REJECTED = {
         "main.py": "from helper import chosen\n",
         "helper.py": "if False:\n    def chosen():\n        return 1\n",
     }, "no static binding"),
+    "conditional_uninitialized_export": ({
+        "main.py": "from helper import selected\n",
+        "helper.py": "if True:\n    selected: int\nelse:\n    selected = 1\n",
+    }, 'no static binding "selected"'),
     "unbound_alias": ({"main.py": "import helper\n", "helper.py": "Pair = tuple[Missing, int]\n"}, "name is not a local value"),
     "unused_bad_type": ({"main.py": IMPORT, "helper.py": HELPER + 'def unused() -> int:\n    return "wrong"\n'}, "helper.py"),
     "unused_resource_function": ({
@@ -464,6 +475,12 @@ ACCEPTED = {
             "def initialize():\n    print('initialized')\n    return [41]\n"
             "if t.TYPE_CHECKING:\n    from unavailable_at_runtime import token\n"
             "else:\n    token = initialize()\n"
+        ),
+    },
+    "record_warnings": {
+        "main.py": (
+            "import warnings\n"
+            "with warnings.catch_warnings(record=True) as caught:\n    assert caught == []\n"
         ),
     },
     "contextmanager_generator_annotation": {
@@ -864,6 +881,15 @@ ACCEPTED = {
             "else:\n    def other():\n        return 'unreachable'\n"
         ),
     },
+    "conditional_package_value": {
+        "main.py": "from helper import selected as chosen\nimport helper\nprint(chosen, helper.selected)\n",
+        "helper/__init__.py": (
+            "import sys\n"
+            "if sys.platform == 'win32':\n    selected = 'windows'\n"
+            "elif sys.platform == 'linux':\n    selected = 'linux'\n"
+            "else:\n    selected = None\n"
+        ),
+    },
     "conditional_function_then_definition": {
         "main.py": "from helper import selected\nprint(selected())\n",
         "helper.py": (
@@ -1024,7 +1050,8 @@ def main() -> None:
                 if args.sanitize:
                     command.append("--sanitize")
                 # Optimizing the bundled address parser and warnings modules can take several minutes.
-                timeout = 300 if name in {"email_address_parsers", "warn_named_helper"} and level > 0 else build_timeout
+                slow_optimized = name in {"email_address_parsers", "record_warnings", "warn_named_helper"}
+                timeout = 300 if slow_optimized and level > 0 else build_timeout
                 require_success(run(command, temporary, timeout=timeout))
                 result = run([str(executable)], temporary)
                 require_success(result)

@@ -353,11 +353,11 @@ pub(super) const LIST_METHODS: &[&str] = &[
 ];
 
 const FROZENSET_OPERATORS: &[&str] = &[
-    "__and__", "__rand__", "__or__", "__ror__", "__sub__", "__rsub__",
+    "__and__", "__rand__", "__or__", "__ror__", "__sub__", "__rsub__", "__xor__", "__rxor__",
 ];
 const SET_OPERATORS: &[&str] = &[
-    "__and__", "__rand__", "__or__", "__ror__", "__sub__", "__rsub__", "__iand__", "__ior__",
-    "__isub__",
+    "__and__", "__rand__", "__or__", "__ror__", "__sub__", "__rsub__", "__xor__", "__rxor__",
+    "__iand__", "__ior__", "__isub__", "__ixor__",
 ];
 
 pub(super) fn set_operators(owner: &str) -> &'static [&'static str] {
@@ -373,11 +373,21 @@ pub(super) fn set_operator(method: &str) -> Option<&'static str> {
         "__and__" | "__rand__" | "__iand__" => "&",
         "__or__" | "__ror__" | "__ior__" => "|",
         "__sub__" | "__rsub__" | "__isub__" => "-",
+        "__xor__" | "__rxor__" | "__ixor__" => "^",
         _ => return None,
     })
 }
 
-pub(super) const MEMORYVIEW_METHODS: &[&str] = &["__enter__", "__exit__", "release"];
+pub(super) const MEMORYVIEW_METHODS: &[&str] = &[
+    "__enter__",
+    "__exit__",
+    "release",
+    "tobytes",
+    "toreadonly",
+    "__getitem__",
+    "__setitem__",
+    "__delitem__",
+];
 
 pub(super) const BYTEARRAY_METHODS: &[&str] = &[
     "__repr__",
@@ -600,6 +610,7 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
                     | "copy"
                     | "discard"
                     | "difference"
+                    | "intersection"
                     | "remove"
                     | "union"
                     | "difference_update"
@@ -618,6 +629,7 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
                 attr,
                 "copy"
                     | "difference"
+                    | "intersection"
                     | "union"
                     | "issuperset"
                     | "issubset"
@@ -1317,13 +1329,21 @@ pub(super) fn call(
                     return Err(type_error(format!("{message}, got {}", values.len())));
                 }
                 let Value::GetSetDescriptor {
-                    owner, name: field, ..
+                    get,
+                    owner,
+                    name: field,
+                    ..
                 } = *ctx.heap.get(descriptor)
                 else {
                     return Err(type_error("expected a getset descriptor"));
                 };
-                let accepts = if owner == "int" {
+                let accepts = if let Value::HashMethod { owner: class, .. } = *ctx.heap.get(get) {
+                    super::stdlib::hashlib::md5::check_receiver(ctx, class, field, values[0])?;
+                    true
+                } else if owner == "int" {
                     ctx.builtin_slot_accepts(values[0], owner)
+                } else if owner == "typing.Union" {
+                    matches!(ctx.heap.get(values[0]), Value::Union(_))
                 } else if crate::objects::HashState::is_provider_class(owner) {
                     ctx.type_name(values[0]) == owner
                 } else {
@@ -1406,11 +1426,49 @@ pub(super) fn call(
             "list" | "tuple" | "dict" | "set" | "frozenset" => {
                 collections::method(ctx, name, args, kwargs)
             }
+            "memoryview" if matches!(method, "__getitem__" | "__setitem__" | "__delitem__") => {
+                ctx.memoryview_item_method(method, args, kwargs)
+            }
             "memoryview" if MEMORYVIEW_METHODS.contains(&method) => {
+                if method == "tobytes" {
+                    if args.is_empty() {
+                        return Err(type_error(
+                            "unbound method memoryview.tobytes() needs an argument",
+                        ));
+                    }
+                    let [order] =
+                        bind_method_arguments("tobytes", &args[1..], kwargs, ["order"], 1)?;
+                    if let Some(order) = order.filter(|&id| id != NONE) {
+                        let value = ctx.str_value(order).map_err(|_| {
+                            type_error(format!(
+                                "tobytes() argument 'order' must be str or None, not {}",
+                                ctx.type_name(order)
+                            ))
+                        })?;
+                        if !matches!(value, "C" | "F" | "A") {
+                            return Err(Error::new("ValueError", "order must be 'C', 'F' or 'A'"));
+                        }
+                    }
+                    if !matches!(ctx.heap.get(args[0]), Value::MemoryView { .. }) {
+                        return Err(type_error("expected memoryview"));
+                    }
+                    let bytes = ctx.memoryview_bytes(args[0])?;
+                    return Ok(ctx.alloc(Value::Bytes(bytes)));
+                }
                 positional(name, kwargs)?;
                 // CPython's __exit__ ignores any positional exception information.
                 let max_args = if method == "__exit__" { usize::MAX } else { 1 };
                 arity(name, args, 1, max_args)?;
+                if method == "toreadonly" {
+                    if !matches!(ctx.heap.get(args[0]), Value::MemoryView { .. }) {
+                        return Err(type_error("expected memoryview"));
+                    }
+                    let child = ctx.new_memoryview(args[0])?;
+                    if let Value::MemoryView { readonly, .. } = ctx.heap.get_mut(child) {
+                        *readonly = true;
+                    }
+                    return Ok(child);
+                }
                 let Value::MemoryView { owner, .. } = ctx.heap.get_mut(args[0]) else {
                     return Err(type_error("expected memoryview"));
                 };
@@ -1857,13 +1915,7 @@ pub(super) fn call(
                 Value::Str(v) => v.chars().count(),
                 Value::SurrogateStr(points) => points.len(),
                 Value::Bytes(v) | Value::ByteArray(v) => v.len(),
-                Value::MemoryView { owner, .. } => {
-                    let owner = Context::memoryview_owner(*owner)?;
-                    match ctx.heap.get(ctx.scalar_value(owner)) {
-                        Value::Array(array) => array.len(),
-                        _ => ctx.bytes_like(owner)?.len(),
-                    }
-                }
+                Value::MemoryView { .. } => ctx.view_layout(args[0])?.len,
                 Value::Range(range) => {
                     return range.len.to_i64().map(|n| ctx.int(n)).ok_or_else(|| {
                         Error::new(
@@ -1907,40 +1959,7 @@ pub(super) fn call(
             let object = object.ok_or_else(|| {
                 type_error("memoryview() missing required argument 'object' (pos 1)")
             })?;
-            ctx.check_buffer_exporter(object)?;
-            let owner = match ctx.heap.get(ctx.scalar_value(object)) {
-                Value::Bytes(_) | Value::ByteArray(_) => object,
-                Value::MemoryView { owner, .. } => Context::memoryview_owner(*owner)?,
-                Value::Array(array) if array.view_layout().0 != "w" => object,
-                Value::Array(_) => {
-                    return Err(Error::new(
-                        "NotImplementedError",
-                        "memoryview of a mutable buffer is unsupported",
-                    ));
-                }
-                _ => {
-                    return Err(type_error(format!(
-                        "memoryview: a bytes-like object is required, not '{}'",
-                        ctx.type_name(object)
-                    )));
-                }
-            };
-            let storage = ctx.scalar_value(owner);
-            if matches!(ctx.heap.get(storage), Value::Array(_) | Value::ByteArray(_)) {
-                ctx.heap.note_buffer_view(storage);
-            }
-            let anonymous = matches!(
-                ctx.heap.get(object),
-                Value::MemoryView {
-                    anonymous: true,
-                    ..
-                }
-            );
-            Ok(ctx.alloc(Value::MemoryView {
-                owner: Some(owner),
-                anonymous,
-                hash: None,
-            }))
+            ctx.new_memoryview(object)
         }
         "slice" => super::slice::construct(ctx, args, kwargs),
         "range" => {

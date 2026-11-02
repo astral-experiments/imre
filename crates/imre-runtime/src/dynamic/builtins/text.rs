@@ -11,7 +11,7 @@ use ruff_python_literal::format::{
 };
 
 use super::super::operators::append_rendered_text;
-use super::super::stdlib::codecs::{decode_named, encode_text};
+use super::super::stdlib::codecs::{decode_named, encode_text_object};
 use super::*;
 
 use crate::objects::{python_whitespace, split_parts, translate, visit_line_fields as split_lines};
@@ -185,7 +185,11 @@ pub(super) fn construct(
                     if encoding_id.is_none() {
                         return Err(type_error("string argument without an encoding"));
                     }
-                    encode_text(ctx, value.unwrap(), encoding_id, errors)?
+                    let result = encode_text_object(ctx, value.unwrap(), encoding_id, errors)?;
+                    if name == "bytes" {
+                        return Ok(result);
+                    }
+                    ctx.bytes_like(result)?.to_vec()
                 }
                 _ if encoding_id.is_some() => {
                     return Err(type_error("encoding without a string argument"));
@@ -386,9 +390,12 @@ pub(super) fn call_bytes_method(ctx: &mut Context, source: Id) -> Result<Option<
 }
 
 pub(in super::super) fn bytes_from_iterable(ctx: &mut Context, obj: Id) -> Result<Vec<u8>> {
+    if matches!(ctx.heap.get(obj), Value::MemoryView { .. }) {
+        return ctx.memoryview_bytes(obj);
+    }
     if matches!(
         ctx.heap.get(ctx.scalar_value(obj)),
-        Value::Bytes(_) | Value::ByteArray(_) | Value::MemoryView { .. }
+        Value::Bytes(_) | Value::ByteArray(_) | Value::BytesIoBuffer { .. }
     ) {
         return super::super::copy_ids(ctx.bytes_like(obj)?);
     }
@@ -1473,8 +1480,7 @@ pub(super) fn method(
         return if name == "decode" {
             decode_named(ctx, ctx.scalar_value(receiver), encoding, errors)
         } else {
-            let b = encode_text(ctx, receiver, encoding, errors)?;
-            Ok(ctx.alloc(Value::Bytes(b)))
+            encode_text_object(ctx, receiver, encoding, errors)
         };
     }
     if name == "zfill" {
@@ -1610,9 +1616,12 @@ pub(super) fn method(
             }
             ctx.check_buffer_exporter(needle)?;
             let byte;
-            let needle = match ctx.buffer_storage(needle)? {
-                Value::Bytes(bytes) | Value::ByteArray(bytes) => bytes.as_slice(),
-                Value::Array(array) => array.as_bytes(),
+            let needle = match ctx.heap.get(ctx.scalar_value(needle)) {
+                Value::Bytes(_)
+                | Value::ByteArray(_)
+                | Value::MemoryView { .. }
+                | Value::BytesIoBuffer { .. }
+                | Value::Array(_) => ctx.native_buffer_bytes(needle)?,
                 _ => {
                     let index = ctx.index_value(needle)?.ok_or_else(|| {
                         type_error(format!(

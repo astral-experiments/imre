@@ -446,11 +446,15 @@ impl Function<'_, '_> {
 
     fn checked(&mut self, invocation: &str) -> String {
         let result = self.value(invocation);
+        self.check_error();
+        result
+    }
+
+    fn check_error(&mut self) {
         let failed = self.value("call i1 @imre_dyn_failed(ptr %ctx)");
         let next = self.name("b");
         self.branch(&failed, &self.error.clone(), &next);
         self.label(&next);
-        result
     }
 
     fn op(&mut self, name: &str, args: &[&str]) -> String {
@@ -618,6 +622,7 @@ impl Function<'_, '_> {
             "call void @imre_dyn_statement_with_exception(ptr %ctx, ptr {ptr}, i64 {count}, ptr {}, i32 {line}, i64 {})",
             self.source.file, self.caught.last().map_or("0", String::as_str)
         ));
+        self.check_error();
     }
 
     fn invoke(&mut self, callable: &str, values: &[&str]) -> String {

@@ -13,6 +13,8 @@ use super::{Context, Error, Id, MemoryStream, NONE, Result, TRUE, Value};
 
 pub(in crate::dynamic) struct Writer {
     pub(in crate::dynamic) raw: Cell<Option<Id>>,
+    pub(super) active: super::native_writer::ActiveCall,
+    pub(super) ready: Cell<bool>,
     capacity: usize,
     pending: RefCell<Vec<u8>>,
     written: Cell<usize>,
@@ -58,26 +60,23 @@ fn native_writer(ctx: &Context, raw: Id) -> Option<Rc<BytesIo>> {
     None
 }
 
-pub(super) fn initialize(ctx: &mut Context, receiver: Id, raw: Id, capacity: usize) -> Result<Id> {
-    // CPython probes the initial position, including when the stream is not seekable.
-    let _ = invoke(ctx, raw, "tell", vec![]);
-    let Value::Instance { memory_stream, .. } = ctx.heap.get_mut(receiver) else {
-        return Err(Error::new(
-            "NotImplementedError",
-            "BufferedWriter reinitialization is unsupported",
-        ));
-    };
-    if memory_stream.is_some() {
-        return Err(Error::new(
-            "NotImplementedError",
-            "BufferedWriter reinitialization is unsupported",
-        ));
-    }
+pub(super) fn initialize(
+    ctx: &mut Context,
+    receiver: Id,
+    raw: Id,
+    capacity: usize,
+    revived: bool,
+) -> Result<Id> {
     let mut pending = Vec::new();
     pending
         .try_reserve_exact(capacity)
         .map_err(|_| crate::Error::allocation())?;
+    let Value::Instance { memory_stream, .. } = ctx.heap.get_mut(receiver) else {
+        unreachable!()
+    };
     *memory_stream = Some(MemoryStream::BufferedBytes(Rc::new(Writer {
+        active: super::native_writer::ActiveCall::default(),
+        ready: Cell::new(revived),
         raw: Cell::new(Some(raw)),
         capacity,
         pending: RefCell::new(pending),
@@ -85,6 +84,9 @@ pub(super) fn initialize(ctx: &mut Context, receiver: Id, raw: Id, capacity: usi
         unflushed: Cell::new(0),
         busy: Cell::new(false),
     })));
+    // Both tell() and conversion of its result may recursively initialize this same writer.
+    let _ = invoke(ctx, raw, "tell", vec![]).and_then(|value| position(ctx, value));
+    super::descriptor_buffer::finish_writer_probe(ctx, receiver)?;
     Ok(NONE)
 }
 
@@ -101,13 +103,15 @@ impl RawWriter<'_> {
     fn raw_write(&mut self, data: &[u8]) -> Result<Option<usize>> {
         let ctx = &mut *self.ctx;
         if let Some(stream) = native_writer(ctx, self.raw) {
-            stream.write(data)?;
+            stream.write(ctx, data)?;
             return Ok(Some(data.len()));
         }
         let bytes = ctx.alloc(Value::Bytes(copy_bytes(data)?));
         let view = ctx.alloc(Value::MemoryView {
             owner: Some(bytes),
             anonymous: true,
+            layout: None,
+            readonly: false,
             hash: None,
         });
         // Attribute lookup itself can invoke Python and collect temporaries.
@@ -206,6 +210,15 @@ fn position(ctx: &mut Context, result: Id) -> Result<i64> {
 }
 
 impl Writer {
+    pub(super) fn finish_probe(&self) -> Result<()> {
+        self.raw()?;
+        self.pending.borrow_mut().clear();
+        self.unflushed.set(0);
+        self.written.set(0);
+        self.ready.set(true);
+        Ok(())
+    }
+
     fn raw(&self) -> Result<Id> {
         self.raw
             .get()
@@ -239,7 +252,10 @@ impl Writer {
                 if b.len() < self.capacity
                     && matches!(
                         ctx.buffer_storage(id)?,
-                        Value::ByteArray(_) | Value::Array(_)
+                        Value::ByteArray(_)
+                            | Value::Array(_)
+                            | Value::BytesIoStorage(_)
+                            | Value::RawReadWindow(_)
                     ) =>
             {
                 Some(id)
@@ -305,6 +321,12 @@ impl Writer {
         if name == "raw" {
             return Ok(self.raw.get().unwrap_or(NONE));
         }
+        if !self.ready.get() {
+            return Err(Error::new(
+                "ValueError",
+                "I/O operation on uninitialized object",
+            ));
+        }
         let whence = if name == "seek" && args.len() == 2 {
             ctx.index_integer(args[1])?
                 .to_i64()
@@ -367,7 +389,10 @@ impl Writer {
             && files::output_bytes(ctx, args[0])?.len() >= self.capacity
             && matches!(
                 ctx.buffer_storage(args[0])?,
-                Value::ByteArray(_) | Value::Array(_)
+                Value::ByteArray(_)
+                    | Value::Array(_)
+                    | Value::BytesIoStorage(_)
+                    | Value::RawReadWindow(_)
             )
             && native_writer(ctx, raw).is_none()
         {

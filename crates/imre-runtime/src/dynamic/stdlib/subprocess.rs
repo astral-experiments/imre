@@ -343,7 +343,7 @@ pub(super) fn call(
             .status(ctx.truth(poll)?)?
             .map_or(NONE, |n| ctx.int(i64::from(n)))),
         ("wait", &[seconds]) => Ok(child
-            .wait(timeout(ctx, seconds)?)?
+            .wait(timeout(ctx, seconds)?, || ctx.dispatch_signals())?
             .map_or(NONE, |n| ctx.int(i64::from(n)))),
         ("signal", &[number]) => {
             let number = ctx

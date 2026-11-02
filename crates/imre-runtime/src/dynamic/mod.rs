@@ -23,6 +23,7 @@ mod importlib_registered;
 mod iterators;
 mod lowlevel_threads;
 mod mapping_abc;
+mod memoryview;
 mod method_decorator;
 mod module_type;
 mod namedtuple;
@@ -36,6 +37,8 @@ mod paramspec;
 mod property;
 mod range;
 mod raw_read_window;
+#[cfg(unix)]
+mod signal_handlers;
 mod slice;
 mod slot_member;
 mod source_code;
@@ -149,6 +152,7 @@ pub(crate) struct Context {
     classes: HashMap<String, Id>,
     // The Python enum bases use native layouts but have writable class dictionaries.
     enum_scopes: HashMap<Id, Id>,
+    signal_handlers: Vec<Id>,
     typing: typing::Registry,
     // Python wrappers retain their registered logger for the lifetime of this heap.
     logger_wrappers: HashMap<*const crate::objects::logging::Logger, Id>,
@@ -362,21 +366,71 @@ impl Context {
         Ok(())
     }
 
+    fn view_storage_id(&self, owner: Id) -> Id {
+        match self.heap.get(owner) {
+            Value::BytesIoBuffer { storage, .. } => *storage,
+            _ => self.scalar_value(owner),
+        }
+    }
+
+    fn owner_bytes(&self, owner: Id) -> Result<&[u8]> {
+        match self.heap.get(self.view_storage_id(owner)) {
+            Value::Bytes(bytes) | Value::ByteArray(bytes) => Ok(bytes),
+            Value::Array(a) => Ok(a.as_bytes()),
+            Value::RawReadWindow(w) => self.window_bytes(*w),
+            Value::BytesIoStorage(Some(file)) => Ok(file.storage()),
+            Value::BytesIoStorage(None) => {
+                Err(Error::new("ValueError", "I/O operation on closed file."))
+            }
+            _ => Err(Error::new(
+                "TypeError",
+                format!(
+                    "a bytes-like object is required, not '{}'",
+                    self.type_name(owner)
+                ),
+            )),
+        }
+    }
+
+    fn view_element_count(&self, owner: Id) -> Result<usize> {
+        match self.heap.get(self.view_storage_id(owner)) {
+            Value::Array(a) => Ok(a.len()),
+            Value::BytesIoStorage(Some(file)) => Ok(file.bytes().len()),
+            _ => Ok(self.owner_bytes(owner)?.len()),
+        }
+    }
+
+    fn writable_storage_bytes(&mut self, storage: Id) -> Result<&mut [u8]> {
+        Self::mutable_storage_bytes(self.heap.get_mut(storage))
+    }
+
+    fn mutable_storage_bytes(value: &mut Value) -> Result<&mut [u8]> {
+        match value {
+            Value::ByteArray(bytes) => Ok(bytes.as_mut_slice()),
+            Value::Array(a) => Ok(a.as_bytes_mut()?),
+            Value::BytesIoStorage(Some(file)) => {
+                Ok(std::rc::Rc::make_mut(file).storage_mut()?.as_mut_slice())
+            }
+            _ => Err(Error::new("TypeError", "cannot modify read-only memory")),
+        }
+    }
+
     fn buffer_storage(&self, id: Id) -> Result<&Value> {
         let owner = match self.heap.get(id) {
             Value::MemoryView { owner, .. } => Self::memoryview_owner(*owner)?,
             _ => id,
         };
-        Ok(self.heap.get(self.scalar_value(owner)))
+        Ok(self.heap.get(self.view_storage_id(owner)))
     }
 
     fn bytes_like(&self, id: Id) -> Result<&[u8]> {
-        match self.buffer_storage(id)? {
-            Value::RawReadWindow(w) => self.window_bytes(*w),
-            Value::Bytes(data) | Value::ByteArray(data) => Ok(data),
-            Value::Array(array) if matches!(self.heap.get(id), Value::MemoryView { .. }) => {
-                Ok(array.as_bytes())
-            }
+        match self.heap.get(self.scalar_value(id)) {
+            Value::MemoryView { .. } => self.view_bytes(id),
+            Value::BytesIoBuffer { storage, .. } => match self.heap.get(*storage) {
+                Value::BytesIoStorage(Some(file)) => Ok(file.bytes()),
+                _ => Err(Error::new("ValueError", "I/O operation on closed file.")),
+            },
+            Value::Bytes(bytes) | Value::ByteArray(bytes) => Ok(bytes),
             _ => Err(Error::new(
                 "TypeError",
                 format!(
@@ -385,6 +439,95 @@ impl Context {
                 ),
             )),
         }
+    }
+
+    fn native_buffer_bytes(&self, id: Id) -> Result<&[u8]> {
+        match self.heap.get(self.scalar_value(id)) {
+            Value::Array(array) => Ok(array.as_bytes()),
+            _ => self.bytes_like(id),
+        }
+    }
+
+    fn invalidate_stream_snapshot(&self, owner: Id) {
+        if let Value::BytesIoBuffer { stream, .. } = self.heap.get(owner)
+            && let Value::Instance {
+                memory_stream: Some(stdlib::io::MemoryStream::Bytes(state)),
+                ..
+            } = self.heap.get(*stream)
+        {
+            state.snapshot.set(None);
+        }
+    }
+
+    fn view_is_readonly(&self, view: Id) -> Result<bool> {
+        let Value::MemoryView {
+            owner, readonly, ..
+        } = *self.heap.get(view)
+        else {
+            unreachable!()
+        };
+        let owner = Self::memoryview_owner(owner)?;
+        Ok(readonly || matches!(self.heap.get(self.view_storage_id(owner)), Value::Bytes(_)))
+    }
+
+    fn new_memoryview(&mut self, object: Id) -> Result<Id> {
+        self.check_buffer_exporter(object)?;
+        let (owner, anonymous, layout) = match *self.heap.get(self.scalar_value(object)) {
+            Value::Bytes(_) | Value::ByteArray(_) => (object, false, None),
+            Value::MemoryView {
+                owner,
+                anonymous,
+                layout,
+                ..
+            } => (Self::memoryview_owner(owner)?, anonymous, layout),
+            Value::BytesIoBuffer { .. } => {
+                let len = self.view_element_count(object)?;
+                self.invalidate_stream_snapshot(object);
+                (
+                    object,
+                    false,
+                    Some(memoryview::ViewLayout {
+                        start: 0,
+                        len,
+                        stride: 1,
+                    }),
+                )
+            }
+            Value::Array(ref a) if a.view_layout().0 != "w" => (object, false, None),
+            Value::Array(_) => {
+                return Err(Error::new(
+                    "NotImplementedError",
+                    "memoryview of a mutable buffer is unsupported",
+                ));
+            }
+            _ => {
+                return Err(Error::new(
+                    "TypeError",
+                    format!(
+                        "memoryview: a bytes-like object is required, not '{}'",
+                        self.type_name(object)
+                    ),
+                ));
+            }
+        };
+        let storage = self.view_storage_id(owner);
+        if matches!(
+            self.heap.get(storage),
+            Value::Array(_) | Value::ByteArray(_) | Value::BytesIoStorage(_)
+        ) {
+            self.heap.note_buffer_view(storage);
+        }
+        let readonly = matches!(
+            self.heap.get(object),
+            Value::MemoryView { readonly: true, .. }
+        );
+        Ok(self.alloc(Value::MemoryView {
+            owner: Some(owner),
+            anonymous,
+            layout,
+            readonly,
+            hash: None,
+        }))
     }
 
     /// Keep the buffer exported while an argument conversion runs Python.
@@ -396,7 +539,11 @@ impl Context {
         let input = self.scalar_value(input);
         if !matches!(
             self.heap.get(input),
-            Value::ByteArray(_) | Value::Array(_) | Value::MemoryView { .. }
+            Value::ByteArray(_)
+                | Value::Array(_)
+                | Value::MemoryView { .. }
+                | Value::BytesIoBuffer { .. }
+                | Value::BytesIoStorage(_)
         ) {
             return convert(self);
         }
@@ -419,7 +566,7 @@ impl Context {
     }
 
     fn buffer_is_exported(&mut self, storage: Id) -> Result<bool> {
-        if self.buffer_exports.contains(&storage) {
+        if self.buffer_exports.iter().any(|&id| id == storage || matches!(self.heap.get(id), Value::BytesIoBuffer {storage: backing,..} if *backing == storage)) {
             return Ok(true);
         }
         if !self.heap.may_have_buffer_views(storage) {
@@ -1969,17 +2116,25 @@ impl Context {
                 defaultdict::METHODS
             }
             "list" => builtins::LIST_METHODS,
-            "method_descriptor" => &["__get__"],
+            "method_descriptor" | "wrapper_descriptor" => &["__get__"],
             "tuple" => &["__repr__", "__getitem__", "index"],
             "set" => &[
                 "__repr__",
                 "__reduce__",
                 "difference",
+                "intersection",
                 "issubset",
                 "union",
                 "update",
             ],
-            "frozenset" => &["__repr__", "__reduce__", "difference", "issubset", "union"],
+            "frozenset" => &[
+                "__repr__",
+                "__reduce__",
+                "difference",
+                "intersection",
+                "issubset",
+                "union",
+            ],
             "bytearray" => {
                 self.builtin("bytearray.fromhex");
                 builtins::BYTEARRAY_METHODS
@@ -2309,7 +2464,10 @@ impl Context {
             self.bind_import_child(name, source_globals, module)?;
             return Ok(Some(module));
         }
-        self.load_bootstrap_module(name, parent, source_globals)
+        // Bootstrap initializers and live sys.modules hooks can reenter Python.
+        stacker::maybe_grow(1024 * 1024, 4 * 1024 * 1024, || {
+            self.load_bootstrap_module(name, parent, source_globals)
+        })
     }
 
     /// Before installing the registry, execute its dependencies and the script's explicit entry.
@@ -2555,9 +2713,13 @@ impl Context {
                 self.bind(scope, "_import_lock", lock);
             }
             "itertools" => {
+                for attr in ["count", "repeat"] {
+                    let value = self.builtin(&format!("{name}.{attr}"));
+                    self.bind(scope, attr, value);
+                }
+            }
+            "_imre_itertools" => {
                 for attr in [
-                    "count",
-                    "repeat",
                     "_cycle_allocate",
                     "_cycle_next",
                     "_filterfalse_allocate",
@@ -2566,7 +2728,7 @@ impl Context {
                     "_chain_get",
                     "_chain_set",
                 ] {
-                    let value = self.builtin(&format!("itertools.{attr}"));
+                    let value = self.builtin(&format!("{name}.{attr}"));
                     self.bind(scope, attr, value);
                 }
             }
@@ -2616,17 +2778,22 @@ impl Context {
             }
             #[cfg(unix)]
             "_signal" if source.is_none() => {
-                #[cfg(target_os = "linux")]
                 stdlib::signal::initialize(self, scope);
-                for (name, disposition) in [("SIG_DFL", libc::SIG_DFL), ("SIG_IGN", libc::SIG_IGN)]
-                {
-                    let value = self.int(disposition as i64);
+                for (name, key, value) in [
+                    ("SIG_DFL", "_signal.SIG_DFL", libc::SIG_DFL),
+                    ("SIG_IGN", "_signal.SIG_IGN", libc::SIG_IGN),
+                ] {
+                    let value = self.signal_sentinel(key, value);
                     self.bind(scope, name, value);
+                }
+                for name in ["signal", "getsignal"] {
+                    let function = self.builtin(&format!("_signal.{name}"));
+                    self.bind(scope, name, function);
                 }
                 let handler = self.builtin("_signal.default_int_handler");
                 self.bind(scope, "default_int_handler", handler);
             }
-            #[cfg(target_os = "linux")]
+            #[cfg(unix)]
             "_imre_signal" if source.is_none() => {
                 let factory = self.builtin("_imre_signal.make_signals");
                 self.bind(scope, "make_signals", factory);
@@ -2681,6 +2848,7 @@ impl Context {
                 let native_new = self.builtin("hashlib.new");
                 self.bind(scope, "_native_new", native_new);
             }
+            "_md5" => stdlib::hashlib::md5::install(self, module, scope)?,
             "_sha3" => {
                 for name in [
                     "sha3_224",
@@ -2976,6 +3144,11 @@ impl Context {
                 let name = self.text("_batched_state");
                 let member = self.alloc(Value::SlotMember { owner, name });
                 self.bind(scope, "_batched_state", member);
+            }
+            if name == "codecs"
+                && let Some(class) = self.scope_name(scope, "CodecInfo")
+            {
+                self.classes.insert("codecs.CodecInfo".into(), class);
             }
             if name == "re"
                 && let Some(class) = self.scope_name(scope, "PatternError")

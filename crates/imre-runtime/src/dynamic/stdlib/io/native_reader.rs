@@ -7,6 +7,7 @@ use files::{BinaryFile, ReadSource};
 
 pub(super) const METHODS: &[&str] = &[
     "__init__",
+    "_dealloc_warn",
     "raw",
     "closed",
     "name",
@@ -40,19 +41,60 @@ fn validate(owner: &str, name: &str, count: usize, kwargs: &[(String, Id)]) -> R
         "read" | "read1" | "readline" | "peek" | "truncate" if count > 1 => {
             format!("{name} expected at most 1 argument, got {count}")
         }
-        "readinto" | "readinto1" if count != 1 => {
+        "readinto" | "readinto1" | "_dealloc_warn" if count != 1 => {
             format!("{owner}.{name}() takes exactly one argument ({count} given)")
         }
         "seek" if count == 0 => "seek expected at least 1 argument, got 0".into(),
         "seek" if count > 2 => format!("seek expected at most 2 arguments, got {count}"),
         "read" | "read1" | "readline" | "peek" | "readinto" | "readinto1" | "truncate" | "seek"
-        | "__exit__" => {
+        | "__exit__" | "_dealloc_warn" => {
             return Ok(());
         }
         _ if count != 0 => format!("{owner}.{name}() takes no arguments ({count} given)"),
         _ => return Ok(()),
     };
     Err(Error::new("TypeError", message))
+}
+
+/// A missing or failing raw warning hook must not interrupt flush or close.
+pub(super) fn dealloc_warn(ctx: &mut Context, receiver: Id, source: Id) {
+    let raw = if let Some(buffer) = backing(ctx, receiver)
+        && let Value::File(handle) = ctx.heap.get(buffer)
+        && let BinaryFile::Descriptor(fd) = handle.as_ref()
+    {
+        Some(fd.raw)
+    } else {
+        super::buffered_reader::initialized_raw(ctx, receiver)
+    };
+    if let Some(raw) = raw {
+        let _ = super::text_wrapper::invoke(ctx, raw, "_dealloc_warn", vec![source]);
+    }
+}
+
+/// A warning or flush override can replace the raw, even across backing types.
+pub(super) fn flush_and_close(ctx: &mut Context, receiver: Id) -> Result<Id> {
+    let flush = super::text_wrapper::invoke(ctx, receiver, "flush", vec![]);
+    if let Err(error) = &flush {
+        for root in error.roots() {
+            ctx.heap.keep(root);
+        }
+    }
+    let close = if let Some(buffer) = backing(ctx, receiver)
+        && let Value::File(handle) = ctx.heap.get(buffer)
+        && let BinaryFile::Descriptor(fd) = handle.as_ref()
+    {
+        fd.close_after_flush(ctx, receiver).map(|_| NONE)
+    } else {
+        super::buffered_reader::close_raw(ctx, receiver)
+    };
+    match (flush, close) {
+        (Err(flush), Err(mut close)) => {
+            close.context = ctx.raised_instance(flush);
+            Err(close)
+        }
+        (Err(flush), _) => Err(flush),
+        (_, result) => result,
+    }
 }
 
 pub(super) fn call(
@@ -74,6 +116,10 @@ pub(super) fn call(
     }
     if name == "writable" {
         return Ok(FALSE);
+    }
+    if name == "_dealloc_warn" {
+        dealloc_warn(ctx, receiver, args[0]);
+        return Ok(NONE);
     }
     if super::buffered_reader::has_state(ctx, receiver) {
         return super::buffered_reader::call(ctx, receiver, name, args);
@@ -126,11 +172,8 @@ pub(super) fn call(
             return ctx.lookup_attr(fd.raw, name);
         }
         if receiver != buffer && name == "close" && !fd.closed() {
-            let flushed = ctx
-                .lookup_attr(receiver, "flush")
-                .and_then(|flush| ctx.call(flush, vec![], Vec::new()));
-            fd.call(ctx, receiver, name, args, kwargs)?;
-            return flushed.map(|_| NONE);
+            fd.warn_on_reader_close(ctx, receiver)?;
+            return flush_and_close(ctx, receiver);
         }
         return fd.call(ctx, receiver, name, args, kwargs);
     }

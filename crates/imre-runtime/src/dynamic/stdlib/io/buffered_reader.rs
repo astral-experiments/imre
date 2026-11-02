@@ -38,7 +38,7 @@ fn raw_member(ctx: &Context, receiver: Id) -> Option<Id> {
             memory_stream: Some(MemoryStream::UninitializedReader(raw)),
             ..
         } => *raw,
-        _ => None,
+        _ => super::descriptor_buffer::explicit_reader_raw(ctx, receiver),
     }
 }
 
@@ -188,7 +188,7 @@ impl Reader {
     ) -> Result<Option<usize>> {
         let mark = ctx.heap.temporary_mark();
         let raw = self.raw()?;
-        let dest = ctx.ownerless_byte_view(backing, start, length)?;
+        let dest = ctx.ownerless_byte_view(backing, start, length, false)?;
         let retry = ctx.heap.temporary_mark();
         let value = loop {
             match invoke(ctx, raw, "readinto", vec![dest]) {
@@ -297,11 +297,7 @@ impl Reader {
                         else {
                             unreachable!("distinct buffered readinto source and destination")
                         };
-                        let dest = match dest {
-                            Value::ByteArray(bytes) => bytes.as_mut_slice(),
-                            Value::Array(array) => array.as_bytes_mut()?,
-                            _ => unreachable!("writable contiguous destination"),
-                        };
+                        let dest = Context::mutable_storage_bytes(dest)?;
                         dest[start..start + n].copy_from_slice(&bytes[offset..offset + n]);
                     }
                     self.pos.set(offset + n);
@@ -477,6 +473,18 @@ impl Reader {
     }
 }
 
+pub(super) fn initialized_raw(ctx: &Context, receiver: Id) -> Option<Id> {
+    Reader::get(ctx, receiver).ok()?.raw.get()
+}
+
+pub(super) fn close_raw(ctx: &mut Context, receiver: Id) -> Result<Id> {
+    let reader = Reader::get(ctx, receiver)?;
+    let raw = reader.raw()?;
+    let result = reader.with_lock(|| invoke(ctx, raw, "close", vec![]));
+    reader.reset();
+    result
+}
+
 pub(super) fn call(ctx: &mut Context, receiver: Id, name: &str, args: &[Id]) -> Result<Id> {
     let size = match name {
         "read" | "readline" => super::super::files::read_length(ctx, args.first().copied())?,
@@ -513,29 +521,18 @@ pub(super) fn call(ctx: &mut Context, receiver: Id, name: &str, args: &[Id]) -> 
         }
         "__exit__" => invoke(ctx, receiver, "close", vec![]),
         "close" => {
-            reader.with_lock(|| Ok(()))?;
-            let closed = ctx.lookup_attr(raw, "closed")?;
-            if ctx.truth(closed)? {
+            let closed = reader.with_lock(|| {
+                let closed = ctx.lookup_attr(raw, "closed")?;
+                let closed = ctx.truth(closed)?;
+                if !closed && ctx.raw_instance_field(receiver, "_finalizing") == Some(TRUE) {
+                    super::native_reader::dealloc_warn(ctx, receiver, receiver);
+                }
+                Ok(closed)
+            })?;
+            if closed {
                 return Ok(NONE);
             }
-            let flush = invoke(ctx, receiver, "flush", vec![]);
-            if let Err(e) = &flush {
-                for id in e.roots() {
-                    ctx.heap.keep(id);
-                }
-            }
-            let result = reader
-                .with_lock(|| invoke(ctx, Reader::get(ctx, receiver)?.raw()?, "close", vec![]));
-            reader.pos.set(0);
-            reader.end.set(0);
-            match (flush, result) {
-                (Err(f), Err(mut e)) => {
-                    e.context = ctx.raised_instance(f);
-                    Err(e)
-                }
-                (Err(f), _) => Err(f),
-                (_, r) => r,
-            }
+            super::native_reader::flush_and_close(ctx, receiver)
         }
         "detach" => {
             invoke(ctx, receiver, "flush", vec![])?;

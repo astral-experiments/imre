@@ -21,6 +21,7 @@ pub(super) struct Program {
     class_nonlocal: bool,
     needs_class_cell: bool,
     needs_dict_cell: bool,
+    postponed_annotations: bool,
     has_named_bindings: bool,
     doc: Option<ruff_text_size::TextRange>,
     strip_docstrings: bool,
@@ -1438,6 +1439,7 @@ impl Program {
             class_nonlocal: false,
             needs_class_cell: false,
             needs_dict_cell: false,
+            postponed_annotations: false,
             has_named_bindings,
             doc: None,
             strip_docstrings: false,
@@ -1543,6 +1545,9 @@ impl Program {
         }
         let mut fields = Vec::new();
         let class = self.class_attributes.is_some();
+        self.postponed_annotations = class
+            && self.string_annotations()
+            && imre_ast::annotations::has_variable_annotation(&body);
         self.needs_class_cell =
             class && imre_ast::class_cell::needed(&body, self.string_annotations());
         self.needs_dict_cell =
@@ -3533,8 +3538,20 @@ impl Context {
                         self.checkpoint(roots, location, caught);
                     }
                 }
-                let transfer = if inject {
-                    let (mut error, _) = cursor.thrown.take().expect("injected exception");
+                #[cfg(unix)]
+                let interrupt = if inject {
+                    None
+                } else {
+                    self.dispatch_signals().err()
+                };
+                #[cfg(not(unix))]
+                let interrupt: Option<Error> = None;
+                let raised = if inject {
+                    cursor.thrown.take().map(|(error, _)| error)
+                } else {
+                    interrupt
+                };
+                let transfer = if let Some(mut error) = raised {
                     self.record_exception_frame(&mut error, None);
                     if cursor.protected.is_empty() {
                         return Err(error);
@@ -4207,12 +4224,7 @@ impl Context {
             Instruction::ClassStart => {
                 self.enable_class_annotation_provider(scope);
                 // Only postponed annotations need a visible mapping from the start of the suite.
-                if !code.string_annotations()
-                    || !code
-                        .instructions
-                        .iter()
-                        .any(|(_, op)| matches!(op, Instruction::StringAnnotation(..)))
-                {
+                if !code.postponed_annotations {
                     let key = self.heap.code_name("__annotations__");
                     self.remove_binding(scope, "__annotations__", key)?;
                 }
@@ -4288,7 +4300,11 @@ impl Context {
                     }
                 }
                 bases = Some((self.alloc(Value::List(values)), keywords));
-                serde_json::json!({"needs_class_cell": child.needs_class_cell, "needs_dict_cell": child.needs_dict_cell})
+                serde_json::json!({
+                    "needs_class_cell": child.needs_class_cell,
+                    "needs_dict_cell": child.needs_dict_cell,
+                    "postponed_annotations": child.postponed_annotations,
+                })
             }
             DefinitionKind::Function(p) => {
                 let mut sig = serde_json::json!({"posonly":[],"positional":[],"kwonly":[],"varargs":p.vararg.as_ref().map(|x|x.name.as_str()),"kwargs":p.kwarg.as_ref().map(|x|x.name.as_str())});

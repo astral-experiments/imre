@@ -66,7 +66,7 @@ pub(in crate::dynamic) fn install_capabilities(
     Ok(())
 }
 
-/// The posix module caches this dictionary. os.environ wraps the same byte keys and values.
+/// Copy current POSIX environment bytes for the cached dictionary or an explicit reload.
 pub(super) fn environment(ctx: &mut Context) -> Id {
     let entries = crate::objects::initial_environment()
         .into_iter()
@@ -316,23 +316,12 @@ pub(super) fn change_environment(
     let posix = ctx.module("posix")?;
     ctx.lookup_attr(posix, "environ")?;
     let key = environment_argument(ctx, args[0])?;
-    let status = if set {
-        let value = environment_argument(ctx, args[1])?;
-        if key.as_bytes().contains(&b'=') {
-            return Err(Error::new(
-                "ValueError",
-                "illegal environment variable name",
-            ));
-        }
-        // SAFETY: the standalone interpreter runs Python on one thread. setenv copies its inputs.
-        unsafe { libc::setenv(key.as_ptr(), value.as_ptr(), 1) }
+    let value = if set {
+        Some(environment_argument(ctx, args[1])?)
     } else {
-        // SAFETY: key stays terminated and live through the synchronous unsetenv call.
-        unsafe { libc::unsetenv(key.as_ptr()) }
+        None
     };
-    if status != 0 {
-        return Err(crate::objects::errno_error(std::io::Error::last_os_error()).into());
-    }
+    crate::objects::change_environment(&key, value.as_deref())?;
     Ok(NONE)
 }
 
@@ -380,7 +369,8 @@ pub(super) fn is_descriptor_function(name: &str) -> bool {
             | "set_inheritable"
             | "link"
             | "symlink"
-    ) || (cfg!(target_os = "linux") && name == "sendfile")
+    ) || (cfg!(unix) && matches!(name, "kill" | "getppid"))
+        || (cfg!(target_os = "linux") && name == "sendfile")
 }
 
 /// Convert an index argument before issuing the descriptor syscall.
@@ -784,6 +774,33 @@ pub(super) fn descriptor(
             format!("posix.{name}() takes no keyword arguments"),
         ));
     }
+    if name == "getppid" {
+        if !args.is_empty() {
+            return Err(Error::new(
+                "TypeError",
+                format!("posix.getppid() takes no arguments ({} given)", args.len()),
+            ));
+        }
+        // SAFETY: getppid reads the calling process's parent PID and takes no arguments.
+        return Ok(ctx.int(i64::from(unsafe { libc::getppid() })));
+    }
+    if name == "kill" {
+        let [pid, signal] = args else {
+            return Err(Error::new(
+                "TypeError",
+                format!("kill expected 2 arguments, got {}", args.len()),
+            ));
+        };
+        let pid = c_int(ctx, *pid)?;
+        let signal = ssize_t(ctx, *signal)?;
+        let audit_pid = ctx.int(i64::from(pid));
+        let audit_signal = ctx.int(signal as i64);
+        super::audit::event(ctx, "os.kill", &[audit_pid, audit_signal])?;
+        // CPython audits the full Py_ssize_t, then narrows it to the POSIX int.
+        native::kill(pid, signal as libc::c_int)?;
+        ctx.dispatch_signals()?;
+        return Ok(NONE);
+    }
     if name == "getsid" {
         let [pid] = args else {
             return Err(Error::new(
@@ -811,7 +828,7 @@ pub(super) fn descriptor(
         result
             .try_reserve_exact(2)
             .map_err(|_| Error::new("MemoryError", ""))?;
-        for value in native::waitpid(pid, options)? {
+        for value in native::waitpid(pid, options, || ctx.dispatch_signals())? {
             result.push(ctx.int(i64::from(value)));
         }
         return Ok(ctx.alloc(Value::Tuple(result)));
@@ -842,16 +859,23 @@ pub(super) fn descriptor(
         let fd = c_int(ctx, *fd)?;
         return if name == "read" {
             let length = ssize_t(ctx, *data)?;
-            Ok(ctx.alloc(Value::Bytes(native::read(fd, length)?)))
+            let bytes = native::read(fd, length, || ctx.dispatch_signals())?;
+            Ok(ctx.alloc(Value::Bytes(bytes)))
         } else {
-            // The synchronous syscall borrows the buffer after fd conversion.
-            // It cannot reenter Python, so mutable storage cannot resize underneath it.
-            let bytes = match ctx.heap.get(ctx.scalar_value(*data)) {
-                Value::Array(array) => array.as_bytes(),
-                _ => ctx.bytes_like(*data)?,
-            };
-            let count = native::write(fd, bytes)?;
-            Ok(ctx.int(count as i64))
+            // Keep the exporter alive and its size fixed while a handler runs.
+            // Reborrow on retry so in-place changes made by the handler are visible.
+            ctx.with_buffer_export(*data, |ctx| {
+                loop {
+                    let bytes = match ctx.heap.get(ctx.scalar_value(*data)) {
+                        Value::Array(array) => array.as_bytes(),
+                        _ => ctx.bytes_like(*data)?,
+                    };
+                    if let Some(count) = native::try_write(fd, bytes)? {
+                        return Ok(ctx.int(count as i64));
+                    }
+                    ctx.dispatch_signals()?;
+                }
+            })
         };
     }
     if name == "ftruncate" {
