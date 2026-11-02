@@ -8713,6 +8713,9 @@ impl<'a> Checker<'a> {
                 return self.call_super_method(call, method, base);
             }
         }
+        if let Some(expr) = self.call_direct_base_initializer(call)? {
+            return Ok(expr);
+        }
         if let Some(expr) = self.explicit_exception_initializer(call)? {
             return Ok(expr);
         }

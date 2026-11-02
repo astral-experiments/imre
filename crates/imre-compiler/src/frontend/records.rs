@@ -1763,6 +1763,33 @@ impl Checker<'_> {
         self.source_call(call, &signature, Some(receiver), 1)
     }
 
+    /// Call the lexical parent on the existing receiver, consuming the explicit first argument.
+    pub(super) fn call_direct_base_initializer(
+        &mut self,
+        call: &ast::ExprCall,
+    ) -> Result<Option<Expr>, String> {
+        let (Some(BaseInitializer::Record(base)), Some(class)) =
+            (self.super_initializer, self.class)
+        else {
+            return Ok(None);
+        };
+        let declarations = &self.classes.declarations.definitions;
+        let owner = &declarations[class];
+        let init = &owner.methods[owner.initializer.expect("initializer context")];
+        if !crate::classes::direct_base_init(
+            self.graph,
+            self.module,
+            declarations[base].definition,
+            init,
+            call,
+        ) {
+            return Ok(None);
+        }
+        let mut bound = call.clone();
+        bound.arguments.args = call.arguments.args.iter().skip(1).cloned().collect();
+        self.call_super_initializer(&bound).map(Some)
+    }
+
     pub(super) fn call_super_initializer(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
         if let Some(class) = self.class
             && !matches!(self.super_initializer, Some(BaseInitializer::Record(_)))

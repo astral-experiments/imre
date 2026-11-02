@@ -107,6 +107,9 @@ REJECTED = {
     "literal_mutable_alias": 'from typing import Literal\na: list[Literal["a"]] = ["a"]\nb: list[str] = a\nb.append("b")\n',
     "literal_non_string": 'from typing import Literal\nx: Literal["a", 7] = "a"\n',
     "literal_invalidated_guard": 'from typing import Literal\ndef f(s: str) -> Literal["a"]:\n    if s == "a":\n        s = input()\n        return s\n    return "a"\n',
+    "direct_base_wrong_receiver": CELL + "class Child(Cell):\n    def __init__(self, other: Cell) -> None:\n        Cell.__init__(other, 1)\n",
+    "direct_base_shadowed_parameter": CELL + "class Child(Cell):\n    def __init__(self, Cell: int) -> None:\n        Cell.__init__(self, 1)\n",
+    "direct_base_bad_argument": CELL + "class Child(Cell):\n    def __init__(self) -> None:\n        Cell.__init__(self, wrong=1)\n",
     "root_super_wrong_arity": CELL.replace("self.value = value", "super().__init__(value)\n        self.value = value"),
     "init_alias_partial_self": CELL.replace("self.value = value", "alias = self\n        self.value = value"),
     "init_rebind_self": CELL.replace("self.value = value", "self = self\n        self.value = value"),
@@ -296,7 +299,7 @@ def main() -> None:
         shutil.copytree(FIXTURES, project, ignore=shutil.ignore_patterns("__pycache__"))
         verify_upstream_definitions()
         class_sources = write_class_data_sources(project, PROJECT / "benchmarks/cpython_stdlib/full")
-        for relative in ["ownership.py", "record_reuse.py", "record_reuse_list.py", "imported/main.py", "string_literals.py", "constant_strings.py", "class_namespace.py", "nested_class_body.py", "class_data_setup.py", "string_enum_members.py", "string_enum_storage.py", "ordinary_enums.py", "enum_exhaustion.py", "conditional_lists.py", "conditional_methods/main.py", "uv_variant.py", "fixed_lineage.py", "object_base.py", "instance_layout.py", "subclass_guard_fields.py", "property_setters.py", "initializer_hook.py", "constructor_fields.py", "constructor_locals.py", "weak_proxy.py", "shallow_copy_protocol.py", "implicit_copy.py", "plain_shallow_copy.py", "abstract_context_manager.py", "abc_metaclass.py", "mapping_abc.py", "mapping_alias.py", "mapping_class_values.py", *class_sources]:
+        for relative in ["ownership.py", "record_reuse.py", "record_reuse_list.py", "imported/main.py", "string_literals.py", "constant_strings.py", "class_namespace.py", "nested_class_body.py", "class_data_setup.py", "string_enum_members.py", "string_enum_storage.py", "ordinary_enums.py", "enum_exhaustion.py", "conditional_lists.py", "conditional_methods/main.py", "uv_variant.py", "fixed_lineage.py", "object_base.py", "instance_layout.py", "subclass_guard_fields.py", "property_setters.py", "initializer_hook.py", "constructor_fields.py", "constructor_locals.py", "direct_base_initializer.py", "weak_proxy.py", "shallow_copy_protocol.py", "implicit_copy.py", "plain_shallow_copy.py", "abstract_context_manager.py", "abc_metaclass.py", "mapping_abc.py", "mapping_alias.py", "mapping_class_values.py", *class_sources]:
             source = project / relative
             reference = run([python, "-E", str(source)], temporary)
             require_success(reference)
