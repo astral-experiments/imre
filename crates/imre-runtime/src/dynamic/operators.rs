@@ -396,6 +396,7 @@ impl Context {
             Value::Str(s) => !s.is_empty(),
             Value::SurrogateStr(points) => !points.is_empty(),
             Value::Bytes(b) | Value::ByteArray(b) => !b.is_empty(),
+            Value::MemoryView { .. } => !self.bytes_like(id)?.is_empty(),
             Value::List(v) | Value::Tuple(v) | Value::NamedTuple { values: v, .. } => !v.is_empty(),
             Value::Set { entries: v, .. }
             | Value::Dict(v)
@@ -737,6 +738,18 @@ impl Context {
             }
             (Value::Int(_) | Value::Bool(_), Value::Float(f)) => {
                 crate::floats::compare(&self.as_int(a).unwrap(), *f) == 0
+            }
+            (Value::MemoryView { .. }, Value::Array(array)) => self
+                .bytes_like(a)
+                .is_ok_and(|bytes| array.equals_unsigned_bytes(bytes)),
+            (Value::Array(array), Value::MemoryView { .. }) => self
+                .bytes_like(b)
+                .is_ok_and(|bytes| array.equals_unsigned_bytes(bytes)),
+            (Value::MemoryView { .. }, _) | (_, Value::MemoryView { .. }) => {
+                match (self.bytes_like(a), self.bytes_like(b)) {
+                    (Ok(left), Ok(right)) => left == right,
+                    _ => false,
+                }
             }
             (Value::Str(a), Value::Str(b)) => a == b,
             (Value::SurrogateStr(a), Value::SurrogateStr(b)) => a == b,
@@ -2364,6 +2377,10 @@ impl Context {
                 output
             }
             Value::ByteArray(bytes) => self.bytearray_repr(id, bytes),
+            Value::MemoryView { owner, .. } => {
+                let state = if owner.is_some() { "" } else { "released " };
+                format!("<{state}memory at {id:#x}>")
+            }
             Value::Instance {
                 dictionary: Some(backing),
                 ..
@@ -4071,6 +4088,14 @@ impl Context {
     }
 
     pub(super) fn binary_special(&mut self, op: &str, a: Id, b: Id) -> Result<Option<Id>> {
+        if matches!(op, "==" | "!=")
+            && let Value::MemoryView { owner, .. } = self.heap.get(a)
+            && (owner.is_none()
+                || matches!(self.heap.get(self.scalar_value(b)),
+                    Value::Bytes(_) | Value::ByteArray(_) | Value::MemoryView { .. } | Value::Array(_)))
+        {
+            return Ok(Some(builtins::boolean(self.equal(a, b) == (op == "=="))));
+        }
         if matches!(op, "==" | "!=")
             && matches!(self.heap.get(a), Value::Deque(_))
             && matches!(self.heap.get(b), Value::Deque(_))

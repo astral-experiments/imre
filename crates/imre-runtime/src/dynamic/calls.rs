@@ -157,6 +157,7 @@ impl Context {
                         | "float"
                         | "bytes"
                         | "bytearray"
+                        | "memoryview"
                         | "str"
                         | "property"
                         | "module"
@@ -1134,6 +1135,7 @@ impl Context {
             }
             ("array.array", Value::Array(_))
             | ("bytearray", Value::ByteArray(_))
+            | ("memoryview", Value::MemoryView { .. })
             | ("object", _)
             | ("bool", Value::Bool(_))
             | ("int", Value::Int(_) | Value::Bool(_))
@@ -1765,6 +1767,14 @@ impl Context {
             }
             Value::None if name == "__doc__" => {
                 return Ok(self.text("The type of the None singleton."));
+            }
+            Value::MemoryView { owner, .. } if matches!(name, "obj" | "readonly" | "nbytes") => {
+                let owner = Self::memoryview_owner(owner)?;
+                return Ok(match name {
+                    "obj" => owner,
+                    "readonly" => TRUE,
+                    _ => self.int(self.bytes_like(owner)?.len() as i64),
+                });
             }
             Value::Slice(parts) if matches!(name, "start" | "stop" | "step") => {
                 return Ok(parts[match name {
@@ -2786,6 +2796,7 @@ impl Context {
                         && matches!(class.as_str(), "set" | "frozenset"))
                     || (builtins::is_exception(class)
                         && matches!(name, "__new__" | "__init__" | "with_traceback"))
+                    || (class == "memoryview" && builtins::MEMORYVIEW_METHODS.contains(&name))
                     || (class == "bytes" && builtins::BYTES_METHODS.contains(&name))
                     || (class == "bytearray" && builtins::BYTEARRAY_METHODS.contains(&name))
                     || (class == "int" && matches!(name, "bit_length" | "to_bytes"))
@@ -4420,6 +4431,7 @@ impl Context {
                                 | "tuple"
                                 | "bytes"
                                 | "bytearray"
+                                | "memoryview"
                                 | "range"
                                 | "range_iterator"
                                 | "longrange_iterator"
