@@ -568,6 +568,10 @@ impl BuiltinDescriptor {
             )),
             "__doc__" | "__text_signature__" if self.method => {
                 let value = match (self.name, name) {
+                    ("intersection_update", "__doc__") if self.owner == "set" => {
+                        "Update the set, keeping only elements found in it and all others."
+                    }
+                    ("intersection_update", _) if self.owner == "set" => "($self, /, *others)",
                     ("utctimetuple", "__doc__") if self.owner == "datetime.datetime" => "Return UTC time tuple, compatible with time.localtime().",
                     ("utctimetuple", _) if self.owner == "datetime.datetime" => "($self, /)",
                     ("__reduce__", "__doc__") if self.owner == "builtin_function_or_method" => return Some(NONE),
