@@ -77,6 +77,8 @@ def current():
     else:
         raise AssertionError("missing file unexpectedly had a size")
     assert os.path.exists is posixpath.exists is genericpath.exists
+    assert os.path.lexists is posixpath.lexists is genericpath.lexists
+    assert os.path.lexists(Path(__file__)) and not os.path.lexists(missing)
     assert os.path.isfile is posixpath.isfile is genericpath.isfile
     assert os.listdir is posix.listdir
     module_dir = os.path.dirname(__file__) or "."
