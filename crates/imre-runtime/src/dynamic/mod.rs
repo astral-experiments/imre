@@ -285,6 +285,7 @@ impl Context {
             | ("str", Value::Str(_) | Value::SurrogateStr(_))
             | ("bytes", Value::Bytes(_))
             | ("bytearray", Value::ByteArray(_))
+            | ("array.array", Value::Array(_))
             | ("set", Value::Set { frozen: false, .. })
             | ("frozenset", Value::Set { frozen: true, .. })
             | (value::REGEX_PATTERN_TYPE, Value::RegexPattern(_))
