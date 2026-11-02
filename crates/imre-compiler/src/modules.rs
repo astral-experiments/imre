@@ -268,6 +268,8 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
                 "\n",
                 include_str!("../stdlib/contextlib_redirect.py"),
                 "\n",
+                include_str!("../stdlib/contextlib_closing.py"),
+                "\n",
                 include_str!("../stdlib/contextlib_contextmanager.py"),
                 "\n",
                 include_str!("../stdlib/contextlib_suppress.py")
@@ -1578,6 +1580,7 @@ impl IntrinsicModule {
                 Intrinsic::ObjectRuntimeExport("contextlib.redirect_stderr")
             }
             (Self::Contextlib, "suppress") => Intrinsic::ObjectRuntimeExport("contextlib.suppress"),
+            (Self::Contextlib, "closing") => Intrinsic::ObjectRuntimeExport("contextlib.closing"),
             (Self::Contextlib, "nullcontext") => Intrinsic::NullContext,
             (Self::Warnings, "warn") => Intrinsic::ObjectRuntimeExport("warnings.warn"),
             (Self::Warnings, "simplefilter") => Intrinsic::WarningFilter { simple: true },

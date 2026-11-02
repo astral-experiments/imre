@@ -230,7 +230,13 @@ pub(in crate::dynamic) fn decode_named(
             let bytes = ctx.bytes_like(input)?.to_vec();
             ctx.alloc(Value::Bytes(bytes))
         };
-        let view = ctx.alloc(Value::MemoryView { owner: Some(owner), anonymous: true, hash: None });
+        let view = ctx.alloc(Value::MemoryView {
+            owner: Some(owner),
+            anonymous: true,
+            layout: None,
+            readonly: false,
+            hash: None,
+        });
         let result = apply(ctx, entry, "decode", view, &name, errors, true)?;
         if ctx.string_storage(result).is_none() {
             return Err(type_error(format!("'{name}' decoder returned '{}' instead of 'str'; use codecs.decode() to decode to arbitrary types", ctx.type_name(result))));
