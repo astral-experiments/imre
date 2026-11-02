@@ -1399,6 +1399,16 @@ impl IntrinsicModule {
             (Self::Tempfile, "NamedTemporaryFile") => {
                 Intrinsic::ObjectRuntimeExport("tempfile.NamedTemporaryFile")
             }
+            (Self::Tempfile, "gettempdir") => Intrinsic::ScopedObjectExport("tempfile.gettempdir"),
+            (Self::Tempfile, "gettempdirb") => {
+                Intrinsic::ScopedObjectExport("tempfile.gettempdirb")
+            }
+            (Self::Tempfile, "gettempprefix") => {
+                Intrinsic::ScopedObjectExport("tempfile.gettempprefix")
+            }
+            (Self::Tempfile, "gettempprefixb") => {
+                Intrinsic::ScopedObjectExport("tempfile.gettempprefixb")
+            }
             (Self::Tempfile, "mkstemp") => Intrinsic::ObjectRuntimeExport("tempfile.mkstemp"),
             (Self::Tempfile, "mkdtemp") => Intrinsic::ObjectRuntimeExport("tempfile.mkdtemp"),
             (Self::CollectionsAbc, "Sequence") => {
