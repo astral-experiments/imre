@@ -33,6 +33,17 @@ def current():
     assert nested.__hash__() == MappingProxyType.__hash__(nested) == 42
     assert {nested: "proxied"}[backing] == "proxied"
 
+    getter = MappingProxyType.__getitem__
+    assert getter.__objclass__ is MappingProxyType and type(getter).__name__ == "wrapper_descriptor"
+    assert getter.__doc__ == "Return self[key]." and getter.__text_signature__ == "($self, key, /)"
+    assert type(view.__getitem__).__name__ == "method-wrapper" and view.__getitem__.__self__ is view
+    assert getter(view, "a") == view.__getitem__("a") == 1
+    try:
+        getter(values, "a")
+    except TypeError:
+        pass
+    else:
+        raise AssertionError("accepted a dict as a proxy descriptor receiver")
     assert view.get("a") == 1
     copied = view.copy()
     copied.clear()
