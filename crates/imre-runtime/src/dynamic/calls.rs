@@ -1273,14 +1273,6 @@ impl Context {
                     ),
                 ..
             } => Ok(self.builtin(class)),
-            Value::NamedTuple {
-                class:
-                    Some(
-                        name @ ("SplitResult" | "SplitResultBytes" | "ParseResult"
-                        | "ParseResultBytes"),
-                    ),
-                ..
-            } => Ok(self.builtin(&format!("urllib.parse.{name}"))),
             Value::Raised(error) => {
                 if let Some(class) = error.class() {
                     return Ok(class);
@@ -1412,18 +1404,6 @@ impl Context {
             | (value::TEMPLATE_ITER_TYPE, Value::TemplateIter { .. })
             | (value::INTERPOLATION_TYPE, Value::Interpolation { .. })
             | ("tuple", Value::Tuple(_) | Value::NamedTuple { .. }) => true,
-            (
-                qualified,
-                Value::NamedTuple {
-                    class: Some(name), ..
-                },
-            ) if matches!(
-                *name,
-                "SplitResult" | "SplitResultBytes" | "ParseResult" | "ParseResultBytes"
-            ) =>
-            {
-                qualified.strip_prefix("urllib.parse.") == Some(*name)
-            }
             ("typing._GenericAlias", Value::GenericAlias(alias))
                 if alias.kind == super::typing::AliasKind::Unpack =>
             {
@@ -3532,13 +3512,7 @@ impl Context {
                 {
                     return Ok(self.builtin(owner));
                 }
-                if matches!(
-                    class,
-                    Some("SplitResult" | "SplitResultBytes" | "ParseResult" | "ParseResultBytes")
-                ) && let Some(property) = stdlib::urllib::property(self, values[1], name)?
-                {
-                    return Ok(property);
-                } else if class == Some(stdlib::flags::TYPE)
+                if class == Some(stdlib::flags::TYPE)
                     && let Some(value) = stdlib::flags::type_attribute(self, name, false)
                 {
                     return Ok(value);
