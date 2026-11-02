@@ -34,6 +34,7 @@ pub(in crate::dynamic) fn install_capabilities(
                 "stat",
                 #[cfg(target_os = "linux")]
                 "statvfs",
+                "truncate",
                 "utime",
             ][..],
         ),
@@ -332,6 +333,7 @@ mod mkfifo;
 pub(in crate::dynamic) mod scheduler;
 #[cfg(target_os = "linux")]
 pub(in crate::dynamic) mod sysconf;
+mod truncate;
 mod unlink;
 mod utime;
 
@@ -361,6 +363,7 @@ pub(super) fn is_descriptor_function(name: &str) -> bool {
             | "dup2"
             | "isatty"
             | "lseek"
+            | "truncate"
             | "ftruncate"
             | "pipe"
             | "read"
@@ -705,6 +708,9 @@ pub(super) fn descriptor(
     if name == "chdir" {
         return chdir(ctx, args, kwargs);
     }
+    if name == "truncate" {
+        return truncate::call(ctx, args, kwargs);
+    }
     if name == "chmod" {
         return chmod::call(ctx, args, kwargs);
     }
@@ -937,16 +943,7 @@ pub(super) fn descriptor(
         };
         let fd = c_int(ctx, *fd)?;
         let length = file_offset(ctx, *length)?;
-        let audit_fd = ctx.int(i64::from(fd));
-        let audit_length = ctx.int(length);
-        super::audit::event(ctx, "os.truncate", &[audit_fd, audit_length])?;
-        loop {
-            match native::truncate(fd, length) {
-                Ok(()) => return Ok(NONE),
-                Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
-                Err(error) => return Err(super::os_error(error)),
-            }
-        }
+        return truncate::by_fd(ctx, fd, length);
     }
     if name == "lseek" {
         let [fd, position, whence] = args else {

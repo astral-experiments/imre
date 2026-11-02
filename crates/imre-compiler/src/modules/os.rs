@@ -121,6 +121,7 @@ pub(super) fn symbol(name: &str) -> Option<Intrinsic> {
         "symlink" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.symlink"),
         "remove" => Intrinsic::Fd(FdOperation::Remove),
         "lseek" => Intrinsic::Fd(FdOperation::Seek),
+        "truncate" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.truncate"),
         "ftruncate" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.ftruncate"),
         "O_RDONLY" => Intrinsic::DescriptorConstant("o_rdonly"),
         "O_WRONLY" => Intrinsic::DescriptorConstant("o_wronly"),
