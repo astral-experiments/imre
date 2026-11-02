@@ -106,6 +106,8 @@ impl Imports {
             && matches!(
                 name,
                 "_imp"
+                    | "opcode"
+                    | "_opcode_metadata"
                     | "sysconfig"
                     | "platform"
                     | "keyword"
@@ -441,7 +443,7 @@ pub(crate) fn compile(
             "keyword",
             "site",
             "importlib",
-            "_opcode",
+            "opcode",
             "operator",
             "struct",
             "traceback",

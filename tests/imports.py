@@ -740,6 +740,7 @@ def main() -> None:
             for fixture, route, output in [
                 ("opcode_flags", [], "0\n0\nno bytecode specialization\n"),
                 ("opcode_stack_effect", [], "-1\n"),
+                ("opcode_module", [], "opcode module OK\n"),
                 ("opcode_operations", [], "opcode operations OK\n"),
                 ("opcode_operations", ["--runtime-imports"], "opcode operations OK\n"),
             ]:
