@@ -4,6 +4,12 @@ import re
 def current():
     for invalid, message, position in (
         ("(?i)a**", "multiple repeat", 6),
+        ("a(?-i)", "missing :", 5),
+        (b"\xff(?i-)", "missing flag", 5),
+        ("(?x) (?i) Ạ(?-im)", "missing :", 16),
+        ("a(?i-i)", "missing :", 6),
+        ("(?-a)", "bad inline flags: cannot turn off flags 'a', 'u' and 'L'", 4),
+        ("a**(?-i)", "multiple repeat", 2),
         (rb"x{1,2}+?", "multiple repeat", 7),
         ("^*", "nothing to repeat", 1),
         ("(^*)**", "nothing to repeat", 2),
@@ -43,6 +49,8 @@ def current():
     assert re.fullmatch("(?x) (?im:a) b", "Ab")
     assert re.fullmatch(r"\(\?i\)", "(?i)")
     assert re.fullmatch(r"[(?i)]+", "(?i)")
+    assert re.fullmatch("(?x)# (?-i)\n(?i-m:a)", "A")
+    assert re.fullmatch(r"[(?-i)]+", "(?i)")
     assert re.fullmatch("(?x:a # (?i)\n b)", "ab")
     assert re.fullmatch(r"(?# (?i\))(?i)a", "A")
     assert re.fullmatch(r"(?i)(?-i:s)i", "sI")
