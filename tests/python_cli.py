@@ -1370,6 +1370,16 @@ def main():
             "sys.exit(37)\n",
             status=37,
         )
+        compare(
+            "-B", "-c",
+            "import sys\n"
+            "atexit = __import__(sys.argv[1])\n"
+            "events = []\n"
+            "class Result:\n"
+            "    def __del__(self): print('finalized', events)\n"
+            "atexit.register(events.append, 'older')\n"
+            "atexit.register(Result)\n", "atexit",
+        )
         compare("-IB", "-c", "raise SystemExit")
         compare("-IB", "-c", "from sys import exit\nexit(None)")
         for source in ('import sys\nsys.exit("7")', 'raise SystemExit("7")'):
