@@ -3278,6 +3278,7 @@ impl Context {
                 for (name, owner) in [
                     ("starmap", "itertools.starmap"),
                     ("takewhile", "itertools.takewhile"),
+                    ("dropwhile", "itertools.dropwhile"),
                 ] {
                     if let Some(class) = self.scope_name(scope, name)
                         && let Value::Class { scope, .. } = *self.heap.get(class)
