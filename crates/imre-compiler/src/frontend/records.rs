@@ -1787,7 +1787,11 @@ impl Checker<'_> {
         }
         let mut bound = call.clone();
         bound.arguments.args = call.arguments.args.iter().skip(1).cloned().collect();
-        self.call_super_initializer(&bound).map(Some)
+        let receiver = call.arguments.args[0]
+            .as_name_expr()
+            .expect("checked direct base receiver");
+        self.call_record_base_initializer(base, &bound, self.names[receiver.id.as_str()])
+            .map(Some)
     }
 
     pub(super) fn call_super_initializer(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
@@ -1852,6 +1856,15 @@ impl Checker<'_> {
                     "super().__init__ requires an explicit subclass initializer",
                 )
             })?;
+        self.call_record_base_initializer(base, call, self.names["self"])
+    }
+
+    fn call_record_base_initializer(
+        &mut self,
+        base: usize,
+        call: &ast::ExprCall,
+        receiver: usize,
+    ) -> Result<Expr, String> {
         calls::reject_unpacking(call, self.source)?;
         let signature = self.classes.methods[base]["__init__"].clone();
         if self.classes.declarations.definitions[base].generated_initializer
@@ -1865,7 +1878,7 @@ impl Checker<'_> {
         }
         let receiver = Expr {
             ty: Type::Class(base),
-            kind: ExprKind::Builtin(Builtin::RecordView, vec![self.local(self.names["self"])]),
+            kind: ExprKind::Builtin(Builtin::RecordView, vec![self.local(receiver)]),
         };
         let mut scope = calls::ArgumentScope::default();
         let args = if self.inference.is_some() {

@@ -194,8 +194,11 @@ pub(crate) fn direct_base_init(
     let Some(method) = call.func.as_attribute_expr() else {
         return false;
     };
+    let Some(receiver) = initializer.parameters.iter_non_variadic_params().next() else {
+        return false;
+    };
     if method.attr.as_str() != "__init__"
-        || !matches!(call.arguments.args.first(), Some(ast::Expr::Name(n)) if n.id == "self")
+        || !matches!(call.arguments.args.first(), Some(ast::Expr::Name(n)) if n.id.as_str() == receiver.name().as_str())
         || graph.resolve(module, &method.value) != Some(Binding::Definition(parent))
     {
         return false;

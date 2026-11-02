@@ -107,6 +107,7 @@ REJECTED = {
     "literal_mutable_alias": 'from typing import Literal\na: list[Literal["a"]] = ["a"]\nb: list[str] = a\nb.append("b")\n',
     "literal_non_string": 'from typing import Literal\nx: Literal["a", 7] = "a"\n',
     "literal_invalidated_guard": 'from typing import Literal\ndef f(s: str) -> Literal["a"]:\n    if s == "a":\n        s = input()\n        return s\n    return "a"\n',
+    "direct_base_misnamed_receiver": CELL + "class Child(Cell):\n    def __init__(other, self: Cell) -> None:\n        Cell.__init__(self, 1)\n",
     "direct_base_wrong_receiver": CELL + "class Child(Cell):\n    def __init__(self, other: Cell) -> None:\n        Cell.__init__(other, 1)\n",
     "direct_base_shadowed_parameter": CELL + "class Child(Cell):\n    def __init__(self, Cell: int) -> None:\n        Cell.__init__(self, 1)\n",
     "direct_base_bad_argument": CELL + "class Child(Cell):\n    def __init__(self) -> None:\n        Cell.__init__(self, wrong=1)\n",
