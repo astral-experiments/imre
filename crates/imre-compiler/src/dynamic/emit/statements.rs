@@ -894,7 +894,7 @@ impl Function<'_, '_> {
         let explicit = if cause.is_some() { 2 } else { 0 };
         let cause = cause.unwrap_or("0");
         self.line(&format!(
-            "call i64 @imre_dyn_op(ptr %ctx, ptr {op}, i64 {exc}, i64 {cause}, i64 {explicit})"
+            "call i64 @imre_dyn_op_at(ptr %ctx, ptr {op}, i64 {exc}, i64 {cause}, i64 {explicit}, ptr null)"
         ));
         self.jump(&self.error.clone());
     }
