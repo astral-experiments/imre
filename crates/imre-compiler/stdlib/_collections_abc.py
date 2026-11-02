@@ -1,6 +1,7 @@
 # Set, mapping view, iterator, and sequence ABC implementations from CPython 3.14.5, Lib/_collections_abc.py.
 # abstractmethod is from Lib/abc.py at the same revision. See stdlib/docstrings/LICENSE.
 import sys
+from abc import ABCMeta as _ABCMeta
 from _collections_abc import Collection, Iterable, MutableMapping, Sized, _check_methods
 from types import GenericAlias
 
@@ -26,8 +27,7 @@ def abstractmethod(funcobj):
     return funcobj
 
 
-# The native class builder installs ABC semantics on this root class.
-class Hashable:
+class Hashable(metaclass=_ABCMeta):
 
     __slots__ = ()
 
@@ -42,7 +42,7 @@ class Hashable:
         return NotImplemented
 
 
-class Awaitable:
+class Awaitable(metaclass=_ABCMeta):
 
     __slots__ = ()
 
@@ -100,7 +100,7 @@ class Coroutine(Awaitable):
         return NotImplemented
 
 
-class AsyncIterable:
+class AsyncIterable(metaclass=_ABCMeta):
 
     __slots__ = ()
 
@@ -184,7 +184,7 @@ class AsyncGenerator(AsyncIterator):
         return NotImplemented
 
 
-class Buffer:
+class Buffer(metaclass=_ABCMeta):
 
     __slots__ = ()
 
@@ -662,6 +662,42 @@ Sequence.register(str)
 Sequence.register(bytes)
 Sequence.register(range)
 Sequence.register(memoryview)
+
+
+class _DeprecateByteStringMeta(_ABCMeta):
+    def __new__(cls, name, bases, namespace, **kwargs):
+        if name != "ByteString":
+            import warnings
+
+            warnings._deprecated(
+                "collections.abc.ByteString",
+                remove=(3, 17),
+            )
+        return super().__new__(cls, name, bases, namespace, **kwargs)
+
+    def __instancecheck__(cls, instance):
+        import warnings
+
+        warnings._deprecated(
+            "collections.abc.ByteString",
+            remove=(3, 17),
+        )
+        return super().__instancecheck__(instance)
+
+class ByteString(Sequence, metaclass=_DeprecateByteStringMeta):
+    """Deprecated ABC serving as a common supertype of ``bytes`` and ``bytearray``.
+
+    This ABC is scheduled for removal in Python 3.17.
+    Use ``isinstance(obj, collections.abc.Buffer)`` to test if ``obj``
+    implements the buffer protocol at runtime. For use in type annotations,
+    either use ``Buffer`` or a union that explicitly specifies the types your
+    code supports (e.g., ``bytes | bytearray | memoryview``).
+    """
+
+    __slots__ = ()
+
+ByteString.register(bytes)
+ByteString.register(bytearray)
 
 
 class MutableSequence(Sequence):

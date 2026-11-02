@@ -15,6 +15,8 @@ pub(in crate::dynamic) fn initialize(ctx: &mut Context, scope: Id) {
         let value = ctx.int(i64::from(policy));
         ctx.bind(scope, name, value);
     }
+    let param = ctx.builtin(super::super::fixed_structseq::SCHED_PARAM);
+    ctx.bind(scope, "sched_param", param);
     let getter = ctx.builtin("posix.sched_getscheduler");
     ctx.bind(scope, "sched_getscheduler", getter);
 }

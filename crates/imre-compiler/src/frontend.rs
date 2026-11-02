@@ -4,7 +4,7 @@ use std::collections::{HashMap, HashSet};
 
 pub(crate) use imre_ast::exceptions::builtin_id as exception_kind;
 use ruff_python_ast as ast;
-use ruff_text_size::{Ranged, TextRange};
+use ruff_text_size::{Ranged, TextRange, TextSize};
 
 use crate::classes::Classes;
 use crate::ir::{self, Binary, Builtin, Compare, Expr, ExprKind, RegexCapture, Statement, Type};
@@ -504,6 +504,18 @@ fn pattern_elements(target: &ast::Expr) -> Option<&[ast::Expr]> {
     }
 }
 
+fn fault_frame_statement(file: String, name: &str, line: u32) -> Statement {
+    let frame = Builtin::FaultFrame {
+        file,
+        name: name.to_owned(),
+        line,
+    };
+    Statement::Expr(Expr {
+        ty: Type::None,
+        kind: ExprKind::Builtin(frame, vec![]),
+    })
+}
+
 /// Resolves the project-wide call graph without changing source-level namespaces.
 #[cfg(test)]
 pub(crate) fn lower(graph: &SourceGraph) -> Result<ir::Module, String> {
@@ -966,6 +978,7 @@ pub(crate) fn lower_with_caller_cache(
                     })
                 })
                 .collect::<Vec<_>>();
+            checker.fault_frame(&mut startup, "<module>", TextSize::default());
             startup.append(&mut body);
             entry = Some(ir::Function {
                 params: Vec::new(),
@@ -978,6 +991,10 @@ pub(crate) fn lower_with_caller_cache(
     if let Some(error) = graph.deferred_object_error.take() {
         return Err(error);
     }
+    let fault_enabled = graph
+        .command_startup
+        .as_ref()
+        .is_some_and(|(flags, _)| flags.faulthandler);
     for initialization in &initializations {
         let module = &graph.modules[initialization.module];
         let mut body = initialization.function.body.clone();
@@ -993,6 +1010,19 @@ pub(crate) fn lower_with_caller_cache(
                         vec![],
                     ),
                 }),
+            );
+        }
+        if fault_enabled && initialization.module != graph.entry && module.archive.is_none() {
+            body.insert(
+                0,
+                fault_frame_statement(
+                    graph
+                        .module_filename(initialization.module)
+                        .to_string_lossy()
+                        .into_owned(),
+                    "<module>",
+                    1,
+                ),
             );
         }
         owners.push(initialization.module);
@@ -1065,27 +1095,28 @@ pub(crate) fn lower_with_caller_cache(
     }
     // The native call graph is acyclic. Programs that cannot inspect frames,
     // lower their limit, or reach the default depth need no tracking at all.
-    let source_frames = if names || count || source_functions + generator_sites > 1000 {
-        python_frames
-            .into_iter()
-            .zip(owners.iter().copied().chain([graph.entry]))
-            .map(|(frame, module)| {
-                frame.then(|| {
-                    if names {
-                        ir::SourceFrame::Module(if module == graph.entry {
-                            "__main__".to_owned()
+    let source_frames =
+        if fault_enabled || names || count || source_functions + generator_sites > 1000 {
+            python_frames
+                .into_iter()
+                .zip(owners.iter().copied().chain([graph.entry]))
+                .map(|(frame, module)| {
+                    frame.then(|| {
+                        if names {
+                            ir::SourceFrame::Module(if module == graph.entry {
+                                "__main__".to_owned()
+                            } else {
+                                graph.modules[module].name.clone()
+                            })
                         } else {
-                            graph.modules[module].name.clone()
-                        })
-                    } else {
-                        ir::SourceFrame::Depth
-                    }
+                            ir::SourceFrame::Depth
+                        }
+                    })
                 })
-            })
-            .collect()
-    } else {
-        Vec::new()
-    };
+                .collect()
+        } else {
+            Vec::new()
+        };
     if generator_sites != 0 && source_frames.is_empty() {
         for function in functions.iter_mut().chain([&mut entry]) {
             ir::walk_expressions_mut(&mut function.body, &mut |value| {
@@ -1259,6 +1290,9 @@ fn lower_body(
     }
     if classes.generators.contains(&signature.id) {
         body = checker.generator_body(body);
+    }
+    if module.archive.is_none() {
+        checker.fault_frame(&mut body, definition.name.as_str(), definition.start());
     }
     Ok((
         LoweredBody {
@@ -2566,12 +2600,21 @@ impl<'a> Checker<'a> {
     ) -> Option<&'static str> {
         let operation = matches!(
             attribute.attr.as_str(),
-            "__and__" | "__rand__" | "__or__" | "__ror__" | "__sub__" | "__rsub__"
+            "__and__"
+                | "__rand__"
+                | "__or__"
+                | "__ror__"
+                | "__sub__"
+                | "__rsub__"
+                | "__xor__"
+                | "__rxor__"
         );
         let name = match attribute.attr.as_str() {
             _ if operation => "set binary operator",
-            "__iand__" | "__ior__" | "__isub__" => "set in-place operator",
+            "__iand__" | "__ior__" | "__isub__" | "__ixor__" => "set in-place operator",
+            "union" => "set.union",
             "difference_update" => "set.difference_update",
+            "remove" => "set.remove",
             "update" => "set.update",
             "issubset" => "set.issubset",
             _ => return None,
@@ -2581,14 +2624,14 @@ impl<'a> Checker<'a> {
         {
             return Some(name);
         }
-        if (operation || attribute.attr.as_str() == "issubset")
+        if (operation || matches!(attribute.attr.as_str(), "issubset" | "union"))
             && (receiver == Some(Type::FrozenStrings)
                 || self.unshadowed_builtin(&attribute.value, "frozenset"))
         {
-            return Some(if operation {
-                name
-            } else {
-                "frozenset.issubset"
+            return Some(match attribute.attr.as_str() {
+                "issubset" => "frozenset.issubset",
+                "union" => "frozenset.union",
+                _ => name,
             });
         }
         None
@@ -2602,6 +2645,9 @@ impl<'a> Checker<'a> {
         if let Some(method) = self.boxed_set_method(attribute, Some(receiver.ty)) {
             return Err(self.object_builtin_error(method, attribute));
         }
+        if receiver.ty == Type::CodecInfo && attribute.attr.as_str() == "_is_text_encoding" {
+            return Err(self.object_builtin_error("CodecInfo._is_text_encoding", attribute));
+        }
         if receiver.ty == Type::BinaryIO && matches!(attribute.attr.as_str(), "name" | "mode") {
             return Err(self.object_builtin_error("binary file metadata", attribute));
         }
@@ -2609,6 +2655,9 @@ impl<'a> Checker<'a> {
             && matches!(receiver.ty, Type::BinaryIO | Type::BytesIO)
         {
             return Err(self.object_builtin_error("binary readinto", attribute));
+        }
+        if receiver.ty == Type::BytesIO && attribute.attr.as_str() == "getbuffer" {
+            return Err(self.object_builtin_error("BytesIO.getbuffer", attribute));
         }
         if receiver.ty == Type::BinaryIO && attribute.attr.as_str() == "writelines" {
             return Err(self.object_builtin_error("binary writelines", attribute));
@@ -4467,6 +4516,9 @@ impl<'a> Checker<'a> {
             {
                 lowered.push(Statement::Assign(*flag, Expr::boolean(true)));
             }
+            if self.fault_enabled() && !lowered.is_empty() {
+                body.push(self.fault_line(statement));
+            }
             body.extend(lowered);
             falls_through &= continues;
         }
@@ -4804,6 +4856,13 @@ impl<'a> Checker<'a> {
                     }
                     if let ast::Expr::Attribute(attr) = target {
                         let receiver = self.expr(&attr.value)?;
+                        if receiver.ty == Type::CodecInfo
+                            && attr.attr.as_str() == "_is_text_encoding"
+                        {
+                            return Err(
+                                self.object_builtin_error("CodecInfo._is_text_encoding", attr)
+                            );
+                        }
                         if matches!(receiver.ty, Type::Popen(..)) && attr.attr.as_str() == "poll" {
                             statements.push(Statement::Expr(Expr {
                                 ty: Type::None,
@@ -5080,6 +5139,9 @@ impl<'a> Checker<'a> {
         if let ast::Expr::Call(call) = &item.context_expr
             && self.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::CatchWarnings))
         {
+            if !call.arguments.keywords.is_empty() {
+                return Err(self.scoped_builtin_error("warnings.catch_warnings", call));
+            }
             self.arguments(call, &[], None)?;
             let mut protected = Vec::new();
             if let Some(target) = &item.optional_vars {
@@ -5343,28 +5405,53 @@ impl<'a> Checker<'a> {
         })
     }
 
-    fn exception_origin(&self, exception: Expr, site: &impl Ranged) -> Expr {
-        if self.graph.command_startup.is_none() && !self.graph.handled_tracebacks {
-            return exception;
-        }
-        let filename = if self.graph.virtual_command && self.module == self.graph.entry {
+    fn fault_enabled(&self) -> bool {
+        self.graph
+            .command_startup
+            .as_ref()
+            .is_some_and(|(flags, _)| flags.faulthandler)
+    }
+
+    fn source_filename(&self) -> String {
+        if self.graph.virtual_command && self.module == self.graph.entry {
             "<string>".to_owned()
         } else {
             self.graph
                 .module_filename(self.module)
                 .to_string_lossy()
                 .into_owned()
-        };
-        let line = self.source[..usize::from(site.start())]
-            .bytes()
-            .filter(|&byte| byte == b'\n')
-            .count() as u64
-            + 1;
+        }
+    }
+
+    fn source_line(&self, start: TextSize) -> u32 {
+        self.graph.session.source_line(self.module, start)
+    }
+
+    fn fault_line(&self, site: &impl Ranged) -> Statement {
+        Statement::Expr(Expr {
+            ty: Type::None,
+            kind: ExprKind::Builtin(Builtin::FaultLine(self.source_line(site.start())), vec![]),
+        })
+    }
+
+    fn fault_frame(&self, body: &mut Vec<Statement>, name: &str, start: TextSize) {
+        if self.fault_enabled() {
+            body.insert(
+                0,
+                fault_frame_statement(self.source_filename(), name, self.source_line(start)),
+            );
+        }
+    }
+
+    fn exception_origin(&self, exception: Expr, site: &impl Ranged) -> Expr {
+        if self.graph.command_startup.is_none() && !self.graph.handled_tracebacks {
+            return exception;
+        }
         Expr {
             ty: Type::Exception,
             kind: ExprKind::Builtin(
-                Builtin::ExceptionOrigin(line),
-                vec![exception, unpacking::string(filename)],
+                Builtin::ExceptionOrigin(self.source_line(site.start()).into()),
+                vec![exception, unpacking::string(self.source_filename())],
             ),
         }
     }
@@ -5955,6 +6042,13 @@ impl<'a> Checker<'a> {
         right: Type,
         node: &impl Ranged,
     ) -> Result<(Binary, Type), String> {
+        if op == ast::Operator::BitXor
+            && [left, right]
+                .into_iter()
+                .any(|ty| matches!(ty, Type::Set(_) | Type::FrozenStrings))
+        {
+            return Err(self.object_builtin_error("set binary operator", node));
+        }
         let bitwise = match op {
             ast::Operator::BitAnd => Some(Binary::BitAnd),
             ast::Operator::BitOr => Some(Binary::BitOr),
@@ -6075,6 +6169,9 @@ impl<'a> Checker<'a> {
     }
 
     fn typed_expr(&mut self, expression: &ast::Expr) -> Result<Expr, String> {
+        if let Some(method) = self.graph.boxed_pattern_method(self.module, expression) {
+            return Err(self.scoped_builtin_error(method, expression));
+        }
         if let ast::Expr::Attribute(attribute) = expression
             && let Some(field) = self.mime_attribute(attribute)
         {
@@ -6097,6 +6194,9 @@ impl<'a> Checker<'a> {
 
     /// Keep the large general frame off recursive left- and right-hand arithmetic.
     fn non_call_expr(&mut self, expression: &ast::Expr) -> Result<Expr, String> {
+        if self.unshadowed_builtin(expression, "hex") {
+            return Err(self.scoped_builtin_error("hex", expression));
+        }
         if self.unshadowed_len(expression) {
             return Ok(self.builtin_len());
         }
@@ -6299,6 +6399,12 @@ impl<'a> Checker<'a> {
                 }
             }
             match symbol {
+                Intrinsic::UrlSplit => {
+                    return Err(self.scoped_builtin_error("urllib.parse.urlsplit", expression));
+                }
+                Intrinsic::SplitResult { .. } => {
+                    return Err(self.scoped_builtin_error("urllib.parse result class", expression));
+                }
                 Intrinsic::Chdir => {
                     return Err(self.scoped_builtin_error("posix.chdir", expression));
                 }
@@ -6308,6 +6414,9 @@ impl<'a> Checker<'a> {
                 Intrinsic::CachedProperty => {
                     return Err(self.object_runtime_export("functools.cached_property", expression));
                 }
+                Intrinsic::ScopedObjectExport(name) => {
+                    return Err(self.scoped_builtin_error(name, expression));
+                }
                 Intrinsic::ObjectRuntimeExport(name) => {
                     return Err(self.object_runtime_export(name, expression));
                 }
@@ -6316,6 +6425,9 @@ impl<'a> Checker<'a> {
                 }
                 Intrinsic::Fnmatch(ir::FnmatchOperation::Match { normcase }) => {
                     return Ok(fnmatch::function(self.types, normcase));
+                }
+                Intrinsic::BuiltinsHex => {
+                    return Err(self.scoped_builtin_error("builtins.hex", expression));
                 }
                 Intrinsic::BuiltinsLen => return Ok(self.builtin_len()),
                 Intrinsic::CodecBom(bytes) => {
@@ -6388,6 +6500,7 @@ impl<'a> Checker<'a> {
                     });
                 }
                 Intrinsic::StringConstant(value) => return Ok(unpacking::string(value)),
+                Intrinsic::BoolConstant(value) => return Ok(Expr::boolean(value)),
                 Intrinsic::LogRecordFlag(mask) => {
                     return Ok(logging_records::op(
                         ir::LogRecordOperation::Flag,
@@ -6477,7 +6590,14 @@ impl<'a> Checker<'a> {
                 if matches!(
                     self.resolve(expression),
                     Some(Binding::Intrinsic(Intrinsic::NamedHash(
-                        "blake2b" | "blake2s"
+                        "blake2b"
+                            | "blake2s"
+                            | "sha3_224"
+                            | "sha3_256"
+                            | "sha3_384"
+                            | "sha3_512"
+                            | "shake_128"
+                            | "shake_256"
                     )))
                 ) =>
             {
@@ -6485,7 +6605,7 @@ impl<'a> Checker<'a> {
                 return Err(self.classified_error(
                     FailureKind::ObjectOperation,
                     expression,
-                    "a BLAKE2 constructor used as a type requires native object dispatch",
+                    "a hash constructor used as a type requires native object dispatch",
                 ));
             }
             ast::Expr::Name(name) if name.id == "__debug__" => (
@@ -7561,6 +7681,20 @@ impl<'a> Checker<'a> {
                 {
                     return self.struct_time_class_field(attribute);
                 }
+                if matches!(
+                    (self.resolve(&attribute.value), attribute.attr.as_str()),
+                    (
+                        Some(Binding::Intrinsic(Intrinsic::SplitResult { bytes: false })),
+                        "_encoded_counterpart"
+                    ) | (
+                        Some(Binding::Intrinsic(Intrinsic::SplitResult { bytes: true })),
+                        "_decoded_counterpart"
+                    )
+                ) {
+                    return Err(
+                        self.scoped_builtin_error("urllib.parse result counterpart", attribute)
+                    );
+                }
                 if let Some((_, declaration)) = self.namedtuple_factory(&attribute.value) {
                     return self.namedtuple_class_attribute(attribute, &declaration);
                 }
@@ -8064,6 +8198,11 @@ impl<'a> Checker<'a> {
                 {
                     return Ok(value);
                 }
+                if attribute.attr.as_str() == "buffer"
+                    && self.types.payload(receiver.ty).unwrap_or(receiver.ty) == Type::TextIO
+                {
+                    return Err(self.scoped_builtin_error("text stream buffer", attribute));
+                }
                 if matches!(attribute.attr.as_str(), "encoding" | "errors")
                     && matches!(
                         self.types.payload(receiver.ty).unwrap_or(receiver.ty),
@@ -8242,6 +8381,9 @@ impl<'a> Checker<'a> {
     }
 
     fn call(&mut self, mut call: &ast::ExprCall) -> Result<Expr, String> {
+        if let Some(method) = self.graph.boxed_pattern_method(self.module, &call.func) {
+            return Err(self.scoped_builtin_error(method, call));
+        }
         if let Some(local) = self.local_class(&call.func)?
             && let Some(base) = local.base
             && !local.abstract_methods.is_empty()
@@ -8256,6 +8398,9 @@ impl<'a> Checker<'a> {
             return Ok(method);
         }
 
+        if self.unshadowed_builtin(&call.func, "hex") {
+            return Err(self.scoped_builtin_error("hex", call));
+        }
         if self.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::BuiltinsAscii)) {
             return self.ascii_call(call);
         }
@@ -8979,8 +9124,14 @@ impl<'a> Checker<'a> {
             Some(Binding::Intrinsic(Intrinsic::TracebackFormatter(name))) => {
                 return Err(self.object_export_error(name, call));
             }
+            Some(Binding::Intrinsic(Intrinsic::BuiltinsHex)) => {
+                return Err(self.scoped_builtin_error("builtins.hex", call));
+            }
             Some(Binding::Intrinsic(Intrinsic::CachedProperty)) => {
                 return Err(self.object_runtime_export("functools.cached_property", call));
+            }
+            Some(Binding::Intrinsic(Intrinsic::ScopedObjectExport(name))) => {
+                return Err(self.scoped_builtin_error(name, call));
             }
             Some(Binding::Intrinsic(Intrinsic::ObjectRuntimeExport(name))) => {
                 return Err(self.object_runtime_export(name, call));
@@ -9868,21 +10019,15 @@ impl<'a> Checker<'a> {
             if attribute.attr.as_str() == "union"
                 && let Some(key) = self.types.set_element(receiver.ty)
             {
-                self.reject_builtin_keywords(call)?;
                 let [arg] = call.arguments.args.as_ref() else {
-                    return Err(error(
-                        self.source,
-                        call,
-                        "set.union requires one set or mapping key view",
-                    ));
+                    return Err(self.object_builtin_error("set.union", call));
                 };
+                if !call.arguments.keywords.is_empty() || arg.is_starred_expr() {
+                    return Err(self.object_builtin_error("set.union", call));
+                }
                 let (other, other_key) = self.union_operand(arg)?;
                 if other_key != Some(key) {
-                    return Err(error(
-                        self.source,
-                        arg,
-                        "set.union requires matching sets or mapping keys",
-                    ));
+                    return Err(self.object_builtin_error("set.union", call));
                 }
                 return Ok(Expr {
                     ty: receiver.ty,
@@ -9949,6 +10094,9 @@ impl<'a> Checker<'a> {
                     (_, method) => method,
                 };
                 let (builtin, ty) = match (method, call.arguments.args.len()) {
+                    ("getbuffer", _) if receiver.ty == Type::BytesIO => {
+                        return Err(self.object_builtin_error("BytesIO.getbuffer", call));
+                    }
                     ("readinto", _) if binary => {
                         return Err(self.object_builtin_error("binary readinto", call));
                     }
@@ -10809,6 +10957,15 @@ impl<'a> Checker<'a> {
             {
                 (Builtin::HashType, Type::BuiltinClass)
             }
+            name @ ("type" | "id")
+                if args.len() == 1
+                    && self.types.is_url_split_result(args[0].ty)
+                    && self.unshadowed_builtin(&call.func, name) =>
+            {
+                return Err(
+                    self.scoped_builtin_error("urllib.parse.urlsplit result identity", call)
+                );
+            }
             "id" if args.len() == 1
                 && args[0].ty == Type::Hash
                 && self.unshadowed_builtin(&call.func, "id") =>
@@ -10940,6 +11097,12 @@ impl<'a> Checker<'a> {
     /// Text uses UTF-8 and defaults to reading; explicit modes stay literal.
     fn open(&mut self, call: &ast::ExprCall, gzip: bool) -> Result<Expr, String> {
         let args = &call.arguments;
+        if !gzip
+            && self.unshadowed_builtin(&call.func, "open")
+            && args.find_argument_value("opener", 7).is_some()
+        {
+            return Err(self.object_builtin_error("open with opener", call));
+        }
         // The typed BinaryIO ABI carries neither raw write results nor a buffer size.
         if !gzip
             && self.unshadowed_builtin(&call.func, "open")

@@ -641,7 +641,11 @@ class TestResult:
         self.skipped.append((test, reason))
 
     def addUnexpectedSuccess(self, test: TestCase) -> None:
-        if self.failfast:
+        try:
+            enabled = self.failfast
+        except AttributeError:
+            enabled = False
+        if enabled:
             self.stop()
         self.unexpectedSuccesses.append(test)
 

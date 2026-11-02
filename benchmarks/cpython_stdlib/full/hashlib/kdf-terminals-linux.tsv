@@ -1,0 +1,23 @@
+product	revision	mode	profile	ran	passed	skipped	failed	errors	returncode	raw_ran	raw_footer
+cpython	5607950ef232dad16d75c0cf53101d9649d89115	reference	original	4	4	0	0	0	0	Ran 4 tests in 0.527s	OK
+cpython	5607950ef232dad16d75c0cf53101d9649d89115	reference	inverse	2	0	0	2	0	1	Ran 2 tests in 0.002s	FAILED (failures=2)
+cpython	5607950ef232dad16d75c0cf53101d9649d89115	extension-hidden	original	4	2	2	0	0	0	Ran 4 tests in 0.049s	OK (skipped=2)
+base	5472a33cc16130407cc906daf38d3ce50332ea88	ordinary-O0	original	4	2	2	0	0	0	Ran 4 tests in 9.290s	OK (skipped=2)
+base	5472a33cc16130407cc906daf38d3ce50332ea88	ordinary-O0	inverse	2	0	2	0	0	0	Ran 2 tests in 1.201s	OK (skipped=2)
+base	5472a33cc16130407cc906daf38d3ce50332ea88	ordinary-O3	original	4	2	2	0	0	0	Ran 4 tests in 3.154s	OK (skipped=2)
+base	5472a33cc16130407cc906daf38d3ce50332ea88	ordinary-O3	inverse	2	0	2	0	0	0	Ran 2 tests in 0.367s	OK (skipped=2)
+base	5472a33cc16130407cc906daf38d3ce50332ea88	boxed-O0	original	4	2	2	0	0	0	Ran 4 tests in 2.339s	OK (skipped=2)
+base	5472a33cc16130407cc906daf38d3ce50332ea88	boxed-O0	inverse	2	0	2	0	0	0	Ran 2 tests in 0.244s	OK (skipped=2)
+base	5472a33cc16130407cc906daf38d3ce50332ea88	boxed-O3	original	4	2	2	0	0	0	Ran 4 tests in 3.722s	OK (skipped=2)
+base	5472a33cc16130407cc906daf38d3ce50332ea88	boxed-O3	inverse	2	0	2	0	0	0	Ran 2 tests in 0.622s	OK (skipped=2)
+merged	6c0cab3a668b7000322557f472f0666a4c4c6c81	ordinary-O0	original	4	4	0	0	0	0	Ran 4 tests in 30.093s	OK
+merged	6c0cab3a668b7000322557f472f0666a4c4c6c81	ordinary-O0	inverse	2	0	0	2	0	1	Ran 2 tests in 1.655s	FAILED (failures=2)
+merged	6c0cab3a668b7000322557f472f0666a4c4c6c81	ordinary-O3	original	4	4	0	0	0	0	Ran 4 tests in 9.354s	OK
+merged	6c0cab3a668b7000322557f472f0666a4c4c6c81	ordinary-O3	inverse	2	0	0	2	0	1	Ran 2 tests in 0.519s	FAILED (failures=2)
+merged	6c0cab3a668b7000322557f472f0666a4c4c6c81	boxed-O0	original	4	4	0	0	0	0	Ran 4 tests in 28.419s	OK
+merged	6c0cab3a668b7000322557f472f0666a4c4c6c81	boxed-O0	inverse	2	0	0	2	0	1	Ran 2 tests in 1.538s	FAILED (failures=2)
+merged	6c0cab3a668b7000322557f472f0666a4c4c6c81	boxed-O3	original	4	4	0	0	0	0	Ran 4 tests in 17.939s	OK
+merged	6c0cab3a668b7000322557f472f0666a4c4c6c81	boxed-O3	inverse	2	0	0	2	0	1	Ran 2 tests in 0.619s	FAILED (failures=2)
+candidate-debug	dc91d1e2adcf1197150f05640bfd0187f1d694cc	ordinary-O0	provider-normal	4	4	0	0	0	0	Ran 4 tests in 49.610s	OK
+candidate-debug	dc91d1e2adcf1197150f05640bfd0187f1d694cc	ordinary-O0	provider-absent	4	2	2	0	0	0	Ran 4 tests in 28.450s	OK (skipped=2)
+candidate-debug	dc91d1e2adcf1197150f05640bfd0187f1d694cc	ordinary-O0	provider-no_scrypt	4	3	1	0	0	0	Ran 4 tests in 32.375s	OK (skipped=1)

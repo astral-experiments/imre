@@ -46,10 +46,8 @@ def _boxedAddSkip(self, test, reason):
 
 def _boxedSkipCase(self, case, name, reason):
     self.startTest(case)
-    self._startCase(name)
     try:
         self.addSkip(case, reason)
-        self._mark("s", "skipped " + repr(reason))
     finally:
         self.stopTest(case)
 

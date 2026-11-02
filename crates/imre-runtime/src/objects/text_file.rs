@@ -1,6 +1,6 @@
 //! Owning access to the same buffered text file used by typed native code.
 
-use super::{exceptions::Result, files, text};
+use super::{exceptions::Result, files};
 
 /// A boxed snapshot uses UTF-8 unless its code points include a surrogate.
 pub(crate) enum MemoryText {
@@ -14,14 +14,6 @@ pub(crate) struct TextFile(crate::ObjectOwner);
 impl TextFile {
     pub(crate) fn standard(stderr: bool) -> Self {
         Self(files::standard_stream(stderr))
-    }
-
-    /// Opens an owned UTF-8 reader or writer on the native file backend.
-    pub(crate) fn open(path: &str, mode: u32) -> Result<Self> {
-        let path = text::try_owned_string(path)?;
-        let file = files::open(&path, mode, false, false)?;
-        // SAFETY: open transfers one strong owner of an initialized file object.
-        Ok(Self(unsafe { crate::ObjectOwner::from_raw(file) }))
     }
 
     pub(crate) fn string_io(initial: Option<&str>, newline: Option<&str>) -> Result<Self> {

@@ -3,6 +3,8 @@
 pub mod exceptions;
 pub mod startup;
 pub mod strings;
+mod type_aliases;
+pub use type_aliases::type_alias_error;
 
 use std::cell::RefCell;
 use std::collections::{BTreeSet, HashMap, HashSet};
@@ -28,6 +30,8 @@ pub fn literal_tuple_element(expr: &ast::Expr) -> bool {
 }
 
 pub mod annotations;
+pub mod class_attributes;
+pub mod class_cell;
 pub mod code_flags;
 
 /// Names imported by the module scope disable method binding even after reassignment.

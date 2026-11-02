@@ -1,11 +1,8 @@
 use std::cell::RefCell;
 use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
 use std::os::fd::{AsRawFd, RawFd};
-use std::process::{Command, Stdio};
 
-use super::{
-    Context, Error, FALSE, Id, NONE, Result, TRUE, Value, argument, instance, option, os_error,
-};
+use super::{Context, Error, FALSE, Id, NONE, Result, TRUE, Value, argument, option, os_error};
 
 /// Binary handles retain their access mode after close.
 pub(in crate::dynamic) enum BinaryFile {
@@ -178,87 +175,6 @@ fn dirname(path: &str) -> &str {
     }
 }
 
-fn run_process(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
-    let command = argument(args, 0)?;
-    let items = ctx.items(command)?;
-    let argv = items
-        .iter()
-        .map(|&id| ctx.str_value(id))
-        .collect::<Result<Vec<_>>>()?;
-    let (executable, rest) = argv
-        .split_first()
-        .ok_or_else(|| Error::new("ValueError", "empty subprocess argument list"))?;
-    let named = |name| {
-        kwargs
-            .iter()
-            .find(|(key, _)| key == name)
-            .map(|&(_, id)| id)
-    };
-    let capture = named("capture_output") == Some(TRUE);
-    let piped = |name| -> Result<bool> {
-        match named(name) {
-            None | Some(NONE) => Ok(capture),
-            Some(_) if capture => Err(Error::new(
-                "ValueError",
-                "stdout and stderr arguments may not be used with capture_output",
-            )),
-            Some(id) if ctx.as_integer(id)? == -1 => Ok(true),
-            _ => Err(Error::new("ValueError", "expected subprocess.PIPE")),
-        }
-    };
-    let stdout = piped("stdout")?;
-    let stderr = piped("stderr")?;
-    let stdio = |captured| {
-        if captured {
-            Stdio::piped()
-        } else {
-            Stdio::inherit()
-        }
-    };
-    let output = Command::new(executable)
-        .args(rest)
-        .stdout(stdio(stdout))
-        .stderr(stdio(stderr))
-        .output()
-        .map_err(os_error)?;
-    let exit_code = output.status.code().unwrap_or_else(|| {
-        use std::os::unix::process::ExitStatusExt;
-        -output.status.signal().unwrap_or(1)
-    });
-    if named("check") == Some(TRUE) && exit_code != 0 {
-        return Err(Error::new(
-            "CalledProcessError",
-            format!("subprocess exited with status {exit_code}"),
-        ));
-    }
-    let text = named("text") == Some(TRUE);
-    let mut stream = |captured: bool, bytes: Vec<u8>| -> Result<Id> {
-        if !captured {
-            return Ok(NONE);
-        }
-        if text {
-            let text = String::from_utf8(bytes)
-                .map_err(|err| Error::new("UnicodeDecodeError", err.to_string()))?;
-            Ok(ctx.text(text.replace("\r\n", "\n").replace('\r', "\n")))
-        } else {
-            Ok(ctx.alloc(Value::Bytes(bytes)))
-        }
-    };
-    let stdout = stream(stdout, output.stdout)?;
-    let stderr = stream(stderr, output.stderr)?;
-    let status = ctx.int(i64::from(exit_code));
-    Ok(instance(
-        ctx,
-        "subprocess.CompletedProcess",
-        &[
-            ("args", command),
-            ("returncode", status),
-            ("stdout", stdout),
-            ("stderr", stderr),
-        ],
-    ))
-}
-
 /// Borrow a binary writer's input, including the native bytes of an array.
 pub(super) fn output_bytes(ctx: &Context, value: Id) -> Result<&[u8]> {
     match ctx.heap.get(value) {
@@ -291,6 +207,54 @@ pub(super) fn read_length(ctx: &mut Context, size: Option<Id>) -> Result<i64> {
     })
 }
 
+/// Validate a writable native destination before the file consumes any input.
+pub(super) fn readinto_target(ctx: &Context, object: Id) -> Result<Id> {
+    if let Some((storage, _)) = ctx.writable_byte_span(object)? {
+        // Some paths validate before delegating. Keep a callback's byte window intact.
+        return Ok(
+            if matches!(
+                ctx.heap.get(object),
+                Value::MemoryView { .. } | Value::BytesIoBuffer { .. }
+            ) {
+                object
+            } else {
+                storage
+            },
+        );
+    }
+    let kind = if object == NONE {
+        "None"
+    } else {
+        ctx.type_name(object)
+    };
+    Err(Error::new(
+        "TypeError",
+        format!("readinto() argument must be read-write bytes-like object, not {kind}"),
+    ))
+}
+
+pub(super) fn readinto_bytes(ctx: &mut Context, object: Id) -> Result<&mut [u8]> {
+    let object = readinto_target(ctx, object)?;
+    let (target, range) = ctx
+        .writable_byte_span(object)?
+        .expect("validated writable buffer");
+    let bytes = ctx.writable_storage_bytes(target)?;
+    Ok(&mut bytes[range])
+}
+
+/// A buffered read encountering EAGAIN returns its copied prefix count, or None if still empty.
+pub(super) fn readinto_error(ctx: &mut Context, error: std::io::Error, count: usize) -> Result<Id> {
+    if error.kind() == std::io::ErrorKind::WouldBlock {
+        Ok(if count == 0 {
+            NONE
+        } else {
+            ctx.int(count as i64)
+        })
+    } else {
+        Err(os_error(error))
+    }
+}
+
 pub(super) fn call(
     ctx: &mut Context,
     name: &str,
@@ -298,10 +262,8 @@ pub(super) fn call(
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
     let first = argument(args, 0)?;
-    match name {
-        "os.path.dirname" => return Ok(ctx.text(dirname(ctx.str_value(first)?).to_owned())),
-        "subprocess.run" => return run_process(ctx, args, kwargs),
-        _ => {}
+    if name == "os.path.dirname" {
+        return Ok(ctx.text(dirname(ctx.str_value(first)?).to_owned()));
     }
     let Value::File(handle) = ctx.heap.get(first) else {
         return Err(Error::new("TypeError", "expected a file"));
@@ -373,13 +335,8 @@ pub(super) fn call(
                     Ok(crate::dynamic::builtins::boolean(enabled))
                 }
                 ("file.read" | "file.readline", [] | [_]) | ("file.readinto", [_]) => {
-                    if let ("file.readinto", [buffer]) = (name, &args[1..])
-                        && !matches!(ctx.heap.get(*buffer), Value::ByteArray(_))
-                    {
-                        return Err(Error::new(
-                            "TypeError",
-                            "readinto() requires a writable bytes-like object",
-                        ));
+                    if let ("file.readinto", [buffer]) = (name, &args[1..]) {
+                        readinto_target(ctx, *buffer)?;
                     }
                     Err(Error::new("UnsupportedOperation", "read"))
                 }
@@ -526,19 +483,14 @@ pub(super) fn call(
         "file.fileno" => Ok(ctx.int(i64::from(f.as_raw_fd()))),
         "file.tell" => Ok(ctx.int(f.stream_position().map_err(os_error)? as i64)),
         "file.readinto" => {
-            let Value::ByteArray(buffer) = ctx.heap.get_mut(argument(args, 1)?) else {
-                return Err(Error::new(
-                    "TypeError",
-                    "readinto() requires a writable bytes-like object",
-                ));
-            };
+            let buffer = readinto_bytes(ctx, argument(args, 1)?)?;
             let mut count = 0;
             while count < buffer.len() {
                 match f.read(&mut buffer[count..]) {
                     Ok(0) => break,
                     Ok(n) => count += n,
                     Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
-                    Err(e) => return Err(os_error(e)),
+                    Err(e) => return readinto_error(ctx, e, count),
                 }
             }
             Ok(ctx.int(count as i64))
@@ -550,17 +502,18 @@ pub(super) fn call(
     }
 }
 
-pub(super) fn buffered_whence(ctx: &mut Context, value: Option<Id>) -> Result<i32> {
-    let whence = match value {
-        None => 0,
+pub(super) fn whence_argument(ctx: &mut Context, value: Option<Id>) -> Result<i32> {
+    match value {
+        None => Ok(0),
         Some(value) => ctx
             .index_integer(value)?
             .to_i64()
             .and_then(|n| i32::try_from(n).ok())
-            .ok_or_else(|| {
-                Error::new("OverflowError", "Python int too large to convert to C int")
-            })?,
-    };
+            .ok_or_else(|| Error::new("OverflowError", "Python int too large to convert to C int")),
+    }
+}
+
+pub(super) fn check_buffered_whence(whence: i32) -> Result<i32> {
     if !matches!(
         whence,
         libc::SEEK_SET | libc::SEEK_CUR | libc::SEEK_END | libc::SEEK_DATA | libc::SEEK_HOLE
@@ -571,6 +524,10 @@ pub(super) fn buffered_whence(ctx: &mut Context, value: Option<Id>) -> Result<i3
         ));
     }
     Ok(whence)
+}
+
+pub(super) fn buffered_whence(ctx: &mut Context, value: Option<Id>) -> Result<i32> {
+    check_buffered_whence(whence_argument(ctx, value)?)
 }
 
 pub(super) fn buffered_offset(ctx: &mut Context, target: Id) -> Result<i64> {

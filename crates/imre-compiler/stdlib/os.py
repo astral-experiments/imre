@@ -2,16 +2,22 @@
 import abc
 import sys
 import posixpath as path
+import stat as st
 from _collections_abc import _check_methods
 from _collections_abc import Mapping as _Mapping, MutableMapping as _MutableMapping
-from posix import access, environ as _environ, fspath, getcwd, getcwdb, listdir, mkdir, putenv, read, scandir, terminal_size, unsetenv, waitpid, write, WNOHANG
+from posix import access, environ as _environ, fspath, getcwd, getcwdb, getppid, kill, listdir, mkdir, putenv, read, scandir, terminal_size, unsetenv, waitpid, write, WNOHANG
 from types import GenericAlias
-from posix import chdir
+from posix import O_NONBLOCK, O_RDONLY, chdir, close, open, stat
 
 if sys.platform == "linux":
-    from posix import fstatvfs, statvfs, statvfs_result
+    import posix as _posix
+    for _name in vars(_posix):
+        if _name.startswith("RTLD_"):
+            globals()[_name] = getattr(_posix, _name)
+    del _name, _posix
+    from posix import O_TMPFILE, fstatvfs, statvfs, statvfs_result
     from posix import (
-        sched_getscheduler, SCHED_BATCH, SCHED_DEADLINE, SCHED_FIFO, SCHED_IDLE,
+        sched_getscheduler, sched_param, SCHED_BATCH, SCHED_DEADLINE, SCHED_FIFO, SCHED_IDLE,
         SCHED_NORMAL, SCHED_OTHER, SCHED_RESET_ON_FORK, SCHED_RR,
     )
 
@@ -376,3 +382,133 @@ def getenv(key, default=None):
 
 def getenvb(key, default=None):
     return environb.get(key, default)
+
+
+# From CPython 3.14.5, Lib/os.py. See stdlib/docstrings/LICENSE.
+if {open, stat} <= supports_dir_fd and {scandir, stat} <= supports_fd:
+
+    def fwalk(top=".", topdown=True, onerror=None, *, follow_symlinks=False, dir_fd=None):
+        """Directory tree generator.
+
+        This behaves exactly like walk(), except that it yields a 4-tuple
+
+            dirpath, dirnames, filenames, dirfd
+
+        `dirpath`, `dirnames` and `filenames` are identical to walk() output,
+        and `dirfd` is a file descriptor referring to the directory `dirpath`.
+
+        The advantage of fwalk() over walk() is that it's safe against symlink
+        races (when follow_symlinks is False).
+
+        If dir_fd is not None, it should be a file descriptor open to a directory,
+          and top should be relative; top will then be relative to that directory.
+          (dir_fd is always supported for fwalk.)
+
+        Caution:
+        Since fwalk() yields file descriptors, those are only valid until the
+        next iteration step, so you should dup() them if you want to keep them
+        for a longer period.
+
+        Example:
+
+        import os
+        for root, dirs, files, rootfd in os.fwalk('python/Lib/xml'):
+            print(root, "consumes", end="")
+            print(sum(os.stat(name, dir_fd=rootfd).st_size for name in files),
+                  end="")
+            print("bytes in", len(files), "non-directory files")
+            if '__pycache__' in dirs:
+                dirs.remove('__pycache__')  # don't visit __pycache__ directories
+        """
+        sys.audit("os.fwalk", top, topdown, onerror, follow_symlinks, dir_fd)
+        top = fspath(top)
+        stack = [(_fwalk_walk, (True, dir_fd, top, top, None))]
+        isbytes = isinstance(top, bytes)
+        try:
+            while stack:
+                yield from _fwalk(stack, isbytes, topdown, onerror, follow_symlinks)
+        finally:
+            # Close any file descriptors still on the stack.
+            while stack:
+                action, value = stack.pop()
+                if action == _fwalk_close:
+                    close(value)
+
+    # Each item in the _fwalk() stack is a pair (action, args).
+    _fwalk_walk = 0  # args: (isroot, dirfd, toppath, topname, entry)
+    _fwalk_yield = 1  # args: (toppath, dirnames, filenames, topfd)
+    _fwalk_close = 2  # args: dirfd
+
+    def _fwalk(stack, isbytes, topdown, onerror, follow_symlinks):
+        # Note: This uses O(depth of the directory tree) file descriptors: if
+        # necessary, it can be adapted to only require O(1) FDs, see issue
+        # #13734.
+
+        action, value = stack.pop()
+        if action == _fwalk_close:
+            close(value)
+            return
+        elif action == _fwalk_yield:
+            yield value
+            return
+        assert action == _fwalk_walk
+        isroot, dirfd, toppath, topname, entry = value
+        try:
+            if not follow_symlinks:
+                # Note: To guard against symlink races, we use the standard
+                # lstat()/open()/fstat() trick.
+                if entry is None:
+                    orig_st = stat(topname, follow_symlinks=False, dir_fd=dirfd)
+                else:
+                    orig_st = entry.stat(follow_symlinks=False)
+            topfd = open(topname, O_RDONLY | O_NONBLOCK, dir_fd=dirfd)
+        except OSError as err:
+            if isroot:
+                raise
+            if onerror is not None:
+                onerror(err)
+            return
+        stack.append((_fwalk_close, topfd))
+        if not follow_symlinks:
+            if isroot and not st.S_ISDIR(orig_st.st_mode):
+                return
+            if not path.samestat(orig_st, stat(topfd)):
+                return
+
+        scandir_it = scandir(topfd)
+        dirs = []
+        nondirs = []
+        entries = None if topdown or follow_symlinks else []
+        for entry in scandir_it:
+            name = entry.name
+            if isbytes:
+                name = fsencode(name)
+            try:
+                if entry.is_dir():
+                    dirs.append(name)
+                    if entries is not None:
+                        entries.append(entry)
+                else:
+                    nondirs.append(name)
+            except OSError:
+                try:
+                    # Add dangling symlinks, ignore disappeared files
+                    if entry.is_symlink():
+                        nondirs.append(name)
+                except OSError:
+                    pass
+
+        if topdown:
+            yield toppath, dirs, nondirs, topfd
+        else:
+            stack.append((_fwalk_yield, (toppath, dirs, nondirs, topfd)))
+
+        toppath = path.join(toppath, toppath[:0])  # Add trailing slash.
+        if entries is None:
+            stack.extend(
+                (_fwalk_walk, (False, topfd, toppath + name, name, None))
+                for name in dirs[::-1])
+        else:
+            stack.extend(
+                (_fwalk_walk, (False, topfd, toppath + name, name, entry))
+                for name, entry in zip(dirs[::-1], entries[::-1]))

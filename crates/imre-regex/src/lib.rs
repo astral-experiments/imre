@@ -636,15 +636,14 @@ fn tokenize(
                 can_repeat = false;
                 0
             }
+            '\\' if lookahead && push_octal_escape(&mut input, &mut output, false)? => {
+                can_repeat = true;
+                1
+            }
             '\\' if lookahead && matches!(input.peek(), Some('1'..='9')) => {
                 let first = input.next().unwrap();
                 let mut id = (first as u8 - b'0') as usize;
                 if let Some(second) = input.next_if(char::is_ascii_digit) {
-                    if first <= '7' && second <= '7' && matches!(input.peek(), Some('0'..='7')) {
-                        return Err(
-                            "three-digit octal escapes in lookaheads are unsupported".into()
-                        );
-                    }
                     id = id * 10 + (second as u8 - b'0') as usize;
                 }
                 if id >= groups.len() {
@@ -781,106 +780,8 @@ fn analyze(output: String, groups: Vec<Option<String>>) -> Result<FixedPattern, 
     })
 }
 
-/// Encode a literal replacement as UTF-8 runs and capture indices. The high
-/// bit distinguishes a group from a byte count, so user text needs no sentinel.
-pub fn replacement(template: &str, groups: &[Capture]) -> Result<Vec<u8>, &'static str> {
-    fn flush(out: &mut Vec<u8>, literal: &mut String) -> Result<(), &'static str> {
-        if !literal.is_empty() {
-            let n = u32::try_from(literal.len())
-                .ok()
-                .filter(|&n| n < 1 << 31)
-                .ok_or("replacement literal is too long")?;
-            out.extend(n.to_le_bytes());
-            out.extend_from_slice(literal.as_bytes());
-            literal.clear();
-        }
-        Ok(())
-    }
-    let mut chars = template.chars().peekable();
-    let mut out = Vec::new();
-    let mut literal = String::new();
-    while let Some(c) = chars.next() {
-        if c != '\\' {
-            literal.push(c);
-            continue;
-        }
-        let escape = chars.next().ok_or("incomplete replacement escape")?;
-        let group = match escape {
-            'g' => {
-                if chars.next() != Some('<') {
-                    return Err("expected < in replacement group");
-                }
-                let mut name = String::new();
-                loop {
-                    match chars.next() {
-                        Some('>') => break,
-                        Some(c) => name.push(c),
-                        None => return Err("unterminated replacement group"),
-                    }
-                }
-                if !name.is_empty() && name.bytes().all(|c| c.is_ascii_digit()) {
-                    name.parse().ok()
-                } else {
-                    groups.iter().position(|g| g.name.as_deref() == Some(&name))
-                }
-            }
-            '1'..='9' => {
-                let mut digits = String::from(escape);
-                if let Some(c) = chars.next_if(char::is_ascii_digit) {
-                    digits.push(c);
-                    if digits.bytes().all(|d| (b'0'..=b'7').contains(&d))
-                        && let Some(c) = chars.next_if(|c| matches!(c, '0'..='7'))
-                    {
-                        digits.push(c);
-                        let octal = u8::from_str_radix(&digits, 8)
-                            .map_err(|_| "octal escape exceeds 0o377")?;
-                        literal.push(char::from(octal));
-                        continue;
-                    }
-                }
-                digits.parse().ok()
-            }
-            '0' => {
-                let mut octal = 0;
-                for _ in 0..2 {
-                    if let Some(c) = chars.next_if(|c| matches!(c, '0'..='7')) {
-                        octal = octal * 8 + c.to_digit(8).unwrap() as u8;
-                    } else {
-                        break;
-                    }
-                }
-                literal.push(char::from(octal));
-                continue;
-            }
-            _ => {
-                let decoded = match escape {
-                    '\\' => '\\',
-                    'a' => '\x07',
-                    'b' => '\x08',
-                    'f' => '\x0c',
-                    'v' => '\x0b',
-                    'n' => '\n',
-                    'r' => '\r',
-                    't' => '\t',
-                    c if c.is_ascii_alphabetic() => return Err("invalid replacement escape"),
-                    c => {
-                        literal.push('\\');
-                        c
-                    }
-                };
-                literal.push(decoded);
-                continue;
-            }
-        };
-        let group = group
-            .filter(|&i| i < groups.len())
-            .ok_or("unknown replacement group")?;
-        flush(&mut out, &mut literal)?;
-        out.extend((group as u32 | 1 << 31).to_le_bytes());
-    }
-    flush(&mut out, &mut literal)?;
-    Ok(out)
-}
+mod replacement;
+pub use replacement::{ReplacementError, ReplacementPart, parse_replacement, replacement};
 
 type Input<'a> = std::iter::Peekable<std::str::Chars<'a>>;
 
@@ -1024,12 +925,47 @@ enum Escape {
     Anchor,
 }
 
+/// Consume a Python pattern octal and emit one scalar (or one octet in a bytes pattern).
+/// Outside a class, a nonzero escape with fewer than three octal digits is a group reference.
+fn push_octal_escape(
+    input: &mut Input<'_>,
+    output: &mut String,
+    in_class: bool,
+) -> Result<bool, String> {
+    let Some(&first @ '0'..='7') = input.peek() else {
+        return Ok(false);
+    };
+    let mut digits = input.clone();
+    let mut value = 0u16;
+    let mut count = 0;
+    while count < 3
+        && let Some(c) = digits.next_if(|c| matches!(c, '0'..='7'))
+    {
+        value = value * 8 + (c as u16 - u16::from(b'0'));
+        count += 1;
+    }
+    if !in_class && first != '0' && count < 3 {
+        return Ok(false);
+    }
+    if value > 0xff {
+        return Err(format!(
+            r"octal escape value \{value:o} outside of range 0-0o377"
+        ));
+    }
+    *input = digits;
+    write!(output, r"\x{value:02x}").unwrap();
+    Ok(true)
+}
+
 fn escaped(
     input: &mut Input<'_>,
     output: &mut String,
     in_class: bool,
     escapes: &mut Escapes,
 ) -> Result<Escape, String> {
+    if push_octal_escape(input, output, in_class)? {
+        return Ok(Escape::Scalar);
+    }
     let c = input.next().ok_or("incomplete regex escape")?;
     let ascii = escapes.alphabet.ascii();
     if ascii && let Some(class) = ascii_class(c) {

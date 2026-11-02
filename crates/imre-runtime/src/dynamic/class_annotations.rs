@@ -56,7 +56,9 @@ impl Context {
                 "annotation outside an executing class body",
             ));
         };
-        namespace.annotation_sites.get_or_insert_with(Default::default)
+        namespace
+            .annotation_sites
+            .get_or_insert_with(Default::default)
             .insert(offset, (name, thunk));
         self.put_item(scratch, name, NONE)?;
         Ok(NONE)
@@ -82,7 +84,11 @@ impl Context {
         let key = self.heap.code_name("__annotations__");
         self.remove_binding(scope, "__annotations__", key)?;
         self.enable_class_annotation_provider(scope);
-        let fields = if fields == NONE { self.dict(Vec::new()) } else { fields };
+        let fields = if fields == NONE {
+            self.dict(Vec::new())
+        } else {
+            fields
+        };
         Ok((fields, annotate))
     }
 

@@ -1,33 +1,43 @@
 """Load Python modules from registered code or filesystem source."""
 
+import _imp
 import sys
-import _frozen_importlib as _bootstrap
 
 from _imre_importlib import (
     cache_name as _cache_name,
     get_code as _registered_code,
+    index as _index,
     loader_fields as _loader_fields,
     path_stats as _path_stats,
     source_name as _source_name,
     warn_debug_override as _warn_debug_override,
     warn_loader_deprecation as _warn_loader_deprecation,
+    warn_import as _warn_import,
 )
 from os import fspath as _fspath, sep
 
 
-# Boxed source directories are searched directly; only ZIP path finders are cached.
-_zip_path_importers = {}
+_MS_WINDOWS = sys.platform == "win32"
+if _MS_WINDOWS:
+    import nt as _os
+    path_separators = "\\/"
+else:
+    import posix as _os
+    path_separators = "/"
+path_sep = path_separators[0]
+path_sep_tuple = tuple(path_separators)
+
+SOURCE_SUFFIXES = [".py", ".pyw"] if _MS_WINDOWS else [".py"]
+BYTECODE_SUFFIXES = [".pyc"]
+EXTENSION_SUFFIXES = _imp.extension_suffixes()
 
 
-def _invalidate_default_path_caches():
-    if hasattr(sys, "path_hooks") or hasattr(sys, "path_importer_cache"):
-        raise NotImplementedError("custom sys.path_hooks and sys.path_importer_cache")
-    for path, finder in list(_zip_path_importers.items()):
-        if finder is None or not path.startswith("/"):
-            del _zip_path_importers[path]
-        elif hasattr(finder, "invalidate_caches"):
-            finder.invalidate_caches()
-    _NamespacePath._epoch += 1
+_is_frozen = __name__ == "_frozen_importlib_external"
+if _is_frozen:
+    import _frozen_importlib as _bootstrap
+else:
+    # The package connects the selected core after this module has executed.
+    _bootstrap = None
 
 
 def _bless_my_loader(module_globals):
@@ -49,11 +59,11 @@ def _bless_my_loader(module_globals):
             if spec_loader is missing:
                 raise AttributeError("Module globals is missing a __spec__.loader")
             raise ValueError("Module globals is missing a __spec__.loader")
-        _warn_loader_deprecation(globals(), False)
+        _warn_loader_deprecation(globals(), False, _is_frozen)
         spec_loader = loader
 
     if loader is not None and loader != spec_loader:
-        _warn_loader_deprecation(globals(), True)
+        _warn_loader_deprecation(globals(), True, _is_frozen)
         return loader
     return spec_loader
 
@@ -68,7 +78,7 @@ def _cache_path(path):
 
 def cache_from_source(path, debug_override=None, *, optimization=None):
     if debug_override is not None:
-        _warn_debug_override()
+        _warn_debug_override(globals(), _is_frozen)
         if optimization is not None:
             raise TypeError("debug_override or optimization must be set to None")
         optimization = "" if debug_override else 1
@@ -87,11 +97,6 @@ def source_from_cache(path):
     if sys.implementation.cache_tag is None:
         raise NotImplementedError("sys.implementation.cache_tag is None")
     return _source_name(_cache_path(path), sys.pycache_prefix)
-
-
-def _get_cached(origin):
-    # The standalone runtime has no bytecode cache tag.
-    return origin if origin.endswith(".pyc") else None
 
 
 class _LoaderBasics:
@@ -162,13 +167,12 @@ class SourceFileLoader(FileLoader, _LoaderBasics):
         return _path_stats(path)
 
     def source_to_code(self, data, path, *, _optimize=-1):
-        from operator import index
-        from os import fsdecode
-
-        filename = fsdecode(path)
+        filename = _fspath(path)
+        if isinstance(filename, bytes):
+            filename = filename.decode(sys.getfilesystemencoding(), sys.getfilesystemencodeerrors())
         if "\0" in filename:
             raise ValueError("embedded null character")
-        level = index(_optimize)
+        level = _index(_optimize)
         if level < -2147483648 or level > 2147483647:
             raise OverflowError("Python int too large to convert to C int")
         if level < -1 or level > 2:
@@ -186,3 +190,12 @@ class SourceFileLoader(FileLoader, _LoaderBasics):
             return code
         source = self.get_data(path)
         return self.source_to_code(source, path)
+
+
+def _file_loader_defaults(location):
+    """Choose a default loader when a FileFinder factory returns None."""
+    if location.endswith(tuple(_imp.extension_suffixes())):
+        raise NotImplementedError("default extension file loaders are unsupported")
+    yield SourceFileLoader, SOURCE_SUFFIXES
+    if location.endswith(tuple(BYTECODE_SUFFIXES)):
+        raise NotImplementedError("default bytecode file loaders are unsupported")

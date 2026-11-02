@@ -194,18 +194,18 @@ impl Index {
 }
 
 impl Entries {
-    /// Identify changes to insertion positions even when the live size is restored.
-    pub(in super::super) fn order_state(&self) -> (usize, usize, usize) {
-        (
-            self.next,
-            self.index.as_ref().map_or(0, |index| index.generation),
-            self.order.as_ref().map_or(0, |order| order.revision),
-        )
+    /// Ordered iterators track node mutations separately from the size of the base dict.
+    pub(in super::super) fn order_state(&self) -> usize {
+        self.order.as_ref().map_or(0, |order| order.revision)
     }
 
     /// Remove all pairs and invalidate lookups suspended in a key comparison.
     pub(in super::super) fn clear(&mut self) -> Vec<(Id, Id)> {
         let old = std::mem::take(self);
+        self.order = old.order;
+        if let Some(order) = &mut self.order {
+            order.by_dense.clear();
+        }
         if let Some(index) = old.index {
             let size = (self.usable + 1).next_power_of_two();
             let mut index = index;
@@ -240,13 +240,7 @@ impl Entries {
                 }),
                 None => None,
             },
-            order: match &self.order {
-                Some(order) => Some(super::Order {
-                    indices: copy(&order.indices)?,
-                    revision: order.revision,
-                }),
-                None => None,
-            },
+            order: None,
             next: self.next,
             usable: self.usable,
         })
@@ -338,15 +332,48 @@ impl Context {
         last: bool,
     ) -> Result<()> {
         let entries = self.stored_entries(dict);
-        let Some(end) = entries.len().checked_sub(1) else {
-            return Err(self.lookup_error("KeyError", key));
-        };
-        if entries[entries.ordered_dense(if last { end } else { 0 })].0 == key {
+        let nodes = entries.ordered_nodes();
+        if (if last { nodes.last() } else { nodes.first() }).is_some_and(|&(node, _)| node == key) {
             return Ok(());
         }
         let (_, dense) = self.find_dictionary_key(dict, key, None)?;
-        let dense = dense.ok_or_else(|| self.lookup_error("KeyError", key))?;
-        self.stored_entries_mut(dict).move_to_end(dense, last)
+        let entries = self.stored_entries(dict);
+        let rank = dense
+            .and_then(|i| entries.ordered_rank(i))
+            .ok_or_else(|| self.lookup_error("KeyError", key))?;
+        self.stored_entries_mut(dict).move_to_end(rank, last);
+        Ok(())
+    }
+
+    /// Detach the node before the backing lookup can run an equality callback.
+    pub(in super::super) fn unlink_ordered_node(&mut self, dict: Id, dense: usize, rank: usize) {
+        let key = self
+            .stored_entries_mut(dict)
+            .unlink_ordered_node(dense, rank);
+        self.heap.weak_edge_removed(key);
+    }
+
+    pub(in super::super) fn clear_ordered_dict(&mut self, dict: Id) {
+        let removed = self
+            .stored_entries_mut(dict)
+            .order
+            .as_mut()
+            .map(|order| {
+                order.revision = order.revision.wrapping_add(1);
+                std::mem::take(&mut order.keys)
+            })
+            .unwrap_or_default();
+        let finalize = self.heap.has_unbound_finalizer(super::super::NONE)
+            && removed
+                .iter()
+                .any(|&(key, _)| self.heap.could_own_finalizer(key, true));
+        for (key, _) in removed {
+            self.heap.weak_edge_removed(key);
+        }
+        super::super::builtins::clear_container(self, dict);
+        if finalize {
+            self.collect_unreachable();
+        }
     }
 
     fn stored_entries_mut(&mut self, dict: Id) -> &mut Entries {
@@ -497,20 +524,31 @@ impl Context {
         if let Value::Union(union) = *self.heap.get(key) {
             return union.hash(self).map(ControlFlow::Break);
         }
-        if let Value::MemoryView { owner, hash } = *self.heap.get(key) {
+        if matches!(self.heap.get(key), Value::BytesIoBuffer { .. }) {
+            return Ok(ControlFlow::Break(Self::identity_hash(key)));
+        }
+        if let Value::MemoryView { owner, hash, .. } = *self.heap.get(key) {
             if let Some(hash) = hash {
                 return Ok(ControlFlow::Break(hash));
             }
             let owner = Self::memoryview_owner(owner)?;
-            if matches!(self.heap.get(self.scalar_value(owner)), Value::Array(_)) {
+            if !self.view_is_readonly(key)? {
                 return Err(Error::new(
                     "ValueError",
                     "cannot hash writable memoryview object",
                 ));
             }
+            if let Value::Array(a) = self.heap.get(self.view_storage_id(owner))
+                && !matches!(a.view_layout().0, "B" | "b" | "c")
+            {
+                return Err(Error::new(
+                    "ValueError",
+                    "memoryview: hashing is restricted to formats 'B', 'b' or 'c'",
+                ));
+            }
             let hash = self.with_buffer_export(key, |ctx| {
                 ctx.dictionary_hash(owner)?;
-                Ok(crate::python_hash::bytes(ctx.bytes_like(key)?))
+                Ok(crate::python_hash::bytes(&ctx.memoryview_bytes(key)?))
             })?;
             if let Value::MemoryView { hash: cached, .. } = self.heap.get_mut(key) {
                 *cached = Some(hash);
@@ -547,6 +585,7 @@ impl Context {
             return Ok(ControlFlow::Break(normalized(hash)));
         }
         // Immutable scalar subclasses inherit the hash of their backing value.
+        let receiver = key;
         let key = self.scalar_value(key);
         let child = match self.heap.get(key) {
             Value::Method {
@@ -642,8 +681,21 @@ impl Context {
                 }
                 Value::Bytes(bytes) => crate::python_hash::bytes(bytes),
                 Value::None => 0xfca8_6420,
-                Value::Calendar { value, .. } => {
-                    if let Some((d, s, u)) = value.hash_delta_parts() {
+                Value::Calendar { value, tzinfo, .. } => {
+                    let value = value.clone();
+                    let kind = value.class();
+                    let mut duration = value.hash_delta_parts();
+                    if matches!(kind, "time" | "datetime")
+                        && (receiver != key
+                            || crate::dynamic::stdlib::datetime::comparison::custom(self, *tzinfo))
+                        && let Some(offset) =
+                            crate::dynamic::stdlib::datetime::comparison::hash_offset(
+                                self, receiver,
+                            )?
+                    {
+                        duration = Some(value.clock_hash_parts(offset));
+                    }
+                    let hash = if let Some((d, s, u)) = duration {
                         finish_tuple(
                             [d, s, u]
                                 .into_iter()
@@ -652,7 +704,12 @@ impl Context {
                         )
                     } else {
                         let [year, month, day, hour, minute, second, microsecond, _] =
-                            value.fields();
+                            if kind == "time" {
+                                let [h, m, s, us, _] = value.clock_parts().map(i128::from);
+                                [0, 0, 0, h, m, s, us, 0]
+                            } else {
+                                value.fields()
+                            };
                         let bytes = [
                             (year >> 8) as u8,
                             year as u8,
@@ -665,12 +722,13 @@ impl Context {
                             (microsecond >> 8) as u8,
                             microsecond as u8,
                         ];
-                        crate::python_hash::bytes(if value.class() == "date" {
-                            &bytes[..4]
-                        } else {
-                            &bytes
+                        crate::python_hash::bytes(match kind {
+                            "date" => &bytes[..4],
+                            "time" => &bytes[4..],
+                            _ => &bytes,
                         })
-                    }
+                    };
+                    self.cache_key_hash(key, normalized(hash))?
                 }
                 Value::Range(range) => {
                     let len = range.len.as_small();
@@ -988,6 +1046,49 @@ impl Context {
     ) -> Result<Id> {
         self.heap.keep(value);
         let (hash, index) = self.find_dictionary_key(dict, key, known_hash)?;
+        self.store_dictionary_value(dict, key, value, hash, index, overwrite)
+    }
+
+    pub(in super::super) fn set_ordered_dictionary_key(
+        &mut self,
+        dict: Id,
+        key: Id,
+        value: Id,
+    ) -> Result<Id> {
+        self.heap.keep(value);
+        let (hash, index) = self.find_dictionary_key(dict, key, None)?;
+        self.store_dictionary_value(dict, key, value, hash, index, true)?;
+        // The backing value is visible to equality hooks during the separate node lookup.
+        if let Err(error) = self.add_ordered_node(dict, key, hash) {
+            for root in error.roots() {
+                self.heap.keep(root);
+            }
+            super::super::builtins::remove_dict_item_hashed(self, dict, key, Some(hash))?;
+            return Err(error);
+        }
+        Ok(value)
+    }
+
+    fn add_ordered_node(&mut self, dict: Id, key: Id, hash: i64) -> Result<()> {
+        let (_, dense) = self.find_dictionary_key(dict, key, Some(hash))?;
+        let dense = dense.ok_or_else(|| self.lookup_error("KeyError", key))?;
+        let entries = self.stored_entries_mut(dict);
+        if entries.ordered_rank(dense).is_none() {
+            entries.reserve_ordered_node()?;
+            entries.link_ordered_key(dense, key, hash);
+        }
+        Ok(())
+    }
+
+    fn store_dictionary_value(
+        &mut self,
+        dict: Id,
+        key: Id,
+        value: Id,
+        hash: i64,
+        index: Option<usize>,
+        overwrite: bool,
+    ) -> Result<Id> {
         let entries = self.stored_entries_mut(dict);
         if let Some(i) = index {
             if !overwrite {

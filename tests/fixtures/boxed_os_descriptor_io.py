@@ -1,8 +1,12 @@
 import errno
-import os
-from os import read, write
 import posix
 import sys
+
+if sys.platform == "linux":
+    tmpfile_flag = vars(posix)["O_TMPFILE"]
+
+import os
+from os import read, write
 import tempfile
 
 
@@ -45,7 +49,15 @@ def check_sendfile():
 
 def current():
     if sys.platform == "linux":
+        check_tmpfile()
         check_sendfile()
+    assert os.strerror is posix.strerror
+    try:
+        os.fstat(-1)
+    except OSError as error:
+        assert os.strerror(Index(error.errno)) == error.strerror
+    else:
+        raise AssertionError("fstat accepted a negative descriptor")
     assert os.read is posix.read and os.write is posix.write
     assert read is posix.read and write is posix.write
     if sys.platform == "linux" and sys.maxsize == 2**63 - 1:
@@ -106,3 +118,28 @@ def current():
     finally:
         os.close(reader)
     print("borrowed descriptors, short transfers and EOF passed")
+
+
+def check_tmpfile():
+    assert os.O_TMPFILE is posix.O_TMPFILE is tmpfile_flag
+    del posix.O_TMPFILE
+    try:
+        assert not hasattr(posix, "O_TMPFILE") and os.O_TMPFILE is tmpfile_flag
+    finally:
+        posix.O_TMPFILE = tmpfile_flag
+    assert os.O_TMPFILE != os.O_DIRECTORY and os.O_TMPFILE & os.O_DIRECTORY
+    with tempfile.TemporaryDirectory() as directory:
+        try:
+            tmp_fd = os.open(directory, os.O_TMPFILE | os.O_RDWR, 0o600)
+        except OSError as error:
+            # Linux can expose O_TMPFILE on a filesystem without anonymous file support.
+            if error.errno not in (errno.EOPNOTSUPP, errno.EISDIR, errno.ENOENT):
+                raise
+        else:
+            try:
+                assert os.fstat(tmp_fd).st_nlink == 0 and not os.listdir(directory)
+                assert os.write(tmp_fd, b"anonymous") == 9
+                os.lseek(tmp_fd, 0, os.SEEK_SET)
+                assert os.read(tmp_fd, 9) == b"anonymous"
+            finally:
+                os.close(tmp_fd)

@@ -11,7 +11,7 @@ use ruff_python_literal::format::{
 };
 
 use super::super::operators::append_rendered_text;
-use super::super::stdlib::codecs::{decode_named, encode_text};
+use super::super::stdlib::codecs::{decode_named, encode_text_object};
 use super::*;
 
 use crate::objects::{python_whitespace, split_parts, translate, visit_line_fields as split_lines};
@@ -175,15 +175,27 @@ pub(super) fn construct(
         "bytes" | "bytearray" => {
             let [value, encoding_id, errors] =
                 bind(name, args, kwargs, ["source", "encoding", "errors"])?;
+            if let ("bytes", Some(source), None, None) = (name, value, encoding_id, errors)
+                && let Some(result) = call_bytes_method(ctx, source)?
+            {
+                return Ok(result);
+            }
             let bytes = match value.map(|id| ctx.heap.get(id)) {
                 Some(_) if value.is_some_and(|id| ctx.string_storage(id).is_some()) => {
                     if encoding_id.is_none() {
                         return Err(type_error("string argument without an encoding"));
                     }
-                    encode_text(ctx, value.unwrap(), encoding_id, errors)?
+                    let result = encode_text_object(ctx, value.unwrap(), encoding_id, errors)?;
+                    if name == "bytes" {
+                        return Ok(result);
+                    }
+                    ctx.bytes_like(result)?.to_vec()
                 }
-                _ if encoding_id.is_some() || errors.is_some() => {
+                _ if encoding_id.is_some() => {
                     return Err(type_error("encoding without a string argument"));
+                }
+                _ if errors.is_some() => {
+                    return Err(type_error("errors without a string argument"));
                 }
                 None => Vec::new(),
                 Some(Value::Bytes(_)) if name == "bytes" => return Ok(value.unwrap()),
@@ -361,10 +373,29 @@ pub(super) fn bytearray_method(
     Ok(NONE)
 }
 
+/// Call the type's `__bytes__` hook and preserve the identity of its bytes result.
+pub(super) fn call_bytes_method(ctx: &mut Context, source: Id) -> Result<Option<Id>> {
+    let Some(method) = ctx.bound_slot(source, "__bytes__")? else {
+        return Ok(None);
+    };
+    let result = ctx.call(method, Vec::new(), Vec::new())?;
+    if !matches!(ctx.heap.get(ctx.scalar_value(result)), Value::Bytes(_)) {
+        let name = ctx.type_name(result);
+        return Err(type_error(format!(
+            "__bytes__ returned non-bytes (type {})",
+            &name[..name.floor_char_boundary(200)]
+        )));
+    }
+    Ok(Some(result))
+}
+
 pub(in super::super) fn bytes_from_iterable(ctx: &mut Context, obj: Id) -> Result<Vec<u8>> {
+    if matches!(ctx.heap.get(obj), Value::MemoryView { .. }) {
+        return ctx.memoryview_bytes(obj);
+    }
     if matches!(
         ctx.heap.get(ctx.scalar_value(obj)),
-        Value::Bytes(_) | Value::ByteArray(_) | Value::MemoryView { .. }
+        Value::Bytes(_) | Value::ByteArray(_) | Value::BytesIoBuffer { .. }
     ) {
         return super::super::copy_ids(ctx.bytes_like(obj)?);
     }
@@ -489,9 +520,9 @@ pub(in super::super) fn format_value(ctx: &mut Context, value: Id, spec: Option<
         )));
     }
     let method = match ctx.heap.get(value) {
-        Value::Calendar { value: calendar, .. }
-            if matches!(calendar.class(), "date" | "datetime" | "time") =>
-        {
+        Value::Calendar {
+            value: calendar, ..
+        } if matches!(calendar.class(), "date" | "datetime" | "time") => {
             Some(ctx.lookup_attr(value, "__format__")?)
         }
         _ => ctx.bound_slot(value, "__format__")?,
@@ -1333,6 +1364,47 @@ fn bytes_join(ctx: &mut Context, receiver: Id, iterable: Id) -> Result<Id> {
     Ok(ctx.alloc(Value::Bytes(result)))
 }
 
+// Rust strings cannot hold lone surrogates. Match these inputs in Python code points.
+fn replace_points(ctx: &mut Context, receiver: Id, old: Id, new: Id, limit: usize) -> Result<Id> {
+    let value = ctx.string_codepoints(receiver)?;
+    let needle = ctx.string_codepoints(old)?;
+    let replacement = ctx.string_codepoints(new)?;
+    let (value, needle, replacement) = (value.as_ref(), needle.as_ref(), replacement.as_ref());
+    let matches = || {
+        let mut next = 0;
+        (0..=value.len())
+            .filter(move |&i| {
+                if i < next || !value[i..].starts_with(needle) {
+                    return false;
+                }
+                next = i + needle.len();
+                true
+            })
+            .take(limit)
+    };
+    let count = matches().count();
+    if count == 0 || old == new || (needle.is_empty() && replacement.is_empty()) {
+        return Ok(ctx.string_storage(receiver).unwrap());
+    }
+    let retained = value.len() - count * needle.len();
+    let memory_error = || Error::new("MemoryError", "");
+    let size = replacement
+        .len()
+        .checked_mul(count)
+        .and_then(|extra| retained.checked_add(extra))
+        .ok_or_else(memory_error)?;
+    let mut result = Vec::new();
+    result.try_reserve_exact(size).map_err(|_| memory_error())?;
+    let mut copied = 0;
+    for i in matches() {
+        result.extend_from_slice(&value[copied..i]);
+        result.extend_from_slice(replacement);
+        copied = i + needle.len();
+    }
+    result.extend_from_slice(&value[copied..]);
+    Ok(ctx.text_codepoints(result))
+}
+
 pub(super) fn method(
     ctx: &mut Context,
     owner: &str,
@@ -1408,8 +1480,7 @@ pub(super) fn method(
         return if name == "decode" {
             decode_named(ctx, ctx.scalar_value(receiver), encoding, errors)
         } else {
-            let b = encode_text(ctx, receiver, encoding, errors)?;
-            Ok(ctx.alloc(Value::Bytes(b)))
+            encode_text_object(ctx, receiver, encoding, errors)
         };
     }
     if name == "zfill" {
@@ -1545,9 +1616,12 @@ pub(super) fn method(
             }
             ctx.check_buffer_exporter(needle)?;
             let byte;
-            let needle = match ctx.buffer_storage(needle)? {
-                Value::Bytes(bytes) | Value::ByteArray(bytes) => bytes.as_slice(),
-                Value::Array(array) => array.as_bytes(),
+            let needle = match ctx.heap.get(ctx.scalar_value(needle)) {
+                Value::Bytes(_)
+                | Value::ByteArray(_)
+                | Value::MemoryView { .. }
+                | Value::BytesIoBuffer { .. }
+                | Value::Array(_) => ctx.native_buffer_bytes(needle)?,
                 _ => {
                     let index = ctx.index_value(needle)?.ok_or_else(|| {
                         type_error(format!(
@@ -1992,6 +2066,12 @@ pub(super) fn method(
             }
         }
         let limit = split_limit(ctx, count)?;
+        if [receiver, args[0], args[1]]
+            .iter()
+            .any(|&id| matches!(ctx.heap.get(ctx.scalar_value(id)), Value::SurrogateStr(_)))
+        {
+            return replace_points(ctx, receiver, args[0], args[1], limit);
+        }
         let value = crate::objects::replace_text(
             ctx.str_value(receiver)?,
             ctx.str_value(args[0])?,

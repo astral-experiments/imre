@@ -14,8 +14,8 @@ use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
 use super::builtins::boolean;
+use super::stdlib::hashlib::digest::SharedHash;
 use super::{Context, Error, Id, NONE, Result, Value};
-use crate::objects::SharedHash;
 use crate::objects::locks::{PrimitiveLock, thread_ident, timeout_float, timeout_int};
 
 type WorkerStatus = std::result::Result<(), String>;
@@ -294,6 +294,8 @@ fn launch(ctx: &Context, operation: Operation, detached_label: Option<String>) -
     let count = Arc::clone(&ctx.threads.count);
     let active = Arc::new(AtomicBool::new(true));
     let worker_active = Arc::clone(&active);
+    let fault_workers =
+        matches!(operation, Operation::Python(_)).then(|| ctx.heap.begin_fault_worker());
     let thread = thread::Builder::new()
         .spawn(move || {
             // A failed bootstrap publishes no identity and contributes nothing to the live count.
@@ -302,6 +304,9 @@ fn launch(ctx: &Context, operation: Operation, detached_label: Option<String>) -
             let (python, acquire) = match operation {
                 Operation::Python(callback) => match callback.load() {
                     Ok((mut worker, function, arguments)) => {
+                        worker
+                            .heap
+                            .observe_fault_workers(fault_workers.as_ref().expect("Python worker"));
                         worker.threads.count = Arc::clone(&count);
                         worker.threads.private_context = true;
                         (Some((worker, function, arguments)), None)
@@ -351,7 +356,9 @@ fn launch(ctx: &Context, operation: Operation, detached_label: Option<String>) -
                 } else if let Some(lock) = acquire {
                     lock.acquire(true, None);
                 } else if let Some((hash, data)) = update {
-                    hash.lock().update(&data);
+                    hash.lock()
+                        .update(&data)
+                        .map_err(|error| error.to_string())?;
                 }
             }
             Ok(())

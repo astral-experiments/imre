@@ -1,5 +1,5 @@
 import zlib
-from zlib import adler32, crc32, error as ZlibError
+from zlib import adler32, compress, crc32, decompress, error as ZlibError
 
 
 class Seed:
@@ -56,3 +56,45 @@ def current():
             adler32(*args)
         except TypeError as error:
             print(str(error))
+
+    data = b"payload" * 20000
+    for encode, decode in [(8, 0), (15, 47), (-9, -15), (31, 47)]:
+        packed = compress(memoryview(data), level=9, wbits=encode)
+        assert decompress(packed + b"trailing", wbits=decode, bufsize=1) == data
+    # Interoperate with zlib and gzip streams emitted by reference zlib.
+    zstream = bytes.fromhex("789c2b48acccc94f4c01000bdd02eb")
+    gzip = bytes.fromhex("1f8b08000000000000032b48acccc94f4c0100156a2c4207000000")
+    assert decompress(zstream, 0, 0) == b"payload"
+    assert decompress(gzip + gzip, 47) == b"payload"
+    assert decompress(compress(b"", 0)) == b""
+
+    data = bytearray(b"input")
+    try:
+        compress(data, Seed(data, True))
+    except BufferError:
+        pass
+    else:
+        raise AssertionError("resized a bytearray while exported")
+    assert decompress(compress(data, Seed(data, False))) == bytes(data) == b"\xffnput"
+    data.extend(b"!")
+
+    for operation, args, error, message in [
+        (compress, (b"", 10), ZlibError, "Bad compression level"),
+        (decompress, (b"", 7), ZlibError, "Error -2 while preparing to decompress data: inconsistent stream state"),
+        (decompress, (b"invalid",), ZlibError, "Error -3 while decompressing data: incorrect header check"),
+        (decompress, (zstream[:-1],), ZlibError, "Error -5 while decompressing data: incomplete or truncated stream"),
+        (decompress, (zstream, 15, -1), ValueError, "bufsize must be non-negative"),
+    ]:
+        try:
+            operation(*args)
+        except error as caught:
+            assert str(caught) == message
+        else:
+            raise AssertionError("invalid arguments or stream accepted")
+
+    try:
+        compress(b"data", **{"other": 1, "": 2})
+    except TypeError as caught:
+        assert str(caught) == "compress() got an unexpected keyword argument 'other'"
+    else:
+        raise AssertionError("unexpected keywords accepted")

@@ -1,4 +1,5 @@
 from _imre_metadata import dedent, filenames as _filenames, zip_names as _zip_names, zip_open as _zip_open, zip_read as _zip_read
+import abc
 from os import fspath
 from os.path import basename, isfile as _is_file, join as _join
 import sys
@@ -22,7 +23,35 @@ def _basename(root):
     return basename(root.rstrip('/'))
 
 
-class Distribution:
+class DeprecatedNonAbstract:
+    def __new__(cls, *args, **kwargs):
+        # Some native builtin bases have no exposed class dictionary.
+        names = {
+            name for base in cls.__mro__ for name in getattr(base, '__dict__', ())
+        }
+        abstract = {
+            name for name in names
+            if getattr(getattr(cls, name), '__isabstractmethod__', False)
+        }
+        if abstract:
+            import warnings
+            warnings.warn(
+                f"Unimplemented abstract methods {abstract}",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+        return super().__new__(cls)
+
+
+class Distribution(DeprecatedNonAbstract):
+    @abc.abstractmethod
+    def read_text(self, filename):
+        pass
+
+    @abc.abstractmethod
+    def locate_file(self, path):
+        pass
+
     @classmethod
     def from_name(cls, name):
         if not name:
@@ -169,13 +198,13 @@ class _Context:
 
 
 def _discover(context):
-    finders = getattr(sys, 'meta_path', None)
-    if finders is not None:
-        for finder in finders:
-            resolver = getattr(finder, 'find_distributions', None)
-            if resolver:
-                yield from resolver(context)
-        return
+    for finder in sys.meta_path:
+        resolver = getattr(finder, 'find_distributions', None)
+        if resolver:
+            yield from resolver(context)
+
+
+def _path_distributions(context=_Context()):
     name = context.name
     normalized = _normalize(name) if name else ''
     legacy = name.lower().replace('-', '_') if name else ''
@@ -196,6 +225,15 @@ def _discover(context):
                 yield _ZipDistribution(archive, directory, entry)
             else:
                 yield Distribution.at(_join(directory, entry))
+
+
+class MetadataPathFinder:
+    find_distributions = staticmethod(_path_distributions)
+
+    @staticmethod
+    def invalidate_caches():
+        # The directory and archive readers open a fresh index for each search.
+        pass
 
 
 def _unique(dists):

@@ -145,10 +145,13 @@ class LabeledTuple(tuple):
 
 
 def consume(streams):
+    assert pickle._loads is not pickle.loads
     for stream in streams:
-        obj, label = pickle.loads(stream)
-        assert type(obj) is LabeledTuple and obj == (3, 4)
-        assert obj.restored and obj.label is label and label["back"] is obj
+        for reader in (pickle.loads, pickle._loads):
+            obj, label = reader(stream)
+            assert type(obj) is LabeledTuple and obj == (3, 4)
+            assert obj.restored and obj.label is label and label["back"] is obj
+    assert pickle._loads(b"N.", encoding=None) is None
     for bad in (b".", b"!", b"h\x07.", b"N]b.", b"cbuiltins\nlist\n]\x81."):
         try:
             pickle.loads(bad)
@@ -268,7 +271,39 @@ def check_global_names(protocol):
             assert pickle.loads(data, fix_imports=fix_imports) is cls
 
 
+class RecordFamily:
+    from typing import NamedTuple
+
+    class Record(NamedTuple):
+        left: object
+        right: object
+
+
+def check_namedtuple_reducer():
+    from copy import copy, deepcopy
+    import copyreg
+
+    shared = []
+    value = RecordFamily.Record(shared, shared)
+    assert value.__getnewargs__() == (shared, shared)
+    for protocol in range(pickle.HIGHEST_PROTOCOL + 1):
+        if protocol < 2:
+            assert value.__reduce_ex__(protocol) == (
+                copyreg._reconstructor, (RecordFamily.Record, tuple, (shared, shared)))
+        else:
+            assert value.__reduce_ex__(protocol) == (
+                copyreg.__newobj__, (RecordFamily.Record, shared, shared), None, None, None)
+        restored = pickle.loads(pickle.dumps(value, protocol))
+        assert type(restored) is type(value)
+        assert restored.left is restored.right and restored.left is not shared
+
+    assert copy(value).left is shared
+    duplicate = deepcopy(value)
+    assert duplicate.left is duplicate.right and duplicate.left is not shared
+
+
 def produce():
+    check_namedtuple_reducer()
     check_object_reducer()
     assert _codecs.encode is codecs.encode and codecs.encode.__module__ == "_codecs"
     for protocol in range(pickle.HIGHEST_PROTOCOL + 1):

@@ -431,14 +431,44 @@ pub(in super::super) fn set_add(ctx: &mut Context, set: Id, value: Id) -> Result
 pub(in super::super) fn update_set(ctx: &mut Context, target: Id, source: Id) -> Result<()> {
     let target = ctx.scalar_value(target);
     let storage = ctx.scalar_value(source);
-    if matches!(ctx.heap.get(storage), Value::Set { .. }) {
-        return merge_set(ctx, target, storage);
+    if matches!(ctx.heap.get(storage), Value::Set { .. })
+        || matches!(ctx.heap.get(source), Value::Dict(_))
+    {
+        return merge_set_entries(ctx, target, storage);
     }
+    let roots = ctx.heap.temporary_mark();
     let iterator = ctx.iterator(source)?;
-    while let Some(item) = ctx.next_item(iterator)? {
-        set_add(ctx, target, item)?;
+    ctx.heap.keep(iterator);
+    let step = ctx.heap.temporary_mark();
+    let mut failed_key = None;
+    let updated: Result<()> = (|| {
+        while let Some(key) = ctx.next_item(iterator)? {
+            ctx.heap.keep(key);
+            failed_key = Some(key);
+            set_add(ctx, target, key)?;
+            failed_key = None;
+            // An equal key stays out of the result and can finalize before the next yield.
+            ctx.discard_truth(step);
+        }
+        Ok(())
+    })();
+
+    ctx.heap.release_temporaries_since(roots);
+    if let Err(error) = &updated {
+        for id in error.roots() {
+            ctx.heap.keep(id);
+        }
     }
-    Ok(())
+    // CPython releases the iterator before a key whose insertion failed.
+    let key_mark = ctx.heap.temporary_mark();
+    if let Some(key) = failed_key {
+        ctx.heap.keep(key);
+    }
+    let iterator_mark = ctx.heap.temporary_mark();
+    ctx.heap.keep(iterator);
+    ctx.discard_truth(iterator_mark);
+    ctx.discard_truth(key_mark);
+    updated
 }
 
 fn set_issubset(ctx: &mut Context, receiver: Id, other: Id) -> Result<Id> {
@@ -447,12 +477,42 @@ fn set_issubset(ctx: &mut Context, receiver: Id, other: Id) -> Result<Id> {
         return ctx.order_sets("<=", receiver, storage);
     }
 
-    // CPython intersects the iterable with the receiver, stopping once all
-    // members match. An empty receiver still consumes and hashes each item.
+    let roots = ctx.heap.temporary_mark();
+    let found = intersect_iterable(ctx, receiver, other)?;
+    let subset = ctx.stored_entries(found).len() == ctx.stored_entries(receiver).len();
+    ctx.discard_truth(roots);
+    Ok(boolean(subset))
+}
+
+/// Intersect left to right, releasing each intermediate result before the next operand.
+fn set_intersection(ctx: &mut Context, receiver: Id, operands: &[Id]) -> Result<Id> {
+    if operands.is_empty() {
+        return ctx.set_binary("&", receiver, receiver, false);
+    }
+    let roots = ctx.heap.temporary_mark();
+    let mut result = receiver;
+    for &other in operands {
+        let storage = ctx.scalar_value(other);
+        result = if matches!(ctx.heap.get(storage), Value::Set { .. }) {
+            ctx.set_binary("&", result, storage, false)?
+        } else {
+            intersect_iterable(ctx, result, other)?
+        };
+        let collect = ctx.heap.discard_truth_operands(roots, ctx.modules);
+        ctx.heap.keep(result);
+        if collect {
+            ctx.collect_unreachable();
+        }
+    }
+    Ok(result)
+}
+
+/// Hash each yielded key once and stop on a match that completes the intersection.
+fn intersect_iterable(ctx: &mut Context, receiver: Id, other: Id) -> Result<Id> {
     let roots = ctx.heap.temporary_mark();
     let found = ctx.alloc(Value::Set {
         entries: Default::default(),
-        frozen: false,
+        frozen: matches!(ctx.heap.get(receiver), Value::Set { frozen: true, .. }),
     });
     let iterator = ctx.iterator(other)?;
     ctx.heap.keep(iterator);
@@ -499,21 +559,20 @@ fn set_issubset(ctx: &mut Context, receiver: Id, other: Id) -> Result<Id> {
     let iterator_mark = ctx.heap.temporary_mark();
     ctx.heap.keep(iterator);
     ctx.discard_truth(iterator_mark);
-    let subset =
-        scan.map(|()| ctx.stored_entries(found).len() == ctx.stored_entries(receiver).len());
-    ctx.discard_truth(found_mark);
-    ctx.discard_truth(key_mark);
-    subset.map(boolean)
+    if scan.is_err() {
+        ctx.discard_truth(found_mark);
+        ctx.discard_truth(key_mark);
+    }
+    scan.map(|()| found)
 }
 
-fn merge_set(ctx: &mut Context, target: Id, source: Id) -> Result<()> {
+fn merge_set_entries(ctx: &mut Context, target: Id, source: Id) -> Result<()> {
     if target == source {
         return Ok(());
     }
-    if matches!(ctx.heap.get(target), Value::Set { entries, .. } if entries.is_empty()) {
-        let Value::Set { entries, .. } = ctx.heap.get(source) else {
-            unreachable!()
-        };
+    if matches!(ctx.heap.get(target), Value::Set { entries, .. } if entries.is_empty())
+        && let Value::Set { entries, .. } = ctx.heap.get(source)
+    {
         let copy = entries.try_clone()?;
         let Value::Set { entries, .. } = ctx.heap.get_mut(target) else {
             unreachable!()
@@ -816,19 +875,28 @@ pub(super) fn method(
                 "descriptor '{method}' of 'dict' object needs an argument"
             )),
             Some(_) => type_error(format!("unbound method {name}() needs an argument")),
-            None if matches!(name, "set.difference_update" | "set.update")
-                || name.ends_with(".issubset") =>
+            None if matches!(
+                name,
+                "set.discard" | "set.remove" | "set.difference_update" | "set.update"
+            ) || name.ends_with(".issubset")
+                || name.ends_with(".intersection")
+                || name.ends_with(".difference")
+                || name.ends_with(".union") =>
             {
                 type_error(format!("unbound method {name}() needs an argument"))
             }
             None => type_error("missing collection receiver"),
         })?;
-    let receiver = if let Some(kind) = name.strip_suffix(".issubset") {
+    let receiver = if let Some((
+        kind,
+        method @ ("difference" | "intersection" | "issubset" | "union"),
+    )) = name.split_once('.')
+    {
         let storage = ctx.scalar_value(object);
         if !matches!(ctx.heap.get(storage), Value::Set { frozen, .. } if *frozen == (kind == "frozenset"))
         {
             return Err(type_error(format!(
-                "descriptor 'issubset' for '{kind}' objects doesn't apply to a '{}' object",
+                "descriptor '{method}' for '{kind}' objects doesn't apply to a '{}' object",
                 ctx.type_name(object)
             )));
         }
@@ -846,7 +914,10 @@ pub(super) fn method(
                 ))
             }
         })?
-    } else if matches!(name, "set.difference_update" | "set.update") {
+    } else if matches!(
+        name,
+        "set.discard" | "set.remove" | "set.difference_update" | "set.update"
+    ) {
         let storage = ctx.scalar_value(object);
         if !matches!(ctx.heap.get(storage), Value::Set { frozen: false, .. }) {
             return Err(type_error(format!(
@@ -877,7 +948,10 @@ pub(super) fn method(
             return Err(type_error("wrapper __ior__() takes no keyword arguments"));
         }
         let [other] = args else {
-            return Err(type_error(format!("expected 1 argument, got {}", args.len())));
+            return Err(type_error(format!(
+                "expected 1 argument, got {}",
+                args.len()
+            )));
         };
         update(ctx, receiver, Some(*other), &[])?;
         return Ok(object);
@@ -887,7 +961,10 @@ pub(super) fn method(
             return Err(type_error("wrapper __eq__() takes no keyword arguments"));
         }
         let [other] = args else {
-            return Err(type_error(format!("expected 1 argument, got {}", args.len())));
+            return Err(type_error(format!(
+                "expected 1 argument, got {}",
+                args.len()
+            )));
         };
         return match ctx.dict_storage(*other) {
             Some(right) => Ok(boolean(ctx.checked_equal(receiver, right)?)),
@@ -915,11 +992,18 @@ pub(super) fn method(
         name,
         "dict.pop"
             | "dict.popitem"
+            | "set.difference"
+            | "frozenset.difference"
+            | "set.intersection"
+            | "frozenset.intersection"
+            | "set.union"
+            | "frozenset.union"
             | "set.issubset"
             | "frozenset.issubset"
             | "set.issuperset"
             | "frozenset.issuperset"
             | "set.discard"
+            | "set.remove"
             | "set.difference_update"
             | "set.update"
             | "frozenset.copy"
@@ -1087,36 +1171,47 @@ pub(super) fn method(
             }
             Ok(TRUE)
         }
+        "set.intersection" | "frozenset.intersection" => set_intersection(ctx, receiver, args),
+        "set.difference" | "frozenset.difference" => ctx.set_difference(receiver, args),
         "set.difference_update" => {
             for &source in args {
                 ctx.set_difference_update(receiver, source)?;
             }
             Ok(NONE)
         }
-        "set.discard" => {
-            arity(name, args, 1, 1)?;
-            if !matches!(ctx.heap.get(receiver), Value::Set { frozen: false, .. }) {
-                return Err(type_error("descriptor 'discard' requires a 'set' object"));
-            }
-            let key = if let Value::Set {
-                entries,
-                frozen: false,
-            } = ctx.heap.get(args[0])
-            {
-                ctx.alloc(Value::Set {
-                    entries: entries.clone(),
-                    frozen: true,
-                })
-            } else {
-                args[0]
+        "set.discard" | "set.remove" => {
+            let key = super::one_positional_arg(name, args, kwargs)?;
+            let index = match ctx.find_dictionary_key(receiver, key, None) {
+                Ok((_, index)) => index,
+                Err(error) if ctx.is_builtin_error(&error, "TypeError") => {
+                    let Value::Set {
+                        frozen: false,
+                        entries,
+                    } = ctx.heap.get(ctx.scalar_value(key))
+                    else {
+                        return Err(error);
+                    };
+                    // Retry a mutable set key with its equivalent frozenset's hash.
+                    // Equality callbacks and KeyError still receive the original key.
+                    let entries = entries.try_clone()?;
+                    let frozen = ctx.alloc(Value::Set {
+                        entries,
+                        frozen: true,
+                    });
+                    let hash = ctx.dictionary_hash(frozen)?;
+                    ctx.find_dictionary_key(receiver, key, Some(hash))?.1
+                }
+                Err(error) => return Err(error),
             };
-            if let Some(index) = ctx.find_dictionary_key(receiver, key, None)?.1 {
+            if let Some(index) = index {
                 let Value::Set { entries, .. } = ctx.heap.get_mut(receiver) else {
                     unreachable!()
                 };
                 let (key, value) = entries.remove(index)?;
                 ctx.heap.weak_edge_removed(key);
                 ctx.heap.weak_edge_removed(value);
+            } else if name == "set.remove" {
+                return Err(ctx.lookup_error("KeyError", key));
             }
             Ok(NONE)
         }
@@ -1124,6 +1219,19 @@ pub(super) fn method(
             arity(name, args, 1, 1)?;
             set_add(ctx, receiver, args[0])?;
             Ok(NONE)
+        }
+        "set.union" | "frozenset.union" => {
+            let result = ctx.alloc(Value::Set {
+                entries: Default::default(),
+                frozen: name == "frozenset.union",
+            });
+            update_set(ctx, result, receiver)?;
+            for &source in args {
+                if source != object {
+                    update_set(ctx, result, source)?;
+                }
+            }
+            Ok(result)
         }
         "set.update" => {
             for &input in args {
@@ -1144,7 +1252,9 @@ fn sequence_index(
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
     if !kwargs.is_empty() {
-        return Err(type_error(format!("{owner}.index() takes no keyword arguments")));
+        return Err(type_error(format!(
+            "{owner}.index() takes no keyword arguments"
+        )));
     }
     let Some((&needle, bounds)) = args.split_first() else {
         return Err(type_error("index expected at least 1 argument, got 0"));
@@ -1169,13 +1279,7 @@ fn sequence_index(
         });
     }
     let (length, _) = ctx.sequence_at(receiver, 0).unwrap();
-    let [start, stop] = limits.map(|i| {
-        if i < 0 {
-            (length as i64 + i).max(0)
-        } else {
-            i
-        }
-    });
+    let [start, stop] = limits.map(|i| if i < 0 { (length as i64 + i).max(0) } else { i });
     find_sequence_item(ctx, receiver, needle, start..stop)?
         .map(|i| ctx.int(i))
         .ok_or_else(|| Error::new("ValueError", format!("{owner}.index(x): x not in {owner}")))
@@ -1303,15 +1407,20 @@ pub(super) fn builtin_slot(
         list_extend(ctx, storage, *value)?;
         return Ok(object);
     }
-    if matches!(method, "__repr__" | "__str__") {
+    if matches!(method, "__repr__" | "__str__" | "__index__") {
         if !kwargs.is_empty() {
-            return Err(type_error(format!("wrapper {method}() takes no keyword arguments")));
+            return Err(type_error(format!(
+                "wrapper {method}() takes no keyword arguments"
+            )));
         }
         if !rest.is_empty() {
             return Err(type_error(format!(
                 "expected 0 arguments, got {}",
                 rest.len()
             )));
+        }
+        if method == "__index__" {
+            return Ok(integer::exact_value(ctx, object));
         }
         if method == "__str__" {
             return Ok(storage);

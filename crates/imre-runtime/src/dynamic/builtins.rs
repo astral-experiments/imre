@@ -161,6 +161,7 @@ pub(super) const IMPORT_KEYWORDS: [&str; 3] = ["name", "path", "name_from"];
 pub(super) fn exception_initializer(kind: &str) -> &'static str {
     match kind {
         "StopIteration" => "StopIteration.__init__",
+        "SystemExit" => "SystemExit.__init__",
         "ImportError" | "ModuleNotFoundError" => "ImportError.__init__",
         kind if exception_subclass(kind, "OSError") == Some(true) => "OSError.__init__",
         _ => "BaseException.__init__",
@@ -207,13 +208,18 @@ pub(super) fn native_implementation(symbol: &str) -> &str {
     }
 }
 
+pub(super) const MAPPING_PROXY_METHODS: &[&str] = &["keys", "values", "items", "get", "copy"];
+
 /// Static constructors retain their declaring type as `__self__` even on instances.
 pub(super) fn constructor_owner(name: &str) -> Option<&str> {
     let owner = name.strip_suffix(".__new__")?;
     (matches!(
         owner,
         "object" | "dict" | "float" | "function" | "int" | "str" | super::thread_local::CLASS
-    ) || is_exception(owner))
+    ) || super::stdlib::itertools::cursor_type(owner).is_some()
+        || is_exception(owner)
+        || owner == super::stdlib::fixed_structseq::SCHED_PARAM
+        || crate::objects::HashState::is_provider_class(owner))
     .then_some(owner)
 }
 
@@ -346,10 +352,12 @@ pub(super) const LIST_METHODS: &[&str] = &[
     "index", "insert", "pop", "remove", "reverse", "sort",
 ];
 
-const FROZENSET_OPERATORS: &[&str] = &["__and__", "__rand__", "__or__", "__ror__", "__sub__", "__rsub__"];
+const FROZENSET_OPERATORS: &[&str] = &[
+    "__and__", "__rand__", "__or__", "__ror__", "__sub__", "__rsub__", "__xor__", "__rxor__",
+];
 const SET_OPERATORS: &[&str] = &[
-    "__and__", "__rand__", "__or__", "__ror__", "__sub__", "__rsub__",
-    "__iand__", "__ior__", "__isub__",
+    "__and__", "__rand__", "__or__", "__ror__", "__sub__", "__rsub__", "__xor__", "__rxor__",
+    "__iand__", "__ior__", "__isub__", "__ixor__",
 ];
 
 pub(super) fn set_operators(owner: &str) -> &'static [&'static str] {
@@ -365,11 +373,21 @@ pub(super) fn set_operator(method: &str) -> Option<&'static str> {
         "__and__" | "__rand__" | "__iand__" => "&",
         "__or__" | "__ror__" | "__ior__" => "|",
         "__sub__" | "__rsub__" | "__isub__" => "-",
+        "__xor__" | "__rxor__" | "__ixor__" => "^",
         _ => return None,
     })
 }
 
-pub(super) const MEMORYVIEW_METHODS: &[&str] = &["release"];
+pub(super) const MEMORYVIEW_METHODS: &[&str] = &[
+    "__enter__",
+    "__exit__",
+    "release",
+    "tobytes",
+    "toreadonly",
+    "__getitem__",
+    "__setitem__",
+    "__delitem__",
+];
 
 pub(super) const BYTEARRAY_METHODS: &[&str] = &[
     "__repr__",
@@ -471,7 +489,11 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         Value::PrimitiveLock(_) if super::thread_lock::is_method(attr) => super::thread_lock::CLASS,
         Value::Bool(_) if attr == "__repr__" => "bool",
         Value::Int(_) if attr == "__repr__" => "int",
-        Value::Int(_) | Value::Bool(_) if matches!(attr, "__add__" | "bit_length" | "to_bytes") => "int",
+        Value::Int(_) | Value::Bool(_)
+            if matches!(attr, "__add__" | "__index__" | "bit_length" | "to_bytes") =>
+        {
+            "int"
+        }
         Value::Float(_) if matches!(attr, "__repr__" | "as_integer_ratio") => "float",
         Value::Str(_) | Value::SurrogateStr(_) if STR_METHODS.contains(&attr) => "str",
         Value::Range(_) if super::range::METHODS.contains(&attr) => "range",
@@ -517,14 +539,6 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         {
             "bytearray"
         }
-        Value::NamedTuple {
-            class: Some("SplitResult" | "SplitResultBytes"),
-            ..
-        } if attr == "geturl" => "urllib.parse.SplitResult",
-        Value::NamedTuple {
-            class: Some("ParseResult" | "ParseResultBytes"),
-            ..
-        } if attr == "geturl" => "urllib.parse.ParseResult",
         Value::Struct { .. } if matches!(attr, "pack" | "unpack") => "struct.Struct",
         Value::Hash(state)
             if crate::objects::HashState::is_provider_class(state.lock().class_name())
@@ -595,6 +609,10 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
                 "add"
                     | "copy"
                     | "discard"
+                    | "difference"
+                    | "intersection"
+                    | "remove"
+                    | "union"
                     | "difference_update"
                     | "update"
                     | "issuperset"
@@ -609,18 +627,21 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         Value::Set { frozen: true, .. }
             if matches!(
                 attr,
-                "copy" | "issuperset" | "issubset" | "__contains__" | "__reduce__" | "__repr__"
+                "copy"
+                    | "difference"
+                    | "intersection"
+                    | "union"
+                    | "issuperset"
+                    | "issubset"
+                    | "__contains__"
+                    | "__reduce__"
+                    | "__repr__"
             ) =>
         {
             "frozenset"
         }
-        Value::DefaultDict { .. }
-            if matches!(
-                attr,
-                "copy" | "__copy__" | "__missing__" | "__repr__" | "__reduce__"
-            ) =>
-        {
-            "collections.defaultdict"
+        Value::DefaultDict { .. } if super::defaultdict::METHODS.contains(&attr) => {
+            super::defaultdict::CLASS
         }
         Value::Dict(_) | Value::DefaultDict { .. } if DICT_METHODS.contains(&attr) => "dict",
         Value::Poll(_) if matches!(attr, "register" | "modify" | "unregister" | "poll") => {
@@ -640,6 +661,12 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
             ) =>
         {
             "selectors"
+        }
+        Value::File(handle)
+            if attr == "truncate"
+                && matches!(handle.as_ref(), super::stdlib::BinaryFile::Descriptor(fd) if fd.reading && fd.writing) =>
+        {
+            "file"
         }
         Value::File(handle)
             if attr == "read1"
@@ -674,7 +701,15 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         Value::RegexPattern(_)
             if matches!(
                 attr,
-                "findall" | "finditer" | "match" | "fullmatch" | "search" | "split" | "sub" | "scanner"
+                "findall"
+                    | "finditer"
+                    | "match"
+                    | "fullmatch"
+                    | "search"
+                    | "split"
+                    | "sub"
+                    | "subn"
+                    | "scanner"
             ) =>
         {
             "pattern"
@@ -692,7 +727,7 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         Value::Filter { .. } if matches!(attr, "__iter__" | "__next__") => "filter",
         Value::Enumerate { .. } if matches!(attr, "__iter__" | "__next__") => "enumerate",
         Value::Count { .. } if matches!(attr, "__iter__" | "__next__") => "itertools.count",
-        Value::Deque(_) if super::deque::METHODS.contains(&attr) => super::deque::CLASS,
+        Value::Deque(_) if super::deque::member(attr).is_some() => super::deque::CLASS,
         Value::Repeat(_) if matches!(attr, "__iter__" | "__next__" | "__length_hint__") => {
             "itertools.repeat"
         }
@@ -780,6 +815,7 @@ pub(super) fn bind<const N: usize>(
 }
 
 /// Bind positional and keyword method arguments using Argument Clinic's diagnostics.
+/// An empty name marks a positional-only parameter.
 pub(super) fn bind_method_arguments<const N: usize>(
     name: &str,
     args: &[Id],
@@ -809,7 +845,7 @@ pub(super) fn bind_method_arguments<const N: usize>(
         )));
     }
     for (i, key) in names[..args.len()].iter().enumerate() {
-        if kwargs.iter().any(|(provided, _)| provided == key) {
+        if !key.is_empty() && kwargs.iter().any(|(provided, _)| provided == key) {
             return Err(type_error(format!(
                 "argument for {name}() given by name ('{key}') and position ({})",
                 i + 1
@@ -818,11 +854,14 @@ pub(super) fn bind_method_arguments<const N: usize>(
     }
     let mut values = std::array::from_fn(|i| args.get(i).copied());
     for (key, value) in kwargs {
-        let index = names.iter().position(|&arg| arg == key).ok_or_else(|| {
-            type_error(format!(
-                "{name}() got an unexpected keyword argument '{key}'"
-            ))
-        })?;
+        let index = names
+            .iter()
+            .position(|&arg| !arg.is_empty() && arg == key)
+            .ok_or_else(|| {
+                type_error(format!(
+                    "{name}() got an unexpected keyword argument '{key}'"
+                ))
+            })?;
         values[index] = Some(*value);
     }
     Ok(values)
@@ -989,7 +1028,9 @@ impl Context {
         args: Vec<Id>,
         kwargs: Vec<(String, Id)>,
     ) -> Result<Id> {
-        if scope != NONE && let Value::Native(name) = self.heap.get(callable) {
+        if scope != NONE
+            && let Value::Native(name) = self.heap.get(callable)
+        {
             match name.as_str() {
                 "eval" => return self.eval_source(scope, &args, &kwargs),
                 "locals" | "vars" if args.is_empty() && kwargs.is_empty() => {
@@ -1035,6 +1076,44 @@ pub(super) fn call(
         ctx.add_exception_note(exception, note)?;
         return Ok(NONE);
     }
+    if let Some(method) = name.strip_prefix("mappingproxy.")
+        && MAPPING_PROXY_METHODS.contains(&method)
+    {
+        let Some((&proxy, rest)) = args.split_first() else {
+            return Err(type_error(format!(
+                "unbound method {name}() needs an argument"
+            )));
+        };
+        let Value::MappingProxy(mapping) = *ctx.heap.get(proxy) else {
+            return Err(type_error(format!(
+                "descriptor '{method}' for 'mappingproxy' objects doesn't apply to a '{}' object",
+                ctx.type_name(proxy)
+            )));
+        };
+        if !kwargs.is_empty() {
+            return Err(type_error(format!("{name}() takes no keyword arguments")));
+        }
+        let forwarded = match (method, rest) {
+            ("get", [key]) => vec![*key, NONE],
+            ("get", [key, default]) => vec![*key, *default],
+            ("get", []) => return Err(type_error("get expected at least 1 argument, got 0")),
+            ("get", _) => {
+                return Err(type_error(format!(
+                    "get expected at most 2 arguments, got {}",
+                    rest.len()
+                )));
+            }
+            (_, []) => Vec::new(),
+            _ => {
+                return Err(type_error(format!(
+                    "{name}() takes no arguments ({} given)",
+                    rest.len()
+                )));
+            }
+        };
+        let bound = ctx.lookup_attr(mapping, method)?;
+        return ctx.call(bound, forwarded, Vec::new());
+    }
     if name == "object.__getattribute__" {
         let Some((&object, values)) = args.split_first() else {
             return Err(type_error(
@@ -1066,15 +1145,20 @@ pub(super) fn call(
     {
         return exceptions::allocate(ctx, owner, args);
     }
-    if let Some(owner @ ("BaseException" | "StopIteration" | "OSError" | "ImportError")) =
-        name.strip_suffix(".__init__")
+    if let Some(
+        owner @ ("BaseException" | "StopIteration" | "SystemExit" | "OSError" | "ImportError"),
+    ) = name.strip_suffix(".__init__")
     {
         return exceptions::initialize(ctx, owner, args, kwargs);
     }
     if matches!(
         name,
-        "object.__hash__" | "object.__repr__" | "object.__str__" | "object.__ne__"
-            | "mappingproxy.__repr__" | "mappingproxy.__str__"
+        "object.__hash__"
+            | "object.__repr__"
+            | "object.__str__"
+            | "object.__ne__"
+            | "mappingproxy.__repr__"
+            | "mappingproxy.__str__"
     ) {
         let (owner, method) = name.split_once('.').unwrap();
         let Some((&receiver, rest)) = args.split_first() else {
@@ -1229,7 +1313,9 @@ pub(super) fn call(
             "float" if method == "as_integer_ratio" => float::as_integer_ratio(ctx, args, kwargs),
             "getset_descriptor" if matches!(method, "__set__" | "__delete__") => {
                 if !kwargs.is_empty() {
-                    return Err(type_error(format!("wrapper {method}() takes no keyword arguments")));
+                    return Err(type_error(format!(
+                        "wrapper {method}() takes no keyword arguments"
+                    )));
                 }
                 let (required, message) = if method == "__set__" {
                     (2, "__set__ expected 2 arguments")
@@ -1242,18 +1328,30 @@ pub(super) fn call(
                 if values.len() != required {
                     return Err(type_error(format!("{message}, got {}", values.len())));
                 }
-                let Value::GetSetDescriptor { owner: "int", name: field, .. } = *ctx.heap.get(descriptor) else {
-                    return Err(type_error("expected an integer getset descriptor"));
+                let Value::GetSetDescriptor {
+                    owner, name: field, ..
+                } = *ctx.heap.get(descriptor)
+                else {
+                    return Err(type_error("expected a getset descriptor"));
                 };
-                if !ctx.builtin_slot_accepts(values[0], "int") {
+                let accepts = if owner == "int" {
+                    ctx.builtin_slot_accepts(values[0], owner)
+                } else if owner == "typing.Union" {
+                    matches!(ctx.heap.get(values[0]), Value::Union(_))
+                } else if crate::objects::HashState::is_provider_class(owner) {
+                    ctx.type_name(values[0]) == owner
+                } else {
+                    return Err(type_error("expected a read-only getset descriptor"));
+                };
+                if !accepts {
                     return Err(type_error(format!(
-                        "descriptor '{field}' for 'int' objects doesn't apply to a '{}' object",
+                        "descriptor '{field}' for '{owner}' objects doesn't apply to a '{}' object",
                         ctx.type_name(values[0])
                     )));
                 }
                 Err(Error::new(
                     "AttributeError",
-                    format!("attribute '{field}' of 'int' objects is not writable"),
+                    format!("attribute '{field}' of '{owner}' objects is not writable"),
                 ))
             }
             "_int_getset" => integer::rational_field(ctx, method, args),
@@ -1266,7 +1364,9 @@ pub(super) fn call(
             "bytes" | "bytearray" if method == "translate" => {
                 translation::translate(ctx, owner, args, kwargs)
             }
-            "int" if method == "__add__" => collections::builtin_slot(ctx, name, args, kwargs),
+            "int" if matches!(method, "__add__" | "__index__") => {
+                collections::builtin_slot(ctx, name, args, kwargs)
+            }
             "str" if method == "__str__" => collections::builtin_slot(ctx, name, args, kwargs),
             "bool" | "int" | "float" | "str" | "bytes" | "bytearray" if method == "__repr__" => {
                 collections::builtin_slot(ctx, name, args, kwargs)
@@ -1320,9 +1420,56 @@ pub(super) fn call(
             "list" | "tuple" | "dict" | "set" | "frozenset" => {
                 collections::method(ctx, name, args, kwargs)
             }
-            "memoryview" if method == "release" => {
+            "memoryview" if matches!(method, "__getitem__" | "__setitem__" | "__delitem__") => {
+                ctx.memoryview_item_method(method, args, kwargs)
+            }
+            "memoryview" if MEMORYVIEW_METHODS.contains(&method) => {
+                if method == "tobytes" {
+                    if args.is_empty() {
+                        return Err(type_error(
+                            "unbound method memoryview.tobytes() needs an argument",
+                        ));
+                    }
+                    let [order] =
+                        bind_method_arguments("tobytes", &args[1..], kwargs, ["order"], 1)?;
+                    if let Some(order) = order.filter(|&id| id != NONE) {
+                        let value = ctx.str_value(order).map_err(|_| {
+                            type_error(format!(
+                                "tobytes() argument 'order' must be str or None, not {}",
+                                ctx.type_name(order)
+                            ))
+                        })?;
+                        if !matches!(value, "C" | "F" | "A") {
+                            return Err(Error::new("ValueError", "order must be 'C', 'F' or 'A'"));
+                        }
+                    }
+                    if !matches!(ctx.heap.get(args[0]), Value::MemoryView { .. }) {
+                        return Err(type_error("expected memoryview"));
+                    }
+                    let bytes = ctx.memoryview_bytes(args[0])?;
+                    return Ok(ctx.alloc(Value::Bytes(bytes)));
+                }
                 positional(name, kwargs)?;
-                arity(name, args, 1, 1)?;
+                // CPython's __exit__ ignores any positional exception information.
+                let max_args = if method == "__exit__" { usize::MAX } else { 1 };
+                arity(name, args, 1, max_args)?;
+                if method == "toreadonly" {
+                    if !matches!(ctx.heap.get(args[0]), Value::MemoryView { .. }) {
+                        return Err(type_error("expected memoryview"));
+                    }
+                    let child = ctx.new_memoryview(args[0])?;
+                    if let Value::MemoryView { readonly, .. } = ctx.heap.get_mut(child) {
+                        *readonly = true;
+                    }
+                    return Ok(child);
+                }
+                let Value::MemoryView { owner, .. } = ctx.heap.get_mut(args[0]) else {
+                    return Err(type_error("expected memoryview"));
+                };
+                if method == "__enter__" {
+                    Context::memoryview_owner(*owner)?;
+                    return Ok(args[0]);
+                }
                 let exports = ctx
                     .buffer_exports
                     .iter()
@@ -1335,9 +1482,6 @@ pub(super) fn call(
                         format!("memoryview has {exports} exported {unit}"),
                     ));
                 }
-                let Value::MemoryView { owner, .. } = ctx.heap.get_mut(args[0]) else {
-                    return Err(type_error("expected memoryview"));
-                };
                 *owner = None;
                 Ok(NONE)
             }
@@ -1419,7 +1563,9 @@ pub(super) fn call(
         "type" => match args {
             [object] if kwargs.is_empty() => ctx.exact_type(*object),
             [_] => Err(type_error("type() takes no keyword arguments")),
-            [name, bases, namespace] => ctx.type_from_namespace(*name, *bases, *namespace, kwargs),
+            [name, bases, namespace] => {
+                ctx.type_from_namespace(None, *name, *bases, *namespace, kwargs)
+            }
             _ => Err(type_error("type() takes 1 or 3 arguments")),
         },
         "super" => {
@@ -1763,13 +1909,7 @@ pub(super) fn call(
                 Value::Str(v) => v.chars().count(),
                 Value::SurrogateStr(points) => points.len(),
                 Value::Bytes(v) | Value::ByteArray(v) => v.len(),
-                Value::MemoryView { owner, .. } => {
-                    let owner = Context::memoryview_owner(*owner)?;
-                    match ctx.heap.get(ctx.scalar_value(owner)) {
-                        Value::Array(array) => array.len(),
-                        _ => ctx.bytes_like(owner)?.len(),
-                    }
-                }
+                Value::MemoryView { .. } => ctx.view_layout(args[0])?.len,
                 Value::Range(range) => {
                     return range.len.to_i64().map(|n| ctx.int(n)).ok_or_else(|| {
                         Error::new(
@@ -1813,32 +1953,7 @@ pub(super) fn call(
             let object = object.ok_or_else(|| {
                 type_error("memoryview() missing required argument 'object' (pos 1)")
             })?;
-            ctx.check_buffer_exporter(object)?;
-            let owner = match ctx.heap.get(ctx.scalar_value(object)) {
-                Value::Bytes(_) => object,
-                Value::MemoryView { owner, .. } => Context::memoryview_owner(*owner)?,
-                Value::Array(array) if array.view_layout().0 != "w" => object,
-                Value::Array(_) | Value::ByteArray(_) => {
-                    return Err(Error::new(
-                        "NotImplementedError",
-                        "memoryview of a mutable buffer is unsupported",
-                    ));
-                }
-                _ => {
-                    return Err(type_error(format!(
-                        "memoryview: a bytes-like object is required, not '{}'",
-                        ctx.type_name(object)
-                    )));
-                }
-            };
-            let storage = ctx.scalar_value(owner);
-            if let Value::Array(array) = ctx.heap.get_mut(storage) {
-                array.viewed = true;
-            }
-            Ok(ctx.alloc(Value::MemoryView {
-                owner: Some(owner),
-                hash: None,
-            }))
+            ctx.new_memoryview(object)
         }
         "slice" => super::slice::construct(ctx, args, kwargs),
         "range" => {

@@ -181,6 +181,22 @@ fn reserve(capacity: usize) -> Result<Vec<u8>> {
     Ok(data)
 }
 
+/// Return the current read-ahead bytes, issuing at most one successful raw read.
+pub(crate) fn peek_bytes(reader: &mut impl BufRead) -> Result<Bytes> {
+    loop {
+        match reader.fill_buf() {
+            Ok(bytes) => {
+                let mut result = reserve(bytes.len())?;
+                result.extend_from_slice(bytes);
+                return Ok(result);
+            }
+            Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
+            Err(error) if error.kind() == io::ErrorKind::WouldBlock => return Ok(Vec::new()),
+            Err(error) => return Err(errno_error(error)),
+        }
+    }
+}
+
 // Standard BufReader cannot adopt a fallibly reserved buffer. Keep regular
 // files on their existing reader and let a subprocess pipe own its reservation.
 enum ReadBuffer {
@@ -355,6 +371,15 @@ impl Input {
         Ok(pos)
     }
 
+    /// Detach bytes already prefetched by the public buffered pipe before reading its raw fd.
+    pub(super) fn take_read_ahead(&mut self) -> Result<Bytes> {
+        let buffered = self.raw.buffer();
+        let mut bytes = reserve(buffered.len())?;
+        bytes.extend_from_slice(buffered);
+        self.raw.consume(bytes.len());
+        Ok(bytes)
+    }
+
     /// read1 consumes available read-ahead or makes a single raw request without prefetching.
     pub(super) fn read_once(&mut self, size: Option<usize>) -> Result<Bytes> {
         let size = size.unwrap_or(self.raw.capacity());
@@ -387,6 +412,10 @@ impl Input {
             }
         }
         Ok(data)
+    }
+
+    pub(super) fn peek(&mut self) -> Result<Bytes> {
+        peek_bytes(&mut self.raw)
     }
 
     pub(super) fn read_into(&mut self, bytes: &mut [u8]) -> Result<usize> {

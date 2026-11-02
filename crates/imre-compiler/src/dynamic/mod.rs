@@ -25,6 +25,7 @@ struct Imports {
     sys_names: HashSet<String>,
     operator_names: HashSet<String>,
     opcode_names: HashSet<String>,
+    hashlib_names: HashSet<String>,
     signal_names: HashMap<String, String>,
     unittest_names: HashSet<String>,
     boxed_mock_names: HashSet<String>,
@@ -105,7 +106,9 @@ impl Imports {
             && matches!(
                 name,
                 "_imp"
+                    | "_hashlib"
                     | "atexit"
+                    | "faulthandler"
                     | "code"
                     | "codeop"
                     | "json"
@@ -113,6 +116,7 @@ impl Imports {
                     | "opcode"
                     | "_opcode_metadata"
                     | "sysconfig"
+                    | "pathlib._local"
                     | "pathlib.types"
                     | "platform"
                     | "keyword"
@@ -142,7 +146,17 @@ fn boxed_opcode(name: &str) -> bool {
 fn boxed_sys_export(name: &str) -> bool {
     matches!(
         name,
-        "path" | "modules" | "version_info" | "implementation" | "exit" | "exc_info" | "exception"
+        "path"
+            | "meta_path"
+            | "path_hooks"
+            | "path_importer_cache"
+            | "modules"
+            | "_xoptions"
+            | "version_info"
+            | "implementation"
+            | "exit"
+            | "exc_info"
+            | "exception"
     )
 }
 
@@ -159,6 +173,10 @@ fn boxed_signal_export(module: &str, name: &str) -> bool {
     )
 }
 
+fn boxed_hashlib_kdf(name: &str) -> bool {
+    matches!(name, "pbkdf2_hmac" | "scrypt")
+}
+
 fn boxed_unittest_cleanup(name: &str) -> bool {
     matches!(
         name,
@@ -170,6 +188,16 @@ fn boxed_operator(name: &str) -> bool {
     matches!(
         name,
         "attrgetter"
+            | "__lt__"
+            | "__le__"
+            | "__eq__"
+            | "__ne__"
+            | "__ge__"
+            | "__gt__"
+            | "__and__"
+            | "__or__"
+            | "__sub__"
+            | "__xor__"
             | "itemgetter"
             | "lt"
             | "le"
@@ -228,6 +256,7 @@ impl<'a> Visitor<'a> for Imports {
                         "sys" => self.sys_names.insert(bound.to_string()),
                         "operator" => self.operator_names.insert(bound.to_string()),
                         "_opcode" => self.opcode_names.insert(bound.to_string()),
+                        "hashlib" => self.hashlib_names.insert(bound.to_string()),
                         "signal" | "_signal" if cfg!(unix) => self
                             .signal_names
                             .insert(bound.to_string(), name.to_owned())
@@ -248,6 +277,7 @@ impl<'a> Visitor<'a> for Imports {
                     let suffix = a.name.as_str();
                     if imp.level == 0
                         && (name == "unittest" && boxed_unittest_cleanup(suffix)
+                            || name == "hashlib" && (boxed_hashlib_kdf(suffix) || suffix == "*")
                             || name == "weakref" && suffix == "finalize"
                             || boxed_signal_export(name, suffix))
                     {
@@ -274,7 +304,7 @@ impl<'a> Visitor<'a> for Imports {
                             || (name == "_opcode" && (boxed_opcode(suffix) || suffix == "*"))
                             || (name == "sys" && boxed_sys_export(suffix))
                             || (name == "string" && suffix == "templatelib")
-                            || (name == "pathlib" && suffix == "types"))
+                            || (name == "pathlib" && matches!(suffix, "_local" | "types")))
                     {
                         self.runtime_imports = true;
                     }
@@ -295,7 +325,10 @@ impl<'a> Visitor<'a> for Imports {
                     || crate::classes::defines_pickle_reducer(class)
                     || class.arguments.as_ref().is_some_and(|arguments| {
                         arguments.keywords.iter().any(|keyword| {
-                            keyword.arg.as_deref().is_some_and(|name| name != "metaclass")
+                            keyword
+                                .arg
+                                .as_deref()
+                                .is_some_and(|name| name != "metaclass")
                         })
                     }) =>
             {
@@ -360,6 +393,8 @@ impl<'a> Visitor<'a> for Imports {
             && let Expr::Name(module) = &*attr.value
             && ((boxed_operator(attr.attr.as_str())
                 && self.operator_names.contains(module.id.as_str()))
+                || (boxed_hashlib_kdf(attr.attr.as_str())
+                    && self.hashlib_names.contains(module.id.as_str()))
                 || (boxed_opcode(attr.attr.as_str())
                     && self.opcode_names.contains(module.id.as_str()))
                 || self
@@ -457,12 +492,15 @@ pub(crate) fn compile(
     // An ordinary entry can import a package that uses the object runtime without
     // accessing sys.path or installation metadata in the entry itself.
     if !runtime_imports
+        && !(startup.is_some() && (src.contains("urllib") || src.contains("ftplib")))
         && !(src.contains("class") && src.contains('='))
         && !(cfg!(unix) && src.contains("signal"))
         && ![
             "__future__",
+            "hashlib",
             "_imp",
             "atexit",
+            "faulthandler",
             "code",
             "weakref",
             "pathlib",
@@ -490,27 +528,37 @@ pub(crate) fn compile(
     {
         return Ok(None);
     }
-    let mut first = match imports(
+    let Ok(mut first) = imports(
         &src,
         if command.is_some() {
             SourceKind::Command
         } else {
             SourceKind::File
         },
-    ) {
-        // A checked operation can require the object ABI even in a file without imports.
-        Ok(i)
-            if module_entry.is_some()
-                || i.runtime_imports
-                || operation.is_some()
-                || (runtime_imports && !i.names.is_empty()) =>
-        {
-            i
-        }
-        // Closed file builds still require a statically resolved import graph.
-        Ok(i) if i.uses_import_builtin && (startup.is_some() || options.runtime_imports) => i,
-        _ => return Ok(None),
+    ) else {
+        return Ok(None);
     };
+    // Python scripts load the URL opener and FTP client as boxed modules.
+    let imports_transport = |transport: &str| {
+        startup.is_some()
+            && !options.runtime_imports
+            && first
+                .names
+                .iter()
+                .any(|(level, name)| *level == 0 && name == transport)
+    };
+    let request_script = imports_transport("urllib.request");
+    let ftp_script = imports_transport("ftplib");
+    let transport_script = request_script || ftp_script;
+    if !(module_entry.is_some()
+        || first.runtime_imports
+        || operation.is_some()
+        || (runtime_imports && !first.names.is_empty())
+        || (first.uses_import_builtin && (startup.is_some() || options.runtime_imports))
+        || transport_script)
+    {
+        return Ok(None);
+    }
     if let Some(name) = module_entry {
         first.add(0, "runpy");
         // Register source candidates without interpreting a module operand as a filesystem path.
@@ -596,6 +644,12 @@ pub(crate) fn compile(
             if late_pprint && !seen.contains("pprint") {
                 imports.names.push((0, "pprint".to_owned()));
             }
+            // Python 3.13 path pickles name this module even when the reader never imports pathlib.
+            if (seen.contains("pickle") || seen.contains("pathlib"))
+                && !seen.contains("pathlib._local")
+            {
+                imports.names.push((0, "pathlib._local".to_owned()));
+            }
             if seen.contains("pathlib") && !seen.contains("pathlib.types") {
                 imports.names.push((0, "pathlib.types".to_owned()));
             }
@@ -608,6 +662,7 @@ pub(crate) fn compile(
         if module_entry.is_none()
             && !options.runtime_imports
             && !registered_imports.called
+            && (!transport_script || owner == "__main__")
             && imports.needs_typed_machinery()
             // Enforce the checked-file machinery contract on the original graph.
             // A module discovered only by boxed imports has no typed layout to preserve.
@@ -735,6 +790,13 @@ pub(crate) fn compile(
                         }
                         continue;
                     };
+                    // Bundled transports cannot stand in for earlier project modules.
+                    if initial.contains(root)
+                        && ((request_script && prefix == "urllib")
+                            || (ftp_script && prefix == "ftplib"))
+                    {
+                        return Ok(None);
+                    }
                     let src = std::fs::read_to_string(&path)
                         .map_err(|e| format!("{}: {e}", path.display()))?;
                     let imports = imports_for_module(&path, &src)?;
@@ -781,6 +843,8 @@ pub(crate) fn compile(
     for name in [
         "__future__",
         "__hello__",
+        "_frozen_importlib",
+        "_frozen_importlib_external",
         "_opcode_metadata",
         "_tokenize",
         "abc",
@@ -791,6 +855,7 @@ pub(crate) fn compile(
         "codeop",
         "copyreg",
         "datetime",
+        "encodings",
         "enum",
         "genericpath",
         "hashlib",
@@ -808,6 +873,7 @@ pub(crate) fn compile(
         "string.templatelib",
         "subprocess",
         "token",
+        "types",
         "zipimport",
     ]
     .into_iter()
@@ -837,6 +903,8 @@ pub(crate) fn compile(
         "context_aware_warnings":startup.map(|(flags, _)| flags.context_aware_warnings),
         "utf8_mode":startup.and_then(|(flags, _)| flags.utf8_mode),
         "warnoptions":startup.map(|(flags, _)| &flags.warnoptions),
+        "xoptions":startup.map(|(flags, _)| &flags.xoptions),
+        "faulthandler":startup.map(|(flags, _)| flags.faulthandler),
         "warn_default_encoding":startup.map(|(flags, _)| flags.warn_default_encoding),
         "optimize":startup.map_or(0, |(flags, _)| flags.optimize),
         "dont_write_bytecode":startup.is_some_and(|(flags, _)| flags.dont_write_bytecode),
@@ -844,7 +912,12 @@ pub(crate) fn compile(
         "command":in_memory,"module_entry":module_entry,"paths":paths,
     });
     check_returns()?;
-    let llvm_ir = emit::emit(&sources, &config.to_string(), keep_docstrings)?;
+    let llvm_ir = emit::emit(
+        &sources,
+        &config.to_string(),
+        keep_docstrings,
+        Path::new(bundled_root),
+    )?;
     Ok(Some(Compilation {
         llvm_ir,
         input_paths: inputs.files.iter().map(|(p, _, _)| p.clone()).collect(),

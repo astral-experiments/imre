@@ -925,6 +925,7 @@ pub(crate) enum LinecacheOperation {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum RandomOperation {
+    Shuffle,
     Seed,
     Float,
     Bits,
@@ -1376,6 +1377,13 @@ pub(crate) enum Builtin {
     SysGetFrameModuleName,
     SysGetRecursionLimit,
     SysContextAwareWarnings,
+    /// Native source metadata for a Python function or module, before its first statement.
+    FaultFrame {
+        file: String,
+        name: String,
+        line: u32,
+    },
+    FaultLine(u32),
     GeneratorFrameEnter(String),
     GeneratorFrameLeave,
     SysSetRecursionLimit,
@@ -2292,7 +2300,9 @@ pub(crate) enum ProcessOperation {
     Semaphore,
     Acquire,
     Release,
-    EnvironCopy,
+    EnvironCopy {
+        bytes: bool,
+    },
     EnvironGet,
     GetCwd,
     Fd(FdOperation),

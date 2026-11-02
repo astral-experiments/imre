@@ -34,20 +34,11 @@ pub(in crate::dynamic) fn initialize(ctx: &mut Context, scope: Id) -> Result<()>
     ctx.bind(scope, "SelectSelector", select);
     ctx.bind(scope, "PollSelector", selector);
     ctx.bind(scope, "DefaultSelector", selector);
-    // Construct an ordinary named tuple class so that indexing, attribute access and
-    // isinstance all refer to the same public SelectorKey type.
-    let class_scope = ctx.scope("selectors", Some(scope));
-    let class_name = ctx.text("SelectorKey");
-    let module_name = ctx.text("selectors");
-    ctx.bind(class_scope, "__name__", class_name);
-    ctx.bind(class_scope, "__module__", module_name);
-    let names = ["fileobj", "fd", "events", "data"].map(|field| ctx.text(field));
-    let annotations = ctx.dict(names.iter().map(|&id| (id, NONE)).collect());
-    let fields = ctx.alloc(Value::Tuple(names.to_vec()));
-    ctx.bind(class_scope, "__annotations__", annotations);
-    ctx.bind(class_scope, "_fields", fields);
-    let base = ctx.builtin("typing.NamedTuple");
-    let key = ctx.allocate_class("SelectorKey".into(), class_scope, vec![base])?;
+    let name = ctx.text("SelectorKey");
+    let fields = ctx.text("fileobj fd events data");
+    let module = ctx.text("selectors");
+    let key =
+        super::super::namedtuple::factory(ctx, &[name, fields], &[("module".into(), module)])?;
     ctx.bind(scope, "SelectorKey", key);
     Ok(())
 }

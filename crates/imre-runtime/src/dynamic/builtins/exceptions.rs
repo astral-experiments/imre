@@ -46,8 +46,9 @@ pub(super) fn allocate(ctx: &mut Context, owner: &str, args: &[Id]) -> Result<Id
     } else {
         ctx.exception(&name, args)
     };
-    // StopIteration.__new__ retains the arguments; only its initializer sets value.
+    // Allocation retains args. The initializers set StopIteration.value and SystemExit.code.
     error.set_stop_value(NONE);
+    error.exit_code = NONE;
     let import = ctx.builtin("ImportError");
     if ctx.subclass(class, import) {
         error.tracing().import_message = Some(NONE);
@@ -106,6 +107,12 @@ pub(super) fn initialize(
     error.message = initialized.message;
     if owner == "ImportError" {
         initialize_import(error, args, kwargs)?;
+    } else if owner == "SystemExit" {
+        let old = error.exit_code;
+        error.initialize_exit_code(args);
+        if old != error.exit_code {
+            ctx.heap.weak_edge_removed(old);
+        }
     }
     Ok(NONE)
 }

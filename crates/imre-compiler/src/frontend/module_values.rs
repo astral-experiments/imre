@@ -634,6 +634,9 @@ impl Initialization {
                 }
                 body.extend(checked);
             }
+            if checker.fault_enabled() && body.len() > start {
+                body.insert(start, checker.fault_line(statement));
+            }
             checkpoints.push(Checkpoint {
                 statement: index,
                 body: start..body.len(),

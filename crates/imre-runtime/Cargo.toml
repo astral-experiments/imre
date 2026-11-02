@@ -33,7 +33,7 @@ memchr = "=2.8.3"
 lz4_flex = { version = "=0.14.0", default-features = false, features = ["safe-encode", "safe-decode", "checked-decode"] }
 corosensei = "=0.3.4"
 flate2 = { version = "=1.1.10", default-features = false, features = ["zlib-rs", "runtime_detection"] }
-zlib-rs = { version = "=0.6.8", default-features = false }
+zlib-rs = { version = "=0.6.8", default-features = false, features = ["__internal-api"] }
 ruff_python_literal = "=0.0.15"
 ruff_python_ast.workspace = true
 ruff_python_parser.workspace = true

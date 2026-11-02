@@ -143,6 +143,21 @@ impl Context {
 
     pub(super) fn op(&mut self, op: &str, a: Id, b: Id, c: Id) -> Result<Id> {
         match op {
+            "annotation_format" => {
+                let limit = self.int(2);
+                let unsupported = self.binary(">", a, limit)?;
+                if self.truth(unsupported)? {
+                    let error = self.builtin("NotImplementedError");
+                    self.op("raise", error, NONE, FALSE)
+                } else {
+                    Ok(NONE)
+                }
+            }
+            "type_alias" => Ok(self.alloc(Value::TypeAlias {
+                name: a,
+                evaluator: b,
+                cached: None,
+            })),
             "template_interpolation" => {
                 let (Value::List(meta) | Value::Tuple(meta)) = self.heap.get(c) else {
                     unreachable!("compiled interpolation metadata");
@@ -213,15 +228,11 @@ impl Context {
                 self.lookup(a, &name)
             }
             "assign" | "assign_target" | "assign_named_target" => {
-                let mut scope = a;
-                if op == "assign_named_target" {
-                    while self.scope_data(scope).comprehension.is_some() {
-                        scope = self
-                            .scope_data(scope)
-                            .parent
-                            .expect("enclosing comprehension scope");
-                    }
-                }
+                let scope = if op == "assign_named_target" {
+                    self.named_expression_scope(a)
+                } else {
+                    a
+                };
                 let name = copy_label(self.str_value(b)?)?;
                 let replaced = self.store_source_name(scope, &name, c)?;
                 if matches!(op, "assign_target" | "assign_named_target") {
@@ -624,6 +635,8 @@ pub(super) unsafe extern "C" fn imre_dyn_new(
     config: *const c_char,
 ) -> *mut Context {
     crate::initialize_io();
+    #[cfg(unix)]
+    crate::signals::initialize_interrupt();
     // SAFETY: native main supplies argc/argv and a static JSON constant.
     let mut config: serde_json::Value =
         serde_json::from_str(unsafe { cstr(config) }).expect("compiler target metadata");
@@ -634,6 +647,11 @@ pub(super) unsafe extern "C" fn imre_dyn_new(
             .as_bool()
             .map_or(if ignore_environment { 0 } else { -1 }, i32::from),
     );
+    if config["faulthandler"].is_null() {
+        config["faulthandler"] = (!ignore_environment
+            && std::env::var_os("PYTHONFAULTHANDLER").is_some_and(|value| !value.is_empty()))
+        .into();
+    }
     let options: Vec<String> =
         serde_json::from_value(config["warnoptions"].take()).unwrap_or_default();
     config["warnoptions"] = crate::sys::startup_warning_options(ignore_environment, options).into();
@@ -692,6 +710,7 @@ pub(super) fn new_context<S: Into<String>>(
         sys_path: NONE,
         default_encoding: NONE,
         audit_hooks: Vec::new(),
+        fault_file: None,
         exit_callbacks: Vec::new(),
         contexts: Vec::new(),
         buffer_exports: Vec::new(),
@@ -703,16 +722,22 @@ pub(super) fn new_context<S: Into<String>>(
         native_code_objects: HashMap::new(),
         source_builtins: None,
         zip_directories: HashMap::new(),
+        zip_path_importers: NONE,
         codec_entries: Default::default(),
         frozen_override: 0,
         modules: NONE,
         import_missing: NONE,
         bootstrap_globals: NONE,
+        import_registry_installed: false,
+        bootstrap_file_spec: NONE,
+        finder_external: NONE,
         classes: HashMap::new(),
         enum_scopes: HashMap::new(),
+        signal_handlers: Vec::new(),
         typing: super::typing::Registry::default(),
         logger_wrappers: HashMap::new(),
         builtins: HashMap::new(),
+        native_type_dicts: HashMap::new(),
         sources: HashMap::new(),
         call_depth: 0,
         deque_comparison_repeats: 0,
@@ -760,37 +785,43 @@ pub(super) unsafe extern "C" fn imre_dyn_finish(ctx: *mut Context) -> i32 {
     // SAFETY: main transfers its unique allocation from imre_dyn_new exactly once.
     let mut ctx = unsafe { Box::from_raw(ctx) };
     let mark = ctx.heap.temporary_mark();
-    let result = ctx.module("sys").and_then(|_| {
+    let result = ctx.startup_sys().and_then(|_| {
+        if ctx.config["faulthandler"].as_bool() == Some(true) {
+            let handler = ctx.module("faulthandler")?;
+            let enable = ctx.lookup_attr(handler, "enable")?;
+            // CPython enables the handler with its preliminary stderr printer, before
+            // exposing the final standard streams. Its descriptor is 2 even when closed.
+            let fd = ctx.int(i64::from(libc::STDERR_FILENO));
+            ctx.call(enable, vec![fd], Vec::new())?;
+        }
+        // CPython snapshots dispositions after enabling a startup fault handler.
+        #[cfg(unix)]
+        ctx.initialize_signal_handlers();
         // The module registry now owns sys. Its startup temporaries must not
         // keep replaced streams alive throughout the main module's execution.
         ctx.heap.release_temporaries_since(mark);
-        let main = ctx.module("__main__")?;
+        ctx.install_import_registry()?;
+        let main = ctx
+            .load_bootstrap_module("__main__", None, NONE)?
+            .ok_or_else(|| Context::missing_module("__main__"))?;
         if let Some(name) = ctx.config["module_entry"].as_str().map(str::to_owned) {
             ctx.run_module_as_main(name)
         } else {
             Ok(main)
         }
     });
+    #[cfg(unix)]
+    let interrupted = result
+        .as_ref()
+        .is_err_and(|e| ctx.is_builtin_error(e, "KeyboardInterrupt"));
     let status = match result {
         Ok(_) => 0,
-        Err(e) if e.kind == "SystemExit" => match e.exit_status {
-            Some(status) => status.report(),
-            None => {
-                use std::io::Write;
-
-                let mut message = if let Some(&[arg]) = ctx.exception_arguments(&e)
-                    && let Some(text) = ctx.string_storage(arg)
-                {
-                    ctx.encode_utf8_codepoints(text, false, "backslashreplace")
-                        .unwrap_or_default()
-                } else {
-                    e.message.into_bytes()
-                };
-                message.push(b'\n');
-                let _ = crate::sys::stderr_writer().write_all(&message);
-                1
-            }
-        },
+        Err(error) if ctx.is_builtin_error(&error, "SystemExit") => {
+            let mark = ctx.heap.temporary_mark();
+            let status = report_system_exit(&mut ctx, error);
+            ctx.heap.release_temporaries_since(mark);
+            status
+        }
         Err(error) if ctx.is_os_error(&error) && error.args.is_some() => {
             ctx.report_os_error(error);
             1
@@ -818,7 +849,70 @@ pub(super) unsafe extern "C" fn imre_dyn_finish(ctx: *mut Context) -> i32 {
     ctx.workers.join_before_exit_callbacks();
     atexit::run(&mut ctx);
     stdlib::io::prepare_writer_shutdown(&ctx);
+    crate::fault_handler::disable();
+    if status == 0 && stdlib::io::has_pending_callback_write(&ctx) {
+        use std::io::Write;
+
+        let _ = writeln!(
+            std::io::stderr().lock(),
+            "NotImplementedError: BufferedWriter has unflushed bytes at shutdown; explicitly flush or close Python-backed writers"
+        );
+        return 1;
+    }
+    #[cfg(unix)]
+    if interrupted {
+        let _ = crate::flush_stdout();
+        return crate::signals::exit_interrupt();
+    }
     status
+}
+
+/// Read the live code at shutdown, including overrides on SystemExit subclasses.
+fn report_system_exit(ctx: &mut Context, error: Error) -> i32 {
+    use std::io::Write;
+
+    let instance = error
+        .trace
+        .as_ref()
+        .and_then(|trace| trace.instance)
+        .unwrap_or_else(|| ctx.alloc(Value::Raised(error)));
+    ctx.heap.keep(instance);
+    let code = ctx.lookup_attr(instance, "code").unwrap_or(instance);
+    if code == NONE {
+        return 0;
+    }
+    if let Ok(integer) = ctx.as_int(code) {
+        return integer.to_i64().unwrap_or(-1) as i32;
+    }
+    ctx.heap.keep(code);
+    if let Some(file) = ctx
+        .sys_binding("stderr")
+        .ok()
+        .flatten()
+        .filter(|&f| f != NONE)
+    {
+        ctx.heap.keep(file);
+        if let Ok(writer) = ctx.lookup_attr(file, "write") {
+            ctx.heap.keep(writer);
+            if let Ok(text) = builtins::call(ctx, "str", &[code], &[]) {
+                let _ = ctx.call(writer, vec![text], Vec::new());
+            }
+        }
+    } else if let Ok(text) = builtins::call(ctx, "str", &[code], &[])
+        && let Ok(bytes) = ctx.encode_utf8_codepoints(text, false, "backslashreplace")
+    {
+        let _ = crate::sys::stderr_writer().write_all(&bytes);
+    }
+    // The message's __str__ or the stream's write method may have replaced stderr.
+    let newline = ctx.text("\n");
+    let written = ctx.sys_binding("stderr").and_then(|file| {
+        let writer = ctx.lookup_attr(file.unwrap_or(NONE), "write")?;
+        ctx.call(writer, vec![newline], Vec::new())
+    });
+    if written.is_err() {
+        let _ = crate::sys::stderr_writer().write_all(b"\n");
+    }
+    1
 }
 
 fn finish(ctx: &mut Context, result: Result<Id>) -> Id {
@@ -1113,6 +1207,10 @@ impl Context {
             let Some(parent) = frame.parent else {
                 return Some(false);
             };
+            // A separate exec/eval locals mapping supplies names to the module, never closure cells.
+            if frame.exec_locals.is_some() {
+                return Some(false);
+            }
             if frame.class_body.is_none() {
                 if frame.globals.contains(name) {
                     return Some(false);
@@ -1354,10 +1452,7 @@ pub(super) unsafe extern "C" fn imre_dyn_truth_mark(ctx: *const Context) -> usiz
 #[unsafe(no_mangle)]
 pub(super) unsafe extern "C" fn imre_dyn_comprehension_step(ctx: *mut Context, mark: usize) {
     // SAFETY: the generated caller owns the context and recorded this mark in its active frame.
-    let ctx = unsafe { &mut *ctx };
-    ctx.heap.release_temporaries_since(mark);
-    ctx.heap.reserve_slot_or_request_collection();
-    ctx.collect_garbage();
+    unsafe { (&mut *ctx).comprehension_step(mark) }
 }
 
 /// Release a consumed truth operand on the branch that no longer needs it.
@@ -1430,6 +1525,11 @@ pub(super) unsafe extern "C" fn imre_dyn_statement_with_exception(
         },
         caught,
     );
+    #[cfg(unix)]
+    if let Err(mut error) = ctx.dispatch_signals() {
+        ctx.record_exception_frame(&mut error, None);
+        ctx.pending = Some(error);
+    }
 }
 
 impl Context {
@@ -1456,9 +1556,11 @@ impl Context {
             self.classes
                 .values()
                 .chain(self.enum_scopes.values())
+                .chain(self.signal_handlers.iter())
                 .chain(self.logger_wrappers.values())
                 .chain(self.typing.roots())
                 .chain(self.builtins.values())
+                .chain(self.native_type_dicts.values())
                 .chain(self.native_code_objects.values())
                 .chain(self.codec_entries.roots())
                 .chain(&self.audit_hooks)
@@ -1466,6 +1568,7 @@ impl Context {
                 .copied()
                 .chain(self.workers.roots().copied())
                 .chain(self.threads.roots())
+                .chain(self.fault_file)
                 .chain(self.contexts.iter().copied())
                 .chain(self.buffer_exports.iter().copied())
                 .chain(self.pending.iter().flat_map(Error::roots))
@@ -1473,9 +1576,12 @@ impl Context {
                 .chain([
                     self.argv,
                     self.sys_path,
+                    self.zip_path_importers,
                     self.modules,
                     self.import_missing,
                     self.bootstrap_globals,
+                    self.bootstrap_file_spec,
+                    self.finder_external,
                     self.default_encoding,
                     self.token_missing,
                 ]),
@@ -1542,14 +1648,14 @@ impl Context {
 
     /// Publish the surviving roots before the next operand can observe a discarded writer.
     pub(super) fn discard_truth(&mut self, mark: usize) {
-        if self.heap.discard_truth_operands(mark) {
+        if self.heap.discard_truth_operands(mark, self.modules) {
             self.collect_unreachable();
         }
     }
 
     /// Keep the returned value and earlier operands while dropping the completed call's temporaries.
     pub(super) fn finish_call_operands(&mut self, mark: usize, result: Id) {
-        if self.heap.discard_operands(mark, result) {
+        if self.heap.discard_operands(mark, result, self.modules) {
             self.collect_unreachable();
         }
     }
@@ -1598,7 +1704,7 @@ impl Context {
     }
 
     /// Invoke pending callbacks after the heap has cleared every dead reference.
-    fn run_weak_callbacks(&mut self, callbacks: impl IntoIterator<Item = (Id, Id)>) {
+    pub(super) fn run_weak_callbacks(&mut self, callbacks: impl IntoIterator<Item = (Id, Id)>) {
         for (callback, reference) in callbacks {
             if let Err(error) = self.call(callback, vec![reference], Vec::new()) {
                 // clear_weak_targets retains __callback__ for cyclic GC, but clears it
@@ -1673,7 +1779,17 @@ mod tests {
         ctx.alloc(Value::AttrGetter(value));
         ctx.heap.release_temporaries_since(mark);
 
-        let encoded = ctx.call(encode, vec![query, TRUE], Vec::new()).unwrap();
+        // The key and decimal values need no escaping.
+        let template = ctx.text("{0}");
+        let quote_via = ctx.lookup_attr(template, "format").unwrap();
+        let safe = ctx.text("");
+        let encoded = ctx
+            .call(
+                encode,
+                vec![query, TRUE, safe, NONE, NONE, quote_via],
+                Vec::new(),
+            )
+            .unwrap();
         let encoded = ctx.str_value(encoded).unwrap();
         assert!(encoded.starts_with("k=0&k=1&"));
         assert!(encoded.ends_with("k=16383"));

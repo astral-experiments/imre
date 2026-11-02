@@ -27,13 +27,18 @@ impl SourceBody {
 }
 
 impl Context {
-    /// Enter the selected module in the startup __main__ namespace via the frozen runpy.
-    pub(super) fn run_module_as_main(&mut self, name: String) -> Result<Id> {
-        let mark = self.heap.temporary_mark();
+    /// Receive the launcher's argument vector before imports can run Python code.
+    pub(super) fn startup_sys(&mut self) -> Result<Id> {
         #[cfg(any(target_os = "linux", target_os = "macos"))]
-        if let Some(bytes) =
-            crate::run_start::wait_for_cleanup(true).map_err(crate::objects::errno_error)?
-        {
+        let arguments =
+            if self.config["module_entry"].is_string() || self.config["executable"].is_string() {
+                crate::run_start::wait_for_cleanup(true).map_err(crate::objects::errno_error)?
+            } else {
+                None
+            };
+        let sys = self.module("sys")?;
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
+        if let Some(bytes) = arguments {
             let codec = crate::objects::Codec::lookup(crate::sys::filesystem_encoding()?.as_str())?;
             let mut original = Vec::new();
             for arg in bytes
@@ -44,9 +49,14 @@ impl Context {
                 original.push(self.text_codepoints(codec.decode_filesystem(arg)?));
             }
             let original = self.alloc(Value::List(original));
-            let sys = self.module("sys")?;
             self.set_attr(sys, "orig_argv", original)?;
         }
+        Ok(sys)
+    }
+
+    /// Enter the selected module in the startup __main__ namespace via the frozen runpy.
+    pub(super) fn run_module_as_main(&mut self, name: String) -> Result<Id> {
+        let mark = self.heap.temporary_mark();
         let requested = self.text(&name);
         stdlib::audit::event(self, "cpython.run_module", &[requested])?;
         let runpy = self.module("runpy")?;
@@ -259,6 +269,23 @@ impl Context {
                 format!("_imp.{method}() takes no keyword arguments"),
             ));
         }
+        if method == "extension_suffixes" {
+            if !args.is_empty() {
+                return Err(Error::new(
+                    "TypeError",
+                    format!(
+                        "_imp.extension_suffixes() takes no arguments ({} given)",
+                        args.len()
+                    ),
+                ));
+            }
+            let suffix = self.config["archive_suffix"]
+                .as_str()
+                .unwrap_or(".imre.a")
+                .to_owned();
+            let suffix = self.text(suffix);
+            return Ok(self.alloc(Value::List(vec![suffix])));
+        }
         let [arg] = args else {
             return Err(Error::new(
                 "TypeError",
@@ -436,8 +463,16 @@ impl Context {
     }
 
     fn file_spec(&mut self, name: Id, origin: Id, locations: Id, loader: Id) -> Result<Id> {
-        let importlib = self.module("importlib")?;
-        let make = self.lookup_attr(importlib, "_file_spec")?;
+        let make = if self.bootstrap_file_spec != NONE
+            && matches!(
+                self.str_value(name)?,
+                "importlib" | "importlib._bootstrap" | "importlib._bootstrap_external"
+            ) {
+            self.bootstrap_file_spec
+        } else {
+            let importlib = self.module("importlib")?;
+            self.lookup_attr(importlib, "_file_spec")?
+        };
         self.call(make, vec![name, origin, locations, loader], vec![])
     }
 
@@ -461,10 +496,16 @@ impl Context {
         }
     }
 
-    pub(super) fn namespace_spec(&mut self, name: Id, locations: Id, module: Id) -> Result<Id> {
+    pub(super) fn namespace_spec(
+        &mut self,
+        name: Id,
+        locations: Id,
+        module: Id,
+        source_globals: Id,
+    ) -> Result<Id> {
         let importlib = self.module("importlib")?;
         let make = self.lookup_attr(importlib, "_namespace_spec")?;
-        self.call(make, vec![name, locations, module], vec![])
+        self.call(make, vec![name, locations, module, source_globals], vec![])
     }
 
     pub(super) fn initialize_source(
@@ -492,6 +533,7 @@ impl Context {
         fullname: &str,
         original: &str,
         for_resource: bool,
+        finder: Option<Id>,
     ) -> Result<Id> {
         let key = self.text(fullname);
         let modules = self.public_modules()?;
@@ -558,6 +600,15 @@ impl Context {
             } else {
                 (fullname, self.sys_path, true)
             };
+        if self.import_registry_installed {
+            let name = self.text(fullname);
+            let path = if top_level { NONE } else { search };
+            let args = vec![name, path];
+            return match finder {
+                Some(finder) => self.call(finder, args, vec![]),
+                None => self.meta_call(NONE, "_find_spec", args),
+            };
+        }
         if stdlib::is_module(fullname) || self.is_frozen(fullname) {
             if for_resource {
                 return Ok(NONE);
@@ -576,7 +627,7 @@ impl Context {
         let name = self.text(fullname);
         if matches!(body, SourceBody::Namespace) {
             let paths = self.location_list(&locations);
-            return self.namespace_spec(name, paths, NONE);
+            return self.namespace_spec(name, paths, NONE, NONE);
         }
         let origin = self.text(path.to_string_lossy());
         let locations = if locations.is_empty() {

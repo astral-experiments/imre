@@ -30,12 +30,45 @@ def scanstrings():
         raise AssertionError('accepted invalid escape')
 
 
+def surrogate_documents():
+    import json
+
+    high, low = chr(0xd83d), chr(0xdc0d)
+    assert json.loads('"'+high+low+'"') == high+low
+    assert json.loads(r'"\ud83d\udc0d"') == chr(0x1f40d)
+    assert json.loads('"'+high+r'\udc0d"') == high+low
+    assert json.loads(r'"\ud83d'+low+'"') == high+low
+    assert json.loads(br'"\ud83d"') == high
+    doc = '[{"'+high+'":1},{"\\ud83d":2,"'+high+'":3},{"\\u0061":"ø"}]'
+    a, b, c = json.loads(doc)
+    assert (a, b, c) == ({high:1}, {high:3}, {'a':'ø'})
+    assert next(iter(a)) is next(iter(b))
+    bom = '\ufeff"'+high+'"'
+    try:
+        json.loads(bom)
+    except json.JSONDecodeError as error:
+        assert error.doc is bom and (error.pos, error.lineno, error.colno) == (0, 1, 1)
+        assert error.msg == 'Unexpected UTF-8 BOM (decode using utf-8-sig)'
+    else:
+        raise AssertionError('leading BOM was accepted')
+    prefix = '["'+high+'😀",\n'
+    malformed = prefix+'?]'
+    try:
+        json.loads(malformed)
+    except json.JSONDecodeError as error:
+        assert error.doc is malformed and error.msg == 'Expecting value'
+        assert (error.pos, error.lineno, error.colno) == (len(prefix),2,1)
+    else:
+        raise AssertionError('invalid value was accepted')
+
+
 def current():
     import importlib
     import json
     import sys
 
     scanstrings()
+    surrogate_documents()
     names = ('json', 'json.decoder', 'json.scanner', 'json.encoder', '_json')
     saved = {name: sys.modules[name] for name in names if name in sys.modules}
     try:
@@ -67,6 +100,14 @@ def current():
                 assert error.args == ('Expecting value: line 2 column 6 (char 7)',)
             else:
                 raise AssertionError('accepted malformed JSON')
+    document = '"' + chr(0xd800) + '\\q"'
+    try:
+        fresh.loads(document)
+    except fresh.JSONDecodeError as error:
+        assert error.doc is document and error.pos == 3
+        assert error.msg == "Invalid \\escape: 'q'"
+    else:
+        raise AssertionError('accepted invalid escape after surrogate')
     # The decoder uses its own globals after the package attribute is rebound.
     fresh.decoder = None
     try:

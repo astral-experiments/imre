@@ -1,5 +1,5 @@
 """Source package imports for the native module registry."""
-from _frozen_importlib_external import _zip_path_importers as _path_importers
+from _imre_importlib import _zip_path_importers as _path_importers
 
 _ENCODING_NAME_CHARS = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_."
 
@@ -52,6 +52,10 @@ class zipimporter(_ZipResourceLoader):
                         raise NotImplementedError('encoding declarations in ZIP source are unsupported')
                     offset = line.find(marker, offset)
         return compile(text, filename, 'exec')
+
+    def create_module(self, spec):
+        # Use the standard module object allocated by module_from_spec.
+        return None
 
     def exec_module(self, module):
         exec(self.get_code(module.__name__), module.__dict__)

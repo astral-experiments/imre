@@ -24,6 +24,7 @@ def current():
         def load(self):
             pass
 
+    check_metaclass_new()
     check_default_state()
     check_inherited_inequality()
     child = Child.__new__(Child, path='pkg')
@@ -189,3 +190,36 @@ def check_inherited_inequality():
         pass
     else:
         raise AssertionError("unguarded recursive inequality slot")
+
+
+def check_metaclass_new():
+    from abc import ABCMeta
+
+    created = []
+
+    class Meta(ABCMeta):
+        def __new__(mcls, name, bases, ns):
+            created.append(name)
+            return super().__new__(mcls, name, bases, ns)
+
+    class Plain(metaclass=Meta):
+        def __init__(self):
+            raise AssertionError("explicit allocation initialized the instance")
+
+    class Custom(Plain):
+        def __new__(cls):
+            return super().__new__(cls)
+
+    class Child(Custom):
+        pass
+
+    assert type(Plain) is Meta and created == ["Plain", "Custom", "Child"]
+    assert Meta.__new__ is not ABCMeta.__new__
+    assert Plain.__new__ is object.__new__
+    assert type(Plain.__new__(Plain)) is Plain
+    assert Child.__new__ is Custom.__new__
+    assert type(Child.__new__(Child)) is Child
+    assert created == ["Plain", "Custom", "Child"]
+
+    Meta.__new__ = property(lambda cls: cls.__name__)
+    assert Plain.__new__ == "Plain" and Child.__new__ == "Child"

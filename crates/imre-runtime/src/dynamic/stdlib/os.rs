@@ -362,12 +362,14 @@ pub(super) fn is_descriptor_function(name: &str) -> bool {
             | "mkdir"
             | "mkfifo"
             | "chmod"
+            | "fchmod"
             | "chdir"
             | "utime"
             | "dup"
             | "dup2"
             | "isatty"
             | "lseek"
+            | "ftruncate"
             | "pipe"
             | "read"
             | "write"
@@ -378,7 +380,8 @@ pub(super) fn is_descriptor_function(name: &str) -> bool {
             | "set_inheritable"
             | "link"
             | "symlink"
-    ) || (cfg!(target_os = "linux") && name == "sendfile")
+    ) || (cfg!(unix) && matches!(name, "kill" | "getppid"))
+        || (cfg!(target_os = "linux") && name == "sendfile")
 }
 
 /// Convert an index argument before issuing the descriptor syscall.
@@ -458,6 +461,10 @@ fn directory_fd(ctx: &mut Context, value: Option<Id>) -> Result<i32> {
         )
     })?;
     Ok(native::directory_fd_number(&fd)?)
+}
+
+fn audit_fd(ctx: &mut Context, fd: i32) -> Id {
+    ctx.int(i64::from(if fd == libc::AT_FDCWD { -1 } else { fd }))
 }
 
 /// Bind the path and keyword-only directory descriptor in Argument Clinic order.
@@ -662,6 +669,10 @@ fn open(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
     } else {
         libc::AT_FDCWD
     };
+    if !ctx.audit_hooks.is_empty() {
+        let audit_flags = ctx.int(i64::from(flags | libc::O_CLOEXEC));
+        super::audit::event(ctx, "open", &[path, NONE, audit_flags])?;
+    }
     match native::open_at(&pathname, flags, mode, dir_fd) {
         Ok(fd) => Ok(ctx.int(i64::from(fd))),
         Err(error) => {
@@ -703,6 +714,9 @@ pub(super) fn descriptor(
     }
     if name == "chmod" {
         return chmod::call(ctx, args, kwargs);
+    }
+    if name == "fchmod" {
+        return chmod::fchmod(ctx, args, kwargs);
     }
     if matches!(name, "mkdir" | "mkfifo") {
         return create_node(ctx, name, args, kwargs);
@@ -771,6 +785,33 @@ pub(super) fn descriptor(
             format!("posix.{name}() takes no keyword arguments"),
         ));
     }
+    if name == "getppid" {
+        if !args.is_empty() {
+            return Err(Error::new(
+                "TypeError",
+                format!("posix.getppid() takes no arguments ({} given)", args.len()),
+            ));
+        }
+        // SAFETY: getppid reads the calling process's parent PID and takes no arguments.
+        return Ok(ctx.int(i64::from(unsafe { libc::getppid() })));
+    }
+    if name == "kill" {
+        let [pid, signal] = args else {
+            return Err(Error::new(
+                "TypeError",
+                format!("kill expected 2 arguments, got {}", args.len()),
+            ));
+        };
+        let pid = c_int(ctx, *pid)?;
+        let signal = ssize_t(ctx, *signal)?;
+        let audit_pid = ctx.int(i64::from(pid));
+        let audit_signal = ctx.int(signal as i64);
+        super::audit::event(ctx, "os.kill", &[audit_pid, audit_signal])?;
+        // CPython audits the full Py_ssize_t, then narrows it to the POSIX int.
+        native::kill(pid, signal as libc::c_int)?;
+        ctx.dispatch_signals()?;
+        return Ok(NONE);
+    }
     if name == "getsid" {
         let [pid] = args else {
             return Err(Error::new(
@@ -798,7 +839,7 @@ pub(super) fn descriptor(
         result
             .try_reserve_exact(2)
             .map_err(|_| Error::new("MemoryError", ""))?;
-        for value in native::waitpid(pid, options)? {
+        for value in native::waitpid(pid, options, || ctx.dispatch_signals())? {
             result.push(ctx.int(i64::from(value)));
         }
         return Ok(ctx.alloc(Value::Tuple(result)));
@@ -829,17 +870,44 @@ pub(super) fn descriptor(
         let fd = c_int(ctx, *fd)?;
         return if name == "read" {
             let length = ssize_t(ctx, *data)?;
-            Ok(ctx.alloc(Value::Bytes(native::read(fd, length)?)))
+            let bytes = native::read(fd, length, || ctx.dispatch_signals())?;
+            Ok(ctx.alloc(Value::Bytes(bytes)))
         } else {
-            // The synchronous syscall borrows the buffer after fd conversion.
-            // It cannot reenter Python, so mutable storage cannot resize underneath it.
-            let bytes = match ctx.heap.get(ctx.scalar_value(*data)) {
-                Value::Array(array) => array.as_bytes(),
-                _ => ctx.bytes_like(*data)?,
-            };
-            let count = native::write(fd, bytes)?;
-            Ok(ctx.int(count as i64))
+            // Keep the exporter alive and its size fixed while a handler runs.
+            // Reborrow on retry so in-place changes made by the handler are visible.
+            ctx.with_buffer_export(*data, |ctx| {
+                loop {
+                    let bytes = match ctx.heap.get(ctx.scalar_value(*data)) {
+                        Value::Array(array) => array.as_bytes(),
+                        _ => ctx.bytes_like(*data)?,
+                    };
+                    if let Some(count) = native::try_write(fd, bytes)? {
+                        return Ok(ctx.int(count as i64));
+                    }
+                    ctx.dispatch_signals()?;
+                }
+            })
         };
+    }
+    if name == "ftruncate" {
+        let [fd, length] = args else {
+            return Err(Error::new(
+                "TypeError",
+                format!("ftruncate expected 2 arguments, got {}", args.len()),
+            ));
+        };
+        let fd = c_int(ctx, *fd)?;
+        let length = file_offset(ctx, *length)?;
+        let audit_fd = ctx.int(i64::from(fd));
+        let audit_length = ctx.int(length);
+        super::audit::event(ctx, "os.truncate", &[audit_fd, audit_length])?;
+        loop {
+            match native::truncate(fd, length) {
+                Ok(()) => return Ok(NONE),
+                Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+                Err(error) => return Err(super::os_error(error)),
+            }
+        }
     }
     if name == "lseek" {
         let [fd, position, whence] = args else {

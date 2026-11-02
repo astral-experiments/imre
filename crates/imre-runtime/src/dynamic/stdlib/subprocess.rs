@@ -160,7 +160,9 @@ fn launch(ctx: &mut Context, values: &[Id]) -> Result<Id> {
             ctx.text(BoxedPopen::default_shell())
         };
         let option = ctx.text("-c");
-        items.try_reserve(2).map_err(|_| Error::new("MemoryError", ""))?;
+        items
+            .try_reserve(2)
+            .map_err(|_| Error::new("MemoryError", ""))?;
         items.splice(..0, [shell_program, option]);
     }
     let program = if executable == NONE {
@@ -341,7 +343,7 @@ pub(super) fn call(
             .status(ctx.truth(poll)?)?
             .map_or(NONE, |n| ctx.int(i64::from(n)))),
         ("wait", &[seconds]) => Ok(child
-            .wait(timeout(ctx, seconds)?)?
+            .wait(timeout(ctx, seconds)?, || ctx.dispatch_signals())?
             .map_or(NONE, |n| ctx.int(i64::from(n)))),
         ("signal", &[number]) => {
             let number = ctx

@@ -270,6 +270,55 @@ pub(crate) fn choice_index(length: &Int, secure: bool) -> Result<BigInt> {
     sequence_index(length.big().magnitude(), secure).map(BigInt::from)
 }
 
+/// Draw one Fisher-Yates swap at a time so sequence callbacks can draw from the same generator.
+pub(crate) fn shuffle_swaps(length: usize) -> impl Iterator<Item = Result<(usize, usize)>> {
+    (1..length).rev().map(|i| {
+        let j = random_below(&BigUint::from(i + 1))?;
+        Ok((
+            i,
+            j.to_usize()
+                .expect("draw is smaller than the sequence length"),
+        ))
+    })
+}
+
+fn shuffle_slice<T>(values: &mut [T]) -> Result<()> {
+    for indices in shuffle_swaps(values.len()) {
+        let (i, j) = indices?;
+        values.swap(i, j);
+    }
+    Ok(())
+}
+
+/// # Safety
+/// The caller roots the native integer list throughout the shuffle.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_random_shuffle_int_list(list: *const crate::List) {
+    // SAFETY: swapping existing owners cannot invoke user code.
+    unsafe {
+        (&*list)
+            .0
+            .with_mut(|values| finish(shuffle_slice(values), ()))
+    };
+}
+
+/// # Safety
+/// The caller roots the native list of tagged elements throughout the shuffle.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_random_shuffle_list(list: *const super::Object) {
+    // SAFETY: only the order of owned element slots changes under the exclusive borrow.
+    unsafe {
+        super::object(list).0.with_mut(|storage| {
+            finish(
+                storage
+                    .sequence_mut()
+                    .and_then(|words| shuffle_slice(&mut words.values)),
+                (),
+            )
+        })
+    };
+}
+
 /// Select from an arithmetic progression without materializing it. A range used
 /// as a sequence must fit len(); randrange and randint admit arbitrary widths.
 fn progression(start: &BigInt, stop: &BigInt, step: &BigInt, mode: u32) -> Result<BigInt> {

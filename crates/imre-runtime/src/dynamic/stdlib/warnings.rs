@@ -3,39 +3,89 @@ use super::{Context, Error, Id, NONE, Result, Value};
 enum Origin {
     Caller(i32),
     FrozenImport(u32),
-    FrozenExternal { globals: Id, line: u32 },
+    Bootstrap {
+        globals: Id,
+        line: u32,
+        frozen_external: bool,
+    },
+}
+
+impl Origin {
+    fn core(source_globals: Id, line: u32) -> Self {
+        if source_globals == NONE {
+            Self::FrozenImport(line)
+        } else {
+            Self::Bootstrap {
+                globals: source_globals,
+                line,
+                frozen_external: false,
+            }
+        }
+    }
 }
 
 impl Context {
-    /// The frozen bootstrap's warning site participates in module- and line-specific filters.
-    pub(in crate::dynamic) fn warn_child_binding(&mut self, message: &str) -> Result<()> {
+    /// Report the warning in the bootstrap module performing this particular import.
+    pub(in crate::dynamic) fn warn_child_binding(
+        &mut self,
+        source_globals: Id,
+        message: &str,
+    ) -> Result<()> {
         self.emit_warning(
             crate::objects::exceptions::Kind::ImportWarning,
             message,
-            Origin::FrozenImport(1353),
+            Origin::core(source_globals, 1353),
             NONE,
         )
     }
 
-    pub(in crate::dynamic) fn warn_legacy_load(&mut self) -> Result<()> {
+    pub(in crate::dynamic) fn warn_import(
+        &mut self,
+        globals: Id,
+        message: &str,
+        line: u32,
+        external: Option<bool>,
+    ) -> Result<()> {
+        let origin = match external {
+            Some(frozen_external) => Origin::Bootstrap {
+                globals,
+                line,
+                frozen_external,
+            },
+            None => Origin::core(globals, line),
+        };
+        self.emit_warning(
+            crate::objects::exceptions::Kind::ImportWarning,
+            message,
+            origin,
+            NONE,
+        )
+    }
+
+    pub(in crate::dynamic) fn warn_legacy_load(&mut self, source_globals: Id) -> Result<()> {
         self.emit_warning(
             crate::objects::exceptions::Kind::DeprecationWarning,
             "the load_module() method is deprecated and slated for removal in Python 3.15; use exec_module() instead",
-            Origin::FrozenImport(533),
+            Origin::core(source_globals, 533),
             NONE,
         )
     }
 
-    pub(in crate::dynamic) fn warn_external_loader(
+    pub(in crate::dynamic) fn warn_bootstrap_loader(
         &mut self,
         globals: Id,
         line: u32,
         message: &str,
+        frozen_external: bool,
     ) -> Result<()> {
         self.emit_warning(
             crate::objects::exceptions::Kind::DeprecationWarning,
             message,
-            Origin::FrozenExternal { globals, line },
+            Origin::Bootstrap {
+                globals,
+                line,
+                frozen_external,
+            },
             NONE,
         )
     }
@@ -82,7 +132,11 @@ impl Context {
                 line,
                 "importlib._bootstrap".to_owned(),
             ),
-            Origin::FrozenExternal { globals, line } => {
+            Origin::Bootstrap {
+                globals,
+                line,
+                frozen_external,
+            } => {
                 let module = self.dict_named_item(globals, "__name__");
                 if module == Some(NONE) {
                     return Ok(());
@@ -91,7 +145,16 @@ impl Context {
                     .and_then(|id| self.str_value(id).ok())
                     .unwrap_or("<string>")
                     .to_owned();
-                ("<frozen importlib._bootstrap_external>".into(), line, module)
+                let filename = if frozen_external {
+                    "<frozen importlib._bootstrap_external>".into()
+                } else {
+                    // Sliced source keeps the code filename but uses the pinned warning call site.
+                    self.heap
+                        .current_location()
+                        .map(|loc| loc.file)
+                        .unwrap_or("<sys>".into())
+                };
+                (filename, line, module)
             }
             Origin::Caller(level) => {
                 if let Some((loc, scope)) = self.heap.warning_frame(level) {
@@ -125,11 +188,16 @@ impl Context {
                     globals,
                     match origin {
                         Origin::Caller(_) => "warn",
-                        Origin::FrozenImport(_) | Origin::FrozenExternal { .. } => "warn_explicit",
+                        Origin::FrozenImport(_) | Origin::Bootstrap { .. } => "warn_explicit",
                     },
                 )
             {
                 let message = self.text(message);
+                let native_import = if category == "ImportWarning" {
+                    self.dict_named_item(globals, "_native_import_warning")
+                } else {
+                    None
+                };
                 let category = self.builtin(category);
                 let args = match origin {
                     Origin::Caller(level) => {
@@ -140,8 +208,8 @@ impl Context {
                         }
                         args
                     }
-                    Origin::FrozenImport(_) | Origin::FrozenExternal { .. } => {
-                        let globals = if let Origin::FrozenExternal { globals, .. } = origin {
+                    Origin::FrozenImport(_) | Origin::Bootstrap { .. } => {
+                        let globals = if let Origin::Bootstrap { globals, .. } = origin {
                             globals
                         } else {
                             // Some closed graphs run the native bootstrap without importing its module.
@@ -166,7 +234,7 @@ impl Context {
                             self.int(i64::from(line)),
                             self.text(&module),
                             registry,
-                            globals,
+                            native_import.unwrap_or(globals),
                         ]
                     }
                 };

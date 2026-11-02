@@ -29,7 +29,7 @@ const JEMALLOC_RUNTIME: &str = "libimre_runtime_jemalloc.a";
 const PYTHON_HEADER: &str = include_str!("../../imre-runtime/include/Python.h");
 
 const USAGE: &str = "Usage: imre check SOURCE.py [--module-root DIRECTORY] [--extension-path DIRECTORY] [--reachable-only] [--runtime-imports] [--entry-profile FILE] [--watch | -w]
-       imre [-I] [-E] [-B] [-O] [-W OPTION] [-X utf8[=0|1]] [-X warn_default_encoding] [-X context_aware_warnings=0|1] (-c CODE | SCRIPT) [PROGRAM_ARGUMENTS...]
+       imre [-I] [-E] [-B] [-O] [-W OPTION] [-X faulthandler] [-X utf8[=0|1]] [-X warn_default_encoding] [-X context_aware_warnings=0|1] (-c CODE | SCRIPT) [PROGRAM_ARGUMENTS...]
        imre extension-header
        imre build-target [--output-dir DIRECTORY]
        imre wheel PROJECT [--out-dir DIR] [--overlay DIR] [--python PYTHON]
@@ -188,6 +188,22 @@ fn run() -> Result<ExitCode, String> {
             .or_else(|| source_path.file_stem().map(PathBuf::from))
             .ok_or("Could not infer an executable name from the source path; pass -o OUTPUT.")?,
     };
+    let python = options.python_startup().map(|(flags, _)| flags);
+    #[cfg(unix)]
+    let child_disposition = python
+        .is_some()
+        .then(run_program::CompileChildren::prepare)
+        .transpose()
+        .map_err(|error| format!("Could not prepare compiler child waits: {error}"))?;
+    let run_image = |directory| {
+        #[cfg(unix)]
+        if let Some(disposition) = child_disposition {
+            disposition
+                .restore()
+                .map_err(|error| format!("Could not restore SIGCHLD: {error}"))?;
+        }
+        run_program(&output, directory, &source_path, args, python)
+    };
     if lto_linker.is_some() && (runtime.is_none() || target.is_none()) {
         return Err("--lto-linker requires explicit --runtime and --target".to_owned());
     }
@@ -290,7 +306,7 @@ fn run() -> Result<ExitCode, String> {
             progress.cached(label);
             if let Some(directory) = run_directory {
                 progress.running(&source_path);
-                return run_program(&output, directory, &source_path, args);
+                return run_image(directory);
             }
             return Ok(ExitCode::SUCCESS);
         }
@@ -498,7 +514,7 @@ fn run() -> Result<ExitCode, String> {
         drop(temporary);
         drop(scratch);
         drop(stage);
-        return run_program(&output, directory, &source_path, args);
+        return run_image(directory);
     }
     Ok(ExitCode::SUCCESS)
 }
@@ -584,16 +600,25 @@ fn run_program(
     directory: tempfile::TempDir,
     source: &Path,
     args: impl Iterator<Item = OsString>,
+    python: Option<&imre_compiler::CommandFlags>,
 ) -> Result<ExitCode, String> {
     #[cfg(unix)]
-    let status = run_program::launch(output, directory, source, args);
+    let status = run_program::launch(output, directory, source, args, python);
     #[cfg(not(unix))]
     let status = {
         let _directory = directory;
         Command::new(output).args(args).status()
     };
     status
-        .map(program_exit_code)
+        .map(|status| {
+            #[cfg(any(target_os = "linux", target_os = "macos"))]
+            if python.is_some()
+                && let Some(sig) = status.signal()
+            {
+                run_program::fatal_signals::propagate(sig);
+            }
+            program_exit_code(status)
+        })
         .map_err(|e| format!("Could not run compiled {}: {e}", source.display()))
 }
 

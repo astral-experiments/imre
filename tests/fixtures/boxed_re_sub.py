@@ -1,10 +1,27 @@
 import gc
 import re
+from array import array
 
 
 def current():
     pattern = re.compile("(?P<word>x*)|é")
     assert re.sub(pattern, "_", "éx", count=1) == "_éx"
+    assert re.subn(pattern, "_", "éx") == ("____", 4)
+    assert pattern.subn("_", "éx", 1) == ("_éx", 1)
+    assert re.compile(b"x").subn(b"x", bytearray(b"x-x")) == (b"x-x", 2)
+    pairs = re.compile(r"(a)?b")
+    assert pairs.subn(r"<\1>", "ab-b") == ("<a>-<>", 2)
+    assert pairs.subn(r"<\1>", "no match") == ("no match", 0)
+    for kwargs, args, message in (
+        ({"unknown": 0}, (), "subn() missing required argument 'repl' (pos 1)"),
+        ({"countt": 1}, ("_", "ab"), "subn() got an unexpected keyword argument 'countt'. Did you mean 'count'?"),
+    ):
+        try:
+            pairs.subn(*args, **kwargs)
+        except TypeError as error:
+            assert str(error) == message
+        else:
+            raise AssertionError("invalid subn arguments accepted")
     compile_pattern = re.compile
     try:
         re.compile = None
@@ -23,6 +40,11 @@ def current():
     sub = pattern.sub
     assert sub(repl=replace, string=subject) == r"\1\1\1"
     assert seen == [((0, 0), ""), ((0, 1), None), ((1, 2), "x"), ((2, 2), "")]
+    seen.clear()
+    assert pattern.subn(repl=replace, string=subject) == (r"\1\1\1", 4)
+    assert seen == [((0, 0), ""), ((0, 1), None), ((1, 2), "x"), ((2, 2), "")]
+    untouched, count = pattern.subn(replace, subject, count=-1)
+    assert untouched is subject and count == 0 and len(seen) == 4
     seen.clear()
     assert sub(replace, subject, count=1) == r"\1éx"
     assert sub(replace, subject, count=-1) is subject and len(seen) == 1
@@ -76,3 +98,36 @@ def current():
     source.extend(b"?")
     source[1] = 99
     assert retained[0].string is source and retained[0].group() == b"c"
+
+    # The punctuation escape in _strptime.TimeRE.pattern prefixes the captured character.
+    assert re.sub(r"([\\.^$*+?\(\){}\[\]|])", r"\\\1", "[é].") == r"\[é\]\."
+    groups = re.compile(r"(?P<one>a)?(b)$")
+    assert groups.sub(r"<\g<one>/\2/\g<0>>", "b\n") == "</b/b>\n"
+    assert re.compile("(|é)").sub(r"[\1]", "é", 2) == "[][é]"
+    assert re.compile(b"(.)").sub(bytearray(rb"\377\1"), b"\x81") == b"\xff\x81"
+    for count in (-1, 0):
+        try:
+            groups.sub(r"é\3", "", count)
+        except re.PatternError as exc:
+            assert (exc.msg, exc.pattern, exc.pos) == ("invalid group reference 3", r"é\3", 2)
+        else:
+            raise AssertionError("missing group accepted before matching")
+    try:
+        groups.sub(r"\g<absent>", "b")
+    except IndexError as exc:
+        assert exc.args == ("unknown group name 'absent'",)
+    else:
+        raise AssertionError("unknown named group accepted")
+    for invalid in ("\\q\\", "\\2\\", "\\400\\", "\\g<x>\\"):
+        try:
+            groups.sub(invalid, "")
+        except re.PatternError as exc:
+            assert exc.msg == "bad escape (end of pattern)" and exc.pos == len(invalid) - 1
+        else:
+            raise AssertionError("incomplete trailing escape ignored")
+    try:
+        re.compile(b"(x)").sub(memoryview(array('B', [92, 49])), b"y")
+    except ValueError as exc:
+        assert str(exc) == "cannot hash writable memoryview object"
+    else:
+        raise AssertionError("unhashable writable memoryview template accepted")

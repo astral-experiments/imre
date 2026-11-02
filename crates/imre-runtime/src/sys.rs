@@ -1,8 +1,8 @@
 //! Process text streams and their native encoding and buffering.
 pub(crate) mod context_warnings;
 mod recursion;
-pub(crate) use recursion::{recursion_limit, set_recursion_limit};
 use super::{Int, LazyLock, Mutex, OUTPUT, Output, Str, flush_stdout, initialize_io};
+pub(crate) use recursion::{recursion_limit, set_recursion_limit};
 mod intern;
 use crate::StrOwner;
 use crate::objects::{Codec, errno_error};
@@ -10,7 +10,10 @@ pub(crate) use intern::{canonical, intern_owner, try_intern_owner};
 use std::io::{self, Write};
 mod encoding;
 mod warnoptions;
-pub(crate) use encoding::{file_encoding, imre_sys_utf8_mode, set_locale, with_process_locale};
+pub(crate) use encoding::{
+    file_encoding, imre_sys_utf8_mode, set_locale, strerror, with_errno_message,
+    with_process_locale,
+};
 pub(crate) use warnoptions::startup_warning_options;
 mod input;
 pub(super) use input::read_input_line;

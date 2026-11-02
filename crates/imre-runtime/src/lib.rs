@@ -34,9 +34,12 @@
 
 mod dynamic;
 mod extensions;
+mod fault_handler;
 mod floats;
 mod format_grammar;
 mod shared;
+#[cfg(unix)]
+mod signals;
 mod string_owner;
 use shared::Shared;
 type ObjectOwner = Shared<objects::Object>;
@@ -589,6 +592,7 @@ pub extern "C" fn imre_stdio_command_init(isolated: u32, utf8: u32) {
 fn prepare_stdio(isolated: bool, utf8: Option<bool>) {
     python_hash::initialize(isolated);
     initialize_io();
+    signals::initialize_interrupt();
     sys::initialize_encoding(isolated, utf8);
     LazyLock::force(&STDIO_SETTINGS);
 }
