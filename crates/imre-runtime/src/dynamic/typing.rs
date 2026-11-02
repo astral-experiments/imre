@@ -232,6 +232,7 @@ pub(super) fn generic_attr_target(ctx: &Context, mut obj: Id, name: &str, writin
 #[derive(Default)]
 pub(super) struct Registry {
     alias_caches: [Option<Id>; 2],
+    pub(super) callable_factory: Option<Id>,
     no_default: Option<Id>,
     overloads: HashMap<(String, String), Vec<(u32, Id)>>,
 }
@@ -241,6 +242,7 @@ impl Registry {
         self.alias_caches
             .iter()
             .flatten()
+            .chain(self.callable_factory.iter())
             .chain(self.no_default.iter())
             .chain(self.overloads.values().flatten().map(|(_, value)| value))
     }
@@ -370,8 +372,9 @@ fn alias(ctx: &mut Context, kind: AliasKind, origin: Id, args: Vec<Id>) -> Resul
     let (index, make_alias, arguments) = match kind {
         AliasKind::Generic => (0, ctx.builtin("typing._GenericAlias"), vec![origin, args]),
         AliasKind::Callable => {
-            let typing = ctx.module("typing")?;
-            let make_alias = ctx.lookup_attr(typing, "_make_callable_alias")?;
+            let make_alias = ctx.typing.callable_factory.ok_or_else(|| {
+                Error::new("RuntimeError", "typing.Callable is not initialized")
+            })?;
             let constructor = ctx.builtin("typing._CallableGenericAlias");
             (1, make_alias, vec![constructor, origin, args])
         }
@@ -608,9 +611,11 @@ fn callable_alias(ctx: &mut Context, kind: AliasKind, origin: Id, args: Vec<Id>)
     };
     if kind == AliasKind::Callable {
         // Cache the spelling supplied by the caller before typing converts its arguments.
-        let parameters = match ctx.heap.get(*parameters) {
-            Value::List(items) => ctx.alloc(Value::Tuple(items.clone())),
-            _ => *parameters,
+        let parameters = if ctx.list_storage(*parameters).is_some() {
+            let items = ctx.items(*parameters)?;
+            ctx.alloc(Value::Tuple(items))
+        } else {
+            *parameters
         };
         return alias(ctx, kind, origin, vec![parameters, *result]);
     }

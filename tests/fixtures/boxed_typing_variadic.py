@@ -1,5 +1,6 @@
+import sys
 from collections.abc import Callable as ABCCallable
-from types import GenericAlias
+from types import GenericAlias, ModuleType
 from typing import Annotated, Callable, ForwardRef, List, NoDefault, ParamSpec, Tuple, TypeVar, TypeVarTuple, Unpack, get_args, get_origin
 from weakref import ref
 
@@ -41,6 +42,22 @@ def current():
     assert Callable[..., None] == Callable[..., type(None)]
     assert Callable[..., None] is not Callable[..., type(None)]
     assert Callable[[None], None] is Callable[(None,), None]
+
+    previous = sys.modules["typing"]
+    sys.modules["typing"] = ModuleType("replacement")
+    try:
+        assert Callable[p, None].__args__ == (p, type(None))
+        assert Callable[[bytes], None].__args__ == (bytes, type(None))
+        unhashable = {}
+        assert Callable[[unhashable], None].__args__[0] is unhashable
+    finally:
+        sys.modules["typing"] = previous
+
+    class Parameters(list):
+        def __iter__(self):
+            return iter((None, int))
+
+    assert Callable[Parameters([bytes]), None] is Callable[[None, int], None]
     assert Callable[["Input"], "Output"].__args__ == (ForwardRef("Input"), ForwardRef("Output"))
 
     alias = tuple[*ts]

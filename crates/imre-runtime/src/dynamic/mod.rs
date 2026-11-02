@@ -3192,6 +3192,15 @@ impl Context {
             {
                 self.classes.insert("re.PatternError".into(), class);
             }
+            if name == "typing"
+                && self.typing.callable_factory.is_none()
+                && self.config["bundled_root"]
+                    .as_str()
+                    .is_some_and(|root| path == std::path::Path::new(root).join("typing.py"))
+            {
+                // A retained Callable still uses its defining module after sys.modules changes.
+                self.typing.callable_factory = self.scope_name(scope, "_make_callable_alias");
+            }
             if name == "threading"
                 && self.config["bundled_root"]
                     .as_str()
