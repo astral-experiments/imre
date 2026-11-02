@@ -2024,6 +2024,12 @@ impl Context {
                             "(...)",
                             Part::Sequence(storage, 0),
                         ),
+                        Value::SlotMember { owner, name } => {
+                            let owner = ctx.class_name(*owner);
+                            let field = ctx.str_value(*name)?;
+                            append_rendered_text(&mut output, &format!("<member '{field}' of '{owner}' objects>"))?;
+                            continue;
+                        }
                         Value::ReadOnlyMember(owner, field) => {
                             append_rendered_text(
                                 &mut output,

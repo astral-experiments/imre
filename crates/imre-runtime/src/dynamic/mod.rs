@@ -20,6 +20,7 @@ mod lowlevel_threads;
 mod mapping_abc;
 mod module_type;
 mod namedtuple;
+mod slot_member;
 mod namespace;
 mod namespace_init;
 mod namespace_repr;
