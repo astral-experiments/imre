@@ -73,6 +73,7 @@ def current():
     directory = os.open(".", os.O_RDONLY)
     path = "imre-boxed-unlink"
     try:
+        check_open_audit(directory)
         for remove, data in ((os.remove, b"hello"), (posix.unlink, b"Hello World!")):
             with open(path, "xb") as file:
                 assert file.write(data) == len(data)
@@ -93,3 +94,33 @@ def current():
         assert error.filename == __file__
     else:
         raise AssertionError("rmdir removed a regular file")
+
+
+def check_open_audit(directory):
+    spelling = b"imre-open-audit-veto"
+    flags = os.O_RDWR | os.O_CREAT | os.O_EXCL
+    events = []
+
+    class Path:
+        def __fspath__(self):
+            return spelling
+
+    def hook(event, args):
+        if armed and event == "open" and args[0] is spelling:
+            events.append(args)
+            raise PermissionError("os.open veto")
+
+    armed = True
+    sys.addaudithook(hook)
+    try:
+        fd = posix.open(Path(), flags, 0o600, dir_fd=directory)
+    except PermissionError as error:
+        assert str(error) == "os.open veto"
+    else:
+        os.close(fd)
+        os.unlink(spelling, dir_fd=directory)
+        raise AssertionError("os.open ignored its audit hook")
+    finally:
+        armed = False
+    assert events == [(spelling, None, flags | os.O_CLOEXEC)]
+    assert not os.path.lexists(spelling)

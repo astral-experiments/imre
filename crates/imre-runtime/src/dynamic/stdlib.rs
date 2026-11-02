@@ -24,7 +24,7 @@ pub(super) mod flags;
 mod fnmatch;
 mod formatters;
 pub(super) mod functools;
-mod hashlib;
+pub(super) mod hashlib;
 mod hmac;
 mod inspect;
 pub(super) mod itertools;
@@ -32,6 +32,7 @@ pub(super) mod locale;
 pub(super) mod tempfile;
 pub(super) mod time;
 mod tokenize;
+mod unicodedata;
 pub(super) use files::{BinaryFile, ReadSource};
 pub(super) use socket::{import_socket_constants, install_lowlevel_socket};
 pub(super) mod io;
@@ -103,6 +104,9 @@ pub(super) fn jit_module(ctx: &mut Context) -> Result<Id> {
 }
 
 pub(super) fn is_module(name: &str) -> bool {
+    if name == "_hashlib" {
+        return hashlib::openssl::provider().is_some();
+    }
     matches!(
         name,
         "_blake2"
@@ -114,6 +118,7 @@ pub(super) fn is_module(name: &str) -> bool {
             | "builtins"
             | "errno"
             | "genericpath"
+            | "urllib.parse"
             | "io"
             | "itertools"
     ) || (cfg!(target_os = "linux") && matches!(name, "_signal" | "_imre_signal"))
@@ -138,6 +143,7 @@ pub(super) fn has_lazy_attributes(name: &str) -> bool {
             | "_thread"
             | "abc"
             | "array"
+            | "_typing"
             | "_collections"
             | "codecs"
             | "_codecs"
@@ -211,7 +217,6 @@ pub(super) fn has_lazy_attributes(name: &str) -> bool {
             | "socket"
             | "_socket"
             | "urllib"
-            | "urllib.parse"
     )
 }
 
@@ -433,9 +438,11 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("_signal", "SIGTERM") => ctx.int(i64::from(libc::SIGTERM)),
         #[cfg(all(unix, not(target_os = "linux")))]
         ("_signal", "alarm") => ctx.builtin("_signal.alarm"),
-        ("codecs" | "_codecs", "encode" | "escape_decode") => ctx.builtin(&format!("codecs.{name}")),
+        ("codecs" | "_codecs", "encode" | "escape_decode" | "utf_16_ex_decode") => {
+            ctx.builtin(&format!("codecs.{name}"))
+        }
         ("_io", "open_code") => ctx.builtin("io.open_code"),
-        ("math", "trunc" | "floor" | "ceil" | "modf" | "gcd" | "isnan") => {
+        ("math", "trunc" | "floor" | "ceil" | "modf" | "gcd" | "isnan" | "isqrt") => {
             ctx.builtin(&format!("math.{name}"))
         }
         ("enum", "auto") => ctx.enum_auto_class()?,
@@ -461,7 +468,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             ctx.builtin("tempfile.TemporaryFile")
         }
         ("gc", "enable" | "disable" | "isenabled") => ctx.builtin(&format!("gc.{name}")),
-        ("unicodedata", "normalize") => ctx.builtin("unicodedata.normalize"),
+        ("unicodedata", "normalize" | "decomposition") => ctx.builtin(&format!("unicodedata.{name}")),
         (
             "_imp",
             "is_frozen"
@@ -539,6 +546,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("collections" | "_collections", "_tuplegetter") => ctx.builtin(super::namedtuple::GETTER),
         ("collections", "defaultdict") => ctx.builtin("collections.defaultdict"),
         ("types", "GenericAlias") => ctx.builtin("types.GenericAlias"),
+        ("_typing", "_idfunc") => ctx.builtin("_typing._idfunc"),
         ("typing", "NoDefault") => super::typing::no_default(ctx),
         ("typing", "TYPE_CHECKING") => FALSE,
         ("typing", "Union") | ("types", "UnionType") => super::union::class(ctx),
@@ -631,6 +639,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         }
         ("sys", "executable" | "_base_executable") => ctx.text(ctx.helper_executable.clone()),
         ("sys", "maxsize") => ctx.int(isize::MAX as i64),
+        ("sys", "maxunicode") => ctx.int(0x10FFFF),
         ("sys", "platform") => ctx.text(if cfg!(target_os = "macos") {
             "darwin"
         } else {
@@ -761,16 +770,11 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         | ("base64", "urlsafe_b64encode" | "urlsafe_b64decode")
         | ("json", "dump" | "dumps" | "loads")
         | ("_json", "_imre_encode_one_shot")
-        | ("random", "random" | "choice")
+        | ("random", "random" | "choice" | "shuffle")
         | ("codecs", "decode" | "lookup" | "register_error" | "lookup_error")
         | ("gc", "collect")
         | ("marshal", "loads")
         | ("pickle", "dumps")
-        | (
-            "urllib.parse",
-            "unquote" | "urlsplit" | "urlunsplit" | "SplitResult" | "SplitResultBytes" | "quote"
-            | "quote_plus" | "quote_from_bytes" | "urlencode",
-        )
         | ("hashlib", "file_digest")
         | ("hmac", "new" | "HMAC" | "compare_digest")
         | (
@@ -1089,6 +1093,25 @@ pub(super) fn call(
         let tb = single_argument("clear_frames", "tb", args, kwargs)?;
         return traceback::clear_frames(ctx, tb);
     }
+    if let Some(method) = name.strip_prefix("collections.defaultdict.")
+        && matches!(method, "__missing__" | "copy" | "__copy__" | "__reduce__")
+    {
+        let Some(&receiver) = args.first() else {
+            return Err(Error::new(
+                "TypeError",
+                format!("unbound method defaultdict.{method}() needs an argument"),
+            ));
+        };
+        if ctx.defaultdict_factory(receiver).is_none() {
+            return Err(Error::new(
+                "TypeError",
+                format!(
+                    "descriptor '{method}' for 'collections.defaultdict' objects doesn't apply to a '{}' object",
+                    ctx.type_name(receiver)
+                ),
+            ));
+        }
+    }
     if name == "collections.defaultdict.__repr__" {
         let Some((&object, args)) = args.split_first() else {
             return Err(Error::new(
@@ -1367,6 +1390,9 @@ pub(super) fn call(
         }
         return Ok(ctx.alloc(Value::Float(crate::objects::imre_random_float())));
     }
+    if name == "random.shuffle" {
+        return random::shuffle(ctx, args, kwargs);
+    }
     if name == "random.randrange" {
         return random::randrange(ctx, args, kwargs);
     }
@@ -1458,6 +1484,9 @@ pub(super) fn call(
     }
     if name == "struct.Struct" {
         return structure::new(ctx, args, kwargs);
+    }
+    if name == "unicodedata.decomposition" {
+        return unicodedata::decomposition(ctx, args, !kwargs.is_empty());
     }
     if name == "unicodedata.normalize" {
         if !kwargs.is_empty() {
@@ -1934,6 +1963,9 @@ pub(super) fn call(
     if let Some(method) = name.strip_prefix("abc.") {
         return super::mapping_abc::call(ctx, method, args, kwargs);
     }
+    if name == "_typing._idfunc" {
+        return builtins::one_positional_arg(name, args, kwargs);
+    }
     if let Some(operation) = name.strip_prefix("typing.") {
         return super::typing::call(ctx, operation, args, kwargs);
     }
@@ -2007,6 +2039,7 @@ pub(super) fn call(
         return match function {
             "encode" | "decode" => codecs::transform(ctx, function, args, kwargs),
             "escape_decode" => codecs::escape_decode(ctx, args, kwargs),
+            "utf_16_ex_decode" => codecs::utf16_extended(ctx, args, kwargs),
             "lookup" => codecs::lookup(ctx, args, kwargs),
             "register_error" | "lookup_error" => {
                 codecs::error_registry(ctx, function, args, kwargs)
@@ -2039,6 +2072,9 @@ pub(super) fn call(
     }
     if let Some(class) = crate::objects::HashState::provider_class(name) {
         return hashlib::hash(ctx, class.rsplit_once('.').unwrap().1, args, kwargs);
+    }
+    if let Some(function) = name.strip_prefix("_hashlib.") {
+        return hashlib::call_openssl(ctx, function, args, kwargs);
     }
     if let Some(algorithm) = name.strip_prefix("hashlib.")
         && crate::objects::HashState::algorithms().any(|name| name == algorithm)
@@ -2187,8 +2223,8 @@ pub(super) fn call(
     {
         return regex::search(ctx, method, args, kwargs);
     }
-    if name == "pattern.sub" {
-        return regex::pattern_sub(ctx, args, kwargs);
+    if let Some(method @ ("sub" | "subn")) = name.strip_prefix("pattern.") {
+        return regex::pattern_sub(ctx, method, args, kwargs);
     }
     if name == "pattern.split" {
         return regex::pattern_split(ctx, args, kwargs);
@@ -2253,6 +2289,7 @@ pub(super) fn call(
             );
         }
         "file.seek" => (3, &["whence"]),
+        "file.truncate" => (2, &[]),
         "file.__exit__" => (4, &[]),
         "struct.unpack" | "file.read" | "file.read1" | "file.readline" | "file.readlines"
         | "file.readinto" | "file.write" | "warnings.warn" => (2, &[]),

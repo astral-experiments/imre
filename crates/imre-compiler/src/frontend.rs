@@ -2571,6 +2571,7 @@ impl<'a> Checker<'a> {
         let name = match attribute.attr.as_str() {
             _ if operation => "set binary operator",
             "__iand__" | "__ior__" | "__isub__" => "set in-place operator",
+            "union" => "set.union",
             "difference_update" => "set.difference_update",
             "remove" => "set.remove",
             "update" => "set.update",
@@ -2582,14 +2583,14 @@ impl<'a> Checker<'a> {
         {
             return Some(name);
         }
-        if (operation || attribute.attr.as_str() == "issubset")
+        if (operation || matches!(attribute.attr.as_str(), "issubset" | "union"))
             && (receiver == Some(Type::FrozenStrings)
                 || self.unshadowed_builtin(&attribute.value, "frozenset"))
         {
-            return Some(if operation {
-                name
-            } else {
-                "frozenset.issubset"
+            return Some(match attribute.attr.as_str() {
+                "issubset" => "frozenset.issubset",
+                "union" => "frozenset.union",
+                _ => name,
             });
         }
         None
@@ -2602,6 +2603,9 @@ impl<'a> Checker<'a> {
     ) -> Result<(Expr, usize, Type), String> {
         if let Some(method) = self.boxed_set_method(attribute, Some(receiver.ty)) {
             return Err(self.object_builtin_error(method, attribute));
+        }
+        if receiver.ty == Type::CodecInfo && attribute.attr.as_str() == "_is_text_encoding" {
+            return Err(self.object_builtin_error("CodecInfo._is_text_encoding", attribute));
         }
         if receiver.ty == Type::BinaryIO && matches!(attribute.attr.as_str(), "name" | "mode") {
             return Err(self.object_builtin_error("binary file metadata", attribute));
@@ -4805,6 +4809,13 @@ impl<'a> Checker<'a> {
                     }
                     if let ast::Expr::Attribute(attr) = target {
                         let receiver = self.expr(&attr.value)?;
+                        if receiver.ty == Type::CodecInfo
+                            && attr.attr.as_str() == "_is_text_encoding"
+                        {
+                            return Err(
+                                self.object_builtin_error("CodecInfo._is_text_encoding", attr)
+                            );
+                        }
                         if matches!(receiver.ty, Type::Popen(..)) && attr.attr.as_str() == "poll" {
                             statements.push(Statement::Expr(Expr {
                                 ty: Type::None,
@@ -6303,6 +6314,12 @@ impl<'a> Checker<'a> {
                 }
             }
             match symbol {
+                Intrinsic::UrlSplit => {
+                    return Err(self.scoped_builtin_error("urllib.parse.urlsplit", expression));
+                }
+                Intrinsic::SplitResult { .. } => {
+                    return Err(self.scoped_builtin_error("urllib.parse result class", expression));
+                }
                 Intrinsic::Chdir => {
                     return Err(self.scoped_builtin_error("posix.chdir", expression));
                 }
@@ -7575,6 +7592,13 @@ impl<'a> Checker<'a> {
                 {
                     return self.struct_time_class_field(attribute);
                 }
+                if matches!(
+                    (self.resolve(&attribute.value), attribute.attr.as_str()),
+                    (Some(Binding::Intrinsic(Intrinsic::SplitResult { bytes: false })), "_encoded_counterpart")
+                    | (Some(Binding::Intrinsic(Intrinsic::SplitResult { bytes: true })), "_decoded_counterpart")
+                ) {
+                    return Err(self.scoped_builtin_error("urllib.parse result counterpart", attribute));
+                }
                 if let Some((_, declaration)) = self.namedtuple_factory(&attribute.value) {
                     return self.namedtuple_class_attribute(attribute, &declaration);
                 }
@@ -8077,6 +8101,11 @@ impl<'a> Checker<'a> {
                         self.string_io_attribute(&receiver, attribute.attr.as_str())
                 {
                     return Ok(value);
+                }
+                if attribute.attr.as_str() == "buffer"
+                    && self.types.payload(receiver.ty).unwrap_or(receiver.ty) == Type::TextIO
+                {
+                    return Err(self.scoped_builtin_error("text stream buffer", attribute));
                 }
                 if matches!(attribute.attr.as_str(), "encoding" | "errors")
                     && matches!(
@@ -9888,21 +9917,15 @@ impl<'a> Checker<'a> {
             if attribute.attr.as_str() == "union"
                 && let Some(key) = self.types.set_element(receiver.ty)
             {
-                self.reject_builtin_keywords(call)?;
                 let [arg] = call.arguments.args.as_ref() else {
-                    return Err(error(
-                        self.source,
-                        call,
-                        "set.union requires one set or mapping key view",
-                    ));
+                    return Err(self.object_builtin_error("set.union", call));
                 };
+                if !call.arguments.keywords.is_empty() || arg.is_starred_expr() {
+                    return Err(self.object_builtin_error("set.union", call));
+                }
                 let (other, other_key) = self.union_operand(arg)?;
                 if other_key != Some(key) {
-                    return Err(error(
-                        self.source,
-                        arg,
-                        "set.union requires matching sets or mapping keys",
-                    ));
+                    return Err(self.object_builtin_error("set.union", call));
                 }
                 return Ok(Expr {
                     ty: receiver.ty,
@@ -10829,6 +10852,12 @@ impl<'a> Checker<'a> {
             {
                 (Builtin::HashType, Type::BuiltinClass)
             }
+            name @ ("type" | "id") if args.len() == 1
+                && self.types.is_url_split_result(args[0].ty)
+                && self.unshadowed_builtin(&call.func, name) =>
+            {
+                return Err(self.scoped_builtin_error("urllib.parse.urlsplit result identity", call));
+            }
             "id" if args.len() == 1
                 && args[0].ty == Type::Hash
                 && self.unshadowed_builtin(&call.func, "id") =>
@@ -10960,6 +10989,12 @@ impl<'a> Checker<'a> {
     /// Text uses UTF-8 and defaults to reading; explicit modes stay literal.
     fn open(&mut self, call: &ast::ExprCall, gzip: bool) -> Result<Expr, String> {
         let args = &call.arguments;
+        if !gzip
+            && self.unshadowed_builtin(&call.func, "open")
+            && args.find_argument_value("opener", 7).is_some()
+        {
+            return Err(self.object_builtin_error("open with opener", call));
+        }
         // The typed BinaryIO ABI carries neither raw write results nor a buffer size.
         if !gzip
             && self.unshadowed_builtin(&call.func, "open")

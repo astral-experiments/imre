@@ -2,12 +2,89 @@
 
 import builtins as _builtins
 import functools
+import sys as _sys
 import typing as _typing
 from _collections_abc import Mapping as _Mapping, MutableMapping as _MutableMapping, Sequence as _Sequence
 from collections import defaultdict as _defaultdict
+from _collections_abc import AsyncIterator as _AsyncIterator, Awaitable as _Awaitable
 from annotationlib import ForwardRef, _make_forward_ref
 from functools import lru_cache
+from _typing import _idfunc
 from typing import Any, Callable, Generic, Protocol, TypeVar
+
+
+# From CPython 3.14.5 Lib/typing.py. See stdlib/docstrings/LICENSE.
+def _caller(depth=1, default='__main__'):
+    try:
+        return _sys._getframemodulename(depth + 1) or default
+    except AttributeError:  # For platforms without _getframemodulename()
+        pass
+    try:
+        return _sys._getframe(depth + 1).f_globals.get('__name__', default)
+    except (AttributeError, ValueError):  # For platforms without _getframe()
+        pass
+    return None
+
+class NewType:
+    """NewType creates simple unique types with almost zero runtime overhead.
+
+    NewType(name, tp) is considered a subtype of tp
+    by static type checkers. At runtime, NewType(name, tp) returns
+    a dummy callable that simply returns its argument.
+
+    Usage::
+
+        UserId = NewType('UserId', int)
+
+        def name_by_id(user_id: UserId) -> str:
+            ...
+
+        UserId('user')          # Fails type check
+
+        name_by_id(42)          # Fails type check
+        name_by_id(UserId(42))  # OK
+
+        num = UserId(5) + 1     # type: int
+    """
+
+    __call__ = _idfunc
+
+    def __init__(self, name, tp):
+        self.__qualname__ = name
+        if '.' in name:
+            name = name.rpartition('.')[-1]
+        self.__name__ = name
+        self.__supertype__ = tp
+        def_mod = _caller()
+        if def_mod != 'typing':
+            self.__module__ = def_mod
+
+    def __mro_entries__(self, bases):
+        # We defined __mro_entries__ to get a better error message
+        # if a user attempts to subclass a NewType instance. bpo-46170
+        superclass_name = self.__name__
+
+        class Dummy:
+            def __init_subclass__(cls):
+                subclass_name = cls.__name__
+                raise TypeError(
+                    f"Cannot subclass an instance of NewType. Perhaps you were looking for: "
+                    f"`{subclass_name} = NewType({subclass_name!r}, {superclass_name})`"
+                )
+
+        return (Dummy,)
+
+    def __repr__(self):
+        return f'{self.__module__}.{self.__qualname__}'
+
+    def __reduce__(self):
+        return self.__qualname__
+
+    def __or__(self, other):
+        return _typing.Union[self, other]
+
+    def __ror__(self, other):
+        return _typing.Union[other, self]
 
 
 T = TypeVar("T")
@@ -487,7 +564,7 @@ def _typeddict_replay(annotate, owner, allow_evaluation):
     return func, names
 
 
-def _typeddict_base_annotations(annotate, format, owner=None):
+def _call_annotate(annotate, format, owner=None):
     from annotationlib import Format
     if format == Format.VALUE_WITH_FAKE_GLOBALS:
         raise ValueError("The VALUE_WITH_FAKE_GLOBALS format is for internal use only")
@@ -528,12 +605,24 @@ def _typeddict_base_annotations(annotate, format, owner=None):
     return {key: value.evaluate(format=Format.FORWARDREF)
             if isinstance(value, ForwardRef) else value for key, value in result.items()}
 
+def _namedtuple_annotate(original):
+    # Check field types at declaration time, even if a name is still undefined.
+    def annotate(format):
+        values = _call_annotate(original, format)
+        if format == 4:
+            return values
+        return {name: _type_check(value, f"field {name} annotation must be a type")
+                for name, value in values.items()}
+
+    return annotate
+
+
 def _configure_typeddict(cls, fields, total, own_annotate=None, bases=()):
     if not hasattr(cls, "__orig_bases__"):
         cls.__orig_bases__ = bases
 
     if own_annotate is not None:
-        fields = _typeddict_base_annotations(own_annotate, 3, cls)
+        fields = _call_annotate(own_annotate, 3, cls)
     annotations = {key: _typeddict_field(tp, cls.__module__, cls)
                    for key, tp in fields.items()}
 
@@ -544,9 +633,9 @@ def _configure_typeddict(cls, fields, total, own_annotate=None, bases=()):
                 continue
             annotate = base.__annotate__
             if annotate is not None:
-                result.update(_typeddict_base_annotations(annotate, format, base))
+                result.update(_call_annotate(annotate, format, base))
         if own_annotate is not None:
-            own = _typeddict_base_annotations(own_annotate, format, cls)
+            own = _call_annotate(own_annotate, format, cls)
             if format != 4:
                 own = {key: _typeddict_field(tp, cls.__module__) for key, tp in own.items()}
         elif format == 4:
@@ -1315,6 +1404,8 @@ Tuple.__doc__ = \
 
     To specify a variable-length tuple of homogeneous type, use Tuple[T, ...].
     """
+Awaitable = _SpecialGenericAlias(_Awaitable, 1)
+AsyncIterator = _SpecialGenericAlias(_AsyncIterator, 1)
 List = _SpecialGenericAlias(list, 1, name="List", inst=False)
 Dict = _SpecialGenericAlias(dict, 2, name="Dict", inst=False)
 Type = _SpecialGenericAlias(type, 1, name="Type", inst=False)

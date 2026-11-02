@@ -5075,6 +5075,15 @@ impl Emitter<'_, '_> {
                 use crate::ir::RandomOperation::*;
                 let values: Vec<_> = args.iter().map(|arg| &arg.value).collect();
                 match op {
+                    Shuffle => {
+                        let symbol = if values[0].ty == Type::ListInt {
+                            "imre_random_shuffle_int_list"
+                        } else {
+                            "imre_random_shuffle_list"
+                        };
+                        self.void_call(symbol, &values);
+                        none()
+                    }
                     Float => self.call("imre_random_float", Type::Float, &[]),
                     Bits => self.call("imre_random_bits", Type::Int, &values),
                     ChoiceIndex { secure } => {
@@ -8704,6 +8713,7 @@ declare ptr @imre_subprocess_quote_argument(i64, i32)
 @imre_os_o_directory = external constant i64
 @imre_os_o_nofollow = external constant i64
 @imre_os_o_nonblock = external constant i64
+@imre_os_o_tmpfile = external constant i64
 @imre_os_seek_set = external constant i64
 @imre_os_seek_cur = external constant i64
 @imre_os_seek_end = external constant i64
@@ -9768,6 +9778,8 @@ declare i64 @imre_int_parse(ptr)
 declare i64 @imre_int_parse_hex(ptr)
 declare ptr @imre_input()
 declare ptr @imre_chr(i64)
+declare void @imre_random_shuffle_int_list(ptr)
+declare void @imre_random_shuffle_list(ptr)
 declare void @imre_random_seed_none()
 declare void @imre_random_seed_int(i64)
 declare void @imre_random_seed_str(ptr)

@@ -45,6 +45,34 @@ def current():
     assert bytes.decode(value) == "a " and bytes.rfind(value, b"a") == 0
     assert bytes.rsplit(value) == [b"a"]
 
+    class Convert:
+        def __bytes__(self):
+            return value
+
+        def __iter__(self):
+            return iter(b"fallback")
+
+    source = Convert()
+    source.__bytes__ = lambda: b"shadow"
+    assert bytes(source) is value and bytearray(source) == b"fallback"
+
+    class Text(str):
+        def __bytes__(self):
+            return b"hook"
+
+    assert bytes(Text("x")) == b"hook" and bytes(Text("x"), "ascii") == b"x"
+    for obj, error, message in (
+        (Wrong(), TypeError, "__bytes__ returned non-bytes (type bytearray)"),
+        (Broken(), LookupError, "binary conversion"),
+        (BindingError(), RuntimeError, "descriptor lookup"),
+    ):
+        try:
+            bytes(obj)
+        except error as exc:
+            assert str(exc) == message
+        else:
+            raise AssertionError("bytes accepted an invalid conversion")
+
     operand = Binary()
     operand.__bytes__ = lambda: b"shadow"
     for field in (b"%b", b"%s"):

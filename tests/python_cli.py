@@ -1126,6 +1126,17 @@ def main():
 
         check_command_stdin(imre, run)
 
+        # The binary buffer must work from an ordinary -c command on its own.
+        for stream in ("stdout", "stderr"):
+            command = (
+                f"import sys; output = sys.{stream}; buf = output.buffer;"
+                "buf.write(b'\\xff\\r\\n'); buf.flush()"
+            )
+            actual = run(imre, "-c", command)
+            expected = run(sys.executable, "-c", command)
+            assert actual.returncode == expected.returncode == 0, actual.stderr
+            assert (actual.stdout, actual.stderr) == (expected.stdout, expected.stderr)
+
         streams = root / "streams.py"
         streams.write_bytes((Path(__file__).with_name("fixtures") / "boxed_sys_output.py").read_bytes())
         expected = run(sys.executable, "-B", streams)
@@ -1231,6 +1242,24 @@ def main():
         (later / "__init__.py").write_text("invalid syntax!\n")
         compare("-B", "-m", "preferred", extra={"PYTHONPATH": str(later.parent)})
 
+        decorated = root / "method_decorators.py"
+        decorated.write_text(
+            "def prefix(tag):\n"
+            "    print('evaluate', tag)\n"
+            "    def decorate(method):\n"
+            "        print('apply', tag)\n"
+            "        return lambda self: tag + method(self)\n"
+            "    return decorate\n"
+            "\n"
+            "class Example:\n"
+            "    @prefix('outer/')\n"
+            "    @prefix('inner/')\n"
+            "    def value(self):\n"
+            "        return 'method'\n"
+            "\n"
+            "print(Example().value())\n"
+        )
+        compare("-IB", decorated)
 
         locale_script = root / "get_locale.py"
         locale_script.write_text(
@@ -1898,12 +1927,25 @@ def report(text):
         compare("-IB", override_fixture, native_args=("run", override_fixture, "--runtime-imports", "--quiet"))
         reader_fixture = fixtures / "io_buffered_reader_type.py"
         compare("-IB", reader_fixture, native_args=("run", reader_fixture, "--quiet"))
+        callback_writer = fixtures / "io_buffered_writer_callbacks.py"
+        compare("-IB", callback_writer, native_args=("run", callback_writer, "--quiet"))
+        shutdown_writer = fixtures / "io_buffered_writer_shutdown.py"
+        sink = root / "callback-shutdown.bin"
+        command = ("run", shutdown_writer, "--quiet", "--", sink)
+        for mode in ("close", "temporary-close"):
+            compare("-IB", shutdown_writer, sink, mode, native_args=(*command, mode))
+            assert sink.read_bytes() == b"abc"
+        pending = run(imre, *command, "pending")
+        assert pending.returncode == 1 and b"unflushed bytes at shutdown" in pending.stderr, pending
+        assert sink.read_bytes() == b""
         memory_writer = fixtures / "io_buffered_writer_bytesio.py"
         compare("-IB", memory_writer, native_args=("run", memory_writer, "--quiet"))
         writer_fixture = fixtures / "io_buffered_writer_type.py"
         compare("-IB", writer_fixture, native_args=("run", writer_fixture, "--quiet"))
         io_fixture = fixtures / "boxed_io_indirect_import.py"
         compare("-IB", io_fixture, native_args=("run", io_fixture, "--runtime-imports", "--quiet"))
+        coroutine_fixture = fixtures / "boxed_prelinked_coroutine.py"
+        compare("-IB", coroutine_fixture, native_args=("run", coroutine_fixture, "--runtime-imports", "--quiet"))
         builtins_fixture = fixtures / "boxed_builtins_module.py"
         compare("-IB", builtins_fixture, native_args=("run", builtins_fixture, "--runtime-imports", "--quiet"))
         for name in (
@@ -1955,6 +1997,13 @@ def report(text):
             "reference = union.__args__[-1]\n"
             "print(type(reference).__name__, reference.__forward_arg__)",
         )
+        split_entry = root / "split_identity.py"
+        split_entry.write_text(
+            "from urllib.parse import urlsplit\n"
+            "first = urlsplit('http://host/a')\n"
+            "print(first is urlsplit('http://host/a'), first is urlsplit(b'http://host/a'))\n"
+        )
+        compare("-IB", split_entry, native_args=("run", split_entry, "--quiet"))
         hex_entry = root / "hex_entry.py"
         for program in (
             "class Offset:\n    def __index__(self): return -(1 << 100)\nprint(hex(Offset()))",
@@ -2020,6 +2069,7 @@ def report(text):
             "boxed_array.py",
             "boxed_bytearray_memoryview.py",
             "boxed_bytes_io.py",
+            "boxed_io_newline_decoder.py",
             "boxed_text_io_wrapper.py",
             "boxed_platform_version.py",
             "boxed_int_to_bytes.py",
@@ -2065,6 +2115,7 @@ def report(text):
             "boxed_typing_no_type_check.py",
             "boxed_typing_no_type_check_decorator.py",
             "boxed_typing_assert_type.py",
+            "boxed_typing_new_type.py",
             "boxed_typing_typeddict.py",
             "boxed_typing_dataclass_transform.py",
             "boxed_typing_optional.py",
@@ -2072,6 +2123,7 @@ def report(text):
             "boxed_typing_protocol.py",
             "boxed_typing_variadic.py",
             "boxed_typing_tuple.py",
+            "boxed_typing_async_collection_aliases.py",
             "boxed_typing_type.py",
             "boxed_typing_mapping.py",
             "boxed_typing_regex_aliases.py",
@@ -2113,6 +2165,7 @@ def report(text):
             "boxed_io_exports.py",
             "boxed_io_reimport.py",
             "boxed_fileio_opener.py",
+            "boxed_open_opener.py",
             "boxed_io_text_encoding.py",
             "boxed_locale.py",
             "boxed_locale_error.py",
@@ -2218,6 +2271,7 @@ def report(text):
             "boxed_asyncio_policy.py",
             "boxed_textwrap.py",
             "boxed_set_ordering.py",
+            "boxed_dict_view_equality.py",
             "boxed_set_issubset.py",
             "boxed_set_operator_descriptors.py",
             "boxed_set_union.py",
@@ -2243,6 +2297,7 @@ def report(text):
             "boxed_fnmatch.py",
             "boxed_unittest_cleanup.py",
             "boxed_unittest_result_registry.py",
+            "boxed_unittest_get_description.py",
             "boxed_unittest_default_result.py",
             "boxed_unittest_runner_warnings.py",
             "boxed_unittest_runner_durations.py",
@@ -2322,6 +2377,7 @@ def report(text):
             "boxed_zlib.py",
             "boxed_hashlib_names.py",
             "bytes/hashlib_sha3_provider.py",
+            "bytes/hashlib_kdf.py",
             "boxed_hashlib_file_digest.py",
             "boxed_standard_base64.py",
             "boxed_csv.py",

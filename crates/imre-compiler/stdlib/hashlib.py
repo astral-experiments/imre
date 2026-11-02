@@ -1,4 +1,10 @@
 # From CPython 3.14.5 Lib/hashlib.py (PSF-2.0). See stdlib/docstrings/LICENSE.
+__all__ = (
+    'md5', 'sha1', 'sha224', 'sha256', 'sha384', 'sha512', 'blake2b', 'blake2s',
+    'sha3_224', 'sha3_256', 'sha3_384', 'sha3_512', 'shake_128', 'shake_256',
+    'new', 'algorithms_guaranteed', 'algorithms_available', 'file_digest',
+)
+
 __builtin_constructor_cache = {}
 
 
@@ -74,3 +80,15 @@ for __func_name in __block_openssl_constructor | __sha3_provider_names:
     except ValueError:
         pass
 del __func_name
+
+
+try:
+    from _hashlib import pbkdf2_hmac
+    __all__ += ('pbkdf2_hmac',)
+except ImportError:
+    pass
+
+try:
+    from _hashlib import scrypt
+except ImportError:
+    pass

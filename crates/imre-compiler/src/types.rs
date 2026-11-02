@@ -1224,6 +1224,10 @@ impl Types {
         self.namedtuple_layout(origin, vec![field; URL_FIELDS.len()])
     }
 
+    pub(crate) fn is_url_split_result(&self, ty: Type) -> bool {
+        matches!(self.tuple_origin(ty), Some(SPLIT_RESULT | SPLIT_RESULT_BYTES))
+    }
+
     pub(crate) fn tuple_origin(&self, ty: Type) -> Option<TupleOrigin> {
         let Type::Tuple(id) = ty else { return None };
         match self.0.borrow().shapes[id] {

@@ -13,6 +13,7 @@ use reader::Reader;
 const CHUNK: usize = 8192;
 pub(super) const METHODS: &[&str] = &[
     "__init__",
+    "__next__",
     "_CHUNK_SIZE",
     "buffer",
     "encoding",
@@ -65,6 +66,7 @@ pub(in crate::dynamic) struct Wrapper {
     readable: bool,
     writable: bool,
     seekable: bool,
+    telling: Cell<bool>,
     read1: bool,
     write_start: Cell<bool>,
     output: RefCell<Vec<u8>>,
@@ -220,6 +222,7 @@ fn initialize(ctx: &mut Context, receiver: Id, args: &[Id], kwargs: &[(String, I
         readable,
         writable,
         seekable,
+        telling: Cell::new(seekable),
         read1,
         write_start: Cell::new(write_start),
         output: RefCell::default(),
@@ -414,15 +417,16 @@ impl Wrapper {
             let Value::Tuple(parts) = ctx.heap.get(decoded) else {
                 unreachable!("native codec decoder returns (text, consumed)");
             };
-            w.input.borrow_mut().append(
+            let mut input = w.input.borrow_mut();
+            input.append(
                 ctx.str_value(parts[0])?,
                 ctx.bytes_like(raw)?,
                 codec,
                 w.newline.as_deref(),
                 end,
+                !all && w.telling.get(),
             )?;
             if end {
-                let mut input = w.input.borrow_mut();
                 let part = input
                     .take(limit, line, w.newline.as_deref(), true)?
                     .unwrap_or_default();
@@ -433,6 +437,53 @@ impl Wrapper {
             }
         }
     }
+}
+
+/// Advance the concrete text iterator. Only an empty line restores telling at EOF.
+pub(super) fn next(
+    ctx: &mut Context,
+    receiver: Id,
+    exact: bool,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Id> {
+    if !kwargs.is_empty() {
+        return Err(Error::new(
+            "TypeError",
+            "wrapper __next__() takes no keyword arguments",
+        ));
+    }
+    if !args.is_empty() {
+        return Err(Error::new(
+            "TypeError",
+            format!("expected 0 arguments, got {}", args.len()),
+        ));
+    }
+    let w = Wrapper::from_receiver(ctx, receiver)?;
+    let buffer = w.binary()?;
+    w.telling.set(false);
+    let line = if exact {
+        w.check_open(ctx, buffer)?;
+        Wrapper::read(ctx, receiver, None, true)?
+    } else {
+        invoke(ctx, receiver, "readline", vec![])?
+    };
+    let text = ctx.string_storage(line).ok_or_else(|| {
+        Error::new(
+            "OSError",
+            format!(
+                "readline() should have returned a str object, not '{}'",
+                ctx.type_name(line)
+            ),
+        )
+    })?;
+    if ctx.truth(text)? {
+        return Ok(line);
+    }
+    let w = Wrapper::from_receiver(ctx, receiver)?;
+    w.input.borrow_mut().clear_snapshot();
+    w.telling.set(w.seekable);
+    Err(Error::new("StopIteration", ""))
 }
 
 /// Dispatch to the text layer while keeping the supplied buffer and its overrides observable.
@@ -528,6 +579,7 @@ pub(super) fn call(
     match name {
         "__enter__" => Ok(receiver),
         "flush" => {
+            w.telling.set(w.seekable);
             w.drain(ctx, receiver)?;
             Wrapper::invoke_buffer(ctx, receiver, "flush", vec![])
         }
@@ -557,10 +609,19 @@ pub(super) fn call(
                     "underlying stream is not seekable",
                 ));
             }
-            invoke(ctx, receiver, "flush", vec![])?;
             if name == "tell" {
+                if !w.telling.get() {
+                    return Err(Error::new(
+                        "OSError",
+                        "telling position disabled by next() call",
+                    ));
+                }
+                invoke(ctx, receiver, "flush", vec![])?;
                 let pos = Wrapper::invoke_buffer(ctx, receiver, "tell", vec![])?;
-                return w.input.borrow().position(ctx, pos);
+                return Wrapper::from_receiver(ctx, receiver)?
+                    .input
+                    .borrow()
+                    .position(ctx, pos);
             }
             let offset = ctx
                 .index_integer(args[0])?
@@ -580,8 +641,7 @@ pub(super) fn call(
                 0 => (offset, 0),
                 2 if offset == 0 => (0, 2),
                 1 if offset == 0 => {
-                    let pos = Wrapper::invoke_buffer(ctx, receiver, "tell", vec![])?;
-                    let pos = w.input.borrow().position(ctx, pos)?;
+                    let pos = invoke(ctx, receiver, "tell", vec![])?;
                     (ctx.as_integer(pos)?, 0)
                 }
                 1 | 2 => {
@@ -601,11 +661,19 @@ pub(super) fn call(
                     ));
                 }
             };
+            invoke(ctx, receiver, "flush", vec![])?;
+            if whence == 2 {
+                Wrapper::from_receiver(ctx, receiver)?
+                    .input
+                    .borrow_mut()
+                    .discard();
+            }
             let off = ctx.int(offset);
             let dir = ctx.int(whence);
             let position = Wrapper::invoke_buffer(ctx, receiver, "seek", vec![off, dir])?;
             let beginning = !ctx.truth(position)?;
-            w.input.replace(Reader::at(beginning));
+            let w = Wrapper::from_receiver(ctx, receiver)?;
+            w.input.replace(Reader::after_seek(beginning, whence == 0));
             w.write_start.set(beginning);
             Ok(position)
         }

@@ -14,7 +14,7 @@ if sys.platform == "linux":
         if _name.startswith("RTLD_"):
             globals()[_name] = getattr(_posix, _name)
     del _name, _posix
-    from posix import fstatvfs, statvfs, statvfs_result
+    from posix import O_TMPFILE, fstatvfs, statvfs, statvfs_result
     from posix import (
         sched_getscheduler, SCHED_BATCH, SCHED_DEADLINE, SCHED_FIFO, SCHED_IDLE,
         SCHED_NORMAL, SCHED_OTHER, SCHED_RESET_ON_FORK, SCHED_RR,

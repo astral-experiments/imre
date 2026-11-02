@@ -817,6 +817,14 @@ pub(super) unsafe extern "C" fn imre_dyn_finish(ctx: *mut Context) -> i32 {
     ctx.workers.join_before_exit_callbacks();
     atexit::run(&mut ctx);
     stdlib::io::prepare_writer_shutdown(&ctx);
+    if status == 0 && stdlib::io::has_pending_callback_write(&ctx) {
+        use std::io::Write;
+
+        let _ = writeln!(std::io::stderr().lock(),
+            "NotImplementedError: BufferedWriter has unflushed bytes at shutdown; explicitly flush or close Python-backed writers"
+        );
+        return 1;
+    }
     status
 }
 
@@ -1545,14 +1553,14 @@ impl Context {
 
     /// Publish the surviving roots before the next operand can observe a discarded writer.
     pub(super) fn discard_truth(&mut self, mark: usize) {
-        if self.heap.discard_truth_operands(mark) {
+        if self.heap.discard_truth_operands(mark, self.modules) {
             self.collect_unreachable();
         }
     }
 
     /// Keep the returned value and earlier operands while dropping the completed call's temporaries.
     pub(super) fn finish_call_operands(&mut self, mark: usize, result: Id) {
-        if self.heap.discard_operands(mark, result) {
+        if self.heap.discard_operands(mark, result, self.modules) {
             self.collect_unreachable();
         }
     }
@@ -1676,7 +1684,13 @@ mod tests {
         ctx.alloc(Value::AttrGetter(value));
         ctx.heap.release_temporaries_since(mark);
 
-        let encoded = ctx.call(encode, vec![query, TRUE], Vec::new()).unwrap();
+        // The key and decimal values need no escaping.
+        let template = ctx.text("{0}");
+        let quote_via = ctx.lookup_attr(template, "format").unwrap();
+        let safe = ctx.text("");
+        let encoded = ctx
+            .call(encode, vec![query, TRUE, safe, NONE, NONE, quote_via], Vec::new())
+            .unwrap();
         let encoded = ctx.str_value(encoded).unwrap();
         assert!(encoded.starts_with("k=0&k=1&"));
         assert!(encoded.ends_with("k=16383"));
