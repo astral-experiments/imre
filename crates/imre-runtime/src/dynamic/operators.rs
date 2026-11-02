@@ -4100,6 +4100,12 @@ impl Context {
         }
     }
 
+    /// An inherited object.__ne__ leaves ordinary comparison to the equality fallback.
+    fn has_custom_ne(&self, value: Id) -> bool {
+        self.slot(value, "__ne__")
+            .is_some_and(|slot| Some(&slot) != self.builtins.get("object.__ne__"))
+    }
+
     fn operator_slot(&mut self, obj: Id, name: &str, other: Id) -> Result<Option<Id>> {
         if let Value::KeyWrapper { comparator, object } = *self.heap.get(obj) {
             return stdlib::functools::key_comparison(self, name, comparator, object, other);
@@ -4112,7 +4118,9 @@ impl Context {
         {
             return Ok(None);
         }
-        let method = if matches!(
+        let method = if name == "__ne__" && !self.has_custom_ne(obj) {
+            None
+        } else if matches!(
             name,
             "__add__"
                 | "__radd__"
@@ -4340,8 +4348,8 @@ impl Context {
             self.heap.keep(left);
             self.heap.keep(right);
             if op == "!="
-                && self.slot(left, "__ne__").is_none()
-                && self.slot(right, "__ne__").is_none()
+                && !self.has_custom_ne(left)
+                && !self.has_custom_ne(right)
             {
                 let equal = self.binary("==", left, right)?;
                 return Ok(Some(if self.truth(equal)? { FALSE } else { TRUE }));

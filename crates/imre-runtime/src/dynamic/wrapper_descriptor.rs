@@ -105,6 +105,7 @@ impl BuiltinDescriptor {
             "str.istitle" => ("str", "istitle"),
             "float.__format__" => ("float", "__format__"),
             "object.__hash__" => ("object", "__hash__"),
+            "object.__ne__" => ("object", "__ne__"),
             "object.__repr__" => ("object", "__repr__"),
             "object.__str__" => ("object", "__str__"),
             "function.__call__" => ("function", "__call__"),

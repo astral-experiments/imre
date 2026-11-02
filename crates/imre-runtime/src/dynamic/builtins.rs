@@ -1016,7 +1016,7 @@ pub(super) fn call(
     }
     if matches!(
         name,
-        "object.__hash__" | "object.__repr__" | "object.__str__"
+        "object.__hash__" | "object.__repr__" | "object.__str__" | "object.__ne__"
             | "mappingproxy.__repr__" | "mappingproxy.__str__"
     ) {
         let (owner, method) = name.split_once('.').unwrap();
@@ -1035,6 +1035,12 @@ pub(super) fn call(
             return Err(type_error(format!(
                 "wrapper {method}() takes no keyword arguments"
             )));
+        }
+        if method == "__ne__" {
+            let [other] = rest else {
+                return Err(type_error(format!("expected 1 argument, got {}", rest.len())));
+            };
+            return ctx.object_ne(receiver, *other);
         }
         if !rest.is_empty() {
             return Err(type_error(format!(

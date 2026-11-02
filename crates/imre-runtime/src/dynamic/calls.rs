@@ -191,6 +191,7 @@ impl Context {
             Value::Class { scope, .. } => self.scope_data(*scope).names.get(name).copied(),
             Value::Native(kind) if kind == "object" => match name {
                 "__hash__" => self.builtins.get("object.__hash__").copied(),
+                "__ne__" => self.builtins.get("object.__ne__").copied(),
                 "__format__" => self.builtins.get("object.__format__").copied(),
                 "__getstate__" => self.builtins.get("object.__getstate__").copied(),
                 "__reduce__" => self.builtins.get("object.__reduce__").copied(),
@@ -3128,6 +3129,7 @@ impl Context {
                             | "__getattribute__"
                             | "__setattr__"
                             | "__delattr__"
+                            | "__ne__"
                             | "__init__"
                             | "__new__"
                     ) =>
@@ -4555,6 +4557,27 @@ impl Context {
             class = primary;
         }
         Some(class)
+    }
+
+    /// Invert only the receiver's equality result, preserving a declined comparison.
+    pub(super) fn object_ne(&mut self, object: Id, other: Id) -> Result<Id> {
+        let class = self.exact_type(object)?;
+        if let Some(slot) = self.class_attr(class, "__eq__") {
+            let method = self.bind_attribute(slot, object, class)?;
+            let equal = self.call(method, vec![other], Vec::new())?;
+            return if equal == value::NOT_IMPLEMENTED {
+                Ok(equal)
+            } else {
+                Ok(builtins::boolean(!self.truth(equal)?))
+            };
+        }
+        if self.allocation_base(class) == self.builtins.get("object").copied() {
+            return Ok(if object == other { FALSE } else { value::NOT_IMPLEMENTED });
+        }
+        Err(Error::new(
+            "NotImplementedError",
+            format!("object.__ne__(): the equality slot of '{}' is unsupported", self.type_name(object)),
+        ))
     }
 
     /// Allocate a plain instance without invoking its constructor or initializer.
