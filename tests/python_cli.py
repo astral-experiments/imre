@@ -969,9 +969,13 @@ def check_unittest_main_names(imre, root, run):
     built = run(imre, "build", source, "--runtime-imports", "--no-cache", "-o", executable)
     assert built.returncode == 0, built
     for args, output in [((), "a\nb\n"), (("Cases.test_b", "Cases.test_a"), "b\na\n"),
-                         (("-v", "-k", "test_b", "Cases"), "b\n")]:
+                         (("-vk", "test_b", "Cases"), "b\n")]:
         result = run(executable, *args)
         assert result.returncode == 0 and result.stdout == output, result
+    extra = run(executable, "Cases", "-v", "Cases.test_b")
+    assert extra.returncode == 2 and not extra.stdout and "unrecognized arguments" in extra.stderr, extra
+    filtered = run(executable, "-k", "-1", "Cases")
+    assert filtered.returncode == 5 and not filtered.stdout, filtered
     missing = run(executable, "-v", "Cases.test_missing")
     assert missing.returncode == 1 and "_FailedTest" in missing.stderr, missing
 
