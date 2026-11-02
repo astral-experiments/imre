@@ -607,7 +607,10 @@ impl Context {
                 {
                     Self::identity_hash(key)
                 }
-                Value::Str(text) | Value::Native(text) => crate::python_hash::text(text),
+                Value::Native(name) => {
+                    crate::python_hash::text(crate::dynamic::builtins::native_implementation(name))
+                }
+                Value::Str(text) => crate::python_hash::text(text),
                 Value::SurrogateStr(points) => {
                     crate::python_hash::codepoints(points.iter().copied())
                 }

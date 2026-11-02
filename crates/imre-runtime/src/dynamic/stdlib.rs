@@ -1067,8 +1067,10 @@ pub(super) fn call(
     {
         return os::scandir::method(ctx, owner, method, args, kwargs);
     }
-    if name == super::thread_lock::CLASS {
-        return super::thread_lock::construct(ctx, args, kwargs);
+    if matches!(name, "_thread.allocate_lock" | "_thread.allocate")
+        || name == super::thread_lock::CLASS
+    {
+        return super::thread_lock::construct(ctx, name, args, kwargs);
     }
     if let Some(method) = name.strip_prefix("_thread._local.") {
         return super::thread_local::method(ctx, method, args, kwargs);

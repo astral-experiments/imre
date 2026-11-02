@@ -1996,6 +1996,19 @@ impl Context {
         source: Option<(PathBuf, importlib::SourceBody)>,
     ) -> Result<()> {
         match name {
+            "_thread" => {
+                for name in ["allocate_lock", "allocate"] {
+                    let factory = self.builtin(&format!("_thread.{name}"));
+                    self.bind(scope, name, factory);
+                }
+                let limit = self.alloc(Value::Float(crate::objects::locks::TIMEOUT_MAX));
+                self.bind(scope, "TIMEOUT_MAX", limit);
+            }
+            "threading" if source.is_none() => {
+                let thread = self.module("_thread")?;
+                let limit = self.lookup_attr(thread, "TIMEOUT_MAX")?;
+                self.bind(scope, "TIMEOUT_MAX", limit);
+            }
             "os" => {
                 #[cfg(unix)]
                 stdlib::os::install_capabilities(self, module, scope)?;

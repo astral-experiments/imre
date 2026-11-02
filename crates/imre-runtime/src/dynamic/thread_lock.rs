@@ -12,14 +12,27 @@ pub(super) fn is_method(name: &str) -> bool {
     )
 }
 
-pub(super) fn construct(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+pub(super) fn construct(
+    ctx: &mut Context,
+    name: &str,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Id> {
     if !kwargs.is_empty() {
-        return Err(Error::new("TypeError", "lock() takes no keyword arguments"));
+        let label = if name == CLASS { "lock" } else { name };
+        return Err(Error::new(
+            "TypeError",
+            format!("{label}() takes no keyword arguments"),
+        ));
     }
     if !args.is_empty() {
         return Err(Error::new(
             "TypeError",
-            format!("lock expected 0 arguments, got {}", args.len()),
+            if name == CLASS {
+                format!("lock expected 0 arguments, got {}", args.len())
+            } else {
+                format!("{name}() takes no arguments ({} given)", args.len())
+            },
         ));
     }
     Ok(ctx.alloc(Value::PrimitiveLock(Default::default())))
