@@ -34,7 +34,7 @@ impl Attributes {
             flags |= libc::POSIX_SPAWN_RESETIDS;
         }
         if setsid {
-            flags |= libc::POSIX_SPAWN_SETSID;
+            flags |= libc::c_int::from(libc::POSIX_SPAWN_SETSID);
         }
         if let Some(value) = setsigmask {
             let mask = signal_set(ctx, value)?;
@@ -81,7 +81,7 @@ impl Attributes {
             flags |= libc::POSIX_SPAWN_SETSCHEDPARAM;
         }
         // SAFETY: attr is initialized and all flags are system spawn flags.
-        check(unsafe { libc::posix_spawnattr_setflags(attr, flags) })?;
+        check(unsafe { libc::posix_spawnattr_setflags(attr, flags as libc::c_short) })?;
         Ok(attributes)
     }
 
