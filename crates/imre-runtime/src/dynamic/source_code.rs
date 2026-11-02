@@ -38,6 +38,8 @@ pub(super) struct Program {
     private_names: Option<Rc<imre_ast::Names>>,
     template_expressions: Rc<HashMap<ruff_text_size::TextSize, String>>,
     instructions: Vec<(u32, Instruction)>,
+    // Declarations collected across module suites while lowering.
+    module_annotations: Vec<(String, ast::Expr)>,
     expression_functions: HashMap<ruff_text_size::TextRange, (usize, Definition)>,
     eager_comprehension_targets: HashMap<ruff_text_size::TextRange, HashSet<String>>,
 }
@@ -86,8 +88,10 @@ enum Instruction {
     CheckAnnotationFormat,
     Annotations {
         entries: Vec<(String, ast::Expr)>,
-        class: bool,
+        scope: annotations::AnnotationScope,
     },
+    ModuleAnnotations(Option<Rc<Program>>),
+    MarkModuleAnnotation(usize),
     StringAnnotation(String, ast::Expr),
     ClassAnnotator(Rc<Program>),
     ClassStart,
@@ -1104,7 +1108,8 @@ impl Program {
                 Instruction::StringAnnotation(name, expr) => {
                     strings.annotation(name, expr, true)?
                 }
-                Instruction::ClassAnnotator(provider) => {
+                Instruction::ClassAnnotator(provider)
+                | Instruction::ModuleAnnotations(Some(provider)) => {
                     nested_reads.extend(
                         strings
                             .annotation_code(provider, class_locals, line_at)?
@@ -1141,7 +1146,9 @@ impl Program {
                         DefinitionKind::Class(None) | DefinitionKind::TypeAlias(_) => {}
                     }
                 }
-                Instruction::ClassStart
+                Instruction::ModuleAnnotations(None)
+                | Instruction::MarkModuleAnnotation(_)
+                | Instruction::ClassStart
                 | Instruction::ClassEnd
                 | Instruction::CheckAnnotationFormat => {}
                 Instruction::Yield(e) | Instruction::Return(e) | Instruction::Next(e, _) => {
@@ -1457,6 +1464,7 @@ impl Program {
             private_names: None,
             template_expressions: Rc::default(),
             instructions: Vec::new(),
+            module_annotations: Vec::new(),
             expression_functions: HashMap::new(),
             eager_comprehension_targets: HashMap::new(),
         }
@@ -1561,9 +1569,20 @@ impl Program {
             class && imre_ast::class_cell::needed(&body, self.string_annotations());
         self.needs_dict_cell =
             class && imre_ast::class_cell::dict_needed(&body, self.string_annotations());
+        let module_annotations =
+            !function && !class && imre_ast::annotations::has_variable_annotation(&body);
+        if module_annotations {
+            self.instructions
+                .push((self.first_line, Instruction::ModuleAnnotations(None)));
+        }
         self.lower_with_fields(body, lines, function, None, class.then_some(&mut fields))?;
+        if !self.module_annotations.is_empty() {
+            let entries = std::mem::take(&mut self.module_annotations);
+            let provider = self.annotation_provider(entries, None, self.first_line);
+            self.instructions[0].1 = Instruction::ModuleAnnotations(Some(provider));
+        }
         if !fields.is_empty() {
-            let provider = self.annotation_provider(fields, &self.qualname, self.first_line);
+            let provider = self.annotation_provider(fields, Some(&self.qualname), self.first_line);
             self.instructions
                 .push((self.first_line, Instruction::ClassAnnotator(provider)));
         }
@@ -1635,19 +1654,29 @@ impl Program {
                         None => Instruction::BindSent(s.targets),
                     }
                 }
-                Stmt::AnnAssign(s) if function || (self.class_attributes.is_some() && s.simple) => {
+                Stmt::AnnAssign(s)
+                    if function
+                        || s.simple
+                        || (self.class_attributes.is_none() && s.target.is_name_expr()) =>
+                {
                     let name = s.target.as_name_expr().map(|name| name.id.to_string());
                     if let Some(name) = &name {
                         if name == "__debug__" {
                             return Err(Error::new("SyntaxError", "cannot assign to __debug__"));
                         }
-                        if let Some((kind, _)) = self.directives.get(name) {
+                        if let Some((kind, _)) = self.directives.get(name)
+                            && (function
+                                || self.class_attributes.is_some()
+                                || *kind != ScopeDirective::Global)
+                        {
                             return Err(Error::new(
                                 "SyntaxError",
                                 format!("annotated name '{name}' can't be {}", kind.keyword()),
                             ));
                         }
-                        self.locals.insert(name.clone());
+                        if function || s.simple || s.value.is_some() {
+                            self.locals.insert(name.clone());
+                        }
                     } else if s.value.is_none() {
                         return Err(unsupported("annotated assignment target"));
                     }
@@ -1660,15 +1689,19 @@ impl Program {
                         self.instructions.push((line, op));
                     }
                     // Function-local annotations never evaluate the annotation expression.
-                    if function {
+                    if function || !s.simple {
                         continue;
                     }
-                    let name = name.expect("simple class annotation");
+                    let name = name.expect("simple annotated name");
                     if self.string_annotations() {
                         Instruction::StringAnnotation(
                             name,
                             annotations::string_literal(&s.annotation),
                         )
+                    } else if self.class_attributes.is_none() {
+                        let index = self.module_annotations.len();
+                        self.module_annotations.push((name, *s.annotation));
+                        Instruction::MarkModuleAnnotation(index)
                     } else if let Some(entries) = &mut fields {
                         entries.push((name, *s.annotation));
                         continue;
@@ -1948,6 +1981,17 @@ impl Program {
                         }
                     }
                     continue;
+                }
+                Stmt::Try(_)
+                    if !function
+                        && self.class_attributes.is_none()
+                        && !self.string_annotations()
+                        && imre_ast::annotations::has_variable_annotation(
+                            std::slice::from_ref(&stmt),
+                        ) =>
+                {
+                    // CPython duplicates finally suites on unwind and numbers else before handlers.
+                    return Err(unsupported("deferred module annotations in try suites"));
                 }
                 Stmt::Try(s) if !s.is_star && !s.handlers.is_empty() && s.finalbody.is_empty() => {
                     let entry = self.instructions.len();
@@ -3804,8 +3848,11 @@ impl Context {
         } = cursor;
         let eval = |ctx: &mut Self, e: &ast::Expr| ctx.source_expr(code, scope, e);
         match op {
-            Instruction::Annotations { entries, class } => {
-                let values = self.source_annotations(code, scope, entries, *class)?;
+            Instruction::Annotations {
+                entries,
+                scope: annotation_scope,
+            } => {
+                let values = self.source_annotations(code, scope, entries, *annotation_scope)?;
                 return Ok(Some(Step::Return(values)));
             }
             Instruction::ReturnSent => return Ok(Some(Step::Return(*sent))),
@@ -4231,8 +4278,24 @@ impl Context {
                 let key = self.heap.code_name(name);
                 let spelling = self.source_expr(code, scope, expression)?;
                 // LOAD_NAME for this implicit store skips enclosing function locals.
-                let annotations = self.lookup_class_local(scope, "__annotations__")?;
+                let annotations = if code.class_attributes.is_some() {
+                    self.lookup_class_local(scope, "__annotations__")?
+                } else {
+                    self.module_annotation_name(scope, "__annotations__")?
+                };
                 self.put_item(annotations, key, spelling)?;
+            }
+            Instruction::ModuleAnnotations(provider) => {
+                self.start_module_annotations(code, owner, scope, provider.as_ref())?;
+            }
+            Instruction::MarkModuleAnnotation(index) => {
+                let active = self.module_annotation_name(scope, "__conditional_annotations__")?;
+                let set = self.scalar_value(active);
+                if !matches!(self.heap.get(set), Value::Set { frozen: false, .. }) {
+                    return Err(Error::new("TypeError", "expected a set"));
+                }
+                let index = self.int(*index as i64);
+                builtins::set_add(self, set, index)?;
             }
             Instruction::ClassAnnotator(provider) => {
                 let annotate = self.source_annotator(provider, owner, scope)?;
