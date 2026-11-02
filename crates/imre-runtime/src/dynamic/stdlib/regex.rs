@@ -1,16 +1,18 @@
 use std::cell::OnceCell;
-use std::collections::HashMap;
 use std::fmt::Write;
 use std::rc::Rc;
 
-use regex_automata::{Anchored, Input, PatternID, meta::Regex, util::captures::Captures};
+use regex_automata::{Anchored, Input, PatternID, Span, meta::Regex, util::captures::Captures};
 
 use super::{Context, Error, Id, NONE, Result, Value, argument};
 use crate::dynamic::builtins::bind;
 
 mod casefold;
 mod progress;
+mod scanner;
 mod split;
+
+pub(super) use scanner::scanner_next;
 
 use progress::Matcher;
 pub(super) use split::pattern_split;
@@ -87,7 +89,7 @@ impl Pattern {
         if let Some((end, _)) = source.char_indices().nth(200) {
             source.truncate(end);
         }
-        let flags = if self.bytes {
+        let flags = if self.bytes || self.source == NONE {
             self.flags
         } else {
             self.flags & !UNICODE
@@ -116,6 +118,31 @@ impl Pattern {
             - 1
     }
 
+    fn engine_flags(&self) -> i64 {
+        if self.source == NONE && self.flags & UNICODE == 0 {
+            self.flags | ASCII
+        } else {
+            self.flags
+        }
+    }
+
+    // CPython may match an empty alternative with pos past endpos, while a
+    // zero-minimum repeat can fail there. Slicing to an empty haystack loses that distinction.
+    fn check_reversed_match(&self) -> Result<()> {
+        if regex_automata::util::syntax::parse_with(
+            &self.engine_source,
+            &syntax(self.bytes, self.engine_flags()),
+        )
+        .is_ok_and(|hir| hir.properties().minimum_len() != Some(0))
+        {
+            return Ok(());
+        }
+        Err(Error::new(
+            "NotImplementedError",
+            "zero-width matching with pos past endpos is unsupported",
+        ))
+    }
+
     fn matcher(&self, full: bool) -> std::result::Result<&Matcher, String> {
         if !full {
             return Ok(&self.regex);
@@ -128,7 +155,7 @@ impl Pattern {
                     .engine_source
                     .strip_suffix(imre_regex::FINAL_NEWLINE_ANCHOR)
                     .unwrap_or(&self.engine_source);
-                build_regex(&format!(r"(?:{source})\z"), self.bytes, self.flags)
+                build_regex(&format!(r"(?:{source})\z"), self.bytes, self.engine_flags())
             })
             .as_ref()
             .map_err(Clone::clone)
@@ -434,6 +461,10 @@ pub(super) fn module_call(
             format!("{name} missing required argument '{arg}'"),
         )
     };
+    if name == "re._compile_scanner" {
+        let [lexicon, flags] = bind(name, args, kwargs, ["lexicon", "flags"])?;
+        return scanner::compile_lexicon(ctx, lexicon.ok_or_else(|| missing("lexicon"))?, flags);
+    }
     if name == "re.compile" {
         let [pattern, flags] = bind(name, args, kwargs, ["pattern", "flags"])?;
         return compiled(ctx, pattern.ok_or_else(|| missing("pattern"))?, flags);
@@ -462,24 +493,99 @@ pub(super) fn module_call(
     call(ctx, name, &[pattern, string])
 }
 
-fn groups<'a>(caps: &Captures, text: &'a [u8]) -> Vec<Option<&'a [u8]>> {
+/// Hide the terminal dollar's synthetic capture and its consumed newline.
+fn group_spans(caps: &Captures) -> impl Iterator<Item = Option<Span>> + '_ {
     let eol = caps.group_info().to_index(PatternID::ZERO, "imre.eol");
-    let mut groups: Vec<_> = (0..eol.unwrap_or(caps.group_len()))
-        .map(|i| caps.get_group(i).map(|span| &text[span.range()]))
-        .collect();
-    if let Some(end) = eol.and_then(|i| caps.get_group(i)) {
-        groups[0] = caps.get_group(0).map(|span| &text[span.start..end.start]);
+    (0..eol.unwrap_or(caps.group_len())).map(move |index| {
+        let mut span = caps.get_group(index)?;
+        if index == 0
+            && let Some(newline) = eol.and_then(|i| caps.get_group(i))
+        {
+            span.end = newline.start;
+        }
+        Some(span)
+    })
+}
+
+pub(in crate::dynamic) struct Match {
+    pub(in crate::dynamic) pattern: Id,
+    pub(in crate::dynamic) subject: Id,
+    spans: Vec<Option<Span>>,
+}
+
+impl Match {
+    fn pattern<'a>(&self, ctx: &'a Context) -> &'a Pattern {
+        let Value::RegexPattern(pattern) = ctx.heap.get(self.pattern) else {
+            unreachable!()
+        };
+        pattern
     }
-    groups
+
+    /// A Scanner lexicon has exactly one participating token group in each match.
+    pub(in crate::dynamic) fn lexicon_branch(&self, ctx: &Context) -> Option<usize> {
+        if self.pattern(ctx).source != NONE {
+            return None;
+        }
+        self.spans[1..]
+            .iter()
+            .position(Option::is_some)
+            .map(|i| i + 1)
+    }
+
+    fn group_index(&self, ctx: &mut Context, group: Id) -> Result<usize> {
+        let index = if let Some(number) = ctx.index_value(group)? {
+            number.to_i64().and_then(|i| usize::try_from(i).ok())
+        } else {
+            let info = self.pattern(ctx).regex.group_info();
+            ctx.str_value(group)
+                .ok()
+                .and_then(|name| info.to_index(PatternID::ZERO, name))
+        };
+        index
+            .filter(|&i| i < self.spans.len())
+            .ok_or_else(|| Error::new("IndexError", "no such group"))
+    }
+
+    fn group(&self, ctx: &mut Context, index: usize, default: Id) -> Result<Id> {
+        let Some(span) = self.spans[index] else {
+            return Ok(default);
+        };
+        let bytes = self.pattern(ctx).bytes;
+        let text = subject_bytes(ctx, self.subject, bytes)?;
+        // A bytearray may have changed size since the search.
+        let data = &text[span.start.min(text.len())..span.end.min(text.len())];
+        let value = group_value(data, bytes);
+        Ok(ctx.alloc(value))
+    }
+
+    fn bounds(&self, ctx: &Context, index: usize) -> Result<(i64, i64)> {
+        let Some(span) = self.spans[index] else {
+            return Ok((-1, -1));
+        };
+        if self.pattern(ctx).bytes {
+            return Ok((span.start as i64, span.end as i64));
+        }
+        let text = ctx.str_value(self.subject)?;
+        let start = text[..span.start].chars().count() as i64;
+        let end = start + text[span.range()].chars().count() as i64;
+        Ok((start, end))
+    }
+}
+
+fn matched(ctx: &Context, receiver: Id) -> Result<Rc<Match>> {
+    match ctx.heap.get(receiver) {
+        Value::RegexMatch(m) => Ok(Rc::clone(m)),
+        _ => Err(Error::new("TypeError", "expected regex match")),
+    }
 }
 
 /// Return the captures after group zero, retaining the caller's default for unmatched groups.
-pub(super) fn match_groups(ctx: &mut Context, matched: Id, default: Id) -> Result<Id> {
-    let Value::RegexMatch { groups, .. } = ctx.heap.get(matched) else {
-        return Err(Error::new("TypeError", "expected regex match"));
-    };
-    let values = groups[1..].iter().map(|s| s.unwrap_or(default)).collect();
-    Ok(ctx.alloc(Value::Tuple(values)))
+pub(super) fn match_groups(ctx: &mut Context, receiver: Id, default: Id) -> Result<Id> {
+    let m = matched(ctx, receiver)?;
+    let groups = (1..m.spans.len())
+        .map(|i| m.group(ctx, i, default))
+        .collect::<Result<_>>()?;
+    Ok(ctx.alloc(Value::Tuple(groups)))
 }
 
 fn group_value(data: &[u8], bytes: bool) -> Value {
@@ -494,6 +600,7 @@ fn group_value(data: &[u8], bytes: bool) -> Value {
 
 fn capture(
     ctx: &mut Context,
+    pattern: Id,
     regex: &Matcher,
     bytes: bool,
     subject: Id,
@@ -505,21 +612,11 @@ fn capture(
     if !captures.is_match() {
         return Ok(NONE);
     }
-    let names: HashMap<_, _> = regex
-        .group_info()
-        .pattern_names(PatternID::ZERO)
-        .enumerate()
-        .filter_map(|(i, name)| name.map(|s| (s.to_owned(), i)))
-        .collect();
-    let values: Vec<_> = groups(&captures, text)
-        .into_iter()
-        .map(|value| value.map(|data| group_value(data, bytes)))
-        .collect();
-    let groups = values
-        .into_iter()
-        .map(|v| v.map(|v| ctx.alloc(v)))
-        .collect();
-    Ok(ctx.alloc(Value::RegexMatch { groups, names }))
+    Ok(ctx.alloc(Value::RegexMatch(Rc::new(Match {
+        pattern,
+        subject,
+        spans: group_spans(&captures).collect(),
+    }))))
 }
 
 fn subject_bytes(ctx: &Context, id: Id, bytes: bool) -> Result<&[u8]> {
@@ -610,20 +707,25 @@ pub(super) fn search(
         }
     };
     let (start, end) = (byte(start), byte(end));
-    if start > end {
-        // CPython can still match an empty alternative past endpos, while a
-        // zero-minimum repeat can fail there. An empty slice loses that distinction.
-        if method == "match"
-            && !regex_automata::util::syntax::parse_with(
-                &pattern.engine_source,
-                &syntax(pattern.bytes, pattern.flags),
-            )
-            .is_ok_and(|hir| hir.properties().minimum_len() != Some(0))
-        {
+    if method == "scanner" {
+        // A mutable buffer needs a Python export for the lifetime of the scanner.
+        if matches!(ctx.heap.get(string), Value::ByteArray(_)) {
             return Err(Error::new(
                 "NotImplementedError",
-                "zero-width matching with pos past endpos is unsupported",
+                "exporting a bytearray to a regex scanner is unsupported",
             ));
+        }
+        return Ok(ctx.alloc(Value::RegexScanner {
+            pattern: receiver,
+            subject: string,
+            start: Some(start),
+            end,
+            retry: false,
+        }));
+    }
+    if start > end {
+        if method == "match" {
+            pattern.check_reversed_match()?;
         }
         return Ok(NONE);
     }
@@ -635,7 +737,7 @@ pub(super) fn search(
     } else {
         Anchored::Yes
     };
-    capture(ctx, matcher, pattern.bytes, string, |text| {
+    capture(ctx, receiver, matcher, pattern.bytes, string, |text| {
         Input::new(&text[..end])
             .range(start..end)
             .anchored(anchored)
@@ -644,28 +746,34 @@ pub(super) fn search(
 
 pub(super) fn call(ctx: &mut Context, name: &str, args: &[Id]) -> Result<Id> {
     let first = argument(args, 0)?;
-    if name == "match.group" {
-        let Value::RegexMatch { groups, names } = ctx.heap.get(first) else {
-            return Err(Error::new("TypeError", "expected regex match"));
-        };
-        let mut selected = Vec::new();
-        for &id in &args[1..] {
-            let index = match ctx.heap.get(id) {
-                Value::Str(key) => names.get(key).copied(),
-                Value::Int(index) => index.to_i64().and_then(|n| usize::try_from(n).ok()),
-                _ => None,
+    if name.starts_with("match.") {
+        let m = matched(ctx, first)?;
+        if name == "match.group" {
+            if args.len() == 1 {
+                return m.group(ctx, 0, NONE);
             }
-            .filter(|&i| i < groups.len())
-            .ok_or_else(|| Error::new("IndexError", "no such group"))?;
-            selected.push(groups[index].unwrap_or(NONE));
+            let mut values = Vec::with_capacity(args.len() - 1);
+            for &group in &args[1..] {
+                let index = m.group_index(ctx, group)?;
+                values.push(m.group(ctx, index, NONE)?);
+            }
+            return Ok(if values.len() == 1 {
+                values[0]
+            } else {
+                ctx.alloc(Value::Tuple(values))
+            });
         }
-        if selected.is_empty() {
-            selected.push(groups[0].unwrap_or(NONE));
-        }
-        return Ok(if selected.len() == 1 {
-            selected[0]
-        } else {
-            ctx.alloc(Value::Tuple(selected))
+        let index = args.get(1).map_or(Ok(0), |&id| m.group_index(ctx, id))?;
+        let (start, end) = m.bounds(ctx, index)?;
+        return Ok(match name {
+            "match.start" => ctx.int(start),
+            "match.end" => ctx.int(end),
+            "match.span" => {
+                let start = ctx.int(start);
+                let end = ctx.int(end);
+                ctx.alloc(Value::Tuple(vec![start, end]))
+            }
+            _ => unreachable!(),
         });
     }
     let Value::RegexPattern(pattern) = ctx.heap.get(first) else {
@@ -680,7 +788,7 @@ pub(super) fn call(ctx: &mut Context, name: &str, args: &[Id]) -> Result<Id> {
         .map_err(|message| pattern_error(ctx, pattern.source, pattern.flags, message))?;
     let subject = argument(args, 1)?;
     match name {
-        "re.match" | "re.fullmatch" => capture(ctx, regex, pattern.bytes, subject, |text| {
+        "re.match" | "re.fullmatch" => capture(ctx, first, regex, pattern.bytes, subject, |text| {
             Input::new(text).anchored(Anchored::Yes)
         }),
         "pattern.findall" => {
@@ -716,7 +824,9 @@ pub(super) fn call(ctx: &mut Context, name: &str, args: &[Id]) -> Result<Id> {
                     .map_or(span.end, |nl| nl.start);
                 start = end;
                 retry = end == span.start;
-                let fields = groups(&captures, &text);
+                let fields: Vec<_> = group_spans(&captures)
+                    .map(|span| span.map(|s| &text[s.range()]))
+                    .collect();
                 let value = match fields.as_slice() {
                     [complete] => group_value(complete.unwrap_or_default(), pattern.bytes),
                     [_, one] => group_value(one.unwrap_or_default(), pattern.bytes),
