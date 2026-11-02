@@ -3,6 +3,34 @@
 use super::value::{Error, Id, NONE, NOT_IMPLEMENTED, Result, Value};
 use super::{Context, builtins};
 
+/// Allocate bare namespace storage. The class call runs the initializer separately.
+pub(super) fn allocate(ctx: &mut Context, args: &[Id]) -> Result<Id> {
+    let owner = super::namespace::CLASS;
+    let base = ctx.classes[owner];
+    let Some(&class) = args.first() else {
+        return Err(Error::new(
+            "TypeError",
+            format!("{owner}.__new__(): not enough arguments"),
+        ));
+    };
+    if !ctx.direct_subclass(class, base) {
+        return Err(ctx.invalid_new_subtype(owner, class));
+    }
+    if let Some(layout) = ctx.allocation_base(class)
+        && layout != base
+    {
+        return Err(Error::new(
+            "TypeError",
+            format!(
+                "{owner}.__new__({}) is not safe, use {}.__new__()",
+                ctx.class_name(class),
+                ctx.class_name(layout)
+            ),
+        ));
+    }
+    Ok(ctx.instance(class, None))
+}
+
 pub(super) fn initialize(
     ctx: &mut Context,
     object: Id,

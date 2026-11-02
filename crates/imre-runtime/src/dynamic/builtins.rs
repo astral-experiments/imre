@@ -229,6 +229,7 @@ pub(super) fn constructor_owner(name: &str) -> Option<&str> {
             | "super"
             | "type"
             | super::thread_local::CLASS
+            | super::namespace::CLASS
     ) || super::stdlib::itertools::cursor_type(owner).is_some()
         || super::deque::iterator_class(owner).is_some()
         || is_exception(owner)
@@ -1313,6 +1314,9 @@ pub(super) fn call(
     }
     if matches!(name, "delattr" | "object.__delattr__") {
         return delete_attribute(ctx, name, args, kwargs);
+    }
+    if name == "types.SimpleNamespace.__new__" {
+        return super::namespace_init::allocate(ctx, args);
     }
     if let Some(owner) = name.strip_suffix(".__new__")
         && is_exception(owner)

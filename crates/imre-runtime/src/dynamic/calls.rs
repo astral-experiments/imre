@@ -3374,7 +3374,9 @@ impl Context {
             }
             Value::Native(ref symbol)
                 if let Some((owner, "__new__")) = symbol.rsplit_once('.')
-                    && (stdlib::itertools::cursor_type(owner).is_some() || super::deque::iterator_class(owner).is_some())
+                    && (owner == super::namespace::CLASS
+                        || stdlib::itertools::cursor_type(owner).is_some()
+                        || super::deque::iterator_class(owner).is_some())
                     && matches!(name, "__doc__" | "__text_signature__") =>
             {
                 return Ok(self.text(match name {
