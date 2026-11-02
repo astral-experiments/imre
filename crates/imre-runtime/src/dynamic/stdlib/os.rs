@@ -339,6 +339,9 @@ mod utime;
 
 /// POSIX functions exported as the same builtins by both os and posix.
 pub(super) fn is_descriptor_function(name: &str) -> bool {
+    if name == "pread" {
+        return cfg!(unix);
+    }
     matches!(
         name,
         "access"
@@ -913,6 +916,19 @@ pub(super) fn descriptor(
         }
         return Ok(ctx.alloc(Value::Tuple(result)));
     }
+    if name == "pread" {
+        let [fd, length, offset] = args else {
+            return Err(Error::new(
+                "TypeError",
+                format!("pread expected 3 arguments, got {}", args.len()),
+            ));
+        };
+        let fd = c_int(ctx, *fd)?;
+        let length = ssize_t(ctx, *length)?;
+        let offset = file_offset(ctx, *offset)?;
+        let bytes = native::read(fd, length, Some(offset), || ctx.dispatch_signals())?;
+        return Ok(ctx.alloc(Value::Bytes(bytes)));
+    }
     if matches!(name, "read" | "write") {
         let [fd, data] = args else {
             return Err(Error::new(
@@ -923,7 +939,7 @@ pub(super) fn descriptor(
         let fd = c_int(ctx, *fd)?;
         return if name == "read" {
             let length = ssize_t(ctx, *data)?;
-            let bytes = native::read(fd, length, || ctx.dispatch_signals())?;
+            let bytes = native::read(fd, length, None, || ctx.dispatch_signals())?;
             Ok(ctx.alloc(Value::Bytes(bytes)))
         } else {
             // Keep the exporter alive and its size fixed while a handler runs.
