@@ -16,6 +16,27 @@ def current():
         result_type = parse.ParseResultBytes if isinstance(url, bytes) else parse.ParseResult
         print(type(parsed) is result_type, isinstance(parsed, result_type), tuple(parsed), parsed.params)
         print(parsed.geturl(), parse.urlunparse(parsed))
+    class CustomSplit(str):
+        def lstrip(self, chars):
+            return self
+        def replace(self, old, new):
+            return self
+        def split(self, sep, maxsplit):
+            return ('changed?', 'override')
+    assert parse.urldefrag(CustomSplit('path#frag')).geturl() == 'changed?#override'
+
+    class Redirect(str):
+        def lstrip(self, chars):
+            return 'ALT:path?#changed'
+
+    assert parse.urldefrag(Redirect('other:path#old')).geturl() == 'alt:path?#changed'
+    regular = Redirect('other:path')
+    assert parse.urldefrag(regular).url is regular
+    for url in ("doc?#", "doc?#part", b"doc?#", b"doc?#part"):
+        result = parse.urldefrag(url)
+        result_type = parse.DefragResultBytes if isinstance(url, bytes) else parse.DefragResult
+        print(type(result) is result_type, isinstance(result, tuple), result._fields)
+        print(tuple(result), result.url, result.fragment, result.geturl())
     try:
         print(parse.urlparse("http://example:oracle").port)
     except ValueError as error:

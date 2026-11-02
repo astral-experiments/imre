@@ -1883,6 +1883,16 @@ fn annotation_with_aliases(
         Some(Binding::Intrinsic(Intrinsic::SplitResult { bytes })) => {
             return Ok(types.url_split_result(bytes));
         }
+        Some(Binding::Intrinsic(Intrinsic::ObjectRuntimeExport(
+            name @ ("urllib.parse.DefragResult" | "urllib.parse.DefragResultBytes"),
+        ))) => {
+            graph.needs_object_runtime.set(true);
+            return Err(error(
+                source,
+                expression,
+                &format!("{name} requires native Python object operations"),
+            ));
+        }
         Some(Binding::Intrinsic(Intrinsic::PurePath(flavor))) => return Ok(Type::PurePath(flavor)),
         Some(Binding::Intrinsic(Intrinsic::CompletedProcess)) => {
             return Ok(Type::CompletedProcess(
