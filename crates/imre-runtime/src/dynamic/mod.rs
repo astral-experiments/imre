@@ -2464,7 +2464,10 @@ impl Context {
             self.bind_import_child(name, source_globals, module)?;
             return Ok(Some(module));
         }
-        self.load_bootstrap_module(name, parent, source_globals)
+        // Bootstrap initializers and live sys.modules hooks can reenter Python.
+        stacker::maybe_grow(1024 * 1024, 4 * 1024 * 1024, || {
+            self.load_bootstrap_module(name, parent, source_globals)
+        })
     }
 
     /// Before installing the registry, execute its dependencies and the script's explicit entry.
