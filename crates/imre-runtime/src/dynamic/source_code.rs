@@ -216,10 +216,40 @@ enum DefinitionKind {
     ClassParameters(Vec<ast::Identifier>),
 }
 
+/// The expressions evaluated at the innermost clause of an eager comprehension.
+#[derive(Clone, Copy)]
+enum EagerElement<'a> {
+    List(&'a ast::Expr),
+    Set(&'a ast::Expr),
+    Dict(&'a ast::Expr, &'a ast::Expr),
+}
+
+impl<'a> EagerElement<'a> {
+    fn expressions(self) -> impl Iterator<Item = &'a ast::Expr> {
+        let (first, second) = match self {
+            Self::List(elt) | Self::Set(elt) => (elt, None),
+            Self::Dict(key, value) => (key, Some(value)),
+        };
+        std::iter::once(first).chain(second)
+    }
+}
+
+fn eager_comprehension(expr: &ast::Expr) -> Option<(EagerElement<'_>, &[ast::Comprehension])> {
+    match expr {
+        ast::Expr::ListComp(c) => Some((EagerElement::List(&c.elt), &c.generators)),
+        ast::Expr::SetComp(c) => Some((EagerElement::Set(&c.elt), &c.generators)),
+        ast::Expr::DictComp(c) => Some((
+            EagerElement::Dict(c.key.as_deref()?, &c.value),
+            &c.generators,
+        )),
+        _ => None,
+    }
+}
+
 /// Check the expressions executed inline or in a synchronous generator's deferred frame.
-fn synchronous_comprehension(
-    element: &ast::Expr,
-    clauses: &[ast::Comprehension],
+fn synchronous_comprehension<'a>(
+    elements: impl IntoIterator<Item = &'a ast::Expr>,
+    clauses: &'a [ast::Comprehension],
     deferred: bool,
 ) -> bool {
     use ast::visitor::{self, Visitor};
@@ -229,7 +259,7 @@ fn synchronous_comprehension(
             self.0.push(expr);
         }
     }
-    let mut body = Body(vec![element]);
+    let mut body = Body(elements.into_iter().collect());
     for (index, clause) in clauses.iter().enumerate() {
         if clause.is_async {
             return false;
@@ -324,13 +354,7 @@ impl<'a> ast::visitor::Visitor<'a> for NamedBindings {
             }
             return;
         }
-        if let ast::Expr::SetComp(ast::ExprSetComp {
-            elt, generators, ..
-        })
-        | ast::Expr::ListComp(ast::ExprListComp {
-            elt, generators, ..
-        }) = expr
-        {
+        if let Some((element, generators)) = eager_comprehension(expr) {
             self.comprehensions.push(ComprehensionBindings::default());
             stacker::maybe_grow(128 * 1024, 2 * 1024 * 1024, || {
                 for clause in generators {
@@ -361,7 +385,9 @@ impl<'a> ast::visitor::Visitor<'a> for NamedBindings {
                     self.visit_expr(&clause.target);
                     self.visit_comprehension(clause);
                 }
-                self.visit_expr(elt);
+                for expr in element.expressions() {
+                    self.visit_expr(expr);
+                }
             });
             self.comprehensions.pop();
             return;
@@ -559,7 +585,7 @@ impl<'a> TemplateSegment<'a> {
     }
 }
 
-/// Names bound by enclosing inlined set comprehensions accompany each pending expression.
+/// Names bound by enclosing inlined comprehensions accompany each pending expression.
 type ScopedExpression<'a> = (&'a ast::Expr, Option<Rc<HashSet<String>>>);
 
 /// Collect names and string constants without recursing through an expression's left spine.
@@ -831,7 +857,11 @@ impl<'a> CompiledStrings<'a, '_> {
                     continue;
                 }
                 ast::Expr::Generator(genexpr)
-                    if synchronous_comprehension(&genexpr.elt, &genexpr.generators, true) =>
+                    if synchronous_comprehension(
+                        [genexpr.elt.as_ref()],
+                        &genexpr.generators,
+                        true,
+                    ) =>
                 {
                     functions
                         .try_reserve(1)
@@ -840,18 +870,13 @@ impl<'a> CompiledStrings<'a, '_> {
                     self.visit_expr(&genexpr.generators[0].iter);
                     continue;
                 }
-                ast::Expr::SetComp(ast::ExprSetComp {
-                    elt, generators, ..
-                })
-                | ast::Expr::ListComp(ast::ExprListComp {
-                    elt, generators, ..
-                }) => {
+                _ if let Some((element, generators)) = eager_comprehension(expr) => {
                     self.visit_expr(&generators[0].iter);
                     let mut names = HashSet::new();
                     for clause in generators {
                         Program::collect_target_names(&clause.target, &mut names)?;
                     }
-                    if synchronous_comprehension(elt, generators, false) {
+                    if synchronous_comprehension(element.expressions(), generators, false) {
                         self.eager_comprehension_targets
                             .insert(expr.range(), names.clone());
                     }
@@ -868,7 +893,9 @@ impl<'a> CompiledStrings<'a, '_> {
                             self.visit_expr(predicate);
                         }
                     }
-                    self.visit_expr(elt);
+                    for expr in element.expressions() {
+                        self.visit_expr(expr);
+                    }
                     continue;
                 }
                 ast::Expr::StringLiteral(literal) => {
@@ -5160,20 +5187,24 @@ impl Context {
         self.keep_source_result(mark, iterator)
     }
 
-    /// Append each element to the result before advancing its innermost iterator.
+    /// Insert each element before advancing the innermost iterator.
     fn source_eager_comprehension(
         &mut self,
         code: &Program,
         parent: Id,
-        element: &ast::Expr,
+        element: EagerElement<'_>,
         clauses: &[ast::Comprehension],
-        kind: &str,
         targets: &HashSet<String>,
     ) -> Result<Id> {
         let mark = self.heap.temporary_mark();
         let result = (|| -> Result<Id> {
             let first = self.source_comprehension_iterator(code, parent, &clauses[0].iter)?;
             let scope = self.comprehension_scope_with_targets(parent, targets.clone());
+            let kind = match element {
+                EagerElement::List(_) => "list",
+                EagerElement::Set(_) => "set",
+                EagerElement::Dict(_, _) => "dict",
+            };
             let collection = self.op(kind, NONE, NONE, NONE)?;
             // Each mark preserves the iterator and persistent roots of all outer clauses.
             let mut levels = Vec::new();
@@ -5199,8 +5230,17 @@ impl Context {
                     let inner = self.source_comprehension_iterator(code, scope, &next.iter)?;
                     levels.push((inner, self.heap.temporary_mark()));
                 } else {
-                    let element = self.source_expr(code, scope, element)?;
-                    self.op("append", collection, element, NONE)?;
+                    match element {
+                        EagerElement::List(elt) | EagerElement::Set(elt) => {
+                            let item = self.source_expr(code, scope, elt)?;
+                            self.op("append", collection, item, NONE)?;
+                        }
+                        EagerElement::Dict(key, value) => {
+                            let key = self.source_expr(code, scope, key)?;
+                            let value = self.source_expr(code, scope, value)?;
+                            self.put_item(collection, key, value)?;
+                        }
+                    }
                 }
             }
             Ok(collection)
@@ -5375,18 +5415,10 @@ impl Context {
                     .heap
                     .packed_tuple(items, v.elts.iter().all(imre_ast::literal_tuple_element)))
             }
-            ast::Expr::SetComp(ast::ExprSetComp {
-                elt, generators, ..
-            })
-            | ast::Expr::ListComp(ast::ExprListComp {
-                elt, generators, ..
-            }) if let Some(targets) = code.eager_comprehension_targets.get(&expr.range()) => {
-                let kind = if matches!(expr, Expr::ListComp(_)) {
-                    "list"
-                } else {
-                    "set"
-                };
-                self.source_eager_comprehension(code, scope, elt, generators, kind, targets)
+            _ if let Some((element, clauses)) = eager_comprehension(expr)
+                && let Some(targets) = code.eager_comprehension_targets.get(&expr.range()) =>
+            {
+                self.source_eager_comprehension(code, scope, element, clauses, targets)
             }
             Expr::Set(display) => {
                 let items = display

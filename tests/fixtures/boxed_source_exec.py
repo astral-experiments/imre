@@ -572,6 +572,41 @@ def source_listcomp():
     assert local["item"] == "outside" and "group" not in local
 
 
+def source_dictcomp():
+    events = []
+
+    def mark(label, value):
+        events.append((label, value))
+        return value
+
+    namespace = {"mark": mark, "label": "global"}
+    exec("""def collect(groups):
+    item = "outside"
+    result = {mark("key", item % 2): (last := mark("value", item))
+              for group in groups for item in group if item}
+    return result, item, last
+
+class Scope:
+    items = (1, 2)
+    label = "class"
+    pairs = {(label, n): label for n in items}
+""", namespace)
+    result, item, last = namespace["collect"]([[2, 0, 1], [4]])
+    assert list(result.items()) == [(0, 4), (1, 1)]
+    assert (item, last) == ("outside", 4)
+    assert events == [("key", 0), ("value", 2), ("key", 1), ("value", 1),
+                      ("key", 0), ("value", 4)]
+    assert namespace["Scope"].pairs == {("global", 1): "global", ("global", 2): "global"}
+
+    events.clear()
+    try:
+        eval("{mark('key', n): mark('value', n) for n in (1, [], 3)}", namespace)
+    except TypeError:
+        assert events == [("key", 1), ("value", 1), ("key", []), ("value", [])]
+    else:
+        raise AssertionError("an unhashable key must stop the comprehension")
+
+
 def source_setcomp():
     namespace = {}
     exec("""
@@ -950,6 +985,7 @@ def current():
     source_genexpr()
     source_listcomp()
     source_setcomp()
+    source_dictcomp()
     source_match()
     check_scope_directives()
     relative_import_hooks()
