@@ -117,22 +117,26 @@ impl Reader {
     pub(super) fn position(&self, ctx: &mut Context, end: Id) -> Result<Id> {
         match &self.snapshot {
             Snapshot::None => return Ok(end),
-            Snapshot::Previous(previous) => {
+            Snapshot::Previous(Some(chunk)) => {
                 let used = self.text[self.chunk_start..self.cursor.max(self.chunk_start)]
                     .chars()
                     .count();
-                if let Some(chunk) = previous
-                    && used <= chunk.chars
-                {
-                    let extra: usize = chunk
-                        .extra
-                        .iter()
-                        .take_while(|(n, _)| *n <= used)
-                        .map(|(_, extra)| extra)
-                        .sum();
-                    let start = ctx.as_integer(end)? - chunk.bytes as i64;
-                    return Ok(ctx.int(start + (used + extra) as i64));
+                if used > chunk.chars {
+                    return Err(super::Error::new(
+                        "OSError",
+                        "can't reconstruct logical file position",
+                    ));
                 }
+                let extra: usize = chunk
+                    .extra
+                    .iter()
+                    .take_while(|(n, _)| *n <= used)
+                    .map(|(_, extra)| extra)
+                    .sum();
+                let start = ctx.as_integer(end)? - chunk.bytes as i64;
+                return Ok(ctx.int(start + (used + extra) as i64));
+            }
+            Snapshot::Previous(None) => {
                 return Err(super::Error::new(
                     "NotImplementedError",
                     "native text position needs a decoder snapshot",

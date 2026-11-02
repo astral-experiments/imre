@@ -147,6 +147,17 @@ def current():
         text.flush()
         assert text.buffer.tell() == 6 and text.tell() == 4
 
+    with io.TextIOWrapper(io.BytesIO("é\nXabc\n".encode()), encoding="utf-8") as text:
+        text._CHUNK_SIZE = 4
+        assert text.readline() == "é\n" and next(text) == "Xabc\n"
+        text.flush()
+        try:
+            text.tell()
+        except OSError as error:
+            assert str(error) == "can't reconstruct logical file position"
+        else:
+            raise AssertionError("position exceeded the saved decoder input")
+
     raw = io.BytesIO()
     text = io.TextIOWrapper(raw, encoding="ascii")
     text.write("kept")
