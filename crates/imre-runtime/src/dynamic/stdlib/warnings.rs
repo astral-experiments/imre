@@ -39,6 +39,20 @@ impl Context {
         )
     }
 
+    pub(in crate::dynamic) fn warn_import(
+        &mut self,
+        globals: Id,
+        message: &str,
+        line: u32,
+        external: Option<bool>,
+    ) -> Result<()> {
+        let origin = match external {
+            Some(frozen_external) => Origin::Bootstrap { globals, line, frozen_external },
+            None => Origin::core(globals, line),
+        };
+        self.emit_warning(crate::objects::exceptions::Kind::ImportWarning, message, origin, NONE)
+    }
+
     pub(in crate::dynamic) fn warn_legacy_load(&mut self, source_globals: Id) -> Result<()> {
         self.emit_warning(
             crate::objects::exceptions::Kind::DeprecationWarning,
@@ -170,6 +184,11 @@ impl Context {
                 )
             {
                 let message = self.text(message);
+                let native_import = if category == "ImportWarning" {
+                    self.dict_named_item(globals, "_native_import_warning")
+                } else {
+                    None
+                };
                 let category = self.builtin(category);
                 let args = match origin {
                     Origin::Caller(level) => {
@@ -206,7 +225,7 @@ impl Context {
                             self.int(i64::from(line)),
                             self.text(&module),
                             registry,
-                            globals,
+                            native_import.unwrap_or(globals),
                         ]
                     }
                 };

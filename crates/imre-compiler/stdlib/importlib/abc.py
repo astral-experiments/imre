@@ -43,6 +43,7 @@ class PathEntryFinder(metaclass=abc.ABCMeta):
         pass
 
 
+_register(MetaPathFinder, machinery.PathFinder)
 _register(PathEntryFinder, machinery.FileFinder)
 
 

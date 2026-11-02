@@ -161,6 +161,7 @@ pub(super) const IMPORT_KEYWORDS: [&str; 3] = ["name", "path", "name_from"];
 pub(super) fn exception_initializer(kind: &str) -> &'static str {
     match kind {
         "StopIteration" => "StopIteration.__init__",
+        "SystemExit" => "SystemExit.__init__",
         "ImportError" | "ModuleNotFoundError" => "ImportError.__init__",
         kind if exception_subclass(kind, "OSError") == Some(true) => "OSError.__init__",
         _ => "BaseException.__init__",
@@ -787,6 +788,7 @@ pub(super) fn bind<const N: usize>(
 }
 
 /// Bind positional and keyword method arguments using Argument Clinic's diagnostics.
+/// An empty name marks a positional-only parameter.
 pub(super) fn bind_method_arguments<const N: usize>(
     name: &str,
     args: &[Id],
@@ -816,7 +818,7 @@ pub(super) fn bind_method_arguments<const N: usize>(
         )));
     }
     for (i, key) in names[..args.len()].iter().enumerate() {
-        if kwargs.iter().any(|(provided, _)| provided == key) {
+        if !key.is_empty() && kwargs.iter().any(|(provided, _)| provided == key) {
             return Err(type_error(format!(
                 "argument for {name}() given by name ('{key}') and position ({})",
                 i + 1
@@ -825,7 +827,7 @@ pub(super) fn bind_method_arguments<const N: usize>(
     }
     let mut values = std::array::from_fn(|i| args.get(i).copied());
     for (key, value) in kwargs {
-        let index = names.iter().position(|&arg| arg == key).ok_or_else(|| {
+        let index = names.iter().position(|&arg| !arg.is_empty() && arg == key).ok_or_else(|| {
             type_error(format!(
                 "{name}() got an unexpected keyword argument '{key}'"
             ))
@@ -1099,8 +1101,9 @@ pub(super) fn call(
     {
         return exceptions::allocate(ctx, owner, args);
     }
-    if let Some(owner @ ("BaseException" | "StopIteration" | "OSError" | "ImportError")) =
-        name.strip_suffix(".__init__")
+    if let Some(
+        owner @ ("BaseException" | "StopIteration" | "SystemExit" | "OSError" | "ImportError"),
+    ) = name.strip_suffix(".__init__")
     {
         return exceptions::initialize(ctx, owner, args, kwargs);
     }

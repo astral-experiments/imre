@@ -7,7 +7,6 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use super::Context;
-use crate::objects::exceptions::ExitStatus;
 
 pub(super) type Id = u64;
 pub(super) type Code = unsafe extern "C" fn(*mut Context, Id) -> Id;
@@ -102,7 +101,8 @@ pub(super) struct Error {
     // Keep the context reachable even if the optional traceback cannot be allocated.
     pub context: Id,
     pub trace: Option<allocator_api2::boxed::Box<Trace>>,
-    pub exit_status: Option<ExitStatus>,
+    /// Python object held by the writable SystemExit.code member.
+    pub exit_code: Id,
     pub import: Option<crate::shared::Shared<ImportFields>>,
 }
 
@@ -131,7 +131,7 @@ impl Error {
             os_args: None,
             context: NONE,
             trace: None,
-            exit_status: None,
+            exit_code: NONE,
             import: None,
         }
     }
@@ -182,10 +182,20 @@ impl Error {
         }
     }
 
+    /// SystemExit.__init__ keeps the previous code when called without arguments.
+    pub(super) fn initialize_exit_code(&mut self, args: &[Id]) {
+        match args {
+            [] => {}
+            [value] => self.exit_code = *value,
+            _ => self.exit_code = self.args.expect("initialized exception argument tuple"),
+        }
+    }
+
     pub(super) fn roots(&self) -> impl Iterator<Item = Id> + '_ {
         self.args
             .into_iter()
             .chain(self.class())
+            .chain((self.exit_code != NONE).then_some(self.exit_code))
             .chain((self.context != NONE).then_some(self.context))
             .chain(
                 self.decode
@@ -575,15 +585,7 @@ impl Context {
         }
         error.message = self.exception_message(&error);
         if kind == "SystemExit" {
-            error.exit_status = match args {
-                [] | [NONE] => Some(ExitStatus::Code(0)),
-                [code] => match self.heap.get(*code) {
-                    Value::Int(i) => Some(ExitStatus::from_i64(i.to_i64())),
-                    Value::Bool(b) => Some(ExitStatus::Code(i32::from(*b))),
-                    _ => None,
-                },
-                _ => None,
-            };
+            error.initialize_exit_code(args);
         }
         error
     }
@@ -1046,6 +1048,7 @@ pub(super) enum Value {
     IoOpen {
         reader: Id,
         writer: Id,
+        random: Id,
     },
     IoMethod {
         owner: Id,
@@ -1100,13 +1103,8 @@ pub(super) struct CachedCall {
 impl Value {
     /// Class of a native file whose Python descriptors are installed by _io.
     pub(super) fn native_io_class_name(&self) -> Option<&'static str> {
-        let name = self.file_class_name()?;
-        // BufferedRandom still uses its intrinsic methods rather than installed _io descriptors.
-        (name != "_io.BufferedRandom").then_some(name)
-    }
-
-    fn file_class_name(&self) -> Option<&'static str> {
         match self {
+            Self::BufferedRandom(..) => Some("_io.BufferedRandom"),
             Self::TextFile(_) => Some("_io.TextIOWrapper"),
             Self::File(file) => Some(match file.as_ref() {
                 super::stdlib::BinaryFile::Descriptor(fd) if fd.reading && fd.writing => {
@@ -1146,7 +1144,7 @@ impl Value {
             Self::Bytes(_) => "bytes",
             Self::MemoryView { .. } => "memoryview",
             Self::ByteArray(_) => "bytearray",
-            Self::File(_) | Self::TextFile(_) => return self.file_class_name(),
+            Self::File(_) | Self::TextFile(_) => return self.native_io_class_name(),
             Self::ProcessHandle(_) => "_imre_subprocess.Handle",
             Self::BufferedRandom(..) => "_io.BufferedRandom",
             Self::SequenceIterator { .. } => "iterator",
@@ -1608,7 +1606,7 @@ impl Value {
                 visit.extend([*scope, *code, *globals]);
                 visit.extend(*back);
             }
-            Self::IoOpen { reader, writer } => visit.extend([*reader, *writer]),
+            Self::IoOpen { reader, writer, random } => visit.extend([*reader, *writer, *random]),
             Self::IoMethod { owner, .. } => visit.push(*owner),
             Self::CodecInfo {
                 decode,

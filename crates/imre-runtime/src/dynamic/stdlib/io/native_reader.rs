@@ -10,11 +10,11 @@ pub(super) const METHODS: &[&str] = &[
     "flush", "close", "tell", "seek", "read", "read1", "readinto", "readline", "peek",
 ];
 
-fn validate(name: &str, count: usize, kwargs: &[(String, Id)]) -> Result<()> {
+fn validate(owner: &str, name: &str, count: usize, kwargs: &[(String, Id)]) -> Result<()> {
     if !kwargs.is_empty() {
         return Err(Error::new(
             "TypeError",
-            format!("BufferedReader.{name}() takes no keyword arguments"),
+            format!("{owner}.{name}() takes no keyword arguments"),
         ));
     }
     let message = match name {
@@ -22,12 +22,12 @@ fn validate(name: &str, count: usize, kwargs: &[(String, Id)]) -> Result<()> {
             format!("{name} expected at most 1 argument, got {count}")
         }
         "readinto" if count != 1 => {
-            format!("BufferedReader.{name}() takes exactly one argument ({count} given)")
+            format!("{owner}.{name}() takes exactly one argument ({count} given)")
         }
         "seek" if count == 0 => "seek expected at least 1 argument, got 0".into(),
         "seek" if count > 2 => format!("seek expected at most 2 arguments, got {count}"),
         "read" | "read1" | "readline" | "peek" | "readinto" | "seek" | "__exit__" => return Ok(()),
-        _ if count != 0 => format!("BufferedReader.{name}() takes no arguments ({count} given)"),
+        _ if count != 0 => format!("{owner}.{name}() takes no arguments ({count} given)"),
         _ => return Ok(()),
     };
     Err(Error::new("TypeError", message))
@@ -35,15 +35,16 @@ fn validate(name: &str, count: usize, kwargs: &[(String, Id)]) -> Result<()> {
 
 pub(super) fn call(
     ctx: &mut Context,
+    owner: &str,
     receiver: Id,
     name: &str,
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
     if name == "__init__" {
-        return descriptor_buffer::initialize(ctx, receiver, args, kwargs, true);
+        return descriptor_buffer::initialize(ctx, receiver, args, kwargs, owner);
     }
-    validate(name, args.len(), kwargs)?;
+    validate(owner, name, args.len(), kwargs)?;
     if name == "peek"
         && let Some(&size) = args.first()
     {

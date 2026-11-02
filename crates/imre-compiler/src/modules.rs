@@ -73,7 +73,14 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
             "unittest/case.py",
             include_str!("../stdlib/unittest/boxed_case.py"),
         )),
-        "pickle" => Some(("pickle.py", include_str!("../stdlib/pickle.py"))),
+        "pickle" => Some((
+            "pickle.py",
+            concat!(
+                include_str!("../stdlib/pickle.py"),
+                "\n",
+                include_str!("../stdlib/pickle_writer.py")
+            ),
+        )),
         // CPython 3.14.5 Lib/_colorize.py. See licenses/CPython.txt.
         "_colorize" => Some(("_colorize.py", include_str!("../stdlib/_colorize.py"))),
         "_compat_pickle" => Some((
@@ -156,12 +163,20 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
                 "../../../benchmarks/cpython_stdlib/full/warnings/upstream/Lib/warnings.py"
             ),
         )),
-        "_py_warnings" => Some((
-            "_py_warnings.py",
-            include_str!(
-                "../../../benchmarks/cpython_stdlib/full/warnings/upstream/Lib/_py_warnings.py"
-            ),
-        )),
+        "_py_warnings" => {
+            static SOURCE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+            Some(("_py_warnings.py", SOURCE.get_or_init(|| {
+                const UPSTREAM: &str = include_str!(
+                    "../../../benchmarks/cpython_stdlib/full/warnings/upstream/Lib/_py_warnings.py"
+                );
+                // Native import warnings may be emitted while all imports are disabled.
+                // Dispatch their WarningMessage without priming the Python line cache.
+                UPSTREAM
+                    .replace("def warn_explicit(", "_native_import_warning = object()\n\ndef warn_explicit(")
+                    .replace("    import linecache\n    linecache.getlines(filename, module_globals)",
+                             "    if module_globals is not _native_import_warning:\n        import linecache\n        linecache.getlines(filename, module_globals)")
+            })))
+        }
         "re" => Some(("re.py", include_str!("../stdlib/re.py"))),
         "decimal" => Some(("decimal.py", include_str!("../stdlib/decimal.py"))),
         // CPython 3.14.5 Lib/py_compile.py. See stdlib/docstrings/LICENSE.
@@ -302,6 +317,8 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
                 include_str!("../stdlib/platform/metadata.py"),
             ),
         )),
+        // CPython 3.14.5 Lib/ftplib.py. See stdlib/docstrings/LICENSE.
+        "ftplib" if cfg!(unix) => Some(("ftplib.py", include_str!("../stdlib/ftplib.py"))),
         "mimetypes" if cfg!(unix) => Some((
             "mimetypes.py",
             include_str!(
@@ -887,6 +904,7 @@ pub(crate) enum Intrinsic {
 }
 
 impl Intrinsic {
+    pub(crate) const PICKLER: Self = Self::ObjectRuntimeExport("pickle.Pickler");
     pub(crate) const IO_BASE: Self = Self::ObjectRuntimeExport("io.IOBase");
     pub(crate) const RAW_IO_BASE: Self = Self::ObjectRuntimeExport("io.RawIOBase");
     pub(crate) const BUFFERED_IO_BASE: Self = Self::ObjectRuntimeExport("io.BufferedIOBase");
@@ -1170,6 +1188,7 @@ impl IntrinsicModule {
                 Intrinsic::ObjectRuntimeExport("_codecs.escape_decode")
             }
             (Self::CodecsNative, "encode") => Intrinsic::ObjectRuntimeExport("_codecs.encode"),
+            (Self::Pickle, "Pickler") => Intrinsic::PICKLER,
             (Self::Pickle, "dumps") => Intrinsic::ObjectRuntimeExport("pickle.dumps"),
             (Self::Pickle, "loads") => Intrinsic::ObjectRuntimeExport("pickle.loads"),
             (Self::Pickle, "_loads") => Intrinsic::ObjectRuntimeExport("pickle._loads"),
@@ -1374,6 +1393,9 @@ impl IntrinsicModule {
             }
             (Self::ImportlibMetadata, "entry_points") => {
                 Intrinsic::ObjectRuntimeExport("importlib.metadata.entry_points")
+            }
+            (Self::ImportlibMachinery, "PathFinder") => {
+                Intrinsic::ObjectRuntimeExport("importlib.machinery.PathFinder")
             }
             (Self::ImportlibMachinery, "FileFinder") => {
                 Intrinsic::ObjectRuntimeExport("importlib.machinery.FileFinder")
@@ -1634,6 +1656,7 @@ impl IntrinsicModule {
             (Self::Typing, "TYPE_CHECKING") => Intrinsic::TypeChecking,
             (Self::Sys, "stdin" | "__stdin__") => Intrinsic::Stdin,
             (Self::Sys, "warnoptions") => Intrinsic::ObjectRuntimeExport("sys.warnoptions"),
+            (Self::Sys, "byteorder") => Intrinsic::ObjectRuntimeExport("sys.byteorder"),
             (Self::Sys, "hash_info") => Intrinsic::ObjectRuntimeExport("sys.hash_info"),
             (Self::Sys, "monitoring") => Intrinsic::ObjectRuntimeExport("sys.monitoring"),
             (Self::Sys, "stdout") => Intrinsic::Stdout,
@@ -2190,6 +2213,8 @@ impl IntrinsicModule {
             (Self::Io | Self::IoNative, "open_code") => {
                 Intrinsic::ObjectRuntimeExport("io.open_code")
             }
+            (Self::Io, "BufferedRandom") => Intrinsic::ObjectRuntimeExport("io.BufferedRandom"),
+            (Self::IoNative, "BufferedRandom") => Intrinsic::ObjectRuntimeExport("_io.BufferedRandom"),
             (Self::Io, "BufferedReader") => Intrinsic::ObjectRuntimeExport("io.BufferedReader"),
             (Self::IoNative, "BufferedReader") => {
                 Intrinsic::ObjectRuntimeExport("_io.BufferedReader")
@@ -2299,6 +2324,8 @@ impl IntrinsicModule {
             (Self::Textwrap, "dedent") => Intrinsic::Dedent,
             (Self::Zlib, "error") => Intrinsic::ZlibError,
             (Self::Zlib, "adler32") => Intrinsic::Adler32,
+            (Self::Zlib, "compress") => Intrinsic::ObjectRuntimeExport("zlib.compress"),
+            (Self::Zlib, "decompress") => Intrinsic::ObjectRuntimeExport("zlib.decompress"),
             (Self::Zlib, "crc32") => Intrinsic::ObjectRuntimeExport("zlib.crc32"),
             (Self::ImreJson, "decode") => Intrinsic::JsonDecode,
             (Self::JsonNative, "scanstring") => Intrinsic::ObjectRuntimeExport("_json.scanstring"),
@@ -2396,6 +2423,7 @@ impl IntrinsicModule {
             (Self::Posix, name) => os::symbol(name)?,
             (Self::Os, "makedirs") if cfg!(unix) => Intrinsic::ObjectRuntimeExport("os.makedirs"),
             (Self::Os, "walk") if cfg!(unix) => Intrinsic::ObjectRuntimeExport("os.walk"),
+            (Self::Os, "fwalk") if cfg!(unix) => Intrinsic::ObjectRuntimeExport("os.fwalk"),
             (Self::Os, "F_OK") => Intrinsic::AccessMode(0),
             (Self::Os, "X_OK") => Intrinsic::AccessMode(1),
             (Self::Os, "W_OK") => Intrinsic::AccessMode(2),

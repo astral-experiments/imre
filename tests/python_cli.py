@@ -959,6 +959,28 @@ def check_pickle_reductions(imre, root, run):
         sys.path.pop(0)
 
 
+def check_boxed_unittest_main_reporting(imre, root, run):
+    source = root / "reporting_tests.py"
+    source.write_text(
+        "import importlib\n"
+        "unittest = importlib.import_module('unittest')\n"
+        "class Cases(unittest.TestCase):\n"
+        "    def test_pass(self): pass\n"
+        "    def test_failure(self):\n"
+        "        with self.subTest(item=1): self.fail('intentional failure')\n"
+        "unittest.main()\n"
+    )
+    executable = root / "reporting_tests"
+    built = run(imre, "build", source, "--runtime-imports", "--no-cache", "-o", executable)
+    assert built.returncode == 0, built
+    passed = run(executable, "-v", "Cases.test_pass")
+    assert passed.returncode == 0, passed
+    assert "test_pass (__main__.Cases.test_pass) ... ok" in passed.stderr.splitlines(), passed
+    failed = run(executable, "-v", "Cases.test_failure")
+    assert failed.returncode == 1 and "(item=1) ... FAIL" in failed.stderr, failed
+    assert failed.stderr.rstrip().endswith("FAILED (failures=1)"), failed
+
+
 def check_unittest_main_names(imre, root, run):
     source = root / "selected_tests.py"
     source.write_text(
@@ -1241,6 +1263,33 @@ def main():
         later.mkdir(parents=True)
         (later / "__init__.py").write_text("invalid syntax!\n")
         compare("-B", "-m", "preferred", extra={"PYTHONPATH": str(later.parent)})
+
+        helper = root / "request_support.py"
+        helper.write_text("from importlib.machinery import ModuleSpec\nspec = ModuleSpec('sample', None)\n")
+        request_script = root / "request_entry.py"
+        request_script.write_text(
+            "from urllib import request\n"
+            "from request_support import spec\n"
+            "print(request.Request('data:,ok').type, spec.name)\n"
+        )
+        compare("-B", request_script)
+
+        ftp_script = root / "ftp_entry.py"
+        ftp_script.write_text("import ftplib\nprint(ftplib.FTP().encoding, ftplib.parse257('257 \"home\"'))\n")
+        compare("-B", ftp_script)
+
+        # A project FTP provider is loaded only if the opener actually uses FTP.
+        alternate = root / "ftp_provider"
+        alternate.mkdir()
+        (alternate / "ftplib.py").write_text("raise RuntimeError('project ftp provider')\n")
+        indirect = alternate / "opener.py"
+        indirect.write_text(
+            "from urllib import request\n"
+            "print(request.Request('data:,ok').type)\n"
+            "try: request.build_opener(request.ProxyHandler({})).open('ftp:///file')\n"
+            "except RuntimeError as error: print(str(error))\n"
+        )
+        compare("-B", indirect)
 
         decorated = root / "method_decorators.py"
         decorated.write_text(
@@ -1914,6 +1963,7 @@ def report(text):
         fixtures = Path(__file__).with_name("fixtures")
         compare("-B", "-c", "from typing import Protocol as P; print(P.__name__)")
         compare("-B", fixtures / "typing_protocol_import.py")
+        compare("-IB", fixtures / "boxed_pickle_writer.py")
         compare(
             "-B", "-c",
             "import typing as t\ndef build():\n    class P(t.Protocol): pass\n"
@@ -1938,6 +1988,8 @@ def report(text):
         pending = run(imre, *command, "pending")
         assert pending.returncode == 1 and b"unflushed bytes at shutdown" in pending.stderr, pending
         assert sink.read_bytes() == b""
+        random_fixture = fixtures / "io_buffered_random_type.py"
+        compare("-IB", random_fixture, native_args=("run", random_fixture, "--quiet"))
         memory_writer = fixtures / "io_buffered_writer_bytesio.py"
         compare("-IB", memory_writer, native_args=("run", memory_writer, "--quiet"))
         pair_fixture = fixtures / "io_buffered_rw_pair.py"
@@ -2062,6 +2114,7 @@ def report(text):
             "boxed_sys_audit_recursion.py",
             "boxed_sys_recursion_limit.py",
             "boxed_sys_intern.py",
+            "boxed_sys_byteorder.py",
             "boxed_sys_hash_info.py",
             "boxed_sys_flags.py",
             "boxed_sys_jit.py",
@@ -2072,6 +2125,7 @@ def report(text):
             "boxed_bytearray_memoryview.py",
             "boxed_bytes_io.py",
             "boxed_io_newline_decoder.py",
+            "boxed_io_utf16.py",
             "boxed_text_io_wrapper.py",
             "boxed_platform_version.py",
             "boxed_int_to_bytes.py",
@@ -2198,6 +2252,7 @@ def report(text):
             "boxed_os_fchmod.py",
             "boxed_os_makedirs.py",
             "boxed_os_walk.py",
+            "boxed_os_fwalk.py",
             "boxed_select.py",
             "boxed_urlsplit.py",
             "boxed_urllib_request.py",
@@ -2208,6 +2263,7 @@ def report(text):
             "boxed_socketserver_source.py",
             "boxed_urllib_data.py",
             "boxed_urllib_http_status.py",
+            "boxed_urllib_ftp.py",
             "boxed_urllib_http.py",
             "boxed_http_transport.py",
             "boxed_message_parameters.py",
@@ -2273,6 +2329,7 @@ def report(text):
             "boxed_function_defaults.py",
             "boxed_reprlib.py",
             "boxed_asyncio_policy.py",
+            "boxed_multiprocessing_context.py",
             "boxed_textwrap.py",
             "boxed_set_ordering.py",
             "boxed_dict_view_equality.py",
@@ -2394,6 +2451,7 @@ def report(text):
             "boxed_bytes_fromhex.py",
             "boxed_binary_endswith.py",
             "boxed_struct.py",
+            "boxed_pickle_writer.py",
             "boxed_reversed_list.py",
             "boxed_reversed_range.py",
             "boxed_heapq.py",
@@ -2430,6 +2488,7 @@ def report(text):
                         extra={"PYTHONINTMAXSTRDIGITS": str(limit)},
                     )
         if os.name == "posix":
+            check_boxed_unittest_main_reporting(imre, root, run)
             check_unittest_main_names(imre, root, run)
             check_unittest_file_discovery(imre, root, run)
             plugin.write_bytes((fixtures / "boxed_subprocess_fileio.py").read_bytes())
@@ -2461,6 +2520,8 @@ def report(text):
             plugin.write_bytes((fixtures / "boxed_posix_sched_getscheduler.py").read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")
             plugin.write_bytes((fixtures / "boxed_fcntl.py").read_bytes())
+            compare("-IB", "-c", imports + "arithmetic.current()")
+            plugin.write_bytes((fixtures / "boxed_posix_rtld_flags.py").read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")
             plugin.write_bytes((fixtures / "boxed_resource.py").read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")

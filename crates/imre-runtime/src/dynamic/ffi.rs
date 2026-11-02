@@ -705,6 +705,7 @@ pub(super) fn new_context<S: Into<String>>(
         modules: NONE,
         import_missing: NONE,
         bootstrap_globals: NONE,
+        import_registry_installed: false,
         bootstrap_file_spec: NONE,
         finder_external: NONE,
         classes: HashMap::new(),
@@ -764,7 +765,9 @@ pub(super) unsafe extern "C" fn imre_dyn_finish(ctx: *mut Context) -> i32 {
         // The module registry now owns sys. Its startup temporaries must not
         // keep replaced streams alive throughout the main module's execution.
         ctx.heap.release_temporaries_since(mark);
-        let main = ctx.module("__main__")?;
+        ctx.install_import_registry()?;
+        let main = ctx.load_bootstrap_module("__main__", None, NONE)?
+            .ok_or_else(|| Context::missing_module("__main__"))?;
         if let Some(name) = ctx.config["module_entry"].as_str().map(str::to_owned) {
             ctx.run_module_as_main(name)
         } else {
@@ -773,24 +776,12 @@ pub(super) unsafe extern "C" fn imre_dyn_finish(ctx: *mut Context) -> i32 {
     });
     let status = match result {
         Ok(_) => 0,
-        Err(e) if e.kind == "SystemExit" => match e.exit_status {
-            Some(status) => status.report(),
-            None => {
-                use std::io::Write;
-
-                let mut message = if let Some(&[arg]) = ctx.exception_arguments(&e)
-                    && let Some(text) = ctx.string_storage(arg)
-                {
-                    ctx.encode_utf8_codepoints(text, false, "backslashreplace")
-                        .unwrap_or_default()
-                } else {
-                    e.message.into_bytes()
-                };
-                message.push(b'\n');
-                let _ = crate::sys::stderr_writer().write_all(&message);
-                1
-            }
-        },
+        Err(error) if ctx.is_builtin_error(&error, "SystemExit") => {
+            let mark = ctx.heap.temporary_mark();
+            let status = report_system_exit(&mut ctx, error);
+            ctx.heap.release_temporaries_since(mark);
+            status
+        }
         Err(error) if ctx.is_os_error(&error) && error.args.is_some() => {
             ctx.report_os_error(error);
             1
@@ -827,6 +818,49 @@ pub(super) unsafe extern "C" fn imre_dyn_finish(ctx: *mut Context) -> i32 {
         return 1;
     }
     status
+}
+
+/// Read the live code at shutdown, including overrides on SystemExit subclasses.
+fn report_system_exit(ctx: &mut Context, error: Error) -> i32 {
+    use std::io::Write;
+
+    let instance = error
+        .trace
+        .as_ref()
+        .and_then(|trace| trace.instance)
+        .unwrap_or_else(|| ctx.alloc(Value::Raised(error)));
+    ctx.heap.keep(instance);
+    let code = ctx.lookup_attr(instance, "code").unwrap_or(instance);
+    if code == NONE {
+        return 0;
+    }
+    if let Ok(integer) = ctx.as_int(code) {
+        return integer.to_i64().unwrap_or(-1) as i32;
+    }
+    ctx.heap.keep(code);
+    if let Some(file) = ctx.sys_binding("stderr").ok().flatten().filter(|&f| f != NONE) {
+        ctx.heap.keep(file);
+        if let Ok(writer) = ctx.lookup_attr(file, "write") {
+            ctx.heap.keep(writer);
+            if let Ok(text) = builtins::call(ctx, "str", &[code], &[]) {
+                let _ = ctx.call(writer, vec![text], Vec::new());
+            }
+        }
+    } else if let Ok(text) = builtins::call(ctx, "str", &[code], &[])
+        && let Ok(bytes) = ctx.encode_utf8_codepoints(text, false, "backslashreplace")
+    {
+        let _ = crate::sys::stderr_writer().write_all(&bytes);
+    }
+    // The message's __str__ or the stream's write method may have replaced stderr.
+    let newline = ctx.text("\n");
+    let written = ctx.sys_binding("stderr").and_then(|file| {
+        let writer = ctx.lookup_attr(file.unwrap_or(NONE), "write")?;
+        ctx.call(writer, vec![newline], Vec::new())
+    });
+    if written.is_err() {
+        let _ = crate::sys::stderr_writer().write_all(b"\n");
+    }
+    1
 }
 
 fn finish(ctx: &mut Context, result: Result<Id>) -> Id {

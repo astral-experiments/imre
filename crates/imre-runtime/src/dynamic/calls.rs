@@ -52,7 +52,7 @@ pub(super) fn module_function(symbol: &str) -> Option<(&str, &str)> {
         #[cfg(target_os = "linux")]
         "resource" if matches!(function, "getrlimit" | "setrlimit") => Some((module, function)),
         "gc" if matches!(function, "enable" | "disable" | "isenabled") => Some((module, function)),
-        "zlib" if matches!(function, "adler32" | "crc32") => Some((module, function)),
+        "zlib" if matches!(function, "adler32" | "crc32" | "compress" | "decompress") => Some((module, function)),
         "_hashlib" if !function.contains('.') => Some((module, function)),
         "hashlib"
             if matches!(function, "new" | "file_digest")
@@ -359,6 +359,18 @@ impl Context {
             unreachable!()
         };
         Some(error)
+    }
+
+    /// Replace the SystemExit member and schedule collection of a released weak target.
+    fn replace_exit_code(&mut self, object: Id, value: Id) -> bool {
+        let Some(error) = self.exception_storage(object, "SystemExit") else {
+            return false;
+        };
+        let old = std::mem::replace(&mut error.exit_code, value);
+        if old != value {
+            self.heap.weak_edge_removed(old);
+        }
+        true
     }
 
     /// Lazily allocate the exact dictionary exposed through BaseException.__dict__.
@@ -814,6 +826,7 @@ impl Context {
                             | "ImportError.__init__"
                             | "OSError.__init__"
                             | "StopIteration.__init__"
+                            | "SystemExit.__init__"
                             | "module.__init__"
                             | "module.__dir__"
                             | "module.__repr__"
@@ -1786,7 +1799,7 @@ impl Context {
                 return self.bind_attribute(descriptor, receiver, owner);
             }
         }
-        if matches!(self.heap.get(obj), Value::File(_)) {
+        if matches!(self.heap.get(obj), Value::File(_) | Value::BufferedRandom(..)) {
             let class = self.exact_type(obj)?;
             if let Some(member) = self.class_attr(class, name)
                 && matches!(
@@ -1923,6 +1936,11 @@ impl Context {
             && let Some(error) = self.exception_storage(obj, "StopIteration")
         {
             return Ok(error.stop_value());
+        }
+        if name == "code"
+            && let Some(error) = self.exception_storage(obj, "SystemExit")
+        {
+            return Ok(error.exit_code);
         }
         if matches!(name, "__new__" | "__init__" | "with_traceback")
             && matches!(self.heap.get(obj), Value::Raised(_))
@@ -3573,6 +3591,9 @@ impl Context {
                 if name == "__new__" && self.has_base(obj, "float") {
                     return Ok(self.builtin("float.__new__"));
                 }
+                if name == "__new__" && self.uses_object_new(self.allocation_base(obj)) {
+                    return Ok(self.builtin("object.__new__"));
+                }
                 if let Some((meta, member)) = metaclass_member {
                     return self.bind_attribute(member, obj, meta);
                 }
@@ -3695,9 +3716,8 @@ impl Context {
                 Value::Function { .. } => return Ok(self.builtin("function.__new__")),
                 Value::ThreadLocal(_) => return Ok(self.builtin("_thread._local.__new__")),
                 Value::Str(_) | Value::SurrogateStr(_) => return Ok(self.builtin("str.__new__")),
-                Value::Class { .. } | Value::Instance { .. } => {
-                    let class = self.heap.get(base).instance_class().unwrap_or(base);
-                    if self.uses_object_new(self.allocation_base(class)) {
+                Value::Instance { class, .. } => {
+                    if self.uses_object_new(self.allocation_base(*class)) {
                         return Ok(self.builtin("object.__new__"));
                     }
                 }
@@ -3918,6 +3938,9 @@ impl Context {
             && let Some(error) = self.exception_storage(obj, "StopIteration")
         {
             error.set_stop_value(NONE);
+            return Ok(());
+        }
+        if name == "code" && self.replace_exit_code(obj, NONE) {
             return Ok(());
         }
         if name == "msg" && self.import_error_message(obj, Some(NONE)).is_some() {
@@ -4666,6 +4689,9 @@ impl Context {
             error.set_stop_value(value);
             return Ok(());
         }
+        if name == "code" && self.replace_exit_code(obj, value) {
+            return Ok(());
+        }
         if member.is_none()
             && matches!(name, "__name__" | "fget" | "fset" | "fdel")
             && let Some(property) = self.heap.get_mut(obj).property_mut()
@@ -5361,6 +5387,7 @@ impl Context {
                             | "ImportError.__init__"
                             | "OSError.__init__"
                             | "StopIteration.__init__"
+                            | "SystemExit.__init__"
                             | "float.__format__"
                             | "float.__getformat__"
                             | "bool.__repr__"
@@ -5432,8 +5459,8 @@ impl Context {
                 }))
             }
             Value::CodecDecoder(codec) => stdlib::codecs::decode(self, codec, &args, &kwargs),
-            Value::IoOpen { reader, writer } => {
-                stdlib::io::open_from_module(self, reader, writer, &args, &kwargs)
+            Value::IoOpen { reader, writer, random } => {
+                stdlib::io::open_from_module(self, reader, writer, random, &args, &kwargs)
             }
             Value::IoMethod { owner, name } => stdlib::io::call(self, owner, name, &args, &kwargs),
             Value::Partial {

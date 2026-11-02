@@ -20,6 +20,30 @@ pub(crate) struct Random<F = File> {
 }
 
 impl FileState {
+    pub(crate) fn random_peek(&mut self) -> Result<Bytes> {
+        self.check_random_reentry()?;
+        let Some(Stream::Random(file)) = &mut self.stream else {
+            return Err(Error::new(Kind::ValueError, "peek of closed file"));
+        };
+        file.peek()
+    }
+
+    /// Return buffered bytes or make one read through the retained anonymous file.
+    pub(crate) fn random_read_once(&mut self, size: Option<usize>) -> Result<Bytes> {
+        self.check_random_reentry()?;
+        let Some(Stream::Random(file)) = &mut self.stream else {
+            return Err(Error::new(Kind::ValueError, "read of closed file"));
+        };
+        let size = file.read_once_size(size);
+        let mut data = Vec::new();
+        data.try_reserve_exact(size)
+            .map_err(|_| Error::allocation())?;
+        data.resize(size, 0);
+        let count = file.read_once(&mut data).map_err(errno_error)?;
+        data.truncate(count);
+        Ok(data)
+    }
+
     /// Whether truncate is invoking the size object's index protocol on this stream.
     pub(crate) fn random_truncating(&self) -> bool {
         matches!(&self.stream, Some(Stream::Random(file)) if file.truncating_name.is_some())
@@ -207,8 +231,20 @@ impl<F: Read + Write + Seek> Random<F> {
         Ok(offset)
     }
 
-    pub(crate) fn capacity(&self) -> usize {
-        self.buffer.len()
+    /// BufferedRandom synchronizes pending writes and refills from its logical cursor.
+    pub(crate) fn peek(&mut self) -> Result<Bytes> {
+        self.flush().map_err(errno_error)?;
+        super::peek_bytes(self)
+    }
+
+    /// A read1 with read-ahead returns only the buffered prefix, regardless of the limit.
+    pub(crate) fn read_once_size(&self, limit: Option<usize>) -> usize {
+        let size = limit.unwrap_or(self.buffer.len());
+        if self.pos < self.read_end {
+            size.min(self.read_end - self.pos)
+        } else {
+            size
+        }
     }
 
     /// Read buffered data or issue a single raw read without reading ahead.
