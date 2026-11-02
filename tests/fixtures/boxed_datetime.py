@@ -218,6 +218,24 @@ def test_time_strptime():
     else:
         raise AssertionError("invalid hour")
 
+    import builtins
+    original_import = builtins.__import__
+
+    def block_parser(name, *args):
+        if name == "_strptime":
+            raise ImportError("parser disabled")
+        return original_import(name, *args)
+
+    builtins.__import__ = block_parser
+    try:
+        Clock.strptime("04", "%H")
+    except ImportError as error:
+        assert str(error) == "parser disabled"
+    else:
+        raise AssertionError("time.strptime bypassed the import hook")
+    finally:
+        builtins.__import__ = original_import
+
 
 def test_date_strptime():
     class Day(date):

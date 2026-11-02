@@ -929,8 +929,9 @@ pub(super) fn call(
         "time.strftime" => strftime::format(ctx, "time", args, kwargs),
         "time" => time(ctx, args, kwargs),
         "time.fromisoformat" => time_fromisoformat(ctx, args, kwargs),
-        "time.strptime" => time_strptime(ctx, args, kwargs),
-        "date.strptime" | "datetime.strptime" => date_strptime(ctx, method, args, kwargs),
+        "date.strptime" | "datetime.strptime" | "time.strptime" => {
+            strptime(ctx, method, args, kwargs)
+        }
         "datetime.date"
         | "datetime.time"
         | "datetime.timetz"
@@ -1467,16 +1468,12 @@ fn strptime_args(
     Ok((class, text, format))
 }
 
-fn date_strptime(
-    ctx: &mut Context,
-    method: &str,
-    args: &[Id],
-    kwargs: &[(String, Id)],
-) -> Result<Id> {
-    let (owner, helper) = if method == "date.strptime" {
-        ("datetime.date", "_strptime_datetime_date")
-    } else {
-        ("datetime.datetime", "_strptime_datetime_datetime")
+fn strptime(ctx: &mut Context, method: &str, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    let (owner, helper) = match method {
+        "date.strptime" => ("datetime.date", "_strptime_datetime_date"),
+        "datetime.strptime" => ("datetime.datetime", "_strptime_datetime_datetime"),
+        "time.strptime" => ("datetime.time", "_strptime_datetime_time"),
+        _ => unreachable!(),
     };
     let (class, text, format) = strptime_args(ctx, owner, args, kwargs)?;
     let module_mark = ctx.heap.temporary_mark();
@@ -1502,13 +1499,6 @@ fn date_strptime(
         }
     }
     result
-}
-
-fn time_strptime(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
-    let (class, text, format) = strptime_args(ctx, "datetime.time", args, kwargs)?;
-    let module = ctx.module("_strptime")?;
-    let parser = ctx.lookup_attr(module, "_strptime_datetime_time")?;
-    ctx.call(parser, vec![class, text, format], vec![])
 }
 
 fn time_fromisoformat(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
