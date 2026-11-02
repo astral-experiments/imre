@@ -62,7 +62,7 @@ impl Context {
 
     fn is_generator_coroutine(&self, id: Id) -> bool {
         matches!(self.heap.get(id), Value::Generator { code, .. }
-            if self.code_object(*code).flags.is_some_and(|flags| flags & imre_ast::code_flags::ITERABLE_COROUTINE != 0))
+            if self.code_object(*code).flags & imre_ast::code_flags::ITERABLE_COROUTINE != 0)
     }
 
     pub(super) fn call_coroutine_method(
