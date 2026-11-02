@@ -155,6 +155,17 @@ impl Context {
                 let parts = self.items(a)?;
                 self.template_literal(&parts)
             }
+            "build_template" => {
+                let interpolations = self.items(b)?;
+                Ok(self.template_from_literal(a, interpolations))
+            }
+            "linked_string_tuple" => {
+                let items = self.items(a)?;
+                Ok(self
+                    .heap
+                    .linked_string_constant(b, |heap| heap.packed_tuple(items, true)))
+            }
+            "linked_string" => Ok(self.heap.linked_string_constant(b, |_| a)),
             "match_class" => self.match_class(a, b, c),
             "match_mapping" => self.match_mapping(a, b),
             "match_mapping_keys" => self.match_mapping_keys(a, b),

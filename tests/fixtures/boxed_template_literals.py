@@ -1,7 +1,21 @@
 from string.templatelib import Interpolation, Template
 
 
+def capture(value):
+    return t"prefix{value}suffix"
+
+
 def current():
+    first_template = capture(1)
+    second_template = capture(2)
+    assert first_template is not second_template
+    assert first_template.strings is second_template.strings
+    expected = ("prefix", "suffix")
+    assert first_template.strings is expected
+    assert first_template.interpolations is not second_template.interpolations
+    assert first_template.values == (1,) and second_template.values == (2,)
+    assert Template("prefix").strings is not Template("prefix").strings
+
     empty = t""
     assert type(empty) is Template
     assert empty.strings == ("",)

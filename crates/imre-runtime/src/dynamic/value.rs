@@ -1698,6 +1698,7 @@ impl CycleSet {
 pub(super) struct Heap {
     slots: Vec<Slot>,
     gc_order: GcOrder,
+    linked_string_constants: HashMap<i64, Id>,
     full_collection: Option<CycleSet>,
     // Native owners identify spellings. Runtime-created strings keep only a weak boxed handle.
     interned: HashMap<crate::StrOwner, InternedString>,
@@ -1783,6 +1784,7 @@ impl Heap {
             ],
             gc_order: GcOrder::EMPTY,
             full_collection: None,
+            linked_string_constants: HashMap::new(),
             interned: HashMap::new(),
             abc_registrations: Vec::new(),
             free_head: END,
@@ -1953,6 +1955,24 @@ impl Heap {
             return self.intern_literal(owner);
         }
         self.alloc_slot(value)
+    }
+
+    /// Linked code owns these immutable constants for the lifetime of its context.
+    pub(super) fn linked_string_constant(
+        &mut self,
+        slot: Id,
+        build: impl FnOnce(&mut Self) -> Id,
+    ) -> Id {
+        let Value::Int(key) = self.get(slot) else {
+            unreachable!("compiler constant slot")
+        };
+        let key = key.to_i64().expect("compiler constant slot fits in i64");
+        if let Some(&value) = self.linked_string_constants.get(&key) {
+            return value;
+        }
+        let value = build(self);
+        self.linked_string_constants.insert(key, value);
+        value
     }
 
     /// Packing an array skips tracking when its elements all have non-GC types.
@@ -2382,6 +2402,7 @@ impl Heap {
     fn mark_roots(&self, globals: impl Iterator<Item = Id>, pending: &mut MarkQueue<'_>) {
         pending.extend(globals);
         pending.extend(self.full_collection_members());
+        pending.extend(self.linked_string_constants.values().copied());
         pending.extend([NONE, FALSE, TRUE, ELLIPSIS, NOT_IMPLEMENTED, EMPTY_TUPLE]);
         pending.extend(
             self.interned

@@ -132,11 +132,24 @@ impl Context {
         }
         strings.push(pending.unwrap_or(empty));
         let strings = self.heap.packed_tuple(strings, false);
+        Ok(self.make_template(strings, interpolations))
+    }
+
+    pub(super) fn template_from_literal(&mut self, strings: Id, interpolations: Vec<Id>) -> Id {
+        // CPython folds BUILD_TUPLE into a code constant up to its stack-use guideline.
+        let strings = match self.heap.get(strings) {
+            Value::Tuple(items) if items.len() > 30 => self.heap.packed_tuple(items.clone(), false),
+            _ => strings,
+        };
+        self.make_template(strings, interpolations)
+    }
+
+    fn make_template(&mut self, strings: Id, interpolations: Vec<Id>) -> Id {
         let interpolations = self.heap.packed_tuple(interpolations, false);
-        Ok(self.alloc(Value::Template {
+        self.alloc(Value::Template {
             strings,
             interpolations,
-        }))
+        })
     }
 
     pub(super) fn template_values(&mut self, interpolations: Id) -> Result<Id> {

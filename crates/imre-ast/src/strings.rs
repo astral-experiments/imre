@@ -63,10 +63,10 @@ pub fn replacements(source: &str) -> impl Iterator<Item = u32> + '_ {
 /// CPython keeps the original expression spelling, including leading whitespace
 /// and enclosing parentheses. Commented expressions require a separate tokenizer
 /// transformation and are left unsupported.
-pub fn template_expressions(
+pub fn template_expressions<'a>(
     source: &str,
     tokens: &Tokens,
-    body: &[ast::Stmt],
+    syntax: impl Into<ast::ModRef<'a>>,
 ) -> HashMap<TextSize, String> {
     use ast::visitor::{self, Visitor};
     struct Fields<'a> {
@@ -128,7 +128,10 @@ pub fn template_expressions(
         expressions: HashMap::new(),
     };
     if tokens.iter().any(|t| t.kind() == TokenKind::TStringStart) {
-        fields.visit_body(body);
+        match syntax.into() {
+            ast::ModRef::Module(module) => fields.visit_body(&module.body),
+            ast::ModRef::Expression(expr) => fields.visit_expr(&expr.body),
+        }
     }
     fields.expressions
 }

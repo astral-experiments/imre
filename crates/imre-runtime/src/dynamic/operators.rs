@@ -3363,10 +3363,10 @@ impl Context {
         matches!(self.heap.get(storage), Value::List(_)).then_some(storage)
     }
 
-    /// A Python override participates in numeric addition before list concatenation.
-    fn list_overrides_add(&self, object: Id) -> bool {
+    /// A Python override replaces the inherited sequence-concatenation slot.
+    fn overrides_add(&self, object: Id, builtin_add: &str) -> bool {
         self.slot(object, "__add__")
-            .is_some_and(|slot| self.builtins.get("list.__add__") != Some(&slot))
+            .is_some_and(|slot| self.builtins.get(builtin_add) != Some(&slot))
     }
 
     /// Concatenate the two reference arrays without invoking either operand's iterator.
@@ -3559,21 +3559,35 @@ impl Context {
             "+" if matches!(self.heap.get(a), Value::Template { .. }) => {
                 return self.concat_template(a, b);
             }
+            "+" if self.string_storage(a).is_some() => {
+                let message = if self.overrides_add(a, "str.__add__") {
+                    format!(
+                        "unsupported operand type(s) for +{}: '{}' and '{}'",
+                        if inplace { "=" } else { "" },
+                        self.type_name(a),
+                        self.type_name(b)
+                    )
+                } else if self.string_storage(b).is_some() {
+                    return self.concat_strings(a, b);
+                } else {
+                    let name = self.type_name(b);
+                    let name = &name[..name.floor_char_boundary(200)];
+                    format!("can only concatenate str (not \"{name}\") to str")
+                };
+                return Err(Error::new("TypeError", message));
+            }
             "+" | "-"
                 if matches!(self.heap.get(a), Value::Complex(_))
                     || matches!(self.heap.get(b), Value::Complex(_)) =>
             {
                 return self.complex_sum(op == "+", a, b);
             }
-            "+" if self.string_storage(a).is_some() && self.string_storage(b).is_some() => {
-                return self.concat_strings(a, b);
-            }
             "+" if let Some(storage) = self.list_storage(a) => {
                 if inplace && storage == a {
                     builtins::call(self, "list.extend", &[storage, b], &[])?;
                     return Ok(a);
                 }
-                if self.list_overrides_add(a) {
+                if self.overrides_add(a, "list.__add__") {
                     // A Python __add__ disables the native sequence-concatenation fallback.
                     return Err(Error::new(
                         "TypeError",
@@ -3860,7 +3874,7 @@ impl Context {
         // Without a Python addition hook, list concatenation waits for the reflected operand.
         if name == "__add__"
             && self.list_storage(obj).is_some()
-            && !self.list_overrides_add(obj)
+            && !self.overrides_add(obj, "list.__add__")
             && self.slot(obj, "__radd__").is_none()
         {
             return Ok(None);
