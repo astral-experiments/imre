@@ -2131,6 +2131,15 @@ impl Context {
                     "__text_signature__" if symbol == "_io.text_encoding" => {
                         return Ok(self.text("($module, encoding, stacklevel=2, /)"));
                     }
+                    "__doc__" if symbol == "posix.sched_getscheduler" => {
+                        return Ok(self.text(concat!(
+                            "Get the scheduling policy for the process identified by pid.\n\n",
+                            "Passing 0 for pid returns the scheduling policy for the calling process.",
+                        )));
+                    }
+                    "__text_signature__" if symbol == "posix.sched_getscheduler" => {
+                        return Ok(self.text("($module, pid, /)"));
+                    }
                     "__doc__" if symbol == "posix.urandom" => {
                         return Ok(self.text("Return a bytes object containing random bytes suitable for cryptographic use."));
                     }

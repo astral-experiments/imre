@@ -602,6 +602,12 @@ impl From<crate::Error> for Error {
             Err(error) => return error,
         };
         let (kind, message) = error.into_parts();
+        let kind = match (kind, os_args.as_deref()) {
+            ("OSError", Some(super::os_error::Args::Native { source, .. })) => {
+                super::os_error::subclass(source.errno).unwrap_or(kind)
+            }
+            _ => kind,
+        };
         match message {
             Ok(message) => Self {
                 os_args,

@@ -76,7 +76,7 @@ impl Args {
     }
 }
 
-fn subclass(code: i64) -> Option<&'static str> {
+pub(super) fn subclass(code: i64) -> Option<&'static str> {
     crate::objects::errno_entries().find_map(|(name, value)| {
         if i64::from(value) != code {
             return None;
