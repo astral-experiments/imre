@@ -629,11 +629,18 @@ pub(crate) fn compile(
             include_str!("../../stdlib/collections/namedtuple_repr.py").into(),
         ));
     }
+    // The sealed io module also needs its Python protocols when imported indirectly.
+    sources.push((
+        "io".into(),
+        Path::new(bundled_root).join("io.py"),
+        include_str!("../../stdlib/io.py").into(),
+    ));
     // These bundled initializers depend only on native modules and may be selected by name at runtime.
     for name in [
         "__future__",
         "__hello__",
         "_tokenize",
+        "abc",
         "ast",
         "codecs",
         "genericpath",
