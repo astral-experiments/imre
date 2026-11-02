@@ -9,28 +9,80 @@ use super::{
     words::WordKind,
 };
 use std::ffi::CStr;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::io;
+use std::os::fd::RawFd;
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 pub(crate) use super::stdlib::imre_wall_time as wall_time;
 
-/// Suspend the calling thread for a checked Python timeout in nanoseconds.
-pub(crate) fn sleep_ns(nanos: i64) -> Result<(), Error> {
+/// A readable signal pipe closes the race between checking pending handlers and
+/// entering the wait. Threads without a wake fd only wait for the timeout.
+fn wait_for_sleep(remaining: Duration, wake: Option<RawFd>) -> io::Result<()> {
+    let mut descriptor = libc::pollfd {
+        fd: wake.unwrap_or(-1),
+        events: libc::POLLIN,
+        revents: 0,
+    };
+    #[cfg(target_os = "linux")]
+    let ready = {
+        let delay = libc::timespec {
+            tv_sec: remaining.as_secs().try_into().unwrap_or(libc::time_t::MAX),
+            tv_nsec: remaining.subsec_nanos().into(),
+        };
+        // SAFETY: the descriptor and timeout live through ppoll. A negative fd is ignored.
+        unsafe { libc::ppoll(&mut descriptor, 1, &delay, std::ptr::null()) }
+    };
+    #[cfg(not(target_os = "linux"))]
+    let ready = {
+        let millis = remaining.as_nanos().div_ceil(1_000_000);
+        let timeout = i32::try_from(millis).unwrap_or(i32::MAX);
+        // SAFETY: poll borrows one initialized descriptor and ignores a negative fd.
+        unsafe { libc::poll(&mut descriptor, 1, timeout) }
+    };
+    if ready < 0 {
+        Err(io::Error::last_os_error())
+    } else if descriptor.revents & libc::POLLNVAL != 0 {
+        Err(io::Error::from_raw_os_error(libc::EBADF))
+    } else {
+        Ok(())
+    }
+}
+
+/// Sleep against a monotonic deadline so time spent running returning Python
+/// handlers counts toward the caller's original timeout.
+pub(crate) fn sleep_ns<E: From<Error>>(
+    nanos: i64,
+    mut dispatch: impl FnMut() -> Result<(), E>,
+) -> Result<(), E> {
     if nanos < 0 {
-        return Err(Error::new(
-            Kind::ValueError,
-            "sleep length must be non-negative",
-        ));
+        return Err(Error::new(Kind::ValueError, "sleep length must be non-negative").into());
     }
     if nanos == 0 {
         std::thread::yield_now();
-    } else {
-        std::thread::sleep(std::time::Duration::from_nanos(nanos as u64));
+        return dispatch();
     }
-    Ok(())
+    let start = Instant::now();
+    let duration = Duration::from_nanos(nanos as u64);
+    let wake = crate::signals::sleep_wakeup().map_err(super::errno_error)?;
+    loop {
+        if wake.is_some() {
+            crate::signals::drain_wakeup();
+        }
+        dispatch()?;
+        let remaining = duration.saturating_sub(start.elapsed());
+        if remaining.is_zero() {
+            return Ok(());
+        }
+        if let Err(error) = wait_for_sleep(remaining, wake)
+            && error.kind() != io::ErrorKind::Interrupted
+        {
+            return Err(super::errno_error(error).into());
+        }
+    }
 }
 
 /// CPython rounds a positive floating-point timeout up to a whole nanosecond.
-pub(crate) fn sleep_float(seconds: f64) -> Result<(), Error> {
+pub(crate) fn sleep_float_ns(seconds: f64) -> Result<i64, Error> {
     if seconds.is_nan() {
         return Err(Error::new(
             Kind::ValueError,
@@ -49,7 +101,7 @@ pub(crate) fn sleep_float(seconds: f64) -> Result<(), Error> {
     } else {
         nanos.ceil()
     };
-    sleep_ns(rounded as i64)
+    Ok(rounded as i64)
 }
 
 /// Signed nanoseconds since the Unix epoch, without rounding through floating point.

@@ -380,7 +380,8 @@ pub(super) fn is_descriptor_function(name: &str) -> bool {
             | "set_inheritable"
             | "link"
             | "symlink"
-    ) || (cfg!(target_os = "linux") && name == "sendfile")
+    ) || (cfg!(unix) && matches!(name, "kill" | "getppid"))
+        || (cfg!(target_os = "linux") && name == "sendfile")
 }
 
 /// Convert an index argument before issuing the descriptor syscall.
@@ -783,6 +784,33 @@ pub(super) fn descriptor(
             "TypeError",
             format!("posix.{name}() takes no keyword arguments"),
         ));
+    }
+    if name == "getppid" {
+        if !args.is_empty() {
+            return Err(Error::new(
+                "TypeError",
+                format!("posix.getppid() takes no arguments ({} given)", args.len()),
+            ));
+        }
+        // SAFETY: getppid reads the calling process's parent PID and takes no arguments.
+        return Ok(ctx.int(i64::from(unsafe { libc::getppid() })));
+    }
+    if name == "kill" {
+        let [pid, signal] = args else {
+            return Err(Error::new(
+                "TypeError",
+                format!("kill expected 2 arguments, got {}", args.len()),
+            ));
+        };
+        let pid = c_int(ctx, *pid)?;
+        let signal = ssize_t(ctx, *signal)?;
+        let audit_pid = ctx.int(i64::from(pid));
+        let audit_signal = ctx.int(signal as i64);
+        super::audit::event(ctx, "os.kill", &[audit_pid, audit_signal])?;
+        // CPython audits the full Py_ssize_t, then narrows it to the POSIX int.
+        native::kill(pid, signal as libc::c_int)?;
+        ctx.dispatch_signals()?;
+        return Ok(NONE);
     }
     if name == "getsid" {
         let [pid] = args else {

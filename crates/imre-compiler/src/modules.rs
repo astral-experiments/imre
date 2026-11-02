@@ -1527,6 +1527,9 @@ impl IntrinsicModule {
             (Self::Warnings, "showwarning") => Intrinsic::WarningDisplay { show: true },
             (Self::Time, "sleep") => Intrinsic::TimeSleep,
             (Self::Time, "time") => Intrinsic::WallTime,
+            (Self::Signal | Self::SignalNative, "signal" | "getsignal") if cfg!(unix) => {
+                Intrinsic::ObjectRuntimeExport("_signal.signal")
+            }
             (Self::Signal, "SIGINT") => Intrinsic::IntConstant(2),
             (Self::Signal, "SIGTERM") => Intrinsic::IntConstant(15),
             (Self::SignalNative, "SIGINT") => Intrinsic::ObjectRuntimeExport("_signal.SIGINT"),

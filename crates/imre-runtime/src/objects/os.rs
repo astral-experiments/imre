@@ -345,6 +345,12 @@ pub(crate) fn getsid(pid: libc::pid_t) -> Result<libc::pid_t> {
     checked(unsafe { libc::getsid(pid) })
 }
 
+/// Send a signal to a POSIX process or process group, including signal zero's existence check.
+pub(crate) fn kill(pid: libc::pid_t, signal: libc::c_int) -> Result<()> {
+    // SAFETY: kill takes only integers and reports failure through errno.
+    checked(unsafe { libc::kill(pid, signal) }).map(|_| ())
+}
+
 /// Wait for a child independently of Popen and return its unmodified POSIX status.
 pub(crate) fn waitpid(pid: libc::pid_t, options: libc::c_int) -> Result<[i32; 2]> {
     let mut status = 0;

@@ -625,13 +625,17 @@ impl Error {
         }
     }
 
-    /// Use Python's argument-free MemoryError when an operation exhausts memory.
-    pub(crate) fn memory_error() -> Self {
+    pub(super) fn without_args(kind: Kind) -> Self {
         Self {
-            kind: Kind::MemoryError,
+            kind,
             payload: Some(Payload::Empty),
             cause: None,
         }
+    }
+
+    /// Use Python's argument-free MemoryError when an operation exhausts memory.
+    pub(crate) fn memory_error() -> Self {
+        Self::without_args(Kind::MemoryError)
     }
 
     pub(super) fn key(key: OwnedWord) -> Self {
@@ -2488,8 +2492,14 @@ pub extern "C" fn imre_error_unhandled() -> i32 {
         }
         return status_after_flush(status, stdout, stderr.and(crate::sys::flush_stderr()));
     }
+    let interrupted = kind_of(&pending) == Kind::KeyboardInterrupt;
     write_exception_chain(pending);
-    status_after_flush(1, stdout, stderr.and(crate::sys::flush_stderr()))
+    let status = status_after_flush(1, stdout, stderr.and(crate::sys::flush_stderr()));
+    if interrupted {
+        crate::signals::exit_interrupt()
+    } else {
+        status
+    }
 }
 
 /// Print the handled exception without changing the active handler or the process exit status.

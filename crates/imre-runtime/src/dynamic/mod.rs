@@ -36,6 +36,8 @@ mod paramspec;
 mod property;
 mod range;
 mod raw_read_window;
+#[cfg(unix)]
+mod signal_handlers;
 mod slice;
 mod slot_member;
 mod source_code;
@@ -149,6 +151,7 @@ pub(crate) struct Context {
     classes: HashMap<String, Id>,
     // The Python enum bases use native layouts but have writable class dictionaries.
     enum_scopes: HashMap<Id, Id>,
+    signal_handlers: HashMap<i32, Id>,
     typing: typing::Registry,
     // Python wrappers retain their registered logger for the lifetime of this heap.
     logger_wrappers: HashMap<*const crate::objects::logging::Logger, Id>,
@@ -2605,17 +2608,20 @@ impl Context {
             }
             #[cfg(unix)]
             "_signal" if source.is_none() => {
-                #[cfg(target_os = "linux")]
                 stdlib::signal::initialize(self, scope);
                 for (name, disposition) in [("SIG_DFL", libc::SIG_DFL), ("SIG_IGN", libc::SIG_IGN)]
                 {
                     let value = self.int(disposition as i64);
                     self.bind(scope, name, value);
                 }
+                for name in ["signal", "getsignal"] {
+                    let function = self.builtin(&format!("_signal.{name}"));
+                    self.bind(scope, name, function);
+                }
                 let handler = self.builtin("_signal.default_int_handler");
                 self.bind(scope, "default_int_handler", handler);
             }
-            #[cfg(target_os = "linux")]
+            #[cfg(unix)]
             "_imre_signal" if source.is_none() => {
                 let factory = self.builtin("_imre_signal.make_signals");
                 self.bind(scope, "make_signals", factory);

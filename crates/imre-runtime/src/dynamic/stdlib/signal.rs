@@ -1,4 +1,4 @@
-//! Signal numbers and pending signals from the Linux process ABI.
+//! Signal numbers and pending signals from the host POSIX ABI.
 use super::{Context, Error, Id, Result, Value, builtins};
 use std::sync::OnceLock;
 
@@ -16,31 +16,37 @@ fn signal_numbers() -> &'static [(&'static str, i32)] {
             SIGHUP, SIGINT, SIGQUIT, SIGILL, SIGTRAP, SIGABRT, SIGIOT, SIGBUS, SIGFPE, SIGKILL,
             SIGUSR1, SIGSEGV, SIGUSR2, SIGPIPE, SIGALRM, SIGTERM, SIGCHLD, SIGCONT, SIGSTOP,
             SIGTSTP, SIGTTIN, SIGTTOU, SIGURG, SIGXCPU, SIGXFSZ, SIGVTALRM, SIGPROF, SIGWINCH,
-            SIGIO, SIGPOLL, SIGPWR, SIGSYS
+            SIGIO, SIGSYS
         );
-        // musl omits the legacy SIGCLD spelling. Linux MIPS and SPARC have SIGEMT instead of SIGSTKFLT.
-        #[cfg(any(target_env = "gnu", target_env = "uclibc"))]
-        numbers.push(("SIGCLD", libc::SIGCHLD));
-        #[cfg(any(
-            target_arch = "mips",
-            target_arch = "mips32r6",
-            target_arch = "mips64",
-            target_arch = "mips64r6",
-            target_arch = "sparc",
-            target_arch = "sparc64"
-        ))]
-        numbers.push(("SIGEMT", libc::SIGEMT));
-        #[cfg(not(any(
-            target_arch = "mips",
-            target_arch = "mips32r6",
-            target_arch = "mips64",
-            target_arch = "mips64r6",
-            target_arch = "sparc",
-            target_arch = "sparc64"
-        )))]
-        numbers.push(("SIGSTKFLT", libc::SIGSTKFLT));
-        numbers.push(("SIGRTMIN", libc::SIGRTMIN()));
-        numbers.push(("SIGRTMAX", libc::SIGRTMAX()));
+        #[cfg(target_os = "linux")]
+        {
+            numbers.extend(signals!(SIGPOLL, SIGPWR));
+            // musl omits the legacy SIGCLD spelling. Linux MIPS and SPARC have SIGEMT instead of SIGSTKFLT.
+            #[cfg(any(target_env = "gnu", target_env = "uclibc"))]
+            numbers.push(("SIGCLD", libc::SIGCHLD));
+            #[cfg(any(
+                target_arch = "mips",
+                target_arch = "mips32r6",
+                target_arch = "mips64",
+                target_arch = "mips64r6",
+                target_arch = "sparc",
+                target_arch = "sparc64"
+            ))]
+            numbers.push(("SIGEMT", libc::SIGEMT));
+            #[cfg(not(any(
+                target_arch = "mips",
+                target_arch = "mips32r6",
+                target_arch = "mips64",
+                target_arch = "mips64r6",
+                target_arch = "sparc",
+                target_arch = "sparc64"
+            )))]
+            numbers.push(("SIGSTKFLT", libc::SIGSTKFLT));
+            numbers.push(("SIGRTMIN", libc::SIGRTMIN()));
+            numbers.push(("SIGRTMAX", libc::SIGRTMAX()));
+        }
+        #[cfg(any(target_vendor = "apple", target_os = "freebsd", target_os = "netbsd", target_os = "openbsd", target_os = "dragonfly"))]
+        numbers.extend(signals!(SIGINFO, SIGEMT));
         numbers.sort_unstable_by_key(|&(name, number)| (number, name));
         numbers
     })
@@ -49,7 +55,7 @@ fn signal_numbers() -> &'static [(&'static str, i32)] {
 /// Populate the module dictionary so imports, attribute changes, and dir share the same bindings.
 pub(in crate::dynamic) fn initialize(ctx: &mut Context, scope: Id) {
     bind_numbers(ctx, scope);
-    let nsig = ctx.int(i64::from(libc::SIGRTMAX() + 1));
+    let nsig = ctx.int(i64::from(crate::signals::nsig()));
     ctx.bind(scope, "NSIG", nsig);
     let alarm = ctx.builtin("_signal.alarm");
     ctx.bind(scope, "alarm", alarm);
@@ -115,7 +121,7 @@ fn pending(ctx: &mut Context) -> Result<Id> {
         entries: Default::default(),
         frozen: false,
     });
-    for number in 1..=libc::SIGRTMAX() {
+    for number in 1..crate::signals::nsig() {
         // SAFETY: sigpending initialized mask, and the signal is in the Linux ABI range.
         if unsafe { libc::sigismember(mask.as_ptr(), number) } == 1 {
             let value = ctx.int(i64::from(number));
