@@ -818,7 +818,6 @@ pub(super) enum Value {
         format: String,
         layout: std::rc::Rc<crate::objects::interpreter_stdlib::StructFormat>,
     },
-    LoggerHandle(std::rc::Rc<crate::objects::logging::Logger>),
     MetadataArchive(std::rc::Rc<crate::objects::ZipArchive>),
     HandlerLock(std::sync::Arc<crate::objects::logging::HandlerLock>),
     Socket(crate::ObjectOwner),
@@ -1734,7 +1733,6 @@ impl Value {
             | Self::CodecDecoder(_)
             | Self::Struct { .. }
             | Self::Hash(_)
-            | Self::LoggerHandle(_)
             | Self::MetadataArchive(_)
             | Self::HandlerLock(_)
             | Self::ThreadHandle(_)

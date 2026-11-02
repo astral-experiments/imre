@@ -4,7 +4,6 @@ import warnings
 from _thread import RLock as _Lock
 from types import GenericAlias
 import weakref
-import _imre_logging as _native
 
 
 _lock = _Lock()

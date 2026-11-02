@@ -739,7 +739,6 @@ pub(super) fn new_context<S: Into<String>>(
         enum_scopes: HashMap::new(),
         signal_handlers: Vec::new(),
         typing: super::typing::Registry::default(),
-        logger_wrappers: HashMap::new(),
         builtins: HashMap::new(),
         native_type_dicts: HashMap::new(),
         sources: HashMap::new(),
@@ -1561,7 +1560,6 @@ impl Context {
                 .values()
                 .chain(self.enum_scopes.values())
                 .chain(self.signal_handlers.iter())
-                .chain(self.logger_wrappers.values())
                 .chain(self.typing.roots())
                 .chain(self.builtins.values())
                 .chain(self.native_type_dicts.values())
