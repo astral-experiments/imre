@@ -147,6 +147,7 @@ pub(crate) struct Context {
     import_missing: Id,
     // The running frozen bootstrap keeps its globals even if its registry entry is replaced.
     bootstrap_globals: Id,
+    bootstrap_module: Id,
     import_registry_installed: bool,
     bootstrap_file_spec: Id,
     // The native path finder stays installed across fresh public bootstrap imports.
@@ -2377,6 +2378,17 @@ impl Context {
         Ok((value != self.import_missing).then_some(value))
     }
 
+    fn module_initializing(&mut self, module: Id) -> Result<bool> {
+        match self
+            .lookup_attr(module, "__spec__")
+            .and_then(|spec| self.lookup_attr(spec, "_initializing"))
+        {
+            Ok(flag) => self.truth(flag),
+            Err(error) if self.is_attribute_error(&error) => Ok(false),
+            Err(error) => Err(error),
+        }
+    }
+
     fn cached_import(&mut self, name: &str) -> Result<Option<Id>> {
         let key = self.text(name);
         let mut retries = 0;
@@ -2386,13 +2398,8 @@ impl Context {
             };
             self.heap.reserve_temporaries(1)?;
             self.heap.keep(module);
-            let initializing = self
-                .lookup_attr(module, "__spec__")
-                .and_then(|spec| self.lookup_attr(spec, "_initializing"));
-            match initializing {
-                Ok(flag) if self.truth(flag)? => break self.public_registered_module(key)?,
-                Err(error) if !self.is_attribute_error(&error) => return Err(error),
-                _ => {}
+            if self.module_initializing(module)? {
+                break self.public_registered_module(key)?;
             }
             if self.public_module_get(key, None)? == module {
                 break Some(module);

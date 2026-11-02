@@ -49,6 +49,11 @@ class _ModuleLockManager:
         self._drop_user()
 
 
+def _lock_unlock_module(name):
+    with _ModuleLockManager(name):
+        pass
+
+
 def _warning_module():
     import warnings
     return warnings
