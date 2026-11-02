@@ -32,6 +32,15 @@ def current():
             print(str(error))
         else:
             raise AssertionError("getencoding accepted arguments")
+    bad = "x" + chr(0xd800) + chr(0xdfff)
+    for options in ({"encoding": bad}, {"errors": bad}, {"errors": 42, "newline": bad}):
+        try:
+            io.TextIOWrapper(io.BytesIO(), **options)
+        except UnicodeEncodeError as error:
+            assert (error.encoding, error.start, error.end) == ("utf-8", 1, 3)
+            assert error.object is bad and error.reason == "surrogates not allowed"
+        else:
+            raise AssertionError("accepted surrogates in text options")
     raw = io.BytesIO()
     wrapper = Wrapper(raw, encoding="utf-8", line_buffering=True)
     assert type(wrapper) is Wrapper and wrapper.buffer is raw and not wrapper.isatty()
