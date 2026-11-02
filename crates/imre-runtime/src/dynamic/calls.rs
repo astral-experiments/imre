@@ -306,7 +306,10 @@ impl Context {
                 "__init_subclass__" => self.builtins.get("object.__init_subclass__").copied(),
                 _ => None,
             },
-            Value::Native(owner) if builtins::set_operators(owner).contains(&name) => {
+            Value::Native(owner)
+                if builtins::set_methods(owner).contains(&name)
+                    || builtins::set_operators(owner).contains(&name) =>
+            {
                 self.builtins.get(&format!("{owner}.{name}")).copied()
             }
             Value::Native(kind) if kind == "collections.defaultdict" => {
@@ -373,10 +376,7 @@ impl Context {
                     || (kind == stdlib::fixed_structseq::SCHED_PARAM
                         && matches!(name, "__reduce__" | "__replace__"))
                     || (kind == "function" && name == "__call__")
-                    || (kind == "builtin_function_or_method" && name == "__reduce__")
-                    || (kind == "set" && matches!(name, "intersection_update" | "update"))
-                    || (matches!(name, "__repr__" | "__reduce__" | "difference" | "intersection" | "isdisjoint" | "issubset" | "symmetric_difference" | "union")
-                        && matches!(kind.as_str(), "set" | "frozenset")) =>
+                    || (kind == "builtin_function_or_method" && name == "__reduce__") =>
             {
                 self.builtins.get(&format!("{kind}.{name}")).copied()
             }
@@ -847,7 +847,7 @@ impl Context {
     }
 
     pub(super) fn bind_attribute(&mut self, value: Id, receiver: Id, owner: Id) -> Result<Id> {
-        if matches!(self.heap.get(value), Value::Native(name) if matches!(name.as_str(), "dict.fromkeys" | "int.from_bytes" | "float.__getformat__" | "bytes.fromhex" | "bytearray.fromhex") || stdlib::datetime::clock_classmethod(name))
+        if matches!(self.heap.get(value), Value::Native(name) if matches!(name.as_str(), "dict.fromkeys" | "set.__class_getitem__" | "frozenset.__class_getitem__" | "int.from_bytes" | "float.__getformat__" | "bytes.fromhex" | "bytearray.fromhex") || stdlib::datetime::clock_classmethod(name))
         {
             return Ok(self.bind_native_classmethod(value, owner));
         }
@@ -3925,36 +3925,26 @@ impl Context {
                 let method = self.builtin("dict.fromkeys");
                 return Ok(self.bind_native_classmethod(method, owner));
             }
-            Value::Native(ref owner) if builtins::set_operators(owner).contains(&name) => {
-                return Ok(self.builtin(&format!("{owner}.{name}")));
+            Value::Set { frozen, .. } if name == "__class_getitem__" => {
+                let owner = if frozen { "frozenset" } else { "set" };
+                let member = self.builtin(&format!("{owner}.{name}"));
+                let class = self.builtin(owner);
+                return Ok(self.bind_native_classmethod(member, class));
             }
-            Value::Native(ref class) if class == "set" && name == "copy" => {
-                return Ok(self.builtin("set.copy"));
-            }
-            Value::Native(ref class)
-                if class == "set"
-                    && matches!(
-                        name,
-                        "clear"
-                            | "discard"
-                            | "pop"
-                            | "remove"
-                            | "difference_update"
-                            | "intersection_update"
-                            | "symmetric_difference_update"
-                            | "update"
-                    ) =>
+            Value::Native(ref owner)
+                if builtins::set_methods(owner).contains(&name)
+                    || builtins::set_operators(owner).contains(&name) =>
             {
-                return Ok(self.builtin(&format!("set.{name}")));
+                let member = self.builtin(&format!("{owner}.{name}"));
+                if name == "__class_getitem__" {
+                    return Ok(self.bind_native_classmethod(member, obj));
+                }
+                return Ok(member);
             }
             Value::Native(ref class)
                 if matches!(class.as_str(), "dict" | "list" | "tuple")
                     || (class == "function" && name == "__call__")
                     || builtins::is_enum_base(class)
-                    || (matches!(
-                        name,
-                        "__repr__" | "difference" | "intersection" | "isdisjoint" | "issubset" | "symmetric_difference" | "union"
-                    ) && matches!(class.as_str(), "set" | "frozenset"))
                     || (builtins::is_exception(class)
                         && matches!(
                             name,

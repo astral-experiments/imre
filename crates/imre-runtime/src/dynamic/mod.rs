@@ -2210,28 +2210,7 @@ impl Context {
             "list" => builtins::LIST_METHODS,
             "method_descriptor" | "wrapper_descriptor" => &["__get__"],
             "tuple" => &["__repr__", "__getitem__", "__len__", "count", "index"],
-            "set" => &[
-                "__repr__",
-                "__reduce__",
-                "difference",
-                "intersection",
-                "intersection_update",
-                "isdisjoint",
-                "issubset",
-                "symmetric_difference",
-                "union",
-                "update",
-            ],
-            "frozenset" => &[
-                "__repr__",
-                "__reduce__",
-                "difference",
-                "intersection",
-                "isdisjoint",
-                "issubset",
-                "symmetric_difference",
-                "union",
-            ],
+            "set" | "frozenset" => builtins::set_methods(name),
             "bytearray" => {
                 self.builtin("bytearray.fromhex");
                 builtins::BYTEARRAY_METHODS

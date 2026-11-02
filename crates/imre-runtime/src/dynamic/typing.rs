@@ -752,6 +752,7 @@ pub(super) fn subscribe(ctx: &mut Context, target: Id, index: Id) -> Option<Resu
                     | "list"
                     | "tuple"
                     | "set"
+                    | "frozenset"
                     | "type"
                     | super::value::REGEX_PATTERN_TYPE
                     | super::value::REGEX_MATCH_TYPE

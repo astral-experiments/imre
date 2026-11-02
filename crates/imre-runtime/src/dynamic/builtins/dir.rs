@@ -116,6 +116,7 @@ fn object_names(ctx: &mut Context, object: Id) -> Result<Id> {
         | Value::Dict(_)
         | Value::Tuple(_)
         | Value::List(_)
+        | Value::Set { .. }
         | Value::Str(_)
         | Value::SurrogateStr(_) => ctx.exact_type(object)?,
         Value::NamedTuple {
@@ -431,7 +432,7 @@ fn class_names(ctx: &Context, class: Id, names: &mut BTreeSet<String>) -> Result
         Value::Native(name)
             if matches!(
                 name.as_str(),
-                "builtin_function_or_method" | "dict" | "list" | "str"
+                "builtin_function_or_method" | "dict" | "list" | "str" | "set" | "frozenset"
             ) =>
         {
             class_names(ctx, ctx.builtins["object"], names)?;
@@ -447,6 +448,7 @@ fn class_names(ctx: &Context, class: Id, names: &mut BTreeSet<String>) -> Result
                         "__text_signature__",
                     ],
                 ),
+                "set" | "frozenset" => (super::set_methods(name), super::set_operators(name)),
                 "dict" => (
                     super::DICT_METHODS,
                     &["__class_getitem__", "__or__", "__reversed__", "__ror__"],
