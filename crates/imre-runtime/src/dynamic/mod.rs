@@ -2714,6 +2714,10 @@ impl Context {
     ) -> Result<()> {
         #[cfg(target_os = "linux")]
         if source.is_none() && matches!(name, "os" | "posix") {
+            for name in ["major", "minor", "makedev"] {
+                let function = self.builtin(&format!("posix.{name}"));
+                self.bind(scope, name, function);
+            }
             stdlib::os::eventfd::initialize(self, scope);
         }
         if name == "_thread" && source.is_none() {
@@ -2819,11 +2823,17 @@ impl Context {
             "posix" if source.is_none() => {
                 stdlib::os::scheduler::initialize(self, scope);
                 stdlib::os::sysconf::initialize(self, module, scope);
+                let lockf = self.builtin("posix.lockf");
+                self.bind(scope, "lockf", lockf);
                 let fadvise = self.builtin("posix.posix_fadvise");
                 self.bind(scope, "posix_fadvise", fadvise);
                 for (attr, flag) in [
                     ("O_PATH", libc::O_PATH),
                     ("O_TMPFILE", libc::O_TMPFILE),
+                    ("F_LOCK", libc::F_LOCK),
+                    ("F_TLOCK", libc::F_TLOCK),
+                    ("F_ULOCK", libc::F_ULOCK),
+                    ("F_TEST", libc::F_TEST),
                     ("POSIX_FADV_NORMAL", libc::POSIX_FADV_NORMAL),
                     ("POSIX_FADV_SEQUENTIAL", libc::POSIX_FADV_SEQUENTIAL),
                     ("POSIX_FADV_RANDOM", libc::POSIX_FADV_RANDOM),

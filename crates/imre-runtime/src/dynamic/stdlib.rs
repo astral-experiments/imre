@@ -1717,6 +1717,10 @@ pub(super) fn call(
         return os::scheduler::get_policy(ctx, args, kwargs);
     }
     #[cfg(target_os = "linux")]
+    if let Some(op @ ("major" | "minor" | "makedev")) = name.strip_prefix("posix.") {
+        return os::device::call(ctx, op, args, kwargs);
+    }
+    #[cfg(target_os = "linux")]
     if let Some(op @ ("eventfd" | "eventfd_read" | "eventfd_write")) = name.strip_prefix("posix.") {
         return os::eventfd::call(ctx, op, args, kwargs);
     }
