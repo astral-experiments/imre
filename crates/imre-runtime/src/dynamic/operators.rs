@@ -5125,7 +5125,7 @@ impl Context {
             && [a, b]
                 .into_iter()
                 .any(|id| match self.heap.get(self.scalar_value(id)) {
-                    Value::Set { .. } => true,
+                    Value::Set { .. } | Value::Deque(_) => true,
                     Value::Calendar { value, .. } => value.class() != "timezone",
                     _ => false,
                 });
