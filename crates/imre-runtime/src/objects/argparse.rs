@@ -75,7 +75,7 @@ struct OptionSpec {
     converter: Option<String>,
     default: Option<String>,
     path_default: bool,
-    help: String,
+    help: Option<String>,
     optional: bool,
     group: Option<usize>,
     mutex: Option<usize>,
@@ -631,7 +631,7 @@ impl Parser {
                 let names = self
                     .options
                     .iter()
-                    .filter(|o| o.mutex == Some(id))
+                    .filter(|o| o.mutex == Some(id) && o.help.is_some())
                     .map(OptionSpec::error_name)
                     .collect::<Vec<_>>()
                     .join(" ");

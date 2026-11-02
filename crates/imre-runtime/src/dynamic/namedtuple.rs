@@ -420,7 +420,6 @@ pub(super) fn factory(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -
     let scope = ctx.scope(&module_name, None);
     ctx.heap.keep(scope);
     let name = ctx.text(&typename);
-    ctx.bind(scope, "__name__", name);
     ctx.bind(scope, "__qualname__", name);
     ctx.bind(scope, "__module__", module);
     let fields = bind_field_metadata(ctx, scope, &names, &defaults);

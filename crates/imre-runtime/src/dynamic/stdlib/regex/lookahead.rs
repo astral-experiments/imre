@@ -191,6 +191,10 @@ impl Lookahead {
         Self::new(source, self.groups.clone(), self.mode, self.fold)
     }
 
+    pub(super) fn total_close_order(&self) -> bool {
+        self.search.captures_len() <= 2 || self.close_order().is_some()
+    }
+
     /// On a winning path without re-entry, participating captures close in
     /// syntax-tree postorder, even when a lookaround crosses a sibling's span.
     pub(super) fn close_order(&self) -> Option<Vec<usize>> {
@@ -204,7 +208,11 @@ impl Lookahead {
             for child in expr.children_iter() {
                 visit(child, count, order)?;
             }
-            if *count != before && matches!(expr, Expr::Repeat { hi, .. } if *hi > 1) {
+            // A captured operand closes after its descendants on every iteration.
+            if *count != before
+                && matches!(expr, Expr::Repeat { child, hi, .. }
+                if *hi > 1 && !matches!(child.as_ref(), Expr::Group(_)))
+            {
                 return None;
             }
             order.extend(group);

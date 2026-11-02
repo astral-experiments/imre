@@ -333,9 +333,11 @@ fn option(
         };
         required = value.value;
     }
+    let is_intrinsic =
+        |expr, intrinsic| registration::is_intrinsic(expr, intrinsic, graph, id, locals);
     let action = match kw.get("action").copied() {
         None => "store",
-        Some(expr) if registration::boolean_action(expr, graph, id, locals) => "boolean_optional",
+        Some(expr) if is_intrinsic(expr, Intrinsic::BooleanOptionalAction) => "boolean_optional",
         Some(expr) => {
             let action = literal(expr, module)?;
             if action == "boolean_optional" {
@@ -597,13 +599,13 @@ fn option(
         ));
     }
     let path_default = matches!(kw.get("default"), Some(ast::Expr::Call(_)));
-    let help = kw
-        .get("help")
-        .map(|&value| literal(value, module))
-        .transpose()?
-        .unwrap_or("");
+    let help = match kw.get("help") {
+        Some(value) if is_intrinsic(value, Intrinsic::ArgparseSuppress) => None,
+        Some(value) => Some(literal(value, module)?),
+        None => Some(""),
+    };
     if !template(
-        help,
+        help.unwrap_or_default(),
         &[
             "prog", "dest", "type", "default", "const", "choices", "required", "nargs",
         ],

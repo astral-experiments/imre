@@ -2,6 +2,39 @@ import re
 
 
 def current():
+    # A successful atomic choice cannot be retried to satisfy its suffix.
+    for expr, text, expected in (
+        (r"(a|ab)c", "abc", ("ab",)), (r"(?>(a|ab))c", "abc", None),
+        (r"(a*+)(b)", "aaab", ("aaa", "b")), (r"a*+a", "aaa", None),
+        (r"a{1,2}+a", "aa", None), (r"a{1,2}a", "aa", ()),
+        (r"(?>a?b){2}", "abb", ()), (r"(?:.(?!D))++C", "ABC", None),
+        (br"(?>(a+))b", b"aab", (b"aa",)), (br".++", b"\xff\x80", ()),
+        (r"[+?]++", "+?", ()), (r"\++a", "++a", ()), (r"\}+a", "}}a", ()),
+        ("(?x:(?> a | ab ) c)", "abc", None),
+    ):
+        m = re.fullmatch(expr, text)
+        assert (None if m is None else m.groups()) == expected, (expr, text)
+    assert [m.span() for m in re.finditer(r"a?+", "a-")] == [(0, 1), (1, 1), (2, 2)]
+    for bad in ("a*++", "a{1,2}+?", "(?>a)**", "(?x:(?>a)* +)"):
+        try:
+            re.compile(bad)
+        except re.PatternError:
+            pass
+        else:
+            raise AssertionError(bad)
+    for expr, text, expected in (
+        (r"(?P<outer>(a)|b)*+", "ab", (1, "outer")),
+        (r"(?P<outer>(a)|b)*+", "a", (1, "outer")),
+        (r"(?:(?P<x>x)|(?P<y>y))++", "xy", (2, "y")),
+        (r"(?:(?P<x>x)|(?P<y>y))++", "yx", (1, "x")),
+        (r"(?:(?>(a|ab))c|a(b)c)", "abc", (2, None)),
+        (r"(?:(?P<a>a)|(?P<b>)b)++", "ab", (2, "b")),
+        (r"(?>(a))(b)", "ab", (2, None)),
+    ):
+        m = re.fullmatch(expr, text)
+        assert (m.lastindex, m.lastgroup) == expected, (expr, text)
+    # Even with captured operands the committed choice cannot retreat for the suffix.
+    assert re.fullmatch(r"(?P<outer>(a)|b)++a", "aba") is None
     for flags in (0, re.L):
         ahead = re.compile(b"a(?!b).", flags)
         assert ahead.search(b"abad").span() == (2, 4)
