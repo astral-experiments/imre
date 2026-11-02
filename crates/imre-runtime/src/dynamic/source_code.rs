@@ -3849,6 +3849,17 @@ impl Context {
         Ok(())
     }
 
+    /// Release completed formatting operands before evaluating the next Python expression.
+    fn keep_format_result(&mut self, mark: usize, value: Id) -> Result<Id> {
+        let collect = self.heap.discard_truth_operands(mark);
+        self.heap.reserve_temporaries(1)?;
+        self.heap.keep(value);
+        if collect {
+            self.collect_unreachable();
+        }
+        Ok(value)
+    }
+
     fn join_source_format(&mut self, parts: Vec<Id>) -> Result<Id> {
         // A lone field preserves the exact object returned by __format__.
         if let [part] = parts.as_slice() {
@@ -3874,25 +3885,28 @@ impl Context {
                     if let Some(debug) = &field.debug_text {
                         parts.push(self.text(debug.as_str()));
                     }
+                    let mark = self.heap.temporary_mark();
                     let mut value = self.source_expr(code, scope, &field.expression)?;
                     let conversion = field.conversion.to_char().or_else(|| {
                         (field.debug_text.is_some() && field.format_spec.is_none()).then_some('r')
                     });
                     if let Some(conversion) = conversion {
                         value = builtins::format_conversion(self, value, conversion)?;
-                        self.heap.keep(value);
+                        self.keep_format_result(mark, value)?;
                     }
                     let spec = if let Some(spec) = &field.format_spec {
+                        let spec_mark = self.heap.temporary_mark();
                         let mut nested = Vec::new();
                         self.source_format_elements(code, scope, &spec.elements, &mut nested)?;
-                        Some(self.join_source_format(nested)?)
+                        let spec = self.join_source_format(nested)?;
+                        Some(self.keep_format_result(spec_mark, spec)?)
                     } else {
                         None
                     };
-                    builtins::format_value(self, value, spec)?
+                    let rendered = builtins::format_value(self, value, spec)?;
+                    self.keep_format_result(mark, rendered)?
                 }
             };
-            self.heap.keep(part);
             parts.push(part);
         }
         Ok(())
@@ -3954,6 +3968,7 @@ impl Context {
             }
             Expr::StringLiteral(_) | Expr::BytesLiteral(_) => Ok(code.literals[&expr.range()]),
             Expr::FString(fstring) => {
+                let mark = self.heap.temporary_mark();
                 let mut parts = Vec::new();
                 for part in fstring.value.iter() {
                     match part {
@@ -3966,7 +3981,8 @@ impl Context {
                         }
                     }
                 }
-                self.join_source_format(parts)
+                let result = self.join_source_format(parts)?;
+                self.keep_format_result(mark, result)
             }
             Expr::TString(template) => {
                 let strings = code.literals[&expr.range()];
