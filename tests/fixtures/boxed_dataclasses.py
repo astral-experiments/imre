@@ -1,4 +1,4 @@
-from dataclasses import KW_ONLY, FrozenInstanceError, InitVar, asdict, dataclass, field, fields
+from dataclasses import KW_ONLY, FrozenInstanceError, InitVar, asdict, astuple, dataclass, field, fields
 
 
 @dataclass
@@ -67,6 +67,34 @@ def replacement():
         assert str(exc) == "InitVar 'factor' must be specified with replace()"
     else:
         raise AssertionError("accepted a missing InitVar")
+
+
+def mapping_conversion():
+    from collections import defaultdict
+
+    @dataclass
+    class Row:
+        value: int
+
+    @dataclass
+    class Table:
+        groups: dict
+
+    class Mapping(dict):
+        pass
+
+    groups = defaultdict(list)
+    groups['a'].append(Row(3))
+    table = Table(Mapping([('group', groups)]))
+    tuple_groups = astuple(table)[0]
+    dict_groups = asdict(table)['groups']
+    assert type(tuple_groups) is type(dict_groups) is Mapping
+    tuple_group, dict_group = tuple_groups['group'], dict_groups['group']
+    assert type(tuple_group) is type(dict_group) is defaultdict
+    assert tuple_group.default_factory is dict_group.default_factory is list
+    assert tuple_group == {'a': [(3,)]}
+    assert dict_group == {'a': [{'value': 3}]}
+    assert tuple_group['a'] is not groups['a'] and dict_group['a'] is not groups['a']
 
 
 def current():
@@ -183,4 +211,5 @@ def current():
         raise AssertionError("comparison swallowed the field lookup error")
 
     replacement()
+    mapping_conversion()
     print("boxed dataclasses")

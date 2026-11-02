@@ -511,6 +511,16 @@ def _convert(obj, factory, named):
         return type(obj)([_convert(x, factory, named) for x in obj])
     if type(obj) is dict:
         return {_convert(k, factory, named): _convert(v, factory, named) for k, v in obj.items()}
+    if isinstance(obj, dict):
+        from collections import defaultdict
+        obj_type = type(obj)
+        if hasattr(obj_type, 'default_factory') or isinstance(obj, defaultdict):
+            result = obj_type(obj.default_factory)
+            for k, v in obj.items():
+                result[_convert(k, factory, named)] = _convert(v, factory, named)
+            return result
+        return obj_type((_convert(k, factory, named), _convert(v, factory, named))
+                        for k, v in obj.items())
     if obj is None or type(obj) in (bool, int, float, str, bytes):
         return obj
     from copy import deepcopy
