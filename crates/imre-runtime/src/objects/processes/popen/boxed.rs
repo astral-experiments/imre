@@ -43,6 +43,7 @@ impl BoxedPopen {
         bufsize: Int,
         pipesize: Int,
         shell: bool,
+        start_new_session: bool,
         warn_line_buffering: &mut dyn FnMut() -> Result<()>,
     ) -> std::result::Result<Self, BoxedLaunchError> {
         let mut words = Words::new(8);
@@ -82,6 +83,8 @@ impl BoxedPopen {
             failure_site: Some(&mut site),
             warn_line_buffering: Some(warn_line_buffering),
             environment: env,
+            // A new session uses the ordinary child-settings path with no group or umask change.
+            child: start_new_session.then_some((0, Int::small(-1).unwrap().0, true)),
             pipe_size: Some((pipesize.0, 2)),
             ..Default::default()
         };

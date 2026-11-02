@@ -106,6 +106,7 @@ fn launch(ctx: &mut Context, values: &[Id]) -> Result<Id> {
         encoding,
         errors,
         shell,
+        start_new_session,
     ] = values
     else {
         return Err(Error::new("TypeError", "invalid Popen launch operands"));
@@ -175,6 +176,7 @@ fn launch(ctx: &mut Context, values: &[Id]) -> Result<Id> {
         ctx.as_int(bufsize)?,
         ctx.as_int(pipesize)?,
         shell,
+        ctx.truth(start_new_session)?,
         &mut || {
             let result = (|| -> Result<()> {
                 let warnings = ctx.module("warnings")?;
