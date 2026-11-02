@@ -1287,10 +1287,14 @@ impl Context {
         }
     }
     pub(super) fn missing_attribute(&self, obj: Id, name: &str) -> Error {
-        Error::new(
-            "AttributeError",
-            format!("'{}' object has no attribute '{name}'", self.type_name(obj)),
-        )
+        let message = if matches!(self.heap.get(obj), Value::Class { .. }) {
+            let class = self.class_name(obj);
+            let class = &class[..class.floor_char_boundary(100)];
+            format!("type object '{class}' has no attribute '{name}'")
+        } else {
+            format!("'{}' object has no attribute '{name}'", self.type_name(obj))
+        };
+        Error::new("AttributeError", message)
     }
 
     /// Match an attribute lookup failure using the ordinary exception hierarchy.
@@ -3081,6 +3085,11 @@ impl Context {
                 receiver: obj,
                 explicit: false,
             }));
+        }
+        // Imported Python modules share ModuleType's fallback after ordinary attributes.
+        if let Value::Module { scope, .. } = *self.heap.get(obj) {
+            let class = self.builtin("module");
+            return self.module_instance_attribute(obj, class, scope, name);
         }
         Err(self.missing_attribute(obj, name))
     }

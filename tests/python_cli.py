@@ -1742,6 +1742,7 @@ def report(text):
             "boxed_logging.py",
             "boxed_logging_file.py",
             "boxed_class_attribute.py",
+            "boxed_missing_attribute_owners.py",
             "boxed_request_strings.py",
             "boxed_str_maketrans.py",
             "boxed_map_capwords.py",
