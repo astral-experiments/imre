@@ -39,8 +39,10 @@ pub(super) fn construct(
         "repr" => {
             positional(name, kwargs)?;
             arity(name, args, 1, 1)?;
-            if let Value::TypeVarTuple { name, .. } = ctx.heap.get(args[0]) {
-                return Ok(*name);
+            match ctx.heap.get(args[0]) {
+                Value::TypeVarTuple { name, .. } => return Ok(*name),
+                Value::TypeAlias(alias) => return Ok(alias.name),
+                _ => {}
             }
             if let Some(result) = ctx.repr_override(args[0])? {
                 return Ok(result);

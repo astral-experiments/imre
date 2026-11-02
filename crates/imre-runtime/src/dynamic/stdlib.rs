@@ -137,6 +137,7 @@ pub(super) fn has_lazy_attributes(name: &str) -> bool {
             | "_thread"
             | "abc"
             | "array"
+            | "_typing"
             | "_collections"
             | "codecs"
             | "_codecs"
@@ -537,6 +538,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("collections" | "_collections", "_tuplegetter") => ctx.builtin(super::namedtuple::GETTER),
         ("collections", "defaultdict") => ctx.builtin("collections.defaultdict"),
         ("types", "GenericAlias") => ctx.builtin("types.GenericAlias"),
+        ("typing" | "_typing", "TypeAliasType") => ctx.builtin("typing.TypeAliasType"),
         ("typing", "NoDefault") => super::typing::no_default(ctx),
         ("typing", "TYPE_CHECKING") => FALSE,
         ("typing", "Union") | ("types", "UnionType") => super::union::class(ctx),

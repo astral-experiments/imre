@@ -76,6 +76,12 @@ pub(crate) fn emit(
         let template_expressions =
             imre_ast::strings::template_expressions(source, parsed.tokens(), parsed.syntax());
         let mut body = parsed.into_syntax().body;
+        if source.contains("type")
+            && let Some((expr, reason)) = imre_ast::type_alias::check(&body)
+        {
+            let error = crate::frontend::error(source, expr, &format!("SyntaxError: {reason}"));
+            return Err(format!("{}:{error}", path.display()));
+        }
         let method_imports = imre_ast::module_imports(&body);
         let private_names = imre_ast::lower(&mut body);
         if source.contains("nonlocal") {
@@ -133,6 +139,7 @@ enum Body<'a> {
         Vec<(&'a str, &'a ast::Expr)>,
         Option<statements::ClassBindings>,
     ),
+    AliasValue(&'a ast::Expr, Option<statements::ClassBindings>),
     AnnotationValue(&'a ast::Expr),
     AnnotationThunk(String, ruff_text_size::TextRange),
     Expression(&'a ast::Expr),
@@ -293,6 +300,7 @@ impl Output {
                 let value = f.checked(&format!("call i64 {entry}(ptr %ctx, i64 {})", f.scope));
                 f.end(&format!("ret i64 {value}"));
             }
+            Body::AliasValue(expr, class) => f.alias_value(expr, class),
             Body::AnnotationValue(expr) => {
                 let value = f.expr(expr);
                 f.end(&format!("ret i64 {value}"));

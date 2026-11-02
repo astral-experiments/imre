@@ -102,7 +102,7 @@ impl Function<'_, '_> {
         sites: &[Site],
         globals: &BTreeSet<String>,
     ) {
-        self.check_annotation_format();
+        self.check_annotation_format("format");
         let active = sites
             .iter()
             .any(|s| s.conditional.is_some())

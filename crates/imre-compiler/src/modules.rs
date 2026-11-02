@@ -1736,6 +1736,7 @@ impl IntrinsicModule {
             (Self::DoctestRuntime, "execute") => Intrinsic::DocExecute,
             (Self::MockRuntime, "mark_call_list") => Intrinsic::MockCallList { mark: true },
             (Self::MockRuntime, "is_call_list") => Intrinsic::MockCallList { mark: false },
+            (Self::Typing, "TypeAliasType") => Intrinsic::ObjectRuntimeExport("typing.TypeAliasType"),
             (Self::Typing, "ParamSpec") => Intrinsic::ObjectRuntimeExport("typing.ParamSpec"),
             (Self::Typing, "ParamSpecArgs") => {
                 Intrinsic::ObjectRuntimeExport("typing.ParamSpecArgs")

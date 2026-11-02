@@ -3,6 +3,7 @@
 pub mod exceptions;
 pub mod startup;
 pub mod strings;
+pub mod type_alias;
 
 use std::cell::RefCell;
 use std::collections::{BTreeSet, HashMap, HashSet};

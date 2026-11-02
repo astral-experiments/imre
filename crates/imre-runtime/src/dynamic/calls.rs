@@ -1098,6 +1098,7 @@ impl Context {
             Value::ParamSpec(_) => "typing.ParamSpec",
             Value::ParamSpecMarker(kind, _) => kind.class(),
             Value::ConstEvaluator(_) => "constevaluator",
+            Value::TypeAlias(_) => "typing.TypeAliasType",
             Value::TypeVarTuple { .. } => "typing.TypeVarTuple",
             Value::GenericAlias(alias) => alias.kind.class(),
             Value::Socket(_) => "socket.socket",
@@ -1203,6 +1204,7 @@ impl Context {
                             | "typing.ParamSpecArgs"
                             | "typing.ParamSpecKwargs"
                             | "constevaluator"
+                            | "typing.TypeAliasType"
                             | "typing.TypeVarTuple"
                             | "typing._UnpackGenericAlias"
                             | "NoDefaultType"
