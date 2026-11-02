@@ -22,7 +22,10 @@ impl Context {
         let args = self.items(arguments)?;
         let kwargs = self.keyword_args(keywords)?;
         let result = self.call_in_scope(scope, callable, args, kwargs)?;
-        if !self.heap.discard_scalar_call(mark, result, arguments) {
+        if !self
+            .heap
+            .discard_scalar_call(mark, result, arguments, callable)
+        {
             self.finish_call_operands(mark, result);
         }
         Ok(result)
@@ -446,9 +449,16 @@ impl Context {
                 code.coroutine = true;
                 Ok(a)
             }
+            "setup_module_string_annotations" => {
+                self.setup_module_annotations(a, true)?;
+                Ok(NONE)
+            }
             "annotate" => {
                 if self.scope_data(a).class_body.is_some() {
                     let mapping = self.lookup_class_local(a, "__annotations__")?;
+                    self.put_item(mapping, b, c)?;
+                } else if c != NONE {
+                    let mapping = self.module_annotation_name(a, "__annotations__")?;
                     self.put_item(mapping, b, c)?;
                 } else if let Some(mapping) = self.lookup_scope_name(a, "__annotations__")? {
                     self.put_item(mapping, b, c)?;

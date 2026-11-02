@@ -2737,23 +2737,59 @@ impl Heap {
         )
     }
 
-    /// Release a private argument list containing scalar tuples at its original call boundary.
-    pub(super) fn discard_scalar_call(&mut self, mark: usize, result: Id, arguments: Id) -> bool {
+    /// Regex matches and patterns on exact text or bytes hold only their subject and pattern source.
+    fn plain_regex_operand(&self, id: Id) -> bool {
+        let weak = |id| self.has_weak_values && self.weak_edge(id);
+        let text = |id| {
+            matches!(
+                self.get(id),
+                Value::Str(_) | Value::SurrogateStr(_) | Value::Bytes(_)
+            ) && !weak(id)
+        };
+        let pattern =
+            |id| matches!(self.get(id), Value::RegexPattern(p) if text(p.source)) && !weak(id);
+        let (value, callable) = match self.get(id) {
+            Value::Method {
+                callable, receiver, ..
+            } => (*receiver, Some(*callable)),
+            Value::RegexPattern(_) | Value::RegexMatch(_) => (id, None),
+            _ => return false,
+        };
+        !weak(id)
+            && callable.is_none_or(|f| matches!(self.get(f), Value::Native(_)) && !weak(f))
+            && (pattern(value)
+                || matches!(self.get(value), Value::RegexMatch(m)
+                    if !weak(value) && text(m.subject) && pattern(m.pattern)))
+    }
+
+    /// Release inert call arguments and peers at the same boundary as the general discard.
+    pub(super) fn discard_scalar_call(
+        &mut self,
+        mark: usize,
+        result: Id,
+        arguments: Id,
+        callable: Id,
+    ) -> bool {
         if !self.tracks_finalizers() {
             return false;
         }
         let Value::List(args) = self.get(arguments) else {
             return false;
         };
+        let tuple_argument = (2..=8).contains(&args.len())
+            && args
+                .iter()
+                .any(|&id| matches!(self.get(id), Value::Tuple(_)));
+        let regex_call = matches!(self.get(callable), Value::Method { receiver, .. }
+            if matches!(self.get(*receiver), Value::RegexPattern(_) | Value::RegexMatch(_)))
+            && self.plain_regex_operand(callable);
+        if args.len() > 8 || !(tuple_argument || regex_call) {
+            return false;
+        }
         let weak = |id| self.has_weak_values && self.weak_edge(id);
         let scalar = |id| self.finalizer_free_scalar(id) && !weak(id);
         let flat = |items: &[Id]| items.len() <= 8 && items.iter().copied().all(scalar);
-        // Without a nested tuple the original discard need not truncate these temporaries.
-        if !(2..=8).contains(&args.len())
-            || !args
-                .iter()
-                .any(|&id| matches!(self.get(id), Value::Tuple(_)))
-            || weak(arguments)
+        if weak(arguments)
             || !args.iter().all(|&id| match self.get(id) {
                 Value::Tuple(items) => !weak(id) && flat(items),
                 _ => scalar(id),
@@ -2764,18 +2800,26 @@ impl Heap {
         let Some(dropped) = self.frames.last().unwrap().live.get(mark..) else {
             return false;
         };
-        if dropped.len() > 64 || !dropped.contains(&arguments) {
+        if dropped.len() > 64 {
             return false;
         }
-        // Other operands may own resources or weak targets. Leave uncertain cases to the collector.
-        if !dropped.iter().all(|&id| {
-            id == arguments
-                || match self.get(id) {
-                    Value::Tuple(items) | Value::List(items) => !weak(id) && flat(items),
-                    Value::Dict(items) => !weak(id) && items.is_empty(),
-                    _ => scalar(id),
-                }
-        }) {
+        let mut saw_arguments = false;
+        let mut would_truncate = tuple_argument;
+        for &id in dropped {
+            if id == arguments {
+                saw_arguments = true;
+                continue;
+            }
+            match self.get(id) {
+                Value::Tuple(items) | Value::List(items) if !weak(id) && flat(items) => {}
+                Value::Dict(items) if !weak(id) && items.is_empty() => {}
+                _ if scalar(id) => {}
+                _ if regex_call && self.plain_regex_operand(id) => would_truncate = true,
+                _ => return false,
+            }
+        }
+        // Without a nested tuple argument or a discarded regex operand, keep the original roots.
+        if !saw_arguments || !would_truncate {
             return false;
         }
         self.release_temporaries_since(mark);
@@ -3183,6 +3227,45 @@ impl Heap {
         };
     }
 
+    /// Look for a short strong path from a current frame to an owner. Recheck every edge:
+    /// assigning an instance field or releasing an operand can invalidate the whole path.
+    fn frame_keeps_instance_owner(&self, owner: Id) -> bool {
+        fn keeps(heap: &Heap, root: Id, owner: Id, budget: &mut usize) -> bool {
+            if *budget == 0 {
+                return false;
+            }
+            *budget -= 1;
+            if root == owner {
+                return true;
+            }
+            match heap.get(root) {
+                Value::Method { receiver, .. } => keeps(heap, *receiver, owner, budget),
+                Value::Instance { fields, .. } => fields
+                    .values()
+                    .take(*budget)
+                    .any(|&value| keeps(heap, value, owner, budget)),
+                _ => false,
+            }
+        }
+
+        self.frames.iter().rev().take(8).any(|frame| {
+            let locals = match self.get(frame.scope) {
+                Value::Scope(scope) => Some(&scope.names),
+                _ => None,
+            };
+            frame
+                .live
+                .iter()
+                .rev()
+                .take(8)
+                .chain(locals.into_iter().flat_map(|names| names.values().take(8)))
+                .any(|&root| {
+                    let mut budget = 16;
+                    keeps(self, root, owner, &mut budget)
+                })
+        })
+    }
+
     pub(super) fn acyclic_finalizer(
         &self,
         roots: impl Iterator<Item = Id>,
@@ -3211,6 +3294,15 @@ impl Heap {
                 .rev()
                 .skip(1)
                 .any(|frame| frame.live.contains(owner))
+        {
+            return Ok(None);
+        }
+        if remaining == 1
+            && let Some(&owner) = self
+                .ordinary_finalizers
+                .iter()
+                .find(|owner| !stdin.is_some_and(|chain| chain.contains(owner)))
+            && self.frame_keeps_instance_owner(owner)
         {
             return Ok(None);
         }
@@ -3917,14 +4009,14 @@ mod tests {
         let owning = heap.alloc(Value::Tuple(vec![owner]));
         let arguments = heap.alloc(Value::List(vec![TRUE, types]));
         let mark = heap.temporary_mark();
-        assert!(!heap.discard_scalar_call(mark, TRUE, arguments));
+        assert!(!heap.discard_scalar_call(mark, TRUE, arguments, NONE));
         heap.keep(arguments);
         heap.keep(owning);
-        assert!(!heap.discard_scalar_call(mark, TRUE, arguments));
+        assert!(!heap.discard_scalar_call(mark, TRUE, arguments, NONE));
         heap.release_temporaries_since(mark);
         heap.keep(arguments);
         heap.keep(types);
-        assert!(heap.discard_scalar_call(mark, TRUE, arguments));
+        assert!(heap.discard_scalar_call(mark, TRUE, arguments, NONE));
         assert_eq!(&heap.frames.last().unwrap().live[mark..], &[TRUE]);
 
         let Value::List(items) = heap.get_mut(arguments) else {
@@ -3932,7 +4024,49 @@ mod tests {
         };
         items[1] = owning;
         heap.keep(arguments);
-        assert!(!heap.discard_scalar_call(mark, NONE, arguments));
+        assert!(!heap.discard_scalar_call(mark, NONE, arguments, NONE));
+    }
+
+    #[test]
+    fn regex_call_releases_only_plain_unobserved_operands() {
+        use super::super::{ffi, stdlib, weakref};
+
+        let mut ctx = ffi::new_context(serde_json::json!({"paths": []}), ["imre"]);
+        let bytes = ctx.alloc(Value::Bytes(b"a".into()));
+        let mutable = ctx.alloc(Value::ByteArray(b"a".into()));
+        let pattern = stdlib::call(&mut ctx, "re.compile", &[bytes], &[]).unwrap();
+        let method = ctx.lookup_attr(pattern, "match").unwrap();
+        let matched = ctx.call(method, vec![bytes], Vec::new()).unwrap();
+        let mutable_match = ctx.call(method, vec![mutable], Vec::new()).unwrap();
+        let owner = ctx.alloc(Value::List(Vec::new()));
+        ctx.heap.register_finalizer(owner);
+
+        for (subject, result, observe_method, release) in [
+            (bytes, matched, false, true),
+            (mutable, mutable_match, false, false),
+            (bytes, matched, true, false),
+        ] {
+            assert!(matches!(ctx.heap.get(result), Value::RegexMatch(_)));
+            if observe_method {
+                ctx.heap
+                    .new_weak_reference(method, NONE, weakref::Kind::Reference, None)
+                    .unwrap();
+            }
+            let mark = ctx.heap.temporary_mark();
+            let args = ctx.alloc(Value::List(vec![subject]));
+            ctx.heap.keep(result);
+            assert_eq!(
+                ctx.heap.discard_scalar_call(mark, result, args, method),
+                release
+            );
+            let live = &ctx.heap.frames.last().unwrap().live[mark..];
+            if release {
+                assert_eq!(live, &[result]);
+            } else {
+                assert_eq!(live, &[args, result]);
+            }
+            ctx.heap.release_temporaries_since(mark);
+        }
     }
 
     #[test]

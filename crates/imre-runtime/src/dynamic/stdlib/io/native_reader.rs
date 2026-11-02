@@ -58,59 +58,6 @@ fn validate(owner: &str, name: &str, count: usize, kwargs: &[(String, Id)]) -> R
     Err(Error::new("TypeError", message))
 }
 
-fn repr(ctx: &mut Context, receiver: Id) -> Result<Id> {
-    let name = match ctx.lookup_attr(receiver, "name") {
-        Ok(name) => Some(name),
-        Err(error)
-            if ctx.is_builtin_error(&error, "AttributeError")
-                || ctx.is_builtin_error(&error, "ValueError") =>
-        {
-            None
-        }
-        Err(error) => return Err(error),
-    };
-    let class = ctx.exact_type(receiver)?;
-    let class_name = if ctx.heap.get(class).io_kind() == Some("BufferedReader") {
-        "_io.BufferedReader"
-    } else {
-        ctx.class_name(class)
-    }
-    .to_owned();
-    let Some(name) = name else {
-        return Ok(ctx.text(format!("<{class_name}>")));
-    };
-    if ctx.repr_ancestors.contains(&receiver) {
-        return Err(Error::new(
-            "RuntimeError",
-            format!("reentrant call inside {class_name}.__repr__"),
-        ));
-    }
-    ctx.repr_ancestors
-        .try_reserve(1)
-        .map_err(|_| crate::Error::allocation())?;
-    ctx.repr_ancestors.push(receiver);
-    let repr = ctx.builtin("repr");
-    let shown = ctx.call(repr, vec![name], Vec::new());
-    ctx.repr_ancestors.pop();
-    let text = format!("<{class_name} name={}>", ctx.str_value(shown?)?);
-    Ok(ctx.text(text))
-}
-
-/// A missing or failing raw warning hook must not interrupt flush or close.
-pub(super) fn dealloc_warn(ctx: &mut Context, receiver: Id, source: Id) {
-    let raw = if let Some(buffer) = backing(ctx, receiver)
-        && let Value::File(handle) = ctx.heap.get(buffer)
-        && let BinaryFile::Descriptor(fd) = handle.as_ref()
-    {
-        Some(fd.raw)
-    } else {
-        super::buffered_reader::initialized_raw(ctx, receiver)
-    };
-    if let Some(raw) = raw {
-        let _ = super::text_wrapper::invoke(ctx, raw, "_dealloc_warn", vec![source]);
-    }
-}
-
 /// A warning or flush override can replace the raw, even across backing types.
 pub(super) fn flush_and_close(ctx: &mut Context, receiver: Id) -> Result<Id> {
     let flush = super::text_wrapper::invoke(ctx, receiver, "flush", vec![]);
@@ -150,14 +97,10 @@ pub(super) fn call(
     }
     validate(owner, name, args.len(), kwargs)?;
     if name == "__repr__" {
-        return repr(ctx, receiver);
+        return super::buffered_io::repr(ctx, receiver);
     }
     if name == "__getstate__" {
-        let class = ctx.exact_type(receiver)?;
-        return Err(Error::new(
-            "TypeError",
-            format!("cannot pickle '{}' instances", ctx.class_name(class)),
-        ));
+        return super::buffered_io::getstate(ctx, receiver);
     }
     if name == "peek"
         && let Some(&size) = args.first()
@@ -168,7 +111,7 @@ pub(super) fn call(
         return Ok(FALSE);
     }
     if name == "_dealloc_warn" {
-        dealloc_warn(ctx, receiver, args[0]);
+        super::buffered_io::dealloc_warn(ctx, receiver, args[0]);
         return Ok(NONE);
     }
     if super::buffered_reader::has_state(ctx, receiver) {
@@ -222,7 +165,7 @@ pub(super) fn call(
             return ctx.lookup_attr(fd.raw, name);
         }
         if receiver != buffer && name == "close" && !fd.closed() {
-            fd.warn_on_reader_close(ctx, receiver)?;
+            fd.warn_on_close(ctx, receiver)?;
             return flush_and_close(ctx, receiver);
         }
         return fd.call(ctx, receiver, name, args, kwargs);

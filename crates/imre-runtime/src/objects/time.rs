@@ -14,6 +14,9 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 pub(crate) use super::stdlib::imre_wall_time as wall_time;
 
+#[cfg(target_os = "linux")]
+mod linux_clock;
+
 /// A signal delivered to the sleeping thread interrupts the native wait. A
 /// returning handler resumes against the same deadline, including callback time.
 pub(crate) fn sleep_ns<E: From<Error>>(
@@ -135,15 +138,22 @@ pub(crate) fn clock_info(name: &[u8]) -> Result<(&'static str, bool, f64), Error
         ),
         _ => return Err(Error::new(Kind::ValueError, "unknown clock")),
     };
+    #[cfg(target_os = "linux")]
+    let (implementation, resolution) = linux_clock::probe(clock, implementation)?;
+    #[cfg(not(target_os = "linux"))]
+    let resolution = clock_resolution(clock).map_err(super::errno_error)?;
+    Ok((implementation, clock != libc::CLOCK_REALTIME, resolution))
+}
+
+fn clock_resolution(clock: libc::clockid_t) -> io::Result<f64> {
     let mut resolution = std::mem::MaybeUninit::<libc::timespec>::uninit();
     // SAFETY: clock_getres initializes the timespec on success.
     if unsafe { libc::clock_getres(clock, resolution.as_mut_ptr()) } != 0 {
-        return Err(super::errno_error(io::Error::last_os_error()));
+        return Err(io::Error::last_os_error());
     }
     // SAFETY: the successful clock_getres call initialized both fields.
     let resolution = unsafe { resolution.assume_init() };
-    let seconds = resolution.tv_sec as f64 + resolution.tv_nsec as f64 * 1e-9;
-    Ok((implementation, clock != libc::CLOCK_REALTIME, seconds))
+    Ok(resolution.tv_sec as f64 + resolution.tv_nsec as f64 * 1e-9)
 }
 
 /// Read the process-independent clock used by CPython's monotonic and performance counters.

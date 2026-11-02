@@ -2,6 +2,7 @@
 
 import argparse
 import errno
+import importlib.util
 import json
 import os
 import platform
@@ -902,6 +903,19 @@ def check_python_process_identity(imre, root, env):
                     pass
 
 
+def check_os_abort(imre, run):
+    import signal
+
+    source = (
+        "import os, resource, signal\n"
+        "resource.setrlimit(resource.RLIMIT_CORE, (0, 0))\n"
+        "signal.signal(signal.SIGABRT, signal.SIG_IGN)\n"
+        "os.abort()\n"
+    )
+    result = run(imre, "-c", source, timeout=600)
+    assert result.returncode == -signal.SIGABRT, result
+
+
 def check_faulthandler(imre, root, env):
     import resource
     import select
@@ -1198,6 +1212,7 @@ def main():
             check_faulthandler(imre, root, env)
             check_python_process_identity(imre, root, env)
         if sys.platform.startswith("linux"):
+            check_os_abort(imre, run)
             check_pending_signals(imre, root, env)
             marked_call_flags = marked_call_refusal_flags(root)
             check_bound_method_allocation(imre, run, marked_call_flags)
@@ -1344,7 +1359,7 @@ def main():
             target["python_version"] + ".0",
         ]
 
-        def compare(*args, extra=None, status=0, native_args=None, native_timeout=60):
+        def compare(*args, extra=None, status=0, stderr=b"", native_args=None, native_timeout=60):
             expected = run(sys.executable, *args, extra=extra)
             actual = run(imre, *(args if native_args is None else native_args), extra=extra, timeout=native_timeout)
             assert actual.returncode == expected.returncode == status, (
@@ -1357,7 +1372,7 @@ def main():
                 actual.stdout,
                 expected.stdout,
             )
-            assert actual.stderr == expected.stderr == b"", (
+            assert actual.stderr == expected.stderr == stderr, (
                 args,
                 actual.stderr,
                 expected.stderr,
@@ -1408,6 +1423,17 @@ def main():
             for prefix in ("", "sub/"):
                 app.writestr(prefix + "__main__.py", (entry / "__main__.py").read_text())
                 app.writestr(prefix + "sibling.py", f"marker = {prefix!r}\n")
+        # A .pyc operand is never Python source, even when its bytes form a valid script.
+        bytecode = root / "not_source.pyc"
+        bytecode.write_text("print('executed as source')\n")
+        compare(bytecode, status=1, stderr=b"RuntimeError: Bad magic number in .pyc file\n")
+        bytecode.write_bytes(b"")
+        compare(bytecode, status=1, stderr=b"EOFError: EOF read where not expected\n")
+        if sys.version_info[:2] == (3, 14):
+            renamed = root / "bad_bytecode"
+            renamed.write_bytes(importlib.util.MAGIC_NUMBER[:2] + b"xx")
+            compare(renamed, status=1, stderr=b"RuntimeError: Bad magic number in .pyc file\n")
+
         compare("application", "tail")
         compare("-I", "./application/sub", "-h")
 
@@ -1521,6 +1547,19 @@ def main():
             "print(date.__module__, datetime.__qualname__, timedelta.__module__)\n"
         )
         compare("-IB", names, native_args=("run", names, "--quiet"))
+
+        comparisons = root / "calendar_comparison.py"
+        for expression in (
+            "d.__eq__(dt)", "date.__le__(dt, d)", "dt.__ne__(d)",
+            "getattr(d, '__eq__')(dt)", "getattr(dt, '__ne__')(d)",
+        ):
+            comparisons.write_text(
+                "from datetime import date, datetime\n"
+                "d = date(2024, 2, 29)\n"
+                "dt = datetime(2024, 2, 29, 23)\n"
+                f"print({expression})\n"
+            )
+            compare("-IB", comparisons, native_args=("run", comparisons, "--quiet"))
 
         if os.name == "posix":
             compare(
@@ -2256,7 +2295,7 @@ def report(text):
         shutdown_writer = fixtures / "io_buffered_writer_shutdown.py"
         sink = root / "callback-shutdown.bin"
         command = ("run", shutdown_writer, "--quiet", "--", sink)
-        for mode in ("close", "temporary-close"):
+        for mode in ("close", "temporary-close", "file-finalize", "callback-finalize"):
             compare("-IB", shutdown_writer, sink, mode, native_args=(*command, mode))
             assert sink.read_bytes() == b"abc"
         pending = run(imre, *command, "pending")
@@ -2485,6 +2524,7 @@ def report(text):
             "boxed_lru_insert_same.py",
             "boxed_annotationlib_refs.py",
             "boxed_class_annotation_sites.py",
+            "boxed_future_module_annotations.py",
             "boxed_typing_no_type_check.py",
             "boxed_typing_no_type_check_decorator.py",
             "boxed_typing_assert_type.py",
@@ -2527,6 +2567,7 @@ def report(text):
             "boxed_re_scanner.py",
             "boxed_re_escape.py",
             "boxed_datetime.py",
+            "boxed_date_comparison.py",
             "boxed_timedelta_multiply.py",
             "boxed_timedelta_scale.py",
             "boxed_timedelta_floordiv.py",
@@ -2862,6 +2903,8 @@ def report(text):
             plugin.write_bytes((fixtures / "boxed_fcntl.py").read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")
             plugin.write_bytes((fixtures / "boxed_posix_rtld_flags.py").read_bytes())
+            compare("-IB", "-c", imports + "arithmetic.current()")
+            plugin.write_bytes((fixtures / "boxed_posix_sysconf.py").read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")
             plugin.write_bytes((fixtures / "boxed_resource.py").read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")

@@ -330,6 +330,8 @@ mod links;
 mod mkfifo;
 #[cfg(target_os = "linux")]
 pub(in crate::dynamic) mod scheduler;
+#[cfg(target_os = "linux")]
+pub(in crate::dynamic) mod sysconf;
 mod unlink;
 mod utime;
 

@@ -454,6 +454,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("unicodedata", "normalize" | "decomposition") => {
             ctx.builtin(&format!("unicodedata.{name}"))
         }
+        ("_imp", "pyc_magic_number_token") => ctx.int(i64::from(imre_ast::PYC_MAGIC_NUMBER_TOKEN)),
         (
             "_imp",
             "is_frozen"
@@ -705,7 +706,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("posix", "_create_environ" | "putenv" | "unsetenv") => {
             ctx.builtin(&format!("posix.{name}"))
         }
-        ("os" | "posix", "getpid" | "urandom") if cfg!(unix) => {
+        ("os" | "posix", "abort" | "getpid" | "urandom") if cfg!(unix) => {
             ctx.builtin(&format!("posix.{name}"))
         }
         ("os", "name") => ctx.text("posix"),
@@ -1318,6 +1319,7 @@ pub(super) fn call(
             | "_locale.getencoding"
             | "sys.getfilesystemencoding"
             | "sys.getfilesystemencodeerrors"
+            | "posix.abort"
             | "posix.getpid"
             | "sys._jit.is_available"
             | "sys._jit.is_enabled"
@@ -1356,6 +1358,9 @@ pub(super) fn call(
                 ctx.heap.code_name(crate::sys::filesystem_errors().as_str())
             }
             "_locale.getencoding" => ctx.text(crate::sys::file_encoding(Some("locale"))),
+            // SAFETY: C abort takes no arguments and terminates the calling process.
+            #[cfg(unix)]
+            "posix.abort" => unsafe { libc::abort() },
             "posix.getpid" => ctx.int(i64::from(std::process::id())),
             "sys.getdefaultencoding" => ctx.default_encoding,
             "sys.get_int_max_str_digits" => {
@@ -1572,6 +1577,10 @@ pub(super) fn call(
         && os::is_descriptor_function(op)
     {
         return os::descriptor(ctx, op, args, kwargs);
+    }
+    #[cfg(target_os = "linux")]
+    if name == "posix.sysconf" {
+        return os::sysconf::call(ctx, args, kwargs);
     }
     #[cfg(target_os = "linux")]
     if name == "posix.sched_getscheduler" {

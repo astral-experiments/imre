@@ -158,6 +158,7 @@ impl BuiltinDescriptor {
                 owner,
                 name,
                 method: !name.starts_with("__")
+                    || (owner == "list" && name == "__getitem__")
                     || (owner == defaultdict::CLASS && matches!(name, "__copy__" | "__missing__"))
                     || matches!(
                         name,
@@ -524,7 +525,10 @@ impl BuiltinDescriptor {
                     ("__bytes__", "__doc__") => "Convert this value to exact type bytes.",
                     ("__complex__", "__doc__") => "Convert this value to exact type complex.",
                     ("__bytes__" | "__complex__", _) => "($self, /)",
-                    ("count" | "find", _) if self.owner == "bytes" => "($self, sub[, start[, end]], /)",
+                    ("index", "__doc__") if self.owner == "bytes" => {
+                        "Return the lowest index in B where subsection 'sub' is found, such that 'sub' is contained within B[start,end].\n\n  start\n    Optional start position. Default: start of the bytes.\n  end\n    Optional stop position. Default: end of the bytes.\n\nRaise ValueError if the subsection is not found."
+                    }
+                    ("count" | "find" | "index", _) if self.owner == "bytes" => "($self, sub[, start[, end]], /)",
                     ("isascii", "__doc__") => {
                         "Return True if all characters in the string are ASCII, False otherwise.\n\nASCII characters have code points in the range U+0000-U+007F.\nEmpty string is ASCII too."
                     }
@@ -567,6 +571,8 @@ impl BuiltinDescriptor {
                     ) => "($self, /)",
                     ("mro", "__doc__") => "Return a type's method resolution order.",
                     ("mro", _) => "($self, /)",
+                    ("__getitem__", "__doc__") if self.owner == "list" => "Return self[index].",
+                    ("__getitem__", _) if self.owner == "list" => "($self, index, /)",
                     ("append", "__doc__") => "Append object to the end of the list.",
                     ("pop", "__doc__") => {
                         "Remove and return item at index (default last).\n\nRaises IndexError if list is empty or index is out of range."

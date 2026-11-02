@@ -2,7 +2,7 @@
 use super::*;
 use std::borrow::Cow;
 
-fn encoded_key(key: &Str) -> Result<Vec<u8>> {
+pub(super) fn encoded_key(key: &Str) -> Result<Vec<u8>> {
     super::super::Codec::encode_str(key, &crate::sys::filesystem_encoding()?, "surrogateescape")
 }
 

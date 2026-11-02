@@ -886,6 +886,7 @@ impl Context {
                             | "bytes.count"
                             | "bytes.decode"
                             | "bytes.find"
+                            | "bytes.index"
                             | "bytes.rfind"
                             | "bytes.rsplit"
                             | "bytes.rstrip"
@@ -907,6 +908,7 @@ impl Context {
                         || name.starts_with("property.")
                         || (name.starts_with("dict.") && name != "dict.__new__")
                         || name.starts_with("abc.")
+                        || name.starts_with("selectors._SelectorMapping.")
                         || name
                             .strip_prefix("str.")
                             .is_some_and(|method| builtins::STR_METHODS.contains(&method))
@@ -2464,6 +2466,9 @@ impl Context {
                         };
                         return Ok(self.text(doc));
                     }
+                    "__doc__" if symbol == "posix.abort" => {
+                        return Ok(self.text("Abort the interpreter immediately.\n\nThis function 'dumps core' or otherwise fails in the hardest way possible\non the hosting operating system.  This function never returns."));
+                    }
                     "__doc__" if symbol == "posix.kill" => {
                         return Ok(self.text("Kill a process with a signal."));
                     }
@@ -2479,7 +2484,8 @@ impl Context {
                     "__text_signature__"
                         if matches!(
                             symbol.as_str(),
-                            "posix.getpid"
+                            "posix.abort"
+                                | "posix.getpid"
                                 | "posix.getppid"
                                 | "gc.enable"
                                 | "gc.disable"
@@ -2671,6 +2677,12 @@ impl Context {
                     if let Value::Native(method) = self.heap.get(callable) {
                         let module_bound = matches!(self.heap.get(receiver), Value::Module { .. });
                         let value = match name {
+                            "__doc__" if method == "posix.sysconf" => {
+                                Some("Return an integer-valued system configuration variable.")
+                            }
+                            "__text_signature__" if method == "posix.sysconf" => {
+                                Some("($module, name, /)")
+                            }
                             "__qualname__" if module_bound => method.rsplit('.').next(),
                             "__module__" if module_bound => {
                                 method.rsplit_once('.').map(|(module, _)| module)
@@ -5243,6 +5255,7 @@ impl Context {
                         stdlib::io::NEWLINE_DECODER
                             | "BufferedRWPair"
                             | "BufferedReader"
+                            | "BufferedWriter"
                             | "IOBase"
                             | "BufferedIOBase"
                     )

@@ -1246,6 +1246,9 @@ impl IntrinsicModule {
             (Self::Imp, "extension_suffixes") => {
                 Intrinsic::ObjectRuntimeExport("_imp.extension_suffixes")
             }
+            (Self::Imp, "pyc_magic_number_token") => {
+                Intrinsic::ObjectRuntimeExport("_imp.pyc_magic_number_token")
+            }
             (Self::Imp, "is_frozen") => Intrinsic::ObjectRuntimeExport("_imp.is_frozen"),
             (Self::Imp, "_override_frozen_modules_for_tests") => {
                 Intrinsic::ObjectRuntimeExport("_imp._override_frozen_modules_for_tests")
@@ -1529,6 +1532,12 @@ impl IntrinsicModule {
             }
             (Self::ImportlibBootstrapExternal, "SourceFileLoader") => {
                 Intrinsic::ObjectRuntimeExport("_frozen_importlib_external.SourceFileLoader")
+            }
+            (Self::ImportlibMachinery | Self::ImportlibBootstrapExternal, "SourcelessFileLoader") => {
+                Intrinsic::ObjectRuntimeExport("_frozen_importlib_external.SourcelessFileLoader")
+            }
+            (Self::ImportlibUtil, "MAGIC_NUMBER") => {
+                Intrinsic::ObjectRuntimeExport("importlib.util.MAGIC_NUMBER")
             }
             (Self::ImportlibUtil, "module_from_spec") => {
                 Intrinsic::ObjectRuntimeExport("importlib.util.module_from_spec")
@@ -1896,6 +1905,7 @@ impl IntrinsicModule {
             (Self::Builtins, "len") => Intrinsic::BuiltinsLen,
             (Self::Builtins, "ascii") => Intrinsic::BuiltinsAscii,
             (Self::Builtins, "hex") => Intrinsic::BuiltinsHex,
+            (Self::Builtins, "exec") => Intrinsic::ScopedObjectExport("builtins.exec"),
             (Self::Sys, "argv") => Intrinsic::Argv,
             (Self::Sys, "orig_argv") => Intrinsic::OrigArgv,
             (Self::Sys, "executable") => Intrinsic::SysExecutable,
@@ -3617,9 +3627,17 @@ impl SourceGraph {
         let entry = fs
             .canonicalize(path)
             .map_err(|err| format!("{}: {err}", path.display()))?;
-        let source = fs
-            .read_to_string(&entry)
-            .map_err(|err| format!("{}: {err}", path.display()))?;
+        let bytes = if crate::named_bytecode(path) {
+            std::fs::File::open(&entry).and_then(crate::read_bytecode_prefix)
+        } else {
+            fs.read(&entry)
+        }
+        .map_err(|err| format!("{}: {err}", path.display()))?;
+        if let Some(error) = crate::bytecode_script_error(path, &bytes) {
+            return Err(error.into());
+        }
+        let source = String::from_utf8(bytes)
+            .map_err(|_| format!("{}: stream did not contain valid UTF-8", path.display()))?;
         let root = entry
             .parent()
             .ok_or("script has no parent directory")?
