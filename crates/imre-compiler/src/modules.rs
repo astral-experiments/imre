@@ -2019,6 +2019,9 @@ impl IntrinsicModule {
             (Self::GenericPath | Self::PosixPath, "getmtime") => {
                 Intrinsic::ObjectRuntimeExport("genericpath.getmtime")
             }
+            (Self::GenericPath | Self::PosixPath, "isjunction") => {
+                Intrinsic::ObjectRuntimeExport("genericpath.isjunction")
+            }
             (Self::GenericPath | Self::PosixPath, "lexists") => {
                 Intrinsic::ObjectRuntimeExport("genericpath.lexists")
             }
