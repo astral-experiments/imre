@@ -154,8 +154,6 @@ pub(crate) struct Context {
     enum_scopes: HashMap<Id, Id>,
     signal_handlers: Vec<Id>,
     typing: typing::Registry,
-    // Python wrappers retain their registered logger for the lifetime of this heap.
-    logger_wrappers: HashMap<*const crate::objects::logging::Logger, Id>,
     builtins: HashMap<String, Id>,
     native_type_dicts: HashMap<Id, Id>,
     sources: HashMap<String, Vec<SourceModule>>,

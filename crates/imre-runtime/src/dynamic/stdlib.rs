@@ -38,7 +38,6 @@ pub(super) use files::{BinaryFile, ReadSource};
 pub(super) use socket::{import_socket_constants, install_lowlevel_socket};
 pub(super) mod io;
 mod json;
-mod logging;
 mod marshal;
 mod math;
 mod metadata;
@@ -186,7 +185,6 @@ pub(super) fn has_lazy_attributes(name: &str) -> bool {
             | "math"
             | "unicodedata"
             | "_json"
-            | "_imre_logging"
             | "_imre_subprocess"
             | "_imre_dataclasses"
             | "gc"
@@ -400,9 +398,6 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         return Ok(ctx.int(i64::from(value)));
     }
     if module == "_imre_subprocess" && subprocess::function(name) {
-        return Ok(ctx.builtin(&format!("{module}.{name}")));
-    }
-    if module == "_imre_logging" && logging::is_function(name) {
         return Ok(ctx.builtin(&format!("{module}.{name}")));
     }
     if matches!((module, name), ("importlib", "machinery") | ("os", "path")) {
@@ -1946,9 +1941,6 @@ pub(super) fn call(
     }
     if let Some(operation) = name.strip_prefix("_imre_subprocess.") {
         return subprocess::call(ctx, operation, args, kwargs);
-    }
-    if let Some(function) = name.strip_prefix("_imre_logging.") {
-        return logging::call(ctx, function, args, kwargs);
     }
     if let Some(function) = name.strip_prefix("urllib.parse.") {
         return urllib::call(ctx, function, args, kwargs);
