@@ -10,10 +10,13 @@ To add a decision, cite the assertion in the pinned CPython source, explain its 
 
 These six OrderedDict originals passed on stock and skipped at both native levels in the unchanged 295-case file. [Tested Imre revision](https://github.com/astral-experiments/imre/commit/b5af3ae9c19865f07fc3910132390a7ff1f32828)
 
+The unmodified namedtuple docstring-sharing test passed on stock and took its upstream CPython-only skip at native O0 and O3. Its companion test for field values and independent edits passed in all three runs.
+
 The deque size original passed on stock and reported the upstream CPython-specific skip on both native runs. [Tested Imre revision](https://github.com/astral-experiments/imre/commit/2a0ad34695006d693080ed35d3dadf8836a73427)
 
 | Original CPython test | Occurrence | Decision and reason | Related paired original |
 | --- | ---: | --- | --- |
+| `test.test_collections.TestNamedTuple.test_field_doc_reuse` | 1 | The test checks that independently generated namedtuple classes share the same field docstring objects. CPython interns those strings to save memory. Imre preserves their values and allows each class to edit its field documentation independently. [Upstream assertion](https://github.com/python/cpython/blob/5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/test_collections.py#L435-L442) | `TestNamedTuple.test_field_doc` |
 | `test.test_deque.TestBasic.test_sizeof` | 1 | The test fixes the exact byte counts of CPython’s C deque header, 16 free-block slots and 64-pointer blocks, including the allocation boundary after 42 blocks. Imre can use a different layout while preserving deque behavior. Bounded eviction and ordering remain in scope. [Upstream assertion](https://github.com/python/cpython/blob/5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/test_deque.py#L747-L759) | `TestBasic.test_maxlen` |
 | `test.test_ordered_dict.CPythonOrderedDictSubclassTests.test_ordered_dict_items_result_gc` | 1 | The subclass inherits a test of the C iterator's recycled tuple. Subclass item iteration preserves the key and value without prescribing when the collector tracks the result. [Upstream assertion](https://github.com/python/cpython/blob/5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/test_ordered_dict.py#L733-L742) | `CPythonOrderedDictSubclassTests.test_views` |
 | `test.test_ordered_dict.CPythonOrderedDictSubclassTests.test_sizeof_exact` | 1 | This subclass inherits a byte-count formula for CPython's C object, table entries, nodes and iterators. A subclass can report a different footprint and still implement the sizing protocol. [Upstream assertion](https://github.com/python/cpython/blob/5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/test_ordered_dict.py#L887-L917) | `CPythonOrderedDictSubclassTests.test_sizeof` |
