@@ -845,7 +845,7 @@ pub(super) enum Value {
         function: Id,
         args: Id,
         keywords: Id,
-        coroutine_marker: Option<Id>,
+        dictionary: Option<Id>,
     },
     PartialPlaceholder,
     KeyWrapper {
@@ -1244,10 +1244,10 @@ impl Value {
                 function,
                 args,
                 keywords,
-                coroutine_marker,
+                dictionary,
             } => {
                 visit.extend([*function, *args, *keywords]);
-                visit.extend(coroutine_marker);
+                visit.extend(dictionary);
             }
             Self::CacheDecorator { maxsize, typed } | Self::CacheParameters { maxsize, typed } => {
                 visit.extend([*maxsize, *typed]);
