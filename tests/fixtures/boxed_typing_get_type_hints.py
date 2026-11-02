@@ -46,6 +46,12 @@ def current():
         error = error_for(expression)
         assert type(error) is NameError and error.name == "Missing"
         assert error.args == ("name 'Missing' is not defined",)
+    # The bare name uses its original spelling; expression identifiers normalize.
+    def unicode_names(bare: "K", nested: "list[K]"):
+        pass
+    assert get_type_hints(unicode_names, {"K": int, "K": bytes}) == {"bare": bytes, "nested": list[int]}
+    spelling = "".join(["not_defined_", "K"])
+    assert error_for(spelling).name is spelling
     assert type(error_for("Target.missing")) is AttributeError
     callback_error = error_for("callback()")
     assert type(callback_error) is NameError and callback_error.name == "callback_name"

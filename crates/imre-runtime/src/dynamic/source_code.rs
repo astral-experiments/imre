@@ -1145,9 +1145,9 @@ impl Context {
     }
 
     /// Attach the name at the failed lookup, leaving exceptions raised by Python code alone.
-    fn undefined_source_name(&mut self, name: &str) -> Error {
+    fn undefined_source_name(name: &str, object: Id) -> Error {
         let mut error = Error::new("NameError", format!("name '{name}' is not defined"));
-        error.tracing().name_error_name = Some(self.text(name));
+        error.tracing().name_error_name = Some(object);
         error
     }
 
@@ -1164,7 +1164,7 @@ impl Context {
                 }
             }
         }
-        Err(self.undefined_source_name(name))
+        Err(Self::undefined_source_name(name, self.text(name)))
     }
 
     /// Construct a function whose globals are supplied by Python code.
@@ -1366,16 +1366,16 @@ impl Context {
         check_runtime_strings(source, parsed.tokens())?;
         let expr = *parsed.into_syntax().body;
         if let ast::Expr::Name(ident) = &expr
-            && ident.id.as_str() == source
+            && usize::from(ident.range().len()) == source.len()
         {
-            // ForwardRef.evaluate uses ordinary membership checks for a bare name;
-            // this path neither reads nor inserts globals["__builtins__"].
+            // ForwardRef.evaluate looks up the original string for a bare identifier.
+            // The parser applies NFKC to ident.id, as required for compound expressions.
             for mapping in [locals, globals, self.default_source_builtins()?] {
                 if self.contains(text, mapping)? {
                     return self.get_item(mapping, text);
                 }
             }
-            return Err(self.undefined_source_name(ident.id.as_str()));
+            return Err(Self::undefined_source_name(self.str_value(text)?, text));
         }
         let mut program = Program::new(Rc::from("<string>"), "<module>");
         program
