@@ -28,7 +28,7 @@ pub(super) fn check_docs(
     body: &[ast::Stmt],
     replacements: &HashMap<TextRange, Vec<u32>>,
 ) -> Result<(), String> {
-    if let Some(range) = imre_ast::strings::find_docstring(body, |doc| {
+    if let Some(range) = imre_ast::strings::find_docstring(body, true, |doc| {
         doc.value
             .iter()
             .map(Ranged::range)

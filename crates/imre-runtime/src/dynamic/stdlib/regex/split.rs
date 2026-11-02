@@ -47,7 +47,7 @@ pub(super) fn split(
     let mut count = 0;
     let mut caps = pattern.regex.create_captures();
     while limit == 0 || count < limit {
-        let span = match next_span(&pattern, text, previous, &mut caps) {
+        let span = match next_span(&pattern, text, 0, previous, &mut caps) {
             Ok(Some(span)) => span,
             Ok(None) => break,
             Err(message) => return Err(pattern_error(ctx, pattern.source, pattern.flags, message)),
@@ -101,10 +101,14 @@ pub(super) fn match_limit(ctx: &mut Context, value: Option<Id>) -> Result<isize>
 pub(super) fn next_span(
     pattern: &Pattern,
     text: &[u8],
+    initial: usize,
     previous: Option<Span>,
     caps: &mut Captures,
 ) -> std::result::Result<Option<Span>, String> {
-    let mut start = previous.map_or(0, |span| span.end);
+    let mut start = previous.map_or(initial, |span| span.end);
+    if start > text.len() {
+        return Ok(None);
+    }
     if previous.is_some_and(|span| span.is_empty()) {
         if nonempty(pattern, text, start, caps)? {
             return Ok(group_spans(caps).next().flatten());

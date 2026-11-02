@@ -153,6 +153,7 @@ pub fn template_format_spec(
 /// Return the first result of checking module, function and class docstrings.
 pub fn find_docstring<'a, T>(
     body: &'a [ast::Stmt],
+    module_docstring: bool,
     check: impl Fn(&'a ast::ExprStringLiteral) -> Option<T>,
 ) -> Option<T> {
     use ast::visitor::{Visitor, walk_stmt};
@@ -188,7 +189,9 @@ pub fn find_docstring<'a, T>(
         fn visit_expr(&mut self, _: &'a ast::Expr) {}
     }
     let mut docs = Docs { check, found: None };
-    docs.check(body);
+    if module_docstring {
+        docs.check(body);
+    }
     docs.visit_body(body);
     docs.found
 }

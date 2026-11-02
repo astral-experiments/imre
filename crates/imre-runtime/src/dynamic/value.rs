@@ -1073,6 +1073,7 @@ impl Value {
                 super::stdlib::BinaryFile::Writer { .. } => "_io.BufferedWriter",
             },
             Self::ProcessHandle(_) => "_imre_subprocess.Handle",
+            Self::BufferedRandom(..) => "_io.BufferedRandom",
             Self::TextFile(_) => "_io.TextIOWrapper",
             Self::SequenceIterator { .. } => "iterator",
             Self::ReverseSequence { .. } => "reversed",
@@ -1114,7 +1115,7 @@ impl Value {
             }
             Self::ItemGetter(_) => "operator.itemgetter",
             Self::Code(_) => "code",
-            Self::Cell(_) => "cell",
+            Self::Cell(_) | Self::ClassCell(_) => "cell",
             Self::Generator { .. } => "generator",
             Self::Coroutine(_) => "coroutine",
             Self::CoroutineWrapper(_) => "coroutine_wrapper",
@@ -2151,7 +2152,7 @@ impl Heap {
             && (self.weak_edge(value)
                 || matches!(
                     self.get(value),
-                    Value::Function { .. } | Value::Cell(Some(_))
+                    Value::Function { .. } | Value::Cell(Some(_)) | Value::ClassCell(Some(_))
                 ))
             && !self.bound_in_active_frame(value)
         {

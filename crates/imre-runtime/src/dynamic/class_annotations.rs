@@ -2,6 +2,42 @@
 use super::{Context, Error, Id, NONE, Result, Value};
 
 impl Context {
+    /// Capture the live class dictionary and the conditional declarations that ran.
+    pub(super) fn class_annotation_environment(
+        &mut self,
+        class_scope: Id,
+        conditional_offsets: Id,
+    ) -> Result<Id> {
+        let parent = self.scope_data(class_scope).parent.expect("class parent");
+        let dict_cell = self.class_annotation_dict_cell(class_scope);
+        let mut names = vec!["__classdict__".to_owned()];
+        let mut cells = vec![dict_cell];
+        if let Some(cell) = self.scope_data(class_scope).class_cell {
+            names.push("__class__".to_owned());
+            cells.push(cell);
+        }
+        if conditional_offsets != NONE {
+            names.push("__conditional_annotations__".to_owned());
+            let offsets = self.items(conditional_offsets)?;
+            let active = self.op("set", NONE, NONE, NONE)?;
+            for (index, offset) in offsets.into_iter().enumerate() {
+                let offset = self.as_integer(offset)?.try_into().expect("source offset");
+                if self
+                    .scope_data(class_scope)
+                    .class_namespace
+                    .as_ref()
+                    .and_then(|ns| ns.annotation_sites.as_ref())
+                    .is_some_and(|sites| sites.contains_key(&offset))
+                {
+                    let index = self.int(index as i64);
+                    super::builtins::set_add(self, active, index)?;
+                }
+            }
+            cells.push(self.alloc(Value::Cell(Some(active))));
+        }
+        Ok(self.closure_environment(parent, names, &cells))
+    }
+
     /// Record each executed ordinary declaration once, in lexical order.
     pub(super) fn record_class_annotation(
         &mut self,

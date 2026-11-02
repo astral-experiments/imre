@@ -25,6 +25,7 @@ pub(super) struct Program {
     pub(super) string_roots: Id,
     first_line: u32,
     kind: FunctionKind,
+    interactive: bool,
     locals: HashSet<String>,
     directives: HashMap<String, (ScopeDirective, ruff_text_size::TextSize)>,
     reads: BTreeSet<String>,
@@ -731,6 +732,38 @@ pub(super) fn line_starts(offsets: impl Iterator<Item = usize> + Clone) -> Resul
     Ok(starts)
 }
 
+/// Interactive input accepts one compound statement or one logical line of simple statements.
+fn check_single_input(body: &[ast::Stmt], tokens: &ast::token::Tokens) -> Result<()> {
+    use ast::token::TokenKind::{Dedent, Newline};
+
+    let Some(first) = body.first() else {
+        return Err(Error::new("SyntaxError", "invalid syntax"));
+    };
+    let mut trailing = tokens
+        .iter()
+        .skip_while(|token| token.start() < first.end());
+    if ast::helpers::is_compound_statement(first) {
+        // An indented suite ends in DEDENT. An inline suite needs a real closing newline.
+        if body.len() != 1
+            || !trailing.any(|token| {
+                token.kind() == Dedent || (token.kind() == Newline && !token.range().is_empty())
+            })
+        {
+            return Err(Error::new("SyntaxError", "invalid syntax"));
+        }
+    } else if let Some(last) = body.last()
+        && trailing
+            .take_while(|token| token.start() < last.start())
+            .any(|token| token.kind() == Newline)
+    {
+        return Err(Error::new(
+            "SyntaxError",
+            "multiple statements found while compiling a single statement",
+        ));
+    }
+    Ok(())
+}
+
 impl Program {
     /// Keep each code object's constants alive, including constants owned by unexecuted children.
     fn prepare_strings<'a>(
@@ -1171,6 +1204,7 @@ impl Program {
             string_roots: NONE,
             first_line: 1,
             kind: FunctionKind::Plain,
+            interactive: false,
             locals: HashSet::new(),
             directives: HashMap::new(),
             reads: BTreeSet::new(),
@@ -1249,7 +1283,8 @@ impl Program {
         lines: &[usize],
         function: bool,
     ) -> Result<()> {
-        if let Some(ast::Stmt::Expr(first)) = body.first()
+        if !self.interactive
+            && let Some(ast::Stmt::Expr(first)) = body.first()
             && let ast::Expr::StringLiteral(doc) = first.value.as_ref()
         {
             if self.strip_docstrings {
@@ -1878,8 +1913,9 @@ impl Context {
 
     pub(super) fn compile_source(&mut self, source: Id, filename: Id, mode: Id) -> Result<Id> {
         let mode = self.str_value(mode)?;
-        if mode != "exec" {
-            return Err(if matches!(mode, "eval" | "single") {
+        let interactive = mode == "single";
+        if mode != "exec" && !interactive {
+            return Err(if mode == "eval" {
                 unsupported(format!("compile mode {mode}"))
             } else {
                 Error::new(
@@ -1901,16 +1937,20 @@ impl Context {
         let filename = filename_text;
         let parsed = ruff_python_parser::parse_module(&source)
             .map_err(|error| Error::new("SyntaxError", format!("{filename}: {error}")))?;
+        if interactive {
+            check_single_input(&parsed.syntax().body, parsed.tokens())?;
+        }
         let spellings = string_replacements(&source, parsed.tokens());
         let strip_docstrings = self.config["optimize"].as_i64().unwrap_or(0) >= 2;
         if !strip_docstrings
             && !spellings.is_empty()
-            && let Some(doc) = imre_ast::strings::find_docstring(&parsed.syntax().body, |doc| {
-                spellings
-                    .range(doc.start()..doc.end())
-                    .any(|(_, points)| points.iter().any(|&p| p != 0xfffd))
-                    .then_some(doc)
-            })
+            && let Some(doc) =
+                imre_ast::strings::find_docstring(&parsed.syntax().body, !interactive, |doc| {
+                    spellings
+                        .range(doc.start()..doc.end())
+                        .any(|(_, points)| points.iter().any(|&p| p != 0xfffd))
+                        .then_some(doc)
+                })
         {
             // CPython cleans docstrings by expanding tabs and requesting UTF-8.
             let text = doc.value.to_str();
@@ -1929,6 +1969,7 @@ impl Context {
         }
         let lines = line_starts(source.match_indices('\n').map(|(offset, _)| offset + 1))?;
         let mut code = Program::new(Rc::from(filename), "<module>", strip_docstrings);
+        code.interactive = interactive;
         code.method_imports = Rc::new(imre_ast::module_imports(&parsed.syntax().body));
         code.template_expressions = Rc::new(imre_ast::strings::template_expressions(
             &source,
@@ -3166,7 +3207,10 @@ impl Context {
                 *sent = NONE;
             }
             Instruction::Eval(e) => {
-                eval(self, e)?;
+                let value = eval(self, e)?;
+                if code.interactive {
+                    self.display_expression(value)?;
+                }
             }
             Instruction::Assert(stmt) => {
                 if !self.source_condition(code, scope, &stmt.test)? {
@@ -3988,7 +4032,7 @@ impl Context {
                         .ok_or_else(|| unsupported("keyword unpack"))?;
                     kwargs.push((key.to_string(), eval(self, &item.value)?));
                 }
-                let result = self.call(f, args, kwargs)?;
+                let result = self.call_in_scope(scope, f, args, kwargs)?;
                 self.finish_call_operands(mark, result);
                 Ok(result)
             }

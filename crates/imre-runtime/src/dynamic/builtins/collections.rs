@@ -814,7 +814,9 @@ pub(super) fn method(
                 "descriptor '{method}' of 'dict' object needs an argument"
             )),
             Some(_) => type_error(format!("unbound method {name}() needs an argument")),
-            None if name == "set.difference_update" || name.ends_with(".issubset") => {
+            None if matches!(name, "set.difference_update" | "set.update")
+                || name.ends_with(".issubset") =>
+            {
                 type_error(format!("unbound method {name}() needs an argument"))
             }
             None => type_error("missing collection receiver"),
@@ -842,11 +844,12 @@ pub(super) fn method(
                 ))
             }
         })?
-    } else if name == "set.difference_update" {
+    } else if matches!(name, "set.difference_update" | "set.update") {
         let storage = ctx.scalar_value(object);
         if !matches!(ctx.heap.get(storage), Value::Set { frozen: false, .. }) {
             return Err(type_error(format!(
-                "descriptor 'difference_update' for 'set' objects doesn't apply to a '{}' object",
+                "descriptor '{}' for 'set' objects doesn't apply to a '{}' object",
+                &name["set.".len()..],
                 ctx.type_name(object)
             )));
         }
@@ -894,6 +897,7 @@ pub(super) fn method(
             | "frozenset.issuperset"
             | "set.discard"
             | "set.difference_update"
+            | "set.update"
             | "frozenset.copy"
             | "set.copy"
             | "frozenset.__contains__"
