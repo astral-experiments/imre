@@ -2256,6 +2256,7 @@ def report(text):
         generic = fixtures / "module_generic_function.py"
         compare("-IB", generic, native_args=("run", generic, "--quiet"))
         compare("-IB", generic, native_args=("run", generic, "--runtime-imports", "--quiet"))
+        compare("-IB", "-c", "import typing; from typing import Text; print(Text is typing.Text is str)")
         reveal = fixtures / "typing_reveal_type.py"
         for command in ((sys.executable, "-IB", reveal),
                         (imre, "run", reveal, "--quiet"),
