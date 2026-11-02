@@ -420,6 +420,35 @@ def test_subclass_construction():
         raise AssertionError("date allocated an incompatible datetime layout")
 
 
+def test_calendar_classmethod_binding():
+    from inspect import getattr_static
+
+    class Fields(dt):
+        def __new__(cls, *fields):
+            return fields
+
+    ordinal = getattr_static(date, "fromordinal")
+    assert ordinal.__get__(None, Fields)(1) == (1, 1, 1)
+    assert ordinal.__get__(42, Fields).__self__ is Fields
+    assert ordinal.__get__(date(2001, 1, 1))(1) == date(1, 1, 1)
+    for owner in (int, "wrong"):
+        try:
+            ordinal.__get__(None, owner)
+        except TypeError:
+            pass
+        else:
+            raise AssertionError("bound an unsuitable calendar class")
+    wrong_type = type("x" * 99 + "ë", (), {})
+    try:
+        ordinal.__get__(None, wrong_type)
+    except TypeError as exc:
+        assert str(exc).endswith("received '" + "x" * 99 + "'")
+    else:
+        raise AssertionError("bound a non-date class")
+    clock = getattr_static(dt, "fromisoformat")
+    assert clock.__get__(None, Fields)("2000-01-02T12") == (2000, 1, 2, 12, 0, 0, 0, None)
+
+
 def test_datetime_fromisoformat():
     class Stamp(dt):
         pass
@@ -919,6 +948,7 @@ def current():
     test_astimezone_subtype()
     test_tzinfo_reduction()
     test_calendar_format()
+    test_calendar_classmethod_binding()
     test_datetime_fromisoformat()
     test_timedelta_negation()
     test_timedelta_positive_and_absolute()

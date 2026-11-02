@@ -1347,27 +1347,35 @@ fn calendar_class_args<'a>(
             format!("descriptor '{method}' of '{owner}' object needs an argument"),
         ));
     };
-    let base = ctx.builtin(owner);
-    if !ctx.is_type_object(class) {
-        let kind = ctx.exact_type(class)?;
-        return Err(Error::new(
-            "TypeError",
-            format!(
-                "descriptor '{method}' for type '{owner}' needs a type, not a '{}' as arg 2",
-                ctx.class_name(kind)
-            ),
-        ));
-    }
-    if !ctx.direct_subclass(class, base) {
-        return Err(Error::new(
-            "TypeError",
-            format!(
-                "descriptor '{method}' requires a subtype of '{owner}' but received '{}'",
-                ctx.class_name(class)
-            ),
-        ));
-    }
+    validate_classmethod_receiver(ctx, owner, method, class)?;
     Ok((class, args))
+}
+
+/// Validate the class before a calendar classmethod is bound or called directly.
+pub(in crate::dynamic) fn validate_classmethod_receiver(
+    ctx: &mut Context,
+    owner: &'static str,
+    method: &str,
+    class: Id,
+) -> Result<()> {
+    let base = ctx.builtin(owner);
+    let is_type = ctx.is_type_object(class);
+    if is_type && ctx.direct_subclass(class, base) {
+        return Ok(());
+    }
+    let kind = if is_type {
+        class
+    } else {
+        ctx.exact_type(class)?
+    };
+    let name = ctx.class_name(kind);
+    let name = &name[..name.floor_char_boundary(100)];
+    let message = if is_type {
+        format!("descriptor '{method}' requires a subtype of '{owner}' but received '{name}'")
+    } else {
+        format!("descriptor '{method}' for type '{owner}' needs a type, not a '{name}' as arg 2")
+    };
+    Err(Error::new("TypeError", message))
 }
 
 fn date_fromordinal(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
