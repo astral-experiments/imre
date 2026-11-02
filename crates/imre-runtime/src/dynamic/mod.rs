@@ -268,6 +268,7 @@ impl Context {
     /// Slot descriptors require the native layout even when a proxy passes isinstance.
     fn builtin_slot_accepts(&self, object: Id, owner: &str) -> bool {
         match (owner, self.heap.get(self.scalar_value(object))) {
+            (weakref::PROXY_TYPE, Value::Weak(wr)) => wr.kind == weakref::Kind::Proxy,
             ("builtin_function_or_method", _) => {
                 self.builtin_type_name(object) == Some("builtin_function_or_method")
             }
@@ -2281,6 +2282,7 @@ impl Context {
             }
             thread_local::CLASS => &["__new__", "__getattribute__", "__setattr__", "__delattr__"],
             stdlib::fixed_structseq::SCHED_PARAM => &["__new__", "__reduce__", "__replace__"],
+            weakref::PROXY_TYPE => weakref::PROXY_METHODS,
             weakref::REFERENCE_TYPE => weakref::REFERENCE_METHODS,
             _ => &[],
         };

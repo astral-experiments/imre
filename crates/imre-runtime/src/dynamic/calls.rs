@@ -366,6 +366,7 @@ impl Context {
                         | "property"
                         | "module"
                         | super::thread_local::CLASS
+                        | weakref::PROXY_TYPE
                         | weakref::REFERENCE_TYPE
                 ) || (kind == super::deque::CLASS && super::deque::owns(name))
                     || stdlib::datetime::members(kind)
@@ -753,8 +754,16 @@ impl Context {
         {
             return self.lookup_attr(object, name).map(Some);
         }
-        let Some(class) = self.heap.get(object).instance_class() else {
-            return Ok(None);
+        let class = match self.heap.get(object) {
+            Value::Weak(wr)
+                if wr.kind == weakref::Kind::Proxy && weakref::PROXY_METHODS.contains(&name) =>
+            {
+                self.builtin(weakref::PROXY_TYPE)
+            }
+            value => match value.instance_class() {
+                Some(class) => class,
+                None => return Ok(None),
+            },
         };
         self.class_attr(class, name)
             .map(|slot| self.bind_attribute(slot, object, class))
@@ -3787,10 +3796,11 @@ impl Context {
                 return self.bind_attribute(callable, obj, class);
             }
             Value::Native(ref class)
-                if class == weakref::REFERENCE_TYPE
-                    && weakref::REFERENCE_METHODS.contains(&name) =>
+                if (class == weakref::REFERENCE_TYPE
+                    && weakref::REFERENCE_METHODS.contains(&name))
+                    || (class == weakref::PROXY_TYPE && weakref::PROXY_METHODS.contains(&name)) =>
             {
-                return Ok(self.builtin(&format!("{}.{name}", weakref::REFERENCE_TYPE)));
+                return Ok(self.builtin(&format!("{class}.{name}")));
             }
             Value::Native(ref builtin)
                 if name == "__qualname__"

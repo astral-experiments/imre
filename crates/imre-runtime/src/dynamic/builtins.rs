@@ -1133,7 +1133,7 @@ pub(super) fn method_receiver_args<'a>(
     Ok((receiver, rest))
 }
 
-fn noargs_method_receiver(
+pub(super) fn noargs_method_receiver(
     ctx: &Context,
     owner: &str,
     method: &str,
@@ -1142,8 +1142,9 @@ fn noargs_method_receiver(
 ) -> Result<Id> {
     let (receiver, rest) = method_receiver_args(ctx, owner, method, args, kwargs)?;
     if !rest.is_empty() {
+        let short = owner.rsplit('.').next().unwrap_or(owner);
         return Err(type_error(format!(
-            "{owner}.{method}() takes no arguments ({} given)",
+            "{short}.{method}() takes no arguments ({} given)",
             rest.len()
         )));
     }
