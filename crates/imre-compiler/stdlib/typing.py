@@ -2,12 +2,77 @@
 
 import builtins as _builtins
 import functools
+import sys as _sys
 import typing as _typing
 from _collections_abc import Mapping as _Mapping, MutableMapping as _MutableMapping
 from collections import defaultdict as _defaultdict
 from annotationlib import ForwardRef, _make_forward_ref
 from functools import lru_cache
+from _typing import _idfunc
 from typing import Any, Callable, Generic, Protocol, TypeVar
+
+
+# From CPython 3.14.5 Lib/typing.py. See stdlib/docstrings/LICENSE.
+class NewType:
+    """NewType creates simple unique types with almost zero runtime overhead.
+
+    NewType(name, tp) is considered a subtype of tp
+    by static type checkers. At runtime, NewType(name, tp) returns
+    a dummy callable that simply returns its argument.
+
+    Usage::
+
+        UserId = NewType('UserId', int)
+
+        def name_by_id(user_id: UserId) -> str:
+            ...
+
+        UserId('user')          # Fails type check
+
+        name_by_id(42)          # Fails type check
+        name_by_id(UserId(42))  # OK
+
+        num = UserId(5) + 1     # type: int
+    """
+
+    __call__ = _idfunc
+
+    def __init__(self, name, tp):
+        self.__qualname__ = name
+        if '.' in name:
+            name = name.rpartition('.')[-1]
+        self.__name__ = name
+        self.__supertype__ = tp
+        def_mod = _sys._getframemodulename(1) or '__main__'
+        if def_mod != 'typing':
+            self.__module__ = def_mod
+
+    def __mro_entries__(self, bases):
+        # We defined __mro_entries__ to get a better error message
+        # if a user attempts to subclass a NewType instance. bpo-46170
+        superclass_name = self.__name__
+
+        class Dummy:
+            def __init_subclass__(cls):
+                subclass_name = cls.__name__
+                raise TypeError(
+                    f"Cannot subclass an instance of NewType. Perhaps you were looking for: "
+                    f"`{subclass_name} = NewType({subclass_name!r}, {superclass_name})`"
+                )
+
+        return (Dummy,)
+
+    def __repr__(self):
+        return f'{self.__module__}.{self.__qualname__}'
+
+    def __reduce__(self):
+        return self.__qualname__
+
+    def __or__(self, other):
+        return _typing.Union[self, other]
+
+    def __ror__(self, other):
+        return _typing.Union[other, self]
 
 
 T = TypeVar("T")
