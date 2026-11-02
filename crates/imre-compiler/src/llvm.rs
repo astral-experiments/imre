@@ -6323,6 +6323,9 @@ impl Emitter<'_, '_> {
                 )),
                 small_integer: false,
             },
+            Builtin::ObjectIsExactTuple => {
+                self.call("imre_object_is_exact_tuple", returns, &[&args[0].value])
+            }
             Builtin::ObjectTextProject => {
                 self.call("imre_object_exact_text", returns, &[&args[0].value])
             }
@@ -9156,6 +9159,7 @@ declare zeroext i1 @imre_contextvars_was_missing(ptr)
 declare ptr @imre_contextvars_enter(ptr)
 declare void @imre_contextvars_leave(ptr, ptr)
 declare i64 @imre_contextvars_len(ptr)
+declare zeroext i1 @imre_object_is_exact_tuple(ptr)
 declare ptr @imre_object_exact_text(ptr)
 declare ptr @imre_object_record_payload(ptr, ptr)
 declare ptr @imre_mapping_object_get(ptr, ptr)

@@ -6935,13 +6935,17 @@ impl<'a> Checker<'a> {
                 return self.boolean_value(boolean, None);
             }
             ast::Expr::Compare(compare) => {
-                if let Some((value, positive)) = self.exact_object_text(compare) {
+                if let Some((value, class, positive)) = self.exact_object_type(compare) {
+                    let predicate = match class {
+                        ty_python_semantic::types::KnownClass::Str => {
+                            Builtin::IsInstance(vec![ir::InstanceType::ExactText])
+                        }
+                        ty_python_semantic::types::KnownClass::Tuple => Builtin::ObjectIsExactTuple,
+                        _ => unreachable!("only exact str and tuple comparisons"),
+                    };
                     let test = Expr {
                         ty: Type::Bool,
-                        kind: ExprKind::Builtin(
-                            Builtin::IsInstance(vec![ir::InstanceType::ExactText]),
-                            vec![self.expr(value)?],
-                        ),
+                        kind: ExprKind::Builtin(predicate, vec![self.expr(value)?]),
                     };
                     return Ok(if positive {
                         test

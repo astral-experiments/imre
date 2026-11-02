@@ -124,6 +124,7 @@ impl Builtin {
             Self::BoxValue
             | Self::ExceptionTupleView
             | Self::ObjectRecordProject(_)
+            | Self::ObjectIsExactTuple
             | Self::ObjectStreamProject
             | Self::ObjectRecordIdentity { .. }
             | Self::ExceptionTupleIdentity

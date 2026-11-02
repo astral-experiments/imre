@@ -518,9 +518,14 @@ impl Session {
             return false;
         };
         let env = ProgramEnvironment::from_file(file);
-        ty.definition(&self.db, &env).is_some_and(|definition| {
-            class.to_instance(&self.db, &env).definition(&self.db, &env) == Some(definition)
-        })
+        // ty represents tuple instances by their element types. Its subclass view
+        // exposes the builtin definition without constructing an unparameterized tuple.
+        let canonical = match class {
+            ty_python_semantic::types::KnownClass::Tuple => class.to_subclass_of(&self.db, &env),
+            _ => class.to_instance(&self.db, &env),
+        };
+        ty.definition(&self.db, &env)
+            .is_some_and(|definition| canonical.definition(&self.db, &env) == Some(definition))
     }
 
     /// Bound methods on these sealed native receiver layouts cannot dispatch to a

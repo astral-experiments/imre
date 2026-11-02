@@ -1162,6 +1162,7 @@ pub(crate) enum Builtin {
     ObjectRecordProject(usize),
     ObjectStreamProject,
     ObjectTextProject,
+    ObjectIsExactTuple,
     ObjectRecordIdentity {
         class: usize,
         reversed: bool,
