@@ -367,9 +367,14 @@ fn native_parameters(ctx: &mut Context, args: Id) -> Id {
 /// Typing retries the constructor without caching when building or comparing its key raises TypeError.
 fn alias(ctx: &mut Context, kind: AliasKind, origin: Id, args: Vec<Id>) -> Result<Id> {
     let args = ctx.alloc(Value::Tuple(args));
-    let (index, constructor) = match kind {
-        AliasKind::Generic => (0, "typing._GenericAlias"),
-        AliasKind::Callable => (1, "typing._CallableGenericAlias"),
+    let (index, make_alias, arguments) = match kind {
+        AliasKind::Generic => (0, ctx.builtin("typing._GenericAlias"), vec![origin, args]),
+        AliasKind::Callable => {
+            let typing = ctx.module("typing")?;
+            let make_alias = ctx.lookup_attr(typing, "_make_callable_alias")?;
+            let constructor = ctx.builtin("typing._CallableGenericAlias");
+            (1, make_alias, vec![constructor, origin, args])
+        }
         _ => {
             let parameters = native_parameters(ctx, args);
             return Ok(allocate_alias(
@@ -380,21 +385,15 @@ fn alias(ctx: &mut Context, kind: AliasKind, origin: Id, args: Vec<Id>) -> Resul
     let cached = if let Some(id) = ctx.typing.alias_caches[index] {
         id
     } else {
-        let function = ctx.builtin(constructor);
-        let cache = ctx.cached_function(function);
+        let cache = ctx.cached_function(make_alias);
         ctx.typing.alias_caches[index] = Some(cache);
         cache
     };
-    let kwargs: Vec<_> = (kind == AliasKind::Callable)
-        .then(|| ("name".to_owned(), ctx.text("Callable")))
-        .into_iter()
-        .collect();
-    let result = ctx.call(cached, vec![origin, args], kwargs.clone());
+    let result = ctx.call(cached, arguments.clone(), Vec::new());
     if let Err(error) = &result {
         let type_error = ctx.builtin("TypeError");
         if ctx.raised_error_matches(error, type_error) {
-            let function = ctx.builtin(constructor);
-            return ctx.call(function, vec![origin, args], kwargs);
+            return ctx.call(make_alias, arguments, Vec::new());
         }
     }
     result
@@ -607,6 +606,14 @@ fn callable_alias(ctx: &mut Context, kind: AliasKind, origin: Id, args: Vec<Id>)
     let [parameters, result] = args.as_slice() else {
         return Err(Error::new("TypeError", CALLABLE_SHAPE_ERROR));
     };
+    if kind == AliasKind::Callable {
+        // Cache the spelling supplied by the caller before typing converts its arguments.
+        let parameters = match ctx.heap.get(*parameters) {
+            Value::List(items) => ctx.alloc(Value::Tuple(items.clone())),
+            _ => *parameters,
+        };
+        return alias(ctx, kind, origin, vec![parameters, *result]);
+    }
     let tuple = ctx.builtin("tuple");
     let actual = if ctx.list_storage(*parameters).is_some() || ctx.instance_of(*parameters, tuple) {
         let mut flat = ctx.items(*parameters)?;

@@ -1,5 +1,6 @@
+from collections.abc import Callable as ABCCallable
 from types import GenericAlias
-from typing import Annotated, ForwardRef, List, NoDefault, Tuple, TypeVar, TypeVarTuple, Unpack, get_args, get_origin
+from typing import Annotated, Callable, ForwardRef, List, NoDefault, ParamSpec, Tuple, TypeVar, TypeVarTuple, Unpack, get_args, get_origin
 from weakref import ref
 
 
@@ -30,6 +31,17 @@ def current():
     assert repr(unpacked) == "typing.Unpack[Ts]"
     assert unpacked[int, str] == (int, str)
     assert Unpack[tuple[int, str]].__typing_unpacked_tuple_args__ == (int, str)
+
+    p = ParamSpec("P")
+    assert Callable[[None, *ts], None].__args__ == (type(None), unpacked, type(None))
+    assert Callable[p, None].__args__ == (p, type(None))
+    assert Callable[..., None].__args__ == (..., type(None))
+    assert Callable[[list[None]], None].__args__[0] == list[None]
+    assert ABCCallable[[None], None].__args__ == (None, None)
+    assert Callable[..., None] == Callable[..., type(None)]
+    assert Callable[..., None] is not Callable[..., type(None)]
+    assert Callable[[None], None] is Callable[(None,), None]
+    assert Callable[["Input"], "Output"].__args__ == (ForwardRef("Input"), ForwardRef("Output"))
 
     alias = tuple[*ts]
     it = iter(alias)

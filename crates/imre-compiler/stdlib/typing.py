@@ -1472,6 +1472,15 @@ def _type_check(arg, message, is_argument=True, module=None, *, allow_special_fo
     return arg
 
 
+def _make_callable_alias(constructor, origin, params):
+    args, result = params
+    result = _type_check(result, "Callable[args, result]: result must be a type.")
+    if not isinstance(args, tuple):
+        args = (args,)
+    flat = tuple(_type_convert(arg) for arg in args) + (result,)
+    return constructor(origin, flat, name="Callable")
+
+
 def _typeddict_qualifier_alias(form, parameters):
     item = _type_check(parameters, f"{form._name} accepts only a single type.")
     if isinstance(item, str):
