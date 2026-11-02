@@ -1095,10 +1095,11 @@ impl IntrinsicModule {
             (Self::Warnings, "showwarning") => Intrinsic::WarningDisplay { show: true },
             (Self::Time, "sleep") => Intrinsic::TimeSleep,
             (Self::Time, "time") => Intrinsic::WallTime,
-            (Self::Signal | Self::SignalNative, "SIGINT") => Intrinsic::IntConstant(2),
-            (Self::Signal | Self::SignalNative, "SIGTERM") => Intrinsic::IntConstant(15),
-            #[cfg(unix)]
-            (Self::SignalNative, "SIGALRM") => Intrinsic::IntConstant(i64::from(libc::SIGALRM)),
+            (Self::Signal, "SIGINT") => Intrinsic::IntConstant(2),
+            (Self::Signal, "SIGTERM") => Intrinsic::IntConstant(15),
+            (Self::SignalNative, "SIGINT") => Intrinsic::ObjectRuntimeExport("_signal.SIGINT"),
+            (Self::SignalNative, "SIGALRM") => Intrinsic::ObjectRuntimeExport("_signal.SIGALRM"),
+            (Self::SignalNative, "SIGTERM") => Intrinsic::ObjectRuntimeExport("_signal.SIGTERM"),
             (Self::Signal | Self::SignalNative, "alarm") if cfg!(unix) => {
                 Intrinsic::ObjectRuntimeExport("_signal.alarm")
             }
