@@ -540,7 +540,7 @@ impl Encoder {
                 let sequence =
                     ctx.builtin_slot_accepts(id, "list") || ctx.builtin_slot_accepts(id, "tuple");
                 let contents = if sequence && matches!(ctx.heap.get(id), Value::Instance { .. }) {
-                    Self::snapshot(ctx, id)?
+                    Self::snapshot(ctx, id, None)?
                 } else {
                     id
                 };
@@ -723,8 +723,27 @@ impl Encoder {
     }
 
     /// Materialize a subclass iterator while keeping previously yielded values alive.
-    fn snapshot(ctx: &mut Context, source: Id) -> Result<Id> {
-        let iterator = ctx.iterator(source)?;
+    fn snapshot(ctx: &mut Context, source: Id, items_owner: Option<Id>) -> Result<Id> {
+        let iterator = ctx.iterator(source).map_err(|error| {
+            let ty = ctx.builtin("TypeError");
+            if !ctx.raised_error_matches(&error, ty) {
+                return error;
+            }
+            if let Some(owner) = items_owner {
+                let owner = super::diagnostic_type_name(ctx, owner);
+                let result = super::diagnostic_type_name(ctx, source);
+                Error::new(
+                    "TypeError",
+                    format!(
+                        "{}.items() returned a non-iterable (type {})",
+                        &owner[..owner.floor_char_boundary(200)],
+                        &result[..result.floor_char_boundary(200)],
+                    ),
+                )
+            } else {
+                Error::new("TypeError", "_iterencode_list needs a sequence")
+            }
+        })?;
         let list = ctx.alloc(Value::List(Vec::new()));
         super::builtins::call(ctx, "list.extend", &[list, iterator], &[])?;
         Ok(list)
@@ -737,7 +756,7 @@ impl Encoder {
         let items = if matches!(ctx.heap.get(result), Value::List(_)) {
             result
         } else {
-            Self::snapshot(ctx, result)?
+            Self::snapshot(ctx, result, Some(id))?
         };
         ctx.heap.reserve_temporaries(1)?;
         ctx.heap.keep(items);
