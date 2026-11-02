@@ -28,8 +28,11 @@ def current():
             return super().__instancecheck__(obj)
 
     class Target(metaclass=CheckMeta):
-        pass
+        annotation_type = int
+        field: annotation_type
 
+    Target.annotation_type = str
+    assert Target.__annotations__ == {"field": str}
     seen = []
     exact = Target()
     assert isinstance(exact, Target) and not seen

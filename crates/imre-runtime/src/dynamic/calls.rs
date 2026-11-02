@@ -6264,8 +6264,10 @@ impl Context {
             && self.builtins.get("abc.ABCMeta") != Some(&meta)
         {
             let namespace = self.active_class_namespace(scope);
+            // A deferred class annotator owns these fields. Its scratch entries are placeholders.
             if self.dict_named_item(namespace, "__annotations__") == Some(annotations)
-                && self.dict_entries(annotations).is_some_and(|items| items.is_empty())
+                && (self.dict_named_item(namespace, "__annotate_func__").is_some()
+                    || self.dict_entries(annotations).is_some_and(|items| items.is_empty()))
             {
                 let key = self.text("__annotations__");
                 self.delete_item(namespace, key)?;
