@@ -438,7 +438,9 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("_signal", "SIGTERM") => ctx.int(i64::from(libc::SIGTERM)),
         #[cfg(all(unix, not(target_os = "linux")))]
         ("_signal", "alarm") => ctx.builtin("_signal.alarm"),
-        ("codecs" | "_codecs", "encode" | "escape_decode") => ctx.builtin(&format!("codecs.{name}")),
+        ("codecs" | "_codecs", "encode" | "escape_decode" | "utf_16_ex_decode") => {
+            ctx.builtin(&format!("codecs.{name}"))
+        }
         ("_io", "open_code") => ctx.builtin("io.open_code"),
         ("math", "trunc" | "floor" | "ceil" | "modf" | "gcd" | "isnan" | "isqrt") => {
             ctx.builtin(&format!("math.{name}"))
@@ -2037,6 +2039,7 @@ pub(super) fn call(
         return match function {
             "encode" | "decode" => codecs::transform(ctx, function, args, kwargs),
             "escape_decode" => codecs::escape_decode(ctx, args, kwargs),
+            "utf_16_ex_decode" => codecs::utf16_extended(ctx, args, kwargs),
             "lookup" => codecs::lookup(ctx, args, kwargs),
             "register_error" | "lookup_error" => {
                 codecs::error_registry(ctx, function, args, kwargs)
