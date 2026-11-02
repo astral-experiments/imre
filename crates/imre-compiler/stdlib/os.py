@@ -11,7 +11,7 @@ from _collections_abc import _check_methods
 from _collections_abc import Mapping as _Mapping, MutableMapping as _MutableMapping
 from posix import _create_environ, abort, access, environ as _environ, fspath, getcwd, getcwdb, getpgid, getppid, kill, listdir, mkdir, putenv, read, scandir, setpgid, terminal_size, unsetenv, waitpid, write, WNOHANG
 from types import GenericAlias
-from posix import O_NONBLOCK, O_RDONLY, chdir, close, closerange, fchdir, open, rmdir, stat, truncate
+from posix import O_NONBLOCK, O_RDONLY, chdir, close, closerange, fchdir, fsync, open, rmdir, stat, truncate
 
 try:
     from posix import getpgrp
@@ -24,6 +24,7 @@ except ImportError:
     pass
 
 if sys.platform == "linux":
+    from posix import fdatasync
     from posix import F_LOCK, F_TEST, F_TLOCK, F_ULOCK, lockf
     from posix import MFD_CLOEXEC, memfd_create
     from posix import RWF_APPEND, RWF_DSYNC, RWF_HIPRI, RWF_NOWAIT, RWF_SYNC, preadv, pwritev
