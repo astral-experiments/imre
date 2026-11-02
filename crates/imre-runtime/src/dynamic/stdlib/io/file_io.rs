@@ -303,7 +303,16 @@ pub(in crate::dynamic) fn open(
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
-    let [file, mode, buffering, encoding, errors, newline, closefd] = builtins::bind(
+    let [
+        file,
+        mode,
+        buffering,
+        encoding,
+        errors,
+        newline,
+        closefd,
+        opener,
+    ] = builtins::bind(
         "open",
         args,
         kwargs,
@@ -315,6 +324,7 @@ pub(in crate::dynamic) fn open(
             "errors",
             "newline",
             "closefd",
+            "opener",
         ],
     )?;
     let file = file.ok_or_else(|| Error::new("TypeError", "open requires a file"))?;
@@ -350,9 +360,10 @@ pub(in crate::dynamic) fn open(
     if binary {
         check_binary_options(encoding, errors, newline)?;
     }
+    let opener = opener.filter(|&v| v != NONE);
     if buffering == 0 {
         let raw_mode = mode_text.replace('t', "");
-        return open_raw(ctx, raw_arg, raw_mode, binary, owns);
+        return open_raw(ctx, raw_arg, raw_mode, binary, owns, opener);
     }
     let update = mode_text.contains('+');
     let text_output = !binary && !update && mode_text.contains(['w', 'a', 'x']);
@@ -363,7 +374,7 @@ pub(in crate::dynamic) fn open(
         && !update
         && !numeric
         && matches!(ctx.heap.get(ctx.scalar_value(raw_arg)), Value::Bytes(_));
-    if binary && update && buffering == 1 {
+    if binary && buffering == 1 {
         ctx.emit_builtin_warning(
             crate::objects::exceptions::Kind::RuntimeWarning,
             "line buffering (buffering=1) isn't supported in binary mode, the default buffer size will be used",
@@ -371,7 +382,14 @@ pub(in crate::dynamic) fn open(
         )?;
     }
     let fd = descriptor_from_argument(ctx, raw_arg);
-    if fd.is_some() || text_output || text_input_with_newline || binary_bytes_path || update {
+    if opener.is_some()
+        || fd.is_some()
+        || text_output
+        || text_input_with_newline
+        || binary_bytes_path
+        || update
+        || (binary && buffering == 1)
+    {
         if fd.is_some_and(|fd| fd < 0) {
             return Err(Error::new("ValueError", "negative file descriptor"));
         }
@@ -384,12 +402,6 @@ pub(in crate::dynamic) fn open(
         }
         let reading = mode_text.contains('r');
         let raw_mode = mode_text.replace('t', "");
-        if buffering > 0 && !update {
-            return Err(Error::new(
-                "ValueError",
-                "explicit buffer sizes are unsupported",
-            ));
-        }
         ctx.module("io")?;
         let raw = ctx.instance(ctx.builtins["_io.FileIO"], None);
         initialize_file(
@@ -399,31 +411,29 @@ pub(in crate::dynamic) fn open(
             &raw_mode,
             owns,
             DescriptorLookup::Resolved(fd),
-            None,
+            opener,
             None,
         )?;
         let handle = state(ctx, raw).expect("initialized FileIO");
-        let buffer = if update {
-            let capacity = if buffering > 1 {
-                buffering as usize
-            } else {
-                crate::text_output::binary_capacity(handle.blksize.get().into())
-            };
-            let result = super::BufferedFd::update(raw, handle.clone(), capacity)
-                .and_then(|buffer| files::BinaryFile::Descriptor(buffer).into_value())
-                .and_then(|value| ctx.heap.alloc_file_writer(value));
-            if result.is_err() {
-                let _ = handle.close();
-            }
-            result?
+        let capacity = if buffering > 1 {
+            buffering as usize
         } else {
-            buffered_descriptor(ctx, raw, handle, reading)?
+            crate::text_output::binary_capacity(handle.blksize.get().into())
         };
+        let line_buffering =
+            buffering == 1 || (!binary && buffering < 0 && handle.fd.get().is_some_and(os::isatty));
+        let buffer = if update {
+            super::BufferedFd::update(raw, handle, capacity)
+        } else {
+            Ok(super::BufferedFd::new(raw, handle, reading, capacity))
+        }
+        .and_then(|buffer| allocate_buffer(ctx, buffer))
+        .map_err(|error| close_on_error(ctx, raw, error))?;
         if binary {
             return Ok(buffer);
         }
         let wrapper = ctx.builtins["_io.TextIOWrapper"];
-        let result = ctx
+        let stream = ctx
             .call(
                 wrapper,
                 vec![
@@ -431,21 +441,17 @@ pub(in crate::dynamic) fn open(
                     encoding.unwrap_or(NONE),
                     errors.unwrap_or(NONE),
                     newline.unwrap_or(NONE),
-                    builtins::boolean(buffering == 1),
+                    builtins::boolean(line_buffering),
                 ],
                 Vec::new(),
             )
-            .and_then(|stream| {
-                let mode = mode
-                    .map(|id| ctx.scalar_value(id))
-                    .unwrap_or_else(|| ctx.text("r"));
-                ctx.set_attr(stream, "mode", mode)?;
-                Ok(stream)
-            });
-        if result.is_err() {
-            let _ = state(ctx, raw).expect("initialized FileIO").close();
-        }
-        return result;
+            .map_err(|error| close_on_error(ctx, buffer, error))?;
+        let mode = mode
+            .map(|id| ctx.scalar_value(id))
+            .unwrap_or_else(|| ctx.text("r"));
+        ctx.set_attr(stream, "mode", mode)
+            .map_err(|error| close_on_error(ctx, stream, error))?;
+        return Ok(stream);
     }
     let filename = if numeric {
         super::super::posixpath::fspath(ctx, raw_arg)?
@@ -512,6 +518,7 @@ fn open_raw(
     raw_mode: String,
     binary: bool,
     owns: bool,
+    opener: Option<Id>,
 ) -> Result<Id> {
     // CPython creates/truncates the raw file before rejecting unbuffered text.
     ctx.module("io")?;
@@ -520,13 +527,17 @@ fn open_raw(
     let mode = ctx.text(raw_mode);
     let file = ctx.call(
         class,
-        vec![filename, mode, builtins::boolean(owns)],
+        vec![
+            filename,
+            mode,
+            builtins::boolean(owns),
+            opener.unwrap_or(NONE),
+        ],
         Vec::new(),
     )?;
     if !binary {
-        let raw = state(ctx, file).unwrap();
-        raw.close()?;
-        return Err(Error::new("ValueError", "can't have unbuffered text I/O"));
+        let error = Error::new("ValueError", "can't have unbuffered text I/O");
+        return Err(close_on_error(ctx, file, error));
     }
     Ok(file)
 }
@@ -563,17 +574,24 @@ fn initialize(ctx: &mut Context, receiver: Id, args: &[Id], kwargs: &[(String, I
     )
 }
 
-fn buffered_descriptor(
-    ctx: &mut Context,
-    raw: Id,
-    handle: Rc<RawFile>,
-    reading: bool,
-) -> Result<Id> {
-    let capacity = crate::text_output::binary_capacity(handle.blksize.get().into());
-    let buffer =
-        files::BinaryFile::Descriptor(super::BufferedFd::new(raw, handle, reading, capacity))
-            .into_value()?;
-    ctx.heap.alloc_file_writer(buffer)
+/// Close the last successfully constructed layer and preserve a secondary close failure.
+fn close_on_error(ctx: &mut Context, layer: Id, error: Error) -> Error {
+    let original = ctx.raised_instance(error.clone());
+    ctx.heap.keep(original);
+    let result = ctx
+        .lookup_attr(layer, "close")
+        .and_then(|close| ctx.call(close, Vec::new(), Vec::new()));
+    if let Err(mut closing) = result {
+        closing.context = original;
+        closing
+    } else {
+        error
+    }
+}
+
+fn allocate_buffer(ctx: &mut Context, buffer: super::BufferedFd) -> Result<Id> {
+    let value = files::BinaryFile::Descriptor(buffer).into_value()?;
+    ctx.heap.alloc_file_writer(value)
 }
 
 impl Context {
@@ -599,7 +617,9 @@ impl Context {
         // FileIO takes ownership of a passed descriptor only after successful initialization.
         let _ = file.into_raw_fd();
         let handle = state(self, raw).expect("initialized FileIO");
-        let result = buffered_descriptor(self, raw, handle.clone(), false);
+        let capacity = crate::text_output::binary_capacity(handle.blksize.get().into());
+        let buffer = super::BufferedFd::new(raw, handle.clone(), false, capacity);
+        let result = allocate_buffer(self, buffer);
         if result.is_err() {
             handle.close()?;
         }
