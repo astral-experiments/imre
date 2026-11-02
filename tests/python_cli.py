@@ -63,6 +63,22 @@ def check_command_stdin(imre, run):
         assert actual.stdout == reference.stdout and actual.stderr == reference.stderr == b""
 
 
+def check_sysconfig_build(imre, root, run):
+    fixture = Path(__file__).with_name("fixtures") / "boxed_sysconfig_build.py"
+    project = root / "build-tree"
+    modules = project / "Modules"
+    modules.mkdir(parents=True)
+    alias = root / "build-link"
+    alias.symlink_to(project, target_is_directory=True)
+    empty = root / "empty-build-tree"
+    (empty / "Modules" / "Setup").mkdir(parents=True)
+    for home, extra in ((project, {}), (empty, {"_PYTHON_PROJECT_BASE": alias.name})):
+        (modules / "Setup").unlink(missing_ok=True)
+        (modules / "Setup.local").touch()
+        result = run(imre, "-B", fixture, project, home, empty, extra=extra)
+        assert (result.returncode, result.stdout, result.stderr) == (0, b"build markers passed\n", b""), result
+
+
 def check_io_compaction_allocation(imre, root, run):
     fixture = Path(__file__).with_name("fixtures") / "refuse_io_compaction.c"
     wrapper = root / "refuse_io_compaction.o"
@@ -984,6 +1000,7 @@ def main():
             check_pending_signals(imre, root, env)
             marked_call_flags = marked_call_refusal_flags(root)
             check_bound_method_allocation(imre, run, marked_call_flags)
+            check_sysconfig_build(imre, root, run)
             check_ffi_result_roots(imre, root, run)
             check_weak_proxy_root_allocation(imre, root, run)
             check_noncallable_allocation(imre, run, marked_call_flags)
