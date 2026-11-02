@@ -73,6 +73,7 @@ impl BuiltinDescriptor {
             "float.__format__" => ("float", "__format__"),
             "object.__hash__" => ("object", "__hash__"),
             "object.__repr__" => ("object", "__repr__"),
+            "function.__call__" => ("function", "__call__"),
             "classmethod.__get__" => ("classmethod", "__get__"),
             "method_descriptor.__get__" => ("method_descriptor", "__get__"),
             "str.__repr__" => ("str", "__repr__"),
@@ -127,6 +128,7 @@ impl BuiltinDescriptor {
                 ctx.type_name(receiver) == class
             }
             "object" => true,
+            "function" => matches!(ctx.heap.get(receiver), Value::Function { .. }),
             "classmethod" => matches!(ctx.heap.get(receiver), Value::ClassMethod(_)),
             "functools.KeyWrapper" => matches!(ctx.heap.get(receiver), Value::KeyWrapper { .. }),
             super::namespace::CLASS => {
@@ -153,7 +155,8 @@ impl BuiltinDescriptor {
                     "descriptor '{}' for '{}' objects doesn't apply to a '{}' object",
                     self.name,
                     self.owner,
-                    ctx.type_name(receiver)
+                    ctx.builtin_type_name(receiver)
+                        .unwrap_or_else(|| ctx.type_name(receiver))
                 ),
             ));
         }
@@ -190,6 +193,10 @@ impl BuiltinDescriptor {
             }
             "__objclass__" if receiver.is_none() || !self.method => ctx.builtin(self.owner),
             "__module__" if receiver.is_some() && self.method => NONE,
+            "__doc__" if self.name == "__call__" => ctx.text("Call self as a function."),
+            "__text_signature__" if self.name == "__call__" => {
+                ctx.text("($self, /, *args, **kwargs)")
+            }
             "__doc__" if self.name == "__contains__" => ctx.text("Return bool(key in self)."),
             "__text_signature__" if self.name == "__contains__" => ctx.text("($self, key, /)"),
             "__doc__" if self.name == "__add__" => ctx.text("Return self+value."),

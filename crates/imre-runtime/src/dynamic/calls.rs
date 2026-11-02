@@ -159,8 +159,9 @@ impl Context {
                         | "property"
                         | "module"
                         | weakref::REFERENCE_TYPE
-                ) || (matches!(name, "__repr__" | "issubset")
-                    && matches!(kind.as_str(), "set" | "frozenset")) =>
+                ) || (kind == "function" && name == "__call__")
+                    || (matches!(name, "__repr__" | "issubset")
+                        && matches!(kind.as_str(), "set" | "frozenset")) =>
             {
                 self.builtins.get(&format!("{kind}.{name}")).copied()
             }
@@ -1977,6 +1978,11 @@ impl Context {
                 if let Some(value) = self.function_attr(obj, fields, name)? {
                     return Ok(value);
                 }
+                if name == "__call__" {
+                    let class = self.builtin("function");
+                    let descriptor = self.builtin("function.__call__");
+                    return self.bind_attribute(descriptor, obj, class);
+                }
             }
             Value::Method {
                 callable, receiver, ..
@@ -2701,6 +2707,7 @@ impl Context {
             }
             Value::Native(ref class)
                 if matches!(class.as_str(), "dict" | "list" | "tuple")
+                    || (class == "function" && name == "__call__")
                     || builtins::is_enum_base(class)
                     || (matches!(name, "__repr__" | "issubset")
                         && matches!(class.as_str(), "set" | "frozenset"))
@@ -4198,6 +4205,27 @@ impl Context {
                     return Err(error);
                 }
                 Ok(result)
+            }
+            Value::Native(name) if name == "function.__call__" => {
+                let mut arguments = args.into_iter();
+                let function = arguments.next().ok_or_else(|| {
+                    Error::new(
+                        "TypeError",
+                        "descriptor '__call__' of 'function' object needs an argument",
+                    )
+                })?;
+                if !matches!(self.heap.get(function), Value::Function { .. }) {
+                    let actual = self
+                        .builtin_type_name(function)
+                        .unwrap_or_else(|| self.type_name(function));
+                    return Err(Error::new(
+                        "TypeError",
+                        format!(
+                            "descriptor '__call__' requires a 'function' object but received a '{actual}'"
+                        ),
+                    ));
+                }
+                self.call(function, arguments.collect(), kwargs)
             }
             Value::Native(name) if name == "classmethod.__get__" => {
                 wrapper_descriptor::descriptor_get(self, "classmethod", &args, &kwargs)
