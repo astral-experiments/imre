@@ -539,11 +539,9 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("typing", "TYPE_CHECKING") => FALSE,
         ("typing", "Union") | ("types", "UnionType") => super::union::class(ctx),
         ("typing", "Generic" | "Protocol") => super::typing::named_class(ctx, "typing", name),
-        (
-            "_collections_abc",
-            abc
-            @ ("Sized" | "Iterable" | "Container" | "Collection" | "Mapping" | "MutableMapping"),
-        ) => super::mapping_abc::class(ctx, abc)?,
+        ("_collections_abc", abc) if super::mapping_abc::bootstrapped(abc) => {
+            super::mapping_abc::class(ctx, abc)?
+        }
         ("_collections_abc", "_check_methods") => ctx.builtin("_collections_abc._check_methods"),
         ("_collections_abc", "Callable") => {
             super::typing::named_class(ctx, "collections.abc", "Callable")

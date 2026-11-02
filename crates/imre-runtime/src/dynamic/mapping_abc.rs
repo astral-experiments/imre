@@ -12,6 +12,14 @@ fn structural_methods(name: &str) -> Option<&'static [&'static str]> {
     }
 }
 
+/// Class namespaces bootstrapped here provide ABC methods without native instance storage.
+pub(super) fn bootstrapped(name: &str) -> bool {
+    matches!(
+        name,
+        "Sized" | "Iterable" | "Container" | "Collection" | "Mapping" | "MutableMapping"
+    )
+}
+
 /// Allocate the real class objects with their CPython direct bases and C3 lineage.
 pub(super) fn class(ctx: &mut Context, name: &str) -> Result<Id> {
     let key = format!("collections.abc.{name}");

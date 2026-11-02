@@ -4595,9 +4595,12 @@ impl Context {
     fn owns_allocation(&self, base: Id) -> bool {
         match self.heap.get(base) {
             Value::Native(_) => true,
-            // Generic and Protocol inherit object.__new__ without native storage.
-            Value::Class { scope, .. } => {
+            // These bootstrapped classes inherit their allocator from the next base.
+            Value::Class { name, scope, .. } => {
+                let mapping_abc = super::mapping_abc::bootstrapped(name)
+                    && self.classes.get(&format!("collections.abc.{name}")) == Some(&base);
                 self.scope_data(*scope).class_cell.is_none()
+                    && !mapping_abc
                     && self.classes.get("typing.Generic") != Some(&base)
                     && self.classes.get("typing.Protocol") != Some(&base)
             }
