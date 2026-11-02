@@ -2369,8 +2369,19 @@ impl Context {
                     ("stdout", "__stdout__", false),
                     ("stderr", "__stderr__", true),
                 ] {
-                    let stream =
-                        self.alloc(Value::TextFile(crate::objects::TextFile::standard(stderr)));
+                    let file = crate::objects::TextFile::standard(stderr);
+                    let path = self.text(if stderr { "<stderr>" } else { "<stdout>" });
+                    let buffer = self.alloc(
+                        stdlib::BinaryFile::Standard {
+                            file: file.clone(),
+                            path,
+                        }
+                        .into_value()?,
+                    );
+                    let stream = self.alloc(Value::TextFile(value::BoxedTextFile {
+                        file,
+                        buffer: Some(buffer),
+                    }));
                     self.bind(scope, name, stream);
                     self.bind(scope, original, stream);
                     if stderr && self.threads.system_module.is_none() {
