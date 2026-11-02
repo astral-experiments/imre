@@ -1405,6 +1405,101 @@ fn replace_points(ctx: &mut Context, receiver: Id, old: Id, new: Id, limit: usiz
     Ok(ctx.text_codepoints(result))
 }
 
+/// Justify a Unicode string using Python code point widths, including lone surrogates.
+fn justify(
+    ctx: &mut Context,
+    receiver: Id,
+    name: &str,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Id> {
+    if !kwargs.is_empty() {
+        return Err(type_error(format!(
+            "str.{name}() takes no keyword arguments"
+        )));
+    }
+    let Some((&width, extra)) = args.split_first() else {
+        return Err(type_error(format!(
+            "{name} expected at least 1 argument, got 0"
+        )));
+    };
+    if extra.len() > 1 {
+        return Err(type_error(format!(
+            "{name} expected at most 2 arguments, got {}",
+            args.len()
+        )));
+    }
+    let width = crate::objects::zfill::width(&ctx.index_integer(width)?)?;
+    let fill = if let Some(&id) = extra.first() {
+        match ctx.heap.get(ctx.scalar_value(id)) {
+            Value::Str(s) => s
+                .chars()
+                .next()
+                .filter(|c| c.len_utf8() == s.len())
+                .map(u32::from),
+            Value::SurrogateStr(points) => match points.as_slice() {
+                [point] => Some(*point),
+                _ => None,
+            },
+            _ => {
+                return Err(type_error(format!(
+                    "The fill character must be a unicode character, not {}",
+                    ctx.type_name(id)
+                )));
+            }
+        }
+        .ok_or_else(|| type_error("The fill character must be exactly one character long"))?
+    } else {
+        u32::from(' ')
+    };
+    let storage = ctx.string_storage(receiver).unwrap();
+    let source = ctx.heap.get(storage);
+    let len = match source {
+        Value::Str(s) => s.chars().count(),
+        Value::SurrogateStr(s) => s.len(),
+        _ => unreachable!(),
+    };
+    let margin = width.saturating_sub(len);
+    if margin == 0 && (receiver == storage || len == 0) {
+        return Ok(storage);
+    }
+    let left = match name {
+        "ljust" => 0,
+        "rjust" => margin,
+        // CPython assigns the extra character on the left only for an odd target width.
+        _ => margin / 2 + (margin & width & 1),
+    };
+    let memory_error = || Error::new("MemoryError", "");
+    let result = if let Value::Str(s) = source
+        && let Some(ch) = char::from_u32(fill).or((margin == 0).then_some(' '))
+    {
+        let size = margin
+            .checked_mul(ch.len_utf8())
+            .and_then(|bytes| bytes.checked_add(s.len()))
+            .ok_or_else(memory_error)?;
+        let mut padded = String::new();
+        padded.try_reserve_exact(size).map_err(|_| memory_error())?;
+        padded.extend(std::iter::repeat_n(ch, left));
+        padded.push_str(s);
+        padded.extend(std::iter::repeat_n(ch, margin - left));
+        Value::Str(padded)
+    } else {
+        let mut points = Vec::new();
+        points
+            .try_reserve_exact(len + margin)
+            .map_err(|_| memory_error())?;
+        points.resize(left, fill);
+        match source {
+            Value::Str(s) => points.extend(s.chars().map(u32::from)),
+            Value::SurrogateStr(s) => points.extend_from_slice(s),
+            _ => unreachable!(),
+        }
+        points.resize(len + margin, fill);
+        Value::SurrogateStr(points)
+    };
+    ctx.heap.fresh_string(result)
+}
+
 pub(super) fn method(
     ctx: &mut Context,
     owner: &str,
@@ -1482,6 +1577,9 @@ pub(super) fn method(
         } else {
             encode_text_object(ctx, receiver, encoding, errors)
         };
+    }
+    if owner == "str" && matches!(name, "center" | "ljust" | "rjust") {
+        return justify(ctx, receiver, name, args, kwargs);
     }
     if name == "zfill" {
         let width = one_positional_arg("str.zfill", args, kwargs)?;
