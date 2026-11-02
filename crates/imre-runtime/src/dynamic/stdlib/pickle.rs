@@ -189,7 +189,7 @@ impl Pickler {
             (ctx.builtin("codecs.encode"), vec![text, latin1])
         };
         let args = ctx.alloc(Value::Tuple(args));
-        self.save_reduce(ctx, obj, func, args)
+        self.save_reduce(ctx, obj, func, args, NONE)
     }
 
     fn save_dict(&mut self, ctx: &mut Context, obj: Id) -> Result<()> {
@@ -365,16 +365,24 @@ impl Pickler {
                 "second item of the tuple returned by __reduce__ must be a tuple",
             ));
         }
-        if fields[2..].iter().any(|&field| field != NONE) {
+        if fields.iter().skip(3).any(|&field| field != NONE) {
             return Err(Error::new(
                 "NotImplementedError",
-                "native pickle does not yet support reduction state, items or state setters",
+                "native pickle does not yet support reduction items or state setters",
             ));
         }
-        self.save_reduce(ctx, obj, fields[0], fields[1])
+        let state = fields.get(2).copied().unwrap_or(NONE);
+        self.save_reduce(ctx, obj, fields[0], fields[1], state)
     }
 
-    fn save_reduce(&mut self, ctx: &mut Context, obj: Id, func: Id, args: Id) -> Result<()> {
+    fn save_reduce(
+        &mut self,
+        ctx: &mut Context,
+        obj: Id,
+        func: Id,
+        args: Id,
+        state: Id,
+    ) -> Result<()> {
         self.save(ctx, func)?;
         self.save(ctx, args)?;
         self.out.push(b'R');
@@ -384,7 +392,12 @@ impl Pickler {
             encoding::memo_get(&mut self.out, self.protocol, index);
             return Ok(());
         }
-        self.remember(ctx, obj)
+        self.remember(ctx, obj)?;
+        if state != NONE {
+            self.save(ctx, state)?;
+            self.out.push(b'b'); // BUILD
+        }
+        Ok(())
     }
 }
 
