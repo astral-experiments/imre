@@ -2974,6 +2974,7 @@ for name in ("md4", "ripemd160"):
             "boxed_itertools_immutable_types.py",
             "boxed_itertools_cursor_repr.py",
             "boxed_itertools_chain.py",
+            "boxed_pairwise.py",
             "boxed_itertools_cycle.py",
             "boxed_itertools_accumulate.py",
             "boxed_itertools_batched.py",

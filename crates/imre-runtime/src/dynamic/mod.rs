@@ -2826,6 +2826,8 @@ impl Context {
                     "_accumulate_state",
                     "_cycle_allocate",
                     "_cycle_next",
+                    "_pairwise_allocate",
+                    "_pairwise_next",
                     "_starmap_allocate",
                     "_starmap_next",
                     "_zip_longest_allocate",
@@ -3388,6 +3390,7 @@ impl Context {
                 self.freeze_itertools_types(scope);
                 for (name, owner) in [
                     ("accumulate", "itertools.accumulate"),
+                    ("pairwise", "itertools.pairwise"),
                     ("starmap", "itertools.starmap"),
                     ("takewhile", "itertools.takewhile"),
                     ("dropwhile", "itertools.dropwhile"),
