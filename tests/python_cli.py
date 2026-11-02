@@ -1677,6 +1677,23 @@ def main():
         )
         compare("-I", "-c", scoped_import, "match", extra={"IMREFLAGS": "--bogus"})
         compare("-I", "-c", scoped_import, "inverse", extra={"IMREFLAGS": "--bogus"})
+        stream_flags = (
+            "import sys\n"
+            "for f in (sys.stdin, sys.stdout, sys.stderr):\n"
+            "    print(f.write_through, f.line_buffering, type(f.buffer).__name__)"
+        )
+        for option, value in (("-uc", ""), ("-c", "1"), ("-c", "0"), ("-Ec", "1"), ("-Iuc", "0")):
+            extra = {"PYTHONUNBUFFERED": value}
+            expected = run(sys.executable, option, stream_flags, extra=extra, stdin=b"")
+            actual = run(imre, option, stream_flags, extra=extra, stdin=b"")
+            assert (actual.returncode, actual.stdout, actual.stderr) == (0, expected.stdout, b"")
+        mixed_writes = (
+            "import os, sys\n"
+            "sys.stdout.write('a'); os.write(1, b'b'); sys.stdout.buffer.write(b'\\xff')\n"
+            "sys.stderr.write('c'); os.write(2, b'd'); sys.stderr.buffer.write(b'\\xfe')"
+        )
+        mixed = run(imre, "-uc", mixed_writes)
+        assert (mixed.returncode, mixed.stdout, mixed.stderr) == (0, b"ab\xff", b"cd\xfe")
         compare("-IBc" + flags_code)
         compare("-c", flags_code, extra={"PYTHONDONTWRITEBYTECODE": "1"})
         compare(
