@@ -242,7 +242,7 @@ enum Body<'a> {
     YieldingLambda(&'a ast::Expr),
     TypeAlias(&'a ast::Expr),
     Generator(&'a [ast::Comprehension], &'a ast::Expr),
-    Unsupported(&'a ast::Stmt, &'static str),
+    UnsupportedAsyncGenerator(&'a ast::StmtFunctionDef),
 }
 
 struct SourceMap<'a> {
@@ -436,9 +436,9 @@ impl Output {
             Body::ClassAnnotations(sites, globals) => f.class_annotation_values(&sites, &globals),
             Body::Annotations(entries, class) => f.annotations(&entries, class, false),
             Body::ModuleAnnotations(entries) => f.annotations(&entries, None, true),
-            Body::Unsupported(stmt, reason) => {
-                f.checkpoint(stmt);
-                f.unsupported(reason);
+            Body::UnsupportedAsyncGenerator(function) => {
+                f.checkpoint(function);
+                f.unsupported("async function");
             }
             Body::Generator(generators, element) => f.generator_step(generators, element),
             Body::AnnotationThunk(entry, range) => {
