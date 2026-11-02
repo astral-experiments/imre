@@ -580,6 +580,7 @@ pub(crate) enum IntrinsicModule {
     Math,
     Numbers,
     Operator,
+    OperatorNative,
     Textwrap,
     Io,
     IoNative,
@@ -1122,6 +1123,7 @@ impl IntrinsicModule {
             "math" => Some(Self::Math),
             "numbers" => Some(Self::Numbers),
             "operator" => Some(Self::Operator),
+            "_operator" => Some(Self::OperatorNative),
             "textwrap" => Some(Self::Textwrap),
             "io" => Some(Self::Io),
             "_io" => Some(Self::IoNative),
@@ -2549,6 +2551,9 @@ impl IntrinsicModule {
             }
             (Self::Collections, "UserString") => {
                 Intrinsic::ObjectRuntimeExport("collections.UserString")
+            }
+            (Self::OperatorNative, "_compare_digest") => {
+                Intrinsic::ObjectRuntimeExport("_operator._compare_digest")
             }
             (Self::Operator, "attrgetter") => Intrinsic::AttrGetter,
             (Self::Operator, "itemgetter") => Intrinsic::ObjectRuntimeExport("operator.itemgetter"),
@@ -5060,6 +5065,7 @@ impl<'a> Loader<'a> {
                 module,
                 IntrinsicModule::Ast
                     | IntrinsicModule::Blake2
+                    | IntrinsicModule::OperatorNative
                     | IntrinsicModule::Sha3
                     | IntrinsicModule::Md5
                     | IntrinsicModule::Atexit
