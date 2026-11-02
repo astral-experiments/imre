@@ -372,6 +372,9 @@ mod utime;
 
 /// POSIX functions exported as the same builtins by both os and posix.
 pub(super) fn is_descriptor_function(name: &str) -> bool {
+    if name == "_exit" {
+        return cfg!(unix);
+    }
     if name == "pread" {
         return cfg!(unix);
     }
@@ -820,6 +823,16 @@ pub(super) fn descriptor(
         };
         native::close(c_int(ctx, fd)?)?;
         return Ok(NONE);
+    }
+    #[cfg(unix)]
+    if name == "_exit" {
+        let [Some(status)] = builtins::bind_builtin_arguments(name, args, kwargs, ["status"], 1)?
+        else {
+            unreachable!("status is required")
+        };
+        let status = c_int(ctx, status)?;
+        // SAFETY: _exit accepts any C int and terminates without running cleanup.
+        unsafe { libc::_exit(status) }
     }
     #[cfg(unix)]
     if name == "waitstatus_to_exitcode" {

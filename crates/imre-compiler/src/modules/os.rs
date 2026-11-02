@@ -89,6 +89,7 @@ pub(super) fn symbol(name: &str) -> Option<Intrinsic> {
         }
         "sendfile" if cfg!(target_os = "linux") => Intrinsic::ObjectRuntimeExport("posix.sendfile"),
         "readlink" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.readlink"),
+        "_exit" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix._exit"),
         "getppid" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.getppid"),
         "kill" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.kill"),
         "getsid" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.getsid"),
