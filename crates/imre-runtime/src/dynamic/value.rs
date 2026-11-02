@@ -3183,6 +3183,45 @@ impl Heap {
         };
     }
 
+    /// Look for a short strong path from a current frame to an owner. Recheck every edge:
+    /// assigning an instance field or releasing an operand can invalidate the whole path.
+    fn frame_keeps_instance_owner(&self, owner: Id) -> bool {
+        fn keeps(heap: &Heap, root: Id, owner: Id, budget: &mut usize) -> bool {
+            if *budget == 0 {
+                return false;
+            }
+            *budget -= 1;
+            if root == owner {
+                return true;
+            }
+            match heap.get(root) {
+                Value::Method { receiver, .. } => keeps(heap, *receiver, owner, budget),
+                Value::Instance { fields, .. } => fields
+                    .values()
+                    .take(*budget)
+                    .any(|&value| keeps(heap, value, owner, budget)),
+                _ => false,
+            }
+        }
+
+        self.frames.iter().rev().take(8).any(|frame| {
+            let locals = match self.get(frame.scope) {
+                Value::Scope(scope) => Some(&scope.names),
+                _ => None,
+            };
+            frame
+                .live
+                .iter()
+                .rev()
+                .take(8)
+                .chain(locals.into_iter().flat_map(|names| names.values().take(8)))
+                .any(|&root| {
+                    let mut budget = 16;
+                    keeps(self, root, owner, &mut budget)
+                })
+        })
+    }
+
     pub(super) fn acyclic_finalizer(
         &self,
         roots: impl Iterator<Item = Id>,
@@ -3211,6 +3250,15 @@ impl Heap {
                 .rev()
                 .skip(1)
                 .any(|frame| frame.live.contains(owner))
+        {
+            return Ok(None);
+        }
+        if remaining == 1
+            && let Some(&owner) = self
+                .ordinary_finalizers
+                .iter()
+                .find(|owner| !stdin.is_some_and(|chain| chain.contains(owner)))
+            && self.frame_keeps_instance_owner(owner)
         {
             return Ok(None);
         }
