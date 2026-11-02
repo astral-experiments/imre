@@ -22,13 +22,24 @@ pub(super) fn compile(
     if locale_dependent(pattern, flags) {
         return Err(original);
     }
-    let (mut source, groups) = imre_regex::backtracking_source(
+    let Ok((mut source, groups)) = imre_regex::backtracking_source(
         pattern,
         flags & VERBOSE != 0,
         alphabet(bytes, ascii, flags),
         flags & DOTALL != 0,
-    )
-    .map_err(|_| original)?;
+    ) else {
+        return Err(original);
+    };
+    // Raw, octal, and hex high-byte literals all translate to \xNN. Even in
+    // bytes mode the VM encodes these literals as UTF-8.
+    if bytes
+        && source
+            .split(r"\x")
+            .skip(1)
+            .any(|tail| matches!(tail.as_bytes().first(), Some(b'8'..=b'9' | b'a'..=b'f')))
+    {
+        return Err(original);
+    }
     let dollar = if flags & MULTILINE != 0 {
         r"(?=\n|\z)"
     } else {
@@ -98,11 +109,11 @@ impl Lookahead {
         })
     }
 
-    /// Preserve the prefix for anchors, and make endpos the assertion's end of input.
     pub(super) fn with_source(&self, source: &str) -> Result<Self, String> {
         Self::new(source, self.groups.clone(), self.mode, self.fold_bytes)
     }
 
+    /// Preserve the prefix for anchors, and make endpos the assertion's end of input.
     pub(super) fn captures(
         &self,
         input: Input<'_>,

@@ -172,6 +172,28 @@ def current():
         assert doubled.fullmatch(wrong) is None
         assert doubled.match(wrong).span(1) == (0, 0)
     assert re.fullmatch(r"^(a+).\1$", "aaaa") is None
+    for spelling, subject, expected in (
+        (r"((a)?)+\2", "aa", ((1, 1), (0, 1))),
+        (rb"(?:(a?)|(b)){0,2}\2\1", b"bb", ((1, 1), (0, 1))),
+    ):
+        try:
+            match = re.fullmatch(spelling, subject)
+        except re.PatternError:
+            continue
+        assert (match.span(1), match.span(2)) == expected
+    try:
+        high_repeat = re.compile(rb"((?:\200|A)+)\1")
+    except re.PatternError:
+        pass
+    else:
+        assert high_repeat.fullmatch(b"\x80\x80").group(1) == b"\x80"
+        assert high_repeat.fullmatch(b"\xc2\x80\xc2\x80") is None
+    try:
+        re.compile(r"(a)\1{2,1}")
+    except re.PatternError:
+        pass
+    else:
+        raise AssertionError("accepted a decreasing repetition range")
     mixed = re.fullmatch(rb"(.+)\1", b"\xffA\xffa", re.I)
     assert mixed.group(1) == b"\xffA" and mixed.span() == (0, 4)
 
