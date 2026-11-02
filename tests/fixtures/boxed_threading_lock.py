@@ -43,6 +43,14 @@ def factories():
 
 
 def current():
+    try:
+        class DerivedLock(Lock):
+            pass
+    except TypeError as error:
+        assert str(error) == "type '_thread.lock' is not an acceptable base type"
+    else:
+        raise AssertionError("primitive lock accepted a subclass")
+
     factories()
     lock = MapLock().lock_class()
     print(type(lock) is Lock is LockType, isinstance(lock, Lock), Lock.__module__, Lock.__name__)

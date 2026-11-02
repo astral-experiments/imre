@@ -1663,6 +1663,7 @@ impl Context {
                             | super::value::TEMPLATE_TYPE
                             | super::value::INTERPOLATION_TYPE
                             | super::namedtuple::GETTER
+                            | super::thread_lock::CLASS
                             | "functools.KeyWrapper"
                             | "member_descriptor"
                     ))
