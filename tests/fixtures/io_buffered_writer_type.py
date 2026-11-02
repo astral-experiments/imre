@@ -69,5 +69,25 @@ try:
         raises(ValueError, NativeWriter, raw, 0)
     with io.open(path, "wb") as stream:
         assert type(stream) is NativeWriter
+        raw = stream.raw
+        assert raw.name is path and raw.fileno() == stream.fileno()
+        assert stream.write(b"abc") == 3 and raw.tell() == 0
+        stream.flush()
+        assert raw.tell() == 3
+    assert raw.closed
+    with io.open(path, "rb") as stream:
+        raw = stream.raw
+        assert raw.name is path and raw.fileno() == stream.fileno()
+        assert stream.read1() == b"abc"
+    assert raw.closed
+    for name in (path, os.fsencode(path)):
+        stream = io.open(name, "wb")
+        fd = stream.fileno()
+        assert stream.write(b"pending") == 7
+        del stream
+        gc.collect()
+        raises(OSError, os.fstat, fd)
+        with io.FileIO(name) as source:
+            assert source.read() == b"pending"
 finally:
     os.unlink(path)

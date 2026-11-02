@@ -312,6 +312,15 @@ pub(in crate::dynamic) fn open(
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
+    open_with_writer(ctx, args, kwargs, None)
+}
+
+pub(super) fn open_with_writer(
+    ctx: &mut Context,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+    writer: Option<Id>,
+) -> Result<Id> {
     let [
         file,
         mode,
@@ -377,11 +386,7 @@ pub(in crate::dynamic) fn open(
     let update = mode_text.contains('+');
     let text_output = !binary && !update && mode_text.contains(['w', 'a', 'x']);
     let text_input = buffering < 0 && matches!(mode_text, "r" | "rt" | "tr");
-    let binary_bytes_path = binary
-        && buffering < 0
-        && !update
-        && !numeric
-        && matches!(ctx.heap.get(ctx.scalar_value(raw_arg)), Value::Bytes(_));
+    let default_binary_path = binary && buffering < 0 && !update && !numeric;
     if binary && buffering == 1 {
         ctx.emit_builtin_warning(
             crate::objects::exceptions::Kind::RuntimeWarning,
@@ -394,7 +399,7 @@ pub(in crate::dynamic) fn open(
         || fd.is_some()
         || text_output
         || text_input
-        || binary_bytes_path
+        || default_binary_path
         || update
         || (binary && buffering == 1)
     {
@@ -422,6 +427,14 @@ pub(in crate::dynamic) fn open(
         } else {
             crate::text_output::binary_capacity(handle.blksize.get().into())
         };
+        if default_binary_path && !reading {
+            // The writer must flush pending bytes before its owned FileIO is finalized.
+            let writer = writer.unwrap_or(ctx.builtins["_io.BufferedWriter"]);
+            let capacity = ctx.int(capacity as i64);
+            return ctx
+                .call(writer, vec![raw, capacity], Vec::new())
+                .map_err(|error| close_on_error(ctx, raw, error));
+        }
         let line_buffering =
             buffering == 1 || (!binary && buffering < 0 && handle.fd.get().is_some_and(os::isatty));
         let buffer = if update {

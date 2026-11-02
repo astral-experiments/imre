@@ -757,7 +757,7 @@ pub(in super::super) fn open_from_module(
     let Some((_, arguments)) = args.split_first() else {
         return Err(Error::new("TypeError", "_io.open needs its module"));
     };
-    let file = open(ctx, arguments, kwargs)?;
+    let file = file_io::open_with_writer(ctx, arguments, kwargs, Some(writer))?;
     let class = match ctx.heap.get(file).native_io_class_name() {
         Some("_io.BufferedRandom") => random,
         Some("_io.BufferedReader") => reader,
