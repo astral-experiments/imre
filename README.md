@@ -111,21 +111,21 @@ branches. Skipped tests count toward the suite size only.
 
 | Module | Paired passes | Upstream tests | How the tests ran |
 | --- | ---: | ---: | --- |
-| `argparse` | 1,103 | 1,893 | Selected cases |
+| `argparse` | 1,397 | 1,893 | Selected cases across three builds, with intact discovery of all 1,893 cases |
 | `collections` | 481 | 659 | Selected cases, registered doctests, and an intact 295-case OrderedDict run |
 | `csv` | 122 | 128 | Complete suite on `main`, six skips |
 | `dataclasses` | 220 | 276 | Selected cases |
-| `datetime` | 1 | 1,098 | Selected cases |
+| `datetime` | 314 | 1,098 | The first 543 cases produced verdicts before the intact run timed out |
 | `fnmatch` | 24 | 24 | Complete suite on `main` |
 | `functools` | 41 | 329 | Selected cases across two development builds |
-| `hashlib` | 65 | 82 | Selected and intact runs (44 passed together on `main`, 45 on a development branch) |
+| `hashlib` | 65 | 82 | Selected and intact runs (45 passed together on `main`) |
 | `importlib` | 15 | 1,346 | 15 of 16 selected cases in both import modes |
 | `io` | 110 | 1,038 | 110 of 123 selected cases across five test suites |
-| `itertools` | 105 | 138 | Selected cases |
+| `itertools` | 107 | 138 | Selected cases on one development tree |
 | `json` | 109 | 216 | Selected cases across builds (103 passed together) |
 | `logging` | 25 | 272 | Selected cases |
-| `os` | 33 | 579 | 24 of 25 intact genericpath tests and nine selected OS tests |
-| `pathlib` | 220 | 1,369 | All 1,369 cases ran on a development branch |
+| `os` | 38 | 579 | 25 intact genericpath cases and 13 selected OS cases whose module teardown errored |
+| `pathlib` | 225 | 1,369 | 220 in the intact development run and five more in a 139-case selection |
 | `re` | 120 | 165 | 120 passed in an intact development run, 69 on a smaller set of changes |
 | `shutil` | 34 | 223 | Selected cases |
 | `socket` | 47 | 746 | Intact suite on a development branch |
@@ -134,9 +134,9 @@ branches. Skipped tests count toward the suite size only.
 | `textwrap` | 68 | 68 | Complete suite on `main` |
 | `threading` | 67 | 228 | All 228 cases ran on a development branch |
 | `typing` | 107 | 712 | Selected tests across development builds |
-| `unittest` | 156 | 1,090 | Package runner on a development branch |
+| `unittest` | 160 | 1,090 | Intact package runner discovered 244 cases and started 213 |
 | `urllib` | 84 | 178 | Selected cases |
-| **Total** | **3,395** | **13,328** | **3 complete suites on `main`** |
+| **Total** | **4,018** | **13,328** | **3 complete suites on `main`** |
 
 See the [standard library coverage report](docs/stdlib.md) for the Linux test
 results and import coverage recorded in this repository.
