@@ -49,8 +49,8 @@ class Reject(Owner):
 class Mapping:
     def __init__(self):
         self.reference = self._reference().copy()
-        key, value = self.reference.popitem()
-        self.last = {key: value}
+        entry_key, entry_value = self.reference.popitem()
+        self.last = {entry_key: entry_value}
 
     def _reference(self):
         return {"kind": "base", "pair": (1, 2)}
