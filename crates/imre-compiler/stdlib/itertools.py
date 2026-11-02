@@ -235,6 +235,51 @@ def _make_takewhile(_allocate, _state):
 
 
 takewhile = _make_takewhile(_itertools._predicate_allocate, _itertools._predicate_state)
+
+
+def _make_dropwhile(_allocate, _state):
+    class dropwhile:
+        """Drop input items while the predicate is true, then yield all remaining items."""
+
+        __slots__ = ()
+
+        def __new__(cls, /, *args, **kwargs):
+            if cls is not __class__:
+                if not isinstance(cls, type):
+                    raise TypeError(f"itertools.dropwhile.__new__(X): X is not a type object ({type(cls).__name__})")
+                if not issubclass(cls, __class__):
+                    raise TypeError(f"itertools.dropwhile.__new__({cls.__name__}): {cls.__name__} is not a subtype of itertools.dropwhile")
+            if kwargs and (cls is __class__ or cls.__init__ is __class__.__init__ or cls.__init__ is object.__init__):
+                raise TypeError("dropwhile() takes no keyword arguments")
+            if len(args) != 2:
+                raise TypeError(f"dropwhile expected 2 arguments, got {len(args)}")
+            return _allocate(__class__, cls, [args[0], False], args[1])
+
+        def __init__(self, *args, **kwargs):
+            if (args or kwargs) and type(self).__init__ is not __class__.__init__:
+                raise TypeError("object.__init__() takes exactly one argument (the instance to initialize)")
+
+        def __iter__(self):
+            if not isinstance(self, __class__):
+                raise TypeError("expected a dropwhile instance")
+            return self
+
+        def __next__(self):
+            source, state = _state(__class__, self)
+            while True:
+                item = next(source)
+                if state[1]:
+                    return item
+                if not state[0](item):
+                    state[1] = True
+                    return item
+                del item
+
+    dropwhile.__qualname__ = "dropwhile"
+    return dropwhile
+
+
+dropwhile = _make_dropwhile(_itertools._predicate_allocate, _itertools._predicate_state)
 del _itertools
 
 
