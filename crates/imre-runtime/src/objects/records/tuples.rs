@@ -81,7 +81,7 @@ const _: () =
 
 const SEMANTICS: RecordSemantics = RecordSemantics {
     kind: 1,
-    flags: 3,
+    flags: 3 | super::EXACT_TUPLE,
     name: std::ptr::null(),
     name_len: 0,
     qualified_name: std::ptr::null(),

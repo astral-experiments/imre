@@ -62,7 +62,7 @@ type Fields = SmallVec<[OwnedWord; 5]>;
 
 const TUPLE: RecordSemantics = RecordSemantics {
     kind: 1,
-    flags: 3,
+    flags: 3 | crate::objects::records::EXACT_TUPLE,
     name: std::ptr::null(),
     name_len: 0,
     qualified_name: std::ptr::null(),
