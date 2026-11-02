@@ -880,77 +880,20 @@ impl Context {
 
     pub(super) fn builtin_type_name(&self, obj: Id) -> Option<&str> {
         Some(match self.heap.get(obj) {
-            Value::None
-            | Value::Ellipsis
-            | Value::NotImplemented
-            | Value::Bool(_)
-            | Value::Float(_)
-            | Value::Complex(_)
-            | Value::Int(_)
-            | Value::Str(_)
-            | Value::SurrogateStr(_)
-            | Value::Array(_)
-            | Value::Bytes(_)
-            | Value::List(_)
-            | Value::Dict(_)
-            | Value::Set { .. }
-            | Value::Range(_)
-            | Value::Scandir(_)
-            | Value::DirEntry(_)
-            | Value::RangeIterator(_)
-            | Value::Slice(_)
-            | Value::Enumerate { .. }
-            | Value::Iterator { .. }
-            | Value::Tuple(_)
-            | Value::DictIterator(_)
-            | Value::DictView { .. }
-            | Value::CallableIterator(_)
-            | Value::FormatIterator { .. }
-            | Value::File(_)
-            | Value::Class { .. }
-            | Value::Function { .. }
-            | Value::Traceback { .. }
-            | Value::PythonFrame { .. }
-            | Value::Code(_)
-            | Value::Cell(_)
-            | Value::Generator { .. }
-            | Value::Module { .. }
-            | Value::ThreadLocal(_)
-            | Value::Hash(_)
-            | Value::ThreadHandle(_)
-            | Value::PrimitiveLock(_) => self.type_name(obj),
-            Value::TextFile(_) => "_io.TextIOWrapper",
+            Value::Module { .. } => self.type_name(obj),
             Value::DefaultDict { .. } => "collections.defaultdict",
-            Value::ByteArray(_) => "bytearray",
-            Value::Map { .. } => "map",
-            Value::Filter { .. } => "filter",
-            Value::Weak(wr) => wr.kind.class(),
-            Value::Zip { .. } => "zip",
-            Value::ClassMethod(_) => "classmethod",
             Value::Cached { .. } => "functools._lru_cache_wrapper",
             Value::KeyWrapper { .. } => KEY_WRAPPER,
             Value::PartialPlaceholder => "functools._PlaceholderType",
             Value::Count { .. } => "itertools.count",
-            Value::SequenceIterator { .. } => "iterator",
-            Value::ReverseSequence { .. } => "reversed",
-            Value::Deque(_) => super::deque::CLASS,
-            Value::DequeIterator { reverse: true, .. } => super::deque::REVERSE_ITERATOR,
-            Value::DequeIterator { .. } => super::deque::ITERATOR,
             Value::Repeat(_) => "itertools.repeat",
             Value::TupleGetter { .. } => super::namedtuple::GETTER,
-            Value::TupleGetterDoc | Value::ReadOnlyMember(_, _) => "member_descriptor",
-            Value::ItemGetter(_) => "operator.itemgetter",
-            Value::StaticMethod { .. } => "staticmethod",
             Value::TypeVar(_) => "typing.TypeVar",
             Value::TypeVarTuple { .. } => "typing.TypeVarTuple",
-            Value::NoDefault => "NoDefaultType",
             Value::GenericAlias(alias) => alias.kind.class(),
             Value::Socket(_) => "socket.socket",
             Value::Union(_) => "typing.Union",
-            Value::Property(_) => "property",
             Value::Super { .. } => "super",
-            Value::GetSetDescriptor { .. } | Value::WeakrefDescriptor(_) => "getset_descriptor",
-            Value::MappingProxy(_) => "mappingproxy",
             Value::Method { explicit: true, .. } => "method",
             Value::Method { callable, .. } => match self.heap.get(*callable) {
                 Value::Function { .. } => "method",
@@ -1049,7 +992,7 @@ impl Context {
                     return None;
                 }
             }
-            _ => return None,
+            value => return value.intrinsic_type_name(),
         })
     }
 
