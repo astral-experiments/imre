@@ -118,9 +118,38 @@ pub(super) fn getcwd(ctx: &mut Context, as_bytes: bool) -> Result<Id> {
     Ok(ctx.text_codepoints(codec.decode_filesystem(&bytes)?))
 }
 
-fn fs_argument(ctx: &mut Context, value: Id) -> Result<CString> {
+pub(super) fn fs_argument(ctx: &mut Context, value: Id) -> Result<CString> {
     let path = posixpath::fspath(ctx, value)?;
     c_path(ctx, path, "embedded null byte")
+}
+
+/// Convert argv slots in order, allowing each path conversion to mutate the list.
+#[cfg(unix)]
+pub(super) fn fs_arguments(ctx: &mut Context, argv: Id, count: usize) -> Result<Vec<CString>> {
+    let mut arguments = Vec::new();
+    arguments
+        .try_reserve_exact(count)
+        .map_err(|_| Error::new("MemoryError", ""))?;
+    for i in 0..count {
+        // A path conversion may mutate argv. Fetch and root just the current item.
+        let mark = ctx.heap.temporary_mark();
+        let index = ctx.int(i as i64);
+        let argument = ctx.get_item(argv, index).and_then(|item| {
+            ctx.heap.keep(item);
+            fs_argument(ctx, item)
+        });
+        let collect = ctx.heap.discard_truth_operands(mark, ctx.modules);
+        if let Err(error) = &argument {
+            for root in error.roots() {
+                ctx.heap.keep(root);
+            }
+        }
+        if collect {
+            ctx.collect_unreachable();
+        }
+        arguments.push(argument?);
+    }
+    Ok(arguments)
 }
 
 /// Encode a filesystem spelling without imposing a C string's NUL restriction.
@@ -223,29 +252,7 @@ fn execv(ctx: &mut Context, args: &[Id]) -> Result<Id> {
     if count == 0 {
         return Err(Error::new("ValueError", "execv() arg 2 must not be empty"));
     }
-    let mut arguments = Vec::new();
-    arguments
-        .try_reserve_exact(count)
-        .map_err(|_| Error::new("MemoryError", ""))?;
-    for i in 0..count {
-        // A path conversion may mutate argv. Fetch and root just the current item.
-        let mark = ctx.heap.temporary_mark();
-        let index = ctx.int(i as i64);
-        let argument = ctx.get_item(argv, index).and_then(|item| {
-            ctx.heap.keep(item);
-            fs_argument(ctx, item)
-        });
-        let collect = ctx.heap.discard_truth_operands(mark, ctx.modules);
-        if let Err(error) = &argument {
-            for root in error.roots() {
-                ctx.heap.keep(root);
-            }
-        }
-        if collect {
-            ctx.collect_unreachable();
-        }
-        arguments.push(argument?);
-    }
+    let arguments = fs_arguments(ctx, argv, count)?;
     if arguments[0].as_bytes().is_empty() {
         return Err(Error::new(
             "ValueError",

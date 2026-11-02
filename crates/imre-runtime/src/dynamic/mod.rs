@@ -2747,6 +2747,8 @@ impl Context {
         #[cfg(unix)]
         if source.is_none() && matches!(name, "os" | "posix") {
             let posix = if name == "os" { Some(self.module("posix")?) } else { None };
+            #[cfg(target_os = "linux")]
+            stdlib::posix_spawn::initialize(self, scope, posix)?;
             for attr in ["chown", "fchown", "lchown", "getuid", "geteuid", "getgid", "getgroups"] {
                 let value = match posix {
                     Some(posix) => self.lookup_attr(posix, attr)?,

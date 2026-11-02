@@ -24,7 +24,7 @@ if sys.platform == "linux":
     import posix as _posix
     from posix import O_NOCTTY, pipe2, ptsname
     for _name in vars(_posix):
-        if _name.startswith("RTLD_"):
+        if _name.startswith("RTLD_") or _name.startswith("POSIX_SPAWN_") or _name in ("posix_spawn", "posix_spawnp"):
             globals()[_name] = getattr(_posix, _name)
     del _name, _posix
     from posix import O_PATH, O_TMPFILE, fstatvfs, statvfs, statvfs_result, sysconf, sysconf_names
