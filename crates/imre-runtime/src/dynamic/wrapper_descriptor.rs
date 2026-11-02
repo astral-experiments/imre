@@ -103,6 +103,7 @@ impl BuiltinDescriptor {
             Some(("float", attr)) => Some(("float", attr, builtins::real_methods("float"))),
             Some(("bytes", attr)) => Some(("bytes", attr, builtins::BYTES_METHODS)),
             Some(("complex", attr)) => Some(("complex", attr, &["__complex__"][..])),
+            Some(("str", attr)) => Some(("str", attr, builtins::STR_METHODS)),
             Some(("bytearray", attr)) => Some(("bytearray", attr, builtins::BYTEARRAY_METHODS)),
             Some(("memoryview", attr)) => Some(("memoryview", attr, builtins::MEMORYVIEW_METHODS)),
             Some(("BaseException", attr)) => {
@@ -198,20 +199,6 @@ impl BuiltinDescriptor {
             "int.__repr__" => ("int", "__repr__"),
             "float.__repr__" => ("float", "__repr__"),
             "int.__format__" => ("int", "__format__"),
-            "str.__format__" => ("str", "__format__"),
-            "str.__mod__" => ("str", "__mod__"),
-            "str.__rmod__" => ("str", "__rmod__"),
-            "str.isascii" => ("str", "isascii"),
-            "str.isalpha" => ("str", "isalpha"),
-            "str.isdigit" => ("str", "isdigit"),
-            "str.title" => ("str", "title"),
-            "str.swapcase" => ("str", "swapcase"),
-            "str.islower" => ("str", "islower"),
-            "str.center" => ("str", "center"),
-            "str.ljust" => ("str", "ljust"),
-            "str.rjust" => ("str", "rjust"),
-            "str.zfill" => ("str", "zfill"),
-            "str.istitle" => ("str", "istitle"),
             "float.__format__" => ("float", "__format__"),
             "object.__hash__" => ("object", "__hash__"),
             "object.__ne__" => ("object", "__ne__"),
@@ -221,8 +208,6 @@ impl BuiltinDescriptor {
             "classmethod.__get__" => ("classmethod", "__get__"),
             "method_descriptor.__get__" => ("method_descriptor", "__get__"),
             "wrapper_descriptor.__get__" => ("wrapper_descriptor", "__get__"),
-            "str.__str__" => ("str", "__str__"),
-            "str.__repr__" => ("str", "__repr__"),
             "bytes.__repr__" => ("bytes", "__repr__"),
             "dict.__ior__" => ("dict", "__ior__"),
             "dict.__eq__" => ("dict", "__eq__"),
@@ -256,17 +241,6 @@ impl BuiltinDescriptor {
                     | "__reduce_ex__"
                     | "count"
                     | "index"
-                    | "isascii"
-                    | "isalpha"
-                    | "isdigit"
-                    | "islower"
-                    | "istitle"
-                    | "center"
-                    | "ljust"
-                    | "rjust"
-                    | "zfill"
-                    | "title"
-                    | "swapcase"
             ),
         })
     }

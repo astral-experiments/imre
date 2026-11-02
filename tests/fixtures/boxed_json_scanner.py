@@ -30,6 +30,7 @@ class Context:
 def current():
     make = _json.make_scanner
     assert json.scanner.make_scanner is json.scanner.c_make_scanner is make
+    assert json.loads("-Infinity", parse_constant=str.upper) == "-INFINITY"
     default_scan = json.JSONDecoder().scan_once
     document = 'é [NaN, NaN]  suffix'
     values, end = default_scan(document, 2)
