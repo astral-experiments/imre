@@ -2065,6 +2065,7 @@ def report(text):
             "boxed_function_defaults.py",
             "boxed_textwrap.py",
             "boxed_set_ordering.py",
+            "boxed_dict_view_equality.py",
             "boxed_set_issubset.py",
             "boxed_set_union.py",
             "boxed_set_difference_update.py",
