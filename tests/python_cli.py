@@ -1499,6 +1499,7 @@ def report(text):
             assert (result.returncode, result.stdout) == (0, b"7\n"), result.stderr
         for fixture in (
             "boxed_ast.py",
+            "boxed_ast_visitors.py",
             "boxed_ast_literal_eval.py",
             "boxed_code_objects.py",
             "boxed_recursive_repr.py",
