@@ -248,6 +248,14 @@ impl Calendar {
         })
     }
 
+    pub(crate) fn delta_microseconds(&self) -> i128 {
+        delta(&self.0)
+    }
+
+    pub(crate) fn from_delta_microseconds(us: &Int) -> Result<Self, Error> {
+        try_owner(Value::Delta(validate_delta(&us.big())?)).map(Self)
+    }
+
     pub(crate) fn delta_parts(&self) -> (i128, i128, i128) {
         parts(delta(&self.0))
     }
