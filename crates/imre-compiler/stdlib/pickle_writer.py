@@ -26,48 +26,61 @@ class _Framer:
     def __init__(self, file_write):
         self.file_write = file_write
         self.current_frame = None
+        self._exporting = None
 
     def start_framing(self):
-        self.current_frame = io.BytesIO()
+        self.current_frame = bytearray()
 
     def end_framing(self):
-        if self.current_frame and self.current_frame.tell() > 0:
+        if self.current_frame:
             self.commit_frame(force=True)
             self.current_frame = None
 
     def commit_frame(self, force=False):
-        if self.current_frame:
+        if self.current_frame is not None:
             f = self.current_frame
-            if f.tell() >= self._FRAME_SIZE_TARGET or force:
-                data = f.getbuffer()
+            if len(f) >= self._FRAME_SIZE_TARGET or force:
+                data = memoryview(f)
                 write = self.file_write
-                if len(data) >= self._FRAME_SIZE_MIN:
-                    # Issue a single call to the write method of the underlying
-                    # file object for the frame opcode with the size of the
-                    # frame. The concatenation is expected to be less expensive
-                    # than issuing an additional call to write.
-                    write(FRAME + pack("<Q", len(data)))
+                previous = self._exporting
+                self._exporting = f
+                try:
+                    if len(data) >= self._FRAME_SIZE_MIN:
+                        # Issue a single call to the write method of the underlying
+                        # file object for the frame opcode with the size of the
+                        # frame. The concatenation is expected to be less expensive
+                        # than issuing an additional call to write.
+                        write(FRAME + pack("<Q", len(data)))
 
-                # Issue a separate call to write to append the frame
-                # contents without concatenation to the above to avoid a
-                # memory copy.
-                write(data)
+                    # Issue a separate call to write to append the frame
+                    # contents without concatenation to the above to avoid a
+                    # memory copy.
+                    write(data)
+                finally:
+                    self._exporting = previous
 
-                # Start the new frame with a new io.BytesIO instance so that
+                # Start the new frame with a new buffer so that
                 # the file object can have delayed access to the previous frame
-                # contents via an unreleased memoryview of the previous
-                # io.BytesIO instance.
-                self.current_frame = io.BytesIO()
+                # contents via an unreleased memoryview of the previous buffer.
+                self.current_frame = bytearray()
 
     def write(self, data):
-        if self.current_frame:
-            return self.current_frame.write(data)
-        else:
+        frame = self.current_frame
+        if frame is None:
             return self.file_write(data)
+        if self._exporting is frame:
+            raise BufferError("Existing exports of data: object cannot be re-sized")
+        if type(data) is not bytes:
+            # Preserve BytesIO.write's buffer conversion for non-opcode inputs.
+            stream = io.BytesIO()
+            stream.write(data)
+            data = stream.getvalue()
+        frame.extend(data)
+        return len(data)
 
     def write_large_bytes(self, header, payload):
         write = self.file_write
-        if self.current_frame:
+        if self.current_frame is not None:
             # Terminate the current frame and flush it to the file.
             self.commit_frame(force=True)
 

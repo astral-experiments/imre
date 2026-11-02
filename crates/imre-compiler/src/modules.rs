@@ -1177,6 +1177,7 @@ impl IntrinsicModule {
                 Intrinsic::ObjectRuntimeExport("_codecs.escape_decode")
             }
             (Self::CodecsNative, "encode") => Intrinsic::ObjectRuntimeExport("_codecs.encode"),
+            (Self::Pickle, "Pickler") => Intrinsic::ObjectRuntimeExport("pickle.Pickler"),
             (Self::Pickle, "dumps") => Intrinsic::ObjectRuntimeExport("pickle.dumps"),
             (Self::Pickle, "loads") => Intrinsic::ObjectRuntimeExport("pickle.loads"),
             (Self::Pickle, "_loads") => Intrinsic::ObjectRuntimeExport("pickle._loads"),
