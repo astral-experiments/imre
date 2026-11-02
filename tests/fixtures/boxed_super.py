@@ -106,7 +106,34 @@ def current():
     check_mro()
     check_super_initialization()
     check_native_classmethod()
+    check_super_descriptor()
     check_subclass_hooks()
+
+
+def check_super_descriptor():
+    class Base:
+        def method(self):
+            return self
+
+    class Child(Base):
+        pass
+
+    obj = Child()
+    descriptor = super(Child)
+    Child.parent = descriptor
+    assert Child.parent is descriptor and obj.parent.method() is obj
+    bound = obj.parent
+    assert bound.__get__(object(), Child) is bound
+
+    class Custom(super):
+        def __get__(self, obj, owner=None):
+            return "override"
+
+    custom = Custom(Child)
+    Child.parent = custom
+    assert obj.parent == "override"
+    rebound = super.__get__(custom, obj)
+    assert type(rebound) is Custom and rebound.__self__ is obj
 
 
 def check_mro():

@@ -194,6 +194,7 @@ impl BuiltinDescriptor {
             "type.__init__" => ("type", "__init__"),
             "super.__getattribute__" => ("super", "__getattribute__"),
             "super.__init__" => ("super", "__init__"),
+            "super.__get__" => ("super", "__get__"),
             "super.__repr__" => ("super", "__repr__"),
             "object.__format__" => ("object", "__format__"),
             "object.__sizeof__" => ("object", "__sizeof__"),
@@ -665,7 +666,13 @@ pub(super) fn descriptor_get(
             format!("descriptor '__get__' of '{class}' object needs an argument"),
         ));
     };
-    let slot = match ctx.heap.get(descriptor) {
+    let payload = if class == "super" {
+        ctx.scalar_value(descriptor)
+    } else {
+        descriptor
+    };
+    let slot = match ctx.heap.get(payload) {
+        Value::Super { .. } if class == "super" => None,
         Value::ClassMethod { .. } if class == "classmethod" => None,
         Value::HeapTypeMethod { name, .. }
             if class
@@ -707,6 +714,14 @@ pub(super) fn descriptor_get(
         )),
         [NONE] | [NONE, NONE] => Err(Error::new("TypeError", "__get__(None, None) is invalid")),
         [receiver] | [receiver, _] => {
+            if let Value::Super {
+                start,
+                receiver: bound,
+                ..
+            } = *ctx.heap.get(payload)
+            {
+                return ctx.bind_super(descriptor, receiver, start, bound);
+            }
             if let Some(slot) = slot
                 && !matches!(ctx.heap.get(descriptor), Value::Native(symbol) if stdlib::datetime::clock_classmethod(symbol))
             {
