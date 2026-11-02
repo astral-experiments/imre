@@ -1718,7 +1718,8 @@ impl Context {
             "list" => builtins::LIST_METHODS,
             "method_descriptor" => &["__get__"],
             "tuple" => &["__repr__", "__getitem__"],
-            "set" | "frozenset" => &["__repr__", "issubset"],
+            "set" => &["__repr__", "issubset", "update"],
+            "frozenset" => &["__repr__", "issubset"],
             "bytearray" => {
                 self.builtin("bytearray.fromhex");
                 builtins::BYTEARRAY_METHODS

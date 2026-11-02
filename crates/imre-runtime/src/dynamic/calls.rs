@@ -227,6 +227,7 @@ impl Context {
                 ) || stdlib::datetime::members(kind)
                     .is_some_and(|members| members.owns(name))
                     || (kind == "function" && name == "__call__")
+                    || (kind == "set" && name == "update")
                     || (matches!(name, "__repr__" | "issubset")
                         && matches!(kind.as_str(), "set" | "frozenset")) =>
             {
@@ -2899,7 +2900,7 @@ impl Context {
                 return Ok(self.builtin("set.copy"));
             }
             Value::Native(ref class)
-                if class == "set" && matches!(name, "discard" | "difference_update") =>
+                if class == "set" && matches!(name, "discard" | "difference_update" | "update") =>
             {
                 return Ok(self.builtin(&format!("set.{name}")));
             }
