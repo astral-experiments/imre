@@ -2,6 +2,66 @@ import json
 from datetime import UTC, date, datetime as dt, time, timedelta, timezone
 
 
+def test_module_exports():
+    import _datetime
+    import datetime
+
+    assert (datetime.MINYEAR, datetime.MAXYEAR) == (1, 9999)
+    assert datetime.__all__ == (
+        "date", "datetime", "time", "timedelta", "timezone", "tzinfo", "MINYEAR", "MAXYEAR", "UTC",
+    )
+    assert datetime is not _datetime and not hasattr(_datetime, "__all__")
+    for name in datetime.__all__:
+        assert vars(datetime)[name] is vars(_datetime)[name]
+    assert datetime.UTC is _datetime.timezone.utc
+    assert issubclass(_datetime.timezone, datetime.tzinfo)
+    assert isinstance(datetime.UTC, _datetime.tzinfo)
+
+    class Zone(datetime.tzinfo):
+        pass
+
+    assert isinstance(Zone(), _datetime.tzinfo)
+    assert timezone.__mro__ == (timezone, datetime.tzinfo, object)
+    try:
+        Zone().utcoffset(None)
+    except NotImplementedError as exc:
+        assert str(exc) == "a tzinfo subclass must implement utcoffset()"
+    else:
+        raise AssertionError("missing abstract timezone offset")
+
+    class IntegerZone(datetime.tzinfo, int):
+        pass
+
+    assert IntegerZone(7) == 7
+    try:
+        datetime.tzinfo.__new__(IntegerZone)
+    except TypeError as exc:
+        assert "is not safe" in str(exc)
+    else:
+        raise AssertionError("accepted plain tzinfo storage for an integer subtype")
+
+
+    class ListZone(list, datetime.tzinfo):
+        pass
+
+    zone = datetime.tzinfo.__new__(ListZone)
+    zone.append(5)
+    assert type(zone) is ListZone and zone == [5]
+
+    class Mixin:
+        def __new__(cls):
+            return "mixin"
+
+    class ZoneFirst(datetime.tzinfo, Mixin):
+        pass
+
+    class MixinFirst(Mixin, datetime.tzinfo):
+        pass
+
+    assert type(ZoneFirst()) is ZoneFirst
+    assert MixinFirst() == "mixin"
+
+
 def test_class_constants():
     for cls, smallest, largest, step in (
         (date, date(1, 1, 1), date(9999, 12, 31), timedelta(days=1)),
@@ -270,6 +330,39 @@ def test_timedelta_negation():
     assert timedelta.__neg__(custom) == timedelta(days=-1)
 
 
+def test_timedelta_positive_and_absolute():
+    zero = timedelta()
+    assert +zero is zero and abs(zero) is zero
+    tiny = timedelta(microseconds=-1)
+    for value, magnitude in (
+        (tiny, timedelta(microseconds=1)),
+        (timedelta.min, timedelta(days=999999999)),
+        (timedelta.max, timedelta.max),
+    ):
+        positive, absolute = +value, abs(value)
+        assert positive == value and absolute == magnitude
+        assert positive is not value and absolute is not value
+
+    class Inherited(timedelta):
+        def __neg__(self):
+            raise AssertionError("abs called subclass __neg__")
+
+    class Override(Inherited):
+        def __pos__(self):
+            return "positive"
+
+        def __abs__(self):
+            return "absolute"
+
+    value = Inherited(microseconds=-1)
+    assert type(+value) is type(abs(value)) is timedelta
+    assert +value == tiny and abs(value) == timedelta(microseconds=1)
+    custom = Override(days=-1)
+    assert +custom == "positive" and abs(custom) == "absolute"
+    assert timedelta.__pos__(custom) == timedelta(days=-1)
+    assert timedelta.__abs__(custom) == timedelta(days=1)
+
+
 def test_calendar_format():
     class Day(date):
         def __str__(self):
@@ -357,14 +450,52 @@ def test_calendar_reduction():
     assert super(Mixed, item).__reduce_ex__(4) == 4
 
 
+def test_calendar_strftime():
+    calls = []
+
+    class Name(str):
+        def replace(self, old, new):
+            calls.append((old, new))
+            return super().replace(old, new)
+
+    class Moment(dt):
+        def timetuple(self):
+            return (7, 1, 2, 3, 4, 5, 1, 2, -1)
+
+        @property
+        def microsecond(self):
+            raise AssertionError("strftime read the Python attribute")
+
+        def utcoffset(self):
+            raise AssertionError("strftime used a receiver method")
+
+        def tzname(self):
+            raise AssertionError("strftime used a receiver method")
+
+    zone = timezone(timedelta(seconds=-75, microseconds=-2), Name("west%Y"))
+    stamp = Moment(2001, 2, 3, 8, 9, 10, 123, zone)
+    assert stamp.strftime(format="%F %C %T %f") == "0007-01-02 00 03:04:05 000123"
+    assert stamp.strftime("%%Z/%:z/%z") == "%Z/-00:01:15.000002/-000115.000002"
+    assert calls == []
+    assert stamp.strftime("%Z %Z %%f") == "west%Y west%Y %f"
+    assert calls == [("%", "%%")]
+    clock = time(8, 9, 10, 456, UTC)
+    assert clock.strftime("%F %H:%M:%S.%f %z %:z %Z") == "1900-01-01 08:09:10.000456 +0000 +00:00 UTC"
+    assert date(2000, 1, 1).strftime("\ud800%f\0%Z\udcff") == "\ud800000000\0\udcff"
+    assert time().strftime("%z%:z%Z") == ""
+
+
 def current():
+    test_calendar_strftime()
     test_calendar_reduction()
     test_calendar_format()
     test_timedelta_negation()
+    test_timedelta_positive_and_absolute()
     test_subclass_construction()
     test_now()
     test_time_of_day()
     test_http_date()
+    test_module_exports()
     test_class_constants()
     test_cookie_timestamp()
     for timestamp in (None, "0", 1 << 100):

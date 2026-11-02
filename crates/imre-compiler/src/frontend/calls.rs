@@ -392,12 +392,20 @@ impl Checker<'_> {
 
     /// Empty containers still have to be evaluated when a call rejects their type.
     pub(super) fn evaluated_argument(&mut self, arg: &ast::Expr) -> Result<Expr, String> {
+        if let Some(ty) = self.empty_argument_type(arg) {
+            self.expr_expected(arg, ty)
+        } else {
+            self.expr(arg)
+        }
+    }
+
+    pub(super) fn empty_argument_type(&self, arg: &ast::Expr) -> Option<Type> {
         match arg {
-            ast::Expr::List(list) if list.elts.is_empty() => self.expr_expected(arg, Type::ListInt),
+            ast::Expr::List(list) if list.elts.is_empty() => Some(Type::ListInt),
             ast::Expr::Dict(dict) if dict.items.is_empty() => {
-                self.expr_expected(arg, self.types.dict(Type::Int, Type::Int))
+                Some(self.types.dict(Type::Int, Type::Int))
             }
-            _ => self.expr(arg),
+            _ => None,
         }
     }
 

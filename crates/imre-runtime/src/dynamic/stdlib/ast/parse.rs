@@ -227,13 +227,12 @@ impl Parser<'_> {
         source: &str,
         tokens: &ast::token::Tokens,
         syntax: impl Into<ast::ModRef<'a>>,
-    ) -> Result<()> {
-        self.replacements = crate::dynamic::source_code::check_runtime_strings(source, tokens)?;
+    ) {
+        self.replacements = crate::dynamic::source_code::string_replacements(source, tokens);
         if !self.literal {
             self.template_expressions =
                 imre_ast::strings::template_expressions(source, tokens, syntax);
         }
-        Ok(())
     }
 
     /// Ruff decodes both isolated surrogates and U+FFFD to its replacement character.
@@ -402,7 +401,20 @@ impl Parser<'_> {
             Expr::TString(mut v) if !self.literal => {
                 ("TemplateStr", vec![self.template_values(&mut v)?])
             }
-            Expr::StringLiteral(v) => ("Constant", vec![self.ctx.text(v.value.to_string()), NONE]),
+            Expr::StringLiteral(v) => {
+                let text = v.value.to_str();
+                let points = crate::dynamic::source_code::original_points(
+                    text,
+                    self.replacements
+                        .range(v.start()..v.end())
+                        .flat_map(|(_, points)| points.iter().copied()),
+                )?;
+                let value = match points {
+                    Some(points) => self.ctx.text_codepoints(points),
+                    None => self.ctx.text(text),
+                };
+                ("Constant", vec![value, NONE])
+            }
             Expr::BytesLiteral(v) => (
                 "Constant",
                 vec![
@@ -578,7 +590,7 @@ pub(super) fn parse_source(
     match mode {
         "exec" => {
             let body = ruff_python_parser::parse_module(source).map_err(syntax)?;
-            parser.prepare_strings(source, body.tokens(), body.syntax())?;
+            parser.prepare_strings(source, body.tokens(), body.syntax());
             parser.function_starts = body
                 .tokens()
                 .iter()
@@ -603,7 +615,7 @@ pub(super) fn parse_source(
                     syntax(err)
                 }
             })?;
-            parser.prepare_strings(source, expr.tokens(), expr.syntax())?;
+            parser.prepare_strings(source, expr.tokens(), expr.syntax());
             let body = parser.expr(*expr.into_syntax().body)?;
             Ok(parsed_instance(parser.ctx, "Expression", &[body], None))
         }

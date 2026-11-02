@@ -118,13 +118,13 @@ fn class_names(ctx: &Context, class: Id, names: &mut BTreeSet<String>) -> Result
         Value::Class {
             name: owner, scope, ..
         } => {
-            let scope = ctx.scope_data(*scope);
+            let scope_id = *scope;
+            let scope = ctx.scope_data(scope_id);
             names.extend(
-                scope
-                    .names
-                    .keys()
-                    .filter(|name| !matches!(name.as_str(), "__qualname__" | "__annotations__"))
-                    .cloned(),
+                ctx.scope_bindings(scope_id)
+                    .map(|(name, _)| name)
+                    .filter(|name| !matches!(*name, "__qualname__" | "__annotations__"))
+                    .map(str::to_owned),
             );
             // These are implicit entries in the dictionary a Python class body creates.
             if scope.class_cell.is_some() {
@@ -132,7 +132,7 @@ fn class_names(ctx: &Context, class: Id, names: &mut BTreeSet<String>) -> Result
                     ["__firstlineno__", "__static_attributes__", "__module__"].map(str::to_owned),
                 );
             }
-            if let Some(&annotations) = scope.names.get("__annotations__")
+            if let Some(annotations) = ctx.namespace_binding(ctx.scope_data(scope_id), "__annotations__")
                 && ctx
                     .dict_entries(annotations)
                     .is_none_or(|entries| !entries.is_empty())
@@ -142,11 +142,11 @@ fn class_names(ctx: &Context, class: Id, names: &mut BTreeSet<String>) -> Result
             if scope
                 .class_namespace
                 .as_ref()
-                .is_some_and(|ns| ns.annotation_sites.is_some() || ns.annotation_thunks.is_some())
+                .is_some_and(|ns| ns.annotation_sites.is_some())
             {
                 names.insert("__annotate_func__".to_owned());
             }
-            if let Some(&slots) = scope.names.get("__slots__") {
+            if let Some(slots) = ctx.namespace_binding(ctx.scope_data(scope_id), "__slots__") {
                 match ctx.heap.get(slots) {
                     Value::Str(name) => {
                         names.insert(slot_name(owner, name));

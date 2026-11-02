@@ -53,7 +53,7 @@ pub(crate) mod fnmatch;
 mod format_cursors;
 mod functools;
 mod hashlib;
-pub(crate) use hashlib::State as HashState;
+pub(crate) use hashlib::{SharedHash, State as HashState};
 pub(crate) mod hmac;
 mod inspect;
 pub(crate) mod interpreter_stdlib;
@@ -85,7 +85,7 @@ pub(crate) mod posixpath;
 mod processes;
 pub(crate) use processes::{BoxedPipe, BoxedPopen, initial_environment};
 mod random;
-pub(crate) use random::{choice_index, imre_random_float};
+pub(crate) use random::{choice_index, imre_random_float, random_below};
 pub(crate) mod readiness;
 pub(crate) mod records;
 mod regexes;
@@ -106,9 +106,9 @@ pub(crate) use text::{translate, zfill};
 pub(crate) mod time;
 pub(crate) use text::{UrlInput, capitalize, case_map, case_map_points, urlquote, urlsplit};
 pub(crate) use text::{
-    count_codepoints, count_text, expand_tabs, find_text, normalize_unicode, ord_byte, ord_char,
-    partition_text, python_alnum, python_isalpha, python_isdigit, python_islower, python_isspace,
-    python_istitle, python_isupper, split_parts,
+    count_codepoints, count_text, expand_tabs, find_codepoints, find_text, normalize_unicode,
+    ord_byte, ord_char, partition_text, python_alnum, python_isalpha, python_isdigit,
+    python_islower, python_isspace, python_istitle, python_isupper, split_parts,
 };
 mod typing;
 pub(crate) use text::{chr_scalar, short_string};
@@ -116,7 +116,7 @@ pub(crate) use typing::{OVERLOAD_DUMMY_ERROR, register_overload};
 mod unions;
 mod values;
 pub(crate) mod warnings;
-pub(crate) use warnings::{runtime_warning, unclosed_scandir};
+pub(crate) use warnings::runtime_warning;
 mod words;
 mod zipfile;
 pub(crate) use zipfile::Archive as ZipArchive;

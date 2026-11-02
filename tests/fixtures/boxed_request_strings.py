@@ -57,6 +57,7 @@ class FailingFlag:
 
 
 def current():
+    check_index()
     for flag in (None, [], [0], 1 << 100):
         print("a\r\nb".splitlines(keepends=flag))
     for call in (
@@ -200,3 +201,55 @@ def current():
             print(ord(chr(value)))
         except (TypeError, ValueError) as error:
             print(type(error).__name__)
+
+
+def check_index():
+    class Bound:
+        def __init__(self, n):
+            self.n = n
+
+        def __index__(self):
+            calls.append(self.n)
+            return self.n
+
+    calls = []
+    text = Text("é🦊:東:🦊")
+    assert text.index(Text("🦊"), Bound(2), Bound(6)) == 5
+    assert calls == [2, 6]
+    assert str.index(text, ":", -10**80, 10**80) == 2
+    surrogate = Text("a\ud800🦊\udfff")
+    assert surrogate.index(Text("\ud800🦊"), None, -1) == 1
+    assert str.index(surrogate, "🦊") == 2
+    assert surrogate.index("", 4, 10**80) == 4
+    repeated = Text("a\ud800\ud800\ud800")
+    assert repeated.find(Text("\ud800\ud800")) == 1
+    assert repeated.rfind(Text("\ud800\ud800"), 1, 10**80) == 2
+    assert repeated.rfind("", 1, -1) == 3
+    assert repeated.rfind("", 5) == -1
+    assert "abc".find("\ud800") == "abc".rfind("\ud800") == -1
+    for call in (
+        lambda: surrogate.index("", 5),
+        lambda: surrogate.index("", 2, 1),
+        lambda: surrogate.index("🦊", 3),
+        lambda: "abc".index("\udfff"),
+    ):
+        try:
+            call()
+        except ValueError as error:
+            assert str(error) == "substring not found"
+        else:
+            raise AssertionError("expected missing substring")
+    for call, message in (
+        (lambda: text.index(), "index expected at least 1 argument, got 0"),
+        (lambda: text.index("x", 0, 1, 2), "index expected at most 3 arguments, got 4"),
+        (lambda: text.index(sub="x"), "str.index() takes no keyword arguments"),
+        (lambda: text.index(1, Bound(0)), "index() argument 1 must be str, not int"),
+        (lambda: str.index(1, "x"), "descriptor 'index' for 'str' objects doesn't apply to a 'int' object"),
+    ):
+        try:
+            call()
+        except TypeError as error:
+            assert str(error) == message
+        else:
+            raise AssertionError("expected invalid index arguments")
+    assert calls == [2, 6]

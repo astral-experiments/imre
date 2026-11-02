@@ -1,6 +1,36 @@
-use super::{Context, Error, NONE, Result};
+use super::{Context, Error, Id, NONE, Result, Value};
+
+enum Origin {
+    Caller(i32),
+    FrozenImport(u32),
+    FrozenExternal { globals: Id, line: u32 },
+}
 
 impl Context {
+    /// The frozen bootstrap's warning site participates in module- and line-specific filters.
+    pub(in crate::dynamic) fn warn_child_binding(&mut self, message: &str) -> Result<()> {
+        self.emit_warning(
+            crate::objects::exceptions::Kind::ImportWarning,
+            message,
+            Origin::FrozenImport(1353),
+            NONE,
+        )
+    }
+
+    pub(in crate::dynamic) fn warn_external_loader(
+        &mut self,
+        globals: Id,
+        line: u32,
+        message: &str,
+    ) -> Result<()> {
+        self.emit_warning(
+            crate::objects::exceptions::Kind::DeprecationWarning,
+            message,
+            Origin::FrozenExternal { globals, line },
+            NONE,
+        )
+    }
+
     pub(in crate::dynamic) fn encoding_warning(&mut self, level: i32) -> Result<()> {
         self.emit_builtin_warning(
             crate::objects::exceptions::Kind::EncodingWarning,
@@ -15,22 +45,125 @@ impl Context {
         message: &str,
         level: i32,
     ) -> Result<()> {
+        self.emit_builtin_warning_with_source(kind, message, level, NONE)
+    }
+
+    /// Preserve the source object in a captured resource warning.
+    pub(in crate::dynamic) fn emit_builtin_warning_with_source(
+        &mut self,
+        kind: crate::objects::exceptions::Kind,
+        message: &str,
+        level: i32,
+        source: Id,
+    ) -> Result<()> {
+        self.emit_warning(kind, message, Origin::Caller(level), source)
+    }
+
+    fn emit_warning(
+        &mut self,
+        kind: crate::objects::exceptions::Kind,
+        message: &str,
+        origin: Origin,
+        source: Id,
+    ) -> Result<()> {
         let category = kind.name();
-        let (filename, line, module) = if let Some((loc, scope)) = self.heap.warning_frame(level) {
-            let globals = self.module_globals(scope)?;
-            let module = self.dict_named_item(globals, "__name__");
-            // CPython suppresses warnings from a module being torn down, before filtering.
-            if module == Some(NONE) {
-                return Ok(());
+        let (filename, line, module) = match origin {
+            Origin::FrozenImport(line) => (
+                "<frozen importlib._bootstrap>".into(),
+                line,
+                "importlib._bootstrap".to_owned(),
+            ),
+            Origin::FrozenExternal { globals, line } => {
+                let module = self.dict_named_item(globals, "__name__");
+                if module == Some(NONE) {
+                    return Ok(());
+                }
+                let module = module
+                    .and_then(|id| self.str_value(id).ok())
+                    .unwrap_or("<string>")
+                    .to_owned();
+                ("<frozen importlib._bootstrap_external>".into(), line, module)
             }
-            let module = module
-                .and_then(|id| self.str_value(id).ok())
-                .unwrap_or("<string>")
-                .to_owned();
-            (loc.file, loc.line, module)
-        } else {
-            ("<sys>".into(), 0, "sys".into())
+            Origin::Caller(level) => {
+                if let Some((loc, scope)) = self.heap.warning_frame(level) {
+                    let globals = self.module_globals(scope)?;
+                    let module = self.dict_named_item(globals, "__name__");
+                    // CPython suppresses warnings from a module being torn down, before filtering.
+                    if module == Some(NONE) {
+                        return Ok(());
+                    }
+                    let module = module
+                        .and_then(|id| self.str_value(id).ok())
+                        .unwrap_or("<string>")
+                        .to_owned();
+                    (loc.file, loc.line, module)
+                } else {
+                    ("<sys>".into(), 0, "sys".into())
+                }
+            }
         };
+        // The bundled Python warnings implementation owns filters installed through
+        // its public API, including context-local filters from catch_warnings.
+        let key = self.heap.code_name("_py_warnings");
+        if let Some(warnings) = self.registered_module(key)?
+            && let Value::Module { scope, .. } = *self.heap.get(warnings)
+        {
+            let globals = self.module_globals(scope)?;
+            if self
+                .dict_named_item(globals, "_wm")
+                .is_some_and(|wm| wm != NONE)
+                && let Some(warn) = self.dict_named_item(
+                    globals,
+                    match origin {
+                        Origin::Caller(_) => "warn",
+                        Origin::FrozenImport(_) | Origin::FrozenExternal { .. } => "warn_explicit",
+                    },
+                )
+            {
+                let message = self.text(message);
+                let category = self.builtin(category);
+                let args = match origin {
+                    Origin::Caller(level) => {
+                        let level = self.int(i64::from(level));
+                        let mut args = vec![message, category, level];
+                        if source != NONE {
+                            args.push(source);
+                        }
+                        args
+                    }
+                    Origin::FrozenImport(_) | Origin::FrozenExternal { .. } => {
+                        let globals = if let Origin::FrozenExternal { globals, .. } = origin {
+                            globals
+                        } else {
+                            // Some closed graphs run the native bootstrap without importing its module.
+                            if self.bootstrap_globals == NONE {
+                                self.bootstrap_globals = self.dict(Vec::new());
+                            }
+                            self.bootstrap_globals
+                        };
+                        let registry = match self.dict_named_item(globals, "__warningregistry__") {
+                            Some(registry) => registry,
+                            None => {
+                                let registry = self.dict(Vec::new());
+                                let key = self.text("__warningregistry__");
+                                self.put_item(globals, key, registry)?;
+                                registry
+                            }
+                        };
+                        vec![
+                            message,
+                            category,
+                            self.text(filename.as_ref()),
+                            self.int(i64::from(line)),
+                            self.text(&module),
+                            registry,
+                            globals,
+                        ]
+                    }
+                };
+                return self.call(warn, args, Vec::new()).map(|_| ());
+            }
+        }
         if !crate::objects::warnings::should_emit(
             crate::objects::warnings::category_number(category).expect("warning category"),
             kind,

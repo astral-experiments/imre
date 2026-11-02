@@ -1,6 +1,7 @@
 """Run unchanged native subprocess methods and assertions under CPython fixtures."""
 
 import argparse
+from dataclasses import replace
 import json
 import os
 from pathlib import Path
@@ -14,7 +15,12 @@ from suite_inventory import load_suite, verify_files, verify_interpreter_tests
 from suite_native import Toolchain, native_method, run_in_fixtures, testcase_fixture
 
 # The subprocess operation, method body, and assertions all run in the binary.
-# sys.executable selects a real oracle child for upstream's literal -c programs.
+PROCESS_CASE = "test.test_subprocess.ProcessTestCase."
+EPIPE_CASES = {PROCESS_CASE + "test_communicate_epipe", PROCESS_CASE + "test_communicate_epipe_only_stdin"}
+FD_LEAK_CASE = PROCESS_CASE + "test_communicate_pipe_fd_leak"
+PIPE_BUF_CASE = PROCESS_CASE + "test_communicate_pipe_buf"
+ZERO_CMD_CASES = EPIPE_CASES | {FD_LEAK_CASE}
+BOXED_CASES = ZERO_CMD_CASES | {PIPE_BUF_CASE, PROCESS_CASE + "test_communicate_memoryview_input"}
 METHODS = {
     "ContextManagerTests": {
         "test_returncode": "int",
@@ -27,9 +33,15 @@ METHODS = {
         "test_stderr_pipe": "bytes",
         "test_stdout_stderr_pipe": "bytes",
         "test_communicate_stdin": "int",
+        "test_communicate_memoryview_input": None,
+        "test_communicate_epipe": None,
+        "test_communicate_epipe_only_stdin": None,
+        "test_communicate_pipe_buf": None,
+        "test_communicate_pipe_fd_leak": None,
         "test_communicate_stdout": "bytes",
         "test_communicate_stderr": "bytes",
         "test_communicate_returns": "bytes",
+        "test_communicate_timeout": None,
         "test_communicate_timeout_large_output": None,
         "test_post_timeout_communicate_sends_input": "int",
     },
@@ -69,6 +81,28 @@ class NativeCase:
 
 
 
+def subprocess_method(tools, directory, source, cls, case_id, fixture):
+    if case_id not in BOXED_CASES:
+        return native_method(tools, directory, source, cls, case_id, fixture)
+    preamble = "import subprocess\nimport sys\n"
+    args = None
+    if case_id in ZERO_CMD_CASES:
+        from test import test_subprocess
+        # setUpModule can replace the fallback Python command with a checked executable.
+        args = lambda: test_subprocess.ZERO_RETURN_CMD
+        preamble += "\nZERO_RETURN_CMD = tuple(sys.argv[1:])\n"
+    elif case_id == PIPE_BUF_CASE:
+        from test import support
+        preamble += f"import os\n\nclass support:\n    PIPE_MAX_SIZE = {support.PIPE_MAX_SIZE!r}\n"
+
+    flags = ["--opt-level", str(tools.level), "--runtime", str(tools.runtime.resolve()),
+             "--clang", str(tools.clang.resolve())]
+    child_env = {"IMRE_PYTHON": str(tools.imre.resolve()), "IMRE_ENCODED_FLAGS": "\x1f".join(flags)}
+    return native_method(replace(tools, runtime_imports=True), directory, source, cls, case_id,
+                         preamble + testcase_fixture(), cleanups=case_id != FD_LEAK_CASE, extra_env=child_env,
+                         assertions="none" if case_id in EPIPE_CASES else "imre", fixture_args=args)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     for flag in ("imre", "runtime", "clang", "result"):
@@ -85,7 +119,7 @@ def main():
     if sys.version_info[:3] != (3, 14, 5):
         raise RuntimeError("use the pinned CPython 3.14.5 build")
     tools = Toolchain(args.imre, args.runtime, args.clang, int(args.opt_level))
-    executions, blocked = {}, {}
+    executions = {}
     with tempfile.TemporaryDirectory() as tmp:
         for cls, methods in METHODS.items():
             for method, scalar in methods.items():
@@ -94,20 +128,15 @@ def main():
                     continue
                 directory = Path(tmp, key)
                 directory.mkdir()
-                try:
-                    fixture = (PREAMBLE.replace("TYPE", scalar) if scalar is not None else
-                               "import subprocess\nimport sys\n" + testcase_fixture())
-                    executions[key] = native_method(tools, directory, source, cls, key, fixture)
-                except (ValueError, AssertionError, RuntimeError) as exc:
-                    if method != "test_post_timeout_communicate_sends_input" or "local may be uninitialized on this path" not in str(exc):
-                        raise
-                    blocked[key] = "Imre does not infer that the except handler calling self.fail() never returns."
+                fixture = (PREAMBLE.replace("TYPE", scalar) if scalar is not None else
+                           "import subprocess\nimport sys\n" + testcase_fixture())
+                executions[key] = subprocess_method(tools, directory, source, cls, key, fixture)
         with patch.dict(os.environ, IMRE_PYTHON=sys.executable):
             native, failures, skips = run_in_fixtures(load_suite(manifest["module"]), executions)
         if failures or skips or set(native) != set(executions):
             raise AssertionError((failures, skips, set(executions) - set(native)))
     args.result.write_text(json.dumps({"opt_level": args.opt_level,
-                                       "native_body_host_fixtures": native, "blocked": blocked}, indent=2) + "\n")
+                                       "native_body_host_fixtures": native, "blocked": {}}, indent=2) + "\n")
 
 
 if __name__ == "__main__":

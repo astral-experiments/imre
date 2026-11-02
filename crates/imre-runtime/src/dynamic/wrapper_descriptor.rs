@@ -43,6 +43,10 @@ impl BuiltinDescriptor {
             Some((owner, attr)) if let Some(members) = stdlib::datetime::members(owner) => {
                 Some((members.owner, attr, members.methods))
             }
+            Some((owner, attr)) if let Some(class) = DictIterator::class(owner) => {
+                Some((class, attr, DictIterator::methods(class)))
+            }
+            Some(("generator", attr)) => Some(("generator", attr, &["__iter__", "__next__"][..])),
             Some(("float", attr)) => Some(("float", attr, &["as_integer_ratio"][..])),
             Some(("bytes", attr)) => Some(("bytes", attr, builtins::BYTES_METHODS)),
             Some(("bytearray", attr)) => Some(("bytearray", attr, builtins::BYTEARRAY_METHODS)),
@@ -51,8 +55,8 @@ impl BuiltinDescriptor {
                 Some(("BaseException", attr, &["add_note", "with_traceback"][..]))
             }
             Some(("frame", attr)) => Some(("frame", attr, &["clear"][..])),
-            Some(("set", attr)) => Some(("set", attr, &["issubset", "update"][..])),
-            Some(("frozenset", attr)) => Some(("frozenset", attr, &["issubset"][..])),
+            Some(("set", attr)) => Some(("set", attr, &["__reduce__", "issubset", "update"][..])),
+            Some(("frozenset", attr)) => Some(("frozenset", attr, &["__reduce__", "issubset"][..])),
             Some(("list", attr)) => Some(("list", attr, builtins::LIST_METHODS)),
             Some(("range", attr)) => Some(("range", attr, range::METHODS)),
             Some((stdlib::os::stat::CLASS, attr)) => {
@@ -82,7 +86,13 @@ impl BuiltinDescriptor {
         }
         let (owner, name) = match symbol {
             "object.__format__" => ("object", "__format__"),
+            "object.__getstate__" => ("object", "__getstate__"),
+            "object.__reduce__" => ("object", "__reduce__"),
             "object.__reduce_ex__" => ("object", "__reduce_ex__"),
+            "int.__add__" => ("int", "__add__"),
+            "bool.__repr__" => ("bool", "__repr__"),
+            "int.__repr__" => ("int", "__repr__"),
+            "float.__repr__" => ("float", "__repr__"),
             "int.__format__" => ("int", "__format__"),
             "str.__format__" => ("str", "__format__"),
             "str.isascii" => ("str", "isascii"),
@@ -96,13 +106,18 @@ impl BuiltinDescriptor {
             "float.__format__" => ("float", "__format__"),
             "object.__hash__" => ("object", "__hash__"),
             "object.__repr__" => ("object", "__repr__"),
+            "object.__str__" => ("object", "__str__"),
             "function.__call__" => ("function", "__call__"),
             "classmethod.__get__" => ("classmethod", "__get__"),
             "method_descriptor.__get__" => ("method_descriptor", "__get__"),
             "str.__repr__" => ("str", "__repr__"),
             "bytes.__repr__" => ("bytes", "__repr__"),
+            "dict.__eq__" => ("dict", "__eq__"),
             "dict.__repr__" => ("dict", "__repr__"),
+            "mappingproxy.__repr__" => ("mappingproxy", "__repr__"),
+            "mappingproxy.__str__" => ("mappingproxy", "__str__"),
             "collections.deque.__contains__" => (deque::CLASS, "__contains__"),
+            "collections.deque.__repr__" => (deque::CLASS, "__repr__"),
             "collections.defaultdict.__repr__" => ("collections.defaultdict", "__repr__"),
             "tuple.__repr__" => ("tuple", "__repr__"),
             "set.__repr__" => ("set", "__repr__"),
@@ -123,6 +138,8 @@ impl BuiltinDescriptor {
             method: matches!(
                 name,
                 "__format__"
+                    | "__getstate__"
+                    | "__reduce__"
                     | "__reduce_ex__"
                     | "isascii"
                     | "isalpha"
@@ -154,6 +171,16 @@ impl BuiltinDescriptor {
         format!("<{kind} '{}' of '{}' objects>", self.name, self.owner)
     }
 
+    pub(super) fn bound_repr(self, ctx: &Context, receiver: Id) -> String {
+        let kind = ctx
+            .builtin_type_name(receiver)
+            .unwrap_or_else(|| ctx.type_name(receiver));
+        format!(
+            "<method-wrapper '{}' of {kind} object at {receiver:#x}>",
+            self.name
+        )
+    }
+
     pub(super) fn bind(self, ctx: &mut Context, descriptor: Id, receiver: Id) -> Result<Id> {
         if receiver == NONE {
             return Ok(descriptor);
@@ -165,6 +192,10 @@ impl BuiltinDescriptor {
             owner if stdlib::datetime::members(owner).is_some() => {
                 ctx.instance_of(receiver, ctx.builtins[owner])
             }
+            owner if DictIterator::class(owner).is_some() => {
+                matches!(ctx.heap.get(receiver), Value::DictIterator(iter) if iter.class_name() == owner)
+            }
+            "generator" => matches!(ctx.heap.get(receiver), Value::Generator { .. }),
             "object" => true,
             "function" => matches!(ctx.heap.get(receiver), Value::Function { .. }),
             "classmethod" => matches!(ctx.heap.get(receiver), Value::ClassMethod(_)),
@@ -188,9 +219,10 @@ impl BuiltinDescriptor {
             "slice" => matches!(ctx.heap.get(receiver), Value::Slice(_)),
             "method_descriptor" => ctx.builtin_type_name(receiver) == Some("method_descriptor"),
             "dict" => ctx.dict_storage(receiver).is_some(),
+            "mappingproxy" => matches!(ctx.heap.get(receiver), Value::MappingProxy(_)),
             deque::CLASS => matches!(ctx.heap.get(receiver), Value::Deque(_)),
             "collections.defaultdict" => ctx.defaultdict_factory(receiver).is_some(),
-            "int" | "float" | "str" | "bytes" | "bytearray" | "list" | "tuple" | "set"
+            "bool" | "int" | "float" | "str" | "bytes" | "bytearray" | "list" | "tuple" | "set"
             | "frozenset" => ctx.builtin_slot_accepts(receiver, self.owner),
             _ => matches!(ctx.heap.get(receiver), Value::ThreadLocal(_)),
         };
@@ -246,11 +278,24 @@ impl BuiltinDescriptor {
             "__text_signature__" if self.name == "__call__" => {
                 ctx.text("($self, /, *args, **kwargs)")
             }
+            "__doc__" if self.name == "__repr__" => ctx.text("Return repr(self)."),
+            "__doc__" if self.name == "__iter__" => ctx.text("Implement iter(self)."),
+            "__doc__" if self.name == "__next__" => ctx.text("Implement next(self)."),
+            "__text_signature__" if matches!(self.name, "__iter__" | "__next__" | "__repr__") => {
+                ctx.text("($self, /)")
+            }
             "__doc__" if self.name == "__contains__" => ctx.text("Return bool(key in self)."),
             "__text_signature__" if self.name == "__contains__" => ctx.text("($self, key, /)"),
             "__doc__" if self.name == "__neg__" => ctx.text("-self"),
-            "__text_signature__" if self.name == "__neg__" => ctx.text("($self, /)"),
+            "__doc__" if self.name == "__pos__" => ctx.text("+self"),
+            "__doc__" if self.name == "__abs__" => ctx.text("abs(self)"),
+            "__text_signature__" if matches!(self.name, "__neg__" | "__pos__" | "__abs__") => {
+                ctx.text("($self, /)")
+            }
             "__doc__" if self.name == "__add__" => ctx.text("Return self+value."),
+            "__doc__" if self.name == "__radd__" => ctx.text("Return value+self."),
+            "__doc__" if self.name == "__sub__" => ctx.text("Return self-value."),
+            "__doc__" if self.name == "__rsub__" => ctx.text("Return value-self."),
             "__doc__" if self.name == "__mul__" => ctx.text("Return self*value."),
             "__doc__" if self.name == "__rmul__" => ctx.text("Return value*self."),
             "__doc__" if self.name == "__truediv__" => ctx.text("Return self/value."),
@@ -258,7 +303,7 @@ impl BuiltinDescriptor {
             "__doc__" if self.name == "__floordiv__" => ctx.text("Return self//value."),
             "__doc__" if self.name == "__rfloordiv__" => ctx.text("Return value//self."),
             "__doc__" if self.name == "__iadd__" => ctx.text("Implement self+=value."),
-            "__text_signature__" if matches!(self.name, "__add__" | "__iadd__" | "__mul__" | "__rmul__" | "__truediv__" | "__rtruediv__" | "__floordiv__" | "__rfloordiv__") => {
+            "__text_signature__" if matches!(self.name, "__add__" | "__radd__" | "__sub__" | "__rsub__" | "__iadd__" | "__mul__" | "__rmul__" | "__truediv__" | "__rtruediv__" | "__floordiv__" | "__rfloordiv__") => {
                 ctx.text("($self, value, /)")
             }
             "__text_signature__" if self.name == "endswith" => {
@@ -270,6 +315,9 @@ impl BuiltinDescriptor {
             )),
             "__doc__" | "__text_signature__" if self.method => {
                 let value = match (self.name, name) {
+                    ("__getstate__" | "__reduce__" | "__reduce_ex__", "__doc__") if self.owner == "object" => "Helper for pickle.",
+                    ("__getstate__" | "__reduce__", _) if self.owner == "object" => "($self, /)",
+                    ("__reduce_ex__", _) if self.owner == "object" => "($self, protocol, /)",
                     ("__reduce__", "__doc__") if self.owner == stdlib::os::stat::CLASS => return Some(NONE),
                     ("__reduce__", _) if self.owner == stdlib::os::stat::CLASS => "($self, /)",
                     ("isascii", "__doc__") => {

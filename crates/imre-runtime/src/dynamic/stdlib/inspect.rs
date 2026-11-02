@@ -25,6 +25,17 @@ pub(super) fn call(
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
+    if name == "_static_member" {
+        if let [obj, attr, missing] = *args
+            && kwargs.is_empty()
+        {
+            return static_member(ctx, obj, attr, missing);
+        }
+        return Err(super::Error::new(
+            "TypeError",
+            "_static_member expects three positional arguments",
+        ));
+    }
     let param = if name == "markcoroutinefunction" {
         "func"
     } else {
@@ -109,4 +120,126 @@ fn layout(ctx: &mut Context, obj: Id) -> Result<Id> {
         }
     }
     Ok(ctx.alloc(Value::Tuple(result)))
+}
+
+/// A user-supplied __dict__ prevents inspect from relying on that namespace.
+fn shadowed_dict(ctx: &Context, class: Id) -> Option<Id> {
+    ctx.find_in_mro(class, |entry| {
+        let value = ctx.own_class_attr(entry, "__dict__")?;
+        if matches!(ctx.heap.get(value), Value::GetSetDescriptor { owner, name: "__dict__", .. }
+            if ctx.builtins.get(*owner) == Some(&entry))
+        {
+            return None;
+        }
+        Some(value)
+    })
+}
+
+/// Read the stored class namespaces without invoking metaclass hooks or binding a member.
+fn class_member(ctx: &mut Context, class: Id, name: &str) -> Option<Id> {
+    for entry in ctx.base_lineage(class, true) {
+        if let Value::Class {
+            metaclass: Some(meta),
+            ..
+        } = ctx.heap.get(entry)
+            && shadowed_dict(ctx, *meta).is_some()
+        {
+            continue;
+        }
+        // Python class frames retain __qualname__ for type's descriptor, outside
+        // the published class dictionary (see Context::class_dictionary).
+        if matches!(ctx.heap.get(entry), Value::Class { .. }) && name == "__qualname__" {
+            continue;
+        }
+        if let Some(value) = ctx.own_class_attr(entry, name) {
+            return Some(value);
+        }
+        // Some native wrapper and method descriptors are interned on first access.
+        if let Value::Native(owner) = ctx.heap.get(entry) {
+            let symbol = format!("{owner}.{name}");
+            if crate::dynamic::wrapper_descriptor::BuiltinDescriptor::lookup(&symbol).is_some() {
+                return Some(ctx.builtin(&symbol));
+            }
+        }
+    }
+    None
+}
+
+fn static_member(ctx: &mut Context, obj: Id, attr: Id, missing: Id) -> Result<Id> {
+    let objtype = ctx.exact_type(obj)?;
+    let is_class = matches!(ctx.heap.get(obj), Value::Class { .. })
+        || ctx.builtin_type_name(obj) == Some("type");
+    let class = if is_class { obj } else { objtype };
+    let instance = if is_class
+        || shadowed_dict(ctx, class).is_some_and(|shadow| {
+            !matches!(
+                ctx.heap.get(shadow),
+                Value::SlotMember { .. } | Value::ReadOnlyMember(_, _)
+            )
+        }) {
+        None
+    } else {
+        let dict = match *ctx.heap.get(obj) {
+            Value::Instance { .. } if ctx.class_instances_have_dict(class) => {
+                Some(ctx.instance_dictionary(obj, class))
+            }
+            Value::Module { scope, .. } => Some(ctx.module_globals(scope)?),
+            Value::Function { fields, .. } => Some(fields.dict),
+            Value::Raised(ref error) => error.trace.as_ref().and_then(|trace| trace.dictionary),
+            Value::Partial { dictionary, .. } => dictionary,
+            Value::Cached { dictionary, .. } | Value::StaticMethod { dictionary, .. } => {
+                Some(dictionary)
+            }
+            _ => None,
+        };
+        if let Some(storage) = dict.and_then(|dict| ctx.dict_storage(dict)) {
+            let (_, index) = ctx.find_dictionary_key(storage, attr, None)?;
+            index.map(|i| ctx.dict_entries(storage).unwrap()[i].1)
+        } else {
+            None
+        }
+    };
+    let Ok(name) = ctx.str_value(attr).map(str::to_owned) else {
+        // Class namespaces have string keys; an unhashable key still raises.
+        ctx.dictionary_hash(attr)?;
+        return Ok(instance.unwrap_or(missing));
+    };
+    let instance = instance.filter(|value| *value != missing);
+    let member = class_member(ctx, class, &name).filter(|value| *value != missing);
+    if ctx.is_inline_instance_slot(class, &name) {
+        return Err(super::Error::new(
+            "NotImplementedError",
+            "inline slot has no boxed member descriptor",
+        ));
+    }
+    if let (Some(value), Some(member)) = (instance, member) {
+        if ctx.native_data_descriptor(member) {
+            return Ok(member);
+        }
+        if let Some(typ) = ctx.heap.get(member).instance_class()
+            && class_member(ctx, typ, "__get__").is_some()
+            && (class_member(ctx, typ, "__set__").is_some()
+                || class_member(ctx, typ, "__delete__").is_some())
+        {
+            return Ok(member);
+        }
+        return Ok(value);
+    }
+    if let Some(value) = member.or_else(|| {
+        is_class
+            .then(|| class_member(ctx, objtype, &name))
+            .flatten()
+    }) {
+        return Ok(value);
+    }
+    if name == "__class__"
+        || (name == "__dict__" && (is_class || ctx.class_instances_have_dict(class)))
+        || (is_class && name == "__qualname__")
+    {
+        return Err(super::Error::new(
+            "NotImplementedError",
+            format!("'{name}' has no boxed getset descriptor"),
+        ));
+    }
+    Ok(instance.unwrap_or(missing))
 }

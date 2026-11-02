@@ -140,15 +140,87 @@ pub fn translate_for_runtime(
 /// Translate a boxed pattern with its byte and Unicode escape rules.
 pub fn translate_pattern(
     pattern: &str,
+    verbose: bool,
+    alphabet: Alphabet,
+    dotall: bool,
+    literal_guards: bool,
+) -> Result<FixedPattern, String> {
+    let (output, groups) = tokenize(pattern, verbose, alphabet, dotall, literal_guards, false)?;
+    analyze(output, groups)
+}
+
+/// Normalize a text pattern requiring a lookahead without accepting backend-specific syntax.
+pub fn lookahead_source(
+    pattern: &str,
+    verbose: bool,
+    alphabet: Alphabet,
+    dotall: bool,
+) -> Result<(String, Vec<Option<String>>), String> {
+    tokenize(pattern, verbose, alphabet, dotall, false, true)
+}
+
+enum Scope {
+    Plain,
+    Capture(usize),
+    Conditional { has_else: bool },
+}
+
+struct GroupState {
+    backtrack: bool,
+    dotall: bool,
+    verbose: bool,
+    atomic_assertion: bool,
+    scope: Scope,
+}
+
+/// Python can retain an earlier end slot while a repeated capture is open.
+/// The backend tests only the start slot, so reject open conditions as well
+/// as Python's invalid backreferences to an open group.
+fn check_reference(id: usize, open: &[GroupState]) -> Result<(), String> {
+    if id == 0
+        || open
+            .iter()
+            .any(|g| matches!(g.scope, Scope::Capture(n) if n == id))
+    {
+        return Err("invalid or open regex group reference".into());
+    }
+    Ok(())
+}
+
+fn reference_id(
+    input: &mut Input<'_>,
+    groups: &[Option<String>],
+    conditional: bool,
+) -> Result<usize, String> {
+    let name: String = std::iter::from_fn(|| input.next_if(|c| *c != ')')).collect();
+    if input.next() != Some(')') {
+        return Err("unterminated group reference".into());
+    }
+    if conditional && !name.is_empty() && name.bytes().all(|b| b.is_ascii_digit()) {
+        return name
+            .parse()
+            .map_err(|_| "invalid regex group reference".into());
+    }
+    groups
+        .iter()
+        .position(|g| g.as_deref() == Some(&name))
+        .ok_or_else(|| "unknown regex group name".into())
+}
+
+fn tokenize(
+    pattern: &str,
     mut verbose: bool,
     alphabet: Alphabet,
     mut dotall: bool,
     literal_guards: bool,
-) -> Result<FixedPattern, String> {
+    lookahead: bool,
+) -> Result<(String, Vec<Option<String>>), String> {
     let mut escapes = Escapes {
         alphabet,
         bracketed_word: false,
     };
+    let mut has_lookahead = false;
+    let mut highest_condition = 0;
     let mut literal_brace = false;
     let mut input = pattern.chars().peekable();
     let mut output = String::new();
@@ -176,11 +248,46 @@ pub fn translate_pattern(
                     verbose = true;
                     continue;
                 }
-                outer_prefixes.push((may_backtrack, dotall, verbose));
+                if lookahead && extension && input.clone().take(2).eq(['P', '=']) {
+                    input.next();
+                    input.next();
+                    let id = reference_id(&mut input, &groups, false)?;
+                    check_reference(id, &outer_prefixes)?;
+                    write!(output, r"\k<{id}>").unwrap();
+                    can_repeat = true;
+                    continue;
+                }
+                let assertion = if lookahead && extension {
+                    input.next_if(|c| matches!(c, '=' | '!'))
+                } else {
+                    None
+                };
+                let atomic_assertion = assertion == Some('=');
+                let mut group = GroupState {
+                    backtrack: may_backtrack,
+                    dotall,
+                    verbose,
+                    atomic_assertion,
+                    scope: Scope::Plain,
+                };
                 may_backtrack = false;
                 output.push('(');
                 if extension {
-                    if input.next_if_eq(&':').is_some() {
+                    if let Some(assertion) = assertion {
+                        has_lookahead = true;
+                        output.push('?');
+                        output.push(assertion);
+                        if atomic_assertion {
+                            // CPython commits to the first successful positive assertion.
+                            output.push_str("(?>");
+                        }
+                    } else if lookahead && input.next_if_eq(&'(').is_some() {
+                        let id = reference_id(&mut input, &groups, true)?;
+                        check_reference(id, &outer_prefixes)?;
+                        highest_condition = highest_condition.max(id);
+                        write!(output, "?({id})").unwrap();
+                        group.scope = Scope::Conditional { has_else: false };
+                    } else if input.next_if_eq(&':').is_some() {
                         output.push_str("?:");
                     } else if matches!(input.peek(), Some('x' | '-')) {
                         let enable = input.next_if_eq(&'-').is_none();
@@ -197,7 +304,7 @@ pub fn translate_pattern(
                         dotall = true;
                     } else if input.next_if_eq(&'>').is_some() {
                         atomic_delimited(&mut input, &mut output, dotall, verbose, &mut escapes)?;
-                        (may_backtrack, dotall, verbose) = outer_prefixes.pop().unwrap();
+                        may_backtrack = group.backtrack;
                         can_repeat = true;
                         continue;
                     } else if input.next_if_eq(&'P').is_some() && input.next_if_eq(&'<').is_some() {
@@ -206,7 +313,8 @@ pub fn translate_pattern(
                             match input.next() {
                                 Some('>') if !name.is_empty() => break,
                                 Some(c)
-                                    if c == '_'
+                                    if lookahead && c != '>'
+                                        || c == '_'
                                         || c.is_ascii_alphabetic()
                                         || !name.is_empty() && c.is_ascii_digit() =>
                                 {
@@ -215,14 +323,21 @@ pub fn translate_pattern(
                                 _ => return Err("expected an ASCII Python capture name".into()),
                             }
                         }
-                        write!(output, "?P<{name}>").unwrap();
+                        // The text lookahead backend uses the original Python names
+                        // separately, including identifiers outside its own name syntax.
+                        if !lookahead {
+                            write!(output, "?P<{name}>").unwrap();
+                        }
+                        group.scope = Scope::Capture(groups.len());
                         groups.push(Some(name));
                     } else {
                         return Err("unsupported regex group, assertion, or inline flag".into());
                     }
                 } else {
+                    group.scope = Scope::Capture(groups.len());
                     groups.push(None);
                 }
+                outer_prefixes.push(group);
                 can_repeat = false;
             }
             '|' => {
@@ -230,18 +345,28 @@ pub fn translate_pattern(
                 // or nested choice before the branch can change the first match.
                 // An empty character class is an unreachable branch that keeps
                 // these alternatives separate without adding a capture.
-                output.push_str(if may_backtrack { r"|[^\s\S]|" } else { "|" });
-                if let Some((outer, _, _)) = outer_prefixes.last_mut() {
-                    *outer = true; // The enclosing prefix now contains a choice.
+                if let Some(group) = outer_prefixes.last_mut() {
+                    group.backtrack = true;
+                    if let Scope::Conditional { has_else } = &mut group.scope {
+                        if *has_else {
+                            return Err("conditional backref with more than two branches".into());
+                        }
+                        *has_else = true;
+                        may_backtrack = false; // A conditional cannot take an extra unreachable branch.
+                    }
                 }
+                output.push_str(if may_backtrack { r"|[^\s\S]|" } else { "|" });
                 may_backtrack = false;
                 can_repeat = false;
             }
             ')' => {
-                if let Some((backtrack, previous_dotall, previous_verbose)) = outer_prefixes.pop() {
-                    may_backtrack |= backtrack;
-                    dotall = previous_dotall;
-                    verbose = previous_verbose;
+                if let Some(group) = outer_prefixes.pop() {
+                    may_backtrack |= group.backtrack;
+                    dotall = group.dotall;
+                    verbose = group.verbose;
+                    if group.atomic_assertion {
+                        output.push(')');
+                    }
                 }
                 output.push(c);
                 can_repeat = true;
@@ -249,6 +374,11 @@ pub fn translate_pattern(
             '.' | '^' => {
                 output.push(c);
                 can_repeat = c == '.';
+            }
+            '$' if lookahead => {
+                // Literals are escaped, so the runtime can lower this anchor using its line mode.
+                output.push('$');
+                can_repeat = false;
             }
             '$' if input.peek().is_none()
                 || verbose && next_token(&mut input.clone(), true)?.is_none() =>
@@ -261,6 +391,43 @@ pub fn translate_pattern(
             '$' => return Err("the $ anchor is supported only at the end of a pattern".into()),
             '[' => {
                 class(&mut input, &mut output, &mut escapes)?;
+                can_repeat = true;
+            }
+            '\\' if lookahead
+                && alphabet == Alphabet::Unicode
+                && matches!(input.peek(), Some('b' | 'B')) =>
+            {
+                // Python words contain Unicode letters, numbers and underscore.
+                // Test both sides without consuming either adjacent character.
+                let word = r"[\p{L}\p{N}_]";
+                let (after_word, after_nonword) = if input.next() == Some('b') {
+                    ('!', '=')
+                } else {
+                    ('=', '!')
+                };
+                write!(
+                    output,
+                    "(?:(?<={word})(?{after_word}{word})|(?<!{word})(?{after_nonword}{word}))"
+                )
+                .unwrap();
+                can_repeat = false;
+            }
+            '\\' if lookahead && matches!(input.peek(), Some('1'..='9')) => {
+                let first = input.next().unwrap();
+                let mut id = (first as u8 - b'0') as usize;
+                if let Some(second) = input.next_if(char::is_ascii_digit) {
+                    if first <= '7' && second <= '7' && matches!(input.peek(), Some('0'..='7')) {
+                        return Err(
+                            "three-digit octal escapes in lookaheads are unsupported".into()
+                        );
+                    }
+                    id = id * 10 + (second as u8 - b'0') as usize;
+                }
+                if id >= groups.len() {
+                    return Err("invalid regex group reference".into());
+                }
+                check_reference(id, &outer_prefixes)?;
+                write!(output, r"\k<{id}>").unwrap();
                 can_repeat = true;
             }
             '\\' => {
@@ -307,11 +474,24 @@ pub fn translate_pattern(
             }
         }
     }
-    if literal_brace && escapes.bracketed_word && alphabet == Alphabet::UnicodeIgnoreCase {
+    if (literal_brace || lookahead)
+        && escapes.bracketed_word
+        && alphabet == Alphabet::UnicodeIgnoreCase
+    {
         return Err(
             "case-insensitive Unicode word sets inside bracket expressions are unsupported".into(),
         );
     }
+    if highest_condition >= groups.len() {
+        return Err("invalid conditional group reference".into());
+    }
+    if lookahead && !has_lookahead {
+        return Err("expected a Python lookahead assertion".into());
+    }
+    Ok((output, groups))
+}
+
+fn analyze(output: String, groups: Vec<Option<String>>) -> Result<FixedPattern, String> {
     let output = preserve_zero_repeat_groups(output)?;
     let hir = regex_syntax::Parser::new()
         .parse(&output)

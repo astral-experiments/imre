@@ -9,6 +9,7 @@ import dis
 from functools import wraps
 import hashlib
 import importlib
+import os
 from pathlib import Path
 import re
 import subprocess
@@ -62,6 +63,7 @@ class Toolchain:
     level: int
     reachable_only: bool = False
     module_root: Path | None = None
+    runtime_imports: bool = False
 
     def build(self, source, directory):
         directory = directory.resolve()
@@ -73,6 +75,8 @@ class Toolchain:
                    "--clang", self.clang.resolve()]
         if self.module_root is not None:
             command.extend(["--module-root", self.module_root.resolve()])
+        if self.runtime_imports:
+            command.append("--runtime-imports")
         if self.reachable_only:
             command.append("--reachable-only")
         try:
@@ -507,26 +511,37 @@ def testcase_fixture(equality=None):
 
 
 def native_method(toolchain, directory, path, owner, case_id, fixture=None, *, operation=None,
-                  assertions="imre", on_child_error=None):
+                  assertions="imre", on_child_error=None, cleanups=False, extra_env=None, fixture_args=None):
     """Build a complete method and run it under host fixtures.
 
+    cleanups drains callbacks on the native instance that registered them.
+    extra_env applies only to the native execution and its descendants.
+    fixture_args supplies program arguments after the upstream fixture hooks run.
     on_child_error observes the raw child result before the runner reports its failure.
     """
     method = case_id.rsplit(".", 1)[1]
     body = method_bytes(path, owner, method)
     entry = (fixture if fixture is not None else testcase_fixture()).encode() + b"\n" + body
-    entry += f'\ncase = NativeCase()\ncase.{method}()\nprint("completed {case_id}")\n'.encode()
+    invocation = f"case.{method}()"
+    if cleanups:
+        invocation = (f"try:\n    {invocation}\nfinally:\n    if not case.doCleanups():\n"
+                      '        raise AssertionError("native testcase cleanup failed")')
+    entry += f'\ncase = NativeCase()\n{invocation}\nprint("completed {case_id}")\n'.encode()
     binary = toolchain.build(entry, directory)
 
     def execute(case, original):
-        result = subprocess.run([binary], capture_output=True, text=True, timeout=60)
+        env = {**os.environ, **extra_env} if extra_env is not None else None
+        argv = [binary, *fixture_args()] if fixture_args is not None else [binary]
+        result = subprocess.run(argv, capture_output=True, text=True, timeout=60, env=env)
         if result.returncode or result.stderr or result.stdout != f"completed {case_id}\n":
             if on_child_error is not None:
                 on_child_error(result)
             raise AssertionError(f"native exit {result.returncode}: {result.stdout!r} {result.stderr!r}")
-        record = {"execution": "native-body", "body": "Imre", "assertions": "Imre",
+        record = {"execution": "native-body", "body": "Imre", "assertions": "Imre" if assertions == "imre" else assertions,
                   "fixture_execution": "CPython module/class/instance hooks; native instance in child",
                   "method_sha256": hashlib.sha256(body).hexdigest()}
+        if cleanups:
+            record["fixture_execution"] += "; registered cleanups executed on the native instance"
         if operation is not None:
             location, description = operation
             record["observation"] = {"roles": roles(body="imre", assertions=assertions,

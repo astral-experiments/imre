@@ -3,6 +3,8 @@
 use std::cell::Cell;
 use std::collections::{HashMap, HashSet};
 use std::fmt;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use super::Context;
 use crate::objects::exceptions::ExitStatus;
@@ -639,14 +641,13 @@ pub(super) struct ClassNamespace {
     pub name_override: Option<Id>,
     /// Backing dictionary shared by live class namespace proxies.
     pub dictionary: Option<Id>,
-    pub annotation_thunks: Option<Id>,
-    /// Closure cell shared by runtime-source method annotation providers.
+    /// Closure cell shared by method annotation providers.
     pub annotation_dict_cell: Option<Id>,
-    /// Scratch field dictionary used only while an ordinary class body is executing.
+    /// Scratch field dictionary used while a class body is executing.
     pub annotation_scratch: Option<Id>,
     /// Executed deferred sites in source order, including repeated field names.
     pub annotation_sites: Option<Box<std::collections::BTreeMap<u32, (Id, Id)>>>,
-    /// TypedDict installs a class-wide annotation function in place of its field thunks.
+    /// Class annotation attributes are served by the installed provider.
     pub provider_annotations: bool,
     /// Slot names consumed when the class is created, independent of later namespace mutations.
     pub slot_names: Option<std::rc::Rc<[String]>>,
@@ -679,6 +680,15 @@ pub(super) struct Scope {
     pub module: String,
 }
 
+impl Scope {
+    /// type.__qualname__ lives outside the finished class dictionary.
+    pub(super) fn binding_namespace(&self, name: &str) -> Option<Id> {
+        self.namespace.filter(|_| {
+            name != "__qualname__" || self.class_namespace.is_none() || self.class_body.is_some()
+        })
+    }
+}
+
 #[derive(Clone, Default)]
 pub(super) struct ClosureScope {
     pub declared: HashSet<String>,
@@ -694,6 +704,20 @@ pub(super) struct ExecGlobals {
 }
 
 #[derive(Clone)]
+pub(super) struct BoxedTextFile {
+    pub(super) file: crate::objects::TextFile,
+    pub(super) buffer: Option<Id>,
+}
+
+impl std::ops::Deref for BoxedTextFile {
+    type Target = crate::objects::TextFile;
+
+    fn deref(&self) -> &Self::Target {
+        &self.file
+    }
+}
+
+#[derive(Clone)]
 pub(super) enum Value {
     None,
     Weak(super::weakref::Reference),
@@ -706,6 +730,8 @@ pub(super) enum Value {
     Calendar {
         value: crate::objects::Calendar,
         tzinfo: Id,
+        // Preserve the fixed timezone name and its Python str subclass methods.
+        tzname: Id,
     },
     Poll(std::rc::Rc<std::cell::RefCell<crate::objects::readiness::Poll>>),
     Scandir(std::rc::Rc<super::stdlib::os::scandir::Scan>),
@@ -745,7 +771,7 @@ pub(super) enum Value {
         decode: Id,
     },
     CodecDecoder(crate::objects::Codec),
-    Hash(std::rc::Rc<std::cell::RefCell<crate::objects::HashState>>),
+    Hash(crate::objects::SharedHash),
     Hmac(Hmac),
     Struct {
         format: String,
@@ -796,7 +822,6 @@ pub(super) enum Value {
     },
     Scope(Scope),
     Cell(Option<Id>),
-    ClassCell(Option<Id>),
     Super {
         start: Id,
         receiver: Id,
@@ -807,6 +832,8 @@ pub(super) enum Value {
         scope: Id,
         origin: Option<Id>,
         initializing: bool,
+        // Exception class retained by this generation of the _locale module.
+        locale_error: Option<Id>,
         // Imported modules are resolved separately from independently constructed ones.
         constructor: Option<Id>,
     },
@@ -998,7 +1025,7 @@ pub(super) enum Value {
     },
     ProcessHandle(crate::objects::BoxedPopen),
     File(crate::shared::Shared<super::stdlib::BinaryFile>),
-    TextFile(crate::objects::TextFile),
+    TextFile(BoxedTextFile),
     RegexScanner {
         pattern: Id,
         subject: Id,
@@ -1043,6 +1070,17 @@ pub(super) struct CachedCall {
 }
 
 impl Value {
+    /// Class of a native file whose Python descriptors are installed by _io.
+    pub(super) fn native_io_class_name(&self) -> Option<&'static str> {
+        match self {
+            Self::TextFile(_) => Some("_io.TextIOWrapper"),
+            Self::File(_) if self.intrinsic_type_name() == Some("_io.BufferedReader") => {
+                Some("_io.BufferedReader")
+            }
+            _ => None,
+        }
+    }
+
     /// Returns the name used for both builtin class lookup and diagnostic messages.
     pub(super) fn intrinsic_type_name(&self) -> Option<&str> {
         Some(match self {
@@ -1061,7 +1099,7 @@ impl Value {
             Self::Str(_) | Self::SurrogateStr(_) => "str",
             Self::Map { .. } => "map",
             Self::Filter { .. } => "filter",
-            Self::Hash(state) => state.borrow().class_name(),
+            Self::Hash(state) => state.lock().class_name(),
             Self::Zip { .. } => "zip",
             Self::Array(_) => "array.array",
             Self::Bytes(_) => "bytes",
@@ -1071,7 +1109,8 @@ impl Value {
                 super::stdlib::BinaryFile::Descriptor(fd) if fd.reading => "_io.BufferedReader",
                 super::stdlib::BinaryFile::Descriptor(_) => "_io.BufferedWriter",
                 super::stdlib::BinaryFile::Reader { .. } => "_io.BufferedReader",
-                super::stdlib::BinaryFile::Writer { .. } => "_io.BufferedWriter",
+                super::stdlib::BinaryFile::Writer { .. }
+                | super::stdlib::BinaryFile::Standard { .. } => "_io.BufferedWriter",
             },
             Self::ProcessHandle(_) => "_imre_subprocess.Handle",
             Self::BufferedRandom(..) => "_io.BufferedRandom",
@@ -1097,15 +1136,7 @@ impl Value {
             Self::RangeIterator(iter) => iter.kind,
             Self::Enumerate { .. } => "enumerate",
             Self::Iterator { kind, .. } => kind,
-            Self::DictIterator(iter) => match (iter.order_state, iter.reverse, iter.kind) {
-                (Some(_), _, _) => "odict_iterator",
-                (_, false, DictViewKind::Keys) => "dict_keyiterator",
-                (_, false, DictViewKind::Values) => "dict_valueiterator",
-                (_, false, DictViewKind::Items) => "dict_itemiterator",
-                (_, true, DictViewKind::Keys) => "dict_reversekeyiterator",
-                (_, true, DictViewKind::Values) => "dict_reversevalueiterator",
-                (_, true, DictViewKind::Items) => "dict_reverseitemiterator",
-            },
+            Self::DictIterator(iter) => iter.class_name(),
             Self::Set { frozen: true, .. } => "frozenset",
             Self::Set { frozen: false, .. } => "set",
             Self::Dict(_) => "dict",
@@ -1116,7 +1147,7 @@ impl Value {
             }
             Self::ItemGetter(_) => "operator.itemgetter",
             Self::Code(_) => "code",
-            Self::Cell(_) | Self::ClassCell(_) => "cell",
+            Self::Cell(_) => "cell",
             Self::Generator { .. } => "generator",
             Self::Coroutine(_) => "coroutine",
             Self::CoroutineWrapper(_) => "coroutine_wrapper",
@@ -1193,7 +1224,6 @@ impl Value {
             | Self::Code(_)
             | Self::Native(_)
             | Self::Scope(_)
-            | Self::ClassCell(_)
             | Self::LoopIterator { .. }
             | Self::ProcessHandle(_)
             | Self::Yielded(_) => false,
@@ -1292,14 +1322,14 @@ impl Value {
             Self::Range(_) | Self::RangeIterator(_) => {}
             Self::AstWalk { queue, .. } => visit.extend(queue),
             Self::Enumerate { input, .. } => visit.push(*input),
-            Self::Calendar { tzinfo, .. } => visit.push(*tzinfo),
+            Self::Calendar { tzinfo, tzname, .. } => visit.extend([*tzinfo, *tzname]),
             Self::DefaultDict { factory, entries } => {
                 visit.push(*factory);
                 for (key, value) in entries {
                     visit.extend([*value, *key]);
                 }
             }
-            Self::Scandir(scan) => visit.push(scan.source),
+            Self::Scandir(scan) => visit.push(scan.source.get()),
             Self::DirEntry(entry) => {
                 visit.extend([entry.name, entry.path]);
                 visit.extend(entry.cached_objects());
@@ -1315,7 +1345,6 @@ impl Value {
                 if let Some(class) = &scope.class_namespace {
                     visit.extend([class.bases, class.mro]);
                     visit.extend(class.name_override);
-                    visit.extend(class.annotation_thunks);
                     visit.extend(class.annotation_dict_cell);
                     visit.extend(class.annotation_scratch);
                     if let Some(sites) = &class.annotation_sites {
@@ -1333,7 +1362,6 @@ impl Value {
                 }
                 visit.extend(scope.names.values());
             }
-            Self::ClassCell(class) => visit.extend(class),
             Self::Super {
                 start,
                 receiver,
@@ -1343,9 +1371,11 @@ impl Value {
                 scope,
                 origin,
                 constructor,
+                locale_error,
                 ..
             } => {
                 visit.push(*scope);
+                visit.extend(locale_error);
                 visit.extend(origin);
                 visit.extend(constructor);
             }
@@ -1446,6 +1476,9 @@ impl Value {
                     cycle.children(visit);
                 }
                 match memory_stream {
+                    Some(super::stdlib::io::MemoryStream::BufferedReader(file)) => {
+                        visit.push(*file)
+                    }
                     Some(super::stdlib::io::MemoryStream::Bytes(stream)) => {
                         visit.extend(stream.snapshot.get())
                     }
@@ -1557,9 +1590,9 @@ impl Value {
             | Self::NoDefault
             | Self::PartialPlaceholder
             | Self::TokenMissing
-            | Self::TextFile(_)
             | Self::ProcessHandle(_)
             | Self::NamedFileCloser(_) => {}
+            Self::TextFile(file) => visit.extend(file.buffer),
             Self::BufferedRandom(_, name) => visit.push(*name),
         }
     }
@@ -1584,6 +1617,40 @@ pub(super) struct DictIterator {
 }
 
 impl DictIterator {
+    const KEYS: [&str; 2] = ["dict_keyiterator", "dict_reversekeyiterator"];
+    const VALUES: [&str; 2] = ["dict_valueiterator", "dict_reversevalueiterator"];
+    const ITEMS: [&str; 2] = ["dict_itemiterator", "dict_reverseitemiterator"];
+    const ORDERED: &str = "odict_iterator";
+
+    pub(super) fn methods(class: &str) -> &'static [&'static str] {
+        if class == Self::ORDERED {
+            &["__iter__", "__next__", "__reduce__"]
+        } else {
+            &["__iter__", "__next__"]
+        }
+    }
+
+    pub(super) fn class_name(&self) -> &'static str {
+        if self.order_state.is_some() {
+            return Self::ORDERED;
+        }
+        let classes = match self.kind {
+            DictViewKind::Keys => Self::KEYS,
+            DictViewKind::Values => Self::VALUES,
+            DictViewKind::Items => Self::ITEMS,
+        };
+        classes[usize::from(self.reverse)]
+    }
+
+    pub(super) fn class(name: &str) -> Option<&'static str> {
+        Self::KEYS
+            .into_iter()
+            .chain(Self::VALUES)
+            .chain(Self::ITEMS)
+            .chain([Self::ORDERED])
+            .find(|&class| class == name)
+    }
+
     /// Capture the original size while keeping the entries live.
     pub(super) fn new(
         dict: Id,
@@ -1907,6 +1974,8 @@ pub(super) struct Heap {
     interned: HashMap<crate::StrOwner, InternedString>,
     // ABC registrations are weak edges. Sweep them before recycling a dead class's slot.
     pub(super) abc_registrations: Vec<[Id; 2]>,
+    // Protocol subclass results use weak keys just like ABC registrations.
+    pub(super) protocol_subclass_cache: HashMap<[Id; 2], bool>,
     // Collecting weak registration pairs must not roll back the invalidation counter.
     pub(super) abc_cache_token: u64,
     free_head: usize,
@@ -1916,6 +1985,8 @@ pub(super) struct Heap {
     pub(super) mock_call_lists: HashSet<Id>,
     frames: Vec<Frame>,
     next_collection: usize,
+    // Worker heaps share the interpreter’s automatic cyclic collection setting.
+    pub(super) automatic_gc: Arc<AtomicBool>,
     weak: HashMap<Id, Vec<Id>>,
     // A dead proxy is still observable after its registry entry disappears.
     pub(super) has_weak_values: bool,
@@ -1995,6 +2066,7 @@ impl Heap {
             linked_string_constants: HashMap::new(),
             interned: HashMap::new(),
             abc_registrations: Vec::new(),
+            protocol_subclass_cache: HashMap::new(),
             abc_cache_token: 0,
             free_head: END,
             free_count: 0,
@@ -2002,6 +2074,7 @@ impl Heap {
             mock_call_lists: HashSet::new(),
             frames: vec![Frame::new(NONE, NONE, FrameOwner::Module(NONE), NONE)],
             next_collection: 4096,
+            automatic_gc: Arc::new(AtomicBool::new(true)),
             weak: HashMap::new(),
             has_weak_values: false,
             collect_next_statement: false,
@@ -2132,7 +2205,7 @@ impl Heap {
     }
 
     pub(super) fn replace_cell(&mut self, cell: Id, value: Option<Id>) -> Option<Id> {
-        let (Value::Cell(contents) | Value::ClassCell(contents)) = self.get_mut(cell) else {
+        let Value::Cell(contents) = self.get_mut(cell) else {
             unreachable!("compiled closure cell")
         };
         let previous = std::mem::replace(contents, value);
@@ -2154,7 +2227,7 @@ impl Heap {
             && (self.weak_edge(value)
                 || matches!(
                     self.get(value),
-                    Value::Function { .. } | Value::Cell(Some(_)) | Value::ClassCell(Some(_))
+                    Value::Function { .. } | Value::Cell(Some(_))
                 ))
             && !self.bound_in_active_frame(value)
         {
@@ -2742,7 +2815,20 @@ impl Heap {
         };
     }
 
-    pub(super) fn acyclic_finalizer(&self, roots: impl Iterator<Item = Id>) -> Result<Option<Id>> {
+    pub(super) fn acyclic_finalizer(
+        &self,
+        roots: impl Iterator<Item = Id>,
+        stdin: Option<&[Id; 3]>,
+    ) -> Result<Option<Id>> {
+        // Input's wrapper and raw file usually survive every allocation checkpoint.
+        if let Some(chain) = stdin
+            && self
+                .ordinary_finalizers
+                .iter()
+                .all(|owner| chain.contains(owner))
+        {
+            return Ok(None);
+        }
         // A suspended caller keeps earlier operands live across a nested call.
         // Scan the callers once when only one finalizer needs a reachability check.
         if let [owner] = self.ordinary_finalizers.as_slice()
@@ -2895,7 +2981,7 @@ impl Heap {
         caught: Id,
     ) -> Option<WeakCallbacks> {
         self.publish_statement(live, location, caught);
-        self.collect_if_due(globals)
+        self.collect_if_due(globals, self.automatic_gc.load(Ordering::Relaxed))
     }
 
     pub(super) fn publish_statement(&mut self, live: &[Id], location: Location, caught: Id) {
@@ -2933,12 +3019,13 @@ impl Heap {
     pub(super) fn collect_if_due(
         &mut self,
         globals: impl Iterator<Item = Id>,
+        automatic_gc: bool,
     ) -> Option<WeakCallbacks> {
         let cycles_due = self.cycles_due();
         if !std::mem::take(&mut self.collect_next_statement) && !cycles_due {
             return None;
         }
-        if cycles_due {
+        if cycles_due && automatic_gc {
             self.mark(globals);
             self.sweep()
         } else {
@@ -2985,15 +3072,15 @@ impl Heap {
             self.collect_next_statement = true;
             return None;
         };
-        self.mark(globals);
+        // A weakref callback can drop an unrelated owner. Keep its graph intact
+        // for Python dispatch when this sweep releases temporary callback roots.
+        self.mark(globals.chain(self.ordinary_finalizers.iter().copied()));
         self.identify_cycles(&mut cycles);
-        // A weakref callback can drop an unrelated owner. Leave its graph intact
-        // for Python dispatch if this sweep only releases temporary callback roots.
-        self.mark(
-            cycles
-                .members()
-                .chain(self.ordinary_finalizers.iter().copied()),
-        );
+        // Peeling leaves both cycles and their unreachable descendants. Every
+        // strong child of a member is therefore already live or itself a member.
+        for id in cycles.members() {
+            self.slots[id as usize].trace.set(END);
+        }
         self.sweep()
     }
 
@@ -3277,6 +3364,9 @@ impl Heap {
         self.abc_registrations.retain(|&[owner, member]| {
             self.slots[owner as usize].marked() && self.slots[member as usize].marked()
         });
+        self.protocol_subclass_cache.retain(|&[owner, member], _| {
+            self.slots[owner as usize].marked() && self.slots[member as usize].marked()
+        });
         // Vacant slots supply their own free-list links. A sweep can therefore
         // retire the entire unreachable graph even if the allocator refuses growth.
         for (id, slot) in self.slots.iter_mut().enumerate() {
@@ -3319,6 +3409,34 @@ mod tests {
         heap.collect([child].into_iter());
         assert!(matches!(heap.get(parent), Value::Tuple(items) if items == &[keep]));
         assert_eq!(heap.free_count, 0);
+    }
+
+    #[test]
+    fn prompt_sweep_preserves_cycle_descendants_and_pending_owners() {
+        let mut heap = Heap::new();
+        let mark = heap.temporary_mark();
+        let leaf = heap.alloc(Value::List(Vec::new()));
+        let cycle = heap.alloc(Value::List(vec![leaf, leaf]));
+        let Value::List(items) = heap.get_mut(cycle) else {
+            unreachable!()
+        };
+        items.push(cycle);
+        let child = heap.alloc(Value::List(Vec::new()));
+        let owner = heap.alloc(Value::List(vec![child]));
+        heap.register_finalizer(owner);
+        let discarded = heap.alloc(Value::List(Vec::new()));
+        heap.release_temporaries_since(mark);
+
+        heap.collect(std::iter::empty());
+        for id in [leaf, cycle, child, owner] {
+            assert!(heap.slots[id as usize].value.is_some());
+        }
+        assert!(heap.slots[discarded as usize].value.is_none());
+
+        heap.take_finalizer(owner, true);
+        heap.collect(std::iter::empty());
+        assert!(heap.slots[owner as usize].value.is_none());
+        assert!(heap.slots[child as usize].value.is_none());
     }
 
     #[test]

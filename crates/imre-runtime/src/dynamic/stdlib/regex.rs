@@ -7,8 +7,10 @@ use regex_automata::{Anchored, Input, PatternID, Span, meta::Regex, util::captur
 use super::{Context, Error, Id, NONE, Result, Value, argument};
 use crate::dynamic::builtins::bind;
 
+mod assertions;
 mod casefold;
 mod group_names;
+mod lookahead;
 mod progress;
 mod scanner;
 mod split;
@@ -82,6 +84,7 @@ pub(in crate::dynamic) struct Pattern {
     bytes: bool,
     engine_source: String,
     regex: Matcher,
+    assertions: Vec<(String, Regex)>,
     full: OnceCell<std::result::Result<Matcher, String>>,
     split_retry: OnceCell<std::result::Result<regex_automata::nfa::thompson::NFA, String>>,
 }
@@ -121,6 +124,14 @@ impl Pattern {
             - 1
     }
 
+    fn match_error(&self, ctx: &mut Context, message: String) -> Error {
+        if matches!(self.regex, Matcher::Lookahead(_)) {
+            Error::new("RuntimeError", message)
+        } else {
+            pattern_error(ctx, self.source, self.flags, message)
+        }
+    }
+
     fn engine_flags(&self) -> i64 {
         if self.source == NONE && self.flags & UNICODE == 0 {
             self.flags | ASCII
@@ -158,7 +169,12 @@ impl Pattern {
                     .engine_source
                     .strip_suffix(imre_regex::FINAL_NEWLINE_ANCHOR)
                     .unwrap_or(&self.engine_source);
-                build_regex(&format!(r"(?:{source})\z"), self.bytes, self.engine_flags())
+                let full = format!(r"(?:{source})\z");
+                if let Matcher::Lookahead(matcher) = &self.regex {
+                    return lookahead::Lookahead::new(&full, matcher.groups.clone())
+                        .map(|m| Matcher::Lookahead(Box::new(m)));
+                }
+                build_regex(&full, self.bytes, self.engine_flags(), &self.assertions)
             })
             .as_ref()
             .map_err(Clone::clone)
@@ -174,23 +190,32 @@ fn syntax(bytes: bool, flags: i64) -> regex_automata::util::syntax::Config {
         .utf8(!bytes)
 }
 
-fn build_regex(source: &str, bytes: bool, flags: i64) -> std::result::Result<Matcher, String> {
+fn build_regex(
+    source: &str,
+    bytes: bool,
+    flags: i64,
+    assertions: &[(String, Regex)],
+) -> std::result::Result<Matcher, String> {
     let syntax = syntax(bytes, flags);
     let mut builder = Regex::builder();
     builder
         .syntax(syntax)
         .configure(Regex::config().utf8_empty(!bytes));
-    let Ok(hir) = regex_automata::util::syntax::parse_with(source, &syntax) else {
-        // Keep the backend's usual diagnostic if parsing fails.
-        return builder
-            .build(source)
-            .map(Matcher::Standard)
-            .map_err(|err| err.to_string());
+    let hir = match regex_automata::util::syntax::parse_with(source, &syntax) {
+        Ok(hir) => hir,
+        Err(err) if !assertions.is_empty() => return Err(err.to_string()),
+        Err(_) => {
+            // Keep the backend's usual diagnostic if parsing fails.
+            return builder
+                .build(source)
+                .map(Matcher::Standard)
+                .map_err(|err| err.to_string());
+        }
     };
     let regex = builder
         .build_from_hir(&hir)
         .map_err(|err| err.to_string())?;
-    Matcher::new(regex, hir, !bytes)
+    Matcher::new(regex, hir, !bytes, assertions)
 }
 
 /// Preserve byte literals outside ASCII in the regex parser's text input.
@@ -463,9 +488,9 @@ fn compiled(ctx: &mut Context, id: Id, flags: Option<Id>) -> Result<Id> {
     // Byte escapes have a separate grammar. Unicode IGNORECASE must fold
     // the literal guard without extending Python's word-category membership.
     let literal_guards = !bytes && (flags & IGNORECASE == 0 || ascii);
-    let translate = || {
+    let translate = |spelling: &str| {
         let mut translated = imre_regex::translate_pattern(
-            &source,
+            spelling,
             flags & VERBOSE != 0,
             alphabet(bytes, ascii, flags),
             flags & DOTALL != 0,
@@ -478,41 +503,91 @@ fn compiled(ctx: &mut Context, id: Id, flags: Option<Id>) -> Result<Id> {
         }
         Ok(translated)
     };
-    let build = |mut source: String| {
+    let fold = |source: String| {
         if flags & IGNORECASE != 0 && !bytes {
-            source = casefold::expand(&source, ascii)?;
+            casefold::expand(&source, ascii)
+        } else {
+            Ok(source)
         }
-        let matcher = build_regex(&source, bytes, flags)?;
+    };
+    let build = |source: String| {
+        let source = fold(source)?;
+        let matcher = build_regex(&source, bytes, flags, &[])?;
         Ok((source, matcher))
     };
     let global_verbose = source.starts_with("(?x)");
     let prepared = if flags & VERBOSE != 0 {
-        translate().and_then(build)
+        translate(&source).and_then(build)
     } else {
         let (raw, prefer_translation) = python_escapes(&source, ascii, flags & MULTILINE != 0);
         let original = || imre_regex::preserve_zero_repeat_groups(raw).and_then(build);
         if prefer_translation || global_verbose {
             // Python has its own verbose layout and literal-brace rules. Keep the
             // direct parser for features outside the subset translator.
-            translate().and_then(build).or_else(|_| original())
+            translate(&source).and_then(build).or_else(|_| original())
         } else {
             original()
         }
     };
-    let (engine_source, regex) = match prepared {
-        Ok(pair) => pair,
-        // Retry unsupported engine syntax with the shared Python subset translator.
+    let prepared = match prepared {
         Err(original)
             if !bytes
                 && flags & VERBOSE == 0
                 && (literal_guards && source.contains("(?!")
                     || flags & !UNICODE == 0 && source.contains("(?>")) =>
         {
-            let translated = translate().map_err(|_| pattern_error(ctx, id, flags, original))?;
-            build(translated).map_err(|message| pattern_error(ctx, id, flags, message))?
+            translate(&source).map_err(|_| original).and_then(build)
         }
-        Err(message) => return Err(pattern_error(ctx, id, flags, message)),
+        result => result,
     };
+    let mut assertions = Vec::new();
+    let (engine_source, regex) = prepared
+        .or_else(|original| {
+            let Some(extracted) = assertions::extract(&source, flags & VERBOSE != 0)? else {
+                return Err(original);
+            };
+            let syntax = syntax(bytes, flags);
+            let mut guards = Vec::new();
+            for (name, body) in extracted.guards {
+                let mut translated = fold(translate(&body)?)?;
+                // Matching the guard only needs a boolean. A terminal dollar still admits a
+                // final newline, but its private capture is unnecessary in this submatcher.
+                if translated.ends_with(imre_regex::FINAL_NEWLINE_ANCHOR) {
+                    translated.truncate(translated.len() - imre_regex::FINAL_NEWLINE_ANCHOR.len());
+                    translated.push_str(r"(?:\n)?\z");
+                }
+                let hir = regex_automata::util::syntax::parse_with(&translated, &syntax)
+                    .map_err(|err| err.to_string())?;
+                // Bound the work done each time the main NFA visits a zero-width assertion.
+                if hir
+                    .properties()
+                    .maximum_len()
+                    .is_none_or(|width| width > 256)
+                    || hir.properties().explicit_captures_len() != 0
+                {
+                    return Err(
+                        "lookahead requires a capture-free pattern of at most 256 bytes".into(),
+                    );
+                }
+                let guard = Regex::builder()
+                    .configure(Regex::config().utf8_empty(!bytes))
+                    .build_from_hir(&hir)
+                    .map_err(|err| err.to_string())?;
+                guards.push((name, guard));
+            }
+            let source = fold(translate(&extracted.source)?)?;
+            let matcher = build_regex(&source, bytes, flags, &guards)?;
+            assertions = guards;
+            Ok((source, matcher))
+        })
+        .or_else(|original| {
+            if bytes {
+                Err(original)
+            } else {
+                lookahead::compile(&source, flags, original)
+            }
+        })
+        .map_err(|message| pattern_error(ctx, id, flags, message))?;
     // GroupInfo contains the synthetic final-newline capture as well as user names.
     let names = regex.group_info().pattern_names(PatternID::ZERO).flatten();
     if let Some(name) = names
@@ -542,6 +617,7 @@ fn compiled(ctx: &mut Context, id: Id, flags: Option<Id>) -> Result<Id> {
         bytes,
         engine_source,
         regex,
+        assertions,
         full: OnceCell::new(),
         split_retry: OnceCell::new(),
     }))))
@@ -729,7 +805,9 @@ fn capture(
 ) -> Result<Id> {
     let text = subject_bytes(ctx, subject, bytes)?;
     let mut captures = regex.create_captures();
-    regex.captures(input(text), &mut captures);
+    regex
+        .captures(input(text), &mut captures)
+        .map_err(|message| Error::new("RuntimeError", message))?;
     if !captures.is_match() {
         return Ok(NONE);
     }
@@ -943,7 +1021,7 @@ fn findall(ctx: &mut Context, pattern: &Pattern, text: &[u8], start: usize) -> R
     let mut captures = pattern.regex.create_captures();
     let mut previous = None;
     while let Some(span) = split::next_span(pattern, text, start, previous, &mut captures)
-        .map_err(|message| pattern_error(ctx, pattern.source, pattern.flags, message))?
+        .map_err(|message| pattern.match_error(ctx, message))?
     {
         previous = Some(span);
         let fields: Vec<_> = group_spans(&captures)

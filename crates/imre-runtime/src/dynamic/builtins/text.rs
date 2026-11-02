@@ -1409,7 +1409,7 @@ pub(super) fn method(
     }
     if matches!(
         (owner, name),
-        ("str", "find" | "rfind" | "count")
+        ("str", "find" | "rfind" | "count" | "index")
             | ("bytes", "rfind")
             | ("bytes" | "bytearray", "startswith" | "endswith")
     ) {
@@ -1429,12 +1429,7 @@ pub(super) fn method(
                 args.len()
             )));
         }
-        let invalid_needle = match (owner, name) {
-            ("str", "count") => ctx.string_storage(needle).is_none(),
-            ("str", _) => ctx.str_value(needle).is_err(),
-            _ => false,
-        };
-        if invalid_needle {
+        if owner == "str" && ctx.string_storage(needle).is_none() {
             let kind = if needle == NONE {
                 "None"
             } else {
@@ -1532,13 +1527,29 @@ pub(super) fn method(
             };
             return Ok(ctx.alloc(Value::Int(value)));
         }
-        let found = crate::objects::find_text(
-            ctx.str_value(receiver)?,
-            ctx.str_value(needle)?,
-            start.as_ref(),
-            end.as_ref(),
-            name == "rfind",
-        );
+        let found = if [receiver, needle]
+            .iter()
+            .any(|&id| matches!(ctx.heap.get(ctx.scalar_value(id)), Value::SurrogateStr(_)))
+        {
+            crate::objects::find_codepoints(
+                &ctx.string_codepoints(receiver)?,
+                &ctx.string_codepoints(needle)?,
+                start.as_ref(),
+                end.as_ref(),
+                name == "rfind",
+            )
+        } else {
+            crate::objects::find_text(
+                ctx.str_value(receiver)?,
+                ctx.str_value(needle)?,
+                start.as_ref(),
+                end.as_ref(),
+                name == "rfind",
+            )
+        };
+        if name == "index" && found.as_small() == Some(-1) {
+            return Err(Error::new("ValueError", "substring not found"));
+        }
         return Ok(ctx.alloc(Value::Int(found)));
     }
     if matches!(owner, "bytes" | "bytearray") && matches!(name, "strip" | "lstrip" | "rstrip") {
@@ -1721,13 +1732,25 @@ pub(super) fn method(
                 &collected
             }
         };
-        if let [item] = values {
-            return ctx
-                .string_storage(*item)
-                .ok_or_else(|| type_error("expected str"));
+        let mut surrogate = matches!(
+            ctx.heap.get(ctx.scalar_value(receiver)),
+            Value::SurrogateStr(_)
+        );
+        for (index, &item) in values.iter().enumerate() {
+            let Some(storage) = ctx.string_storage(item) else {
+                let class = ctx.exact_type(item)?;
+                let name = ctx.class_name(class);
+                return Err(type_error(format!(
+                    "sequence item {index}: expected str instance, {} found",
+                    &name[..name.floor_char_boundary(80)]
+                )));
+            };
+            if values.len() == 1 {
+                return Ok(storage);
+            }
+            surrogate |= matches!(ctx.heap.get(storage), Value::SurrogateStr(_));
         }
-        let surrogate = |id| matches!(ctx.heap.get(ctx.scalar_value(id)), Value::SurrogateStr(_));
-        if surrogate(receiver) || values.iter().copied().any(surrogate) {
+        if surrogate {
             let sep = ctx.string_codepoints(receiver)?;
             let mut output = Vec::new();
             for (index, &item) in values.iter().enumerate() {

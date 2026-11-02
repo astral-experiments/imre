@@ -64,7 +64,7 @@ pub unsafe extern "C" fn imre_run_config(
         2 => Some("check argument not allowed, it will be overridden."),
         3 => Some("stdin and input arguments may not both be used."),
         4 => Some("stdout and stderr arguments may not be used with capture_output."),
-        5 => return Error::new(Kind::SubprocessError, "Cannot disambiguate when both text and universal_newlines are supplied but different. Pass one or the other.").returning(std::ptr::null()),
+        5 => return super::ambiguous_text_mode().returning(std::ptr::null()),
         _ => fail("SystemError", "unknown check_output validation"),
     };
     if let Some(message) = invalid {
@@ -400,7 +400,7 @@ fn deadline_capture_drains_both_full_pipes_before_expiry() {
     let mut ready = [0];
     std::fs::File::from(stdout).read_exact(&mut ready).unwrap();
     assert_eq!(ready, [b'!']);
-    let result = child.communicate(&[], Some(&Deadline::Float(1.0)), false);
+    let result = child.communicate(&[], Some(&Deadline::Float(1.0)), false, selector::current());
     assert!(child.signal(|| Ok(libc::SIGKILL)).is_ok());
     assert!(child.close_wait().is_ok());
     let Ok(Exchange::Timeout([Some(stdout), Some(stderr)], None)) = result else {

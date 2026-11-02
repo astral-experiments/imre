@@ -1,3 +1,4 @@
+import gc
 import io
 import sys
 from io import RawIOBase
@@ -187,6 +188,18 @@ def exercise(path):
         print(stream.readline(ReadSize(stream)), stream.tell())
     from io import UnsupportedOperation
 
+    buffered_path = path + ".buffered"
+    with open(buffered_path, "wb", 4) as writer:
+        writer.write(b"a")
+        writer.write(b"bcd")
+        with open(buffered_path, "rb") as reader:
+            assert reader.read() == b""
+        writer.write(b"e")
+        with open(buffered_path, "rb") as reader:
+            assert reader.read() == b"abcd"
+    with open(buffered_path, "rb") as reader:
+        assert reader.read() == b"abcde"
+
     target_path = path + ".output"
     with open(target_path, "wb") as output:
         assert output.name is target_path and output.mode == "wb"
@@ -362,6 +375,30 @@ def exercise(path):
             reader.seek(ClosingOffset(reader))
         except ValueError as error:
             print(error.args, reader.closed)
+
+    def bad_lines():
+        yield b"prefix"
+        gc.collect()
+        yield None
+        raise AssertionError("read past the rejected item")
+
+    with open(path + ".writelines", "wb") as writer:
+        try:
+            writer.writelines(bad_lines())
+        except TypeError:
+            pass
+        else:
+            raise AssertionError("writelines accepted None")
+        assert writer.writelines([b"!"]) is None
+        for call, owner in ((lambda: writer.writelines(), "_IOBase"), (writer.writelines, "BufferedWriter")):
+            try:
+                call()
+            except TypeError as error:
+                assert str(error) == f"{owner}.writelines() takes exactly one argument (0 given)"
+            else:
+                raise AssertionError("writelines accepted zero arguments")
+    with open(path + ".writelines", "rb") as reader:
+        assert reader.read() == b"prefix!"
 
     lines = path + ".lines"
     with open(lines, "w") as output:

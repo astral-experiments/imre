@@ -1,7 +1,7 @@
 # Public I/O ABCs and protocols from CPython 3.14.5, Lib/io.py. See stdlib/docstrings/LICENSE.
 import _io
 import abc
-from _io import (BytesIO, DEFAULT_BUFFER_SIZE, FileIO, StringIO, TextIOWrapper,
+from _io import (BufferedReader, BytesIO, DEFAULT_BUFFER_SIZE, FileIO, StringIO, TextIOWrapper,
                  UnsupportedOperation, open, open_code, text_encoding)
 from _collections_abc import _check_methods
 
@@ -19,7 +19,7 @@ class TextIOBase(_io._TextIOBase, IOBase):
 
 RawIOBase.register(FileIO)
 
-for klass in (BytesIO, *_buffered_types):
+for klass in (BytesIO, BufferedReader, *_buffered_types):
     BufferedIOBase.register(klass)
 
 for klass in (StringIO, TextIOWrapper):

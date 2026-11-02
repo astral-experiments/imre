@@ -14,24 +14,81 @@ pub(in crate::dynamic) fn signature(name: &str) -> &'static str {
     }
 }
 
-pub(in crate::dynamic) fn install(ctx: &mut Context, module: Id, scope: Id) {
-    for name in [
-        "stack_effect",
+const FUNCTIONS: &[(&str, &str)] = &[
+    ("stack_effect", "Compute the stack effect of the opcode."),
+    (
         "is_valid",
+        "Return True if opcode is valid, False otherwise.",
+    ),
+    (
         "has_arg",
+        "Return True if the opcode uses its oparg, False otherwise.",
+    ),
+    (
         "has_const",
+        "Return True if the opcode accesses a constant, False otherwise.",
+    ),
+    (
         "has_name",
+        "Return True if the opcode accesses an attribute by name, False otherwise.",
+    ),
+    (
         "has_jump",
+        "Return True if the opcode has a jump target, False otherwise.",
+    ),
+    (
         "has_free",
+        concat!(
+            "Return True if the opcode accesses a free variable, False otherwise.\n",
+            "\n",
+            "Note that 'free' in this context refers to names in the current scope\n",
+            "that are referenced by inner scopes or names in outer scopes that are\n",
+            "referenced from this scope. It does not include references to global\n",
+            "or builtin scopes.",
+        ),
+    ),
+    (
         "has_local",
+        "Return True if the opcode accesses a local variable, False otherwise.",
+    ),
+    (
         "has_exc",
+        "Return True if the opcode sets an exception handler, False otherwise.",
+    ),
+    (
         "get_specialization_stats",
+        "Return the specialization stats",
+    ),
+    (
         "get_nb_ops",
+        "Return array of symbols of binary ops.\n\nIndexed by the BINARY_OP oparg value.",
+    ),
+    (
         "get_intrinsic1_descs",
+        "Return a list of names of the unary intrinsics.",
+    ),
+    (
         "get_intrinsic2_descs",
-        "get_special_method_names",
+        "Return a list of names of the binary intrinsics.",
+    ),
+    (
         "get_executor",
-    ] {
+        "Return the executor object at offset in code if exists, None otherwise.",
+    ),
+    (
+        "get_special_method_names",
+        "Return a list of special method names.",
+    ),
+];
+
+pub(in crate::dynamic) fn doc(name: &str) -> Option<&'static str> {
+    FUNCTIONS
+        .iter()
+        .find_map(|&(key, doc)| (key == name).then_some(doc))
+}
+
+pub(in crate::dynamic) fn install(ctx: &mut Context, module: Id, scope: Id) {
+    for &(name, _) in FUNCTIONS {
         let callable = ctx.builtin(&format!("_opcode.{name}"));
         let function = ctx.alloc(Value::Method {
             callable,

@@ -62,6 +62,11 @@ class _DictionaryPatch:
 
 
 class _PatchFactory:
+    TEST_PREFIX: str
+
+    def __init__(self) -> None:
+        self.TEST_PREFIX = "test"
+
     def _dictionary(self, in_dict: dict[str, str], values: dict[str, str] | None, clear: bool, kwargs: dict[str, str]) -> _DictionaryPatch:
         if values is None:
             raise TypeError("'NoneType' object is not iterable")
@@ -103,23 +108,28 @@ class _Call:
         self._kwargs = kwargs
         self._text = _call_text(args, kwargs)
 
-    def _format(self, name: str) -> str:
-        if name == "call":
-            return self._text
-        return name + self._text[4:]
-
     @staticmethod
     def _represent(value: _Call | None) -> str:
         if value is None:
             return "None"
-        return value._format("call")
+        return _format_recorded_call(value, "call")
 
     @staticmethod
     def _represent_list(values: list[_Call]) -> str:
         parts: list[str] = []
         for value in values:
-            parts.append(value._format("call"))
+            parts.append(_format_recorded_call(value, "call"))
         return _format_list(parts, is_call_list(values))
+
+
+def _format_recorded_call(value: _Call, name: str) -> str:
+    if name == "call":
+        return value._text
+    return name + value._text[4:]
+
+
+def _new_call(args: list[_Arg], kwargs: dict[str, _Arg]) -> _Call:
+    return _Call(args, kwargs)
 
 
 def _new_call_list() -> list[_Call]:
@@ -161,26 +171,36 @@ class _Node:
         self._history = []
         self._ancestors = []
 
+    def _reset_state(self, reset_return: bool, reset_effect: bool) -> None:
+        self.called = False
+        self.call_count = 0
+        self.call_args = None
+        self.call_args_list = _new_call_list()
+        # Children retain this private list to report subsequent ancestor calls.
+        while len(self._history):
+            self._history.pop()
+        if reset_effect:
+            self.side_effect = None
+        if reset_return:
+            self._result = -1
+
     def _reset(self, nodes: list[_Node], reset_return: bool, reset_effect: bool) -> None:
         pending: list[tuple[_Node, bool, bool]] = [(self, reset_return, reset_effect)]
         while len(pending):
             node, clear_return, clear_effect = pending.pop()
-            node.called = False
-            node.call_count = 0
-            node.call_args = None
-            node.call_args_list = _new_call_list()
-            # Children retain this private list to report subsequent ancestor calls.
-            while len(node._history):
-                node._history.pop()
-            if clear_effect:
-                node.side_effect = None
-            if clear_return:
-                node._result = -1
+            node._reset_state(clear_return, clear_effect)
             for name in node._children:
                 pending.append((nodes[node._children[name]], clear_return, clear_effect))
             if node._result != -1:
                 # A retained return value resets its calls, but keeps its configuration.
                 pending.append((nodes[node._result], False, False))
+
+
+def _check_child_name(name: str) -> None:
+    if (name.startswith("assert") or name.startswith("assret") or name.startswith("asert")
+            or name.startswith("aseert") or name.startswith("assrt")
+            or name in {"called_with", "called_once", "called_once_with", "any_call", "has_calls", "not_called"}):
+        raise AttributeError(f"{name!r} is not a valid assertion. Use a spec for the mock if {name!r} is meant to be an attribute.")
 
 
 class Mock:
@@ -198,10 +218,7 @@ class Mock:
         return result
 
     def _child(self, name: str) -> Mock:
-        if (name.startswith("assert") or name.startswith("assret") or name.startswith("asert")
-                or name.startswith("aseert") or name.startswith("assrt")
-                or name in {"called_with", "called_once", "called_once_with", "any_call", "has_calls", "not_called"}):
-            raise AttributeError(f"{name!r} is not a valid assertion. Use a spec for the mock if {name!r} is meant to be an attribute.")
+        _check_child_name(name)
         node = self._node
         if name not in node._children:
             index = len(self._nodes)
@@ -227,14 +244,14 @@ class Mock:
         return self._at(node._result)
 
     def _record(self, args: list[_Arg], kwargs: dict[str, _Arg]) -> Mock:
-        received = _Call(args, kwargs)
+        received = _new_call(args, kwargs)
         self._node.called = True
-        self._node.call_count += 1
         self._node.call_args = received
         self._node.call_args_list.append(received)
-        self._node._history.append(received._format("call"))
+        self._node.call_count = len(self._node.call_args_list)
+        self._node._history.append(_format_recorded_call(received, "call"))
         for ancestor in self._node._ancestors:
-            ancestor.calls.append(received._format(ancestor.prefix))
+            ancestor.calls.append(_format_recorded_call(received, ancestor.prefix))
         effect = self._node.side_effect
         if effect is not None:
             raise effect
@@ -267,19 +284,19 @@ class Mock:
             raise AssertionError(f"Expected '{self._name()}' to have been called once. Called {self._node.call_count} times." + self._calls_repr())
 
     def _assert_called_with(self, args: list[_Arg], kwargs: dict[str, _Arg]) -> None:
-        expected = _Call(args, kwargs)
+        expected = _new_call(args, kwargs)
         observed = self._node.call_args
-        if observed is not None and expected == observed:
+        if observed is not None and observed == expected:
             return
-        actual = "not called." if observed is None else observed._format(self._name())
-        raise AssertionError("expected call not found.\nExpected: " + expected._format(self._name()) + "\n  Actual: " + actual)
+        actual = "not called." if observed is None else _format_recorded_call(observed, self._name())
+        raise AssertionError("expected call not found.\nExpected: " + _format_recorded_call(expected, self._name()) + "\n  Actual: " + actual)
 
     def _assert_any_call(self, args: list[_Arg], kwargs: dict[str, _Arg]) -> None:
-        expected = _Call(args, kwargs)
+        expected = _new_call(args, kwargs)
         for actual in self._node.call_args_list:
             if expected == actual:
                 return
-        raise AssertionError(expected._format(self._name()) + " call not found")
+        raise AssertionError(_format_recorded_call(expected, self._name()) + " call not found")
 
     def _assert_called_once_with(self, args: list[_Arg], kwargs: dict[str, _Arg]) -> None:
         if self._node.call_count != 1:

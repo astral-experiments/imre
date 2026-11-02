@@ -6,8 +6,17 @@ use std::fmt::Write;
 use regex_syntax::ast::{self, Ast, ClassSetItem, Span, Visitor};
 
 pub(super) fn expand(source: &str, ascii: bool) -> Result<String, String> {
+    expand_with_syntax(source, source, ascii)
+}
+
+/// A translated lookahead opener can be parsed as a same-width group for folding its literals.
+pub(super) fn expand_with_syntax(
+    source: &str,
+    syntax: &str,
+    ascii: bool,
+) -> Result<String, String> {
     let ast = ast::parse::Parser::new()
-        .parse(source)
+        .parse(syntax)
         .map_err(|err| err.to_string())?;
     let visitor = Fold {
         source,
