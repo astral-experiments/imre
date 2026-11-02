@@ -1,7 +1,6 @@
 //! Object-valued members declared by a dynamically constructed slotted class.
 
 use super::{Context, Error, Id, Result, Value};
-use ruff_python_stdlib::identifiers::is_identifier;
 
 impl Context {
     /// Construct the replacement for an ordinary object-root dataclass.
@@ -131,9 +130,6 @@ impl Context {
             .any(|&base| self.class_instances_support_weakref(base));
         let mut members = Vec::new();
         for original in slots {
-            if !is_identifier(original) {
-                return Err(Error::new("TypeError", "__slots__ must be identifiers"));
-            }
             if original == "__dict__" {
                 return Err(Error::new(
                     "NotImplementedError",
