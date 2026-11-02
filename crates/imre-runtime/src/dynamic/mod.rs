@@ -271,6 +271,7 @@ impl Context {
             ("bool", Value::Bool(_))
             | ("int", Value::Int(_) | Value::Bool(_))
             | ("float", Value::Float(_))
+            | ("complex", Value::Complex(_))
             | ("str", Value::Str(_) | Value::SurrogateStr(_))
             | ("bytes", Value::Bytes(_))
             | ("bytearray", Value::ByteArray(_))
@@ -2185,6 +2186,7 @@ impl Context {
                 "as_integer_ratio",
                 "__repr__",
             ],
+            "complex" => &["__complex__"],
             "bytes" => {
                 self.builtin("bytes.fromhex");
                 builtins::BYTES_METHODS

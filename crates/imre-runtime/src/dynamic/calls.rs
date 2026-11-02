@@ -344,6 +344,7 @@ impl Context {
                         | "bool"
                         | "int"
                         | "float"
+                        | "complex"
                         | "bytes"
                         | "bytearray"
                         | "memoryview"
@@ -3611,6 +3612,7 @@ impl Context {
                         ))
                     || (class == "memoryview" && builtins::MEMORYVIEW_METHODS.contains(&name))
                     || (class == "bytes" && builtins::BYTES_METHODS.contains(&name))
+                    || (class == "complex" && name == "__complex__")
                     || (class == "bytearray" && builtins::BYTEARRAY_METHODS.contains(&name))
                     || (name == "__repr__"
                         && matches!(class.as_str(), "bool" | "int" | "float"))
@@ -5371,7 +5373,7 @@ impl Context {
     }
 
     /// Allocate the immutable string or bytes payload while retaining the Python class.
-    pub(super) fn new_string(
+    pub(super) fn new_immutable_scalar(
         &mut self,
         kind: &str,
         class: Id,
@@ -5382,17 +5384,17 @@ impl Context {
         if !self.subclass(class, base) {
             return Err(self.invalid_new_subtype(kind, class));
         }
-        let text = builtins::call(self, kind, args, kwargs)?;
+        let value = builtins::call(self, kind, args, kwargs)?;
         if class == base {
-            return Ok(text);
+            return Ok(value);
         }
-        let text = self.scalar_value(text);
+        let storage = self.scalar_value(value);
         Ok(self.alloc(Value::Instance {
             namespace: None,
             class,
             fields: Default::default(),
             dictionary: None,
-            scalar: Some(text),
+            scalar: Some(storage),
             property: None,
             weak_reference: None,
             cycle: None,
@@ -5621,6 +5623,7 @@ impl Context {
                             | "OSError.__init__"
                             | "StopIteration.__init__"
                             | "SystemExit.__init__"
+                            | "complex.__complex__"
                             | "float.__format__"
                             | "float.__getformat__"
                             | "bool.__repr__"
@@ -6014,7 +6017,7 @@ impl Context {
                         .find(|(base, _)| self.has_base(callable, base))
                         .map(|(_, new)| self.builtin(new))
                 });
-                let string_base = ["str", "bytes"]
+                let scalar_base = ["str", "bytes", "complex"]
                     .into_iter()
                     .find(|kind| self.has_base(callable, kind));
                 let float_subclass = self.has_base(callable, "float");
@@ -6039,8 +6042,8 @@ impl Context {
                     ));
                 } else if self.has_base(callable, "module") {
                     self.allocate_module(callable)
-                } else if let Some(kind) = string_base {
-                    self.new_string(kind, callable, &args, &kwargs)?
+                } else if let Some(kind) = scalar_base {
+                    self.new_immutable_scalar(kind, callable, &args, &kwargs)?
                 } else if float_subclass {
                     let positional = std::iter::once(callable)
                         .chain(args.iter().copied())
@@ -6074,7 +6077,7 @@ impl Context {
                     self.call_initializer(init, instance, actual, args, kwargs)?;
                 } else if new.is_none()
                     && !native_tzinfo_new
-                    && string_base.is_none()
+                    && scalar_base.is_none()
                     && !rlock_subclass
                     && !float_subclass
                     && collection_kind.is_none()

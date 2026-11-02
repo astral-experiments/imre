@@ -407,6 +407,7 @@ pub(super) const BYTEARRAY_METHODS: &[&str] = &[
 ];
 
 pub(super) const BYTES_METHODS: &[&str] = &[
+    "__bytes__",
     "__mod__",
     "__repr__",
     "count",
@@ -544,6 +545,7 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         }
         Value::MemoryView { .. } if MEMORYVIEW_METHODS.contains(&attr) => "memoryview",
         Value::Bytes(_) if BYTES_METHODS.contains(&attr) => "bytes",
+        Value::Complex(_) if attr == "__complex__" => "complex",
         Value::ByteArray(_)
             if BYTEARRAY_METHODS.contains(&attr) || matches!(attr, "decode" | "translate") =>
         {
@@ -1422,6 +1424,24 @@ pub(super) fn call(
             "int" if method == "bit_length" => integer::bit_length(ctx, args, kwargs),
             "int" if method == "from_bytes" => integer::from_bytes(ctx, args, kwargs),
             "int" if method == "to_bytes" => integer::to_bytes(ctx, args, kwargs),
+            _ if matches!(
+                (owner, method),
+                ("bytes", "__bytes__") | ("complex", "__complex__")
+            ) =>
+            {
+                let receiver = noargs_method_receiver(ctx, owner, method, args, kwargs)?;
+                let storage = ctx.scalar_value(receiver);
+                if storage == receiver {
+                    return Ok(receiver);
+                }
+                let value = match ctx.heap.get(storage) {
+                    Value::Bytes(bytes) if bytes.len() <= 1 => return Ok(storage),
+                    Value::Bytes(bytes) => Value::Bytes(super::copy_ids(bytes)?),
+                    Value::Complex(number) => Value::Complex(*number),
+                    _ => unreachable!("descriptor receiver has checked native layout"),
+                };
+                Ok(ctx.alloc(value))
+            }
             "bytes" | "bytearray" if method == "maketrans" => {
                 translation::maketrans(ctx, name, args, kwargs)
             }
