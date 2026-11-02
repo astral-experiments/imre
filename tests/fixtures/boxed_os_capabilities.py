@@ -36,6 +36,12 @@ def current():
     assert mkfifo is os.mkfifo and mkfifo is posix.mkfifo
     assert mkfifo not in supports_fd and mkfifo not in supports_follow_symlinks
     if sys.platform == "linux":
+        read_fd, write_fd = os.pipe2(0)
+        try:
+            assert os.get_inheritable(read_fd) and os.get_inheritable(write_fd)
+        finally:
+            os.close(write_fd)
+            os.close(read_fd)
         assert mkfifo in supports_dir_fd
     assert os.mkdir is posix.mkdir and os.mkdir in supports_dir_fd
     directory = os.path.dirname(__file__) or "."

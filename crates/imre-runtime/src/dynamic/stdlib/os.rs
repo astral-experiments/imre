@@ -335,6 +335,9 @@ mod utime;
 
 /// POSIX functions exported as the same builtins by both os and posix.
 pub(super) fn is_descriptor_function(name: &str) -> bool {
+    if cfg!(target_os = "linux") && name == "pipe2" {
+        return true;
+    }
     matches!(
         name,
         "access"
@@ -860,18 +863,27 @@ pub(super) fn descriptor(
         }
         return Ok(ctx.alloc(Value::Tuple(result)));
     }
-    if name == "pipe" {
-        if !args.is_empty() {
-            return Err(Error::new(
-                "TypeError",
-                format!("posix.pipe() takes no arguments ({} given)", args.len()),
-            ));
-        }
+    if matches!(name, "pipe" | "pipe2") {
+        let flags = match (name, args) {
+            ("pipe", []) => libc::O_CLOEXEC,
+            ("pipe2", [flags]) => c_int(ctx, *flags)?,
+            _ => {
+                let arity = if name == "pipe" {
+                    "no arguments"
+                } else {
+                    "exactly one argument"
+                };
+                return Err(Error::new(
+                    "TypeError",
+                    format!("posix.{name}() takes {arity} ({} given)", args.len()),
+                ));
+            }
+        };
         let mut result = Vec::new();
         result
             .try_reserve_exact(2)
             .map_err(|_| Error::new("MemoryError", ""))?;
-        for fd in native::pipe(libc::O_CLOEXEC)? {
+        for fd in native::pipe(flags)? {
             result.push(ctx.int(i64::from(fd)));
         }
         return Ok(ctx.alloc(Value::Tuple(result)));
