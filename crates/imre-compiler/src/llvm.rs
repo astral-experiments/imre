@@ -1331,7 +1331,7 @@ impl Emitter<'_, '_> {
             .iter()
             .flatten()
             .any(|v| v.receiver.ty == Type::ListInt && v.data.is_some())
-            || crate::list_specialization::contains_loop(body)
+            || crate::ir::contains_loop(body)
         {
             return None;
         }

@@ -2540,6 +2540,15 @@ pub(crate) fn walk_statements<'a>(body: &'a [Statement], visit: &mut impl FnMut(
     });
 }
 
+/// Includes loops in eager expression scopes when deciding whether a suite can be cloned.
+pub(crate) fn contains_loop(body: &[Statement]) -> bool {
+    let mut found = false;
+    walk_statements(body, &mut |statement| {
+        found |= matches!(statement, Statement::For { .. } | Statement::While(..));
+    });
+    found
+}
+
 /// Visits expression trees, including statements embedded in eager expressions.
 /// Analyses must include every checked branch, even when it never executes.
 pub(crate) fn walk_expressions<'a>(body: &'a [Statement], visit: &mut impl FnMut(&'a Expr)) {
