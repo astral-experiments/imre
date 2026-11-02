@@ -1666,7 +1666,7 @@ def report(text):
             "boxed_string_surrogates.py",
             "boxed_string_expandtabs.py",
         ):
-            if fixture == "boxed_stat.py" and sys.platform not in ("linux", "darwin"):
+            if fixture in ("boxed_stat.py", "boxed_signal.py") and sys.platform not in ("linux", "darwin"):
                 continue
             plugin.write_bytes((fixtures / fixture).read_bytes())
             if fixture == "boxed_slice_deep_repr.py":

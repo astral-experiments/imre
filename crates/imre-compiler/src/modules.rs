@@ -336,6 +336,7 @@ pub(crate) enum IntrinsicModule {
     Secrets,
     Sysconfig,
     Signal,
+    SignalNative,
     Opcode,
     Unidiff,
     Pathlib,
@@ -774,6 +775,7 @@ impl IntrinsicModule {
             "secrets" => Some(Self::Secrets),
             "sysconfig" => Some(Self::Sysconfig),
             "signal" => Some(Self::Signal),
+            "_signal" if cfg!(unix) => Some(Self::SignalNative),
             "_opcode" => Some(Self::Opcode),
             "unidiff" => Some(Self::Unidiff),
             "argparse" => Some(Self::Argparse),
@@ -1093,8 +1095,19 @@ impl IntrinsicModule {
             (Self::Warnings, "showwarning") => Intrinsic::WarningDisplay { show: true },
             (Self::Time, "sleep") => Intrinsic::TimeSleep,
             (Self::Time, "time") => Intrinsic::WallTime,
-            (Self::Signal, "SIGINT") => Intrinsic::IntConstant(2),
-            (Self::Signal, "SIGTERM") => Intrinsic::IntConstant(15),
+            (Self::Signal | Self::SignalNative, "SIGINT") => Intrinsic::IntConstant(2),
+            (Self::Signal | Self::SignalNative, "SIGTERM") => Intrinsic::IntConstant(15),
+            #[cfg(unix)]
+            (Self::SignalNative, "SIGALRM") => Intrinsic::IntConstant(i64::from(libc::SIGALRM)),
+            (Self::Signal | Self::SignalNative, "alarm") if cfg!(unix) => {
+                Intrinsic::ObjectRuntimeExport("_signal.alarm")
+            }
+            (Self::Signal, "SIGALRM") if cfg!(unix) => {
+                Intrinsic::ObjectRuntimeExport("signal.SIGALRM")
+            }
+            (Self::Signal, "Signals") if cfg!(unix) => {
+                Intrinsic::ObjectRuntimeExport("signal.Signals")
+            }
             // Native executables have no adaptive bytecode interpreter.
             (Self::Opcode, "ENABLE_SPECIALIZATION" | "ENABLE_SPECIALIZATION_FT") => {
                 Intrinsic::IntConstant(0)

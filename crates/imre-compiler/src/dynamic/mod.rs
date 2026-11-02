@@ -100,6 +100,9 @@ impl Imports {
     }
     fn add(&mut self, level: u32, name: &str) {
         self.names.push((level, name.to_owned()));
+        if level == 0 && cfg!(unix) && matches!(name, "signal" | "_signal") {
+            self.runtime_imports = true;
+        }
         if level == 0
             && matches!(
                 name,
@@ -372,6 +375,7 @@ pub(crate) fn compile(
     // An ordinary entry can import a package that uses the object runtime without
     // accessing sys.path or installation metadata in the entry itself.
     if !runtime_imports
+        && !(cfg!(unix) && src.contains("signal"))
         && ![
             "_imp",
             "sys",
