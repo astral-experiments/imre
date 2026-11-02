@@ -1766,6 +1766,7 @@ fn annotation_with_aliases(
         Some(Binding::Intrinsic(Intrinsic::TextIO)) => return Ok(Type::TextIO),
         Some(Binding::Intrinsic(Intrinsic::BinaryIO)) => return Ok(Type::BinaryIO),
         Some(Binding::Intrinsic(Intrinsic::JsonDecoderClass)) => return Ok(Type::JsonDecoder),
+        Some(Binding::Intrinsic(Intrinsic::JsonEncoderClass)) => return Ok(Type::JsonEncoder),
         Some(Binding::Intrinsic(Intrinsic::Socket)) => return Ok(Type::Socket),
         Some(Binding::Intrinsic(Intrinsic::ZipFile)) => return Ok(Type::ZipFile),
         Some(Binding::Intrinsic(Intrinsic::ZipInfo)) => return Ok(Type::ZipInfo),
@@ -7198,6 +7199,7 @@ impl<'a> Checker<'a> {
                         | Type::ProcessSelectorClass
                         | Type::Hash
                         | Type::JsonDecoder
+                        | Type::JsonEncoder
                         | Type::ZipFile
                         | Type::ZipInfo
                         | Type::CsvReader
@@ -9267,6 +9269,21 @@ impl<'a> Checker<'a> {
         ) {
             return self.json_decode(call);
         }
+        if self.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::JsonEncoderClass)) {
+            let flag = |name, default| {
+                ParameterKind::KeywordOnly.parameter(name, Type::Bool, Some(Expr::boolean(default)))
+            };
+            let args = self.arguments(
+                call,
+                &[
+                    flag("ensure_ascii", true),
+                    flag("allow_nan", true),
+                    flag("sort_keys", false),
+                ],
+                None,
+            )?;
+            return Ok(self.ordered_builtin(Builtin::JsonEncoderNew, Type::JsonEncoder, args));
+        }
         if self.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::JsonDecoderClass)) {
             self.reject_builtin_keywords(call)?;
             if !call.arguments.args.is_empty() {
@@ -9600,6 +9617,9 @@ impl<'a> Checker<'a> {
             }
             if receiver.ty == Type::Hash {
                 return self.hash_method(receiver, attribute, call);
+            }
+            if receiver.ty == Type::JsonEncoder && attribute.attr.as_str() == "encode" {
+                return self.json_encoder_method(receiver, call);
             }
             if receiver.ty == Type::JsonDecoder && attribute.attr.as_str() == "decode" {
                 let args =
