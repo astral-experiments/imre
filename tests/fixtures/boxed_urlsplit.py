@@ -135,6 +135,15 @@ def current():
     from urllib.parse import quote, quote_from_bytes, quote_plus, urlencode
 
     print(quote("Málaga <&> 東京", safe="!$&'()*+,/:;=@"), quote("/", safe="%!$&'()*+,/:=@"))
+    undecodable = chr(0xdcff)
+    assert quote_plus(undecodable, errors="surrogateescape") == "%FF"
+    assert quote_plus(" +" + undecodable, safe="+" + undecodable, errors="surrogateescape") == "++%FF"
+    try:
+        quote_plus(" " + undecodable)
+    except UnicodeEncodeError as error:
+        assert (error.start, error.end) == (1, 2)
+    else:
+        raise AssertionError("strict quoting accepted a surrogate")
     print(quote_from_bytes(bytearray(b"/%\xff")), quote_plus("a b+c"))
     pairs = [("k", ["first", "second"])]
     def detach(value, *options):
