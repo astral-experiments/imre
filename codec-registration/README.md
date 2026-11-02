@@ -3,3 +3,9 @@
 The stock reference is Linux CPython 3.14.5 at 5607950ef232dad16d75c0cf53101d9649d89115. The source-pinned native public baseline 36c4f334e96c3bb5a8270ff8f8c85808715fec6d appears in the earlier buffered-rw-pair class packet. It registered all 82, then errored on the missing codecs.register during every setUp.
 
 Development revision 9d54510b5601917481fc2a6c228cdccd2e11eba0 adds the first codec search path on public parent a23a577bcd59a7322af266ff9ec4e8f569f2f929. Its focused archive preserves the 3.14.5 reference and both native optimization levels. It separates the accepted four-tuple path, callback lifetime and cache behavior from the enabled original lookupTestDecoder callback, which still raised AttributeError on the missing CodecInfo constructor at that revision. Supplemental controls do not count as original class cases.
+
+O0 and O3 independently reran the first successful original, test_bufio_write_through (module ordinal 447, class ordinal 3). Its callbacks and runtime streams matched stock in a fresh one-case process at both optimization levels. The first twelve observed O0 successes also passed together in a clean, stock-matched run. The engineering cutoff archive distinguishes an original class no-progress timeout from subsequently cancelled development runs and records containment and cleanup.
+
+On the integrated development head 5e547cf0, both native levels exercised the exact enabled lookupTestDecoder and all fifteen stock selector outcomes. A separate O0 run of the original test_seek_and_tell reaches a genuine later body error at line 3289, when the native file opener receives the user codec name. Standalone codec lookup and the file stream's encoding support are reported separately.
+
+The corrected review head 4b4274a9 includes a cross-API cache test. Calling the public lookup API between two UTF-16-LE decodes no longer lets a later callback replace the winning default provider. Its predecessor 5eade8bd fails both call orders.
