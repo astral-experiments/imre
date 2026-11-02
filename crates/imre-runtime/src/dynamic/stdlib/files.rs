@@ -284,8 +284,10 @@ pub(super) fn call(
     let first = argument(args, 0)?;
     match name {
         "os.path.join" => {
+            let first = super::posixpath::fspath(ctx, first)?;
             let mut path = ctx.str_value(first)?.to_owned();
             for &part in &args[1..] {
+                let part = super::posixpath::fspath(ctx, part)?;
                 path = join(&path, ctx.str_value(part)?);
             }
             return Ok(ctx.text(path));
