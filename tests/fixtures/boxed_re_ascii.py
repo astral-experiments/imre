@@ -59,3 +59,25 @@ def current():
     else:
         assert empty_match is not None and empty_match.span() == (1, 1)
     assert empty.fullmatch("aa", 1, 0) is None
+
+    for spelling, subject, word, pos, end in (
+        (r"(Python)\1", "xPythonPythony", "Python", 1, 13),
+        (r"(é🙂)\1", "xé🙂é🙂y", "é🙂", 1, 5),
+        (b"(\xffA)\\1", b"x\xffA\xffAy", b"\xffA", 1, 5),
+    ):
+        doubled = re.compile(spelling)
+        assert doubled.pattern == spelling
+        match = doubled.fullmatch(subject, pos, end)
+        assert match is not None and match.group(0, 1) == (word + word, word)
+        assert doubled.match(subject, pos + 1, end) is None
+        assert doubled.fullmatch(subject, pos, end - 1) is None
+    assert re.fullmatch(r"(Python)\1", "PythonPythox") is None
+
+    # Repeating a variable expression can accept a different capture on the second copy.
+    try:
+        variable = re.compile(r"(a|b)\1")
+    except re.PatternError:
+        pass
+    else:
+        assert variable.fullmatch("bb").group(1) == "b"
+        assert variable.fullmatch("ab") is None
