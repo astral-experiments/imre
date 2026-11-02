@@ -3089,7 +3089,6 @@ impl Context {
                         return Ok(self.builtin(parent));
                     }
                     "__bases__" | "__mro__" => return Ok(self.builtin_hierarchy_tuple(obj, name)),
-                    "utc" if !base => return Ok(stdlib::datetime::utc(self)),
                     _ => {}
                 }
             }
@@ -3990,6 +3989,18 @@ impl Context {
         }
     }
 
+    fn check_zone_constant_write(&self, obj: Id, name: &str) -> Result<()> {
+        if matches!(name, "utc" | "min" | "max")
+            && matches!(self.heap.get(obj), Value::Calendar { value, .. } if value.class() == "timezone")
+        {
+            return Err(Error::new(
+                "AttributeError",
+                format!("'datetime.timezone' object attribute '{name}' is read-only"),
+            ));
+        }
+        Ok(())
+    }
+
     pub(super) fn delete_attr(&mut self, obj: Id, name: &str) -> Result<()> {
         if let Value::Native(class) = self.heap.get(obj)
             && HashState::is_provider_class(class)
@@ -4052,6 +4063,7 @@ impl Context {
         if let Some(result) = super::paramspec::update(self, obj, name, None) {
             return result;
         }
+        self.check_zone_constant_write(obj, name)?;
         self.check_template_write(obj, name)?;
         super::namespace::check_class_write(self, obj, name)?;
         stdlib::io::check_class_write(self, obj, name)?;
@@ -4691,6 +4703,7 @@ impl Context {
                 "custom ABCMeta construction and subclass checks are unsupported",
             ));
         }
+        self.check_zone_constant_write(obj, name)?;
         self.check_template_write(obj, name)?;
         super::namespace::check_class_write(self, obj, name)?;
         stdlib::io::check_class_write(self, obj, name)?;
@@ -4708,6 +4721,7 @@ impl Context {
                     class.as_str(),
                     HashState::CLASS
                         | HashState::XOF_CLASS
+                        | "datetime.timezone"
                         | "typing.TypeVar"
                         | KEY_WRAPPER
                         | stdlib::flags::TYPE

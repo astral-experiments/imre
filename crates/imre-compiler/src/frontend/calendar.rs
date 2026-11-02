@@ -328,8 +328,8 @@ impl Checker<'_> {
         a: &ast::ExprAttribute,
     ) -> Result<Expr, String> {
         let name = a.attr.as_str();
-        if kind == C::Zone && fixed_zone_method(name) {
-            return Err(self.object_runtime_export("timezone method descriptor", a));
+        if kind == C::Zone && (fixed_zone_method(name) || matches!(name, "min" | "max" | "utc")) {
+            return Err(self.object_runtime_export("timezone member", a));
         }
         if kind == C::DateTime && name == "tzinfo" {
             let ty = self.types.optional(Type::Calendar(C::Zone));
