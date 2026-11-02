@@ -684,7 +684,7 @@ pub(super) struct ClassNamespace {
     pub dictionary: Option<Id>,
     /// Closure cell shared by method annotation providers.
     pub annotation_dict_cell: Option<Id>,
-    /// Field dictionary and executed annotation offsets while the class body is running.
+    /// The field dictionary (NONE if unbound) and executed offsets while the class body runs.
     pub annotation_scratch: Option<(Id, HashSet<u32>)>,
     /// Class annotation attributes are served by the installed provider.
     pub provider_annotations: bool,

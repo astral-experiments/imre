@@ -6858,10 +6858,13 @@ impl Context {
                 .expect("class parameter scope");
             self.bind(scope, "__type_params__", params);
         }
-        let annotations = self.dict(Vec::new());
-        if bindings.postponed_annotations || typed_dict_meta.is_some() {
-            self.bind_local(scope, "__annotations__", annotations);
-        }
+        let annotations = if bindings.postponed_annotations || typed_dict_meta.is_some() {
+            let fields = self.dict(Vec::new());
+            self.bind_local(scope, "__annotations__", fields);
+            fields
+        } else {
+            NONE
+        };
         if let Value::Scope(frame) = self.heap.get_mut(scope) {
             frame
                 .class_namespace
