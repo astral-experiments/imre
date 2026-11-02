@@ -4829,12 +4829,11 @@ impl Context {
 
     pub(super) fn class(
         &mut self,
-        name: Id,
         bases: Id,
         body: Id,
+        total: Option<Id>,
         parameterized: bool,
     ) -> Result<Id> {
-        let name = self.str_value(name)?.to_owned();
         let (original, mut bases) = super::typing::resolve_bases(self, bases)?;
         let mut typed_dict_meta = None;
         if let Some(meta) = self.module_value("typing", "_TypedDictMeta")
@@ -4869,6 +4868,7 @@ impl Context {
         else {
             return Err(Error::new("TypeError", "invalid class body"));
         };
+        let name = self.str_value(self.code_object(code).name)?.to_owned();
         #[derive(serde::Deserialize)]
         struct ClassBindings {
             #[serde(default)]
@@ -4994,7 +4994,13 @@ impl Context {
         }
         // Look up the inherited hook after __set_name__, before publishing the class.
         let hook = self.super_attribute(class, class, class, "__init_subclass__")?;
-        self.call(hook, Vec::new(), Vec::new())?;
+        let mut kwargs = Vec::new();
+        if typed_dict_meta.is_none()
+            && let Some(total) = total
+        {
+            kwargs.push(("total".to_owned(), total));
+        }
+        self.call(hook, Vec::new(), kwargs)?;
         if module == "_collections_abc"
             && matches!(
                 name.as_str(),
@@ -5022,7 +5028,7 @@ impl Context {
                 .ok_or_else(|| Error::new("RuntimeError", "missing TypedDict initializer"))?;
             self.call(
                 configure,
-                vec![class, fields, TRUE, TRUE, thunks],
+                vec![class, fields, total.unwrap_or(TRUE), TRUE, thunks],
                 Vec::new(),
             )?;
         }

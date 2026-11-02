@@ -23,6 +23,25 @@ def current():
         __optional_keys__ = Film.__optional_keys__
         __total__ = True
 
+    class Partial(TypedDict, total=False):
+        __total__ = True
+        year: int
+
+    assert Partial.__total__ is False
+    assert Partial.__optional_keys__ == {"year"} and not Partial.__required_keys__
+    assert Partial(year=1979) == {"year": 1979}
+
+    class Receiver:
+        def __init_subclass__(cls, *, total):
+            cls.received = total
+
+    class Child(Receiver, total=None): pass
+    assert Child.received is None
+
+    namespace = {"TypedDict": TypedDict}
+    exec("class Loaded(TypedDict, total=False): pass", namespace)
+    assert namespace["Loaded"].__total__ is False
+
     Draft = TypedDict("Draft", [("title", str)], total=False)
     assert is_typeddict(Film) and is_typeddict(tp=Draft)
     assert type(Film) is type(Draft) and type(Film).__name__ == "_TypedDictMeta"

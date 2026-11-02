@@ -317,12 +317,19 @@ impl Function<'_, '_> {
                         .map(|d| self.expr(&d.expression))
                         .collect::<Vec<_>>();
                     let bases = self.op("list", &[]);
-                    if let Some(args) = v.arguments.as_deref() {
-                        if !args.keywords.is_empty() {
+                    let kwargs = if let Some(args) = v.arguments.as_deref() {
+                        if args
+                            .keywords
+                            .iter()
+                            .any(|kw| kw.arg.as_deref() != Some("total"))
+                            || args.keywords.len() > 1
+                        {
                             self.unsupported("class keyword arguments");
                         }
-                        self.arguments(&bases, args, "0");
-                    }
+                        self.arguments(&bases, args, "0")
+                    } else {
+                        "0".into()
+                    };
                     let init = self.define(
                         v.start(),
                         self.source.private_names.definition(&v.name),
@@ -330,13 +337,12 @@ impl Function<'_, '_> {
                         None,
                         Body::Namespace(&v.body),
                     );
-                    let name = self.code_name(self.source.private_names.definition(&v.name));
                     let operation = if v.type_params.is_some() {
                         "parameterized_class"
                     } else {
                         "class"
                     };
-                    let class = self.op(operation, &[&name, &bases, &init]);
+                    let class = self.op(operation, &[&kwargs, &bases, &init]);
                     self.decorated(&v.name, &decorators, class);
                 }
                 ast::Stmt::Return(v) => {
