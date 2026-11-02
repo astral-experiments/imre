@@ -2345,7 +2345,8 @@ def _hint_scope(params, globalns, localns, is_class):
     return globalns, localns
 
 
-def _resolve_hint(value, globalns, localns, owner, seen, include_extras, format, parent_ref=None):
+def _resolve_hint(value, globalns, localns, owner, seen, include_extras, format, parent_ref=None,
+                  *, prefer_fwd_module=True):
     from annotationlib import Format, ForwardRef
     from types import GenericAlias, ModuleType
     if isinstance(value, str):
@@ -2354,18 +2355,25 @@ def _resolve_hint(value, globalns, localns, owner, seen, include_extras, format,
         expr = value.__forward_arg__
         if expr in seen:
             return value
-        if value.__forward_module__ is not None:
-            import sys
-            module = sys.modules.get(value.__forward_module__)
-            if module is not None:
-                globalns = module.__dict__
+        if prefer_fwd_module and value.__forward_module__ is not None:
+            globalns = None
+            # A reference with its own module replaces the globals built by _hint_scope.
+            # Restore the owner's parameters without modifying the real module dictionary.
+            if params := getattr(owner, "__type_params__", None):
+                import sys
+                namespace = getattr(sys.modules.get(value.__forward_module__), "__dict__", None)
+                if namespace is not None:
+                    globalns = dict(namespace)
+                    for param in params:
+                        globalns[param.__name__] = param
         result = value.evaluate(globals=globalns, locals=localns, type_params=(), owner=owner, format=format)
         if format == Format.FORWARDREF and isinstance(result, ForwardRef):
             return result
         if isinstance(result, str):
             result = ForwardRef(result, module=value.__forward_module__, owner=owner or value.__owner__,
                                 is_argument=value.__forward_is_argument__, is_class=value.__forward_is_class__)
-        return _resolve_hint(result, globalns, localns, owner, seen + (expr,), include_extras, format, value)
+        return _resolve_hint(result, globalns, localns, owner, seen + (expr,), include_extras, format,
+                             value, prefer_fwd_module=False)
 
     origin = _typing.get_origin(value)
     if origin is None or origin is Literal:
@@ -2377,7 +2385,8 @@ def _resolve_hint(value, globalns, localns, owner, seen, include_extras, format,
         module = getattr(parent_ref, '__forward_module__', None)
         ref_owner = getattr(parent_ref, '__owner__', None)
         values = tuple(ForwardRef(arg, module=module, owner=ref_owner) if isinstance(arg, str) else arg for arg in args)
-    resolved = tuple(_resolve_hint(a, globalns, localns, owner, seen, include_extras, format) for a in values)
+    resolved = tuple(_resolve_hint(a, globalns, localns, owner, seen, include_extras, format,
+                                   prefer_fwd_module=prefer_fwd_module) for a in values)
     if isinstance(value, _AnnotatedAlias):
         if not include_extras:
             return resolved[0]
