@@ -52,6 +52,12 @@ impl<'a> ConditionalFacts<'a> {
                         for value in &node.operands {
                             if matches!(value, ast::Expr::Name(_) | ast::Expr::Named(_)) {
                                 self.predicate(value);
+                            } else if let ast::Expr::Call(call) = value
+                                && matches!(&*call.func, ast::Expr::Name(name) if name.id == "type")
+                                && let [ast::Expr::Name(name)] = call.arguments.args.as_ref()
+                            {
+                                // An exact type comparison can narrow the argument's slot.
+                                self.0.insert(name.id.as_str());
                             } else if let ast::Expr::Attribute(field) = value
                                 && let ast::Expr::Name(receiver) = &*field.value
                             {
