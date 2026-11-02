@@ -195,6 +195,10 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
                 include_str!("../stdlib/logging/boxed.py"),
             ),
         )),
+        "logging.handlers" => Some((
+            "logging/handlers.py",
+            include_str!("../stdlib/logging/buffering.py"),
+        )),
         "platform" => Some((
             "platform.py",
             concat!(
@@ -3643,7 +3647,11 @@ impl<'a> Loader<'a> {
             )),
             (module == Some(IntrinsicModule::LoggingHandlers)).then_some((
                 LOGGING_HANDLER_CLASSES,
-                include_str!("../stdlib/logging/handlers.py"),
+                concat!(
+                    include_str!("../stdlib/logging/handlers.py"),
+                    "\n",
+                    include_str!("../stdlib/logging/buffering.py"),
+                ),
             )),
             needs_textwrap(TEXTWRAP_FUNCTIONS).then_some((
                 TEXTWRAP_FUNCTIONS,
