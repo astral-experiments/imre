@@ -555,6 +555,11 @@ fn box_native_entry(ctx: &mut Context, entry: CodecInfo) -> Result<Id> {
         _ => native_functions(ctx, codec)?,
     };
     let name = ctx.text(codec.name());
+    // getregentry resolves IncrementalDecoder as a global in its encoding module.
+    let incremental = match *ctx.heap.get(module) {
+        Value::Module { scope, .. } => ctx.lookup(scope, "IncrementalDecoder")?,
+        _ => ctx.lookup_attr(module, "IncrementalDecoder")?,
+    };
     let id = ctx.call(
         class,
         Vec::new(),
@@ -563,7 +568,7 @@ fn box_native_entry(ctx: &mut Context, entry: CodecInfo) -> Result<Id> {
             ("encode".into(), encode),
             ("decode".into(), decode),
             ("incrementalencoder".into(), NONE),
-            ("incrementaldecoder".into(), NONE),
+            ("incrementaldecoder".into(), incremental),
             ("streamreader".into(), NONE),
             ("streamwriter".into(), writer),
         ],
@@ -795,34 +800,88 @@ pub(super) fn decode_slice(
 }
 
 fn registered_utf8(ctx: &mut Context, input: Id, name: &str, signature: bool) -> Result<Id> {
-    let data = ctx.bytes_like(input)?;
+    stateful_utf8(ctx, input, name, signature, true).map(|(text, _)| text)
+}
+
+fn utf8_input(ctx: &Context, input: Id) -> Result<&[u8]> {
+    if let Value::Array(array) = ctx.buffer_storage(input)? {
+        Ok(array.as_bytes())
+    } else {
+        ctx.bytes_like(input)
+    }
+}
+
+/// Consume complete sequences and leave a trailing partial character for the next call.
+fn stateful_utf8(
+    ctx: &mut Context,
+    input: Id,
+    name: &str,
+    signature: bool,
+    final_input: bool,
+) -> Result<(Id, usize)> {
+    let data = utf8_input(ctx, input)?;
     // The utf-8-sig codec passes the slice after the BOM to utf_8_decode.
     let data = if signature {
         data.strip_prefix(b"\xef\xbb\xbf").unwrap_or(data)
     } else {
         data
     };
+    let mut consumed = 0;
+    let mut prefix =
+        |text: &mut String, data: &[u8], offset: usize| -> Result<Option<DecodeIssue>> {
+            let issue = crate::objects::utf8_prefix(text, data, offset)?;
+            if let Some(problem) = &issue
+                && !final_input
+            {
+                let tail = &data[problem.start..];
+                // A truncated surrogate may still be consumed by the surrogatepass handler.
+                if problem.reason == "unexpected end of data" || matches!(tail, [0xed, 0xa0..=0xbf])
+                {
+                    consumed = problem.start;
+                    return Ok(None);
+                }
+            }
+            consumed = data.len();
+            Ok(issue)
+        };
     let mut text = String::new();
-    let Some(issue) = crate::objects::utf8_prefix(&mut text, data, 0)? else {
-        return Ok(ctx.text(text));
+    let Some(issue) = prefix(&mut text, data, 0)? else {
+        return Ok((ctx.text(text), consumed));
     };
     let points = text.chars().map(u32::from).collect();
     let error = issue.error(data);
-    resume_decode(ctx, name, points, error, |points, data, position| {
+    // CPython's UTF-8 decoder handles these policies directly even when
+    // register_error has replaced a callback with the same name.
+    let resolve = |ctx: &mut Context| match name {
+        "ignore" | "replace" | "surrogateescape" => Ok(ctx.builtin(handler_builtin(name).unwrap())),
+        _ => handler(ctx, name),
+    };
+    let result = resume_decode_with(ctx, resolve, points, error, |points, data, position| {
         text.clear();
-        let issue = crate::objects::utf8_prefix(&mut text, data, position)?;
+        let issue = prefix(&mut text, data, position)?;
         points
             .try_reserve(text.len())
             .map_err(|_| crate::Error::allocation())?;
         points.extend(text.chars().map(u32::from));
         Ok(issue)
-    })
+    })?;
+    Ok((result, consumed))
 }
 
 /// Resume from the position and possibly changed byte object supplied by the handler.
 fn resume_decode(
     ctx: &mut Context,
     name: &str,
+    points: Vec<u32>,
+    error: crate::Error,
+    prefix: impl FnMut(&mut Vec<u32>, &[u8], usize) -> Result<Option<DecodeIssue>>,
+) -> Result<Id> {
+    resume_decode_with(ctx, |ctx| handler(ctx, name), points, error, prefix)
+}
+
+fn resume_decode_with(
+    ctx: &mut Context,
+    resolve: impl FnOnce(&mut Context) -> Result<Id>,
     mut points: Vec<u32>,
     error: crate::Error,
     mut prefix: impl FnMut(&mut Vec<u32>, &[u8], usize) -> Result<Option<DecodeIssue>>,
@@ -832,7 +891,7 @@ fn resume_decode(
         return Err(raised);
     }
     let exception = ctx.alloc(Value::Raised(raised));
-    let callback = handler(ctx, name)?;
+    let callback = resolve(ctx)?;
     // One decode retains its first handler even if a callback replaces the registry entry.
     ctx.heap.keep(callback);
     loop {
@@ -904,6 +963,38 @@ fn positional_codec_args(
             args.len()
         ))),
     }
+}
+
+pub(super) fn utf8_decode(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    if !kwargs.is_empty() {
+        return Err(type_error(
+            "_codecs.utf_8_decode() takes no keyword arguments",
+        ));
+    }
+    let Some(&input) = args.first() else {
+        return Err(type_error(
+            "utf_8_decode expected at least 1 argument, got 0",
+        ));
+    };
+    if args.len() > 3 {
+        return Err(type_error(format!(
+            "utf_8_decode expected at most 3 arguments, got {}",
+            args.len()
+        )));
+    }
+    ctx.with_buffer_export(input, |ctx| {
+        utf8_input(ctx, input)?;
+        let errors = entry_error_policy(ctx, "utf_8_decode", args.get(1).copied())?;
+        let final_input = args
+            .get(2)
+            .map(|&id| ctx.truth(id))
+            .transpose()?
+            .unwrap_or(false);
+        let name = error_name(ctx, errors)?.to_owned();
+        let (text, consumed) = stateful_utf8(ctx, input, &name, false, final_input)?;
+        let consumed = ctx.alloc(Value::Int(crate::Int::from_usize(consumed)));
+        Ok(ctx.alloc(Value::Tuple(vec![text, consumed])))
+    })
 }
 
 pub(super) fn escape_decode(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {

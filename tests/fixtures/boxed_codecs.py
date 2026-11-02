@@ -117,7 +117,77 @@ def check_boms():
         assert getattr(codecs, name) is mark
 
 
+def check_incremental_decoder_factory():
+    from encodings.utf_8 import IncrementalDecoder
+
+    import encodings.latin_1
+    import gc
+    latin_decoder = encodings.latin_1.IncrementalDecoder
+    del encodings.latin_1.IncrementalDecoder
+    try:
+        codecs.lookup("L1")
+    except NameError as error:
+        assert error.name == "IncrementalDecoder"
+    else:
+        raise AssertionError("missing Latin-1 decoder")
+    finally:
+        encodings.latin_1.IncrementalDecoder = latin_decoder
+    gc.collect()
+    latin = codecs.lookup("L1")
+    assert latin.decode(b"\xc7") == ("Ç", 1) and latin.incrementaldecoder is latin_decoder
+
+    entry = codecs.lookup("utf-8")
+    assert codecs.getincrementaldecoder("u8") is entry.incrementaldecoder is IncrementalDecoder
+    decoder = IncrementalDecoder()
+    assert decoder.decode(b"A\xe2") == "A"
+    assert decoder.getstate() == (b"\xe2", 0)
+    decoder.setstate((b"\xe2\x82", 0))
+    assert decoder.decode(b"\xac", True) == "€"
+    for name in ("ascii", "latin-1", "cp1251", "cp424", "cp437"):
+        decoder = codecs.getincrementaldecoder(name)()
+        assert decoder.decode(b"x", True) == codecs.lookup(name).decode(b"x")[0]
+    decoder = codecs.getincrementaldecoder("cp437")()
+    lookup = codecs.lookup
+    codecs.lookup = None
+    try:
+        assert decoder.decode(b"\x82") == "é"
+    finally:
+        codecs.lookup = lookup
+    def search(name):
+        if name == "incremental_test":
+            return codecs.CodecInfo(None, None, incrementaldecoder=IncrementalDecoder)
+
+    codecs.register(search)
+    try:
+        assert codecs.getincrementaldecoder("incremental-test") is IncrementalDecoder
+    finally:
+        codecs.unregister(search)
+    decoder = IncrementalDecoder("surrogatepass")
+    assert decoder.decode(b"\xed\xa0") == ""
+    assert ord(decoder.decode(b"\x80", True)) == 0xd800
+    decoder.reset()
+    assert decoder.getstate() == (b"", 0)
+
+    def replace_input(error):
+        assert error.object == b"\xff\xe2"
+        error.object = b"ABC\xe2"
+        return "!", 1
+
+    codecs.register_error("test.incremental_input", replace_input)
+    assert codecs.utf_8_decode(b"\xff\xe2", "test.incremental_input", False) == ("!BC", 3)
+    entry.incrementaldecoder = None
+    try:
+        codecs.getincrementaldecoder("UTF-8")
+    except LookupError as error:
+        assert error.args == ("UTF-8",)
+    else:
+        raise AssertionError("missing incremental decoder")
+    finally:
+        entry.incrementaldecoder = IncrementalDecoder
+
+
 def current():
+    check_incremental_decoder_factory()
     check_text_encoding_flag()
     check_escape_decode()
     fixed_endian_encoders()

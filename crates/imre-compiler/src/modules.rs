@@ -2046,6 +2046,15 @@ impl IntrinsicModule {
             (Self::Types, "TracebackType") => Intrinsic::NominalClass("traceback"),
             (Self::Types, "FrameType") => Intrinsic::NominalClass("frame"),
             (Self::Types, "CodeType") => Intrinsic::NominalClass("code"),
+            (Self::Codecs, "getincrementaldecoder") => {
+                Intrinsic::ObjectRuntimeExport("codecs.getincrementaldecoder")
+            }
+            (Self::Codecs | Self::CodecsNative, "utf_8_decode") => {
+                Intrinsic::ObjectRuntimeExport("codecs.utf_8_decode")
+            }
+            (Self::Codecs, "BufferedIncrementalDecoder") => {
+                Intrinsic::ObjectRuntimeExport("codecs.BufferedIncrementalDecoder")
+            }
             (Self::Codecs, "IncrementalDecoder") => {
                 Intrinsic::ObjectRuntimeExport("codecs.IncrementalDecoder")
             }
