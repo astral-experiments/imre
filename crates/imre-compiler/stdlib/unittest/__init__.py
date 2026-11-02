@@ -271,6 +271,11 @@ class TestCase(_SuiteMember):
             standard = _inequality_message(repr(first), repr(second))
             raise self.failureException(self._formatMessage(msg, standard))
 
+    def _assertClassEqual(self, first: type, second: type, msg: str | None = None) -> None:
+        if first != second:
+            standard = _inequality_message(repr(first), repr(second))
+            raise self.failureException(self._formatMessage(msg, standard))
+
     def _assertOptionalTextEqual(self, first: str | None, second: str | None, msg: str | None = None) -> None:
         if first is None:
             if second is None:

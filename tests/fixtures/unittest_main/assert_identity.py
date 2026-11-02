@@ -40,6 +40,14 @@ class InterruptedDisplay:
 
 
 class IdentityTest(unittest.TestCase):
+    def test_type_values(self):
+        expected = str
+        self.assertEqual(type("text"), expected)
+        self.assertEqual(type(b"bytes"), bytes)
+        with self.assertRaises(AssertionError) as caught:
+            self.assertEqual(type(b"bytes"), expected, "type differs")
+        self.assertEqual(str(caught.exception), "<class 'bytes'> != <class 'str'> : type differs")
+
     def test_alias_and_equal_distinct_objects(self):
         first = [1]
         alias = first
