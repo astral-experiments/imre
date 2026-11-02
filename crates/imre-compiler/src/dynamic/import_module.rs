@@ -120,6 +120,10 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
                 format!("{implementation}{functions}")
             })))
         }
+        "importlib.resources._adapters" => Some((
+            "importlib/resources/_adapters.py",
+            include_str!("../../stdlib/importlib/resources/_adapters.py"),
+        )),
         "importlib.resources" => Some((
             "importlib/resources/__init__.py",
             include_str!("../../stdlib/importlib/resources/__init__.py"),
