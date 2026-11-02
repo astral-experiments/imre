@@ -1160,16 +1160,15 @@ pub(super) unsafe extern "C" fn imre_dyn_scoped_call_at(
 
 /// Record a class annotation only when its statement executes.
 #[unsafe(no_mangle)]
-pub(super) unsafe extern "C" fn imre_dyn_class_annotation(
+pub(super) unsafe extern "C" fn imre_dyn_mark_class_annotation(
     ctx: *mut Context,
     scope: Id,
     name: Id,
-    thunk: Id,
     offset: u32,
 ) -> Id {
     // SAFETY: the compiler passes the active context and handles from the current class body.
     let ctx = unsafe { &mut *ctx };
-    let result = ctx.record_class_annotation(scope, name, thunk, offset);
+    let result = ctx.record_class_annotation(scope, name, offset);
     finish(ctx, result)
 }
 

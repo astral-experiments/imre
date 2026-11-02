@@ -3874,37 +3874,6 @@ impl Context {
                         .own_class_attr(obj, name)
                         .unwrap_or_else(|| self.heap.packed_tuple(Vec::new(), false)));
                 }
-                if name == "__annotations__"
-                    && let Some(sites) = self
-                        .scope_data(scope)
-                        .class_namespace
-                        .as_ref()
-                        .and_then(|namespace| namespace.annotation_sites.as_ref())
-                {
-                    let sites: Vec<_> = sites.values().copied().collect();
-                    // An annotation can replace __annotations__ and collect the old thunks.
-                    let mark = self.heap.temporary_mark();
-                    for &(key, thunk) in &sites {
-                        self.heap.keep(key);
-                        self.heap.keep(thunk);
-                    }
-                    let mapping = self.dict(Vec::new());
-                    self.heap.keep(mapping);
-                    let result = (|| {
-                        for (key, thunk) in sites {
-                            let value = self.call(thunk, Vec::new(), Vec::new())?;
-                            self.put_item(mapping, key, value)?;
-                        }
-                        self.bind_local(scope, name, mapping);
-                        let Value::Scope(frame) = self.heap.get_mut(scope) else {
-                            unreachable!("class scope")
-                        };
-                        frame.class_namespace.as_mut().unwrap().annotation_sites = None;
-                        Ok(mapping)
-                    })();
-                    self.heap.release_temporaries_since(mark);
-                    return result;
-                }
                 if name == "__name__" {
                     let assigned = self
                         .scope_data(scope)
@@ -4424,7 +4393,6 @@ impl Context {
                 {
                     return self.update_class_annotation_attr(scope, name, None);
                 }
-                let annotations = self.scope_data(scope).class_namespace.as_ref();
                 let error = match name {
                     "__name__" | "__qualname__" | "__bases__" | "__type_params__"
                     | "__module__" | "__doc__" => Error::new(
@@ -4441,12 +4409,6 @@ impl Context {
                     "__base__" => Error::new("AttributeError", "readonly attribute"),
                     "__annotate__" if member.is_none() => {
                         Error::new("TypeError", "cannot delete __annotate__ attribute")
-                    }
-                    "__annotations__"
-                        if member.is_none()
-                            && annotations.is_some_and(|ns| ns.annotation_sites.is_some()) =>
-                    {
-                        Error::new("AttributeError", "__annotations__")
                     }
                     _ => {
                         let key = self.text(name);
@@ -5255,12 +5217,6 @@ impl Context {
                     && self.has_class_annotation_provider(scope)
                 {
                     return self.update_class_annotation_attr(scope, name, Some(value));
-                }
-                if name == "__annotations__"
-                    && let Value::Scope(data) = self.heap.get_mut(scope)
-                    && let Some(namespace) = &mut data.class_namespace
-                {
-                    namespace.annotation_sites = None;
                 }
                 self.bind(scope, name, value);
                 if name == "__del__" {
@@ -6910,7 +6866,7 @@ impl Context {
             frame
                 .class_namespace
                 .get_or_insert_with(Default::default)
-                .annotation_scratch = Some(annotations);
+                .annotation_scratch = Some((annotations, Default::default()));
         }
         self.execute(code, scope, FrameOwner::Function(body))?;
         if (bindings.needs_class_cell || self.scope_name(scope, "__classcell__").is_some())
@@ -6968,9 +6924,6 @@ impl Context {
             }
             return Ok(class);
         }
-        let explicit_annotations = self
-            .scope_name(scope, "__annotations__")
-            .is_some_and(|value| value != annotations);
         let exposed_body = self.finish_class_namespace(scope)?;
         // NamedTupleMeta visits the original values, including defaults replaced by tuple getters.
         let namedtuple_namespace = if self.namedtuple_base(&bases).is_some() {
@@ -6992,9 +6945,6 @@ impl Context {
         if let Value::Scope(frame) = self.heap.get_mut(scope) {
             if let Some(namespace) = &mut frame.class_namespace {
                 namespace.annotation_scratch = None;
-                if explicit_annotations {
-                    namespace.annotation_sites = None;
-                }
             }
             frame.globals.clear();
             frame.closure.nonlocals.clear();
