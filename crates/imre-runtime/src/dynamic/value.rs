@@ -784,6 +784,7 @@ pub(super) enum Value {
     CodecInfo {
         entry: crate::objects::CodecInfo,
         decode: Id,
+        text_encoding_override: Option<Id>,
     },
     CodecDecoder(crate::objects::Codec),
     Hash(crate::objects::SharedHash),
@@ -1592,7 +1593,14 @@ impl Value {
             }
             Self::IoOpen { reader, writer } => visit.extend([*reader, *writer]),
             Self::IoMethod { owner, .. } => visit.push(*owner),
-            Self::CodecInfo { decode, .. } => visit.push(*decode),
+            Self::CodecInfo {
+                decode,
+                text_encoding_override,
+                ..
+            } => {
+                visit.push(*decode);
+                visit.extend(*text_encoding_override);
+            }
             Self::RegexScanner {
                 pattern, subject, ..
             } => visit.extend([*pattern, *subject]),
