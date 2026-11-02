@@ -259,6 +259,14 @@ fn run_process(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Resul
     ))
 }
 
+/// Borrow a binary writer's input, including the native bytes of an array.
+pub(super) fn output_bytes(ctx: &Context, value: Id) -> Result<&[u8]> {
+    match ctx.heap.get(value) {
+        Value::Array(array) => Ok(array.as_bytes()),
+        _ => ctx.bytes_like(value),
+    }
+}
+
 pub(super) fn read_length(ctx: &mut Context, size: Option<Id>) -> Result<i64> {
     let Some(id) = size.filter(|&id| id != NONE) else {
         return Ok(-1);
@@ -335,7 +343,7 @@ pub(super) fn call(
             let mut file = file.borrow_mut();
             return match (name, &args[1..]) {
                 ("file.write", [value]) => {
-                    let bytes = ctx.bytes_like(*value)?;
+                    let bytes = output_bytes(ctx, *value)?;
                     file.write_bytes(bytes)?;
                     Ok(ctx.int(bytes.len() as i64))
                 }
@@ -542,7 +550,7 @@ pub(super) fn call(
     }
 }
 
-fn buffered_whence(ctx: &mut Context, value: Option<Id>) -> Result<i32> {
+pub(super) fn buffered_whence(ctx: &mut Context, value: Option<Id>) -> Result<i32> {
     let whence = match value {
         None => 0,
         Some(value) => ctx
@@ -565,7 +573,7 @@ fn buffered_whence(ctx: &mut Context, value: Option<Id>) -> Result<i32> {
     Ok(whence)
 }
 
-fn buffered_offset(ctx: &mut Context, target: Id) -> Result<i64> {
+pub(super) fn buffered_offset(ctx: &mut Context, target: Id) -> Result<i64> {
     ctx.index_integer(target)?.to_i64().ok_or_else(|| {
         Error::new(
             "ValueError",
@@ -599,7 +607,7 @@ fn standard_buffer_method(
     }
     match (name, args) {
         ("file.write", [value]) => {
-            let data = ctx.bytes_like(*value)?;
+            let data = output_bytes(ctx, *value)?;
             if file.closed() {
                 return Err(Error::new("ValueError", "write to closed file"));
             }

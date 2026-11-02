@@ -64,6 +64,8 @@ pub(super) fn resolve(
                         | Intrinsic::ObjectRuntimeExport(
                             "io.BufferedReader"
                             | "_io.BufferedReader"
+                            | "io.BufferedWriter"
+                            | "_io.BufferedWriter"
                             | "_io._IOBase"
                             | "_io._RawIOBase"
                             | "_io._BufferedIOBase"
