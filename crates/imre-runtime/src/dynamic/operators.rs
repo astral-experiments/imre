@@ -1362,7 +1362,12 @@ impl Context {
         if self.format_slot(id, "__repr__").is_none()
             && (quoted || self.format_slot(id, "__str__").is_none())
         {
-            return Ok(None);
+            if !matches!(
+                self.heap.get(id),
+                Value::ParamSpec(_) | Value::ParamSpecMarker(_, _)
+            ) {
+                return Ok(None);
+            }
         }
         self.repr_ancestors
             .try_reserve(ancestors.len())
