@@ -1756,7 +1756,7 @@ impl Context {
                 return self.bind_attribute(descriptor, receiver, owner);
             }
         }
-        if matches!(self.heap.get(obj), Value::File(_)) {
+        if matches!(self.heap.get(obj), Value::File(_) | Value::BufferedRandom(..)) {
             let class = self.exact_type(obj)?;
             if let Some(member) = self.class_attr(class, name)
                 && matches!(
@@ -5353,8 +5353,8 @@ impl Context {
                 }))
             }
             Value::CodecDecoder(codec) => stdlib::codecs::decode(self, codec, &args, &kwargs),
-            Value::IoOpen { reader, writer } => {
-                stdlib::io::open_from_module(self, reader, writer, &args, &kwargs)
+            Value::IoOpen { reader, writer, random } => {
+                stdlib::io::open_from_module(self, reader, writer, random, &args, &kwargs)
             }
             Value::IoMethod { owner, name } => stdlib::io::call(self, owner, name, &args, &kwargs),
             Value::Partial {

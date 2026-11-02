@@ -20,6 +20,22 @@ pub(crate) struct Random<F = File> {
 }
 
 impl FileState {
+    /// Return buffered bytes or make one read through the retained anonymous file.
+    pub(crate) fn random_read_once(&mut self, size: Option<usize>) -> Result<Bytes> {
+        self.check_random_reentry()?;
+        let Some(Stream::Random(file)) = &mut self.stream else {
+            return Err(Error::new(Kind::ValueError, "read of closed file"));
+        };
+        let size = size.unwrap_or(file.capacity());
+        let mut data = Vec::new();
+        data.try_reserve_exact(size)
+            .map_err(|_| Error::allocation())?;
+        data.resize(size, 0);
+        let count = file.read_once(&mut data).map_err(errno_error)?;
+        data.truncate(count);
+        Ok(data)
+    }
+
     /// Whether truncate is invoking the size object's index protocol on this stream.
     pub(crate) fn random_truncating(&self) -> bool {
         matches!(&self.stream, Some(Stream::Random(file)) if file.truncating_name.is_some())

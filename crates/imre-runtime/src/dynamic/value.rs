@@ -1046,6 +1046,7 @@ pub(super) enum Value {
     IoOpen {
         reader: Id,
         writer: Id,
+        random: Id,
     },
     IoMethod {
         owner: Id,
@@ -1100,13 +1101,8 @@ pub(super) struct CachedCall {
 impl Value {
     /// Class of a native file whose Python descriptors are installed by _io.
     pub(super) fn native_io_class_name(&self) -> Option<&'static str> {
-        let name = self.file_class_name()?;
-        // BufferedRandom still uses its intrinsic methods rather than installed _io descriptors.
-        (name != "_io.BufferedRandom").then_some(name)
-    }
-
-    fn file_class_name(&self) -> Option<&'static str> {
         match self {
+            Self::BufferedRandom(..) => Some("_io.BufferedRandom"),
             Self::TextFile(_) => Some("_io.TextIOWrapper"),
             Self::File(file) => Some(match file.as_ref() {
                 super::stdlib::BinaryFile::Descriptor(fd) if fd.reading && fd.writing => {
@@ -1146,7 +1142,7 @@ impl Value {
             Self::Bytes(_) => "bytes",
             Self::MemoryView { .. } => "memoryview",
             Self::ByteArray(_) => "bytearray",
-            Self::File(_) | Self::TextFile(_) => return self.file_class_name(),
+            Self::File(_) | Self::TextFile(_) => return self.native_io_class_name(),
             Self::ProcessHandle(_) => "_imre_subprocess.Handle",
             Self::BufferedRandom(..) => "_io.BufferedRandom",
             Self::SequenceIterator { .. } => "iterator",
@@ -1608,7 +1604,7 @@ impl Value {
                 visit.extend([*scope, *code, *globals]);
                 visit.extend(*back);
             }
-            Self::IoOpen { reader, writer } => visit.extend([*reader, *writer]),
+            Self::IoOpen { reader, writer, random } => visit.extend([*reader, *writer, *random]),
             Self::IoMethod { owner, .. } => visit.push(*owner),
             Self::CodecInfo {
                 decode,
