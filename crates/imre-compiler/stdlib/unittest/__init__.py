@@ -177,6 +177,9 @@ class TestCase(_SuiteMember):
     def _declaredCaseMethods(self) -> tuple[list[str], list[str]]:
         raise RuntimeError("native unittest case requires its class metadata")
 
+    def defaultTestResult(self) -> TestResult:
+        return TestResult()
+
     def countTestCases(self) -> int:
         return 1
 
