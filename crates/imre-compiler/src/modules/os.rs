@@ -114,6 +114,8 @@ pub(super) fn symbol(name: &str) -> Option<Intrinsic> {
         "readlink" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.readlink"),
         "_exit" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix._exit"),
         "getppid" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.getppid"),
+        "WIFSTOPPED" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.WIFSTOPPED"),
+        "execv" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.execv"),
         "kill" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.kill"),
         "getsid" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.getsid"),
         "waitpid" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.waitpid"),

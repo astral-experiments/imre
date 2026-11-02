@@ -721,7 +721,9 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         }
         ("os" | "posix", "listdir") if cfg!(unix) => ctx.builtin("posix.listdir"),
         ("os" | "posix", "fspath") => ctx.builtin("posix.fspath"),
-        ("os" | "posix", name) if os::is_descriptor_function(name) => {
+        ("os" | "posix", name)
+            if os::is_descriptor_function(name) || os::is_process_function(name) =>
+        {
             ctx.builtin(&format!("posix.{name}"))
         }
         ("posixpath", "normpath") | ("posix", "_path_normpath") => {
@@ -1699,7 +1701,7 @@ pub(super) fn call(
         return os::stat::call(ctx, op, args, kwargs);
     }
     if let Some(op) = name.strip_prefix("posix.")
-        && os::is_descriptor_function(op)
+        && (os::is_descriptor_function(op) || os::is_process_function(op))
     {
         return os::descriptor(ctx, op, args, kwargs);
     }

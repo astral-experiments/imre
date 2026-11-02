@@ -97,7 +97,7 @@ pub(super) fn getcwd(ctx: &mut Context, as_bytes: bool) -> Result<Id> {
     Ok(ctx.text_codepoints(codec.decode_filesystem(&bytes)?))
 }
 
-fn environment_argument(ctx: &mut Context, value: Id) -> Result<CString> {
+fn fs_argument(ctx: &mut Context, value: Id) -> Result<CString> {
     let path = posixpath::fspath(ctx, value)?;
     c_path(ctx, path, "embedded null byte")
 }
@@ -141,6 +141,77 @@ pub(super) fn memfd_create(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id
     let fd = rustix::fs::memfd_create(name.as_c_str(), MemfdFlags::from_bits_retain(flags))
         .map_err(|e| super::os_error(e.into()))?;
     Ok(ctx.int(i64::from(fd.into_raw_fd())))
+}
+
+pub(super) fn is_process_function(name: &str) -> bool {
+    cfg!(unix) && matches!(name, "execv" | "WIFSTOPPED")
+}
+
+/// Resolve arguments before auditing, then replace this process using the captured bytes.
+#[cfg(unix)]
+fn execv(ctx: &mut Context, args: &[Id]) -> Result<Id> {
+    let &[path, argv] = args else {
+        return Err(Error::new(
+            "TypeError",
+            format!("execv expected 2 arguments, got {}", args.len()),
+        ));
+    };
+    let path = posixpath::path_arg(
+        ctx,
+        path,
+        "execv: path should be string, bytes or os.PathLike",
+    )?;
+    ctx.heap.keep(path);
+    let executable = c_path(ctx, path, "execv: embedded null character in path")?;
+    if !ctx.builtin_slot_accepts(argv, "list") && !ctx.builtin_slot_accepts(argv, "tuple") {
+        return Err(Error::new(
+            "TypeError",
+            "execv() arg 2 must be a tuple or list",
+        ));
+    }
+    let mark = ctx.heap.temporary_mark();
+    let count = match ctx.instance_len(argv) {
+        Ok(Some(count)) => count,
+        Ok(None) => ctx.sequence_at(argv, 0).map_or(0, |(length, _)| length),
+        // CPython replaces a failed length check with the empty-argv error.
+        Err(_) => 0,
+    };
+    ctx.discard_truth(mark);
+    if count == 0 {
+        return Err(Error::new("ValueError", "execv() arg 2 must not be empty"));
+    }
+    let mut arguments = Vec::new();
+    arguments
+        .try_reserve_exact(count)
+        .map_err(|_| Error::new("MemoryError", ""))?;
+    for i in 0..count {
+        // A path conversion may mutate argv. Fetch and root just the current item.
+        let mark = ctx.heap.temporary_mark();
+        let index = ctx.int(i as i64);
+        let argument = ctx.get_item(argv, index).and_then(|item| {
+            ctx.heap.keep(item);
+            fs_argument(ctx, item)
+        });
+        let collect = ctx.heap.discard_truth_operands(mark, ctx.modules);
+        if let Err(error) = &argument {
+            for root in error.roots() {
+                ctx.heap.keep(root);
+            }
+        }
+        if collect {
+            ctx.collect_unreachable();
+        }
+        arguments.push(argument?);
+    }
+    if arguments[0].as_bytes().is_empty() {
+        return Err(Error::new(
+            "ValueError",
+            "execv() arg 2 first element cannot be empty",
+        ));
+    }
+    let arguments = crate::objects::CStrings::new(arguments)?;
+    super::audit::event(ctx, "os.exec", &[path, argv, NONE])?;
+    Err(arguments.execv(&executable).into())
 }
 
 /// Read cryptographically secure bytes from the operating system.
@@ -351,9 +422,9 @@ pub(super) fn change_environment(
     // posix.putenv can run before os is imported. Preserve the initial dictionary first.
     let posix = ctx.module("posix")?;
     ctx.lookup_attr(posix, "environ")?;
-    let key = environment_argument(ctx, args[0])?;
+    let key = fs_argument(ctx, args[0])?;
     let value = if set {
-        Some(environment_argument(ctx, args[1])?)
+        Some(fs_argument(ctx, args[1])?)
     } else {
         None
     };
@@ -924,12 +995,15 @@ pub(super) fn descriptor(
         unsafe { libc::_exit(status) }
     }
     #[cfg(unix)]
-    if name == "waitstatus_to_exitcode" {
+    if matches!(name, "WIFSTOPPED" | "waitstatus_to_exitcode") {
         let [Some(status)] = builtins::bind_builtin_arguments(name, args, kwargs, ["status"], 1)?
         else {
             unreachable!("status is required")
         };
         let status = c_int(ctx, status)?;
+        if name == "WIFSTOPPED" {
+            return Ok(builtins::boolean(libc::WIFSTOPPED(status)));
+        }
         let code = if libc::WIFEXITED(status) {
             libc::WEXITSTATUS(status)
         } else if libc::WIFSIGNALED(status) {
@@ -1026,6 +1100,10 @@ pub(super) fn descriptor(
         };
         let sid = native::getsid(c_int(ctx, *pid)?)?;
         return Ok(ctx.int(i64::from(sid)));
+    }
+    #[cfg(unix)]
+    if name == "execv" {
+        return execv(ctx, args);
     }
     if name == "waitpid" {
         let [pid, options] = args else {

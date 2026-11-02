@@ -737,6 +737,8 @@ pub(super) fn method(
             | "list.__init__"
             | "list.__repr__"
             | "tuple.__repr__"
+            | "list.__len__"
+            | "tuple.__len__"
             | "set.__repr__"
             | "frozenset.__repr__"
     ) {
@@ -1441,7 +1443,7 @@ pub(super) fn builtin_slot(
     }
     if matches!(
         method,
-        "__repr__" | "__str__" | "__index__" | "__abs__" | "__int__" | "__float__"
+        "__repr__" | "__str__" | "__index__" | "__abs__" | "__int__" | "__float__" | "__len__"
     ) {
         if !kwargs.is_empty() {
             return Err(type_error(format!(
@@ -1453,6 +1455,19 @@ pub(super) fn builtin_slot(
                 "expected 0 arguments, got {}",
                 rest.len()
             )));
+        }
+        if method == "__len__" {
+            let length = match ctx.heap.get(storage) {
+                Value::List(items)
+                | Value::Tuple(items)
+                | Value::NamedTuple { values: items, .. } => items.len(),
+                Value::Instance { class, .. } => ctx
+                    .namedtuple_fields(*class)
+                    .expect("validated tuple receiver")
+                    .len(),
+                _ => unreachable!("validated list or tuple receiver"),
+            };
+            return Ok(ctx.int(length as i64));
         }
         if method == "__abs__" {
             return super::absolute_value(ctx, object);
