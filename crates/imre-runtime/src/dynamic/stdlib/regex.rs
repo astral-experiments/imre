@@ -201,11 +201,16 @@ impl Pattern {
 
     /// Describe the matcher and translated program that this Pattern will execute.
     fn debug_program(&self, output: &mut String) {
-        let backend = match &self.regex {
-            Matcher::Standard(_) => "regex-automata meta",
-            Matcher::Lookahead(_) => "fancy-regex",
-            Matcher::Guarded(_) => "progress-aware PikeVM",
-            Matcher::Asserted(_) => "assertion-aware Thompson NFA",
+        let source: &dyn std::fmt::Debug = &self.engine_source;
+        let (backend, program) = match &self.regex {
+            Matcher::Standard(_) => ("regex-automata meta", source),
+            #[cfg(target_os = "linux")]
+            Matcher::Locale(locale) => {
+                ("regex-automata meta, LC_CTYPE at search time", locale.program())
+            }
+            Matcher::Lookahead(_) => ("fancy-regex", source),
+            Matcher::Guarded(_) => ("progress-aware PikeVM", source),
+            Matcher::Asserted(_) => ("assertion-aware Thompson NFA", source),
         };
         let kind = if self.bytes { "bytes" } else { "str" };
         write!(
@@ -213,7 +218,7 @@ impl Pattern {
             "Imre regex ({backend}, {kind}, flags={:#x}, groups={})\n  program {:?}",
             self.flags,
             self.group_count(),
-            self.engine_source,
+            program,
         )
         .unwrap();
         for (slot, guard) in &self.assertions {

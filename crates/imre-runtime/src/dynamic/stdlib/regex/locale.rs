@@ -94,6 +94,10 @@ impl LocaleMatcher {
         })
     }
 
+    pub(super) fn program(&self) -> &dyn std::fmt::Debug {
+        &self.atoms
+    }
+
     pub(super) fn same_program(&self, other: &Self) -> bool {
         self.atoms == other.atoms
     }
