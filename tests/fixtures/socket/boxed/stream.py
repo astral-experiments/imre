@@ -39,6 +39,13 @@ class ClosingWhence:
 
 def run():
     with socket.socket() as peer:
+        for mode in ("rt", "w+b", "r'b"):
+            try:
+                peer.makefile(mode, buffering="unused")
+            except ValueError as exc:
+                assert str(exc) == "invalid mode %r (only r, w, b allowed)" % mode
+            else:
+                raise AssertionError("socket accepted invalid file mode")
         stream = peer.makefile("rb")
         try:
             stream.seek(0, ClosingWhence(stream))

@@ -302,12 +302,27 @@ pub(super) fn call(
     let s = handle.clone();
     if method == "makefile" {
         check_args(method, args, kwargs, 2, &["mode", "buffering"])?;
-        let mode = option(args, 0, kwargs, "mode")?
-            .map(|id| ctx.str_value(id))
-            .transpose()?
-            .unwrap_or("r");
+        let binary_reader = if let Some(mode) = option(args, 0, kwargs, "mode")? {
+            let storage = ctx
+                .string_storage(mode)
+                .ok_or_else(|| Error::new("TypeError", "expected str"))?;
+            match ctx.heap.get(storage) {
+                Value::Str(text) if text.bytes().all(|c| matches!(c, b'r' | b'w' | b'b')) => {
+                    text == "rb"
+                }
+                _ => {
+                    let repr = ctx.repr(mode);
+                    return Err(Error::new(
+                        "ValueError",
+                        format!("invalid mode {repr} (only r, w, b allowed)"),
+                    ));
+                }
+            }
+        } else {
+            false
+        };
         let buffering = int_option(ctx, args, kwargs, 1, "buffering", -1)?;
-        if mode != "rb" || buffering != -1 {
+        if !binary_reader || buffering != -1 {
             return Err(Error::new(
                 "NotImplementedError",
                 "socket.makefile supports the default buffered binary reader",
