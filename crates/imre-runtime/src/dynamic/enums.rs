@@ -39,38 +39,6 @@ impl Context {
         matches!(self.heap.get(base), Value::Native(name) if matches!(name.as_str(), "enum.StrEnum" | "enum.IntEnum" | "enum.IntFlag"))
     }
 
-    pub(super) fn new_int(&mut self, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
-        let Some((&class, values)) = args.split_first() else {
-            return Err(Error::new(
-                "TypeError",
-                "int.__new__(): not enough arguments",
-            ));
-        };
-        let base = self.builtin("int");
-        if !self.subclass(class, base) {
-            return Err(Error::new(
-                "TypeError",
-                "int.__new__ requires an int subtype",
-            ));
-        }
-        let value = builtins::call(self, "int", values, kwargs)?;
-        if class == base {
-            return Ok(value);
-        }
-        Ok(self.alloc(Value::Instance {
-            namespace: None,
-            class,
-            fields: Default::default(),
-            scalar: Some(value),
-            dictionary: None,
-            property: None,
-            weak_reference: None,
-            cycle: None,
-            member_values: None,
-            memory_stream: None,
-        }))
-    }
-
     pub(super) fn enum_lookup(
         &mut self,
         class: Id,
@@ -165,7 +133,7 @@ impl Context {
         }
 
         let key = self.alloc(Value::Int(crate::Int::new(value.clone())));
-        let member = self.new_int(&[class, key], &[])?;
+        let member = self.new_immutable_scalar("int", class, &[key], &[])?;
         self.default_set_attr(member, "_value_", key)?;
         let mut members = Vec::new();
         let mut combined = BigInt::zero();
@@ -406,10 +374,14 @@ impl Context {
         let args = self.enum_new_args(class, raw);
         let member = if let Some(new) = new {
             self.call(new, args, Vec::new())?
-        } else if matches!(self.heap.get(base), Value::Native(name) if name == "enum.StrEnum") {
-            self.new_immutable_scalar("str", class, &args[1..], &[])?
         } else {
-            self.new_int(&args, &[])?
+            let kind = if matches!(self.heap.get(base), Value::Native(name) if name == "enum.StrEnum")
+            {
+                "str"
+            } else {
+                "int"
+            };
+            self.new_immutable_scalar(kind, class, &args[1..], &[])?
         };
         let Value::Instance {
             scalar: Some(scalar),

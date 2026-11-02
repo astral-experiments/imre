@@ -5387,45 +5387,6 @@ impl Context {
         Ok(self.instance(class, None))
     }
 
-    /// Allocate a binary64 payload while retaining the requested float subclass.
-    ///
-    /// ```python
-    /// class Weight(float):
-    ///     pass
-    /// assert type(Weight("1.5")) is Weight
-    /// ```
-    pub(super) fn new_float(&mut self, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
-        let Some((&class, values)) = args.split_first() else {
-            return Err(Error::new(
-                "TypeError",
-                "float.__new__(): not enough arguments",
-            ));
-        };
-        let base = self.builtin("float");
-        if !self.subclass(class, base) {
-            return Err(Error::new(
-                "TypeError",
-                "float.__new__ requires a float subtype",
-            ));
-        }
-        let value = builtins::call(self, "float", values, kwargs)?;
-        if class == base {
-            return Ok(value);
-        }
-        Ok(self.alloc(Value::Instance {
-            namespace: None,
-            class,
-            fields: Default::default(),
-            scalar: Some(value),
-            dictionary: None,
-            property: None,
-            weak_reference: None,
-            cycle: None,
-            member_values: None,
-            memory_stream: None,
-        }))
-    }
-
     /// Create empty mapping storage for the requested type without running its initializer.
     fn new_dict(&mut self, args: &[Id]) -> Result<Id> {
         let Some(&class) = args.first() else {
@@ -5470,7 +5431,7 @@ impl Context {
         Error::new("TypeError", message)
     }
 
-    /// Allocate the immutable string or bytes payload while retaining the Python class.
+    /// Construct the builtin value and retain the requested Python class for a subtype.
     pub(super) fn new_immutable_scalar(
         &mut self,
         kind: &str,
@@ -5707,7 +5668,6 @@ impl Context {
             }
             Value::Native(name) if name == "object.__new__" => self.new_object(&args, &kwargs),
             Value::Native(name) if name == "dict.__new__" => self.new_dict(&args),
-            Value::Native(name) if name == "int.__new__" => self.new_int(&args, &kwargs),
             Value::Native(name) if name == "_thread._local.__new__" => {
                 super::thread_local::allocate(self, &args, &kwargs)
             }
@@ -5733,7 +5693,6 @@ impl Context {
             {
                 stdlib::pickle::object_reduce(self, &name["object.".len()..], &args, &kwargs)
             }
-            Value::Native(name) if name == "float.__new__" => self.new_float(&args, &kwargs),
             Value::Native(name)
                 if builtins::is_builtin(&name)
                     || builtins::constructor_owner(&name)
@@ -6147,10 +6106,9 @@ impl Context {
                     .find(|(base, _)| self.has_base(callable, base))
                     .map(|(_, new)| self.builtin(new))
                 });
-                let scalar_base = ["str", "bytes", "complex"]
+                let scalar_base = ["str", "bytes", "complex", "float"]
                     .into_iter()
                     .find(|kind| self.has_base(callable, kind));
-                let float_subclass = self.has_base(callable, "float");
                 let rlock_subclass = self.has_base(callable, super::thread_rlock::CLASS);
                 let collection_kind = ["set", "frozenset", "bytearray"]
                     .into_iter()
@@ -6172,11 +6130,6 @@ impl Context {
                     self.allocate_module(callable)
                 } else if let Some(kind) = scalar_base {
                     self.new_immutable_scalar(kind, callable, &args, &kwargs)?
-                } else if float_subclass {
-                    let positional = std::iter::once(callable)
-                        .chain(args.iter().copied())
-                        .collect::<Vec<_>>();
-                    self.new_float(&positional, &kwargs)?
                 } else {
                     let storage = if rlock_subclass {
                         Some(self.alloc(Value::HandlerLock(Default::default())))
@@ -6207,7 +6160,6 @@ impl Context {
                     && !native_tzinfo_new
                     && scalar_base.is_none()
                     && !rlock_subclass
-                    && !float_subclass
                     && collection_kind.is_none()
                     && (!args.is_empty() || !kwargs.is_empty())
                 {
