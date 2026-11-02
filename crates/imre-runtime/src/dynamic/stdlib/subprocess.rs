@@ -21,7 +21,7 @@ pub(super) fn function(name: &str) -> bool {
 fn path(ctx: &mut Context, value: Id, defer_nul: bool) -> Result<Vec<u8>> {
     let value = posixpath::fspath(ctx, value)?;
     if defer_nul {
-        os::path_bytes(ctx, value)
+        os::encoded_path(ctx, value)
     } else {
         Ok(os::c_path(ctx, value, "embedded null byte")?.into_bytes())
     }
@@ -118,6 +118,7 @@ fn launch(ctx: &mut Context, values: &[Id]) -> Result<Id> {
         errors,
         shell,
         start_new_session,
+        umask,
         pass_fds,
     ] = values
     else {
@@ -133,16 +134,21 @@ fn launch(ctx: &mut Context, values: &[Id]) -> Result<Id> {
         io::text_options(ctx, encoding, errors, NONE)?;
     }
     let pipesize = ctx.as_int(pipesize)?;
-    // A session argument can run Python during both spawn selection and fork conversion.
+    // Child settings can run Python during both spawn selection and fork conversion.
     let default_fds = matches!(ctx.heap.get(pass_fds), Value::Tuple(fds) if fds.is_empty());
-    let probe = executable != NONE || start_new_session != FALSE || !default_fds;
-    let bufsize = ctx.as_int(bufsize)?;
-    let check_buffer = bufsize.as_small() != Some(-1) && streams.iter().any(|(mode, _)| *mode == 1);
-    let handles = (probe || check_buffer)
-        .then(|| BoxedPopen::prepare_handles(&streams, &pipesize, &bufsize))
+    let default_umask = matches!(ctx.heap.get(umask), Value::Int(n) if n.as_small() == Some(-1));
+    let pipe_count = streams.iter().filter(|(mode, _)| *mode == 1).count();
+    let pipe_options = pipe_count != 0 && ctx.as_int(bufsize)?.as_small() != Some(-1);
+    let handles = (executable != NONE
+        || start_new_session != FALSE
+        || !default_umask
+        || !default_fds
+        || pipe_options)
+        .then(|| BoxedPopen::prepare_handles(&streams, &pipesize))
         .transpose()?;
-    if check_buffer && bufsize.as_small() == Some(1) {
-        for _ in streams.iter().filter(|(mode, _)| *mode == 1) {
+    // Popen opens the parent pipe wrappers before _execute_child examines child settings.
+    if pipe_options && os::c_int(ctx, bufsize)? == 1 {
+        for _ in 0..pipe_count {
             let warnings = ctx.module("warnings")?;
             let warn = ctx.lookup_attr(warnings, "warn")?;
             let message = ctx.text("line buffering (buffering=1) isn't supported in binary mode, the default buffer size will be used");
@@ -197,7 +203,7 @@ fn launch(ctx: &mut Context, values: &[Id]) -> Result<Id> {
         executable
     };
     // CPython's dirname probe can call __fspath__ before the actual executable conversion.
-    let probed_directory = if probe && BoxedPopen::probes_executable() {
+    let probed_directory = if handles.is_some() && BoxedPopen::probes_executable() {
         let probe = posixpath::fspath(ctx, program)?;
         match ctx.heap.get(ctx.scalar_value(probe)) {
             Value::Str(s) => s.contains('/'),
@@ -208,7 +214,7 @@ fn launch(ctx: &mut Context, values: &[Id]) -> Result<Id> {
     } else {
         false
     };
-    let direct = match handles.as_ref().filter(|_| probe) {
+    let mut direct = match handles.as_ref() {
         Some(handles) if probed_directory => {
             let close_fds = ctx.truth(close_fds)?;
             // CPython tests pass_fds before cwd, redirected handles and session settings.
@@ -224,6 +230,11 @@ fn launch(ctx: &mut Context, values: &[Id]) -> Result<Id> {
         Some(_) => Some(false),
         None => None,
     };
+    if direct == Some(true) && !default_umask {
+        let zero = ctx.int(0);
+        let negative = ctx.binary("<", umask, zero)?;
+        direct = Some(ctx.truth(negative)?);
+    }
     // Fork snapshots environ before encoding the executable; posix_spawn packs it after argv.
     let mut child_env = if direct == Some(true) {
         None
@@ -237,8 +248,9 @@ fn launch(ctx: &mut Context, values: &[Id]) -> Result<Id> {
     let resolved_program = posixpath::fspath(ctx, program)?;
     ctx.heap.reserve_temporaries(1)?;
     ctx.heap.keep(resolved_program);
+    // Fork validates NULs in C after converting its integer arguments.
     let program_bytes = if direct == Some(false) {
-        os::path_bytes(ctx, resolved_program)?
+        os::encoded_path(ctx, resolved_program)?
     } else {
         os::c_path(ctx, resolved_program, "embedded null byte")?.into_bytes()
     };
@@ -268,6 +280,12 @@ fn launch(ctx: &mut Context, values: &[Id]) -> Result<Id> {
         (ctx.truth(close_fds)?, ctx.truth(restore_signals)?)
     };
     let new_session = direct != Some(true) && ctx.truth(start_new_session)?;
+    let umask = if default_umask || direct == Some(true) {
+        -1
+    } else {
+        os::c_int(ctx, umask)?
+    };
+    // fork_exec parses its umask before checking the normalized descriptor sequence.
     let mut keep = Vec::new();
     if let Some(fds) = normalized {
         for fd in ctx.items(fds)? {
@@ -275,7 +293,7 @@ fn launch(ctx: &mut Context, values: &[Id]) -> Result<Id> {
         }
     }
     // On the prepared path, argv[0] is converted independently of the executable.
-    let (alternate, arguments) = if probe {
+    let (alternate, arguments) = if handles.is_some() {
         (Some(program_bytes), items.as_slice())
     } else {
         argv.push(program_bytes);
@@ -299,9 +317,10 @@ fn launch(ctx: &mut Context, values: &[Id]) -> Result<Id> {
         restore_signals,
         directory,
         child_env,
-        bufsize,
+        ctx.as_int(bufsize)?,
         pipesize,
         new_session,
+        umask,
         keep,
     );
     match child {

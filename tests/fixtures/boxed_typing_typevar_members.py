@@ -1,6 +1,6 @@
 from inspect import getattr_static
 from types import MappingProxyType
-from typing import TypeVar
+from typing import TypeVar, Unpack
 
 
 def current():
@@ -11,6 +11,17 @@ def current():
     assert namespace["__doc__"] == TypeVar.__doc__ and TypeVar.__doc__.startswith("Type variable.")
     assert namespace["has_default"] is TypeVar.has_default
     assert namespace["has_default"](variable) is variable.has_default() is False
+    substitute = namespace["__typing_subst__"]
+    assert substitute is TypeVar.__typing_subst__
+    assert substitute(variable, None) is type(None)
+    assert variable.__typing_subst__(int) is int
+    for unpacked in (Unpack[tuple[int, ...]], (*tuple[int, ...],)[0]):
+        try:
+            variable.__typing_subst__(unpacked)
+        except TypeError as error:
+            assert str(error) == f"{unpacked} is not valid as type argument"
+        else:
+            raise AssertionError("substituted an unpacked tuple for a type variable")
     try:
         namespace["extra"] = 1
     except TypeError:

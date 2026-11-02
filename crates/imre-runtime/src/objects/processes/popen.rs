@@ -369,12 +369,6 @@ pub(super) fn error_after_handles(modes: &[u32], fork_error_pipe: bool, error: E
         .map_or(error, errno_error)
 }
 
-fn pipe_buffer_size(size: &Int) -> Result<i32> {
-    size.as_small()
-        .and_then(|n| i32::try_from(n).ok())
-        .ok_or_else(c_int_overflow)
-}
-
 /// Preserve the fd's ordering against standard streams even when it exceeds C int bounds.
 fn redirect_number(fd: &Int) -> (i32, bool) {
     if let Some(number) = fd.to_i64().and_then(|n| i32::try_from(n).ok()) {
@@ -459,7 +453,10 @@ unsafe fn spawn(config: &LaunchConfig, mut extras: LaunchExtras<'_>) -> Result<P
     let bufsize = if modes.contains(&1) {
         // SAFETY: the caller roots the buffer-size integer.
         let size = unsafe { Int::borrow(config.bufsize) };
-        pipe_buffer_size(&size)?
+        match c_int(&size) {
+            Some(size) => size,
+            None => return Err(c_int_overflow()),
+        }
     } else {
         -1
     };

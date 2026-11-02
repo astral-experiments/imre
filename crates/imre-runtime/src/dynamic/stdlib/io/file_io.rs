@@ -297,6 +297,17 @@ fn descriptor_from_argument(ctx: &mut Context, file: Id) -> Option<RawFd> {
         .and_then(|n| RawFd::try_from(n).ok())
 }
 
+/// FileIO encodes path spellings that the UTF-8 buffered-file shortcut cannot use.
+fn needs_encoded_path(ctx: &Context, path: Id) -> Result<bool> {
+    Ok(match ctx.heap.get(ctx.scalar_value(path)) {
+        Value::Bytes(_) | Value::SurrogateStr(_) => true,
+        Value::Str(text) if !text.is_ascii() => {
+            crate::sys::filesystem_encoding()?.as_str() != "utf-8"
+        }
+        _ => false,
+    })
+}
+
 /// Pass FileIO only its operation and optional update marker, in that order.
 fn raw_open_mode(mode: &str) -> String {
     let mut raw: String = mode.chars().filter(|c| "rwax".contains(*c)).collect();
@@ -377,11 +388,6 @@ pub(in crate::dynamic) fn open(
     let update = mode_text.contains('+');
     let text_output = !binary && !update && mode_text.contains(['w', 'a', 'x']);
     let text_input = buffering < 0 && matches!(mode_text, "r" | "rt" | "tr");
-    let binary_bytes_path = binary
-        && buffering < 0
-        && !update
-        && !numeric
-        && matches!(ctx.heap.get(ctx.scalar_value(raw_arg)), Value::Bytes(_));
     if binary && buffering == 1 {
         ctx.emit_builtin_warning(
             crate::objects::exceptions::Kind::RuntimeWarning,
@@ -394,9 +400,9 @@ pub(in crate::dynamic) fn open(
         || fd.is_some()
         || text_output
         || text_input
-        || binary_bytes_path
         || update
         || (binary && buffering == 1)
+        || (binary && !numeric && needs_encoded_path(ctx, raw_arg)?)
     {
         if fd.is_some_and(|fd| fd < 0) {
             return Err(Error::new("ValueError", "negative file descriptor"));

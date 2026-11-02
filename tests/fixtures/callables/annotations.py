@@ -23,6 +23,7 @@ def main() -> None:
     print(type_repr(annotations['a']))
     print(type_repr(convert))
     print(type_repr('str'))
+    assert type_repr(value=int) == 'int'
     annotations['a'] = bytes
     print(annotations)
     print(get_annotations(convert, format=Format.FORWARDREF))

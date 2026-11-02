@@ -956,7 +956,9 @@ pub(crate) enum Intrinsic {
     EnvironBytes,
     BoolConstant(bool),
     GetEnv,
-    GetCwd,
+    GetCwd {
+        bytes: bool,
+    },
     Chdir,
     Strerror,
     StatResult,
@@ -1380,6 +1382,9 @@ impl IntrinsicModule {
                 Intrinsic::NominalClass("collections.abc.MutableMapping")
             }
             (Self::AnnotationLib, "ForwardRef") => Intrinsic::ForwardRef,
+            (Self::AnnotationLib, "annotations_to_string") => {
+                Intrinsic::ObjectRuntimeExport("annotationlib.annotations_to_string")
+            }
             (Self::AnnotationLib, "get_annotations") => Intrinsic::GetAnnotations,
             (Self::AnnotationLib, "type_repr") => Intrinsic::AnnotationTypeRepr,
             (Self::AnnotationFormat, "VALUE") => Intrinsic::AnnotationFormat(1),
@@ -1828,6 +1833,7 @@ impl IntrinsicModule {
             }
             (Self::Sys, "_getframemodulename") => Intrinsic::SysGetFrameModuleName,
             (Self::Sys, "getsizeof") => Intrinsic::ObjectRuntimeExport("sys.getsizeof"),
+            (Self::Sys, "is_finalizing") => Intrinsic::ObjectRuntimeExport("sys.is_finalizing"),
             (Self::Sys, "getrecursionlimit") => Intrinsic::SysGetRecursionLimit,
             (Self::Sys, "setrecursionlimit") => Intrinsic::SysSetRecursionLimit,
             (Self::SysJit, "is_available") => Intrinsic::SysJitPredicate("_jit.is_available"),
@@ -2145,6 +2151,10 @@ impl IntrinsicModule {
             (Self::Thread, "allocate") => Intrinsic::ObjectRuntimeExport("_thread.allocate"),
             (Self::Thread | Self::Threading, "TIMEOUT_MAX") => {
                 Intrinsic::ObjectRuntimeExport("_thread.TIMEOUT_MAX")
+            }
+            #[cfg(unix)]
+            (Self::Thread, "interrupt_main") => {
+                Intrinsic::ObjectRuntimeExport("_thread.interrupt_main")
             }
             (Self::Thread, "_count") => Intrinsic::ObjectRuntimeExport("_thread._count"),
             (Self::Thread, "start_new_thread") => {
@@ -2689,7 +2699,8 @@ impl IntrinsicModule {
             (Self::Os, "environb") if cfg!(unix) => Intrinsic::EnvironBytes,
             (Self::Os, "supports_bytes_environ") => Intrinsic::BoolConstant(cfg!(unix)),
             (Self::Os, "getenv") => Intrinsic::GetEnv,
-            (Self::Os, "getcwd") => Intrinsic::GetCwd,
+            (Self::Os, "getcwd") => Intrinsic::GetCwd { bytes: false },
+            (Self::Os, "getcwdb") if cfg!(unix) => Intrinsic::GetCwd { bytes: true },
             (Self::Os, "fspath") => Intrinsic::FsPath,
             (Self::Os, "_fspath") if cfg!(unix) => Intrinsic::ObjectRuntimeExport("os._fspath"),
             (Self::Os, "fsdecode") => Intrinsic::FsDecode,

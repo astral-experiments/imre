@@ -34,6 +34,7 @@ pub(in crate::dynamic) fn install_capabilities(
                 "stat",
                 #[cfg(target_os = "linux")]
                 "statvfs",
+                "truncate",
                 "utime",
             ][..],
         ),
@@ -97,10 +98,10 @@ fn environment_argument(ctx: &mut Context, value: Id) -> Result<CString> {
     c_path(ctx, path, "embedded null byte")
 }
 
-/// Encode a filesystem spelling, preserving embedded NULs until a C API needs termination.
-pub(super) fn path_bytes(ctx: &mut Context, path: Id) -> Result<Vec<u8>> {
+/// Encode a filesystem spelling without imposing a C string's NUL restriction.
+pub(super) fn encoded_path(ctx: &mut Context, path: Id) -> Result<Vec<u8>> {
     match ctx.heap.get(ctx.scalar_value(path)) {
-        Value::Bytes(bytes) => super::super::copy_ids(bytes),
+        Value::Bytes(bytes) => Ok(bytes.to_vec()),
         Value::Str(_) | Value::SurrogateStr(_) => ctx.encode_os_path(path),
         _ => unreachable!("fspath returns str or bytes"),
     }
@@ -108,7 +109,7 @@ pub(super) fn path_bytes(ctx: &mut Context, path: Id) -> Result<Vec<u8>> {
 
 /// Terminate the validated filesystem spelling before evaluating any later Python argument.
 pub(super) fn c_path(ctx: &mut Context, path: Id, nul_error: &str) -> Result<CString> {
-    CString::new(path_bytes(ctx, path)?).map_err(|_| Error::new("ValueError", nul_error))
+    CString::new(encoded_path(ctx, path)?).map_err(|_| Error::new("ValueError", nul_error))
 }
 
 /// Read cryptographically secure bytes from the operating system.
@@ -336,11 +337,15 @@ mod mkfifo;
 pub(in crate::dynamic) mod scheduler;
 #[cfg(target_os = "linux")]
 pub(in crate::dynamic) mod sysconf;
+mod truncate;
 mod unlink;
 mod utime;
 
 /// POSIX functions exported as the same builtins by both os and posix.
 pub(super) fn is_descriptor_function(name: &str) -> bool {
+    if name == "pread" {
+        return cfg!(unix);
+    }
     matches!(
         name,
         "access"
@@ -365,6 +370,7 @@ pub(super) fn is_descriptor_function(name: &str) -> bool {
             | "dup2"
             | "isatty"
             | "lseek"
+            | "truncate"
             | "ftruncate"
             | "pipe"
             | "read"
@@ -378,7 +384,7 @@ pub(super) fn is_descriptor_function(name: &str) -> bool {
             | "link"
             | "symlink"
     ) || (cfg!(unix) && matches!(name, "kill" | "getppid" | "waitstatus_to_exitcode"))
-        || (cfg!(target_os = "linux") && name == "sendfile")
+        || (cfg!(target_os = "linux") && matches!(name, "posix_fallocate" | "sendfile"))
 }
 
 /// Convert an index argument before issuing the descriptor syscall.
@@ -709,6 +715,9 @@ pub(super) fn descriptor(
     if name == "chdir" {
         return chdir(ctx, args, kwargs);
     }
+    if name == "truncate" {
+        return truncate::call(ctx, args, kwargs);
+    }
     if name == "chmod" {
         return chmod::call(ctx, args, kwargs);
     }
@@ -816,6 +825,26 @@ pub(super) fn descriptor(
             format!("posix.{name}() takes no keyword arguments"),
         ));
     }
+    #[cfg(target_os = "linux")]
+    if name == "posix_fallocate" {
+        let [fd, offset, length] = args else {
+            return Err(Error::new(
+                "TypeError",
+                format!("posix_fallocate expected 3 arguments, got {}", args.len()),
+            ));
+        };
+        let fd = c_int(ctx, *fd)?;
+        let offset = file_offset(ctx, *offset)?;
+        let length = file_offset(ctx, *length)?;
+        loop {
+            // SAFETY: posix_fallocate borrows the fd and takes signed offsets by value.
+            match unsafe { libc::posix_fallocate(fd, offset, length) } {
+                0 => return Ok(NONE),
+                libc::EINTR => ctx.dispatch_signals()?,
+                code => return Err(super::os_error(std::io::Error::from_raw_os_error(code))),
+            }
+        }
+    }
     if name == "getppid" {
         if !args.is_empty() {
             return Err(Error::new(
@@ -891,6 +920,19 @@ pub(super) fn descriptor(
         }
         return Ok(ctx.alloc(Value::Tuple(result)));
     }
+    if name == "pread" {
+        let [fd, length, offset] = args else {
+            return Err(Error::new(
+                "TypeError",
+                format!("pread expected 3 arguments, got {}", args.len()),
+            ));
+        };
+        let fd = c_int(ctx, *fd)?;
+        let length = ssize_t(ctx, *length)?;
+        let offset = file_offset(ctx, *offset)?;
+        let bytes = native::read(fd, length, Some(offset), || ctx.dispatch_signals())?;
+        return Ok(ctx.alloc(Value::Bytes(bytes)));
+    }
     if matches!(name, "read" | "write") {
         let [fd, data] = args else {
             return Err(Error::new(
@@ -901,7 +943,7 @@ pub(super) fn descriptor(
         let fd = c_int(ctx, *fd)?;
         return if name == "read" {
             let length = ssize_t(ctx, *data)?;
-            let bytes = native::read(fd, length, || ctx.dispatch_signals())?;
+            let bytes = native::read(fd, length, None, || ctx.dispatch_signals())?;
             Ok(ctx.alloc(Value::Bytes(bytes)))
         } else {
             // Keep the exporter alive and its size fixed while a handler runs.
@@ -941,16 +983,7 @@ pub(super) fn descriptor(
         };
         let fd = c_int(ctx, *fd)?;
         let length = file_offset(ctx, *length)?;
-        let audit_fd = ctx.int(i64::from(fd));
-        let audit_length = ctx.int(length);
-        super::audit::event(ctx, "os.truncate", &[audit_fd, audit_length])?;
-        loop {
-            match native::truncate(fd, length) {
-                Ok(()) => return Ok(NONE),
-                Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
-                Err(error) => return Err(super::os_error(error)),
-            }
-        }
+        return truncate::by_fd(ctx, fd, length);
     }
     if name == "lseek" {
         let [fd, position, whence] = args else {

@@ -8,6 +8,22 @@ def current():
     assert module.ForwardRef is annotationlib.ForwardRef
     print(module.Format.VALUE, module.Format.FORWARDREF.value, module.Format.STRING.value)
 
+    class Text(str):
+        pass
+
+    class Display:
+        def __repr__(self):
+            return "display"
+
+    text = Text("T")
+    annotations = {"text": text, "type": int, "object": Display(), "dots": ...}
+    rendered = module.annotations_to_string(annotations=annotations)
+    assert list(rendered.items()) == [
+        ("text", "T"), ("type", "int"), ("object", "display"), ("dots", "...")
+    ]
+    assert rendered["text"] is text and annotations["type"] is int
+    assert module.type_repr(module.type_repr) == "annotationlib.type_repr"
+
     ref = module.ForwardRef("Thing", module="models", is_class=True)
     same = module.ForwardRef("Thing", module="models", is_class=True, is_argument=False)
     print(repr(ref), ref.__forward_arg__, ref.__forward_module__, ref.__forward_is_class__)

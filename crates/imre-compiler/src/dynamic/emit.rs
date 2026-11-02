@@ -196,6 +196,11 @@ impl Output {
     }
 }
 
+enum DefinitionName<'a> {
+    Binding(&'a ast::Identifier),
+    Plain(&'a str),
+}
+
 enum Body<'a> {
     Namespace(&'a [ast::Stmt]),
     Statements(&'a [ast::Stmt]),
