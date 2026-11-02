@@ -3311,6 +3311,7 @@ impl Context {
                     return Ok(self.class_dictionary(scope));
                 }
                 if matches!(name, "__annotations__" | "__annotate__")
+                    && metaclass_member.is_none()
                     && self.has_class_annotation_provider(scope)
                 {
                     return self.class_annotation_attr(obj, scope, name);
@@ -3777,10 +3778,12 @@ impl Context {
             }
             Value::Class { scope, .. } => {
                 if matches!(name, "__annotations__" | "__annotate__")
+                    && member.is_none()
                     && self.has_class_annotation_provider(scope)
                 {
                     return self.update_class_annotation_attr(scope, name, None);
                 }
+                let annotations = self.scope_data(scope).class_namespace.as_ref();
                 let error = match name {
                     "__name__" | "__qualname__" | "__bases__" | "__type_params__"
                     | "__module__" | "__doc__" => Error::new(
@@ -3795,15 +3798,12 @@ impl Context {
                         format!("attribute '{name}' of 'type' objects is not writable"),
                     ),
                     "__base__" => Error::new("AttributeError", "readonly attribute"),
-                    "__annotate__" => {
+                    "__annotate__" if member.is_none() => {
                         Error::new("TypeError", "cannot delete __annotate__ attribute")
                     }
                     "__annotations__"
-                        if self
-                            .scope_data(scope)
-                            .class_namespace
-                            .as_ref()
-                            .is_some_and(|namespace| namespace.annotation_sites.is_some()) =>
+                        if member.is_none()
+                            && annotations.is_some_and(|ns| ns.annotation_sites.is_some()) =>
                     {
                         Error::new("AttributeError", "__annotations__")
                     }
@@ -4567,6 +4567,7 @@ impl Context {
                 }
                 let scope = *scope;
                 if matches!(name, "__annotations__" | "__annotate__")
+                    && member.is_none()
                     && self.has_class_annotation_provider(scope)
                 {
                     return self.update_class_annotation_attr(scope, name, Some(value));
@@ -6061,7 +6062,9 @@ impl Context {
             self.bind(scope, "__qualname__", qualname);
         }
         let annotations = self.dict(Vec::new());
-        self.bind_local(scope, "__annotations__", annotations);
+        if typed_dict_meta.is_some() {
+            self.bind_local(scope, "__annotations__", annotations);
+        }
         if let Value::Scope(frame) = self.heap.get_mut(scope) {
             frame.class_namespace.get_or_insert_with(Default::default).annotation_scratch = Some(annotations);
         }
@@ -6129,12 +6132,8 @@ impl Context {
         } else {
             None
         };
-        if typed_dict_meta.is_none() && self.scope_name(scope, "__annotate_func__").is_some() {
+        if typed_dict_meta.is_none() {
             self.enable_class_annotation_provider(scope);
-            if self.scope_name(scope, "__annotations__") == Some(annotations) {
-                let key = self.heap.code_name("__annotations__");
-                self.remove_binding(scope, "__annotations__", key)?;
-            }
         }
         if let Some(original) = original {
             self.bind(scope, "__orig_bases__", original);

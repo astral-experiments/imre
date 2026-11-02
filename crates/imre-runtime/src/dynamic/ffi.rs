@@ -419,8 +419,14 @@ impl Context {
                 code.coroutine = true;
                 Ok(a)
             }
+            "setup_annotations" => {
+                self.setup_class_annotations(a);
+                Ok(NONE)
+            }
             "annotate" => {
-                if let Some(mapping) = self.scope_name(a, "__annotations__") {
+                if self.scope_data(a).class_body.is_some() {
+                    self.store_class_annotation(a, b, c)?;
+                } else if let Some(mapping) = self.scope_name(a, "__annotations__") {
                     self.put_item(mapping, b, c)?;
                 }
                 Ok(NONE)

@@ -17,6 +17,24 @@ pub(in crate::dynamic::emit) struct ClassSites {
     unconditional: BTreeSet<TextSize>,
 }
 
+/// Initialize stringized annotations in the class namespace even when their statements are conditional.
+pub(in crate::dynamic::emit) fn uses_annotations(body: &[ast::Stmt]) -> bool {
+    struct Annotations(bool);
+    impl<'a> Visitor<'a> for Annotations {
+        fn visit_stmt(&mut self, stmt: &'a ast::Stmt) {
+            match stmt {
+                ast::Stmt::AnnAssign(_) => self.0 = true,
+                ast::Stmt::FunctionDef(_) | ast::Stmt::ClassDef(_) => {}
+                _ if !self.0 => visitor::walk_stmt(self, stmt),
+                _ => {}
+            }
+        }
+    }
+    let mut found = Annotations(false);
+    found.visit_body(body);
+    found.0
+}
+
 impl Function<'_, '_> {
     pub(in crate::dynamic::emit) fn annotated_class_body(&mut self, statements: &[ast::Stmt]) {
         let unconditional = statements.iter().map(Ranged::start).collect();

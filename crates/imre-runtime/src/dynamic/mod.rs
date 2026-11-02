@@ -1666,6 +1666,10 @@ impl Context {
             self.heap.replace_cell(cell, Some(value));
             return;
         }
+        self.bind_namespace(scope, name, value);
+    }
+
+    fn bind_namespace(&mut self, scope: Id, name: &str, value: Id) {
         if let Some(namespace) = self.scope_data(scope).binding_namespace(name) {
             let key = self.heap.code_name(name);
             let storage = self.dict_storage(namespace).expect("namespace dictionary");
@@ -1728,6 +1732,13 @@ impl Context {
 
     fn lookup(&mut self, mut scope: Id, name: &str) -> Result<Id> {
         let origin = scope;
+        let frame = self.scope_data(scope);
+        if frame.class_body.is_some()
+            && !frame.globals.contains(name)
+            && let Some(value) = self.namespace_binding(frame, name)
+        {
+            return Ok(value);
+        }
         loop {
             scope = self.binding_scope(scope, name);
             if let Some(locals) = self.scope_data(scope).exec_locals {

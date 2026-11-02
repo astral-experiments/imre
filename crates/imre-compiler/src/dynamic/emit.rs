@@ -267,6 +267,11 @@ impl Output {
                 if f.class_locals.is_some() && !f.source.string_annotations {
                     f.annotated_class_body(stmts);
                 } else {
+                    if f.class_locals.is_some()
+                        && statements::class_annotations::uses_annotations(stmts)
+                    {
+                        f.op("setup_annotations", &[&f.scope.clone()]);
+                    }
                     f.statements(stmts);
                 }
             }

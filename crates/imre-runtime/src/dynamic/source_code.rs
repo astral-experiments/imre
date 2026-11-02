@@ -4029,12 +4029,7 @@ impl Context {
             Instruction::StringAnnotation(name, expression) => {
                 let key = self.heap.code_name(name);
                 let spelling = self.source_expr(code, scope, expression)?;
-                // LOAD_NAME for this implicit store skips enclosing function locals.
-                let annotations = match self.scope_name(scope, "__annotations__") {
-                    Some(mapping) => mapping,
-                    None => self.lookup(self.root_scope(scope), "__annotations__")?,
-                };
-                self.put_item(annotations, key, spelling)?;
+                self.store_class_annotation(scope, key, spelling)?;
             }
             Instruction::ClassAnnotator(provider) => {
                 let annotate = self.source_annotator(provider, owner, scope)?;
@@ -4042,13 +4037,18 @@ impl Context {
             }
             Instruction::ClassStart => {
                 self.enable_class_annotation_provider(scope);
-                // Only postponed annotations need a visible mapping from the start of the suite.
-                if !code.string_annotations()
-                    || !code
+                if code.string_annotations()
+                    && code
                         .instructions
                         .iter()
                         .any(|(_, op)| matches!(op, Instruction::StringAnnotation(..)))
                 {
+                    self.setup_class_annotations(scope);
+                } else if self
+                    .namespace_binding(self.scope_data(scope), "__annotations__")
+                    .is_some()
+                {
+                    // A TypedDict may have started with its private field mapping.
                     let key = self.heap.code_name("__annotations__");
                     self.remove_binding(scope, "__annotations__", key)?;
                 }
