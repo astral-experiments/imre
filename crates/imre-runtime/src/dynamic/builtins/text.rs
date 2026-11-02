@@ -75,11 +75,8 @@ pub(super) fn construct(
             let number = match value.map(|id| ctx.heap.get(id)) {
                 None => crate::Int::from(0),
                 Some(Value::Str(s)) => crate::integer_text::parse_radix(s, radix as u32)?,
-                Some(Value::Bytes(b)) if b.is_ascii() => {
-                    crate::integer_text::parse_radix(std::str::from_utf8(b).unwrap(), radix as u32)?
-                }
-                Some(Value::Bytes(_)) => {
-                    return Err(Error::new("ValueError", "invalid byte literal for int()"));
+                Some(Value::Bytes(b) | Value::ByteArray(b)) => {
+                    crate::integer_text::parse_bytes_radix(b, radix as u32)?
                 }
                 _ if base.is_some() => {
                     return Err(type_error(
