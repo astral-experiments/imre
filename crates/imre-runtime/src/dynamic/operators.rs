@@ -3812,7 +3812,7 @@ impl Context {
             }
             Ok(true)
         })();
-        let collect = self.heap.discard_truth_operands(roots);
+        let collect = self.heap.discard_truth_operands(roots, self.modules);
         if let Err(error) = &result {
             for id in error.roots() {
                 self.heap.keep(id);
