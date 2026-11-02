@@ -117,6 +117,9 @@ class _Environ(_MutableMapping):
     def __len__(self):
         return len(self._data)
 
+    def copy(self):
+        return dict(self)
+
 
 environ = _Environ(_environ)
 
