@@ -2241,6 +2241,7 @@ def report(text):
             "boxed_csv.py",
             "boxed_bytes_count.py",
             "boxed_bytes_separators.py",
+            "boxed_binary_splitlines.py",
             "boxed_bytes_join.py",
             "boxed_bytes_fromhex.py",
             "boxed_binary_endswith.py",

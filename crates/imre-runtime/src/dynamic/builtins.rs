@@ -369,6 +369,7 @@ pub(super) const BYTEARRAY_METHODS: &[&str] = &[
     "reverse",
     "rstrip",
     "split",
+    "splitlines",
     "startswith",
     "strip",
 ];
@@ -386,6 +387,7 @@ pub(super) const BYTES_METHODS: &[&str] = &[
     "rsplit",
     "rstrip",
     "split",
+    "splitlines",
     "startswith",
     "strip",
     "translate",
@@ -1241,7 +1243,14 @@ pub(super) fn call(
             "bytearray"
                 if matches!(
                     method,
-                    "decode" | "endswith" | "lstrip" | "rstrip" | "split" | "startswith" | "strip"
+                    "decode"
+                        | "endswith"
+                        | "lstrip"
+                        | "rstrip"
+                        | "split"
+                        | "splitlines"
+                        | "startswith"
+                        | "strip"
                 ) =>
             {
                 text::method(ctx, owner, method, args, kwargs)
