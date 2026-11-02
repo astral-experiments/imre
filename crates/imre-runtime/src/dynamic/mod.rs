@@ -1640,6 +1640,12 @@ impl Context {
         }
         let value = self.alloc(Value::Native(name.to_owned()));
         self.builtins.insert(name.to_owned(), value);
+        if let Some(constants) = crate::objects::Calendar::class_constants(name) {
+            for (field, value) in ["min", "max", "resolution"].into_iter().zip(constants) {
+                let id = stdlib::datetime::store(self, value, NONE);
+                self.builtins.insert(format!("{name}.{field}"), id);
+            }
+        }
         if builtins::is_exception(name) {
             self.builtin(&format!("{}.__new__", builtins::exception_new_owner(name)));
             self.builtin(builtins::exception_initializer(name));

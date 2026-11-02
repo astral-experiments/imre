@@ -161,7 +161,11 @@ impl Context {
                         | "property"
                         | "module"
                         | weakref::REFERENCE_TYPE
-                ) || (kind == "function" && name == "__call__")
+                ) || (matches!(
+                    kind.as_str(),
+                    "datetime.date" | "datetime.datetime" | "datetime.time" | "datetime.timedelta"
+                ) && matches!(name, "min" | "max" | "resolution"))
+                    || (kind == "function" && name == "__call__")
                     || (matches!(name, "__repr__" | "issubset")
                         && matches!(kind.as_str(), "set" | "frozenset")) =>
             {
@@ -1493,6 +1497,16 @@ impl Context {
             && self.readable_data_descriptor(member)
         {
             return self.bind_attribute(member, obj, meta);
+        }
+        if matches!(name, "min" | "max" | "resolution") {
+            let owner = match self.heap.get(obj) {
+                Value::Calendar { .. } => Some(self.exact_type(obj)?),
+                Value::Native(_) => Some(obj),
+                _ => None,
+            };
+            if let Some(value) = owner.and_then(|class| self.own_class_attr(class, name)) {
+                return Ok(value);
+            }
         }
         if let Value::Union(union) = *self.heap.get(obj) {
             match name {
