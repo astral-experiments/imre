@@ -10,6 +10,20 @@ class Child(SimpleNamespace):
 
 
 def current():
+    allocate = SimpleNamespace.__dict__["__new__"]
+    assert allocate.__self__ is SimpleNamespace
+    assert allocate.__text_signature__ == "($type, *args, **kwargs)"
+    bare = allocate(Child, object(), ignored=True)
+    assert type(bare) is Child and vars(bare) == {}
+    assert bare.__new__ is allocate
+    for args in ((), (1,), (object,)):
+        try:
+            allocate(*args)
+        except TypeError:
+            pass
+        else:
+            raise AssertionError("accepted an invalid namespace type")
+
     ns = SimpleNamespace([("first", 1), ("last", 2)], first=3)
     descriptor = SimpleNamespace.__repr__
     handlers = {descriptor: descriptor}

@@ -17,6 +17,8 @@ pub(super) fn class(ctx: &mut Context) -> Result<Id> {
         let method = ctx.builtin(&format!("{CLASS}.{slot}"));
         ctx.bind(scope, slot, method);
     }
+    let new = ctx.builtin("types.SimpleNamespace.__new__");
+    ctx.bind(scope, "__new__", new);
     let get = ctx.builtin("types.SimpleNamespace.__dict__");
     let set = ctx.builtin("types.SimpleNamespace.readonly_dict");
     let descriptor = ctx.alloc(Value::GetSetDescriptor {
