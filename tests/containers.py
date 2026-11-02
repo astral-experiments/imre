@@ -51,6 +51,15 @@ assert len(d["a"]) == 2 and d["a"][1] == 4
 assert list(Custom().keys())[0] == "custom"
 print("views verified")
 """,
+    "dict_getitem_callback": """
+import unittest
+case = unittest.TestCase()
+d = {"a": 4}
+print(d.__getitem__("a"))
+case.assertRaises(KeyError, d.__getitem__, "absent")
+case.assertRaises(TypeError, d.__getitem__)
+case.assertRaises(TypeError, d.__getitem__, "a", "b")
+""",
     "dict_values_iteration": """
 rows = {"first": [1], "second": [2]}
 for row in rows.values():

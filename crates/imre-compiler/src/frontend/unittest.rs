@@ -831,7 +831,11 @@ impl Checker<'_> {
                                 (self.locals[slot], attr.attr.as_str()),
                                 (Type::Poll, "poll" | "register" | "modify" | "unregister")
                                     | (Type::Popen(..), "communicate")
-                            ) {
+                            ) || (attr.attr.as_str() == "__getitem__"
+                                && self.types.mapping(self.locals[slot]).is_some_and(|(k, v)| {
+                                    self.locals[slot] == self.types.dict(k, v)
+                                }))
+                            {
                                 *attr.value = root;
                                 break 'method attr.attr.to_string();
                             }
