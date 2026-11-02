@@ -68,8 +68,24 @@ def dictionary_cases(protocol):
     return graph, small, wide, replaced, recursive
 
 
+def check_floats(protocol):
+    for value, text, bits in (
+        (-0.0, b"-0.0", "8000000000000000"),
+        (900719925474099.25, b"900719925474099.2", "430999999999999a"),
+        (5e-324, b"5e-324", "0000000000000001"),
+        (float("-inf"), b"-inf", "fff0000000000000"),
+        (-float("nan"), b"nan", "fff8000000000000"),
+    ):
+        data = pickle.dumps(value, protocol)
+        if protocol == 0:
+            assert data == b"F" + text + b"\n."
+        else:
+            assert data.endswith(b"G" + bytes.fromhex(bits) + b".")
+
+
 def produce():
     for protocol in range(pickle.HIGHEST_PROTOCOL + 1):
+        check_floats(protocol)
         for result in (11, (int,), (11, ()), (int, 11)):
             try:
                 pickle.dumps(BadReturn(result), protocol)
