@@ -4,7 +4,11 @@ use crate::objects::socket as native;
 
 pub(super) fn attribute(ctx: &mut Context, name: &str) -> Result<Id> {
     let value = match name {
+        // IPv6 is compiled in on the supported Linux and macOS targets, independently of
+        // whether a particular process can create or bind an IPv6 socket.
+        "has_ipv6" => return Ok(super::TRUE),
         "AF_INET" => libc::AF_INET,
+        "AF_INET6" => libc::AF_INET6,
         "AF_UNSPEC" => libc::AF_UNSPEC,
         "AF_UNIX" => libc::AF_UNIX,
         "SOCK_STREAM" => libc::SOCK_STREAM,
