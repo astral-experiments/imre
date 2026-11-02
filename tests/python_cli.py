@@ -1274,6 +1274,10 @@ def main():
         )
         compare("-B", request_script)
 
+        ftp_script = root / "ftp_entry.py"
+        ftp_script.write_text("import ftplib\nprint(ftplib.FTP().encoding, ftplib.parse257('257 \"home\"'))\n")
+        compare("-B", ftp_script)
+
         decorated = root / "method_decorators.py"
         decorated.write_text(
             "def prefix(tag):\n"
