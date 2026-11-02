@@ -1,6 +1,7 @@
 """Import modules registered with the native loader."""
 
 
+from _imre_importlib import import_module as _import_module
 from _frozen_importlib import ModuleSpec as _ModuleSpec
 import _frozen_importlib_external as _bootstrap_external
 
@@ -36,5 +37,4 @@ def import_module(name, package=None):
         name = _resolve_relative(name, package)
     elif not name:
         raise ValueError("Empty module name")
-    # A nonempty fromlist returns the requested module, including a dotted child.
-    return __import__(name, fromlist=("__name__",))
+    return _import_module(name)

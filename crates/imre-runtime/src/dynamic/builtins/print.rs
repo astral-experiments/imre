@@ -28,7 +28,7 @@ pub(super) fn call(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> R
     let file = match file.filter(|&file| file != NONE) {
         Some(file) => file,
         None => {
-            let sys = ctx.module("sys")?;
+            let sys = ctx.sys_module;
             match ctx.lookup_attr(sys, "stdout") {
                 Ok(NONE) => return Ok(NONE),
                 Ok(file) => file,

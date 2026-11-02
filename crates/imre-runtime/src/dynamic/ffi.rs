@@ -612,6 +612,7 @@ pub(super) fn new_context<S: Into<String>>(
         codec_entries: Default::default(),
         frozen_override: 0,
         modules: NONE,
+        sys_module: NONE,
         classes: HashMap::new(),
         typing: super::typing::Registry::default(),
         logger_wrappers: HashMap::new(),
@@ -660,7 +661,8 @@ pub(super) unsafe extern "C" fn imre_dyn_register(
 pub(super) unsafe extern "C" fn imre_dyn_finish(ctx: *mut Context) -> i32 {
     // SAFETY: main transfers its unique allocation from imre_dyn_new exactly once.
     let mut ctx = unsafe { Box::from_raw(ctx) };
-    match ctx.module("__main__") {
+    let result = ctx.module("sys").and_then(|_| ctx.module("__main__"));
+    match result {
         Ok(_) => 0,
         Err(e) if e.kind == "SystemExit" => match e.exit_status {
             Some(status) => status.report(),
@@ -1288,6 +1290,7 @@ impl Context {
                     self.argv,
                     self.sys_path,
                     self.modules,
+                    self.sys_module,
                     self.default_encoding,
                     self.token_missing,
                 ]),

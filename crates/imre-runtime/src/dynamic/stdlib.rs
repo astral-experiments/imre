@@ -384,6 +384,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         | (
             "_imre_importlib",
             "find_spec"
+            | "import_module"
             | "get_code"
             | "loader_fields"
             | "path_stats"
@@ -1359,6 +1360,12 @@ pub(super) fn call(
             ("warn_debug_override", [], []) => {
                 crate::objects::cache_paths::warn_debug_override()?;
                 return Ok(NONE);
+            }
+            ("import_module", [name], []) => {
+                let name = ctx.str_value(*name)?.to_owned();
+                return ctx
+                    .find_module(&name)?
+                    .ok_or_else(|| Context::missing_module(&name));
             }
             ("find_spec", [fullname, original], []) => {
                 let fullname = ctx.str_value(*fullname)?.to_owned();

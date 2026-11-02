@@ -111,7 +111,9 @@ pub(crate) struct Context {
     zip_directories: HashMap<String, crate::objects::ZipArchive>,
     codec_entries: stdlib::codecs::Registry,
     frozen_override: i32,
+    // The interpreter keeps its original dictionary even when Python reassigns sys.modules.
     modules: Id,
+    sys_module: Id,
     classes: HashMap<String, Id>,
     typing: typing::Registry,
     // Python wrappers retain their registered logger for the lifetime of this heap.
@@ -1803,9 +1805,23 @@ impl Context {
         .with_import(Some(name), None, None)
     }
 
+    fn public_modules(&mut self) -> Result<Id> {
+        if self.sys_module == NONE {
+            return Ok(self.modules);
+        }
+        self.lookup_attr(self.sys_module, "modules")
+    }
+
     fn registered_module(&mut self, name: Id) -> Result<Option<Id>> {
-        let (_, index) = self.find_dictionary_key(self.modules, name, None)?;
-        Ok(index.map(|i| self.stored_entries(self.modules)[i].1))
+        let modules = self.public_modules()?;
+        if matches!(self.heap.get(modules), Value::Dict(_)) {
+            let (_, index) = self.find_dictionary_key(modules, name, None)?;
+            return Ok(index.map(|i| self.stored_entries(modules)[i].1));
+        }
+        let get = self.lookup_attr(modules, "get")?;
+        let missing = self.alloc(Value::List(Vec::new()));
+        let value = self.call(get, vec![name, missing], Vec::new())?;
+        Ok((value != missing).then_some(value))
     }
 
     fn cached_import(&mut self, name: &str) -> Result<Option<Id>> {
@@ -1822,10 +1838,19 @@ impl Context {
 
     fn publish_module(&mut self, name: &str, module: Id) -> Result<()> {
         let key = self.text(name);
-        self.put_item(self.modules, key, module)
+        let modules = self.public_modules()?;
+        self.put_item(modules, key, module)
     }
 
     fn module(&mut self, name: &str) -> Result<Id> {
+        let key = self.text(name);
+        let (_, index) = self.find_dictionary_key(self.modules, key, None)?;
+        if let Some(index) = index {
+            let module = self.stored_entries(self.modules)[index].1;
+            if module != NONE {
+                return Ok(module);
+            }
+        }
         self.find_module(name)?
             .ok_or_else(|| Self::missing_module(name))
     }
@@ -1965,10 +1990,28 @@ impl Context {
             constructor: None,
         });
         let key = self.text(name);
-        self.put_item(self.modules, key, module)?;
-        if let Err(e) = self.run_initializer(name, module, scope, name_id, origin, source) {
-            builtins::remove_dict_item(self, self.modules, key)?;
-            return Err(e);
+        let modules = self.public_modules()?;
+        self.put_item(modules, key, module)?;
+        if let Err(error) = self.run_initializer(name, module, scope, name_id, origin, source) {
+            // Mapping callbacks during cleanup run inside the initializer's exception handler.
+            let exception = self.raised_instance(error);
+            let previous = self.heap.replace_active(exception);
+            self.heap.keep(previous);
+            let cleanup = self
+                .public_modules()
+                .and_then(|modules| self.delete_item(modules, key));
+            self.heap.replace_active(previous);
+            if let Err(mut error) = cleanup
+                && !self.is_builtin_error(&error, "KeyError")
+            {
+                if error.context == NONE
+                    && error.trace.as_ref().and_then(|t| t.instance) != Some(exception)
+                {
+                    error.context = exception;
+                }
+                return Err(error);
+            }
+            return self.op("reraise", exception, NONE, NONE).map(Some);
         }
         // A script can delete its own __main__ binding. Its exit status is determined by the script.
         if name == "__main__" {
@@ -1976,10 +2019,16 @@ impl Context {
         }
         // An initializer can replace its own registry entry. The successful import
         // returns that value and moves its binding after the dependencies it imported.
-        let loaded = self.get_item(self.modules, key)?;
-        self.delete_item(self.modules, key)?;
-        self.put_item(self.modules, key, loaded)?;
-        if let Some((parent, child)) = parent {
+        let modules = self.public_modules()?;
+        let pop = self.lookup_attr(modules, "pop")?;
+        let loaded = self.call(pop, vec![key], Vec::new())?;
+        self.heap.keep(loaded);
+        let modules = self.public_modules()?;
+        self.put_item(modules, key, loaded)?;
+        if let Some((parent_name, child)) = name.rsplit_once('.') {
+            let modules = self.public_modules()?;
+            let parent_key = self.text(parent_name);
+            let parent = self.get_item(modules, parent_key)?;
             self.set_attr(parent, child, loaded)?;
         }
         Ok(Some(loaded))
@@ -2062,7 +2111,10 @@ impl Context {
                 stdlib::readiness::initialize(self, scope)?;
             }
             "sys" => {
-                self.bind(scope, "modules", self.modules);
+                if self.sys_module == NONE {
+                    self.sys_module = module;
+                    self.bind(scope, "modules", self.modules);
+                }
                 for name in ["audit", "addaudithook"] {
                     let callable = self.builtin(&format!("sys.{name}"));
                     let function = self.alloc(Value::Method {

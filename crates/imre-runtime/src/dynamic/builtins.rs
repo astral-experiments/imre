@@ -1571,10 +1571,12 @@ pub(super) fn call(
                 ));
             }
             let result = ctx.module(&name)?;
-            if ctx.optional_truth(fromlist, false)? {
-                return Ok(result);
+            if !ctx.optional_truth(fromlist, false)?
+                && let Some((top, _)) = name.split_once('.')
+            {
+                return ctx.module(top);
             }
-            ctx.module(name.split('.').next().unwrap())
+            Ok(result)
         }
         "complex" => ctx.new_complex(args, kwargs),
         "float" => float::construct(ctx, args, kwargs),
