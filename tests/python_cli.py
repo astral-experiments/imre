@@ -3110,6 +3110,8 @@ for name in ("md4", "ripemd160"):
             compare("-IB", "-c", imports + "arithmetic.current()")
         if sys.platform in ("darwin", "linux"):
             compare("-IB", str(fixtures / "boxed_geteuid_exports.py"), "os", "posix")
+            plugin.write_bytes((fixtures / "boxed_grp.py").read_bytes())
+            compare("-IB", "-c", imports + "arithmetic.current()")
             plugin.write_bytes((fixtures / "boxed_pwd.py").read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")
             plugin.write_bytes((fixtures / "boxed_posix_expanduser.py").read_bytes())

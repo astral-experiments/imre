@@ -484,6 +484,8 @@ pub(super) fn change_environment(
 
 mod chmod;
 mod chown;
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+pub(super) use chown::owner_id;
 mod links;
 mod mkfifo;
 #[cfg(target_os = "linux")]
