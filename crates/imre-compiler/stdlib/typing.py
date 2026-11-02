@@ -487,7 +487,7 @@ def _typeddict_replay(annotate, owner, allow_evaluation):
     return func, names
 
 
-def _typeddict_base_annotations(annotate, format, owner=None):
+def _call_annotate(annotate, format, owner=None):
     from annotationlib import Format
     if format == Format.VALUE_WITH_FAKE_GLOBALS:
         raise ValueError("The VALUE_WITH_FAKE_GLOBALS format is for internal use only")
@@ -528,12 +528,24 @@ def _typeddict_base_annotations(annotate, format, owner=None):
     return {key: value.evaluate(format=Format.FORWARDREF)
             if isinstance(value, ForwardRef) else value for key, value in result.items()}
 
+def _namedtuple_annotate(original):
+    # Check field types at declaration time, even if a name is still undefined.
+    def annotate(format):
+        values = _call_annotate(original, format)
+        if format == 4:
+            return values
+        return {name: _type_check(value, f"field {name} annotation must be a type")
+                for name, value in values.items()}
+
+    return annotate
+
+
 def _configure_typeddict(cls, fields, total, own_annotate=None, bases=()):
     if not hasattr(cls, "__orig_bases__"):
         cls.__orig_bases__ = bases
 
     if own_annotate is not None:
-        fields = _typeddict_base_annotations(own_annotate, 3, cls)
+        fields = _call_annotate(own_annotate, 3, cls)
     annotations = {key: _typeddict_field(tp, cls.__module__, cls)
                    for key, tp in fields.items()}
 
@@ -544,9 +556,9 @@ def _configure_typeddict(cls, fields, total, own_annotate=None, bases=()):
                 continue
             annotate = base.__annotate__
             if annotate is not None:
-                result.update(_typeddict_base_annotations(annotate, format, base))
+                result.update(_call_annotate(annotate, format, base))
         if own_annotate is not None:
-            own = _typeddict_base_annotations(own_annotate, format, cls)
+            own = _call_annotate(own_annotate, format, cls)
             if format != 4:
                 own = {key: _typeddict_field(tp, cls.__module__) for key, tp in own.items()}
         elif format == 4:
