@@ -97,6 +97,10 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
                 include_str!("../stdlib/zipimport_source.py"),
             ),
         )),
+        "importlib.metadata._adapters" => Some((
+            "importlib/metadata/_adapters.py",
+            include_str!("../stdlib/importlib/metadata_adapters.py"),
+        )),
         "importlib.metadata" => Some((
             "importlib/metadata/__init__.py",
             concat!(
@@ -1173,6 +1177,9 @@ impl IntrinsicModule {
             }
             (Self::ImportlibMetadata, "distributions") => {
                 Intrinsic::ObjectRuntimeExport("importlib.metadata.distributions")
+            }
+            (Self::ImportlibMetadata, "metadata") => {
+                Intrinsic::ObjectRuntimeExport("importlib.metadata.metadata")
             }
             (Self::ImportlibMetadata, "distribution") => {
                 Intrinsic::ObjectRuntimeExport("importlib.metadata.distribution")
@@ -3703,7 +3710,7 @@ impl<'a> Loader<'a> {
                             .map(|&at| &parsed.syntax().body[at]);
                         let simple = prefix.clone().all(|stmt| {
                             module_name_guard(stmt)
-                                || platform_import(&self.modules, id, stmt).is_some()
+                                || conditional_import(&self.modules, id, stmt).is_some()
                                 || (module.is_package
                                     && value_name(stmt).is_some()
                                     && module_value(stmt).is_some_and(literal_export))
@@ -3787,7 +3794,7 @@ impl<'a> Loader<'a> {
                     )?;
                 }
                 _ => {
-                    if let Some(name) = platform_import(&self.modules, id, statement) {
+                    if let Some(name) = conditional_import(&self.modules, id, statement) {
                         self.bind(id, name, Binding::ConditionalValue, statement)?;
                         self.needs_object_imports = true;
                     }
@@ -4714,13 +4721,30 @@ pub(crate) fn errno_import(statement: &ast::Stmt) -> Option<&ast::StmtImportFrom
     .then_some(import)
 }
 
-/// Both arms bind the same name. The runtime evaluates the platform check and
-/// imports the optional provider only in the selected arm, before the next import.
-fn platform_import<'a>(
+/// Both arms bind one name. The source importer runs the selected imports and
+/// their module initializers before continuing to the next statement.
+fn conditional_import<'a>(
     modules: &[SourceModule],
     module: ModuleId,
     statement: &'a ast::Stmt,
 ) -> Option<&'a str> {
+    if let ast::Stmt::Try(guard) = statement {
+        let [ast::ExceptHandler::ExceptHandler(handler)] = guard.handlers.as_slice() else {
+            return None;
+        };
+        let exception = handler.type_.as_deref()?;
+        if guard.is_star
+            || !guard.orelse.is_empty()
+            || !guard.finalbody.is_empty()
+            || handler.name.is_some()
+            || !matches!(exception, ast::Expr::Name(n) if n.id.as_str() == "ImportError")
+            || resolve_binding(modules, module, exception).is_some()
+        {
+            return None;
+        }
+        let name = single_import_binding(&guard.body)?;
+        return (single_import_binding(&handler.body)? == name).then_some(name);
+    }
     let guard = statement.as_if_stmt()?;
     let test = guard.test.as_compare_expr()?;
     let [left, right] = test.operands.as_ref() else {
@@ -4758,6 +4782,23 @@ fn platform_import<'a>(
         && value_name(fallback) == Some(name)
         && module_value(fallback).is_some_and(literal_export))
     .then_some(name)
+}
+
+fn single_import_binding(body: &[ast::Stmt]) -> Option<&str> {
+    let aliases = match body {
+        [ast::Stmt::Import(import)] => &import.names,
+        [ast::Stmt::ImportFrom(import)] => &import.names,
+        _ => return None,
+    };
+    let [alias] = aliases.as_slice() else {
+        return None;
+    };
+    if let Some(name) = &alias.asname {
+        return Some(name.as_str());
+    }
+    // An unaliased dotted import binds only the first component.
+    let name = alias.name.as_str().split('.').next()?;
+    (name != "*").then_some(name)
 }
 
 /// Allow an identity check with a closed builtin raise before importing a dependency.

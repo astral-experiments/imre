@@ -42,22 +42,19 @@ class Distribution:
             raise ValueError('cannot accept context and kwargs')
         return _discover(context or _Context(**kwargs))
 
-    def _header(self, key):
+    @property
+    def metadata(self):
+        from importlib.metadata._adapters import Message
         text = self.read_text('METADATA') or self.read_text('PKG-INFO') or self.read_text('')
-        value = _first_header(text or '', key)
-        if value is None:
-            import warnings
-            warnings.warn('Implicit None on return values is deprecated and will raise KeyErrors.',
-                          DeprecationWarning, stacklevel=2)
-        return value
+        return Message(text or '')
 
     @property
     def version(self):
-        return self._header('Version')
+        return self.metadata['Version']
 
     @property
     def name(self):
-        return self._header('Name')
+        return self.metadata['Name']
 
     @property
     def _normalized_name(self):
@@ -163,6 +160,10 @@ def distribution(distribution_name):
 
 def distributions(**kwargs):
     return Distribution.discover(**kwargs)
+
+
+def metadata(distribution_name):
+    return distribution(distribution_name).metadata
 
 
 def version(distribution_name):
