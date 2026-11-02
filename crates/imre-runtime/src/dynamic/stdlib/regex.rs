@@ -22,7 +22,7 @@ use assertions::{Guard, Kind};
 use progress::Matcher;
 pub(super) use split::pattern_split;
 use split::split;
-pub(super) use sub::pattern_sub;
+pub(super) use sub::{match_expand, pattern_sub};
 
 const IGNORECASE: i64 = 2;
 const LOCALE: i64 = 4;
