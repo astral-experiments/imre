@@ -116,6 +116,8 @@ impl Imports {
                     | "site"
                     | "importlib.machinery"
                     | "traceback"
+                    | "code"
+                    | "codeop"
                     | "unittest.case"
                     | "string.templatelib"
             )
@@ -457,6 +459,7 @@ pub(crate) fn compile(
             "operator",
             "struct",
             "traceback",
+            "code",
             "unittest",
             "SystemExit",
             "__import__",
@@ -699,7 +702,9 @@ pub(crate) fn compile(
         "abc",
         "annotationlib",
         "ast",
+        "code",
         "codecs",
+        "codeop",
         "copyreg",
         "datetime",
         "genericpath",

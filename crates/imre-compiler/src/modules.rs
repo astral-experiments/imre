@@ -133,6 +133,9 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
                 include_str!("../stdlib/csv/sniffer.py"),
             ),
         )),
+        // CPython 3.14.5 interactive console sources. See stdlib/docstrings/LICENSE.
+        "code" => Some(("code.py", include_str!("../stdlib/code.py"))),
+        "codeop" => Some(("codeop.py", include_str!("../stdlib/codeop.py"))),
         "copy" => Some(("copy.py", include_str!("../stdlib/copy.py"))),
         "copyreg" => Some(("copyreg.py", include_str!("../stdlib/copyreg.py"))),
         "warnings" => Some((
