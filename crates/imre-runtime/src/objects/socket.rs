@@ -1132,8 +1132,8 @@ pub(crate) fn ipv6_address(
     Ok(InternetAddress::V6(addr))
 }
 
-pub(crate) fn address(host: &str, port: i64, name: &str) -> Result<libc::sockaddr_in> {
-    let ip = hostbyname(host.as_bytes())?;
+pub(crate) fn address(host: &[u8], port: i32, name: &str) -> Result<libc::sockaddr_in> {
+    let ip = hostbyname(host)?;
     let port = u16::try_from(port).map_err(|_| port_error(name))?;
     // SAFETY: zero is a valid initial sockaddr_in, including target-specific padding.
     let mut addr: libc::sockaddr_in = unsafe { std::mem::zeroed() };
@@ -1153,7 +1153,7 @@ unsafe fn unpack(pair: *const usize, name: &str) -> Result<libc::sockaddr_in> {
     // SAFETY: the compiler verified and rooted both fields.
     unsafe {
         let port = c_int(*pair.add(1)).map_err(|_| port_error(name))?;
-        address(&**pair.cast::<*const Str>(), i64::from(port), name)
+        address((&**pair.cast::<*const Str>()).as_bytes(), port, name)
     }
 }
 
@@ -1314,7 +1314,8 @@ fn unpack_socket_name(addr: &libc::sockaddr_storage, len: libc::socklen_t) -> Re
         #[cfg(target_vendor = "apple")]
         if len as usize > path_offset {
             // SAFETY: the initialized storage includes at least the first Unix path byte.
-            let unix = unsafe { &*(addr as *const libc::sockaddr_storage).cast::<libc::sockaddr_un>() };
+            let unix =
+                unsafe { &*(addr as *const libc::sockaddr_storage).cast::<libc::sockaddr_un>() };
             if unix.sun_path[0] == 0 {
                 return Ok(SocketName::UnnamedUnix);
             }

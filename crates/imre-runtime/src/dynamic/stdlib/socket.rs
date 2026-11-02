@@ -238,98 +238,90 @@ fn address(
     pair: Id,
     name: &str,
 ) -> Result<native::InternetAddress> {
-    if family == libc::AF_INET6 {
-        let fields = ctx.tuple_items(pair)?.ok_or_else(|| {
-            Error::new(
-                "TypeError",
-                format!(
-                    "{name}(): AF_INET6 address must be tuple, not {}",
-                    ctx.type_name(pair)
-                ),
-            )
-        })?;
-        if !(2..=4).contains(&fields.len()) {
-            return Err(Error::new(
-                "TypeError",
-                "AF_INET6 address must be a tuple (host, port[, flowinfo[, scopeid]])",
-            ));
-        }
-        // Convert in CPython's argument order; __index__ may run arbitrary code.
-        let host = match ctx.heap.get(ctx.scalar_value(fields[0])) {
-            Value::Bytes(_) | Value::ByteArray(_) => ctx.bytes_like(fields[0])?.to_vec(),
-            Value::Str(_) | Value::SurrogateStr(_) => {
-                let text = ctx.str_value(fields[0])?;
-                if !text.is_ascii() {
-                    return Err(Error::new(
-                        "NotImplementedError",
-                        "IPv6 Unicode host names require IDNA encoding",
-                    ));
-                }
-                text.as_bytes().to_vec()
-            }
-            _ => {
+    let ipv6 = family == libc::AF_INET6;
+    let family_name = if ipv6 { "AF_INET6" } else { "AF_INET" };
+    let fields = ctx.tuple_items(pair)?.ok_or_else(|| {
+        Error::new(
+            "TypeError",
+            format!(
+                "{name}(): {family_name} address must be tuple, not {}",
+                ctx.type_name(pair)
+            ),
+        )
+    })?;
+    if ipv6 && !(2..=4).contains(&fields.len()) {
+        return Err(Error::new(
+            "TypeError",
+            "AF_INET6 address must be a tuple (host, port[, flowinfo[, scopeid]])",
+        ));
+    }
+    if !ipv6 && fields.len() != 2 {
+        return Err(Error::new(
+            "TypeError",
+            "AF_INET address must be a pair (host, port)",
+        ));
+    }
+    // Convert in CPython's argument order; __index__ may run arbitrary code.
+    let host = match ctx.heap.get(ctx.scalar_value(fields[0])) {
+        Value::Bytes(_) | Value::ByteArray(_) => ctx.bytes_like(fields[0])?.to_vec(),
+        Value::Str(_) | Value::SurrogateStr(_) => {
+            let text = ctx.str_value(fields[0])?;
+            if ipv6 && !text.is_ascii() {
                 return Err(Error::new(
-                    "TypeError",
-                    format!(
-                        "str, bytes or bytearray expected, not {}",
-                        ctx.type_name(fields[0])
-                    ),
+                    "NotImplementedError",
+                    "IPv6 Unicode host names require IDNA encoding",
                 ));
             }
-        };
-        if host.contains(&0) {
+            text.as_bytes().to_vec()
+        }
+        _ => {
             return Err(Error::new(
                 "TypeError",
-                "host name must not contain null character",
+                format!(
+                    "str, bytes or bytearray expected, not {}",
+                    ctx.type_name(fields[0])
+                ),
             ));
         }
-        let mut index = |id| {
-            ctx.index_integer(id).map_err(|error| {
-                if ctx.is_builtin_error(&error, "OverflowError") {
-                    Error::new("OverflowError", format!("{name}(): port must be 0-65535."))
-                } else {
-                    error
-                }
-            })
-        };
-        let port = index(fields[1])?
-            .to_i64()
-            .and_then(|n| i32::try_from(n).ok())
-            .ok_or_else(|| {
-                Error::new("OverflowError", format!("{name}(): port must be 0-65535."))
-            })?;
-        let mut unsigned = |id| index(id).map(unsigned_mask);
-        let flow = fields
-            .get(2)
-            .copied()
-            .map(&mut unsigned)
-            .transpose()?
-            .unwrap_or(0);
-        let scope = fields
-            .get(3)
-            .copied()
-            .map(unsigned)
-            .transpose()?
-            .unwrap_or(0);
-        return Ok(native::ipv6_address(&host, port, flow, scope, name)?);
+    };
+    if host.contains(&0) {
+        return Err(Error::new(
+            "TypeError",
+            "host name must not contain null character",
+        ));
     }
-    let Value::Tuple(fields) = ctx.heap.get(pair) else {
-        return Err(Error::new(
-            "TypeError",
-            "AF_INET address must be a pair (host, port)",
-        ));
+    let mut index = |id| {
+        ctx.index_integer(id).map_err(|error| {
+            if ctx.is_builtin_error(&error, "OverflowError") {
+                Error::new("OverflowError", format!("{name}(): port must be 0-65535."))
+            } else {
+                error
+            }
+        })
     };
-    let [host, port] = fields.as_slice() else {
-        return Err(Error::new(
-            "TypeError",
-            "AF_INET address must be a pair (host, port)",
-        ));
-    };
-    Ok(native::InternetAddress::V4(native::address(
-        ctx.str_value(*host)?,
-        ctx.as_integer(*port)?,
-        name,
-    )?))
+    let port = index(fields[1])?
+        .to_i64()
+        .and_then(|n| i32::try_from(n).ok())
+        .ok_or_else(|| Error::new("OverflowError", format!("{name}(): port must be 0-65535.")))?;
+    if !ipv6 {
+        return Ok(native::InternetAddress::V4(native::address(
+            &host, port, name,
+        )?));
+    }
+    let mut unsigned = |id| index(id).map(unsigned_mask);
+    let flow = fields
+        .get(2)
+        .copied()
+        .map(&mut unsigned)
+        .transpose()?
+        .unwrap_or(0);
+    let scope = fields
+        .get(3)
+        .copied()
+        .map(unsigned)
+        .transpose()?
+        .unwrap_or(0);
+    Ok(native::ipv6_address(&host, port, flow, scope, name)?)
 }
 
 fn unsigned_mask(value: crate::Int) -> u32 {

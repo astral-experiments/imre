@@ -12,7 +12,17 @@ def check(family, host):
         assert sender.sendto(memoryview(b"first"), target) == 5
         assert sender.sendto(b"", 0, target) == 0
         assert sender.sendto(bytearray(b"discard"), target) == 7
-        assert sender.sendto(b"last", target) == 4
+        payload = bytearray(b"last")
+        class Port:
+            def __index__(self):
+                try:
+                    payload.append(0)
+                except BufferError:
+                    return target[1]
+                raise AssertionError("sendto released the buffer before converting the port")
+
+        assert sender.sendto(payload, (host.encode("ascii"), Port())) == 4
+        payload.append(0)
         assert receiver.recvfrom(2) == (b"fi", source)
         assert receiver.recvfrom(16) == (b"", source)
         # A zero-size recvfrom consumes a datagram and still returns the sender.
