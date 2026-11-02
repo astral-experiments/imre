@@ -5,8 +5,8 @@ use crate::dynamic::stdlib::{builtins, tempfile};
 const OWNER: &str = "BufferedRandom";
 pub(super) const METHODS: &[&str] = &[
     "__init__", "raw", "name", "mode", "closed", "readable", "writable", "seekable", "fileno",
-    "isatty", "peek", "read", "read1", "readinto", "readline", "write", "seek", "tell", "flush", "close",
-    "truncate",
+    "isatty", "peek", "read", "read1", "readinto", "readline", "write", "seek", "tell", "flush",
+    "close", "truncate",
 ];
 
 pub(super) fn call(

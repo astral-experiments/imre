@@ -34,6 +34,10 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
             ),
         )),
         "argparse" => Some(("argparse.py", include_str!("../../stdlib/argparse.py"))),
+        "_json" => Some((
+            "_json.py",
+            include_str!("../../stdlib/json/accelerator_scanner.py"),
+        )),
         "json.encoder" => Some((
             "json/encoder.py",
             include_str!("../../stdlib/json/encoder.py"),

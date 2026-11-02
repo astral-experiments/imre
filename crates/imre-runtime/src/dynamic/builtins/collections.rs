@@ -915,7 +915,10 @@ pub(super) fn method(
             return Err(type_error("wrapper __ior__() takes no keyword arguments"));
         }
         let [other] = args else {
-            return Err(type_error(format!("expected 1 argument, got {}", args.len())));
+            return Err(type_error(format!(
+                "expected 1 argument, got {}",
+                args.len()
+            )));
         };
         update(ctx, receiver, Some(*other), &[])?;
         return Ok(object);
@@ -925,7 +928,10 @@ pub(super) fn method(
             return Err(type_error("wrapper __eq__() takes no keyword arguments"));
         }
         let [other] = args else {
-            return Err(type_error(format!("expected 1 argument, got {}", args.len())));
+            return Err(type_error(format!(
+                "expected 1 argument, got {}",
+                args.len()
+            )));
         };
         return match ctx.dict_storage(*other) {
             Some(right) => Ok(boolean(ctx.checked_equal(receiver, right)?)),
@@ -1210,7 +1216,9 @@ fn sequence_index(
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
     if !kwargs.is_empty() {
-        return Err(type_error(format!("{owner}.index() takes no keyword arguments")));
+        return Err(type_error(format!(
+            "{owner}.index() takes no keyword arguments"
+        )));
     }
     let Some((&needle, bounds)) = args.split_first() else {
         return Err(type_error("index expected at least 1 argument, got 0"));
@@ -1235,13 +1243,7 @@ fn sequence_index(
         });
     }
     let (length, _) = ctx.sequence_at(receiver, 0).unwrap();
-    let [start, stop] = limits.map(|i| {
-        if i < 0 {
-            (length as i64 + i).max(0)
-        } else {
-            i
-        }
-    });
+    let [start, stop] = limits.map(|i| if i < 0 { (length as i64 + i).max(0) } else { i });
     find_sequence_item(ctx, receiver, needle, start..stop)?
         .map(|i| ctx.int(i))
         .ok_or_else(|| Error::new("ValueError", format!("{owner}.index(x): x not in {owner}")))
@@ -1371,7 +1373,9 @@ pub(super) fn builtin_slot(
     }
     if matches!(method, "__repr__" | "__str__" | "__index__") {
         if !kwargs.is_empty() {
-            return Err(type_error(format!("wrapper {method}() takes no keyword arguments")));
+            return Err(type_error(format!(
+                "wrapper {method}() takes no keyword arguments"
+            )));
         }
         if !rest.is_empty() {
             return Err(type_error(format!(

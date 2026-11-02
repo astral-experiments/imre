@@ -14,7 +14,11 @@ impl BuiltinDescriptor {
             && let Some(owner) = stdlib::itertools::cursor_type(owner)
             && let Some(name) = stdlib::itertools::slots(owner).find(|&slot| slot == attr)
         {
-            return Some(Self { owner, name, method: name == "__length_hint__" });
+            return Some(Self {
+                owner,
+                name,
+                method: name == "__length_hint__",
+            });
         }
         if let Some((class, attr)) = symbol.rsplit_once('.')
             && let Some(owner) = crate::objects::HashState::provider_class(class)
@@ -71,7 +75,9 @@ impl BuiltinDescriptor {
                 Some((defaultdict::CLASS, attr, defaultdict::METHODS))
             }
             Some(("generator", attr)) => Some(("generator", attr, &["__iter__", "__next__"][..])),
-            Some(("mappingproxy", attr)) => Some(("mappingproxy", attr, builtins::MAPPING_PROXY_METHODS)),
+            Some(("mappingproxy", attr)) => {
+                Some(("mappingproxy", attr, builtins::MAPPING_PROXY_METHODS))
+            }
             Some(("type", attr)) => Some(("type", attr, &["mro"][..])),
             Some(("float", attr)) => Some(("float", attr, &["as_integer_ratio"][..])),
             Some(("bytes", attr)) => Some(("bytes", attr, builtins::BYTES_METHODS)),

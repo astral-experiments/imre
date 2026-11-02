@@ -816,9 +816,9 @@ impl Context {
             (Value::MemoryView { .. }, _) | (_, Value::MemoryView { .. }) => {
                 match (self.buffer_storage(a), self.buffer_storage(b)) {
                     (Ok(Value::RawReadWindow(w)), Ok(Value::Array(array)))
-                    | (Ok(Value::Array(array)), Ok(Value::RawReadWindow(w))) => {
-                        self.window_bytes(*w).is_ok_and(|bytes| array.equals_unsigned_bytes(bytes))
-                    }
+                    | (Ok(Value::Array(array)), Ok(Value::RawReadWindow(w))) => self
+                        .window_bytes(*w)
+                        .is_ok_and(|bytes| array.equals_unsigned_bytes(bytes)),
                     (Ok(Value::RawReadWindow(_)), _) | (_, Ok(Value::RawReadWindow(_))) => {
                         matches!((self.bytes_like(a), self.bytes_like(b)), (Ok(a), Ok(b)) if a == b)
                     }
@@ -1979,8 +1979,12 @@ impl Context {
                         ));
                     }
                     match ctx.heap.get(storage) {
-                        Value::Method { callable, receiver, explicit }
-                            if *explicit || matches!(ctx.heap.get(*callable), Value::Function { .. }) =>
+                        Value::Method {
+                            callable,
+                            receiver,
+                            explicit,
+                        } if *explicit
+                            || matches!(ctx.heap.get(*callable), Value::Function { .. }) =>
                         {
                             let (callable, receiver) = (*callable, *receiver);
                             append_rendered_text(&mut output, "<bound method ")?;
@@ -2720,7 +2724,7 @@ impl Context {
             Value::Native(name) if matches!(name.as_str(), "typing.Any" | "typing.Callable") => {
                 name.clone()
             }
-            Value::TypeVarTuple { name, .. } => self.display(*name),
+            Value::TypeVarTuple { name, .. } | Value::TypeAlias { name, .. } => self.display(*name),
             Value::NoDefault => "typing.NoDefault".to_owned(),
             Value::TypeVar(var) => {
                 let variance = if var.covariant {
@@ -4017,7 +4021,8 @@ impl Context {
                 }
                 continue;
             }
-            if matches!(self.heap.get(left), Value::Weak(wr) if wr.kind != weakref::Kind::Reference) {
+            if matches!(self.heap.get(left), Value::Weak(wr) if wr.kind != weakref::Kind::Reference)
+            {
                 return self.binary("|", left, right);
             }
             let next_right = match self.heap.get(right) {
@@ -4568,13 +4573,18 @@ impl Context {
             // A float subtype inherits float's comparison slots independently. In particular,
             // float.__ne__ need not call an overridden __eq__, and NaN is unequal to itself.
             if matches!(name, "__eq__" | "__ne__")
-                && let Value::Instance { scalar: Some(scalar), .. } = self.heap.get(obj)
+                && let Value::Instance {
+                    scalar: Some(scalar),
+                    ..
+                } = self.heap.get(obj)
                 && let Value::Float(number) = self.heap.get(*scalar)
             {
                 let other = self.scalar_value(other);
                 let equal = match self.heap.get(other) {
                     Value::Float(right) => number == right,
-                    Value::Int(_) | Value::Bool(_) => crate::floats::compare(&self.as_int(other)?, *number) == 0,
+                    Value::Int(_) | Value::Bool(_) => {
+                        crate::floats::compare(&self.as_int(other)?, *number) == 0
+                    }
                     _ => return Ok(None),
                 };
                 return Ok(Some(builtins::boolean(equal == (name == "__eq__"))));
@@ -4711,12 +4721,14 @@ impl Context {
 
     pub(super) fn binary_special(&mut self, op: &str, a: Id, b: Id) -> Result<Option<Id>> {
         // Keep inherited dict comparisons on the iterative container walk, including cycles.
-        if op == "==" && [a, b].into_iter().all(|value| {
-            self.dict_storage(value).is_some()
-                && self.slot(value, "__eq__").is_none_or(|slot| {
-                    Some(&slot) == self.builtins.get("dict.__eq__")
-                })
-        }) {
+        if op == "=="
+            && [a, b].into_iter().all(|value| {
+                self.dict_storage(value).is_some()
+                    && self
+                        .slot(value, "__eq__")
+                        .is_none_or(|slot| Some(&slot) == self.builtins.get("dict.__eq__"))
+            })
+        {
             return Ok(None);
         }
         if matches!(op, "==" | "!=")
@@ -4791,10 +4803,7 @@ impl Context {
         {
             self.heap.keep(left);
             self.heap.keep(right);
-            if op == "!="
-                && !self.has_custom_ne(left)
-                && !self.has_custom_ne(right)
-            {
+            if op == "!=" && !self.has_custom_ne(left) && !self.has_custom_ne(right) {
                 let equal = self.binary("==", left, right)?;
                 return Ok(Some(if self.truth(equal)? { FALSE } else { TRUE }));
             }
@@ -4960,6 +4969,15 @@ impl Context {
         self.binary_operation(op, a, b, true)
     }
 
+    pub(super) fn finalize_removed_dict_value(&mut self, removed: Id) {
+        if self.heap.tracks_finalizers()
+            && self.heap.could_own_finalizer(removed, true)
+            && self.heap.has_unbound_finalizer(NONE)
+        {
+            self.collect_unreachable();
+        }
+    }
+
     pub(super) fn delete_item(&mut self, obj: Id, key: Id) -> Result<()> {
         let target = self.weak_proxy_target(obj)?;
         if target != obj {
@@ -4980,12 +4998,7 @@ impl Context {
         if let Some(dict) = self.dict_storage(obj) {
             let removed = builtins::remove_dict_item(self, dict, key)?
                 .ok_or_else(|| self.lookup_error("KeyError", key))?;
-            if self.heap.tracks_finalizers()
-                && self.heap.could_own_finalizer(removed, true)
-                && self.heap.has_unbound_finalizer(NONE)
-            {
-                self.collect_unreachable();
-            }
+            self.finalize_removed_dict_value(removed);
             return Ok(());
         }
         match self.heap.get(obj) {

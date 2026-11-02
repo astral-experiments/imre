@@ -517,9 +517,9 @@ pub(in super::super) fn format_value(ctx: &mut Context, value: Id, spec: Option<
         )));
     }
     let method = match ctx.heap.get(value) {
-        Value::Calendar { value: calendar, .. }
-            if matches!(calendar.class(), "date" | "datetime" | "time") =>
-        {
+        Value::Calendar {
+            value: calendar, ..
+        } if matches!(calendar.class(), "date" | "datetime" | "time") => {
             Some(ctx.lookup_attr(value, "__format__")?)
         }
         _ => ctx.bound_slot(value, "__format__")?,
@@ -1361,6 +1361,47 @@ fn bytes_join(ctx: &mut Context, receiver: Id, iterable: Id) -> Result<Id> {
     Ok(ctx.alloc(Value::Bytes(result)))
 }
 
+// Rust strings cannot hold lone surrogates. Match these inputs in Python code points.
+fn replace_points(ctx: &mut Context, receiver: Id, old: Id, new: Id, limit: usize) -> Result<Id> {
+    let value = ctx.string_codepoints(receiver)?;
+    let needle = ctx.string_codepoints(old)?;
+    let replacement = ctx.string_codepoints(new)?;
+    let (value, needle, replacement) = (value.as_ref(), needle.as_ref(), replacement.as_ref());
+    let matches = || {
+        let mut next = 0;
+        (0..=value.len())
+            .filter(move |&i| {
+                if i < next || !value[i..].starts_with(needle) {
+                    return false;
+                }
+                next = i + needle.len();
+                true
+            })
+            .take(limit)
+    };
+    let count = matches().count();
+    if count == 0 || old == new || (needle.is_empty() && replacement.is_empty()) {
+        return Ok(ctx.string_storage(receiver).unwrap());
+    }
+    let retained = value.len() - count * needle.len();
+    let memory_error = || Error::new("MemoryError", "");
+    let size = replacement
+        .len()
+        .checked_mul(count)
+        .and_then(|extra| retained.checked_add(extra))
+        .ok_or_else(memory_error)?;
+    let mut result = Vec::new();
+    result.try_reserve_exact(size).map_err(|_| memory_error())?;
+    let mut copied = 0;
+    for i in matches() {
+        result.extend_from_slice(&value[copied..i]);
+        result.extend_from_slice(replacement);
+        copied = i + needle.len();
+    }
+    result.extend_from_slice(&value[copied..]);
+    Ok(ctx.text_codepoints(result))
+}
+
 pub(super) fn method(
     ctx: &mut Context,
     owner: &str,
@@ -2019,6 +2060,12 @@ pub(super) fn method(
             }
         }
         let limit = split_limit(ctx, count)?;
+        if [receiver, args[0], args[1]]
+            .iter()
+            .any(|&id| matches!(ctx.heap.get(ctx.scalar_value(id)), Value::SurrogateStr(_)))
+        {
+            return replace_points(ctx, receiver, args[0], args[1], limit);
+        }
         let value = crate::objects::replace_text(
             ctx.str_value(receiver)?,
             ctx.str_value(args[0])?,

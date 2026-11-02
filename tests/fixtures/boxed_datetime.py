@@ -583,6 +583,30 @@ def test_explicit_zone_conversion():
             return type(value), value.tzinfo is self, value.hour
 
     assert Child.fromtimestamp(0, Hook()) == (Child, True, 0)
+    child = Child(2000, 1, 2)
+    assert child.fromtimestamp(0, Hook()) == (Child, True, 0)
+    assert type(child.combine(child, time())) is Child
+
+
+def test_astimezone_subtype():
+    constructed = []
+
+    class Child(dt):
+        def __new__(cls, *args, **kwargs):
+            value = dt.__new__(cls, *args, **kwargs)
+            constructed.append((value, value.tzinfo))
+            return value
+
+    class Target(tzinfo):
+        def fromutc(self, value):
+            return value
+
+    source = timezone(timedelta(hours=1))
+    target = Target()
+    result = Child(2000, 1, 1, 6, tzinfo=source, fold=1).astimezone(target)
+    intermediate, constructor_zone = constructed[1]
+    assert constructor_zone is source and result is intermediate
+    assert result.tzinfo is target and (result.hour, result.fold) == (5, 0)
 
 
 def test_tzinfo_reduction():
@@ -660,6 +684,7 @@ def current():
     test_fixed_timezone_methods()
     test_custom_tzinfo()
     test_explicit_zone_conversion()
+    test_astimezone_subtype()
     test_tzinfo_reduction()
     test_calendar_format()
     test_timedelta_negation()

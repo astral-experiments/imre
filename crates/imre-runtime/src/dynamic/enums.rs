@@ -109,7 +109,10 @@ impl Context {
         } else {
             self.class_name(class)
         };
-        Err(Error::new("ValueError", format!("{} is not a valid {name}", self.repr(*value))))
+        Err(Error::new(
+            "ValueError",
+            format!("{} is not a valid {name}", self.repr(*value)),
+        ))
     }
 
     /// Intern a combination without adding a new declaration to __members__.
@@ -122,13 +125,16 @@ impl Context {
             let name = self.class_name(class);
             return Err(Error::new(
                 "TypeError",
-                format!("<flag '{name}'> has no members; specify `names=()` if you meant to create a new, empty, enum"),
+                format!(
+                    "<flag '{name}'> has no members; specify `names=()` if you meant to create a new, empty, enum"
+                ),
             ));
         }
         // populate_enum retains the original declarations in __members__. The
         // single-bit mask and order do not depend on a later name-map replacement.
         let declared = self.lookup_attr(class, "__members__")?;
-        let declared = self.dict_entries(self.mapping_proxy_target(declared))
+        let declared = self
+            .dict_entries(self.mapping_proxy_target(declared))
             .ok_or_else(|| Error::new("TypeError", "expected enum member dictionary"))?;
         let mut singles = Vec::new();
         let mut mask = BigInt::zero();
@@ -310,7 +316,10 @@ impl Context {
             Some(state) => state
                 .members
                 .into_iter()
-                .filter_map(|name| self.namespace_binding(self.scope_data(scope), &name).map(|value| (name, value)))
+                .filter_map(|name| {
+                    self.namespace_binding(self.scope_data(scope), &name)
+                        .map(|value| (name, value))
+                })
                 .collect(),
             None => self
                 .scope_bindings(scope)

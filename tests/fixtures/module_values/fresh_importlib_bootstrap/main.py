@@ -30,6 +30,18 @@ def fresh_imports(*blocked):
 with fresh_imports():
     frozen = importlib.import_module("importlib")
     frozen_machinery = frozen.import_module("importlib.machinery")
+    frozen_util = frozen.import_module("importlib.util")
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always", DeprecationWarning)
+        try:
+            frozen_util.cache_from_source("example.py", False, optimization="")
+        except TypeError:
+            pass
+        else:
+            raise AssertionError("conflicting optimization arguments were accepted")
+    warning, = caught
+    assert warning.category is DeprecationWarning
+    assert (warning.filename, warning.lineno) == ("<frozen importlib._bootstrap_external>", 258)
 
 with fresh_imports("_frozen_importlib", "_frozen_importlib_external"):
     source = importlib.import_module("importlib")

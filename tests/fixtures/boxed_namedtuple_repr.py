@@ -50,6 +50,22 @@ def current():
     else:
         raise AssertionError("accepted surplus NamedTuple type arguments")
 
+    observed = []
+
+    class Member:
+        def __set_name__(self, owner, name):
+            observed.append((owner, name, hasattr(owner, "later")))
+            owner.later = "from descriptor"
+
+    member = Member()
+
+    class Record(NamedTuple):
+        field: object = member
+        later = "from class body"
+
+    assert observed == [(Record, "field", False)]
+    assert Record().field is member and Record.later == "from class body"
+
     for invalid in ("_private", "for", 1):
         try:
             class Bad(NamedTuple):

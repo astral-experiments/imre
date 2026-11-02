@@ -78,7 +78,7 @@ def _cache_path(path):
 
 def cache_from_source(path, debug_override=None, *, optimization=None):
     if debug_override is not None:
-        _warn_debug_override(None if _is_frozen else globals())
+        _warn_debug_override(globals(), _is_frozen)
         if optimization is not None:
             raise TypeError("debug_override or optimization must be set to None")
         optimization = "" if debug_override else 1

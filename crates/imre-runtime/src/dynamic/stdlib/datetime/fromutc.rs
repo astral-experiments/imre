@@ -257,10 +257,73 @@ pub(super) fn astimezone(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]
     let source_offset = call_tzinfo(ctx, source, "utcoffset", dt)?;
     let off = calendar(ctx, source_offset, "timedelta")
         .ok_or_else(|| Error::new("NotImplementedError", "astimezone() with a naive datetime"))?;
-    let utc = value
-        .shift(&off, true)?
-        .with_datetime_zone(target_zone.as_ref())?;
+    let shifted = value.shift(&off, true)?;
     let class = ctx.exact_type(dt)?;
-    let intermediate = result_datetime(ctx, class, utc, target)?;
+    let intermediate = if class == ctx.builtin("datetime.datetime") {
+        store(
+            ctx,
+            shifted.with_datetime_zone(target_zone.as_ref())?,
+            target,
+        )
+    } else {
+        // Subtracting the offset calls the subtype constructor with the original zone.
+        let mark = ctx.heap.temporary_mark();
+        let result = result_datetime(ctx, class, shifted, source)?;
+        ctx.heap.release_temporaries_since(mark);
+        let intermediate = attach_target(ctx, result, target, target_zone.as_ref())?;
+        ctx.heap.release_temporaries_since(mark);
+        ctx.heap.keep(intermediate);
+        if intermediate != result && ctx.heap.observes_released_roots() {
+            ctx.collect_unreachable();
+        }
+        intermediate
+    };
     invoke(ctx, target, intermediate)
+}
+
+fn attach_target(ctx: &mut Context, result: Id, target: Id, zone: Option<&Calendar>) -> Result<Id> {
+    ctx.heap.keep(result);
+    let scalar = ctx.scalar_value(result);
+    let (wall, old_zone) = match ctx.heap.get(scalar) {
+        Value::Calendar { value, tzinfo, .. } if value.class() == "datetime" => {
+            (value.clone(), *tzinfo)
+        }
+        _ => return Ok(result),
+    };
+    let zoned = wall.with_datetime_zone(zone)?;
+    if old_zone == NONE {
+        // A naive result requires fresh aware storage. Allocate its actual type
+        // without repeating __new__ or copying Python instance attributes.
+        let copy = store(ctx, zoned, target);
+        if scalar == result {
+            return Ok(copy);
+        }
+        let class = ctx.exact_type(result)?;
+        let instance = ctx.instance(class, None);
+        if let Value::Instance { scalar, .. } = ctx.heap.get_mut(instance) {
+            *scalar = Some(copy);
+        }
+        return Ok(instance);
+    }
+    if ctx.heap.observes_released_roots() {
+        // A releasing zone's finalizer can see the intermediate already in UTC.
+        let utc = utc(ctx);
+        change_zone(
+            ctx,
+            scalar,
+            wall.with_datetime_zone(Some(&Calendar::utc()))?,
+            utc,
+        );
+        ctx.collect_unreachable();
+    }
+    change_zone(ctx, scalar, zoned, target);
+    Ok(result)
+}
+
+fn change_zone(ctx: &mut Context, scalar: Id, wall: Calendar, zone: Id) {
+    if let Value::Calendar { value, tzinfo, .. } = ctx.heap.get_mut(scalar) {
+        *value = wall;
+        let old = std::mem::replace(tzinfo, zone);
+        ctx.heap.weak_edge_removed(old);
+    }
 }

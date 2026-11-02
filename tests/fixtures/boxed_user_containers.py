@@ -38,3 +38,9 @@ def current():
     assert UserString(text).data == "ééé" and text.count(UserString("éé")) == 1
     assert UserString("a\udcff" * 3).count(UserString("\udcffa")) == 2
     assert type(TextChild("word")[1:]) is TextChild
+
+    for cls, value, method in ((str, "", "rindex"), (dict, {}, "__ror__"), (list, [], "__imul__")):
+        names = dir(cls)
+        assert names == dir(value) and method in names
+        names.remove(method)
+        assert method in dir(cls)
