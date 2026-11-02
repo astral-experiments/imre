@@ -2035,6 +2035,9 @@ impl IntrinsicModule {
             (Self::Typing | Self::CollectionsAbc, "Iterator") => Intrinsic::Iterator,
             (Self::Io, "UnsupportedOperation") => Intrinsic::UnsupportedOperation,
             (Self::Gzip, "open") => Intrinsic::GzipOpen,
+            (Self::Types, "get_original_bases") => {
+                Intrinsic::ObjectRuntimeExport("types.get_original_bases")
+            }
             (Self::Types, "new_class") => Intrinsic::ObjectRuntimeExport("types.new_class"),
             (Self::Types, "prepare_class") => Intrinsic::ObjectRuntimeExport("types.prepare_class"),
             (Self::Types, "resolve_bases") => Intrinsic::ObjectRuntimeExport("types.resolve_bases"),
