@@ -6928,6 +6928,23 @@ impl<'a> Checker<'a> {
                 return self.boolean_value(boolean, None);
             }
             ast::Expr::Compare(compare) => {
+                if let Some((value, positive)) = self.exact_object_text(compare) {
+                    let test = Expr {
+                        ty: Type::Bool,
+                        kind: ExprKind::Builtin(
+                            Builtin::IsInstance(vec![ir::InstanceType::ExactText]),
+                            vec![self.expr(value)?],
+                        ),
+                    };
+                    return Ok(if positive {
+                        test
+                    } else {
+                        Expr {
+                            ty: Type::Bool,
+                            kind: ExprKind::Not(Box::new(test)),
+                        }
+                    });
+                }
                 if let [op @ (ast::CmpOp::Is | ast::CmpOp::IsNot)] = compare.ops.as_ref()
                     && let [left, right] = compare.operands.as_ref()
                     && let (Some(left), Some(right)) =

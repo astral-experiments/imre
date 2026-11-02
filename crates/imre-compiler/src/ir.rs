@@ -1161,6 +1161,7 @@ pub(crate) enum Builtin {
     BoxValue,
     ObjectRecordProject(usize),
     ObjectStreamProject,
+    ObjectTextProject,
     ObjectRecordIdentity {
         class: usize,
         reversed: bool,
@@ -2376,6 +2377,8 @@ impl IoBase {
 #[derive(Clone, Copy)]
 pub(crate) enum InstanceType {
     Exact(Type),
+    /// An exact builtin string, excluding nominal string subclasses.
+    ExactText,
     ContextVar,
     ContextToken,
     IoBase(IoBase),
@@ -2400,6 +2403,7 @@ impl InstanceType {
             Self::ContextVar => matches!(ty, Type::ContextVar(_)),
             Self::ContextToken => matches!(ty, Type::ContextToken(_)),
             Self::Exact(Type::Int) => matches!(ty, Type::Int | Type::Bool | Type::IntEnum(_)),
+            Self::ExactText => matches!(ty, Type::Str | Type::StrLiteral(_)),
             Self::Exact(Type::Str) => {
                 matches!(ty, Type::Str | Type::StrLiteral(_) | Type::StrEnum(_))
             }
