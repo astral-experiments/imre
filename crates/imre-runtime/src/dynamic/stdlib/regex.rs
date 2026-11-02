@@ -487,8 +487,8 @@ pub(super) fn module_call(
     let [pattern, string, flags] = bind(name, args, kwargs, ["pattern", "string", "flags"])?;
     let string = string.ok_or_else(|| missing("string"))?;
     let pattern = compiled(ctx, pattern.ok_or_else(|| missing("pattern"))?, flags)?;
-    if name == "re.search" {
-        return search(ctx, "search", &[pattern, string], &[]);
+    if let Some(method @ ("search" | "finditer")) = name.strip_prefix("re.") {
+        return search(ctx, method, &[pattern, string], &[]);
     }
     call(ctx, name, &[pattern, string])
 }
@@ -707,7 +707,7 @@ pub(super) fn search(
         }
     };
     let (start, end) = (byte(start), byte(end));
-    if method == "scanner" {
+    if matches!(method, "scanner" | "finditer") {
         // A mutable buffer needs a Python export for the lifetime of the scanner.
         if matches!(ctx.heap.get(string), Value::ByteArray(_)) {
             return Err(Error::new(
@@ -715,13 +715,18 @@ pub(super) fn search(
                 "exporting a bytearray to a regex scanner is unsupported",
             ));
         }
-        return Ok(ctx.alloc(Value::RegexScanner {
+        let scanner = ctx.alloc(Value::RegexScanner {
             pattern: receiver,
             subject: string,
             start: Some(start),
             end,
             retry: false,
-        }));
+        });
+        if method == "finditer" {
+            let search = ctx.lookup_attr(scanner, "search")?;
+            return Ok(ctx.alloc(Value::CallableIterator(Some([search, NONE]))));
+        }
+        return Ok(scanner);
     }
     if start > end {
         if method == "match" {

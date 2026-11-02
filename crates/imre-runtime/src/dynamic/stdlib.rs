@@ -693,7 +693,8 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         | ("hmac", "new" | "HMAC" | "compare_digest")
         | (
             "re",
-            "match" | "fullmatch" | "search" | "compile" | "_compile_scanner" | "split" | "findall",
+            "match" | "fullmatch" | "search" | "compile" | "_compile_scanner" | "split" | "findall"
+            | "finditer",
         )
         | ("typing", "IO" | "NamedTuple" | "Generator" | "Iterator" | "Sequence")
         | ("enum", "_simple_enum")
@@ -1895,7 +1896,7 @@ pub(super) fn call(
     if name == "hashlib.new" {
         return hashlib::new(ctx, args, kwargs);
     }
-    if let Some(method @ ("match" | "fullmatch" | "search" | "scanner")) =
+    if let Some(method @ ("match" | "fullmatch" | "search" | "scanner" | "finditer")) =
         name.strip_prefix("pattern.")
     {
         return regex::search(ctx, method, args, kwargs);
