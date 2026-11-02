@@ -65,6 +65,14 @@ def current():
     result.failfast = True
     failed.run(result)
     assert result.wasSuccessful() and not result.shouldStop
+    method = unittest.TestResult.__dict__["wasSuccessful"]
+    assert method.__name__ == "wasSuccessful" and method.__qualname__ == "TestResult.wasSuccessful"
+    assert method.__doc__ == "Tells whether or not this result was a success."
+    legacy = unittest.TestResult()
+    del legacy.unexpectedSuccesses
+    assert legacy.wasSuccessful()
+    legacy.errors.append((failed, "error"))
+    assert not legacy.wasSuccessful()
     assert result.expectedFailures[0][0] is failed
     assert "ValueError: from the body" in result.expectedFailures[0][1]
     cleanup.run(result)

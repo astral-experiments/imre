@@ -82,6 +82,12 @@ def _boxedResultInit(self, stream=None, descriptions=None, verbosity=None):
     self.tb_locals = False
 
 
+def _wasSuccessful(self):
+    """Tells whether or not this result was a success."""
+    return (len(self.failures) == len(self.errors) == 0
+            and (not hasattr(self, "unexpectedSuccesses") or len(self.unexpectedSuccesses) == 0))
+
+
 def _printErrors(self):
     pass
 
@@ -259,6 +265,9 @@ TestResult.addSubTest = _resultSubTest
 TestResult.addError = _addError
 TestResult.addFailure = _addFailure
 TestResult._recordException = _recordBoxedException
+_wasSuccessful.__name__ = "wasSuccessful"
+_wasSuccessful.__qualname__ = "TestResult.wasSuccessful"
+TestResult.wasSuccessful = _wasSuccessful
 TestResult.printErrors = _printErrors
 TextTestResult.__init__ = _boxedTextResultInit
 TextTestResult.addSubTest = _textSubTest
