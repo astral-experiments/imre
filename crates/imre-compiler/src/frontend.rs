@@ -3161,6 +3161,13 @@ impl<'a> Checker<'a> {
         }
         if let ast::Expr::Call(call) = expression
             && let Some(shape) = self.types.mapping(concrete)
+            && concrete == self.types.dict(shape.0, shape.1)
+            && let Some(result) = self.copied_factory_mapping(call, shape)?
+        {
+            return coerce(self, result, expected, expression);
+        }
+        if let ast::Expr::Call(call) = expression
+            && let Some(shape) = self.types.mapping(concrete)
             && let Some(result) = self.fromkeys_call(call, Some(shape))?
         {
             return coerce(self, result, expected, expression);

@@ -87,6 +87,10 @@ pub(crate) struct Class {
 }
 
 impl Class {
+    pub(crate) fn has_literal_hook(&self, name: &str) -> bool {
+        self.init_hooks.get(name).is_some_and(|hook| hook.writes.is_empty())
+    }
+
     /// The ABI slot stays in the root layout when a subclass adds Python fields.
     pub(crate) fn exception_argument_slot(&self) -> usize {
         self.fields

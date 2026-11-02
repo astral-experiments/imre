@@ -47,13 +47,13 @@ class Reject(Owner):
 
 
 class Mapping:
-    reference: dict[str, str]
+    reference: dict[str, object]
 
     def __init__(self):
         self.reference = self._reference().copy()
 
-    def _reference(self):
-        return {"kind": "base"}
+    def _reference(self) -> dict[str, object]:
+        return {"kind": "base", "pair": (1, 2)}
 
 
 class DerivedMapping(Mapping):
@@ -72,5 +72,7 @@ except ValueError as error:
     print(str(error))
 
 
-assert Mapping().reference["kind"] == "base"
-assert DerivedMapping().reference["kind"] == "derived"
+print(Mapping().reference["pair"])
+derived_mapping = DerivedMapping()
+print(derived_mapping.reference["kind"])
+assert derived_mapping._reference()["kind"].upper() == "DERIVED"
