@@ -25,6 +25,8 @@ def current():
     assert saved == (item, item) and next(alias, None) is None
     assert list(product()) == [()] and list(product(None, repeat=0)) == [()]
 
+    assert next(product()) is next(product(None, repeat=0))
+
     class LabelledProduct(product):
         def __next__(self):
             return super().__next__() + ("label",)
