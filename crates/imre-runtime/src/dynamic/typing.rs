@@ -189,7 +189,12 @@ pub(super) fn forwards_to_origin(name: &str) -> bool {
 }
 
 /// Resolve ordinary attributes of parameterized typing generics on their origin.
-pub(super) fn generic_attr_target(ctx: &Context, mut obj: Id, name: &str, writing: bool) -> Result<Id> {
+pub(super) fn generic_attr_target(
+    ctx: &Context,
+    mut obj: Id,
+    name: &str,
+    writing: bool,
+) -> Result<Id> {
     let mut depth = 0;
     while let Value::GenericAlias(alias) = ctx.heap.get(obj)
         && alias.kind == AliasKind::Generic
@@ -904,6 +909,21 @@ pub(super) fn bind_generic_parameters(
 pub(super) const VARIANCE_FIELDS: [&str; 3] =
     ["__covariant__", "__contravariant__", "__infer_variance__"];
 
+/// Publish the implemented TypeVar class members to passive lookup and to vars(TypeVar).
+pub(super) fn install_typevar_namespace(ctx: &mut Context, class: Id) {
+    let has_default = ctx.builtin("typing.TypeVar.has_default");
+    let mut entries = vec![(ctx.text("has_default"), has_default)];
+    for field in VARIANCE_FIELDS {
+        let member = ctx.readonly_member("typing.TypeVar", field);
+        entries.push((ctx.text(field), member));
+    }
+    let doc = ctx.text(include_str!("../../native/typing-TypeVar-doc.txt"));
+    entries.push((ctx.text("__doc__"), doc));
+    entries.push((ctx.text("__module__"), ctx.text("typing")));
+    let dictionary = ctx.dict(entries);
+    ctx.native_type_dicts.insert(class, dictionary);
+}
+
 pub(super) fn attribute(ctx: &mut Context, value: Id, name: &str) -> Option<Result<Id>> {
     if matches!(ctx.heap.get(value), Value::Native(class) if class == "typing.TypeVar")
         && let Some(member) = ctx.own_class_attr(value, name)
@@ -915,7 +935,8 @@ pub(super) fn attribute(ctx: &mut Context, value: Id, name: &str) -> Option<Resu
             ctx.class_attr(ctx.module_value("typing", "_SpecialGenericAlias")?, name)?
         }
         Value::GenericAlias(alias) if alias.kind == AliasKind::Generic && name == "copy_with" => {
-            let callable = ctx.class_attr(ctx.module_value("typing", "_SpecialGenericAlias")?, name)?;
+            let callable =
+                ctx.class_attr(ctx.module_value("typing", "_SpecialGenericAlias")?, name)?;
             ctx.alloc(Value::Method {
                 callable,
                 receiver: value,
@@ -1152,7 +1173,8 @@ pub(super) fn attribute(ctx: &mut Context, value: Id, name: &str) -> Option<Resu
                 if a.instantiable { TRUE } else { FALSE }
             }
             attr if let Some((_, value)) = a.metadata().find(|(name, _)| *name == attr) => value,
-            attr if (a.kind == AliasKind::Concatenate || (a.kind != AliasKind::Generic && a.name.is_some()))
+            attr if (a.kind == AliasKind::Concatenate
+                || (a.kind != AliasKind::Generic && a.name.is_some()))
                 && forwards_to_origin(attr) =>
             {
                 return Some(ctx.lookup_attr(a.origin, attr));
