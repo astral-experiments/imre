@@ -260,7 +260,7 @@ pub(super) fn call(
         }
         "readinto" => {
             let id = args[0];
-            let Value::ByteArray(buffer) = ctx.heap.get_mut(id) else {
+            let Some((storage, span)) = ctx.writable_byte_span(id) else {
                 let kind = if id == NONE {
                     "None"
                 } else {
@@ -271,7 +271,10 @@ pub(super) fn call(
                     format!("{name}() argument must be read-write bytes-like object, not {kind}"),
                 ));
             };
-            let count = stream.file.borrow_mut().read_into(buffer)?;
+            let Value::ByteArray(buffer) = ctx.heap.get_mut(storage) else {
+                unreachable!()
+            };
+            let count = stream.file.borrow_mut().read_into(&mut buffer[span])?;
             Ok(ctx.int(count as i64))
         }
         "seek" => {
