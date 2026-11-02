@@ -217,9 +217,9 @@ pub fn lookahead_source(
     )
 }
 
-/// Normalize text for the boxed matcher when a lookaround, Python word boundary,
-/// or scoped case/alphabet rule needs its extended group and capture support.
-pub fn lookahead_or_scoped_source(
+/// Translate a pattern needing native backtracking, retaining Python capture slots.
+/// Bytes patterns enter this matcher only for validated capture references.
+pub fn backtracking_source(
     pattern: &str,
     verbose: bool,
     alphabet: Alphabet,
@@ -231,7 +231,7 @@ pub fn lookahead_or_scoped_source(
         alphabet,
         dotall,
         false,
-        Grammar::LookaheadOrScoped,
+        Grammar::Backtracking,
     )
 }
 
@@ -239,7 +239,7 @@ pub fn lookahead_or_scoped_source(
 enum Grammar {
     Standard { multiline: bool },
     Lookahead,
-    LookaheadOrScoped,
+    Backtracking,
 }
 
 enum Scope {
@@ -254,26 +254,53 @@ enum Scope {
 // covers widths beyond Python's maximum representable lookbehind distance.
 const VARIABLE_WIDTH: u64 = u64::MAX;
 
+#[derive(Clone, Copy, Default)]
+struct Width {
+    min: u64,
+    max: u64,
+}
+
+impl Width {
+    const UNKNOWN: Self = Self {
+        min: 0,
+        max: VARIABLE_WIDTH,
+    };
+
+    fn fixed(n: u64) -> Self {
+        Self { min: n, max: n }
+    }
+
+    fn exact(self) -> u64 {
+        if self.min == self.max {
+            self.min
+        } else {
+            VARIABLE_WIDTH
+        }
+    }
+}
+
 #[derive(Default)]
 struct BranchWidth {
-    prefix: u64,
-    atom: u64,
-    previous: Option<u64>,
+    prefix: Width,
+    atom: Width,
+    previous: Option<Width>,
 }
 
 impl BranchWidth {
-    fn push(&mut self, atom: u64) {
-        self.prefix = self.prefix.saturating_add(self.atom);
+    fn push(&mut self, atom: Width) {
+        self.prefix.min = self.prefix.min.saturating_add(self.atom.min);
+        self.prefix.max = self.prefix.max.saturating_add(self.atom.max);
         self.atom = atom;
     }
 
-    fn width(&self) -> u64 {
-        let width = self.prefix.saturating_add(self.atom);
-        if self.previous.is_some_and(|other| other != width) {
-            VARIABLE_WIDTH
-        } else {
-            width
+    fn width(&self) -> Width {
+        let mut min = self.prefix.min.saturating_add(self.atom.min);
+        let mut max = self.prefix.max.saturating_add(self.atom.max);
+        if let Some(previous) = self.previous {
+            min = min.min(previous.min);
+            max = max.max(previous.max);
         }
+        Width { min, max }
     }
 
     fn finish_branch(&mut self) {
@@ -348,6 +375,8 @@ fn tokenize(
     // Earlier captures can provide the width of a later lookbehind backreference.
     let needs_lookbehind_width = lookahead && pattern.contains("(?<");
     let mut has_lookaround = false;
+    let mut has_reference = false;
+    let mut nullable_repeat = false;
     let mut width = BranchWidth::default();
     let mut group_widths = Vec::new(); // Indexed by capture number minus one.
     let mut has_boundary = false;
@@ -371,7 +400,7 @@ fn tokenize(
                     guarded_class(&mut input, &mut output, verbose, &mut escapes)?;
                     // A following quantifier would repeat the consumed class alone.
                     can_repeat = false;
-                    width.push(1);
+                    width.push(Width::fixed(1));
                     continue;
                 }
                 // A standalone (?x) may follow only earlier global flags and ignored layout.
@@ -389,6 +418,7 @@ fn tokenize(
                     input.next();
                     let id = reference_id(&mut input, &groups, false)?;
                     check_reference(id, &outer_prefixes)?;
+                    has_reference = true;
                     write!(output, r"\k<{id}>").unwrap();
                     can_repeat = true;
                     width.push(group_widths[id - 1]);
@@ -478,7 +508,7 @@ fn tokenize(
                         atomic_delimited(&mut input, &mut output, dotall, verbose, &mut escapes)?;
                         may_backtrack = group.backtrack;
                         width = group.width;
-                        width.push(VARIABLE_WIDTH);
+                        width.push(Width::UNKNOWN);
                         can_repeat = true;
                         continue;
                     } else if input.next_if_eq(&'P').is_some() && input.next_if_eq(&'<').is_some() {
@@ -504,14 +534,14 @@ fn tokenize(
                         }
                         group.scope = Scope::Capture(groups.len());
                         groups.push(Some(name));
-                        group_widths.push(VARIABLE_WIDTH);
+                        group_widths.push(Width::UNKNOWN);
                     } else {
                         return Err("unsupported regex group, assertion, or inline flag".into());
                     }
                 } else {
                     group.scope = Scope::Capture(groups.len());
                     groups.push(None);
-                    group_widths.push(VARIABLE_WIDTH);
+                    group_widths.push(Width::UNKNOWN);
                 }
                 outer_prefixes.push(group);
                 can_repeat = false;
@@ -537,7 +567,7 @@ fn tokenize(
                     // A synthetic branch must preserve the backend's fixed-width
                     // analysis inside lookbehinds and the captures they reference.
                     let size = if needs_lookbehind_width {
-                        width.width()
+                        width.width().exact()
                     } else {
                         1
                     };
@@ -560,14 +590,12 @@ fn tokenize(
                 let mut body_width = width.width();
                 if let Some(group) = outer_prefixes.pop() {
                     match group.scope {
-                        Scope::Lookbehind { .. } if body_width > u64::from(u32::MAX) => {
+                        Scope::Lookbehind { .. } if body_width.exact() > u64::from(u32::MAX) => {
                             return Err("look-behind requires fixed-width pattern".into());
                         }
-                        Scope::Lookbehind { .. } | Scope::Lookahead => body_width = 0,
+                        Scope::Lookbehind { .. } | Scope::Lookahead => body_width = Width::fixed(0),
                         Scope::Capture(id) => group_widths[id - 1] = body_width,
-                        Scope::Conditional { has_else: false } if body_width != 0 => {
-                            body_width = VARIABLE_WIDTH
-                        }
+                        Scope::Conditional { has_else: false } => body_width.min = 0,
                         _ => {}
                     }
                     width = group.width;
@@ -589,13 +617,13 @@ fn tokenize(
             '.' | '^' => {
                 output.push(c);
                 can_repeat = c == '.';
-                u64::from(can_repeat)
+                Width::fixed(u64::from(can_repeat))
             }
             '$' if grammar != (Grammar::Standard { multiline: false }) => {
                 // Literals are escaped, so the runtime can lower this anchor using its line mode.
                 output.push('$');
                 can_repeat = false;
-                0
+                Width::fixed(0)
             }
             '$' if input.peek().is_none()
                 || verbose && next_token(&mut input.clone(), true)?.is_none() =>
@@ -604,13 +632,13 @@ fn tokenize(
                 // from group zero. Dots are not valid in Python group names.
                 output.push_str(FINAL_NEWLINE_ANCHOR);
                 can_repeat = false;
-                0
+                Width::fixed(0)
             }
             '$' => return Err("the $ anchor is supported only at the end of a pattern".into()),
             '[' => {
                 class(&mut input, &mut output, &mut escapes)?;
                 can_repeat = true;
-                1
+                Width::fixed(1)
             }
             '\\' if lookahead && matches!(input.peek(), Some('b' | 'B')) => {
                 // Compare the Python word status on either side without consuming a scalar.
@@ -634,11 +662,11 @@ fn tokenize(
                 )
                 .unwrap();
                 can_repeat = false;
-                0
+                Width::fixed(0)
             }
             '\\' if lookahead && push_octal_escape(&mut input, &mut output, false)? => {
                 can_repeat = true;
-                1
+                Width::fixed(1)
             }
             '\\' if lookahead && matches!(input.peek(), Some('1'..='9')) => {
                 let first = input.next().unwrap();
@@ -650,6 +678,7 @@ fn tokenize(
                     return Err("invalid regex group reference".into());
                 }
                 check_reference(id, &outer_prefixes)?;
+                has_reference = true;
                 write!(output, r"\k<{id}>").unwrap();
                 can_repeat = true;
                 group_widths[id - 1]
@@ -657,13 +686,13 @@ fn tokenize(
             '\\' => {
                 let kind = escaped(&mut input, &mut output, false, &mut escapes)?;
                 can_repeat = kind != Escape::Anchor;
-                u64::from(can_repeat)
+                Width::fixed(u64::from(can_repeat))
             }
             '{' if !starts_counted_repeat(input.clone()) => {
                 literal_brace = true;
                 literal(&mut output, c);
                 can_repeat = true;
-                1
+                Width::fixed(1)
             }
             '*' | '+' | '?' | '{' => {
                 may_backtrack = true;
@@ -671,8 +700,7 @@ fn tokenize(
                     return Err("regex quantifier requires a preceding atom".into());
                 }
                 output.push(c);
-                let mut repetitions = None;
-                if c == '{' {
+                let (lo, hi) = if c == '{' {
                     let lo = if input.peek() == Some(&',') {
                         output.push('0');
                         0
@@ -680,19 +708,30 @@ fn tokenize(
                         count(&mut input, &mut output)?
                             .ok_or("expected a compact regex repetition count")?
                     };
-                    repetitions = Some(lo);
-                    if input.next_if_eq(&',').is_some() {
+                    let hi = if input.next_if_eq(&',').is_some() {
                         output.push(',');
-                        repetitions = count(&mut input, &mut output)?.filter(|&hi| hi == lo);
-                    }
+                        count(&mut input, &mut output)?.map_or(VARIABLE_WIDTH, u64::from)
+                    } else {
+                        u64::from(lo)
+                    };
                     if input.next_if_eq(&'}').is_none() {
                         return Err("expected a compact regex repetition count".into());
                     }
+                    if hi < u64::from(lo) {
+                        return Err("min repeat greater than max repeat".into());
+                    }
                     output.push('}');
-                }
-                width.atom = width
-                    .atom
-                    .saturating_mul(repetitions.map_or(VARIABLE_WIDTH, u64::from));
+                    (u64::from(lo), hi)
+                } else {
+                    (
+                        u64::from(c == '+'),
+                        if c == '?' { 1 } else { VARIABLE_WIDTH },
+                    )
+                };
+                // Another optional iteration at the same offset can change the last capture.
+                nullable_repeat |= width.atom.min == 0 && hi.saturating_sub(lo) > 1;
+                width.atom.min = width.atom.min.saturating_mul(lo);
+                width.atom.max = width.atom.max.saturating_mul(hi);
                 if input.next_if_eq(&'?').is_some() {
                     output.push('?');
                 }
@@ -705,7 +744,7 @@ fn tokenize(
             c => {
                 literal(&mut output, c);
                 can_repeat = true;
-                1
+                Width::fixed(1)
             }
         };
         width.push(atom_width);
@@ -718,14 +757,31 @@ fn tokenize(
     if highest_condition >= groups.len() {
         return Err("invalid conditional group reference".into());
     }
-    if lookahead
-        && !has_lookaround
-        && !(grammar == Grammar::LookaheadOrScoped && (scoped_mode || has_boundary))
-    {
-        return Err("expected a Python lookahead assertion".into());
+    let casefold = modes.iter().any(|(_, mode)| mode.ignores_case());
+    let text_assertions =
+        alphabet != Alphabet::Bytes && (has_lookaround || scoped_mode || has_boundary);
+    match grammar {
+        Grammar::Lookahead if !has_lookaround => {
+            return Err("expected a Python lookahead assertion".into());
+        }
+        Grammar::Backtracking if !has_reference && !text_assertions => {
+            return Err("pattern does not require backtracking".into());
+        }
+        // Keep previously supported case-sensitive text assertions on their existing matcher.
+        // For newly admitted references, a stalled repeat could leave the wrong capture.
+        Grammar::Backtracking
+            if nullable_repeat && has_reference && (!text_assertions || casefold) =>
+        {
+            return Err("a repeated empty match could change the referenced capture".into());
+        }
+        _ => {}
     }
-    if modes.iter().any(|(_, mode)| mode.ignores_case()) {
-        output = casefold::scoped(&output, &modes, lookahead)?;
+    if casefold {
+        output = if grammar == Grammar::Backtracking && has_reference {
+            casefold::backrefs(&output, &modes)?
+        } else {
+            casefold::scoped(&output, &modes, lookahead)?
+        };
     }
     Ok((output, groups))
 }
@@ -1143,7 +1199,7 @@ mod tests {
         assert!(super::lookahead_source(named, false, UnicodeIgnoreCase, false).is_err());
         assert!(super::lookahead_source(r"(?u:\b)", false, Unicode, false).is_err());
         let (source, groups) =
-            super::lookahead_or_scoped_source(named, false, UnicodeIgnoreCase, false).unwrap();
+            super::backtracking_source(named, false, UnicodeIgnoreCase, false).unwrap();
         assert_eq!(groups, [None, Some("é".to_owned())]);
         let compiled = regex::RegexBuilder::new(&source)
             .case_insensitive(true)
