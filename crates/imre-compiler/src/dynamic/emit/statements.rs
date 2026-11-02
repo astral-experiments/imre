@@ -59,7 +59,6 @@ impl<'a> Visitor<'a> for ClosureNames {
                 if let Some(args) = &c.arguments {
                     self.visit_arguments(args);
                 }
-                self.locals_incomplete |= c.type_params.is_some();
             }
             ast::Stmt::Global(g) => {
                 self.globals.extend(g.names.iter().map(ToString::to_string));
