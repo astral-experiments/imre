@@ -1929,7 +1929,8 @@ impl Context {
         if matches!(
             self.heap.get(obj),
             Value::File(_) | Value::BufferedRandom(..)
-        ) {
+        ) || (name == "truncate" && matches!(self.heap.get(obj), Value::TextFile(_)))
+        {
             let class = self.exact_type(obj)?;
             if let Some(member) = self.class_attr(class, name)
                 && matches!(
