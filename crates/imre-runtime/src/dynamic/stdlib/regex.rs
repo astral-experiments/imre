@@ -205,9 +205,10 @@ impl Pattern {
         let (backend, program) = match &self.regex {
             Matcher::Standard(_) => ("regex-automata meta", source),
             #[cfg(target_os = "linux")]
-            Matcher::Locale(locale) => {
-                ("regex-automata meta, LC_CTYPE at search time", locale.program())
-            }
+            Matcher::Locale(locale) => (
+                "regex-automata meta, LC_CTYPE at search time",
+                locale.program(),
+            ),
             Matcher::Lookahead(_) => ("fancy-regex", source),
             Matcher::Guarded(_) => ("progress-aware PikeVM", source),
             Matcher::Asserted(_) => ("assertion-aware Thompson NFA", source),
