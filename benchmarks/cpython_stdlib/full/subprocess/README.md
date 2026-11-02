@@ -116,6 +116,12 @@ call. Pinned CPython runs the original fixtures and child. The
 [Linux receipt](communicate-timeout-text-linux.json) records the partial stderr
 and both complete streams at O0 and O3.
 
+`--case test.test_subprocess.ProcessTestCase.test_communicate_memoryview_input`
+runs the original with runtime-loaded modules. The compiled parent sends a byte
+memoryview to an Imre `-c` child, checks the 18 echoed bytes and that stderr is
+`None`, and runs both registered pipe cleanups. Pinned CPython supplies the
+original fixture hooks. [Linux receipt](memoryview-input-linux.json)
+
 The differential `tests/fixtures/processes/popen_pipes.py` fixture also checks
 a 200,000-byte exchange on all three pipes, recovery after a zero deadline,
 rejection of new input, repeated output, text newline conversion, and shared
