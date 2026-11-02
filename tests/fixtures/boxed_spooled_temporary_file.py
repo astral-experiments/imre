@@ -17,6 +17,10 @@ def current():
         stream.rollover()
         assert stream.fileno() == descriptor
         assert stream.tell() == 5 and stream.seek(2) == 2 and stream.read() == b"cde"
+        assert stream.writelines([b"f", b"g"]) is None
+        write_lines = stream._file.writelines
+        assert write_lines((bytearray(b"h"),)) is None
+        assert stream.seek(5) == 5 and stream.read() == b"fgh"
     assert stream.closed and stream.name == descriptor
     try:
         os.dup(descriptor)

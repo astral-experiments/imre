@@ -1654,7 +1654,12 @@ impl Context {
 
     /// Resolve an immediately called attribute before its arguments are evaluated.
     pub(super) fn lookup_method(&mut self, obj: Id, name: &str) -> Result<Id> {
-        if name == "writelines" && matches!(self.heap.get(obj), Value::File(_)) {
+        if name == "writelines"
+            && matches!(
+                self.heap.get(obj),
+                Value::BufferedRandom(..) | Value::File(_)
+            )
+        {
             // A direct call reports the defining IOBase descriptor in argument errors.
             let callable = self.builtin("_IOBase.writelines");
             return Ok(self.alloc(Value::Method {
