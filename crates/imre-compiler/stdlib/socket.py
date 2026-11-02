@@ -1,11 +1,13 @@
 """Socket helpers using the runtime's native socket operations."""
 
 import _socket
-from _socket import IPPROTO_UDP, SOCK_DGRAM, SOCK_RAW, SOCK_RDM, SOCK_SEQPACKET
+from _socket import SOCK_DGRAM, SOCK_RAW, SOCK_RDM, SOCK_SEQPACKET
 from _socket import SOCK_STREAM, error, has_ipv6, socket
 
 if hasattr(_socket, "AF_INET6"):
     AF_INET6 = _socket.AF_INET6
+if hasattr(_socket, "IPPROTO_UDP"):
+    IPPROTO_UDP = _socket.IPPROTO_UDP
 if hasattr(_socket, "IPPROTO_IPV6"):
     IPPROTO_IPV6 = _socket.IPPROTO_IPV6
 if hasattr(_socket, "IPV6_V6ONLY"):
