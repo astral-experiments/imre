@@ -1253,6 +1253,12 @@ impl Checker<'_> {
         {
             return Ok(names);
         }
+        if attribute.attr.as_str() == "assertIsInstance"
+            && let Some(receiver) = &receiver
+            && let Some(checked) = self.unittest_text_instance(call, class, receiver)?
+        {
+            return Ok(checked);
+        }
         if matches!(attribute.attr.as_str(), "assertIn" | "assertNotIn")
             && let Some(receiver) = &receiver
             && let Some(checked) =
