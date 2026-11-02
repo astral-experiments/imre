@@ -48,6 +48,17 @@ try:
             assert isinstance(writer, io.BufferedIOBase)
             assert not isinstance(raw, NativeWriter)
             assert writer.raw is raw
+            label = "_io.BufferedWriter" if cls is NativeWriter else "Writer"
+            assert repr(writer) == f"<{label} name={path!r}>"
+            raw.name = writer
+            try:
+                repr(writer)
+            except RuntimeError as exc:
+                assert str(exc) == f"reentrant call inside {label}.__repr__"
+            else:
+                raise AssertionError("recursive writer name did not raise")
+            raw.name = b"out"
+            assert repr(writer) == f"<{label} name=b'out'>"
             raises(TypeError, writer.write, "text")
             view = memoryview(b"x")
             view.release()
@@ -69,5 +80,6 @@ try:
         raises(ValueError, NativeWriter, raw, 0)
     with io.open(path, "wb") as stream:
         assert type(stream) is NativeWriter
+        assert repr(stream) == f"<_io.BufferedWriter name={path!r}>"
 finally:
     os.unlink(path)
