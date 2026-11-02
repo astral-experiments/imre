@@ -6,6 +6,11 @@
       "build": {
         "exit": 0,
         "elf_sha256": "a748eecd57fa051cbe73abee21b1363f22dc0365649f617625e723f69c42613c"
+      },
+      "list": {
+        "exit": 0,
+        "elf_sha256": "a748eecd57fa051cbe73abee21b1363f22dc0365649f617625e723f69c42613c",
+        "registered": 667
       }
     },
     "ordinary3": {
@@ -23,6 +28,14 @@
         "exit": 0,
         "elf_sha256": "7db04e4331ec195b5775f4cb4dbf2923f7088e3981a9d9c019d31bb3ad310b12",
         "registered": 667
+      },
+      "selected": {
+        "exit": 0,
+        "elf_sha256": "7db04e4331ec195b5775f4cb4dbf2923f7088e3981a9d9c019d31bb3ad310b12",
+        "complete": true,
+        "original_outcomes": {
+          "ok": 5
+        }
       }
     },
     "boxed3": {

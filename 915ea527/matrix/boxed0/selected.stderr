@@ -1,0 +1,10 @@
+test_constructor_max_buffer_size_removal (test.test_io.CBufferedRWPairTest.test_constructor_max_buffer_size_removal) ... ok
+test_constructor_with_not_readable (test.test_io.CBufferedRWPairTest.test_constructor_with_not_readable) ... ok
+test_constructor_with_not_writeable (test.test_io.CBufferedRWPairTest.test_constructor_with_not_writeable) ... ok
+test_args_error (test.test_io.CBufferedRandomTest.test_args_error) ... ok
+test_truncate (test.test_io.CBufferedRandomTest.test_truncate) ... ok
+
+----------------------------------------------------------------------
+Ran 5 tests in 51.791s
+
+OK

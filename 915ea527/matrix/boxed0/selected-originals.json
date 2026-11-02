@@ -1,0 +1,63 @@
+{
+  "source": "/workspace/scratch/imre-io/pair-random-primary-evidence/public-3960/boxed0",
+  "phase": "selected",
+  "exited": true,
+  "complete": true,
+  "sha256": "8f9332df57ee057662529a5ee95a3187d9b6565ef1f116c9018daf3837d9bb16",
+  "counts": {
+    "ok": 5
+  },
+  "originals_with_terminal_outcome": 5,
+  "rows": [
+    {
+      "id": "test.test_io.CBufferedRWPairTest.test_constructor_max_buffer_size_removal",
+      "events": [
+        {
+          "status": "ok",
+          "subtest": false
+        }
+      ],
+      "outcome": "ok"
+    },
+    {
+      "id": "test.test_io.CBufferedRWPairTest.test_constructor_with_not_readable",
+      "events": [
+        {
+          "status": "ok",
+          "subtest": false
+        }
+      ],
+      "outcome": "ok"
+    },
+    {
+      "id": "test.test_io.CBufferedRWPairTest.test_constructor_with_not_writeable",
+      "events": [
+        {
+          "status": "ok",
+          "subtest": false
+        }
+      ],
+      "outcome": "ok"
+    },
+    {
+      "id": "test.test_io.CBufferedRandomTest.test_args_error",
+      "events": [
+        {
+          "status": "ok",
+          "subtest": false
+        }
+      ],
+      "outcome": "ok"
+    },
+    {
+      "id": "test.test_io.CBufferedRandomTest.test_truncate",
+      "events": [
+        {
+          "status": "ok",
+          "subtest": false
+        }
+      ],
+      "outcome": "ok"
+    }
+  ]
+}

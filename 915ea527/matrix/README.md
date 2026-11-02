@@ -4,9 +4,9 @@ The public Imre commit is 915ea527aa75c5787f9d566c0db939f4b459b46f and the CPyth
 
 | Lane | Build exit | IDs matched in CPython order | Selected process | Whole process |
 |---|---:|---:|---|---|
-| ordinary0 | 0 | Pending | Pending | Pending |
+| ordinary0 | 0 | 667 | Pending | Pending |
 | ordinary3 | 0 | Pending | Pending | Pending |
-| boxed0 | 0 | 667 | Pending | Pending |
+| boxed0 | 0 | 667 | Exit 0 | Pending |
 | boxed3 | 0 | 667 | Pending | Pending |
 
 Raw build and process output, arguments and ELF hashes accompany each completed phase. Unfinished phases have no final disposition. The unchanged test, Python I/O implementation, entry point and full canonical registry are in the sibling boxed-O0 receipt.
