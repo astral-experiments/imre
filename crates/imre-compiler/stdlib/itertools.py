@@ -154,7 +154,6 @@ def _make_filterfalse(_allocate, _state):
 
 
 filterfalse = _make_filterfalse(_itertools._filterfalse_allocate, _itertools._filterfalse_state)
-del _itertools
 
 
 class _TeeBlock:
@@ -309,6 +308,28 @@ def _ssize_index(value):
     return value
 
 
+def _make_product_next(_advance):
+    def __next__(self):
+        if self._stopped:
+            raise StopIteration
+        pools = self._pools
+        indices = self._indices
+        result = _advance(self, pools, indices)
+        if result is not NotImplemented:
+            return result
+        result = tuple(pool[index] for pool, index in zip(pools, indices))
+        for position in range(len(indices) - 1, -1, -1):
+            indices[position] += 1
+            if indices[position] < len(pools[position]):
+                return result
+            indices[position] = 0
+        self._stopped = True
+        return result
+
+    __next__.__qualname__ = "product.__next__"
+    return __next__
+
+
 class product:
     """Cartesian product, advancing the rightmost input first."""
 
@@ -329,19 +350,10 @@ class product:
     def __iter__(self):
         return self
 
-    def __next__(self):
-        if self._stopped:
-            raise StopIteration
-        pools = self._pools
-        indices = self._indices
-        result = tuple(pool[index] for pool, index in zip(pools, indices))
-        for position in range(len(indices) - 1, -1, -1):
-            indices[position] += 1
-            if indices[position] < len(pools[position]):
-                return result
-            indices[position] = 0
-        self._stopped = True
-        return result
+    __next__ = _make_product_next(_itertools._product_advance)
+
+
+del _make_product_next, _itertools
 
 
 class batched:
