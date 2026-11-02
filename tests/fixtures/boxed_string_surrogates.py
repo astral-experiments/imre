@@ -12,7 +12,50 @@ class EchoSpec:
         return spec
 
 
+def affixes():
+    word = Text("é\udfff🙂")
+    assert word.startswith("é") and word.endswith("🙂")
+    assert not word.startswith("é🙂") and not word.endswith("é🙂")
+    assert word.startswith(Text("\udfff🙂"), 1)
+    assert word.endswith("é\udfff", 0, -1)
+    assert not word.startswith("\udffe", 1) and not word.endswith("\udffe🙂")
+    assert not "é🙂".startswith("\udfff") and not "é🙂".endswith("\udfff")
+    assert word.startswith(("", 0), 3) and not word.startswith("", 4)
+    assert word.endswith(("\udfff", "🙂", 0))
+    try:
+        word.startswith(("\udffe", 0, "é"))
+    except TypeError:
+        pass
+    else:
+        raise AssertionError("accepted a non-string tuple member")
+
+    seen = []
+
+    class Bound:
+        def __init__(self, value):
+            self.value = value
+
+        def __index__(self):
+            seen.append(self.value)
+            if self.value is None:
+                raise RuntimeError("bound sentinel")
+            return self.value
+
+    large = 10 ** 100
+    assert word.startswith("é", Bound(-large), Bound(large))
+    assert seen == [-large, large]
+    assert not word.endswith("", large, None)
+    seen.clear()
+    try:
+        word.endswith(0, Bound(0), Bound(None))
+    except RuntimeError as error:
+        assert str(error) == "bound sentinel" and seen == [0, None]
+    else:
+        raise AssertionError("affix type checked before end bound")
+
+
 def current():
+    affixes()
     low = "\udcff"
     high = "\U0000d800"
     path = "dir/" + low
