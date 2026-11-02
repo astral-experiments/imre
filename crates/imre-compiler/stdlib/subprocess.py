@@ -24,6 +24,25 @@ def _cleanup():
     _process.cleanup()
 
 
+def _text_encoding():
+    import sys
+
+    if sys.flags.warn_default_encoding:
+        import warnings
+        frame = sys._getframe()
+        filename = frame.f_code.co_filename
+        stacklevel = 2
+        frame = frame.f_back
+        while frame is not None and frame.f_code.co_filename == filename:
+            stacklevel += 1
+            frame = frame.f_back
+        warnings.warn("'encoding' argument not specified.", EncodingWarning, stacklevel)
+    if sys.flags.utf8_mode:
+        return "utf-8"
+    from _locale import getencoding
+    return getencoding()
+
+
 def _decode(data, stream):
     if data is None:
         return None
@@ -79,10 +98,7 @@ class Popen:
         self.errors = errors
         self.text_mode = encoding or errors or text or universal_newlines
         if self.text_mode and encoding is None:
-            self.encoding = io.text_encoding(None, 2)
-            if self.encoding == "locale":
-                from _locale import getencoding
-                self.encoding = getencoding()
+            self.encoding = _text_encoding()
         line_buffering = self.text_mode and bufsize == 1
         if line_buffering:
             bufsize = -1
