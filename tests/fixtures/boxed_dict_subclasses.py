@@ -132,7 +132,7 @@ def ordered_dictionary():
 
     merged = UnionChild()
     merged["b"] = 1
-    assert (merged | {"a": 2})["a"] == (2,)
+    assert list((merged | {"a": 2}).items()) == [("b", ((1,),)), ("a", (2,))]
     assert type({"a": 2} | merged) is UnionChild
     assert type(OrderedDict() | merged) is OrderedDict
     same = merged
