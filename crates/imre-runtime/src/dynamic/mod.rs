@@ -2753,7 +2753,11 @@ impl Context {
                 "chown", "fchown", "lchown", "getuid", "geteuid", "getgid", "getgroups", "getpgrp",
             ] {
                 let value = match posix {
-                    Some(posix) => self.lookup_attr(posix, attr)?,
+                    Some(posix) => match self.lookup_attr(posix, attr) {
+                        Ok(value) => value,
+                        Err(error) if self.is_attribute_error(&error) => continue,
+                        Err(error) => return Err(error),
+                    },
                     None => self.builtin(&format!("posix.{attr}")),
                 };
                 self.bind(scope, attr, value);

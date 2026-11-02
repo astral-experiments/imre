@@ -9,9 +9,14 @@ from posix import _exit
 from posix import pread, pwrite, readinto
 from _collections_abc import _check_methods
 from _collections_abc import Mapping as _Mapping, MutableMapping as _MutableMapping
-from posix import _create_environ, abort, access, environ as _environ, fspath, getcwd, getcwdb, getpgid, getpgrp, getppid, kill, listdir, mkdir, putenv, read, scandir, setpgid, terminal_size, unsetenv, waitpid, write, WNOHANG
+from posix import _create_environ, abort, access, environ as _environ, fspath, getcwd, getcwdb, getpgid, getppid, kill, listdir, mkdir, putenv, read, scandir, setpgid, terminal_size, unsetenv, waitpid, write, WNOHANG
 from types import GenericAlias
 from posix import O_NONBLOCK, O_RDONLY, chdir, close, closerange, open, rmdir, stat, truncate
+
+try:
+    from posix import getpgrp
+except ImportError:
+    pass
 
 try:
     from posix import waitstatus_to_exitcode

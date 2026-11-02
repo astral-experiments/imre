@@ -500,7 +500,7 @@ pub(in crate::dynamic) mod xattr;
 
 /// POSIX functions exported as the same builtins by both os and posix.
 pub(super) fn is_descriptor_function(name: &str) -> bool {
-    if matches!(name, "getpgid" | "getpgrp" | "setpgid") {
+    if matches!(name, "getpgid" | "setpgid") {
         return cfg!(unix);
     }
     if name == "_exit" {

@@ -1723,7 +1723,9 @@ pub(super) fn call(
         return os::spawn_exec(ctx, args, kwargs);
     }
     if let Some(op) = name.strip_prefix("posix.")
-        && (os::is_descriptor_function(op) || os::is_process_function(op))
+        && (os::is_descriptor_function(op)
+            || os::is_process_function(op)
+            || (cfg!(unix) && op == "getpgrp"))
     {
         return os::descriptor(ctx, op, args, kwargs);
     }
