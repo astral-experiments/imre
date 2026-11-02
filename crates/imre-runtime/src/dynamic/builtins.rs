@@ -304,6 +304,7 @@ pub(super) fn is_enum_base(name: &str) -> bool {
 }
 
 pub(super) const DICT_METHODS: &[&str] = &[
+    "__ior__",
     "__eq__",
     "__new__",
     "__repr__",

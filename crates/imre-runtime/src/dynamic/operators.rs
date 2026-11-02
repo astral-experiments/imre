@@ -4592,6 +4592,10 @@ impl Context {
             *left = bytes;
             return Ok(a);
         }
+        if op == "|" && matches!(self.heap.get(a), Value::Dict(_) | Value::DefaultDict { .. }) {
+            builtins::update_dict(self, a, Some(b), &[])?;
+            return Ok(a);
+        }
         self.binary_operation(op, a, b, true)
     }
 
