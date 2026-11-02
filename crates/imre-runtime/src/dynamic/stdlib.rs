@@ -266,7 +266,10 @@ fn argument(args: &[Id], index: usize) -> Result<Id> {
 }
 
 /// Name the actual type for C diagnostics without consulting Python attribute hooks.
-pub(in crate::dynamic) fn diagnostic_type_name(ctx: &Context, value: Id) -> std::borrow::Cow<'_, str> {
+pub(in crate::dynamic) fn diagnostic_type_name(
+    ctx: &Context,
+    value: Id,
+) -> std::borrow::Cow<'_, str> {
     if matches!(ctx.heap.get(value), Value::Struct { .. }) {
         return "_struct.Struct".into();
     }
