@@ -3905,6 +3905,14 @@ impl Context {
     fn allocation_base(&self, class: Id) -> Option<Id> {
         self.find_in_mro(class, |base| match self.heap.get(base) {
             Value::Native(_) => Some(base),
+            // Generic and Protocol are bootstrapped with a class namespace, but
+            // inherit object.__new__ and do not supply native instance storage.
+            Value::Class { .. }
+                if self.classes.get("typing.Generic") == Some(&base)
+                    || self.classes.get("typing.Protocol") == Some(&base) =>
+            {
+                None
+            }
             Value::Class { scope, .. } if self.scope_data(*scope).class_cell.is_none() => {
                 Some(base)
             }
