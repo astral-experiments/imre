@@ -286,6 +286,8 @@ def current():
 
     for pattern, message, position in (
         (r"[\w-b]", r"bad character range \w-b", 1),
+        (b"[\xff-a]", r"bad character range \xff-a", 1),
+        (r"a**[\w-b]", "multiple repeat", 2),
         (rb"[a-\D]", r"bad character range a-\D", 1),
         (r"é[\x62-a]", r"bad character range \x-a", 4),
         (rb"[\141-\w]", r"bad character range \1-\w", 3),

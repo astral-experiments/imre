@@ -1302,7 +1302,23 @@ pub fn class_range_diagnostic(source: &str, bytes: bool) -> Option<(String, usiz
         Some(&mut from_end),
     )
     .err()?;
-    (from_end != 0).then(|| (error, source.chars().count() - from_end))
+    if from_end == 0 {
+        return None;
+    }
+    let position = source.chars().count() - from_end;
+    if bytes && !error.is_ascii() {
+        // Tokenizer.error uses ASCII backslash replacement after calculating the offset.
+        let mut message = String::new();
+        for c in error.chars() {
+            if c.is_ascii() {
+                message.push(c);
+            } else {
+                write!(message, r"\x{:02x}", c as u32).unwrap();
+            }
+        }
+        return Some((message, position));
+    }
+    Some((error, position))
 }
 
 fn parse_class(

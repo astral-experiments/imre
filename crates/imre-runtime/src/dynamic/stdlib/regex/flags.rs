@@ -43,6 +43,19 @@ fn delimited(source: &[u8], mut i: usize, delimiter: u8) -> Option<usize> {
     (delimiter == b'\n').then_some(i)
 }
 
+fn original_spelling(source: &[u8], bytes: bool) -> std::borrow::Cow<'_, str> {
+    if bytes && !source.is_ascii() {
+        source
+            .iter()
+            .copied()
+            .map(char::from)
+            .collect::<String>()
+            .into()
+    } else {
+        std::str::from_utf8(source).unwrap().into()
+    }
+}
+
 // Properly ordered ASCII literals need no Python range check. Escapes and non-ASCII
 // endpoints are compared by the class parser after decoding.
 fn suspect_range(source: &[u8]) -> bool {
@@ -125,22 +138,25 @@ pub(super) fn parse(
                 let end = delimited(source, start, b']').unwrap_or(source.len());
                 let class = &source[i..end];
                 if suspect_range(class) {
-                    let text: std::borrow::Cow<'_, str> = if bytes && !class.is_ascii() {
-                        class
-                            .iter()
-                            .copied()
-                            .map(char::from)
-                            .collect::<String>()
-                            .into()
-                    } else {
-                        std::str::from_utf8(class).unwrap().into()
-                    };
+                    let text = original_spelling(class, bytes);
                     if let Some((msg, at)) = imre_regex::class_range_diagnostic(&text, bytes) {
-                        result.deferred = Some(deferred(
+                        let bad = deferred(
                             (msg, position(i) + at),
                             &source[result.skip..i],
                             parents.len(),
-                        ));
+                        );
+                        // A backend that rejects the later range cannot supply an AST for
+                        // an earlier duplicate repetition. Diagnose its complete prefix.
+                        let prefix = original_spelling(&bad.prefix, bytes);
+                        if let Some((msg, offset)) =
+                            imre_regex::repeat_diagnostic(&prefix, result.bits & VERBOSE != 0)
+                        {
+                            return Err((
+                                msg,
+                                position(result.skip) + prefix[..offset].chars().count(),
+                            ));
+                        }
+                        result.deferred = Some(bad);
                         break;
                     }
                 }
