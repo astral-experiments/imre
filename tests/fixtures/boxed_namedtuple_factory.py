@@ -108,8 +108,15 @@ def current():
             lengths.append(1)
             return len(lengths)
 
+    class Inherited(Measured):
+        pass
+
+    measured = Inherited(2, 3)
+    measured.__len__ = lambda: 99
+    assert len(measured) == 1 and tuple.__len__(measured) == 2
+    lengths.clear()
     try:
-        Measured._make((2, 3))
+        Inherited._make((2, 3))
     except TypeError as error:
         assert str(error) == "Expected 2 arguments, got 2"
     else:

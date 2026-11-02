@@ -2122,9 +2122,6 @@ pub(super) fn call(
                         )
                     });
                 }
-                Value::Instance { class, .. } if ctx.namedtuple_fields(*class).is_some() => {
-                    ctx.items(args[0])?.len()
-                }
                 Value::Instance { .. } | Value::Raised(_) => {
                     ctx.instance_len(args[0])?.ok_or_else(|| no_length(ctx))?
                 }
