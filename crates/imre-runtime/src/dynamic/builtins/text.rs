@@ -1122,7 +1122,9 @@ pub(super) fn method(
     if name == "__new__" {
         return ctx.new_string(owner, receiver, args, kwargs);
     }
-    let receiver = if owner == "bytes" || (owner == "bytearray" && name == "endswith") {
+    let receiver = if owner == "bytes"
+        || (owner == "bytearray" && matches!(name, "endswith" | "startswith"))
+    {
         let storage = ctx.scalar_value(receiver);
         if !matches!(
             (owner, ctx.heap.get(storage)),
@@ -1181,8 +1183,8 @@ pub(super) fn method(
     if matches!(
         (owner, name),
         ("str", "find" | "rfind" | "count")
-            | ("bytes", "rfind" | "startswith" | "endswith")
-            | ("bytearray", "endswith")
+            | ("bytes", "rfind")
+            | ("bytes" | "bytearray", "startswith" | "endswith")
     ) {
         if !kwargs.is_empty() {
             return Err(type_error(format!(

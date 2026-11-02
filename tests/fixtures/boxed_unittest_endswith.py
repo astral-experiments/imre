@@ -23,6 +23,19 @@ class Tail:
 
 def current():
     case = Case()
+    case.assertStartsWith("filename", ("bad", "file", 3))
+    case.assertStartsWith(bytearray(b"filename"), (b"bad", bytearray(b"file")))
+    for value, prefix, expected in (
+        ("filename", "name", "'filename' doesn't start with 'name'"),
+        ("abc", ("x", "y"), "'abc' doesn't start with any of ('x', 'y')"),
+        (b"abc", "a", "Expected str, not bytes"),
+    ):
+        try:
+            case.assertStartsWith(value, prefix, msg="extra")
+        except Failure as error:
+            assert str(error) == expected + " : extra", str(error)
+        else:
+            raise AssertionError("prefix mismatch succeeded")
     tail = Tail()
     case.assertEndsWith(tail, "match")
     case.assertEndsWith("filename", ("bad", "name", 3))
