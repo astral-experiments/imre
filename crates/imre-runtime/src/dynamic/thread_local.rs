@@ -301,20 +301,7 @@ impl Context {
         if name != "__class__" {
             return Err(self.missing_attribute(obj, name));
         }
-        let message = match value {
-            None => "can't delete __class__ attribute".to_owned(),
-            Some(value) if self.builtin_type_name(value) != Some("type") => {
-                format!(
-                    "__class__ must be set to a class, not '{}' object",
-                    self.type_name(value)
-                )
-            }
-            Some(_) => {
-                "__class__ assignment only supported for mutable types or ModuleType subclasses"
-                    .to_owned()
-            }
-        };
-        Err(Error::new("TypeError", message))
+        Err(self.immutable_class_assignment(value))
     }
 
     pub(super) fn update_local_attribute(
