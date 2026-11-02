@@ -409,8 +409,19 @@ impl Context {
         )
     }
 
-    fn check_bytearray_resize(&self, id: Id) -> Result<()> {
-        if self.buffer_exports.contains(&id) {
+    fn buffer_is_exported(&mut self, storage: Id) -> Result<bool> {
+        if self.buffer_exports.contains(&storage) {
+            return Ok(true);
+        }
+        if !self.heap.may_have_buffer_views(storage) {
+            return Ok(false);
+        }
+        let (heap, roots) = self.heap_and_roots();
+        heap.has_live_buffer_view(storage, roots)
+    }
+
+    fn check_bytearray_resize(&mut self, id: Id) -> Result<()> {
+        if self.buffer_is_exported(id)? {
             Err(Self::exported_bytearray_error())
         } else {
             Ok(())
