@@ -329,6 +329,12 @@ pub extern "C" fn imre_os_close(fd: usize) {
     finish(c_int(fd).and_then(close), ());
 }
 
+/// Read the kernel session ID without changing the caller's process state.
+pub(crate) fn getsid(pid: libc::pid_t) -> Result<libc::pid_t> {
+    // SAFETY: getsid accepts any pid_t and retains no pointers.
+    checked(unsafe { libc::getsid(pid) })
+}
+
 /// Wait for a child independently of Popen and return its unmodified POSIX status.
 pub(crate) fn waitpid(pid: libc::pid_t, options: libc::c_int) -> Result<[i32; 2]> {
     let mut status = 0;
