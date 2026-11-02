@@ -991,7 +991,7 @@ impl Checker<'_> {
         Ok(self.evaluated_receiver(receiver, value))
     }
 
-    /// Route inherited boxed assertions to the object runtime when a typed class lacks the member.
+    /// Route inherited unittest operations to the object runtime when a typed class lacks the member.
     pub(super) fn missing_class_member(
         &self,
         class: usize,
@@ -1007,6 +1007,11 @@ impl Checker<'_> {
                 | "assertNotIsSubclass"
                 | "assertNotHasAttr"
         ) && self.unittest_case(class)
+        {
+            return self.object_runtime_export(name, node);
+        }
+        if matches!(name, "loadTestsFromName" | "loadTestsFromNames")
+            && self.unittest_subclass(class, "TestLoader")
         {
             return self.object_runtime_export(name, node);
         }
@@ -1229,6 +1234,25 @@ impl Checker<'_> {
                 self.unittest_assert_raises(call, class, receiver, attribute.attr.as_str())?
         {
             return Ok(context);
+        }
+        if attribute.attr.as_str() == "object" && self.bundled_mock_class(class, "_PatchFactory") {
+            // Class and module references are valid patch operands in the object runtime.
+            for arg in call
+                .arguments
+                .args
+                .iter()
+                .chain(call.arguments.keywords.iter().map(|kw| &kw.value))
+            {
+                if self.class_reference(arg).is_none()
+                    && !matches!(
+                        self.resolve(arg),
+                        Some(Binding::Module(_) | Binding::IntrinsicModule(_))
+                    )
+                {
+                    self.expr(arg)?;
+                }
+            }
+            return Err(self.object_runtime_export("unittest.mock.patch.object", call));
         }
         if attribute.attr.as_str() == "dict"
             && self.bundled_mock_class(class, "_PatchFactory")

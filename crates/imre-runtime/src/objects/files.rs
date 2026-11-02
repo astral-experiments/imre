@@ -126,6 +126,26 @@ impl FileState {
         })
     }
 
+    pub(super) fn is_raw(&self) -> bool {
+        self.raw
+    }
+
+    /// Closing the raw view of a buffered pipe discards the outer pending bytes.
+    pub(super) fn close_raw_pipe(&mut self) -> io::Result<()> {
+        match self.stream.take() {
+            Some(Stream::Write(writer)) => close_file(writer.into_file()),
+            stream => stream.map_or(Ok(()), Stream::close),
+        }
+    }
+
+    pub(super) fn read_pipe_once(&mut self, size: Option<usize>) -> Result<Bytes> {
+        self.input()?.read_once(size)
+    }
+
+    pub(super) fn read_pipe_line(&mut self, size: Option<usize>) -> Result<Bytes> {
+        self.input()?.binary_line_limited(size)
+    }
+
     pub(crate) fn closed(&self) -> bool {
         self.stream.is_none()
     }
@@ -566,6 +586,7 @@ fn with_errno_description(error: io::Error, build: impl FnOnce(Kind, i32, &str) 
     let description = unsafe { std::ffi::CStr::from_ptr(buffer.as_ptr()) }.to_string_lossy();
     let kind = match errno {
         libc::EINPROGRESS | libc::EALREADY => Kind::BlockingIOError,
+        libc::ECHILD => Kind::ChildProcessError,
         libc::ESHUTDOWN => Kind::BrokenPipeError,
         _ => os_error_kind(error.kind()),
     };

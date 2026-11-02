@@ -320,6 +320,7 @@ impl Checker<'_> {
                 ("importlib.metadata", "PackageNotFoundError"),
                 ("csv", "Error"),
                 ("socket", "gaierror"),
+                ("socket", "herror"),
             ]
             .into_iter()
             .find(|(module, name)| symbol.exported_by(module, name))?;
@@ -825,13 +826,12 @@ impl Checker<'_> {
                             let root =
                                 self.unittest_argument(&attr.value, &mut body, &mut locals, false)?;
                             let slot = locals.last().unwrap().1;
-                            // Sealed poll methods have no property lookup or user callback.
-                            if self.locals[slot] == Type::Poll
-                                && matches!(
-                                    attr.attr.as_str(),
-                                    "poll" | "register" | "modify" | "unregister"
-                                )
-                            {
+                            // Sealed native methods have no property lookup or user callback.
+                            if matches!(
+                                (self.locals[slot], attr.attr.as_str()),
+                                (Type::Poll, "poll" | "register" | "modify" | "unregister")
+                                    | (Type::Popen(..), "communicate")
+                            ) {
                                 *attr.value = root;
                                 break 'method attr.attr.to_string();
                             }

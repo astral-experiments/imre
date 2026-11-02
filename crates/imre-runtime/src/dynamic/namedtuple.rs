@@ -76,6 +76,30 @@ pub(super) fn doc_method(
     let Some((&member, rest)) = args.split_first() else {
         return Err(Error::new("TypeError", "missing member descriptor"));
     };
+    if let Value::SlotMember { owner, name: field } = *ctx.heap.get(member)
+        && kwargs.is_empty()
+    {
+        return match (name, rest) {
+            ("__get__", [obj] | [obj, _]) if *obj != NONE => ctx.read_slot_member(member, *obj),
+            ("__get__", [_, owner]) if *owner != NONE => Ok(member),
+            ("__get__", [_] | [_, _]) => {
+                Err(Error::new("TypeError", "__get__(None, None) is invalid"))
+            }
+            ("__set__", [obj, value]) => ctx
+                .write_slot_member(member, *obj, Some(*value))
+                .map(|()| NONE),
+            ("__delete__", [obj]) => ctx.write_slot_member(member, *obj, None).map(|()| NONE),
+            ("__reduce__", []) => {
+                let get = ctx.builtin("getattr");
+                let args = ctx.alloc(Value::Tuple(vec![owner, field]));
+                Ok(ctx.alloc(Value::Tuple(vec![get, args])))
+            }
+            _ => Err(Error::new(
+                "TypeError",
+                format!("invalid arguments to {name}"),
+            )),
+        };
+    }
     let field = match ctx.heap.get(member) {
         Value::ReadOnlyMember(owner, field) => Some((*owner, *field)),
         _ => None,
@@ -526,6 +550,7 @@ pub(super) fn allocate(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) 
         property: None,
         weak_reference: None,
         cycle: None,
+        member_values: None,
         memory_stream: None,
     }))
 }
@@ -557,6 +582,7 @@ pub(super) fn make(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> R
         property: None,
         weak_reference: None,
         cycle: None,
+        member_values: None,
         memory_stream: None,
     }))
 }

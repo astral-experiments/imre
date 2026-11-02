@@ -318,9 +318,13 @@ impl Checker<'_> {
     ) -> Result<Expr, String> {
         let string_enum = matches!(receiver.ty, Type::StrEnum(_));
         let copy = string_enum && method == ir::StrDescriptor::ZFill;
+        let mapping = matches!(
+            method,
+            ir::StrDescriptor::Title | ir::StrDescriptor::SwapCase
+        );
         if !(matches!(receiver.ty, Type::Str | Type::StrLiteral(_))
             || copy
-            || (string_enum && method.is_predicate()))
+            || (string_enum && (method.is_predicate() || mapping)))
         {
             let name = self.exact_argument_type_name(receiver.ty).ok_or_else(|| {
                 error(
@@ -345,8 +349,8 @@ impl Checker<'_> {
         let mut bound = call.clone();
         bound.arguments.args = tail.iter().cloned().collect();
         let receiver = Self::string_value(receiver);
-        let result = if method.is_predicate() {
-            self.splitlines_or_predicate(receiver, method.name(), &bound)?
+        let result = if method.is_predicate() || mapping {
+            self.splitlines_or_unary_text(receiver, method.name(), &bound)?
         } else if method == ir::StrDescriptor::ZFill {
             self.zfill(receiver, &bound, copy)?
         } else {

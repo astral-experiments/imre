@@ -8,6 +8,7 @@ pub const VARARGS: u32 = 4;
 pub const VARKEYWORDS: u32 = 8;
 pub const NESTED: u32 = 0x10;
 pub const GENERATOR: u32 = 0x20;
+pub const NOFREE: u32 = 0x40;
 pub const COROUTINE: u32 = 0x80;
 pub const ITERABLE_COROUTINE: u32 = 0x100;
 pub const ASYNC_GENERATOR: u32 = 0x200;
@@ -15,6 +16,22 @@ pub const FUTURE_BARRY_AS_BDFL: u32 = 0x0040_0000;
 pub const FUTURE_ANNOTATIONS: u32 = 0x0100_0000;
 pub const HAS_DOCSTRING: u32 = 0x0400_0000;
 pub const METHOD: u32 = 0x0800_0000;
+
+/// Names exported by CPython 3.14 inspect from dis.COMPILER_FLAG_NAMES.
+pub const INSPECT_FLAGS: &[(&str, u32)] = &[
+    ("CO_OPTIMIZED", OPTIMIZED),
+    ("CO_NEWLOCALS", NEWLOCALS),
+    ("CO_VARARGS", VARARGS),
+    ("CO_VARKEYWORDS", VARKEYWORDS),
+    ("CO_NESTED", NESTED),
+    ("CO_GENERATOR", GENERATOR),
+    ("CO_NOFREE", NOFREE),
+    ("CO_COROUTINE", COROUTINE),
+    ("CO_ITERABLE_COROUTINE", ITERABLE_COROUTINE),
+    ("CO_ASYNC_GENERATOR", ASYNC_GENERATOR),
+    ("CO_HAS_DOCSTRING", HAS_DOCSTRING),
+    ("CO_METHOD", METHOD),
+];
 
 #[derive(Default)]
 struct Yields(bool);

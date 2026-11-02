@@ -155,14 +155,13 @@ class TestCase(_SuiteMember):
     _subtest_params: dict[str, object]
     failureException: typing.ClassVar[type[Exception]] = AssertionError
     _testMethodName: str
-    longMessage: bool
+    longMessage = True
     maxDiff: int | None
     _diffThreshold: int
 
     def __init__(self, methodName: str = "runTest") -> None:
         self._subtest_params = {}
         self._testMethodName = methodName
-        self.longMessage = True
         self.maxDiff = 640
         self._diffThreshold = 65536
         _validateCaseMethod(self, methodName)
@@ -579,6 +578,13 @@ class _SubTestContext:
         runner = self.case._runner
         if runner is None or isinstance(exc, (_SubTestStop, KeyboardInterrupt)):
             return False
+        case = self.case
+        runner._subtest_result(case, self._description(), exc, isinstance(exc, case.failureException))
+        if runner.failfast:
+            raise _SubTestStop()
+        return True
+
+    def _description(self) -> str:
         parts: list[str] = []
         if self.has_message:
             parts.append("[" + str(self.message) + "]")
@@ -587,12 +593,7 @@ class _SubTestContext:
             for key in self.params:
                 items.append(key + "=" + repr(self.params[key]))
             parts.append("(" + ", ".join(items) + ")")
-        description = " ".join(parts) or "(<subtest>)"
-        case = self.case
-        runner._subtest_result(case, description, exc, isinstance(exc, case.failureException))
-        if runner.failfast:
-            raise _SubTestStop()
-        return True
+        return " ".join(parts) or "(<subtest>)"
 
 
 class TestResult:

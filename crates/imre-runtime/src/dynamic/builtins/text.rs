@@ -11,22 +11,13 @@ use ruff_python_literal::format::{
 };
 
 use super::super::operators::append_rendered_text;
-use super::super::stdlib::codecs::encode_text;
+use super::super::stdlib::codecs::{decode_named, encode_text};
 use super::*;
 
 use crate::objects::{python_whitespace, split_parts, translate, visit_line_fields as split_lines};
 
 mod bytes_fields;
 mod maketrans;
-
-fn decode(ctx: &mut Context, id: Id, encoding: Option<Id>, errors: Option<Id>) -> Result<Id> {
-    let encoding = encoding
-        .map(|id| ctx.str_value(id))
-        .transpose()?
-        .unwrap_or("utf-8");
-    let codec = crate::objects::Codec::lookup(encoding)?;
-    super::super::stdlib::codecs::decode_bytes(ctx, codec, ctx.scalar_value(id), errors)
-}
 
 pub(super) fn construct(
     ctx: &mut Context,
@@ -105,7 +96,7 @@ pub(super) fn construct(
                 return Ok(ctx.text(""));
             };
             if encoding.is_some() || errors.is_some() {
-                return decode(ctx, value, encoding, errors);
+                return decode_named(ctx, ctx.scalar_value(value), encoding, errors);
             }
             let target = ctx.weak_proxy_target(value)?;
             if target != value {
@@ -370,8 +361,11 @@ pub(super) fn bytearray_method(
 }
 
 pub(in super::super) fn bytes_from_iterable(ctx: &mut Context, obj: Id) -> Result<Vec<u8>> {
-    if let Value::Bytes(data) | Value::ByteArray(data) = ctx.heap.get(ctx.scalar_value(obj)) {
-        return super::super::copy_ids(data);
+    if matches!(
+        ctx.heap.get(ctx.scalar_value(obj)),
+        Value::Bytes(_) | Value::ByteArray(_) | Value::MemoryView { .. }
+    ) {
+        return super::super::copy_ids(ctx.bytes_like(obj)?);
     }
     let iter = ctx.iterator(obj)?;
     ctx.heap.keep(iter);
@@ -442,7 +436,15 @@ pub(in super::super) fn format_value(ctx: &mut Context, value: Id, spec: Option<
             ctx.type_name(spec)
         )));
     }
-    if let Some(method) = ctx.bound_slot(value, "__format__")? {
+    let method = match ctx.heap.get(value) {
+        Value::Calendar { value: calendar, .. }
+            if matches!(calendar.class(), "date" | "datetime" | "time") =>
+        {
+            Some(ctx.lookup_attr(value, "__format__")?)
+        }
+        _ => ctx.bound_slot(value, "__format__")?,
+    };
+    if let Some(method) = method {
         let spec = match spec {
             Some(spec) => spec,
             None => ctx
@@ -601,7 +603,10 @@ fn format_string(
                     .iter()
                     .find(|(k, _)| k == &key)
                     .map(|(_, id)| *id)
-                    .ok_or_else(|| Error::new("KeyError", key))?,
+                    .ok_or_else(|| {
+                        let key = ctx.text(key);
+                        ctx.lookup_error("KeyError", key)
+                    })?,
             };
             for access in field.parts {
                 value = match access {
@@ -1253,9 +1258,13 @@ pub(super) fn method(
     if name == "__new__" {
         return ctx.new_string(owner, receiver, args, kwargs);
     }
+    let original_receiver = receiver;
     let receiver = if owner == "bytes"
-        || (owner == "bytearray" && matches!(name, "endswith" | "startswith"))
-    {
+        || (owner == "bytearray"
+            && matches!(
+                name,
+                "endswith" | "lstrip" | "rstrip" | "split" | "startswith" | "strip"
+            )) {
         let storage = ctx.scalar_value(receiver);
         if !matches!(
             (owner, ctx.heap.get(storage)),
@@ -1279,7 +1288,7 @@ pub(super) fn method(
     if name == "decode" || name == "encode" {
         let [encoding, errors] = bind(name, args, kwargs, ["encoding", "errors"])?;
         return if name == "decode" {
-            decode(ctx, receiver, encoding, errors)
+            decode_named(ctx, ctx.scalar_value(receiver), encoding, errors)
         } else {
             let b = encode_text(ctx, receiver, encoding, errors)?;
             Ok(ctx.alloc(Value::Bytes(b)))
@@ -1463,15 +1472,16 @@ pub(super) fn method(
         );
         return Ok(ctx.alloc(Value::Int(found)));
     }
-    if name == "rstrip"
-        && let Value::Bytes(data) = ctx.heap.get(receiver)
-    {
+    if matches!(owner, "bytes" | "bytearray") && matches!(name, "strip" | "lstrip" | "rstrip") {
         if !kwargs.is_empty() {
-            return Err(type_error("bytes.rstrip() takes no keyword arguments"));
+            return Err(type_error(format!(
+                "{}.{name}() takes no keyword arguments",
+                ctx.type_name(original_receiver)
+            )));
         }
         if args.len() > 1 {
             return Err(type_error(format!(
-                "rstrip expected at most 1 argument, got {}",
+                "{name} expected at most 1 argument, got {}",
                 args.len()
             )));
         }
@@ -1479,29 +1489,51 @@ pub(super) fn method(
             .first()
             .copied()
             .filter(|&id| id != NONE)
-            .map(|id| ctx.bytes_like(id))
+            .map(|id| match ctx.heap.get(ctx.scalar_value(id)) {
+                Value::Array(array) => Ok(array.as_bytes()),
+                _ => ctx.bytes_like(id),
+            })
             .transpose()?
             .unwrap_or(b" \t\n\x0b\x0c\r");
-        return Ok(match crate::objects::rstrip_bytes(data, chars)? {
-            Some(trimmed) => ctx.alloc(Value::Bytes(trimmed)),
+        let immutable = owner == "bytes";
+        let trimmed = crate::objects::strip_bytes(
+            ctx.bytes_like(receiver)?,
+            chars,
+            name != "rstrip",
+            name != "lstrip",
+            immutable && original_receiver == receiver,
+        )?;
+        return Ok(match trimmed {
+            Some(data) if immutable => ctx.alloc(Value::Bytes(data)),
+            Some(data) => ctx.alloc(Value::ByteArray(data)),
             None => receiver,
         });
     }
-    if name == "rsplit" && matches!(ctx.heap.get(receiver), Value::Bytes(_)) {
-        let [sep, max] =
-            super::bind_method_arguments("rsplit", args, kwargs, ["sep", "maxsplit"], 2)?;
+    if matches!(owner, "bytes" | "bytearray") && matches!(name, "split" | "rsplit") {
+        let [sep, max] = super::bind_method_arguments(name, args, kwargs, ["sep", "maxsplit"], 2)?;
         let limit = split_limit(ctx, max)?;
         let separator = sep
             .filter(|&id| id != NONE)
-            .map(|id| ctx.bytes_like(id))
+            .map(|id| match ctx.heap.get(ctx.scalar_value(id)) {
+                Value::Array(array) => Ok(array.as_bytes()),
+                _ => ctx.bytes_like(id),
+            })
             .transpose()?;
-        let Value::Bytes(data) = ctx.heap.get(receiver) else {
-            unreachable!()
-        };
-        let parts = crate::objects::rsplit_bytes(data, separator, limit)?;
+        let immutable = owner == "bytes";
+        let parts = crate::objects::split_bytes(
+            ctx.bytes_like(receiver)?,
+            separator,
+            limit,
+            name == "rsplit",
+            immutable,
+        )?;
         let fields = parts
             .into_iter()
-            .map(|part| part.map_or(receiver, |bytes| ctx.alloc(Value::Bytes(bytes))))
+            .map(|part| match part {
+                None => receiver,
+                Some(bytes) if immutable => ctx.alloc(Value::Bytes(bytes)),
+                Some(bytes) => ctx.alloc(Value::ByteArray(bytes)),
+            })
             .collect();
         return Ok(ctx.alloc(Value::List(fields)));
     }
@@ -1512,10 +1544,12 @@ pub(super) fn method(
         "isdigit" => Some(crate::objects::python_isdigit),
         "islower" => Some(|text| crate::objects::python_islower(text.chars())),
         "isspace" => Some(crate::objects::python_isspace),
+        "istitle" => Some(|text| crate::objects::python_istitle(text.chars())),
         "isupper" => Some(crate::objects::python_isupper),
         _ => None,
     };
-    if let Some(predicate) = predicate {
+    let mapping = matches!(name, "title" | "swapcase");
+    if predicate.is_some() || mapping {
         if !kwargs.is_empty() {
             return Err(type_error(format!(
                 "str.{name}() takes no keyword arguments"
@@ -1527,6 +1561,21 @@ pub(super) fn method(
                 args.len()
             )));
         }
+    }
+    if mapping {
+        let title = name == "title";
+        let storage = ctx.string_storage(receiver).unwrap();
+        let mapped = match ctx.heap.get(storage) {
+            Value::Str(text) if text.is_empty() => return ctx.heap.string_literal(""),
+            Value::Str(text) => Value::Str(crate::objects::case_map(text, title)?),
+            Value::SurrogateStr(points) => {
+                Value::SurrogateStr(crate::objects::case_map_points(points, title)?)
+            }
+            _ => unreachable!(),
+        };
+        return ctx.heap.fresh_string(mapped);
+    }
+    if let Some(predicate) = predicate {
         if matches!(name, "isascii" | "isalpha" | "isdigit")
             && matches!(
                 ctx.heap.get(ctx.scalar_value(receiver)),
@@ -1543,6 +1592,14 @@ pub(super) fn method(
             return Ok(boolean(crate::objects::python_islower(
                 points.iter().copied().filter_map(char::from_u32),
             )));
+        }
+        if name == "istitle"
+            && let Value::SurrogateStr(points) = ctx.heap.get(ctx.scalar_value(receiver))
+        {
+            // A surrogate ends a cased run, just like the uncased replacement character.
+            return Ok(boolean(crate::objects::python_istitle(points.iter().map(
+                |&cp| char::from_u32(cp).unwrap_or(char::REPLACEMENT_CHARACTER),
+            ))));
         }
         return Ok(boolean(predicate(ctx.str_value(receiver)?)));
     }

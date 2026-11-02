@@ -41,10 +41,75 @@ def _runRegistered(self, case, name):
     if getattr(cls, "__unittest_skip__", False) or getattr(method, "__unittest_skip__", False):
         reason = getattr(cls, "__unittest_skip_why__", "") or getattr(method, "__unittest_skip_why__", "")
         self._skipCase(case, name, reason)
+    elif (getattr(case, "__unittest_expecting_failure__", False)
+          or getattr(method, "__unittest_expecting_failure__", False)):
+        _runExpectedCase(self, case, name, method)
     else:
-        if getattr(cls, "__unittest_expecting_failure__", False) or getattr(method, "__unittest_expecting_failure__", False):
-            raise NotImplementedError("native unittest does not yet support expectedFailure")
         self._runCase(case, name, case.setUp, method, case.tearDown)
+
+
+def _runExpectedCase(dispatch, test, name, method):
+    result = dispatch._observer if isinstance(dispatch, _CaseResultDispatch) else dispatch
+    result.startTest(test)
+    try:
+        dispatch._startCase(name)
+        outcome = case._Outcome(result)
+        test._outcome = outcome
+        try:
+            with outcome.testPartExecutor(test):
+                test._callSetUp()
+            if outcome.success:
+                outcome.expecting_failure = True
+                with outcome.testPartExecutor(test):
+                    test._callTestMethod(method)
+                outcome.expecting_failure = False
+                with outcome.testPartExecutor(test):
+                    test._callTearDown()
+            test.doCleanups()
+            if outcome.success:
+                if outcome.expectedFailure is None:
+                    test._addUnexpectedSuccess(result)
+                else:
+                    test._addExpectedFailure(result, outcome.expectedFailure)
+        finally:
+            outcome.expectedFailure = None
+            test._outcome = None
+    finally:
+        result.stopTest(test)
+
+
+_subtestEnter = _SubTestContext.__enter__
+_subtestExit = _SubTestContext.__exit__
+
+
+def _boxedSubTestEnter(self):
+    _subtestEnter(self)
+    outcome = getattr(self.case, "_outcome", None)
+    if outcome is not None and outcome.result_supports_subtests:
+        subtest = _SubTest(self.case.id(), self._description())
+        subtest.test_case = self.case
+        subtest.failureException = self.case.failureException
+        self._executor = outcome.testPartExecutor(subtest, True)
+        self._executor.__enter__()
+
+
+def _boxedSubTestExit(self, typ, value, tb):
+    outcome = getattr(self.case, "_outcome", None)
+    if outcome is None:
+        return _subtestExit(self, typ, value, tb)
+    try:
+        if not outcome.result_supports_subtests:
+            return False
+        suppressed = self._executor.__exit__(typ, value, tb)
+        if outcome.expectedFailure or (not outcome.success and getattr(outcome.result, "failfast", False)):
+            raise case._ShouldStop
+        return suppressed
+    finally:
+        self._leave()
+
+
+_SubTestContext.__enter__ = _boxedSubTestEnter
+_SubTestContext.__exit__ = _boxedSubTestExit
 
 
 TestResult._runRegistered = _runRegistered

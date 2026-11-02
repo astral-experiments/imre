@@ -18,7 +18,8 @@ class _CaseResultDispatch(TestResult):
         self._observer = observer
         for name in ("startTest", "stopTest", "addSuccess", "addError", "addFailure", "stop"):
             setattr(self, name, getattr(observer, name))
-        self.addSkip = observer.addSkip
+        if hasattr(observer, "addSkip"):
+            self.addSkip = observer.addSkip
         self.skipped = getattr(observer, "skipped", ())
 
     def __getattr__(self, name):
@@ -35,6 +36,28 @@ def _addFailure(self, test, error):
     if self.failfast:
         self.stop()
     self.failures.append((test, _boxedResultDetail(error)))
+
+
+def _resultExpectedFailure(self, test, error):
+    self.expectedFailures.append((test, _boxedResultDetail(error)))
+
+
+def _resultSubTest(self, test, subtest, error):
+    if error is not None:
+        if self.failfast:
+            self.stop()
+        problems = self.failures if issubclass(error[0], test.failureException) else self.errors
+        problems.append((subtest, _boxedResultDetail(error)))
+
+
+def _textExpectedFailure(self, test, error):
+    _resultExpectedFailure(self, test, error)
+    self._mark("x", "expected failure")
+
+
+def _textUnexpectedSuccess(self, test):
+    TestResult.addUnexpectedSuccess(self, test)
+    self._mark("u", "unexpected success")
 
 
 def _recordBoxedException(self, case, exc, detail):
@@ -73,6 +96,15 @@ def _textPrintErrors(self):
         self.stream.writeln()
     self._reportProblems("ERROR", self._errorNames, self.errors)
     self._reportProblems("FAIL", self._failureNames, self.failures)
+    if self.unexpectedSuccesses:
+        self.stream.writeln("=" * 70)
+        for test in self.unexpectedSuccesses:
+            name = str(test)
+            if self.descriptions:
+                description = test.shortDescription()
+                if description:
+                    name += "\n" + description
+            self.stream.writeln("UNEXPECTED SUCCESS: " + name)
 
 
 def _wrappedStream(self):
@@ -88,9 +120,9 @@ def _streamAttribute(self, name):
 def _boxedRunnerInit(self, stream=None, descriptions=True, verbosity=1, failfast=False,
                      buffer=False, resultclass=None, warnings=None, *, tb_locals=False,
                      durations=None):
-    if buffer or tb_locals or warnings is not None or durations is not None:
+    if buffer or tb_locals or durations is not None:
         raise NotImplementedError("native TextTestRunner does not yet support output buffering, "
-                                  "local variables in tracebacks, warning filters or durations")
+                                  "local variables in tracebacks or durations")
     self.stream = _WritelnDecorator(sys.stderr if stream is None else stream)
     self.descriptions = descriptions
     self.verbosity = verbosity
@@ -120,26 +152,29 @@ def _boxedTextResultInit(self, stream=None, descriptions=True, verbosity=1, *, d
     self.durations = durations
 
 
-from unittest.signals import registerResult as _registerRunnerResult
+from unittest import runner as _runnerModule
 
 
 def _runWithResult(self, test):
     result = self._makeResult()
-    _registerRunnerResult(result)
+    _runnerModule.registerResult(result)
     result.failfast = self.failfast
     result.buffer = self.buffer
     result.tb_locals = self.tb_locals
-    started = time.time()
-    start = getattr(result, "startTestRun", None)
-    if start is not None:
-        start()
-    try:
-        test(result)
-    finally:
-        stop = getattr(result, "stopTestRun", None)
-        if stop is not None:
-            stop()
-    elapsed = time.time() - started
+    with _runnerModule.warnings.catch_warnings():
+        if self.warnings:
+            _runnerModule.warnings.simplefilter(self.warnings)
+        started = time.time()
+        start = getattr(result, "startTestRun", None)
+        if start is not None:
+            start()
+        try:
+            test(result)
+        finally:
+            stop = getattr(result, "stopTestRun", None)
+            if stop is not None:
+                stop()
+        elapsed = time.time() - started
     result.printErrors()
     if hasattr(result, "separator2"):
         self.stream.writeln(result.separator2)
@@ -176,11 +211,15 @@ def _runWithResult(self, test):
 _WritelnDecorator.stream = property(_wrappedStream)
 _WritelnDecorator.__getattr__ = _streamAttribute
 TestResult.__init__ = _boxedResultInit
+TestResult.addExpectedFailure = _resultExpectedFailure
+TestResult.addSubTest = _resultSubTest
 TestResult.addError = _addError
 TestResult.addFailure = _addFailure
 TestResult._recordException = _recordBoxedException
 TestResult.printErrors = _printErrors
 TextTestResult.__init__ = _boxedTextResultInit
+TextTestResult.addExpectedFailure = _textExpectedFailure
+TextTestResult.addUnexpectedSuccess = _textUnexpectedSuccess
 TextTestResult.addError = _textError
 TextTestResult.addFailure = _textFailure
 TextTestResult.printErrors = _textPrintErrors

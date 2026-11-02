@@ -11,12 +11,14 @@ mod casefold;
 mod progress;
 mod scanner;
 mod split;
+mod sub;
 
 pub(super) use scanner::scanner_next;
 
 use progress::Matcher;
 pub(super) use split::pattern_split;
 use split::split;
+pub(super) use sub::pattern_sub;
 
 const IGNORECASE: i64 = 2;
 const LOCALE: i64 = 4;
@@ -212,20 +214,21 @@ fn byte_pattern(bytes: &[u8]) -> String {
 // Python uses str.isalnum() plus "_" for \w and includes four additional
 // ASCII separators in Unicode whitespace. The nested classes also work
 // when these escapes occur inside a bracketed class in the input.
-fn python_escapes(pattern: &str, ascii: bool, multiline: bool) -> String {
+fn python_escapes(pattern: &str, ascii: bool, multiline: bool) -> (String, bool) {
+    let mut literal_brace = false;
     let mut result = String::with_capacity(pattern.len());
     let mut chars = pattern.chars().peekable();
     let mut in_class = false;
     while let Some(c) = chars.next() {
         if c != '\\' {
-            if c == '{'
-                && !in_class
-                && chars.peek() == Some(&',')
-                && chars.clone().skip(1).find(|c| !c.is_ascii_digit()) == Some('}')
-            {
-                // Python treats an omitted lower bound as zero, including in {,}.
-                result.push_str("{0");
-                continue;
+            if c == '{' && !in_class {
+                if !imre_regex::starts_counted_repeat(chars.clone()) {
+                    literal_brace = true;
+                } else if chars.peek() == Some(&',') {
+                    // Python treats an omitted lower bound as zero, including in {,}.
+                    result.push_str("{0");
+                    continue;
+                }
             }
             if c == '$' && !in_class && !multiline && chars.peek().is_none() {
                 result.push_str(imre_regex::FINAL_NEWLINE_ANCHOR);
@@ -279,7 +282,7 @@ fn python_escapes(pattern: &str, ascii: bool, multiline: bool) -> String {
             }
         }
     }
-    result
+    (result, literal_brace)
 }
 
 /// Report offsets in the user's spelling before byte escaping, case folding or verbose translation.
@@ -342,6 +345,19 @@ fn repeats_literal_capture(pattern: &[u8], flags: i64) -> bool {
         && !body.iter().any(|byte| br"\.^$*+?{}[]|()".contains(byte))
 }
 
+fn alphabet(bytes: bool, ascii: bool, flags: i64) -> imre_regex::Alphabet {
+    use imre_regex::Alphabet;
+    if bytes {
+        Alphabet::Bytes
+    } else if ascii {
+        Alphabet::Ascii
+    } else if flags & IGNORECASE != 0 {
+        Alphabet::UnicodeIgnoreCase
+    } else {
+        Alphabet::Unicode
+    }
+}
+
 fn compiled(ctx: &mut Context, id: Id, flags: Option<Id>) -> Result<Id> {
     let flags = flags
         .map(|value| ctx.as_integer(value))
@@ -400,41 +416,55 @@ fn compiled(ctx: &mut Context, id: Id, flags: Option<Id>) -> Result<Id> {
         source.extend_from_within(1..source.len() - 1);
     }
     let ascii = bytes || flags & ASCII != 0;
-    let engine_source = if flags & VERBOSE != 0 {
-        let mut source =
-            imre_regex::translate_with_flags(&source, true, ascii, flags & DOTALL != 0)
-                .map_err(|message| pattern_error(ctx, id, flags, message))?
-                .source;
-        if flags & MULTILINE != 0 && source.ends_with(imre_regex::FINAL_NEWLINE_ANCHOR) {
-            source.truncate(source.len() - imre_regex::FINAL_NEWLINE_ANCHOR.len());
-            source.push('$');
-        }
-        source
-    } else {
-        imre_regex::preserve_zero_repeat_groups(python_escapes(
+    // Byte escapes have a separate grammar. Unicode IGNORECASE must fold
+    // the literal guard without extending Python's word-category membership.
+    let literal_guards = !bytes && (flags & IGNORECASE == 0 || ascii);
+    let translate = || {
+        let mut translated = imre_regex::translate_pattern(
             &source,
-            ascii,
-            flags & MULTILINE != 0,
-        ))
-        .map_err(|message| pattern_error(ctx, id, flags, message))?
+            flags & VERBOSE != 0,
+            alphabet(bytes, ascii, flags),
+            flags & DOTALL != 0,
+            literal_guards,
+        )?
+        .source;
+        if flags & MULTILINE != 0 && translated.ends_with(imre_regex::FINAL_NEWLINE_ANCHOR) {
+            translated.truncate(translated.len() - imre_regex::FINAL_NEWLINE_ANCHOR.len());
+            translated.push('$');
+        }
+        Ok(translated)
     };
-    let engine_source = if flags & IGNORECASE != 0 && !bytes {
-        casefold::expand(&engine_source, ascii)
-            .map_err(|message| pattern_error(ctx, id, flags, message))?
+    let build = |mut source: String| {
+        if flags & IGNORECASE != 0 && !bytes {
+            source = casefold::expand(&source, ascii)?;
+        }
+        let matcher = build_regex(&source, bytes, flags)?;
+        Ok((source, matcher))
+    };
+    let prepared = if flags & VERBOSE != 0 {
+        translate().and_then(build)
     } else {
-        engine_source
+        let (raw, literal_brace) = python_escapes(&source, ascii, flags & MULTILINE != 0);
+        let original = || imre_regex::preserve_zero_repeat_groups(raw).and_then(build);
+        if literal_brace {
+            // The subset parser checks adjacent quantifiers before quoting a Python literal.
+            // Keep accepted engine syntax such as an inline verbose comment containing '{'.
+            translate().and_then(build).or_else(|_| original())
+        } else {
+            original()
+        }
     };
-    // The regular-expression backend does not parse atomic groups directly.
-    // The shared Python translator can lower the subset with a fixed delimiter.
-    let (engine_source, regex) = match build_regex(&engine_source, bytes, flags) {
-        Ok(regex) => (engine_source, regex),
-        Err(original) if !bytes && flags & !UNICODE == 0 && source.contains("(?>") => {
-            let translated = imre_regex::translate(&source, false)
-                .map_err(|_| pattern_error(ctx, id, flags, original))?
-                .source;
-            let regex = build_regex(&translated, bytes, flags)
-                .map_err(|message| pattern_error(ctx, id, flags, message))?;
-            (translated, regex)
+    let (engine_source, regex) = match prepared {
+        Ok(pair) => pair,
+        // Retry unsupported engine syntax with the shared Python subset translator.
+        Err(original)
+            if !bytes
+                && flags & VERBOSE == 0
+                && (literal_guards && source.contains("(?!")
+                    || flags & !UNICODE == 0 && source.contains("(?>")) =>
+        {
+            let translated = translate().map_err(|_| pattern_error(ctx, id, flags, original))?;
+            build(translated).map_err(|message| pattern_error(ctx, id, flags, message))?
         }
         Err(message) => return Err(pattern_error(ctx, id, flags, message)),
     };
@@ -487,8 +517,8 @@ pub(super) fn module_call(
     let [pattern, string, flags] = bind(name, args, kwargs, ["pattern", "string", "flags"])?;
     let string = string.ok_or_else(|| missing("string"))?;
     let pattern = compiled(ctx, pattern.ok_or_else(|| missing("pattern"))?, flags)?;
-    if name == "re.search" {
-        return search(ctx, "search", &[pattern, string], &[]);
+    if let Some(method @ ("search" | "finditer")) = name.strip_prefix("re.") {
+        return search(ctx, method, &[pattern, string], &[]);
     }
     call(ctx, name, &[pattern, string])
 }
@@ -546,6 +576,12 @@ impl Match {
             .ok_or_else(|| Error::new("IndexError", "no such group"))
     }
 
+    /// Resolve a capture by its integer index or name, including nonparticipating groups.
+    pub(in crate::dynamic) fn group_item(&self, ctx: &mut Context, key: Id) -> Result<Id> {
+        let index = self.group_index(ctx, key)?;
+        self.group(ctx, index, NONE)
+    }
+
     fn group(&self, ctx: &mut Context, index: usize, default: Id) -> Result<Id> {
         let Some(span) = self.spans[index] else {
             return Ok(default);
@@ -588,6 +624,23 @@ pub(super) fn match_groups(ctx: &mut Context, receiver: Id, default: Id) -> Resu
     Ok(ctx.alloc(Value::Tuple(groups)))
 }
 
+pub(super) fn match_groupdict(ctx: &mut Context, receiver: Id, default: Id) -> Result<Id> {
+    let m = matched(ctx, receiver)?;
+    let mut fields = Vec::new();
+    for index in 1..m.spans.len() {
+        if let Some(name) = m
+            .pattern(ctx)
+            .regex
+            .group_info()
+            .to_name(PatternID::ZERO, index)
+        {
+            let key = ctx.text(name.to_owned());
+            fields.push((key, m.group(ctx, index, default)?));
+        }
+    }
+    Ok(ctx.dict(fields))
+}
+
 fn group_value(data: &[u8], bytes: bool) -> Value {
     if bytes {
         Value::Bytes(data.to_vec())
@@ -620,30 +673,33 @@ fn capture(
 }
 
 fn subject_bytes(ctx: &Context, id: Id, bytes: bool) -> Result<&[u8]> {
-    match ctx.heap.get(id) {
-        Value::Bytes(value) | Value::ByteArray(value) if bytes => Ok(value),
-        Value::Bytes(_) | Value::ByteArray(_) => Err(Error::new(
-            "TypeError",
-            "cannot use a string pattern on a bytes-like object",
-        )),
-        _ => {
-            let text = ctx.str_value(id).map_err(|_| {
-                Error::new(
-                    "TypeError",
-                    format!(
-                        "expected string or bytes-like object, got '{}'",
-                        ctx.type_name(id)
-                    ),
-                )
-            })?;
+    let value = ctx.heap.get(ctx.scalar_value(id));
+    if !matches!(value, Value::Str(_) | Value::SurrogateStr(_)) {
+        ctx.check_buffer_exporter(id)?;
+    }
+    match value {
+        Value::Bytes(_) | Value::ByteArray(_) | Value::MemoryView { owner: Some(_), .. } => {
             if bytes {
-                return Err(Error::new(
-                    "TypeError",
-                    "cannot use a bytes pattern on a string-like object",
-                ));
+                return ctx.bytes_like(id);
             }
-            Ok(text.as_bytes())
+            Err(Error::new(
+                "TypeError",
+                "cannot use a string pattern on a bytes-like object",
+            ))
         }
+        Value::Str(_) | Value::SurrogateStr(_) if bytes => Err(Error::new(
+            "TypeError",
+            "cannot use a bytes pattern on a string-like object",
+        )),
+        _ => ctx.str_value(id).map(str::as_bytes).map_err(|_| {
+            Error::new(
+                "TypeError",
+                format!(
+                    "expected string or bytes-like object, got '{}'",
+                    ctx.type_name(id)
+                ),
+            )
+        }),
     }
 }
 
@@ -707,21 +763,32 @@ pub(super) fn search(
         }
     };
     let (start, end) = (byte(start), byte(end));
-    if method == "scanner" {
-        // A mutable buffer needs a Python export for the lifetime of the scanner.
-        if matches!(ctx.heap.get(string), Value::ByteArray(_)) {
+    if matches!(method, "scanner" | "finditer") {
+        // Resizing a bytearray or releasing a view requires a persistent scanner export.
+        if matches!(
+            ctx.heap.get(ctx.scalar_value(string)),
+            Value::ByteArray(_) | Value::MemoryView { .. }
+        ) {
             return Err(Error::new(
                 "NotImplementedError",
-                "exporting a bytearray to a regex scanner is unsupported",
+                format!(
+                    "exporting a {} to a regex scanner is unsupported",
+                    ctx.type_name(string)
+                ),
             ));
         }
-        return Ok(ctx.alloc(Value::RegexScanner {
+        let scanner = ctx.alloc(Value::RegexScanner {
             pattern: receiver,
             subject: string,
             start: Some(start),
             end,
             retry: false,
-        }));
+        });
+        if method == "finditer" {
+            let search = ctx.lookup_attr(scanner, "search")?;
+            return Ok(ctx.alloc(Value::CallableIterator(Some([search, NONE]))));
+        }
+        return Ok(scanner);
     }
     if start > end {
         if method == "match" {
@@ -754,8 +821,7 @@ pub(super) fn call(ctx: &mut Context, name: &str, args: &[Id]) -> Result<Id> {
             }
             let mut values = Vec::with_capacity(args.len() - 1);
             for &group in &args[1..] {
-                let index = m.group_index(ctx, group)?;
-                values.push(m.group(ctx, index, NONE)?);
+                values.push(m.group_item(ctx, group)?);
             }
             return Ok(if values.len() == 1 {
                 values[0]

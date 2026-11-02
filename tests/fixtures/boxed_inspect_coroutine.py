@@ -1,5 +1,6 @@
 import inspect
 from functools import partial, update_wrapper
+from inspect import CO_ASYNC_GENERATOR, CO_COROUTINE, CO_GENERATOR
 from inspect import cleandoc, iscoroutinefunction, markcoroutinefunction
 
 
@@ -10,6 +11,10 @@ assert cleandoc("  first  \n  \u00a0second") == "first  \n\u00a0second"
 
 async def view():
     raise AssertionError("inspection called the view")
+
+
+print(CO_GENERATOR, CO_COROUTINE, CO_ASYNC_GENERATOR)
+print(view.__code__.co_flags & CO_COROUTINE)
 
 
 async def async_generator():

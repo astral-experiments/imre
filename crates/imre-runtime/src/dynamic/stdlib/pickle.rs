@@ -1,3 +1,4 @@
+use super::super::value::DictViewKind;
 use super::{Context, Error, Id, NONE, Result, Value};
 use std::collections::HashMap;
 mod encoding;
@@ -66,6 +67,7 @@ impl Pickler {
                     Value::None => self.out.push(b'N'),
                     Value::Bool(value) => encoding::boolean(&mut self.out, self.protocol, *value),
                     Value::Int(value) => encoding::int(&mut self.out, self.protocol, value)?,
+                    Value::Float(value) => encoding::float(&mut self.out, self.protocol, *value),
                     Value::Str(text) => {
                         encoding::string(&mut self.out, self.protocol, text)?;
                         self.remember(ctx, obj)?;
@@ -76,11 +78,27 @@ impl Pickler {
                         for &item in &items {
                             self.save(ctx, item)?;
                         }
-                        encoding::tuple_end(&mut self.out, self.protocol, items.len());
-                        if !items.is_empty() {
-                            self.remember(ctx, obj)?;
+                        if let Some(&index) = self.memo.get(&obj) {
+                            // A mutable child finished this same tuple while its elements were saved.
+                            encoding::recursive_tuple(
+                                &mut self.out,
+                                self.protocol,
+                                items.len(),
+                                index,
+                            );
+                        } else {
+                            encoding::tuple_end(&mut self.out, self.protocol, items.len());
+                            if !items.is_empty() {
+                                self.remember(ctx, obj)?;
+                            }
                         }
                     }
+                    Value::Bytes(bytes) if self.protocol >= 3 => {
+                        encoding::bytes(&mut self.out, self.protocol, bytes)?;
+                        self.remember(ctx, obj)?;
+                    }
+                    Value::Bytes(_) => self.save_legacy_bytes(ctx, obj)?,
+                    Value::Dict(_) => self.save_dict(ctx, obj)?,
                     Value::Function { .. } | Value::Class { .. } | Value::Native(_) => {
                         self.save_global(ctx, obj, None)?;
                     }
@@ -89,6 +107,92 @@ impl Pickler {
                 Ok(())
             },
         )
+    }
+
+    /// Protocols before BINBYTES reconstruct through bytes() or _codecs.encode(text, "latin1").
+    fn save_legacy_bytes(&mut self, ctx: &mut Context, obj: Id) -> Result<()> {
+        let Value::Bytes(bytes) = ctx.heap.get(obj) else {
+            unreachable!()
+        };
+        let (func, args) = if bytes.is_empty() {
+            (ctx.builtin("bytes"), Vec::new())
+        } else {
+            let text = crate::objects::Codec::Latin1.decode(bytes, None)?;
+            let text = ctx.text(text);
+            let latin1 = ctx
+                .heap
+                .source_string_constant("latin1")
+                .ok_or_else(crate::Error::allocation)?;
+            (ctx.builtin("codecs.encode"), vec![text, latin1])
+        };
+        let args = ctx.alloc(Value::Tuple(args));
+        self.save_reduce(ctx, obj, func, args)
+    }
+
+    fn save_dict(&mut self, ctx: &mut Context, obj: Id) -> Result<()> {
+        const BATCH_SIZE: usize = 1000;
+        if self.protocol == 0 {
+            self.out.extend_from_slice(b"(d"); // MARK, DICT
+        } else {
+            self.out.push(b'}'); // EMPTY_DICT
+        }
+        self.remember(ctx, obj)?;
+
+        let entries = ctx.stored_entries(obj);
+        if entries.is_empty() {
+            return Ok(());
+        }
+        if self.protocol == 0 {
+            // The text protocol iterates dict.items(), including its mutation checks.
+            let iter = ctx.dict_iterator(obj, DictViewKind::Items, false, false);
+            while let Some(item) = ctx.next_item(iter)? {
+                let Value::Tuple(pair) = ctx.heap.get(item) else {
+                    unreachable!("dict items iterator yields pairs");
+                };
+                self.save_pair(ctx, pair[0], pair[1])?;
+                self.out.push(b's'); // SETITEM
+            }
+            return Ok(());
+        }
+        let size = entries.len();
+        if size == 1 {
+            let (key, value) = entries[0];
+            self.save_pair(ctx, key, value)?;
+            self.out.push(b's'); // SETITEM
+            return Ok(());
+        }
+
+        let mut position = 0;
+        loop {
+            self.out.push(b'('); // MARK
+            let mut count = 0;
+            while count < BATCH_SIZE {
+                let Some((slot, key, value)) = ctx.stored_entries(obj).at(position) else {
+                    break;
+                };
+                position = slot + 1;
+                self.save_pair(ctx, key, value)?;
+                count += 1;
+            }
+            self.out.push(b'u'); // SETITEMS
+            if ctx.stored_entries(obj).len() != size {
+                return Err(Error::new(
+                    "RuntimeError",
+                    "dictionary changed size during iteration",
+                ));
+            }
+            if count < BATCH_SIZE {
+                return Ok(());
+            }
+        }
+    }
+
+    fn save_pair(&mut self, ctx: &mut Context, key: Id, value: Id) -> Result<()> {
+        // Either reducer may remove this entry before the other object is saved.
+        ctx.heap.keep(key);
+        ctx.heap.keep(value);
+        self.save(ctx, key)?;
+        self.save(ctx, value)
     }
 
     fn save_global(&mut self, ctx: &mut Context, obj: Id, name: Option<String>) -> Result<()> {
@@ -207,9 +311,19 @@ impl Pickler {
                 "native pickle does not yet support reduction state, items or state setters",
             ));
         }
-        self.save(ctx, fields[0])?;
-        self.save(ctx, fields[1])?;
+        self.save_reduce(ctx, obj, fields[0], fields[1])
+    }
+
+    fn save_reduce(&mut self, ctx: &mut Context, obj: Id, func: Id, args: Id) -> Result<()> {
+        self.save(ctx, func)?;
+        self.save(ctx, args)?;
         self.out.push(b'R');
+        if let Some(&index) = self.memo.get(&obj) {
+            // A reconstructor argument can reach this object through a mutable container.
+            self.out.push(b'0'); // POP
+            encoding::memo_get(&mut self.out, self.protocol, index);
+            return Ok(());
+        }
         self.remember(ctx, obj)
     }
 }

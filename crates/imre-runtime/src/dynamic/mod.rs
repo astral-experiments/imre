@@ -3,6 +3,7 @@
 
 mod abstract_class;
 mod array;
+mod atexit;
 mod builtins;
 mod calls;
 mod class_annotations;
@@ -28,6 +29,7 @@ mod os_error;
 mod property;
 mod range;
 mod slice;
+mod slot_member;
 mod source_code;
 mod static_method;
 mod stdlib;
@@ -99,14 +101,16 @@ pub(crate) struct Context {
     heap: Heap,
     config: serde_json::Value,
     executable: PathBuf,
+    helper_executable: String,
     argv: Id,
     sys_path: Id,
     default_encoding: Id,
     audit_hooks: Vec<Id>,
+    exit_callbacks: Vec<Id>,
     // The active stack roots suspended contexts while Context.run executes native code.
     contexts: Vec<Id>,
     // A buffer export pins its bytearray's size while Python callbacks run.
-    bytearray_exports: Vec<Id>,
+    buffer_exports: Vec<Id>,
     // Active sorts temporarily detach their list storage while Python callbacks run.
     sorting_lists: Vec<Id>,
     // Container ancestors visible to a reentrant Python __repr__.
@@ -290,8 +294,51 @@ impl Context {
         }
     }
 
+    fn memoryview_owner(owner: Option<Id>) -> Result<Id> {
+        owner.ok_or_else(|| {
+            Error::new(
+                "ValueError",
+                "operation forbidden on released memoryview object",
+            )
+        })
+    }
+
+    /// Acquiring a Python-defined buffer can replace the native storage or install a release callback.
+    fn check_buffer_exporter(&self, object: Id) -> Result<()> {
+        let Value::Instance { class, .. } = self.heap.get(object) else {
+            return Ok(());
+        };
+        let python_slot = |slot| {
+            self.find_in_mro(*class, |base| match self.heap.get(base) {
+                Value::Class { .. } => self.own_class_attr(base, slot).map(|_| true),
+                Value::Native(name)
+                    if matches!(name.as_str(), "array.array" | "bytearray")
+                        || (name == "bytes" && slot == "__buffer__") =>
+                {
+                    Some(false)
+                }
+                _ => None,
+            })
+        };
+        if match python_slot("__buffer__") {
+            Some(true) => true,
+            Some(false) => python_slot("__release_buffer__") == Some(true),
+            None => false,
+        } {
+            return Err(Error::new(
+                "NotImplementedError",
+                "Python-defined buffer hooks are unsupported",
+            ));
+        }
+        Ok(())
+    }
+
     fn bytes_like(&self, id: Id) -> Result<&[u8]> {
-        match self.heap.get(self.scalar_value(id)) {
+        let owner = match self.heap.get(id) {
+            Value::MemoryView { owner, .. } => Self::memoryview_owner(*owner)?,
+            _ => id,
+        };
+        match self.heap.get(self.scalar_value(owner)) {
             Value::Bytes(data) | Value::ByteArray(data) => Ok(data),
             _ => Err(Error::new(
                 "TypeError",
@@ -303,19 +350,22 @@ impl Context {
         }
     }
 
-    /// Keep the underlying bytearray exported while an argument conversion runs Python.
+    /// Keep the buffer exported while an argument conversion runs Python.
     fn with_buffer_export<T>(
         &mut self,
         input: Id,
         convert: impl FnOnce(&mut Self) -> Result<T>,
     ) -> Result<T> {
         let input = self.scalar_value(input);
-        if !matches!(self.heap.get(input), Value::ByteArray(_)) {
+        if !matches!(
+            self.heap.get(input),
+            Value::ByteArray(_) | Value::MemoryView { .. }
+        ) {
             return convert(self);
         }
-        self.bytearray_exports.push(input);
+        self.buffer_exports.push(input);
         let result = convert(self);
-        self.bytearray_exports.pop();
+        self.buffer_exports.pop();
         result
     }
 
@@ -332,7 +382,7 @@ impl Context {
     }
 
     fn check_bytearray_resize(&self, id: Id) -> Result<()> {
-        if self.bytearray_exports.contains(&id) {
+        if self.buffer_exports.contains(&id) {
             Err(Self::exported_bytearray_error())
         } else {
             Ok(())
@@ -1179,8 +1229,8 @@ impl Context {
             };
             return Ok(entries.iter().map(|&(_, member)| member).collect());
         }
-        if let Value::MappingProxy(dict) = *self.heap.get(id) {
-            return self.items(dict);
+        if matches!(self.heap.get(id), Value::MappingProxy(_)) {
+            return self.items(self.mapping_proxy_target(id));
         }
         if let Some(storage) = self.string_storage(id)
             && storage != id
@@ -1641,6 +1691,7 @@ impl Context {
         let value = self.alloc(Value::Native(name.to_owned()));
         self.builtins.insert(name.to_owned(), value);
         if let Some(constants) = crate::objects::Calendar::class_constants(name) {
+            stdlib::datetime::install_members(self, name);
             for (field, value) in ["min", "max", "resolution"].into_iter().zip(constants) {
                 let id = stdlib::datetime::store(self, value, NONE);
                 self.builtins.insert(format!("{name}.{field}"), id);
@@ -1675,7 +1726,8 @@ impl Context {
                 builtins::BYTEARRAY_METHODS
             }
             "property" => property::METHODS,
-            "int" => &["bit_length", "to_bytes", "__format__"],
+            "memoryview" => builtins::MEMORYVIEW_METHODS,
+            "int" => &["bit_length", "from_bytes", "to_bytes", "__format__"],
             "float" => &["__format__", "__getformat__", "as_integer_ratio"],
             "bytes" => {
                 self.builtin("bytes.fromhex");
@@ -1711,36 +1763,22 @@ impl Context {
     /// Resolve a named import from a loaded module, including package children.
     fn import_from(&mut self, object: Id, member: Id) -> Result<Id> {
         let name = self.str_value(member)?.to_owned();
-        let attribute_error = match self.lookup_attr(object, &name) {
-            Err(error) if error.kind == "AttributeError" => error,
+        let attribute_error = match self.lookup_named_attr(object, &name, Some(member)) {
+            Err(error) if self.is_attribute_error(&error) => error,
             value => return value,
         };
-        let Value::Module {
-            name: module,
-            scope,
-            ..
-        } = self.heap.get(object)
-        else {
-            return Err(attribute_error);
+        // The importer has already attempted package children. A circular import
+        // can publish a child in sys.modules before binding it on the parent.
+        let module_name = match self.lookup_attr(object, "__name__") {
+            Ok(value) => Some(value),
+            Err(err) if self.is_attribute_error(&err) => None,
+            Err(err) => return Err(err),
         };
-        let names = &self.scope_data(*scope).names;
-        let package = if names.contains_key("__path__") {
-            names.get("__name__").map(|id| self.display(*id))
-        } else {
-            None
-        };
-        let child = format!("{}.{name}", package.as_deref().unwrap_or(module));
-        // A child's initializer can raise ModuleNotFoundError for its own dependency.
-        // Only a failure to find the requested child is a missing export.
-        match self.module(&child) {
-            Err(error)
-                if error.kind == "ModuleNotFoundError"
-                    && error
-                        .import
-                        .as_ref()
-                        .and_then(|fields| fields.name.as_deref())
-                        == Some(&child) => {}
-            value => return value,
+        if let Some(module) = module_name.and_then(|id| self.str_value(id).ok()) {
+            let child = self.text(format!("{module}.{name}"));
+            if let Some(value) = self.registered_module(child)? {
+                return Ok(value);
+            }
         }
         let Value::Module {
             scope,
@@ -1749,14 +1787,11 @@ impl Context {
             ..
         } = self.heap.get(object)
         else {
-            unreachable!()
+            return Err(attribute_error);
         };
-        let names = &self.scope_data(*scope).names;
-        let module = names
-            .get("__name__")
-            .and_then(|id| self.str_value(*id).ok());
+        let module = module_name.and_then(|id| self.str_value(id).ok());
         let quoted_module = string_repr(module.unwrap_or("<unknown module name>"));
-        let origin = origin.or_else(|| names.get("__file__").copied());
+        let origin = origin.or_else(|| self.scope_name(*scope, "__file__"));
         let path = origin.and_then(|id| self.str_value(id).ok());
         let prefix = format!(
             "cannot import name {} from {quoted_module}",
@@ -1920,7 +1955,10 @@ impl Context {
         } else {
             let (search, child) = if let Some((parent, child)) = parent {
                 (
-                    self.lookup_attr(parent, "__path__").map_err(|_| {
+                    self.lookup_attr(parent, "__path__").map_err(|err| {
+                        if !self.is_attribute_error(&err) {
+                            return err;
+                        }
                         Error::new(
                             "ModuleNotFoundError",
                             format!(
@@ -1951,6 +1989,12 @@ impl Context {
         self.bind(scope, "__name__", name_id);
         if source.is_some() {
             self.bind(scope, "__doc__", NONE);
+        } else if let Some(doc) = self.config["module_docs"].get(name) {
+            let doc = doc
+                .as_str()
+                .map(str::to_owned)
+                .map_or(NONE, |text| self.text(text));
+            self.bind(scope, "__doc__", doc);
         }
         if !locations.is_empty() {
             let dirs = locations
@@ -1998,7 +2042,11 @@ impl Context {
         let key = self.text(name);
         self.put_item(self.modules, key, module)?;
         if let Err(e) = self.run_initializer(name, module, scope, name_id, origin, source) {
-            builtins::remove_dict_item(self, self.modules, key)?;
+            // The executing script remains importable during interpreter shutdown,
+            // including after SystemExit or an uncaught exception.
+            if name != "__main__" {
+                builtins::remove_dict_item(self, self.modules, key)?;
+            }
             return Err(e);
         }
         // A script can delete its own __main__ binding. Its exit status is determined by the script.
@@ -2029,10 +2077,36 @@ impl Context {
             let rlock = self.builtin(thread_rlock::CLASS);
             self.bind(scope, "RLock", rlock);
         }
+        if matches!(name, "io" | "_io") {
+            let error = self.builtin("BlockingIOError");
+            self.bind(scope, "BlockingIOError", error);
+        }
         match name {
+            "itertools" => {
+                for attr in [
+                    "count",
+                    "repeat",
+                    "_cycle_allocate",
+                    "_cycle_next",
+                    "_chain_allocate",
+                    "_chain_get",
+                    "_chain_set",
+                ] {
+                    let value = self.builtin(&format!("itertools.{attr}"));
+                    self.bind(scope, attr, value);
+                }
+            }
+            "inspect" => {
+                for &(name, flag) in imre_ast::code_flags::INSPECT_FLAGS {
+                    let value = self.int(i64::from(flag));
+                    self.bind(scope, name, value);
+                }
+            }
             "abc" => {
                 let meta = self.abc_meta();
                 self.bind(scope, "ABCMeta", meta);
+                let token = self.builtin("abc.get_cache_token");
+                self.bind(scope, "get_cache_token", token);
             }
             #[cfg(target_os = "linux")]
             "_signal" if source.is_none() => stdlib::signal::initialize(self, scope),
@@ -2082,9 +2156,23 @@ impl Context {
                 let devnull = self.text("/dev/null");
                 self.bind(scope, "devnull", devnull);
             }
+            "math" if source.is_none() => {
+                let pi = self.alloc(Value::Float(std::f64::consts::PI));
+                self.bind(scope, "pi", pi);
+            }
             "errno" => stdlib::install_errno(self, scope)?,
+            "atexit" => atexit::install(self, scope),
             "_socket" => stdlib::install_lowlevel_socket(self, scope)?,
-            "socket" if source.is_none() => stdlib::import_socket_constants(self, scope)?,
+            "socket"
+                if source.is_none()
+                    || source.as_ref().is_some_and(|(path, _)| {
+                        self.config["bundled_root"].as_str().is_some_and(|root| {
+                            path == &std::path::Path::new(root).join("socket.py")
+                        })
+                    }) =>
+            {
+                stdlib::import_socket_constants(self, scope)?
+            }
             "_opcode" => {
                 // Imre emits native code and has no adaptive bytecode interpreter.
                 let disabled = self.int(0);
@@ -2156,12 +2244,17 @@ impl Context {
                         self.threads.default_stderr = Some(stream);
                     }
                 }
+                let stdin = stdlib::io::standard_input(self)?;
+                self.bind(scope, "stdin", stdin);
+                self.bind(scope, "__stdin__", stdin);
                 let jit = stdlib::jit_module(self)?;
                 self.bind(scope, "_jit", jit);
             }
             "re" => {
                 let pattern = self.builtin(value::REGEX_PATTERN_TYPE);
                 self.bind(scope, "Pattern", pattern);
+                let match_type = self.builtin(value::REGEX_MATCH_TYPE);
+                self.bind(scope, "Match", match_type);
             }
             "array" => {
                 let array = self.builtin("array.array");

@@ -1,6 +1,7 @@
 import _io
 import io
 import sys
+import weakref
 from io import IncrementalNewlineDecoder
 
 
@@ -46,6 +47,12 @@ def current():
     assert wrapped.newlines == ("\r", "\n", "\r\n")
     assert type(wrapped.decode(Text("x"))) is str
     clean = Derived(None, True)
+    try:
+        decoder.reset(weakref.proxy(clean))
+    except TypeError as exc:
+        assert "weakref.ProxyType" in str(exc)
+    else:
+        raise AssertionError("unbound descriptor accepted a proxy")
     clean.tag = "subclass"
     assert clean.tag == "subclass" and type(clean.decode(Text("\u0d00"))) is str
     assert wrapped.setstate((delegate, -1)) is delegate

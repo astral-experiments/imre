@@ -1,4 +1,5 @@
 mod class_metadata;
+pub(super) mod type_parameters;
 mod worker;
 
 use ruff_python_ast as ast;
@@ -34,6 +35,14 @@ impl<'a> Visitor<'a> for ClosureNames {
             ast::Stmt::FunctionDef(f) => {
                 self.locals.insert(f.name.to_string());
                 self.incomplete = true;
+                for decorator in &f.decorator_list {
+                    self.visit_decorator(decorator);
+                }
+                for param in f.parameters.iter_non_variadic_params() {
+                    if let Some(default) = &param.default {
+                        self.visit_expr(default);
+                    }
+                }
                 if !f.decorator_list.is_empty()
                     || f.parameters
                         .posonlyargs
@@ -48,7 +57,13 @@ impl<'a> Visitor<'a> for ClosureNames {
             ast::Stmt::ClassDef(c) => {
                 self.locals.insert(c.name.to_string());
                 self.incomplete = true;
-                self.locals_incomplete = true;
+                for decorator in &c.decorator_list {
+                    self.visit_decorator(decorator);
+                }
+                if let Some(args) = &c.arguments {
+                    self.visit_arguments(args);
+                }
+                self.locals_incomplete |= c.type_params.is_some();
             }
             ast::Stmt::Global(g) => {
                 self.globals.extend(g.names.iter().map(ToString::to_string));
@@ -261,7 +276,8 @@ impl Function<'_, '_> {
                             let sig = self.text("{}");
                             let defaults = self.op("dict", &[]);
                             let thunk = self.checked(&format!("call i64 @imre_dyn_def_from_site(ptr %ctx, ptr {code}, i64 {}, i64 {name}, i64 {sig}, i64 {defaults}, i64 {name}, i64 0, i64 0, i1 true)", self.scope));
-                            self.op("annotate_deferred", &[&self.scope.clone(), &key, &thunk]);
+                            let offset = v.start().to_u32();
+                            self.checked(&format!("call i64 @imre_dyn_class_annotation(ptr %ctx, i64 {}, i64 {key}, i64 {thunk}, i32 {offset})", self.scope));
                         } else {
                             let value =
                                 if self.class_locals.is_some() && self.source.string_annotations {
@@ -316,6 +332,28 @@ impl Function<'_, '_> {
                         .iter()
                         .map(|d| self.expr(&d.expression))
                         .collect::<Vec<_>>();
+                    let outer = self.scope.clone();
+                    let mut outer_class_locals = None;
+                    let parameter_scope = v.type_params.as_deref().map(|params| {
+                        let names = self.op("dict", &[]);
+                        for param in params {
+                            let ast::TypeParam::TypeVar(typevar) = param else {
+                                self.unsupported("variadic class type parameters");
+                                continue;
+                            };
+                            if typevar.bound.is_some() || typevar.default.is_some() {
+                                self.unsupported("class type parameter bounds and defaults");
+                            }
+                            let binding = self.code_name(typevar.name.as_str());
+                            let name =
+                                self.code_name(self.source.private_names.definition(&typevar.name));
+                            self.op("put", &[&names, &binding, &name]);
+                        }
+                        let scope = self.op("class_parameter_scope", &[&outer, &names]);
+                        self.scope = self.op("class_base_scope", &[&scope, &outer]);
+                        outer_class_locals = self.class_locals.take();
+                        scope
+                    });
                     let bases = self.op("list", &[]);
                     let kwargs = if let Some(args) = v.arguments.as_deref() {
                         if args
@@ -330,6 +368,11 @@ impl Function<'_, '_> {
                     } else {
                         "0".into()
                     };
+                    if let Some(scope) = parameter_scope.as_ref() {
+                        self.scope = scope.clone();
+                        let generic = self.lookup(".generic_base");
+                        self.op("append", &[&bases, &generic]);
+                    }
                     let init = self.define(
                         v.start(),
                         self.source.private_names.definition(&v.name),
@@ -337,6 +380,10 @@ impl Function<'_, '_> {
                         None,
                         Body::Namespace(&v.body),
                     );
+                    if parameter_scope.is_some() {
+                        self.scope = outer;
+                        self.class_locals = outer_class_locals;
+                    }
                     let operation = if v.type_params.is_some() {
                         "parameterized_class"
                     } else {
@@ -447,12 +494,21 @@ impl Function<'_, '_> {
                         continue;
                     };
                     let module = self.import(&name);
-                    for alias in &v.names {
+                    let fromlist = self.op("list", &[]);
+                    let names: Vec<_> = v
+                        .names
+                        .iter()
+                        .map(|alias| self.code_name(alias.name.as_str()))
+                        .collect();
+                    for attr in &names {
+                        self.op("append", &[&fromlist, attr]);
+                    }
+                    self.op("fromlist", &[&module, &fromlist]);
+                    for (alias, attr) in v.names.iter().zip(names) {
                         if alias.name.as_str() == "*" {
                             self.op("import_star", &[&self.scope.clone(), &module]);
                             continue;
                         }
-                        let attr = self.code_name(alias.name.as_str());
                         let value = self.op("from", &[&module, &attr]);
                         self.bind(
                             alias.asname.as_ref().unwrap_or(&alias.name).as_str(),
@@ -894,7 +950,7 @@ impl Function<'_, '_> {
         let explicit = if cause.is_some() { 2 } else { 0 };
         let cause = cause.unwrap_or("0");
         self.line(&format!(
-            "call i64 @imre_dyn_op(ptr %ctx, ptr {op}, i64 {exc}, i64 {cause}, i64 {explicit})"
+            "call i64 @imre_dyn_op_at(ptr %ctx, ptr {op}, i64 {exc}, i64 {cause}, i64 {explicit}, ptr null)"
         ));
         self.jump(&self.error.clone());
     }

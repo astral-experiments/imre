@@ -170,7 +170,7 @@ pub(super) fn path_operation(
         }
         ("random_name", []) => Ok(ctx.text(tempdirs::random_name().map_err(errno_error)?)),
         ("default_directory", []) => Ok(filesystem_text(ctx, tempdirs::find_default_directory()?)),
-        ("abspath" | "mkdir", &[arg]) => {
+        ("abspath" | "mkdir" | "cleanup_directory", &[arg]) => {
             let arg = super::posixpath::fspath(ctx, arg)?;
             let value = ctx.heap.get(ctx.scalar_value(arg));
             let is_bytes = matches!(value, Value::Bytes(_));
@@ -184,6 +184,26 @@ pub(super) fn path_operation(
                 Value::Bytes(bytes) => Path::new(OsStr::from_bytes(bytes)),
                 _ => return Err(Error::new("UnicodeError", "cannot encode filesystem path")),
             };
+            if name == "cleanup_directory" {
+                if !path.is_absolute() || path.file_name().is_none() {
+                    return Err(Error::new(
+                        "ValueError",
+                        "expected a named temporary directory",
+                    ));
+                }
+                let mut entry = path.to_owned();
+                return match tempdirs::remove_tree(&mut entry) {
+                    Ok(()) => Ok(NONE),
+                    Err(error) => {
+                        let filename = if is_bytes {
+                            ctx.alloc(Value::Bytes(entry.into_os_string().into_vec()))
+                        } else {
+                            filesystem_text(ctx, entry)
+                        };
+                        Err(ctx.with_errno_filename(errno_error(error).into(), filename)?)
+                    }
+                };
+            }
             if name == "mkdir" {
                 if path.as_os_str().as_bytes().contains(&0) {
                     return Err(Error::new(

@@ -54,6 +54,7 @@ pub(super) const NOT_IMPLEMENTED: Id = 4;
 const EMPTY_TUPLE: Id = 5;
 
 pub(super) const REGEX_PATTERN_TYPE: &str = "re.Pattern";
+pub(super) const REGEX_MATCH_TYPE: &str = "re.Match";
 pub(super) const TEMPLATE_TYPE: &str = "string.templatelib.Template";
 pub(super) const TEMPLATE_ITER_TYPE: &str = "string.templatelib.TemplateIter";
 pub(super) const INTERPOLATION_TYPE: &str = "string.templatelib.Interpolation";
@@ -634,17 +635,21 @@ pub(super) type Result<T> = std::result::Result<T, Error>;
 pub(super) struct ClassNamespace {
     pub bases: Id,
     pub mro: Id,
-    /// The qualified name reported when writes to a static type are rejected.
-    pub immutable_name: Option<&'static str>,
     /// A name assigned through type's __name__ descriptor, including a str subclass.
     pub name_override: Option<Id>,
     /// Backing dictionary shared by live class namespace proxies.
     pub dictionary: Option<Id>,
     pub annotation_thunks: Option<Id>,
+    /// Scratch field dictionary used only while an ordinary class body is executing.
+    pub annotation_scratch: Option<Id>,
+    /// Executed deferred sites in source order, including repeated field names.
+    pub annotation_sites: Option<Box<std::collections::BTreeMap<u32, (Id, Id)>>>,
     /// TypedDict installs a class-wide annotation function in place of its field thunks.
     pub provider_annotations: bool,
     /// Slot names consumed when the class is created, independent of later namespace mutations.
     pub slot_names: Option<std::rc::Rc<[String]>>,
+    /// Dynamic classes install real descriptors instead of using inline fields by spelling.
+    pub member_slots: bool,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -727,6 +732,11 @@ pub(super) enum Value {
     SurrogateStr(Vec<u32>),
     Array(super::array::Array),
     Bytes(Vec<u8>),
+    /// A contiguous read-only view keeps its original bytes exporter alive until release.
+    MemoryView {
+        owner: Option<Id>,
+        hash: Option<i64>,
+    },
     ByteArray(Vec<u8>),
     CodecInfo {
         entry: crate::objects::CodecInfo,
@@ -821,6 +831,8 @@ pub(super) enum Value {
         running: bool,
     },
     Class {
+        /// Private layout tag for native I/O class generations.
+        io_kind: Option<&'static str>,
         metaclass: Option<Id>,
         name: String,
         scope: Id,
@@ -839,6 +851,8 @@ pub(super) enum Value {
     Instance {
         class: Id,
         fields: indexmap::IndexMap<String, Id>,
+        /// Storage addressed by the declaring member, independent of the instance dictionary.
+        member_values: Option<Box<HashMap<Id, Id>>>,
         /// Exact ordinary instance dictionary once exposed or replaced.
         namespace: Option<Id>,
         dictionary: Option<Id>,
@@ -858,6 +872,10 @@ pub(super) enum Value {
     /// The writable document member of the native tuple descriptor type.
     TupleGetterDoc,
     ReadOnlyMember(&'static str, &'static str),
+    SlotMember {
+        owner: Id,
+        name: Id,
+    },
     /// The original keys are held in a Python tuple, shared by multi-key reductions.
     ItemGetter(Id),
     ThreadLocal(super::thread_local::Dictionaries),
@@ -975,6 +993,7 @@ pub(super) enum Value {
         owner: Id,
         name: &'static str,
     },
+    ProcessHandle(crate::objects::BoxedPopen),
     File(crate::shared::Shared<super::stdlib::BinaryFile>),
     TextFile(crate::objects::TextFile),
     RegexScanner {
@@ -1024,6 +1043,7 @@ impl Value {
     /// Returns the name used for both builtin class lookup and diagnostic messages.
     pub(super) fn intrinsic_type_name(&self) -> Option<&str> {
         Some(match self {
+            Self::Selector(handle) => handle.borrow().class_name(),
             Self::Context(_) => "_contextvars.Context",
             Self::ContextVar { .. } => "_contextvars.ContextVar",
             Self::ContextToken { .. } => "_contextvars.Token",
@@ -1042,6 +1062,7 @@ impl Value {
             Self::Zip { .. } => "zip",
             Self::Array(_) => "array.array",
             Self::Bytes(_) => "bytes",
+            Self::MemoryView { .. } => "memoryview",
             Self::ByteArray(_) => "bytearray",
             Self::File(file) => match file.as_ref() {
                 super::stdlib::BinaryFile::Descriptor(fd) if fd.reading => "_io.BufferedReader",
@@ -1049,6 +1070,7 @@ impl Value {
                 super::stdlib::BinaryFile::Reader { .. } => "_io.BufferedReader",
                 super::stdlib::BinaryFile::Writer { .. } => "_io.BufferedWriter",
             },
+            Self::ProcessHandle(_) => "_imre_subprocess.Handle",
             Self::TextFile(_) => "_io.TextIOWrapper",
             Self::SequenceIterator { .. } => "iterator",
             Self::ReverseSequence { .. } => "reversed",
@@ -1058,6 +1080,7 @@ impl Value {
             Self::List(_) => "list",
             Self::CallableIterator(_) => "callable_iterator",
             Self::RegexPattern(_) => REGEX_PATTERN_TYPE,
+            Self::RegexMatch(_) => REGEX_MATCH_TYPE,
             Self::RegexScanner { .. } => "_sre.SRE_Scanner",
             Self::Tuple(_) => "tuple",
             Self::Slice(_) => "slice",
@@ -1084,7 +1107,9 @@ impl Value {
             Self::Dict(_) => "dict",
             Self::MappingProxy(_) => "mappingproxy",
             Self::Function { .. } => "function",
-            Self::TupleGetterDoc | Self::ReadOnlyMember(_, _) => "member_descriptor",
+            Self::TupleGetterDoc | Self::ReadOnlyMember(_, _) | Self::SlotMember { .. } => {
+                "member_descriptor"
+            }
             Self::ItemGetter(_) => "operator.itemgetter",
             Self::Code(_) => "code",
             Self::Cell(_) => "cell",
@@ -1117,6 +1142,13 @@ impl Value {
             Self::PythonFrame { .. } => "frame",
             _ => return None,
         })
+    }
+
+    pub(super) fn io_kind(&self) -> Option<&'static str> {
+        match self {
+            Self::Class { io_kind, .. } => *io_kind,
+            _ => None,
+        }
     }
 
     pub(super) fn instance_class(&self) -> Option<Id> {
@@ -1159,6 +1191,7 @@ impl Value {
             | Self::Scope(_)
             | Self::ClassCell(_)
             | Self::LoopIterator { .. }
+            | Self::ProcessHandle(_)
             | Self::Yielded(_) => false,
             Self::Tuple(items) => !items.is_empty(),
             _ => true,
@@ -1236,6 +1269,7 @@ impl Value {
             }
             Self::Yielded(item) => visit.push(*item),
             Self::Slice(parts) => visit.extend(parts),
+            Self::MemoryView { owner, .. } => visit.extend(owner),
             Self::Template {
                 strings,
                 interpolations,
@@ -1278,6 +1312,12 @@ impl Value {
                     visit.extend([class.bases, class.mro]);
                     visit.extend(class.name_override);
                     visit.extend(class.annotation_thunks);
+                    visit.extend(class.annotation_scratch);
+                    if let Some(sites) = &class.annotation_sites {
+                        for &(name, thunk) in sites.values() {
+                            visit.extend([name, thunk]);
+                        }
+                    }
                     visit.extend(class.dictionary);
                 }
                 visit.extend(scope.parent);
@@ -1378,9 +1418,11 @@ impl Value {
                 visit.extend([union.args, union.members, union.parameters]);
                 visit.extend(union.unhashable);
             }
+            Self::SlotMember { owner, name } => visit.extend([*owner, *name]),
             Self::Instance {
                 class,
                 fields,
+                member_values,
                 namespace,
                 dictionary,
                 scalar,
@@ -1412,6 +1454,11 @@ impl Value {
                 }
                 visit.push(*class);
                 visit.extend(dictionary);
+                if let Some(values) = member_values {
+                    for (&member, &value) in values.iter() {
+                        visit.extend([member, value]);
+                    }
+                }
                 visit.extend(fields.values());
                 visit.extend(namespace);
                 visit.extend(scalar);
@@ -1508,6 +1555,7 @@ impl Value {
             | Self::PartialPlaceholder
             | Self::TokenMissing
             | Self::TextFile(_)
+            | Self::ProcessHandle(_)
             | Self::NamedFileCloser(_) => {}
             Self::BufferedRandom(_, name) => visit.push(*name),
         }
@@ -1856,6 +1904,8 @@ pub(super) struct Heap {
     interned: HashMap<crate::StrOwner, InternedString>,
     // ABC registrations are weak edges. Sweep them before recycling a dead class's slot.
     pub(super) abc_registrations: Vec<[Id; 2]>,
+    // Collecting weak registration pairs must not roll back the invalidation counter.
+    pub(super) abc_cache_token: u64,
     free_head: usize,
     free_count: usize,
     pub(super) immutable_hashes: HashMap<Id, i64>,
@@ -1942,6 +1992,7 @@ impl Heap {
             linked_string_constants: HashMap::new(),
             interned: HashMap::new(),
             abc_registrations: Vec::new(),
+            abc_cache_token: 0,
             free_head: END,
             free_count: 0,
             immutable_hashes: HashMap::new(),
@@ -2088,6 +2139,11 @@ impl Heap {
             self.weak_edge_removed(old);
         }
         previous
+    }
+
+    /// An interpreter root (such as packed callback operands) can own weak targets indirectly.
+    pub(super) fn observes_released_roots(&self) -> bool {
+        self.has_weak_values || self.tracks_finalizers()
     }
 
     pub fn weak_edge_removed(&mut self, value: Id) {

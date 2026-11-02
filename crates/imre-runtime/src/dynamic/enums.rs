@@ -63,6 +63,7 @@ impl Context {
             property: None,
             weak_reference: None,
             cycle: None,
+            member_values: None,
             memory_stream: None,
         }))
     }

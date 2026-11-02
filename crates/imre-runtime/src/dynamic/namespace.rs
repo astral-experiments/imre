@@ -30,13 +30,22 @@ pub(super) fn class(ctx: &mut Context) -> Result<Id> {
     let class = ctx.allocate_class("SimpleNamespace".into(), scope, vec![object])?;
     // The static type has dictionary storage but introduces no weak-reference slot.
     if let Value::Scope(frame) = ctx.heap.get_mut(scope) {
-        let namespace = frame.class_namespace.as_mut().unwrap();
-        namespace.slot_names = Some(["__dict__".into()].into());
-        namespace.immutable_name = Some(CLASS);
+        frame.class_namespace.as_mut().unwrap().slot_names = Some(["__dict__".into()].into());
     }
     ctx.classes.insert(CLASS.into(), class);
     ctx.builtins.insert(CLASS.into(), class);
     Ok(class)
+}
+
+/// The type's slot descriptors are immutable; ordinary subclass attributes are writable.
+pub(super) fn check_class_write(ctx: &Context, obj: Id, name: &str) -> Result<()> {
+    if matches!(ctx.heap.get(obj), Value::Class { .. }) && ctx.classes.get(CLASS) == Some(&obj) {
+        return Err(Error::new(
+            "TypeError",
+            format!("cannot set '{name}' attribute of immutable type '{CLASS}'"),
+        ));
+    }
+    Ok(())
 }
 
 pub(super) fn method(

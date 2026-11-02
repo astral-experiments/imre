@@ -20,3 +20,16 @@ def current():
         assert str(error) == "ResourceWarning not triggered"
     else:
         raise AssertionError("sibling warning satisfied the assertion")
+
+    class Unnamed:
+        __name__ = None
+
+        def __str__(self):
+            raise AssertionError("unexpected name conversion")
+
+        def __call__(self, function, *args):
+            return function(*args)
+
+    callback = Unnamed()
+    case.assertWarns(UserWarning, callback, warnings.warn, "unnamed")
+    case.assertRaises(ValueError, callback, int, "invalid")

@@ -328,7 +328,33 @@ def choose(value, guard):
     assert choose(ValueError("matched"), False) == "exception"
 
 
+def source_genexpr():
+    namespace = {}
+    exec("""
+def make(events):
+    def source():
+        events.append("outer")
+        return [(1, 2), (3, 4)]
+    def inner(value):
+        events.append(value)
+        return (value, value + 1)
+    tag = "early"
+    value = "outer local"
+    result = ((tag, item) for pair in source() for value in pair if value % 2 for item in inner(value))
+    tag = "late"
+    return result, value
+""", namespace)
+    events = []
+    generator, original = namespace["make"](events)
+    assert events == ["outer"] and original == "outer local"
+    assert next(generator) == ("late", 1)
+    assert events == ["outer", 1]
+    assert list(generator) == [("late", 2), ("late", 3), ("late", 4)]
+    assert events == ["outer", 1, 3]
+
+
 def current():
+    source_genexpr()
     source_match()
     check_scope_directives()
     relative_import_hooks()
@@ -347,6 +373,7 @@ def current():
             compile(data, "settings.py", "exec")
         except SyntaxError as error:
             print(str(error), error.args, error.msg, error.filename, error.lineno, error.offset, error.text, error.end_lineno, error.end_offset)
+    exec("assert ... is expected", {"expected": Ellipsis, "Ellipsis": None})
     namespace = {"__name__": "template", "events": [], "external": 41, "default": 100}
     namespace["left"] = Comparable()
     namespace["right"] = object()

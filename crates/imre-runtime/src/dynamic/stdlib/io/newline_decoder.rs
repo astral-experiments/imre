@@ -257,7 +257,12 @@ pub(super) fn call(
             format!("unbound method IncrementalNewlineDecoder.{name}() needs an argument")
         }));
     };
-    if !ctx.instance_of(receiver, owner) {
+    if !ctx
+        .heap
+        .get(receiver)
+        .instance_class()
+        .is_some_and(|class| ctx.direct_subclass(class, owner))
+    {
         let actual = ctx.type_name(receiver);
         return Err(type_error(if name == "__init__" {
             format!("descriptor '__init__' requires a '{CLASS}' object but received a '{actual}'")

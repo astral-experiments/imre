@@ -64,3 +64,53 @@ def current():
         logger.removeHandler(handler)
         handler.close()
         os.unlink(path)
+
+    # A write-only stream may be flushed by emit() and by FileHandler.close().
+    class Writer:
+        def __init__(self, file):
+            self.file = file
+
+        def write(self, message):
+            return self.file.write(message)
+
+        def close(self):
+            self.file.close()
+
+    handler = logging.FileHandler(path, delay=True)
+    try:
+        with open(path, "w", encoding="utf-8") as raw:
+            handler.stream = Writer(raw)
+            handler.handle(logging.makeLogRecord({"msg": "saved"}))
+            handler.close()
+            assert raw.closed and handler.stream is None and handler._closed
+        with open(path, "rb") as stream:
+            assert stream.read() == b"saved\n"
+    finally:
+        if os.path.exists(path):
+            os.unlink(path)
+
+    class FalseStream:
+        def __bool__(self):
+            return False
+
+        @property
+        def flush(self):
+            raise AssertionError("looked up flush on a false stream")
+
+    logging.StreamHandler(FalseStream()).flush()
+
+    error = AttributeError("from inside flush")
+
+    class FailingStream:
+        def flush(self):
+            raise error
+
+    handler = logging.StreamHandler(FailingStream())
+    try:
+        handler.flush()
+    except AttributeError as caught:
+        assert caught is error
+    else:
+        raise AssertionError("swallowed a flush failure")
+    finally:
+        handler.stream = None

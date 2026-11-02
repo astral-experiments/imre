@@ -1,9 +1,11 @@
 """Stream annotations and special forms for the runtime typing module."""
 
 import builtins as _builtins
+import functools
 import typing as _typing
 from _collections_abc import Mapping as _Mapping, MutableMapping as _MutableMapping
 from collections import defaultdict as _defaultdict
+from annotationlib import ForwardRef
 from functools import lru_cache
 from typing import Any, Callable, Generic, Protocol, TypeVar
 
@@ -58,38 +60,66 @@ class _TypedDictMeta(type):
     __instancecheck__ = __subclasscheck__
 
 
-def _typeddict_field(value):
+def _typeddict_forward_ref(arg, module=None, owner=None, *, is_class=False):
+    from annotationlib import ForwardRef
+    # typing._make_forward_ref eagerly checks the syntax, without resolving names.
+    source = f"({arg},)[0]" if arg.lstrip().startswith("*") else arg
+    try:
+        _typing._validate_forward_ref(source)
+    except SyntaxError:
+        raise SyntaxError(f"Forward reference must be an expression -- got {arg!r}")
+    return ForwardRef(arg, module=module, owner=owner, is_class=is_class)
+
+
+def _typeddict_field(value, module, owner=None):
     if value is None:
         return type(None)
-    value = _type_check(value, "TypedDict field must be a type")
-    if not isinstance(value, type):
-        raise NotImplementedError("TypedDict field qualifiers and non-class annotations are unsupported")
-    return value
+    if isinstance(value, str):
+        return _typeddict_forward_ref(value, module, owner)
+    message = "TypedDict('Name', {f0: t0, f1: t1, ...}); each t must be a type"
+    return _type_check(value, message)
+
+
+def _typeddict_qualifiers(tp):
+    qualifiers = set()
+    annotated = getattr(_typing, "Annotated", None)
+    while True:
+        origin = _typing.get_origin(tp)
+        if origin is not None and origin is annotated:
+            args = _typing.get_args(tp)
+            if not args:
+                break
+            tp = args[0]
+        elif origin is Required or origin is NotRequired or origin is ReadOnly:
+            qualifiers.add(origin)
+            tp, = _typing.get_args(tp)
+        else:
+            break
+    return qualifiers
+
+
+def _annotation_type_repr(value):
+    # Equivalent to annotationlib.type_repr for the supported runtime values.
+    from types import BuiltinFunctionType, FunctionType
+
+    if value is None:
+        return "None"
+    if value is type(None):
+        return "NoneType"
+    if isinstance(value, (type, FunctionType, BuiltinFunctionType)):
+        return (value.__qualname__ if value.__module__ == "builtins" else
+                f"{value.__module__}.{value.__qualname__}")
+    if value is ...:
+        return "..."
+    from string.templatelib import Template
+    if isinstance(value, Template):
+        raise NotImplementedError("template annotation strings require AST unparsing")
+    return repr(value)
 
 
 def _typeddict_annotation_strings(annotations):
-    # The VALUE fallback has no source expression. Match annotationlib.type_repr.
-    from types import BuiltinFunctionType, FunctionType
-
-    result = {}
-    for name, value in annotations.items():
-        if isinstance(value, str):
-            result[name] = value
-        elif value is None:
-            result[name] = "None"
-        elif value is type(None):
-            result[name] = "NoneType"
-        elif isinstance(value, (type, FunctionType, BuiltinFunctionType)):
-            result[name] = (value.__qualname__ if value.__module__ == "builtins" else
-                            f"{value.__module__}.{value.__qualname__}")
-        elif value is ...:
-            result[name] = "..."
-        else:
-            from string.templatelib import Template
-            if isinstance(value, Template):
-                raise NotImplementedError("template annotation strings require AST unparsing")
-            result[name] = repr(value)
-    return result
+    return {name: value if isinstance(value, str) else _annotation_type_repr(value)
+            for name, value in annotations.items()}
 
 
 def _typeddict_base_annotations(annotate, format):
@@ -144,11 +174,13 @@ def _configure_typeddict(cls, fields, total, thunks=None, bases=()):
     for key, tp in fields.items():
         if thunks is not None and key in thunks:
             tp = thunks[key]()
-        annotations[key] = _typeddict_field(tp)
+        annotations[key] = _typeddict_field(tp, cls.__module__, cls)
 
     def __annotate__(format):
         result = {}
         for base in bases:
+            if base is Generic:
+                continue
             annotate = base.__annotate__
             if annotate is not None:
                 result.update(_typeddict_base_annotations(annotate, format))
@@ -162,7 +194,7 @@ def _configure_typeddict(cls, fields, total, thunks=None, bases=()):
         if format in (1, 3):
             for name, tp in annotations.items():
                 if thunks is not None and name in thunks:
-                    tp = _typeddict_field(thunks[name]())
+                    tp = _typeddict_field(thunks[name](), cls.__module__)
                 result[name] = tp
             return result
         raise NotImplementedError(format)
@@ -182,15 +214,21 @@ def _configure_typeddict(cls, fields, total, thunks=None, bases=()):
         optional |= base_optional
         readonly.update(namespace.get("__readonly_keys__", ()))
         mutable.update(namespace.get("__mutable_keys__", ()))
-    for key in annotations:
-        if total:
+    for key, tp in annotations.items():
+        qualifiers = _typeddict_qualifiers(tp)
+        if Required in qualifiers or (NotRequired not in qualifiers and total):
             required.add(key)
             optional.discard(key)
         else:
             optional.add(key)
             required.discard(key)
-        mutable.add(key)
-        readonly.discard(key)
+        if ReadOnly in qualifiers:
+            if key in mutable:
+                raise TypeError(f"Cannot override mutable key {key!r} with read-only key")
+            readonly.add(key)
+        else:
+            mutable.add(key)
+            readonly.discard(key)
     cls.__required_keys__ = frozenset(required)
     cls.__optional_keys__ = frozenset(optional)
     cls.__readonly_keys__ = frozenset(readonly)
@@ -405,6 +443,23 @@ def no_type_check(arg):
     return arg
 
 
+def no_type_check_decorator(decorator):
+    """Decorator to give another decorator the @no_type_check effect.
+
+    This wraps the decorator with something that wraps the decorated
+    function in @no_type_check.
+    """
+    import warnings
+    warnings._deprecated("typing.no_type_check_decorator", remove=(3, 15))
+    @functools.wraps(decorator)
+    def wrapped_decorator(*args, **kwds):
+        func = decorator(*args, **kwds)
+        func = no_type_check(func)
+        return func
+
+    return wrapped_decorator
+
+
 # Optional and the special form protocol from CPython 3.14.5 Lib/typing.py.
 # See stdlib/docstrings/LICENSE. Union and the type parameters are native exports.
 class _Final:
@@ -594,6 +649,73 @@ def _type_check(arg, message, *, allow_special_forms=False):
     if type(arg) is tuple:
         raise TypeError(f"{message} Got {repr(arg)[:100]}.")
     return arg
+
+
+def _typeddict_qualifier_alias(form, parameters):
+    item = _type_check(parameters, f"{form._name} accepts only a single type.")
+    if isinstance(item, str):
+        item = _typeddict_forward_ref(item)
+    return _typing._GenericAlias(form, (type(None) if item is None else item,))
+
+
+@_SpecialForm
+def Required(self, parameters):
+    """Special typing construct to mark a TypedDict key as required.
+
+    This is mainly useful for total=False TypedDicts.
+
+    For example::
+
+        class Movie(TypedDict, total=False):
+            title: Required[str]
+            year: int
+
+        m = Movie(
+            title='The Matrix',  # typechecker error if key is omitted
+            year=1999,
+        )
+
+    There is no runtime checking that a required key is actually provided
+    when instantiating a related TypedDict.
+    """
+    return _typeddict_qualifier_alias(self, parameters)
+
+
+@_SpecialForm
+def NotRequired(self, parameters):
+    """Special typing construct to mark a TypedDict key as potentially missing.
+
+    For example::
+
+        class Movie(TypedDict):
+            title: str
+            year: NotRequired[int]
+
+        m = Movie(
+            title='The Matrix',  # typechecker error if key is omitted
+            year=1999,
+        )
+    """
+    return _typeddict_qualifier_alias(self, parameters)
+
+
+@_SpecialForm
+def ReadOnly(self, parameters):
+    """A special typing construct to mark an item of a TypedDict as read-only.
+
+    For example::
+
+        class Movie(TypedDict):
+            title: ReadOnly[str]
+            year: int
+
+        def mutate_movie(m: Movie) -> None:
+            m["year"] = 1992  # allowed
+            m["title"] = "The Matrix"  # typechecker error
+
+    There is no runtime checking for this property.
+    """
+    return _typeddict_qualifier_alias(self, parameters)
 
 
 @_SpecialForm
@@ -855,6 +977,8 @@ def _specialize_generic_alias_uncached(alias, args):
             raise TypeError(f"{arg} is not valid as type argument")
         replacements[parameter] = arg
     args = tuple(_substitute_alias_argument(arg, replacements) for arg in alias.__args__)
+    if isinstance(alias, _AnnotatedAlias):
+        return alias.copy_with(args)
     return _typing._GenericAlias(alias.__origin__, args, name=alias._name, inst=alias._inst)
 
 
@@ -883,6 +1007,77 @@ class _TypedCacheSpecialForm(_SpecialForm):
             return self._typed_getitem(parameters, tuple(type(p) for p in parameters))
         except TypeError:
             return self._getitem(self, *parameters)
+
+
+# PEP 593 stores metadata separately from the wrapped type's generic arguments.
+class _AnnotatedAlias(_NotIterable):
+    __module__ = __name__
+    _name = "Annotated"
+    _inst = True
+    __getattr__ = _SpecialGenericAlias.__getattr__
+    __setattr__ = _SpecialGenericAlias.__setattr__
+    __call__ = _SpecialGenericAlias.__call__
+    __or__ = _SpecialGenericAlias.__or__
+    __ror__ = _SpecialGenericAlias.__ror__
+
+    def __init__(self, origin, metadata):
+        if isinstance(origin, _AnnotatedAlias):
+            metadata = origin.__metadata__ + metadata
+            origin = origin.__origin__
+        self.__origin__ = origin
+        self.__args__ = (origin,)
+        self.__metadata__ = metadata
+        if isinstance(origin, (TypeVar, _typing.TypeVarTuple)):
+            self.__parameters__ = (origin,)
+        else:
+            self.__parameters__ = () if isinstance(origin, type) else getattr(origin, "__parameters__", ())
+
+    def __repr__(self):
+        origin = _annotation_type_repr(self.__origin__)
+        return f"typing.Annotated[{origin}, {', '.join(repr(item) for item in self.__metadata__)}]"
+
+    def __eq__(self, other):
+        if not isinstance(other, _AnnotatedAlias):
+            return NotImplemented
+        return self.__origin__ == other.__origin__ and self.__metadata__ == other.__metadata__
+
+    def __hash__(self):
+        return hash((self.__origin__, self.__metadata__))
+
+    def copy_with(self, params):
+        assert len(params) == 1
+        return _AnnotatedAlias(params[0], self.__metadata__)
+
+    def __reduce__(self):
+        from operator import getitem
+        return getitem, (Annotated, (self.__origin__,) + self.__metadata__)
+
+    def __getitem__(self, parameters):
+        if isinstance(self.__origin__, _typing.TypeVarTuple):
+            raise TypeError("Substitution of bare TypeVarTuple is not supported")
+        return _specialize_generic_alias(self, parameters)
+
+    def __mro_entries__(self, bases):
+        return (self.__origin__,)
+
+    def __subclasscheck__(self, cls):
+        raise TypeError("Subscripted generics cannot be used with class and instance checks")
+
+    __instancecheck__ = __subclasscheck__
+
+
+@_TypedCacheSpecialForm
+def Annotated(self, *parameters):
+    """Attach ordered metadata to a type without changing its underlying type."""
+    if len(parameters) < 2:
+        raise TypeError("Annotated[...] should be used with at least two arguments (a type and an annotation).")
+    origin = parameters[0]
+    if not isinstance(origin, type) and getattr(origin, "__typing_is_unpacked_typevartuple__", False) is True:
+        raise TypeError("Annotated[...] should not be used with an unpacked TypeVarTuple")
+    origin = _type_check(origin, "Annotated[t, ...]: t must be a type.", allow_special_forms=True)
+    if isinstance(origin, str):
+        origin = _typeddict_forward_ref(origin, is_class=True)
+    return _AnnotatedAlias(type(None) if origin is None else origin, parameters[1:])
 
 
 @_TypedCacheSpecialForm

@@ -1,7 +1,29 @@
-//! Class-wide annotation providers used by TypedDict, following CPython's type descriptors.
+//! Deferred ordinary class declarations and class-wide annotation providers.
 use super::{Context, Error, Id, NONE, Result, Value};
 
 impl Context {
+    /// Record each executed ordinary declaration once, in lexical order.
+    pub(super) fn record_class_annotation(
+        &mut self,
+        scope: Id,
+        name: Id,
+        thunk: Id,
+        offset: u32,
+    ) -> Result<Id> {
+        let Value::Scope(frame) = self.heap.get_mut(scope) else {
+            unreachable!("compiled class scope")
+        };
+        let namespace = frame.class_namespace.get_or_insert_with(Default::default);
+        let Some(scratch) = namespace.annotation_scratch else {
+            // TypedDict consumes the field-indexed view of the class body.
+            return self.op("annotate_deferred", scope, name, thunk);
+        };
+        namespace.annotation_sites.get_or_insert_with(Default::default)
+            .insert(offset, (name, thunk));
+        self.put_item(scratch, name, NONE)?;
+        Ok(NONE)
+    }
+
     /// Keep declaration inputs alive across type creation, but remove the
     /// scratch field map before __set_name__ can inspect the class namespace.
     pub(super) fn prepare_typeddict_namespace(
@@ -103,11 +125,21 @@ impl Context {
             }
             return Ok(());
         }
-        let key = self.heap.code_name("__annotations_cache__");
+        let explicit = self.scope_name(scope, name).is_some();
+        let storage = if explicit {
+            name
+        } else {
+            "__annotations_cache__"
+        };
+        let key = self.text(storage);
         if let Some(value) = value {
-            self.bind_local(scope, "__annotations_cache__", value);
-        } else if !self.remove_binding(scope, "__annotations_cache__", key)? {
+            self.bind_local(scope, storage, value);
+        } else if !self.remove_binding(scope, storage, key)? {
             return Err(Error::new("AttributeError", "__annotations__"));
+        }
+        if explicit {
+            let key = self.text("__annotations_cache__");
+            self.remove_binding(scope, "__annotations_cache__", key)?;
         }
         for name in ["__annotate__", "__annotate_func__"] {
             let key = self.heap.code_name(name);

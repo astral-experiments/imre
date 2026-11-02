@@ -27,7 +27,7 @@ The ranges below are the 25th and 75th percentiles of the same 12 measurements o
 
 We timed each command from process creation through exit on one logical CPU of an AMD EPYC Milan Linux x86-64 VM. Times include interpreter startup, imports, parsing, computation, file I/O and output. Fixture generation, compilation and validation run outside the timer. For every process the runner clears the previous output, checks the exit status and stderr, and compares stdout and the complete output file with the expected bytes.
 
-Each workload gets two warmups and twelve measured runs per implementation. The measured rounds use all six engine orders twice. The filesystem cache is warm. The README's speedup divides the CPython median by the Imre median. The [raw samples](results/runtime-suite.json) include the engine order within each round, versions, binary hashes and output hashes.
+Each workload gets two warmups and twelve measured runs per implementation. The measured rounds use all six engine orders twice. The filesystem cache is warm. The generated timing table reports speedup as the CPython median divided by the Imre median. The [raw samples](results/runtime-suite.json) include the engine order within each round, versions, binary hashes and output hashes.
 
 The October 28, 2026 run used CPython 3.14.5 with PGO, LTO, the GIL enabled and the JIT disabled. Imre 0.1.3 compiled at optimization level 3 with Clang 18.1.3 and the system allocator. The Rust references and Imre runtime used rustc 1.98.1-dev (Ohm), release optimization level 3, 16 codegen units and LTO disabled. We passed `-Zohm-defaults=no` to Cargo because Ohm’s experimental defaults triggered a compiler error while building the runtime.
 

@@ -28,6 +28,42 @@ def current():
     assert parse.unwrap(' < URL:https://example.test/a?b#c > ') == 'https://example.test/a?b#c'
     assert parse.unwrap('url:path') == 'url:path'
 
+    from importlib import import_module
+    module = import_module('.'.join(('urllib', 'parse')))
+    original_plus = module.unquote_plus
+    original_bytes = module.unquote_to_bytes
+
+    def first_name(s, *, encoding, errors):
+        assert (s, encoding, errors) == ('k', 'ascii', 'strict')
+        module.unquote_plus = lambda value, **options: value + '!'
+        return s.upper()
+
+    class Buffer(bytes):
+        def __bytes__(self):
+            raise AssertionError('query parsing must read the buffer')
+
+    assert module.unquote_to_bytes(Buffer(b'%41+')) == b'A+'
+    assert module.parse_qsl(memoryview(b'x=%ff')) == [(b'x', b'\xff')]
+
+    class Limited(str):
+        def split(self, sep):
+            raise AssertionError('field limit must be checked before splitting')
+
+    try:
+        module.unquote_plus = first_name
+        module.unquote_to_bytes = lambda s: s
+        try:
+            module.parse_qsl(Limited('a=b&c=d'), max_num_fields=1)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError('field limit not enforced')
+        assert module.parse_qs('&&ignored&blank=&k=v', encoding='ascii', errors='strict') == {'K': ['v!']}
+        assert module.parse_qsl(Buffer(b'ignored&+k=%FF+')) == [(b' k', b'%FF ')]
+    finally:
+        module.unquote_plus = original_plus
+        module.unquote_to_bytes = original_bytes
+
     class Redirect(str):
         def lstrip(self, chars):
             return 'ALT:path?#changed'
@@ -100,6 +136,15 @@ def current():
     from urllib.parse import quote, quote_from_bytes, quote_plus, urlencode
 
     print(quote("Málaga <&> 東京", safe="!$&'()*+,/:;=@"), quote("/", safe="%!$&'()*+,/:=@"))
+    undecodable = chr(0xdcff)
+    assert quote_plus(undecodable, errors="surrogateescape") == "%FF"
+    assert quote_plus(" +" + undecodable, safe="+" + undecodable, errors="surrogateescape") == "++%FF"
+    try:
+        quote_plus(" " + undecodable)
+    except UnicodeEncodeError as error:
+        assert (error.start, error.end) == (1, 2)
+    else:
+        raise AssertionError("strict quoting accepted a surrogate")
     print(quote_from_bytes(bytearray(b"/%\xff")), quote_plus("a b+c"))
     pairs = [("k", ["first", "second"])]
     def detach(value, *options):

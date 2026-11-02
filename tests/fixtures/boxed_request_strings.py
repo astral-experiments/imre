@@ -41,6 +41,11 @@ class CustomAscii(str):
         return "override"
 
 
+class CustomTitle(str):
+    def istitle(self):
+        return "override"
+
+
 class CustomUpper(str):
     def isupper(self):
         return "override"
@@ -124,6 +129,8 @@ def current():
             method("")
         except ValueError as error:
             print(error)
+    bound_title = Digit.TWO.istitle
+    print(bound_title(), str.istitle(Digit.TWO))
     bound_digit = Digit.TWO.isdigit
     print(bound_digit(), str.isalpha(Digit.TWO))
     for value in (Text("é"), Text("²"), "\ud800", Text("7\udfff"), Text("a\udfff"),
@@ -160,6 +167,14 @@ def current():
         print(saved(), str.isascii(value))
     for call in (lambda: str.isascii(), lambda: str.isascii(1), lambda: "a".isascii(1),
                  lambda: "a".isascii(wrong=1)):
+        try:
+            call()
+        except TypeError as error:
+            print(error)
+    for value in ("", "ǅa", "A\u0345", "\ud800", "A\udc00B", "A\udc00b", CustomTitle("ABC")):
+        saved = value.istitle
+        print(saved(), str.istitle(value))
+    for call in (lambda: "A".istitle(1), lambda: "A".istitle(value=1)):
         try:
             call()
         except TypeError as error:

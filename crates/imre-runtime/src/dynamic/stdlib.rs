@@ -43,14 +43,17 @@ pub(super) mod os;
 pub(super) mod pickle;
 mod pkgutil;
 mod posixpath;
+mod random;
 pub(super) mod readiness;
 pub(super) mod regex;
-mod secrets;
+#[cfg(target_os = "linux")]
+mod resource;
 mod select;
 #[cfg(target_os = "linux")]
 pub(super) mod signal;
 mod socket;
 mod structure;
+mod subprocess;
 pub(super) mod traceback;
 pub(super) mod urllib;
 mod warnings;
@@ -76,7 +79,7 @@ pub(super) fn jit_module(ctx: &mut Context) -> Result<Id> {
 }
 
 pub(super) fn is_module(name: &str) -> bool {
-    matches!(name, "builtins" | "errno" | "genericpath")
+    matches!(name, "atexit" | "builtins" | "errno" | "genericpath" | "itertools")
         || (cfg!(target_os = "linux") && matches!(name, "_signal" | "_imre_signal"))
         || has_lazy_attributes(name)
 }
@@ -86,6 +89,7 @@ pub(super) fn is_module(name: &str) -> bool {
 pub(super) fn has_lazy_attributes(name: &str) -> bool {
     if cfg!(unix) && matches!(name, "zipimport" | "_imre_zipimport")
         || cfg!(all(unix, not(target_os = "linux"))) && name == "_signal"
+        || cfg!(target_os = "linux") && name == "resource"
     {
         return true;
     }
@@ -100,6 +104,7 @@ pub(super) fn has_lazy_attributes(name: &str) -> bool {
             | "array"
             | "_collections"
             | "codecs"
+            | "_codecs"
             | "types"
             | "_io"
             | "_weakref"
@@ -120,7 +125,6 @@ pub(super) fn has_lazy_attributes(name: &str) -> bool {
             | "_imre_tokenize"
             | "_imre_pkgutil"
             | "fnmatch"
-            | "itertools"
             | "operator"
             | "platform"
             | "site"
@@ -133,6 +137,7 @@ pub(super) fn has_lazy_attributes(name: &str) -> bool {
             | "unicodedata"
             | "json"
             | "_imre_logging"
+            | "_imre_subprocess"
             | "_imre_dataclasses"
             | "gc"
             | "_imre_mock"
@@ -274,6 +279,7 @@ fn instance(ctx: &mut Context, type_name: &str, fields: &[(&str, Id)]) -> Id {
         property: None,
         weak_reference: None,
         cycle: None,
+        member_values: None,
         memory_stream: None,
         fields: fields
             .iter()
@@ -361,6 +367,9 @@ fn path_text(ctx: &mut Context, path: &Path) -> Result<Id> {
 }
 
 pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<Id> {
+    if module == "_imre_subprocess" && subprocess::function(name) {
+        return Ok(ctx.builtin(&format!("{module}.{name}")));
+    }
     if module == "_imre_logging" && logging::is_function(name) {
         return Ok(ctx.builtin(&format!("{module}.{name}")));
     }
@@ -383,6 +392,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("_signal", "SIGTERM") => ctx.int(i64::from(libc::SIGTERM)),
         #[cfg(all(unix, not(target_os = "linux")))]
         ("_signal", "alarm") => ctx.builtin("_signal.alarm"),
+        ("codecs" | "_codecs", "encode") => ctx.builtin("codecs.encode"),
         ("io" | "_io", "open_code") => ctx.builtin("io.open_code"),
         ("math", "trunc" | "floor" | "ceil" | "modf") => ctx.builtin(&format!("math.{name}")),
         ("enum", "auto") => ctx.enum_auto_class()?,
@@ -393,8 +403,8 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         }
         (
             "_imre_tempfile",
-            "abspath" | "mkdir" | "random_name" | "default_directory" | "open_named"
-            | "finish_named" | "keep_named",
+            "abspath" | "mkdir" | "cleanup_directory" | "random_name" | "default_directory"
+            | "open_named" | "finish_named" | "keep_named",
         ) => ctx.builtin(&format!("{module}.{name}")),
         ("locale" | "_locale", "getencoding") => ctx.builtin("_locale.getencoding"),
         ("tempfile", "TemporaryFile") | ("_imre_tempfile", "open_file") => {
@@ -420,7 +430,15 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         | ("_imre_mock", "is_call_list" | "mark_call_list")
         | (
             "_imre_dataclasses",
-            "is_defaultdict" | "load_global" | "loaded_module" | "members" | "metadata",
+            "field_identifier"
+            | "make_type"
+            | "is_defaultdict"
+            | "load_global"
+            | "loaded_module"
+            | "members"
+            | "metadata"
+            | "slotted_type"
+            | "retarget_class_cell",
         ) => ctx.builtin(&format!("{module}.{name}")),
         ("_imre_thread", "start" | "join" | "alive" | "threads" | "current") => {
             ctx.builtin(&format!("{module}.{name}"))
@@ -440,6 +458,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("types", "GeneratorType") => ctx.builtin("generator"),
         ("types", "CoroutineType") => ctx.builtin("coroutine"),
         ("types", "MethodType") => ctx.builtin("method"),
+        ("types", "MemberDescriptorType") => ctx.builtin("member_descriptor"),
         ("types", "MethodDescriptorType") => ctx.builtin("method_descriptor"),
         ("types", "FrameType") => ctx.builtin("frame"),
         ("types", "FunctionType") => ctx.builtin("function"),
@@ -447,13 +466,6 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("types", "EllipsisType") => ctx.builtin("ellipsis"),
         ("types", "NoneType" | "NotImplementedType") => ctx.builtin(name),
         ("types", "CodeType") => ctx.builtin("code"),
-        ("itertools", "count") => ctx.builtin("itertools.count"),
-        ("itertools", "repeat") => ctx.builtin("itertools.repeat"),
-        ("itertools", "_cycle_allocate" | "_cycle_next") => {
-            ctx.builtin(&format!("itertools.{name}"))
-        }
-        ("itertools", "_chain_allocate") => ctx.builtin("itertools._chain_allocate"),
-        ("itertools", "_chain_get" | "_chain_set") => ctx.builtin(&format!("itertools.{name}")),
         (
             "_collections",
             "_count_elements"
@@ -486,6 +498,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             | "_new_typeddict"
             | "_UnpackGenericAlias"
             | "_eval_type_expression"
+            | "_validate_forward_ref"
             | "Any"
             | "Callable"
             | "cast"
@@ -521,6 +534,12 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("hashlib", "algorithms_available" | "algorithms_guaranteed") => {
             return hashlib::algorithms(ctx);
         }
+        #[cfg(target_os = "linux")]
+        ("resource", "getrlimit") => ctx.builtin("resource.getrlimit"),
+        #[cfg(target_os = "linux")]
+        ("resource", "RLIMIT_STACK") => ctx.int(i64::from(libc::RLIMIT_STACK)),
+        #[cfg(target_os = "linux")]
+        ("resource", "RLIM_INFINITY") => resource::limit(ctx, resource::INFINITY),
         ("secrets", "choice") => ctx.builtin("secrets.choice"),
         ("select", "select" | "poll") => ctx.builtin(&format!("select.{name}")),
         ("select", name) if let Some(flag) = crate::objects::os::poll_constant(name) => {
@@ -545,7 +564,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("sys", "prefix" | "base_prefix" | "exec_prefix" | "base_exec_prefix") => {
             path_text(ctx, &layout(ctx)?.prefix)?
         }
-        ("sys", "executable" | "_base_executable") => path_text(ctx, &ctx.executable.clone())?,
+        ("sys", "executable" | "_base_executable") => ctx.text(ctx.helper_executable.clone()),
         ("sys", "maxsize") => ctx.int(isize::MAX as i64),
         ("sys", "platform") => ctx.text(if cfg!(target_os = "macos") {
             "darwin"
@@ -586,7 +605,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("functools", "_CacheInfo") => functools::cache_info_type(ctx)?,
         ("functools", "WRAPPER_ASSIGNMENTS") => tuple_text(ctx, functools::ASSIGNED),
         ("functools", "WRAPPER_UPDATES") => tuple_text(ctx, functools::UPDATED),
-        ("posixpath", "join" | "abspath" | "dirname") => ctx.builtin(&format!("os.path.{name}")),
+        ("posixpath", "join" | "dirname") => ctx.builtin(&format!("os.path.{name}")),
         ("os" | "posix", "getcwd" | "getcwdb") if cfg!(unix) => {
             ctx.builtin(&format!("posix.{name}"))
         }
@@ -677,8 +696,8 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         | ("struct", "Struct" | "calcsize" | "pack" | "unpack" | "error")
         | ("base64", "urlsafe_b64encode" | "urlsafe_b64decode")
         | ("json", "dump" | "dumps" | "loads")
-        | ("random", "random")
-        | ("codecs", "encode" | "decode" | "lookup" | "register_error" | "lookup_error")
+        | ("random", "random" | "choice")
+        | ("codecs", "decode" | "lookup" | "register_error" | "lookup_error")
         | ("gc", "collect")
         | ("marshal", "loads")
         | ("pickle", "dumps")
@@ -691,7 +710,8 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         | ("hmac", "new" | "HMAC" | "compare_digest")
         | (
             "re",
-            "match" | "fullmatch" | "search" | "compile" | "_compile_scanner" | "split" | "findall",
+            "match" | "fullmatch" | "search" | "compile" | "_compile_scanner" | "split" | "findall"
+            | "finditer",
         )
         | ("typing", "IO" | "NamedTuple" | "Generator" | "Iterator" | "Sequence")
         | ("enum", "_simple_enum")
@@ -844,6 +864,10 @@ pub(super) fn call(
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
+    if let Some(method) = name.strip_prefix("atexit.") {
+        return super::atexit::call(ctx, method, args, kwargs);
+    }
+
     if name == "_imre_linecache.source_lines" {
         let ([data], []) = (args, kwargs) else {
             return Err(Error::new(
@@ -1055,15 +1079,23 @@ pub(super) fn call(
         return Ok(if receiver.is_some() { NONE } else { dict });
     }
     if name == "sys._getframemodulename" {
-        let [depth] =
-            builtins::bind_method_arguments("_getframemodulename", &args[1..], kwargs, ["depth"], 1)?;
+        let [depth] = builtins::bind_method_arguments(
+            "_getframemodulename",
+            &args[1..],
+            kwargs,
+            ["depth"],
+            1,
+        )?;
         let depth = match depth {
             Some(value) => frame_depth(ctx, value)?,
             None => 0,
         };
         let argument = ctx.int(i64::from(depth));
         audit::event(ctx, name, &[argument])?;
-        return Ok(ctx.heap.caller_module_at(depth.max(0) as usize).unwrap_or(NONE));
+        return Ok(ctx
+            .heap
+            .caller_module_at(depth.max(0) as usize)
+            .unwrap_or(NONE));
     }
     if name == "sys.unraisablehook" {
         return super::unraisable::default_hook(ctx, args, kwargs);
@@ -1186,6 +1218,10 @@ pub(super) fn call(
             _ => FALSE,
         });
     }
+    #[cfg(target_os = "linux")]
+    if name == "resource.getrlimit" {
+        return resource::getrlimit(ctx, args, kwargs);
+    }
     if name == "random.random" {
         if !kwargs.is_empty() {
             return Err(Error::new(
@@ -1201,8 +1237,8 @@ pub(super) fn call(
         }
         return Ok(ctx.alloc(Value::Float(crate::objects::imre_random_float())));
     }
-    if name == "secrets.choice" {
-        return secrets::choice(ctx, args, kwargs);
+    if matches!(name, "random.choice" | "secrets.choice") {
+        return random::choice(ctx, args, kwargs, name == "secrets.choice");
     }
     if name == "_collections_abc._check_methods" {
         if let Some((key, _)) = kwargs.iter().find(|(key, _)| key != "C") {
@@ -1601,6 +1637,22 @@ pub(super) fn call(
     }
     if let Some(method) = name.strip_prefix("_imre_dataclasses.") {
         match (method, args, kwargs) {
+            ("field_identifier", [_], []) => {
+                return inspect::call(ctx, "_signature_identifier", args, kwargs);
+            }
+            ("make_type", [name, bases, members], []) => {
+                let name = ctx.str_value(*name)?.to_owned();
+                if name.contains('\0') {
+                    return Err(Error::new(
+                        "ValueError",
+                        "type name must not contain null characters",
+                    ));
+                }
+                let bases = ctx
+                    .tuple_items(*bases)?
+                    .ok_or_else(|| Error::new("TypeError", "expected a tuple of bases"))?;
+                return ctx.dataclass_from_namespace(name, bases, *members, "types", false, true);
+            }
             ("is_defaultdict", [obj], []) => {
                 // Boxed defaultdict exposes its factory on instances, including derived instances.
                 return Ok(if ctx.defaultdict_factory(*obj).is_some() {
@@ -1621,6 +1673,30 @@ pub(super) fn call(
             ("loaded_module", [name], []) => {
                 return Ok(ctx.registered_module(*name)?.unwrap_or(NONE));
             }
+            ("retarget_class_cell", [method, old, new], []) => {
+                // Compiled methods keep the implicit __class__ cell apart from ordinary freevars.
+                if let Value::Function {
+                    class_cell: Some(cell),
+                    code,
+                    ..
+                } = *ctx.heap.get(*method)
+                    && matches!(ctx.heap.get(cell), Value::ClassCell(Some(owner)) if owner == old)
+                {
+                    let parameters = ctx.code_object(code).parameters;
+                    let sig: serde_json::Value =
+                        serde_json::from_str(ctx.str_value(parameters)?)
+                            .map_err(|e| Error::new("SystemError", e.to_string()))?;
+                    if sig["class_cell"] == true {
+                        *ctx.heap.get_mut(cell) = Value::ClassCell(Some(*new));
+                        ctx.heap.weak_edge_removed(*old);
+                        return Ok(TRUE);
+                    }
+                }
+                return Ok(FALSE);
+            }
+            ("slotted_type", [old, namespace], []) => {
+                return ctx.slotted_dataclass(*old, *namespace);
+            }
             ("members", [class], []) => {
                 if let Value::Class { scope, .. } = *ctx.heap.get(*class) {
                     let names = ctx.scope_data(scope).names.clone();
@@ -1631,8 +1707,28 @@ pub(super) fn call(
                     return Ok(ctx.dict(entries));
                 }
             }
-            ("metadata", [dict], []) if ctx.dict_storage(*dict).is_some() => {
-                return Ok(ctx.alloc(Value::MappingProxy(*dict)));
+            ("metadata", [mapping], []) => {
+                let mapping = *mapping;
+                // Like mappingproxy_new, require mapping subscription and exclude lists and tuples.
+                let supported = match ctx.heap.get(ctx.scalar_value(mapping)) {
+                    Value::List(_) | Value::Tuple(_) | Value::NamedTuple { .. } => false,
+                    Value::Instance { class, .. } if ctx.namedtuple_fields(*class).is_some() => false,
+                    Value::Dict(_) | Value::DefaultDict { .. } | Value::MappingProxy(_)
+                    | Value::Str(_) | Value::SurrogateStr(_) | Value::Bytes(_) | Value::ByteArray(_)
+                    | Value::Array(_) | Value::Range(_) | Value::MemoryView { .. }
+                    | Value::Context(_) => true,
+                    _ => {
+                        ctx.dict_storage(mapping).is_some()
+                            || ctx.slot(mapping, "__getitem__").is_some()
+                            || ctx.enum_values(mapping).is_some()
+                    }
+                };
+                if !supported {
+                    return Err(Error::new("TypeError", format!(
+                        "mappingproxy() argument must be a mapping, not {}", ctx.type_name(mapping)
+                    )));
+                }
+                return Ok(ctx.alloc(Value::MappingProxy(mapping)));
             }
             _ => {}
         }
@@ -1640,6 +1736,9 @@ pub(super) fn call(
             "TypeError",
             format!("invalid arguments to {name}"),
         ));
+    }
+    if let Some(operation) = name.strip_prefix("_imre_subprocess.") {
+        return subprocess::call(ctx, operation, args, kwargs);
     }
     if let Some(function) = name.strip_prefix("_imre_logging.") {
         return logging::call(ctx, function, args, kwargs);
@@ -1728,6 +1827,9 @@ pub(super) fn call(
             }
             _ => codecs::builtin_handler(ctx, function, args, kwargs),
         };
+    }
+    if name == "_socket.getaddrinfo" {
+        return socket::getaddrinfo(ctx, args, kwargs);
     }
     if name == "_socket.close" {
         return socket::close(ctx, args, kwargs);
@@ -1866,10 +1968,13 @@ pub(super) fn call(
     if name == "hashlib.new" {
         return hashlib::new(ctx, args, kwargs);
     }
-    if let Some(method @ ("match" | "fullmatch" | "search" | "scanner")) =
+    if let Some(method @ ("match" | "fullmatch" | "search" | "scanner" | "finditer")) =
         name.strip_prefix("pattern.")
     {
         return regex::search(ctx, method, args, kwargs);
+    }
+    if name == "pattern.sub" {
+        return regex::pattern_sub(ctx, args, kwargs);
     }
     if name == "pattern.split" {
         return regex::pattern_split(ctx, args, kwargs);
@@ -1918,11 +2023,11 @@ pub(super) fn call(
         "subprocess.run" => (1, &["text", "capture_output", "stdout", "stderr", "check"]),
         "file.seek" => (3, &["whence"]),
         "file.__exit__" => (4, &[]),
-        "struct.unpack" | "pattern.findall" | "file.read" | "file.readline" | "file.readinto"
-        | "file.write" | "warnings.warn" => (2, &[]),
+        "struct.unpack" | "pattern.findall" | "file.read" | "file.read1" | "file.readline"
+        | "file.readinto" | "file.write" | "warnings.warn" => (2, &[]),
         "match.group" | "os.path.join" => (usize::MAX, &[]),
         "collections.defaultdict.__missing__" => (2, &[]),
-        "match.groups" => (2, &["default"]),
+        "match.groups" | "match.groupdict" => (2, &["default"]),
         "match.start" | "match.end" | "match.span" => (2, &[]),
         "scanner.match" | "scanner.search" => (1, &[]),
         "sys.exc_info" | "sys.exception" => (0, &[]),
@@ -1934,7 +2039,6 @@ pub(super) fn call(
         | "sysconfig.get_config_var"
         | "sysconfig.get_preferred_scheme"
         | "os.confstr"
-        | "os.path.abspath"
         | "os.path.dirname"
         | "struct.calcsize"
         | "_string.formatter_parser"
@@ -2259,12 +2363,14 @@ pub(super) fn call(
         {
             return files::call(ctx, name, args, kwargs);
         }
-        "match.groups" => {
-            return regex::match_groups(
-                ctx,
-                argument(args, 0)?,
-                option(args, 1, kwargs, "default")?.unwrap_or(NONE),
-            );
+        "match.groups" | "match.groupdict" => {
+            let receiver = argument(args, 0)?;
+            let default = option(args, 1, kwargs, "default")?.unwrap_or(NONE);
+            return if name == "match.groupdict" {
+                regex::match_groupdict(ctx, receiver, default)
+            } else {
+                regex::match_groups(ctx, receiver, default)
+            };
         }
         name if name.starts_with("pattern.") || name.starts_with("match.") => {
             return regex::call(ctx, name, args);

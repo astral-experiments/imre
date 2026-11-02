@@ -33,7 +33,10 @@ def normcase(s):
 
 def isabs(s):
     """Test whether a path is absolute."""
-    s = os.fspath(s)
+    return _starts_with_sep(os.fspath(s))
+
+
+def _starts_with_sep(s):
     if type(s) is str:
         # A filesystem string can contain surrogate-escaped bytes.
         return s[:1] == "/"
@@ -75,13 +78,15 @@ def splitext(p):
     return p, p[:0]
 
 
-def _relpath_absolute(path):
-    if not isabs(path):
+def abspath(path):
+    """Return a normalized absolute path."""
+    path = os.fspath(path)
+    if not _starts_with_sep(path):
         use_bytes = isinstance(path, bytes)
         cwd = os.getcwdb() if use_bytes else os.getcwd()
         sep = b"/" if use_bytes else "/"
         # The second startswith is the one performed by join(cwd, path).
-        if not isabs(path):
+        if not _starts_with_sep(path):
             path = cwd + path if cwd[-1:] == sep else cwd + (sep + path)
     return os.path.normpath(path)
 
@@ -96,10 +101,10 @@ def relpath(path, start=None):
         start = b"." if use_bytes else "."
     else:
         start = os.fspath(start)
-    start = _relpath_absolute(start)
+    start = abspath(start)
     if isinstance(start, bytes) != use_bytes:
         raise TypeError("Can't mix strings and bytes in path components")
-    return _relative_parts(_relpath_absolute(path), start)
+    return _relative_parts(abspath(path), start)
 
 
 # Component traversal and symlink cache follow CPython 3.14.5 Lib/posixpath.py.

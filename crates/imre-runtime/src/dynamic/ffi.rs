@@ -151,10 +151,6 @@ impl Context {
                 };
                 self.template_interpolation(a, b, conversion, spec)
             }
-            "template_literal" => {
-                let parts = self.items(a)?;
-                self.template_literal(&parts)
-            }
             "build_template" => {
                 let interpolations = self.items(b)?;
                 Ok(self.template_from_literal(a, interpolations))
@@ -233,8 +229,9 @@ impl Context {
                 let name = copy_label(self.str_value(b)?)?;
                 self.module(&name)
             }
+            "fromlist" => self.prepare_fromlist(a, b),
             "from" => self.import_from(a, b),
-            "import_star" => self.import_star(a, b, false),
+            "import_star" => self.import_star(a, b),
             "lookup_enter" => self.context_method(a, "__enter__"),
             "lookup_exit" => self.context_method(a, "__exit__"),
             "attr" | "method" => {
@@ -347,6 +344,23 @@ impl Context {
                 Ok(std::mem::replace(&mut items[index], NONE))
             }
             "slice_object" => Ok(self.alloc(Value::Slice([a, b, c]))),
+            "class_parameter_scope" => super::typing::class_parameter_scope(self, a, b),
+            "class_base_scope" => {
+                if self.scope_data(b).class_body.is_none() {
+                    return Ok(a);
+                }
+                // A generic class's bases can read its enclosing class dictionary. Its
+                // body and methods close over the parameter scope without that dictionary.
+                let module = self.scope_data(a).module.clone();
+                let scope = self.scope(&module, Some(a));
+                let namespace = self.class_dictionary(b);
+                let Value::Scope(frame) = self.heap.get_mut(scope) else {
+                    unreachable!()
+                };
+                frame.exec_locals = Some(namespace);
+                frame.closure.declared_complete = true;
+                Ok(scope)
+            }
             "class" | "parameterized_class" => {
                 let metaclass = self.dict_named_item(a, "metaclass");
                 let total = self.dict_named_item(a, "total");
@@ -410,6 +424,9 @@ impl Context {
                 .next_item(a)?
                 .ok_or_else(|| Error::new("StopIteration", "")),
             "not" => Ok(flag(!self.truth(a)?)),
+            "neg" if matches!(self.heap.get(a), Value::Calendar { value, .. } if value.class() == "timedelta") => {
+                stdlib::call(self, "datetime.timedelta.__neg__", &[a], &[])
+            }
             "neg" | "pos" if let Value::Float(f) = self.heap.get(a) => {
                 Ok(self.alloc(Value::Float(if op == "neg" { -*f } else { *f })))
             }
@@ -630,8 +647,10 @@ pub(super) fn new_context<S: Into<String>>(
     config: serde_json::Value,
     args: impl IntoIterator<Item = S>,
 ) -> Context {
-    let executable = config["executable"]
-        .as_str()
+    let launcher = config["executable"].as_str();
+    let helper_executable =
+        launcher.map_or_else(crate::objects::python_executable_text, str::to_owned);
+    let executable = launcher
         .map(PathBuf::from)
         .or_else(|| std::env::current_exe().ok())
         .unwrap_or_default();
@@ -641,12 +660,14 @@ pub(super) fn new_context<S: Into<String>>(
         workers: Default::default(),
         config,
         executable,
+        helper_executable,
         argv: NONE,
         sys_path: NONE,
         default_encoding: NONE,
         audit_hooks: Vec::new(),
+        exit_callbacks: Vec::new(),
         contexts: Vec::new(),
-        bytearray_exports: Vec::new(),
+        buffer_exports: Vec::new(),
         sorting_lists: Vec::new(),
         repr_ancestors: Vec::new(),
         token_missing: NONE,
@@ -704,7 +725,7 @@ pub(super) unsafe extern "C" fn imre_dyn_register(
 pub(super) unsafe extern "C" fn imre_dyn_finish(ctx: *mut Context) -> i32 {
     // SAFETY: main transfers its unique allocation from imre_dyn_new exactly once.
     let mut ctx = unsafe { Box::from_raw(ctx) };
-    match ctx.module("__main__") {
+    let status = match ctx.module("__main__") {
         Ok(_) => 0,
         Err(e) if e.kind == "SystemExit" => match e.exit_status {
             Some(status) => status.report(),
@@ -747,7 +768,10 @@ pub(super) unsafe extern "C" fn imre_dyn_finish(ctx: *mut Context) -> i32 {
             eprintln!("{error}");
             1
         }
-    }
+    };
+    ctx.workers.join_before_exit_callbacks();
+    atexit::run(&mut ctx);
+    status
 }
 
 fn finish(ctx: &mut Context, result: Result<Id>) -> Id {
@@ -868,18 +892,6 @@ pub(super) unsafe extern "C" fn imre_dyn_lit(
 }
 
 #[unsafe(no_mangle)]
-pub(super) unsafe extern "C" fn imre_dyn_op(
-    ctx: *mut Context,
-    opcode: *const c_char,
-    a: Id,
-    b: Id,
-    c: Id,
-) -> Id {
-    // SAFETY: legacy call sites pass the same handles, without an instruction position.
-    unsafe { imre_dyn_op_at(ctx, opcode, a, b, c, std::ptr::null()) }
-}
-
-#[unsafe(no_mangle)]
 pub(super) unsafe extern "C" fn imre_dyn_op_at(
     ctx: *mut Context,
     opcode: *const c_char,
@@ -943,6 +955,21 @@ pub(super) unsafe extern "C" fn imre_dyn_generator_body(
         let source = unsafe { cstr(source) };
         code.body = value::Body::PendingGenerator { source, body_line };
     }
+}
+
+/// Record a class annotation only when its statement executes.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_class_annotation(
+    ctx: *mut Context,
+    scope: Id,
+    name: Id,
+    thunk: Id,
+    offset: u32,
+) -> Id {
+    // SAFETY: the compiler passes the active context and handles from the current class body.
+    let ctx = unsafe { &mut *ctx };
+    let result = ctx.record_class_annotation(scope, name, thunk, offset);
+    finish(ctx, result)
 }
 
 /// Static per-definition record emitted beside its native entry point.
@@ -1025,7 +1052,7 @@ impl Context {
                     freevars.push(name.to_owned());
                     break;
                 }
-                if !frame.closure.declared_complete {
+                if frame.class_body.is_none() && !frame.closure.declared_complete {
                     return None;
                 }
                 cursor = frame.parent;
@@ -1329,11 +1356,12 @@ impl Context {
                 .chain(self.native_code_objects.values())
                 .chain(self.codec_entries.roots())
                 .chain(&self.audit_hooks)
+                .chain(&self.exit_callbacks)
                 .copied()
                 .chain(self.workers.roots().copied())
                 .chain(self.threads.roots())
                 .chain(self.contexts.iter().copied())
-                .chain(self.bytearray_exports.iter().copied())
+                .chain(self.buffer_exports.iter().copied())
                 .chain(self.pending.iter().flat_map(Error::roots))
                 .chain(self.source_builtins)
                 .chain([

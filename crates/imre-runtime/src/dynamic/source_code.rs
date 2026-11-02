@@ -29,7 +29,7 @@ pub(super) struct Program {
     private_names: Option<Rc<imre_ast::Names>>,
     template_expressions: Rc<HashMap<ruff_text_size::TextSize, String>>,
     instructions: Vec<(u32, Instruction)>,
-    lambdas: HashMap<ruff_text_size::TextRange, (usize, Definition)>,
+    expression_functions: HashMap<ruff_text_size::TextRange, (usize, Definition)>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -100,6 +100,13 @@ enum Instruction {
         handler: usize,
     },
     ExitWith,
+    EnterExcept {
+        handler: usize,
+        end: usize,
+    },
+    ExceptMatch(ast::Expr, usize),
+    BindException(String),
+    ClearException(String),
     StartFinally,
     EndFinally,
     Delegate,
@@ -129,6 +136,47 @@ struct Definition {
 enum DefinitionKind {
     Function(Box<ast::Parameters>),
     Class(Option<Box<ast::Arguments>>),
+}
+
+/// An await or an asynchronous comprehension in the deferred body requires
+/// an async generator. Assignment expressions need the enclosing binding scope.
+fn synchronous_genexpr(genexpr: &ast::ExprGenerator) -> bool {
+    use ast::visitor::{self, Visitor};
+    struct Body<'a>(Vec<&'a ast::Expr>);
+    impl<'a> Visitor<'a> for Body<'a> {
+        fn visit_expr(&mut self, expr: &'a ast::Expr) {
+            self.0.push(expr);
+        }
+    }
+    let mut body = Body(vec![&genexpr.elt]);
+    for (index, clause) in genexpr.generators.iter().enumerate() {
+        if clause.is_async {
+            return false;
+        }
+        body.visit_expr(&clause.target);
+        if index != 0 {
+            body.visit_expr(&clause.iter);
+        }
+        for condition in &clause.ifs {
+            body.visit_expr(condition);
+        }
+    }
+    while let Some(expr) = body.0.pop() {
+        match expr {
+            ast::Expr::Await(_) | ast::Expr::Named(_) => return false,
+            ast::Expr::Lambda(lambda) => {
+                if let Some(params) = &lambda.parameters {
+                    body.visit_parameters(params);
+                }
+            }
+            ast::Expr::Generator(nested) => body.visit_expr(&nested.generators[0].iter),
+            ast::Expr::ListComp(c) if c.generators.iter().any(|g| g.is_async) => return false,
+            ast::Expr::SetComp(c) if c.generators.iter().any(|g| g.is_async) => return false,
+            ast::Expr::DictComp(c) if c.generators.iter().any(|g| g.is_async) => return false,
+            _ => visitor::walk_expr(&mut body, expr),
+        }
+    }
+    true
 }
 
 /// CPython records self.X stores from code units immediately enclosed by a class.
@@ -255,6 +303,13 @@ enum Transfer {
     Raise(Id),
 }
 
+#[derive(Clone, Copy)]
+enum HandlerKind {
+    Finally,
+    Except,
+    With(Id),
+}
+
 /// A protected source region survives yields, including yields in its cleanup.
 #[derive(Clone)]
 pub(super) struct FinallyBlock {
@@ -263,12 +318,16 @@ pub(super) struct FinallyBlock {
     end: usize,
     depth: usize,
     pending: Option<Transfer>,
-    exit: Option<Id>,
+    kind: HandlerKind,
 }
 
 impl FinallyBlock {
     pub(super) fn roots(&self) -> impl Iterator<Item = Id> {
-        self.exit.into_iter().chain(match self.pending {
+        let exit = match self.kind {
+            HandlerKind::With(exit) => Some(exit),
+            _ => None,
+        };
+        exit.into_iter().chain(match self.pending {
             Some(Transfer::Raise(id) | Transfer::Return(id)) => Some(id),
             _ => None,
         })
@@ -512,9 +571,9 @@ impl<'a> CompiledStrings<'a, '_> {
         Ok(())
     }
 
-    fn scan(&mut self) -> Result<(bool, Vec<&'a ast::ExprLambda>)> {
+    fn scan(&mut self) -> Result<(bool, Vec<&'a ast::Expr>)> {
         use ast::visitor::Visitor;
-        let mut lambdas = Vec::new();
+        let mut functions = Vec::new();
         if !self.directives.is_empty() {
             self.check_directive_reads()?;
         }
@@ -532,13 +591,21 @@ impl<'a> CompiledStrings<'a, '_> {
                     self.heap.code_name(attr.attr.as_str());
                 }
                 ast::Expr::Lambda(lambda) => {
-                    lambdas
+                    functions
                         .try_reserve(1)
                         .map_err(|_| Error::new("MemoryError", ""))?;
-                    lambdas.push(lambda);
+                    functions.push(expr);
                     if let Some(parameters) = &lambda.parameters {
                         self.visit_parameters(parameters);
                     }
+                    continue;
+                }
+                ast::Expr::Generator(genexpr) if synchronous_genexpr(genexpr) => {
+                    functions
+                        .try_reserve(1)
+                        .map_err(|_| Error::new("MemoryError", ""))?;
+                    functions.push(expr);
+                    self.visit_expr(&genexpr.generators[0].iter);
                     continue;
                 }
                 ast::Expr::StringLiteral(literal) => {
@@ -577,7 +644,7 @@ impl<'a> CompiledStrings<'a, '_> {
         if self.exhausted {
             return Err(Error::new("MemoryError", ""));
         }
-        Ok((class_cell, lambdas))
+        Ok((class_cell, functions))
     }
 
     fn finish(self) -> Id {
@@ -660,6 +727,7 @@ impl Program {
                 Instruction::Eval(e)
                 | Instruction::Unless(e, _)
                 | Instruction::Iter(e)
+                | Instruction::ExceptMatch(e, _)
                 | Instruction::Await(e) => strings.visit_expr(e),
                 Instruction::Match { subject, cases, .. } => {
                     strings.visit_expr(subject);
@@ -681,7 +749,9 @@ impl Program {
                         strings.visit_expr(target);
                     }
                 }
-                Instruction::DeleteName(name) => {
+                Instruction::DeleteName(name)
+                | Instruction::BindException(name)
+                | Instruction::ClearException(name) => {
                     strings.heap.code_name(name);
                 }
                 Instruction::DeleteItem(item) => {
@@ -768,40 +838,53 @@ impl Program {
                 | Instruction::Break(_)
                 | Instruction::EnterFinally { .. }
                 | Instruction::ExitWith
+                | Instruction::EnterExcept { .. }
                 | Instruction::StartFinally
                 | Instruction::EndFinally
                 | Instruction::Delegate => {}
             }
         }
-        let (class_cell, lambdas) = strings.scan()?;
+        let (class_cell, functions) = strings.scan()?;
         self.class_cell |= class_cell;
-        self.lambdas
-            .try_reserve(lambdas.len())
+        self.expression_functions
+            .try_reserve(functions.len())
             .map_err(|_| Error::new("MemoryError", ""))?;
-        for (site, lambda) in lambdas.into_iter().enumerate() {
-            let params = lambda.parameters.clone().unwrap_or_default();
-            let mut child = Self::new(self.filename.clone(), "<lambda>");
+        for (site, expr) in functions.into_iter().enumerate() {
+            let name = if matches!(expr, ast::Expr::Lambda(_)) {
+                "<lambda>"
+            } else {
+                "<genexpr>"
+            };
+            let mut child = Self::new(self.filename.clone(), name);
             child.qualname =
-                Self::qualified_name(&self.qualname, self.class_attributes.is_some(), "<lambda>");
+                Self::qualified_name(&self.qualname, self.class_attributes.is_some(), name);
             child.method_imports = self.method_imports.clone();
             child.template_expressions = self.template_expressions.clone();
             child.private_names = self.private_names.clone();
+            child.first_line = line_at(expr.start().to_usize());
+            let params = match expr {
+                ast::Expr::Lambda(lambda) => {
+                    let params = lambda.parameters.clone().unwrap_or_default();
+                    let line = child.first_line;
+                    let end = match child.lower_suspension(*lambda.body.clone(), line, true)? {
+                        Some(body) => Instruction::Return(Some(body)),
+                        None => Instruction::ReturnSent,
+                    };
+                    child.instructions.push((line, end));
+                    params
+                }
+                ast::Expr::Generator(genexpr) => child.lower_genexpr(genexpr, line_at)?,
+                _ => unreachable!("anonymous function expression"),
+            };
             child
                 .locals
                 .extend(params.iter().map(|p| p.name().to_string()));
-            let line = line_at(lambda.start().to_usize());
-            child.first_line = line;
-            let end = match child.lower_suspension(*lambda.body.clone(), line, true)? {
-                Some(body) => Instruction::Return(Some(body)),
-                None => Instruction::ReturnSent,
-            };
-            child.instructions.push((line, end));
-            self.lambdas.insert(
-                lambda.range(),
+            self.expression_functions.insert(
+                expr.range(),
                 (
                     site,
                     Definition {
-                        binding: "<lambda>".to_owned(),
+                        binding: name.to_owned(),
                         decorators: Vec::new(),
                         body: Rc::new(child),
                         kind: DefinitionKind::Function(params),
@@ -809,8 +892,9 @@ impl Program {
                 ),
             );
         }
-        for (_, lambda) in self.lambdas.values_mut() {
-            let child = Rc::get_mut(&mut lambda.body).expect("newly lowered lambda");
+        for (_, definition) in self.expression_functions.values_mut() {
+            let child =
+                Rc::get_mut(&mut definition.body).expect("newly lowered expression function");
             let (roots, reads) =
                 child.prepare_strings(strings.heap, strings.shared, spellings, line_at)?;
             if self.class_attributes.is_none() && !self.locals.contains("__class__") {
@@ -844,6 +928,62 @@ impl Program {
             });
         }
         Ok((self.string_roots, &self.reads))
+    }
+
+    /// Lower a generator expression to resumable for loops. Its frame already
+    /// owns the outer iterator; only inner clauses evaluate Iter instructions.
+    fn lower_genexpr(
+        &mut self,
+        genexpr: &ast::ExprGenerator,
+        line_at: &impl Fn(usize) -> u32,
+    ) -> Result<Box<ast::Parameters>> {
+        self.kind = FunctionKind::Generator;
+        let mut heads = Vec::new();
+        for (index, clause) in genexpr.generators.iter().enumerate() {
+            self.declare_target(&clause.target)?;
+            let line = line_at(clause.target.start().to_usize());
+            if index != 0 {
+                self.instructions
+                    .push((line, Instruction::Iter(clause.iter.clone())));
+            }
+            let head = self.instructions.len();
+            heads.push(head);
+            self.instructions
+                .push((line, Instruction::Next(Some(clause.target.clone()), 0)));
+            for predicate in &clause.ifs {
+                self.instructions.push((
+                    line_at(predicate.start().to_usize()),
+                    Instruction::Unless(predicate.clone(), head),
+                ));
+            }
+        }
+        self.instructions.push((
+            line_at(genexpr.elt.start().to_usize()),
+            Instruction::Yield(Some(*genexpr.elt.clone())),
+        ));
+        for head in heads.into_iter().rev() {
+            self.instructions
+                .push((self.instructions[head].0, Instruction::Jump(head)));
+            let end = self.instructions.len();
+            let Instruction::Next(_, target) = &mut self.instructions[head].1 else {
+                unreachable!("loop head")
+            };
+            *target = end;
+        }
+        let range = genexpr.range();
+        let mut params = ast::Parameters::default();
+        params.args.push(ast::ParameterWithDefault {
+            range,
+            node_index: ast::AtomicNodeIndex::NONE,
+            default: None,
+            parameter: ast::Parameter {
+                range,
+                node_index: ast::AtomicNodeIndex::NONE,
+                name: ast::Identifier::new(".0", range),
+                annotation: None,
+            },
+        });
+        Ok(Box::new(params))
     }
 
     fn declare(&mut self, kind: ScopeDirective, names: &[ast::Identifier]) -> Result<()> {
@@ -946,7 +1086,7 @@ impl Program {
             private_names: None,
             template_expressions: Rc::default(),
             instructions: Vec::new(),
-            lambdas: HashMap::new(),
+            expression_functions: HashMap::new(),
         }
     }
 
@@ -1089,9 +1229,7 @@ impl Program {
                                 self.instructions
                                     .push((line, Instruction::DeleteName(name)));
                             }
-                            ast::Expr::Subscript(item)
-                                if !matches!(*item.slice, ast::Expr::Slice(_)) =>
-                            {
+                            ast::Expr::Subscript(item) => {
                                 self.instructions
                                     .push((line, Instruction::DeleteItem(item)));
                             }
@@ -1296,16 +1434,95 @@ impl Program {
                     }
                     continue;
                 }
-                Stmt::Try(s)
-                    if s.handlers.is_empty() && s.orelse.is_empty() && !s.finalbody.is_empty() =>
-                {
+                Stmt::Try(s) if !s.is_star && !s.handlers.is_empty() && s.finalbody.is_empty() => {
+                    let entry = self.instructions.len();
+                    self.instructions
+                        .push((line, Instruction::EnterExcept { handler: 0, end: 0 }));
+                    self.lower(s.body, lines, function, active.as_deref_mut())?;
+                    // On fallthrough, leave the protected body before running the else suite.
+                    self.instructions.push((line, Instruction::StartFinally));
+                    let handler = self.instructions.len();
+                    let mut handled = Vec::new();
+                    let count = s.handlers.len();
+                    for (i, ast::ExceptHandler::ExceptHandler(h)) in
+                        s.handlers.into_iter().enumerate()
+                    {
+                        if h.type_.is_none() && i + 1 < count {
+                            return Err(Error::new(
+                                "SyntaxError",
+                                "default 'except:' must be last",
+                            ));
+                        }
+                        let handler_line =
+                            lines.partition_point(|n| *n <= h.start().to_usize()) as u32;
+                        let check = h.type_.map(|class| {
+                            let i = self.instructions.len();
+                            self.instructions
+                                .push((handler_line, Instruction::ExceptMatch(*class, 0)));
+                            i
+                        });
+                        let cleanup = h.name.map(|name| {
+                            let name = name.to_string();
+                            self.locals.insert(name.clone());
+                            self.instructions
+                                .push((handler_line, Instruction::BindException(name.clone())));
+                            let entry = self.instructions.len();
+                            self.instructions.push((
+                                handler_line,
+                                Instruction::EnterFinally { handler: 0, end: 0 },
+                            ));
+                            (entry, name)
+                        });
+                        self.lower(h.body, lines, function, active.as_deref_mut())?;
+                        if let Some((entry, name)) = cleanup {
+                            // The implicit finally clears the target on fallthrough, unwind and generator close.
+                            self.instructions
+                                .push((handler_line, Instruction::StartFinally));
+                            let handler = self.instructions.len();
+                            self.instructions
+                                .push((handler_line, Instruction::ClearException(name)));
+                            self.instructions
+                                .push((handler_line, Instruction::EndFinally));
+                            let end = self.instructions.len();
+                            self.instructions[entry].1 = Instruction::EnterFinally { handler, end };
+                        }
+                        handled.push(self.instructions.len());
+                        self.instructions.push((handler_line, Instruction::Jump(0)));
+                        if let Some(i) = check {
+                            let next = self.instructions.len();
+                            let Instruction::ExceptMatch(_, next_handler) =
+                                &mut self.instructions[i].1
+                            else {
+                                unreachable!()
+                            };
+                            *next_handler = next;
+                        }
+                    }
+                    self.instructions.push((line, Instruction::EndFinally));
+                    let end = self.instructions.len();
+                    self.instructions[entry].1 = Instruction::EnterExcept { handler, end };
+                    self.lower(s.orelse, lines, function, active.as_deref_mut())?;
+                    let done = self.instructions.len();
+                    for i in handled {
+                        self.instructions[i].1 = Instruction::Jump(done);
+                    }
+                    continue;
+                }
+                Stmt::Try(mut s) if !s.is_star && !s.finalbody.is_empty() => {
+                    let finalbody = std::mem::take(&mut s.finalbody);
                     let enter = self.instructions.len();
                     self.instructions
                         .push((line, Instruction::EnterFinally { handler: 0, end: 0 }));
-                    self.lower(s.body, lines, function, active.as_deref_mut())?;
+                    // The finally surrounds the handlers and else suite as well as the try body.
+                    let protected = if s.handlers.is_empty() {
+                        s.body
+                    } else {
+                        std::iter::once(Stmt::Try(s)).collect()
+                    };
+                    self.lower(protected, lines, function, active.as_deref_mut())?;
                     self.instructions.push((line, Instruction::StartFinally));
                     let handler = self.instructions.len();
-                    self.lower(s.finalbody, lines, function, active.as_deref_mut())?;
+                    self.lower(finalbody, lines, function, active.as_deref_mut())?;
                     self.instructions.push((line, Instruction::EndFinally));
                     let end = self.instructions.len();
                     self.instructions[enter].1 = Instruction::EnterFinally { handler, end };
@@ -2436,7 +2653,10 @@ impl Context {
                 let iter = cursor.iterators.pop().expect("inner iterator");
                 self.release_loop_iterator(iter);
             }
-            if block.pending.is_none() {
+            if block.pending.is_none()
+                && (!matches!(block.kind, HandlerKind::Except)
+                    || matches!(transfer, Transfer::Raise(_)))
+            {
                 block.pending = Some(transfer);
                 cursor.ip = block.handler;
                 return Ok(None);
@@ -2586,14 +2806,19 @@ impl Context {
                 } else if let Some((_, op)) = op {
                     cursor.ip += 1;
                     match op {
-                        Instruction::EnterFinally { handler, end } => {
+                        Instruction::EnterFinally { handler, end }
+                        | Instruction::EnterExcept { handler, end } => {
                             cursor.protected.push(FinallyBlock {
                                 start: cursor.ip,
                                 handler: *handler,
                                 end: *end,
                                 depth: cursor.iterators.len(),
                                 pending: None,
-                                exit: None,
+                                kind: if matches!(op, Instruction::EnterExcept { .. }) {
+                                    HandlerKind::Except
+                                } else {
+                                    HandlerKind::Finally
+                                },
                             });
                             continue;
                         }
@@ -2713,7 +2938,7 @@ impl Context {
         module: &str,
         names: Option<&[(String, String)]>,
         level: u32,
-    ) -> Result<(Id, Id)> {
+    ) -> Result<Id> {
         let mut root = scope;
         while let Some(parent) = self.scope_data(root).parent {
             root = parent;
@@ -2745,12 +2970,11 @@ impl Context {
         } else {
             NONE
         };
-        let imported = self.call(
+        self.call(
             importer,
             vec![modname, globals, locals, fromlist, level],
             Vec::new(),
-        )?;
-        Ok((imported, importer))
+        )
     }
 
     /// Keep the iterator's backing sequence available when the final pull drops it.
@@ -2974,7 +3198,7 @@ impl Context {
                     end: handler + 2,
                     depth: iterators.len(),
                     pending: None,
-                    exit: Some(exit),
+                    kind: HandlerKind::With(exit),
                 });
                 if let Some(target) = &item.optional_vars {
                     self.bind_target(code, scope, target, value)?;
@@ -2982,7 +3206,9 @@ impl Context {
             }
             Instruction::ExitWith => {
                 let block = cursor.protected.last_mut().expect("active context manager");
-                let exit = block.exit.expect("context manager exit");
+                let HandlerKind::With(exit) = block.kind else {
+                    unreachable!("context manager exit");
+                };
                 let exception = match block.pending {
                     Some(Transfer::Raise(error)) => error,
                     _ => NONE,
@@ -2996,7 +3222,41 @@ impl Context {
                     });
                 }
             }
+            Instruction::BindException(name) => {
+                self.bind_source_name(scope, name, self.heap.active_exception())?;
+            }
+            Instruction::ClearException(name) => {
+                self.bind_source_name(scope, name, NONE)?;
+                let key = self.heap.code_name(name);
+                self.op("delname", scope, key, NONE)?;
+            }
+            Instruction::ExceptMatch(class, next_handler) => {
+                let class = eval(self, class)?;
+                let base = self.builtin("BaseException");
+                let items = self.tuple_items(class)?;
+                let classes = items.as_deref().unwrap_or(std::slice::from_ref(&class));
+                if !classes
+                    .iter()
+                    .all(|&target| self.direct_subclass(target, base))
+                {
+                    return Err(Error::new(
+                        "TypeError",
+                        "catching classes that do not inherit from BaseException is not allowed",
+                    ));
+                }
+                let Value::Raised(error) = self.heap.get(self.heap.active_exception()) else {
+                    unreachable!("matching an active exception")
+                };
+                // Python except clauses use the actual inheritance chain, ignoring ABC registration.
+                if !classes.iter().any(|&target| match error.class() {
+                    Some(actual) => self.direct_subclass(actual, target),
+                    None => self.raised_error_matches(error, target),
+                }) {
+                    *ip = *next_handler;
+                }
+            }
             Instruction::EnterFinally { .. }
+            | Instruction::EnterExcept { .. }
             | Instruction::StartFinally
             | Instruction::EndFinally
             | Instruction::Jump(_)
@@ -3072,7 +3332,7 @@ impl Context {
                 }));
             }
             Instruction::Import { module, alias } => {
-                let (mut imported, _) = self.import_source_module(owner, scope, module, None, 0)?;
+                let mut imported = self.import_source_module(owner, scope, module, None, 0)?;
                 let mut parts = module.split('.');
                 let first = parts.next().expect("nonempty module name");
                 if alias.is_some() {
@@ -3084,12 +3344,10 @@ impl Context {
                 self.bind_source_name(scope, alias.as_deref().unwrap_or(first), imported)?;
             }
             Instruction::From(module, level, names) => {
-                let (m, importer) =
-                    self.import_source_module(owner, scope, module, Some(names), *level)?;
+                let m = self.import_source_module(owner, scope, module, Some(names), *level)?;
                 for (name, local) in names {
                     if name == "*" {
-                        let custom_hook = importer != self.builtin("__import__");
-                        self.import_star(scope, m, custom_hook)?;
+                        self.import_star(scope, m)?;
                         continue;
                     }
                     let name = self.text(name);
@@ -3396,15 +3654,30 @@ impl Context {
         use ast::Expr;
         let eval = |ctx: &mut Self, e: &Expr| ctx.source_expr(code, scope, e);
         match expr {
-            Expr::Lambda(lambda) => {
-                let (site, definition) = &code.lambdas[&lambda.range()];
-                self.source_definition(
+            Expr::Lambda(_) | Expr::Generator(_)
+                if code.expression_functions.contains_key(&expr.range()) =>
+            {
+                let (site, definition) = &code.expression_functions[&expr.range()];
+                let function = self.source_definition(
                     code,
                     self.heap.current_code(),
                     scope,
                     code.instructions.len() + site,
                     definition,
-                )
+                )?;
+                if let Expr::Generator(genexpr) = expr {
+                    self.heap.keep(function);
+                    let outer = eval(self, &genexpr.generators[0].iter)?;
+                    let iter = self.iterator(outer)?;
+                    let generator = self.call(function, vec![iter], Vec::new())?;
+                    let Value::Generator { iterators, .. } = self.heap.get_mut(generator) else {
+                        unreachable!("source generator expression")
+                    };
+                    iterators.push(iter);
+                    Ok(generator)
+                } else {
+                    Ok(function)
+                }
             }
             Expr::Name(n) => {
                 let name = n.id.as_str();
@@ -3448,6 +3721,7 @@ impl Context {
                 Ok(self.template_from_literal(strings, interpolations))
             }
             Expr::NoneLiteral(_) => Ok(NONE),
+            Expr::EllipsisLiteral(_) => Ok(value::ELLIPSIS),
             Expr::BooleanLiteral(v) => Ok(if v.value { TRUE } else { FALSE }),
             Expr::NumberLiteral(v) => {
                 let value = match &v.value {

@@ -8,7 +8,7 @@ use std::rc::Rc;
 
 use super::super::{builtins, files, os_error};
 use super::{Context, Error, Id, MemoryStream, NONE, Result, Value};
-use crate::objects::os;
+use crate::objects::{BoxedPipe, os};
 
 pub(super) const METHODS: &[&str] = &[
     "__init__", "__repr__", "closed", "mode", "closefd", "_blksize", "close", "fileno", "read",
@@ -17,7 +17,8 @@ pub(super) const METHODS: &[&str] = &[
 ];
 
 pub(in crate::dynamic) struct RawFile {
-    pub(super) fd: Cell<Option<RawFd>>,
+    fd: Cell<Option<RawFd>>,
+    pipe: Option<BoxedPipe>,
     closefd: bool,
     mode: &'static str,
     blksize: Cell<i64>,
@@ -43,8 +44,14 @@ fn closed() -> Error {
 }
 
 impl RawFile {
+    pub(super) fn live_fd(&self) -> Option<RawFd> {
+        self.fd
+            .get()
+            .filter(|_| self.pipe.as_ref().is_none_or(|p| !p.closed()))
+    }
+
     fn access<T>(&self, operation: impl FnOnce(RawFd) -> Result<T>) -> Result<T> {
-        operation(self.fd.get().ok_or_else(closed)?)
+        operation(self.live_fd().ok_or_else(closed)?)
     }
 
     pub(super) fn close(&self) -> Result<()> {
@@ -52,7 +59,11 @@ impl RawFile {
             && self.closefd
         {
             self.blksize.set(super::DEFAULT_BUFFER_SIZE);
-            os::close(fd)?;
+            if let Some(pipe) = &self.pipe {
+                pipe.close_raw()?;
+            } else {
+                os::close(fd)?;
+            }
         }
         Ok(())
     }
@@ -274,7 +285,16 @@ pub(in crate::dynamic) fn open(
         }
         ctx.module("io")?;
         let raw = ctx.instance(ctx.builtins["_io.FileIO"], None);
-        initialize_file(ctx, raw, raw_arg, self::mode(&raw_mode), owns, fd, None)?;
+        initialize_file(
+            ctx,
+            raw,
+            raw_arg,
+            self::mode(&raw_mode),
+            owns,
+            fd,
+            None,
+            None,
+        )?;
         let handle = state(ctx, raw).expect("initialized FileIO");
         let capacity = crate::text_output::binary_capacity(handle.blksize.get().into());
         let buffer =
@@ -353,9 +373,7 @@ pub(in crate::dynamic) fn open(
         "r" | "rt" | "tr" => crate::objects::TextFile::open(path, 0)
             .map(Value::TextFile)
             .map_err(Error::from),
-        _ => {
-            files::BinaryFile::open(path, filename, mode).and_then(files::BinaryFile::into_value)
-        }
+        _ => files::BinaryFile::open(path, filename, mode).and_then(files::BinaryFile::into_value),
     };
     match file {
         Ok(file) if writing => ctx.heap.alloc_file_writer(file),
@@ -409,9 +427,41 @@ fn initialize(ctx: &mut Context, receiver: Id, args: &[Id], kwargs: &[(String, I
             .unwrap_or("r"),
     );
     let owns = closefd.map(|v| ctx.truth(v)).transpose()?.unwrap_or(true);
-    initialize_file(ctx, receiver, path, selected_mode, owns, None, opener)
+    initialize_file(ctx, receiver, path, selected_mode, owns, None, opener, None)
 }
 
+/// Expose the child stream and the native communication cursor through the same file.
+pub(in crate::dynamic) fn popen_pipe(
+    ctx: &mut Context,
+    file: crate::ObjectOwner,
+    reading: bool,
+) -> Result<Id> {
+    ctx.module("io")?;
+    let pipe = BoxedPipe::from_owner(file);
+    let fd = pipe.fileno()?;
+    let number = ctx.int(i64::from(fd));
+    let raw = ctx.instance(ctx.builtins["_io.FileIO"], None);
+    let mode = if reading { "rb" } else { "wb" };
+    initialize_file(
+        ctx,
+        raw,
+        number,
+        self::mode(mode),
+        true,
+        Some(fd),
+        None,
+        Some(pipe.clone()),
+    )?;
+    if pipe.is_raw() {
+        return Ok(raw);
+    }
+    let handle = state(ctx, raw).expect("initialized FileIO");
+    let buffer = super::BufferedFd::pipe(raw, handle, reading, pipe);
+    ctx.heap
+        .alloc_file_writer(files::BinaryFile::Descriptor(buffer).into_value()?)
+}
+
+#[allow(clippy::too_many_arguments)]
 fn initialize_file(
     ctx: &mut Context,
     receiver: Id,
@@ -420,6 +470,7 @@ fn initialize_file(
     owns: bool,
     selected_fd: Option<RawFd>,
     opener: Option<Id>,
+    pipe: Option<BoxedPipe>,
 ) -> Result<Id> {
     if let Some(raw) = state(ctx, receiver) {
         raw.close()?;
@@ -508,6 +559,7 @@ fn initialize_file(
     let raw = Rc::new(RawFile {
         fd: Cell::new(Some(fd)),
         closefd: owns,
+        pipe,
         mode,
         blksize: Cell::new(blksize),
         repr_active: Cell::new(false),
@@ -519,7 +571,7 @@ fn initialize_file(
     let initialized = ctx.set_attr(receiver, "name", path).and_then(|()| {
         if descriptor.is_some() && flags == 2 {
             // Append seeks a passed descriptor to EOF, but does not alter its OS flags.
-            let active_fd = raw.fd.get().unwrap_or(-1);
+            let active_fd = raw.live_fd().unwrap_or(-1);
             // SAFETY: lseek accepts any descriptor number and retains no pointers.
             if unsafe { libc::lseek(active_fd, 0, libc::SEEK_END) } < 0 {
                 let err = std::io::Error::last_os_error();
@@ -623,7 +675,7 @@ pub(super) fn call(
         ));
     }
     let raw = state(ctx, receiver);
-    let is_closed = raw.as_ref().is_none_or(|raw| raw.fd.get().is_none());
+    let is_closed = raw.as_ref().is_none_or(|raw| raw.live_fd().is_none());
     match name {
         "closed" => return Ok(builtins::boolean(is_closed)),
         "closefd" => return Ok(builtins::boolean(raw.as_ref().is_none_or(|r| r.closefd))),
@@ -635,8 +687,12 @@ pub(super) fn call(
             ));
         }
         "__repr__" => {
-            let class = if ctx.heap.get(receiver).instance_class()
-                == ctx.builtins.get("_io.FileIO").copied()
+            let class = if ctx
+                .heap
+                .get(receiver)
+                .instance_class()
+                .and_then(|class| ctx.heap.get(class).io_kind())
+                == Some("FileIO")
             {
                 "_io.FileIO"
             } else {
@@ -661,7 +717,7 @@ pub(super) fn call(
                         format!("name={}", ctx.str_value(shown)?)
                     }
                     Err(err) if err.kind == "AttributeError" => {
-                        let fd = raw.fd.get().ok_or_else(closed)?;
+                        let fd = raw.live_fd().ok_or_else(closed)?;
                         format!("fd={fd}")
                     }
                     Err(err) => return Err(err),
