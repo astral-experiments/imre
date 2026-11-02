@@ -1,17 +1,44 @@
 # URL request, local path and environment proxy helpers from CPython 3.14.5
 # Lib/urllib/request.py. See ../docstrings/LICENSE.
+import bisect
 import os
 import re
 import socket
 import sys
 
+from email.message import Message
 from urllib.error import URLError
+from urllib.response import addinfourl
 from urllib.parse import (
     _splithost, _splitport, _splittag, _splittype, quote, unquote, unwrap, urlparse, urlsplit,
 )
 
 
-__all__ = ["Request", "pathname2url", "url2pathname"]
+__all__ = [
+    "Request", "OpenerDirector", "BaseHandler", "FileHandler", "UnknownHandler",
+    "urlopen", "install_opener", "build_opener", "pathname2url", "url2pathname",
+]
+
+
+__version__ = '%d.%d' % sys.version_info[:2]
+
+_opener = None
+def urlopen(url, data=None, timeout=socket._GLOBAL_DEFAULT_TIMEOUT,
+            *, context=None):
+    """Open a URL or Request through the installed or default opener."""
+    global _opener
+    if context:
+        # The context selects a fresh opener. Only an HTTPS handler consumes it.
+        opener = build_opener()
+    elif _opener is None:
+        _opener = opener = build_opener()
+    else:
+        opener = _opener
+    return opener.open(url, data, timeout)
+
+def install_opener(opener):
+    global _opener
+    _opener = opener
 
 
 _cut_port_re = re.compile(r":\d+$", re.ASCII)
@@ -141,6 +168,244 @@ class Request:
         return list(hdrs.items())
 
 
+class OpenerDirector:
+    def __init__(self):
+        client_version = "Python-urllib/%s" % __version__
+        self.addheaders = [('User-agent', client_version)]
+        # self.handlers is retained only for backward compatibility
+        self.handlers = []
+        # manage the individual handlers
+        self.handle_open = {}
+        self.handle_error = {}
+        self.process_response = {}
+        self.process_request = {}
+
+    def add_handler(self, handler):
+        if not hasattr(handler, "add_parent"):
+            raise TypeError("expected BaseHandler instance, got %r" %
+                            type(handler))
+
+        added = False
+        for meth in dir(handler):
+            if meth in ["redirect_request", "do_open", "proxy_open"]:
+                # oops, coincidental match
+                continue
+
+            i = meth.find("_")
+            protocol = meth[:i]
+            condition = meth[i+1:]
+
+            if condition.startswith("error"):
+                j = condition.find("_") + i + 1
+                kind = meth[j+1:]
+                try:
+                    kind = int(kind)
+                except ValueError:
+                    pass
+                lookup = self.handle_error.get(protocol, {})
+                self.handle_error[protocol] = lookup
+            elif condition == "open":
+                kind = protocol
+                lookup = self.handle_open
+            elif condition == "response":
+                kind = protocol
+                lookup = self.process_response
+            elif condition == "request":
+                kind = protocol
+                lookup = self.process_request
+            else:
+                continue
+
+            handlers = lookup.setdefault(kind, [])
+            if handlers:
+                bisect.insort(handlers, handler)
+            else:
+                handlers.append(handler)
+            added = True
+
+        if added:
+            bisect.insort(self.handlers, handler)
+            handler.add_parent(self)
+
+    def close(self):
+        # Only exists for backwards compatibility.
+        pass
+
+    def _call_chain(self, chain, kind, meth_name, *args):
+        # Handlers raise an exception if no one else should try to handle
+        # the request, or return None if they can't but another handler
+        # could.  Otherwise, they return the response.
+        handlers = chain.get(kind, ())
+        for handler in handlers:
+            func = getattr(handler, meth_name)
+            result = func(*args)
+            if result is not None:
+                return result
+
+    def open(self, fullurl, data=None, timeout=socket._GLOBAL_DEFAULT_TIMEOUT):
+        # accept a URL or a Request object
+        if isinstance(fullurl, str):
+            req = Request(fullurl, data)
+        else:
+            req = fullurl
+            if data is not None:
+                req.data = data
+
+        req.timeout = timeout
+        protocol = req.type
+
+        # pre-process request
+        meth_name = protocol+"_request"
+        for processor in self.process_request.get(protocol, []):
+            meth = getattr(processor, meth_name)
+            req = meth(req)
+
+        sys.audit('urllib.Request', req.full_url, req.data, req.headers, req.get_method())
+        response = self._open(req, data)
+
+        # post-process response
+        meth_name = protocol+"_response"
+        for processor in self.process_response.get(protocol, []):
+            meth = getattr(processor, meth_name)
+            response = meth(req, response)
+
+        return response
+
+    def _open(self, req, data=None):
+        result = self._call_chain(self.handle_open, 'default',
+                                  'default_open', req)
+        if result:
+            return result
+
+        protocol = req.type
+        result = self._call_chain(self.handle_open, protocol, protocol +
+                                  '_open', req)
+        if result:
+            return result
+
+        return self._call_chain(self.handle_open, 'unknown',
+                                'unknown_open', req)
+
+    def error(self, proto, *args):
+        if proto in ('http', 'https'):
+            # XXX http[s] protocols are special-cased
+            dict = self.handle_error['http'] # https is not different than http
+            proto = args[2]  # YUCK!
+            meth_name = 'http_error_%s' % proto
+            http_err = 1
+            orig_args = args
+        else:
+            dict = self.handle_error
+            meth_name = proto + '_error'
+            http_err = 0
+        args = (dict, proto, meth_name) + args
+        result = self._call_chain(*args)
+        if result:
+            return result
+
+        if http_err:
+            args = (dict, 'default', 'http_error_default') + orig_args
+            return self._call_chain(*args)
+
+
+def build_opener(*handlers):
+    """Create an opener object from a list of handlers.
+
+    The default opener supports local files. Other protocols can be
+    supplied by handlers.
+
+    If any of the handlers passed as arguments are subclasses of the
+    default handlers, the default handlers will not be used.
+    """
+    opener = OpenerDirector()
+    default_classes = [UnknownHandler, FileHandler]
+    skip = set()
+    for klass in default_classes:
+        for check in handlers:
+            if isinstance(check, type):
+                if issubclass(check, klass):
+                    skip.add(klass)
+            elif isinstance(check, klass):
+                skip.add(klass)
+    for klass in skip:
+        default_classes.remove(klass)
+
+    for klass in default_classes:
+        handler = _DefaultUnknownHandler() if klass is UnknownHandler else klass()
+        opener.add_handler(handler)
+
+    for h in handlers:
+        if isinstance(h, type):
+            h = h()
+        opener.add_handler(h)
+    return opener
+
+
+class BaseHandler:
+    handler_order = 500
+
+    def add_parent(self, parent):
+        self.parent = parent
+
+    def close(self):
+        # Only exists for backwards compatibility
+        pass
+
+    def __lt__(self, other):
+        if not hasattr(other, "handler_order"):
+            # Try to preserve the old behavior of having custom classes
+            # inserted after default ones (works only for custom user
+            # classes which are not aware of handler_order).
+            return True
+        return self.handler_order < other.handler_order
+
+
+class UnknownHandler(BaseHandler):
+    def unknown_open(self, req):
+        raise URLError('unknown url type: %s' % req.type)
+
+
+class _DefaultUnknownHandler(UnknownHandler):
+    def unknown_open(self, req):
+        if req.type in ("http", "https", "ftp", "data"):
+            raise NotImplementedError("urllib.request has no default %s handler" % req.type)
+        return super().unknown_open(req)
+
+
+class FileHandler(BaseHandler):
+    # names for the localhost
+    names = None
+    def get_names(self):
+        if FileHandler.names is None:
+            try:
+                FileHandler.names = tuple(
+                    _host_addresses('localhost') + _host_addresses(socket.gethostname()))
+            except socket.gaierror:
+                FileHandler.names = (socket.gethostbyname('localhost'),)
+        return FileHandler.names
+
+    # not entirely sure what the rules are here
+    def open_local_file(self, req):
+        import email.utils
+        import mimetypes
+        localfile = url2pathname(req.full_url, require_scheme=True, resolve_host=True)
+        try:
+            stats = os.stat(localfile)
+            size = stats.st_size
+            modified = email.utils.formatdate(stats.st_mtime, usegmt=True)
+            mtype = mimetypes.guess_file_type(localfile)[0]
+            headers = Message()
+            headers['Content-type'] = mtype or 'text/plain'
+            headers['Content-length'] = str(size)
+            headers['Last-modified'] = modified
+            origurl = pathname2url(localfile, add_scheme=True)
+            return addinfourl(open(localfile, 'rb'), headers, origurl)
+        except OSError as exp:
+            raise URLError(exp, exp.filename)
+
+    file_open = open_local_file
+
+
 def _is_local_authority(authority, resolve):
     # Compare hostnames
     if not authority or authority == 'localhost':
@@ -159,7 +424,7 @@ def _is_local_authority(authority, resolve):
         address = socket.gethostbyname(authority)
     except (socket.gaierror, AttributeError, UnicodeEncodeError):
         return False
-    return address in _file_host_addresses()
+    return address in FileHandler().get_names()
 
 
 def _host_addresses(host):
@@ -168,19 +433,6 @@ def _host_addresses(host):
         return socket.gethostbyname_ex(host)[2]
     return [entry[4][0] for entry in
             socket.getaddrinfo(host, 0, socket.AF_INET, socket.SOCK_STREAM)]
-
-
-_file_hosts = None
-
-def _file_host_addresses():
-    global _file_hosts
-    if _file_hosts is None:
-        try:
-            _file_hosts = tuple(_host_addresses('localhost') +
-                                _host_addresses(socket.gethostname()))
-        except socket.gaierror:
-            _file_hosts = (socket.gethostbyname('localhost'),)
-    return _file_hosts
 
 
 def url2pathname(url, *, require_scheme=False, resolve_host=False):

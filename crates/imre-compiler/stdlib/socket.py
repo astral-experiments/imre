@@ -4,6 +4,8 @@ import _socket
 import os
 from _socket import close, error, has_ipv6, socket
 
+_GLOBAL_DEFAULT_TIMEOUT = object()
+
 for _name in ("NI_DGRAM", "NI_NAMEREQD", "NI_NOFQDN", "NI_NUMERICHOST", "NI_NUMERICSERV",
               "gaierror", "getnameinfo", "if_indextoname", "if_nameindex", "if_nametoindex"):
     if hasattr(_socket, _name):

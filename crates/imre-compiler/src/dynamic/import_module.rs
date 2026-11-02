@@ -73,6 +73,7 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
                 }),
             ))
         }
+        "bisect" => Some(("bisect.py", include_str!("../../stdlib/bisect.py"))),
         "urllib.error" => Some((
             "urllib/error.py",
             include_str!("../../stdlib/urllib/error.py"),
