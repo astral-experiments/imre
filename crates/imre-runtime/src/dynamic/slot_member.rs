@@ -30,6 +30,7 @@ impl Context {
         let provider_annotations = self.has_class_annotation_provider(original);
         let class = self.dataclass_from_namespace(
             name.clone(),
+            Vec::new(),
             namespace,
             &module,
             true,
@@ -43,16 +44,44 @@ impl Context {
         Ok(class)
     }
 
-    /// Build a fresh object-root type and initialize its member descriptors.
+    /// Build a plain dataclass type, initializing descriptors before inherited subclass hooks.
     pub(super) fn dataclass_from_namespace(
         &mut self,
         name: String,
+        bases: Vec<Id>,
         namespace: Id,
         module: &str,
         member_slots: bool,
         provider_annotations: bool,
     ) -> Result<Id> {
         let object = self.builtin("object");
+        for &base in &bases {
+            if base == object {
+                continue;
+            }
+            let ordinary = match self.heap.get(base) {
+                Value::Class {
+                    scope,
+                    metaclass: None,
+                    ancestors,
+                    ..
+                } if ancestors.as_slice() == [object] => {
+                    let frame = self.scope_data(*scope);
+                    frame.class_cell.is_some()
+                        && frame
+                            .class_namespace
+                            .as_ref()
+                            .is_some_and(|layout| layout.slot_names.is_none())
+                }
+                _ => false,
+            };
+            if !ordinary {
+                return Err(Error::new(
+                    "NotImplementedError",
+                    "boxed make_dataclass requires plain unslotted object-root bases",
+                ));
+            }
+        }
         let entries = self
             .dict_entries(namespace)
             .ok_or_else(|| Error::new("TypeError", "expected a class namespace dictionary"))?
@@ -71,10 +100,12 @@ impl Context {
             let key = self.str_value(key)?.to_owned();
             self.bind_local(scope, &key, value);
         }
-        let class = self.allocate_class(name, scope, vec![object])?;
+        let class = self.allocate_class(name, scope, bases)?;
         *self.heap.get_mut(cell) = Value::ClassCell(Some(class));
         self.install_weakref_descriptor(class, scope);
         self.initialize_class_members(class, scope)?;
+        let hook = self.super_attribute(class, class, class, "__init_subclass__")?;
+        self.call(hook, Vec::new(), Vec::new())?;
         Ok(class)
     }
 
