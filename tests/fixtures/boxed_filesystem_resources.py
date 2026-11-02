@@ -3,16 +3,20 @@ from importlib import resources
 from importlib.resources import contents, is_resource
 import warnings
 from importlib.resources.abc import ResourceReader, Traversable, TraversableResources, TraversalError
-import data
+import data.child
 
 
 class Loader:
+    def __init__(self, name, root):
+        self.name = name
+        self.root = root
+
     def get_resource_reader(self, name):
-        assert name == 'data'
+        assert name == self.name
         return self
 
     def files(self):
-        return sentinel
+        return self.root
 
 
 class Reader(TraversableResources):
@@ -99,8 +103,14 @@ else:
 
 
 sentinel = object()
-data.__spec__.loader = Loader()
+data.__spec__.loader = Loader('data', sentinel)
+child_root = object()
+data.child.__spec__.loader = Loader('data.child', child_root)
 assert resources.files(data) is sentinel
+assert resources.files('data.child') is child_root
+assert data.child.call(resources.files) is child_root
+assert data.child.call(data.wrapper) is child_root
+assert data.child.call(data.regular) is sentinel
 
 
 data.__spec__.loader = LegacyReader()
