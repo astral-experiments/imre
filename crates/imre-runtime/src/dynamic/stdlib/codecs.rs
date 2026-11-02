@@ -601,7 +601,9 @@ pub(in crate::dynamic) fn encode_text(
         errors
     };
     if let Ok(text) = ctx.str_value(id) {
-        return Ok(encoder.encode_str(text, errors)?);
+        return encoder
+            .encode_str(text, errors)
+            .map_err(|error| ctx.encode_error(error, id));
     }
     let errors = errors.to_owned();
     match encoder {

@@ -84,6 +84,9 @@ pub(super) fn encode(
     let mark = ctx.heap.temporary_mark();
     ctx.heap.reserve_temporaries(3)?;
     ctx.heap.keep(callback);
+    // A Python return and each allocated error detail are rooted in the native caller.
+    // Keep only the callback and its reusable exception between iterations.
+    let iteration_mark = ctx.heap.temporary_mark();
     let mut exception = None;
     let result = (|| {
         let mut pos = 0;
@@ -130,12 +133,10 @@ pub(super) fn encode(
                     reason: why,
                 }));
                 let exc = ctx.alloc(Value::Raised(error));
-                ctx.heap.keep(exc);
                 exception = Some(exc);
                 exc
             };
             let response = ctx.call(callback, vec![exc], Vec::new())?;
-            let response_mark = ctx.heap.temporary_mark();
             ctx.heap.keep(response);
             let invalid =
                 || type_error("encoding error handler must return (str/bytes, int) tuple");
@@ -180,7 +181,8 @@ pub(super) fn encode(
                     }
                 }
             }
-            ctx.heap.release_temporaries_since(response_mark);
+            ctx.heap.release_temporaries_since(iteration_mark);
+            ctx.heap.keep(exc);
             pos = resume as usize;
         }
         Ok(output)

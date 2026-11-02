@@ -37,10 +37,10 @@ pub(crate) struct OsErrorArgs {
     pub(crate) text_paths: Option<[Option<String>; 2]>,
 }
 
-/// Borrow the five arguments retained by a native decoder for its Python exception.
-pub(crate) struct DecodeErrorArgs<'a> {
+/// Borrow the codec name, input and half-open range retained by a native Unicode error.
+pub(crate) struct CodecErrorArgs<'a, T> {
     pub(crate) encoding: &'a str,
-    pub(crate) object: &'a [u8],
+    pub(crate) object: T,
     pub(crate) start: i64,
     pub(crate) end: i64,
     pub(crate) reason: &'a str,
@@ -656,23 +656,40 @@ impl Error {
         Self::new(Kind::IndexError, "list index out of range")
     }
 
-    pub(crate) fn decode_args(&self) -> Option<DecodeErrorArgs<'_>> {
+    pub(crate) fn decode_args(&self) -> Option<CodecErrorArgs<'_, &[u8]>> {
+        self.codec_args(Kind::UnicodeDecodeError, 8, |word| {
+            // SAFETY: codec_args checked the bytes tag and self retains the object.
+            unsafe { (&*(word as *const crate::Bytes)).as_slice() }
+        })
+    }
+
+    // The boxed encoder already has the original Python string, including its subclass.
+    pub(crate) fn encode_args(&self) -> Option<CodecErrorArgs<'_, ()>> {
+        self.codec_args(Kind::UnicodeEncodeError, 3, |_| ())
+    }
+
+    fn codec_args<T>(
+        &self,
+        kind: Kind,
+        tag: u32,
+        input: impl FnOnce(usize) -> T,
+    ) -> Option<CodecErrorArgs<'_, T>> {
         let Some(Payload::Arguments(arguments)) = &self.payload else {
             return None;
         };
         let [encoding, object, start, end, reason] = arguments.args.as_slice() else {
             return None;
         };
-        if self.kind != Kind::UnicodeDecodeError
-            || [encoding, object, start, end, reason].map(|arg| arg.kind.raw()) != [3, 8, 2, 2, 3]
+        if self.kind != kind
+            || [encoding, object, start, end, reason].map(|arg| arg.kind.raw()) != [3, tag, 2, 2, 3]
         {
             return None;
         }
         // SAFETY: the checked tags and owned arguments root these borrows for the life of self.
         unsafe {
-            Some(DecodeErrorArgs {
+            Some(CodecErrorArgs {
                 encoding: (&*(encoding.word as *const Str)).as_str(),
-                object: (&*(object.word as *const crate::Bytes)).as_slice(),
+                object: input(object.word),
                 start: crate::Int::borrow(start.word).to_i64()?,
                 end: crate::Int::borrow(end.word).to_i64()?,
                 reason: (&*(reason.word as *const Str)).as_str(),
