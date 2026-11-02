@@ -212,7 +212,7 @@ pub(super) fn constructor_owner(name: &str) -> Option<&str> {
     let owner = name.strip_suffix(".__new__")?;
     (matches!(
         owner,
-        "object" | "dict" | "float" | "int" | "str" | super::thread_local::CLASS
+        "object" | "dict" | "float" | "function" | "int" | "str" | super::thread_local::CLASS
     ) || is_exception(owner))
     .then_some(owner)
 }
@@ -1328,6 +1328,15 @@ pub(super) fn call(
             }
             "map" | "filter" | "enumerate" => ctx.iterator_method(owner, method, args, kwargs),
             "property" => super::property::method(ctx, method, args, kwargs),
+            "function" if method == "__new__" => {
+                let Some((&class, args)) = args.split_first() else {
+                    return Err(type_error("function.__new__(): not enough arguments"));
+                };
+                if class != ctx.builtin("function") {
+                    return Err(ctx.invalid_new_subtype("function", class));
+                }
+                ctx.construct_function(args, kwargs)
+            }
             "function" | "staticmethod" if method == "__get__" => {
                 positional(name, kwargs)?;
                 arity(name, args, 2, 3)?;
