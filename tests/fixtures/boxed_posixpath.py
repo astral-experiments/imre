@@ -170,6 +170,43 @@ def current():
         os.fspath = original
     assert calls == ["werkzeug/serving.py"] * 4 + ["serving.py"]
 
+    with open(Path(__file__), "rb", -1, None, None, None) as stream:
+        assert stream.read(6) == b"import"
+    with open(Path(__file__), encoding="utf-8", errors=None, newline=None) as stream:
+        assert stream.readline() == "import genericpath\n"
+    class DescriptorPath:
+        def __index__(self):
+            return fd
+
+        def __fspath__(self):
+            raise AssertionError("open selected the pathname of a valid descriptor")
+
+    fd = os.open(__file__, os.O_RDONLY)
+    try:
+        with open(DescriptorPath(), "rb", closefd=False) as stream:
+            assert stream.fileno() == fd
+            assert stream.read(6) == b"import"
+        assert os.lseek(fd, 0, os.SEEK_SET) == 0
+    finally:
+        os.close(fd)
+    fd = os.open(__file__, os.O_RDONLY)
+    with open(DescriptorPath(), "rb") as stream:
+        assert stream.read(6) == b"import"
+    try:
+        os.fstat(fd)
+    except OSError:
+        pass
+    else:
+        os.close(fd)
+        raise AssertionError("closing a buffered reader left its owned descriptor open")
+
+    # Conversion runs before incompatible binary options are rejected.
+    try:
+        open(Raises(), "rb", -1, None, "replace", None)
+    except RuntimeError as exc:
+        assert str(exc) == "method call"
+    else:
+        raise AssertionError("open ignored the failing filesystem protocol")
     assert os.fsdecode(Path(b"caf\xc3\xa9")) == "café"
     assert not os.path.isfile(Path("missing\0file"))
 

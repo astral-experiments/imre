@@ -2185,6 +2185,20 @@ impl Context {
                 "keywords" => return Ok(keywords),
                 _ => {}
             },
+            Value::File(ref handle)
+                if matches!(name, "raw" | "name" | "mode")
+                    && matches!(handle.as_ref(), super::stdlib::BinaryFile::Descriptor(_)) =>
+            {
+                let super::stdlib::BinaryFile::Descriptor(fd) = handle.as_ref() else {
+                    unreachable!()
+                };
+                let raw = fd.raw;
+                return if name == "raw" {
+                    Ok(raw)
+                } else {
+                    self.lookup_attr(raw, name)
+                };
+            }
             Value::File(ref handle) if name == "closed" => {
                 return Ok(if handle.closed() { TRUE } else { FALSE });
             }

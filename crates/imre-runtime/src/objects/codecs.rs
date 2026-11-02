@@ -288,7 +288,7 @@ impl Codec {
     }
 
     /// Text streams accept the locale sentinel in addition to registry names.
-    pub(super) fn for_stream(encoding: Option<&str>) -> Result<Self> {
+    pub(crate) fn for_stream(encoding: Option<&str>) -> Result<Self> {
         match encoding {
             None | Some("locale") => Ok(Self::Utf8 { signature: false }),
             Some(name) => Self::lookup(name),

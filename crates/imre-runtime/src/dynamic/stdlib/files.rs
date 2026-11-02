@@ -9,6 +9,7 @@ use super::{
 
 /// Binary handles retain their access mode after close.
 pub(in crate::dynamic) enum BinaryFile {
+    Descriptor(super::io::BufferedFd),
     Reader {
         slot: RefCell<Option<ReadSource>>,
         socket: bool,
@@ -57,6 +58,7 @@ impl BinaryFile {
     /// All aliases observe closure through the same buffered stream.
     pub(in crate::dynamic) fn closed(&self) -> bool {
         match self {
+            Self::Descriptor(fd) => fd.closed(),
             Self::Reader { slot, .. } => slot.borrow().is_none(),
             Self::Writer(file) => file.borrow().closed(),
         }
@@ -302,6 +304,7 @@ pub(super) fn call(
     };
     let handle = handle.clone();
     let (slot, socket) = match handle.as_ref() {
+        BinaryFile::Descriptor(file) => return file.call(ctx, first, name, &args[1..], kwargs),
         BinaryFile::Reader { slot, socket } => (slot, *socket),
         BinaryFile::Writer(file) => {
             if name == "file.seek" {

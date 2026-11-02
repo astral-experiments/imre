@@ -1478,70 +1478,7 @@ pub(super) fn call(
             super::static_method::construct(ctx, *callable)
         }
         "property" => super::property::construct(ctx, args, kwargs),
-        "open" => {
-            arity(name, args, 0, 4)?;
-            let [path, mode, buffering, encoding] = bind(
-                name,
-                args,
-                kwargs,
-                ["file", "mode", "buffering", "encoding"],
-            )?;
-            let filename = path.ok_or_else(|| type_error("open requires a file"))?;
-            let buffering = buffering
-                .map(|value| ctx.index_integer(value))
-                .transpose()?
-                .map_or(Some(-1), |n| n.to_i64().and_then(|n| i32::try_from(n).ok()))
-                .ok_or_else(|| {
-                    Error::new("OverflowError", "Python int too large to convert to C int")
-                })?;
-            if buffering == 0 {
-                return super::stdlib::io::open_raw(ctx, filename, mode, encoding);
-            }
-            if buffering > 0 {
-                return Err(Error::new(
-                    "ValueError",
-                    "explicit buffer sizes are unsupported",
-                ));
-            }
-            let path = ctx.str_value(filename)?;
-            let mode = mode.map(|id| ctx.str_value(id)).transpose()?.unwrap_or("r");
-            if let Some(encoding) = encoding.filter(|&value| value != NONE) {
-                if mode.contains('b') {
-                    return Err(Error::new(
-                        "ValueError",
-                        "binary mode doesn't take an encoding argument",
-                    ));
-                }
-                let encoding = ctx.str_value(encoding)?;
-                if !matches!(
-                    crate::objects::Codec::lookup(encoding)?,
-                    crate::objects::Codec::Utf8 { signature: false }
-                ) {
-                    return Err(Error::new(
-                        "ValueError",
-                        "text files require UTF-8 encoding",
-                    ));
-                }
-            }
-            let text_mode = match mode {
-                "r" | "rt" | "tr" => Some(0),
-                "w" | "wt" | "tw" => Some(1),
-                _ => None,
-            };
-            let writing = mode.contains(['w', 'a', 'x']);
-            let file = match text_mode {
-                Some(mode) => crate::objects::TextFile::open(path, mode)
-                    .map(Value::TextFile)
-                    .map_err(Error::from),
-                None => super::stdlib::BinaryFile::open(path, mode)
-                    .and_then(super::stdlib::BinaryFile::into_value),
-            };
-            match file {
-                Ok(file) if writing => ctx.heap.alloc_file_writer(file),
-                Ok(file) => Ok(ctx.alloc(file)),
-                Err(error) => Err(ctx.with_open_filename(error, filename)?),
-            }
-        }
+        "open" => super::stdlib::io::open(ctx, args, kwargs),
         "__import__" => {
             let [module, _, _, fromlist, level] = bind(
                 name,
