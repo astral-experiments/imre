@@ -4495,6 +4495,21 @@ impl Context {
                 }
             }
         }
+        if op == "%"
+            && [left, right]
+                .into_iter()
+                .any(|id| self.calendar_slot_class(id, false).is_some())
+        {
+            return Err(Error::new(
+                "TypeError",
+                format!(
+                    "unsupported operand type(s) for %{}: '{}' and '{}'",
+                    if inplace { "=" } else { "" },
+                    stdlib::datetime::type_name(self, a),
+                    stdlib::datetime::type_name(self, b)
+                ),
+            ));
+        }
         if op == "**"
             && [left, right]
                 .into_iter()
@@ -4625,6 +4640,10 @@ impl Context {
                 | "__rtruediv__"
                 | "__floordiv__"
                 | "__rfloordiv__"
+                | "__mod__"
+                | "__rmod__"
+                | "__divmod__"
+                | "__rdivmod__"
         ) && self
             .calendar_slot_class(
                 obj,
@@ -4684,14 +4703,20 @@ impl Context {
     /// Try divmod's numeric slots in order, including the inherited slot of integer subclasses.
     pub(super) fn divmod(&mut self, a: Id, b: Id) -> Result<Id> {
         let class = |value| {
-            self.heap.get(value).instance_class().or_else(|| {
-                self.builtin_type_name(value)
-                    .and_then(|name| self.builtins.get(name).copied())
-            })
+            self.heap
+                .get(value)
+                .instance_class()
+                .or_else(|| self.calendar_slot_class(value, false))
+                .or_else(|| {
+                    self.builtin_type_name(value)
+                        .and_then(|name| self.builtins.get(name).copied())
+                })
         };
         let (left, right) = (class(a), class(b));
         let python_slot = |value| {
-            self.slot(value, "__divmod__").is_some() || self.slot(value, "__rdivmod__").is_some()
+            self.calendar_slot_class(value, false).is_some()
+                || self.slot(value, "__divmod__").is_some()
+                || self.slot(value, "__rdivmod__").is_some()
         };
         let reflected_first = match (left, right) {
             (Some(left), Some(right))
@@ -4710,7 +4735,9 @@ impl Context {
             } else {
                 (a, "__divmod__", b)
             };
-            if self.slot(receiver, hook).is_some() {
+            if self.calendar_slot_class(receiver, false).is_some()
+                || self.slot(receiver, hook).is_some()
+            {
                 if let Some(result) = self.operator_slot(receiver, hook, other)? {
                     return Ok(result);
                 }
@@ -4720,12 +4747,16 @@ impl Context {
                 return Ok(self.alloc(Value::Tuple(vec![quotient, remainder])));
             }
         }
+        let type_name = |id| match self.heap.get(id) {
+            Value::Calendar { .. } => stdlib::datetime::type_name(self, id),
+            _ => self.type_name(id).into(),
+        };
         Err(Error::new(
             "TypeError",
             format!(
                 "unsupported operand type(s) for divmod(): '{}' and '{}'",
-                self.type_name(a),
-                self.type_name(b)
+                type_name(a),
+                type_name(b)
             ),
         ))
     }
@@ -4920,7 +4951,7 @@ impl Context {
         }
         let class = |id| {
             self.heap.get(id).instance_class().or_else(|| {
-                if matches!(op, "+" | "-" | "*" | "/" | "//") {
+                if matches!(op, "+" | "-" | "*" | "/" | "//" | "%") {
                     self.calendar_slot_class(id, matches!(op, "+" | "-"))
                 } else {
                     None
