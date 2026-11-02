@@ -1332,7 +1332,7 @@ pub(super) fn method(
         || (owner == "bytearray"
             && matches!(
                 name,
-                "endswith" | "lstrip" | "rstrip" | "split" | "startswith" | "strip"
+                "endswith" | "lstrip" | "rstrip" | "split" | "splitlines" | "startswith" | "strip"
             )) {
         let storage = ctx.scalar_value(receiver);
         if !matches!(
@@ -1609,6 +1609,44 @@ pub(super) fn method(
             Some(data) => ctx.alloc(Value::ByteArray(data)),
             None => receiver,
         });
+    }
+    if matches!(owner, "bytes" | "bytearray") && name == "splitlines" {
+        let [keepends] = bind_method_arguments(name, args, kwargs, ["keepends"], 1)?;
+        // Truth conversion can mutate a bytearray receiver before it is split.
+        let keep = ctx.optional_truth(keepends, false)?;
+        let mut fields = Vec::new();
+        let mut start = 0;
+        loop {
+            let data = ctx.bytes_like(receiver)?;
+            let rest = &data[start..];
+            if rest.is_empty() {
+                break;
+            }
+            let end = memchr::memchr2(b'\r', b'\n', rest).unwrap_or(rest.len());
+            let boundary = match &rest[end..] {
+                [b'\r', b'\n', ..] => 2,
+                [] => 0,
+                _ => 1,
+            };
+            let field = &rest[..if keep { end + boundary } else { end }];
+            let line =
+                if owner == "bytes" && original_receiver == receiver && field.len() == data.len() {
+                    receiver
+                } else {
+                    let copy = super::super::copy_ids(field)?;
+                    ctx.alloc(if owner == "bytes" {
+                        Value::Bytes(copy)
+                    } else {
+                        Value::ByteArray(copy)
+                    })
+                };
+            fields
+                .try_reserve(1)
+                .map_err(|_| Error::new("MemoryError", ""))?;
+            fields.push(line);
+            start += end + boundary;
+        }
+        return Ok(ctx.alloc(Value::List(fields)));
     }
     if matches!(owner, "bytes" | "bytearray") && matches!(name, "split" | "rsplit") {
         let [sep, max] = super::bind_method_arguments(name, args, kwargs, ["sep", "maxsplit"], 2)?;
