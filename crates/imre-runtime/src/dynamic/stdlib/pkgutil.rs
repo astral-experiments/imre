@@ -31,7 +31,7 @@ pub(super) fn call(
         }),
         "find_module" => {
             let name = text.to_owned();
-            Ok(ctx.find_module(&name, true)?.unwrap_or(NONE))
+            Ok(ctx.find_module(&name)?.unwrap_or(NONE))
         }
         "find_spec" => {
             let name = text.to_owned();
