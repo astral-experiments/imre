@@ -65,6 +65,7 @@ for _name in ("getegid", "getresgid", "getresuid"):
 del _name, _posix
 
 curdir = path.curdir
+pardir = path.pardir
 defpath = path.defpath
 extsep = path.extsep
 

@@ -2894,6 +2894,9 @@ impl IntrinsicModule {
             (Self::PosixPath, "normcase") => Intrinsic::PosixNormcase,
             (Self::Os, "devnull") => Intrinsic::StringConstant("/dev/null"),
             (Self::Os | Self::OsPath | Self::PosixPath, "extsep") => Intrinsic::StringConstant("."),
+            (Self::Os | Self::OsPath | Self::PosixPath, "pardir") => {
+                Intrinsic::StringConstant("..")
+            }
             (Self::GenericPath | Self::PosixPath, "commonprefix") => {
                 Intrinsic::ObjectRuntimeExport("genericpath.commonprefix")
             }
