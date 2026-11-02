@@ -23,6 +23,13 @@ class Child(Base):
         super().__init__(label=label)
 
 
+class Shadow:
+    value: int
+
+    def __init__(self, super: int) -> None:
+        self.value = super
+
+
 events: list[str] = []
 print(Child("one", events).label)
 try:
@@ -31,13 +38,4 @@ except AssertionError as error:
     print(str(error))
 for event in events:
     print(event)
-
-
-class Shadow:
-    value: int
-
-    def __init__(self, super: int) -> None:
-        self.value = super
-
-
 print(Shadow(42).value)
