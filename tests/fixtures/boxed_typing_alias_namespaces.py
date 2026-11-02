@@ -89,7 +89,7 @@ def current():
     for value in (generic_alias, unpack_alias, callable_alias):
         names = dir(value)
         assert names == sorted(set(value.__dir__()))
-        assert {"__args__", "__origin__", "__parameters__", "_inst", "_name", "__module__"} <= set(names)
+        assert {"__args__", "__origin__", "__parameters__", "_inst", "_name"} <= set(names)
         assert "_not_an_attribute" not in names
         assert "__unpacked__" not in names
     assert generic_alias.origin_only == 1 and generic_alias._private == 2
@@ -99,11 +99,18 @@ def current():
     assert unpack_alias._name is None and unpack_alias._inst is True
     assert callable_alias._name == "Callable" and callable_alias._inst is True
     assert type(callable_alias)(callable_alias.__origin__, callable_alias.__args__)._name is None
+    assert "__module__" in dir(callable_alias) and "__module__" in dir(unpack_alias)
     assert callable_alias.__module__ == unpack_alias.__module__ == "typing"
     custom = type(callable_alias)(Origin, (int, str), inst=False)
     assert custom._name is None and custom._inst is False and custom.origin_only == 1
     assert custom.copy_with.__self__ is custom and custom.copy_with((str, int)).__args__ == (str, int)
     assert unpack_alias.copy_with((typing.Tuple[str],)) == typing.Unpack[typing.Tuple[str]]
+    missing = object()
+    module = getattr(custom, "__module__", missing)
+    Origin.__module__ = "moved_origin"
+    assert getattr(custom, "__module__", missing) is module
+    if module is missing:
+        assert "__module__" not in dir(custom)
     print("three read-only alias class namespaces")
 
 

@@ -163,14 +163,23 @@ pub(in crate::dynamic) fn typing_alias_dir(ctx: &mut Context, alias: &Alias) -> 
             .expect("native alias class dictionary")
             .to_vec()
         {
+            // An unnamed generic has no stored instance module; its class's module would be wrong.
+            if alias.kind == AliasKind::Generic
+                && alias.name.is_none()
+                && ctx.str_value(key)? == "__module__"
+            {
+                continue;
+            }
             ctx.put_item(names, key, NONE)?;
         }
     }
     if alias.kind == AliasKind::Callable {
         // The native Callable alias owns its reducer and its public module name.
-        for field in ["__reduce__", "__module__"] {
-            let key = ctx.text(field);
-            ctx.put_item(names, key, NONE)?;
+        let reduce = ctx.text("__reduce__");
+        ctx.put_item(names, reduce, NONE)?;
+        if alias.name.is_some() {
+            let module = ctx.text("__module__");
+            ctx.put_item(names, module, NONE)?;
         }
     }
     let items = ctx.items(names)?;

@@ -1412,14 +1412,6 @@ pub(super) fn attribute(ctx: &mut Context, value: Id, name: &str) -> Option<Resu
                 let class = ctx.builtin(a.kind.class());
                 ctx.own_class_attr(class, "__doc__")?
             }
-            "__module__" if matches!(a.kind, AliasKind::Generic | AliasKind::Callable) => {
-                let origin = a.origin;
-                return Some(
-                    ctx.with_slot_depth("maximum recursion depth exceeded", |ctx| {
-                        ctx.lookup_attr(origin, "__module__")
-                    }),
-                );
-            }
             attr if let Some((_, value)) = a.metadata().find(|(name, _)| *name == attr) => value,
             attr if (matches!(
                 a.kind,
