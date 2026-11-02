@@ -37,6 +37,7 @@ def orphan():
 
 
 def current():
+    proxy_length()
     iterate_proxy()
     saved_bound_method()
     observed = []
@@ -314,3 +315,27 @@ def iterate_proxy():
         pass
     else:
         raise AssertionError("dead proxy still advanced")
+
+
+def proxy_length():
+    from gc import collect
+
+    class Sized:
+        def __len__(self):
+            owners.clear()
+            collect()
+            assert witness() is self
+            return 7
+
+    owners = [Sized()]
+    witness = ref(owners[0])
+    observer = proxy(owners[0])
+    assert len(observer) == 7
+    collect()
+    assert witness() is None
+    try:
+        len(observer)
+    except ReferenceError:
+        pass
+    else:
+        raise AssertionError("dead proxy reported a length")
