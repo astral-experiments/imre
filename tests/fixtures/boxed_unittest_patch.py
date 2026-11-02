@@ -117,6 +117,7 @@ class PatchBase:
 
 
 class PatchTests(PatchBase):
+    test_builtin = getattr
     test_data = 123
 
     def test_nested(self):
@@ -127,6 +128,7 @@ class PatchTests(PatchBase):
 
 
 assert patch.object(sys, "stdout", original_stderr)(PatchTests) is PatchTests
+assert PatchTests.test_builtin(sys, "stdout") is original_stderr
 case = PatchTests()
 assert case.test_nested() is original_stderr and sys.stdout is original_stdout
 assert case.test_inherited() is original_stderr and case.other() is original_stdout

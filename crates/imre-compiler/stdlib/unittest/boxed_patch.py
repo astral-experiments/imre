@@ -122,7 +122,8 @@ class _patch:
             for name in dir(func):
                 if name.startswith(patch.TEST_PREFIX):
                     method = getattr(func, name)
-                    if hasattr(method, '__call__'):
+                    # Some boxed builtins are callable without exposing __call__.
+                    if hasattr(method, '__call__') or isinstance(method, type(len)):
                         patcher = _patch(self.getter, self.attribute, self.new, self.create)
                         setattr(func, name, patcher(method))
             return func
