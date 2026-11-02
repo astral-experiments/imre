@@ -23,7 +23,7 @@ const UNITS: [&str; 7] = [
     "weeks",
 ];
 
-pub(super) fn store(ctx: &mut Context, value: Calendar, tzinfo: Id) -> Id {
+pub(in crate::dynamic) fn store(ctx: &mut Context, value: Calendar, tzinfo: Id) -> Id {
     ctx.alloc(Value::Calendar { value, tzinfo })
 }
 

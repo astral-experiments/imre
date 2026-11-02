@@ -49,6 +49,36 @@ impl Calendar {
         })
     }
 
+    /// Build each type's own min, max and resolution, in CPython's class-dictionary order.
+    pub(crate) fn class_constants(class: &str) -> Option<[Self; 3]> {
+        let (min, max, resolution) = match class {
+            "datetime.date" => (Value::DateOnly(1), Value::DateOnly(MAX_ORD), DAY),
+            "datetime.datetime" => {
+                let datetime = |local| Value::Date {
+                    local,
+                    zone: None,
+                    fold: 0,
+                };
+                (datetime(0), datetime(MAX_ORD * DAY - 1), 1)
+            }
+            "datetime.time" => {
+                let time = |local| Value::Time {
+                    local,
+                    zone: None,
+                    fold: 0,
+                };
+                (time(0), time(DAY - 1), 1)
+            }
+            "datetime.timedelta" => (
+                Value::Delta(-999_999_999 * DAY),
+                Value::Delta(1_000_000_000 * DAY - 1),
+                1,
+            ),
+            _ => return None,
+        };
+        Some([min, max, Value::Delta(resolution)].map(|value| Self(owner(value))))
+    }
+
     pub(crate) fn utc() -> Self {
         Self(utc())
     }
