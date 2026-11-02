@@ -2021,7 +2021,6 @@ enum Finalization {
 
 struct Slot {
     value: Option<Value>,
-    trace: Cell<usize>,
     // Next in collection order while occupied, or next free slot while vacant.
     gc_next: Cell<usize>,
     // Previous in collection order while occupied.
@@ -2035,7 +2034,6 @@ impl Slot {
     fn new(value: Value) -> Self {
         Self {
             value: Some(value),
-            trace: Cell::new(UNMARKED),
             gc_next: Cell::new(UNMARKED),
             gc_prev: Cell::new(UNMARKED),
             untracked_tuple: Cell::new(false),
@@ -2052,10 +2050,6 @@ impl Slot {
             Some(value) => !self.untracked_tuple.get() && value.gc_object(),
             None => false,
         }
-    }
-
-    fn marked(&self) -> bool {
-        self.trace.get() != UNMARKED
     }
 }
 
@@ -2109,24 +2103,25 @@ impl GcOrder {
     }
 }
 
-/// The pending trace lives in heap slots, so looking up a weak intern entry needs no scratch allocation.
+/// The trace links are reserved with each heap slot, so marking needs no scratch allocation.
 pub(super) struct MarkQueue<'a> {
     slots: &'a [Slot],
+    traces: &'a [Cell<usize>],
     next: usize,
     ordered: Option<&'a mut GcOrder>,
 }
 
 impl MarkQueue<'_> {
     pub(super) fn push(&mut self, id: Id) {
-        let slot = &self.slots[id as usize];
-        if !slot.marked() {
+        let trace = &self.traces[id as usize];
+        if trace.get() == UNMARKED {
             if let Some(order) = &mut self.ordered {
-                slot.trace.set(END);
-                if slot.gc_next.get() == UNMARKED {
+                trace.set(END);
+                if self.slots[id as usize].gc_next.get() == UNMARKED {
                     order.push(id as usize, self.slots);
                 }
             } else {
-                slot.trace.set(self.next);
+                trace.set(self.next);
                 self.next = id as usize;
             }
         }
@@ -2143,7 +2138,7 @@ impl MarkQueue<'_> {
         if index == END {
             return None;
         }
-        self.next = self.slots[index].trace.replace(END);
+        self.next = self.traces[index].replace(END);
         Some(index as Id)
     }
 }
@@ -2188,6 +2183,8 @@ impl CycleSet {
 /// partial expression remains rooted while evaluating a nested native function.
 pub(super) struct Heap {
     slots: Vec<Slot>,
+    // Keep the collector's links contiguous so it can scan marks without loading every Value.
+    traces: Vec<Cell<usize>>,
     gc_order: GcOrder,
     linked_string_constants: HashMap<i64, Id>,
     full_collection: Option<CycleSet>,
@@ -2272,21 +2269,23 @@ impl Frame {
 }
 
 impl Heap {
-    /// Bytes reserved beside each boxed value in a slab slot, including alignment.
+    /// Bytes reserved for each boxed value's slot metadata and trace link, including alignment.
     pub(super) fn size_overhead() -> usize {
-        size_of::<Slot>() - size_of::<Value>()
+        size_of::<Slot>() + size_of::<Cell<usize>>() - size_of::<Value>()
     }
 
     pub fn new() -> Self {
+        let slots = vec![
+            Slot::new(Value::None),
+            Slot::new(Value::Bool(false)),
+            Slot::new(Value::Bool(true)),
+            Slot::new(Value::Ellipsis),
+            Slot::new(Value::NotImplemented),
+            Slot::new(Value::Tuple(Vec::new())),
+        ];
         let mut heap = Self {
-            slots: vec![
-                Slot::new(Value::None),
-                Slot::new(Value::Bool(false)),
-                Slot::new(Value::Bool(true)),
-                Slot::new(Value::Ellipsis),
-                Slot::new(Value::NotImplemented),
-                Slot::new(Value::Tuple(Vec::new())),
-            ],
+            traces: vec![Cell::new(UNMARKED); slots.len()],
+            slots,
             gc_order: GcOrder::EMPTY,
             full_collection: None,
             linked_string_constants: HashMap::new(),
@@ -2511,8 +2510,7 @@ impl Heap {
     pub(super) fn fresh_string(&mut self, value: Value) -> Result<Id> {
         debug_assert!(matches!(value, Value::Str(_) | Value::SurrogateStr(_)));
         if self.free_head == END {
-            self.slots
-                .try_reserve(1)
+            self.reserve_slot()
                 .map_err(|_| Error::new("MemoryError", ""))?;
         }
         self.frames
@@ -2524,6 +2522,11 @@ impl Heap {
         Ok(self.alloc_slot(value))
     }
 
+    fn reserve_slot(&mut self) -> std::result::Result<(), std::collections::TryReserveError> {
+        self.traces.try_reserve(1)?;
+        self.slots.try_reserve(1)
+    }
+
     fn alloc_slot(&mut self, value: Value) -> Id {
         let index = if self.free_head != END {
             let index = self.free_head;
@@ -2533,12 +2536,14 @@ impl Heap {
             self.slots[index].may_have_buffer_views = false;
             index
         } else {
-            if self.slots.len() == self.slots.capacity() && self.slots.try_reserve(1).is_err() {
+            if self.reserve_slot().is_err() {
                 // Keep space for the next value when doubling the heap fails.
                 // The next statement can collect with a complete set of live handles.
+                self.traces.reserve_exact(1);
                 self.slots.reserve_exact(1);
                 self.next_collection = self.slots.len();
             }
+            self.traces.push(Cell::new(UNMARKED));
             self.slots.push(Slot::new(value));
             self.slots.len() - 1
         };
@@ -3127,6 +3132,7 @@ impl Heap {
     fn mark(&self, globals: impl Iterator<Item = Id>) {
         let mut pending = MarkQueue {
             slots: &self.slots,
+            traces: &self.traces,
             next: END,
             ordered: None,
         };
@@ -3162,9 +3168,9 @@ impl Heap {
 
     fn reachable(&self, id: Id, roots: impl Iterator<Item = Id>) -> bool {
         self.mark(roots);
-        let reachable = self.slots[id as usize].marked();
-        for slot in &self.slots {
-            slot.trace.set(UNMARKED);
+        let reachable = self.traces[id as usize].get() != UNMARKED;
+        for trace in &self.traces {
+            trace.set(UNMARKED);
         }
         reachable
     }
@@ -3186,15 +3192,15 @@ impl Heap {
     ) -> Result<bool> {
         let mut cycles = CycleSet::new(self.slots.len())?;
         self.mark_reference_survivors(roots, &mut cycles, None);
-        let live = self.slots.iter().any(|slot| {
-            slot.marked()
+        let live = self.slots.iter().enumerate().any(|(id, slot)| {
+            self.traces[id].get() != UNMARKED
                 && matches!(slot.value, Some(Value::MemoryView { owner: Some(owner), .. })
                     if owner == storage || matches!(self.get(owner),
                         Value::Instance { scalar: Some(payload), .. } if *payload == storage)
                         || matches!(self.get(owner), Value::BytesIoBuffer {storage: backing, ..} if *backing == storage))
         });
-        for slot in &self.slots {
-            slot.trace.set(UNMARKED);
+        for trace in &self.traces {
+            trace.set(UNMARKED);
         }
         self.slots[storage as usize].may_have_buffer_views = live;
         Ok(live)
@@ -3352,6 +3358,7 @@ impl Heap {
         let mut visited = END;
         let mut pending = MarkQueue {
             slots: &self.slots,
+            traces: &self.traces,
             next: END,
             ordered: None,
         };
@@ -3360,7 +3367,7 @@ impl Heap {
             && let Some(id) = pending.pop()
         {
             let slot = &self.slots[id as usize];
-            slot.trace.set(visited);
+            self.traces[id as usize].set(visited);
             visited = id as usize;
             if slot.finalization == Finalization::Pending
                 && !stdin.is_some_and(|chain| chain.contains(&id))
@@ -3377,10 +3384,10 @@ impl Heap {
             CycleSet::new(self.slots.len()).map(|mut cycles| self.identify_cycles(&mut cycles))
         };
         while let Some(id) = pending.pop() {
-            self.slots[id as usize].trace.set(UNMARKED);
+            self.traces[id as usize].set(UNMARKED);
         }
         while visited != END {
-            visited = self.slots[visited].trace.replace(UNMARKED);
+            visited = self.traces[visited].replace(UNMARKED);
         }
         next
     }
@@ -3548,7 +3555,7 @@ impl Heap {
     pub(super) fn reserve_slot_or_request_collection(&mut self) {
         if self.slots.len() < self.next_collection
             && self.free_head == END
-            && self.slots.try_reserve(1).is_err()
+            && self.reserve_slot().is_err()
         {
             self.next_collection = self.slots.len();
         }
@@ -3561,9 +3568,7 @@ impl Heap {
 
     /// Request collection before a streaming callback exhausts the heap.
     pub(super) fn prepare_streaming_collection(&mut self, limit: usize) -> bool {
-        if self.free_head == END
-            && (self.slots.len() >= limit || self.slots.try_reserve(1).is_err())
-        {
+        if self.free_head == END && (self.slots.len() >= limit || self.reserve_slot().is_err()) {
             self.next_collection = self.slots.len();
             return true;
         }
@@ -3607,7 +3612,7 @@ impl Heap {
         // Peeling leaves both cycles and their unreachable descendants. Every
         // strong child of a member is therefore already live or itself a member.
         for id in cycles.members() {
-            self.slots[id as usize].trace.set(END);
+            self.traces[id as usize].set(END);
         }
     }
 
@@ -3623,9 +3628,9 @@ impl Heap {
         }
         let mut cycles = CycleSet::new(self.slots.len())?;
         self.mark_reference_survivors(roots, &mut cycles, Some(child));
-        let last = !self.slots[child as usize].marked();
-        for slot in &self.slots {
-            slot.trace.set(UNMARKED);
+        let last = self.traces[child as usize].get() == UNMARKED;
+        for trace in &self.traces {
+            trace.set(UNMARKED);
         }
         Ok(last)
     }
@@ -3643,12 +3648,13 @@ impl Heap {
     fn unreachable_children(&self, value: &Value, mut visit: impl FnMut(usize)) {
         let mut children = MarkQueue {
             slots: &self.slots,
+            traces: &self.traces,
             next: END,
             ordered: None,
         };
         value.children(&mut children);
         while let Some(id) = children.pop() {
-            self.slots[id as usize].trace.set(UNMARKED);
+            self.traces[id as usize].set(UNMARKED);
             visit(id as usize);
         }
     }
@@ -3660,6 +3666,7 @@ impl Heap {
     fn mark_full(&mut self, globals: impl Iterator<Item = Id>, passed: &mut Vec<usize>) {
         let mut pending = MarkQueue {
             slots: &self.slots,
+            traces: &self.traces,
             next: END,
             ordered: None,
         };
@@ -3668,7 +3675,7 @@ impl Heap {
         let mut scan = std::mem::replace(&mut self.gc_order, GcOrder::EMPTY);
         while let Some(id) = scan.pop(&self.slots) {
             let slot = &self.slots[id];
-            if !slot.marked() {
+            if self.traces[id].get() == UNMARKED {
                 passed.push(id);
                 continue;
             }
@@ -3676,6 +3683,7 @@ impl Heap {
             // mark queue would reverse dictionary values and reorder aliases.
             self.get(id as Id).children(&mut MarkQueue {
                 slots: &self.slots,
+                traces: &self.traces,
                 next: END,
                 ordered: Some(&mut scan),
             });
@@ -3694,7 +3702,7 @@ impl Heap {
         // A finalizer can resurrect these objects. Keep their encounter order until
         // the final sweep decides which slots to retire.
         for &id in passed.iter() {
-            if !self.slots[id].marked() {
+            if self.traces[id].get() == UNMARKED {
                 self.gc_order.push(id, &self.slots);
             }
         }
@@ -3712,7 +3720,7 @@ impl Heap {
         unowned.clear();
         incoming.fill(0);
         for (id, slot) in self.slots.iter().enumerate() {
-            if !slot.marked()
+            if self.traces[id].get() == UNMARKED
                 && let Some(value) = &slot.value
             {
                 // Count the candidate itself so that zero denotes a vacant or reachable slot.
@@ -3791,7 +3799,7 @@ impl Heap {
         }
         let mut cycles = CycleSet::new(self.slots.len())?;
         self.mark_reference_survivors(roots, &mut cycles, None);
-        let reachable = self.slots[owner as usize].marked();
+        let reachable = self.traces[owner as usize].get() != UNMARKED;
         let callbacks = if deallocating || !reachable {
             if !reachable {
                 // Weakrefs in the owner's dictionary are still live during its deallocation.
@@ -3801,8 +3809,8 @@ impl Heap {
         } else {
             Vec::new()
         };
-        for slot in &self.slots {
-            slot.trace.set(UNMARKED);
+        for trace in &self.traces {
+            trace.set(UNMARKED);
         }
         Ok(callbacks)
     }
@@ -3840,8 +3848,8 @@ impl Heap {
                     return !refs.is_empty();
                 }
             } else {
-                refs.retain(|&id| self.slots[id as usize].marked());
-                if dealloc.is_none() && self.slots[target as usize].marked() {
+                refs.retain(|&id| self.traces[id as usize].get() != UNMARKED);
+                if dealloc.is_none() && self.traces[target as usize].get() != UNMARKED {
                     return !refs.is_empty();
                 }
             }
@@ -3864,7 +3872,7 @@ impl Heap {
                 eprintln!("Exception ignored while clearing object weakrefs: MemoryError");
             }
             for &id in refs.iter() {
-                let reachable = self.slots[id as usize].marked();
+                let reachable = self.traces[id as usize].get() != UNMARKED;
                 let wr = self.slots[id as usize]
                     .value
                     .as_mut()
@@ -3944,10 +3952,10 @@ impl Heap {
 
     fn sweep(&mut self) -> Option<WeakCallbacks> {
         self.ordinary_finalizers
-            .retain(|&id| self.slots[id as usize].marked());
+            .retain(|&id| self.traces[id as usize].get() != UNMARKED);
         self.file_writers.retain(|&id| {
             let slot = &self.slots[id as usize];
-            slot.marked()
+            self.traces[id as usize].get() != UNMARKED
                 && match &slot.value {
                     Some(Value::TextFile(file)) => !file.closed(),
                     Some(Value::File(file)) => !file.closed(),
@@ -3955,19 +3963,21 @@ impl Heap {
                 }
         });
         self.interned
-            .retain(|_, entry| self.slots[entry.id as usize].marked());
+            .retain(|_, entry| self.traces[entry.id as usize].get() != UNMARKED);
         let callbacks = self.clear_weak_targets(None, None);
         self.abc_registrations.retain(|&[owner, member]| {
-            self.slots[owner as usize].marked() && self.slots[member as usize].marked()
+            self.traces[owner as usize].get() != UNMARKED
+                && self.traces[member as usize].get() != UNMARKED
         });
         self.abc_subclass_cache.retain(|&[owner, member], _| {
-            self.slots[owner as usize].marked() && self.slots[member as usize].marked()
+            self.traces[owner as usize].get() != UNMARKED
+                && self.traces[member as usize].get() != UNMARKED
         });
         // Vacant slots supply their own free-list links. A sweep can therefore
         // retire the entire unreachable graph even if the allocator refuses growth.
         for id in 0..self.slots.len() {
             let slot = &self.slots[id];
-            if slot.trace.replace(UNMARKED) == UNMARKED && slot.value.is_some() {
+            if self.traces[id].replace(UNMARKED) == UNMARKED && slot.value.is_some() {
                 self.gc_order.remove(id, &self.slots);
                 let slot = &mut self.slots[id];
                 slot.value = None;
