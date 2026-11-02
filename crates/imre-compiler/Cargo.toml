@@ -39,7 +39,7 @@ zip = { version = "8", default-features = false, features = ["deflate-flate2-zli
 
 [target.'cfg(unix)'.dependencies]
 libc = "=0.2.190"
-object = { version = "=0.39.1", default-features = false, features = ["read_core", "std", "elf", "macho"] }
+object = { version = "=0.39.1", default-features = false, features = ["read_core", "std", "archive", "elf", "macho"] }
 
 [[bin]]
 name = "imre"

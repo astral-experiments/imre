@@ -1,8 +1,8 @@
 //! Emit native functions and control flow for closed modules using boxed Python values.
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fmt::Write as _;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use ruff_python_ast as ast;
 use ruff_text_size::Ranged;
@@ -37,8 +37,9 @@ pub(crate) fn emit(
     modules: &[(String, PathBuf, String)],
     config: &str,
     keep_docstrings: bool,
-    bundled_root: &std::path::Path,
-) -> Result<String, String> {
+    bundled_root: &Path,
+    providers: &HashSet<String>,
+) -> Result<(String, bool), String> {
     let mut output = Output {
         keep_docstrings,
         ..Output::default()
@@ -47,7 +48,79 @@ pub(crate) fn emit(
     let mut main = format!(
         "define i32 @main(i32 %argc, ptr %argv) {{\nentry:\n  %ctx = call ptr @imre_dyn_new(i32 %argc, ptr %argv, ptr {config})\n"
     );
+    let mut declarations = HashSet::new();
     for (unit, (name, path, source)) in modules.iter().enumerate() {
+        let bundled = path.starts_with(bundled_root);
+        let external = if bundled && !providers.is_empty() {
+            provider(name, path, source, keep_docstrings)?
+                .map(|(symbol, _)| symbol)
+                .filter(|symbol| providers.contains(symbol))
+        } else {
+            None
+        };
+        let module_name = output.data(name.as_bytes());
+        let file = output.data(path.to_str().ok_or("module path must be UTF-8")?.as_bytes());
+        let code = if let Some(symbol) = external {
+            if declarations.insert(symbol.clone()) {
+                writeln!(output.functions, "declare i64 @{symbol}(ptr, i64)").unwrap();
+            }
+            format!("@{symbol}")
+        } else {
+            output.module(unit, name, path, source, &file, bundled)?
+        };
+        writeln!(
+            main,
+            "  call void @imre_dyn_register(ptr %ctx, ptr {module_name}, ptr {file}, ptr {code})"
+        )
+        .unwrap();
+    }
+    main.push_str("  %status = call i32 @imre_dyn_finish(ptr %ctx)\n  ret i32 %status\n}\n");
+    Ok((
+        format!("{ABI}\n{}\n{}\n{main}", output.constants, output.functions),
+        !declarations.is_empty(),
+    ))
+}
+
+/// Emit one bundled initializer with a symbol determined by its source and native body.
+pub(super) fn provider(
+    name: &str,
+    path: &Path,
+    source: &str,
+    keep_docstrings: bool,
+) -> Result<Option<(String, String)>, String> {
+    let mut output = Output {
+        keep_docstrings,
+        ..Output::default()
+    };
+    let filename = path.to_str().ok_or("module path must be UTF-8")?;
+    let file = output.data(filename.as_bytes());
+    let entry = output.module(0, name, path, source, &file, true)?;
+    // These slots are numbered across the whole program and must stay in its codegen unit.
+    if !output.string_constant_slots.is_empty() {
+        return Ok(None);
+    }
+    let mut ir = format!("{ABI}\n{}\n{}", output.constants, output.functions);
+    let mut hash = blake3::Hasher::new();
+    for field in [name, filename, source, &ir] {
+        hash.update(&(field.len() as u64).to_le_bytes());
+        hash.update(field.as_bytes());
+    }
+    hash.update(&[u8::from(keep_docstrings)]);
+    let symbol = format!("imre_provider_{}", hash.finalize().to_hex());
+    writeln!(ir, "@{symbol} = alias i64 (ptr, i64), ptr {entry}").unwrap();
+    Ok(Some((symbol, ir)))
+}
+
+impl Output {
+    fn module(
+        &mut self,
+        unit: usize,
+        name: &str,
+        path: &Path,
+        source: &str,
+        file: &str,
+        bundled: bool,
+    ) -> Result<String, String> {
         let parsed = ruff_python_parser::parse_module(source)
             .map_err(|err| format!("{}: {err}", path.display()))?;
         crate::analysis::check_star_import_scopes(source, &parsed.syntax().body)
@@ -59,22 +132,20 @@ pub(crate) fn emit(
             return Err(format!("{}:{error}", path.display()));
         }
         let replacements = strings::literal_replacements(source, parsed.tokens());
-        if output.keep_docstrings && !replacements.is_empty() {
+        if self.keep_docstrings && !replacements.is_empty() {
             strings::check_docs(source, &parsed.syntax().body, &replacements)
                 .map_err(|error| format!("{}:{error}", path.display()))?;
         }
         let package = if path.file_name().is_some_and(|file| file == "__init__.py") {
-            name.as_str()
+            name
         } else {
             name.rsplit_once('.').map_or("", |(parent, _)| parent)
         };
-        let docs = if keep_docstrings && name == "collections" && path.starts_with(bundled_root) {
+        let docs = if self.keep_docstrings && name == "collections" && bundled {
             crate::modules::doctest::sealed(crate::modules::IntrinsicModule::Collections)
         } else {
             None
         };
-        let name = output.data(name.as_bytes());
-        let file = output.data(path.to_str().ok_or("module path must be UTF-8")?.as_bytes());
         let has_templates = parsed
             .tokens()
             .iter()
@@ -115,24 +186,14 @@ pub(crate) fn emit(
             private_names,
             package,
             text: source,
-            file: &file,
+            file,
             newlines: source
                 .match_indices('\n')
                 .map(|(offset, _)| offset)
                 .collect(),
         };
-        let code = output.code(&location, String::new(), Body::Namespace(&body), false);
-        writeln!(
-            main,
-            "  call void @imre_dyn_register(ptr %ctx, ptr {name}, ptr {file}, ptr {code})"
-        )
-        .unwrap();
+        Ok(self.code(&location, String::new(), Body::Namespace(&body), false))
     }
-    main.push_str("  %status = call i32 @imre_dyn_finish(ptr %ctx)\n  ret i32 %status\n}\n");
-    Ok(format!(
-        "{ABI}\n{}\n{}\n{main}",
-        output.constants, output.functions
-    ))
 }
 
 enum Body<'a> {
@@ -659,5 +720,60 @@ impl Function<'_, '_> {
         let position = span.map_or_else(|| "null".into(), |span| self.output.position(span));
         let scope = &self.scope;
         self.checked(&format!("call i64 @imre_dyn_scoped_call_at(ptr %ctx, i64 {callable}, i64 {args}, i64 {kwargs}, i64 {mark}, ptr {position}, i64 {scope})"))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn provider_substitution() {
+        let root = Path::new("<imre stdlib>");
+        let path = root.join("example.py");
+        let source = "value = 1";
+        let compiled =
+            |name, path: &Path, src, docs| provider(name, path, src, docs).unwrap().unwrap().0;
+        let symbol = compiled("example", &path, source, true);
+        assert_ne!(symbol, compiled("other", &path, source, true));
+        assert_ne!(
+            symbol,
+            compiled("example", &root.join("other.py"), source, true)
+        );
+        assert_ne!(symbol, compiled("example", &path, "value = 2", true));
+        assert_ne!(symbol, compiled("example", &path, source, false));
+        assert!(
+            provider("example", &path, "value = t'{123}'", true)
+                .unwrap()
+                .is_none()
+        );
+
+        let bundled = ("example".into(), path, source.into());
+        let project = (
+            "example".into(),
+            PathBuf::from("/project/example.py"),
+            source.into(),
+        );
+        let symbols = HashSet::from([symbol.clone()]);
+        let refs = |modules: &[_]| {
+            let (ir, used) = emit(modules, "{}", true, root, &symbols).unwrap();
+            assert!(used);
+            let declared = format!("declare i64 @{symbol}(ptr, i64)");
+            assert_eq!(ir.lines().filter(|line| *line == declared).count(), 1);
+            ir.lines()
+                .filter(|line| line.contains("call void @imre_dyn_register("))
+                .map(|line| line.ends_with(&format!("@{symbol})")))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            refs(&[bundled.clone(), project.clone(), bundled.clone()]),
+            [true, false, true]
+        );
+        assert!(
+            !emit(std::slice::from_ref(&project), "{}", true, root, &symbols)
+                .unwrap()
+                .1
+        );
+        assert_eq!(refs(&[project, bundled]), [false, true]);
     }
 }

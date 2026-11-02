@@ -66,6 +66,7 @@ jobs:
             jemalloc_manifest=$(jq -er '.packages[] | select(.name == "tikv-jemalloc-sys") | .manifest_path' "$RUNNER_TEMP/imre-packages.json")
             cp "$(dirname "$jemalloc_manifest")/jemalloc/COPYING" "$ARCHIVE_NAME/LICENSE-jemalloc"
             python3 scripts/bundle-linux-toolchain.py "$ARCHIVE_NAME/imre-toolchain"
+            python3 scripts/build-bundled-providers.py "$ARCHIVE_NAME/imre"
           fi
           tar czvf "$ARCHIVE_FILE" "$ARCHIVE_NAME"
           shasum -a 256 "$ARCHIVE_FILE" > "$ARCHIVE_FILE.sha256"

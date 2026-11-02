@@ -81,6 +81,14 @@ fn run() -> Result<ExitCode, String> {
         println!("imre {}", env!("CARGO_PKG_VERSION"));
         return Ok(ExitCode::SUCCESS);
     }
+    if command == "--emit-bundled-provider-ir" {
+        let dir = args.next().ok_or("expected a provider output directory")?;
+        if args.next().is_some() {
+            return Err("expected a single provider output directory".into());
+        }
+        imre_compiler::write_bundled_provider_ir(Path::new(&dir))?;
+        return Ok(ExitCode::SUCCESS);
+    }
     if command == "build-target" {
         return wheel::report(args);
     }
@@ -151,7 +159,7 @@ fn run() -> Result<ExitCode, String> {
         allocator,
         clang,
         optimization,
-        compile: options,
+        compile: mut options,
         link,
     } = build_options;
     if help {
@@ -191,21 +199,27 @@ fn run() -> Result<ExitCode, String> {
             .or_else(|| source_path.file_stem().map(PathBuf::from))
             .ok_or("Could not infer an executable name from the source path; pass -o OUTPUT.")?,
     };
-    let python = options.python_startup().map(|(flags, _)| flags);
     #[cfg(unix)]
-    let child_disposition = python
+    let child_disposition = options
+        .python_startup()
         .is_some()
         .then(run_program::CompileChildren::prepare)
         .transpose()
         .map_err(|error| format!("Could not prepare compiler child waits: {error}"))?;
-    let run_image = |directory| {
+    let run_image = |directory, options: &imre_compiler::CompileOptions| {
         #[cfg(unix)]
         if let Some(disposition) = child_disposition {
             disposition
                 .restore()
                 .map_err(|error| format!("Could not restore SIGCHLD: {error}"))?;
         }
-        run_program(&output, directory, &source_path, args, python)
+        run_program(
+            &output,
+            directory,
+            &source_path,
+            args,
+            options.python_startup().map(|(flags, _)| flags),
+        )
     };
     if lto_linker.is_some() && (runtime.is_none() || target.is_none()) {
         return Err("--lto-linker requires explicit --runtime and --target".to_owned());
@@ -309,7 +323,7 @@ fn run() -> Result<ExitCode, String> {
             progress.cached(label);
             if let Some(directory) = run_directory {
                 progress.running(&source_path);
-                return run_image(directory);
+                return run_image(directory, &options);
             }
             return Ok(ExitCode::SUCCESS);
         }
@@ -327,6 +341,8 @@ fn run() -> Result<ExitCode, String> {
         Units(Vec<CodegenUnit>),
     }
     let (code, input_paths, sources, extension_archives) = if split {
+        options.bundled_provider_archive =
+            bundled_native.and_then(|toolchain| toolchain.provider_archive(&optimization));
         let c = imre_compiler::compile_file_units(&source_path, module_root.as_deref(), &options)?;
         (
             Code::Units(c.units),
@@ -505,7 +521,13 @@ fn run() -> Result<ExitCode, String> {
     if let (Some(cache), Some(stage), Some(file)) = (&cache, &stage, &staged_output) {
         build_cache::materialize(file, &output).map_err(|e| e.to_string())?;
         if cache
-            .publish(sources, stage.path(), file, &output)
+            .publish(
+                sources,
+                stage.path(),
+                file,
+                &output,
+                options.bundled_provider_archive.as_deref(),
+            )
             .is_some()
         {
             build_cache::trace("store");
@@ -517,7 +539,7 @@ fn run() -> Result<ExitCode, String> {
         drop(temporary);
         drop(scratch);
         drop(stage);
-        return run_image(directory);
+        return run_image(directory, &options);
     }
     Ok(ExitCode::SUCCESS)
 }
