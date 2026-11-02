@@ -96,8 +96,11 @@ impl BuiltinDescriptor {
                 Some(("mappingproxy", attr, builtins::MAPPING_PROXY_METHODS))
             }
             Some(("type", attr)) => Some(("type", attr, &["mro"][..])),
-            Some(("int", attr)) => Some(("int", attr, &["__trunc__"][..])),
-            Some(("float", attr)) => Some(("float", attr, &["__trunc__", "as_integer_ratio"][..])),
+            Some(("int", attr)) => Some(("int", attr, builtins::real_methods("int"))),
+            Some(("float", "as_integer_ratio")) => {
+                Some(("float", "as_integer_ratio", &["as_integer_ratio"][..]))
+            }
+            Some(("float", attr)) => Some(("float", attr, builtins::real_methods("float"))),
             Some(("bytes", attr)) => Some(("bytes", attr, builtins::BYTES_METHODS)),
             Some(("complex", attr)) => Some(("complex", attr, &["__complex__"][..])),
             Some(("bytearray", attr)) => Some(("bytearray", attr, builtins::BYTEARRAY_METHODS)),
@@ -156,6 +159,7 @@ impl BuiltinDescriptor {
                     || matches!(
                         name,
                         "__reversed__"
+                            | "__round__"
                             | "__trunc__"
                             | "__getinitargs__"
                             | "__reduce__"
@@ -444,8 +448,10 @@ impl BuiltinDescriptor {
             "__text_signature__" if self.name == "__contains__" => ctx.text("($self, key, /)"),
             "__doc__" if self.name == "__neg__" => ctx.text("-self"),
             "__doc__" if self.name == "__pos__" => ctx.text("+self"),
+            "__doc__" if self.name == "__int__" => ctx.text("int(self)"),
+            "__doc__" if self.name == "__float__" => ctx.text("float(self)"),
             "__doc__" if self.name == "__abs__" => ctx.text("abs(self)"),
-            "__text_signature__" if matches!(self.name, "__neg__" | "__pos__" | "__abs__") => {
+            "__text_signature__" if matches!(self.name, "__neg__" | "__pos__" | "__abs__" | "__int__" | "__float__") => {
                 ctx.text("($self, /)")
             }
             "__doc__" if self.name == "__index__" => ctx.text(
@@ -550,6 +556,9 @@ impl BuiltinDescriptor {
                     ("pop", "__doc__") => {
                         "Remove and return item at index (default last).\n\nRaises IndexError if list is empty or index is out of range."
                     }
+                    ("__round__", "__doc__") if self.owner == "int" => "Rounding an Integral returns itself.\n\nRounding with an ndigits argument also returns an integer.",
+                    ("__round__", "__doc__") => "Return the Integral closest to x, rounding half toward even.\n\nWhen an argument is passed, work like built-in round(x, ndigits).",
+                    ("__round__", _) => "($self, ndigits=None, /)",
                     ("__trunc__", "__doc__") if self.owner == "int" => "Truncating an Integral returns itself.",
                     ("__trunc__", "__doc__") => "Return the Integral closest to x between 0 and x.",
                     ("__trunc__", _) => "($self, /)",

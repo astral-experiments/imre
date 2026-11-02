@@ -3541,10 +3541,8 @@ impl Context {
             }
             Value::Native(ref class)
                 if class == "bool"
-                    && matches!(
-                        name,
-                        "__add__" | "__index__" | "__trunc__" | "bit_length" | "to_bytes"
-                    ) =>
+                    && (builtins::real_methods("int").contains(&name)
+                        || matches!(name, "__add__" | "__index__" | "bit_length" | "to_bytes")) =>
             {
                 return Ok(self.builtin(&format!("int.{name}")));
             }
@@ -3608,11 +3606,14 @@ impl Context {
                     || (name == "__repr__"
                         && matches!(class.as_str(), "bool" | "int" | "float"))
                     || (class == "int"
-                        && matches!(
-                            name,
-                            "__add__" | "__index__" | "__trunc__" | "bit_length" | "to_bytes"
-                        ))
-                    || (class == "float" && matches!(name, "__trunc__" | "as_integer_ratio"))
+                        && (builtins::real_methods("int").contains(&name)
+                            || matches!(
+                                name,
+                                "__add__" | "__index__" | "bit_length" | "to_bytes"
+                            )))
+                    || (class == "float"
+                        && (builtins::real_methods(class).contains(&name)
+                            || name == "as_integer_ratio"))
                     || (class == "str"
                         && (name == "maketrans" || builtins::STR_METHODS.contains(&name))) =>
             {
@@ -5643,11 +5644,13 @@ impl Context {
                             | "float.__getformat__"
                             | "bool.__repr__"
                             | "float.__repr__"
-                            | "float.__trunc__"
                             | "float.as_integer_ratio"
                             | "getset_descriptor.__set__"
                             | "getset_descriptor.__delete__"
                     )
+                    || name.strip_prefix("float.").is_some_and(|method| {
+                        builtins::real_methods("float").contains(&method)
+                    })
                     || !name.contains('.')
                     || matches!(
                         name.split('.').next(),
