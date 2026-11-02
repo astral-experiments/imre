@@ -588,6 +588,9 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("_collections_abc", abc) if super::mapping_abc::bootstrapped(abc) => {
             super::mapping_abc::class(ctx, abc)?
         }
+        ("_collections_abc", "_CallableGenericAlias") => {
+            ctx.builtin("collections.abc._CallableGenericAlias")
+        }
         ("_collections_abc", "_check_methods") => ctx.builtin("_collections_abc._check_methods"),
         (
             "typing",
