@@ -68,7 +68,7 @@ def check_context_protocol_allocation(imre, root, run):
     subprocess.run(["cc", "-c", fixtures / "refuse_context_protocol.c", "-o", wrapper], check=True)
     flags = "\x1f".join([
         "-C", f"link-arg={wrapper}",
-        "-C", "link-arg=-Wl,--wrap=imre_dyn_op_at,--wrap=imre_dyn_op,--wrap=malloc,--wrap=realloc,--wrap=calloc",
+        "-C", "link-arg=-Wl,--wrap=imre_dyn_op_at,--wrap=malloc,--wrap=realloc,--wrap=calloc",
     ])
     for opcode in ("lookup_enter", "lookup_exit"):
         for target in [0, 1]:
@@ -303,7 +303,7 @@ def check_weak_proxy_root_allocation(imre, root, run):
     subprocess.run(["cc", "-c", fixtures / "refuse_weak_proxy_root.c", "-o", wrapper], check=True)
     flags = "\x1f".join([
         "-C", f"link-arg={wrapper}",
-        "-C", "link-arg=-Wl,--wrap=imre_dyn_op_at,--wrap=imre_dyn_op,--wrap=imre_dyn_lit,--wrap=malloc,--wrap=realloc,--wrap=calloc",
+        "-C", "link-arg=-Wl,--wrap=imre_dyn_op_at,--wrap=imre_dyn_lit,--wrap=malloc,--wrap=realloc,--wrap=calloc",
     ])
     source = root / "weak_proxy_subscripts.py"
     # A single expression keeps the reads' temporary handles in the same frame.
@@ -326,7 +326,7 @@ def call_allocation_flags(root):
     subprocess.run(["cc", "-c", fixtures / "itemgetter_refuse.c", "-o", wrapper], check=True)
     return "\x1f".join([
         "-C", f"link-arg={wrapper}",
-        "-C", "link-arg=-Wl,--wrap=imre_dyn_call_at,--wrap=imre_dyn_op_at,--wrap=imre_dyn_op,--wrap=malloc,--wrap=realloc,--wrap=imre_dyn_lit",
+        "-C", "link-arg=-Wl,--wrap=imre_dyn_call_at,--wrap=imre_dyn_op_at,--wrap=malloc,--wrap=realloc,--wrap=imre_dyn_lit",
     ])
 
 
@@ -676,7 +676,7 @@ def check_ffi_result_roots(imre, root, run):
     subprocess.run(["cc", "-c", fixtures / "ffi_result_roots_refuse.c", "-o", wrapper], check=True)
     result_flags = "\x1f".join([
         "-C", f"link-arg={wrapper}",
-        "-C", "link-arg=-Wl,--wrap=imre_dyn_op_at,--wrap=imre_dyn_op,--wrap=imre_dyn_lit,--wrap=malloc,--wrap=realloc,--wrap=calloc",
+        "-C", "link-arg=-Wl,--wrap=imre_dyn_op_at,--wrap=imre_dyn_lit,--wrap=malloc,--wrap=realloc,--wrap=calloc",
     ])
     import_path = f"import sys; sys.path.insert(0, {str(fixtures)!r}); "
     source = import_path + "import boxed_ffi_result_roots as fixture; fixture.allocation()"
@@ -1591,6 +1591,8 @@ def report(text):
         fixtures = Path(__file__).with_name("fixtures")
         final_fixture = fixtures / "boxed_typing_final.py"
         compare("-IB", final_fixture, native_args=("run", final_fixture, "--runtime-imports", "--quiet"))
+        io_fixture = fixtures / "boxed_io_indirect_import.py"
+        compare("-IB", io_fixture, native_args=("run", io_fixture, "--runtime-imports", "--quiet"))
         builtins_fixture = fixtures / "boxed_builtins_module.py"
         compare("-IB", builtins_fixture, native_args=("run", builtins_fixture, "--runtime-imports", "--quiet"))
         for name in (
@@ -1668,6 +1670,7 @@ def report(text):
             "boxed_spooled_temporary_file.py",
             "boxed_named_temporary_file.py",
             "boxed_tempfile_default_directory.py",
+            "boxed_tempfile_mktemp.py",
             "boxed_random.py",
             "boxed_secrets.py",
             "boxed_pkgutil.py",
@@ -1683,6 +1686,7 @@ def report(text):
             "boxed_lru_insert_same.py",
             "boxed_annotationlib_refs.py",
             "boxed_typing_no_type_check.py",
+            "boxed_typing_no_type_check_decorator.py",
             "boxed_typing_assert_type.py",
             "boxed_typing_typeddict.py",
             "boxed_typing_dataclass_transform.py",
@@ -1703,6 +1707,7 @@ def report(text):
             "boxed_re_escape.py",
             "boxed_datetime.py",
             "boxed_dataclasses.py",
+            "boxed_make_dataclass.py",
             "boxed_dataclass_slots.py",
             "boxed_dataclass_init_annotations.py",
             "boxed_dataclass_classvars.py",
@@ -1710,7 +1715,9 @@ def report(text):
             "boxed_time.py",
             "boxed_time_strftime.py",
             "boxed_codecs.py",
+            "boxed_io_exports.py",
             "boxed_io_text_encoding.py",
+            "boxed_io_protocols.py",
             "boxed_selector_wide_fds.py",
             "boxed_pipe_flags.py",
             "boxed_os_file_descriptors.py",
@@ -1738,6 +1745,7 @@ def report(text):
             "boxed_logging.py",
             "boxed_logging_file.py",
             "boxed_class_attribute.py",
+            "boxed_missing_attribute_owners.py",
             "boxed_request_strings.py",
             "boxed_str_maketrans.py",
             "boxed_map_capwords.py",
@@ -1784,6 +1792,7 @@ def report(text):
             "boxed_fnmatch.py",
             "boxed_unittest_cleanup.py",
             "boxed_unittest_result_registry.py",
+            "boxed_unittest_runner_warnings.py",
             "boxed_unittest_class_cleanup.py",
             "boxed_pathlib.py",
             "boxed_posixpath.py",
@@ -1906,6 +1915,12 @@ def report(text):
                 assert (fault.returncode, fault.stdout, fault.stderr) == (0, oracle.stdout, b""), fault
                 retry = run(binary, extra=injected | {"IMRE_SECRETS_TEST_SOURCE": "reject"})
                 assert (retry.returncode, retry.stdout, retry.stderr) == (0, b"c\n", b"draw\ndraw\n"), retry
+        # A nested declaration is invalid even if the surrounding function is never called.
+        source = root / "generic-nonlocal.py"
+        source.write_text("def factory():\n    class Box[T]:\n        def f(self):\n            nonlocal T\n")
+        invalid = run(imre, "build", source, "--runtime-imports", "-o", root / "invalid-nonlocal")
+        assert invalid.returncode and b"SyntaxError: nonlocal binding not allowed for type parameter 'T'" in invalid.stderr, invalid
+
         for fixture in ("boxed_typing_generics.py", "boxed_typing_list.py"):
             plugin.write_bytes((fixtures / fixture).read_bytes())
             compare("-IB", "-c", imports)
@@ -1958,6 +1973,11 @@ except ImportError:
         (root / "chunks.bin").write_bytes(b"0a\r\n\xffx!\n")
         plugin.write_bytes((Path(__file__).with_name("fixtures") / "boxed_io.py").read_bytes())
         compare("-IB", "-c", imports + "arithmetic.exercise('chunks.bin')")
+        compare(
+            "-IB", "-c",
+            "with open('chunks.bin', 'rb') as stream:\n    print(stream.name, stream.mode)\n"
+            "print(stream.name, stream.mode)",
+        )
         compare(
             "-IB", "-c",
             "import sys, hashlib\nsys.path\n"

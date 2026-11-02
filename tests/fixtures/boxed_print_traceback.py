@@ -147,3 +147,37 @@ for module in ("package.errors", "__main__", None, ModuleName("package.errors"))
     visits = []
     capture(Outer.Local("with module"), limit=0)
     print(visits)
+
+
+from traceback import print_stack
+
+
+def stack_messages(depth, limit):
+    if depth:
+        return stack_messages(depth - 1, limit)
+    stream = io.StringIO()
+    print_stack(limit=limit, file=stream)
+    return stream.getvalue()
+
+
+assert stack_messages(0, 1).endswith("    print_stack(limit=limit, file=stream)\n")
+assert "[Previous line repeated 2 more times]" in stack_messages(5, 6)
+assert sum(line.startswith('  File "') for line in stack_messages(5, -1).splitlines()) == 1
+
+
+# A frame with no line number has a header, no source text and no repetition marker.
+class NoLine:
+    f_code = stack_messages.__code__
+    f_lineno = None
+    f_globals = {}
+
+    def __init__(self, back):
+        self.f_back = back
+
+
+frame = None
+for index in range(5):
+    frame = NoLine(frame)
+stream = io.StringIO()
+print_stack(frame, file=stream)
+assert stream.getvalue().count('line None, in stack_messages\n') == 5

@@ -61,7 +61,7 @@ impl Context {
         Ok(bytes)
     }
 
-    fn string_encoding_error(
+    pub(in crate::dynamic) fn string_encoding_error(
         &mut self,
         id: Id,
         codec: &str,

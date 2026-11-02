@@ -22,6 +22,11 @@ const CONSTANTS: &[(&str, i32)] = &[
 
 // socket.py imports these constants once, so deletion must not fall back to a native value.
 const IMPORTED_CONSTANTS: &[(&str, i32)] = &[
+    ("AI_NUMERICSERV", libc::AI_NUMERICSERV),
+    ("EAI_SERVICE", libc::EAI_SERVICE),
+    ("EAI_NODATA", libc::EAI_NODATA),
+    ("EAI_NONAME", libc::EAI_NONAME),
+    ("SOL_TCP", libc::IPPROTO_TCP),
     ("NI_DGRAM", libc::NI_DGRAM),
     ("NI_NAMEREQD", libc::NI_NAMEREQD),
     ("NI_NOFQDN", libc::NI_NOFQDN),
@@ -39,6 +44,10 @@ const IMPORTED_CONSTANTS: &[(&str, i32)] = &[
 
 const RESOLVER_NAMES: &[&str] = &[
     "gaierror",
+    "herror",
+    "gethostname",
+    "gethostbyname",
+    "gethostbyaddr",
     "getnameinfo",
     "if_nameindex",
     "if_nametoindex",
@@ -55,6 +64,8 @@ pub(in super::super) fn install_lowlevel_socket(ctx: &mut Context, scope: Id) ->
         let value = ctx.builtin(&format!("socket.{name}"));
         ctx.bind(scope, name, value);
     }
+    let resolver = ctx.builtin("_socket.getaddrinfo");
+    ctx.bind(scope, "getaddrinfo", resolver);
     let socket_type = attribute(ctx, "socket")?;
     ctx.bind(scope, "SocketType", socket_type);
     for name in ["has_ipv6", "socket", "close", "error"] {
@@ -64,9 +75,12 @@ pub(in super::super) fn install_lowlevel_socket(ctx: &mut Context, scope: Id) ->
     Ok(())
 }
 
-/// An ordinary importlib-only executable can load socket without its bundled Python source.
+/// Snapshot the native constants and build the public enum members before socket.py runs.
 pub(in super::super) fn import_socket_constants(ctx: &mut Context, scope: Id) -> Result<()> {
     let low = ctx.module("_socket")?;
+    ctx.bind(scope, "_socket", low);
+    let getaddrinfo = ctx.builtin("socket.getaddrinfo");
+    ctx.bind(scope, "getaddrinfo", getaddrinfo);
     for name in IMPORTED_CONSTANTS
         .iter()
         .map(|&(name, _)| name)
@@ -78,11 +92,58 @@ pub(in super::super) fn import_socket_constants(ctx: &mut Context, scope: Id) ->
             Err(error) => return Err(error),
         }
     }
+    let Value::Module {
+        scope: low_scope, ..
+    } = *ctx.heap.get(low)
+    else {
+        return Err(Error::new("TypeError", "_socket must be a module"));
+    };
+    let namespace = ctx.module_globals(low_scope)?;
+    for (class_name, prefix, base_name) in [
+        ("AddressFamily", "AF_", "enum.IntEnum"),
+        ("SocketKind", "SOCK_", "enum.IntEnum"),
+        ("AddressInfo", "AI_", "enum.IntFlag"),
+    ] {
+        let enum_scope = ctx.scope("socket", None);
+        let module = ctx.text("socket");
+        ctx.bind(enum_scope, "__module__", module);
+        let mut entries: Vec<_> = ctx
+            .dict_entries(namespace)
+            .expect("module globals")
+            .iter()
+            .filter_map(|&(key, value)| {
+                let name = ctx.str_value(key).ok()?;
+                (name.starts_with(prefix) && !name.bytes().any(|ch| ch.is_ascii_lowercase()))
+                    .then(|| (name.to_owned(), value))
+            })
+            .collect();
+        // Enum._convert_ sorts by value, breaking alias ties by name. When
+        // replacement exports cannot be ordered together, it sorts by name.
+        entries.sort_by(|(a, _), (b, _)| a.cmp(b));
+        if entries.iter().all(|(_, value)| ctx.as_int(*value).is_ok()) {
+            entries.sort_by(|(_, a), (_, b)| ctx.as_int(*a).unwrap().cmp(&ctx.as_int(*b).unwrap()));
+        }
+        for (name, value) in &entries {
+            ctx.bind(enum_scope, name, *value);
+        }
+        let base = ctx.builtin(base_name);
+        let class = ctx.allocate_class(class_name.into(), enum_scope, vec![base])?;
+        ctx.populate_enum(class, Some(base))?;
+        ctx.bind(scope, class_name, class);
+        for (name, _) in entries {
+            let member = ctx.class_attr(class, &name).expect("declared socket enum");
+            ctx.bind(scope, &name, member);
+        }
+    }
     Ok(())
 }
 
 pub(super) fn attribute(ctx: &mut Context, name: &str) -> Result<Id> {
-    if let Some(&(_, value)) = CONSTANTS.iter().find(|&&(key, _)| key == name) {
+    if !name.starts_with("AF_")
+        && !name.starts_with("SOCK_")
+        && !name.starts_with("AI_")
+        && let Some(&(_, value)) = CONSTANTS.iter().find(|&&(key, _)| key == name)
+    {
         return Ok(ctx.int(i64::from(value)));
     }
     match name {
@@ -91,7 +152,7 @@ pub(super) fn attribute(ctx: &mut Context, name: &str) -> Result<Id> {
         "has_ipv6" => Ok(super::TRUE),
         "socket" => Ok(ctx.builtin("socket.socket")),
         "close" => Ok(ctx.builtin("_socket.close")),
-        "getaddrinfo" | "getfqdn" => Ok(ctx.alloc(Value::Native(format!("socket.{name}")))),
+        "getfqdn" => Ok(ctx.alloc(Value::Native("socket.getfqdn".into()))),
         "error" => Ok(ctx.builtin("OSError")),
         "timeout" => Ok(ctx.alloc(Value::Native("TimeoutError".into()))),
         _ => Err(Error::new(
@@ -266,6 +327,76 @@ fn unsigned_mask(value: crate::Int) -> u32 {
         .expect("masked uint32")
 }
 
+/// PyArg's "et" conversion IDNA-encodes str and treats bytes/bytearray as already encoded.
+fn host_argument(
+    ctx: &mut Context,
+    name: &str,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Vec<u8>> {
+    let arg = super::super::builtins::one_positional_arg(name, args, kwargs)?;
+    let bytes = match ctx.heap.get(ctx.scalar_value(arg)) {
+        Value::Bytes(_) | Value::ByteArray(_) => ctx.bytes_like(arg)?.to_vec(),
+        Value::Str(_) | Value::SurrogateStr(_) => {
+            let host = ctx.str_value(arg)?;
+            if !host.is_ascii() {
+                return Err(Error::new(
+                    "NotImplementedError",
+                    "Unicode host names require IDNA encoding",
+                ));
+            }
+            // Match the ASCII fast path in encodings.idna; the final label may be empty.
+            let empty = if host.starts_with('.') {
+                Some(0)
+            } else {
+                host.find("..").map(|i| i + 1)
+            };
+            if let Some(i) = empty {
+                return Err(ctx.string_encoding_error(
+                    arg,
+                    "idna",
+                    "label empty",
+                    u32::from(b'.'),
+                    i..i + 1,
+                ));
+            }
+            let mut offset = 0;
+            for label in host.split('.') {
+                if label.len() >= 64 {
+                    return Err(ctx.string_encoding_error(
+                        arg,
+                        "idna",
+                        "label too long",
+                        0,
+                        offset..offset + label.len(),
+                    ));
+                }
+                offset += label.len() + 1;
+            }
+            host.as_bytes().to_vec()
+        }
+        _ => {
+            return Err(Error::new(
+                "TypeError",
+                format!(
+                    "{name}() argument 1 must be str, bytes or bytearray, not {}",
+                    ctx.type_name(arg)
+                ),
+            ));
+        }
+    };
+    if bytes.contains(&0) {
+        return Err(Error::new(
+            "TypeError",
+            format!(
+                "{name}() argument 1 must be encoded string without null bytes, not {}",
+                ctx.type_name(arg)
+            ),
+        ));
+    }
+    Ok(bytes)
+}
+
 fn interface_name(ctx: &mut Context, name: &std::ffi::CStr) -> Result<Id> {
     let codec = crate::objects::Codec::lookup(crate::sys::filesystem_encoding()?.as_str())?;
     Ok(ctx.text_codepoints(codec.decode_filesystem(name.to_bytes())?))
@@ -353,32 +484,75 @@ fn if_indextoname(ctx: &mut Context, arg: Id) -> Result<Id> {
     interface_name(ctx, unsafe { std::ffi::CStr::from_ptr(ptr) })
 }
 
-fn getaddrinfo(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
-    let keys = ["host", "port", "family", "type", "proto", "flags"];
-    check_args("getaddrinfo", args, kwargs, keys.len(), &keys)?;
-    let host =
-        option(args, 0, kwargs, "host")?.ok_or_else(|| Error::new("TypeError", "missing host"))?;
-    let service =
-        option(args, 1, kwargs, "port")?.ok_or_else(|| Error::new("TypeError", "missing port"))?;
-    let host = (host != NONE).then(|| ctx.str_value(host)).transpose()?;
-    let service = match ctx.heap.get(service) {
+fn getaddrinfo_args(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<[Id; 6]> {
+    let values = super::super::builtins::bind_builtin_arguments(
+        "getaddrinfo",
+        args,
+        kwargs,
+        ["host", "port", "family", "type", "proto", "flags"],
+        2,
+    )?;
+    let zero = ctx.int(0);
+    Ok(values.map(|value| value.unwrap_or(zero)))
+}
+
+/// An importlib-only executable may use socket without its bundled Python source.
+fn public_getaddrinfo(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    let args = getaddrinfo_args(ctx, args, kwargs)?;
+    let socket = ctx.module("socket")?;
+    let low = ctx.lookup_attr(socket, "_socket")?;
+    let resolver = ctx.lookup_attr(low, "getaddrinfo")?;
+    let rows = ctx.call(resolver, args.to_vec(), Vec::new())?;
+    let iter = ctx.iterator(rows)?;
+    let mut result = Vec::new();
+    while let Some(row) = ctx.next_item(iter)? {
+        let mut fields = ctx.unpack_items(row, 5, None)?;
+        for (value, name) in fields.iter_mut().zip(["AddressFamily", "SocketKind"]) {
+            let class = ctx.lookup_attr(socket, name)?;
+            match ctx.call(class, vec![*value], Vec::new()) {
+                Ok(member) => *value = member,
+                Err(error) if ctx.is_builtin_error(&error, "ValueError") => {}
+                Err(error) => return Err(error),
+            }
+        }
+        result.push(ctx.alloc(Value::Tuple(fields)));
+    }
+    Ok(ctx.alloc(Value::List(result)))
+}
+
+pub(super) fn getaddrinfo(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    let [host, service, family, ty, protocol, flags] = getaddrinfo_args(ctx, args, kwargs)?;
+    let family = ctx.index_c_int(family)?;
+    let ty = ctx.index_c_int(ty)?;
+    let protocol = ctx.index_c_int(protocol)?;
+    let flags = ctx.index_c_int(flags)?;
+    let host = match ctx.heap.get(ctx.scalar_value(host)) {
         Value::None => None,
-        Value::Str(s) => Some(s.clone()),
-        Value::Int(n) => Some(n.to_string()),
-        _ => {
-            return Err(Error::new(
-                "TypeError",
-                "port must be an integer or a string",
-            ));
+        Value::Bytes(bytes) => Some(bytes.clone()),
+        _ => Some(ctx.str_value(host)?.as_bytes().to_vec()),
+    };
+    let service = if let Some(index) = ctx.index_value(service)? {
+        Some(index.to_string().into_bytes())
+    } else {
+        match ctx.heap.get(ctx.scalar_value(service)) {
+            Value::None => None,
+            Value::Bytes(bytes) => Some(bytes.clone()),
+            Value::Str(s) => Some(s.as_bytes().to_vec()),
+            Value::SurrogateStr(_) => Some(ctx.encode_utf8_codepoints(service, false, "strict")?),
+            _ => return Err(Error::new("OSError", "Int or String expected")),
         }
     };
+    // CPython passes the NUL-terminated host and service buffers to libc.
+    fn c_string_prefix(value: &[u8]) -> &[u8] {
+        value.split(|&byte| byte == 0).next().unwrap_or_default()
+    }
     let rows = native::getaddrinfo(
-        host,
-        service.as_deref(),
-        int_option(ctx, args, kwargs, 2, "family", libc::AF_UNSPEC)?,
-        int_option(ctx, args, kwargs, 3, "type", 0)?,
-        int_option(ctx, args, kwargs, 4, "proto", 0)?,
-        int_option(ctx, args, kwargs, 5, "flags", 0)?,
+        host.as_deref().map(c_string_prefix),
+        service.as_deref().map(c_string_prefix),
+        family,
+        ty,
+        protocol,
+        flags,
     )?;
     let mut result = Vec::with_capacity(rows.len());
     for row in rows {
@@ -524,8 +698,31 @@ pub(super) fn call(
             let arg = super::super::builtins::one_positional_arg(name, args, kwargs)?;
             return if_indextoname(ctx, arg);
         }
-        "getaddrinfo" => return getaddrinfo(ctx, args, kwargs),
+        "getaddrinfo" => return public_getaddrinfo(ctx, args, kwargs),
         "getnameinfo" => return getnameinfo(ctx, args, kwargs),
+        "gethostname" => {
+            check_args(name, args, kwargs, 0, &[])?;
+            super::audit::event(ctx, "socket.gethostname", args)?;
+            let raw = native::hostname()?;
+            let codec = crate::objects::Codec::lookup(crate::sys::filesystem_encoding()?.as_str())?;
+            return Ok(ctx.text_codepoints(codec.decode_filesystem(&raw)?));
+        }
+        "gethostbyname" => {
+            let host = host_argument(ctx, name, args, kwargs)?;
+            super::audit::event(ctx, "socket.gethostbyname", args)?;
+            return Ok(ctx.text(native::hostbyname(&host)?.to_string()));
+        }
+        "gethostbyaddr" => {
+            let host = host_argument(ctx, name, args, kwargs)?;
+            super::audit::event(ctx, "socket.gethostbyaddr", args)?;
+            let entry = native::hostbyaddr(&host)?;
+            let name = ctx.text(entry.name);
+            let aliases = entry.aliases.into_iter().map(|s| ctx.text(s)).collect();
+            let aliases = ctx.alloc(Value::List(aliases));
+            let addresses = entry.addresses.into_iter().map(|s| ctx.text(s)).collect();
+            let addresses = ctx.alloc(Value::List(addresses));
+            return Ok(ctx.alloc(Value::Tuple(vec![name, aliases, addresses])));
+        }
         "getfqdn" => {
             check_args(name, args, kwargs, 1, &["name"])?;
             let host = option(args, 0, kwargs, "name")?

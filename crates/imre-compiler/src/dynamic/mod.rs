@@ -202,6 +202,9 @@ impl<'a> Visitor<'a> for Imports {
                 for alias in &imp.names {
                     let name = alias.name.as_str();
                     let bound = alias.asname.as_ref().unwrap_or(&alias.name);
+                    if name == "__future__" {
+                        self.runtime_imports = true;
+                    }
                     match name {
                         "sys" => self.sys_names.insert(bound.to_string()),
                         "operator" => self.operator_names.insert(bound.to_string()),
@@ -256,6 +259,9 @@ impl<'a> Visitor<'a> for Imports {
                         ));
                     }
                 }
+            }
+            Stmt::ClassDef(class) if class.type_params.is_some() => {
+                self.runtime_imports = true;
             }
             Stmt::Assign(a) if a.targets.iter().any(|t| self.sys_path(t)) => {
                 self.runtime_imports = true;
@@ -401,6 +407,7 @@ pub(crate) fn compile(
     if !runtime_imports
         && !(cfg!(unix) && src.contains("signal"))
         && ![
+            "__future__",
             "_imp",
             "sys",
             "platform",
@@ -560,7 +567,6 @@ pub(crate) fn compile(
                     ))
                 } else {
                     import_module::boxed_source(&prefix)
-                        .or_else(|| crate::modules::bundled_runtime_source(&prefix))
                 };
                 if let Some((filename, source)) = bundled {
                     let path = Path::new(bundled_root).join(filename);
@@ -623,13 +629,22 @@ pub(crate) fn compile(
             include_str!("../../stdlib/collections/namedtuple_repr.py").into(),
         ));
     }
+    // The sealed io module also needs its Python protocols when imported indirectly.
+    sources.push((
+        "io".into(),
+        Path::new(bundled_root).join("io.py"),
+        include_str!("../../stdlib/io.py").into(),
+    ));
     // These bundled initializers depend only on native modules and may be selected by name at runtime.
     for name in [
+        "__future__",
         "__hello__",
         "_tokenize",
+        "abc",
         "ast",
         "codecs",
         "genericpath",
+        "hashlib",
         "platform",
         "re",
         "signal",
@@ -639,7 +654,7 @@ pub(crate) fn compile(
         "zipimport",
     ] {
         if !seen.contains(name)
-            && let Some((file, source)) = crate::modules::bundled_runtime_source(name)
+            && let Some((file, source)) = import_module::boxed_source(name)
         {
             sources.push((
                 name.into(),

@@ -370,8 +370,11 @@ pub(super) fn bytearray_method(
 }
 
 pub(in super::super) fn bytes_from_iterable(ctx: &mut Context, obj: Id) -> Result<Vec<u8>> {
-    if let Value::Bytes(data) | Value::ByteArray(data) = ctx.heap.get(ctx.scalar_value(obj)) {
-        return super::super::copy_ids(data);
+    if matches!(
+        ctx.heap.get(ctx.scalar_value(obj)),
+        Value::Bytes(_) | Value::ByteArray(_) | Value::MemoryView { .. }
+    ) {
+        return super::super::copy_ids(ctx.bytes_like(obj)?);
     }
     let iter = ctx.iterator(obj)?;
     ctx.heap.keep(iter);
@@ -1254,7 +1257,7 @@ pub(super) fn method(
         return ctx.new_string(owner, receiver, args, kwargs);
     }
     let receiver = if owner == "bytes"
-        || (owner == "bytearray" && matches!(name, "endswith" | "startswith"))
+        || (owner == "bytearray" && matches!(name, "endswith" | "split" | "startswith"))
     {
         let storage = ctx.scalar_value(receiver);
         if !matches!(
@@ -1487,21 +1490,31 @@ pub(super) fn method(
             None => receiver,
         });
     }
-    if name == "rsplit" && matches!(ctx.heap.get(receiver), Value::Bytes(_)) {
-        let [sep, max] =
-            super::bind_method_arguments("rsplit", args, kwargs, ["sep", "maxsplit"], 2)?;
+    if matches!(owner, "bytes" | "bytearray") && matches!(name, "split" | "rsplit") {
+        let [sep, max] = super::bind_method_arguments(name, args, kwargs, ["sep", "maxsplit"], 2)?;
         let limit = split_limit(ctx, max)?;
         let separator = sep
             .filter(|&id| id != NONE)
-            .map(|id| ctx.bytes_like(id))
+            .map(|id| match ctx.heap.get(ctx.scalar_value(id)) {
+                Value::Array(array) => Ok(array.as_bytes()),
+                _ => ctx.bytes_like(id),
+            })
             .transpose()?;
-        let Value::Bytes(data) = ctx.heap.get(receiver) else {
-            unreachable!()
-        };
-        let parts = crate::objects::rsplit_bytes(data, separator, limit)?;
+        let immutable = owner == "bytes";
+        let parts = crate::objects::split_bytes(
+            ctx.bytes_like(receiver)?,
+            separator,
+            limit,
+            name == "rsplit",
+            immutable,
+        )?;
         let fields = parts
             .into_iter()
-            .map(|part| part.map_or(receiver, |bytes| ctx.alloc(Value::Bytes(bytes))))
+            .map(|part| match part {
+                None => receiver,
+                Some(bytes) if immutable => ctx.alloc(Value::Bytes(bytes)),
+                Some(bytes) => ctx.alloc(Value::ByteArray(bytes)),
+            })
             .collect();
         return Ok(ctx.alloc(Value::List(fields)));
     }
@@ -1516,7 +1529,8 @@ pub(super) fn method(
         "isupper" => Some(crate::objects::python_isupper),
         _ => None,
     };
-    if let Some(predicate) = predicate {
+    let mapping = matches!(name, "title" | "swapcase");
+    if predicate.is_some() || mapping {
         if !kwargs.is_empty() {
             return Err(type_error(format!(
                 "str.{name}() takes no keyword arguments"
@@ -1528,6 +1542,21 @@ pub(super) fn method(
                 args.len()
             )));
         }
+    }
+    if mapping {
+        let title = name == "title";
+        let storage = ctx.string_storage(receiver).unwrap();
+        let mapped = match ctx.heap.get(storage) {
+            Value::Str(text) if text.is_empty() => return ctx.heap.string_literal(""),
+            Value::Str(text) => Value::Str(crate::objects::case_map(text, title)?),
+            Value::SurrogateStr(points) => {
+                Value::SurrogateStr(crate::objects::case_map_points(points, title)?)
+            }
+            _ => unreachable!(),
+        };
+        return ctx.heap.fresh_string(mapped);
+    }
+    if let Some(predicate) = predicate {
         if matches!(name, "isascii" | "isalpha" | "isdigit")
             && matches!(
                 ctx.heap.get(ctx.scalar_value(receiver)),

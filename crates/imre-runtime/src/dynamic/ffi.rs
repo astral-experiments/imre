@@ -151,10 +151,6 @@ impl Context {
                 };
                 self.template_interpolation(a, b, conversion, spec)
             }
-            "template_literal" => {
-                let parts = self.items(a)?;
-                self.template_literal(&parts)
-            }
             "build_template" => {
                 let interpolations = self.items(b)?;
                 Ok(self.template_from_literal(a, interpolations))
@@ -347,6 +343,23 @@ impl Context {
                 Ok(std::mem::replace(&mut items[index], NONE))
             }
             "slice_object" => Ok(self.alloc(Value::Slice([a, b, c]))),
+            "class_parameter_scope" => super::typing::class_parameter_scope(self, a, b),
+            "class_base_scope" => {
+                if self.scope_data(b).class_body.is_none() {
+                    return Ok(a);
+                }
+                // A generic class's bases can read its enclosing class dictionary. Its
+                // body and methods close over the parameter scope without that dictionary.
+                let module = self.scope_data(a).module.clone();
+                let scope = self.scope(&module, Some(a));
+                let namespace = self.class_dictionary(b);
+                let Value::Scope(frame) = self.heap.get_mut(scope) else {
+                    unreachable!()
+                };
+                frame.exec_locals = Some(namespace);
+                frame.closure.declared_complete = true;
+                Ok(scope)
+            }
             "class" | "parameterized_class" => {
                 let metaclass = self.dict_named_item(a, "metaclass");
                 let total = self.dict_named_item(a, "total");
@@ -649,7 +662,7 @@ pub(super) fn new_context<S: Into<String>>(
         default_encoding: NONE,
         audit_hooks: Vec::new(),
         contexts: Vec::new(),
-        bytearray_exports: Vec::new(),
+        buffer_exports: Vec::new(),
         sorting_lists: Vec::new(),
         repr_ancestors: Vec::new(),
         token_missing: NONE,
@@ -871,18 +884,6 @@ pub(super) unsafe extern "C" fn imre_dyn_lit(
 }
 
 #[unsafe(no_mangle)]
-pub(super) unsafe extern "C" fn imre_dyn_op(
-    ctx: *mut Context,
-    opcode: *const c_char,
-    a: Id,
-    b: Id,
-    c: Id,
-) -> Id {
-    // SAFETY: legacy call sites pass the same handles, without an instruction position.
-    unsafe { imre_dyn_op_at(ctx, opcode, a, b, c, std::ptr::null()) }
-}
-
-#[unsafe(no_mangle)]
 pub(super) unsafe extern "C" fn imre_dyn_op_at(
     ctx: *mut Context,
     opcode: *const c_char,
@@ -1028,7 +1029,7 @@ impl Context {
                     freevars.push(name.to_owned());
                     break;
                 }
-                if !frame.closure.declared_complete {
+                if frame.class_body.is_none() && !frame.closure.declared_complete {
                     return None;
                 }
                 cursor = frame.parent;
@@ -1336,7 +1337,7 @@ impl Context {
                 .chain(self.workers.roots().copied())
                 .chain(self.threads.roots())
                 .chain(self.contexts.iter().copied())
-                .chain(self.bytearray_exports.iter().copied())
+                .chain(self.buffer_exports.iter().copied())
                 .chain(self.pending.iter().flat_map(Error::roots))
                 .chain(self.source_builtins)
                 .chain([

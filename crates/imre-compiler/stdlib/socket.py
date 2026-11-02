@@ -2,8 +2,7 @@
 
 import _socket
 import os
-from _socket import SOCK_DGRAM, SOCK_RAW, SOCK_RDM, SOCK_SEQPACKET
-from _socket import SOCK_STREAM, close, error, has_ipv6, socket
+from _socket import close, error, has_ipv6, socket
 
 for _name in ("NI_DGRAM", "NI_NAMEREQD", "NI_NOFQDN", "NI_NUMERICHOST", "NI_NUMERICSERV",
               "gaierror", "getnameinfo", "if_indextoname", "if_nameindex", "if_nametoindex"):
@@ -11,18 +10,16 @@ for _name in ("NI_DGRAM", "NI_NAMEREQD", "NI_NOFQDN", "NI_NUMERICHOST", "NI_NUME
         globals()[_name] = getattr(_socket, _name)
 del _name
 
-if hasattr(_socket, "AF_INET"):
-    AF_INET = _socket.AF_INET
-if hasattr(_socket, "SOL_SOCKET"):
-    SOL_SOCKET = _socket.SOL_SOCKET
-if hasattr(_socket, "SO_REUSEADDR"):
-    SO_REUSEADDR = _socket.SO_REUSEADDR
-if hasattr(_socket, "SO_REUSEPORT"):
-    SO_REUSEPORT = _socket.SO_REUSEPORT
+if hasattr(_socket, "gethostname"):
+    gethostname = _socket.gethostname
+if hasattr(_socket, "gethostbyname"):
+    gethostbyname = _socket.gethostbyname
+if hasattr(_socket, "gethostbyaddr"):
+    gethostbyaddr = _socket.gethostbyaddr
+if hasattr(_socket, "herror"):
+    herror = _socket.herror
 if hasattr(_socket, "SocketType"):
     SocketType = _socket.SocketType
-if hasattr(_socket, "AF_INET6"):
-    AF_INET6 = _socket.AF_INET6
 if hasattr(_socket, "IPPROTO_UDP"):
     IPPROTO_UDP = _socket.IPPROTO_UDP
 if hasattr(_socket, "IPPROTO_IPV6"):
@@ -31,20 +28,18 @@ if hasattr(_socket, "IPV6_V6ONLY"):
     IPV6_V6ONLY = _socket.IPV6_V6ONLY
 
 
-def has_dualstack_ipv6():
-    """Return True if the platform supports creating a SOCK_STREAM socket
-    which can handle both AF_INET and AF_INET6 (IPv4 / IPv6) connections.
-    """
-    if not has_ipv6 \
-            or not hasattr(_socket, 'IPPROTO_IPV6') \
-            or not hasattr(_socket, 'IPV6_V6ONLY'):
-        return False
+def _intenum_converter(value, enum_klass):
     try:
-        with socket(AF_INET6, SOCK_STREAM) as sock:
-            sock.setsockopt(IPPROTO_IPV6, IPV6_V6ONLY, 0)
-            return True
-    except error:
-        return False
+        return enum_klass(value)
+    except ValueError:
+        return value
+
+
+def getaddrinfo(host, port, family=0, type=0, proto=0, flags=0):
+    return [(_intenum_converter(af, AddressFamily), _intenum_converter(kind, SocketKind),
+             protocol, canonname, sockaddr)
+            for af, kind, protocol, canonname, sockaddr
+            in _socket.getaddrinfo(host, port, family, type, proto, flags)]
 
 
 def create_server(address, *, family=AF_INET, backlog=None, reuse_port=False,
@@ -87,3 +82,19 @@ def create_server(address, *, family=AF_INET, backlog=None, reuse_port=False,
     except error:
         sock.close()
         raise
+
+
+def has_dualstack_ipv6():
+    """Return True if the platform supports creating a SOCK_STREAM socket
+    which can handle both AF_INET and AF_INET6 (IPv4 / IPv6) connections.
+    """
+    if not has_ipv6 \
+            or not hasattr(_socket, 'IPPROTO_IPV6') \
+            or not hasattr(_socket, 'IPV6_V6ONLY'):
+        return False
+    try:
+        with socket(AF_INET6, SOCK_STREAM) as sock:
+            sock.setsockopt(IPPROTO_IPV6, IPV6_V6ONLY, 0)
+            return True
+    except error:
+        return False

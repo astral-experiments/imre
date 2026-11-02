@@ -421,7 +421,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         | ("_imre_mock", "is_call_list" | "mark_call_list")
         | (
             "_imre_dataclasses",
-            "is_defaultdict" | "load_global" | "loaded_module" | "members" | "metadata" | "slotted_type" | "retarget_class_cell",
+            "field_identifier" | "make_type" | "is_defaultdict" | "load_global" | "loaded_module" | "members" | "metadata" | "slotted_type" | "retarget_class_cell",
         ) => ctx.builtin(&format!("{module}.{name}")),
         ("_imre_thread", "start" | "join" | "alive" | "threads" | "current") => {
             ctx.builtin(&format!("{module}.{name}"))
@@ -488,6 +488,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             | "_new_typeddict"
             | "_UnpackGenericAlias"
             | "_eval_type_expression"
+            | "_validate_forward_ref"
             | "Any"
             | "Callable"
             | "cast"
@@ -693,7 +694,8 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         | ("hmac", "new" | "HMAC" | "compare_digest")
         | (
             "re",
-            "match" | "fullmatch" | "search" | "compile" | "_compile_scanner" | "split" | "findall",
+            "match" | "fullmatch" | "search" | "compile" | "_compile_scanner" | "split" | "findall"
+            | "finditer",
         )
         | ("typing", "IO" | "NamedTuple" | "Generator" | "Iterator" | "Sequence")
         | ("enum", "_simple_enum")
@@ -1603,6 +1605,17 @@ pub(super) fn call(
     }
     if let Some(method) = name.strip_prefix("_imre_dataclasses.") {
         match (method, args, kwargs) {
+            ("field_identifier", [_], []) => {
+                return inspect::call(ctx, "_signature_identifier", args, kwargs);
+            }
+            ("make_type", [name, bases, members], []) => {
+                let name = ctx.str_value(*name)?.to_owned();
+                if name.contains('\0') {
+                    return Err(Error::new("ValueError", "type name must not contain null characters"));
+                }
+                let bases = ctx.tuple_items(*bases)?.ok_or_else(|| Error::new("TypeError", "expected a tuple of bases"))?;
+                return ctx.dataclass_from_namespace(name, bases, *members, "types", false, true);
+            }
             ("is_defaultdict", [obj], []) => {
                 // Boxed defaultdict exposes its factory on instances, including derived instances.
                 return Ok(if ctx.defaultdict_factory(*obj).is_some() {
@@ -1748,6 +1761,9 @@ pub(super) fn call(
             _ => codecs::builtin_handler(ctx, function, args, kwargs),
         };
     }
+    if name == "_socket.getaddrinfo" {
+        return socket::getaddrinfo(ctx, args, kwargs);
+    }
     if name == "_socket.close" {
         return socket::close(ctx, args, kwargs);
     }
@@ -1885,7 +1901,7 @@ pub(super) fn call(
     if name == "hashlib.new" {
         return hashlib::new(ctx, args, kwargs);
     }
-    if let Some(method @ ("match" | "fullmatch" | "search" | "scanner")) =
+    if let Some(method @ ("match" | "fullmatch" | "search" | "scanner" | "finditer")) =
         name.strip_prefix("pattern.")
     {
         return regex::search(ctx, method, args, kwargs);
@@ -1941,7 +1957,7 @@ pub(super) fn call(
         | "file.write" | "warnings.warn" => (2, &[]),
         "match.group" | "os.path.join" => (usize::MAX, &[]),
         "collections.defaultdict.__missing__" => (2, &[]),
-        "match.groups" => (2, &["default"]),
+        "match.groups" | "match.groupdict" => (2, &["default"]),
         "match.start" | "match.end" | "match.span" => (2, &[]),
         "scanner.match" | "scanner.search" => (1, &[]),
         "sys.exc_info" | "sys.exception" => (0, &[]),
@@ -2277,12 +2293,14 @@ pub(super) fn call(
         {
             return files::call(ctx, name, args, kwargs);
         }
-        "match.groups" => {
-            return regex::match_groups(
-                ctx,
-                argument(args, 0)?,
-                option(args, 1, kwargs, "default")?.unwrap_or(NONE),
-            );
+        "match.groups" | "match.groupdict" => {
+            let receiver = argument(args, 0)?;
+            let default = option(args, 1, kwargs, "default")?.unwrap_or(NONE);
+            return if name == "match.groupdict" {
+                regex::match_groupdict(ctx, receiver, default)
+            } else {
+                regex::match_groups(ctx, receiver, default)
+            };
         }
         name if name.starts_with("pattern.") || name.starts_with("match.") => {
             return regex::call(ctx, name, args);

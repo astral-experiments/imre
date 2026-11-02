@@ -1,11 +1,12 @@
 from _imre_dataclasses import (
-    is_defaultdict as _is_defaultdict, load_global as _load_global,
-    loaded_module as _loaded_module, members as _members, metadata as _metadata,
+    field_identifier as _field_identifier, is_defaultdict as _is_defaultdict,
+    load_global as _load_global, loaded_module as _loaded_module,
+    make_type as _make_type, members as _members, metadata as _metadata,
     retarget_class_cell as _retarget_class_cell, slotted_type as _slotted_type,
 )
 from types import FunctionType, GenericAlias, MemberDescriptorType
 
-__all__ = ["dataclass", "field", "Field", "fields", "is_dataclass", "asdict", "astuple", "replace",
+__all__ = ["dataclass", "field", "Field", "fields", "is_dataclass", "make_dataclass", "asdict", "astuple", "replace",
            "MISSING", "KW_ONLY", "InitVar", "FrozenInstanceError"]
 
 _FIELDS = "__dataclass_fields__"
@@ -565,6 +566,79 @@ def dataclass(cls=None, /, *, init=True, repr=True, eq=True, order=False,
     def wrap(cls):
         return _decorate(cls, params)
     return wrap if cls is None else wrap(cls)
+
+
+def make_dataclass(cls_name, fields, *, bases=(), namespace=None, init=True,
+                   repr=True, eq=True, order=False, unsafe_hash=False, frozen=False,
+                   match_args=True, kw_only=False, slots=False, weakref_slot=False,
+                   module=None, decorator=dataclass):
+    """Create a class from field declarations and apply the requested decorator."""
+    from keyword import iskeyword
+    import sys
+
+    annotations = {}
+    defaults = {}
+    implicit = False
+    for item in fields:
+        if isinstance(item, str):
+            name = item
+            annotation = None
+            implicit = True
+        elif len(item) == 2:
+            name, annotation = item
+        elif len(item) == 3:
+            name, annotation, default = item
+            defaults[name] = default
+        else:
+            raise TypeError(f'Invalid field: {item!r}')
+
+        if not isinstance(name, str) or not _field_identifier(name):
+            raise TypeError(f'Field names must be valid identifiers: {name!r}')
+        if iskeyword(name):
+            raise TypeError(f'Field names must not be keywords: {name!r}')
+        if name in annotations:
+            raise TypeError(f'Field name duplicated: {name!r}')
+        annotations[name] = annotation
+
+    if implicit:
+        raise NotImplementedError('implicit Any fields require deferred typing.Any resolution')
+    if not isinstance(bases, tuple):
+        raise TypeError('type.__new__() argument 2 must be tuple, not ' + type(bases).__name__)
+
+    members = {}
+    if namespace is not None:
+        members.update(namespace)
+    members.update(defaults)
+    if '__slots__' in members or '__classcell__' in members:
+        raise NotImplementedError('boxed make_dataclass requires an ordinary class namespace')
+    if any(not isinstance(key, str) for key in members):
+        raise NotImplementedError('boxed class namespaces require string keys')
+    members.setdefault('__module__', 'types')
+    members.setdefault('__doc__', None)
+    members.setdefault('__qualname__', cls_name)
+    if not isinstance(members['__qualname__'], str):
+        raise TypeError('type __qualname__ must be a str')
+    for key in ('__init_subclass__', '__class_getitem__'):
+        value = members.get(key)
+        if isinstance(value, FunctionType):
+            members[key] = classmethod(value)
+    if isinstance(members.get('__new__'), FunctionType):
+        members['__new__'] = staticmethod(members['__new__'])
+    cls = _make_type(cls_name, bases, members)
+
+    def annotate(format):
+        # The field types are already values. Rendering strings requires annotationlib.
+        if format == 4:
+            raise NotImplementedError(format)
+        return annotations.copy()
+
+    cls.__annotate__ = annotate
+    if module is None:
+        module = sys._getframemodulename(1) or '__main__'
+    cls.__module__ = module
+    return decorator(cls, init=init, repr=repr, eq=eq, order=order,
+                     unsafe_hash=unsafe_hash, frozen=frozen, match_args=match_args,
+                     kw_only=kw_only, slots=slots, weakref_slot=weakref_slot)
 
 
 def _convert(obj, factory, named):
