@@ -38,7 +38,7 @@ def current():
         assert str(error) == "no such group"
     else:
         raise AssertionError("mapping lookup error was lost")
-    assert "{v:>{width}}".format_map({"v": "x", "width": 3}) == "  x"
+    assert "{v:{spec}}".format_map({"v": 15, "spec": "x"}) == "f"
     for template in ("{}", "{0}", "{v:{0}}"):
         try:
             template.format_map({"v": "x"})
