@@ -749,6 +749,9 @@ impl Context {
                             | "object.__getattribute__"
                             | "enum.auto.__init__"
                             | "enum.auto.__repr__"
+                            | "enum.Enum.__repr__"
+                            | "enum.Enum.__str__"
+                            | "enum.Enum.__format__"
                             | "enum.Enum.__copy__"
                             | "enum.Enum.__deepcopy__"
                             | "object.__setattr__"
@@ -1750,10 +1753,16 @@ impl Context {
         } = self.heap.get(obj)
         {
             let (class, inline, namespace) = (*class, fields.get(name).copied(), *namespace);
-            if matches!(name, "name" | "value")
-                && let Some((_, member_name, value)) = self.enum_member(obj)
-            {
-                return Ok(if name == "name" { member_name } else { value });
+            if matches!(name, "name" | "value") {
+                if self.float_enum_names(class).is_some() {
+                    let attr = self.class_attr(class, name);
+                    if attr.is_none_or(|attr| matches!(self.heap.get(attr), Value::Instance { class: owner, .. } if *owner == class)) {
+                        let field = if name == "name" { "_name_" } else { "_value_" };
+                        return self.lookup_attr(obj, field);
+                    }
+                } else if let Some((_, member_name, value)) = self.enum_member(obj) {
+                    return Ok(if name == "name" { member_name } else { value });
+                }
             }
             let layout = self.instance_layout(class, name);
             if layout.active_slot {
@@ -6116,6 +6125,9 @@ impl Context {
         if typed_dict_meta.is_none() {
             super::typing::class_parameters(self, scope, original, &bases)?;
         }
+        let float_enum = enum_kind
+            .filter(|kind| kind.scalar_base().is_none())
+            .and_then(|_| self.float_enum_type(&bases));
         let object = self.builtin("object");
         let ordinary_slots = typed_dict_meta.is_none()
             && enum_kind.is_none()
@@ -6162,7 +6174,13 @@ impl Context {
         }
         self.initialize_class_members(class, scope)?;
         if let Some(kind) = enum_kind {
-            let scalar = kind.scalar_base().map(|base| self.builtin(base));
+            let scalar = if let Some((member_type, first_enum)) = float_enum {
+                self.bind(scope, "_member_type_", member_type);
+                self.install_float_enum_display(class, member_type, first_enum)?;
+                Some(member_type)
+            } else {
+                kind.scalar_base().map(|base| self.builtin(base))
+            };
             self.populate_enum(class, scalar)?;
         }
         // Look up the inherited hook after __set_name__, before publishing the class.
