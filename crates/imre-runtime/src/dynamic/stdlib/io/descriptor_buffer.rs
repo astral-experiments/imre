@@ -192,6 +192,17 @@ pub(super) fn ssize(ctx: &mut Context, value: Id) -> Result<i64> {
     })
 }
 
+pub(super) fn random_initialized(ctx: &Context, receiver: Id) -> bool {
+    backing(ctx, receiver).is_some()
+        || matches!(
+            ctx.heap.get(receiver),
+            Value::Instance {
+                memory_stream: Some(MemoryStream::Reader(_)),
+                ..
+            }
+        )
+}
+
 /// Attach one buffered stream to a caller-owned native FileIO, without reopening its fd.
 pub(super) fn initialize(
     ctx: &mut Context,
@@ -251,6 +262,10 @@ pub(super) fn initialize(
             || backing(ctx, receiver).is_some();
         invalidate_writer(ctx, receiver, Some(raw))?;
     }
+    if owner == "BufferedRandom" && !random_initialized(ctx, receiver) {
+        // The public raw slot is visible during size validation and raw.tell().
+        super::buffered_reader::start_init(ctx, receiver, Some(raw))?;
+    }
     if capacity <= 0 {
         return Err(Error::new(
             "ValueError",
@@ -260,8 +275,7 @@ pub(super) fn initialize(
     let handle = match native_raw(ctx, raw, methods, owner) {
         Ok(handle) => handle,
         Err(_) if owner == "BufferedRandom" => {
-            if backing(ctx, receiver).is_some() || super::buffered_reader::has_state(ctx, receiver)
-            {
+            if random_initialized(ctx, receiver) {
                 return Err(Error::new(
                     "NotImplementedError",
                     "BufferedRandom reinitialization is unsupported",
@@ -276,7 +290,7 @@ pub(super) fn initialize(
     };
     if backing(ctx, receiver).is_some()
         || super::bytes_writer::state(ctx, receiver).is_some()
-        || owner == "BufferedRandom" && super::buffered_reader::has_state(ctx, receiver)
+        || owner == "BufferedRandom" && random_initialized(ctx, receiver)
     {
         return Err(Error::new(
             "NotImplementedError",

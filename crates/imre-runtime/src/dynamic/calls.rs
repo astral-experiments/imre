@@ -5256,6 +5256,7 @@ impl Context {
                             | "BufferedRWPair"
                             | "BufferedReader"
                             | "BufferedWriter"
+                            | "BufferedRandom"
                             | "IOBase"
                             | "BufferedIOBase"
                     )

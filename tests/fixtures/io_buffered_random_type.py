@@ -234,3 +234,34 @@ except io.UnsupportedOperation:
 else:
     assert not raw.closed
     raw.close()
+
+
+class FirstInit(io.BufferedRandom):
+    pass
+
+
+for cls in (io.BufferedRandom, FirstInit):
+    assert cls.__new__ is object.__new__
+    bare = cls.__new__(cls)
+    assert bare.raw is None
+    for method, value in ((bare.read, 0), (bare.write, b"")):
+        try:
+            method(value)
+        except ValueError as exc:
+            assert "uninitialized" in str(exc)
+        else:
+            raise AssertionError("operation accepted on bare BufferedRandom")
+    rejected = io.BytesIO(b"old")
+    try:
+        bare.__init__(rejected, 0)
+    except ValueError:
+        assert bare.raw is rejected and not rejected.closed
+    else:
+        raise AssertionError("accepted zero buffer size")
+    with io.BytesIO(b"new") as raw:
+        bare.__init__(raw, 2)
+        assert bare.read(1) == b"n" and bare.write(b"") == 0
+        bare.close()
+        assert raw.closed
+    assert rejected.read() == b"old"
+    rejected.close()

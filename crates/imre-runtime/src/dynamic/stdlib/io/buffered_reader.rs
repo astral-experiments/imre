@@ -48,7 +48,7 @@ fn raw_member(ctx: &Context, receiver: Id) -> Option<Id> {
 
 /// Reinitialization invalidates buffered operations; the public raw slot changes only
 /// after readable() succeeds, even if allocation or size validation subsequently fails.
-fn start_init(ctx: &mut Context, receiver: Id, raw: Option<Id>) -> Result<()> {
+pub(super) fn start_init(ctx: &mut Context, receiver: Id, raw: Option<Id>) -> Result<()> {
     let previous = raw_member(ctx, receiver);
     let Value::Instance { memory_stream, .. } = ctx.heap.get_mut(receiver) else {
         return Err(Error::new(
@@ -95,6 +95,10 @@ pub(super) fn install(
         .and_then(|n| index(ctx, n))
         .ok()
         .filter(|n| *n >= 0);
+    if update && super::descriptor_buffer::random_initialized(ctx, receiver) {
+        // A callback in raw.tell() finished initializing this same wrapper.
+        return Ok(NONE);
+    }
     let state = Reader {
         raw: Cell::new(Some(raw)),
         size: size as usize,
