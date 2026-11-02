@@ -13,6 +13,45 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 pub(crate) use super::stdlib::imre_wall_time as wall_time;
 
+/// Suspend the calling thread for a checked Python timeout in nanoseconds.
+pub(crate) fn sleep_ns(nanos: i64) -> Result<(), Error> {
+    if nanos < 0 {
+        return Err(Error::new(
+            Kind::ValueError,
+            "sleep length must be non-negative",
+        ));
+    }
+    if nanos == 0 {
+        std::thread::yield_now();
+    } else {
+        std::thread::sleep(std::time::Duration::from_nanos(nanos as u64));
+    }
+    Ok(())
+}
+
+/// CPython rounds a positive floating-point timeout up to a whole nanosecond.
+pub(crate) fn sleep_float(seconds: f64) -> Result<(), Error> {
+    if seconds.is_nan() {
+        return Err(Error::new(
+            Kind::ValueError,
+            "Invalid value NaN (not a number)",
+        ));
+    }
+    let nanos = seconds * 1e9;
+    if !((i64::MIN as f64)..-(i64::MIN as f64)).contains(&nanos) {
+        return Err(Error::new(
+            Kind::OverflowError,
+            "timestamp out of range for platform time_t",
+        ));
+    }
+    let rounded = if nanos < 0.0 {
+        nanos.floor()
+    } else {
+        nanos.ceil()
+    };
+    sleep_ns(rounded as i64)
+}
+
 /// Signed nanoseconds since the Unix epoch, without rounding through floating point.
 pub(crate) fn wall_time_ns() -> i128 {
     match SystemTime::now().duration_since(UNIX_EPOCH) {
