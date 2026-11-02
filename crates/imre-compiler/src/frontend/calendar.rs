@@ -126,7 +126,10 @@ pub(super) fn boxed_member(receiver: Type, name: &str) -> bool {
             receiver == Type::Calendar(C::Delta)
         }
         "fromisoformat" | "strptime" => {
-            matches!(receiver, Type::Calendar(C::DateTime) | Type::ClockTime)
+            matches!(
+                receiver,
+                Type::Calendar(C::Date | C::DateTime) | Type::ClockTime
+            )
         }
         "fromtimestamp" => receiver == Type::Calendar(C::Date),
         "ctime" | "fromisocalendar" | "fromordinal" | "isocalendar" | "isoweekday" | "today" => {
