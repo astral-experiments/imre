@@ -775,6 +775,7 @@ pub(super) enum Value {
         running: bool,
     },
     Class {
+        metaclass: Option<Id>,
         name: String,
         scope: Id,
         ancestors: Vec<Id>,
@@ -966,6 +967,7 @@ impl Value {
     pub(super) fn instance_class(&self) -> Option<Id> {
         match self {
             Self::Instance { class, .. } => Some(*class),
+            Self::Class { metaclass, .. } => *metaclass,
             Self::Module { constructor, .. } => *constructor,
             Self::Raised(error) => error.class(),
             _ => None,
@@ -1177,8 +1179,12 @@ impl Value {
                 );
             }
             Self::Class {
-                scope, ancestors, ..
+                scope,
+                ancestors,
+                metaclass,
+                ..
             } => {
+                visit.extend(*metaclass);
                 visit.push(*scope);
                 visit.extend(ancestors);
             }
@@ -2287,7 +2293,11 @@ impl Heap {
     }
 
     pub fn caller_module(&self) -> Id {
-        match self.frames.last().unwrap().owner {
+        self.caller_module_at(0).expect("current frame")
+    }
+
+    pub fn caller_module_at(&self, depth: usize) -> Option<Id> {
+        Some(match self.frames.iter().rev().nth(depth)?.owner {
             FrameOwner::Module(module) => module,
             FrameOwner::Function(function) => {
                 let Value::Function { fields, .. } = self.get(function) else {
@@ -2295,7 +2305,7 @@ impl Heap {
                 };
                 fields.module
             }
-        }
+        })
     }
 
     pub fn current_scope(&self) -> Id {
