@@ -4281,6 +4281,12 @@ impl Context {
 
     /// Bypass the object's deletion hook, while honoring data descriptors on its class.
     pub(super) fn default_delete_attr(&mut self, obj: Id, name: &str) -> Result<()> {
+        if let Some(owner) = self.itertools_layout(obj) {
+            return Err(Error::new(
+                "TypeError",
+                format!("cannot delete '{name}' attribute of immutable type '{owner}'"),
+            ));
+        }
         if let Some(result) = super::paramspec::update(self, obj, name, None) {
             return result;
         }
@@ -4907,6 +4913,12 @@ impl Context {
     }
 
     pub(super) fn default_set_attr(&mut self, obj: Id, name: &str, value: Id) -> Result<()> {
+        if let Some(owner) = self.itertools_layout(obj) {
+            return Err(Error::new(
+                "TypeError",
+                format!("cannot set '{name}' attribute of immutable type '{owner}'"),
+            ));
+        }
         if let Some(result) = super::paramspec::update(self, obj, name, Some(value)) {
             return result;
         }

@@ -1810,11 +1810,11 @@ pub(super) fn call(
     if name == "_imre_itertools._starmap_next" {
         return itertools::starmap_next(ctx, args, kwargs);
     }
-    if name == "_imre_itertools._filterfalse_allocate" {
-        return itertools::filterfalse_allocate(ctx, args, kwargs);
+    if name == "_imre_itertools._predicate_allocate" {
+        return itertools::predicate_allocate(ctx, args, kwargs);
     }
-    if name == "_imre_itertools._filterfalse_state" {
-        return itertools::filterfalse_state(ctx, args, kwargs);
+    if name == "_imre_itertools._predicate_state" {
+        return itertools::predicate_state(ctx, args, kwargs);
     }
     if name == "_imre_itertools._chain_allocate" {
         let [base, class, source] = args else {
