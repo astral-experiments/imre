@@ -4,8 +4,9 @@ use crate::modules::{Binding, Intrinsic, IntrinsicModule, SourceGraph};
 /// Prefer boxed module implementations over the common bundled sources.
 pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
     match name {
-        "enum" => Some(("enum.py", include_str!("../../stdlib/enum.py"))),
+        "reprlib" => Some(("reprlib.py", include_str!("../../stdlib/reprlib.py"))),
         "datetime" => Some(("datetime.py", include_str!("../../stdlib/datetime.py"))),
+        "enum" => Some(("enum.py", include_str!("../../stdlib/enum.py"))),
         "json" => Some((
             "json/__init__.py",
             concat!(
@@ -142,6 +143,10 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
             "pathlib/_os.py",
             include_str!("../../stdlib/pathlib/_os.py"),
         )),
+        "pathlib.types" => Some((
+            "pathlib/types.py",
+            include_str!("../../stdlib/pathlib/types.py"),
+        )),
         "glob" => Some(("glob.py", include_str!("../../stdlib/glob.py"))),
         "ntpath" => Some(("ntpath.py", include_str!("../../stdlib/ntpath.py"))),
         // CPython 3.14.5 Lib/shutil.py. See stdlib/docstrings/LICENSE.
@@ -226,6 +231,18 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
         "importlib.resources" => Some((
             "importlib/resources/__init__.py",
             include_str!("../../stdlib/importlib/resources/__init__.py"),
+        )),
+        "importlib.readers" => Some((
+            "importlib/readers.py",
+            include_str!("../../stdlib/importlib/readers.py"),
+        )),
+        "importlib.resources._itertools" => Some((
+            "importlib/resources/_itertools.py",
+            include_str!("../../stdlib/importlib/resources/_itertools.py"),
+        )),
+        "importlib.resources.readers" => Some((
+            "importlib/resources/readers.py",
+            include_str!("../../stdlib/importlib/resources/readers.py"),
         )),
         "importlib.resources.abc" => Some((
             "importlib/resources/abc.py",

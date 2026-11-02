@@ -275,6 +275,7 @@ impl Context {
                         | "str"
                         | "property"
                         | "module"
+                        | super::thread_local::CLASS
                         | weakref::REFERENCE_TYPE
                 ) || stdlib::datetime::members(kind)
                     .is_some_and(|members| members.owns(name))
@@ -666,6 +667,7 @@ impl Context {
                 | Value::Native(_)
                 | Value::CodecDecoder(_)
                 | Value::IoMethod { .. }
+                | Value::IoOpen { .. }
                 | Value::Method { .. }
         ) || matches!(self.heap.get(value),Value::Weak(wr) if wr.kind != weakref::Kind::Proxy)
             || self.slot(value, "__call__").is_some()
@@ -811,8 +813,16 @@ impl Context {
                 _ => false,
             };
             if method {
+                // A saved writelines method uses its receiver type in argument errors.
+                let callable = match self.heap.get(value) {
+                    Value::IoMethod {
+                        owner: defining,
+                        name: "writelines",
+                    } if self.direct_subclass(owner, *defining) => self.builtin("file.writelines"),
+                    _ => value,
+                };
                 return Ok(self.alloc(Value::Method {
-                    callable: value,
+                    callable,
                     receiver,
                     explicit: matches!(self.heap.get(value), Value::Cached { .. }),
                 }));
@@ -1079,7 +1089,9 @@ impl Context {
                     name: "__init__" | "__repr__" | "__iter__" | "__next__" | "__del__",
                     ..
                 } => "method-wrapper",
-                Value::Native(_) | Value::IoMethod { .. } => "builtin_function_or_method",
+                Value::Native(_) | Value::IoOpen { .. } | Value::IoMethod { .. } => {
+                    "builtin_function_or_method"
+                }
                 _ => return None,
             },
             Value::Native(name) if let Some(slot) = BuiltinDescriptor::lookup(name) => slot.class(),
@@ -1725,7 +1737,7 @@ impl Context {
                 return self.bind_attribute(descriptor, receiver, owner);
             }
         }
-        if self.heap.get(obj).native_io_class_name() == Some("_io.BufferedReader") {
+        if matches!(self.heap.get(obj), Value::File(_)) {
             let class = self.exact_type(obj)?;
             if let Some(member) = self.class_attr(class, name)
                 && matches!(
@@ -1809,8 +1821,13 @@ impl Context {
             if for_call
                 && field.is_none()
                 && let Some(member) = member
-                && let Value::Native(symbol) = self.heap.get(member)
-                && BuiltinDescriptor::lookup(symbol).is_some()
+                && match self.heap.get(member) {
+                    Value::Native(symbol) => BuiltinDescriptor::lookup(symbol).is_some(),
+                    Value::IoMethod {
+                        name: "writelines", ..
+                    } => true,
+                    _ => false,
+                }
             {
                 return Ok(self.alloc(Value::Method {
                     callable: member,
@@ -2162,6 +2179,15 @@ impl Context {
                     "__text_signature__" if symbol == "_io.text_encoding" => {
                         return Ok(self.text("($module, encoding, stacklevel=2, /)"));
                     }
+                    "__doc__" if symbol == "posix.sched_getscheduler" => {
+                        return Ok(self.text(concat!(
+                            "Get the scheduling policy for the process identified by pid.\n\n",
+                            "Passing 0 for pid returns the scheduling policy for the calling process.",
+                        )));
+                    }
+                    "__text_signature__" if symbol == "posix.sched_getscheduler" => {
+                        return Ok(self.text("($module, pid, /)"));
+                    }
                     "__doc__" if symbol == "posix.urandom" => {
                         return Ok(self.text("Return a bytes object containing random bytes suitable for cryptographic use."));
                     }
@@ -2370,11 +2396,7 @@ impl Context {
                 explicit,
             } => match name {
                 "__self__" => return Ok(receiver),
-                _ if matches!(
-                    self.heap.get(callable),
-                    Value::IoMethod { name: "open", .. }
-                ) =>
-                {
+                _ if matches!(self.heap.get(callable), Value::IoOpen { .. }) => {
                     let original = self.builtin("open");
                     return self.lookup_attr(original, name);
                 }
@@ -2731,7 +2753,7 @@ impl Context {
             Value::Native(ref class) if class == super::thread_local::CLASS => match name {
                 "__module__" => return Ok(self.text("_thread")),
                 "__name__" | "__qualname__" => return Ok(self.text("_local")),
-                attr if super::thread_local::is_method(attr) => {
+                attr if attr == "__new__" || super::thread_local::is_method(attr) => {
                     return Ok(self.builtin(&format!("{class}.{attr}")));
                 }
                 _ => {}
@@ -3523,6 +3545,7 @@ impl Context {
                     return Ok(self.builtin("dict.__new__"));
                 }
                 Value::Int(_) => return Ok(self.builtin("int.__new__")),
+                Value::ThreadLocal(_) => return Ok(self.builtin("_thread._local.__new__")),
                 Value::Str(_) | Value::SurrogateStr(_) => return Ok(self.builtin("str.__new__")),
                 Value::Class { .. } | Value::Instance { .. } => {
                     let class = self.heap.get(base).instance_class().unwrap_or(base);
@@ -3945,6 +3968,18 @@ impl Context {
             }
         }
         layout
+    }
+
+    /// Slots and data descriptor methods operate on the object even with a thread-specific dictionary.
+    pub(super) fn local_data_attribute(&self, class: Id, name: &str, writing: bool) -> bool {
+        if self.instance_layout(class, name).active_slot {
+            return true;
+        }
+        self.class_attr(class, name).is_some_and(|member| {
+            self.native_data_descriptor(member)
+                || self.data_descriptor(member)
+                    && (writing || self.slot(member, "__get__").is_some())
+        })
     }
 
     fn writable_attribute_member(&mut self, obj: Id, name: &str) -> Option<Id> {
@@ -4918,9 +4953,34 @@ impl Context {
         }))
     }
 
+    /// Invoke the initializer found on the type, including its descriptor binding.
+    pub(super) fn call_initializer(
+        &mut self,
+        init: Id,
+        instance: Id,
+        class: Id,
+        args: Vec<Id>,
+        kwargs: Vec<(String, Id)>,
+    ) -> Result<()> {
+        let init = self.bind_attribute(init, instance, class)?;
+        let result = self.call(init, args, kwargs)?;
+        if result != NONE {
+            return Err(Error::new(
+                "TypeError",
+                format!(
+                    "__init__() should return None, not '{}'",
+                    self.type_name(result)
+                ),
+            ));
+        }
+        Ok(())
+    }
+
     /// Count a generated NamedTuple repr frame like a runtime-loaded Python call.
     pub(super) fn check_call_depth(&self, additional: usize) -> Result<()> {
-        if self.call_depth + additional >= 1000 {
+        if self.call_depth.max(self.heap.python_depth()) + additional
+            >= crate::sys::recursion_limit() as usize
+        {
             return Err(Error::new(
                 "RecursionError",
                 "maximum recursion depth exceeded",
@@ -5060,6 +5120,9 @@ impl Context {
             Value::Native(name) if name == "object.__new__" => self.new_object(&args, &kwargs),
             Value::Native(name) if name == "dict.__new__" => self.new_dict(&args),
             Value::Native(name) if name == "int.__new__" => self.new_int(&args, &kwargs),
+            Value::Native(name) if name == "_thread._local.__new__" => {
+                super::thread_local::allocate(self, &args, &kwargs)
+            }
             Value::Native(name) if name == "tuple.__new__" => {
                 if args.first().is_some_and(|&class| matches!(self.heap.get(class), Value::Native(name) if name == stdlib::flags::TYPE)) {
                     return Err(Error::new("TypeError", "cannot create 'sys.flags' instances"));
@@ -5155,6 +5218,9 @@ impl Context {
                 }))
             }
             Value::CodecDecoder(codec) => stdlib::codecs::decode(self, codec, &args, &kwargs),
+            Value::IoOpen { reader, writer } => {
+                stdlib::io::open_from_module(self, reader, writer, &args, &kwargs)
+            }
             Value::IoMethod { owner, name } => stdlib::io::call(self, owner, name, &args, &kwargs),
             Value::Partial {
                 function,
@@ -5540,17 +5606,7 @@ impl Context {
                 };
                 let actual = self.exact_type(instance)?;
                 if let Some(init) = self.class_attr(actual, "__init__") {
-                    let init = self.bind_attribute(init, instance, actual)?;
-                    let result = self.call(init, args, kwargs)?;
-                    if result != NONE {
-                        return Err(Error::new(
-                            "TypeError",
-                            format!(
-                                "__init__() should return None, not '{}'",
-                                self.type_name(result)
-                            ),
-                        ));
-                    }
+                    self.call_initializer(init, instance, actual, args, kwargs)?;
                 } else if new.is_none()
                     && !native_tzinfo_new
                     && string_base.is_none()

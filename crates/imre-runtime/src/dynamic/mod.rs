@@ -255,7 +255,8 @@ impl Context {
             | ("bytes", Value::Bytes(_))
             | ("bytearray", Value::ByteArray(_))
             | ("set", Value::Set { frozen: false, .. })
-            | ("frozenset", Value::Set { frozen: true, .. }) => true,
+            | ("frozenset", Value::Set { frozen: true, .. })
+            | (thread_local::CLASS, Value::ThreadLocal(_)) => true,
             _ => false,
         }
     }
@@ -1881,6 +1882,7 @@ impl Context {
                 self.builtin("str.maketrans");
                 builtins::STR_METHODS
             }
+            thread_local::CLASS => &["__new__", "__getattribute__", "__setattr__", "__delattr__"],
             weakref::REFERENCE_TYPE => weakref::REFERENCE_METHODS,
             _ => &[],
         };
@@ -2373,6 +2375,8 @@ impl Context {
                 self.bind(scope, "get_cache_token", token);
             }
             #[cfg(target_os = "linux")]
+            "posix" if source.is_none() => stdlib::os::scheduler::initialize(self, scope),
+            #[cfg(target_os = "linux")]
             "_signal" if source.is_none() => stdlib::signal::initialize(self, scope),
             #[cfg(target_os = "linux")]
             "_imre_signal" if source.is_none() => {
@@ -2467,7 +2471,7 @@ impl Context {
             }
             "io" => stdlib::io::install(self, scope),
             "_json" => {
-                for name in ["encode_basestring", "encode_basestring_ascii"] {
+                for name in ["encode_basestring", "encode_basestring_ascii", "scanstring"] {
                     let callable = self.builtin(&format!("_json.{name}"));
                     let function = self.alloc(Value::Method {
                         callable,
@@ -2492,10 +2496,14 @@ impl Context {
                 for name in [
                     "audit",
                     "addaudithook",
+                    "getrecursionlimit",
+                    "setrecursionlimit",
                     "_getframe",
                     "_getframemodulename",
                     "displayhook",
                     "unraisablehook",
+                    "get_int_max_str_digits",
+                    "set_int_max_str_digits",
                 ] {
                     let callable = self.builtin(&format!("sys.{name}"));
                     let function = self.alloc(Value::Method {

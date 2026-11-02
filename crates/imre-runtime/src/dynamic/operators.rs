@@ -123,6 +123,13 @@ enum RenderRoot<'a> {
     Exception(&'a Error),
 }
 
+#[derive(Clone, Copy)]
+enum FormatLookup {
+    Repr,
+    Str,
+    MethodName,
+}
+
 enum FormatPart {
     Value(Id, bool),
     TypeArgument(Id, bool),
@@ -1264,8 +1271,8 @@ impl Context {
             root,
             quoted,
             true,
-            |ctx, id, quoted, work, ancestors, remaining| {
-                ctx.element_format(id, quoted, work, ancestors, remaining)
+            |ctx, id, lookup, work, ancestors, remaining| {
+                ctx.element_format(id, lookup, work, ancestors, remaining)
             },
         )
     }
@@ -1353,17 +1360,30 @@ impl Context {
         Ok(Some(result))
     }
 
+    /// Look up a method's live qualified name, falling back only when that attribute is absent.
+    fn bound_method_name(&mut self, callable: Id) -> Result<Option<Id>> {
+        for attribute in ["__qualname__", "__name__"] {
+            match self.lookup_attr(callable, attribute) {
+                Ok(name) => return Ok(self.string_storage(name)),
+                Err(error) if self.is_attribute_error(&error) => {}
+                Err(error) => return Err(error),
+            }
+        }
+        Ok(None)
+    }
+
     /// Keep pending children alive while a hook mutates and reenters its container.
     fn element_format(
         &mut self,
         id: Id,
-        quoted: bool,
+        lookup: FormatLookup,
         work: &mut [FormatPart],
         ancestors: &[Id],
         sequence_words: Option<usize>,
     ) -> Result<Option<String>> {
-        if self.format_slot(id, "__repr__").is_none()
-            && (quoted || self.format_slot(id, "__str__").is_none())
+        if !matches!(lookup, FormatLookup::MethodName)
+            && self.format_slot(id, "__repr__").is_none()
+            && (matches!(lookup, FormatLookup::Repr) || self.format_slot(id, "__str__").is_none())
         {
             return Ok(None);
         }
@@ -1380,10 +1400,10 @@ impl Context {
         }
         self.repr_ancestors.extend_from_slice(ancestors);
         let previous = std::mem::replace(&mut self.repr_sequence_words, sequence_words);
-        let converted = if quoted {
-            self.repr_override(id)
-        } else {
-            builtins::call(self, "str", &[id], &[]).map(Some)
+        let converted = match lookup {
+            FormatLookup::Repr => self.repr_override(id),
+            FormatLookup::Str => builtins::call(self, "str", &[id], &[]).map(Some),
+            FormatLookup::MethodName => self.bound_method_name(id),
         };
         self.repr_sequence_words = previous;
         let result = converted.and_then(|value| {
@@ -1540,7 +1560,7 @@ impl Context {
         mut element_repr: impl FnMut(
             &mut C,
             Id,
-            bool,
+            FormatLookup,
             &mut [FormatPart],
             &[Id],
             Option<usize>,
@@ -1805,7 +1825,7 @@ impl Context {
                     if let Some(text) = element_repr(
                         &mut ctx,
                         id,
-                        false,
+                        FormatLookup::Str,
                         &mut work,
                         &active,
                         remaining_sequence_words,
@@ -1833,7 +1853,7 @@ impl Context {
                         && let Some(text) = element_repr(
                             &mut ctx,
                             id,
-                            true,
+                            FormatLookup::Repr,
                             &mut work,
                             &active,
                             remaining_sequence_words,
@@ -1857,6 +1877,29 @@ impl Context {
                         ));
                     }
                     match ctx.heap.get(storage) {
+                        Value::Method { callable, receiver, explicit }
+                            if *explicit || matches!(ctx.heap.get(*callable), Value::Function { .. }) =>
+                        {
+                            let (callable, receiver) = (*callable, *receiver);
+                            append_rendered_text(&mut output, "<bound method ")?;
+                            push_frame(&mut work, Part::Text(">"))?;
+                            push_frame(&mut work, Part::Value(receiver, true))?;
+                            if let Value::Function { fields, .. } = ctx.heap.get(callable) {
+                                append_rendered_text(&mut output, ctx.str_value(fields.qualname)?)?;
+                            } else {
+                                let name = element_repr(
+                                    &mut ctx,
+                                    callable,
+                                    FormatLookup::MethodName,
+                                    &mut work,
+                                    &active,
+                                    remaining_sequence_words,
+                                )?;
+                                append_rendered_text(&mut output, name.as_deref().unwrap_or("?"))?;
+                            }
+                            append_rendered_text(&mut output, " of ")?;
+                            continue;
+                        }
                         Value::Union(union) => {
                             type_words += 24;
                             if type_words > type_budget {
@@ -3697,7 +3740,78 @@ impl Context {
         result
     }
 
+    /// Dispatch one mapping proxy slot at a time. Left operands inspect the original
+    /// right operand before a reflected proxy slot unwraps it.
+    fn mapping_proxy_union(&mut self, mut left: Id, mut right: Id) -> Result<Id> {
+        loop {
+            if let Value::MappingProxy(mapping) = *self.heap.get(left) {
+                left = mapping;
+                if let Value::MappingProxy(mapping) = *self.heap.get(right) {
+                    right = mapping;
+                }
+                continue;
+            }
+            if matches!(self.heap.get(left), Value::Weak(wr) if wr.kind != weakref::Kind::Reference) {
+                return self.binary("|", left, right);
+            }
+            let next_right = match self.heap.get(right) {
+                Value::MappingProxy(mapping) => Some(*mapping),
+                Value::Weak(wr) if wr.kind != weakref::Kind::Reference => None,
+                _ => return self.binary("|", left, right),
+            };
+            match self.heap.get(left) {
+                Value::Union(_) | Value::TypeVar(_) => {
+                    return super::union::make(self, &[left, right]);
+                }
+                Value::GenericAlias(alias)
+                    if alias.kind.is_typing_alias()
+                        || matches!(alias.kind, super::typing::AliasKind::Literal(_)) =>
+                {
+                    return super::union::make(self, &[left, right]);
+                }
+                Value::DictView {
+                    kind: value::DictViewKind::Keys | value::DictViewKind::Items,
+                    ..
+                } => {
+                    return self.dict_view_union(left, right);
+                }
+                _ => {}
+            }
+            if let Some(result) = self.operator_slot(left, "__or__", right)? {
+                return Ok(result);
+            }
+            // Upgrade weak references only when their reflected slot actually wins.
+            right = match next_right {
+                Some(mapping) => mapping,
+                None => {
+                    let target = self.weak_proxy_target(right)?;
+                    self.heap.keep(target);
+                    target
+                }
+            };
+        }
+    }
+
+    /// Dictionary keys and items accept any iterable on either side of a binary union.
+    fn dict_view_union(&mut self, left: Id, right: Id) -> Result<Id> {
+        let result = self.alloc(Value::Set {
+            entries: Default::default(),
+            frozen: false,
+        });
+        builtins::update_set(self, result, left)?;
+        builtins::update_set(self, result, right)?;
+        Ok(result)
+    }
+
     fn binary_operation(&mut self, op: &str, a: Id, b: Id, inplace: bool) -> Result<Id> {
+        if !inplace
+            && op == "|"
+            && (matches!(self.heap.get(a), Value::MappingProxy(_))
+                || matches!(self.heap.get(b), Value::MappingProxy(_))
+                    && !matches!(self.heap.get(a), Value::Weak(wr) if wr.kind != weakref::Kind::Reference))
+        {
+            return self.with_proxy_operands(a, b, |ctx| ctx.mapping_proxy_union(a, b));
+        }
         if self.heap.has_weak_values && !matches!(op, "is" | "is not") {
             let left = self.weak_proxy_target(a)?;
             let right = self.weak_proxy_target(b)?;
@@ -3751,14 +3865,7 @@ impl Context {
                 if op != "|" {
                     return self.set_algebra(op, a, b, false);
                 }
-                // Dictionary keys and items implement reflected union, returning a fresh set.
-                let result = self.alloc(Value::Set {
-                    entries: Default::default(),
-                    frozen: false,
-                });
-                builtins::update_set(self, result, a)?;
-                builtins::update_set(self, result, b)?;
-                return Ok(result);
+                return self.dict_view_union(a, b);
             }
             "|" | "&" | "-"
                 if matches!(self.heap.get(a), Value::Set { .. })
@@ -4526,6 +4633,10 @@ impl Context {
                 unreachable!()
             };
             *left = bytes;
+            return Ok(a);
+        }
+        if op == "|" && matches!(self.heap.get(a), Value::Dict(_) | Value::DefaultDict { .. }) {
+            builtins::update_dict(self, a, Some(b), &[])?;
             return Ok(a);
         }
         self.binary_operation(op, a, b, true)

@@ -1,9 +1,12 @@
 //! Unicode 16.0 text properties for integer conversion, matching CPython 3.14.
 
 use std::borrow::Cow;
+use std::cell::RefCell;
 use std::fmt::{self, Write};
+use std::sync::OnceLock;
+use std::sync::atomic::{AtomicU32, Ordering};
 
-use num_bigint::BigInt;
+use num_bigint::{BigInt, BigUint};
 use num_traits::Zero;
 
 use crate::{Error, Kind, Str};
@@ -147,33 +150,29 @@ pub extern "C" fn imre_integer_digits_init(isolated: u32) {
                     )
             })
     };
-    let _ = DIGITS.set(DecimalLimit::new(configured));
+    let _ = DIGITS.set(AtomicU32::new(configured));
 }
 
 const DEFAULT_DIGITS: u32 = 4300;
-static DIGITS: std::sync::OnceLock<DecimalLimit> = std::sync::OnceLock::new();
+static DIGITS: OnceLock<AtomicU32> = OnceLock::new();
 
-struct DecimalLimit {
-    digits: u32,
-    maximum_exclusive: std::sync::OnceLock<num_bigint::BigUint>,
+thread_local! {
+    // Cache only the threshold for the most recently checked nonzero limit on this thread.
+    static MAXIMUM_EXCLUSIVE: RefCell<(u32, BigUint)> = const { RefCell::new((0, BigUint::ZERO)) };
 }
 
-impl DecimalLimit {
-    fn new(digits: u32) -> Self {
-        Self {
-            digits,
-            maximum_exclusive: std::sync::OnceLock::new(),
-        }
-    }
-}
-
-fn decimal_limit() -> &'static DecimalLimit {
+fn decimal_limit() -> &'static AtomicU32 {
     // Runtime unit tests may call the formatting ABI without a generated main.
-    DIGITS.get_or_init(|| DecimalLimit::new(DEFAULT_DIGITS))
+    DIGITS.get_or_init(|| AtomicU32::new(DEFAULT_DIGITS))
 }
 
 pub(super) fn decimal_digit_limit() -> u32 {
-    decimal_limit().digits
+    decimal_limit().load(Ordering::Relaxed)
+}
+
+/// Change the interpreter's limit for subsequent integer conversions on every thread.
+pub(super) fn set_decimal_digit_limit(limit: u32) {
+    decimal_limit().store(limit, Ordering::Relaxed);
 }
 
 pub(super) fn decimal_digits_allowed(count: usize) -> bool {
@@ -214,22 +213,21 @@ fn check_digit_count(count: usize, limit: u32) -> crate::Result<()> {
 
 /// A broad bit-length bound avoids allocating a configured power of ten for small inputs.
 pub(super) fn check_decimal(value: &num_bigint::BigInt) -> crate::Result<()> {
-    let limit = decimal_limit();
-    let digits = u64::from(limit.digits);
+    let limit = decimal_digit_limit();
+    let digits = u64::from(limit);
     let bits = value.bits();
-    if digits == 0 || bits <= digits * 3 {
+    if limit == 0 || bits <= digits * 3 {
         return Ok(());
     }
     if bits > digits * 4
-        || value.magnitude()
-            >= limit
-                .maximum_exclusive
-                .get_or_init(|| num_bigint::BigUint::from(10u8).pow(limit.digits))
+        || MAXIMUM_EXCLUSIVE.with_borrow_mut(|cached| {
+            if cached.0 != limit {
+                *cached = (limit, BigUint::from(10u8).pow(limit));
+            }
+            value.magnitude() >= &cached.1
+        })
     {
-        Err(Error::new(
-            Kind::ValueError,
-            output_limit_message(limit.digits)?,
-        ))
+        Err(Error::new(Kind::ValueError, output_limit_message(limit)?))
     } else {
         Ok(())
     }

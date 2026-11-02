@@ -801,6 +801,7 @@ pub(super) fn method(
     let slot = matches!(
         name,
         "dict.__init__"
+            | "dict.__ior__"
             | "dict.__eq__"
             | "dict.__repr__"
             | "dict.__len__"
@@ -870,6 +871,16 @@ pub(super) fn method(
         }
         let representation = ctx.checked_container_slot_repr(object, receiver)?;
         return Ok(ctx.text(representation));
+    }
+    if name == "dict.__ior__" {
+        if !kwargs.is_empty() {
+            return Err(type_error("wrapper __ior__() takes no keyword arguments"));
+        }
+        let [other] = args else {
+            return Err(type_error(format!("expected 1 argument, got {}", args.len())));
+        };
+        update(ctx, receiver, Some(*other), &[])?;
+        return Ok(object);
     }
     if name == "dict.__eq__" {
         if !kwargs.is_empty() {

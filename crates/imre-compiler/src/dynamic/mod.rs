@@ -108,11 +108,14 @@ impl Imports {
                 name,
                 "_imp"
                     | "atexit"
+                    | "code"
+                    | "codeop"
                     | "json"
                     | "json.encoder"
                     | "opcode"
                     | "_opcode_metadata"
                     | "sysconfig"
+                    | "pathlib.types"
                     | "platform"
                     | "keyword"
                     | "site"
@@ -271,7 +274,8 @@ impl<'a> Visitor<'a> for Imports {
                         && ((name == "operator" && boxed_operator(suffix))
                             || (name == "_opcode" && (boxed_opcode(suffix) || suffix == "*"))
                             || (name == "sys" && boxed_sys_export(suffix))
-                            || (name == "string" && suffix == "templatelib"))
+                            || (name == "string" && suffix == "templatelib")
+                            || (name == "pathlib" && suffix == "types"))
                     {
                         self.runtime_imports = true;
                     }
@@ -449,7 +453,9 @@ pub(crate) fn compile(
             "__future__",
             "_imp",
             "atexit",
+            "code",
             "weakref",
+            "pathlib",
             "sys",
             "platform",
             "keyword",
@@ -557,15 +563,21 @@ pub(crate) fn compile(
     loop {
         let (owner, package, imports) = if let Some(next) = work.pop_front() {
             next
-        } else if late_pprint && !seen.contains("pprint") {
-            // A computed import may request pprint. Collect its bundled dependencies
-            // after the file graph, without parsing unrelated local modules.
-            bundled_only = true;
-            let mut imports = Imports::default();
-            imports.names.push((0, "pprint".to_owned()));
-            (String::new(), false, imports)
         } else {
-            break;
+            // Collect late imports and their bundled dependencies after the explicit
+            // file graph, without parsing unrelated modules in project directories.
+            let mut imports = Imports::default();
+            if late_pprint && !seen.contains("pprint") {
+                imports.names.push((0, "pprint".to_owned()));
+            }
+            if seen.contains("pathlib") && !seen.contains("pathlib.types") {
+                imports.names.push((0, "pathlib.types".to_owned()));
+            }
+            if imports.names.is_empty() {
+                break;
+            }
+            bundled_only = true;
+            (String::new(), false, imports)
         };
         if !options.runtime_imports
             && !registered_imports.called
@@ -599,6 +611,13 @@ pub(crate) fn compile(
             })
         {
             names.push((0, "_collections_abc".to_owned()));
+        }
+        // The native string scanner imports the decoder's exception on a syntax error.
+        if names
+            .iter()
+            .any(|(level, name)| *level == 0 && name == "_json")
+        {
+            names.push((0, "json.decoder".to_owned()));
         }
         for (level, requested) in names {
             let Some(name) = resolve(&owner, package, level, &requested) else {
@@ -726,7 +745,9 @@ pub(crate) fn compile(
         "abc",
         "annotationlib",
         "ast",
+        "code",
         "codecs",
+        "codeop",
         "copyreg",
         "datetime",
         "enum",
@@ -744,6 +765,7 @@ pub(crate) fn compile(
         "stat",
         "string",
         "string.templatelib",
+        "subprocess",
         "token",
         "zipimport",
     ]

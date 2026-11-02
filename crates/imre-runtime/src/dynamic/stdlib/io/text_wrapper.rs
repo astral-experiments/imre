@@ -95,6 +95,46 @@ fn flag(ctx: &mut Context, obj: Id, method: &str) -> Result<bool> {
     ctx.truth(value)
 }
 
+pub(in crate::dynamic::stdlib) fn text_options(
+    ctx: &Context,
+    encoding: Id,
+    errors: Id,
+    newline: Id,
+) -> Result<(String, Option<String>, Codec)> {
+    let string = |id, key: &str| -> Result<Option<String>> {
+        if id == NONE {
+            return Ok(None);
+        }
+        let v = ctx.str_value(id).map_err(|_| {
+            Error::new(
+                "TypeError",
+                format!(
+                    "TextIOWrapper() argument '{key}' must be str or None, not {}",
+                    ctx.type_name(id)
+                ),
+            )
+        })?;
+        if v.contains('\0') {
+            return Err(Error::new("ValueError", "embedded null character"));
+        }
+        Ok(Some(v.to_owned()))
+    };
+    let encoding = string(encoding, "encoding")?;
+    let encoding = crate::sys::file_encoding(encoding.as_deref()).into_owned();
+    string(errors, "errors")?;
+    let newline = string(newline, "newline")?;
+    if let Some(nl) = &newline
+        && !matches!(nl.as_str(), "" | "\r" | "\n" | "\r\n")
+    {
+        return Err(Error::new(
+            "ValueError",
+            format!("illegal newline value: {nl}"),
+        ));
+    }
+    let codec = Codec::lookup(&encoding)?;
+    Ok((encoding, newline, codec))
+}
+
 fn initialize(ctx: &mut Context, receiver: Id, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
     const KEYS: [&str; 6] = [
         "buffer",
@@ -147,37 +187,7 @@ fn initialize(ctx: &mut Context, receiver: Id, args: &[Id], kwargs: &[(String, I
         line_buffering,
         write_through,
     ] = options;
-    let string = |id, key: &str| -> Result<Option<String>> {
-        if id == NONE {
-            return Ok(None);
-        }
-        let v = ctx.str_value(id).map_err(|_| {
-            Error::new(
-                "TypeError",
-                format!(
-                    "TextIOWrapper() argument '{key}' must be str or None, not {}",
-                    ctx.type_name(id)
-                ),
-            )
-        })?;
-        if v.contains('\0') {
-            return Err(Error::new("ValueError", "embedded null character"));
-        }
-        Ok(Some(v.to_owned()))
-    };
-    let encoding = string(encoding, "encoding")?;
-    let encoding = crate::sys::file_encoding(encoding.as_deref()).into_owned();
-    string(errors, "errors")?;
-    let newline = string(newline, "newline")?;
-    if let Some(nl) = &newline
-        && !matches!(nl.as_str(), "" | "\r" | "\n" | "\r\n")
-    {
-        return Err(Error::new(
-            "ValueError",
-            format!("illegal newline value: {nl}"),
-        ));
-    }
-    let codec = Codec::lookup(&encoding)?;
+    let (encoding, newline, codec) = text_options(ctx, encoding, errors, newline)?;
     let line_buffering = ctx.truth(line_buffering)?;
     let write_through = ctx.truth(write_through)?;
     let readable = flag(ctx, buffer, "readable")?;

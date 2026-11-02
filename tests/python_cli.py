@@ -1018,10 +1018,25 @@ def check_unittest_file_discovery(imre, root, run):
         (directory / "test_skipped.py").write_text(
             "import unittest\nraise unittest.SkipTest('unavailable module')\n"
         )
+        (directory / "test_process_exports.py").write_text(
+            "import subprocess as _process, unittest as _unittest\n"
+            "from subprocess import __all__ as _exports\n"
+            "from subprocess import *\n"
+            "_names = []\n"
+            "for _name in list(globals()):\n"
+            "    if not _name.startswith('_'):\n"
+            "        _names.append(_name)\n"
+            "class Exports(_unittest.TestCase):\n"
+            "    def test_star(self):\n"
+            "        self.assertEqual(_names, _exports)\n"
+            "        for name in _exports:\n"
+            "            self.assertIs(globals()[name], getattr(_process, name))\n"
+            "        self.assertEqual(check_output(['/bin/sh', '-c', 'printf captured']), b'captured')\n"
+        )
         for command in ((sys.executable, "-B", entry), (executable,)):
             result = run(*command, directory)
             assert (result.returncode, result.stdout, result.stderr) == (
-                0, b"3 ['test_late.Late.test_body'] 0\n"
+                0, b"4 ['test_late.Late.test_body'] 0\n"
                 b"[('unittest.loader.ModuleSkipped.test_skipped', 'unavailable module')]\n", b"",
             ), result
 
@@ -1838,6 +1853,8 @@ def report(text):
         compare("-IB", io_registration, native_args=("run", io_registration, "--quiet"))
         reader_fixture = fixtures / "io_buffered_reader_type.py"
         compare("-IB", reader_fixture, native_args=("run", reader_fixture, "--quiet"))
+        writer_fixture = fixtures / "io_buffered_writer_type.py"
+        compare("-IB", writer_fixture, native_args=("run", writer_fixture, "--quiet"))
         io_fixture = fixtures / "boxed_io_indirect_import.py"
         compare("-IB", io_fixture, native_args=("run", io_fixture, "--runtime-imports", "--quiet"))
         builtins_fixture = fixtures / "boxed_builtins_module.py"
@@ -1917,6 +1934,7 @@ def report(text):
             "boxed_code_objects.py",
             "boxed_numeric_repr.py",
             "boxed_recursive_repr.py",
+            "boxed_bound_method_repr.py",
             "boxed_simple_namespace.py",
             "boxed_namedtuple_repr.py",
             "boxed_namedtuple_factory.py",
@@ -1929,6 +1947,7 @@ def report(text):
             "boxed_sys_getframe.py",
             "boxed_sys_audit.py",
             "boxed_sys_audit_recursion.py",
+            "boxed_sys_recursion_limit.py",
             "boxed_sys_intern.py",
             "boxed_sys_hash_info.py",
             "boxed_sys_flags.py",
@@ -2040,6 +2059,7 @@ def report(text):
             "boxed_select_selector.py",
             "boxed_pipe_flags.py",
             "boxed_os_environb.py",
+            "boxed_os_python_fspath.py",
             "boxed_os_file_descriptors.py",
             "boxed_os_fdopen.py",
             "boxed_binary_bytes_paths.py",
@@ -2059,6 +2079,7 @@ def report(text):
             "boxed_socket_timeout.py",
             "boxed_urllib_data.py",
             "boxed_urllib_http_status.py",
+            "boxed_urllib_http.py",
             "boxed_http_transport.py",
             "boxed_message_parameters.py",
             "boxed_unicodedata.py",
@@ -2117,6 +2138,7 @@ def report(text):
             "boxed_attribute_deletion.py",
             "boxed_recursion.py",
             "boxed_function_defaults.py",
+            "boxed_reprlib.py",
             "boxed_textwrap.py",
             "boxed_set_ordering.py",
             "boxed_set_issubset.py",
@@ -2125,6 +2147,7 @@ def report(text):
             "boxed_set_difference_update.py",
             "boxed_weakref.py",
             "boxed_public_weakref.py",
+            "boxed_weakref_unraisable.py",
             "boxed_gc_collect.py",
             "boxed_gc_controls.py",
             "boxed_gc_finalizers.py",
@@ -2169,6 +2192,7 @@ def report(text):
             "boxed_module_type.py",
             "boxed_source_module_getattr.py",
             "boxed_thread_local.py",
+            "boxed_thread_local_subclass.py",
             "boxed_threading_lock.py",
             "boxed_import_depth.py",
             "boxed_dict_subclasses.py",
@@ -2264,7 +2288,11 @@ def report(text):
             check_unittest_file_discovery(imre, root, run)
             plugin.write_bytes((fixtures / "boxed_subprocess_fileio.py").read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")
+            plugin.write_bytes((fixtures / "boxed_subprocess_exports.py").read_bytes())
+            compare("-IB", "-c", imports + "arithmetic.current()")
             plugin.write_bytes((fixtures / "boxed_subprocess_buffering.py").read_bytes())
+            compare("-IB", "-c", imports + "arithmetic.current()")
+            plugin.write_bytes((fixtures / "boxed_subprocess_text.py").read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")
             plugin.write_bytes((fixtures / "boxed_os_chdir.py").read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")
@@ -2284,6 +2312,8 @@ def report(text):
             plugin.write_bytes((fixtures / "boxed_os_scandir.py").read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")
         if sys.platform == "linux":
+            plugin.write_bytes((fixtures / "boxed_posix_sched_getscheduler.py").read_bytes())
+            compare("-IB", "-c", imports + "arithmetic.current()")
             plugin.write_bytes((fixtures / "boxed_fcntl.py").read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")
             plugin.write_bytes((fixtures / "boxed_resource.py").read_bytes())

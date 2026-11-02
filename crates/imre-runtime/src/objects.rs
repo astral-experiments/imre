@@ -64,8 +64,8 @@ mod joined_lines;
 mod json;
 pub(crate) use json::{
     DecodedJson, Indent as JsonIndent, JsonNumber, decode_json, decode_json_bytes, json_bom_error,
-    write_codepoints as write_json_codepoints, write_fragment as write_json_fragment,
-    write_string as write_json_string,
+    string_end as json_string_end, write_codepoints as write_json_codepoints,
+    write_fragment as write_json_fragment, write_string as write_json_string,
 };
 mod linecache;
 pub(crate) use linecache::{SourceDecodeError, decode_compile_source, decode_source_lines};
@@ -122,7 +122,7 @@ mod zipfile;
 pub(crate) use zipfile::Archive as ZipArchive;
 
 pub(crate) use errno::{DOC as ERRNO_DOC, platform_entries as errno_entries};
-pub(crate) use files::{FileState, errno_error, open_file, open_raw_file};
+pub(crate) use files::{FileState, Random, errno_error, open_file, open_raw_file};
 
 use super::{
     Bytes, Error, Int, Kind, List, MAX_LIST_LEN, StorageCell, Str, decode_index, fail, finish,

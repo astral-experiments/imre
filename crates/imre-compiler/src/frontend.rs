@@ -10954,6 +10954,22 @@ impl<'a> Checker<'a> {
         {
             return Err(self.object_builtin_error("binary open with buffering", call));
         }
+        let mut checked_path = None;
+        if !gzip
+            && self.unshadowed_builtin(&call.func, "open")
+            && let Some(ast::Expr::StringLiteral(mode)) = args.find_argument_value("mode", 1)
+            && paths::is_text_update_open(args, mode.value.to_str())
+            && let Some(path) = args.find_argument_value("file", 0)
+        {
+            let value = self.expr(path)?;
+            if matches!(
+                value.ty,
+                Type::Str | Type::Bytes | Type::Path | Type::PurePath(_)
+            ) {
+                return Err(self.scoped_builtin_error("named text update open", call));
+            }
+            checked_path = Some(value);
+        }
         let (path, mode) = match call.arguments.args.as_ref() {
             [path] if !gzip => (path, "r"),
             [path, ast::Expr::StringLiteral(mode)] => {
@@ -10968,7 +10984,10 @@ impl<'a> Checker<'a> {
                 ));
             }
         };
-        let path = self.path_argument(path)?;
+        let path = match checked_path {
+            Some(value) => self.path_text(value, path)?,
+            None => self.path_argument(path)?,
+        };
         let (ty, mut builtin) = match (gzip, mode) {
             (true, "rt") => (Type::TextIO, Builtin::GzipOpen),
             (true, "rb") => (Type::BinaryIO, Builtin::GzipOpen),

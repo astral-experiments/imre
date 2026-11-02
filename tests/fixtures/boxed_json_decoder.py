@@ -1,8 +1,41 @@
+def scanstrings():
+    import json
+    from _json import scanstring
+    assert type(scanstring).__name__ == "builtin_function_or_method"
+    assert (scanstring.__module__, scanstring.__qualname__) == ("_json", "scanstring")
+    import importlib
+    import sys
+    accelerator = sys.modules['_json']
+    try:
+        del sys.modules['_json']
+        fresh = importlib.import_module('_json')
+        assert fresh is not accelerator
+        assert scanstring.__self__ is accelerator and fresh.scanstring.__self__ is fresh
+        assert fresh.scanstring is not scanstring
+        assert fresh.scanstring('"new"', 1) == ('new', 5)
+        assert scanstring('"old"', 1) == ('old', 5)
+    finally:
+        sys.modules['_json'] = accelerator
+    assert json.decoder.scanstring is scanstring
+    assert scanstring('é"\\ud800\\udc00x"!', 2) == (chr(0x10000) + 'x', 16)
+    assert scanstring('"a\nb"', 1, False) == ('a\nb', 5)
+    unpaired = '"' + chr(0xd800) + '\\udc00"'
+    assert scanstring(unpaired, 1) == (chr(0xd800) + chr(0xdc00), len(unpaired))
+    malformed = 'é"\\x"'
+    try:
+        scanstring(malformed, 2)
+    except json.JSONDecodeError as error:
+        assert error.doc is malformed and error.pos == 2 and error.msg == 'Invalid \\escape'
+    else:
+        raise AssertionError('accepted invalid escape')
+
+
 def current():
     import importlib
     import json
     import sys
 
+    scanstrings()
     names = ('json', 'json.decoder', 'json.scanner', 'json.encoder', '_json')
     saved = {name: sys.modules[name] for name in names if name in sys.modules}
     try:

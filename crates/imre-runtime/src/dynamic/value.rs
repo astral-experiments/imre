@@ -602,6 +602,12 @@ impl From<crate::Error> for Error {
             Err(error) => return error,
         };
         let (kind, message) = error.into_parts();
+        let kind = match (kind, os_args.as_deref()) {
+            ("OSError", Some(super::os_error::Args::Native { source, .. })) => {
+                super::os_error::subclass(source.errno).unwrap_or(kind)
+            }
+            _ => kind,
+        };
         match message {
             Ok(message) => Self {
                 os_args,
@@ -1019,6 +1025,10 @@ pub(super) enum Value {
         offset: usize,
         kind: FormatKind,
     },
+    IoOpen {
+        reader: Id,
+        writer: Id,
+    },
     IoMethod {
         owner: Id,
         name: &'static str,
@@ -1072,11 +1082,24 @@ pub(super) struct CachedCall {
 impl Value {
     /// Class of a native file whose Python descriptors are installed by _io.
     pub(super) fn native_io_class_name(&self) -> Option<&'static str> {
+        let name = self.file_class_name()?;
+        // BufferedRandom still uses its intrinsic methods rather than installed _io descriptors.
+        (name != "_io.BufferedRandom").then_some(name)
+    }
+
+    fn file_class_name(&self) -> Option<&'static str> {
         match self {
             Self::TextFile(_) => Some("_io.TextIOWrapper"),
-            Self::File(_) if self.intrinsic_type_name() == Some("_io.BufferedReader") => {
-                Some("_io.BufferedReader")
-            }
+            Self::File(file) => Some(match file.as_ref() {
+                super::stdlib::BinaryFile::Descriptor(fd) if fd.reading && fd.writing => {
+                    "_io.BufferedRandom"
+                }
+                super::stdlib::BinaryFile::Descriptor(fd) if fd.reading => "_io.BufferedReader",
+                super::stdlib::BinaryFile::Descriptor(_) => "_io.BufferedWriter",
+                super::stdlib::BinaryFile::Reader { .. } => "_io.BufferedReader",
+                super::stdlib::BinaryFile::Writer { .. }
+                | super::stdlib::BinaryFile::Standard { .. } => "_io.BufferedWriter",
+            }),
             _ => None,
         }
     }
@@ -1105,16 +1128,9 @@ impl Value {
             Self::Bytes(_) => "bytes",
             Self::MemoryView { .. } => "memoryview",
             Self::ByteArray(_) => "bytearray",
-            Self::File(file) => match file.as_ref() {
-                super::stdlib::BinaryFile::Descriptor(fd) if fd.reading => "_io.BufferedReader",
-                super::stdlib::BinaryFile::Descriptor(_) => "_io.BufferedWriter",
-                super::stdlib::BinaryFile::Reader { .. } => "_io.BufferedReader",
-                super::stdlib::BinaryFile::Writer { .. }
-                | super::stdlib::BinaryFile::Standard { .. } => "_io.BufferedWriter",
-            },
+            Self::File(_) | Self::TextFile(_) => return self.file_class_name(),
             Self::ProcessHandle(_) => "_imre_subprocess.Handle",
             Self::BufferedRandom(..) => "_io.BufferedRandom",
-            Self::TextFile(_) => "_io.TextIOWrapper",
             Self::SequenceIterator { .. } => "iterator",
             Self::ReverseSequence { .. } => "reversed",
             Self::Deque(_) => super::deque::CLASS,
@@ -1476,9 +1492,7 @@ impl Value {
                     cycle.children(visit);
                 }
                 match memory_stream {
-                    Some(super::stdlib::io::MemoryStream::BufferedReader(file)) => {
-                        visit.push(*file)
-                    }
+                    Some(super::stdlib::io::MemoryStream::BufferedFile(file)) => visit.push(*file),
                     Some(super::stdlib::io::MemoryStream::Bytes(stream)) => {
                         visit.extend(stream.snapshot.get())
                     }
@@ -1547,6 +1561,7 @@ impl Value {
                 visit.extend([*scope, *code, *globals]);
                 visit.extend(*back);
             }
+            Self::IoOpen { reader, writer } => visit.extend([*reader, *writer]),
             Self::IoMethod { owner, .. } => visit.push(*owner),
             Self::CodecInfo { decode, .. } => visit.push(*decode),
             Self::RegexScanner {
@@ -2684,6 +2699,11 @@ impl Heap {
         })
     }
 
+    /// The first activation is a sentinel outside the Python frame stack.
+    pub(super) fn python_depth(&self) -> usize {
+        self.frames.len() - 1
+    }
+
     pub fn current_code(&self) -> Id {
         self.frames.last().unwrap().code
     }
@@ -2798,6 +2818,10 @@ impl Heap {
         if self.slots[id as usize].finalization == Finalization::Pending {
             self.take_finalizer(id, false);
         }
+    }
+
+    pub(super) fn pending_finalizers(&self) -> &[Id] {
+        &self.ordinary_finalizers
     }
 
     pub(super) fn has_ordinary_finalizers(&self) -> bool {

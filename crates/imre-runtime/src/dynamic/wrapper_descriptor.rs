@@ -121,6 +121,7 @@ impl BuiltinDescriptor {
             "str.__str__" => ("str", "__str__"),
             "str.__repr__" => ("str", "__repr__"),
             "bytes.__repr__" => ("bytes", "__repr__"),
+            "dict.__ior__" => ("dict", "__ior__"),
             "dict.__eq__" => ("dict", "__eq__"),
             "dict.__repr__" => ("dict", "__repr__"),
             "mappingproxy.__repr__" => ("mappingproxy", "__repr__"),
@@ -232,9 +233,7 @@ impl BuiltinDescriptor {
             "mappingproxy" => matches!(ctx.heap.get(receiver), Value::MappingProxy(_)),
             deque::CLASS => matches!(ctx.heap.get(receiver), Value::Deque(_)),
             "collections.defaultdict" => ctx.defaultdict_factory(receiver).is_some(),
-            "bool" | "int" | "float" | "str" | "bytes" | "bytearray" | "list" | "tuple" | "set"
-            | "frozenset" => ctx.builtin_slot_accepts(receiver, self.owner),
-            _ => matches!(ctx.heap.get(receiver), Value::ThreadLocal(_)),
+            _ => ctx.builtin_slot_accepts(receiver, self.owner),
         };
         if !accepts {
             return Err(Error::new(
@@ -327,6 +326,8 @@ impl BuiltinDescriptor {
             "__doc__" if self.name == "__rtruediv__" => ctx.text("Return value/self."),
             "__doc__" if self.name == "__floordiv__" => ctx.text("Return self//value."),
             "__doc__" if self.name == "__rfloordiv__" => ctx.text("Return value//self."),
+            "__doc__" if self.name == "__ior__" => ctx.text("Return self|=value."),
+            "__text_signature__" if self.name == "__ior__" => ctx.text("($self, value, /)"),
             "__doc__" if self.name == "__iadd__" => ctx.text("Implement self+=value."),
             "__text_signature__" if matches!(self.name, "__add__" | "__radd__" | "__sub__" | "__rsub__" | "__iadd__" | "__mul__" | "__rmul__" | "__truediv__" | "__rtruediv__" | "__floordiv__" | "__rfloordiv__") => {
                 ctx.text("($self, value, /)")
