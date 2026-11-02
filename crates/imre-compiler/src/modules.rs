@@ -1835,6 +1835,14 @@ impl IntrinsicModule {
             (Self::Threading, "_RLock") => Intrinsic::ObjectRuntimeExport("threading._RLock"),
             (Self::Threading, "_PyRLock") => Intrinsic::ObjectRuntimeExport("threading._PyRLock"),
             (Self::Threading, "_CRLock") => Intrinsic::ObjectRuntimeExport("threading._CRLock"),
+            (Self::Threading, "Semaphore") => Intrinsic::ObjectRuntimeExport("threading.Semaphore"),
+            (Self::Threading, "BoundedSemaphore") => {
+                Intrinsic::ObjectRuntimeExport("threading.BoundedSemaphore")
+            }
+            (Self::Threading, "Barrier") => Intrinsic::ObjectRuntimeExport("threading.Barrier"),
+            (Self::Threading, "BrokenBarrierError") => {
+                Intrinsic::ObjectRuntimeExport("threading.BrokenBarrierError")
+            }
             (Self::Threading, "Condition") => Intrinsic::ObjectRuntimeExport("threading.Condition"),
             (Self::Threading, "Event") => Intrinsic::ObjectRuntimeExport("threading.Event"),
             (Self::Threading, "Thread") => Intrinsic::ObjectRuntimeExport("threading.Thread"),
