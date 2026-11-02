@@ -4201,12 +4201,8 @@ impl Emitter<'_, '_> {
                 &[&args[0].value],
             ),
             Builtin::RegexCompile { source, spelling } => {
-                // Distinct Python spellings may compile to the same engine pattern.
-                // A non-UTF-8 prefix separates this record from legacy UTF-8 literals.
-                let mut bytes = vec![0xff];
-                bytes.extend_from_slice(&(spelling.len() as u64).to_le_bytes());
-                bytes.extend_from_slice(spelling.as_bytes());
-                bytes.extend_from_slice(source.as_bytes());
+                // A non-UTF-8 byte separates the original spelling from the engine pattern.
+                let bytes = [spelling.as_bytes(), &[0xff], source.as_bytes()].concat();
                 self.pooled_literal(&bytes, returns)
             }
             Builtin::RegexSpelling => self.call("imre_regex_spelling", returns, &[&args[0].value]),
@@ -9564,7 +9560,7 @@ declare ptr @imre_str_static_literal(ptr, i64)
 declare ptr @imre_str_interned_literal(ptr, i64)
 declare ptr @imre_sys_intern(ptr)
 declare i32 @imre_sys_is_interned(ptr)
-declare ptr @imre_regex_compile(ptr, i64)
+declare ptr @imre_regex_literal(ptr, i64)
 declare ptr @imre_regex_spelling(ptr)
 declare ptr @imre_unittest_compile_pattern(ptr)
 declare i64 @imre_patch_len(ptr)
@@ -10102,7 +10098,7 @@ mod tests {
             &CompileOptions::default(),
         )
         .unwrap();
-        assert_eq!(llvm.matches("call ptr @imre_regex_compile(").count(), 1);
+        assert_eq!(llvm.matches("call ptr @imre_regex_literal(").count(), 1);
         assert_eq!(llvm.matches("call ptr @imre_regex_search(").count(), 2);
         let cleanup = llvm
             .split_once("define internal void @imre_clear_literals(")
