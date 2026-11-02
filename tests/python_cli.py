@@ -2836,7 +2836,8 @@ def report(text):
         invalid = run(imre, "build", source, "--runtime-imports", "-o", root / "invalid-nonlocal")
         assert invalid.returncode and b"SyntaxError: nonlocal binding not allowed for type parameter 'T'" in invalid.stderr, invalid
 
-        for fixture in ("boxed_typing_generics.py", "boxed_typing_list.py", "boxed_typing_concatenate.py"):
+        for fixture in ("boxed_typing_generics.py", "boxed_typing_list.py",
+                        "boxed_typing_set_aliases.py", "boxed_typing_concatenate.py"):
             plugin.write_bytes((fixtures / fixture).read_bytes())
             compare("-IB", "-c", imports)
         if sys.platform.startswith("linux"):
