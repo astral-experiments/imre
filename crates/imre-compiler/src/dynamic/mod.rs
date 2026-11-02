@@ -260,6 +260,9 @@ impl<'a> Visitor<'a> for Imports {
                     }
                 }
             }
+            Stmt::ClassDef(class) if class.type_params.is_some() => {
+                self.runtime_imports = true;
+            }
             Stmt::Assign(a) if a.targets.iter().any(|t| self.sys_path(t)) => {
                 self.runtime_imports = true;
                 self.paths(&a.value);

@@ -2911,6 +2911,11 @@ impl Context {
                 {
                     return self.class_annotation_attr(obj, scope, name);
                 }
+                if name == "__type_params__" {
+                    return Ok(self
+                        .own_class_attr(obj, name)
+                        .unwrap_or_else(|| self.heap.packed_tuple(Vec::new(), false)));
+                }
                 if name == "__annotations__"
                     && let Some(thunks) = self
                         .scope_data(scope)
@@ -5270,6 +5275,12 @@ impl Context {
                 .unwrap_or_else(|| self.text("builtins"))
         };
         self.bind(scope, "__module__", module_name);
+        if parameterized {
+            let params = self
+                .scope_name(parent, ".type_params")
+                .expect("class parameter scope");
+            self.bind(scope, "__type_params__", params);
+        }
         if let Ok(qualname) = self.lookup_attr(body, "__qualname__") {
             self.bind(scope, "__qualname__", qualname);
         }

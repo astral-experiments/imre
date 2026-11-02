@@ -1911,6 +1911,12 @@ def report(text):
                 assert (fault.returncode, fault.stdout, fault.stderr) == (0, oracle.stdout, b""), fault
                 retry = run(binary, extra=injected | {"IMRE_SECRETS_TEST_SOURCE": "reject"})
                 assert (retry.returncode, retry.stdout, retry.stderr) == (0, b"c\n", b"draw\ndraw\n"), retry
+        # A nested declaration is invalid even if the surrounding function is never called.
+        source = root / "generic-nonlocal.py"
+        source.write_text("def factory():\n    class Box[T]:\n        def f(self):\n            nonlocal T\n")
+        invalid = run(imre, "build", source, "--runtime-imports", "-o", root / "invalid-nonlocal")
+        assert invalid.returncode and b"SyntaxError: nonlocal binding not allowed for type parameter 'T'" in invalid.stderr, invalid
+
         for fixture in ("boxed_typing_generics.py", "boxed_typing_list.py"):
             plugin.write_bytes((fixtures / fixture).read_bytes())
             compare("-IB", "-c", imports)

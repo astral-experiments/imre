@@ -343,6 +343,23 @@ impl Context {
                 Ok(std::mem::replace(&mut items[index], NONE))
             }
             "slice_object" => Ok(self.alloc(Value::Slice([a, b, c]))),
+            "class_parameter_scope" => super::typing::class_parameter_scope(self, a, b),
+            "class_base_scope" => {
+                if self.scope_data(b).class_body.is_none() {
+                    return Ok(a);
+                }
+                // A generic class's bases can read its enclosing class dictionary. Its
+                // body and methods close over the parameter scope without that dictionary.
+                let module = self.scope_data(a).module.clone();
+                let scope = self.scope(&module, Some(a));
+                let namespace = self.class_dictionary(b);
+                let Value::Scope(frame) = self.heap.get_mut(scope) else {
+                    unreachable!()
+                };
+                frame.exec_locals = Some(namespace);
+                frame.closure.declared_complete = true;
+                Ok(scope)
+            }
             "class" | "parameterized_class" => {
                 let metaclass = self.dict_named_item(a, "metaclass");
                 let total = self.dict_named_item(a, "total");
@@ -1012,7 +1029,7 @@ impl Context {
                     freevars.push(name.to_owned());
                     break;
                 }
-                if !frame.closure.declared_complete {
+                if frame.class_body.is_none() && !frame.closure.declared_complete {
                     return None;
                 }
                 cursor = frame.parent;
