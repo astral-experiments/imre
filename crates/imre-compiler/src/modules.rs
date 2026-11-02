@@ -522,6 +522,7 @@ pub(crate) enum IntrinsicModule {
     Urllib,
     UrllibParse,
     Email,
+    EmailHeaderValueParser,
     EmailUtils,
     Collections,
     CollectionsNative,
@@ -1002,6 +1003,7 @@ impl IntrinsicModule {
             "genericpath" => Some(Self::GenericPath),
             "posixpath" => Some(Self::PosixPath),
             "email" => Some(Self::Email),
+            "email._header_value_parser" => Some(Self::EmailHeaderValueParser),
             "email.utils" => Some(Self::EmailUtils),
             "urllib" => Some(Self::Urllib),
             "urllib.parse" => Some(Self::UrllibParse),
@@ -1117,6 +1119,9 @@ impl IntrinsicModule {
             } else {
                 Self::JsonDecoder
             }));
+        }
+        if self == Self::Email && name == "_header_value_parser" {
+            return Some(Binding::IntrinsicModule(Self::EmailHeaderValueParser));
         }
         if self == Self::Email && name == "utils" {
             return Some(Binding::IntrinsicModule(Self::EmailUtils));
@@ -2511,6 +2516,12 @@ impl IntrinsicModule {
             }
             (Self::UrllibParse, "unquote_plus") => {
                 Intrinsic::ObjectRuntimeExport("urllib.parse.unquote_plus")
+            }
+            (Self::EmailHeaderValueParser, "get_addr_spec") => {
+                Intrinsic::ObjectRuntimeExport("email._header_value_parser.get_addr_spec")
+            }
+            (Self::EmailHeaderValueParser, "get_angle_addr") => {
+                Intrinsic::ObjectRuntimeExport("email._header_value_parser.get_angle_addr")
             }
             (Self::EmailUtils, "parsedate_to_datetime") => Intrinsic::EmailParseDate,
             (Self::EmailUtils, "format_datetime") => Intrinsic::EmailFormatDateTime,
@@ -4520,6 +4531,7 @@ impl<'a> Loader<'a> {
                         })?;
                         if binding
                             == Binding::Intrinsic(Intrinsic::Fnmatch(FnmatchOperation::Parts))
+                            || module == IntrinsicModule::EmailHeaderValueParser
                         {
                             self.checked_builtin_imports.push((id, alias.range()));
                         }
@@ -4548,7 +4560,8 @@ impl<'a> Loader<'a> {
                         // A Sequence annotation keeps its typed list contract; value uses request boxing.
                         self.needs_object_imports |= !matches!(
                             module,
-                            IntrinsicModule::Marshal
+                            IntrinsicModule::EmailHeaderValueParser
+                                | IntrinsicModule::Marshal
                                 | IntrinsicModule::Pickle
                                 | IntrinsicModule::Struct
                                 | IntrinsicModule::Warnings
