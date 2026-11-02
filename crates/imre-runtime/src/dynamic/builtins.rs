@@ -907,7 +907,10 @@ pub(super) fn call(
     {
         return exceptions::initialize(ctx, owner, args, kwargs);
     }
-    if matches!(name, "object.__hash__" | "object.__repr__") {
+    if matches!(
+        name,
+        "object.__hash__" | "object.__repr__" | "object.__str__"
+    ) {
         let method = name.trim_start_matches("object.");
         let Some((&receiver, rest)) = args.split_first() else {
             return Err(type_error(format!(
@@ -927,6 +930,13 @@ pub(super) fn call(
         }
         if method == "__repr__" {
             return ctx.object_repr(receiver);
+        }
+        if method == "__str__" {
+            if let Some(value) = ctx.repr_override(receiver)? {
+                return Ok(value);
+            }
+            let repr = ctx.checked_format(receiver, true)?;
+            return Ok(ctx.text(repr));
         }
         return Ok(ctx.int(Context::identity_hash(receiver)));
     }
@@ -1613,8 +1623,10 @@ pub(super) fn call(
                 return Err(Error::new("ValueError", "Empty module name"));
             }
             let result = ctx.module(&name)?;
-            if ctx.optional_truth(fromlist, false)? {
-                return Ok(result);
+            if let Some(list) = fromlist
+                && ctx.truth(list)?
+            {
+                return ctx.prepare_fromlist(result, list);
             }
             ctx.module(name.split('.').next().unwrap())
         }

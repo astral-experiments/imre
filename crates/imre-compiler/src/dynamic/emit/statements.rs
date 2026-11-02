@@ -493,12 +493,21 @@ impl Function<'_, '_> {
                         continue;
                     };
                     let module = self.import(&name);
-                    for alias in &v.names {
+                    let fromlist = self.op("list", &[]);
+                    let names: Vec<_> = v
+                        .names
+                        .iter()
+                        .map(|alias| self.code_name(alias.name.as_str()))
+                        .collect();
+                    for attr in &names {
+                        self.op("append", &[&fromlist, attr]);
+                    }
+                    self.op("fromlist", &[&module, &fromlist]);
+                    for (alias, attr) in v.names.iter().zip(names) {
                         if alias.name.as_str() == "*" {
                             self.op("import_star", &[&self.scope.clone(), &module]);
                             continue;
                         }
-                        let attr = self.code_name(alias.name.as_str());
                         let value = self.op("from", &[&module, &attr]);
                         self.bind(
                             alias.asname.as_ref().unwrap_or(&alias.name).as_str(),
