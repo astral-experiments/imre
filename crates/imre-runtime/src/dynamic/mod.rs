@@ -3,6 +3,7 @@
 
 mod abstract_class;
 mod array;
+mod atexit;
 mod builtins;
 mod calls;
 mod class_annotations;
@@ -105,6 +106,7 @@ pub(crate) struct Context {
     sys_path: Id,
     default_encoding: Id,
     audit_hooks: Vec<Id>,
+    exit_callbacks: Vec<Id>,
     // The active stack roots suspended contexts while Context.run executes native code.
     contexts: Vec<Id>,
     // A buffer export pins its bytearray's size while Python callbacks run.
@@ -2040,7 +2042,11 @@ impl Context {
         let key = self.text(name);
         self.put_item(self.modules, key, module)?;
         if let Err(e) = self.run_initializer(name, module, scope, name_id, origin, source) {
-            builtins::remove_dict_item(self, self.modules, key)?;
+            // The executing script remains importable during interpreter shutdown,
+            // including after SystemExit or an uncaught exception.
+            if name != "__main__" {
+                builtins::remove_dict_item(self, self.modules, key)?;
+            }
             return Err(e);
         }
         // A script can delete its own __main__ binding. Its exit status is determined by the script.
@@ -2155,6 +2161,7 @@ impl Context {
                 self.bind(scope, "pi", pi);
             }
             "errno" => stdlib::install_errno(self, scope)?,
+            "atexit" => atexit::install(self, scope),
             "_socket" => stdlib::install_lowlevel_socket(self, scope)?,
             "socket"
                 if source.is_none()

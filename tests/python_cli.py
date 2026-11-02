@@ -1340,6 +1340,28 @@ def main():
             extra={"PYTHONDONTWRITEBYTECODE": "1", "IMREFLAGS": "--bogus"},
         )
         compare("-B", "-c", "import sys\nsys.exit(37)", status=37)
+        compare(
+            "-B", "-c",
+            "import atexit, gc, sys\n"
+            "class SelfRemoving:\n"
+            "    def __call__(self): atexit.unregister(self)\n"
+            "    def __del__(self): atexit.register(print, 'registered during cleanup')\n"
+            "atexit.register(SelfRemoving())\n"
+            "atexit._run_exitfuncs()\n"
+            "assert atexit._ncallbacks() == 0\n"
+            "def first(label, *, flag):\n"
+            "    import __main__\n"
+            "    print(label, flag, __main__.message)\n"
+            "atexit.register(first, 'oldest', flag=7)\n"
+            "@atexit.register\n"
+            "def newest():\n"
+            "    print('newest')\n"
+            "    atexit.unregister(first)\n"
+            "message = 'retained'\n"
+            "gc.collect()\n"
+            "sys.exit(37)\n",
+            status=37,
+        )
         compare("-IB", "-c", "raise SystemExit")
         compare("-IB", "-c", "from sys import exit\nexit(None)")
         for source in ('import sys\nsys.exit("7")', 'raise SystemExit("7")'):

@@ -46,14 +46,32 @@ fn record(ctx: &mut Context, [class, value, tb]: [Id; 3], message: Id, object: I
 
 /// A hook or an audit veto can run Python, including nested collections and finalizers.
 pub(super) fn deallocator(ctx: &mut Context, error: Error, method: Id) {
-    let Ok(fields) = exception_fields(ctx, error, true) else {
+    report(
+        ctx,
+        error,
+        true,
+        Some(method),
+        "Exception ignored while calling deallocator",
+    );
+}
+
+/// Preserve the exception before formatting the callable or invoking the user's hook.
+pub(super) fn report(
+    ctx: &mut Context,
+    error: Error,
+    supply_frame: bool,
+    callable: Option<Id>,
+    prefix: &str,
+) {
+    let Ok(fields) = exception_fields(ctx, error, supply_frame) else {
         return;
     };
-    let message = match ctx.checked_format(method, true) {
-        Ok(method) => ctx.text(format!(
-            "Exception ignored while calling deallocator {method}"
-        )),
-        Err(_) => NONE,
+    let message = match callable {
+        Some(callable) => match ctx.checked_format(callable, true) {
+            Ok(name) => ctx.text(format!("{prefix} {name}")),
+            Err(_) => NONE,
+        },
+        None => ctx.text(prefix),
     };
     let args = record(ctx, fields, message, NONE);
     ctx.heap.keep(args);

@@ -665,6 +665,7 @@ pub(super) fn new_context<S: Into<String>>(
         sys_path: NONE,
         default_encoding: NONE,
         audit_hooks: Vec::new(),
+        exit_callbacks: Vec::new(),
         contexts: Vec::new(),
         buffer_exports: Vec::new(),
         sorting_lists: Vec::new(),
@@ -724,7 +725,7 @@ pub(super) unsafe extern "C" fn imre_dyn_register(
 pub(super) unsafe extern "C" fn imre_dyn_finish(ctx: *mut Context) -> i32 {
     // SAFETY: main transfers its unique allocation from imre_dyn_new exactly once.
     let mut ctx = unsafe { Box::from_raw(ctx) };
-    match ctx.module("__main__") {
+    let status = match ctx.module("__main__") {
         Ok(_) => 0,
         Err(e) if e.kind == "SystemExit" => match e.exit_status {
             Some(status) => status.report(),
@@ -767,7 +768,10 @@ pub(super) unsafe extern "C" fn imre_dyn_finish(ctx: *mut Context) -> i32 {
             eprintln!("{error}");
             1
         }
-    }
+    };
+    ctx.workers.join_before_exit_callbacks();
+    atexit::run(&mut ctx);
+    status
 }
 
 fn finish(ctx: &mut Context, result: Result<Id>) -> Id {
@@ -1352,6 +1356,7 @@ impl Context {
                 .chain(self.native_code_objects.values())
                 .chain(self.codec_entries.roots())
                 .chain(&self.audit_hooks)
+                .chain(&self.exit_callbacks)
                 .copied()
                 .chain(self.workers.roots().copied())
                 .chain(self.threads.roots())
