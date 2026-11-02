@@ -1646,13 +1646,16 @@ impl Context {
         }
     }
 
+    /// Drop truth operands and report whether their release requires a collection.
+    pub(super) fn discard_truth_operands(&mut self, mark: usize) -> bool {
+        let stdin = super::stdlib::io::rooted_input_chain(self);
+        self.heap
+            .discard_truth_operands(mark, self.modules, stdin.as_ref())
+    }
+
     /// Publish the surviving roots before the next operand can observe a discarded writer.
     pub(super) fn discard_truth(&mut self, mark: usize) {
-        let stdin = super::stdlib::io::rooted_input_chain(self);
-        if self
-            .heap
-            .discard_truth_operands(mark, self.modules, stdin.as_ref())
-        {
+        if self.discard_truth_operands(mark) {
             self.collect_unreachable();
         }
     }
