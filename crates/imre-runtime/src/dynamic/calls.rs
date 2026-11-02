@@ -1031,6 +1031,7 @@ impl Context {
                 class:
                     Some(
                         class @ ("time.struct_time"
+                        | stdlib::fixed_structseq::UNRAISABLE_ARGS
                         | stdlib::fixed_structseq::HASH_INFO
                         | stdlib::fixed_structseq::TERMINAL_SIZE
                         | stdlib::flags::TYPE
@@ -1200,6 +1201,7 @@ impl Context {
                     class:
                         Some(
                             class @ ("time.struct_time"
+                            | stdlib::fixed_structseq::UNRAISABLE_ARGS
                             | stdlib::fixed_structseq::HASH_INFO
                             | stdlib::fixed_structseq::TERMINAL_SIZE
                             | stdlib::flags::TYPE),
@@ -2915,6 +2917,7 @@ impl Context {
                 }
                 if let Some(
                     owner @ ("time.struct_time"
+                    | stdlib::fixed_structseq::UNRAISABLE_ARGS
                     | stdlib::fixed_structseq::HASH_INFO
                     | stdlib::fixed_structseq::TERMINAL_SIZE
                     | stdlib::flags::TYPE),

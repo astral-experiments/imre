@@ -48,18 +48,25 @@ impl Context {
                 self.heap.keep(root);
             }
         }
-        let result = if generator {
-            self.generator_close(owner).map(|_| ())
-        } else {
-            self.bound_slot(owner, "__del__").and_then(|method| {
-                if let Some(method) = method {
-                    self.call(method, Vec::new(), Vec::new())?;
+        if generator {
+            if let Err(error) = self.generator_close(owner) {
+                eprintln!("Exception ignored while calling __del__: {error}");
+            }
+        } else if let Some(slot) = self.slot(owner, "__del__") {
+            self.heap.keep(slot);
+            if let Ok(Some(method)) = self.bound_slot(owner, "__del__") {
+                self.heap.keep(method);
+                // CPython calls ordinary function slots unbound. Other descriptors
+                // report the callable produced by descriptor binding.
+                let deallocator = if matches!(self.heap.get(slot), Value::Function { .. }) {
+                    slot
+                } else {
+                    method
+                };
+                if let Err(error) = self.call(method, Vec::new(), Vec::new()) {
+                    super::unraisable::deallocator(self, error, deallocator);
                 }
-                Ok(())
-            })
-        };
-        if let Err(error) = result {
-            eprintln!("Exception ignored while calling __del__: {error}");
+            }
         }
         self.pending = pending;
         self.heap.release_temporaries_since(mark);
