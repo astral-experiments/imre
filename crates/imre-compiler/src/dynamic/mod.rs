@@ -280,9 +280,16 @@ impl<'a> Visitor<'a> for Imports {
         visitor::walk_stmt(self, s);
     }
     fn visit_expr(&mut self, e: &'a Expr) {
-        if matches!(e, Expr::Name(n) if n.id == "__import__" && n.ctx == ast::ExprContext::Load) {
-            self.uses_import_builtin = true;
-            self.add(0, "importlib");
+        if let Expr::Name(name) = e
+            && name.ctx == ast::ExprContext::Load
+        {
+            if name.id == "__import__" {
+                self.uses_import_builtin = true;
+                self.add(0, "importlib");
+            }
+            if self.boxed_mock_names.contains(name.id.as_str()) {
+                self.runtime_imports = true;
+            }
         }
         // A resource lookup can be the first operation to load its package.
         if let Expr::Call(call) = e
@@ -332,8 +339,7 @@ impl<'a> Visitor<'a> for Imports {
         {
             self.runtime_imports = true;
         }
-        if matches!(e, Expr::Name(n) if n.ctx == ast::ExprContext::Load && self.boxed_mock_names.contains(n.id.as_str()))
-            || matches!(e, Expr::Name(n) if n.id.as_str() == "SystemExit")
+        if matches!(e, Expr::Name(n) if n.id.as_str() == "SystemExit")
             || matches!(e, Expr::Attribute(a) if boxed_sys_export(a.attr.as_str()) && matches!(&*a.value, Expr::Name(n) if self.sys_names.contains(n.id.as_str())))
         {
             self.runtime_imports = true;
