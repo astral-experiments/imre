@@ -3659,6 +3659,9 @@ impl Context {
                 if let Some(value) = self.class_attr(obj, name) {
                     return self.bind_attribute(value, NONE, obj);
                 }
+                if name == "__init__" && self.has_base(obj, "type") {
+                    return Ok(self.builtin("type.__init__"));
+                }
                 if name == "_abc_caches_clear" && self.is_protocol_declaration(obj) {
                     let callable = self.builtin("abc._abc_caches_clear");
                     return Ok(self.alloc(Value::Method {

@@ -33,8 +33,12 @@ def current():
     assert child().inherited() == "inherited"
     assert events == [("first", child), ("second", child), ("subclass", child, 7)]
 
+    class DefaultMeta(type):
+        pass
+    assert DefaultMeta.__init__ is type.__init__
+
     calls = []
-    class InitializingMeta(type):
+    class InitializingMeta(DefaultMeta):
         def __init__(cls, name, bases, body, **kw):
             super().__init__(name, bases, body, **kw)
             calls.append((cls, name, bases, body, kw))
@@ -52,6 +56,23 @@ def current():
     assert calls[1][2] == (parent,) and type(dynamic) is InitializingMeta
     assert dynamic.generated == "dynamic" and parent.marker is supplied["marker"]
     assert "generated" not in supplied and "generated" not in Child.saved_body
+
+    from abc import ABCMeta
+    class Redirect(ABCMeta):
+        def __new__(meta, name, bases, body):
+            if name == "Redirected":
+                return parent
+            return ABCMeta.__new__(meta, name, bases, body)
+
+    class RedirectBase(metaclass=Redirect):
+        pass
+
+    calls.clear()
+    body = {}
+    assert type("Redirected", (RedirectBase,), body) is parent
+    assert Redirect("Redirected", (RedirectBase,), body) is parent
+    assert calls == [(parent, "Redirected", (RedirectBase,), body, {})]
+    assert calls[0][3] is body
 
     reader = make_reader()
     cell = reader.__closure__[0]

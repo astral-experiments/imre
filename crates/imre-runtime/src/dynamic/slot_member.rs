@@ -230,11 +230,38 @@ impl Context {
                 "ABCMeta.__new__ requires an ABCMeta subtype",
             ));
         }
-        self.type_from_namespace(Some(meta), name, bases, namespace, &keywords)
+        self.new_type_from_namespace(Some(meta), name, bases, namespace, &keywords)
+    }
+
+    /// Call the allocator, then initialize a result of the requested metaclass.
+    pub(super) fn type_from_namespace(
+        &mut self,
+        explicit_meta: Option<Id>,
+        name: Id,
+        base_tuple: Id,
+        namespace: Id,
+        kwargs: &[(String, Id)],
+    ) -> Result<Id> {
+        let class =
+            self.new_type_from_namespace(explicit_meta, name, base_tuple, namespace, kwargs)?;
+        let caller = explicit_meta.unwrap_or_else(|| self.builtin("type"));
+        let actual = self.exact_type(class)?;
+        if self.direct_subclass(actual, caller)
+            && let Some(init) = self.class_attr(actual, "__init__")
+        {
+            self.call_initializer(
+                init,
+                class,
+                actual,
+                vec![name, base_tuple, namespace],
+                kwargs.to_vec(),
+            )?;
+        }
+        Ok(class)
     }
 
     /// Construct a class from a copied namespace with its selected metaclass.
-    pub(super) fn type_from_namespace(
+    fn new_type_from_namespace(
         &mut self,
         explicit_meta: Option<Id>,
         name: Id,
@@ -340,7 +367,6 @@ impl Context {
         let layout = super::typing::ClassLayout::TypeNamespace;
         let bases = self.validate_class_bases(bases, layout)?;
         let layout_base = self.member_layout_base(&bases)?;
-        let original_namespace = namespace;
         let namespace = super::builtins::copy_dict(self, namespace, storage)?;
         let slots =
             self.declared_slot_names(self.dict_named_item(namespace, "__slots__"), layout_base)?;
@@ -458,16 +484,6 @@ impl Context {
         self.finish_namespace_class(class, scope, cell, dict_cell, kwargs.to_vec())?;
         if abc.is_some() {
             self.init_abstract_class(class, scope)?;
-        } else if let Some(meta) = metaclass
-            && let Some(init) = self.class_attr(meta, "__init__")
-        {
-            self.call_initializer(
-                init,
-                class,
-                meta,
-                vec![name, base_tuple, original_namespace],
-                kwargs.to_vec(),
-            )?;
         }
         Ok(class)
     }
