@@ -9,7 +9,10 @@ class Cache:
         self.seen = None
 
     def get(self, key, default=None):
-        return self.data.get(key, default)
+        value = self.data.get(key, default)
+        if key == 'marker':
+            self.data[key] = new
+        return value
 
     def __contains__(self, key):
         return key in self.data
@@ -26,9 +29,26 @@ class Cache:
         raise ArithmeticError('during cleanup')
 
 
+class BrokenSpec:
+    @property
+    def __spec__(self):
+        raise ValueError('failed to read spec')
+
+old = object()
+new = object()
 proxy = Cache()
+proxy.data['marker'] = old
+proxy.data['broken_spec'] = BrokenSpec()
 try:
     sys.modules = proxy
+    assert import_module('marker') is new
+    try:
+        import_module('broken_spec')
+    except ValueError as exc:
+        assert str(exc) == 'failed to read spec'
+    else:
+        raise AssertionError('errors reading the cached spec must propagate')
+
     try:
         import_module('flaky')
     except ArithmeticError as exc:

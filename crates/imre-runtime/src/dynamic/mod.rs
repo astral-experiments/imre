@@ -125,6 +125,7 @@ pub(crate) struct Context {
     frozen_override: i32,
     // The interpreter keeps its original dictionary even when Python reassigns sys.modules.
     modules: Id,
+    import_missing: Id,
     classes: HashMap<String, Id>,
     typing: typing::Registry,
     // Python wrappers retain their registered logger for the lifetime of this heap.
@@ -1912,21 +1913,49 @@ impl Context {
         }
     }
 
-    fn public_registered_module(&mut self, name: Id) -> Result<Option<Id>> {
+    fn public_module_get(&mut self, name: Id, default: Option<Id>) -> Result<Id> {
         let modules = self.public_modules()?;
         if matches!(self.heap.get(modules), Value::Dict(_)) {
             let (_, index) = self.find_dictionary_key(modules, name, None)?;
-            return Ok(index.map(|i| self.stored_entries(modules)[i].1));
+            return Ok(index.map_or(default.unwrap_or(NONE), |i| self.stored_entries(modules)[i].1));
         }
         let get = self.lookup_attr(modules, "get")?;
-        let missing = self.alloc(Value::List(Vec::new()));
-        let value = self.call(get, vec![name, missing], Vec::new())?;
-        Ok((value != missing).then_some(value))
+        let args = match default {
+            Some(default) => vec![name, default],
+            None => vec![name],
+        };
+        self.call(get, args, Vec::new())
+    }
+
+    fn public_registered_module(&mut self, name: Id) -> Result<Option<Id>> {
+        let value = self.public_module_get(name, Some(self.import_missing))?;
+        Ok((value != self.import_missing).then_some(value))
     }
 
     fn cached_import(&mut self, name: &str) -> Result<Option<Id>> {
         let key = self.text(name);
-        match self.public_registered_module(key)? {
+        let mut retries = 0;
+        let module = loop {
+            let Some(module) = self.public_registered_module(key)? else {
+                break self.public_registered_module(key)?;
+            };
+            self.heap.reserve_temporaries(1)?;
+            self.heap.keep(module);
+            let initializing = self.lookup_attr(module, "__spec__")
+                .and_then(|spec| self.lookup_attr(spec, "_initializing"));
+            match initializing {
+                Ok(flag) if self.truth(flag)? => break self.public_registered_module(key)?,
+                Err(error) if !self.is_attribute_error(&error) => return Err(error),
+                _ => {}
+            }
+            if self.public_module_get(key, None)? == module {
+                break Some(module);
+            }
+            // A callback can replace the entry while _find_and_load checks its spec.
+            retries += 1;
+            self.check_call_depth(retries)?;
+        };
+        match module {
             Some(NONE) => Err(Error::new(
                 "ModuleNotFoundError",
                 format!("import of {name} halted; None in sys.modules"),
@@ -1980,8 +2009,12 @@ impl Context {
 
     /// Run a module initializer after its parent has been resolved.
     fn load_module(&mut self, name: &str, parent: Option<(Id, &str)>) -> Result<Option<Id>> {
-        if let Some(id) = self.cached_import(name)? {
-            return Ok(Some(id));
+        if parent.is_some() {
+            let key = self.text(name);
+            let child = self.public_module_get(key, None)?;
+            if child != NONE {
+                return Ok(Some(child));
+            }
         }
         let mut locations = Vec::new();
         let source = if name == "__main__" {
