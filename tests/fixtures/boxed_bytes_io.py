@@ -210,16 +210,22 @@ def current():
     class ResizingRaw(io.BytesIO):
         @property
         def closed(self):
+            if not self.check_export:
+                return super().closed
             try:
                 dest.append(0)
             except BufferError:
                 pass
             else:
                 raise AssertionError("readinto destination resized during callback")
-            return False
+            return super().closed
 
     raw = ResizingRaw(b"xy")
-    assert io.BufferedReader(raw, 2).readinto1(dest) == 2
+    raw.check_export = True
+    reader = io.BufferedReader(raw, 2)
+    assert reader.readinto1(dest) == 2
     assert dest == b"xy"
+    raw.check_export = False
+    reader.close()
 
     print("BytesIO retains native stream position and immutable snapshots")
