@@ -488,6 +488,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             | "_new_typeddict"
             | "_UnpackGenericAlias"
             | "_eval_type_expression"
+            | "_validate_forward_ref"
             | "Any"
             | "Callable"
             | "cast"

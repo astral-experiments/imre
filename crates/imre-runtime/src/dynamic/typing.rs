@@ -984,6 +984,119 @@ fn typevar(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id
     })))
 }
 
+/// Check a forward reference without evaluating names or converting the tree into Python AST objects.
+fn validate_forward_ref(source: &str) -> Result<()> {
+    use ruff_python_ast::token::TokenKind;
+    use ruff_python_ast::visitor::{self, Visitor};
+    use ruff_python_ast::{Expr, ExprContext};
+    use ruff_text_size::Ranged;
+    use std::collections::HashSet;
+
+    fn invalid_binding<'a>(mut names: impl Iterator<Item = &'a str>) -> bool {
+        let mut seen = HashSet::new();
+        names.any(|name| name == "__debug__" || !seen.insert(name))
+    }
+
+    #[derive(Default)]
+    struct Bindings {
+        invalid: bool,
+    }
+    impl<'a> Visitor<'a> for Bindings {
+        fn visit_expr(&mut self, expr: &'a Expr) {
+            if self.invalid {
+                return;
+            }
+            self.invalid = match expr {
+                Expr::Call(call) => invalid_binding(
+                    call.arguments
+                        .keywords
+                        .iter()
+                        .filter_map(|kw| kw.arg.as_deref()),
+                ),
+                Expr::Lambda(lambda) => lambda.parameters.as_ref().is_some_and(|params| {
+                    invalid_binding(params.iter().map(|p| p.name().as_str()))
+                }),
+                Expr::Name(name) => name.ctx == ExprContext::Store && name.id == "__debug__",
+                Expr::Attribute(attr) => {
+                    attr.ctx == ExprContext::Store && attr.attr.as_str() == "__debug__"
+                }
+                _ => false,
+            };
+            stacker::maybe_grow(128 * 1024, 2 * 1024 * 1024, || {
+                visitor::walk_expr(self, expr)
+            });
+        }
+    }
+    if source.contains('\0') {
+        return Err(Error::new(
+            "SyntaxError",
+            "source code string cannot contain null bytes",
+        ));
+    }
+    // CPython's tokenizer caps the combined nesting of (), [] and {} at 200.
+    // Keep deeply nested input out of the recursive parser. Short references only lex once.
+    const MAX_NESTING: usize = 200;
+    if source.len() > MAX_NESTING {
+        let mut lexer =
+            ruff_python_parser::lexer::lex(source, ruff_python_parser::Mode::Expression);
+        let mut depth = 0_usize;
+        loop {
+            match lexer.next_token() {
+                TokenKind::Lpar | TokenKind::Lsqb | TokenKind::Lbrace => {
+                    depth += 1;
+                    if depth > MAX_NESTING {
+                        return Err(Error::new("SyntaxError", "too many nested parentheses"));
+                    }
+                }
+                TokenKind::Rpar | TokenKind::Rsqb | TokenKind::Rbrace => {
+                    depth = depth.saturating_sub(1)
+                }
+                TokenKind::EndOfFile | TokenKind::Unknown => break,
+                _ => {}
+            }
+        }
+    }
+    let parsed = ruff_python_parser::parse_expression(source)
+        .map_err(|error| Error::new("SyntaxError", error.to_string()))?;
+    let body = parsed.syntax().body.as_ref();
+    let invalid = match body {
+        Expr::Yield(_) => Some("'yield' outside function"),
+        Expr::YieldFrom(_) => Some("'yield from' outside function"),
+        Expr::Await(_) => Some("'await' outside function"),
+        _ => None,
+    };
+    if let Some(message) = invalid {
+        return Err(Error::new("SyntaxError", message));
+    }
+    // The grammar alone cannot validate nested coroutine/generator scopes or walrus
+    // bindings across comprehension scopes. Those require a compile-time symbol table.
+    let tokens = parsed.tokens();
+    let comprehension = tokens.iter().any(|t| t.kind() == TokenKind::For);
+    let lambda_body = body.as_lambda_expr().map(|lambda| lambda.body.range());
+    if tokens.iter().any(|token| match token.kind() {
+        TokenKind::Await | TokenKind::Async => true,
+        TokenKind::Yield => {
+            comprehension || !lambda_body.is_some_and(|r| r.contains_range(token.range()))
+        }
+        TokenKind::ColonEqual => comprehension,
+        _ => false,
+    }) {
+        return Err(Error::new(
+            "NotImplementedError",
+            "forward reference requires scope validation",
+        ));
+    }
+    let mut bindings = Bindings::default();
+    bindings.visit_expr(body);
+    if bindings.invalid {
+        return Err(Error::new(
+            "SyntaxError",
+            "invalid binding in forward reference",
+        ));
+    }
+    Ok(())
+}
+
 pub(super) fn call(
     ctx: &mut Context,
     operation: &str,
@@ -1163,6 +1276,10 @@ pub(super) fn call(
             "TypeError",
             "_GenericAlias.__init__() requires an origin and arguments",
         )),
+        ("_validate_forward_ref", [text]) => {
+            validate_forward_ref(ctx.str_value(*text)?)?;
+            Ok(NONE)
+        }
         ("_eval_type_expression", [text, globals, locals]) => {
             ctx.eval_type_expression(*text, *globals, *locals)
         }
