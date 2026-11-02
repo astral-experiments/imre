@@ -80,4 +80,29 @@ def current():
     assert fallback | MappingProxyType(proxy) == ('right backing', fallback)
     assert len(seen) == 3
     assert type(seen[0]) is MappingProxyType and seen[1] is proxy and seen[2] is mapping
+    import typing
+    import weakref
+
+    assert (typing.Literal[1] | proxy).__args__[-1] is proxy
+    assert list[int] | proxy == ('right backing', list[int])
+
+    class ReturnsOperand(dict):
+        def __or__(self, other):
+            return other
+
+    class Target:
+        pass
+
+    target = Target()
+    reference = weakref.proxy(target)
+    returning = MappingProxyType(ReturnsOperand())
+    assert returning | reference is reference
+    del target
+    assert returning | reference is reference
+
+    class Child(UnionMapping):
+        def __ror__(self, other):
+            return 'subclass first'
+
+    assert proxy | MappingProxyType(Child()) == 'subclass first'
     return 0
