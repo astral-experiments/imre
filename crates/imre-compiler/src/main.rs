@@ -29,7 +29,7 @@ const JEMALLOC_RUNTIME: &str = "libimre_runtime_jemalloc.a";
 const PYTHON_HEADER: &str = include_str!("../../imre-runtime/include/Python.h");
 
 const USAGE: &str = "Usage: imre check SOURCE.py [--module-root DIRECTORY] [--extension-path DIRECTORY] [--reachable-only] [--runtime-imports] [--entry-profile FILE] [--watch | -w]
-       imre [-I] [-B] [-X utf8[=0|1]] -c CODE [PROGRAM_ARGUMENTS...]
+       imre [-I] [-E] [-B] [-X utf8[=0|1]] [-X context_aware_warnings=0|1] -c CODE [PROGRAM_ARGUMENTS...]
        imre extension-header
        imre build-target [--output-dir DIRECTORY]
        imre wheel PROJECT [--out-dir DIR] [--overlay DIR] [--python PYTHON]
@@ -111,9 +111,15 @@ fn run() -> Result<ExitCode, String> {
     {
         let invocation = match python_command::parse(command.clone(), &mut args) {
             Ok(value) => value,
-            Err(message) => {
+            Err(python_command::ParseError::Usage(message)) => {
                 eprintln!("{message}");
                 return Ok(ExitCode::from(2));
+            }
+            Err(python_command::ParseError::ContextWarnings(message)) => {
+                eprintln!(
+                    "Fatal Python error: config_init_context_aware_warnings: {message}\nPython runtime state: preinitialized\n"
+                );
+                return Ok(ExitCode::FAILURE);
             }
         };
         if let python_command::Invocation::Script { path, .. } = &invocation

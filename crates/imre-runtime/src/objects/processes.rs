@@ -1083,26 +1083,6 @@ fn copy_argv(words: &[usize], copy: impl Fn(usize) -> Result<CString>) -> Result
     Ok(argv)
 }
 
-/// # Safety
-/// The caller roots the legacy ABI's exact list and optional directory/environment.
-unsafe fn spawn_list(
-    args: *const Object,
-    cwd: *const Str,
-    env: *const Object,
-    streams: u32,
-) -> Result<Child> {
-    popen::cleanup();
-    // SAFETY: the compiler passes a rooted exact list, never a tuple or a scalar.
-    let cmd = unsafe { WordKind::new(5).acquire(args as usize) };
-    let config = popen::LaunchConfig::basic(args.cast(), 5, cwd, env, streams, 0, true);
-    // SAFETY: the original configuration remains rooted while spawn reports any error.
-    unsafe {
-        launch_error::spawn(&cmd, &config, streams, Default::default(), true, |_| {
-            Ok(ChildAttributes::default())
-        })
-    }
-}
-
 /// Runs a child with its output forwarded directly to the parent's stderr.
 ///
 /// # Safety
@@ -1110,8 +1090,23 @@ unsafe fn spawn_list(
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_subprocess_to_stderr(args: *const Object, check: u32) {
     let run = || -> Result<ExitStatus> {
-        // SAFETY: all argv owners are rooted by the caller.
-        let child = unsafe { spawn_list(args, std::ptr::null(), std::ptr::null(), 4)? };
+        popen::cleanup();
+        let streams = 4;
+        let config = popen::LaunchConfig::basic(
+            args.cast(),
+            5,
+            std::ptr::null(),
+            std::ptr::null(),
+            streams,
+            0,
+        );
+        // SAFETY: the caller roots the exact argv list through launch.
+        let child = unsafe {
+            let cmd = WordKind::new(5).acquire(args as usize);
+            launch_error::spawn(&cmd, &config, streams, Default::default(), true, |_| {
+                Ok(ChildAttributes::default())
+            })
+        }?;
         ChildGuard {
             child,
             reaped: false,
@@ -1145,7 +1140,7 @@ unsafe fn prepare_process(
 ) -> Result<(Launch, Option<CString>)> {
     popen::cleanup();
     // SAFETY: existing run and asynchronous ABIs accept an exact list.
-    let config = popen::LaunchConfig::basic(args.cast(), 5, cwd, env, 0, 0, true);
+    let config = popen::LaunchConfig::basic(args.cast(), 5, cwd, env, 0, 0);
     // SAFETY: the legacy arguments have their original word representations.
     let (launch, cwd, _) = unsafe {
         let cmd = WordKind::new(5).acquire(args as usize);
@@ -1561,7 +1556,6 @@ mod tests {
             env.map_or(std::ptr::null(), crate::ObjectOwner::as_ptr),
             0x11 | (1 << 16), // capture both streams as text
             Int::small(-1).unwrap().0,
-            true,
         );
         let deadline = timeout
             .as_ref()

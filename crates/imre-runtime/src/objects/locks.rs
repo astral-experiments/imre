@@ -4,6 +4,26 @@ use super::{Error, Int, Kind};
 use std::sync::{Condvar, Mutex};
 use std::time::Duration;
 
+/// The unsigned pthread identifier exposed by Python's get_ident.
+pub(crate) fn thread_ident() -> usize {
+    // SAFETY: pthread_self identifies the caller and takes no arguments.
+    unsafe { libc::pthread_self() as usize }
+}
+
+#[cfg(target_os = "linux")]
+pub(crate) fn native_thread_id() -> u64 {
+    // SAFETY: gettid returns the caller's kernel thread ID and takes no arguments.
+    unsafe { libc::syscall(libc::SYS_gettid) as u64 }
+}
+
+#[cfg(target_os = "macos")]
+pub(crate) fn native_thread_id() -> u64 {
+    let mut id = 0;
+    // SAFETY: zero selects the current thread, and the output points to a live u64.
+    unsafe { libc::pthread_threadid_np(0, &mut id) };
+    id
+}
+
 #[derive(Default)]
 pub(crate) struct PrimitiveLock {
     held: Mutex<bool>,

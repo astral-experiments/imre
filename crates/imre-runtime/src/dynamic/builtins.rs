@@ -89,6 +89,16 @@ exception_kinds!(
     StopAsyncIteration,
     Warning,
     RuntimeWarning,
+    DeprecationWarning,
+    EncodingWarning,
+    UserWarning,
+    PendingDeprecationWarning,
+    SyntaxWarning,
+    FutureWarning,
+    ImportWarning,
+    UnicodeWarning,
+    BytesWarning,
+    ResourceWarning,
 );
 
 const FUNCTIONS: &[&str] = &[
@@ -226,6 +236,7 @@ pub(super) fn constructor_owner(name: &str) -> Option<&str> {
 pub(super) fn is_builtin_type(name: &str) -> bool {
     TYPES.contains(&name)
         || super::stdlib::structseq::lookup(name).is_some()
+        || name == super::stdlib::flags::TYPE
         || is_exception(name)
         || is_enum_base(name)
 }
@@ -233,6 +244,7 @@ pub(super) fn is_builtin_type(name: &str) -> bool {
 /// Static builtin types have a GC-capable metaclass, but are never themselves tracked.
 pub(super) fn is_static_gc_type(name: &str) -> bool {
     TYPES.contains(&name)
+        || name == super::stdlib::flags::TYPE
         || EXCEPTIONS.contains(&name)
         || (is_iterator_type(name) && !name.contains('.'))
         || matches!(
@@ -417,6 +429,7 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         }
         Value::ItemGetter(_) if attr == "__reduce__" => "operator.itemgetter",
         Value::Property(_) if super::property::METHODS.contains(&attr) => "property",
+        Value::ClassMethod(_) if attr == "__get__" => "classmethod",
         Value::StaticMethod { .. } if attr == "__get__" => "staticmethod",
         Value::Generator { .. } if matches!(attr, "send" | "throw" | "close") => "generator",
         Value::Bytes(_) if BYTES_METHODS.contains(&attr) => "bytes",

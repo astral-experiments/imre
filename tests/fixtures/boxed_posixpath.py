@@ -3,7 +3,7 @@ import os
 import os.path
 import posix
 import posixpath
-from os import altsep, fspath, pathsep, sep
+from os import altsep, fspath, linesep, pathsep, sep
 from os.path import altsep as path_altsep, pathsep as path_list_sep, sep as path_sep
 from posixpath import normpath
 
@@ -77,6 +77,8 @@ def current():
     else:
         raise AssertionError("missing file unexpectedly had a size")
     assert os.path.exists is posixpath.exists is genericpath.exists
+    assert os.path.lexists is posixpath.lexists is genericpath.lexists
+    assert os.path.lexists(Path(__file__)) and not os.path.lexists(missing)
     assert os.path.isfile is posixpath.isfile is genericpath.isfile
     assert os.listdir is posix.listdir
     module_dir = os.path.dirname(__file__) or "."
@@ -125,6 +127,8 @@ def current():
     assert sep is os.sep is path_sep is posixpath.sep and sep == "/"
     assert altsep is os.altsep is path_altsep is posixpath.altsep is None
     assert pathsep is os.pathsep is path_list_sep is os.path.pathsep is posixpath.pathsep
+    assert linesep is os.linesep and linesep == "\n"
+    assert not hasattr(posixpath, "linesep")
     assert pathsep == ":"
     assert ":λ::some path:".split(pathsep) == ["", "λ", "", "some path", ""]
     assert os.path.splitext is posixpath.splitext and os.path.join is posixpath.join

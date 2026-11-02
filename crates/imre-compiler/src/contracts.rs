@@ -534,6 +534,7 @@ impl Builtin {
             | Self::IntBounded { .. }
             | Self::CanElideMapperFrames(_)
             | Self::SysGetRecursionLimit
+            | Self::SysContextAwareWarnings
             | Self::GeneratorFrameLeave
             | Self::IntSignAsFloat
             | Self::IsInstance(_)
@@ -595,7 +596,7 @@ impl Builtin {
                 Contract::new(true, PreservesOwners)
             }
             Self::SortByComparator => Contract::new(true, Unknown),
-            Self::ListReserveRange => Contract::new(false, PreservesOwners),
+            Self::ListReserveRange | Self::StructCyclePrefix => Contract::new(false, PreservesOwners),
             Self::AnnotationRef
             | Self::BinaryOpen(_)
             | Self::BinaryRead
@@ -692,6 +693,7 @@ impl Builtin {
             | Self::SysStreamText { .. }
             | Self::SysEncoding(_)
             | Self::OsName
+            | Self::OsLinesep
             | Self::OsPathsep
             | Self::OsSeparator { .. }
             | Self::OptionalStrConcat
@@ -826,6 +828,9 @@ impl Builtin {
                 &[Type::ListInt, Type::Int, Type::Int, Type::Int],
                 Type::Bool,
             ),
+            Self::StructCyclePrefix => matches!(args, [list, period, limit]
+                if types.element(list.ty).is_some_and(|ty| types.is_value_struct(ty))
+                    && period.ty == Type::Int && limit.ty == Type::Int && result == Type::Int),
             Self::ListReserveRange => {
                 signature(
                     &[Type::ListInt, Type::Int, Type::Int, Type::Int, Type::Int],
@@ -1086,6 +1091,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_flush_stdout"
                 | "imre_environ_get"
                 | "imre_getcwd"
+                | "imre_os_linesep"
                 | "imre_os_pathsep"
                 | "imre_shutil_which"
                 | "imre_environ_copy"
@@ -1151,6 +1157,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_join_buffer_new"
                 | "imre_join_buffer_finish"
                 | "imre_str_replace"
+                | "imre_str_replace_count"
                 | "imre_print_str"
                 | "imre_print_bytes"
                 | "imre_bytes_str"

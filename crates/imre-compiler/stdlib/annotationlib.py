@@ -65,3 +65,23 @@ class ForwardRef:
         if self.__owner__ is not None:
             extra.append(f", owner={self.__owner__!r}")
         return f"ForwardRef({self.__forward_arg__!r}{''.join(extra)})"
+
+
+def _get_value_annotations(obj):
+    if isinstance(obj, type) and '__annotations__' not in getattr(obj, '__dict__', {}):
+        annotations = None
+    else:
+        annotations = getattr(obj, '__annotations__', None)
+    if annotations is None:
+        annotate = getattr(obj, '__annotate__', None)
+        if annotate is not None:
+            annotations = annotate(1)
+            if not isinstance(annotations, dict):
+                raise ValueError(f"{obj!r}.__annotate__ returned a non-dict")
+        elif isinstance(obj, type) or callable(obj):
+            return {}
+        else:
+            raise TypeError(f"{obj!r} does not have annotations")
+    if not isinstance(annotations, dict):
+        raise ValueError(f"{obj!r}.__annotations__ is neither a dict nor None")
+    return dict(annotations)

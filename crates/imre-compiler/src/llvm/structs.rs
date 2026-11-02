@@ -223,7 +223,7 @@ impl Emitter<'_, '_> {
                 let (yes, no, end) = (self.label(), self.label(), self.label());
                 self.branch(&cached, &yes, &no);
                 self.start(&yes);
-                // A repeated list uses one immutable row (mask zero) for every index.
+                // A repeated or periodic list masks the ordinal into its physical rows.
                 let physical = self.instruction(format!("and i64 {native}, {index_mask}"));
                 let p = self.instruction(format!(
                     "getelementptr inbounds %{name}, ptr {data}, i64 {physical}"

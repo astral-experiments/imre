@@ -94,7 +94,7 @@ impl Checker<'_> {
         };
         (
             unpacking::string(path),
-            !command.is_some_and(|flags| flags.isolated),
+            !command.is_some_and(|flags| flags.ignore_environment),
         )
     }
 }

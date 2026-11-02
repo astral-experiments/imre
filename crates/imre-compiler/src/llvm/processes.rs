@@ -528,7 +528,7 @@ impl Emitter<'_, '_> {
             }
             ProcessOperation::PopenStatus { poll: true } => {
                 let word = self.checked_instruction(format!(
-                    "call i64 @imre_popen_status(ptr {}, i1 true)",
+                    "call i64 @imre_popen_poll(ptr {})",
                     args[0].value.operand
                 ));
                 self.unpack_word(word, returns)
