@@ -1840,6 +1840,7 @@ def report(text):
             "boxed_configparser.py",
             "boxed_logging.py",
             "boxed_logging_file.py",
+            "boxed_logging_adapter.py",
             "boxed_logging_file_error.py",
             "boxed_class_attribute.py",
             "boxed_missing_attribute_owners.py",
