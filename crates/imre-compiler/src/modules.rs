@@ -1615,6 +1615,7 @@ impl IntrinsicModule {
                 Intrinsic::ObjectRuntimeExport("inspect.ismethodwrapper")
             }
             (Self::Inspect, "isbuiltin") => Intrinsic::ObjectRuntimeExport("inspect.isbuiltin"),
+            (Self::Inspect, "unwrap") => Intrinsic::ObjectRuntimeExport("inspect.unwrap"),
             (Self::Inspect, "signature") => Intrinsic::ObjectRuntimeExport("inspect.signature"),
             (Self::Inspect, "getattr_static") => Intrinsic::InspectGetattrStatic,
             (Self::Inspect, "ismethoddescriptor") => Intrinsic::InspectIsMethodDescriptor,
