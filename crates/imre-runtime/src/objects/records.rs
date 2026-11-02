@@ -415,7 +415,8 @@ pub unsafe extern "C" fn imre_tuple_batch_try_new(
             super::exceptions::record_allocation_failed();
             std::ptr::null_mut()
         }
-        // A wide tuple or thread-local teardown uses ordinary standalone storage.
+        // SAFETY: the same live descriptor supports standalone allocation when
+        // the layout is too wide or the thread-local batch is unavailable.
         _ => unsafe { imre_record_try_new(descriptor) },
     }
 }

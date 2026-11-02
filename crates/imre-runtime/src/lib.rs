@@ -1285,6 +1285,7 @@ fn short_record_fields(bytes: &[u8], slots: &mut [usize], mask: u32) -> bool {
     let (spaces, digits) = unsafe {
         #[inline]
         unsafe fn classify(ptr: *const u8) -> (u32, u32, bool) {
+            // SAFETY: each caller passes a readable 16-byte window on x86-64.
             unsafe {
                 let v = _mm_loadu_si128(ptr.cast());
                 let spaces = _mm_or_si128(
@@ -2260,11 +2261,9 @@ mod tests {
                             let expected = fields.get(index).and_then(|s| s.parse::<i64>().ok());
                             if word != 0 {
                                 assert_ne!(mask & (1 << index), 0);
-                                assert_eq!(
-                                    unsafe { Int::borrow(word) }.as_small(),
-                                    expected,
-                                    "{text:?} {index}"
-                                );
+                                // SAFETY: each nonzero slot holds a live integer written by the parser.
+                                let value = unsafe { Int::borrow(word) }.as_small();
+                                assert_eq!(value, expected, "{text:?} {index}");
                             } else if mask & (1 << index) != 0
                                 && width <= 8
                                 && fields.get(index) == Some(&digits.as_str())

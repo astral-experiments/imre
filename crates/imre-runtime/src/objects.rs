@@ -591,10 +591,10 @@ unsafe fn append_sequence_word(
         .values
         .try_reserve(1)
         .map_err(|_| Error::allocation())?;
-    // SAFETY: word is rooted and agrees with the sequence's declared kind.
     let word = if owned {
         word
     } else {
+        // SAFETY: word is rooted and agrees with the sequence's declared kind.
         unsafe { sequence.kind.acquire(word) }.into_word()
     };
     sequence.values.push(word);

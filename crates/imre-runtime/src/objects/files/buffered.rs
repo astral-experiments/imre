@@ -542,8 +542,9 @@ impl Input {
             let word = u64::from_le_bytes(*bytes) ^ 0x0a0a_0a0a_0a0a_0a0a;
             word.wrapping_sub(0x0101_0101_0101_0101) & !word & 0x8080_8080_8080_8080
         }
-        let end = window.chunks_exact(8).enumerate().find_map(|(i, chunk)| {
-            let matches = newline(chunk.try_into().unwrap());
+        let (chunks, _) = window.as_chunks::<8>();
+        let end = chunks.iter().enumerate().find_map(|(i, chunk)| {
+            let matches = newline(chunk);
             (matches != 0).then(|| 8 * i + (matches.trailing_zeros() / 8) as usize + 1)
         })?;
         self.text.pos += end;
