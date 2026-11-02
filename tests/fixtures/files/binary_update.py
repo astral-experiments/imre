@@ -32,6 +32,13 @@ try:
     else:
         raise AssertionError("immutable readinto target accepted on a closed file")
 
+    try:
+        stream.flush()
+    except ValueError as error:
+        assert str(error) == "flush of closed file"
+    else:
+        raise AssertionError("flushed a closed update stream")
+
     with open(path, "w+b", buffering=3) as stream:
         assert stream.mode == "rb+" and os.fstat(stream.fileno()).st_size == 0
         stream.write(b"abcdef")

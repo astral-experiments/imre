@@ -571,7 +571,7 @@ impl BufferedFd {
                     "readinto" => "readinto of closed file",
                     "seek" => "seek of closed file",
                     "write" => "write to closed file",
-                    "flush" if !self.reading => "flush of closed file",
+                    "flush" if self.writing => "flush of closed file",
                     "flush" | "__enter__" => "I/O operation on closed file.",
                     _ => "I/O operation on closed file",
                 },
