@@ -14,6 +14,13 @@ use regex_syntax::hir::HirKind;
 const SPACE: &str =
     r"\x09-\x0d\x1c-\x20\x85\xa0\x{1680}\x{2000}-\x{200a}\x{2028}\x{2029}\x{202f}\x{205f}\x{3000}";
 
+/// Python's capture-number limit (CPython Modules/_sre/sre.h).
+pub const MAX_GROUPS: u32 = if usize::BITS > 32 {
+    i32::MAX as u32 / 2
+} else {
+    isize::MAX as u32 / size_of::<usize>() as u32 / 2
+};
+
 /// The synthetic capture used to implement Python's terminal dollar before a final newline.
 pub const FINAL_NEWLINE_ANCHOR: &str = r"(?P<imre.eol>\n)?\z";
 
@@ -249,6 +256,12 @@ struct WarningVisitor<'a> {
     literals: &'a mut Vec<usize>,
     valid_name: fn(&str, bool) -> bool,
     emit: &'a mut dyn FnMut(ClassWarning) -> bool,
+    condition: Option<&'a mut ConditionDiagnostic>,
+}
+
+struct ConditionDiagnostic {
+    digit_limit: usize,
+    error: Option<(String, usize)>,
 }
 
 /// Report ambiguous tokens as the Python grammar consumes them. A promoted warning
@@ -268,6 +281,7 @@ pub fn visit_class_warnings(
         literals: &mut literals,
         valid_name,
         emit: &mut emit,
+        condition: None,
     };
     let _ = tokenize(
         pattern,
@@ -279,6 +293,39 @@ pub fn visit_class_warnings(
         Some(&mut visitor),
     );
     literals
+}
+
+/// Locate an invalid numeric condition using the source-ordered Python syntax visitor.
+pub fn numeric_condition_diagnostic(
+    pattern: &str,
+    verbose: bool,
+    alphabet: Alphabet,
+    dotall: bool,
+    scoped_verbose: fn(&str, bool, bool) -> Option<bool>,
+    valid_name: fn(&str, bool) -> bool,
+    digit_limit: usize,
+) -> Option<(String, usize)> {
+    let mut condition = ConditionDiagnostic {
+        digit_limit,
+        error: None,
+    };
+    let mut visitor = WarningVisitor {
+        scoped_verbose,
+        literals: &mut Vec::new(),
+        valid_name,
+        emit: &mut |_| true,
+        condition: Some(&mut condition),
+    };
+    let _ = tokenize(
+        pattern,
+        verbose,
+        alphabet,
+        dotall,
+        false,
+        Grammar::Validation,
+        Some(&mut visitor),
+    );
+    condition.error
 }
 
 /// Translate Python syntax for validation without requiring a particular matcher.
@@ -402,15 +449,15 @@ fn check_reference(id: usize, open: &[GroupState]) -> Result<(), String> {
     Ok(())
 }
 
-fn reference_id(
-    input: &mut Input<'_>,
-    groups: &[Option<String>],
-    conditional: bool,
-) -> Result<usize, String> {
+fn reference_name(input: &mut Input<'_>) -> Result<String, String> {
     let name: String = std::iter::from_fn(|| input.next_if(|c| *c != ')')).collect();
     if input.next() != Some(')') {
         return Err("unterminated group reference".into());
     }
+    Ok(name)
+}
+
+fn reference_id(name: &str, groups: &[Option<String>], conditional: bool) -> Result<usize, String> {
     if conditional && !name.is_empty() && name.bytes().all(|b| b.is_ascii_digit()) {
         return name
             .parse()
@@ -418,7 +465,7 @@ fn reference_id(
     }
     groups
         .iter()
-        .position(|g| g.as_deref() == Some(&name))
+        .position(|g| g.as_deref() == Some(name))
         .ok_or_else(|| "unknown regex group name".into())
 }
 
@@ -464,6 +511,7 @@ fn tokenize(
     let mut group_widths = Vec::new(); // Indexed by capture number minus one.
     let mut has_boundary = false;
     let mut highest_condition = 0;
+    let mut pending_conditions = Vec::new();
     let mut literal_brace = false;
     let mut input = Input::new(pattern);
     let mut output = String::new();
@@ -503,7 +551,8 @@ fn tokenize(
                 if lookahead && extension && input.clone().take(2).eq(['P', '=']) {
                     input.next();
                     input.next();
-                    let id = reference_id(&mut input, &groups, false)?;
+                    let name = reference_name(&mut input)?;
+                    let id = reference_id(&name, &groups, false)?;
                     check_reference(id, &outer_prefixes)?;
                     has_reference = true;
                     write!(output, r"\k<{id}>").unwrap();
@@ -551,10 +600,33 @@ fn tokenize(
                             output.push_str("(?>");
                         }
                     } else if lookahead && input.next_if_eq(&'(').is_some() {
-                        let id = reference_id(&mut input, &groups, true)?;
+                        let start = input.position;
+                        let name = reference_name(&mut input)?;
+                        if let Some(probe) =
+                            warnings.as_mut().and_then(|v| v.condition.as_deref_mut())
+                            && !name.is_empty()
+                            && name.bytes().all(|c| c.is_ascii_digit())
+                        {
+                            if probe.digit_limit != 0 && name.len() > probe.digit_limit {
+                                return Err("invalid regex group reference".into());
+                            }
+                            let digits = name.trim_start_matches('0');
+                            let group = digits.parse::<u32>().unwrap_or(u32::MAX);
+                            if digits.is_empty() || group >= MAX_GROUPS {
+                                let msg = if digits.is_empty() {
+                                    "bad group number".into()
+                                } else {
+                                    format!("invalid group reference {digits}")
+                                };
+                                probe.error = Some((msg, start));
+                                return Err("invalid conditional group reference".into());
+                            }
+                            pending_conditions.push((group as usize, start));
+                        }
+                        let id = reference_id(&name, &groups, true)?;
                         if visiting {
                             if id == 0
-                                || id >= (1 << 30) - 1
+                                || id >= MAX_GROUPS as usize
                                 || outer_prefixes.iter().any(|g| {
                                     matches!(g.scope,
                                 Scope::Lookbehind { first_local_group } if id >= first_local_group)
@@ -899,6 +971,14 @@ fn tokenize(
         );
     }
     if highest_condition >= groups.len() {
+        if outer_prefixes.is_empty()
+            && let Some(probe) = warnings.as_mut().and_then(|v| v.condition.as_deref_mut())
+            && let Some((group, start)) = pending_conditions
+                .into_iter()
+                .find(|(g, _)| *g >= groups.len())
+        {
+            probe.error = Some((format!("invalid group reference {group}"), start));
+        }
         return Err("invalid conditional group reference".into());
     }
     let casefold = modes.iter().any(|(_, mode)| mode.ignores_case());
@@ -1731,6 +1811,39 @@ mod tests {
         }
         for pattern in ["{2}", "a{2,1}", "a*{2}", "a{4294967295}"] {
             assert!(translate(pattern, false).is_err(), "{pattern}");
+        }
+    }
+
+    #[test]
+    fn reports_numeric_conditions_in_python_parse_order() {
+        let probe = |pat: &str| {
+            super::numeric_condition_diagnostic(
+                pat,
+                false,
+                super::Alphabet::Unicode,
+                false,
+                |_, _, verbose| Some(verbose),
+                |_, _| true,
+                4300,
+            )
+        };
+        assert_eq!(probe("é(?(0)x)["), Some(("bad group number".into(), 4)));
+        assert_eq!(
+            probe("(?(3)x)(?(2)y)"),
+            Some(("invalid group reference 3".into(), 3))
+        );
+        assert_eq!(
+            probe("(?(2)x)(?(1073741823)y)["),
+            Some(("invalid group reference 1073741823".into(), 10))
+        );
+        for source in [
+            "(?(2)x)[",
+            "(?(2)x)(",
+            r"\p{Letter}(?(0)x)",
+            "(?(01)x|y)(a)",
+            "[(?(0)]",
+        ] {
+            assert_eq!(probe(source), None);
         }
     }
 
