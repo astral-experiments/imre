@@ -61,6 +61,23 @@ def decode_allocation():
     print(config["VALUE"])
 
 
+def async_generator_syntax():
+    # Scope checks also visit dead code and defaults evaluated by the enclosing function.
+    filename = "async-scope.py"
+    for source, message, line, start, end in (
+        ("async def f():\n    é=1; yield from ()", "'yield from' inside async function", 2, 11, 24),
+        ("async def f():\n    return 5\n    if False: yield 1", "'return' with value in async generator", 2, 5, 13),
+        ("async def f():\n    def child(x=(yield)): pass\n    return 5", "'return' with value in async generator", 3, 5, 13),
+    ):
+        try:
+            compile(source, filename, "exec")
+        except SyntaxError as error:
+            assert error.args == (message, (filename, line, start, None, line, end))
+        else:
+            raise AssertionError(source)
+    compile("async def f():\n    def nested(): yield from ()\n    return nested", filename, "exec")
+
+
 def syntax_members():
     try:
         compile(b"# coding: unknown-encoding\n", "dir/one.py", "exec")
@@ -960,6 +977,7 @@ def current():
     source_nested_functions()
     check_source_lambdas()
     syntax_members()
+    async_generator_syntax()
     for data in (b"\xef\xbb\xbfVALUE = 61", bytearray(b"#!python\r# coding: latin-1\rVALUE = '\xe9'")):
         config = {}
         exec(compile(data, "settings.py", "exec"), config)

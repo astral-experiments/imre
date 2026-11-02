@@ -314,7 +314,7 @@ impl Session {
         if let Some(error) = parsed.errors().first() {
             return Err(format!("{path}: {error}"));
         }
-        check_star_import_scopes(source, &parsed.syntax().body)
+        check_scope_syntax(source, &parsed.syntax().body)
             .map_err(|error| format!("{path}:{error}"))?;
         check_handler_count(parsed.tokens()).map_err(|error| format!("{path}: {error}"))?;
         // The parser has already checked Python indentation; file inputs additionally
@@ -1310,8 +1310,20 @@ impl<'a> Visitor<'a> for LoopTransfers {
     fn visit_expr(&mut self, _expr: &'a Expr) {}
 }
 
+/// Check code-scope restrictions shared by typed and object compilation.
+pub(crate) fn check_scope_syntax(source: &str, body: &[Stmt]) -> Result<(), String> {
+    if let Some((range, message)) = imre_ast::async_generators::syntax_error(body) {
+        return Err(crate::frontend::error(
+            source,
+            &range,
+            &format!("SyntaxError: {message}"),
+        ));
+    }
+    check_star_import_scopes(source, body)
+}
+
 /// Wildcard imports can only publish names in a module body, including its conditional suites.
-pub(crate) fn check_star_import_scopes(source: &str, body: &[Stmt]) -> Result<(), String> {
+fn check_star_import_scopes(source: &str, body: &[Stmt]) -> Result<(), String> {
     #[derive(Default)]
     struct Scopes {
         nested: bool,

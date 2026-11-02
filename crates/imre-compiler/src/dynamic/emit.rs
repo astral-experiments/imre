@@ -123,7 +123,7 @@ impl Output {
     ) -> Result<String, String> {
         let parsed = ruff_python_parser::parse_module(source)
             .map_err(|err| format!("{}: {err}", path.display()))?;
-        crate::analysis::check_star_import_scopes(source, &parsed.syntax().body)
+        crate::analysis::check_scope_syntax(source, &parsed.syntax().body)
             .map_err(|error| format!("{}:{error}", path.display()))?;
         if let Some(keyword) = imre_ast::repeated_keyword(parsed.syntax().into()) {
             let name = keyword.arg.as_ref().expect("repeated named argument");

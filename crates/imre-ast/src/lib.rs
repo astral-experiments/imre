@@ -33,6 +33,7 @@ pub fn literal_tuple_element(expr: &ast::Expr) -> bool {
 }
 
 pub mod annotations;
+pub mod async_generators;
 pub mod class_attributes;
 pub mod class_cell;
 pub mod code_flags;
