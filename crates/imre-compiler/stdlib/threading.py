@@ -79,13 +79,12 @@ class Thread:
             raise RuntimeError("thread.__init__() not called")
         if self._ident is not None:
             raise RuntimeError("threads can only be started once")
-        if self._context is not None:
-            raise NotImplementedError("native workers cannot enter a Python context")
+        has_context = self._context is not None
         # Truth conversion can run Python and replace the target or even start this thread.
         daemon = bool(self.daemon)
         if self._ident is not None:
             raise RuntimeError("threads can only be started once")
-        self._handle, self._ident, self._native_id = _imre_thread.start(self, daemon)
+        self._handle, self._ident, self._native_id = _imre_thread.start(self, daemon, has_context)
 
     def join(self, timeout=None):
         if not self._initialized:
