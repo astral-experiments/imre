@@ -140,6 +140,17 @@ pub(super) fn finish_writer_probe(ctx: &Context, receiver: Id) -> Result<()> {
     ))
 }
 
+/// A descriptor installed inside a Random raw.tell() keeps its physical position.
+pub(super) fn finish_random_probe(ctx: &Context, receiver: Id) -> bool {
+    let Some((_, fd, _)) = wrapper_fallback(ctx, receiver) else {
+        return false;
+    };
+    if let Some(Buffer::Random(file)) = fd.buffer.borrow_mut().as_mut() {
+        file.reset();
+    }
+    true
+}
+
 /// A Python finalizer can decline close, raise, or resurrect the writer.
 pub(in crate::dynamic) fn note_writer_finalizer(ctx: &Context, owner: Id) {
     if let Some((_, _, armed)) = wrapper_fallback(ctx, owner) {
@@ -220,6 +231,17 @@ pub(super) fn ssize(ctx: &mut Context, value: Id) -> Result<i64> {
     })
 }
 
+fn random_initialized(ctx: &Context, receiver: Id) -> bool {
+    backing(ctx, receiver).is_some()
+        || matches!(
+            ctx.heap.get(receiver),
+            Value::Instance {
+                memory_stream: Some(MemoryStream::Reader(_)),
+                ..
+            }
+        )
+}
+
 /// Attach one buffered stream to a caller-owned native FileIO, without reopening its fd.
 pub(super) fn initialize(
     ctx: &mut Context,
@@ -279,6 +301,10 @@ pub(super) fn initialize(
             || backing(ctx, receiver).is_some();
         invalidate_writer(ctx, receiver, Some(raw))?;
     }
+    if owner == "BufferedRandom" && !random_initialized(ctx, receiver) {
+        // The public raw slot is visible during size validation and raw.tell().
+        super::buffered_reader::start_init(ctx, receiver, Some(raw))?;
+    }
     if capacity <= 0 {
         return Err(Error::new(
             "ValueError",
@@ -288,8 +314,7 @@ pub(super) fn initialize(
     let handle = match native_raw(ctx, raw, methods, owner) {
         Ok(handle) => handle,
         Err(_) if owner == "BufferedRandom" => {
-            if backing(ctx, receiver).is_some() || super::buffered_reader::has_state(ctx, receiver)
-            {
+            if random_initialized(ctx, receiver) {
                 return Err(Error::new(
                     "NotImplementedError",
                     "BufferedRandom reinitialization is unsupported",
@@ -304,7 +329,7 @@ pub(super) fn initialize(
     };
     if backing(ctx, receiver).is_some()
         || super::bytes_writer::state(ctx, receiver).is_some()
-        || owner == "BufferedRandom" && super::buffered_reader::has_state(ctx, receiver)
+        || owner == "BufferedRandom" && random_initialized(ctx, receiver)
     {
         return Err(Error::new(
             "NotImplementedError",

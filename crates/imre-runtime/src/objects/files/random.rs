@@ -105,7 +105,7 @@ impl<F: Read + Write + Seek> Random<F> {
         Ok(raw.saturating_add_signed(self.pos as i64 - self.raw_pos as i64))
     }
 
-    fn reset(&mut self) {
+    pub(crate) fn reset(&mut self) {
         self.raw_pos = 0;
         self.pos = 0;
         self.read_end = 0;

@@ -234,3 +234,67 @@ except io.UnsupportedOperation:
 else:
     assert not raw.closed
     raw.close()
+
+
+class FirstInit(io.BufferedRandom):
+    pass
+
+
+for cls in (io.BufferedRandom, FirstInit):
+    assert cls.__new__ is object.__new__
+    bare = cls.__new__(cls)
+    assert bare.raw is None
+    for method, value in ((bare.read, 0), (bare.write, b"")):
+        try:
+            method(value)
+        except ValueError as exc:
+            assert "uninitialized" in str(exc)
+        else:
+            raise AssertionError("operation accepted on bare BufferedRandom")
+    rejected = io.BytesIO(b"old")
+    try:
+        bare.__init__(rejected, 0)
+    except ValueError:
+        assert bare.raw is rejected and not rejected.closed
+    else:
+        raise AssertionError("accepted zero buffer size")
+    with io.BytesIO(b"new") as raw:
+        bare.__init__(raw, 2)
+        assert bare.read(1) == b"n" and bare.write(b"") == 0
+        bare.close()
+        assert raw.closed
+    assert rejected.read() == b"old"
+    rejected.close()
+
+
+class AttachingRaw(io.BytesIO):
+    def tell(self):
+        assert self.target.raw is self
+        self.target.__init__(self.inner, 4)
+        if self.write_during_probe:
+            assert self.target.write(b"X") == 1
+        else:
+            assert self.target.read(1) == b"i"
+        return super().tell()
+
+
+for descriptor in (False, True):
+    for write in (False, True):
+        inner = io.FileIO(path, "w+") if descriptor else io.BytesIO()
+        try:
+            inner.write(b"inner")
+            inner.seek(0)
+            outer = AttachingRaw()
+            target = io.BufferedRandom.__new__(io.BufferedRandom)
+            outer.target, outer.inner, outer.write_during_probe = target, inner, write
+            target.__init__(outer, 2)
+            assert target.raw is inner and not outer.closed
+            assert target.tell() == (0 if write else 4)
+            assert target.read() == (b"inner" if write else b"r")
+            target.close()
+            assert inner.closed
+            outer.close()
+        finally:
+            inner.close()
+            if descriptor:
+                os.unlink(path)
