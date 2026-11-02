@@ -62,7 +62,7 @@ pub(super) fn original_spelling(source: &[u8], bytes: bool) -> std::borrow::Cow<
 fn suspect_range(source: &[u8]) -> bool {
     let long_escape = source
         .windows(2)
-        .any(|p| p[0] == b'\\' && matches!(p[1], b'0'..=b'7' | b'x' | b'u' | b'U'));
+        .any(|p| p[0] == b'\\' && matches!(p[1], b'0'..=b'7' | b'x' | b'u' | b'U' | b'N'));
     source.windows(3).enumerate().any(|(i, p)| {
         p[1] == b'-'
             && p[2] != b']'

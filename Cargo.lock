@@ -738,6 +738,7 @@ version = "0.1.5"
 dependencies = [
  "regex",
  "regex-syntax",
+ "unicode_names2",
 ]
 
 [[package]]
