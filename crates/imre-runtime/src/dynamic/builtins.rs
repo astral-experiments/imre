@@ -82,6 +82,7 @@ const FUNCTIONS: &[&str] = &[
     "max",
     "ord",
     "chr",
+    "hex",
     "divmod",
     "round",
     "callable",
@@ -1397,6 +1398,11 @@ pub(super) fn call(
             positional(name, kwargs)?;
             arity(name, args, 2, 3)?;
             ctx.exec_source(args[0], args[1], args.get(2).copied(), None)
+        }
+        "hex" => {
+            let value = one_positional_arg("hex", args, kwargs)?;
+            let number = ctx.index_integer(value)?;
+            Ok(ctx.text(format!("{:#x}", number.big().as_ref())))
         }
         "abs" => {
             if !kwargs.is_empty() {

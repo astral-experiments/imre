@@ -67,6 +67,8 @@ pub(super) fn flag_attribute(ctx: &mut Context, name: &str) -> Result<Id> {
         let module = ctx.module("enum")?;
         let repr = ctx.lookup_attr(module, "global_flag_repr")?;
         ctx.bind(scope, "__repr__", repr);
+        let hex = ctx.builtin("hex");
+        ctx.bind(scope, "_numeric_repr_", hex);
         // CPython's RegexFlag explicitly uses object.__str__ to display its global name.
         let string = ctx.builtin("object.__str__");
         ctx.bind(scope, "__str__", string);

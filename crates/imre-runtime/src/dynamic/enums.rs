@@ -122,7 +122,8 @@ impl Context {
         let Value::Dict(entries) = self.heap.get(names) else {
             unreachable!()
         };
-        let mut declared = Vec::new();
+        let mut singles = Vec::new();
+        let mut composites = Vec::new();
         let mut mask = BigInt::zero();
         for &(key, member) in entries {
             let Some((_, canonical, value)) = self.enum_member(member) else {
@@ -134,41 +135,70 @@ impl Context {
             let bit = self.as_int(value)?.big().into_owned();
             mask |= &bit;
             if bit.is_positive() && (&bit & (&bit - 1u8)).is_zero() {
-                declared.push((self.str_value(key)?.to_owned(), bit));
+                singles.push((key, bit));
+            } else if !bit.is_zero() {
+                composites.push((key, bit));
             }
         }
         let mut value = bits.big().into_owned();
+        let mut negative_alias = None;
         if value.is_negative() {
+            let limit = BigInt::one() << mask.bits();
+            let skipped = (&limit - 1u8) ^ &mask;
+            if value >= -&limit && (&value & skipped).is_zero() {
+                negative_alias = Some(self.alloc(Value::Int(bits)));
+            }
             value += BigInt::one() << mask.bits().max(value.bits());
         }
+
         let key = self.alloc(Value::Int(crate::Int::new(value.clone())));
-        if let Some(member) = self.member_for_value(values, key) {
-            return Ok(member);
-        }
         let mut names = Vec::new();
-        let mut rest = value;
-        for (name, bit) in declared {
-            if (&rest & &bit) == bit {
-                rest ^= bit;
-                names.push(name);
+        let mut combined = BigInt::zero();
+        for (name, bit) in singles {
+            if (&value & &bit) == bit {
+                combined |= bit;
+                names.push(self.str_value(name)?);
+            }
+        }
+        // Flag._missing_ includes declared composites in definition order when
+        // the value has bits outside the single-bit members.
+        if combined != value {
+            for (name, bits) in composites {
+                if (&value & &bits) == bits {
+                    combined |= bits;
+                    names.push(self.str_value(name)?);
+                }
             }
         }
         let name = if names.is_empty() {
             NONE
         } else {
-            if !rest.is_zero() {
-                names.push(if self.classes.get("re.RegexFlag") == Some(&class) {
-                    format!("{rest:#x}")
-                } else {
-                    rest.to_string()
-                });
+            let prefix = self.text(names.join("|"));
+            let unknown = value ^ combined;
+            if unknown.is_zero() {
+                prefix
+            } else {
+                let formatter = self.lookup_attr(class, "_numeric_repr_")?;
+                let unknown = self.alloc(Value::Int(crate::Int::new(unknown)));
+                let formatted = self.call(formatter, vec![unknown], Vec::new())?;
+                let suffix = builtins::percent(self, "|%s", formatted)?;
+                self.binary("+", prefix, suffix)?
             }
-            self.text(names.join("|"))
         };
-        let member = self.new_int(&[class, key], &[])?;
-        self.default_set_attr(member, "_name_", name)?;
-        self.default_set_attr(member, "_value_", key)?;
-        self.put_item(values, key, member)?;
+
+        // A formatter can call the class again and intern a result before us.
+        let member = if let Some(existing) = self.member_for_value(values, key) {
+            existing
+        } else {
+            let member = self.new_int(&[class, key], &[])?;
+            self.default_set_attr(member, "_name_", name)?;
+            self.default_set_attr(member, "_value_", key)?;
+            self.put_item(values, key, member)?;
+            member
+        };
+        if let Some(original) = negative_alias {
+            self.put_item(values, original, member)?;
+        }
         Ok(member)
     }
 
