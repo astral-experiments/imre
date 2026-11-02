@@ -199,3 +199,17 @@ assert isinstance(frame, FrameSummary) and frame.name == 'captured_walk'
 assert frame.locals['marker'] == "'live'"
 assert frame.line == 'return walk_stack(None)'
 assert 'in captured_walk' in summary.format()[0]
+
+
+def saved_closure(value):
+    def inner():
+        binding = value
+        return sys._getframe()
+    return inner()
+
+
+saved = saved_closure(17)
+summary = StackSummary.extract([(saved, saved.f_lineno)], capture_locals=True)
+assert summary[0].locals == {'binding': '17', 'value': '17'}
+saved.clear()
+assert StackSummary.extract([(saved, 1)], capture_locals=True)[0].locals is None

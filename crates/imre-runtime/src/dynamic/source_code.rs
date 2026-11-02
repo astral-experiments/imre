@@ -2996,6 +2996,11 @@ impl Context {
 
     /// Resolve the caller's namespace, copying bindings only for optimized frames.
     pub(super) fn frame_locals(&mut self, scope: Id) -> Result<Id> {
+        self.locals_for_code(scope, self.heap.current_code())
+    }
+
+    /// Read bindings using the code that owns the scope, including its free variables.
+    pub(super) fn locals_for_code(&mut self, scope: Id, code: Id) -> Result<Id> {
         let frame = self.scope_data(scope);
         if let Some(locals) = frame.exec_locals {
             return Ok(locals);
@@ -3025,7 +3030,7 @@ impl Context {
             }
             local = parent;
         }
-        if let Value::Code(code) = self.heap.get(self.heap.current_code()) {
+        if let Value::Code(code) = self.heap.get(code) {
             names.extend(code.freevars.iter().cloned());
             // Some compiled functions retain their lexical environment because their entire
             // closure cannot yet be cloned. Their statically resolved reads are still locals.

@@ -235,7 +235,8 @@ class StackSummary(list):
             linecache.lazycache(filename, f.f_globals)
             # Must defer line lookups until we have called checkcache.
             if capture_locals:
-                f_locals = f.f_locals
+                from traceback import _frame_locals
+                f_locals = _frame_locals(f)
             else:
                 f_locals = None
             result.append(
