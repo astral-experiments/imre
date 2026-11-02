@@ -145,6 +145,19 @@ default-poll originals at O0 and O3. These are ordinals 118, 119, 122, 123,
 positive cases, fault controls, and terminal process-group checks separately.
 [Six intact communicate originals](communicate-intact-six-linux.json)
 
+The coordinator credited ordinal 122 as the one addition to 177. Ordinals 118,
+119, 123, 124, and 126 were already included. [Score update](https://github.com/astral-experiments/imre/pull/3851)
+
+POSIX ordinal 33, `test_communicate_BrokenPipeError_stdin_flush`, failed at
+O0 and O3 on `8ea92fe7` because the replacement stdin received zero flush calls.
+Public commit `934c42f0` passed the unchanged method through its fixtures at
+both levels. Both parents read 2,163 bytes from the native help child's stdout,
+observed EOF and reaped both the help child and the module fixture. Separate
+controls checked which pipe received the input and which errors propagated.
+The raw bundle `communicate-flush-receipt.tar.gz` has SHA-256
+`710b0f6b85f96bb29c9e4cc319721fe29b29103ba74b22112e44c6dff53b16d1`.
+[Original and controls](communicate-replaced-stdin-linux.json)
+
 ## Original fixtures and per-ID evidence
 
 Use the shared [suite runner](../../SUITE_RUNNER.md) from
