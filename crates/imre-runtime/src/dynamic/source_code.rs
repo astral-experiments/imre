@@ -35,6 +35,7 @@ pub(super) struct Program {
     template_expressions: Rc<HashMap<ruff_text_size::TextSize, String>>,
     instructions: Vec<(u32, Instruction)>,
     expression_functions: HashMap<ruff_text_size::TextRange, (usize, Definition)>,
+    set_comprehension_targets: HashMap<ruff_text_size::TextRange, HashSet<String>>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -161,9 +162,12 @@ enum DefinitionKind {
     Class(Option<Box<ast::Arguments>>),
 }
 
-/// An await or an asynchronous comprehension in the deferred body requires
-/// an async generator. Assignment expressions need the enclosing binding scope.
-fn synchronous_genexpr(genexpr: &ast::ExprGenerator) -> bool {
+/// Check the expressions executed inline or in a synchronous generator's deferred frame.
+fn synchronous_comprehension(
+    element: &ast::Expr,
+    clauses: &[ast::Comprehension],
+    deferred: bool,
+) -> bool {
     use ast::visitor::{self, Visitor};
     struct Body<'a>(Vec<&'a ast::Expr>);
     impl<'a> Visitor<'a> for Body<'a> {
@@ -171,13 +175,13 @@ fn synchronous_genexpr(genexpr: &ast::ExprGenerator) -> bool {
             self.0.push(expr);
         }
     }
-    let mut body = Body(vec![&genexpr.elt]);
-    for (index, clause) in genexpr.generators.iter().enumerate() {
+    let mut body = Body(vec![element]);
+    for (index, clause) in clauses.iter().enumerate() {
         if clause.is_async {
             return false;
         }
         body.visit_expr(&clause.target);
-        if index != 0 {
+        if !deferred || index != 0 {
             body.visit_expr(&clause.iter);
         }
         for condition in &clause.ifs {
@@ -186,7 +190,9 @@ fn synchronous_genexpr(genexpr: &ast::ExprGenerator) -> bool {
     }
     while let Some(expr) = body.0.pop() {
         match expr {
-            ast::Expr::Await(_) | ast::Expr::Named(_) => return false,
+            ast::Expr::Await(_) => return false,
+            // A deferred assignment would need to update a binding outside its frame.
+            ast::Expr::Named(_) if deferred => return false,
             ast::Expr::Lambda(lambda) => {
                 if let Some(params) = &lambda.parameters {
                     body.visit_parameters(params);
@@ -202,10 +208,18 @@ fn synchronous_genexpr(genexpr: &ast::ExprGenerator) -> bool {
     true
 }
 
+#[derive(Default)]
+struct ComprehensionBindings {
+    iteration_variables: HashSet<String>,
+    named_assignments: HashSet<String>,
+}
+
 /// Assignment expressions bind in the containing code unit, including unexecuted branches.
 #[derive(Default)]
 struct NamedBindings {
-    targets: Vec<(String, ruff_text_size::TextSize)>,
+    targets: Vec<(String, ruff_text_size::TextSize, bool)>,
+    comprehensions: Vec<ComprehensionBindings>,
+    invalid_target: Option<Error>,
     in_iterable: bool,
     invalid_iterable: bool,
 }
@@ -223,7 +237,29 @@ impl<'a> ast::visitor::Visitor<'a> for NamedBindings {
             if self.in_iterable {
                 self.invalid_iterable = true;
             } else {
-                self.targets.push((name.id.to_string(), name.start()));
+                if self
+                    .comprehensions
+                    .iter()
+                    .any(|frame| frame.iteration_variables.contains(name.id.as_str()))
+                {
+                    self.invalid_target.get_or_insert_with(|| {
+                        Error::new(
+                            "SyntaxError",
+                            format!(
+                                "assignment expression cannot rebind comprehension iteration variable '{}'",
+                                name.id
+                            ),
+                        )
+                    });
+                }
+                if let Some(frame) = self.comprehensions.last_mut() {
+                    frame.named_assignments.insert(name.id.to_string());
+                }
+                self.targets.push((
+                    name.id.to_string(),
+                    name.start(),
+                    !self.comprehensions.is_empty(),
+                ));
             }
         }
         if !self.in_iterable
@@ -232,6 +268,42 @@ impl<'a> ast::visitor::Visitor<'a> for NamedBindings {
             if let Some(params) = &lambda.parameters {
                 self.visit_parameters(params);
             }
+            return;
+        }
+        if let ast::Expr::SetComp(comp) = expr {
+            self.comprehensions.push(ComprehensionBindings::default());
+            stacker::maybe_grow(128 * 1024, 2 * 1024 * 1024, || {
+                for clause in &comp.generators {
+                    let frame = self
+                        .comprehensions
+                        .last_mut()
+                        .expect("current comprehension");
+                    if let Err(error) = Program::collect_target_names(
+                        &clause.target,
+                        &mut frame.iteration_variables,
+                    ) {
+                        self.invalid_target.get_or_insert(error);
+                    }
+                    if let Some(name) = frame
+                        .named_assignments
+                        .intersection(&frame.iteration_variables)
+                        .min()
+                    {
+                        self.invalid_target.get_or_insert_with(|| {
+                            Error::new(
+                                "SyntaxError",
+                                format!(
+                                    "comprehension inner loop cannot rebind assignment expression target '{name}'"
+                                ),
+                            )
+                        });
+                    }
+                    self.visit_expr(&clause.target);
+                    self.visit_comprehension(clause);
+                }
+                self.visit_expr(&comp.elt);
+            });
+            self.comprehensions.pop();
             return;
         }
         stacker::maybe_grow(128 * 1024, 2 * 1024 * 1024, || {
@@ -257,7 +329,16 @@ impl NamedBindings {
                 "assignment expression cannot be used in a comprehension iterable expression",
             ));
         }
-        for (name, offset) in self.targets {
+        if let Some(error) = self.invalid_target {
+            return Err(error);
+        }
+        for (name, offset, comprehension) in self.targets {
+            if comprehension && program.class_attributes.is_some() {
+                return Err(Error::new(
+                    "SyntaxError",
+                    "assignment expression within a comprehension cannot be used in a class body",
+                ));
+            }
             if let Some((kind, directive)) = program.directives.get(&name) {
                 if offset < *directive {
                     return Err(Error::new(
@@ -271,6 +352,12 @@ impl NamedBindings {
             }
             if name == "__debug__" {
                 return Err(Error::new("SyntaxError", "cannot assign to __debug__"));
+            }
+            if comprehension && program.name == "<module>" {
+                program
+                    .directives
+                    .entry(name.clone())
+                    .or_insert((ScopeDirective::Global, 0.into()));
             }
             program.locals.insert(name);
         }
@@ -475,6 +562,9 @@ impl<'a> TemplateSegment<'a> {
     }
 }
 
+/// Names bound by enclosing inlined set comprehensions accompany each pending expression.
+type ScopedExpression<'a> = (&'a ast::Expr, Option<Rc<HashSet<String>>>);
+
 /// Collect names and string constants without recursing through an expression's left spine.
 struct CompiledStrings<'a, 'ctx> {
     heap: &'ctx mut value::Heap,
@@ -482,7 +572,10 @@ struct CompiledStrings<'a, 'ctx> {
     spellings: &'ctx StringReplacements,
     constants: &'ctx mut HashMap<ruff_text_size::TextRange, Id>,
     roots: Vec<Id>,
-    pending: Vec<&'a ast::Expr>,
+    pending: Vec<ScopedExpression<'a>>,
+    bound: Option<Rc<HashSet<String>>>,
+    comprehension_reads: BTreeSet<String>,
+    set_comprehension_targets: &'ctx mut HashMap<ruff_text_size::TextRange, HashSet<String>>,
     reads: &'ctx mut BTreeSet<String>,
     directives: &'ctx HashMap<String, (ScopeDirective, ruff_text_size::TextSize)>,
     exhausted: bool,
@@ -493,7 +586,7 @@ impl<'a> ast::visitor::Visitor<'a> for CompiledStrings<'a, '_> {
         if self.pending.try_reserve(1).is_err() {
             self.exhausted = true;
         } else {
-            self.pending.push(expr);
+            self.pending.push((expr, self.bound.clone()));
         }
     }
 
@@ -663,10 +756,10 @@ impl<'a> CompiledStrings<'a, '_> {
     fn check_directive_reads(&mut self) -> Result<()> {
         use ast::visitor::Visitor;
         let roots = std::mem::take(&mut self.pending);
-        for &root in &roots {
+        for (root, _) in &roots {
             self.visit_expr(root);
         }
-        while let Some(expr) = self.pending.pop() {
+        while let Some((expr, _)) = self.pending.pop() {
             match expr {
                 ast::Expr::Name(name) => {
                     if let Some((kind, position)) = self.directives.get(name.id.as_str())
@@ -699,19 +792,31 @@ impl<'a> CompiledStrings<'a, '_> {
         Ok(())
     }
 
-    fn scan(&mut self) -> Result<(bool, Vec<&'a ast::Expr>)> {
+    fn scan(&mut self) -> Result<(bool, Vec<ScopedExpression<'a>>)> {
         use ast::visitor::Visitor;
         let mut functions = Vec::new();
         if !self.directives.is_empty() {
             self.check_directive_reads()?;
         }
         let mut class_cell = false;
-        while let Some(expr) = self.pending.pop() {
+        while let Some((expr, bound)) = self.pending.pop() {
+            self.bound = bound;
             match expr {
                 ast::Expr::Name(name) => {
-                    class_cell |= matches!(name.id.as_str(), "super" | "__class__");
-                    if name.ctx == ast::ExprContext::Load {
-                        self.reads.insert(name.id.to_string());
+                    if !self
+                        .bound
+                        .as_ref()
+                        .is_some_and(|names| names.contains(name.id.as_str()))
+                    {
+                        class_cell |= matches!(name.id.as_str(), "super" | "__class__");
+                        if name.ctx == ast::ExprContext::Load {
+                            if self.bound.is_some() {
+                                // Like nested functions, the comprehension body skips a class namespace.
+                                self.comprehension_reads.insert(name.id.to_string());
+                            } else {
+                                self.reads.insert(name.id.to_string());
+                            }
+                        }
                     }
                     self.heap.code_name(name.id.as_str());
                 }
@@ -722,18 +827,46 @@ impl<'a> CompiledStrings<'a, '_> {
                     functions
                         .try_reserve(1)
                         .map_err(|_| Error::new("MemoryError", ""))?;
-                    functions.push(expr);
+                    functions.push((expr, self.bound.clone()));
                     if let Some(parameters) = &lambda.parameters {
                         self.visit_parameters(parameters);
                     }
                     continue;
                 }
-                ast::Expr::Generator(genexpr) if synchronous_genexpr(genexpr) => {
+                ast::Expr::Generator(genexpr)
+                    if synchronous_comprehension(&genexpr.elt, &genexpr.generators, true) =>
+                {
                     functions
                         .try_reserve(1)
                         .map_err(|_| Error::new("MemoryError", ""))?;
-                    functions.push(expr);
+                    functions.push((expr, self.bound.clone()));
                     self.visit_expr(&genexpr.generators[0].iter);
+                    continue;
+                }
+                ast::Expr::SetComp(comp) => {
+                    self.visit_expr(&comp.generators[0].iter);
+                    let mut names = HashSet::new();
+                    for clause in &comp.generators {
+                        Program::collect_target_names(&clause.target, &mut names)?;
+                    }
+                    if synchronous_comprehension(&comp.elt, &comp.generators, false) {
+                        self.set_comprehension_targets
+                            .insert(comp.range(), names.clone());
+                    }
+                    if let Some(enclosing) = &self.bound {
+                        names.extend(enclosing.iter().cloned());
+                    }
+                    self.bound = Some(Rc::new(names));
+                    for (index, clause) in comp.generators.iter().enumerate() {
+                        self.visit_expr(&clause.target);
+                        if index != 0 {
+                            self.visit_expr(&clause.iter);
+                        }
+                        for predicate in &clause.ifs {
+                            self.visit_expr(predicate);
+                        }
+                    }
+                    self.visit_expr(&comp.elt);
                     continue;
                 }
                 ast::Expr::StringLiteral(literal) => {
@@ -928,6 +1061,9 @@ impl Program {
             constants: &mut self.literals,
             roots: Vec::new(),
             pending: Vec::new(),
+            bound: None,
+            comprehension_reads: BTreeSet::new(),
+            set_comprehension_targets: &mut self.set_comprehension_targets,
             exhausted: false,
         };
         for (_, op) in &mut self.instructions {
@@ -1093,7 +1229,11 @@ impl Program {
         self.expression_functions
             .try_reserve(functions.len())
             .map_err(|_| Error::new("MemoryError", ""))?;
-        for (site, expr) in functions.into_iter().enumerate() {
+        let mut comprehension_sites = HashMap::new();
+        for (site, (expr, bound)) in functions.into_iter().enumerate() {
+            if let Some(names) = bound {
+                comprehension_sites.insert(expr.range(), names);
+            }
             let name = if matches!(expr, ast::Expr::Lambda(_)) {
                 "<lambda>"
             } else {
@@ -1143,19 +1283,24 @@ impl Program {
                 ),
             );
         }
-        for (_, definition) in self.expression_functions.values_mut() {
+        for (range, (_, definition)) in &mut self.expression_functions {
             let child =
                 Rc::get_mut(&mut definition.body).expect("newly lowered expression function");
+            let bound = comprehension_sites.get(range);
             let (roots, reads) =
                 child.prepare_strings(strings.heap, strings.shared, spellings, line_at)?;
+            let captured = reads
+                .iter()
+                .filter(|n| !bound.is_some_and(|b| b.contains(n.as_str())));
             if self.class_attributes.is_none() && !self.locals.contains("__class__") {
-                self.class_cell |= reads.contains("__class__") || reads.contains("super");
+                self.class_cell |= captured.clone().any(|n| n == "__class__" || n == "super");
             }
-            nested_reads.extend(reads.iter().cloned());
+            nested_reads.extend(captured.cloned());
             if roots != NONE {
                 strings.keep(roots)?;
             }
         }
+        nested_reads.append(&mut strings.comprehension_reads);
         self.string_roots = strings.finish();
         // An annotation's class-local name falls back to globals when the class
         // dictionary lacks it. Functions nested inside the annotation skip the class.
@@ -1353,6 +1498,7 @@ impl Program {
             template_expressions: Rc::default(),
             instructions: Vec::new(),
             expression_functions: HashMap::new(),
+            set_comprehension_targets: HashMap::new(),
         }
     }
 
@@ -1984,9 +2130,13 @@ impl Program {
 
     /// Declare every local name in a loop or unpacking target.
     fn declare_target(&mut self, target: &ast::Expr) -> Result<()> {
+        Self::collect_target_names(target, &mut self.locals)
+    }
+
+    fn collect_target_names(target: &ast::Expr, names: &mut HashSet<String>) -> Result<()> {
         match target {
             ast::Expr::Name(n) => {
-                self.locals.insert(n.id.to_string());
+                names.insert(n.id.to_string());
             }
             ast::Expr::Attribute(_) | ast::Expr::Subscript(_) => {}
             ast::Expr::Starred(_) => {
@@ -2009,10 +2159,13 @@ impl Program {
                     ));
                 }
                 for element in elts {
-                    self.declare_target(match element {
-                        ast::Expr::Starred(star) => &star.value,
-                        _ => element,
-                    })?;
+                    Self::collect_target_names(
+                        match element {
+                            ast::Expr::Starred(star) => &star.value,
+                            _ => element,
+                        },
+                        names,
+                    )?;
                 }
             }
             _ => return Err(unsupported("unpacking target")),
@@ -2256,6 +2409,12 @@ impl Context {
         ));
         match parsed.into_syntax() {
             ast::Mod::Expression(expression) => {
+                if code.has_named_bindings {
+                    use ast::visitor::Visitor;
+                    let mut named = NamedBindings::default();
+                    named.visit_expr(&expression.body);
+                    named.declare(&mut code)?;
+                }
                 code.instructions
                     .push((1, Instruction::Return(Some(*expression.body))));
             }
@@ -4124,19 +4283,23 @@ impl Context {
             *existing
         } else {
             let parameters = self.text(sig.to_string());
-            let freevars =
-                if code.name != "<module>" && child.class_attributes.is_none() && !child.class_cell
+            let freevars = if (code.name != "<module>"
+                || self.scope_data(scope).comprehension.is_some())
+                && child.class_attributes.is_none()
+                && !child.class_cell
+            {
+                // A function defined in a class captures an enclosing function's cells.
+                let enclosing = if code.class_attributes.is_some()
+                    && self.scope_data(scope).comprehension.is_none()
                 {
-                    // A function defined in a class captures an enclosing function's cells.
-                    let enclosing = if code.class_attributes.is_some() {
-                        self.scope_data(scope).parent.unwrap_or(scope)
-                    } else {
-                        scope
-                    };
-                    self.enclosing_freevars(enclosing, child.reads.iter().map(String::as_str))
+                    self.scope_data(scope).parent.unwrap_or(scope)
                 } else {
-                    None
+                    scope
                 };
+                self.enclosing_freevars(enclosing, child.reads.iter().map(String::as_str))
+            } else {
+                None
+            };
             let id = self.box_source_code(child.clone(), Some(parameters));
             if let Some(names) = freevars {
                 let Value::Code(nested) = self.heap.get_mut(id) else {
@@ -4321,8 +4484,8 @@ impl Context {
         Ok(())
     }
 
-    /// Release completed formatting operands before evaluating the next Python expression.
-    fn keep_format_result(&mut self, mark: usize, value: Id) -> Result<Id> {
+    /// Retain only an expression's result and the roots that preceded its evaluation.
+    fn keep_source_result(&mut self, mark: usize, value: Id) -> Result<Id> {
         let collect = self.heap.discard_truth_operands(mark);
         self.heap.reserve_temporaries(1)?;
         self.heap.keep(value);
@@ -4378,19 +4541,19 @@ impl Context {
                     });
                     if let Some(conversion) = conversion {
                         value = builtins::format_conversion(self, value, conversion)?;
-                        self.keep_format_result(mark, value)?;
+                        self.keep_source_result(mark, value)?;
                     }
                     let spec = if let Some(spec) = &field.format_spec {
                         let spec_mark = self.heap.temporary_mark();
                         let mut nested = Vec::new();
                         self.source_format_elements(code, scope, &spec.elements, &mut nested)?;
                         let spec = self.join_source_format(nested)?;
-                        Some(self.keep_format_result(spec_mark, spec)?)
+                        Some(self.keep_source_result(spec_mark, spec)?)
                     } else {
                         None
                     };
                     let rendered = builtins::format_value(self, value, spec)?;
-                    self.keep_format_result(mark, rendered)?
+                    self.keep_source_result(mark, rendered)?
                 }
             };
             parts.push(part);
@@ -4476,6 +4639,81 @@ impl Context {
         Ok(())
     }
 
+    /// Obtain an iterator in the selected scope and drop its consumed expression operands.
+    fn source_comprehension_iterator(
+        &mut self,
+        code: &Program,
+        scope: Id,
+        expression: &ast::Expr,
+    ) -> Result<Id> {
+        let mark = self.heap.temporary_mark();
+        let source = self.source_expr(code, scope, expression)?;
+        let iterator = self.iterator(source)?;
+        self.keep_source_result(mark, iterator)
+    }
+
+    /// Run the clauses inline, hashing each element before advancing its innermost iterator.
+    fn source_set_comprehension(
+        &mut self,
+        code: &Program,
+        parent: Id,
+        comp: &ast::ExprSetComp,
+        targets: &HashSet<String>,
+    ) -> Result<Id> {
+        let mark = self.heap.temporary_mark();
+        let result = (|| -> Result<Id> {
+            let first =
+                self.source_comprehension_iterator(code, parent, &comp.generators[0].iter)?;
+            let scope = self.comprehension_scope_with_targets(parent, targets.clone());
+            let set = self.alloc(Value::Set {
+                entries: Default::default(),
+                frozen: false,
+            });
+            // Each mark preserves the iterator and persistent roots of all outer clauses.
+            let mut levels = Vec::new();
+            levels
+                .try_reserve_exact(comp.generators.len())
+                .map_err(|_| crate::Error::memory_error())?;
+            levels.push((first, self.heap.temporary_mark()));
+            'advance: while let Some(&(iterator, step)) = levels.last() {
+                self.comprehension_step(step);
+                let Some(item) = self.next_item(iterator)? else {
+                    levels.pop();
+                    continue;
+                };
+                self.heap.keep(item);
+                let clause = &comp.generators[levels.len() - 1];
+                self.bind_target(code, scope, &clause.target, item)?;
+                for test in &clause.ifs {
+                    if !self.source_condition(code, scope, test)? {
+                        continue 'advance;
+                    }
+                }
+                if let Some(next) = comp.generators.get(levels.len()) {
+                    let inner = self.source_comprehension_iterator(code, scope, &next.iter)?;
+                    levels.push((inner, self.heap.temporary_mark()));
+                } else {
+                    let element = self.source_expr(code, scope, &comp.elt)?;
+                    builtins::set_add(self, set, element)?;
+                }
+            }
+            Ok(set)
+        })();
+        match result {
+            Ok(set) => self.keep_source_result(mark, set),
+            Err(error) => {
+                let collect = self.heap.discard_truth_operands(mark);
+                for root in error.roots() {
+                    self.heap.keep(root);
+                }
+                if collect {
+                    self.collect_unreachable();
+                }
+                Err(error)
+            }
+        }
+    }
+
     fn source_expr_inner(&mut self, code: &Program, scope: Id, expr: &ast::Expr) -> Result<Id> {
         use ast::Expr;
         let eval = |ctx: &mut Self, e: &Expr| ctx.source_expr(code, scope, e);
@@ -4507,10 +4745,21 @@ impl Context {
             }
             Expr::Name(n) => {
                 let name = n.id.as_str();
-                if code.class_attributes.is_some() && code.locals.contains(name) {
+                let mut enclosing = scope;
+                while self.scope_data(enclosing).comprehension.is_some() {
+                    let frame = self.scope_data(enclosing);
+                    if frame.closure.declared.contains(name) {
+                        return self.lookup(enclosing, name);
+                    }
+                    enclosing = frame.parent.expect("enclosing comprehension scope");
+                }
+                if scope == enclosing
+                    && code.class_attributes.is_some()
+                    && code.locals.contains(name)
+                {
                     return self.lookup_class_local(scope, name);
                 }
-                self.check_source_local(code, scope, name)?;
+                self.check_source_local(code, enclosing, name)?;
                 self.lookup(scope, name)
             }
             Expr::Named(named) if code.has_named_bindings => {
@@ -4519,8 +4768,11 @@ impl Context {
                 };
                 let mark = self.heap.temporary_mark();
                 let value = eval(self, &named.value)?;
-                if self.store_source_name(scope, name.id.as_str(), value)?
-                    && self.heap.named_assignment(mark, value)
+                if self.store_source_name(
+                    self.named_expression_scope(scope),
+                    name.id.as_str(),
+                    value,
+                )? && self.heap.named_assignment(mark, value)
                 {
                     self.collect_unreachable();
                     self.heap.release_unbound_finalizers();
@@ -4543,7 +4795,7 @@ impl Context {
                     }
                 }
                 let result = self.join_source_format(parts)?;
-                self.keep_format_result(mark, result)
+                self.keep_source_result(mark, result)
             }
             Expr::TString(template) => {
                 let strings = code.literals[&expr.range()];
@@ -4614,6 +4866,11 @@ impl Context {
                 Ok(self
                     .heap
                     .packed_tuple(items, v.elts.iter().all(imre_ast::literal_tuple_element)))
+            }
+            Expr::SetComp(comp)
+                if let Some(targets) = code.set_comprehension_targets.get(&comp.range()) =>
+            {
+                self.source_set_comprehension(code, scope, comp, targets)
             }
             Expr::Set(display) => {
                 let items = display
