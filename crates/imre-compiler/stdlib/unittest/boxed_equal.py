@@ -286,6 +286,23 @@ def _tail_type_check(self, s, tails, msg):
                         f'Expected bytes, not {type(s).__name__}'))
 
 
+def assertStartsWith(self, s, prefix, msg=None):
+    try:
+        if s.startswith(prefix):
+            return
+    except (AttributeError, TypeError):
+        self._tail_type_check(s, prefix, msg)
+        raise
+    from unittest.util import safe_repr
+    a = safe_repr(s, short=True)
+    b = safe_repr(prefix)
+    if isinstance(prefix, tuple):
+        standardMsg = f"{a} doesn't start with any of {b}"
+    else:
+        standardMsg = f"{a} doesn't start with {b}"
+    self.fail(self._formatMessage(msg, standardMsg))
+
+
 def assertEndsWith(self, s, suffix, msg=None):
     try:
         if s.endswith(suffix):
@@ -304,4 +321,5 @@ def assertEndsWith(self, s, suffix, msg=None):
 
 
 TestCase._tail_type_check = _tail_type_check
+TestCase.assertStartsWith = assertStartsWith
 TestCase.assertEndsWith = assertEndsWith

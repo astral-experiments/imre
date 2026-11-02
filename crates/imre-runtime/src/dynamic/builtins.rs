@@ -280,7 +280,14 @@ pub(super) const LIST_METHODS: &[&str] = &[
 ];
 
 pub(super) const BYTEARRAY_METHODS: &[&str] = &[
-    "__repr__", "append", "clear", "copy", "endswith", "extend", "reverse",
+    "__repr__",
+    "append",
+    "clear",
+    "copy",
+    "endswith",
+    "extend",
+    "reverse",
+    "startswith",
 ];
 
 pub(super) const BYTES_METHODS: &[&str] = &[
@@ -977,7 +984,7 @@ pub(super) fn call(
                 collections::builtin_slot(ctx, name, args, kwargs)
             }
             "bytes" | "bytearray" if method == "fromhex" => text::fromhex(ctx, name, args, kwargs),
-            "bytearray" if matches!(method, "decode" | "endswith") => {
+            "bytearray" if matches!(method, "decode" | "endswith" | "startswith") => {
                 text::method(ctx, owner, method, args, kwargs)
             }
             "str" | "bytes" => text::method(ctx, owner, method, args, kwargs),
