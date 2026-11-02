@@ -1561,6 +1561,7 @@ def report(text):
             "boxed_slice_deep_repr.py",
             "boxed_slice_repr_cycles.py",
             "boxed_source_exec.py",
+            "boxed_relative_package_imports.py",
             "boxed_sys_getframe.py",
             "boxed_sys_audit.py",
             "boxed_sys_audit_recursion.py",

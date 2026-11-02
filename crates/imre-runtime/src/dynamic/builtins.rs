@@ -1537,7 +1537,7 @@ pub(super) fn call(
         "property" => super::property::construct(ctx, args, kwargs),
         "open" => super::stdlib::io::open(ctx, args, kwargs),
         "__import__" => {
-            let [module, _, _, fromlist, level] = bind(
+            let [module, globals, _, fromlist, level] = bind(
                 name,
                 args,
                 kwargs,
@@ -1546,11 +1546,24 @@ pub(super) fn call(
             let name = ctx
                 .str_value(module.ok_or_else(|| type_error("__import__ requires a name"))?)?
                 .to_owned();
-            if level.map(|v| ctx.as_integer(v)).transpose()?.unwrap_or(0) != 0 {
-                return Err(Error::new(
-                    "ImportError",
-                    "explicit relative __import__ is unsupported",
-                ));
+            let level = match level {
+                Some(level) => ctx
+                    .index_integer(level)?
+                    .to_i64()
+                    .and_then(|level| i32::try_from(level).ok())
+                    .ok_or_else(|| {
+                        Error::new("OverflowError", "Python int too large to convert to C int")
+                    })?,
+                None => 0,
+            };
+            if level < 0 {
+                return Err(Error::new("ValueError", "level must be >= 0"));
+            }
+            if level != 0 {
+                return ctx.relative_import(&name, globals, fromlist, level);
+            }
+            if name.is_empty() {
+                return Err(Error::new("ValueError", "Empty module name"));
             }
             let result = ctx.module(&name)?;
             if ctx.optional_truth(fromlist, false)? {
