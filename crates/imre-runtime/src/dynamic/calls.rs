@@ -150,7 +150,8 @@ impl Context {
                         | "property"
                         | "module"
                         | weakref::REFERENCE_TYPE
-                ) || (name == "__repr__" && matches!(kind.as_str(), "set" | "frozenset")) =>
+                ) || (matches!(name, "__repr__" | "issubset")
+                    && matches!(kind.as_str(), "set" | "frozenset")) =>
             {
                 self.builtins.get(&format!("{kind}.{name}")).copied()
             }
@@ -2439,7 +2440,8 @@ impl Context {
             Value::Native(ref class)
                 if matches!(class.as_str(), "dict" | "list" | "tuple")
                     || builtins::is_enum_base(class)
-                    || (name == "__repr__" && matches!(class.as_str(), "set" | "frozenset"))
+                    || (matches!(name, "__repr__" | "issubset")
+                        && matches!(class.as_str(), "set" | "frozenset"))
                     || (builtins::is_exception(class)
                         && matches!(name, "__new__" | "__init__" | "with_traceback"))
                     || (class == "bytes" && builtins::BYTES_METHODS.contains(&name))

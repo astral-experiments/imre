@@ -1028,6 +1028,23 @@ def main():
                 "os", "posix",
             )
 
+        subset_method = root / "set_issubset.py"
+        for statement in (
+            "print({1, 2}.issubset([2, 1]))",
+            "print(set().issubset([]), frozenset().issubset([]))",
+            "items = set([1, 2])\nprint(items.issubset([2, 1]))",
+            "items = frozenset({1, 2})\ncheck = items.issubset\nprint(check([1]))",
+            "check = {1, 2}.issubset\nprint(check([1]))",
+            "print(set.issubset({1}, [1, 2]))",
+            "check = set.issubset\nprint(check({2}, [1]))",
+            "print(frozenset(['a']).issubset(['a', 'b']))",
+            "check = frozenset(['a']).issubset\nprint(check(['b']))",
+            "print(frozenset.issubset(frozenset([1]), [1]))",
+            "check = frozenset.issubset\nprint(check(frozenset([2]), [1]))",
+        ):
+            subset_method.write_text(statement + "\n")
+            compare("-B", subset_method, native_args=("run", subset_method, "--quiet"))
+
         set_method = root / "set_difference_update.py"
         for statement in (
             "items.difference_update([2])",
@@ -1558,6 +1575,7 @@ def report(text):
             "boxed_function_defaults.py",
             "boxed_textwrap.py",
             "boxed_set_ordering.py",
+            "boxed_set_issubset.py",
             "boxed_set_union.py",
             "boxed_set_difference_update.py",
             "boxed_weakref.py",

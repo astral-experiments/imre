@@ -923,7 +923,7 @@ impl Context {
     }
 
     /// Compare stored set members using their insertion hashes, including for frozen sets.
-    fn order_sets(&mut self, op: &str, a: Id, b: Id) -> Result<Id> {
+    pub(super) fn order_sets(&mut self, op: &str, a: Id, b: Id) -> Result<Id> {
         let (subset, superset) = if matches!(op, ">" | ">=") {
             (b, a)
         } else {
@@ -936,7 +936,18 @@ impl Context {
         }
         let mut position = 0;
         while let Some((at, key, _, hash)) = self.dictionary_pair(subset, position) {
-            if self.find_dictionary_key(superset, key, hash)?.1.is_none() {
+            let member = self.find_dictionary_key(superset, key, hash);
+            if let Err(error) = &member {
+                for id in error.roots() {
+                    self.heap.keep(id);
+                }
+            }
+            // Equality can remove the current key. Release the lookup reference
+            // before advancing the live cursor, so its finalizer may mutate the set.
+            let mark = self.heap.temporary_mark();
+            self.heap.keep(key);
+            self.discard_truth(mark);
+            if member?.1.is_none() {
                 return Ok(FALSE);
             }
             position = at + 1;
