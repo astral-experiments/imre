@@ -21,6 +21,37 @@ def current():
             assert str(error) == "cannot create 're.Pattern' instances"
         else:
             raise AssertionError("constructed a pattern without compiling")
+    from re import Match
+    found = unicode_digits.match("1")
+    assert type(found) is re.Match is Match
+    assert type(re.search(b"x", b"xy")) is Match
+    assert found.__class__ is Match
+    assert isinstance(found, Match) and not isinstance(unicode_digits, Match)
+    assert issubclass(Match, object) and not issubclass(Match, Pattern)
+    assert type(Match) is type and repr(Match) == "<class 're.Match'>"
+    assert (Match.__module__, Match.__name__, Match.__qualname__) == ("re", "Match", "Match")
+    assert Match[str].__origin__ is Match and Match[bytes].__args__ == (bytes,)
+    assert Match.__new__ is object.__new__
+    for construct in (lambda: Match(), lambda: Match.__new__(Match)):
+        try:
+            construct()
+        except TypeError as error:
+            assert str(error) == "cannot create 're.Match' instances"
+        else:
+            raise AssertionError("constructed a match without matching")
+    try:
+        Match.extra = 1
+    except TypeError as error:
+        assert str(error) == "cannot set 'extra' attribute of immutable type 're.Match'"
+    else:
+        raise AssertionError("modified re.Match")
+    try:
+        class SubMatch(Match):
+            pass
+    except TypeError as error:
+        assert str(error) == "type 're.Match' is not an acceptable base type"
+    else:
+        raise AssertionError("subclassed re.Match")
     print(re.A is re.ASCII, re.U is re.UNICODE)
     print(ascii_digits.pattern, ascii_digits.flags, unicode_digits.flags)
     for text in ("200", "-404", "+12", "1_2", "٢٠٠", "-１２", "200\n"):
