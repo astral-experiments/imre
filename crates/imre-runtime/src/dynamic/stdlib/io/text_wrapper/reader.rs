@@ -137,8 +137,11 @@ impl Reader {
                     .take_while(|(n, _)| *n <= used)
                     .map(|(_, extra)| extra)
                     .sum();
-                let start = ctx.as_integer(end)? - chunk.bytes as i64;
-                return Ok(ctx.int(start + (used + extra) as i64));
+                let back = (chunk.bytes - used - extra) as i64;
+                let position = ctx.as_integer(end)?.checked_sub(back).ok_or_else(|| {
+                    super::Error::new("OverflowError", "text stream position out of range")
+                })?;
+                return Ok(ctx.int(position));
             }
             Snapshot::Previous(None) => {
                 return Err(super::Error::new(
