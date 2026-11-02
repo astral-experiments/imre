@@ -81,7 +81,8 @@ def mapping_conversion():
         groups: dict
 
     class Mapping(dict):
-        pass
+        def __deepcopy__(self, memo):
+            return "copied mapping"
 
     groups = defaultdict(list)
     groups['a'].append(Row(3))
@@ -95,6 +96,17 @@ def mapping_conversion():
     assert tuple_group == {'a': [(3,)]}
     assert dict_group == {'a': [{'value': 3}]}
     assert tuple_group['a'] is not groups['a'] and dict_group['a'] is not groups['a']
+
+    import collections
+    import weakref
+
+    mapping = Mapping()
+    assert asdict(Table(weakref.proxy(mapping))) == {"groups": "copied mapping"}
+    try:
+        collections.defaultdict = tuple
+        assert asdict(Table(groups))["groups"].default_factory is list
+    finally:
+        collections.defaultdict = defaultdict
 
 
 def current():
