@@ -110,6 +110,34 @@ def check_readv():
     expect_errno(readv, (fd, [first]), errno.EBADF)
 
 
+def check_preadv():
+    from os import preadv
+
+    assert preadv is os.preadv is posix.preadv
+    assert os.RWF_HIPRI == posix.RWF_HIPRI
+    assert os.RWF_NOWAIT == posix.RWF_NOWAIT
+    with tempfile.TemporaryFile() as source:
+        fd = source.fileno()
+        os.write(fd, b"abcdef")
+        os.lseek(fd, 1, os.SEEK_SET)
+        head, tail = bytearray(b".."), bytearray(b"...")
+        assert preadv(fd, [head, tail], 2) == 4
+        assert (head, tail) == (b"cd", b"ef.")
+        assert preadv(fd, [head], 6, 0) == 0
+        expect_errno(preadv, (fd, [head], -2), errno.EINVAL)
+        assert os.lseek(fd, 0, os.SEEK_CUR) == 1
+        try:
+            preadv(fd, [head], 0, 1 << 30)
+        except NotImplementedError:
+            pass  # libc supplies only the flags-free preadv.
+        except OSError as error:
+            assert error.errno in (errno.EINVAL, errno.EOPNOTSUPP)
+        else:
+            raise AssertionError("unsupported preadv flag succeeded")
+        assert os.lseek(fd, 0, os.SEEK_CUR) == 1
+    expect_errno(preadv, (fd, [head], 0), errno.EBADF)
+
+
 def check_splice():
     from os import splice
 
@@ -144,6 +172,7 @@ def current():
         check_sendfile()
         check_splice()
         check_readv()
+        check_preadv()
     assert os.strerror is posix.strerror
     try:
         os.fstat(-1)

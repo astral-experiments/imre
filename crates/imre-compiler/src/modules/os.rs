@@ -194,6 +194,11 @@ pub(super) fn symbol(name: &str) -> Option<Intrinsic> {
         "close" => Intrinsic::Fd(FdOperation::Close),
         "closerange" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.closerange"),
         "read" => Intrinsic::Fd(FdOperation::Read),
+        "preadv" if cfg!(target_os = "linux") => Intrinsic::ObjectRuntimeExport("posix.preadv"),
+        #[cfg(target_os = "linux")]
+        "RWF_HIPRI" => Intrinsic::IntConstant(i64::from(libc::RWF_HIPRI)),
+        #[cfg(target_os = "linux")]
+        "RWF_NOWAIT" => Intrinsic::IntConstant(i64::from(libc::RWF_NOWAIT)),
         "readv" if cfg!(target_os = "linux") => Intrinsic::ObjectRuntimeExport("posix.readv"),
         "readinto" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.readinto"),
         "lockf" if cfg!(target_os = "linux") => Intrinsic::ObjectRuntimeExport("posix.lockf"),

@@ -558,6 +558,7 @@ pub(super) fn is_descriptor_function(name: &str) -> bool {
                 name,
                 "copy_file_range"
                     | "get_terminal_size"
+                    | "preadv"
                     | "readv"
                     | "splice"
                     | "lockf"
@@ -1376,6 +1377,25 @@ pub(super) fn descriptor(
         }
         return Ok(ctx.alloc(Value::Tuple(result)));
     }
+    #[cfg(target_os = "linux")]
+    if name == "preadv" {
+        let [fd, buffers, offset, rest @ ..] = args else {
+            return Err(Error::new(
+                "TypeError",
+                format!("preadv expected at least 3 arguments, got {}", args.len()),
+            ));
+        };
+        if rest.len() > 1 {
+            return Err(Error::new(
+                "TypeError",
+                format!("preadv expected at most 4 arguments, got {}", args.len()),
+            ));
+        }
+        let fd = c_int(ctx, *fd)?;
+        let offset = file_offset(ctx, *offset)?;
+        let flags = rest.first().map(|id| c_int(ctx, *id)).transpose()?.unwrap_or(0);
+        return readv::readv(ctx, fd, *buffers, Some((offset, flags)));
+    }
     if matches!(name, "pread" | "pwrite") {
         let [fd, data, offset] = args else {
             return Err(Error::new(
@@ -1402,7 +1422,7 @@ pub(super) fn descriptor(
         let fd = c_int(ctx, *fd)?;
         #[cfg(target_os = "linux")]
         if name == "readv" {
-            return readv::readv(ctx, fd, *data);
+            return readv::readv(ctx, fd, *data, None);
         }
         return if name == "read" {
             let length = ssize_t(ctx, *data)?;
