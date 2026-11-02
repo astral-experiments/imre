@@ -1658,6 +1658,7 @@ def report(text):
             "boxed_unittest_assert_almost_equal.py",
             "boxed_unittest_assert_count_equal.py",
             "boxed_unittest_membership.py",
+            "boxed_unittest_endswith.py",
             "boxed_unittest_instance.py",
             "boxed_unittest_subclass.py",
             "boxed_unittest_not_has_attr.py",
