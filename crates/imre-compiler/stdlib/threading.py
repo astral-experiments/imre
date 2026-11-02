@@ -13,7 +13,10 @@ except ImportError:
     from collections import deque as _deque
 
 
-__all__ = ["Thread", "Lock", "RLock", "Condition", "Event", "Semaphore", "BoundedSemaphore",
+ThreadError = _thread.error
+
+
+__all__ = ["Thread", "ThreadError", "Lock", "RLock", "Condition", "Event", "Semaphore", "BoundedSemaphore",
            "Barrier", "BrokenBarrierError", "TIMEOUT_MAX", "local", "get_ident",
            "main_thread", "current_thread", "enumerate", "active_count"]
 try:
