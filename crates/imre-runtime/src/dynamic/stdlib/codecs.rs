@@ -396,10 +396,20 @@ pub(super) fn lookup_transform(
     }
     initialize_search_path(ctx)?;
     let key = crate::objects::normalize_codec(spelling)?;
-    if let Some(&entry) = ctx.codec_entries.search_cache.get(&key)
-        && (entry.is_some() || native_fallback)
-    {
-        return Ok(entry);
+    // The default provider can win for a native-only codec even when the requested
+    // operation has no boxed implementation. A later callback cannot replace that win.
+    let result_for_request = |entry: Option<Id>| {
+        if entry.is_none() && !native_fallback {
+            Err(Error::new(
+                "LookupError",
+                format!("unknown encoding: {spelling}"),
+            ))
+        } else {
+            Ok(entry)
+        }
+    };
+    if let Some(&entry) = ctx.codec_entries.search_cache.get(&key) {
+        return result_for_request(entry);
     }
     let count = ctx.codec_entries.search_path.len();
     if count == 0 {
@@ -411,7 +421,8 @@ pub(super) fn lookup_transform(
     let name = ctx.text(key.clone());
     let (heap, roots) = ctx.heap_and_roots();
     let name = heap.intern(name, roots);
-    let default = native_fallback.then(|| ctx.builtin("encodings.search_function"));
+    let native_only = wide_unicode::encoding(&key).is_some() || key == "raw_unicode_escape";
+    let default = native_only.then(|| ctx.builtin("encodings.search_function"));
     // A callback may change the live list. CPython snapshots only its length.
     for index in 0..count {
         let callback = ctx
@@ -421,7 +432,7 @@ pub(super) fn lookup_transform(
             .copied()
             .ok_or_else(|| Error::new("IndexError", "list index out of range"))?;
         if Some(callback) == default {
-            return cache_lookup(ctx, key, None);
+            return result_for_request(cache_lookup(ctx, key, None)?);
         }
         let mark = ctx.heap.temporary_mark();
         ctx.heap.keep(callback);

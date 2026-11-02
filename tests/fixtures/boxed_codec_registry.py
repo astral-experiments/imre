@@ -1,5 +1,6 @@
 import _codecs
 import codecs
+import encodings
 
 
 def search(name):
@@ -16,13 +17,18 @@ def miss(name):
     calls.append("miss:" + name)
 
 
+def custom_escape(name):
+    if name == "raw_unicode_escape":
+        calls.append(name)
+        return (None, lambda value: ("custom", len(value)), None, None)
+
+
 assert codecs.register is _codecs.register
 assert codecs.unregister is _codecs.unregister
 assert codecs.lookup is _codecs.lookup
 
 calls = []
 enabled = False
-
 
 codecs.register(miss)
 codecs.register(search)
@@ -60,3 +66,21 @@ except LookupError:
     pass
 else:
     raise AssertionError("unregistered codec was still cached")
+
+
+calls.clear()
+codecs.register(custom_escape)
+try:
+    assert codecs.decode(br"\u0042", "raw-unicode-escape") == "B"
+    assert calls == []
+    codecs.unregister(encodings.search_function)
+    try:
+        assert codecs.decode(br"\u0042", "raw-unicode-escape") == "custom"
+        assert codecs.lookup("raw_unicode_escape")[1](b"x") == ("custom", 1)
+        assert calls == ["raw_unicode_escape"]
+    finally:
+        codecs.register(encodings.search_function)
+finally:
+    codecs.unregister(custom_escape)
+
+assert codecs.decode(br"\u0042", "raw-unicode-escape") == "B"
