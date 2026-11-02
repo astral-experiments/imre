@@ -222,9 +222,9 @@ impl Popen {
         text: bool,
         select: bool,
     ) -> Result<Exchange> {
-        let timeout = deadline.map(Deadline::seconds).transpose()?;
-        let pending = self.begin_exchange(input, timeout, text, select)?;
+        let pending = self.begin_exchange(input, deadline, text, select)?;
         let start = pending.start;
+        let timeout = pending.timeout;
         let exchange = pending.drain(
             |timeout, select| self.exchange_pipes(&[], timeout, false, select),
             crate::objects::stdlib::check_interrupt,
@@ -248,10 +248,17 @@ impl Popen {
     pub(super) fn begin_exchange(
         &mut self,
         input: &[u8],
-        timeout: Option<f64>,
+        deadline: Option<&Deadline>,
         text: bool,
         select: bool,
     ) -> Result<PendingExchange> {
+        if self.communication.started && !input.is_empty() {
+            return Err(Error::new(
+                Kind::ValueError,
+                "Cannot send input after starting communication",
+            ));
+        }
+        let timeout = deadline.map(Deadline::seconds).transpose()?;
         let start = Instant::now();
         Ok(PendingExchange {
             progress: self.exchange_pipes(input, timeout, text, select)?,
@@ -269,12 +276,6 @@ impl Popen {
         select: bool,
     ) -> Result<PipeProgress> {
         let data = &mut self.communication;
-        if data.started && !input.is_empty() {
-            return Err(Error::new(
-                Kind::ValueError,
-                "Cannot send input after starting communication",
-            ));
-        }
         let mut out = [Vec::new(), Vec::new()];
         if timeout.is_none() && !data.started && self.pipes.iter().flatten().count() <= 1 {
             if let Some(stdin) = &self.pipes[0] {

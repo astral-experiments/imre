@@ -213,9 +213,12 @@ impl BoxedPopen {
         seconds: Option<f64>,
         select: bool,
     ) -> Result<communicate::PendingExchange> {
-        self.0
-            .borrow_mut()
-            .begin_exchange(input, seconds, false, select)
+        self.0.borrow_mut().begin_exchange(
+            input,
+            seconds.map(Deadline::Float).as_ref(),
+            false,
+            select,
+        )
     }
 
     pub(crate) fn finish_communication<E: From<Error>>(
