@@ -21,6 +21,11 @@ pub(super) fn product_advance(
         return Ok(NOT_IMPLEMENTED);
     }
 
+    if pools.is_empty() {
+        ctx.set_attr(*receiver, "_stopped", TRUE)?;
+        return Ok(ctx.heap.packed_tuple(Vec::new(), false));
+    }
+
     let mut row = Vec::new();
     let mut carry = None;
     for (position, (&pool, &digit)) in pools.iter().zip(digits).enumerate() {
