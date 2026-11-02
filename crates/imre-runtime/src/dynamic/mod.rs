@@ -2836,9 +2836,17 @@ impl Context {
             "posix" if source.is_none() => {
                 stdlib::os::scheduler::initialize(self, scope);
                 stdlib::os::sysconf::initialize(self, module, scope);
-                for name in ["lockf", "posix_fadvise", "ptsname"] {
+                for name in ["lockf", "posix_fadvise", "ptsname", "splice"] {
                     let function = self.builtin(&format!("posix.{name}"));
                     self.bind(scope, name, function);
+                }
+                for (attr, flag) in [
+                    ("SPLICE_F_MOVE", libc::SPLICE_F_MOVE),
+                    ("SPLICE_F_NONBLOCK", libc::SPLICE_F_NONBLOCK),
+                    ("SPLICE_F_MORE", libc::SPLICE_F_MORE),
+                ] {
+                    let value = self.int(i64::from(flag));
+                    self.bind(scope, attr, value);
                 }
                 for (attr, flag) in [
                     ("O_PATH", libc::O_PATH),
@@ -2914,9 +2922,19 @@ impl Context {
                 if source.is_none() {
                     let posix = self.module("posix")?;
                     for attr in [
-                        "ptsname", "O_NOCTTY",
-                        "getxattr", "setxattr", "listxattr", "removexattr",
-                        "XATTR_CREATE", "XATTR_REPLACE", "XATTR_SIZE_MAX",
+                        "ptsname",
+                        "O_NOCTTY",
+                        "splice",
+                        "SPLICE_F_MOVE",
+                        "SPLICE_F_NONBLOCK",
+                        "SPLICE_F_MORE",
+                        "getxattr",
+                        "setxattr",
+                        "listxattr",
+                        "removexattr",
+                        "XATTR_CREATE",
+                        "XATTR_REPLACE",
+                        "XATTR_SIZE_MAX",
                     ] {
                         let value = self.lookup_attr(posix, attr)?;
                         self.bind(scope, attr, value);

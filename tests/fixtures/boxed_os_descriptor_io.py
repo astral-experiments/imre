@@ -79,11 +79,39 @@ def check_copy_file_range():
             raise AssertionError("negative count was accepted")
 
 
+def check_splice():
+    from os import splice
+
+    assert splice is os.splice is posix.splice
+    for name in ("SPLICE_F_MOVE", "SPLICE_F_MORE", "SPLICE_F_NONBLOCK"):
+        assert vars(os)[name] == vars(posix)[name]
+    with tempfile.TemporaryFile() as source, tempfile.TemporaryFile() as destination:
+        src, dst = source.fileno(), destination.fileno()
+        os.write(src, b"abcdef")
+        reader, writer = os.pipe()
+        try:
+            flags = os.SPLICE_F_MOVE | os.SPLICE_F_MORE
+            assert splice(src=Index(src), dst=Index(writer), count=Index(4),
+                          flags=Index(flags), offset_src=Index(1)) == 4
+            assert os.lseek(src, 0, os.SEEK_CUR) == 6
+            assert splice(reader, dst, 2, offset_dst=3) == 2
+            assert os.read(reader, 2) == b"de"
+            assert os.lseek(dst, 0, os.SEEK_CUR) == 0
+            assert os.read(dst, 5) == b"\x00\x00\x00bc"
+            expect_errno(splice, (reader, dst, 1, None, None, os.SPLICE_F_NONBLOCK), errno.EAGAIN)
+            expect_errno(splice, (reader, dst, 1, 0), errno.ESPIPE)
+            assert splice(-1, -1, 0) == 0
+        finally:
+            os.close(reader)
+            os.close(writer)
+
+
 def current():
     if sys.platform == "linux":
         check_tmpfile()
         check_copy_file_range()
         check_sendfile()
+        check_splice()
     assert os.strerror is posix.strerror
     try:
         os.fstat(-1)
