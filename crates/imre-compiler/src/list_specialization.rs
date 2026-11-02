@@ -131,7 +131,7 @@ fn rewrite_block(body: &mut [Statement], locals: &mut Vec<Type>) {
                         start,
                         stop,
                         step,
-                        integer(appends),
+                        Expr::integer(appends),
                     ],
                 ),
             }));
@@ -527,7 +527,7 @@ fn while_arguments(test: &Expr) -> Option<([Expr; 3], usize)> {
     else {
         return None;
     };
-    Some(([cursor.clone(), length.clone(), integer(1)], *source))
+    Some(([cursor.clone(), length.clone(), Expr::integer(1)], *source))
 }
 
 /// Repeating these reads cannot allocate, raise, mutate, or call user code.
@@ -548,8 +548,8 @@ fn range_arguments(args: &[Expr]) -> Option<[Expr; 3]> {
         return None;
     }
     match args {
-        [stop] => Some([integer(0), stop.clone(), integer(1)]),
-        [start, stop] => Some([start.clone(), stop.clone(), integer(1)]),
+        [stop] => Some([Expr::integer(0), stop.clone(), Expr::integer(1)]),
+        [start, stop] => Some([start.clone(), stop.clone(), Expr::integer(1)]),
         [start, stop, step] => Some([start.clone(), stop.clone(), step.clone()]),
         _ => None,
     }
@@ -564,13 +564,6 @@ fn small_literal(value: &Expr) -> Option<i64> {
     (-(1_i64 << 62)..(1_i64 << 62))
         .contains(&value)
         .then_some(value)
-}
-
-fn integer(value: i64) -> Expr {
-    Expr {
-        ty: Type::Int,
-        kind: ExprKind::Int(value.to_string()),
-    }
 }
 
 fn alias(expression: &Expr, aliases: &[Option<usize>]) -> Option<usize> {

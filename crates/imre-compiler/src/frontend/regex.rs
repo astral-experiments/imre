@@ -174,13 +174,7 @@ impl Checker<'_> {
                             operation: RegexCapture::Group,
                             known: true,
                         },
-                        vec![
-                            self.local(matched),
-                            Expr {
-                                ty: Type::Int,
-                                kind: ExprKind::Int(index.to_string()),
-                            },
-                        ],
+                        vec![self.local(matched), Expr::integer(index)],
                     ),
                 },
             ));
@@ -476,13 +470,7 @@ impl Checker<'_> {
                             operation: RegexCapture::Group,
                             known: true,
                         },
-                        vec![
-                            self.local(slot),
-                            Expr {
-                                ty: Type::Int,
-                                kind: ExprKind::Int(index.to_string()),
-                            },
-                        ],
+                        vec![self.local(slot), Expr::integer(index)],
                     ),
                 })
                 .collect();
@@ -520,10 +508,7 @@ impl Checker<'_> {
                     )
                 })?
         } else {
-            Expr {
-                ty: Type::Int,
-                kind: ExprKind::Int("0".into()),
-            }
+            Expr::integer(0)
         };
         if let ExprKind::Negate(inner) = &selector.kind
             && matches!(&inner.kind, ExprKind::Int(value) if value == "0")
@@ -532,10 +517,7 @@ impl Checker<'_> {
         }
         let index = Self::capture_index(layout.as_ref(), &selector);
         if let Some(index) = index {
-            selector = Expr {
-                ty: Type::Int,
-                kind: ExprKind::Int(index.to_string()),
-            };
+            selector = Expr::integer(index);
         }
         if method == "span" {
             let slot = self.hidden(Type::RegexMatch);

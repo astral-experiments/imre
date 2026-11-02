@@ -91,7 +91,7 @@ impl Checker<'_> {
                     "action" => None,
                     "message" | "module" => Some(empty()),
                     "append" => Some(no.clone()),
-                    _ => Some(pipelines::integer(0)),
+                    _ => Some(Expr::integer(0)),
                 };
                 Parameter {
                     name: name.into(),
@@ -117,10 +117,10 @@ impl Checker<'_> {
                         .position(|name| checker.unshadowed_builtin(arg, name))
                     {
                         category = id as u32;
-                        pipelines::integer(0)
+                        Expr::integer(0)
                     } else if !simple && checker.unshadowed_builtin(arg, "int") {
                         invalid |= 2;
-                        pipelines::integer(0)
+                        Expr::integer(0)
                     } else if !simple {
                         let value = checker.expr(arg)?;
                         if !matches!(value.ty, Type::Int | Type::Bool | Type::Str | Type::None) {
@@ -142,7 +142,7 @@ impl Checker<'_> {
                 }
                 "lineno" if checker.unshadowed_builtin(arg, "int") => {
                     invalid |= 8;
-                    pipelines::integer(0)
+                    Expr::integer(0)
                 }
                 "lineno" | "append" => checker.expr(arg)?,
                 _ => unreachable!(),
@@ -177,7 +177,7 @@ impl Checker<'_> {
             powers::integer(line)
         } else {
             invalid |= 8;
-            pipelines::integer(0)
+            Expr::integer(0)
         };
         let append = field("append").unwrap();
         if !matches!(append.ty, Type::Bool | Type::Int) {

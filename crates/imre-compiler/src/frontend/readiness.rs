@@ -32,13 +32,7 @@ impl Checker<'_> {
         let positive = Expr {
             ty: Type::Bool,
             kind: ExprKind::Compare(
-                vec![
-                    value.clone(),
-                    Expr {
-                        ty: Type::Int,
-                        kind: ExprKind::Int("0".into()),
-                    },
-                ],
+                vec![value.clone(), Expr::integer(0)],
                 vec![ir::Compare::Greater],
             ),
         };

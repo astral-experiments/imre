@@ -229,7 +229,7 @@ impl Checker<'_> {
             ty: c.ty,
             kind: ExprKind::Builtin(
                 Builtin::ListGet,
-                vec![self.globals.slot_value(c.slot), pipelines::integer(0)],
+                vec![self.globals.slot_value(c.slot), Expr::integer(0)],
             ),
         }
     }
@@ -320,7 +320,7 @@ impl Checker<'_> {
         let value = self.coerce(value, c.ty, attr)?;
         let slot = self.hidden(value.ty);
         let cell = self.globals.slot_value(c.slot);
-        let set = Statement::SetItem(cell.clone(), pipelines::integer(0), self.local(slot));
+        let set = Statement::SetItem(cell.clone(), Expr::integer(0), self.local(slot));
         let store = if c.inherited {
             let append = Statement::Expr(Expr {
                 ty: Type::None,

@@ -105,7 +105,7 @@ impl Checker<'_> {
         call: &ast::ExprCall,
     ) -> Result<Expr, String> {
         let int = |name: &str, optional: bool| {
-            parameter(name, Type::Int, optional.then(|| logging::number(0)))
+            parameter(name, Type::Int, optional.then(|| Expr::integer(0)))
         };
         let (builtin, args) = match kind {
             C::Date => {
@@ -290,11 +290,7 @@ impl Checker<'_> {
             .iter()
             .position(|&field| field == name)
             .ok_or_else(|| error(self.source, a, "unsupported datetime value attribute"))?;
-        Ok(op(
-            Op::Field,
-            Type::Int,
-            vec![recv, logging::number(i as u8)],
-        ))
+        Ok(op(Op::Field, Type::Int, vec![recv, Expr::integer(i as u8)]))
     }
     pub(super) fn calendar_method(
         &mut self,

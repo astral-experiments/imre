@@ -87,7 +87,7 @@ impl Checker<'_> {
             return Ok(None);
         }
         if attr.attr.as_str() == "optimize" {
-            return Ok(Some(pipelines::integer(i64::from(
+            return Ok(Some(Expr::integer(i64::from(
                 self.graph.python_optimization(),
             ))));
         }
@@ -104,7 +104,7 @@ impl Checker<'_> {
             "utf8_mode" => flags.utf8_mode,
             _ => return Err(error(self.source, attr, "unsupported sys.flags field")),
         };
-        Ok(Some(pipelines::integer(i64::from(setting))))
+        Ok(Some(Expr::integer(i64::from(setting))))
     }
 
     pub(super) fn stdout_value(&self) -> Expr {
@@ -654,7 +654,7 @@ impl Checker<'_> {
             self.graph.checked_argument_type(self.module, arg.range());
             self.index_word(value, arg, false)?
         } else {
-            pipelines::integer(0)
+            Expr::integer(0)
         };
         Ok(Expr {
             ty,

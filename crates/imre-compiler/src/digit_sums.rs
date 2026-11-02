@@ -9,7 +9,7 @@
 use crate::ir::{
     self, Binary, Builtin, Compare, Expr, ExprKind, Function, Module, Statement, Type,
 };
-use crate::reductions::{count_writes, integer, literal};
+use crate::reductions::{count_writes, literal};
 
 mod terms;
 
@@ -97,7 +97,10 @@ fn fuse(
         };
         let success = Expr {
             ty: Type::Bool,
-            kind: ExprKind::Compare(vec![local(pack), integer(0)], vec![Compare::GreaterEqual]),
+            kind: ExprKind::Compare(
+                vec![local(pack), Expr::integer(0)],
+                vec![Compare::GreaterEqual],
+            ),
         };
         let unpack = |phase| {
             let (op, bits) = if phase == 0 {
@@ -107,7 +110,7 @@ fn fuse(
             };
             Expr {
                 ty: Type::Int,
-                kind: ExprKind::Binary(op, Box::new(local(pack)), Box::new(integer(bits))),
+                kind: ExprKind::Binary(op, Box::new(local(pack)), Box::new(Expr::integer(bits))),
             }
         };
         let outputs = vec![

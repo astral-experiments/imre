@@ -48,7 +48,11 @@ fn plus(value: Expr, offset: i128) -> Expr {
     }
     Expr {
         ty: Type::Int,
-        kind: ExprKind::Binary(Binary::Add, Box::new(value), Box::new(int(offset))),
+        kind: ExprKind::Binary(
+            Binary::Add,
+            Box::new(value),
+            Box::new(Expr::integer(offset)),
+        ),
     }
 }
 
@@ -305,7 +309,7 @@ pub(super) fn fuse(
             kind: ExprKind::Conditional(
                 Box::new(greater(bound, 0)),
                 Box::new(bound.clone()),
-                Box::new(int(0)),
+                Box::new(Expr::integer(0)),
             ),
         };
         fast.push(Statement::Assign(index, plus(present, padding - 1)));

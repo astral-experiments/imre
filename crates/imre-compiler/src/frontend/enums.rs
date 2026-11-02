@@ -51,7 +51,7 @@ impl Checker<'_> {
             kind: ExprKind::Builtin(Builtin::Repr, vec![val]),
         };
         let slot = self.hidden(Type::Str);
-        let limit = pipelines::integer(100);
+        let limit = Expr::integer(100);
         let index_type = self.types.optional(Type::Int);
         let absent = self.coerce(Expr::none(), index_type, call)?;
         let stop = self.coerce(limit.clone(), index_type, call)?;

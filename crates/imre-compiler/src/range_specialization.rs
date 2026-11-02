@@ -332,7 +332,11 @@ fn rewrite_loop(statement: &mut Statement, locals: &mut Vec<Type>, plan: Plan) {
     let guard = Expr {
         ty: Type::Bool,
         kind: ExprKind::Compare(
-            vec![integer(0), local(captured), integer(MAX_SMALL - plan.step)],
+            vec![
+                Expr::integer(0),
+                local(captured),
+                Expr::integer(MAX_SMALL - plan.step),
+            ],
             vec![Compare::LessEqual, Compare::LessEqual],
         ),
     };
@@ -354,13 +358,6 @@ fn rewrite_loop(statement: &mut Statement, locals: &mut Vec<Type>, plan: Plan) {
 
 fn local(slot: usize) -> Expr {
     Expr::local(slot, Type::Int)
-}
-
-fn integer(value: i64) -> Expr {
-    Expr {
-        ty: Type::Int,
-        kind: ExprKind::Int(value.to_string()),
-    }
 }
 
 #[cfg(test)]

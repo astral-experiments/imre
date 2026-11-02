@@ -290,11 +290,7 @@ impl Checker<'_> {
         Ok(scope.finish(Expr {
             ty,
             kind: ExprKind::Conditional(
-                Box::new(pipelines::compare(
-                    Compare::Equal,
-                    size,
-                    pipelines::integer(0),
-                )),
+                Box::new(pipelines::compare(Compare::Equal, size, Expr::integer(0))),
                 Box::new(xof),
                 Box::new(calls::type_error(ty, vec![], fixed_error)),
             ),

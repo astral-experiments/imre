@@ -334,10 +334,7 @@ impl Checker<'_> {
         });
         match start {
             Some(start) => self.expr_expected(start, Type::Int),
-            None => Ok(Expr {
-                ty: Type::Int,
-                kind: ExprKind::Int(identity.into()),
-            }),
+            None => Ok(Expr::integer(identity)),
         }
     }
 
@@ -413,13 +410,7 @@ impl Checker<'_> {
                         Expr {
                             ty: Type::Bool,
                             kind: ExprKind::Compare(
-                                vec![
-                                    step.clone(),
-                                    Expr {
-                                        ty: Type::Int,
-                                        kind: ExprKind::Int("0".into()),
-                                    },
-                                ],
+                                vec![step.clone(), Expr::integer(0)],
                                 vec![Compare::Equal],
                             ),
                         },
