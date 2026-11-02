@@ -42,6 +42,8 @@ pub(super) fn module_function(symbol: &str) -> Option<(&str, &str)> {
         "_thread" if matches!(function, "allocate" | "allocate_lock") => Some((module, function)),
         #[cfg(target_os = "linux")]
         "_signal" if function == "sigpending" => Some((module, function)),
+        #[cfg(unix)]
+        "_signal" if function == "default_int_handler" => Some((module, function)),
         "_contextvars" if function == "copy_context" => Some((module, function)),
         "_io" if function == "text_encoding" => Some((module, function)),
         #[cfg(target_os = "linux")]
@@ -2133,6 +2135,12 @@ impl Context {
                 match name {
                     "__name__" | "__qualname__" => return Ok(self.text(function.to_owned())),
                     "__module__" => return Ok(self.text(module.to_owned())),
+                    "__doc__" if symbol == "_signal.default_int_handler" => {
+                        return Ok(self.text("The default handler for SIGINT installed by Python.\n\nIt raises KeyboardInterrupt."));
+                    }
+                    "__text_signature__" if symbol == "_signal.default_int_handler" => {
+                        return Ok(self.text("($module, signalnum, frame, /)"));
+                    }
                     "__doc__" if symbol == "_signal.sigpending" => {
                         return Ok(self.text("Examine pending signals.\n\nReturns a set of signal numbers that are pending for delivery to\nthe calling thread."));
                     }

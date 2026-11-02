@@ -1001,6 +1001,26 @@ pub(super) fn call(
         return functools::key_method(ctx, slot, args, kwargs);
     }
     #[cfg(unix)]
+    if name == "_signal.default_int_handler" {
+        if !kwargs.is_empty() {
+            return Err(Error::new(
+                "TypeError",
+                "_signal.default_int_handler() takes no keyword arguments",
+            ));
+        }
+        if args.len() != 2 {
+            return Err(Error::new(
+                "TypeError",
+                format!(
+                    "default_int_handler expected 2 arguments, got {}",
+                    args.len()
+                ),
+            ));
+        }
+        os::c_int(ctx, args[0])?;
+        return Err(Error::new("KeyboardInterrupt", ""));
+    }
+    #[cfg(unix)]
     if name == "_signal.alarm" {
         if !kwargs.is_empty() {
             return Err(Error::new(
