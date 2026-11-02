@@ -1735,18 +1735,11 @@ pub(super) fn method(
         let format = ctx.str_value(format)?.to_owned();
         return percent(ctx, &format, value);
     }
-    let (&receiver, args) = args.split_first().ok_or_else(|| {
-        if name == "__new__" {
-            type_error("str.__new__(): not enough arguments")
-        } else if matches!(owner, "str" | "bytes" | "bytearray") {
-            type_error(format!("unbound method {owner}.{name}() needs an argument"))
-        } else {
-            type_error("missing string receiver")
-        }
-    })?;
-    if name == "__new__" {
-        return ctx.new_immutable_scalar(owner, receiver, args, kwargs);
-    }
+    let Some((&receiver, args)) = args.split_first() else {
+        return Err(type_error(format!(
+            "unbound method {owner}.{name}() needs an argument"
+        )));
+    };
     let original_receiver = receiver;
     let receiver = if owner == "bytes"
         || (owner == "bytearray"

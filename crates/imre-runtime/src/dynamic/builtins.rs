@@ -1382,6 +1382,12 @@ pub(super) fn call(
         && !is_exception(name)
     {
         return match owner {
+            "int" | "float" | "str" | "bytes" if method == "__new__" => {
+                let Some((&class, values)) = args.split_first() else {
+                    return Err(type_error(format!("{name}(): not enough arguments")));
+                };
+                ctx.new_immutable_scalar(owner, class, values, kwargs)
+            }
             "type" if method == "__init__" => {
                 let Some((&class, args)) = args.split_first() else {
                     return Err(type_error(

@@ -30,7 +30,7 @@ impl Context {
         let member = if let Some(new) = new {
             self.call(new, copy_ids(&args)?, Vec::new())?
         } else {
-            self.new_float(&args, &[])?
+            self.new_immutable_scalar("float", class, &args[1..], &[])?
         };
         if let Err(error) = self.lookup_attr(member, "_value_") {
             if !self.is_attribute_error(&error) {

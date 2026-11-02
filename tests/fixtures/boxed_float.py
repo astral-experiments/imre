@@ -74,6 +74,15 @@ def current():
         else:
             raise AssertionError("accepted invalid as_integer_ratio call")
 
+    for allocate in (int.__new__, float.__new__):
+        for args in ((), (dict,), (1,)):
+            try:
+                allocate(*args)
+            except TypeError as error:
+                print(str(error))
+            else:
+                raise AssertionError("accepted invalid scalar constructor arguments")
+
     weight = Weight("1.5")
     assert type(weight) is Weight and isinstance(weight, float)
     assert float(weight) == 1.5 and weight + 0.5 == 2.0
