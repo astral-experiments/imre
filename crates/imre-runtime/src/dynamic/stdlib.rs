@@ -155,6 +155,7 @@ pub(super) fn has_lazy_attributes(name: &str) -> bool {
             | "typing"
             | "contextlib"
             | "contextvars"
+            | "_contextvars"
             | "warnings"
             | "subprocess"
             | "socket"
@@ -605,6 +606,9 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("subprocess", "PIPE") => ctx.int(-1),
         ("subprocess", "STDOUT") => ctx.int(-2),
         ("subprocess", "DEVNULL") => ctx.int(-3),
+        ("contextvars" | "_contextvars", "ContextVar" | "Context" | "Token" | "copy_context") => {
+            ctx.builtin(&format!("_contextvars.{name}"))
+        }
         ("functools", "Placeholder") => ctx.alloc(Value::PartialPlaceholder),
         (
             "sys",
@@ -674,7 +678,6 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             | "_signature_layout",
         )
         | ("email.utils", "parsedate_to_datetime" | "format_datetime" | "formatdate")
-        | ("contextvars", "ContextVar" | "Context" | "Token" | "copy_context")
         | ("warnings", "warn")
         | (
             "fnmatch",
@@ -1573,7 +1576,7 @@ pub(super) fn call(
     if let Some(name) = name.strip_prefix("socket.") {
         return socket::call(ctx, name, args, kwargs);
     }
-    if let Some(method) = name.strip_prefix("contextvars.") {
+    if let Some(method) = name.strip_prefix("_contextvars.") {
         return contextvars::call(ctx, method, args, kwargs);
     }
     if name == "getset_descriptor.__get__" {

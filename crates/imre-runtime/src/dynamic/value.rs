@@ -890,6 +890,9 @@ impl Value {
     /// Returns the name used for both builtin class lookup and diagnostic messages.
     pub(super) fn intrinsic_type_name(&self) -> Option<&str> {
         Some(match self {
+            Self::Context(_) => "_contextvars.Context",
+            Self::ContextVar { .. } => "_contextvars.ContextVar",
+            Self::ContextToken { .. } => "_contextvars.Token",
             Self::None => "NoneType",
             Self::Weak(wr) => wr.kind.class(),
             Self::Ellipsis => "ellipsis",

@@ -39,6 +39,7 @@ pub(super) fn module_function(symbol: &str) -> Option<(&str, &str)> {
             Some(("_functools", function))
         }
         "_thread" if matches!(function, "allocate" | "allocate_lock") => Some((module, function)),
+        "_contextvars" if function == "copy_context" => Some((module, function)),
         "zlib" if function == "adler32" => Some((module, function)),
         "hashlib"
             if matches!(function, "new" | "file_digest")
@@ -950,6 +951,9 @@ impl Context {
                             | super::namedtuple::GETTER
                             | "operator.itemgetter"
                             | "collections.defaultdict"
+                            | "_contextvars.Context"
+                            | "_contextvars.ContextVar"
+                            | "_contextvars.Token"
                             | stdlib::os::stat::CLASS
                             | "array.array"
                             | super::deque::CLASS
@@ -1132,11 +1136,11 @@ impl Context {
             | ("map", Value::Map { .. })
             | ("filter", Value::Filter { .. })
             | ("selectors.PollSelector", Value::Selector(_))
-            | ("contextvars.ContextVar", Value::ContextVar { .. })
-            | ("contextvars.Context", Value::Context(_))
+            | ("_contextvars.ContextVar", Value::ContextVar { .. })
+            | ("_contextvars.Context", Value::Context(_))
             | ("functools.partial", Value::Partial { .. })
             | ("functools._lru_cache_wrapper", Value::Cached { .. })
-            | ("contextvars.Token", Value::ContextToken { .. })
+            | ("_contextvars.Token", Value::ContextToken { .. })
             | ("operator.attrgetter", Value::AttrGetter(_))
             | (super::namedtuple::GETTER, Value::TupleGetter { .. })
             | ("member_descriptor", Value::TupleGetterDoc | Value::ReadOnlyMember(_, _))
@@ -2112,6 +2116,9 @@ impl Context {
                 if matches!(
                     class.as_str(),
                     "array.array"
+                        | "_contextvars.Context"
+                        | "_contextvars.ContextVar"
+                        | "_contextvars.Token"
                         | KEY_WRAPPER
                         | "functools._lru_cache_wrapper"
                         | HashState::CLASS
@@ -2137,6 +2144,7 @@ impl Context {
                         return Ok(self.text(short.to_owned()));
                     }
                     "__module__" => return Ok(self.text(module.to_owned())),
+                    "MISSING" if class == "_contextvars.Token" => return Ok(self.token_missing),
                     "__hash__" | "__doc__" | "__text_signature__" if class == KEY_WRAPPER => {
                         return Ok(NONE);
                     }
@@ -2518,9 +2526,6 @@ impl Context {
                 if method.starts_with("abc.abstract.") && name == "__isabstractmethod__" =>
             {
                 return Ok(TRUE);
-            }
-            Value::Native(ref class) if class == "contextvars.Token" && name == "MISSING" => {
-                return Ok(self.token_missing);
             }
             Value::Native(ref class)
                 if name == "__format__" && self.builtin_type_name(obj) == Some("type") =>
