@@ -522,6 +522,26 @@ ACCEPTED = {
         "data/message.txt": "hello\n",
         "data/directory-payload.txt": "directory payload\n",
     },
+    "source_loader_compile_override": {
+        "main.py": (
+            "from importlib.machinery import SourceFileLoader\n"
+            "from types import ModuleType\n"
+            "class PluginLoader(SourceFileLoader):\n"
+            "    def get_data(self, path):\n"
+            "        data = super().get_data(path)\n"
+            "        self.source_to_code = self.compile_plugin\n"
+            "        return data\n"
+            "    def compile_plugin(self, data, path):\n"
+            "        assert data == b'value = 1' and path == self.path\n"
+            "        return compile('value = 2', path, 'exec')\n"
+            "path = __file__ + '.plugin.py'\n"
+            "with open(path, 'wb') as out:\n"
+            "    out.write(b'value = 1')\n"
+            "module = ModuleType('plugin')\n"
+            "PluginLoader('plugin', path).exec_module(module)\n"
+            "assert module.value == 2\n"
+        ),
+    },
     "source_loader_path_stats": {
         "main.py": (
             "import os\nfrom importlib.machinery import SourceFileLoader\n"
