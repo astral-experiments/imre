@@ -217,6 +217,24 @@ ACCEPTED = {
             "assert Owner.value == 1\n"
         ),
     },
+    "optional_import_error_alternatives": {
+        "main.py": "from pkg.adapter import chosen, available, recovered\nprint(chosen, available, recovered)\n",
+        "pkg/__init__.py": "",
+        "pkg/adapter.py": (
+            "try:\n    import absent.plugin as chosen\n"
+            "except ImportError:\n    from .fallback import value as chosen\n"
+            "try:\n    from .preferred import value as available\n"
+            "except ImportError:\n    from .unexpected import value as available\n"
+            "try:\n    from .broken import value as recovered\n"
+            "except ImportError:\n    from .fallback import value as recovered\n"
+            "from . import after\n"
+        ),
+        "pkg/preferred.py": "print('preferred')\nvalue = 23\n",
+        "pkg/broken.py": "print('broken')\nraise ImportError('provider unavailable')\n",
+        "pkg/fallback.py": "print('fallback')\nvalue = 17\n",
+        "pkg/unexpected.py": "raise AssertionError('unselected fallback executed')\n",
+        "pkg/after.py": "print('after')\n",
+    },
     "optional_platform_import": {
         "main.py": "import configure\nfrom adapter import present, absent\nprint(present, absent)\n",
         "configure.py": "import sys\nsys.platform = 'test-platform'\nprint('configure')\n",
