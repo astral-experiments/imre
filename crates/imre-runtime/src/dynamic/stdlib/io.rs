@@ -406,20 +406,25 @@ fn argument_count(owner: &str, name: &str, n: usize) -> Result<()> {
 }
 
 /// IOBase consumes the receiver's actual iterator and each writer override.
-fn lines(
+pub(super) fn lines(
     ctx: &mut Context,
     receiver: Id,
     name: &str,
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
+    let (owner, name) = if let Some(method) = name.strip_prefix("file.") {
+        (ctx.type_name(receiver).trim_start_matches("_io."), method)
+    } else {
+        ("_IOBase", name)
+    };
     if !kwargs.is_empty() {
         return Err(Error::new(
             "TypeError",
-            format!("_IOBase.{name}() takes no keyword arguments"),
+            format!("{owner}.{name}() takes no keyword arguments"),
         ));
     }
-    argument_count("_IOBase", name, args.len())?;
+    argument_count(owner, name, args.len())?;
     if matches!(name, "__iter__" | "writelines") {
         let closed = ctx.lookup_attr(receiver, "closed")?;
         if ctx.truth(closed)? {
@@ -441,9 +446,13 @@ fn lines(
         }
         "writelines" => {
             let iterator = ctx.iterator(args[0])?;
+            ctx.heap.keep(iterator);
+            let step = ctx.heap.temporary_mark();
             while let Some(line) = ctx.next_item(iterator)? {
+                ctx.heap.keep(line);
                 let write = ctx.lookup_attr(receiver, "write")?;
                 ctx.call(write, vec![line], Vec::new())?;
+                ctx.heap.release_temporaries_since(step);
             }
             Ok(NONE)
         }

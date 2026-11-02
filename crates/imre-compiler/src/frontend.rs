@@ -2583,6 +2583,9 @@ impl<'a> Checker<'a> {
         {
             return Err(self.object_builtin_error("binary readinto", attribute));
         }
+        if receiver.ty == Type::BinaryIO && attribute.attr.as_str() == "writelines" {
+            return Err(self.object_builtin_error("binary writelines", attribute));
+        }
         if let Type::Class(class) = receiver.ty
             && self.native_mock(class)
             && self.module
@@ -9831,6 +9834,9 @@ impl<'a> Checker<'a> {
             }
             if attribute.attr.as_str() == "fromkeys" && self.types.mapping(receiver.ty).is_some() {
                 return self.dict_fromkeys(call, None, Some(receiver));
+            }
+            if receiver.ty == Type::BinaryIO && attribute.attr.as_str() == "writelines" {
+                return Err(self.object_builtin_error("binary writelines", call));
             }
             self.reject_builtin_keywords(call)?;
             if receiver.ty == Type::StringIO

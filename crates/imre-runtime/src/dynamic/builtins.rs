@@ -553,6 +553,7 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
                     | "readline"
                     | "readinto"
                     | "write"
+                    | "writelines"
                     | "flush"
                     | "close"
                     | "__enter__"
