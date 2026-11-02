@@ -719,7 +719,9 @@ pub(crate) fn lower_with_caller_cache(
                 })]
                 .into();
             }
-            let defaults = keyword_forwarding::prepare(graph, module_id, &mut method);
+            let defaults = keyword_forwarding::prepare_method(
+                graph, module_id, &mut method, context, &classes.declarations,
+            );
             let mut signature = signature(
                 &method,
                 graph,

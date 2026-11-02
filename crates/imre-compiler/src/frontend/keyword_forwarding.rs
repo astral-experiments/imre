@@ -29,6 +29,148 @@ pub(super) fn prepare(
     }
 }
 
+/// In an otherwise unchanged initializer, bind packs at a statically known
+/// base call only when the call is first and no other statement observes them.
+pub(super) fn prepare_method(
+    graph: &SourceGraph,
+    module: ModuleId,
+    method: &mut ast::StmtFunctionDef,
+    context: records::MethodContext,
+    classes: &Classes,
+) -> Defaults {
+    if method.name.as_str() == "__init__"
+        && let Some(origin) = expand_initializer(graph, module, method, context, classes)
+    {
+        Defaults {
+            module,
+            forwarded: Some((1, origin)),
+        }
+    } else {
+        prepare(graph, module, method)
+    }
+}
+
+fn expand_initializer(
+    graph: &SourceGraph,
+    module: ModuleId,
+    method: &mut ast::StmtFunctionDef,
+    context: records::MethodContext,
+    classes: &Classes,
+) -> Option<ModuleId> {
+    let parameters = &method.parameters;
+    let positional = parameters.vararg.as_ref()?;
+    let keywords = parameters.kwarg.as_ref()?;
+    if positional.annotation.is_some()
+        || keywords.annotation.is_some()
+        || !parameters.posonlyargs.is_empty()
+        || !parameters.kwonlyargs.is_empty()
+        || parameters.args.len() != 1
+    {
+        return None;
+    }
+    let after_doc = usize::from(docstring_literal(&method.body).is_some());
+    let (first, tail) = method.body.get(after_doc..)?.split_first()?;
+    let ast::Stmt::Expr(stmt) = first else {
+        return None;
+    };
+    let call = stmt.value.as_call_expr()?;
+    let origin = classes.definitions[context.class].method_origins[context.index];
+    let parent = &classes.definitions[*classes.definitions[classes.ids[&origin]].bases.first()?];
+    let direct = crate::classes::direct_base_init(graph, module, parent.definition, method, call);
+    if !direct
+        && (!crate::classes::super_init(call)
+            || graph.modules[module].bindings.contains_key("super")
+            || [
+                parameters.args[0].name().as_str(),
+                positional.name.as_str(),
+                keywords.name.as_str(),
+            ]
+            .contains(&"super"))
+    {
+        return None;
+    }
+    let [ast::Expr::Starred(star)] = &call.arguments.args[usize::from(direct)..] else {
+        return None;
+    };
+    let [kw] = &*call.arguments.keywords else {
+        return None;
+    };
+    if star.value.as_name_expr()?.id.as_str() != positional.name.as_str()
+        || kw.arg.is_some()
+        || kw.value.as_name_expr()?.id.as_str() != keywords.name.as_str()
+    {
+        return None;
+    }
+
+    let index = parent.initializer?;
+    let base = &parent.methods[index];
+    let params = &base.parameters;
+    let base_module = parent.method_origins[index].module;
+    if params.vararg.is_some()
+        || params.kwarg.is_some()
+        || !params.kwonlyargs.is_empty()
+        || !params.posonlyargs.is_empty()
+        || params.args.is_empty()
+    {
+        return None;
+    }
+    let mut uses = Uses {
+        names: HashSet::new(),
+        bound: HashSet::new(),
+        keyword: keywords.name.as_str(),
+        reads: 0,
+        safe: true,
+    };
+    // A base parameter may have the same name as the original callable or module.
+    uses.visit_expr(&call.func);
+    for stmt in tail {
+        uses.visit_stmt(stmt);
+    }
+    if !uses.safe
+        || uses.names.contains(positional.name.as_str())
+        || uses.names.contains(keywords.name.as_str())
+        || uses.bound.contains("super")
+    {
+        return None;
+    }
+    let receiver = parameters.args[0].name();
+    let fixed = &params.args[1..];
+    // A newly materialized parameter must not shadow a free name or a receiver.
+    // Limit inherited defaults to immutables lowered from their defining module.
+    if fixed.iter().any(|p| {
+        p.name() == receiver
+            || uses.names.contains(p.name().as_str())
+            || !p.annotation().is_some_and(scalar_annotation)
+            || p.default.as_deref().is_some_and(|d| {
+                calls::scalar_literal(d, &graph.modules[base_module].source).is_err()
+            })
+    }) {
+        return None;
+    }
+    let range = call.range();
+    let mut forwarded: Vec<_> = call.arguments.args[..usize::from(direct)].to_vec();
+    forwarded.extend(fixed.iter().map(|p| {
+        ast::Expr::Name(ast::ExprName {
+            range,
+            node_index: ast::AtomicNodeIndex::NONE,
+            id: p.name().as_str().into(),
+            ctx: ast::ExprContext::Load,
+        })
+    }));
+    let ast::Stmt::Expr(stmt) = &mut method.body[after_doc] else {
+        unreachable!()
+    };
+    let ast::Expr::Call(call) = &mut *stmt.value else {
+        unreachable!()
+    };
+    call.arguments.args = forwarded.into_iter().collect();
+    call.arguments.keywords.clear();
+    method.parameters.vararg = None;
+    method.parameters.kwarg = None;
+    method.parameters.args.extend(fixed.iter().cloned());
+    Some(base_module)
+}
+
 struct Uses<'a> {
     names: HashSet<&'a str>,
     bound: HashSet<&'a str>,

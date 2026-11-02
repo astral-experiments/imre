@@ -20,3 +20,21 @@ class Grandchild(Child):
 print(Child().value)
 print(Grandchild(42).value)
 print(Grandchild().tag)
+
+
+class Forward(Parent):
+    tag: str
+
+    def __init__(self, *args, **kwargs):
+        Parent.__init__(self, *args, **kwargs)
+        self.tag = "forwarded"
+
+
+class InheritedForward(Forward):
+    pass
+
+
+print(Forward().value)
+print(Forward(29).value)
+print(InheritedForward(value=31).value)
+print(InheritedForward().tag)
