@@ -281,6 +281,8 @@ pub(super) const LIST_METHODS: &[&str] = &[
     "index", "insert", "pop", "remove", "reverse", "sort",
 ];
 
+pub(super) const MEMORYVIEW_METHODS: &[&str] = &["release"];
+
 pub(super) const BYTEARRAY_METHODS: &[&str] = &[
     "__repr__",
     "append",
@@ -398,6 +400,7 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         {
             "coroutine_wrapper"
         }
+        Value::MemoryView { .. } if MEMORYVIEW_METHODS.contains(&attr) => "memoryview",
         Value::Bytes(_) if BYTES_METHODS.contains(&attr) => "bytes",
         Value::ByteArray(_)
             if BYTEARRAY_METHODS.contains(&attr) || matches!(attr, "decode" | "translate") =>
@@ -1024,6 +1027,27 @@ pub(super) fn call(
             "list" | "tuple" | "dict" | "set" | "frozenset" => {
                 collections::method(ctx, name, args, kwargs)
             }
+            "memoryview" if method == "release" => {
+                positional(name, kwargs)?;
+                arity(name, args, 1, 1)?;
+                let exports = ctx
+                    .buffer_exports
+                    .iter()
+                    .filter(|&&view| view == args[0])
+                    .count();
+                if exports != 0 {
+                    let unit = if exports == 1 { "buffer" } else { "buffers" };
+                    return Err(Error::new(
+                        "BufferError",
+                        format!("memoryview has {exports} exported {unit}"),
+                    ));
+                }
+                let Value::MemoryView { owner, .. } = ctx.heap.get_mut(args[0]) else {
+                    return Err(type_error("expected memoryview"));
+                };
+                *owner = None;
+                Ok(NONE)
+            }
             "slice" => super::slice::method(ctx, method, args, kwargs),
             "range" | "range_iterator" | "longrange_iterator" => {
                 super::range::method(ctx, owner, method, args, kwargs)
@@ -1426,6 +1450,7 @@ pub(super) fn call(
                 Value::Str(v) => v.chars().count(),
                 Value::SurrogateStr(points) => points.len(),
                 Value::Bytes(v) | Value::ByteArray(v) => v.len(),
+                Value::MemoryView { .. } => ctx.bytes_like(args[0])?.len(),
                 Value::Range(range) => {
                     return range.len.to_i64().map(|n| ctx.int(n)).ok_or_else(|| {
                         Error::new(
@@ -1462,6 +1487,32 @@ pub(super) fn call(
             Ok(ctx.alloc(Value::Filter {
                 predicate: *predicate,
                 input,
+            }))
+        }
+        "memoryview" => {
+            let [object] = bind(name, args, kwargs, ["object"])?;
+            let object = object.ok_or_else(|| {
+                type_error("memoryview() missing required argument 'object' (pos 1)")
+            })?;
+            let owner = match ctx.heap.get(ctx.scalar_value(object)) {
+                Value::Bytes(_) => object,
+                Value::MemoryView { owner, .. } => Context::memoryview_owner(*owner)?,
+                Value::Array(_) | Value::ByteArray(_) => {
+                    return Err(Error::new(
+                        "NotImplementedError",
+                        "memoryview of a mutable buffer is unsupported",
+                    ));
+                }
+                _ => {
+                    return Err(type_error(format!(
+                        "memoryview: a bytes-like object is required, not '{}'",
+                        ctx.type_name(object)
+                    )));
+                }
+            };
+            Ok(ctx.alloc(Value::MemoryView {
+                owner: Some(owner),
+                hash: None,
             }))
         }
         "slice" => super::slice::construct(ctx, args, kwargs),

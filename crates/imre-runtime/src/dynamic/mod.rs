@@ -108,7 +108,7 @@ pub(crate) struct Context {
     // The active stack roots suspended contexts while Context.run executes native code.
     contexts: Vec<Id>,
     // A buffer export pins its bytearray's size while Python callbacks run.
-    bytearray_exports: Vec<Id>,
+    buffer_exports: Vec<Id>,
     // Active sorts temporarily detach their list storage while Python callbacks run.
     sorting_lists: Vec<Id>,
     // Container ancestors visible to a reentrant Python __repr__.
@@ -292,8 +292,21 @@ impl Context {
         }
     }
 
+    fn memoryview_owner(owner: Option<Id>) -> Result<Id> {
+        owner.ok_or_else(|| {
+            Error::new(
+                "ValueError",
+                "operation forbidden on released memoryview object",
+            )
+        })
+    }
+
     fn bytes_like(&self, id: Id) -> Result<&[u8]> {
-        match self.heap.get(self.scalar_value(id)) {
+        let owner = match self.heap.get(id) {
+            Value::MemoryView { owner, .. } => Self::memoryview_owner(*owner)?,
+            _ => id,
+        };
+        match self.heap.get(self.scalar_value(owner)) {
             Value::Bytes(data) | Value::ByteArray(data) => Ok(data),
             _ => Err(Error::new(
                 "TypeError",
@@ -305,19 +318,22 @@ impl Context {
         }
     }
 
-    /// Keep the underlying bytearray exported while an argument conversion runs Python.
+    /// Keep the buffer exported while an argument conversion runs Python.
     fn with_buffer_export<T>(
         &mut self,
         input: Id,
         convert: impl FnOnce(&mut Self) -> Result<T>,
     ) -> Result<T> {
         let input = self.scalar_value(input);
-        if !matches!(self.heap.get(input), Value::ByteArray(_)) {
+        if !matches!(
+            self.heap.get(input),
+            Value::ByteArray(_) | Value::MemoryView { .. }
+        ) {
             return convert(self);
         }
-        self.bytearray_exports.push(input);
+        self.buffer_exports.push(input);
         let result = convert(self);
-        self.bytearray_exports.pop();
+        self.buffer_exports.pop();
         result
     }
 
@@ -334,7 +350,7 @@ impl Context {
     }
 
     fn check_bytearray_resize(&self, id: Id) -> Result<()> {
-        if self.bytearray_exports.contains(&id) {
+        if self.buffer_exports.contains(&id) {
             Err(Self::exported_bytearray_error())
         } else {
             Ok(())
@@ -1677,6 +1693,7 @@ impl Context {
                 builtins::BYTEARRAY_METHODS
             }
             "property" => property::METHODS,
+            "memoryview" => builtins::MEMORYVIEW_METHODS,
             "int" => &["bit_length", "to_bytes", "__format__"],
             "float" => &["__format__", "__getformat__", "as_integer_ratio"],
             "bytes" => {

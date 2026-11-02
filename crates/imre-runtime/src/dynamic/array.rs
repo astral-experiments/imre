@@ -98,6 +98,17 @@ impl Array {
         self.bytes.len() / self.format.width()
     }
 
+    /// Compare one-dimensional buffer values across formats, independently of element width.
+    pub(super) fn equals_unsigned_bytes(&self, bytes: &[u8]) -> bool {
+        self.format != Format::Wide
+            && self.len() == bytes.len()
+            && bytes.iter().enumerate().all(|(i, &byte)| match self.at(i) {
+                Ok(Value::Int(value)) => value.as_small() == Some(i64::from(byte)),
+                Ok(Value::Float(value)) => value == f64::from(byte),
+                _ => false,
+            })
+    }
+
     pub(super) fn at(&self, index: usize) -> Result<Value> {
         let width = self.format.width();
         let element = &self.bytes[width * index..width * (index + 1)];

@@ -727,6 +727,11 @@ pub(super) enum Value {
     SurrogateStr(Vec<u32>),
     Array(super::array::Array),
     Bytes(Vec<u8>),
+    /// A contiguous read-only view keeps its original bytes exporter alive until release.
+    MemoryView {
+        owner: Option<Id>,
+        hash: Option<i64>,
+    },
     ByteArray(Vec<u8>),
     CodecInfo {
         entry: crate::objects::CodecInfo,
@@ -1045,6 +1050,7 @@ impl Value {
             Self::Zip { .. } => "zip",
             Self::Array(_) => "array.array",
             Self::Bytes(_) => "bytes",
+            Self::MemoryView { .. } => "memoryview",
             Self::ByteArray(_) => "bytearray",
             Self::File(file) => match file.as_ref() {
                 super::stdlib::BinaryFile::Descriptor(fd) if fd.reading => "_io.BufferedReader",
@@ -1239,6 +1245,7 @@ impl Value {
             }
             Self::Yielded(item) => visit.push(*item),
             Self::Slice(parts) => visit.extend(parts),
+            Self::MemoryView { owner, .. } => visit.extend(owner),
             Self::Template {
                 strings,
                 interpolations,

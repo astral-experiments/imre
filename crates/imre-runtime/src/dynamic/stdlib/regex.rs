@@ -620,30 +620,29 @@ fn capture(
 }
 
 fn subject_bytes(ctx: &Context, id: Id, bytes: bool) -> Result<&[u8]> {
-    match ctx.heap.get(id) {
-        Value::Bytes(value) | Value::ByteArray(value) if bytes => Ok(value),
-        Value::Bytes(_) | Value::ByteArray(_) => Err(Error::new(
-            "TypeError",
-            "cannot use a string pattern on a bytes-like object",
-        )),
-        _ => {
-            let text = ctx.str_value(id).map_err(|_| {
-                Error::new(
-                    "TypeError",
-                    format!(
-                        "expected string or bytes-like object, got '{}'",
-                        ctx.type_name(id)
-                    ),
-                )
-            })?;
+    match ctx.heap.get(ctx.scalar_value(id)) {
+        Value::Bytes(_) | Value::ByteArray(_) | Value::MemoryView { owner: Some(_), .. } => {
             if bytes {
-                return Err(Error::new(
-                    "TypeError",
-                    "cannot use a bytes pattern on a string-like object",
-                ));
+                return ctx.bytes_like(id);
             }
-            Ok(text.as_bytes())
+            Err(Error::new(
+                "TypeError",
+                "cannot use a string pattern on a bytes-like object",
+            ))
         }
+        Value::Str(_) | Value::SurrogateStr(_) if bytes => Err(Error::new(
+            "TypeError",
+            "cannot use a bytes pattern on a string-like object",
+        )),
+        _ => ctx.str_value(id).map(str::as_bytes).map_err(|_| {
+            Error::new(
+                "TypeError",
+                format!(
+                    "expected string or bytes-like object, got '{}'",
+                    ctx.type_name(id)
+                ),
+            )
+        }),
     }
 }
 
@@ -708,11 +707,17 @@ pub(super) fn search(
     };
     let (start, end) = (byte(start), byte(end));
     if matches!(method, "scanner" | "finditer") {
-        // A mutable buffer needs a Python export for the lifetime of the scanner.
-        if matches!(ctx.heap.get(string), Value::ByteArray(_)) {
+        // Resizing a bytearray or releasing a view requires a persistent scanner export.
+        if matches!(
+            ctx.heap.get(ctx.scalar_value(string)),
+            Value::ByteArray(_) | Value::MemoryView { .. }
+        ) {
             return Err(Error::new(
                 "NotImplementedError",
-                "exporting a bytearray to a regex scanner is unsupported",
+                format!(
+                    "exporting a {} to a regex scanner is unsupported",
+                    ctx.type_name(string)
+                ),
             ));
         }
         let scanner = ctx.alloc(Value::RegexScanner {
