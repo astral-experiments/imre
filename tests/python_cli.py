@@ -959,6 +959,28 @@ def check_pickle_reductions(imre, root, run):
         sys.path.pop(0)
 
 
+def check_boxed_unittest_main_reporting(imre, root, run):
+    source = root / "reporting_tests.py"
+    source.write_text(
+        "import importlib\n"
+        "unittest = importlib.import_module('unittest')\n"
+        "class Cases(unittest.TestCase):\n"
+        "    def test_pass(self): pass\n"
+        "    def test_failure(self):\n"
+        "        with self.subTest(item=1): self.fail('intentional failure')\n"
+        "unittest.main()\n"
+    )
+    executable = root / "reporting_tests"
+    built = run(imre, "build", source, "--runtime-imports", "--no-cache", "-o", executable)
+    assert built.returncode == 0, built
+    passed = run(executable, "-v", "Cases.test_pass")
+    assert passed.returncode == 0, passed
+    assert "test_pass (__main__.Cases.test_pass) ... ok" in passed.stderr.splitlines(), passed
+    failed = run(executable, "-v", "Cases.test_failure")
+    assert failed.returncode == 1 and "(item=1) ... FAIL" in failed.stderr, failed
+    assert failed.stderr.rstrip().endswith("FAILED (failures=1)"), failed
+
+
 def check_unittest_main_names(imre, root, run):
     source = root / "selected_tests.py"
     source.write_text(
@@ -2433,6 +2455,7 @@ def report(text):
                         extra={"PYTHONINTMAXSTRDIGITS": str(limit)},
                     )
         if os.name == "posix":
+            check_boxed_unittest_main_reporting(imre, root, run)
             check_unittest_main_names(imre, root, run)
             check_unittest_file_discovery(imre, root, run)
             plugin.write_bytes((fixtures / "boxed_subprocess_fileio.py").read_bytes())
