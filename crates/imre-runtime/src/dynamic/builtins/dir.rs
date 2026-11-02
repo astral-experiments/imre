@@ -321,13 +321,6 @@ pub(in crate::dynamic) fn typing_alias_dir(ctx: &mut Context, alias: &Alias) -> 
             .expect("native alias class dictionary")
             .to_vec()
         {
-            // An unnamed generic has no stored instance module; its class's module would be wrong.
-            if alias.kind == AliasKind::Generic
-                && alias.name.is_none()
-                && ctx.str_value(key)? == "__module__"
-            {
-                continue;
-            }
             ctx.put_item(names, key, NONE)?;
         }
     }

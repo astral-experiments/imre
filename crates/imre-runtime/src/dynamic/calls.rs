@@ -4270,6 +4270,9 @@ impl Context {
     /// Bypass the object's deletion hook, while honoring data descriptors on its class.
     pub(super) fn default_delete_attr(&mut self, obj: Id, name: &str) -> Result<()> {
         self.check_immutable_type_write(obj, name)?;
+        if let Some(result) = super::typing::update_generic_module(self, obj, name, None) {
+            return result;
+        }
         if let Some(result) = super::paramspec::update(self, obj, name, None) {
             return result;
         }
@@ -4893,6 +4896,9 @@ impl Context {
 
     pub(super) fn default_set_attr(&mut self, obj: Id, name: &str, value: Id) -> Result<()> {
         self.check_immutable_type_write(obj, name)?;
+        if let Some(result) = super::typing::update_generic_module(self, obj, name, Some(value)) {
+            return result;
+        }
         if let Some(result) = super::paramspec::update(self, obj, name, Some(value)) {
             return result;
         }

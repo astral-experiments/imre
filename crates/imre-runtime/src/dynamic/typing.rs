@@ -170,6 +170,8 @@ pub(super) struct Alias {
     pub parameters: Id,
     pub kind: AliasKind,
     pub name: Option<Id>,
+    /// Instance override of the module inherited from typing._GenericAlias.
+    pub module: Option<Id>,
     pub instantiable: bool,
     pub unpacked: bool,
 }
@@ -199,6 +201,23 @@ impl Alias {
             ("_inst", if self.instantiable { TRUE } else { FALSE }),
         ]
     }
+}
+
+/// Set or delete the module on an individual _GenericAlias without mutating its origin.
+pub(super) fn update_generic_module(ctx: &mut Context, obj: Id, name: &str, value: Option<Id>) -> Option<Result<()>> {
+    if name != "__module__" {
+        return None;
+    }
+    let Value::GenericAlias(alias) = ctx.heap.get_mut(obj) else { return None };
+    if alias.kind != AliasKind::Generic {
+        return None;
+    }
+    if let Some(old) = std::mem::replace(&mut alias.module, value) {
+        ctx.heap.weak_edge_removed(old);
+    } else if value.is_none() {
+        return Some(Err(ctx.missing_attribute(obj, name)));
+    }
+    Some(Ok(()))
 }
 
 /// Walk nested Literal origins without consuming native stack frames.
@@ -433,6 +452,7 @@ fn allocate_alias(
         parameters,
         kind,
         name,
+        module: None,
         instantiable,
         unpacked: false,
     }))
@@ -1565,6 +1585,13 @@ pub(super) fn attribute(ctx: &mut Context, value: Id, name: &str) -> Option<Resu
                 return Some(ctx.lookup_attr(a.origin, name));
             }
             "__name__" | "__qualname__" | "_name" if let Some(label) = a.name => label,
+            "__module__" if a.kind == AliasKind::Generic => match a.module {
+                Some(module) => module,
+                None => {
+                    let class = ctx.builtin("typing._GenericAlias");
+                    ctx.own_class_attr(class, name)?
+                }
+            },
             "__module__" if a.name.is_some() => ctx.text("typing"),
             "__name__" | "__qualname__" if a.kind == AliasKind::Concatenate => {
                 return Some(ctx.lookup_attr(a.origin, "__name__"));
@@ -2180,15 +2207,13 @@ pub(super) fn call(
             .iter()
             .any(|key| ctx.classes.get(*key) == Some(&origin));
         let parameters = collect_type_parameters(ctx, args, enforce_order)?;
-        return Ok(allocate_alias(
-            ctx,
-            kind,
-            origin,
-            args,
-            parameters,
-            name,
-            instantiable,
-        ));
+        let alias = allocate_alias(ctx, kind, origin, args, parameters, name, instantiable);
+        if kind == AliasKind::Generic && !ctx.truth(name.unwrap_or(NONE))? {
+            ctx.heap.keep(alias);
+            let module = ctx.lookup_attr(origin, "__module__")?;
+            ctx.set_attr(alias, "__module__", module)?;
+        }
+        return Ok(alias);
     }
     if operation == "TypeAliasType" {
         let [name, value, params] = super::builtins::bind_method_arguments(

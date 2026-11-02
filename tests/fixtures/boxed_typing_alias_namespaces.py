@@ -95,7 +95,22 @@ def current():
         __origin_private__ = 3
         copy_with = "origin method"
 
+    captured_module = object()
+    Origin.__module__ = captured_module
     generic_alias = Origin[int]
+    Origin.__module__ = "new_origin"
+    assert generic_alias.__module__ is captured_module and Origin[str].__module__ == "new_origin"
+    assert "__module__" in dir(generic_alias) and typing.List[int].__module__ == "typing"
+    generic_alias.__module__ = None
+    assert generic_alias.__module__ is None and Origin.__module__ == "new_origin"
+    del generic_alias.__module__
+    assert generic_alias.__module__ == type(generic_alias).__module__ == "typing"
+    try:
+        del generic_alias.__module__
+    except AttributeError:
+        pass
+    else:
+        raise AssertionError("deleted inherited module on a generic alias")
     unpack_alias = typing.Unpack[typing.Tuple[int]]
     callable_alias = typing.Callable[..., int]
     for value in (generic_alias, unpack_alias, callable_alias):

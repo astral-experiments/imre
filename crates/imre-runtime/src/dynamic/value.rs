@@ -1608,6 +1608,7 @@ impl Value {
             Self::GenericAlias(alias) => {
                 visit.extend([alias.origin, alias.args, alias.parameters]);
                 visit.extend(alias.name);
+                visit.extend(alias.module);
                 if let super::typing::AliasKind::Literal(members) = alias.kind {
                     visit.push(members);
                 }
