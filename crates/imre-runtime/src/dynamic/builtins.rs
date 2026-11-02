@@ -1419,7 +1419,9 @@ pub(super) fn call(
         "type" => match args {
             [object] if kwargs.is_empty() => ctx.exact_type(*object),
             [_] => Err(type_error("type() takes no keyword arguments")),
-            [name, bases, namespace] => ctx.type_from_namespace(*name, *bases, *namespace, kwargs),
+            [name, bases, namespace] => {
+                ctx.type_from_namespace(None, *name, *bases, *namespace, kwargs)
+            }
             _ => Err(type_error("type() takes 1 or 3 arguments")),
         },
         "super" => {

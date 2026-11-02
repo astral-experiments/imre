@@ -2143,6 +2143,7 @@ def report(text):
             "boxed_oserror.py",
             "boxed_type_identity.py",
             "boxed_type_namespace.py",
+            "boxed_abc_namespace.py",
             "boxed_singleton_types.py",
             "boxed_singleton_subclass.py",
             "boxed_function_closure_cells.py",
