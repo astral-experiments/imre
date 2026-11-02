@@ -293,7 +293,10 @@ fn object_fallback<T>(
                 &overloads,
                 !graph.needs_object_runtime.get()
                     && graph.object_builtin_errors.borrow().contains(&error),
-                graph.modules.iter().position(|module| module.is_bundled("socketserver")),
+                graph
+                    .modules
+                    .iter()
+                    .position(|module| module.is_bundled("socketserver")),
             )?;
         }
         Ok(())

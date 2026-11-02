@@ -875,7 +875,13 @@ fn file_errors<'db>(db: &'db dyn Db, checked: CheckedFile<'db>) -> Vec<String> {
                         skipped.iter().any(|scope| scope.contains_range(range))
                             || (checked.scoped_builtin(db)
                                 && CALL_ARGUMENT_RULES.contains(&diagnostic.id().as_str())
-                                && runtime_argument(db, file, range, diagnostic.id().as_str(), checked.runtime_provider(db)))
+                                && runtime_argument(
+                                    db,
+                                    file,
+                                    range,
+                                    diagnostic.id().as_str(),
+                                    checked.runtime_provider(db),
+                                ))
                             // ty also reports implicit None returns at the annotation span.
                             || (diagnostic.id().as_str() == "invalid-return-type"
                                 && diagnostic.headline_message()
@@ -1618,7 +1624,11 @@ mod diagnostic_mode_tests {
         assert!(message.contains("not callable"), "{message}");
         // Entry profiles can skip a scope without changing its source or Salsa revision.
         let whole = TextRange::new(0.into(), 40.into());
-        assert!(session.errors(Some(&[vec![whole]]), &[], false, None).is_ok());
+        assert!(
+            session
+                .errors(Some(&[vec![whole]]), &[], false, None)
+                .is_ok()
+        );
         assert_eq!(session.errors(None, &[], false, None).unwrap_err(), message);
     }
 }

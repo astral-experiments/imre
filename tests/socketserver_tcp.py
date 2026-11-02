@@ -16,6 +16,13 @@ REJECT = {
         "identity('wrong')\n",
         "invalid-argument-type",
     ),
+    "runtime_server_value_keeps_argument_checks": (
+        "from socketserver import ThreadingTCPServer\n"
+        "def identity(value: int) -> int: return value\n"
+        "print(ThreadingTCPServer)\n"
+        "identity('wrong')\n",
+        "expected int, got str",
+    ),
     "timed_listener_subclass": (
         "from socketserver import TCPServer, BaseRequestHandler\n"
         "class Timed(TCPServer):\n"
