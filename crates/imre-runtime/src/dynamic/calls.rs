@@ -2103,6 +2103,7 @@ impl Context {
                 return stdlib::datetime::attribute(self, obj, &value.clone(), tzinfo, name);
             }
             Value::Native(ref class) if class == stdlib::os::stat::CLASS => match name {
+                "__reduce__" => return Ok(self.builtin("os.stat_result.__reduce__")),
                 field if let Some(id) = stdlib::os::stat::member(self, field) => return Ok(id),
                 "__module__" => return Ok(self.text("os")),
                 "__name__" | "__qualname__" => return Ok(self.text("stat_result")),
