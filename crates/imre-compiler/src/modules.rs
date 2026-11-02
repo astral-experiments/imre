@@ -1172,6 +1172,9 @@ impl IntrinsicModule {
             (Self::ImportlibResources, "files") => {
                 Intrinsic::ObjectRuntimeExport("importlib.resources.files")
             }
+            (Self::ImportlibResources, "read_binary") => {
+                Intrinsic::ObjectRuntimeExport("importlib.resources.read_binary")
+            }
             (Self::ImportlibResources, "read_text") => {
                 Intrinsic::ObjectRuntimeExport("importlib.resources.read_text")
             }
