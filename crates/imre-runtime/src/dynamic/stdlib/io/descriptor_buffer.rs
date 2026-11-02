@@ -530,6 +530,8 @@ impl BufferedFd {
     /// Realign the raw offset first and let the live FileIO truncate implement its size protocol.
     fn truncate(&self, ctx: &mut Context, size: Id) -> Result<Id> {
         self.check_reentry(ctx)?;
+        // The native flush writes and seeks on the descriptor without calling Python.
+        native_raw(ctx, self.raw, &["write", "seek"], "BufferedRandom")?;
         {
             let mut slot = self.buffer.borrow_mut();
             let Some(Buffer::Random(file)) = slot.as_mut() else {
