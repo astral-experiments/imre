@@ -531,6 +531,20 @@ ACCEPTED = {
         ),
         "after.py": "import sys\nprint('after')\n",
     },
+    "optional_import_in_dependency": {
+        "helper.py": (
+            "try:\n    import sys as provider\nexcept ImportError:\n    provider = None\n"
+            "import child\n"
+            "assert provider is not None\n"
+            "def value() -> int: return 7\n"
+        ),
+        "child.py": (
+            "from importlib import import_module\n"
+            "parent = import_module('helper')\n"
+            "print(parent.provider is not None)\n"
+        ),
+        "main.py": "from helper import value\nprint(value())\n",
+    },
     "optional_import_error_alternatives": {
         "main.py": "from pkg.adapter import chosen, available, recovered\nprint(chosen, available, recovered)\n",
         "pkg/__init__.py": "",
