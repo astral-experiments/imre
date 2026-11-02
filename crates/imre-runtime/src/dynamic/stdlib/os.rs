@@ -368,6 +368,7 @@ pub(super) fn is_descriptor_function(name: &str) -> bool {
             | "dup2"
             | "isatty"
             | "lseek"
+            | "ftruncate"
             | "pipe"
             | "read"
             | "write"
@@ -840,6 +841,26 @@ pub(super) fn descriptor(
             let count = native::write(fd, bytes)?;
             Ok(ctx.int(count as i64))
         };
+    }
+    if name == "ftruncate" {
+        let [fd, length] = args else {
+            return Err(Error::new(
+                "TypeError",
+                format!("ftruncate expected 2 arguments, got {}", args.len()),
+            ));
+        };
+        let fd = c_int(ctx, *fd)?;
+        let length = file_offset(ctx, *length)?;
+        let audit_fd = ctx.int(i64::from(fd));
+        let audit_length = ctx.int(length);
+        super::audit::event(ctx, "os.truncate", &[audit_fd, audit_length])?;
+        loop {
+            match native::truncate(fd, length) {
+                Ok(()) => return Ok(NONE),
+                Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+                Err(error) => return Err(super::os_error(error)),
+            }
+        }
     }
     if name == "lseek" {
         let [fd, position, whence] = args else {
