@@ -44,7 +44,7 @@ pub(super) fn receiver_call<'a>(
 }
 
 /// Literal factories cannot observe partial fields, publish self or invoke another override.
-fn returns_literal(method: &ast::StmtFunctionDef) -> bool {
+pub(super) fn returns_literal(method: &ast::StmtFunctionDef) -> bool {
     let [prefix @ .., ast::Stmt::Return(ret)] = method.body.as_slice() else {
         return false;
     };

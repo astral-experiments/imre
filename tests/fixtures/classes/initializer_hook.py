@@ -47,18 +47,26 @@ class Reject(Owner):
 
 
 class Mapping:
-    reference: dict[str, object]
-
     def __init__(self):
         self.reference = self._reference().copy()
+        key, value = self.reference.popitem()
+        self.last = {key: value}
 
-    def _reference(self) -> dict[str, object]:
+    def _reference(self):
         return {"kind": "base", "pair": (1, 2)}
 
 
 class DerivedMapping(Mapping):
     def _reference(self):
         return {"kind": "derived"}
+
+
+class Pairs:
+    def __init__(self):
+        self.pairs = self.make().copy()
+
+    def make(self):
+        return {"a": (1, 2), "b": (3, 4)}
 
 
 show(Owner("first"))
@@ -72,7 +80,9 @@ except ValueError as error:
     print(str(error))
 
 
-print(Mapping().reference["pair"])
+print(Mapping().last["pair"])
 derived_mapping = DerivedMapping()
-print(derived_mapping.reference["kind"])
+print(derived_mapping.last["kind"])
 assert derived_mapping._reference()["kind"].upper() == "DERIVED"
+assert Pairs().make()["b"][0] == 3
+assert Pairs().pairs["a"][1] == 2
