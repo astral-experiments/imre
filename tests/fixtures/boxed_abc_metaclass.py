@@ -91,6 +91,13 @@ def current():
         raise AssertionError("accepted incompatible metaclasses")
     assert events == ["meta", "body"]
 
+    try:
+        direct = Factory("Direct", (), {})
+    except NotImplementedError:
+        pass
+    else:
+        assert type(direct) is Factory and direct(key=3) == {"key": 3}
+
     Factory.__call__ = Base
     try:
         Base()

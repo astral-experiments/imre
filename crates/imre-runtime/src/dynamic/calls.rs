@@ -4914,6 +4914,11 @@ impl Context {
                         return Ok(instance);
                     }
                     instance
+                } else if self.has_base(callable, "type") {
+                    return Err(Error::new(
+                        "NotImplementedError",
+                        "direct metaclass construction is unsupported",
+                    ));
                 } else if self.has_base(callable, "module") {
                     self.allocate_module(callable)
                 } else if let Some(kind) = string_base {
