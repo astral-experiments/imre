@@ -124,7 +124,7 @@ pub fn repeated_keyword(node: ast::AnyNodeRef<'_>) -> Option<&ast::Keyword> {
 #[derive(Default)]
 pub struct Names {
     pub string_annotations: bool,
-    pub duplicate_type_parameter: Option<Identifier>,
+    pub type_parameter_error: Option<(Identifier, String)>,
     original: HashMap<TextSize, Name>,
     owners: HashMap<TextSize, Name>,
     import_roots: HashSet<TextSize>,
@@ -208,6 +208,34 @@ impl Mangler<'_> {
         self.remember(name.start(), &mut name.id);
     }
 
+    fn parameter_bindings(&self, params: &mut ast::TypeParams) {
+        let mut bindings = HashSet::new();
+        for param in &mut params.type_params {
+            let name = match param {
+                ast::TypeParam::TypeVar(p) => &mut p.name,
+                ast::TypeParam::TypeVarTuple(p) => &mut p.name,
+                ast::TypeParam::ParamSpec(p) => &mut p.name,
+            };
+            self.definition(name);
+            let message = match name.as_str() {
+                "__classdict__" => Some(
+                    "reserved name '__classdict__' cannot be used for type parameter".to_owned(),
+                ),
+                "__debug__" => Some("cannot assign to __debug__".to_owned()),
+                _ if !bindings.insert(name.id.clone()) => {
+                    Some(format!("duplicate type parameter '{}'", name.id))
+                }
+                _ => None,
+            };
+            if let Some(message) = message {
+                self.names
+                    .borrow_mut()
+                    .type_parameter_error
+                    .get_or_insert_with(|| (name.clone(), message));
+            }
+        }
+    }
+
     /// Keep the source spelling for symbol-table queries after private-name mangling.
     fn remember(&self, start: TextSize, name: &mut Name) {
         if let Some(replacement) = self.replacement(name.as_str()) {
@@ -239,21 +267,7 @@ impl Transformer for Mangler<'_> {
                         only_parameters: Some(&names),
                         ..body
                     };
-                    let mut bindings = HashSet::new();
-                    for param in &mut params.type_params {
-                        let name = match param {
-                            ast::TypeParam::TypeVar(p) => &mut p.name,
-                            ast::TypeParam::TypeVarTuple(p) => &mut p.name,
-                            ast::TypeParam::ParamSpec(p) => &mut p.name,
-                        };
-                        header.definition(name);
-                        if !bindings.insert(name.id.clone()) {
-                            self.names
-                                .borrow_mut()
-                                .duplicate_type_parameter
-                                .get_or_insert_with(|| name.clone());
-                        }
-                    }
+                    header.parameter_bindings(params);
                     header.visit_type_params(params);
                     if let Some(arguments) = &mut class.arguments {
                         header.visit_arguments(arguments);
@@ -274,6 +288,9 @@ impl Transformer for Mangler<'_> {
                         .insert(first.start(), Name::new(self.owner));
                 }
                 self.definition(&mut function.name);
+                if let Some(params) = &mut function.type_params {
+                    self.parameter_bindings(params);
+                }
             }
 
             ast::Stmt::Global(global) => {

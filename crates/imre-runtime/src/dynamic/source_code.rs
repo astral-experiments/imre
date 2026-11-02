@@ -2551,6 +2551,10 @@ impl Context {
             dict: globals,
             builtins,
         });
+        let class_cell = freevars
+            .iter()
+            .position(|name| name == "__class__")
+            .map(|index| cells[index]);
         let scope = self.closure_environment(scope, freevars, &cells);
         let fields = super::function_fields::FunctionFields::new(
             self,
@@ -2565,7 +2569,7 @@ impl Context {
             closure,
             code,
             scope,
-            class_cell: None,
+            class_cell,
             defaults,
             kwdefaults,
         }))

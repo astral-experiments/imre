@@ -82,8 +82,8 @@ pub(crate) fn emit(
             statements::type_parameters::check_nonlocals(source, &body)
                 .map_err(|error| format!("{}:{error}", path.display()))?;
         }
-        if let Some(param) = &private_names.duplicate_type_parameter {
-            let reason = format!("SyntaxError: duplicate type parameter '{}'", param.id);
+        if let Some((param, message)) = &private_names.type_parameter_error {
+            let reason = format!("SyntaxError: {message}");
             let error = crate::frontend::error(source, param, &reason);
             return Err(format!("{}:{error}", path.display()));
         }

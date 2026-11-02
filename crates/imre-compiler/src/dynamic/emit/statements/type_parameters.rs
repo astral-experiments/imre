@@ -1,4 +1,4 @@
-//! Validate nonlocal declarations against the lexical scope of class type parameters.
+//! Validate nonlocal declarations against the lexical scope of type parameters.
 use super::{ClosureNames, Visitor, ast, visitor};
 use std::collections::BTreeMap;
 
@@ -42,10 +42,19 @@ pub(in super::super) fn check_nonlocals(source: &str, body: &[ast::Stmt]) -> Res
                     self.visit_body(&class.body);
                     self.bindings = outer;
                 }
-                ast::Stmt::FunctionDef(function) if !self.bindings.is_empty() => {
+                ast::Stmt::FunctionDef(function)
+                    if function.type_params.is_some() || !self.bindings.is_empty() =>
+                {
                     // An intervening ordinary local hides the type parameter. A
                     // nonlocal declaration forwards the lookup to its outer scope.
                     let outer = self.bindings.clone();
+                    if let Some(params) = &function.type_params {
+                        self.bindings.extend(
+                            params
+                                .iter()
+                                .map(|p| (p.name().to_string(), Binding::Parameter)),
+                        );
+                    }
                     let mut names = ClosureNames::default();
                     names.visit_body(&function.body);
                     names.locals.extend(

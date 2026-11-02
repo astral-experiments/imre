@@ -290,6 +290,9 @@ impl<'a> Visitor<'a> for Imports {
                     }
                 }
             }
+            Stmt::FunctionDef(function) if function.type_params.is_some() => {
+                self.runtime_imports = true;
+            }
             Stmt::ClassDef(class)
                 if class.type_params.is_some()
                     || crate::classes::defines_pickle_reducer(class)
