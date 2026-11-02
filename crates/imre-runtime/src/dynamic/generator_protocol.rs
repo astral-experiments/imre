@@ -107,6 +107,7 @@ impl Context {
         let Value::Generator {
             offset,
             owner,
+            frame,
             scope,
             iterators,
             ..
@@ -116,6 +117,7 @@ impl Context {
         };
         *offset = None;
         *owner = FrameOwner::Module(NONE);
+        *frame = None;
         *scope = NONE;
         iterators.clear();
         self.heap.disarm_generator_finalizer(id);
@@ -126,7 +128,6 @@ impl Context {
         let Value::Generator {
             code,
             scope,
-            owner,
             offset,
             running,
             ..
@@ -151,7 +152,7 @@ impl Context {
                 line: definition.first_line,
                 span: None,
             };
-            self.heap.enter(scope, code, owner);
+            self.heap.enter(scope, code, FrameOwner::Generator(id));
             self.heap.publish_statement(&[], location, NONE);
             self.record_exception_frame(&mut error, None);
             self.heap.leave(NONE, false);
