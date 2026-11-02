@@ -1,4 +1,5 @@
 mod class_metadata;
+mod worker;
 
 use ruff_python_ast as ast;
 use ruff_python_ast::visitor::{self, Visitor};
@@ -627,6 +628,11 @@ impl Function<'_, '_> {
             }
             Body::Expression(expr) => closure_names.visit_expr(expr),
             _ => closure_names.incomplete = true,
+        }
+        if let (Body::Statements(stmts), Some(params), None) = (&body, params, returns)
+            && let Some(names) = worker::parameters(stmts, params)
+        {
+            signature["thread_parameters"] = json!(names);
         }
         let code = self.output.definition(self.source, prefix, body, start);
         let defaults = self.op("dict", &[]);

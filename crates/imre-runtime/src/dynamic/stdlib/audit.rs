@@ -29,6 +29,15 @@ fn dispatch(ctx: &mut Context, event: Id, args: &[Id]) -> Result<Id> {
     })
 }
 
+/// Emit an event from the runtime, using this interpreter's live audit hooks.
+pub(in crate::dynamic) fn event(ctx: &mut Context, name: &str, args: &[Id]) -> Result<()> {
+    if !ctx.audit_hooks.is_empty() {
+        let name = ctx.text(name);
+        dispatch(ctx, name, args)?;
+    }
+    Ok(())
+}
+
 pub(super) fn emit(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
     if !kwargs.is_empty() {
         return Err(Error::new(
