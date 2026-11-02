@@ -202,6 +202,65 @@ class Cases(unittest.TestCase):
     assert visited == ["setup", "fail", "teardown", "setup", "pass", "teardown"]
 
 
+def source_name_deletion():
+    import gc
+    import weakref
+
+    namespace = {"weakref": weakref, "gc": gc, "name": "global"}
+    exec(
+        "class Box:\n"
+        "    name = 'local'\n"
+        "    del name\n"
+        "    remaining = name\n"
+        "def check():\n"
+        "    value = Box()\n"
+        "    ref = weakref.ref(value)\n"
+        "    del value\n"
+        "    gc.collect()\n"
+        "    return ref()\n",
+        namespace,
+    )
+    assert namespace["Box"].remaining == "global"
+    assert not hasattr(namespace["Box"], "name")
+    assert namespace["check"]() is None
+    try:
+        exec("def f():\n    del name\nf()", namespace)
+    except UnboundLocalError as error:
+        assert str(error) == "cannot access local variable 'name' where it is not associated with a value"
+    else:
+        raise AssertionError("deleting an unbound local must raise")
+    exec("del name", namespace)
+    assert "name" not in namespace
+
+
+def relative_import_hooks():
+    import sys
+
+    calls = []
+    missing = ImportError("relative hook failed")
+
+    def importer(name, globals_, locals_, fromlist, level):
+        assert globals_ is namespace and locals_ is local
+        calls.append((name, fromlist, level))
+        if name == "missing":
+            raise missing
+        return sys
+
+    namespace = {"__builtins__": {"__import__": importer}}
+    local = {}
+    exec("from sys import argv as absolute\nfrom . import argv as sibling\nfrom ..helper import argv as parent",
+         namespace, local)
+    assert local["absolute"] is local["sibling"] is local["parent"] is sys.argv
+    try:
+        exec("from .missing import attr", namespace, local)
+    except ImportError as error:
+        assert error is missing
+    else:
+        raise AssertionError("relative import hook exception was lost")
+    assert calls == [("sys", ("argv",), 0), ("", ("argv",), 1),
+                     ("helper", ("argv",), 2), ("missing", ("attr",), 1)]
+
+
 def starred_calls():
     events = []
 
@@ -284,6 +343,8 @@ def starred_calls():
 
 def current():
     starred_calls()
+    relative_import_hooks()
+    source_name_deletion()
     source_classes()
     source_test_cases()
     syntax_members()

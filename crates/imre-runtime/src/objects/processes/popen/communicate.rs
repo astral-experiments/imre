@@ -385,7 +385,6 @@ fn deadline_capture_drains_both_full_pipes_before_expiry() {
         std::ptr::null(),
         0x11,
         Int::small(-1).unwrap().0,
-        true,
     );
     // SAFETY: argv remains rooted and both configured output pipes belong to the child.
     let mut child = unsafe { spawn(&config, LaunchExtras::default()) }

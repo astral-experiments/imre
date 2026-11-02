@@ -253,11 +253,11 @@ pub(super) fn infer_fields(
     module: usize,
     init: &ast::StmtFunctionDef,
     fields: &mut Vec<Field>,
-) -> Result<(), String> {
+) {
     let params = init
         .parameters
         .iter_non_variadic_params()
-        .filter_map(|p| p.annotation().map(|ann| (p.name().as_str(), ann.clone())))
+        .filter_map(|p| p.annotation().map(|ann| (p.name().as_str(), ann)))
         .collect::<HashMap<_, _>>();
     for stmt in &init.body {
         let ast::Stmt::Assign(assign) = stmt else {
@@ -274,7 +274,7 @@ pub(super) fn infer_fields(
             continue;
         }
         let ann = match &*assign.value {
-            ast::Expr::Name(name) => params.get(name.id.as_str()).cloned(),
+            ast::Expr::Name(name) => params.get(name.id.as_str()).map(|&ann| ann.clone()),
             ast::Expr::Call(call)
                 if matches!(&*call.func, ast::Expr::Name(name) if name.id == "list")
                     && graph.resolve(module, &call.func).is_none()
@@ -332,5 +332,4 @@ pub(super) fn infer_fields(
             });
         }
     }
-    Ok(())
 }

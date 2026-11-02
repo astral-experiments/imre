@@ -68,6 +68,7 @@ pub(super) struct Trace {
     /// Live members belong to the exception instance across traceback clones.
     pub source_syntax: Option<crate::shared::Shared<[std::cell::Cell<Id>; 9]>>,
     pub import_names: Option<[Id; 3]>,
+    pub name_error_name: Option<Id>,
     pub dictionary: Option<Id>,
     stop_value: Id,
     cached: Option<(usize, Id)>,
@@ -199,6 +200,7 @@ impl Error {
                             .flat_map(|fields| fields.iter().map(std::cell::Cell::get)),
                     )
                     .chain(trace.import_names.into_iter().flatten())
+                    .chain(trace.name_error_name)
                     .chain(trace.dictionary)
                     .chain(trace.cached.map(|(_, head)| head))
             }))
@@ -433,6 +435,7 @@ impl Context {
             Value::Method { .. } => "method",
             Value::ClassMethod(_) => "classmethod",
             Value::ThreadLocal(_) => super::thread_local::CLASS,
+            Value::ThreadHandle(_) => "_thread._ThreadHandle",
             Value::PrimitiveLock(_) => super::thread_lock::CLASS,
             Value::FormatIterator { kind, .. } => match kind {
                 FormatKind::Markup => "formatteriterator",
@@ -772,6 +775,7 @@ pub(super) enum Value {
         running: bool,
     },
     Class {
+        metaclass: Option<Id>,
         name: String,
         scope: Id,
         ancestors: Vec<Id>,
@@ -810,6 +814,7 @@ pub(super) enum Value {
     /// The original keys are held in a Python tuple, shared by multi-key reductions.
     ItemGetter(Id),
     ThreadLocal(super::thread_local::Dictionaries),
+    ThreadHandle(std::rc::Rc<super::thread_worker::Handle>),
     PrimitiveLock(std::sync::Arc<crate::objects::locks::PrimitiveLock>),
     Raised(Error),
     Traceback {
@@ -845,7 +850,7 @@ pub(super) enum Value {
         function: Id,
         args: Id,
         keywords: Id,
-        coroutine_marker: Option<Id>,
+        dictionary: Option<Id>,
     },
     PartialPlaceholder,
     KeyWrapper {
@@ -962,6 +967,7 @@ impl Value {
     pub(super) fn instance_class(&self) -> Option<Id> {
         match self {
             Self::Instance { class, .. } => Some(*class),
+            Self::Class { metaclass, .. } => *metaclass,
             Self::Module { constructor, .. } => *constructor,
             Self::Raised(error) => error.class(),
             _ => None,
@@ -1173,8 +1179,12 @@ impl Value {
                 );
             }
             Self::Class {
-                scope, ancestors, ..
+                scope,
+                ancestors,
+                metaclass,
+                ..
             } => {
+                visit.extend(*metaclass);
                 visit.push(*scope);
                 visit.extend(ancestors);
             }
@@ -1244,10 +1254,10 @@ impl Value {
                 function,
                 args,
                 keywords,
-                coroutine_marker,
+                dictionary,
             } => {
                 visit.extend([*function, *args, *keywords]);
-                visit.extend(coroutine_marker);
+                visit.extend(dictionary);
             }
             Self::CacheDecorator { maxsize, typed } | Self::CacheParameters { maxsize, typed } => {
                 visit.extend([*maxsize, *typed]);
@@ -1287,6 +1297,7 @@ impl Value {
             | Self::Hash(_)
             | Self::LoggerHandle(_)
             | Self::HandlerLock(_)
+            | Self::ThreadHandle(_)
             | Self::PrimitiveLock(_)
             | Self::Poll(_)
             | Self::Socket(_)
@@ -2125,18 +2136,6 @@ impl Heap {
         self.frames.last().unwrap().live.len()
     }
 
-    /// Compiled calls root their fresh argument list before evaluating its operands.
-    pub(super) fn argument_mark(&self, arguments: Id) -> Option<usize> {
-        if !self.tracks_finalizers() {
-            return None;
-        }
-        self.frames
-            .last()?
-            .live
-            .iter()
-            .position(|&id| id == arguments)
-    }
-
     /// A scalar and a container of scalars cannot hold an output file.
     pub(super) fn could_own_finalizer(&self, id: Id, skip_bound: bool) -> bool {
         let scalar = |id| {
@@ -2294,7 +2293,11 @@ impl Heap {
     }
 
     pub fn caller_module(&self) -> Id {
-        match self.frames.last().unwrap().owner {
+        self.caller_module_at(0).expect("current frame")
+    }
+
+    pub fn caller_module_at(&self, depth: usize) -> Option<Id> {
+        Some(match self.frames.iter().rev().nth(depth)?.owner {
             FrameOwner::Module(module) => module,
             FrameOwner::Function(function) => {
                 let Value::Function { fields, .. } = self.get(function) else {
@@ -2302,7 +2305,7 @@ impl Heap {
                 };
                 fields.module
             }
-        }
+        })
     }
 
     pub fn current_scope(&self) -> Id {
@@ -2430,13 +2433,42 @@ impl Heap {
         {
             return Ok(None);
         }
-        let mut cycles = CycleSet::new(self.slots.len())?;
-        self.mark(roots);
-        let next = self.identify_cycles(&mut cycles);
-        for slot in &self.slots {
-            slot.trace.set(UNMARKED);
+        // If the roots keep every pending finalizer alive, no finalizer can run.
+        // Keep the visited links until the search ends so resetting a partial
+        // trace costs only the slots it touched, even after a large heap peak.
+        let mut remaining = self.ordinary_finalizers.len();
+        let mut visited = END;
+        let mut pending = MarkQueue {
+            slots: &self.slots,
+            next: END,
+            ordered: None,
+        };
+        self.mark_roots(roots, &mut pending);
+        while remaining != 0
+            && let Some(id) = pending.pop()
+        {
+            let slot = &self.slots[id as usize];
+            slot.trace.set(visited);
+            visited = id as usize;
+            if slot.finalization == Finalization::Pending {
+                remaining -= 1;
+            }
+            if remaining != 0 {
+                self.get(id).children(&mut pending);
+            }
         }
-        Ok(next)
+        let next = if remaining == 0 {
+            Ok(None)
+        } else {
+            CycleSet::new(self.slots.len()).map(|mut cycles| self.identify_cycles(&mut cycles))
+        };
+        while let Some(id) = pending.pop() {
+            self.slots[id as usize].trace.set(UNMARKED);
+        }
+        while visited != END {
+            visited = self.slots[visited].trace.replace(UNMARKED);
+        }
+        next
     }
 
     /// Track a disk writer in the activation whose locals or return value may own it.

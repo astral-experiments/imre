@@ -75,11 +75,8 @@ pub(super) fn construct(
             let number = match value.map(|id| ctx.heap.get(id)) {
                 None => crate::Int::from(0),
                 Some(Value::Str(s)) => crate::integer_text::parse_radix(s, radix as u32)?,
-                Some(Value::Bytes(b)) if b.is_ascii() => {
-                    crate::integer_text::parse_radix(std::str::from_utf8(b).unwrap(), radix as u32)?
-                }
-                Some(Value::Bytes(_)) => {
-                    return Err(Error::new("ValueError", "invalid byte literal for int()"));
+                Some(Value::Bytes(b) | Value::ByteArray(b)) => {
+                    crate::integer_text::parse_bytes_radix(b, radix as u32)?
                 }
                 _ if base.is_some() => {
                     return Err(type_error(
@@ -1344,6 +1341,7 @@ pub(super) fn method(
     }
     let predicate: Option<fn(&str) -> bool> = match name {
         "isalnum" => Some(crate::objects::python_alnum),
+        "isascii" => Some(str::is_ascii),
         "islower" => Some(|text| crate::objects::python_islower(text.chars())),
         "isspace" => Some(crate::objects::python_isspace),
         "isupper" => Some(crate::objects::python_isupper),
@@ -1360,6 +1358,15 @@ pub(super) fn method(
                 "str.{name}() takes no arguments ({} given)",
                 args.len()
             )));
+        }
+        if name == "isascii"
+            && matches!(
+                ctx.heap.get(ctx.scalar_value(receiver)),
+                Value::SurrogateStr(_)
+            )
+        {
+            // This representation always contains at least one non-ASCII surrogate.
+            return Ok(boolean(false));
         }
         if name == "islower"
             && let Value::SurrogateStr(points) = ctx.heap.get(ctx.scalar_value(receiver))
@@ -1519,18 +1526,39 @@ pub(super) fn method(
         return Ok(FALSE);
     }
     if name == "replace" {
-        positional(name, kwargs)?;
-        arity(name, args, 2, 3)?;
-        let count = args
-            .get(2)
-            .map(|&x| ctx.as_integer(x))
-            .transpose()?
-            .unwrap_or(-1);
+        let total = args.len() + kwargs.len();
+        if total > 3 {
+            let kind = if args.is_empty() { "keyword " } else { "" };
+            return Err(type_error(format!(
+                "replace() takes at most 3 {kind}arguments ({total} given)"
+            )));
+        }
+        if args.len() < 2 {
+            return Err(type_error(format!(
+                "replace() takes at least 2 positional arguments ({} given)",
+                args.len()
+            )));
+        }
+        let [count] = bind_builtin_arguments(name, &args[2..], kwargs, ["count"], 0)?;
+        for (i, &id) in args[..2].iter().enumerate() {
+            if ctx.string_storage(id).is_none() {
+                let kind = if id == NONE {
+                    "None"
+                } else {
+                    ctx.type_name(id)
+                };
+                return Err(type_error(format!(
+                    "replace() argument {} must be str, not {kind}",
+                    i + 1
+                )));
+            }
+        }
+        let limit = split_limit(ctx, count)?;
         let value = crate::objects::replace_text(
             ctx.str_value(receiver)?,
             ctx.str_value(args[0])?,
             ctx.str_value(args[1])?,
-            usize::try_from(count).unwrap_or(usize::MAX),
+            limit,
             args[0] == args[1],
             |length| {
                 let mut text = String::new();

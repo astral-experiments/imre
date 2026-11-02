@@ -46,6 +46,8 @@ pub const NATIVE_ARCHIVE_EXTENSION: &str = "imre.a";
 #[derive(Clone, Copy, serde::Serialize)]
 pub struct CommandFlags {
     pub isolated: bool,
+    pub ignore_environment: bool,
+    pub context_aware_warnings: bool,
     /// Python's language optimization level; independent of LLVM optimization.
     pub optimize: i32,
     pub safe_path: bool,

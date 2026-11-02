@@ -14,8 +14,8 @@ mod print;
 mod text;
 mod translation;
 pub(super) use collections::{
-    clear_container, copy_dict, hashable, remove_dict_item, remove_dict_item_hashed, set_add,
-    set_member, sort_values, update as update_dict, update_set,
+    clear_container, copy_dict, hashable, list_extend, remove_dict_item, remove_dict_item_hashed,
+    set_add, set_member, sort_values, update as update_dict, update_set,
 };
 pub(super) use text::{
     bytes_from_iterable, bytes_percent, format_conversion, format_value, percent, zeroed_bytes,
@@ -89,6 +89,16 @@ exception_kinds!(
     StopAsyncIteration,
     Warning,
     RuntimeWarning,
+    DeprecationWarning,
+    EncodingWarning,
+    UserWarning,
+    PendingDeprecationWarning,
+    SyntaxWarning,
+    FutureWarning,
+    ImportWarning,
+    UnicodeWarning,
+    BytesWarning,
+    ResourceWarning,
 );
 
 const FUNCTIONS: &[&str] = &[
@@ -225,7 +235,8 @@ pub(super) fn constructor_owner(name: &str) -> Option<&str> {
 
 pub(super) fn is_builtin_type(name: &str) -> bool {
     TYPES.contains(&name)
-        || name == super::stdlib::hash_info::TYPE
+        || super::stdlib::fixed_structseq::fixed_type(name).is_some()
+        || name == super::stdlib::flags::TYPE
         || is_exception(name)
         || is_enum_base(name)
 }
@@ -233,6 +244,7 @@ pub(super) fn is_builtin_type(name: &str) -> bool {
 /// Static builtin types have a GC-capable metaclass, but are never themselves tracked.
 pub(super) fn is_static_gc_type(name: &str) -> bool {
     TYPES.contains(&name)
+        || name == super::stdlib::flags::TYPE
         || EXCEPTIONS.contains(&name)
         || (is_iterator_type(name) && !name.contains('.'))
         || matches!(
@@ -356,6 +368,7 @@ pub(super) const STR_METHODS: &[&str] = &[
     "find",
     "format",
     "isalnum",
+    "isascii",
     "islower",
     "isspace",
     "isupper",
@@ -417,6 +430,7 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         }
         Value::ItemGetter(_) if attr == "__reduce__" => "operator.itemgetter",
         Value::Property(_) if super::property::METHODS.contains(&attr) => "property",
+        Value::ClassMethod(_) if attr == "__get__" => "classmethod",
         Value::StaticMethod { .. } if attr == "__get__" => "staticmethod",
         Value::Generator { .. } if matches!(attr, "send" | "throw" | "close") => "generator",
         Value::Bytes(_) if BYTES_METHODS.contains(&attr) => "bytes",
@@ -458,6 +472,7 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
                     | "send"
                     | "sendall"
                     | "shutdown"
+                    | "getsockopt"
                     | "setsockopt"
                     | "setblocking"
                     | "getblocking"

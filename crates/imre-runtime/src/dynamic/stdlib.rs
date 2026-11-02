@@ -17,10 +17,11 @@ mod csv;
 pub(super) mod datetime;
 mod email;
 mod files;
+pub(super) mod fixed_structseq;
+pub(super) mod flags;
 mod fnmatch;
 mod formatters;
 pub(super) mod functools;
-pub(super) mod hash_info;
 mod hashlib;
 mod hmac;
 mod inspect;
@@ -28,6 +29,7 @@ pub(super) mod itertools;
 pub(super) mod tempfile;
 mod time;
 pub(super) use files::{BinaryFile, ReadSource};
+pub(super) use socket::install_lowlevel_socket;
 pub(super) mod io;
 mod json;
 mod logging;
@@ -83,6 +85,7 @@ pub(super) fn has_lazy_attributes(name: &str) -> bool {
         name,
         "sys"
             | "_imp"
+            | "_imre_thread"
             | "threading"
             | "_thread"
             | "abc"
@@ -155,6 +158,7 @@ pub(super) fn has_lazy_attributes(name: &str) -> bool {
             | "warnings"
             | "subprocess"
             | "socket"
+            | "_socket"
             | "urllib"
             | "urllib.parse"
     )
@@ -395,6 +399,9 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         | ("_imre_dataclasses", "load_global" | "loaded_module" | "members" | "metadata") => {
             ctx.builtin(&format!("{module}.{name}"))
         }
+        ("_imre_thread", "start" | "join" | "alive" | "threads" | "current") => {
+            ctx.builtin(&format!("{module}.{name}"))
+        }
         ("threading", "Lock") | ("_thread", "LockType") => ctx.builtin(super::thread_lock::CLASS),
         ("_weakref", name) if let Some(value) = super::weakref::export(ctx, name) => value,
         ("threading", "local") | ("_thread", "_local") => ctx.builtin(super::thread_local::CLASS),
@@ -449,7 +456,9 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             "typing",
             "TypeVar"
             | "TypeVarTuple"
+            | "_new_typeddict"
             | "_UnpackGenericAlias"
+            | "_eval_type_expression"
             | "Any"
             | "Callable"
             | "cast"
@@ -515,7 +524,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             full_version(ctx)?,
             compiler_version(ctx)
         )),
-        ("sys", "hash_info") => hash_info::current(ctx),
+        ("sys", "hash_info") => fixed_structseq::current_hash_info(ctx),
         ("sys", "version_info") => version_info(ctx, &full_version(ctx)?)?,
         ("sys", "implementation") => {
             let name = ctx.text("imre");
@@ -540,33 +549,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
                 FALSE
             }
         }
-        ("sys", "flags") => {
-            let isolated_flag = ctx.config["isolated"].as_bool().unwrap_or(false);
-            let isolated = ctx.int(i64::from(isolated_flag));
-            let no_user_site = ctx.int(i64::from(
-                ctx.config["no_user_site"].as_bool().unwrap_or(false),
-            ));
-            let safe_path = if ctx.config["safe_path"].as_bool().unwrap_or(false) {
-                TRUE
-            } else {
-                FALSE
-            };
-            let bytecode = ctx.int(i64::from(
-                ctx.config["dont_write_bytecode"].as_bool().unwrap_or(false),
-            ));
-            let optimize = ctx.int(ctx.config["optimize"].as_i64().unwrap_or(0));
-            record(
-                ctx,
-                &[
-                    ("optimize", optimize),
-                    ("isolated", isolated),
-                    ("ignore_environment", isolated),
-                    ("no_user_site", no_user_site),
-                    ("safe_path", safe_path),
-                    ("dont_write_bytecode", bytecode),
-                ],
-            )
-        }
+        ("sys", "flags") => flags::current(ctx),
         ("functools", "_CacheInfo") => functools::cache_info_type(ctx)?,
         ("functools", "WRAPPER_ASSIGNMENTS") => tuple_text(ctx, functools::ASSIGNED),
         ("functools", "WRAPPER_UPDATES") => tuple_text(ctx, functools::UPDATED),
@@ -575,6 +558,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             ctx.builtin(&format!("posix.{name}"))
         }
         ("os" | "posix", "DirEntry") => ctx.builtin(os::scandir::ENTRY),
+        ("os" | "posix", "terminal_size") => ctx.builtin(fixed_structseq::TERMINAL_SIZE),
         ("os" | "posix", "stat_result") => ctx.builtin(os::stat::CLASS),
         ("os" | "posix", name @ ("stat" | "lstat" | "fstat")) => {
             ctx.builtin(&format!("posix.{name}"))
@@ -647,7 +631,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             | "realpath_parts" | "realpath_parent" | "realpath_kind" | "realpath_readlink"
             | "realpath_notdir" | "realpath_loop",
         )
-        | ("_imre_zipimport", "exists" | "index" | "read" | "contains")
+        | ("_imre_zipimport", "exists" | "index" | "read" | "contains" | "invalidate")
         | ("platform", "system" | "node" | "release" | "version" | "machine" | "mac_ver")
         | ("struct", "Struct" | "calcsize" | "pack" | "unpack" | "error")
         | ("base64", "urlsafe_b64encode" | "urlsafe_b64decode")
@@ -812,6 +796,31 @@ pub(super) fn call(
 ) -> Result<Id> {
     if super::lowlevel_threads::function_name(name).is_some() {
         return super::lowlevel_threads::call(ctx, name, args, kwargs);
+    }
+    if name == "_thread.get_ident"
+        || (cfg!(any(target_os = "linux", target_os = "macos")) && name == "_thread.get_native_id")
+    {
+        if !kwargs.is_empty() {
+            return Err(Error::new(
+                "TypeError",
+                format!("{name}() takes no keyword arguments"),
+            ));
+        }
+        if !args.is_empty() {
+            return Err(Error::new(
+                "TypeError",
+                format!("{name}() takes no arguments ({} given)", args.len()),
+            ));
+        }
+        let id = match name {
+            #[cfg(any(target_os = "linux", target_os = "macos"))]
+            "_thread.get_native_id" => crate::objects::locks::native_thread_id() as usize,
+            _ => crate::objects::locks::thread_ident(),
+        };
+        return Ok(ctx.alloc(Value::Int(crate::Int::from_usize(id))));
+    }
+    if let Some(function) = name.strip_prefix("_imre_thread.") {
+        return super::thread_worker::call(ctx, function, args, kwargs);
     }
     if let Some(slot) = name.strip_prefix("functools.KeyWrapper.") {
         return functools::key_method(ctx, slot, args, kwargs);
@@ -1619,7 +1628,7 @@ pub(super) fn call(
                 function,
                 args,
                 keywords,
-                ..
+                dictionary: None,
             } => {
                 let Value::Dict(entries) = ctx.heap.get(keywords) else {
                     unreachable!()
@@ -1653,7 +1662,7 @@ pub(super) fn call(
             function,
             args,
             keywords,
-            coroutine_marker: None,
+            dictionary: None,
         }));
     }
     if let Some(method @ ("digest" | "hexdigest")) = name.strip_prefix("hash.") {

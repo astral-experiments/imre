@@ -4,7 +4,17 @@ class Derived(RuntimeWarning):
     pass
 
 
+class ClientWarning(UserWarning):
+    pass
+
+
 def check() -> None:
+    try:
+        raise ClientWarning("client")
+    except ResourceWarning:
+        raise AssertionError("a sibling warning category matched")
+    except Warning as problem:
+        print(repr(problem))
     try:
         raise RuntimeWarning("runtime")
     except RuntimeError:

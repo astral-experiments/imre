@@ -27,15 +27,8 @@ pub unsafe extern "C" fn imre_subprocess_shell_output(
         let codec = Codec::for_stream(encoding.map(Str::as_str))?;
         // stdout=PIPE and stderr=STDOUT merge both writes into one kernel pipe.
         let streams = 1 | (5 << 4);
-        let mut config = popen::LaunchConfig::basic(
-            args,
-            kind,
-            std::ptr::null(),
-            std::ptr::null(),
-            streams,
-            0,
-            true,
-        );
+        let mut config =
+            popen::LaunchConfig::basic(args, kind, std::ptr::null(), std::ptr::null(), streams, 0);
         config.shell = true;
         // SAFETY: the command uses the same rooted scalar/list/tuple ABI as Popen.
         let command = unsafe { WordKind::new(kind).acquire(args as usize) };

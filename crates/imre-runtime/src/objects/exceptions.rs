@@ -145,6 +145,15 @@ pub(crate) enum Kind {
     Warning = 80,
     RuntimeWarning = 81,
     DeprecationWarning = 82,
+    EncodingWarning = 83,
+    UserWarning = 84,
+    PendingDeprecationWarning = 85,
+    SyntaxWarning = 86,
+    FutureWarning = 87,
+    ImportWarning = 88,
+    UnicodeWarning = 89,
+    BytesWarning = 90,
+    ResourceWarning = 91,
 }
 
 impl Kind {
@@ -227,6 +236,15 @@ impl Kind {
             80 => Self::Warning,
             81 => Self::RuntimeWarning,
             82 => Self::DeprecationWarning,
+            83 => Self::EncodingWarning,
+            84 => Self::UserWarning,
+            85 => Self::PendingDeprecationWarning,
+            86 => Self::SyntaxWarning,
+            87 => Self::FutureWarning,
+            88 => Self::ImportWarning,
+            89 => Self::UnicodeWarning,
+            90 => Self::BytesWarning,
+            91 => Self::ResourceWarning,
             _ => return None,
         })
     }
@@ -305,6 +323,15 @@ impl Kind {
             Self::Warning => "Warning",
             Self::RuntimeWarning => "RuntimeWarning",
             Self::DeprecationWarning => "DeprecationWarning",
+            Self::EncodingWarning => "EncodingWarning",
+            Self::UserWarning => "UserWarning",
+            Self::PendingDeprecationWarning => "PendingDeprecationWarning",
+            Self::SyntaxWarning => "SyntaxWarning",
+            Self::FutureWarning => "FutureWarning",
+            Self::ImportWarning => "ImportWarning",
+            Self::UnicodeWarning => "UnicodeWarning",
+            Self::BytesWarning => "BytesWarning",
+            Self::ResourceWarning => "ResourceWarning",
             Self::UnidiffParseError => "UnidiffParseError",
         }
     }
@@ -314,7 +341,18 @@ impl Kind {
             Self::BaseException => true,
             Self::Warning => matches!(
                 self,
-                Self::Warning | Self::RuntimeWarning | Self::DeprecationWarning
+                Self::Warning
+                    | Self::RuntimeWarning
+                    | Self::DeprecationWarning
+                    | Self::EncodingWarning
+                    | Self::UserWarning
+                    | Self::PendingDeprecationWarning
+                    | Self::SyntaxWarning
+                    | Self::FutureWarning
+                    | Self::ImportWarning
+                    | Self::UnicodeWarning
+                    | Self::BytesWarning
+                    | Self::ResourceWarning
             ),
             Self::NameError => matches!(self, Self::NameError | Self::UnboundLocalError),
             Self::SyntaxError => matches!(self, Self::SyntaxError | Self::IndentationError),

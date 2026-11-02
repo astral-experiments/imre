@@ -39,6 +39,13 @@ class ClosingWhence:
 
 def run():
     with socket.socket() as peer:
+        for mode in ("rt", "w+b", "r'b"):
+            try:
+                peer.makefile(mode, buffering="unused")
+            except ValueError as exc:
+                assert str(exc) == "invalid mode %r (only r, w, b allowed)" % mode
+            else:
+                raise AssertionError("socket accepted invalid file mode")
         stream = peer.makefile("rb")
         try:
             stream.seek(0, ClosingWhence(stream))
@@ -57,10 +64,13 @@ def run():
             second = peer.makefile("rb")
             descriptor = peer.fileno()
             assert file.fileno() == second.fileno() == descriptor
+            assert file.name == second.name == descriptor
             peer.close()
             assert peer.fileno() == descriptor
             second.close()
             assert second.closed and not file.closed and peer.fileno() == descriptor
+            assert second.name == -1 and repr(second) == "<_io.BufferedReader name=-1>"
+            assert file.name == descriptor and repr(file) == f"<_io.BufferedReader name={descriptor}>"
             client.sendall(b"Header\r\n\x00\xffENDtail")
             client.shutdown(socket.SHUT_WR)
             for length in (-2, -9):
@@ -91,6 +101,7 @@ def run():
                 file = peer.makefile("rb")
                 file.close()
                 assert peer.fileno() >= 0
+                assert file.name == -1 and repr(file) == "<_io.BufferedReader name=-1>"
                 client.sendall(b"X\xff")
                 data = bytearray(4)
                 assert peer.recv_into(data, 2) == 2

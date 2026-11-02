@@ -264,7 +264,6 @@ impl LaunchConfig {
         env: *const Object,
         streams: u32,
         bufsize: usize,
-        close_fds: bool,
     ) -> Self {
         if Self::has_redirects(streams) || streams & (1 << 18) != 0 {
             fail(
@@ -280,7 +279,7 @@ impl LaunchConfig {
             env,
             streams,
             bufsize,
-            close_fds,
+            close_fds: true,
             executable: std::ptr::null(),
             executable_kind: 3,
             shell: false,
@@ -674,15 +673,15 @@ pub unsafe extern "C" fn imre_child_signal(control: *const ChildControl, signal:
 }
 
 /// # Safety
-/// Legacy entry point: the caller roots this Popen on its owner thread.
+/// The caller roots this Popen on its owner thread while polling.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn imre_popen_status(handle: *const Object, poll: bool) -> usize {
+pub unsafe extern "C" fn imre_popen_poll(handle: *const Object) -> usize {
     // SAFETY: clone the callable under the borrow, then invoke it after releasing the borrow.
     unsafe {
-        if poll && let Some(callback) = with_process(handle, |p| p.poll_override.clone()) {
+        if let Some(callback) = with_process(handle, |p| p.poll_override.clone()) {
             return callback.invoke();
         }
-        imre_child_status(imre_popen_control(handle), poll)
+        imre_child_status(imre_popen_control(handle), true)
     }
 }
 

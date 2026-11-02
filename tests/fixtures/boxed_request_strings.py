@@ -21,6 +21,11 @@ class CustomAlnum(str):
         return "override"
 
 
+class CustomAscii(str):
+    def isascii(self):
+        return "override"
+
+
 class CustomUpper(str):
     def isupper(self):
         return "override"
@@ -74,6 +79,13 @@ def current():
     print(str.partition is str.partition)
     parent = super(Text, Text)
     print(parent.replace is str.replace, parent.replace("<m>", "m", "&amp;"))
+    assert parent.replace(Text("aaa"), "a", "x", count=Index()) == "xxx"
+    try:
+        parent.replace("abc", None, "", count=Index())
+    except TypeError as error:
+        assert str(error) == "replace() argument 1 must be str, not None"
+    else:
+        raise AssertionError("str.replace accepted None as its old string")
     try:
         DescriptorOwner().partition(":")
     except TypeError as error:
@@ -111,6 +123,15 @@ def current():
         print(value.isalnum(), str.isalnum(value))
     for call in (lambda: str.isalnum(), lambda: str.isalnum(1), lambda: "a".isalnum(1),
                  lambda: "a".isalnum(value="x")):
+        try:
+            call()
+        except TypeError as error:
+            print(error)
+    for value in ("", "\0\x7f", "A\x80", "🦊", "\ud800", Text("A\udfff"), CustomAscii("a")):
+        saved = value.isascii
+        print(saved(), str.isascii(value))
+    for call in (lambda: str.isascii(), lambda: str.isascii(1), lambda: "a".isascii(1),
+                 lambda: "a".isascii(wrong=1)):
         try:
             call()
         except TypeError as error:

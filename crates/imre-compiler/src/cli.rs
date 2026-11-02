@@ -82,7 +82,7 @@ impl BuildOptions {
                 false,
             )?;
         }
-        if !flags.isolated
+        if !flags.ignore_environment
             && let Some(paths) = env::var_os("PYTHONPATH")
         {
             for path in env::split_paths(&paths) {

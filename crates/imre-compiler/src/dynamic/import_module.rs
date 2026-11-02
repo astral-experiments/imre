@@ -27,6 +27,7 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
                     [
                         include_str!("../../stdlib/inspect.py"),
                         include_str!("../../stdlib/inspect_signature.py"),
+                        section("def ismodule(object):", "def isclass(object):"),
                         section("def formatannotation(", "def formatannotationrelativeto("),
                         section("def _signature_bound_method(", "def _signature_is_builtin("),
                         section("class _void:", "class _ParameterKind("),
@@ -43,6 +44,7 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
         "functools" => Some(("functools.py", include_str!("../../stdlib/functools.py"))),
         // CPython 3.14.5 Lib/shutil.py. See stdlib/docstrings/LICENSE.
         "shutil" => Some(("shutil.py", include_str!("../../stdlib/shutil.py"))),
+        "socket" => Some(("socket.py", include_str!("../../stdlib/socket.py"))),
         "tempfile" => Some((
             "tempfile.py",
             include_str!("../../stdlib/tempfile/names.py"),
@@ -71,6 +73,7 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
             "unittest/loader.py",
             include_str!("../../stdlib/unittest/loader_boxed.py"),
         )),
+        "threading" => Some(("threading.py", include_str!("../../stdlib/threading.py"))),
         "textwrap" => {
             static SOURCE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
             Some(("textwrap.py", SOURCE.get_or_init(|| {

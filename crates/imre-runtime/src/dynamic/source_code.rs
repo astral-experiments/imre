@@ -30,13 +30,14 @@ pub(super) struct Program {
 enum Instruction {
     Eval(ast::Expr),
     AugAssign(ast::StmtAugAssign),
+    DeleteName(String),
     DeleteItem(ast::ExprSubscript),
     Assign(Vec<ast::Expr>, ast::Expr),
     Import {
         module: String,
         alias: Option<String>,
     },
-    From(String, Vec<(String, String)>),
+    From(String, u32, Vec<(String, String)>),
     Define(Definition),
     ClassStart,
     ClassEnd,
@@ -407,6 +408,9 @@ impl Program {
                         strings.visit_expr(target);
                     }
                 }
+                Instruction::DeleteName(name) => {
+                    strings.heap.code_name(name);
+                }
                 Instruction::DeleteItem(item) => {
                     strings.visit_expr(&item.value);
                     strings.visit_expr(&item.slice);
@@ -435,7 +439,7 @@ impl Program {
                         strings.heap.code_name(alias);
                     }
                 }
-                Instruction::From(module, bindings) => {
+                Instruction::From(module, _, bindings) => {
                     strings.heap.code_name(module);
                     for (name, alias) in bindings {
                         strings.heap.code_name(name);
@@ -626,6 +630,12 @@ impl Program {
                 Stmt::Delete(s) => {
                     for target in s.targets {
                         match target {
+                            ast::Expr::Name(name) => {
+                                let name = name.id.to_string();
+                                self.locals.insert(name.clone());
+                                self.instructions
+                                    .push((line, Instruction::DeleteName(name)));
+                            }
                             ast::Expr::Subscript(item)
                                 if !matches!(*item.slice, ast::Expr::Slice(_)) =>
                             {
@@ -669,11 +679,8 @@ impl Program {
                     continue;
                 }
                 Stmt::Assert(s) => Instruction::Assert(s),
-                Stmt::ImportFrom(s) if s.level == 0 && !s.is_lazy => {
-                    let module = s
-                        .module
-                        .as_ref()
-                        .ok_or_else(|| unsupported("relative import"))?;
+                Stmt::ImportFrom(s) if !s.is_lazy => {
+                    let module = s.module.as_ref().map_or("", |module| module.as_str());
                     let mut names = vec![];
                     for alias in &s.names {
                         if alias.name.as_str() == "*" {
@@ -683,7 +690,7 @@ impl Program {
                         self.locals.insert(local.clone());
                         names.push((alias.name.to_string(), local));
                     }
-                    Instruction::From(module.to_string(), names)
+                    Instruction::From(module.to_owned(), s.level, names)
                 }
                 Stmt::FunctionDef(s) if !s.is_async && s.type_params.is_none() && !function => {
                     if self.class_attributes.is_some()
@@ -1219,6 +1226,13 @@ impl Context {
         })
     }
 
+    /// Attach the name at the failed lookup, leaving exceptions raised by Python code alone.
+    fn undefined_source_name(name: &str, object: Id) -> Error {
+        let mut error = Error::new("NameError", format!("name '{name}' is not defined"));
+        error.tracing().name_error_name = Some(object);
+        error
+    }
+
     pub(super) fn source_global(&mut self, globals: ExecGlobals, name: &str) -> Result<Id> {
         for mapping in [globals.dict, globals.builtins] {
             if matches!(self.heap.get(mapping), Value::Dict(_)) {
@@ -1232,10 +1246,7 @@ impl Context {
                 }
             }
         }
-        Err(Error::new(
-            "NameError",
-            format!("name '{name}' is not defined"),
-        ))
+        Err(Self::undefined_source_name(name, self.text(name)))
     }
 
     /// Construct a function whose globals are supplied by Python code.
@@ -1425,7 +1436,50 @@ impl Context {
             .expect("initialized builtins dictionary"))
     }
 
+    /// Evaluate one forward-reference expression in its defining Python namespaces.
+    pub(super) fn eval_type_expression(&mut self, text: Id, globals: Id, locals: Id) -> Result<Id> {
+        let source = self.str_value(text)?;
+        let parsed = ruff_python_parser::parse_expression(source).map_err(|_| {
+            Error::new(
+                "SyntaxError",
+                format!("Forward reference must be an expression -- got {source:?}"),
+            )
+        })?;
+        check_runtime_strings(source, parsed.tokens())?;
+        let expr = *parsed.into_syntax().body;
+        if let ast::Expr::Name(ident) = &expr
+            && usize::from(ident.range().len()) == source.len()
+        {
+            // ForwardRef.evaluate looks up the original string for a bare identifier.
+            // The parser applies NFKC to ident.id, as required for compound expressions.
+            for mapping in [locals, globals, self.default_source_builtins()?] {
+                if self.contains(text, mapping)? {
+                    return self.get_item(mapping, text);
+                }
+            }
+            return Err(Self::undefined_source_name(self.str_value(text)?, text));
+        }
+        let mut program = Program::new(Rc::from("<string>"), "<module>");
+        program
+            .instructions
+            .push((1, Instruction::Return(Some(expr))));
+        program.prepare_strings(&mut self.heap, &mut HashMap::new())?;
+        let code = self.box_source_code(Rc::new(program), None);
+        self.run_in_namespace(code, globals, Some(locals), None)
+    }
+
     pub(super) fn exec_source(
+        &mut self,
+        source: Id,
+        globals: Id,
+        locals: Option<Id>,
+        function: Option<Id>,
+    ) -> Result<Id> {
+        self.run_in_namespace(source, globals, locals, function)
+            .map(|_| NONE)
+    }
+
+    fn run_in_namespace(
         &mut self,
         source: Id,
         globals: Id,
@@ -1514,7 +1568,7 @@ impl Context {
             }
             let defaults = self.dict(Vec::new());
             let function = self.source_function(code_id, scope, defaults);
-            self.call(function, Vec::new(), Vec::new())?;
+            self.call(function, Vec::new(), Vec::new())
         } else {
             // Definitions retain the global frame. The module alone sees the separate mapping.
             let module = if let Some(locals) = locals {
@@ -1531,9 +1585,8 @@ impl Context {
                 || FrameOwner::Module(self.function_module(scope)),
                 FrameOwner::Function,
             );
-            self.execute(code_id, module, owner)?;
+            self.execute(code_id, module, owner)
         }
-        Ok(NONE)
     }
 
     pub(super) fn call_source(&mut self, code: Id, scope: Id, owner: FrameOwner) -> Result<Id> {
@@ -2097,6 +2150,7 @@ impl Context {
         scope: Id,
         module: &str,
         names: Option<&[(String, String)]>,
+        level: u32,
     ) -> Result<Id> {
         let mut root = scope;
         while let Some(parent) = self.scope_data(root).parent {
@@ -2123,7 +2177,7 @@ impl Context {
         } else {
             NONE
         };
-        let zero = self.int(0);
+        let level = self.int(i64::from(level));
         let locals = if self.code_object(owner).parameters == NONE {
             self.scope_data(scope).exec_locals.unwrap_or(globals)
         } else {
@@ -2131,7 +2185,7 @@ impl Context {
         };
         self.call(
             importer,
-            vec![modname, globals, locals, fromlist, zero],
+            vec![modname, globals, locals, fromlist, level],
             Vec::new(),
         )
     }
@@ -2224,6 +2278,11 @@ impl Context {
                 for target in targets {
                     self.bind_target(code, scope, target, value)?;
                 }
+            }
+            Instruction::DeleteName(name) => {
+                self.check_source_local(code, scope, name)?;
+                let key = self.heap.code_name(name);
+                self.op("delname", scope, key, NONE)?;
             }
             Instruction::DeleteItem(item) => {
                 let object = eval(self, &item.value)?;
@@ -2403,7 +2462,7 @@ impl Context {
                 }));
             }
             Instruction::Import { module, alias } => {
-                let mut imported = self.import_source_module(owner, scope, module, None)?;
+                let mut imported = self.import_source_module(owner, scope, module, None, 0)?;
                 let mut parts = module.split('.');
                 let first = parts.next().expect("nonempty module name");
                 if alias.is_some() {
@@ -2414,8 +2473,8 @@ impl Context {
                 }
                 self.bind_source_name(scope, alias.as_deref().unwrap_or(first), imported)?;
             }
-            Instruction::From(module, names) => {
-                let m = self.import_source_module(owner, scope, module, Some(names))?;
+            Instruction::From(module, level, names) => {
+                let m = self.import_source_module(owner, scope, module, Some(names), *level)?;
                 for (name, local) in names {
                     let name = self.text(name);
                     let v = self.op("from", m, name, NONE)?;
@@ -2508,7 +2567,7 @@ impl Context {
                 let mut value = self.source_function(code, defining_scope, defaults);
                 if let Some(bases) = bases {
                     let name = self.heap.code_name(&child.name);
-                    value = self.class(name, bases, value)?;
+                    value = self.class(name, bases, value, false)?;
                 }
                 for decorator in decorators.into_iter().rev() {
                     value = self.call(decorator, vec![value], Vec::new())?;
@@ -2652,6 +2711,23 @@ impl Context {
         Ok(truth)
     }
 
+    /// A function-local read or deletion must not fall back to a same-named global.
+    fn check_source_local(&self, code: &Program, scope: Id, name: &str) -> Result<()> {
+        if code.class_attributes.is_none()
+            && code.name != "<module>"
+            && code.locals.contains(name)
+            && self.scope_name(scope, name).is_none()
+        {
+            return Err(Error::new(
+                "UnboundLocalError",
+                format!(
+                    "cannot access local variable '{name}' where it is not associated with a value"
+                ),
+            ));
+        }
+        Ok(())
+    }
+
     fn source_keyword_mapping(
         &mut self,
         code: &Program,
@@ -2719,18 +2795,7 @@ impl Context {
                 {
                     return self.lookup(self.root_scope(scope), name);
                 }
-                if code.class_attributes.is_none()
-                    && code.name != "<module>"
-                    && code.locals.contains(name)
-                    && self.scope_name(scope, name).is_none()
-                {
-                    return Err(Error::new(
-                        "UnboundLocalError",
-                        format!(
-                            "cannot access local variable '{name}' where it is not associated with a value"
-                        ),
-                    ));
-                }
+                self.check_source_local(code, scope, name)?;
                 self.lookup(scope, name)
             }
             Expr::StringLiteral(_) | Expr::BytesLiteral(_) => Ok(code.literals[&expr.range()]),

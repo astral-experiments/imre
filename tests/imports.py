@@ -151,6 +151,24 @@ REJECTED = {
 }
 
 ACCEPTED = {
+    "optional_platform_import": {
+        "main.py": "import configure\nfrom adapter import present, absent\nprint(present, absent)\n",
+        "configure.py": "import sys\nsys.platform = 'test-platform'\nprint('configure')\n",
+        "adapter.py": (
+            "import sys\n"
+            "if sys.platform in {'test-platform'}:\n"
+            "    from provider import value as present\n"
+            "else:\n"
+            "    present = None\n"
+            "if sys.platform == 'missing-platform':\n"
+            "    from unavailable import value as absent\n"
+            "else:\n"
+            "    absent = None\n"
+            "import after\n"
+        ),
+        "provider.py": "print('provider')\nvalue = 42\n",
+        "after.py": "print('after')\n",
+    },
     "wildcard_native_namespaces": {
         "main.py": "import paths\nimport prepare\nimport codes\nimport computed\n",
         "paths.py": (
@@ -342,8 +360,9 @@ ACCEPTED = {
     },
     "zip_source_spec": {
         "main.py": (
-            "import sys\nimport zipimport\nfrom importlib import import_module\n"
+            "import sys\nimport zipimport\nfrom importlib import import_module, invalidate_caches\n"
             "from importlib.util import find_spec\nfrom witness import seen\n"
+            "def refresh():\n    assert sys.exception() is None\n    refresh_finder()\n"
             "for name in ('stored', 'deflated'):\n"
             "    sys.path.insert(0, __file__.rsplit('/', 1)[0] + '/' + name + '.zip')\n"
             "    assert find_spec(name) is not None and name not in seen\n"
@@ -352,6 +371,26 @@ ACCEPTED = {
             "    assert spec.loader is package.__loader__ and type(spec.loader) is zipimport.zipimporter\n"
             "    assert spec.submodule_search_locations is package.__path__\n"
             "    print(seen, spec.loader.get_data(package.__path__[0] + '/message.txt'))\n"
+            "finder = spec.loader\n"
+            "with open(finder.archive, \"rb\") as archive:\n"
+            "    original = archive.read()\n"
+            "with open(finder.archive.rsplit(\"/\", 1)[0] + \"/stored.zip\", \"rb\") as archive:\n"
+            "    replacement = archive.read()\n"
+            "refresh_finder = finder.invalidate_caches\n"
+            "finder.invalidate_caches = refresh\n"
+            "try:\n"
+            "    with open(finder.archive, \"wb\") as archive:\n"
+            "        archive.write(replacement)\n"
+            "    assert finder.find_spec(\"stored\") is None\n"
+            "    assert invalidate_caches() is None\n"
+            "    assert finder.find_spec(\"deflated\") is None\n"
+            "    assert finder.find_spec(\"stored\").loader is finder\n"
+            "    assert finder.get_data(\"stored/message.txt\") == b\"hello\"\n"
+            "finally:\n"
+            "    del finder.invalidate_caches\n"
+            "    with open(finder.archive, \"wb\") as archive:\n"
+            "        archive.write(original)\n"
+            "    finder.invalidate_caches()\n"
         ),
         "witness.py": "seen = []\n",
     },

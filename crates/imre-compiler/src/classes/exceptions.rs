@@ -90,7 +90,7 @@ fn builtin_mro(kind: u32) -> Vec<u32> {
         37 => 10,
         40 => 39, // UnboundLocalError derives from NameError.
         42 => 41,
-        81 | 82 => 80, // RuntimeWarning and DeprecationWarning derive from Warning.
+        81..=91 => 80, // The builtin warning categories derive directly from Warning.
         _ => 1,
     };
     let mut out = vec![kind];
