@@ -1353,6 +1353,9 @@ impl IntrinsicModule {
                 Intrinsic::ObjectRuntimeExport("codecs.IncrementalDecoder")
             }
             (Self::Codecs, "CodecInfo") => Intrinsic::CodecInfoClass,
+            (Self::Threading, "_RLock") => Intrinsic::ObjectRuntimeExport("threading._RLock"),
+            (Self::Threading, "_PyRLock") => Intrinsic::ObjectRuntimeExport("threading._PyRLock"),
+            (Self::Threading, "_CRLock") => Intrinsic::ObjectRuntimeExport("threading._CRLock"),
             (Self::Threading, "Thread") => Intrinsic::ObjectRuntimeExport("threading.Thread"),
             (Self::Threading, "_dangling") => Intrinsic::ObjectRuntimeExport("threading._dangling"),
             (Self::Threading, "main_thread") => {
