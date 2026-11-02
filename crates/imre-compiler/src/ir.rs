@@ -1071,6 +1071,7 @@ pub(crate) enum Builtin {
     SysIntern,
     SysIsInterned,
     OsName,
+    OsLinesep,
     OsPathsep,
     OsSeparator {
         alternate: bool,

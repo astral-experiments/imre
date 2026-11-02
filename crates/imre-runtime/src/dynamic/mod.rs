@@ -2025,6 +2025,8 @@ impl Context {
                     let value = self.lookup_attr(path, name)?;
                     self.bind(scope, name, value);
                 }
+                let linesep = self.text(crate::objects::os::LINE_SEPARATOR);
+                self.bind(scope, "linesep", linesep);
                 self.bind(scope, "path", path);
                 self.publish_module("os.path", path)?;
             }
