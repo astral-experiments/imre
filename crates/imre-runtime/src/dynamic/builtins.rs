@@ -415,6 +415,7 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         Value::HandlerLock(_) if super::thread_rlock::is_method(attr) => super::thread_rlock::CLASS,
         Value::PrimitiveLock(_) if super::thread_lock::is_method(attr) => super::thread_lock::CLASS,
         Value::Int(_) | Value::Bool(_) if matches!(attr, "bit_length" | "to_bytes") => "int",
+        Value::Float(_) if attr == "as_integer_ratio" => "float",
         Value::Str(_) | Value::SurrogateStr(_) if STR_METHODS.contains(&attr) => "str",
         Value::Range(_) if super::range::METHODS.contains(&attr) => "range",
         Value::RangeIterator(iter)
@@ -1015,6 +1016,7 @@ pub(super) fn call(
             }
             "module" => ctx.module_method(method, args, kwargs),
             "float" if method == "__getformat__" => float::getformat(ctx, args, kwargs),
+            "float" if method == "as_integer_ratio" => float::as_integer_ratio(ctx, args, kwargs),
             "int" if method == "bit_length" => integer::bit_length(ctx, args, kwargs),
             "int" if method == "to_bytes" => integer::to_bytes(ctx, args, kwargs),
             "bytes" | "bytearray" if method == "maketrans" => {

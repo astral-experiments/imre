@@ -40,6 +40,7 @@ impl BuiltinDescriptor {
                     "__lt__", "__le__", "__eq__", "__ne__", "__gt__", "__ge__", "__call__",
                 ][..],
             )),
+            Some(("float", attr)) => Some(("float", attr, &["as_integer_ratio"][..])),
             Some(("bytearray", attr)) => Some(("bytearray", attr, builtins::BYTEARRAY_METHODS)),
             Some(("BaseException", attr)) => Some(("BaseException", attr, &["with_traceback"][..])),
             Some(("frame", attr)) => Some(("frame", attr, &["clear"][..])),
@@ -209,6 +210,10 @@ impl BuiltinDescriptor {
                     ("pop", "__doc__") => {
                         "Remove and return item at index (default last).\n\nRaises IndexError if list is empty or index is out of range."
                     }
+                    ("as_integer_ratio", "__doc__") => {
+                        "Return a pair of integers, whose ratio is exactly equal to the original float.\n\nThe ratio is in lowest terms and has a positive denominator.  Raise\nOverflowError on infinities and a ValueError on NaNs.\n\n>>> (10.0).as_integer_ratio()\n(10, 1)\n>>> (0.0).as_integer_ratio()\n(0, 1)\n>>> (-.25).as_integer_ratio()\n(-1, 4)"
+                    }
+                    ("as_integer_ratio", _) => "($self, /)",
                     ("append", _) => "($self, object, /)",
                     _ => "($self, index=-1, /)",
                 };
