@@ -397,8 +397,8 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         }
         (
             "_imre_tempfile",
-            "abspath" | "mkdir" | "random_name" | "default_directory" | "open_named"
-            | "finish_named" | "keep_named",
+            "abspath" | "mkdir" | "cleanup_directory" | "random_name" | "default_directory"
+            | "open_named" | "finish_named" | "keep_named",
         ) => ctx.builtin(&format!("{module}.{name}")),
         ("locale" | "_locale", "getencoding") => ctx.builtin("_locale.getencoding"),
         ("tempfile", "TemporaryFile") | ("_imre_tempfile", "open_file") => {

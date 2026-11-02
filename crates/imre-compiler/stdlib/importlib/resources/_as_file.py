@@ -2,6 +2,7 @@
 
 import os
 import tempfile
+from _imre_tempfile import cleanup_directory
 from contextlib import contextmanager
 
 from importlib.resources._filesystem import _FilePath
@@ -29,6 +30,31 @@ def _temp_file(reader, name, Path):
         _remove(filename)
 
 
+def _copy_entry(source, parent):
+    name = source.name
+    if not name or name in ('.', '..') or os.path.basename(name) != name:
+        raise ValueError("expected a single resource name")
+    child = parent / name
+    if source.is_dir():
+        child.mkdir()
+        for entry in source.iterdir():
+            _copy_entry(entry, child)
+    else:
+        with child.open('wb') as stream:
+            stream.write(source.read_bytes())
+    return child
+
+
+@contextmanager
+def _temp_directory(source, Path):
+    assert source.is_dir()
+    directory = tempfile.mkdtemp()
+    try:
+        yield _copy_entry(source, Path(directory))
+    finally:
+        cleanup_directory(directory)
+
+
 @contextmanager
 def _existing(path):
     yield path
@@ -47,7 +73,7 @@ def as_file(path):
     except FileNotFoundError:
         directory = False
     if directory:
-        raise NotImplementedError("materializing virtual resource directories is unsupported")
+        return _temp_directory(path, Path)
     name = path.name
     if os.path.basename(name) != name:
         raise ValueError("expected a resource name without directory components")
