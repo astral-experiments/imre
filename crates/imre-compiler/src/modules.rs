@@ -1316,6 +1316,9 @@ impl IntrinsicModule {
                 Intrinsic::ObjectRuntimeExport("typing.get_type_hints")
             }
             (Self::Typing, "List") => Intrinsic::ObjectRuntimeExport("typing.List"),
+            (Self::Typing, "dataclass_transform") => {
+                Intrinsic::ObjectRuntimeExport("typing.dataclass_transform")
+            }
             (Self::Typing, "final") => Intrinsic::ObjectRuntimeExport("typing.final"),
             (Self::Typing, "TypedDict") => Intrinsic::ObjectRuntimeExport("typing.TypedDict"),
             (Self::Typing, "is_typeddict") => Intrinsic::ObjectRuntimeExport("typing.is_typeddict"),

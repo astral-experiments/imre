@@ -424,7 +424,7 @@ pub(super) fn subscribe(ctx: &mut Context, target: Id, index: Id) -> Option<Resu
             AliasKind::AbcCallable
         }
         Value::Native(n) if n == "typing.Callable" => AliasKind::Callable,
-        Value::Native(n) if matches!(n.as_str(), "dict" | "list" | "tuple" | "set") => {
+        Value::Native(n) if matches!(n.as_str(), "dict" | "list" | "tuple" | "set" | "type") => {
             AliasKind::Builtin
         }
         Value::Class { ancestors, .. } => {

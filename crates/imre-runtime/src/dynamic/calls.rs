@@ -3473,7 +3473,8 @@ impl Context {
     pub(super) fn default_set_attr(&mut self, obj: Id, name: &str, value: Id) -> Result<()> {
         super::namespace::check_class_write(self, obj, name)?;
         if let Value::Native(class) = self.heap.get(obj)
-            && (HashState::is_provider_class(class)
+            && (builtins::is_static_gc_type(class)
+                || HashState::is_provider_class(class)
                 || matches!(
                     class.as_str(),
                     HashState::CLASS | HashState::XOF_CLASS | KEY_WRAPPER | stdlib::flags::TYPE
