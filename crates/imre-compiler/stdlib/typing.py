@@ -1980,6 +1980,13 @@ ByteString = _DeprecatedGenericAlias(_ByteString, 0, removal_version=(3, 17))
 
 
 # Reconstruction callables and arguments used by CPython's typing alias reducers.
+def _copy_generic_alias(alias, params):
+    cls = type(alias)
+    if cls is _typing._UnpackGenericAlias:
+        return cls(alias.__origin__, params)
+    return cls(alias.__origin__, params, name=alias._name, inst=alias._inst)
+
+
 def _reduce_generic_alias(alias):
     from operator import getitem
     origin = globals()[alias._name] if alias._name else alias.__origin__

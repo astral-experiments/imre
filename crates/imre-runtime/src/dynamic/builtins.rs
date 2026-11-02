@@ -6,7 +6,7 @@ use super::value::{
 };
 
 mod collections;
-mod dir;
+pub(super) mod dir;
 mod exceptions;
 mod float;
 mod round;
