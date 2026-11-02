@@ -2885,7 +2885,7 @@ impl Context {
         module: &str,
         names: Option<&[(String, String)]>,
         level: u32,
-    ) -> Result<(Id, Id)> {
+    ) -> Result<Id> {
         let mut root = scope;
         while let Some(parent) = self.scope_data(root).parent {
             root = parent;
@@ -2917,12 +2917,11 @@ impl Context {
         } else {
             NONE
         };
-        let imported = self.call(
+        self.call(
             importer,
             vec![modname, globals, locals, fromlist, level],
             Vec::new(),
-        )?;
-        Ok((imported, importer))
+        )
     }
 
     /// Keep the iterator's backing sequence available when the final pull drops it.
@@ -3248,7 +3247,7 @@ impl Context {
                 }));
             }
             Instruction::Import { module, alias } => {
-                let (mut imported, _) = self.import_source_module(owner, scope, module, None, 0)?;
+                let mut imported = self.import_source_module(owner, scope, module, None, 0)?;
                 let mut parts = module.split('.');
                 let first = parts.next().expect("nonempty module name");
                 if alias.is_some() {
@@ -3260,12 +3259,10 @@ impl Context {
                 self.bind_source_name(scope, alias.as_deref().unwrap_or(first), imported)?;
             }
             Instruction::From(module, level, names) => {
-                let (m, importer) =
-                    self.import_source_module(owner, scope, module, Some(names), *level)?;
+                let m = self.import_source_module(owner, scope, module, Some(names), *level)?;
                 for (name, local) in names {
                     if name == "*" {
-                        let fromlist_handled = *level > 0 || importer != self.builtin("__import__");
-                        self.import_star(scope, m, fromlist_handled)?;
+                        self.import_star(scope, m)?;
                         continue;
                     }
                     let name = self.text(name);

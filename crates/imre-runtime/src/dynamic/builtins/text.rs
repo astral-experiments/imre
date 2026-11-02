@@ -1256,9 +1256,13 @@ pub(super) fn method(
     if name == "__new__" {
         return ctx.new_string(owner, receiver, args, kwargs);
     }
+    let original_receiver = receiver;
     let receiver = if owner == "bytes"
-        || (owner == "bytearray" && matches!(name, "endswith" | "split" | "startswith"))
-    {
+        || (owner == "bytearray"
+            && matches!(
+                name,
+                "endswith" | "lstrip" | "rstrip" | "split" | "startswith" | "strip"
+            )) {
         let storage = ctx.scalar_value(receiver);
         if !matches!(
             (owner, ctx.heap.get(storage)),
@@ -1466,15 +1470,16 @@ pub(super) fn method(
         );
         return Ok(ctx.alloc(Value::Int(found)));
     }
-    if name == "rstrip"
-        && let Value::Bytes(data) = ctx.heap.get(receiver)
-    {
+    if matches!(owner, "bytes" | "bytearray") && matches!(name, "strip" | "lstrip" | "rstrip") {
         if !kwargs.is_empty() {
-            return Err(type_error("bytes.rstrip() takes no keyword arguments"));
+            return Err(type_error(format!(
+                "{}.{name}() takes no keyword arguments",
+                ctx.type_name(original_receiver)
+            )));
         }
         if args.len() > 1 {
             return Err(type_error(format!(
-                "rstrip expected at most 1 argument, got {}",
+                "{name} expected at most 1 argument, got {}",
                 args.len()
             )));
         }
@@ -1482,11 +1487,23 @@ pub(super) fn method(
             .first()
             .copied()
             .filter(|&id| id != NONE)
-            .map(|id| ctx.bytes_like(id))
+            .map(|id| match ctx.heap.get(ctx.scalar_value(id)) {
+                Value::Array(array) => Ok(array.as_bytes()),
+                _ => ctx.bytes_like(id),
+            })
             .transpose()?
             .unwrap_or(b" \t\n\x0b\x0c\r");
-        return Ok(match crate::objects::rstrip_bytes(data, chars)? {
-            Some(trimmed) => ctx.alloc(Value::Bytes(trimmed)),
+        let immutable = owner == "bytes";
+        let trimmed = crate::objects::strip_bytes(
+            ctx.bytes_like(receiver)?,
+            chars,
+            name != "rstrip",
+            name != "lstrip",
+            immutable && original_receiver == receiver,
+        )?;
+        return Ok(match trimmed {
+            Some(data) if immutable => ctx.alloc(Value::Bytes(data)),
+            Some(data) => ctx.alloc(Value::ByteArray(data)),
             None => receiver,
         });
     }

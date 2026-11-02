@@ -229,8 +229,9 @@ impl Context {
                 let name = copy_label(self.str_value(b)?)?;
                 self.module(&name)
             }
+            "fromlist" => self.prepare_fromlist(a, b),
             "from" => self.import_from(a, b),
-            "import_star" => self.import_star(a, b, false),
+            "import_star" => self.import_star(a, b),
             "lookup_enter" => self.context_method(a, "__enter__"),
             "lookup_exit" => self.context_method(a, "__exit__"),
             "attr" | "method" => {
@@ -423,6 +424,9 @@ impl Context {
                 .next_item(a)?
                 .ok_or_else(|| Error::new("StopIteration", "")),
             "not" => Ok(flag(!self.truth(a)?)),
+            "neg" if matches!(self.heap.get(a), Value::Calendar { value, .. } if value.class() == "timedelta") => {
+                stdlib::call(self, "datetime.timedelta.__neg__", &[a], &[])
+            }
             "neg" | "pos" if let Value::Float(f) = self.heap.get(a) => {
                 Ok(self.alloc(Value::Float(if op == "neg" { -*f } else { *f })))
             }
@@ -947,6 +951,21 @@ pub(super) unsafe extern "C" fn imre_dyn_generator_body(
         let source = unsafe { cstr(source) };
         code.body = value::Body::PendingGenerator { source, body_line };
     }
+}
+
+/// Record a class annotation only when its statement executes.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_class_annotation(
+    ctx: *mut Context,
+    scope: Id,
+    name: Id,
+    thunk: Id,
+    offset: u32,
+) -> Id {
+    // SAFETY: the compiler passes the active context and handles from the current class body.
+    let ctx = unsafe { &mut *ctx };
+    let result = ctx.record_class_annotation(scope, name, thunk, offset);
+    finish(ctx, result)
 }
 
 /// Static per-definition record emitted beside its native entry point.

@@ -43,6 +43,8 @@ pub(super) fn module_function(symbol: &str) -> Option<(&str, &str)> {
         "_signal" if function == "sigpending" => Some((module, function)),
         "_contextvars" if function == "copy_context" => Some((module, function)),
         "_io" if function == "text_encoding" => Some((module, function)),
+        #[cfg(target_os = "linux")]
+        "resource" if function == "getrlimit" => Some((module, function)),
         "zlib" if matches!(function, "adler32" | "crc32") => Some((module, function)),
         "hashlib"
             if matches!(function, "new" | "file_digest")
@@ -55,6 +57,60 @@ pub(super) fn module_function(symbol: &str) -> Option<(&str, &str)> {
         }
         _ => None,
     }
+}
+
+fn excess_positional_error(
+    name: &str,
+    allowed: usize,
+    defaults: usize,
+    given: usize,
+    keywords: usize,
+) -> Error {
+    let limit = if defaults == 0 {
+        allowed.to_string()
+    } else {
+        format!("from {} to {allowed}", allowed as isize - defaults as isize)
+    };
+    let unit = if allowed == 1 && defaults == 0 {
+        "argument"
+    } else {
+        "arguments"
+    };
+    let (count, verb) = if keywords == 0 {
+        (given.to_string(), if given == 1 { "was" } else { "were" })
+    } else {
+        let positional_unit = if given == 1 { "argument" } else { "arguments" };
+        let keyword_unit = if keywords == 1 {
+            "argument"
+        } else {
+            "arguments"
+        };
+        (
+            format!(
+                "{given} positional {positional_unit} (and {keywords} keyword-only {keyword_unit})"
+            ),
+            "were",
+        )
+    };
+    Error::new(
+        "TypeError",
+        format!("{name}() takes {limit} positional {unit} but {count} {verb} given"),
+    )
+}
+
+fn missing_arguments_error(name: &str, kind: &str, missing: &[&str]) -> Error {
+    let count = missing.len();
+    let unit = if count == 1 { "argument" } else { "arguments" };
+    let names = match missing {
+        [one] => format!("'{one}'"),
+        [one, two] => format!("'{one}' and '{two}'"),
+        [rest @ .., last] => format!("'{}', and '{last}'", rest.join("', '")),
+        [] => unreachable!(),
+    };
+    Error::new(
+        "TypeError",
+        format!("{name}() missing {count} required {kind} {unit}: {names}"),
+    )
 }
 
 /// Build a non-callable diagnostic while keeping allocation failure catchable.
@@ -596,7 +652,7 @@ impl Context {
     }
 
     pub(super) fn bind_attribute(&mut self, value: Id, receiver: Id, owner: Id) -> Result<Id> {
-        if matches!(self.heap.get(value), Value::Native(name) if matches!(name.as_str(), "dict.fromkeys" | "float.__getformat__" | "bytes.fromhex" | "bytearray.fromhex"))
+        if matches!(self.heap.get(value), Value::Native(name) if matches!(name.as_str(), "dict.fromkeys" | "int.from_bytes" | "float.__getformat__" | "bytes.fromhex" | "bytearray.fromhex"))
         {
             return Ok(self.bind_native_classmethod(value, owner));
         }
@@ -663,6 +719,10 @@ impl Context {
                             | "OSError.__init__"
                             | "StopIteration.__init__"
                             | "module.__init__"
+                            | "module.__dir__"
+                            | "module.__repr__"
+                            | "module.__getattribute__"
+                            | "object.__str__"
                             | "bytes.decode"
                             | "bytes.rfind"
                             | "bytes.rsplit"
@@ -1176,7 +1236,10 @@ impl Context {
             | ("_contextvars.Token", Value::ContextToken { .. })
             | ("operator.attrgetter", Value::AttrGetter(_))
             | (super::namedtuple::GETTER, Value::TupleGetter { .. })
-            | ("member_descriptor", Value::TupleGetterDoc | Value::ReadOnlyMember(_, _) | Value::SlotMember { .. })
+            | (
+                "member_descriptor",
+                Value::TupleGetterDoc | Value::ReadOnlyMember(_, _) | Value::SlotMember { .. },
+            )
             | ("operator.itemgetter", Value::ItemGetter(_))
             | ("itertools.count", Value::Count { .. })
             | (super::deque::CLASS, Value::Deque(_))
@@ -1402,10 +1465,15 @@ impl Context {
                 constructor: Some(class),
                 ..
             } => class,
+            Value::Module { scope, .. } => {
+                return self.module_get_attribute(obj, scope, name, original);
+            }
             _ => return self.default_get_attr(obj, name),
         };
         let attribute = if let Some(hook) = self.class_attr(class, "__getattribute__") {
             self.attribute_hook(hook, obj, class, name, original)
+        } else if let Value::Module { scope, .. } = *self.heap.get(obj) {
+            self.module_get_attribute(obj, scope, name, original)
         } else {
             self.default_get_attr(obj, name)
         };
@@ -1805,7 +1873,9 @@ impl Context {
             }
             Value::Native(ref class) if class == "module" => match name {
                 "__doc__" => return Ok(self.text(module_type::DOC)),
-                "__init__" | "__new__" => return Ok(self.builtin(&format!("module.{name}"))),
+                "__init__" | "__new__" | "__dir__" | "__repr__" | "__getattribute__" => {
+                    return Ok(self.builtin(&format!("module.{name}")));
+                }
                 "__name__" | "__qualname__" => return Ok(self.text("module")),
                 "__module__" => return Ok(self.text("builtins")),
                 _ => {}
@@ -1816,7 +1886,11 @@ impl Context {
                 "__doc__" => return Ok(NONE),
                 "__qualname__" => {
                     let qualname = self.lookup_attr(owner, "__qualname__")?;
-                    return Ok(self.text(format!("{}.{}", self.str_value(qualname)?, self.str_value(field)?)));
+                    return Ok(self.text(format!(
+                        "{}.{}",
+                        self.str_value(qualname)?,
+                        self.str_value(field)?
+                    )));
                 }
                 _ => {}
             },
@@ -1936,6 +2010,10 @@ impl Context {
                     }
                     "__text_signature__" if symbol == "_thread.start_new_thread" => {
                         return Ok(self.text("($module, function, args, kwargs={}, /)"));
+                    }
+                    "__doc__" if symbol == "resource.getrlimit" => return Ok(NONE),
+                    "__text_signature__" if symbol == "resource.getrlimit" => {
+                        return Ok(self.text("($module, resource, /)"));
                     }
                     "__doc__" if symbol == "posix.getpid" => {
                         return Ok(self.text("Return the current process id."));
@@ -2201,23 +2279,27 @@ impl Context {
                 owner, name: field, ..
             } if HashState::is_provider_class(owner)
                 || owner == value::TEMPLATE_TYPE
-                || stdlib::datetime::members(owner).is_some() => match name
+                || stdlib::datetime::members(owner).is_some() =>
             {
-                "__objclass__" => return Ok(self.builtin(owner)),
-                "__name__" => return Ok(self.text(field)),
-                "__qualname__" => {
-                    return Ok(self.text(format!("{}.{field}", owner.rsplit_once('.').unwrap().1)));
+                match name {
+                    "__objclass__" => return Ok(self.builtin(owner)),
+                    "__name__" => return Ok(self.text(field)),
+                    "__qualname__" => {
+                        return Ok(
+                            self.text(format!("{}.{field}", owner.rsplit_once('.').unwrap().1))
+                        );
+                    }
+                    "__get__" => {
+                        let get = self.builtin("getset_descriptor.__get__");
+                        return Ok(self.alloc(Value::Method {
+                            callable: get,
+                            receiver: obj,
+                            explicit: false,
+                        }));
+                    }
+                    _ => {}
                 }
-                "__get__" => {
-                    let get = self.builtin("getset_descriptor.__get__");
-                    return Ok(self.alloc(Value::Method {
-                        callable: get,
-                        receiver: obj,
-                        explicit: false,
-                    }));
-                }
-                _ => {}
-            },
+            }
             Value::Native(ref class) if let Some(owner) = HashState::provider_class(class) => {
                 let (module, short) = owner.rsplit_once('.').unwrap();
                 match name {
@@ -2430,10 +2512,10 @@ impl Context {
             Value::Native(ref class) if class == "datetime.timezone" && name == "utc" => {
                 return Ok(stdlib::datetime::utc(self));
             }
-            Value::MappingProxy(dict)
+            Value::MappingProxy(_)
                 if matches!(name, "keys" | "items" | "values" | "get" | "copy") =>
             {
-                return self.lookup_attr(dict, name);
+                return self.lookup_attr(self.mapping_proxy_target(obj), name);
             }
             Value::Native(ref symbol)
                 if name == "__self__"
@@ -2566,6 +2648,17 @@ impl Context {
                 }
             }
             Value::DefaultDict { factory, .. } if name == "default_factory" => return Ok(factory),
+            Value::Int(_) | Value::Bool(_) if name == "from_bytes" => {
+                let owner = self.exact_type(obj)?;
+                let method = self.builtin("int.from_bytes");
+                return Ok(self.bind_native_classmethod(method, owner));
+            }
+            Value::Native(ref class)
+                if name == "from_bytes" && matches!(class.as_str(), "int" | "bool") =>
+            {
+                let method = self.builtin("int.from_bytes");
+                return Ok(self.bind_native_classmethod(method, obj));
+            }
             Value::Float(_) if name == "__getformat__" => {
                 let owner = self.builtin("float");
                 let method = self.builtin("float.__getformat__");
@@ -2886,21 +2979,21 @@ impl Context {
                 if name == "__class__" {
                     return Ok(constructor.unwrap_or_else(|| self.builtin("module")));
                 }
-                if let Some(class) = constructor {
-                    return self.module_instance_attribute(obj, class, scope, name);
-                }
-                if let Some(value) = self.scope_name(scope, name) {
-                    return Ok(value);
-                }
-                if stdlib::is_module(module) {
-                    if !stdlib::has_lazy_attributes(module) {
-                        let class = self.builtin("module");
-                        return self.module_instance_attribute(obj, class, scope, name);
+                if constructor.is_none() && stdlib::has_lazy_attributes(module) {
+                    if let Some(value) = self.scope_name(scope, name) {
+                        return Ok(value);
                     }
-                    let value = stdlib::attribute(self, &module.to_owned(), name)?;
-                    self.bind(scope, name, value);
-                    return Ok(value);
+                    match stdlib::attribute(self, &module.to_owned(), name) {
+                        Ok(value) => {
+                            self.bind(scope, name, value);
+                            return Ok(value);
+                        }
+                        Err(error) if self.is_attribute_error(&error) => {}
+                        Err(error) => return Err(error),
+                    }
                 }
+                let class = constructor.unwrap_or_else(|| self.builtin("module"));
+                return self.module_instance_attribute(obj, class, scope, name);
             }
             Value::Class {
                 name: ref class_name,
@@ -2921,29 +3014,35 @@ impl Context {
                         .unwrap_or_else(|| self.heap.packed_tuple(Vec::new(), false)));
                 }
                 if name == "__annotations__"
-                    && let Some(thunks) = self
+                    && let Some(sites) = self
                         .scope_data(scope)
                         .class_namespace
                         .as_ref()
-                        .and_then(|c| c.annotation_thunks)
+                        .and_then(|namespace| namespace.annotation_sites.as_ref())
                 {
-                    let entries = self.dict_entries(thunks).unwrap().to_vec();
-                    let mapping = self
-                        .own_class_attr(obj, name)
-                        .ok_or_else(|| self.missing_attribute(obj, name))?;
-                    let mut evaluated = Vec::with_capacity(entries.len());
-                    for (key, thunk) in entries {
-                        let value = self.call(thunk, Vec::new(), Vec::new())?;
-                        evaluated.push((key, value));
+                    let sites: Vec<_> = sites.values().copied().collect();
+                    // An annotation can replace __annotations__ and collect the old thunks.
+                    let mark = self.heap.temporary_mark();
+                    for &(key, thunk) in &sites {
+                        self.heap.keep(key);
+                        self.heap.keep(thunk);
                     }
-                    for (key, value) in evaluated {
-                        self.put_item(mapping, key, value)?;
-                    }
-                    let Value::Scope(frame) = self.heap.get_mut(scope) else {
-                        unreachable!()
-                    };
-                    frame.class_namespace.as_mut().unwrap().annotation_thunks = None;
-                    return Ok(mapping);
+                    let mapping = self.dict(Vec::new());
+                    self.heap.keep(mapping);
+                    let result = (|| {
+                        for (key, thunk) in sites {
+                            let value = self.call(thunk, Vec::new(), Vec::new())?;
+                            self.put_item(mapping, key, value)?;
+                        }
+                        self.bind_local(scope, name, mapping);
+                        let Value::Scope(frame) = self.heap.get_mut(scope) else {
+                            unreachable!("class scope")
+                        };
+                        frame.class_namespace.as_mut().unwrap().annotation_sites = None;
+                        Ok(mapping)
+                    })();
+                    self.heap.release_temporaries_since(mark);
+                    return result;
                 }
                 if name == "__name__" {
                     let assigned = self
@@ -3316,12 +3415,8 @@ impl Context {
             Value::StaticMethod { dictionary, .. } => {
                 super::static_method::update_attribute(self, obj, dictionary, name, None)
             }
-            Value::Module {
-                scope, constructor, ..
-            } => {
-                if constructor.is_some() {
-                    self.update_module_annotations(scope, name, None)?;
-                }
+            Value::Module { scope, .. } => {
+                self.update_module_annotations(scope, name, None)?;
                 if name == "__dict__" {
                     return Err(Error::new("AttributeError", "readonly attribute"));
                 }
@@ -3360,8 +3455,7 @@ impl Context {
                             .scope_data(scope)
                             .class_namespace
                             .as_ref()
-                            .and_then(|c| c.annotation_thunks)
-                            .is_some() =>
+                            .is_some_and(|namespace| namespace.annotation_sites.is_some()) =>
                     {
                         Error::new("AttributeError", "__annotations__")
                     }
@@ -3474,7 +3568,10 @@ impl Context {
                         if matches {
                             layout.declared_slot = true;
                             layout.active_slot |= !shadowed
-                                && !frame.class_namespace.as_ref().is_some_and(|ns| ns.member_slots);
+                                && !frame
+                                    .class_namespace
+                                    .as_ref()
+                                    .is_some_and(|ns| ns.member_slots);
                         }
                     }
                 }
@@ -4049,9 +4146,7 @@ impl Context {
                     self.sys_path = value;
                 }
                 let scope = *scope;
-                if constructor.is_some() {
-                    self.update_module_annotations(scope, name, Some(value))?;
-                }
+                self.update_module_annotations(scope, name, Some(value))?;
                 self.bind(scope, name, value);
             }
             Value::Instance { class, fields, .. } if Some(*class) != object_class => {
@@ -4078,7 +4173,7 @@ impl Context {
                     && let Value::Scope(data) = self.heap.get_mut(scope)
                     && let Some(namespace) = &mut data.class_namespace
                 {
-                    namespace.annotation_thunks = None;
+                    namespace.annotation_sites = None;
                 }
                 self.bind(scope, name, value);
                 if name == "__del__" {
@@ -4971,6 +5066,7 @@ impl Context {
                 for (n, &v) in pos.iter().zip(&args) {
                     self.bind_argument(local, n, v)?;
                 }
+                let given = args.len();
                 if let Some(n) = sig["varargs"].as_str() {
                     let extra = if pos.is_empty() {
                         args
@@ -4979,11 +5075,6 @@ impl Context {
                     };
                     let extra = self.alloc(Value::Tuple(extra));
                     self.bind_argument(local, n, extra)?;
-                } else if args.len() > pos.len() {
-                    return Err(Error::new(
-                        "TypeError",
-                        format!("too many positional arguments to {name}"),
-                    ));
                 }
                 let mut extra = Vec::new();
                 for (n, v) in kwargs {
@@ -5023,34 +5114,56 @@ impl Context {
                 } else {
                     self.items(defaults)?
                 };
+                if given > pos.len() && !sig["varargs"].is_string() {
+                    let bound = &self.scope_data(local).names;
+                    let keywords = kwonly.iter().filter(|n| bound.contains_key(*n)).count();
+                    return Err(excess_positional_error(
+                        &name,
+                        pos.len(),
+                        default_values.len(),
+                        given,
+                        keywords,
+                    ));
+                }
+                let mut missing = Vec::new();
                 for (index, n) in pos.iter().enumerate() {
                     if !self.scope_data(local).names.contains_key(n) {
                         let offset = index + default_values.len();
-                        let val = offset
+                        if let Some(&val) = offset
                             .checked_sub(pos.len())
                             .and_then(|i| default_values.get(i))
-                            .copied()
-                            .ok_or_else(|| {
-                                Error::new("TypeError", format!("{name} requires argument {n:?}"))
-                            })?;
-                        self.bind_argument(local, n, val)?;
+                        {
+                            self.bind_argument(local, n, val)?;
+                        } else {
+                            missing
+                                .try_reserve(1)
+                                .map_err(|_| Error::new("MemoryError", ""))?;
+                            missing.push(n.as_str());
+                        }
                     }
+                }
+                if !missing.is_empty() {
+                    return Err(missing_arguments_error(&name, "positional", &missing));
                 }
                 for n in &kwonly {
                     if !self.scope_data(local).names.contains_key(n) {
-                        let val = self
-                            .dict_entries(kwdefaults)
-                            .and_then(|entries| {
-                                entries.iter().find_map(|&(key, value)| {
-                                    matches!(self.heap.get(key), Value::Str(text) if text == n)
-                                        .then_some(value)
-                                })
+                        let val = self.dict_entries(kwdefaults).and_then(|entries| {
+                            entries.iter().find_map(|&(key, value)| {
+                                matches!(self.heap.get(key), Value::Str(text) if text == n).then_some(value)
                             })
-                            .ok_or_else(|| {
-                                Error::new("TypeError", format!("{name} requires argument {n:?}"))
-                            })?;
-                        self.bind_argument(local, n, val)?;
+                        });
+                        if let Some(val) = val {
+                            self.bind_argument(local, n, val)?;
+                        } else {
+                            missing
+                                .try_reserve(1)
+                                .map_err(|_| Error::new("MemoryError", ""))?;
+                            missing.push(n.as_str());
+                        }
                     }
+                }
+                if !missing.is_empty() {
+                    return Err(missing_arguments_error(&name, "keyword-only", &missing));
                 }
                 if let Some(types) = sig["types"].as_object() {
                     for (param, expected) in types {
@@ -5144,7 +5257,9 @@ impl Context {
 
     /// Initialize descriptor names in class body insertion order, before subclass hooks run.
     pub(super) fn initialize_class_members(&mut self, class: Id, scope: Id) -> Result<()> {
-        let Value::Scope(class_scope) = self.heap.get_mut(scope) else { unreachable!() };
+        let Value::Scope(class_scope) = self.heap.get_mut(scope) else {
+            unreachable!()
+        };
         let members = class_scope
             .class_body
             .take()
@@ -5295,8 +5410,21 @@ impl Context {
         }
         let annotations = self.dict(Vec::new());
         self.bind_local(scope, "__annotations__", annotations);
+        if typed_dict_meta.is_none()
+            && let Value::Scope(frame) = self.heap.get_mut(scope)
+        {
+            frame.class_namespace.get_or_insert_with(Default::default).annotation_scratch = Some(annotations);
+        }
         self.execute(code, scope, FrameOwner::Function(body))?;
+        let explicit_annotations = self.scope_name(scope, "__annotations__")
+            .is_some_and(|value| value != annotations);
         if let Value::Scope(frame) = self.heap.get_mut(scope) {
+            if let Some(namespace) = &mut frame.class_namespace {
+                namespace.annotation_scratch = None;
+                if explicit_annotations {
+                    namespace.annotation_sites = None;
+                }
+            }
             frame.globals.clear();
             frame.closure.nonlocals.clear();
         }

@@ -20,7 +20,6 @@ mod lowlevel_threads;
 mod mapping_abc;
 mod module_type;
 mod namedtuple;
-mod slot_member;
 mod namespace;
 mod namespace_init;
 mod namespace_repr;
@@ -29,6 +28,7 @@ mod os_error;
 mod property;
 mod range;
 mod slice;
+mod slot_member;
 mod source_code;
 mod static_method;
 mod stdlib;
@@ -1227,8 +1227,8 @@ impl Context {
             };
             return Ok(entries.iter().map(|&(_, member)| member).collect());
         }
-        if let Value::MappingProxy(dict) = *self.heap.get(id) {
-            return self.items(dict);
+        if matches!(self.heap.get(id), Value::MappingProxy(_)) {
+            return self.items(self.mapping_proxy_target(id));
         }
         if let Some(storage) = self.string_storage(id)
             && storage != id
@@ -1725,7 +1725,7 @@ impl Context {
             }
             "property" => property::METHODS,
             "memoryview" => builtins::MEMORYVIEW_METHODS,
-            "int" => &["bit_length", "to_bytes", "__format__"],
+            "int" => &["bit_length", "from_bytes", "to_bytes", "__format__"],
             "float" => &["__format__", "__getformat__", "as_integer_ratio"],
             "bytes" => {
                 self.builtin("bytes.fromhex");
@@ -1761,36 +1761,22 @@ impl Context {
     /// Resolve a named import from a loaded module, including package children.
     fn import_from(&mut self, object: Id, member: Id) -> Result<Id> {
         let name = self.str_value(member)?.to_owned();
-        let attribute_error = match self.lookup_attr(object, &name) {
-            Err(error) if error.kind == "AttributeError" => error,
+        let attribute_error = match self.lookup_named_attr(object, &name, Some(member)) {
+            Err(error) if self.is_attribute_error(&error) => error,
             value => return value,
         };
-        let Value::Module {
-            name: module,
-            scope,
-            ..
-        } = self.heap.get(object)
-        else {
-            return Err(attribute_error);
+        // The importer has already attempted package children. A circular import
+        // can publish a child in sys.modules before binding it on the parent.
+        let module_name = match self.lookup_attr(object, "__name__") {
+            Ok(value) => Some(value),
+            Err(err) if self.is_attribute_error(&err) => None,
+            Err(err) => return Err(err),
         };
-        let names = &self.scope_data(*scope).names;
-        let package = if names.contains_key("__path__") {
-            names.get("__name__").map(|id| self.display(*id))
-        } else {
-            None
-        };
-        let child = format!("{}.{name}", package.as_deref().unwrap_or(module));
-        // A child's initializer can raise ModuleNotFoundError for its own dependency.
-        // Only a failure to find the requested child is a missing export.
-        match self.module(&child) {
-            Err(error)
-                if error.kind == "ModuleNotFoundError"
-                    && error
-                        .import
-                        .as_ref()
-                        .and_then(|fields| fields.name.as_deref())
-                        == Some(&child) => {}
-            value => return value,
+        if let Some(module) = module_name.and_then(|id| self.str_value(id).ok()) {
+            let child = self.text(format!("{module}.{name}"));
+            if let Some(value) = self.registered_module(child)? {
+                return Ok(value);
+            }
         }
         let Value::Module {
             scope,
@@ -1799,14 +1785,11 @@ impl Context {
             ..
         } = self.heap.get(object)
         else {
-            unreachable!()
+            return Err(attribute_error);
         };
-        let names = &self.scope_data(*scope).names;
-        let module = names
-            .get("__name__")
-            .and_then(|id| self.str_value(*id).ok());
+        let module = module_name.and_then(|id| self.str_value(id).ok());
         let quoted_module = string_repr(module.unwrap_or("<unknown module name>"));
-        let origin = origin.or_else(|| names.get("__file__").copied());
+        let origin = origin.or_else(|| self.scope_name(*scope, "__file__"));
         let path = origin.and_then(|id| self.str_value(id).ok());
         let prefix = format!(
             "cannot import name {} from {quoted_module}",
@@ -1970,7 +1953,10 @@ impl Context {
         } else {
             let (search, child) = if let Some((parent, child)) = parent {
                 (
-                    self.lookup_attr(parent, "__path__").map_err(|_| {
+                    self.lookup_attr(parent, "__path__").map_err(|err| {
+                        if !self.is_attribute_error(&err) {
+                            return err;
+                        }
                         Error::new(
                             "ModuleNotFoundError",
                             format!(
@@ -2084,6 +2070,20 @@ impl Context {
             self.bind(scope, "BlockingIOError", error);
         }
         match name {
+            "itertools" => {
+                for attr in [
+                    "count",
+                    "repeat",
+                    "_cycle_allocate",
+                    "_cycle_next",
+                    "_chain_allocate",
+                    "_chain_get",
+                    "_chain_set",
+                ] {
+                    let value = self.builtin(&format!("itertools.{attr}"));
+                    self.bind(scope, attr, value);
+                }
+            }
             "inspect" => {
                 for &(name, flag) in imre_ast::code_flags::INSPECT_FLAGS {
                     let value = self.int(i64::from(flag));
@@ -2093,6 +2093,8 @@ impl Context {
             "abc" => {
                 let meta = self.abc_meta();
                 self.bind(scope, "ABCMeta", meta);
+                let token = self.builtin("abc.get_cache_token");
+                self.bind(scope, "get_cache_token", token);
             }
             #[cfg(target_os = "linux")]
             "_signal" if source.is_none() => stdlib::signal::initialize(self, scope),

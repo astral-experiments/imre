@@ -410,7 +410,7 @@ def parse_qsl(qs, keep_blank_values=False, strict_parsing=False,
     else:
         # A memoryview may be strided; take its bytes in logical order.
         if isinstance(qs, memoryview):
-            qs = qs.tobytes()
+            qs = bytes(qs)
         try:
             # Latin-1 maps each octet to one character and reads the buffer
             # directly, bypassing __bytes__ on subclasses.

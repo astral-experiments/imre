@@ -354,34 +354,22 @@ fn handle(storage: Storage) -> *const Object {
 /// Instantiates a literal already validated by the compiler with this regex engine.
 ///
 /// # Safety
-/// `data` holds a translated UTF-8 pattern (the original ABI), or 0xff,
-/// its eight-byte little-endian Python spelling length, the original spelling
-/// and the translated pattern. Both strings are validated UTF-8.
+/// `data` holds the original UTF-8 spelling and the translated UTF-8 pattern,
+/// separated by 0xff. The compiler has validated the translated pattern.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn imre_regex_compile(data: *const u8, len: usize) -> *const Object {
-    let bytes = if len == 0 {
-        &[][..]
-    } else {
-        // SAFETY: the compiler emits initialized static bytes of this length.
-        unsafe { std::slice::from_raw_parts(data, len) }
-    };
-    let (spelling, translated) = if let Some(record) = bytes.strip_prefix(&[0xff]) {
-        let (length, strings) = record.split_at(8);
-        let length = u64::from_le_bytes(length.try_into().unwrap()) as usize;
-        strings.split_at(length)
-    } else {
-        (bytes, bytes)
-    };
-    // SAFETY: both slices come from complete Rust strings emitted by the compiler.
-    let (spelling, source) = unsafe {
-        (
+pub unsafe extern "C" fn imre_regex_literal(data: *const u8, len: usize) -> *const Object {
+    // SAFETY: the compiler emits initialized static bytes of this length.
+    let bytes = unsafe { std::slice::from_raw_parts(data, len) };
+    let separator = memchr::memchr(0xff, bytes).expect("missing regex literal separator");
+    let (spelling, source) = bytes.split_at(separator);
+    // SAFETY: both ranges come from complete Rust strings emitted by the compiler.
+    let pattern = unsafe {
+        Pattern::with_spelling(
+            str::from_utf8_unchecked(&source[1..]),
             str::from_utf8_unchecked(spelling),
-            str::from_utf8_unchecked(translated),
         )
     };
-    handle(Storage::RegexPattern(Box::new(Pattern::with_spelling(
-        source, spelling,
-    ))))
+    handle(Storage::RegexPattern(Box::new(pattern)))
 }
 
 /// Return the original Python spelling even when the native engine expanded an escape.
@@ -802,16 +790,19 @@ mod tests {
 
     #[test]
     fn wide_and_long_capture_snapshots_preserve_exact_offsets() {
+        let spelling = r"(\x61)(b)?(c)?(d)?(e)?(?P<last>f)";
         let pattern = "(a)(b)?(c)?(d)?(e)?(?P<last>f)";
         for text in ["af".to_owned(), format!("{}af", "é".repeat(40_000))] {
             let prefix_chars = text.chars().count() - 2;
             let text = StrOwner::new(Str::from(text));
             // SAFETY: the helper owns each ABI handle until its last access.
             unsafe {
-                let compiled = crate::ObjectOwner::from_raw(imre_regex_compile(
-                    pattern.as_ptr(),
-                    pattern.len(),
-                ));
+                let bytes = [spelling.as_bytes(), &[0xff], pattern.as_bytes()].concat();
+                let compiled =
+                    crate::ObjectOwner::from_raw(imre_regex_literal(bytes.as_ptr(), bytes.len()));
+                let original =
+                    StrOwner::from_raw(imre_regex_spelling(crate::ObjectOwner::as_ptr(&compiled)));
+                assert_eq!(original.as_str(), spelling);
                 let found = crate::ObjectOwner::from_raw(imre_regex_search(
                     crate::ObjectOwner::as_ptr(&compiled),
                     StrOwner::as_ptr(&text),
@@ -898,8 +889,9 @@ mod tests {
         let input = StrOwner::downgrade(&text);
         // SAFETY: every call uses the declared owners; returned owners are consumed once.
         unsafe {
-            let pattern =
-                crate::ObjectOwner::from_raw(imre_regex_compile(source.as_ptr(), source.len()));
+            let pattern = crate::ObjectOwner::from_raw(handle(Storage::RegexPattern(Box::new(
+                Pattern::new(source),
+            ))));
             let matched = crate::ObjectOwner::from_raw(imre_regex_search(
                 crate::ObjectOwner::as_ptr(&pattern),
                 StrOwner::as_ptr(&text),

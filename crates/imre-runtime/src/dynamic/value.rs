@@ -642,6 +642,10 @@ pub(super) struct ClassNamespace {
     pub annotation_thunks: Option<Id>,
     /// Closure cell shared by runtime-source method annotation providers.
     pub annotation_dict_cell: Option<Id>,
+    /// Scratch field dictionary used only while an ordinary class body is executing.
+    pub annotation_scratch: Option<Id>,
+    /// Executed deferred sites in source order, including repeated field names.
+    pub annotation_sites: Option<Box<std::collections::BTreeMap<u32, (Id, Id)>>>,
     /// TypedDict installs a class-wide annotation function in place of its field thunks.
     pub provider_annotations: bool,
     /// Slot names consumed when the class is created, independent of later namespace mutations.
@@ -868,7 +872,10 @@ pub(super) enum Value {
     /// The writable document member of the native tuple descriptor type.
     TupleGetterDoc,
     ReadOnlyMember(&'static str, &'static str),
-    SlotMember { owner: Id, name: Id },
+    SlotMember {
+        owner: Id,
+        name: Id,
+    },
     /// The original keys are held in a Python tuple, shared by multi-key reductions.
     ItemGetter(Id),
     ThreadLocal(super::thread_local::Dictionaries),
@@ -986,6 +993,7 @@ pub(super) enum Value {
         owner: Id,
         name: &'static str,
     },
+    ProcessHandle(crate::objects::BoxedPopen),
     File(crate::shared::Shared<super::stdlib::BinaryFile>),
     TextFile(crate::objects::TextFile),
     RegexScanner {
@@ -1061,6 +1069,7 @@ impl Value {
                 super::stdlib::BinaryFile::Reader { .. } => "_io.BufferedReader",
                 super::stdlib::BinaryFile::Writer { .. } => "_io.BufferedWriter",
             },
+            Self::ProcessHandle(_) => "_imre_subprocess.Handle",
             Self::TextFile(_) => "_io.TextIOWrapper",
             Self::SequenceIterator { .. } => "iterator",
             Self::ReverseSequence { .. } => "reversed",
@@ -1097,7 +1106,9 @@ impl Value {
             Self::Dict(_) => "dict",
             Self::MappingProxy(_) => "mappingproxy",
             Self::Function { .. } => "function",
-            Self::TupleGetterDoc | Self::ReadOnlyMember(_, _) | Self::SlotMember { .. } => "member_descriptor",
+            Self::TupleGetterDoc | Self::ReadOnlyMember(_, _) | Self::SlotMember { .. } => {
+                "member_descriptor"
+            }
             Self::ItemGetter(_) => "operator.itemgetter",
             Self::Code(_) => "code",
             Self::Cell(_) => "cell",
@@ -1172,6 +1183,7 @@ impl Value {
             | Self::Scope(_)
             | Self::ClassCell(_)
             | Self::LoopIterator { .. }
+            | Self::ProcessHandle(_)
             | Self::Yielded(_) => false,
             Self::Tuple(items) => !items.is_empty(),
             _ => true,
@@ -1293,6 +1305,12 @@ impl Value {
                     visit.extend(class.name_override);
                     visit.extend(class.annotation_thunks);
                     visit.extend(class.annotation_dict_cell);
+                    visit.extend(class.annotation_scratch);
+                    if let Some(sites) = &class.annotation_sites {
+                        for &(name, thunk) in sites.values() {
+                            visit.extend([name, thunk]);
+                        }
+                    }
                     visit.extend(class.dictionary);
                 }
                 visit.extend(scope.parent);
@@ -1527,6 +1545,7 @@ impl Value {
             | Self::PartialPlaceholder
             | Self::TokenMissing
             | Self::TextFile(_)
+            | Self::ProcessHandle(_)
             | Self::NamedFileCloser(_) => {}
             Self::BufferedRandom(_, name) => visit.push(*name),
         }
@@ -1875,6 +1894,8 @@ pub(super) struct Heap {
     interned: HashMap<crate::StrOwner, InternedString>,
     // ABC registrations are weak edges. Sweep them before recycling a dead class's slot.
     pub(super) abc_registrations: Vec<[Id; 2]>,
+    // Collecting weak registration pairs must not roll back the invalidation counter.
+    pub(super) abc_cache_token: u64,
     free_head: usize,
     free_count: usize,
     pub(super) immutable_hashes: HashMap<Id, i64>,
@@ -1961,6 +1982,7 @@ impl Heap {
             linked_string_constants: HashMap::new(),
             interned: HashMap::new(),
             abc_registrations: Vec::new(),
+            abc_cache_token: 0,
             free_head: END,
             free_count: 0,
             immutable_hashes: HashMap::new(),

@@ -8,7 +8,7 @@ mod descriptor_buffer;
 pub(in crate::dynamic) use descriptor_buffer::BufferedFd;
 mod bytes_io;
 mod file_io;
-pub(in crate::dynamic) use file_io::open;
+pub(in crate::dynamic) use file_io::{open, popen_pipe};
 mod text_wrapper;
 
 #[derive(Clone)]
@@ -214,6 +214,11 @@ pub(in super::super) fn install(ctx: &mut Context, module: Id) {
     ctx.builtins.insert("_io.FileIO".into(), file);
     let buffered = class(ctx, module, "BufferedIOBase", io, buffered_io::METHODS);
     ctx.builtins.insert("_io._BufferedIOBase".into(), buffered);
+    // CPython's io module registers the concrete C file types with the public ABC.
+    for name in ["_io.BufferedReader", "_io.BufferedWriter"] {
+        let concrete = ctx.builtin(name);
+        ctx.heap.abc_registrations.push([buffered, concrete]);
+    }
     let bytes_io = class(ctx, module, "BytesIO", buffered, bytes_io::METHODS);
     ctx.builtins.insert("_io.BytesIO".into(), bytes_io);
     let text = class(

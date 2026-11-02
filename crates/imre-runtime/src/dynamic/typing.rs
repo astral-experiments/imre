@@ -1340,6 +1340,23 @@ pub(super) fn call(
         ("_eval_type_expression", [text, globals, locals]) => {
             ctx.eval_type_expression(*text, *globals, *locals)
         }
+        ("get_origin" | "get_args", [v])
+            if matches!(ctx.heap.get(*v), Value::Instance { .. })
+                && ctx
+                    .module_value("typing", "_AnnotatedAlias")
+                    .is_some_and(|class| ctx.instance_of(*v, class)) =>
+        {
+            if operation == "get_origin" {
+                let typing = ctx.module("typing")?;
+                ctx.lookup_attr(typing, "Annotated")
+            } else {
+                let origin = ctx.lookup_attr(*v, "__origin__")?;
+                // Keep the origin rooted across a metadata descriptor lookup.
+                let args = ctx.alloc(Value::Tuple(vec![origin]));
+                let metadata = ctx.lookup_attr(*v, "__metadata__")?;
+                ctx.op("+", args, metadata, NONE)
+            }
+        }
         ("get_origin", [v]) => Ok(match ctx.heap.get(*v) {
             Value::Instance { .. }
                 if ctx
@@ -1665,8 +1682,18 @@ impl Context {
         mro.push(NONE);
         mro.extend_from_slice(&ancestors);
         let slot_names = self.declared_slot_names(scope)?;
-        let members = if self.scope_data(scope).class_namespace.as_ref().is_some_and(|ns| ns.member_slots) {
-            self.prepare_slot_members(&name, scope, &bases, slot_names.as_deref().unwrap_or_default())?
+        let members = if self
+            .scope_data(scope)
+            .class_namespace
+            .as_ref()
+            .is_some_and(|ns| ns.member_slots)
+        {
+            self.prepare_slot_members(
+                &name,
+                scope,
+                &bases,
+                slot_names.as_deref().unwrap_or_default(),
+            )?
         } else {
             Vec::new()
         };

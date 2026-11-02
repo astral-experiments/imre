@@ -292,9 +292,12 @@ pub(super) const BYTEARRAY_METHODS: &[&str] = &[
     "copy",
     "endswith",
     "extend",
+    "lstrip",
     "reverse",
+    "rstrip",
     "split",
     "startswith",
+    "strip",
 ];
 
 pub(super) const BYTES_METHODS: &[&str] = &[
@@ -302,11 +305,13 @@ pub(super) const BYTES_METHODS: &[&str] = &[
     "__repr__",
     "decode",
     "endswith",
+    "lstrip",
     "rfind",
     "rsplit",
     "rstrip",
     "split",
     "startswith",
+    "strip",
     "translate",
 ];
 
@@ -559,7 +564,7 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         Value::RegexPattern(_)
             if matches!(
                 attr,
-                "findall" | "finditer" | "match" | "fullmatch" | "search" | "split" | "scanner"
+                "findall" | "finditer" | "match" | "fullmatch" | "search" | "split" | "sub" | "scanner"
             ) =>
         {
             "pattern"
@@ -907,7 +912,10 @@ pub(super) fn call(
     {
         return exceptions::initialize(ctx, owner, args, kwargs);
     }
-    if matches!(name, "object.__hash__" | "object.__repr__") {
+    if matches!(
+        name,
+        "object.__hash__" | "object.__repr__" | "object.__str__"
+    ) {
         let method = name.trim_start_matches("object.");
         let Some((&receiver, rest)) = args.split_first() else {
             return Err(type_error(format!(
@@ -927,6 +935,13 @@ pub(super) fn call(
         }
         if method == "__repr__" {
             return ctx.object_repr(receiver);
+        }
+        if method == "__str__" {
+            if let Some(value) = ctx.repr_override(receiver)? {
+                return Ok(value);
+            }
+            let repr = ctx.checked_format(receiver, true)?;
+            return Ok(ctx.text(repr));
         }
         return Ok(ctx.int(Context::identity_hash(receiver)));
     }
@@ -1003,6 +1018,7 @@ pub(super) fn call(
             "float" if method == "__getformat__" => float::getformat(ctx, args, kwargs),
             "float" if method == "as_integer_ratio" => float::as_integer_ratio(ctx, args, kwargs),
             "int" if method == "bit_length" => integer::bit_length(ctx, args, kwargs),
+            "int" if method == "from_bytes" => integer::from_bytes(ctx, args, kwargs),
             "int" if method == "to_bytes" => integer::to_bytes(ctx, args, kwargs),
             "bytes" | "bytearray" if method == "maketrans" => {
                 translation::maketrans(ctx, name, args, kwargs)
@@ -1014,7 +1030,12 @@ pub(super) fn call(
                 collections::builtin_slot(ctx, name, args, kwargs)
             }
             "bytes" | "bytearray" if method == "fromhex" => text::fromhex(ctx, name, args, kwargs),
-            "bytearray" if matches!(method, "decode" | "endswith" | "split" | "startswith") => {
+            "bytearray"
+                if matches!(
+                    method,
+                    "decode" | "endswith" | "lstrip" | "rstrip" | "split" | "startswith" | "strip"
+                ) =>
+            {
                 text::method(ctx, owner, method, args, kwargs)
             }
             "str" | "bytes" => text::method(ctx, owner, method, args, kwargs),
@@ -1458,8 +1479,10 @@ pub(super) fn call(
                     ..
                 } => bindings.len(),
                 Value::Dict(v) | Value::DefaultDict { entries: v, .. } => v.len(),
-                Value::DictView { dict, .. } | Value::MappingProxy(dict) => {
-                    collections::entries(ctx, *dict)?.len()
+                Value::DictView { dict, .. } => collections::entries(ctx, *dict)?.len(),
+                Value::MappingProxy(_) => {
+                    let mapping = ctx.mapping_proxy_target(args[0]);
+                    return call(ctx, "len", &[mapping], &[]);
                 }
                 Value::Class { .. } => {
                     let values = ctx.enum_values(args[0]).ok_or_else(|| no_length(ctx))?;
@@ -1613,8 +1636,10 @@ pub(super) fn call(
                 return Err(Error::new("ValueError", "Empty module name"));
             }
             let result = ctx.module(&name)?;
-            if ctx.optional_truth(fromlist, false)? {
-                return Ok(result);
+            if let Some(list) = fromlist
+                && ctx.truth(list)?
+            {
+                return ctx.prepare_fromlist(result, list);
             }
             ctx.module(name.split('.').next().unwrap())
         }

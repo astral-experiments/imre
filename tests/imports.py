@@ -474,6 +474,7 @@ ACCEPTED = {
         "main.py": (FIXTURES.parent / "boxed_resources_as_file.py").read_text(),
         "data/__init__.py": "",
         "data/message.txt": "hello\n",
+        "data/directory-payload.txt": "directory payload\n",
     },
     "source_loader_path_stats": {
         "main.py": (

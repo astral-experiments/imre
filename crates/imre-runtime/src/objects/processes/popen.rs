@@ -7,6 +7,8 @@ use crate::objects::files::{FileState, errno_error};
 use std::cell::RefCell;
 
 mod active;
+mod boxed;
+pub(crate) use boxed::{BoxedPipe, BoxedPopen};
 mod communicate;
 mod control;
 mod poll;
@@ -66,18 +68,22 @@ impl ChildPipes {
 }
 
 /// Explicit descriptors and any handles already opened by Popen's constructor.
-pub(super) struct Redirects {
+pub(super) struct Redirects<'a> {
     pub(super) fds: [RawFd; 3],
     pub(super) oversized: bool,
     pub(super) prepared: Option<ChildPipes>,
+    pub(super) environment: Option<ByteEnvironment>,
+    pub(super) failure_site: Option<&'a mut Option<(launch_error::Site, bool)>>,
 }
 
-impl Default for Redirects {
+impl Default for Redirects<'_> {
     fn default() -> Self {
         Self {
             fds: [-1; 3],
             oversized: false,
             prepared: None,
+            environment: None,
+            failure_site: None,
         }
     }
 }
@@ -134,7 +140,13 @@ impl Popen {
 
 impl Drop for Popen {
     fn drop(&mut self) {
-        if self.finalize() {
+        let live = if self.finalized {
+            // A language finalizer may have retained and then released a live child.
+            !matches!(self.control.poll(), Ok(Some(_)))
+        } else {
+            self.finalize()
+        };
+        if live {
             // Internal run/call temporaries need not have a language-level owner.
             active::defer_internal(self.control.clone(), std::mem::take(&mut self.pipes));
         }
@@ -206,11 +218,14 @@ struct SizedPipeConfig {
 }
 
 #[derive(Default)]
-struct LaunchExtras {
+struct LaunchExtras<'a> {
     redirects: [usize; 3],
     child: Option<(usize, usize, bool)>,
     keep: Option<(usize, u32)>,
     pipe_size: Option<(usize, u32)>,
+    environment: Option<ByteEnvironment>,
+    failure_site: Option<&'a mut Option<(launch_error::Site, bool)>>,
+    warn_line_buffering: Option<&'a mut dyn FnMut() -> Result<()>>,
 }
 
 impl LaunchConfig {
@@ -223,7 +238,7 @@ impl LaunchConfig {
     /// # Safety
     /// Bit 18 selects ChildConfig; stream modes 6/7 select RedirectConfig.
     /// Older callers using fixed streams supply only the original prefix.
-    unsafe fn extras(config: *const Self) -> LaunchExtras {
+    unsafe fn extras(config: *const Self) -> LaunchExtras<'static> {
         // SAFETY: the launch prefix is present for all three ABI layouts.
         let streams = unsafe { (*config).streams };
         if streams & (1 << 18) != 0 {
@@ -244,14 +259,13 @@ impl LaunchConfig {
                 child: Some((config.group, config.mask, config.new_session)),
                 keep,
                 pipe_size,
+                ..Default::default()
             }
         } else if Self::has_redirects(streams) {
             LaunchExtras {
                 // SAFETY: a borrowed stream promises the three-word extension.
                 redirects: unsafe { (*config.cast::<RedirectConfig>()).words },
-                child: None,
-                keep: None,
-                pipe_size: None,
+                ..Default::default()
             }
         } else {
             LaunchExtras::default()
@@ -343,7 +357,7 @@ pub(super) fn error_after_handles(modes: &[u32], fork_error_pipe: bool, error: E
 ///
 /// # Safety
 /// The caller roots the argv, optional directory/environment and buffer size.
-unsafe fn spawn(config: &LaunchConfig, extras: LaunchExtras) -> Result<Popen> {
+unsafe fn spawn(config: &LaunchConfig, mut extras: LaunchExtras<'_>) -> Result<Popen> {
     // CPython runs _cleanup before validating the new Popen's arguments.
     cleanup();
     // SAFETY: settings describe the rooted command, path and integer representations.
@@ -467,6 +481,12 @@ unsafe fn spawn(config: &LaunchConfig, extras: LaunchExtras) -> Result<Popen> {
     let mut pipes: Pipes = [None, None, None];
     for (i, parent) in parents.into_iter().enumerate() {
         if let Some(fd) = parent {
+            if !text
+                && bufsize == 1
+                && let Some(warn) = &mut extras.warn_line_buffering
+            {
+                warn()?;
+            }
             pipes[i] = Some(FileState::pipe(fd.into(), i != 0, text, bufsize)?);
         }
     }
@@ -474,6 +494,8 @@ unsafe fn spawn(config: &LaunchConfig, extras: LaunchExtras) -> Result<Popen> {
         fds: descriptors,
         oversized,
         prepared: Some(prepared),
+        environment: extras.environment,
+        failure_site: extras.failure_site,
     };
     // SAFETY: the compiler supplies the same exact owners as subprocess.run.
     let child =

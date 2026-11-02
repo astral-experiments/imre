@@ -102,14 +102,54 @@ pub fn translate_with_flags(
     translate_for_runtime(pattern, verbose, ascii, dotall, true)
 }
 
+/// Character and case rules for Python pattern escapes.
+#[derive(Clone, Copy, PartialEq)]
+pub enum Alphabet {
+    Unicode,
+    UnicodeIgnoreCase,
+    Ascii,
+    Bytes,
+}
+
+struct Escapes {
+    alphabet: Alphabet,
+    bracketed_word: bool,
+}
+
 /// Use the caller's regex flags to limit literal guards to sound text modes.
 pub fn translate_for_runtime(
     pattern: &str,
     verbose: bool,
     ascii: bool,
+    dotall: bool,
+    literal_guards: bool,
+) -> Result<FixedPattern, String> {
+    translate_pattern(
+        pattern,
+        verbose,
+        if ascii {
+            Alphabet::Ascii
+        } else {
+            Alphabet::Unicode
+        },
+        dotall,
+        literal_guards,
+    )
+}
+
+/// Translate a boxed pattern with its byte and Unicode escape rules.
+pub fn translate_pattern(
+    pattern: &str,
+    verbose: bool,
+    alphabet: Alphabet,
     mut dotall: bool,
     literal_guards: bool,
 ) -> Result<FixedPattern, String> {
+    let mut escapes = Escapes {
+        alphabet,
+        bracketed_word: false,
+    };
+    let mut literal_brace = false;
     let mut input = pattern.chars().peekable();
     let mut output = String::new();
     let mut groups = vec![None]; // Group zero is the whole match.
@@ -121,7 +161,7 @@ pub fn translate_for_runtime(
             '(' => {
                 let extension = input.next_if_eq(&'?').is_some();
                 if literal_guards && extension && input.next_if_eq(&'!').is_some() {
-                    guarded_class(&mut input, &mut output, verbose, ascii)?;
+                    guarded_class(&mut input, &mut output, verbose, &mut escapes)?;
                     // A following quantifier would repeat the consumed class alone.
                     can_repeat = false;
                     continue;
@@ -139,7 +179,7 @@ pub fn translate_for_runtime(
                         output.push_str("?s:");
                         dotall = true;
                     } else if input.next_if_eq(&'>').is_some() {
-                        atomic_delimited(&mut input, &mut output, dotall, verbose, ascii)?;
+                        atomic_delimited(&mut input, &mut output, dotall, verbose, &mut escapes)?;
                         (may_backtrack, dotall) = outer_prefixes.pop().unwrap();
                         can_repeat = true;
                         continue;
@@ -202,12 +242,17 @@ pub fn translate_for_runtime(
             }
             '$' => return Err("the $ anchor is supported only at the end of a pattern".into()),
             '[' => {
-                class(&mut input, &mut output, ascii)?;
+                class(&mut input, &mut output, &mut escapes)?;
                 can_repeat = true;
             }
             '\\' => {
-                let kind = escaped(&mut input, &mut output, false, ascii)?;
+                let kind = escaped(&mut input, &mut output, false, &mut escapes)?;
                 can_repeat = kind != Escape::Anchor;
+            }
+            '{' if !starts_counted_repeat(input.clone()) => {
+                literal_brace = true;
+                literal(&mut output, c);
+                can_repeat = true;
             }
             '*' | '+' | '?' | '{' => {
                 may_backtrack = true;
@@ -243,6 +288,11 @@ pub fn translate_for_runtime(
                 can_repeat = true;
             }
         }
+    }
+    if literal_brace && escapes.bracketed_word && alphabet == Alphabet::UnicodeIgnoreCase {
+        return Err(
+            "case-insensitive Unicode word sets inside bracket expressions are unsupported".into(),
+        );
     }
     let output = preserve_zero_repeat_groups(output)?;
     let hir = regex_syntax::Parser::new()
@@ -396,6 +446,20 @@ pub fn replacement(template: &str, groups: &[Capture]) -> Result<Vec<u8>, &'stat
 
 type Input<'a> = std::iter::Peekable<std::str::Chars<'a>>;
 
+/// Does the text after an unescaped opening brace form a Python repetition count?
+/// Only a complete ASCII bound (including an omitted bound in `{,}`) is a quantifier.
+pub fn starts_counted_repeat(mut input: Input<'_>) -> bool {
+    if !matches!(input.peek(), Some('0'..='9' | ',')) {
+        return false;
+    }
+    let mut suffix = input.skip_while(char::is_ascii_digit);
+    match suffix.next() {
+        Some('}') => true,
+        Some(',') => suffix.find(|c| !c.is_ascii_digit()) == Some('}'),
+        _ => false,
+    }
+}
+
 fn count(input: &mut Input<'_>, output: &mut String) -> Result<bool, String> {
     let digits: String = std::iter::from_fn(|| input.next_if(char::is_ascii_digit)).collect();
     if digits.is_empty() {
@@ -436,14 +500,14 @@ fn guarded_class(
     input: &mut Input<'_>,
     output: &mut String,
     verbose: bool,
-    ascii: bool,
+    escapes: &mut Escapes,
 ) -> Result<(), String> {
     let unsupported =
         "negative regex guard requires single literal alternatives followed by a class";
     let mut excluded = String::new();
     loop {
         match next_token(input, verbose)? {
-            Some('\\') if escaped(input, &mut excluded, false, ascii)? == Escape::Scalar => {}
+            Some('\\') if escaped(input, &mut excluded, false, escapes)? == Escape::Scalar => {}
             Some(c) if !r"\.^$*+?{}[]()|".contains(c) => literal(&mut excluded, c),
             _ => return Err(unsupported.into()),
         }
@@ -455,8 +519,8 @@ fn guarded_class(
     }
     output.push('[');
     match next_token(input, verbose)? {
-        Some('[') => class(input, output, ascii)?,
-        Some('\\') if escaped(input, output, false, ascii)? == Escape::Class => {}
+        Some('[') => class(input, output, escapes)?,
+        Some('\\') if escaped(input, output, false, escapes)? == Escape::Class => {}
         _ => return Err(unsupported.into()),
     }
     write!(output, "--[{excluded}]]").unwrap();
@@ -471,16 +535,18 @@ fn atomic_delimited(
     output: &mut String,
     dotall: bool,
     verbose: bool,
-    ascii: bool,
+    escapes: &mut Escapes,
 ) -> Result<(), String> {
     if !['.', '*', '?'].into_iter().all(|c| input.next() == Some(c)) {
         return Err("unsupported atomic regex group".into());
     }
     let mut delimiter = String::new();
     match input.next() {
-        Some('[') => class(input, &mut delimiter, ascii)?,
+        Some('[') => class(input, &mut delimiter, escapes)?,
         Some('\\') => {
-            if escaped(input, &mut delimiter, false, ascii)? == Escape::Anchor {
+            // The delimiter also appears inside a negated class in the lowered scan.
+            let word_delimiter = matches!(input.peek(), Some('w' | 'W'));
+            if escaped(input, &mut delimiter, word_delimiter, escapes)? == Escape::Anchor {
                 return Err("an atomic scan delimiter must consume a character".into());
             }
         }
@@ -522,9 +588,10 @@ fn escaped(
     input: &mut Input<'_>,
     output: &mut String,
     in_class: bool,
-    ascii: bool,
+    escapes: &mut Escapes,
 ) -> Result<Escape, String> {
     let c = input.next().ok_or("incomplete regex escape")?;
+    let ascii = matches!(escapes.alphabet, Alphabet::Ascii | Alphabet::Bytes);
     if ascii && let Some(class) = ascii_class(c) {
         output.push_str(class);
         return Ok(Escape::Class);
@@ -538,11 +605,19 @@ fn escaped(
             // Python uses Unicode letters, numbers and the literal underscore.
             // Rust's shorthand additionally includes marks, connector characters,
             // and join controls, all of which Python treats as non-word.
+            let protect_word = escapes.alphabet == Alphabet::UnicodeIgnoreCase && !in_class;
+            if protect_word {
+                output.push_str("(?-i:");
+            }
+            escapes.bracketed_word |= in_class;
             output.push_str(if c == 'w' {
                 r"[\p{L}\p{N}_]"
             } else {
                 r"[^\p{L}\p{N}_]"
             });
+            if protect_word {
+                output.push(')');
+            }
             return Ok(Escape::Class);
         }
         'd' | 'D' => {
@@ -569,6 +644,9 @@ fn escaped(
         'v' => '\x0b',
         'f' => '\x0c',
         'r' => '\r',
+        'u' | 'U' if escapes.alphabet == Alphabet::Bytes => {
+            return Err(format!("bad escape \\{c} in bytes pattern"));
+        }
         'x' | 'u' | 'U' => {
             let digits = match c {
                 'x' => 2,
@@ -583,6 +661,11 @@ fn escaped(
                     .ok_or("invalid hexadecimal regex escape")?;
                 result = result * 16 + next;
             }
+            if c == 'x' {
+                // The same escape denotes a scalar in text and a single octet in bytes.
+                write!(output, "\\x{result:02x}").unwrap();
+                return Ok(Escape::Scalar);
+            }
             char::from_u32(result).ok_or("regex escape is not a Unicode scalar")?
         }
         c if c.is_ascii_punctuation() || verbose_space(c) => c,
@@ -592,7 +675,7 @@ fn escaped(
     Ok(Escape::Scalar)
 }
 
-fn class(input: &mut Input<'_>, output: &mut String, ascii: bool) -> Result<(), String> {
+fn class(input: &mut Input<'_>, output: &mut String, escapes: &mut Escapes) -> Result<(), String> {
     output.push('[');
     // An immediate second '[' is CPython's possible nested set (FutureWarning).
     if input.peek() == Some(&'[') {
@@ -627,7 +710,7 @@ fn class(input: &mut Input<'_>, output: &mut String, ascii: bool) -> Result<(), 
             continue;
         }
         let scalar = if c == '\\' {
-            escaped(input, output, true, ascii)? == Escape::Scalar
+            escaped(input, output, true, escapes)? == Escape::Scalar
         } else {
             literal(output, c);
             true
@@ -764,6 +847,24 @@ mod tests {
     }
 
     #[test]
+    fn incomplete_counts_leave_the_brace_and_following_pattern_intact() {
+        for (pattern, text) in [
+            (r"^{\w+}$", "{width}"),
+            (r"a{1, 3}", "a{1,3}"),
+            (r"a{4294967295x", "a{4294967295x"),
+            (r"a{１}", "a{１}"),
+            (r"a{{2}", "a{{"),
+            (r"{}?", "{"),
+        ] {
+            let regex = Regex::new(&translate(pattern, true).unwrap().source).unwrap();
+            assert_eq!(regex.find(text).unwrap().as_str(), text, "{pattern}");
+        }
+        for pattern in ["{2}", "a{2,1}", "a*{2}", "a{4294967295}"] {
+            assert!(translate(pattern, false).is_err(), "{pattern}");
+        }
+    }
+
+    #[test]
     fn rejects_semantics_the_engine_does_not_share() {
         for source in [
             r"a$b",
@@ -774,7 +875,6 @@ mod tests {
             r"(?i:a)",
             r"a*+",
             r"a* ?",
-            r"a{1, 3}",
             r"((a)?b)+",
             r"(x?)*",
             r"[a&&b]",

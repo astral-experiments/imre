@@ -63,6 +63,22 @@ def check_command_stdin(imre, run):
         assert actual.stdout == reference.stdout and actual.stderr == reference.stderr == b""
 
 
+def check_sysconfig_build(imre, root, run):
+    fixture = Path(__file__).with_name("fixtures") / "boxed_sysconfig_build.py"
+    project = root / "build-tree"
+    modules = project / "Modules"
+    modules.mkdir(parents=True)
+    alias = root / "build-link"
+    alias.symlink_to(project, target_is_directory=True)
+    empty = root / "empty-build-tree"
+    (empty / "Modules" / "Setup").mkdir(parents=True)
+    for home, extra in ((project, {}), (empty, {"_PYTHON_PROJECT_BASE": alias.name})):
+        (modules / "Setup").unlink(missing_ok=True)
+        (modules / "Setup.local").touch()
+        result = run(imre, "-B", fixture, project, home, empty, extra=extra)
+        assert (result.returncode, result.stdout, result.stderr) == (0, b"build markers passed\n", b""), result
+
+
 def check_io_compaction_allocation(imre, root, run):
     fixture = Path(__file__).with_name("fixtures") / "refuse_io_compaction.c"
     wrapper = root / "refuse_io_compaction.o"
@@ -922,6 +938,7 @@ def check_unittest_file_discovery(imre, root, run):
         "result = unittest.TestResult()\n"
         "suite.run(result)\n"
         "print(result.testsRun, [test.id() for test, error in result.failures], len(result.errors))\n"
+        "print([(test.id(), reason) for test, reason in result.skipped])\n"
     )
     for optimization in ("0", "3"):
         directory = root / ("late_tests_" + optimization)
@@ -944,10 +961,14 @@ def check_unittest_file_discovery(imre, root, run):
             "        self.assertIs(safe_repr, unittest.util.safe_repr)\n"
             "        self.assertEqual(safe_repr(None), 'None')\n"
         )
+        (directory / "test_skipped.py").write_text(
+            "import unittest\nraise unittest.SkipTest('unavailable module')\n"
+        )
         for command in ((sys.executable, "-B", entry), (executable,)):
             result = run(*command, directory)
             assert (result.returncode, result.stdout, result.stderr) == (
-                0, b"2 ['test_late.Late.test_body'] 0\n", b"",
+                0, b"3 ['test_late.Late.test_body'] 0\n"
+                b"[('unittest.loader.ModuleSkipped.test_skipped', 'unavailable module')]\n", b"",
             ), result
 
 
@@ -979,6 +1000,7 @@ def main():
             check_pending_signals(imre, root, env)
             marked_call_flags = marked_call_refusal_flags(root)
             check_bound_method_allocation(imre, run, marked_call_flags)
+            check_sysconfig_build(imre, root, run)
             check_ffi_result_roots(imre, root, run)
             check_weak_proxy_root_allocation(imre, root, run)
             check_noncallable_allocation(imre, run, marked_call_flags)
@@ -1652,6 +1674,7 @@ def report(text):
         for name in (
             "boxed_lowlevel_thread.py", "boxed_lowlevel_thread_roots.py",
             "boxed_thread_dangling.py", "boxed_threading_rlock.py",
+            "boxed_threading_condition_event.py",
         ):
             thread_fixture = fixtures / name
             compare("-IB", thread_fixture, native_args=("run", thread_fixture, "--runtime-imports", "--quiet"))
@@ -1682,6 +1705,7 @@ def report(text):
             "decoder = __import__(''.join(('co', 'decs'))).IncrementalDecoder\n"
             "print(decoder.__module__, decoder('replace').errors, decoder().getstate())",
         )
+        compare("-IB", fixtures / "boxed_unittest_named_loader.py")
         for fixture in (
             "boxed_ast.py",
             "boxed_ast_visitors.py",
@@ -1709,6 +1733,7 @@ def report(text):
             "boxed_text_io_wrapper.py",
             "boxed_platform_version.py",
             "boxed_int_to_bytes.py",
+            "boxed_int_from_bytes.py",
             "boxed_divmod_slots.py",
             "boxed_complex.py",
             "boxed_float.py",
@@ -1717,6 +1742,7 @@ def report(text):
             "boxed_float_arithmetic.py",
             "boxed_bytes_fields.py",
             "boxed_binary_subclass_lengths.py",
+            "boxed_binary_strip.py",
             "boxed_class_union.py",
             "boxed_bytes_octal.py",
             "boxed_contextvars.py",
@@ -1739,6 +1765,7 @@ def report(text):
             "boxed_lru_insert_eviction.py",
             "boxed_lru_insert_same.py",
             "boxed_annotationlib_refs.py",
+            "boxed_class_annotation_sites.py",
             "boxed_typing_no_type_check.py",
             "boxed_typing_no_type_check_decorator.py",
             "boxed_typing_assert_type.py",
@@ -1756,6 +1783,7 @@ def report(text):
             "boxed_re_ascii.py",
             "boxed_re_verbose.py",
             "boxed_re_split.py",
+            "boxed_re_match_subscript.py",
             "boxed_re_findall_empty.py",
             "boxed_re_scanner.py",
             "boxed_re_escape.py",
@@ -1799,6 +1827,7 @@ def report(text):
             "boxed_global.py",
             "boxed_logging.py",
             "boxed_logging_file.py",
+            "boxed_logging_file_error.py",
             "boxed_class_attribute.py",
             "boxed_missing_attribute_owners.py",
             "boxed_request_strings.py",
@@ -1814,12 +1843,11 @@ def report(text):
             "boxed_unittest_subclass.py",
             "boxed_unittest_not_has_attr.py",
             "boxed_unittest_not_equal.py",
-            "boxed_unittest_less_equal.py",
+            "boxed_unittest_ordering.py",
             "boxed_unittest_assert_raises.py",
             "boxed_unittest_assert_warns.py",
             "boxed_unittest_assert_regex.py",
             "boxed_unittest_patch.py",
-            "boxed_unittest_named_loader.py",
             "boxed_unittest_identity.py",
             "boxed_unittest_skip.py",
             "boxed_frozenset.py",
@@ -1869,6 +1897,7 @@ def report(text):
             "boxed_itertools_groupby.py",
             "boxed_object_new.py",
             "boxed_module_type.py",
+            "boxed_source_module_getattr.py",
             "boxed_thread_local.py",
             "boxed_threading_lock.py",
             "boxed_import_depth.py",
@@ -1941,6 +1970,10 @@ def report(text):
                     )
         if os.name == "posix":
             check_unittest_file_discovery(imre, root, run)
+            plugin.write_bytes((fixtures / "boxed_subprocess_fileio.py").read_bytes())
+            compare("-IB", "-c", imports + "arithmetic.current()")
+            plugin.write_bytes((fixtures / "boxed_subprocess_buffering.py").read_bytes())
+            compare("-IB", "-c", imports + "arithmetic.current()")
             plugin.write_bytes((fixtures / "boxed_os_capabilities.py").read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")
             plugin.write_bytes((fixtures / "boxed_mimetypes.py").read_bytes())
@@ -1955,6 +1988,8 @@ def report(text):
             plugin.write_bytes((fixtures / "boxed_os_scandir.py").read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")
         if sys.platform == "linux":
+            plugin.write_bytes((fixtures / "boxed_resource.py").read_bytes())
+            compare("-IB", "-c", imports + "arithmetic.current()")
             shim = root / "secrets_entropy.so"
             subprocess.run(["cc", "-shared", "-fPIC", fixtures / "secrets_entropy.c", "-ldl", "-o", shim], check=True)
             probe = root / "entropy.py"

@@ -172,6 +172,7 @@ fn register(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<I
         ));
     }
     ctx.heap.abc_registrations.push([owner, cls]);
+    ctx.heap.abc_cache_token = ctx.heap.abc_cache_token.wrapping_add(1);
     Ok(cls)
 }
 
@@ -207,6 +208,24 @@ pub(super) fn call(
             *slot = ctx.text(method);
         }
         return ctx.abc_check_methods(candidate, &names[..methods.len()]);
+    }
+    if name == "get_cache_token" {
+        if !kwargs.is_empty() {
+            return Err(Error::new(
+                "TypeError",
+                "_abc.get_cache_token() takes no keyword arguments",
+            ));
+        }
+        if !args.is_empty() {
+            return Err(Error::new(
+                "TypeError",
+                format!(
+                    "_abc.get_cache_token() takes no arguments ({} given)",
+                    args.len()
+                ),
+            ));
+        }
+        return Ok(ctx.alloc(Value::Int(crate::Int::new(ctx.heap.abc_cache_token.into()))));
     }
     if name == "register" {
         return register(ctx, args, kwargs);
