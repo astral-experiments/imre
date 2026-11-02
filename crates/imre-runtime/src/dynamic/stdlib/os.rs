@@ -333,7 +333,7 @@ pub(in crate::dynamic) mod scheduler;
 mod unlink;
 mod utime;
 #[cfg(target_os = "linux")]
-mod xattr;
+pub(in crate::dynamic) mod xattr;
 
 /// POSIX functions exported as the same builtins by both os and posix.
 pub(super) fn is_descriptor_function(name: &str) -> bool {
@@ -372,11 +372,7 @@ pub(super) fn is_descriptor_function(name: &str) -> bool {
             | "link"
             | "symlink"
     ) || (cfg!(unix) && matches!(name, "kill" | "getppid" | "waitstatus_to_exitcode"))
-        || (cfg!(target_os = "linux")
-            && matches!(
-                name,
-                "sendfile" | "listxattr" | "setxattr" | "getxattr" | "removexattr"
-            ))
+        || (cfg!(target_os = "linux") && name == "sendfile")
 }
 
 /// Convert an index argument before issuing the descriptor syscall.
@@ -711,10 +707,6 @@ pub(super) fn descriptor(
     }
     if matches!(name, "remove" | "unlink" | "rmdir") {
         return unlink::call(ctx, name, args, kwargs);
-    }
-    #[cfg(target_os = "linux")]
-    if matches!(name, "getxattr" | "setxattr" | "removexattr" | "listxattr") {
-        return xattr::call(ctx, name, args, kwargs);
     }
     if name == "utime" {
         return utime::call(ctx, args, kwargs);

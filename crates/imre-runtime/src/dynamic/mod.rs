@@ -2690,13 +2690,9 @@ impl Context {
         source_globals: Id,
         source: Option<(PathBuf, importlib::SourceBody, Option<Id>)>,
     ) -> Result<()> {
-        if name == "_thread" && source.is_none() {
-            let rlock = self.builtin(thread_rlock::CLASS);
-            self.bind(scope, "RLock", rlock);
-        }
         #[cfg(target_os = "linux")]
         if name == "posix" && source.is_none() {
-            for name in ["getxattr", "setxattr", "listxattr", "removexattr"] {
+            for name in stdlib::os::xattr::FUNCTIONS {
                 let function = self.builtin(&format!("posix.{name}"));
                 self.bind(scope, name, function);
             }
@@ -2708,6 +2704,10 @@ impl Context {
                 let value = self.int(i64::from(n));
                 self.bind(scope, attr, value);
             }
+        }
+        if name == "_thread" && source.is_none() {
+            let rlock = self.builtin(thread_rlock::CLASS);
+            self.bind(scope, "RLock", rlock);
         }
         if matches!(name, "io" | "_io") {
             let error = self.builtin("BlockingIOError");

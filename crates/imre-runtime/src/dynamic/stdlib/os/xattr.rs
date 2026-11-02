@@ -9,6 +9,9 @@ use super::{
 };
 use crate::dynamic::stdlib::audit;
 
+pub(in crate::dynamic) const FUNCTIONS: [&str; 4] =
+    ["getxattr", "setxattr", "listxattr", "removexattr"];
+
 fn bind<const N: usize>(
     op: &str,
     args: &[Id],
@@ -83,7 +86,7 @@ fn address(arg: &PathArg, default: Option<&CStr>) -> (i32, *const libc::c_char) 
 }
 
 /// Access Linux inode attributes through a pathname, symbolic link, or borrowed descriptor.
-pub(super) fn call(
+pub(in crate::dynamic::stdlib) fn call(
     ctx: &mut Context,
     op: &str,
     args: &[Id],

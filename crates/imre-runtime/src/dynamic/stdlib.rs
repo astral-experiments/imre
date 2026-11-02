@@ -397,6 +397,10 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
     {
         return Ok(ctx.int(i64::from(value)));
     }
+    #[cfg(target_os = "linux")]
+    if matches!(module, "os" | "posix") && os::xattr::FUNCTIONS.contains(&name) {
+        return Ok(ctx.builtin(&format!("posix.{name}")));
+    }
     if module == "_imre_subprocess" && subprocess::function(name) {
         return Ok(ctx.builtin(&format!("{module}.{name}")));
     }
@@ -1541,6 +1545,12 @@ pub(super) fn call(
     ) || name.starts_with("_imre_posixpath.")
     {
         return posixpath::call(ctx, name, args, kwargs);
+    }
+    #[cfg(target_os = "linux")]
+    if let Some(op) = name.strip_prefix("posix.")
+        && os::xattr::FUNCTIONS.contains(&op)
+    {
+        return os::xattr::call(ctx, op, args, kwargs);
     }
     if let Some(operation) = name.strip_prefix("_imre_metadata.") {
         return metadata::call(ctx, operation, args, kwargs);
