@@ -241,6 +241,27 @@ def current():
     assert bound(number) == 1 << 101
     assert add(number, 0.5) is NotImplemented
 
+    index = int.__index__
+    assert type(index) is type(add) and index.__objclass__ is int
+    assert index is Number.__index__ is bool.__index__
+    exact = 1 << 100
+    assert exact.__index__() is exact
+    assert number.__index__() == exact and type(number.__index__()) is int
+    assert True.__index__() == 1 and type(True.__index__()) is int
+
+    class CustomIndex(int):
+        def __index__(self):
+            return 73
+
+    custom = CustomIndex(4)
+    assert custom.__index__() == 73 and index(custom) == 4
+    try:
+        index("4")
+    except TypeError as error:
+        assert str(error) == "descriptor '__index__' requires a 'int' object but received a 'str'"
+    else:
+        raise AssertionError("int index accepted a string")
+
     class Library:
         field = 17
 
