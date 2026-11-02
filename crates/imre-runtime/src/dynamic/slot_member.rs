@@ -215,6 +215,40 @@ impl Context {
         self.finish_namespace_class(class, scope, cell, None, Vec::new())
     }
 
+    /// Allocate through type.__new__, validating its explicit receiver and positional arguments.
+    pub(super) fn type_new(&mut self, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+        let Some((&meta, args)) = args.split_first() else {
+            return Err(Error::new(
+                "TypeError",
+                "type.__new__(): not enough arguments",
+            ));
+        };
+        let type_class = self.builtin("type");
+        if !self.direct_subclass(meta, type_class) {
+            let owner = self.exact_type(meta)?;
+            let message = if self.direct_subclass(owner, type_class) {
+                let name = self.class_name(meta);
+                format!("type.__new__({name}): {name} is not a subtype of type")
+            } else {
+                format!(
+                    "type.__new__(X): X is not a type object ({})",
+                    self.type_name(meta)
+                )
+            };
+            return Err(Error::new("TypeError", message));
+        }
+        let [name, bases, namespace] = args else {
+            return Err(Error::new(
+                "TypeError",
+                format!(
+                    "type.__new__() takes exactly 3 arguments ({} given)",
+                    args.len()
+                ),
+            ));
+        };
+        self.type_from_namespace(Some(meta), *name, *bases, *namespace, kwargs, false)
+    }
+
     /// Validate the receiver of the unbound ABCMeta.__new__ method.
     pub(super) fn abc_new_from_namespace(
         &mut self,
@@ -230,10 +264,10 @@ impl Context {
                 "ABCMeta.__new__ requires an ABCMeta subtype",
             ));
         }
-        self.type_from_namespace(Some(meta), name, bases, namespace, &keywords)
+        self.type_from_namespace(Some(meta), name, bases, namespace, &keywords, true)
     }
 
-    /// Construct a class from a copied namespace, optionally using an ABC metaclass.
+    /// Construct a class from a copy of its namespace, including any deferred annotation cells.
     pub(super) fn type_from_namespace(
         &mut self,
         explicit_meta: Option<Id>,
@@ -241,6 +275,7 @@ impl Context {
         base_tuple: Id,
         namespace: Id,
         kwargs: &[(String, Id)],
+        abc_new: bool,
     ) -> Result<Id> {
         let argument = |ctx: &Context, position, expected, value| {
             Error::new(
@@ -292,12 +327,6 @@ impl Context {
                 None,
                 false,
             )?;
-            let Some(winner) = winner.filter(|&meta| self.is_abc_metaclass(meta)) else {
-                return Err(Error::new(
-                    "NotImplementedError",
-                    "type() with specialized metaclasses is unsupported",
-                ));
-            };
             if bases
                 .iter()
                 .any(|&base| self.direct_subclass(base, type_class))
@@ -307,13 +336,13 @@ impl Context {
                     "type() with specialized metaclasses is unsupported",
                 ));
             }
-            let abc = self.abc_meta();
-            if explicit_meta != Some(winner)
-                && self.class_attr(winner, "__new__") != self.class_attr(abc, "__new__")
+            if let Some(winner) = winner
+                && explicit_meta != Some(winner)
+                && self.class_attr(winner, "__new__").is_some()
             {
                 let result =
-                    self.call_abc_new(winner, name, base_tuple, namespace, kwargs.to_vec())?;
-                if explicit_meta.is_some() {
+                    self.call_metaclass_new(winner, name, base_tuple, namespace, kwargs.to_vec())?;
+                if abc_new {
                     // The outer ABCMeta.__new__ also initializes a more derived __new__ result.
                     let Value::Class { scope, .. } = *self.heap.get(result) else {
                         self.lookup_attr(result, "__dict__")?;
@@ -332,7 +361,7 @@ impl Context {
                 }
                 return Ok(result);
             }
-            Some(winner)
+            winner
         } else {
             None
         };
@@ -376,7 +405,7 @@ impl Context {
             self.heap.keep(value);
         }
         // Inherited ABCMeta.__new__ calls type.__new__ from abc's defining globals.
-        let creator = metaclass.and(self.builtins.get("abc.ABCMeta").copied());
+        let creator = abc_new.then(|| self.abc_meta());
         let creator_scope = match creator.map(|meta| self.heap.get(meta)) {
             Some(Value::Class { scope, .. }) => *scope,
             _ => self.heap.current_scope(),
@@ -453,7 +482,7 @@ impl Context {
         };
         *class_meta = metaclass;
         self.finish_namespace_class(class, scope, cell, dict_cell, kwargs.to_vec())?;
-        if metaclass.is_some() {
+        if abc_new {
             self.init_abstract_class(class, scope)?;
         }
         Ok(class)
