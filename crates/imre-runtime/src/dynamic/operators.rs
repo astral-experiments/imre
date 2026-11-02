@@ -1952,6 +1952,14 @@ impl Context {
                             push_frame(&mut work, Part::Value(*value, true))?;
                             continue;
                         }
+                        Value::MappingProxy(mapping) => {
+                            if repr {
+                                append_rendered_text(&mut output, "mappingproxy(")?;
+                                push_frame(&mut work, Part::Text(")"))?;
+                            }
+                            push_frame(&mut work, Part::Value(*mapping, repr))?;
+                            continue;
+                        }
                         Value::Slice(_) => {
                             if slice_budget.is_some_and(|limit| slice_depth >= limit) {
                                 return Err(Error::new(

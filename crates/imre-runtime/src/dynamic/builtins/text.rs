@@ -111,7 +111,8 @@ pub(super) fn construct(
             if target != value {
                 ctx.heap.keep(target);
             }
-            let value = target;
+            // mappingproxy.__str__ returns the backing mapping's string object directly.
+            let value = ctx.mapping_proxy_target(target);
             if matches!(ctx.heap.get(value), Value::Str(_) | Value::SurrogateStr(_)) {
                 return Ok(value);
             }
