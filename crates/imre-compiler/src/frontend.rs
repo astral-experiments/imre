@@ -9358,11 +9358,12 @@ impl<'a> Checker<'a> {
                 self.defer_object_error(&error);
                 return Ok(Expr::none());
             }
-            Some(Binding::Intrinsic(Intrinsic::GetCwd)) => {
+            Some(Binding::Intrinsic(Intrinsic::GetCwd { bytes })) => {
                 self.arguments(call, &[], None)?;
+                let op = ir::ProcessOperation::GetCwd { bytes };
                 return Ok(Expr {
-                    ty: Type::Str,
-                    kind: ExprKind::Builtin(Builtin::Process(ir::ProcessOperation::GetCwd), vec![]),
+                    ty: if bytes { Type::Bytes } else { Type::Str },
+                    kind: ExprKind::Builtin(Builtin::Process(op), vec![]),
                 });
             }
             Some(Binding::Intrinsic(Intrinsic::Popen)) => return self.popen(call, None),
