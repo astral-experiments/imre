@@ -1256,7 +1256,9 @@ impl Context {
         if let Some(values) = self.enum_values(id) {
             if let Some(ordered) = self.float_enum_names(id) {
                 let names = self.lookup_attr(id, "_member_map_")?;
-                return self.items(ordered)?.into_iter()
+                return self
+                    .items(ordered)?
+                    .into_iter()
                     .map(|key| self.get_item(names, key))
                     .collect();
             }
@@ -1563,7 +1565,10 @@ impl Context {
         let Some(body) = frame.namespace else {
             return Ok(None);
         };
-        let annotation_cell = frame.class_namespace.as_ref().and_then(|ns| ns.annotation_dict_cell);
+        let annotation_cell = frame
+            .class_namespace
+            .as_ref()
+            .and_then(|ns| ns.annotation_dict_cell);
         let names: indexmap::IndexMap<String, Id> = self
             .dict_entries(body)
             .expect("class body dictionary")
@@ -1587,7 +1592,10 @@ impl Context {
             let key = self.text("__classdictcell__");
             self.put_item(body, key, cell)?;
         }
-        Ok(Some(ExposedClassBody { mapping: body, annotation_cell }))
+        Ok(Some(ExposedClassBody {
+            mapping: body,
+            annotation_cell,
+        }))
     }
 
     /// Materialize once and keep that exact dict as the module's binding storage.
@@ -1889,9 +1897,21 @@ impl Context {
                     });
                     self.builtins.insert(format!("int.{field}"), descriptor);
                 }
-                &["__add__", "bit_length", "from_bytes", "to_bytes", "__format__", "__repr__"]
+                &[
+                    "__add__",
+                    "bit_length",
+                    "from_bytes",
+                    "to_bytes",
+                    "__format__",
+                    "__repr__",
+                ]
             }
-            "float" => &["__format__", "__getformat__", "as_integer_ratio", "__repr__"],
+            "float" => &[
+                "__format__",
+                "__getformat__",
+                "as_integer_ratio",
+                "__repr__",
+            ],
             "bytes" => {
                 self.builtin("bytes.fromhex");
                 builtins::BYTES_METHODS
@@ -2061,7 +2081,9 @@ impl Context {
         let modules = self.public_modules()?;
         if matches!(self.heap.get(modules), Value::Dict(_)) {
             let (_, index) = self.find_dictionary_key(modules, name, None)?;
-            return Ok(index.map_or(default.unwrap_or(NONE), |i| self.stored_entries(modules)[i].1));
+            return Ok(index.map_or(default.unwrap_or(NONE), |i| {
+                self.stored_entries(modules)[i].1
+            }));
         }
         let get = self.lookup_attr(modules, "get")?;
         let args = match default {
@@ -2085,7 +2107,8 @@ impl Context {
             };
             self.heap.reserve_temporaries(1)?;
             self.heap.keep(module);
-            let initializing = self.lookup_attr(module, "__spec__")
+            let initializing = self
+                .lookup_attr(module, "__spec__")
                 .and_then(|spec| self.lookup_attr(spec, "_initializing"));
             match initializing {
                 Ok(flag) if self.truth(flag)? => break self.public_registered_module(key)?,
@@ -2669,8 +2692,10 @@ impl Context {
                 ),
                 importlib::SourceBody::Compiled(_)
                     if let Some(origin) = origin
-                        && ((matches!(name, "importlib" | "importlib._bootstrap" | "importlib._bootstrap_external")
-                            && self.bootstrap_file_spec != NONE)
+                        && ((matches!(
+                            name,
+                            "importlib" | "importlib._bootstrap" | "importlib._bootstrap_external"
+                        ) && self.bootstrap_file_spec != NONE)
                             || (name != "__main__"
                                 && !stdlib::is_module(name)
                                 && self.sources.contains_key("importlib")
