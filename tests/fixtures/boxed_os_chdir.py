@@ -1,6 +1,7 @@
 import errno
 import os
 import posix
+import subprocess
 import sys
 from os import chdir
 
@@ -35,13 +36,15 @@ def current():
         assert chdir(descriptor) is None
         assert os.getcwd() == original
         chdir(dirname)
-        chdir("..")
         try:
             chdir(Directory(missing))
         except FileNotFoundError as error:
             assert error.errno == errno.ENOENT and error.filename is missing
         else:
             raise AssertionError("changed into a nonexistent directory")
+        child = subprocess.run(["/bin/pwd", "-P"], stdout=subprocess.PIPE, check=True)
+        assert child.stdout == os.fsencode(os.path.join(original, dirname)) + b"\n"
+        chdir("..")
         fd = os.open(__file__, os.O_RDONLY)
         try:
             try:
