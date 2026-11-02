@@ -8,7 +8,7 @@ pub(super) fn function(name: &str) -> bool {
         "launch"
             | "pid"
             | "pipe"
-            | "status"
+            | "poll"
             | "wait"
             | "signal"
             | "communicate"
@@ -337,7 +337,10 @@ fn launch(ctx: &mut Context, values: &[Id]) -> Result<Id> {
         keep,
     );
     match child {
-        Ok(child) => Ok(ctx.alloc(Value::ProcessHandle(child))),
+        Ok(child) => Ok(ctx.alloc(Value::ProcessHandle {
+            child,
+            reported: false,
+        })),
         Err(failure) => {
             let error = failure.error.into();
             match failure.directory {
@@ -365,6 +368,33 @@ fn timeout(ctx: &Context, value: Id) -> Result<Option<f64>> {
         .ok_or_else(|| Error::new("TypeError", "expected a numeric timeout"))
 }
 
+// Python owns the mutable returncode. Keep the physical reap in ChildControl so
+// a later assignment cannot authorize signaling a PID that has been released.
+fn report_status(ctx: &mut Context, handle: Id, status: Option<i32>) -> Id {
+    let Some(code) = status else { return NONE };
+    let Value::ProcessHandle { reported, .. } = ctx.heap.get_mut(handle) else {
+        unreachable!("validated process handle")
+    };
+    // A returning signal handler can already have waited and reset returncode.
+    let code = if std::mem::replace(reported, true) {
+        0
+    } else {
+        code
+    };
+    ctx.int(i64::from(code))
+}
+
+enum StopWait {
+    Assigned,
+    Raised(Error),
+}
+
+impl From<crate::Error> for StopWait {
+    fn from(error: crate::Error) -> Self {
+        Self::Raised(error.into())
+    }
+}
+
 pub(super) fn call(
     ctx: &mut Context,
     name: &str,
@@ -387,10 +417,11 @@ pub(super) fn call(
     let Some((&handle, operands)) = args.split_first() else {
         return Err(Error::new("TypeError", "missing native process handle"));
     };
-    let Value::ProcessHandle(child) = ctx.heap.get(handle) else {
+    let Value::ProcessHandle { child, reported } = ctx.heap.get(handle) else {
         return Err(Error::new("TypeError", "expected a native process handle"));
     };
     let child = child.clone();
+    let reported = *reported;
     match (name, operands) {
         ("pid", []) => Ok(ctx.int(i64::from(child.pid()))),
         ("pipe", &[index]) => {
@@ -403,21 +434,35 @@ pub(super) fn call(
                 None => Ok(NONE),
             }
         }
-        ("status", &[poll]) => Ok(child
-            .status(ctx.truth(poll)?)?
-            .map_or(NONE, |n| ctx.int(i64::from(n)))),
-        ("wait", &[seconds]) => Ok(child
-            .wait(timeout(ctx, seconds)?, || ctx.dispatch_signals())?
-            .map_or(NONE, |n| ctx.int(i64::from(n)))),
+        // Python asks again only after its public status was cleared. A real
+        // second wait would get ECHILD, which Popen reports as zero.
+        ("poll", []) | ("wait", [_, _]) if reported => Ok(ctx.int(0)),
+        ("poll", []) => Ok(report_status(ctx, handle, child.poll()?)),
+        ("wait", &[seconds, owner]) => {
+            let seconds = timeout(ctx, seconds)?;
+            match child.wait(seconds, || {
+                ctx.dispatch_signals().map_err(StopWait::Raised)?;
+                // A timed wait checks public status between polls. A blocking
+                // waitpid resumes after a returning handler and reports its reap.
+                if seconds.is_some() {
+                    let status = ctx
+                        .lookup_attr(owner, "returncode")
+                        .map_err(StopWait::Raised)?;
+                    if status != NONE {
+                        return Err(StopWait::Assigned);
+                    }
+                }
+                Ok(())
+            }) {
+                Ok(code) => Ok(report_status(ctx, handle, code)),
+                Err(StopWait::Assigned) => Ok(NONE),
+                Err(StopWait::Raised(error)) => Err(error),
+            }
+        }
         ("signal", &[number]) => {
-            let number = ctx
-                .index_integer(number)?
-                .to_i64()
-                .and_then(|n| i32::try_from(n).ok())
-                .ok_or_else(|| {
-                    Error::new("OverflowError", "Python int too large to convert to C int")
-                })?;
-            child.signal(number)?;
+            // os.kill converts its signal to Py_ssize_t before narrowing for POSIX.
+            let number = os::ssize_t(ctx, number)?;
+            child.signal(number as libc::c_int)?;
             Ok(NONE)
         }
         ("communicate", &[input, seconds, use_select]) => {

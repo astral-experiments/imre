@@ -2737,7 +2737,7 @@ impl Context {
                 code.method_imports = Rc::new(imre_ast::module_imports(&body));
                 let caller = self.heap.current_code();
                 let inherited = matches!(self.heap.get(caller), Value::Code(code) if
-            code.flags.unwrap_or(0) & imre_ast::code_flags::FUTURE_ANNOTATIONS != 0
+            code.flags & imre_ast::code_flags::FUTURE_ANNOTATIONS != 0
             || matches!(&code.body, Body::Source(p) if p.private_names.as_ref().is_some_and(|n| n.string_annotations)));
                 if inherited || imre_ast::future_annotations(&body) {
                     code.private_names = Some(Rc::new(imre_ast::lower_in(&mut body, "", true)));
@@ -2849,8 +2849,15 @@ impl Context {
             first_line: program.first_line,
             module_definition: !program.nested_global && program.name == program.qualname,
             coroutine: program.kind == FunctionKind::Coroutine,
+            flags: match program.kind {
+                FunctionKind::Generator | FunctionKind::GeneratorLambda => {
+                    imre_ast::code_flags::GENERATOR
+                }
+                FunctionKind::Coroutine => imre_ast::code_flags::COROUTINE,
+                FunctionKind::Plain => 0,
+            },
+            flags_complete: false,
             body: Body::Source(program),
-            flags: None,
             parameters: parameters.unwrap_or(NONE),
             nested: Vec::new(),
             closure_supported: freevars.is_some(),
@@ -3448,7 +3455,7 @@ impl Context {
         }
         let signature: Signature<'_> = serde_json::from_str(self.str_value(code.parameters)?)
             .map_err(|_| Error::new("SystemError", "invalid generator signature"))?;
-        let postponed = code.flags.unwrap_or(0) & imre_ast::code_flags::FUTURE_ANNOTATIONS != 0;
+        let postponed = code.flags & imre_ast::code_flags::FUTURE_ANNOTATIONS != 0;
         let private_names = signature
             .private_scope
             .or(postponed.then_some(("", true)))

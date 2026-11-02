@@ -698,14 +698,14 @@ impl Session {
         calls: FallbackCalls,
         runtime_provider: Option<usize>,
     ) -> Result<(), String> {
-        let all_calls = matches!(calls, FallbackCalls::All);
-        self.set_fallback_rules(all_calls);
+        let all_calls = matches!(calls, FallbackCalls::All | FallbackCalls::DecoratorFactories);
+        self.set_fallback_rules(all_calls, matches!(calls, FallbackCalls::DecoratorFactories));
         let provider = runtime_provider.map(|index| self.files[index]);
         self.errors(skipped, overloads, all_calls, provider)?;
         if let FallbackCalls::Entry(entry) = calls {
             // Only the entry gained a new statement order. Imported modules retain
             // the argument-checking policy they had before the guard.
-            self.set_fallback_rules(true);
+            self.set_fallback_rules(true, false);
             let checked = CheckedFile::new(
                 &self.db,
                 self.files[entry],
@@ -722,14 +722,19 @@ impl Session {
         Ok(())
     }
 
-    fn set_fallback_rules(&mut self, scoped_builtin: bool) {
+    fn set_fallback_rules(&mut self, scoped_builtin: bool, check_callees: bool) {
         let mut rules = RuleSelection::default();
         let arguments = if scoped_builtin {
             CALL_ARGUMENT_RULES
         } else {
             &[]
         };
-        for &name in ["invalid-return-type"].iter().chain(arguments) {
+        let callee = check_callees.then_some("call-non-callable");
+        for name in ["invalid-return-type"]
+            .into_iter()
+            .chain(arguments.iter().copied())
+            .chain(callee)
+        {
             rules.enable(
                 default_lint_registry()
                     .get(name)
@@ -805,6 +810,8 @@ pub(crate) enum FallbackCalls {
     None,
     Entry(usize),
     All,
+    /// A factory must return a callable to decorate the method.
+    DecoratorFactories,
 }
 
 const CALL_ARGUMENT_RULES: &[&str] = &[

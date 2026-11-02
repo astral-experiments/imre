@@ -1,6 +1,7 @@
 //! Abstract method declarations on the bundled ABC and its subclasses.
 
 use std::collections::BTreeSet;
+use std::ffi::c_long;
 
 use super::Context;
 use super::value::{Error, FALSE, Id, NONE, NOT_IMPLEMENTED, Result, TRUE, Value};
@@ -292,7 +293,27 @@ impl Context {
                 super::builtins::set_add(self, methods, key)?;
             }
         }
-        self.set_abstract_methods(scope, methods)
+        self.set_abstract_methods(scope, methods)?;
+
+        let Some(marker) = self.own_class_attr(class, "__abc_tpflags__") else {
+            return Ok(());
+        };
+        let Value::Int(bits) = self.heap.get(marker) else {
+            return Ok(());
+        };
+        const COLLECTION_FLAGS: c_long = (1 << 5) | (1 << 6);
+        let error = match bits.to_i64().and_then(|n| c_long::try_from(n).ok()) {
+            Some(n) if n & COLLECTION_FLAGS == COLLECTION_FLAGS => Error::new(
+                "TypeError",
+                "__abc_tpflags__ cannot be both Py_TPFLAGS_SEQUENCE and Py_TPFLAGS_MAPPING",
+            ),
+            Some(_) => return Ok(()),
+            None => Error::new("OverflowError", "Python int too large to convert to C long"),
+        };
+        // A class captured by __init_subclass__ exposes its namespace even if ABC setup fails.
+        let key = self.heap.code_name("__abc_tpflags__");
+        self.remove_binding(scope, "__abc_tpflags__", key)?;
+        Err(error)
     }
 
     pub(super) fn set_abstract_methods(&mut self, scope: Id, methods: Id) -> Result<()> {

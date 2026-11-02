@@ -168,7 +168,7 @@ pub(super) fn call(
             fd.warn_on_close(ctx, receiver)?;
             return flush_and_close(ctx, receiver);
         }
-        return fd.call(ctx, receiver, name, args, kwargs);
+        return fd.call(ctx, receiver, name, args);
     }
     if matches!(name, "name" | "mode" | "raw") {
         if let Some((path, mode)) = handle.path_metadata() {
@@ -226,7 +226,7 @@ pub(super) fn call(
         };
         return Ok(ctx.alloc(Value::Bytes(data)));
     }
-    let result = files::binary_method(ctx, buffer, name, args, kwargs)?;
+    let result = files::binary_method(ctx, buffer, name, args)?;
     Ok(if name == "__enter__" {
         receiver
     } else {

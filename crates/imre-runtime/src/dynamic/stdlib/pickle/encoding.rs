@@ -230,6 +230,13 @@ fn legacy_global<'a>(module: &'a str, name: &'a str) -> Result<(&'a str, &'a str
             _ => return Err(unsupported()),
         });
     }
+    if module == "itertools" {
+        return Ok(match name {
+            "filterfalse" => (module, "ifilterfalse"),
+            "zip_longest" => (module, "izip_longest"),
+            _ => (module, name),
+        });
+    }
     if module == "collections" {
         return Ok(match name {
             "UserDict" => ("UserDict", "IterableUserDict"),
@@ -265,7 +272,6 @@ fn legacy_global<'a>(module: &'a str, name: &'a str) -> Result<(&'a str, &'a str
         "http.cookiejar",
         "http.cookies",
         "http.server",
-        "itertools",
         "multiprocessing.connection",
         "multiprocessing.context",
         "multiprocessing.popen_fork",

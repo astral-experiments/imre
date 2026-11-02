@@ -554,6 +554,7 @@ pub(crate) enum IntrinsicModule {
     Tomli,
     TomliW,
     Shutil,
+    Grp,
     Pwd,
     Resource,
     Fcntl,
@@ -1075,6 +1076,7 @@ impl IntrinsicModule {
             "tomli_w" => Some(Self::TomliW),
             "shutil" => Some(Self::Shutil),
             "fcntl" if cfg!(target_os = "linux") => Some(Self::Fcntl),
+            "grp" if cfg!(any(target_os = "linux", target_os = "macos")) => Some(Self::Grp),
             "pwd" if cfg!(any(target_os = "linux", target_os = "macos")) => Some(Self::Pwd),
             "resource" if cfg!(target_os = "linux") => Some(Self::Resource),
             "random" => Some(Self::Random),
@@ -2610,6 +2612,9 @@ impl IntrinsicModule {
             (Self::Itertools, "count") => Intrinsic::Count,
             (Self::Itertools, "takewhile") => Intrinsic::ObjectRuntimeExport("itertools.takewhile"),
             (Self::Itertools, "dropwhile") => Intrinsic::ObjectRuntimeExport("itertools.dropwhile"),
+            (Self::Itertools, "zip_longest") => {
+                Intrinsic::ObjectRuntimeExport("itertools.zip_longest")
+            }
             (Self::Itertools, "filterfalse") => {
                 Intrinsic::ObjectRuntimeExport("itertools.filterfalse")
             }
@@ -2676,6 +2681,10 @@ impl IntrinsicModule {
             (Self::Fcntl, "F_SETFL") => Intrinsic::ObjectRuntimeExport("fcntl.F_SETFL"),
             (Self::Fcntl, "F_GETPIPE_SZ") => Intrinsic::ObjectRuntimeExport("fcntl.F_GETPIPE_SZ"),
             (Self::Fcntl, "F_SETPIPE_SZ") => Intrinsic::ObjectRuntimeExport("fcntl.F_SETPIPE_SZ"),
+            (Self::Grp, "getgrall") => Intrinsic::ObjectRuntimeExport("grp.getgrall"),
+            (Self::Grp, "getgrgid") => Intrinsic::ObjectRuntimeExport("grp.getgrgid"),
+            (Self::Grp, "getgrnam") => Intrinsic::ObjectRuntimeExport("grp.getgrnam"),
+            (Self::Grp, "struct_group") => Intrinsic::ObjectRuntimeExport("grp.struct_group"),
             (Self::Pwd, "getpwall") => Intrinsic::ObjectRuntimeExport("pwd.getpwall"),
             (Self::Pwd, "getpwnam") => Intrinsic::ObjectRuntimeExport("pwd.getpwnam"),
             (Self::Pwd, "getpwuid") => Intrinsic::ObjectRuntimeExport("pwd.getpwuid"),
@@ -3138,6 +3147,7 @@ pub(crate) struct SourceGraph {
     checked_diagnostics: std::cell::RefCell<Vec<Vec<CheckedDiagnostic>>>,
     pub(crate) needs_object_runtime: std::cell::Cell<bool>,
     pub(crate) check_decorated_method_calls: std::cell::Cell<bool>,
+    pub(crate) check_method_factories: std::cell::Cell<bool>,
     pub(crate) class_body_error: std::cell::RefCell<Option<String>>,
     pub(crate) object_builtin_errors: std::cell::RefCell<HashSet<String>>,
     pub(crate) deferred_object_error: std::cell::RefCell<Option<String>>,
@@ -4384,6 +4394,7 @@ impl<'a> Loader<'a> {
             checked_diagnostics: std::cell::RefCell::new(checked_diagnostics),
             needs_object_runtime: std::cell::Cell::new(self.needs_object_imports),
             check_decorated_method_calls: Default::default(),
+            check_method_factories: Default::default(),
             class_body_error: Default::default(),
             object_builtin_errors: Default::default(),
             deferred_object_error: self.wildcard_import.into(),

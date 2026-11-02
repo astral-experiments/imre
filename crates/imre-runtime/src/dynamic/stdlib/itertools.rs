@@ -271,6 +271,146 @@ impl Context {
     }
 }
 
+fn compatible_cursor_class(ctx: &Context, base: Id, class: Id, layout: &str) -> bool {
+    ctx.itertools_layout(base) == Some(layout)
+        && matches!(ctx.heap.get(class), Value::Class { ancestors, .. }
+            if (class == base || ancestors.contains(&base))
+                && ancestors.iter().all(|a| !matches!(ctx.heap.get(*a), Value::Native(kind) if kind != "object")))
+}
+
+pub(super) fn zip_longest_allocate(
+    ctx: &mut Context,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Id> {
+    if let [base, class, state] = args
+        && kwargs.is_empty()
+        && compatible_cursor_class(ctx, *base, *class, "itertools.zip_longest")
+    {
+        return Ok(instance_with_state(ctx, *base, *class, *state));
+    }
+    Err(Error::new(
+        "TypeError",
+        "expected a zip_longest subclass with compatible layout",
+    ))
+}
+
+pub(super) fn starmap_allocate(
+    ctx: &mut Context,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Id> {
+    let [base, class, function, source] = args else {
+        return Err(Error::new(
+            "TypeError",
+            "invalid starmap allocation arguments",
+        ));
+    };
+    if !kwargs.is_empty() || !compatible_cursor_class(ctx, *base, *class, "itertools.starmap") {
+        return Err(Error::new(
+            "TypeError",
+            "expected a starmap subclass with compatible layout",
+        ));
+    }
+    Ok(iterator_instance(ctx, *base, *class, *source, *function))
+}
+
+/// Fetch one row, fully unpack it, then invoke the saved callable.
+pub(super) fn starmap_next(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    if kwargs.is_empty()
+        && let [base, receiver] = args
+        && ctx.itertools_layout(*base) == Some("itertools.starmap")
+        && let Value::Instance {
+            member_values: Some(values),
+            ..
+        } = ctx.heap.get(*receiver)
+        && let Some(state) = values.get(base)
+        && let Value::Tuple(pair) = ctx.heap.get(*state)
+        && let &[source, function] = pair.as_slice()
+    {
+        let mark = ctx.heap.temporary_mark();
+        let row = ctx
+            .next_result(source)?
+            .ok_or_else(|| Error::new("StopIteration", ""))?;
+        ctx.heap.keep(row);
+        let tuple = super::super::builtins::call(ctx, "tuple", &[row], &[])?;
+        // Converting a non-tuple releases the source row before the callable runs.
+        ctx.finish_call_operands(mark, tuple);
+        let args = ctx
+            .tuple_items(tuple)?
+            .expect("tuple constructor returned a tuple");
+        return ctx.call(function, args, Vec::new());
+    }
+    Err(Error::new("TypeError", "expected an initialized starmap"))
+}
+
+pub(super) fn predicate_allocate(
+    ctx: &mut Context,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Id> {
+    let [base, class, state, iterable] = args else {
+        return Err(Error::new(
+            "TypeError",
+            "invalid predicate iterator allocation arguments",
+        ));
+    };
+    if !kwargs.is_empty()
+        || !matches!(ctx.heap.get(*class), Value::Class { ancestors, .. }
+        if *class == *base || ancestors.contains(base))
+    {
+        return Err(Error::new(
+            "TypeError",
+            "expected a predicate iterator subclass",
+        ));
+    }
+    let source = ctx.iterator(*iterable)?;
+    Ok(iterator_instance(ctx, *base, *class, source, *state))
+}
+
+/// Retain the source and cursor state in a GC-traced, class-owned slot.
+fn iterator_instance(ctx: &mut Context, base: Id, class: Id, source: Id, state: Id) -> Id {
+    ctx.heap.keep(source);
+    let state = ctx.alloc(Value::Tuple(vec![source, state]));
+    instance_with_state(ctx, base, class, state)
+}
+
+fn instance_with_state(ctx: &mut Context, base: Id, class: Id, state: Id) -> Id {
+    ctx.heap.keep(state);
+    let result = ctx.instance(class, None);
+    let Value::Instance { member_values, .. } = ctx.heap.get_mut(result) else {
+        unreachable!("fresh iterator instance")
+    };
+    // The declaring class keys this private slot, so subclass descriptors cannot intercept it.
+    member_values
+        .get_or_insert_with(Default::default)
+        .insert(base, state);
+    result
+}
+
+pub(super) fn iterator_state(
+    ctx: &Context,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+    kind: &str,
+) -> Result<Id> {
+    if let [base, receiver] = args
+        && kwargs.is_empty()
+        && matches!(ctx.heap.get(*base), Value::Class { .. })
+        && let Value::Instance {
+            member_values: Some(values),
+            ..
+        } = ctx.heap.get(*receiver)
+        && let Some(&state) = values.get(base)
+    {
+        return Ok(state);
+    }
+    Err(Error::new(
+        "TypeError",
+        format!("expected a {kind} instance"),
+    ))
+}
+
 /// Store the acquired iterator before pulling either member of the first pair.
 pub(super) fn pairwise_allocate(
     ctx: &mut Context,
@@ -279,11 +419,10 @@ pub(super) fn pairwise_allocate(
 ) -> Result<Id> {
     if let [base, class, source] = args
         && kwargs.is_empty()
-        && ctx.itertools_layout(*base) == Some("itertools.pairwise")
-        && ctx.direct_subclass(*class, *base)
+        && compatible_cursor_class(ctx, *base, *class, "itertools.pairwise")
     {
         let state = ctx.alloc(Value::Tuple(vec![*source]));
-        return Ok(instance_with_cursor_state(ctx, *base, *class, state));
+        return Ok(instance_with_state(ctx, *base, *class, state));
     }
     Err(Error::new("TypeError", "expected a pairwise subclass"))
 }
@@ -365,126 +504,6 @@ pub(super) fn pairwise_next(ctx: &mut Context, args: &[Id], kwargs: &[(String, I
     let (live_source, _) = pairwise_state(ctx, base, receiver)?;
     set_pairwise_state(ctx, base, receiver, live_source, Some(following));
     Ok(ctx.alloc(Value::Tuple(vec![previous, following])))
-}
-
-pub(super) fn starmap_allocate(
-    ctx: &mut Context,
-    args: &[Id],
-    kwargs: &[(String, Id)],
-) -> Result<Id> {
-    let [base, class, function, source] = args else {
-        return Err(Error::new(
-            "TypeError",
-            "invalid starmap allocation arguments",
-        ));
-    };
-    if !kwargs.is_empty()
-        || ctx.itertools_layout(*base) != Some("itertools.starmap")
-        || !matches!(ctx.heap.get(*class), Value::Class { ancestors, .. }
-            if (*class == *base || ancestors.contains(base))
-                && ancestors.iter().all(|a| !matches!(ctx.heap.get(*a), Value::Native(kind) if kind != "object")))
-    {
-        return Err(Error::new(
-            "TypeError",
-            "expected a starmap subclass with compatible layout",
-        ));
-    }
-    Ok(iterator_instance(ctx, *base, *class, *source, *function))
-}
-
-/// Fetch one row, fully unpack it, then invoke the saved callable.
-pub(super) fn starmap_next(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
-    if kwargs.is_empty()
-        && let [base, receiver] = args
-        && ctx.itertools_layout(*base) == Some("itertools.starmap")
-        && let Value::Instance {
-            member_values: Some(values),
-            ..
-        } = ctx.heap.get(*receiver)
-        && let Some(state) = values.get(base)
-        && let Value::Tuple(pair) = ctx.heap.get(*state)
-        && let &[source, function] = pair.as_slice()
-    {
-        let mark = ctx.heap.temporary_mark();
-        let row = ctx
-            .next_result(source)?
-            .ok_or_else(|| Error::new("StopIteration", ""))?;
-        ctx.heap.keep(row);
-        let tuple = super::super::builtins::call(ctx, "tuple", &[row], &[])?;
-        // Converting a non-tuple releases the source row before the callable runs.
-        ctx.finish_call_operands(mark, tuple);
-        let args = ctx
-            .tuple_items(tuple)?
-            .expect("tuple constructor returned a tuple");
-        return ctx.call(function, args, Vec::new());
-    }
-    Err(Error::new("TypeError", "expected an initialized starmap"))
-}
-
-pub(super) fn predicate_allocate(
-    ctx: &mut Context,
-    args: &[Id],
-    kwargs: &[(String, Id)],
-) -> Result<Id> {
-    let [base, class, state, iterable] = args else {
-        return Err(Error::new(
-            "TypeError",
-            "invalid predicate iterator allocation arguments",
-        ));
-    };
-    if !kwargs.is_empty()
-        || !matches!(ctx.heap.get(*class), Value::Class { ancestors, .. }
-        if *class == *base || ancestors.contains(base))
-    {
-        return Err(Error::new(
-            "TypeError",
-            "expected a predicate iterator subclass",
-        ));
-    }
-    let source = ctx.iterator(*iterable)?;
-    Ok(iterator_instance(ctx, *base, *class, source, *state))
-}
-
-/// Retain the source and cursor state in a GC-traced, class-owned slot.
-fn iterator_instance(ctx: &mut Context, base: Id, class: Id, source: Id, state: Id) -> Id {
-    ctx.heap.keep(source);
-    let state = ctx.alloc(Value::Tuple(vec![source, state]));
-    instance_with_cursor_state(ctx, base, class, state)
-}
-
-fn instance_with_cursor_state(ctx: &mut Context, base: Id, class: Id, state: Id) -> Id {
-    ctx.heap.keep(state);
-    let result = ctx.instance(class, None);
-    let Value::Instance { member_values, .. } = ctx.heap.get_mut(result) else {
-        unreachable!("fresh iterator instance")
-    };
-    // The declaring class keys this private slot, so subclass descriptors cannot intercept it.
-    member_values
-        .get_or_insert_with(Default::default)
-        .insert(base, state);
-    result
-}
-
-pub(super) fn predicate_state(
-    ctx: &mut Context,
-    args: &[Id],
-    kwargs: &[(String, Id)],
-) -> Result<Id> {
-    if let [base, receiver] = args
-        && kwargs.is_empty()
-        && matches!(ctx.heap.get(*base), Value::Class { .. })
-        && let Value::Instance {
-            member_values: Some(values),
-            ..
-        } = ctx.heap.get(*receiver)
-        && let Some(&state) = values.get(base)
-    {
-        return Ok(state);
-    }
-    Err(Error::new(
-        "TypeError",
-        "expected a predicate iterator instance",
-    ))
 }
 
 /// Build the shared repeat cursor, converting a supplied count exactly once.

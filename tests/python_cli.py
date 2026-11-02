@@ -2946,6 +2946,7 @@ for name in ("md4", "ripemd160"):
             "boxed_pairwise.py",
             "boxed_itertools_cycle.py",
             "boxed_itertools_batched.py",
+            "boxed_itertools_zip_longest.py",
             "boxed_itertools_tee.py",
             "boxed_itertools_combinations.py",
             "boxed_itertools_permutations.py",
@@ -3077,9 +3078,13 @@ for name in ("md4", "ripemd160"):
             compare("-IB", "-c", imports + "arithmetic.current()")
             plugin.write_bytes((fixtures / "boxed_subprocess_exports.py").read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")
+            compare("-EOOB", "-Werror::ResourceWarning", "-X", "utf8=0",
+                    "-c", imports + "arithmetic.interpreter_flags()")
             plugin.write_bytes((fixtures / "boxed_subprocess_interruptible_read.py").read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")
             plugin.write_bytes((fixtures / "boxed_subprocess_pass_fds.py").read_bytes())
+            compare("-IB", "-c", imports + "arithmetic.current()")
+            plugin.write_bytes((fixtures / "boxed_subprocess_returncode.py").read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")
             plugin.write_bytes((fixtures / "boxed_subprocess_lifetime.py").read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")
@@ -3106,6 +3111,8 @@ for name in ("md4", "ripemd160"):
             compare("-IB", "-c", imports + "arithmetic.current()")
         if sys.platform in ("darwin", "linux"):
             compare("-IB", str(fixtures / "boxed_geteuid_exports.py"), "os", "posix")
+            plugin.write_bytes((fixtures / "boxed_grp.py").read_bytes())
+            compare("-IB", "-c", imports + "arithmetic.current()")
             plugin.write_bytes((fixtures / "boxed_pwd.py").read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")
             plugin.write_bytes((fixtures / "boxed_posix_expanduser.py").read_bytes())
@@ -3120,6 +3127,9 @@ for name in ("md4", "ripemd160"):
             plugin.write_bytes((fixtures / "boxed_posix_fadvise.py").read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")
             plugin.write_bytes((fixtures / "boxed_posix_fallocate.py").read_bytes())
+            compare("-IB", "-c", imports + "arithmetic.current()")
+            compare("-IB", str(fixtures / "boxed_posix_spawn_exports.py"), "posix", "os")
+            plugin.write_bytes((fixtures / "boxed_posix_spawn_actions.py").read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")
             plugin.write_bytes((fixtures / "boxed_posix_sched_param.py").read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")

@@ -91,6 +91,19 @@ pub(super) fn symbol(name: &str) -> Option<Intrinsic> {
         "memfd_create" if cfg!(target_os = "linux") => {
             Intrinsic::ObjectRuntimeExport("posix.memfd_create")
         }
+        "posix_spawn" if cfg!(target_os = "linux") => {
+            Intrinsic::ObjectRuntimeExport("posix.posix_spawn")
+        }
+        "posix_spawnp" if cfg!(target_os = "linux") => {
+            Intrinsic::ObjectRuntimeExport("posix.posix_spawnp")
+        }
+        "POSIX_SPAWN_OPEN" if cfg!(target_os = "linux") => Intrinsic::IntConstant(0),
+        "POSIX_SPAWN_CLOSE" if cfg!(target_os = "linux") => Intrinsic::IntConstant(1),
+        "POSIX_SPAWN_DUP2" if cfg!(target_os = "linux") => Intrinsic::IntConstant(2),
+        // Native module initialization probes the optional libc closefrom extension.
+        "POSIX_SPAWN_CLOSEFROM" if cfg!(target_os = "linux") => {
+            Intrinsic::ObjectRuntimeExport("posix.POSIX_SPAWN_CLOSEFROM")
+        }
         "urandom" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.urandom"),
         "umask" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.umask"),
         "utime" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.utime"),

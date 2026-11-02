@@ -2747,6 +2747,8 @@ impl Context {
         #[cfg(unix)]
         if source.is_none() && matches!(name, "os" | "posix") {
             let posix = if name == "os" { Some(self.module("posix")?) } else { None };
+            #[cfg(target_os = "linux")]
+            stdlib::posix_spawn::initialize(self, scope, posix)?;
             for attr in ["chown", "fchown", "lchown", "getuid", "geteuid", "getgid", "getgroups"] {
                 let value = match posix {
                     Some(posix) => self.lookup_attr(posix, attr)?,
@@ -2791,6 +2793,8 @@ impl Context {
                     "_pairwise_next",
                     "_starmap_allocate",
                     "_starmap_next",
+                    "_zip_longest_allocate",
+                    "_zip_longest_state",
                     "_predicate_allocate",
                     "_predicate_state",
                     "_chain_allocate",
@@ -2987,6 +2991,8 @@ impl Context {
                 let native_new = self.builtin("hashlib.new");
                 self.bind(scope, "_native_new", native_new);
             }
+            #[cfg(any(target_os = "linux", target_os = "macos"))]
+            "grp" => stdlib::grp::install(self, scope),
             #[cfg(any(target_os = "linux", target_os = "macos"))]
             "pwd" => stdlib::pwd::install(self, scope),
             "_md5" => stdlib::hashlib::md5::install(self, module, scope)?,
@@ -3299,11 +3305,12 @@ impl Context {
             {
                 self.freeze_itertools_types(scope);
                 for (name, owner) in [
+                    ("pairwise", "itertools.pairwise"),
                     ("starmap", "itertools.starmap"),
                     ("takewhile", "itertools.takewhile"),
                     ("dropwhile", "itertools.dropwhile"),
                     ("compress", "itertools.compress"),
-                    ("pairwise", "itertools.pairwise"),
+                    ("zip_longest", "itertools.zip_longest"),
                 ] {
                     if let Some(class) = self.scope_name(scope, name)
                         && let Value::Class { scope, .. } = *self.heap.get(class)
