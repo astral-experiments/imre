@@ -111,7 +111,7 @@ branches. Skipped tests count toward the suite size only.
 
 | Module | Paired passes | Upstream tests | How the tests ran |
 | --- | ---: | ---: | --- |
-| `argparse` | 1,425 | 1,893 | Development builds. The intact baseline contributes 1,397 pairs. Additional original cases passed in focused runs with clean teardown. |
+| `argparse` | 1,539 | 1,893 | Development builds. The intact baseline contributes 1,397 pairs. Additional original cases passed in focused runs with clean teardown. |
 | `collections` | 517 | 659 | Selected tests across development builds. Twelve additional UserString originals passed at both levels. |
 | `csv` | 122 | 128 | Complete suite on `main`, six skips |
 | `dataclasses` | 234 | 276 | Development builds. The intact runs each passed 207 of 276. Three original cases were new to the cross-build total. |
@@ -135,8 +135,8 @@ branches. Skipped tests count toward the suite size only.
 | `threading` | 81 | 228 | All 228 cases ran in ordinary and boxed modes on one development build |
 | `typing` | 107 | 712 | Selected tests across development builds |
 | `unittest` | 160 | 1,090 | Intact package runner discovered 244 cases and started 213 |
-| `urllib` | 84 | 178 | Selected cases |
-| **Total** | **4,555** | **13,328** | **3 complete suites on `main`** |
+| `urllib` | 97 | 178 | Selected cases |
+| **Total** | **4,682** | **13,328** | **3 complete suites on `main`** |
 
 See the [standard library coverage report](docs/stdlib.md) for the Linux test
 results and import coverage recorded in this repository.
