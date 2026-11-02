@@ -400,41 +400,51 @@ fn compiled(ctx: &mut Context, id: Id, flags: Option<Id>) -> Result<Id> {
         source.extend_from_within(1..source.len() - 1);
     }
     let ascii = bytes || flags & ASCII != 0;
-    let engine_source = if flags & VERBOSE != 0 {
-        let mut source =
-            imre_regex::translate_with_flags(&source, true, ascii, flags & DOTALL != 0)
-                .map_err(|message| pattern_error(ctx, id, flags, message))?
-                .source;
-        if flags & MULTILINE != 0 && source.ends_with(imre_regex::FINAL_NEWLINE_ANCHOR) {
-            source.truncate(source.len() - imre_regex::FINAL_NEWLINE_ANCHOR.len());
-            source.push('$');
+    // Byte escapes have a separate grammar. Unicode IGNORECASE must fold
+    // the literal guard without extending Python's word-category membership.
+    let literal_guards = !bytes && (flags & IGNORECASE == 0 || ascii);
+    let translate = || {
+        let mut translated = imre_regex::translate_for_runtime(
+            &source,
+            flags & VERBOSE != 0,
+            ascii,
+            flags & DOTALL != 0,
+            literal_guards,
+        )?
+        .source;
+        if flags & MULTILINE != 0 && translated.ends_with(imre_regex::FINAL_NEWLINE_ANCHOR) {
+            translated.truncate(translated.len() - imre_regex::FINAL_NEWLINE_ANCHOR.len());
+            translated.push('$');
         }
-        source
+        Ok(translated)
+    };
+    let build = |mut source: String| {
+        if flags & IGNORECASE != 0 && !bytes {
+            source = casefold::expand(&source, ascii)?;
+        }
+        let matcher = build_regex(&source, bytes, flags)?;
+        Ok((source, matcher))
+    };
+    let prepared = if flags & VERBOSE != 0 {
+        translate()
     } else {
         imre_regex::preserve_zero_repeat_groups(python_escapes(
             &source,
             ascii,
             flags & MULTILINE != 0,
         ))
-        .map_err(|message| pattern_error(ctx, id, flags, message))?
     };
-    let engine_source = if flags & IGNORECASE != 0 && !bytes {
-        casefold::expand(&engine_source, ascii)
-            .map_err(|message| pattern_error(ctx, id, flags, message))?
-    } else {
-        engine_source
-    };
-    // The regular-expression backend does not parse atomic groups directly.
-    // The shared Python translator can lower the subset with a fixed delimiter.
-    let (engine_source, regex) = match build_regex(&engine_source, bytes, flags) {
-        Ok(regex) => (engine_source, regex),
-        Err(original) if !bytes && flags & !UNICODE == 0 && source.contains("(?>") => {
-            let translated = imre_regex::translate(&source, false)
-                .map_err(|_| pattern_error(ctx, id, flags, original))?
-                .source;
-            let regex = build_regex(&translated, bytes, flags)
-                .map_err(|message| pattern_error(ctx, id, flags, message))?;
-            (translated, regex)
+    let (engine_source, regex) = match prepared.and_then(build) {
+        Ok(pair) => pair,
+        // Retry unsupported engine syntax with the shared Python subset translator.
+        Err(original)
+            if !bytes
+                && flags & VERBOSE == 0
+                && (literal_guards && source.contains("(?!")
+                    || flags & !UNICODE == 0 && source.contains("(?>")) =>
+        {
+            let translated = translate().map_err(|_| pattern_error(ctx, id, flags, original))?;
+            build(translated).map_err(|message| pattern_error(ctx, id, flags, message))?
         }
         Err(message) => return Err(pattern_error(ctx, id, flags, message)),
     };
