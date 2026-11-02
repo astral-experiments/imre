@@ -236,8 +236,16 @@ def fields():
     fields, outer = fallback["fields"]()
     assert not outer and fallback["__annotations__"] == {"second": "Missing"}
     assert fields.__annotate__ is None
-    exec("class Declared:\n    existed = '__annotations__' in locals()\n    field: int\nclass Empty(Declared): pass", ns)
-    assert not ns["Declared"].existed
+    exec("""class Declared:
+    try:
+        __annotations__
+    except NameError:
+        pass
+    else:
+        raise AssertionError("deferred fields exposed an annotation mapping during construction")
+    field: int
+class Empty(Declared): pass
+""", ns)
     assert ns["Empty"].__annotate__ is None and ns["Empty"].__annotations__ == {}
     for expr in ("(tmp := int)", "(yield int)", "(await T)"):
         for source in ("def f(arg: " + expr + "): pass",
