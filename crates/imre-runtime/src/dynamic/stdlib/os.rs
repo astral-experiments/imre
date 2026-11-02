@@ -350,6 +350,7 @@ pub(super) fn is_descriptor_function(name: &str) -> bool {
         name,
         "access"
             | "open"
+            | "getsid"
             | "waitpid"
             | "rename"
             | "replace"
@@ -769,6 +770,19 @@ pub(super) fn descriptor(
             "TypeError",
             format!("posix.{name}() takes no keyword arguments"),
         ));
+    }
+    if name == "getsid" {
+        let [pid] = args else {
+            return Err(Error::new(
+                "TypeError",
+                format!(
+                    "posix.getsid() takes exactly one argument ({} given)",
+                    args.len()
+                ),
+            ));
+        };
+        let sid = native::getsid(c_int(ctx, *pid)?)?;
+        return Ok(ctx.int(i64::from(sid)));
     }
     if name == "waitpid" {
         let [pid, options] = args else {

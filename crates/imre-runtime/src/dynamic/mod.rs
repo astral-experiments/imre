@@ -43,7 +43,6 @@ mod thread_local;
 mod thread_lock;
 mod thread_rlock;
 mod thread_worker;
-mod type_constructor;
 mod typing;
 mod union;
 mod unraisable;
@@ -1851,10 +1850,7 @@ impl Context {
                 let id = stdlib::datetime::store(self, value, NONE);
                 self.builtins.insert(format!("{name}.{field}"), id);
             }
-        } else if name == "datetime.timezone" {
-            self.builtin(stdlib::datetime::TZINFO);
-            self.builtin("datetime.timezone.__getinitargs__");
-        } else if name == stdlib::datetime::TZINFO {
+        } else if matches!(name, "datetime.timezone" | stdlib::datetime::TZINFO) {
             stdlib::datetime::install_members(self, name);
         }
         if builtins::is_exception(name) {

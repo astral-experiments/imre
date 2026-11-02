@@ -44,7 +44,11 @@ pub(in crate::dynamic) fn tzinfo(ctx: &mut Context) -> Id {
 pub(in crate::dynamic) fn members(class: &str) -> Option<Members> {
     let (owner, fields, methods): (_, &[_], &[_]) = match class {
         TZINFO => (TZINFO, &[], &["__reduce__", "tzname", "utcoffset", "dst"]),
-        "datetime.timezone" => ("datetime.timezone", &[], &["__getinitargs__"]),
+        "datetime.timezone" => (
+            "datetime.timezone",
+            &[],
+            &["__getinitargs__", "utcoffset", "dst", "tzname"],
+        ),
         "datetime.date" => (
             "datetime.date",
             &FIELDS[..3],
@@ -134,7 +138,11 @@ pub(in crate::dynamic) fn install_members(ctx: &mut Context, class: &str) {
     if class == "datetime.datetime" {
         ctx.builtin("datetime.date");
     }
-    ctx.builtin(&format!("{class}.__new__"));
+    if class == "datetime.timezone" {
+        ctx.builtin(TZINFO);
+    } else {
+        ctx.builtin(&format!("{class}.__new__"));
+    }
     for method in members.methods {
         ctx.builtin(&format!("{class}.{method}"));
     }
@@ -185,6 +193,56 @@ fn calendar(ctx: &Context, obj: Id, class: &str) -> Option<Calendar> {
         }
         _ => None,
     }
+}
+
+/// Return a fixed zone's stored offset or name after validating its datetime argument.
+fn fixed_zone_method(
+    ctx: &mut Context,
+    method: &str,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Id> {
+    let name = method.rsplit('.').next().unwrap();
+    let Some((&receiver, rest)) = args.split_first() else {
+        return Err(Error::new(
+            "TypeError",
+            format!("unbound method {method}() needs an argument"),
+        ));
+    };
+    let (value, offset, name_object) = match ctx.heap.get(receiver) {
+        Value::Calendar {
+            value,
+            tzoffset,
+            tzname,
+            ..
+        } if *tzoffset != NONE => (value, *tzoffset, *tzname),
+        _ => {
+            let actual = ctx.exact_type(receiver).ok();
+            let kind =
+                actual.map_or_else(|| ctx.type_name(receiver), |class| ctx.class_name(class));
+            return Err(Error::new(
+                "TypeError",
+                format!(
+                    "descriptor '{name}' for 'datetime.timezone' objects doesn't apply to a '{kind}' object"
+                ),
+            ));
+        }
+    };
+    let dt = crate::dynamic::builtins::one_positional_arg(method, rest, kwargs)?;
+    if dt != NONE && calendar(ctx, dt, "datetime").is_none() {
+        let actual = ctx.exact_type(dt).ok();
+        let kind = actual.map_or_else(|| ctx.type_name(dt), |class| ctx.class_name(class));
+        return Err(Error::new(
+            "TypeError",
+            format!("{name}(dt) argument must be a datetime instance or None, not {kind}"),
+        ));
+    }
+    Ok(match name {
+        "utcoffset" => offset,
+        "dst" => NONE,
+        _ if name_object != NONE => name_object,
+        _ => ctx.text(value.text()),
+    })
 }
 
 fn zone(ctx: &Context, id: Id) -> Result<Option<Calendar>> {
@@ -537,6 +595,9 @@ pub(super) fn call(
                 *scalar = storage;
             }
             Ok(result)
+        }
+        "timezone.utcoffset" | "timezone.dst" | "timezone.tzname" => {
+            fixed_zone_method(ctx, method, args, kwargs)
         }
         "tzinfo.utcoffset" | "tzinfo.dst" | "tzinfo.tzname" => {
             let name = method.rsplit('.').next().unwrap();
