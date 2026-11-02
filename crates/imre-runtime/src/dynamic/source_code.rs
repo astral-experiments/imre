@@ -3443,7 +3443,8 @@ impl Context {
         let value = self.enum_assignment(scope, name, value)?;
         let replaced = self.replacing_finalizer(scope, name, value);
         let scope = self.binding_scope(scope, name);
-        if let Some(locals) = self.scope_data(scope).exec_locals {
+        let frame = self.scope_data(scope);
+        if let Some(locals) = frame.exec_locals.or(frame.class_body_mapping()) {
             if matches!(self.heap.get(locals), Value::List(_)) {
                 return Err(Error::new(
                     "TypeError",
@@ -4007,15 +4008,12 @@ impl Context {
                 let key = self.heap.code_name(name);
                 let spelling = self.source_expr(code, scope, expression)?;
                 // LOAD_NAME for this implicit store skips enclosing function locals.
-                let annotations = match self.scope_name(scope, "__annotations__") {
-                    Some(mapping) => mapping,
-                    None => self.lookup(self.root_scope(scope), "__annotations__")?,
-                };
+                let annotations = self.lookup_class_local(scope, "__annotations__")?;
                 self.put_item(annotations, key, spelling)?;
             }
             Instruction::ClassAnnotator(provider) => {
                 let annotate = self.source_annotator(provider, owner, scope)?;
-                self.bind(scope, "__annotate_func__", annotate);
+                self.bind_source_name(scope, "__annotate_func__", annotate)?;
             }
             Instruction::ClassStart => {
                 self.enable_class_annotation_provider(scope);
@@ -4044,7 +4042,7 @@ impl Context {
                     .map(|name| self.heap.code_name(name))
                     .collect();
                 let attrs = self.alloc(Value::Tuple(names));
-                self.bind(scope, "__static_attributes__", attrs);
+                self.bind_source_name(scope, "__static_attributes__", attrs)?;
             }
             Instruction::Define(definition) => {
                 let value = self.source_definition(code, owner, scope, *ip - 1, definition)?;
@@ -4509,11 +4507,8 @@ impl Context {
             }
             Expr::Name(n) => {
                 let name = n.id.as_str();
-                if code.class_attributes.is_some()
-                    && code.locals.contains(name)
-                    && self.scope_name(scope, name).is_none()
-                {
-                    return self.lookup(self.root_scope(scope), name);
+                if code.class_attributes.is_some() && code.locals.contains(name) {
+                    return self.lookup_class_local(scope, name);
                 }
                 self.check_source_local(code, scope, name)?;
                 self.lookup(scope, name)
