@@ -179,6 +179,26 @@ def current():
         assert pattern.fullmatch(word + word).group(name) == word
         assert pattern.fullmatch(word) is None
 
+    for spelling, flags, word, repeated, wrong in (
+        ("(?P<name>ab)(?P=name)", re.I, "Ab", "aB", "ac"),
+        (r"(k)\1", re.I, "K", "K", "x"),
+        (r"(is)\1", re.I | re.A, "iS", "Is", "ıS"),
+        (rb"(is)\1", re.I, b"iS", b"Is", b"ix"),
+        (b"(?P<name>a)(?P=name)", re.L, b"a", b"a", b"A"),
+    ):
+        doubled = re.compile(spelling, flags)
+        match = doubled.fullmatch(word + repeated)
+        assert match.group(1) == word and match.span(1) == (0, len(word))
+        assert doubled.fullmatch(word + wrong) is None
+
+    for letter, other in (("s", "ſ"), ("i", "ı")):
+        try:
+            doubled = re.compile("(" + letter + r")\1", re.I)
+        except re.PatternError:
+            continue
+        assert doubled.fullmatch(other + other).group(1) == other
+        assert doubled.fullmatch(letter + other) is None
+
     for spelling, message, position in (
         ("é(?P<?foo>x)", "bad character in group name '?foo'", 5),
         ("(?P=<foo>)", "bad character in group name '<foo>'", 4),
