@@ -9,7 +9,6 @@ const CONSTANTS: &[(&str, i32)] = &[
     ("AF_UNIX", libc::AF_UNIX),
     ("AI_PASSIVE", libc::AI_PASSIVE),
     ("SOCK_STREAM", libc::SOCK_STREAM),
-    ("SOL_SOCKET", libc::SOL_SOCKET),
     ("IPPROTO_TCP", libc::IPPROTO_TCP),
     ("IPPROTO_IPV6", libc::IPPROTO_IPV6),
     ("IPV6_V6ONLY", libc::IPV6_V6ONLY),
@@ -25,6 +24,7 @@ const CONSTANTS: &[(&str, i32)] = &[
 // socket.py imports these constants once, so deletion must not fall back to a native value.
 const IMPORTED_CONSTANTS: &[(&str, i32)] = &[
     ("IPPROTO_UDP", libc::IPPROTO_UDP),
+    ("SOL_SOCKET", libc::SOL_SOCKET),
     ("SO_REUSEPORT", libc::SO_REUSEPORT),
     ("SOCK_DGRAM", libc::SOCK_DGRAM),
     ("SOCK_RAW", libc::SOCK_RAW),
