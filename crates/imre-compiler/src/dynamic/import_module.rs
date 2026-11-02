@@ -20,17 +20,12 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
                         .split_once("def get_original_bases(")
                         .unwrap();
                     let descriptor = UPSTREAM.find("class DynamicClassAttribute:").unwrap();
-                    let (definitions, _) = UPSTREAM[descriptor..].split_once("\n__all__ =").unwrap();
-                    // Keep CPython's wrapper and its callable-result protocol. Native code
-                    // owns function flags, including the flags on source-created generators.
-                    let (before_flags, rest) = definitions
-                        .split_once("    if (func.__class__ is FunctionType")
-                        .unwrap();
-                    let fallback = &rest[rest.find("    import functools").unwrap()..];
+                    let coroutine = UPSTREAM.find("def coroutine(func):").unwrap();
                     format!(
-                        "{helpers}{}\nfrom types import CoroutineType, GeneratorType, _prepare_coroutine\n\
-                         {before_flags}    if _prepare_coroutine(func):\n        return func\n\n{fallback}",
+                        "{helpers}{}\n{}\n{}",
                         include_str!("../../stdlib/types_original_bases.py"),
+                        &UPSTREAM[descriptor..coroutine],
+                        include_str!("../../stdlib/types_coroutine.py"),
                     )
                 }),
             ))
