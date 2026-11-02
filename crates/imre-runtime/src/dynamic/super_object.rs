@@ -16,6 +16,12 @@ impl Context {
         }
     }
 
+    pub(super) fn class_qualname(&self, class: Id) -> &str {
+        self.own_class_attr(class, "__qualname__")
+            .and_then(|qualname| self.str_value(qualname).ok())
+            .unwrap_or_else(|| self.class_name(class).rsplit('.').next().unwrap())
+    }
+
     /// Borrow the immutable MRO tuple retained by a completed Python class.
     pub(super) fn published_mro(&self, class: Id) -> Option<&[Id]> {
         let Value::Class { scope, .. } = self.heap.get(class) else {
@@ -47,8 +53,9 @@ impl Context {
                             lineage.push(self.builtin(base));
                         }
                     }
-                    "bool" => lineage.push(self.builtin("int")),
-                    "datetime.datetime" => lineage.push(self.builtin("datetime.date")),
+                    name if let Some(parent) = Self::native_base(name) => {
+                        lineage.push(self.builtin(parent));
+                    }
                     "enum.IntEnum" | "enum.IntFlag" | "enum.StrEnum" => {
                         let scalar = if name == "enum.StrEnum" { "str" } else { "int" };
                         lineage.push(self.builtin(scalar));
@@ -86,7 +93,7 @@ impl Context {
                 "TypeError",
                 format!(
                     "{}.mro() takes no keyword arguments",
-                    self.class_name(class)
+                    self.class_qualname(class)
                 ),
             ));
         }
@@ -95,7 +102,7 @@ impl Context {
                 "TypeError",
                 format!(
                     "{}.mro() takes no arguments ({} given)",
-                    self.class_name(class),
+                    self.class_qualname(class),
                     args.len()
                 ),
             ));

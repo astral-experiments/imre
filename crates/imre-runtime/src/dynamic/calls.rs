@@ -927,10 +927,7 @@ impl Context {
         if let (Value::Native(child), Value::Native(parent)) =
             (self.heap.get(class), self.heap.get(target))
         {
-            if (child == stdlib::flags::TYPE
-                || stdlib::fixed_structseq::fixed_type(child).is_some())
-                && parent == "tuple"
-            {
+            if Self::native_base(child) == Some(parent) {
                 return true;
             }
             if parent == "object" {
@@ -941,21 +938,29 @@ impl Context {
             }
             return matches!(
                 (child.as_str(), parent.as_str()),
-                ("bool", "int")
-                    | ("datetime.datetime", "datetime.date")
-                    | ("typing._UnpackGenericAlias", "typing._GenericAlias")
-                    | (HashState::XOF_CLASS, HashState::CLASS)
-                    | (stdlib::os::stat::CLASS, "tuple")
-                    | ("collections.defaultdict", "dict")
-                    | ("odict_keys", "dict_keys")
-                    | ("odict_items", "dict_items")
-                    | ("odict_values", "dict_values")
-                    | ("enum.IntEnum" | "enum.IntFlag", "int" | "enum.Enum")
+                ("enum.IntEnum" | "enum.IntFlag", "int" | "enum.Enum")
                     | ("enum.StrEnum", "str" | "enum.Enum")
             );
         }
         false
     }
+    /// Immediate native parent shared by subclass checks and the class lineage.
+    pub(super) fn native_base(class: &str) -> Option<&'static str> {
+        Some(match class {
+            "bool" => "int",
+            "datetime.datetime" => "datetime.date",
+            stdlib::flags::TYPE | stdlib::os::stat::CLASS => "tuple",
+            class if stdlib::fixed_structseq::fixed_type(class).is_some() => "tuple",
+            "typing._UnpackGenericAlias" => "typing._GenericAlias",
+            HashState::XOF_CLASS => HashState::CLASS,
+            "collections.defaultdict" => "dict",
+            "odict_keys" => "dict_keys",
+            "odict_items" => "dict_items",
+            "odict_values" => "dict_values",
+            _ => return None,
+        })
+    }
+
     fn equal_class(&self, a: Id, b: Id) -> bool {
         a == b
             || matches!((self.heap.get(a),self.heap.get(b)),(Value::Native(x),Value::Native(y)) if x==y)

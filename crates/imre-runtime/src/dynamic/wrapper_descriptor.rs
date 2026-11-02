@@ -259,6 +259,7 @@ impl BuiltinDescriptor {
                     && let Some(receiver) = receiver
                 {
                     match ctx.heap.get(receiver) {
+                        _ if self.owner == "type" => ctx.class_qualname(receiver),
                         Value::NamedTuple { class: Some(stdlib::os::stat::CLASS), .. } => "stat_result",
                         value if let Some(class) = value.instance_class() => ctx
                             .class_attr(class, "__qualname__")

@@ -112,13 +112,18 @@ def check_mro():
     assert original == [D, C, B, A, object] and D.__mro__ == tuple(original)
     original.clear()
     assert D.mro() == type.mro(D) == [D, C, B, A, object]
+    from collections import defaultdict
+    from os import terminal_size
     assert bool.mro() == type.mro(bool) == [bool, int, object]
+    assert terminal_size.mro() == [terminal_size, tuple, object]
+    assert type.mro(defaultdict) == [defaultdict, dict, object]
     assert D.mro.__self__ is D and not hasattr(super(D, D()), "mro")
 
     class Meta(type): pass
     class ViaMeta(metaclass=Meta): pass
     class Shadow(D): mro = None
     assert ViaMeta.mro() == [ViaMeta, object] and Meta.mro is type.mro
+    assert ViaMeta.mro.__qualname__ == ViaMeta.__qualname__ + ".mro"
     assert type.mro(Meta) == [Meta, type, object]
     assert Shadow.mro is None and type.mro(Shadow)[1:] == D.mro()
     for invalid in (lambda: type.mro(D()), lambda: D.mro(1), lambda: Meta.mro()):
