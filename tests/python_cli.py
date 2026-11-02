@@ -2585,6 +2585,7 @@ def report(text):
             "boxed_int_to_bytes.py",
             "boxed_int_rational_fields.py",
             "boxed_int_from_bytes.py",
+            "boxed_int_conversion.py",
             "boxed_divmod_slots.py",
             "boxed_complex.py",
             "boxed_float.py",

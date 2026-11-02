@@ -65,7 +65,15 @@ pub(super) fn construct(
                     "int() base must be >= 2 and <= 36, or 0",
                 ));
             }
-            let number = match value.map(|id| ctx.heap.get(id)) {
+            let storage = if let Some(value) = value.filter(|_| base.is_none()) {
+                if let Some(integer) = ctx.numeric_int(value)? {
+                    return Ok(integer);
+                }
+                Some(ctx.scalar_value(value))
+            } else {
+                value
+            };
+            let number = match storage.map(|id| ctx.heap.get(id)) {
                 None => crate::Int::from(0),
                 Some(Value::Str(s)) => crate::integer_text::parse_radix(s, radix as u32)?,
                 Some(Value::Bytes(b) | Value::ByteArray(b)) => {
@@ -76,8 +84,12 @@ pub(super) fn construct(
                         "int() can't convert non-string with explicit base",
                     ));
                 }
-                Some(Value::Float(f)) => crate::Int::new(crate::floats::float_to_integer(*f)?),
-                _ => ctx.as_int(value.unwrap())?,
+                _ => {
+                    return Err(type_error(format!(
+                        "int() argument must be a string, a bytes-like object or a real number, not '{}'",
+                        ctx.type_name(value.unwrap())
+                    )));
+                }
             };
             Ok(ctx.alloc(Value::Int(number)))
         }
