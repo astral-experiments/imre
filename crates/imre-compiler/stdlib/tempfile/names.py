@@ -1,5 +1,7 @@
 """POSIX named temporary files and directories for runtime-loaded modules."""
 
+import functools as _functools
+import warnings as _warnings
 import os as _os
 import errno as _errno
 from _thread import allocate_lock as _allocate_lock
@@ -265,33 +267,154 @@ def mktemp(suffix="", prefix=template, dir=None):
                           "No usable temporary filename found")
 
 
-class _TemporaryFileWrapper:
-    def __init__(self, file, name, closer):
-        self.file = file
-        self.name = name
-        self._closer = closer
-        self._original_name = name
+class _NamedFileCloser:
+    """Keep the runtime guard alive while the named file or its methods are in use."""
 
-    def __getattr__(self, name):
-        value = getattr(self.file, name)
-        if callable(value):
-            def call(*args, **kwargs):
-                return value(*args, **kwargs)
-            call._closer = self._closer
-            setattr(self, name, call)
-            return call
-        return value
+    def __init__(self, guard, name):
+        self.guard = guard
+        self.name = name
 
     def close(self):
-        _finish_named(self._closer, self._original_name, False)
+        _finish_named(self.guard, self.name, False)
 
+    def cleanup(self):
+        _finish_named(self.guard, self.name, True)
+
+
+# From CPython 3.14.5 Lib/tempfile.py. See ../docstrings/LICENSE.
+class _TemporaryFileCloser:
+    """A separate object allowing proper closing of a temporary file's
+    underlying file object, without adding a __del__ method to the
+    temporary file."""
+
+    cleanup_called = False
+    close_called = False
+
+    def __init__(
+        self,
+        file,
+        name,
+        delete=True,
+        delete_on_close=True,
+        warn_message="Implicitly cleaning up unknown file",
+    ):
+        self.file = file
+        self.name = name
+        self.delete = delete
+        self.delete_on_close = delete_on_close
+        self.warn_message = warn_message
+
+    def cleanup(self, windows=(_os.name == 'nt'), unlink=_os.unlink):
+        if not self.cleanup_called:
+            self.cleanup_called = True
+            try:
+                if not self.close_called:
+                    self.close_called = True
+                    self.file.close()
+            finally:
+                # Windows provides delete-on-close as a primitive, in which
+                # case the file was deleted by self.file.close().
+                if self.delete and not (windows and self.delete_on_close):
+                    try:
+                        unlink(self.name)
+                    except FileNotFoundError:
+                        pass
+
+    def close(self):
+        if not self.close_called:
+            self.close_called = True
+            try:
+                self.file.close()
+            finally:
+                if self.delete and self.delete_on_close:
+                    self.cleanup()
+
+    def __del__(self):
+        close_called = self.close_called
+        self.cleanup()
+        if not close_called:
+            _warnings.warn(self.warn_message, ResourceWarning)
+
+
+class _TemporaryFileWrapper:
+    """Temporary file wrapper
+
+    This class provides a wrapper around files opened for
+    temporary use.  In particular, it seeks to automatically
+    remove the file when it is no longer needed.
+    """
+
+    def __init__(self, file, name, delete=True, delete_on_close=True):
+        self.file = file
+        self.name = name
+        self._closer = _TemporaryFileCloser(
+            file,
+            name,
+            delete,
+            delete_on_close,
+            warn_message=f"Implicitly cleaning up {self!r}",
+        )
+
+    @classmethod
+    def _from_named_file(cls, file, name, guard):
+        wrapper = cls.__new__(cls)
+        wrapper.file = file
+        wrapper.name = name
+        wrapper._closer = _NamedFileCloser(guard, name)
+        return wrapper
+
+    def __repr__(self):
+        file = self.__dict__['file']
+        return f"<{type(self).__name__} {file=}>"
+
+    def __getattr__(self, name):
+        # Attribute lookups are delegated to the underlying file
+        # and cached for non-numeric results
+        # (i.e. methods are cached, closed and friends are not)
+        file = self.__dict__['file']
+        a = getattr(file, name)
+        # Some native methods are callable without exposing their __call__ slot.
+        if hasattr(a, '__call__') or isinstance(a, type(len)):
+            func = a
+            @_functools.wraps(func)
+            def func_wrapper(*args, **kwargs):
+                return func(*args, **kwargs)
+            # Avoid closing the file as long as the wrapper is alive,
+            # see issue #18879.
+            func_wrapper._closer = self._closer
+            a = func_wrapper
+        if not isinstance(a, int):
+            setattr(self, name, a)
+        return a
+
+    # The underlying __enter__ method returns the wrong object
+    # (self.file) so override it to return the wrapper
     def __enter__(self):
         self.file.__enter__()
         return self
 
-    def __exit__(self, exc_type, exc, tb):
-        _finish_named(self._closer, self._original_name, True)
+    # Need to trap __exit__ as well to ensure the file gets
+    # deleted when used in a with statement
+    def __exit__(self, exc, value, tb):
+        result = self.file.__exit__(exc, value, tb)
+        self._closer.cleanup()
+        return result
 
+    def close(self):
+        """
+        Close the temporary file, possibly deleting it.
+        """
+        self._closer.close()
+
+    # iter() doesn't use __getattr__ to find the __iter__ method
+    def __iter__(self):
+        # Don't return iter(self.file), but yield from it to avoid closing
+        # file as long as it's being used as iterator (see issue #23700).  We
+        # can't use 'yield from' here because iter(file) returns the file
+        # object itself, which has a close method, and thus the file would get
+        # closed when the generator is finalized, due to PEP380 semantics.
+        for line in self.file:
+            yield line
 
 def NamedTemporaryFile(mode="w+b", buffering=-1, encoding=None, newline=None,
                        suffix=None, prefix=None, dir=None, delete=True, *,
@@ -320,7 +443,7 @@ def NamedTemporaryFile(mode="w+b", buffering=-1, encoding=None, newline=None,
         raise ValueError("binary mode doesn't take a newline argument")
     (file, closer), name = _create_file(dir, prefix, suffix, output_type, _open_named, delete_on_close)
     try:
-        wrapper = _TemporaryFileWrapper(file, name, closer)
+        wrapper = _TemporaryFileWrapper._from_named_file(file, name, closer)
         if not delete:
             _keep_named(closer)
         return wrapper

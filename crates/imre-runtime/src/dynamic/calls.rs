@@ -1004,7 +1004,11 @@ impl Context {
                 {
                     "method-wrapper"
                 }
-                Value::Native(_) => "builtin_function_or_method",
+                Value::IoMethod {
+                    name: "__init__" | "__repr__" | "__iter__" | "__next__" | "__del__",
+                    ..
+                } => "method-wrapper",
+                Value::Native(_) | Value::IoMethod { .. } => "builtin_function_or_method",
                 _ => return None,
             },
             Value::Native(name) if let Some(slot) = BuiltinDescriptor::lookup(name) => slot.class(),
