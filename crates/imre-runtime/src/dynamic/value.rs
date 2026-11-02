@@ -882,7 +882,7 @@ pub(super) enum Value {
     },
     Class {
         /// Private layout tag for native I/O class generations.
-        io_kind: Option<&'static str>,
+        io_kind: Option<super::stdlib::io::NativeClass>,
         metaclass: Option<Id>,
         name: String,
         scope: Id,
@@ -1048,6 +1048,7 @@ pub(super) enum Value {
     IoOpen {
         reader: Id,
         writer: Id,
+        random: Id,
     },
     IoMethod {
         owner: Id,
@@ -1102,13 +1103,8 @@ pub(super) struct CachedCall {
 impl Value {
     /// Class of a native file whose Python descriptors are installed by _io.
     pub(super) fn native_io_class_name(&self) -> Option<&'static str> {
-        let name = self.file_class_name()?;
-        // BufferedRandom still uses its intrinsic methods rather than installed _io descriptors.
-        (name != "_io.BufferedRandom").then_some(name)
-    }
-
-    fn file_class_name(&self) -> Option<&'static str> {
         match self {
+            Self::BufferedRandom(..) => Some("_io.BufferedRandom"),
             Self::TextFile(_) => Some("_io.TextIOWrapper"),
             Self::File(file) => Some(match file.as_ref() {
                 super::stdlib::BinaryFile::Descriptor(fd) if fd.reading && fd.writing => {
@@ -1148,7 +1144,7 @@ impl Value {
             Self::Bytes(_) => "bytes",
             Self::MemoryView { .. } => "memoryview",
             Self::ByteArray(_) => "bytearray",
-            Self::File(_) | Self::TextFile(_) => return self.file_class_name(),
+            Self::File(_) | Self::TextFile(_) => return self.native_io_class_name(),
             Self::ProcessHandle(_) => "_imre_subprocess.Handle",
             Self::BufferedRandom(..) => "_io.BufferedRandom",
             Self::SequenceIterator { .. } => "iterator",
@@ -1217,7 +1213,14 @@ impl Value {
 
     pub(super) fn io_kind(&self) -> Option<&'static str> {
         match self {
-            Self::Class { io_kind, .. } => *io_kind,
+            Self::Class {
+                io_kind: Some(super::stdlib::io::NativeClass::Named(name)),
+                ..
+            } => Some(name),
+            Self::Class {
+                io_kind: Some(super::stdlib::io::NativeClass::Pair { .. }),
+                ..
+            } => Some("BufferedRWPair"),
             _ => None,
         }
     }
@@ -1470,8 +1473,12 @@ impl Value {
                 scope,
                 ancestors,
                 metaclass,
+                io_kind,
                 ..
             } => {
+                if let Some(super::stdlib::io::NativeClass::Pair { reader, writer }) = io_kind {
+                    visit.extend([*reader, *writer]);
+                }
                 visit.extend(*metaclass);
                 visit.push(*scope);
                 visit.extend(ancestors);
@@ -1520,6 +1527,10 @@ impl Value {
                 match memory_stream {
                     Some(super::stdlib::io::MemoryStream::BufferedFile(file)) => visit.push(*file),
                     Some(super::stdlib::io::MemoryStream::BufferedBytes(writer)) => visit.extend(writer.raw.get()),
+                    Some(super::stdlib::io::MemoryStream::Pair(pair)) => {
+                        visit.extend(pair.reader);
+                        visit.extend(pair.writer);
+                    }
                     Some(super::stdlib::io::MemoryStream::Bytes(stream)) => {
                         visit.extend(stream.snapshot.get())
                     }
@@ -1595,7 +1606,7 @@ impl Value {
                 visit.extend([*scope, *code, *globals]);
                 visit.extend(*back);
             }
-            Self::IoOpen { reader, writer } => visit.extend([*reader, *writer]),
+            Self::IoOpen { reader, writer, random } => visit.extend([*reader, *writer, *random]),
             Self::IoMethod { owner, .. } => visit.push(*owner),
             Self::CodecInfo {
                 decode,

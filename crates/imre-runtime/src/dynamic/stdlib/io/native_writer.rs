@@ -29,13 +29,14 @@ fn truncate_file(ctx: &mut Context, buffer: Id, size: Option<Id>) -> Result<Id> 
 
 pub(super) fn call(
     ctx: &mut Context,
+    owner: &str,
     receiver: Id,
     name: &str,
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
     if name == "__init__" {
-        return descriptor_buffer::initialize(ctx, receiver, args, kwargs, false);
+        return descriptor_buffer::initialize(ctx, receiver, args, kwargs, owner);
     }
     if name == "truncate" {
         let count = args.len() + kwargs.len();
@@ -54,14 +55,14 @@ pub(super) fn call(
     } else if !kwargs.is_empty() {
         return Err(Error::new(
             "TypeError",
-            format!("BufferedWriter.{name}() takes no keyword arguments"),
+            format!("{owner}.{name}() takes no keyword arguments"),
         ));
     }
-    super::argument_count("BufferedWriter", name, args.len())?;
+    super::argument_count(owner, name, args.len())?;
     if name == "write" {
         files::output_bytes(ctx, args[0])?;
     }
-    if name == "readable" {
+    if name == "readable" && owner == "BufferedWriter" {
         return Ok(FALSE);
     }
     if name == "__exit__" {
@@ -102,6 +103,7 @@ pub(super) fn call(
         return match name {
             "raw" => Ok(fd.raw),
             "name" | "mode" => ctx.lookup_attr(fd.raw, name),
+            "truncate" if owner == "BufferedRandom" => fd.call(ctx, receiver, name, args, kwargs),
             "truncate" => {
                 fd.call(ctx, receiver, "flush", &[], &[])?;
                 let truncate = ctx.lookup_attr(fd.raw, "truncate")?;

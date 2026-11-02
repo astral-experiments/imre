@@ -24,6 +24,7 @@ use seekable::Memory;
 pub(super) use seekable::disk_offset;
 
 use buffered::{Input, Output};
+pub(crate) use buffered::peek_bytes;
 
 pub(super) type BoxedFile = allocator_api2::boxed::Box<FileState>;
 
@@ -148,6 +149,10 @@ impl FileState {
 
     pub(super) fn read_pipe_once(&mut self, size: Option<usize>) -> Result<Bytes> {
         self.input()?.read_once(size)
+    }
+
+    pub(super) fn peek_pipe(&mut self) -> Result<Bytes> {
+        self.input()?.peek()
     }
 
     pub(super) fn read_pipe_line(&mut self, size: Option<usize>) -> Result<Bytes> {
