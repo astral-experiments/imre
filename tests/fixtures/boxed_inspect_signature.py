@@ -45,6 +45,18 @@ class CallableInstance:
         raise AssertionError("signature compared the callable")
 
 
+class FunctionProxy:
+    def __init__(self, func):
+        self.__name__ = func.__name__
+        self.__code__ = func.__code__
+        self.__defaults__ = func.__defaults__
+        self.__kwdefaults__ = func.__kwdefaults__
+        self.__annotations__ = func.__annotations__
+
+    def __call__(self, *args, **kwargs):
+        pass
+
+
 class StaticCall:
     __call__ = staticmethod(lambda first, second: None)
 
@@ -92,6 +104,21 @@ class NewFirst(ConstructorBase):
 class DefaultInit(ConstructorBase):
     __init__ = object.__init__
 
+
+proxy = FunctionProxy(original)
+assert inspect.signature(proxy) == inspect.signature(original)
+proxy.__defaults__ = (5,)
+proxy.__kwdefaults__ = {"flag": True}
+proxy.__annotations__ = {"return": bytes}
+proxy_sig = inspect.signature(proxy)
+assert proxy_sig.parameters["b"].default == 5
+assert proxy_sig.parameters["flag"].default is True
+assert proxy_sig.return_annotation is bytes
+proxy.__code__ = compile("1 + 1", "<expr>", "eval")
+proxy.__annotations__ = {}
+assert str(inspect.signature(proxy)) == "()"
+del proxy.__defaults__
+assert str(inspect.signature(proxy)) == "(*args, **kwargs)"
 
 target = CallableInstance()
 target.__call__ = lambda shadow: None
