@@ -520,6 +520,12 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         {
             "selectors"
         }
+        Value::File(handle)
+            if attr == "read1"
+                && matches!(handle.as_ref(), super::stdlib::BinaryFile::Descriptor(fd) if fd.reading) =>
+        {
+            "file"
+        }
         Value::File(_)
             if matches!(
                 attr,
