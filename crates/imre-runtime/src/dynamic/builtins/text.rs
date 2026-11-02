@@ -1427,26 +1427,45 @@ pub(super) fn method(
     if owner == "str" && name == "maketrans" {
         return maketrans::table(ctx, args, kwargs);
     }
-    if owner == "bytes" && name == "__mod__" {
-        let (receiver, args) = args.split_first().ok_or_else(|| {
-            type_error("descriptor '__mod__' of 'bytes' object needs an argument")
+    if matches!(
+        (owner, name),
+        ("str", "__mod__" | "__rmod__") | ("bytes", "__mod__")
+    ) {
+        let (&receiver, args) = args.split_first().ok_or_else(|| {
+            type_error(format!(
+                "descriptor '{name}' of '{owner}' object needs an argument"
+            ))
         })?;
-        let Value::Bytes(format) = ctx.heap.get(ctx.scalar_value(*receiver)) else {
+        if !ctx.builtin_slot_accepts(receiver, owner) {
             return Err(type_error(format!(
-                "descriptor '__mod__' requires a 'bytes' object but received a '{}'",
-                ctx.type_name(*receiver)
+                "descriptor '{name}' requires a '{owner}' object but received a '{}'",
+                ctx.type_name(receiver)
             )));
-        };
-        if !kwargs.is_empty() {
-            return Err(type_error("wrapper __mod__() takes no keyword arguments"));
         }
-        let [rhs] = args else {
+        if !kwargs.is_empty() {
+            return Err(type_error(format!(
+                "wrapper {name}() takes no keyword arguments"
+            )));
+        }
+        let &[other] = args else {
             return Err(type_error(format!(
                 "expected 1 argument, got {}",
                 args.len()
             )));
         };
-        return bytes_percent(ctx, &format.clone(), *rhs);
+        if let Value::Bytes(format) = ctx.heap.get(ctx.scalar_value(receiver)) {
+            return bytes_percent(ctx, &format.clone(), other);
+        }
+        let (format, value) = if name == "__rmod__" {
+            if ctx.string_storage(other).is_none() {
+                return Ok(NOT_IMPLEMENTED);
+            }
+            (other, receiver)
+        } else {
+            (receiver, other)
+        };
+        let format = ctx.str_value(format)?.to_owned();
+        return percent(ctx, &format, value);
     }
     let (&receiver, args) = args.split_first().ok_or_else(|| {
         if name == "__new__" {
