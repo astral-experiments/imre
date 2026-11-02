@@ -2674,6 +2674,12 @@ impl Context {
                     "__name__" | "__qualname__" => {
                         return Ok(self.text(short.to_owned()));
                     }
+                    "__dict__" if class == super::deque::CLASS => {
+                        return super::deque::class_dictionary(self, obj);
+                    }
+                    "__module__" if class == super::deque::CLASS => {
+                        return Ok(self.heap.code_name(module));
+                    }
                     "__module__" => return Ok(self.text(module.to_owned())),
                     "MISSING" if class == "_contextvars.Token" => return Ok(self.token_missing),
                     "__hash__" | "__doc__" | "__text_signature__" if class == KEY_WRAPPER => {

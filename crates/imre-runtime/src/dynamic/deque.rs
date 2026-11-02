@@ -4,30 +4,50 @@ use super::{Context, Error, Id, NONE, Result, Value, builtins};
 pub(super) const CLASS: &str = "collections.deque";
 pub(super) const ITERATOR: &str = "collections._deque_iterator";
 pub(super) const REVERSE_ITERATOR: &str = "collections._deque_reverse_iterator";
+// Keep the implemented members in the order of CPython's deque type dictionary.
 pub(super) const METHODS: &[&str] = &[
-    "__init__",
-    "append",
-    "appendleft",
-    "clear",
-    "copy",
-    "__copy__",
-    "__iadd__",
-    "extend",
-    "extendleft",
-    "remove",
-    "index",
-    "pop",
-    "popleft",
-    "reverse",
-    "__len__",
-    "__contains__",
     "__repr__",
     "__iter__",
-    "__reversed__",
+    "__init__",
+    "__len__",
     "__getitem__",
     "__setitem__",
     "__delitem__",
+    "__contains__",
+    "__iadd__",
+    "append",
+    "appendleft",
+    "clear",
+    "__copy__",
+    "copy",
+    "extend",
+    "extendleft",
+    "index",
+    "pop",
+    "popleft",
+    "remove",
+    "__reversed__",
+    "reverse",
 ];
+
+/// Expose the immutable native type's own members through the same objects as class lookup.
+pub(super) fn class_dictionary(ctx: &mut Context, class: Id) -> Result<Id> {
+    const STORAGE: &str = "<collections.deque namespace>";
+    let dictionary = if let Some(&dictionary) = ctx.builtins.get(STORAGE) {
+        dictionary
+    } else {
+        let mut entries = Vec::with_capacity(METHODS.len() + 1);
+        for name in METHODS.iter().copied().chain(["__module__"]) {
+            let key = ctx.heap.code_name(name);
+            let value = ctx.lookup_attr(class, name)?;
+            entries.push((key, value));
+        }
+        let dictionary = ctx.dict(entries);
+        ctx.builtins.insert(STORAGE.into(), dictionary);
+        dictionary
+    };
+    Ok(ctx.alloc(Value::MappingProxy(dictionary)))
+}
 
 pub(super) enum IndexOp {
     Get,
