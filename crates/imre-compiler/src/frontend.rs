@@ -4714,6 +4714,7 @@ impl<'a> Checker<'a> {
                 if let ast::Expr::Call(call) = &*expression.value
                     && self.resolve(&call.func)
                         == Some(Binding::Intrinsic(Intrinsic::SubprocessRun))
+                    && call.arguments.find_keyword("stdout").is_some()
                 {
                     Some(Statement::Expr(self.process_run(call, true)?))
                 } else if let ast::Expr::Call(call) = &*expression.value
