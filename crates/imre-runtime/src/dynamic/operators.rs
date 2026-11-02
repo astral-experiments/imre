@@ -310,6 +310,23 @@ impl Context {
         Ok(self.require_index_result(value)?.1)
     }
 
+    /// Convert an index to the signed C int used by Python's native argument parser.
+    pub(super) fn index_c_int(&mut self, value: Id) -> Result<i32> {
+        let long = self.index_integer(value)?.to_i64().ok_or_else(|| {
+            Error::new("OverflowError", "Python int too large to convert to C long")
+        })?;
+        i32::try_from(long).map_err(|_| {
+            Error::new(
+                "OverflowError",
+                if long < 0 {
+                    "signed integer is less than minimum"
+                } else {
+                    "signed integer is greater than maximum"
+                },
+            )
+        })
+    }
+
     /// Require an index and retain its Python type alongside its numeric value.
     fn require_index_result(&mut self, value: Id) -> Result<(Id, crate::Int)> {
         self.index_result(value)?.ok_or_else(|| {
