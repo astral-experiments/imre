@@ -51,6 +51,7 @@ mod select;
 pub(super) mod signal;
 mod socket;
 mod structure;
+mod subprocess;
 pub(super) mod traceback;
 pub(super) mod urllib;
 mod warnings;
@@ -133,6 +134,7 @@ pub(super) fn has_lazy_attributes(name: &str) -> bool {
             | "unicodedata"
             | "json"
             | "_imre_logging"
+            | "_imre_subprocess"
             | "_imre_dataclasses"
             | "gc"
             | "_imre_mock"
@@ -362,6 +364,9 @@ fn path_text(ctx: &mut Context, path: &Path) -> Result<Id> {
 }
 
 pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<Id> {
+    if module == "_imre_subprocess" && subprocess::function(name) {
+        return Ok(ctx.builtin(&format!("{module}.{name}")));
+    }
     if module == "_imre_logging" && logging::is_function(name) {
         return Ok(ctx.builtin(&format!("{module}.{name}")));
     }
@@ -1672,6 +1677,9 @@ pub(super) fn call(
             "TypeError",
             format!("invalid arguments to {name}"),
         ));
+    }
+    if let Some(operation) = name.strip_prefix("_imre_subprocess.") {
+        return subprocess::call(ctx, operation, args, kwargs);
     }
     if let Some(function) = name.strip_prefix("_imre_logging.") {
         return logging::call(ctx, function, args, kwargs);

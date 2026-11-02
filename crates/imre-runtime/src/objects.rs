@@ -78,7 +78,7 @@ mod paths;
 pub(crate) use paths::{directory_entries, exists, is_file, path_utf8};
 pub(crate) mod posixpath;
 mod processes;
-pub(crate) use processes::initial_environment;
+pub(crate) use processes::{BoxedPipe, BoxedPopen, initial_environment};
 mod random;
 pub(crate) use random::{choice_index, imre_random_float};
 pub(crate) mod readiness;

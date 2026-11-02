@@ -8,6 +8,9 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
             "traceback.py",
             include_str!("../../stdlib/traceback_stack.py"),
         )),
+        "subprocess" if cfg!(unix) => {
+            Some(("subprocess.py", include_str!("../../stdlib/subprocess.py")))
+        }
         "linecache" => {
             static SOURCE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
             const UPSTREAM: &str = include_str!(
