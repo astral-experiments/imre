@@ -129,7 +129,23 @@ class ByteSave(TextSave):
         return self.__save[b"IMRE_SETUP_FIXTURE"]
 
 
+class InitializedSave(unittest.TestCase):
+    def __init__(self, value: str):
+        super().__init__()
+        self.__save = value
+
+    def setUp(self):
+        self.__save = "replaced"
+
+    def read(self) -> str:
+        return self.__save
+
+
 def outside_runner() -> None:
+    initialized = InitializedSave("constructor")
+    print(initialized.read())
+    initialized.setUp()
+    print(initialized.read())
     saved = dict(os.environ)
     os.environ["IMRE_SETUP_FIXTURE"] = "initial"
     text = TextSave()

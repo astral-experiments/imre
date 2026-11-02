@@ -173,20 +173,30 @@ pub(super) fn slots(
                     continue;
                 };
                 let name = if let Some(key) = crate::classes::private_field(&c.name, name) {
-                    // Class-data publication scans the original source. Until private
-                    // declarations share that normalization, never invent a second slot.
-                    if group.iter().any(|&member| {
-                        let def = &classes.definitions[member];
-                        [name, key.as_str()].into_iter().any(|member| {
+                    // A private field already owned by this class's initializer
+                    // keeps its ordinary storage. An inherited spelling may denote
+                    // a different lexical name and cannot stand in for a new field.
+                    let inherited = c
+                        .bases
+                        .first()
+                        .map_or(0, |&base| classes.definitions[base].fields.len());
+                    let initialized = c.fields[inherited..].iter().any(|f| f.name == name);
+                    if group.iter().any(|&id| {
+                        let def = &classes.definitions[id];
+                        let declared = |member: &str| {
                             def.static_bindings.contains_key(member)
                                 || def.fields.iter().any(|f| f.name == member)
                                 || def.methods.iter().any(|m| m.name.as_str() == member)
-                        })
+                        };
+                        declared(&key) || (!initialized && declared(name))
                     }) {
                         return Err(graph.modules[c.definition.module].error(
                             value,
                             "private fixture field overlaps a declared class member",
                         ));
+                    }
+                    if initialized {
+                        continue;
                     }
                     private.insert(key.clone());
                     key
