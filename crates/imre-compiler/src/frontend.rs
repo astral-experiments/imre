@@ -2575,6 +2575,9 @@ impl<'a> Checker<'a> {
         if let Some(method) = self.boxed_set_method(attribute, Some(receiver.ty)) {
             return Err(self.object_builtin_error(method, attribute));
         }
+        if receiver.ty == Type::BinaryIO && matches!(attribute.attr.as_str(), "name" | "mode") {
+            return Err(self.object_builtin_error("binary file metadata", attribute));
+        }
         if attribute.attr.as_str() == "readinto"
             && matches!(receiver.ty, Type::BinaryIO | Type::BytesIO)
         {
