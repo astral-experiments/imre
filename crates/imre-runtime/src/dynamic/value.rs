@@ -1385,6 +1385,9 @@ impl Value {
                     visit.push(reference.callback);
                 }
                 match memory_stream {
+                    Some(super::stdlib::io::MemoryStream::Decoder(decoder)) => {
+                        visit.extend([decoder.delegate, decoder.errors]);
+                    }
                     Some(super::stdlib::io::MemoryStream::Bytes(stream)) => {
                         visit.extend(stream.snapshot.get())
                     }

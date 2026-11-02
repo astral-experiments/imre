@@ -8,6 +8,7 @@ mod descriptor_buffer;
 pub(in crate::dynamic) use descriptor_buffer::BufferedFd;
 mod bytes_io;
 mod file_io;
+mod newline_decoder;
 pub(in crate::dynamic) use file_io::open;
 mod text_wrapper;
 
@@ -17,6 +18,7 @@ pub(in crate::dynamic) enum MemoryStream {
     Bytes(std::rc::Rc<bytes_io::BytesIo>),
     Wrapper(std::rc::Rc<text_wrapper::Wrapper>),
     Raw(std::rc::Rc<file_io::RawFile>),
+    Decoder(newline_decoder::Decoder),
 }
 
 const DEFAULT_BUFFER_SIZE: i64 = 128 * 1024;
@@ -121,6 +123,15 @@ pub(in super::super) fn install(ctx: &mut Context, module: Id) {
         ctx.bind(module, name, value);
     }
     let object = ctx.builtin("object");
+    let decoder = class(
+        ctx,
+        module,
+        "IncrementalNewlineDecoder",
+        object,
+        newline_decoder::METHODS,
+    );
+    ctx.builtins
+        .insert("_io.IncrementalNewlineDecoder".into(), decoder);
     let io = class(
         ctx,
         module,
@@ -193,7 +204,10 @@ fn class(ctx: &mut Context, module: Id, name: &str, base: Id, methods: &[&'stati
         .allocate_class(name.into(), scope, vec![base])
         .expect("a single I/O base has a linearization");
     let module_name = ctx.text(
-        if matches!(name, "StringIO" | "BytesIO" | "TextIOWrapper" | "FileIO") {
+        if matches!(
+            name,
+            "StringIO" | "BytesIO" | "TextIOWrapper" | "FileIO" | "IncrementalNewlineDecoder"
+        ) {
             "_io"
         } else {
             "io"
@@ -206,6 +220,7 @@ fn class(ctx: &mut Context, module: Id, name: &str, base: Id, methods: &[&'stati
     let descriptor_owner = match name {
         "TextIOBase" => "_io._TextIOBase",
         "StringIO" => "_io.StringIO",
+        "IncrementalNewlineDecoder" => "_io.IncrementalNewlineDecoder",
         "FileIO" => "_io.FileIO",
         "TextIOWrapper" => "_io.TextIOWrapper",
         "BytesIO" => "_io.BytesIO",
@@ -364,6 +379,9 @@ pub(in super::super) fn call(
             format!("invalid receiver for {name}")
         };
         return Err(Error::new("TypeError", message));
+    }
+    if ctx.builtins.get("_io.IncrementalNewlineDecoder") == Some(&owner) {
+        return newline_decoder::call(ctx, receiver, name, rest, kwargs);
     }
     if bytes_io != Some(owner)
         && matches!(name, "__iter__" | "__next__" | "readlines" | "writelines")
