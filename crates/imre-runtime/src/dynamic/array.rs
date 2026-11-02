@@ -338,6 +338,62 @@ pub(super) fn new(ctx: &mut Context, args: &[Id], kw: &[(String, Id)]) -> Result
     Ok(ctx.alloc(Value::Array(array)))
 }
 
+/// Append the bytes from one read before reporting an aligned size mismatch.
+fn from_file(ctx: &mut Context, receiver: Id, file: Id, count: Id) -> Result<Id> {
+    let count = ctx.index_integer(count)?.to_i64().ok_or_else(|| {
+        Error::new(
+            "OverflowError",
+            "Python int too large to convert to C ssize_t",
+        )
+    })?;
+    if count < 0 {
+        return Err(Error::new("ValueError", "negative count"));
+    }
+    let format = array_mut(ctx, receiver).format;
+    let size = count
+        .checked_mul(format.width() as i64)
+        .ok_or_else(|| Error::new("MemoryError", ""))?;
+    let read = ctx.lookup_attr(file, "read")?;
+    let size_arg = ctx.int(size);
+    let result = ctx.call(read, vec![size_arg], Vec::new())?;
+    let result = ctx.scalar_value(result);
+    let Value::Bytes(data) = ctx.heap.get(result) else {
+        return Err(Error::new("TypeError", "read() didn't return bytes"));
+    };
+    let len = data.len();
+    if len % format.width() != 0 {
+        return Err(Error::new(
+            "ValueError",
+            "bytes length not a multiple of item size",
+        ));
+    }
+    if len != 0 {
+        if ctx.buffer_is_exported(receiver)? {
+            return Err(Error::new(
+                "BufferError",
+                "cannot resize an array that is exporting buffers",
+            ));
+        }
+        let Some((Value::Bytes(data), Value::Array(target))) =
+            ctx.heap.source_and_target(result, receiver)
+        else {
+            unreachable!("validated bytes and array are distinct");
+        };
+        target.append_bytes(data)?;
+    }
+    if len != size as usize {
+        return Err(Error::new("EOFError", "read() didn't return enough bytes"));
+    }
+    Ok(NONE)
+}
+
+pub(super) fn has_method(name: &str) -> bool {
+    matches!(
+        name,
+        "tobytes" | "tolist" | "append" | "fromfile" | "byteswap"
+    )
+}
+
 pub(super) fn attribute(ctx: &mut Context, id: Id, name: &str) -> Option<Id> {
     let Value::Array(array) = ctx.heap.get(id) else {
         return None;
@@ -345,7 +401,7 @@ pub(super) fn attribute(ctx: &mut Context, id: Id, name: &str) -> Option<Id> {
     match name {
         "typecode" => Some(ctx.text(array.format.code())),
         "itemsize" => Some(ctx.int(array.format.width() as i64)),
-        "tobytes" | "tolist" | "append" => {
+        name if has_method(name) => {
             let callable = ctx.builtin(&format!("array.array.{name}"));
             Some(ctx.alloc(Value::Method {
                 callable,
@@ -376,6 +432,19 @@ pub(super) fn method(
         ));
     }
     match (name, args) {
+        ("fromfile", &[file, count]) => from_file(ctx, receiver, file, count),
+        ("byteswap", []) => {
+            let width = array.format.width();
+            if width > 1 {
+                for item in array_mut(ctx, receiver)
+                    .writable_bytes(0)?
+                    .chunks_exact_mut(width)
+                {
+                    item.reverse();
+                }
+            }
+            Ok(NONE)
+        }
         ("tobytes", []) => {
             let mut bytes = Vec::new();
             bytes

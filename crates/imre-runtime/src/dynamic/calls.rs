@@ -2896,7 +2896,7 @@ impl Context {
             {
                 let class = class.as_str().to_owned();
                 let (module, short) = class.rsplit_once('.').unwrap();
-                if class == "array.array" && matches!(name, "append" | "tolist" | "tobytes") {
+                if class == "array.array" && super::array::has_method(name) {
                     return Ok(self.builtin(&format!("array.array.{name}")));
                 }
                 if class == super::namedtuple::GETTER
