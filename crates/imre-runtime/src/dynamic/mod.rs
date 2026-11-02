@@ -470,6 +470,7 @@ impl Context {
                 | Value::FormatIterator { .. }
                 | Value::Generator { .. }
                 | Value::CoroutineWrapper(_)
+                | Value::BufferedRandom(..)
                 | Value::File(_)
                 | Value::TextFile(_)
                 | Value::Enumerate { .. }
@@ -491,6 +492,7 @@ impl Context {
     fn iterator(&mut self, id: Id) -> Result<Id> {
         if self.is_native_iterator(id) {
             let closed = match self.heap.get(id) {
+                Value::BufferedRandom(file, _) => file.borrow().closed(),
                 Value::File(file) => file.closed(),
                 Value::TextFile(file) => file.closed(),
                 _ => false,
@@ -616,6 +618,7 @@ impl Context {
                 | Value::Zip { .. }
                 | Value::Generator { .. }
                 | Value::CoroutineWrapper(_)
+                | Value::BufferedRandom(..)
                 | Value::File(_)
                 | Value::TextFile(_)
                 | Value::Enumerate { .. }
@@ -982,7 +985,7 @@ impl Context {
                 });
             }
             Value::LoopIterator { peeked, .. } => return Ok(peeked.take()),
-            Value::File(_) | Value::TextFile(_) => {
+            Value::BufferedRandom(..) | Value::File(_) | Value::TextFile(_) => {
                 let readline = self.lookup_attr(id, "readline")?;
                 let line = self.call(readline, Vec::new(), Vec::new())?;
                 return Ok(self.truth(line)?.then_some(line));
@@ -1187,6 +1190,7 @@ impl Context {
                 | Value::FormatIterator { .. }
                 | Value::Map { .. }
                 | Value::Filter { .. }
+                | Value::BufferedRandom(..)
                 | Value::File(_)
                 | Value::TextFile(_)
                 | Value::Count { .. }

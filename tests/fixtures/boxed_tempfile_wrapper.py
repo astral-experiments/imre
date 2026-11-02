@@ -18,6 +18,20 @@ def current():
     print(os.path.exists(name))
 
     named = tempfile.NamedTemporaryFile()
+    path = named.name
+    named.write(b"first\n\nlast")
+    named.seek(0)
+    assert iter(named.file) is named.file
+    cursor = iter(named)
+    assert next(cursor) == b"first\n"
+    del named
+    gc.collect()
+    assert os.path.exists(path)
+    assert list(cursor) == [b"\n", b"last"]
+    gc.collect()
+    assert not os.path.exists(path)
+
+    named = tempfile.NamedTemporaryFile()
     path, write = named.name, named.write
     del named
     gc.collect()
