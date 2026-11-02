@@ -302,7 +302,7 @@ impl Context {
                 if name == "__hash__"
                     && matches!(
                         kind.as_str(),
-                        "list" | "dict" | "set" | "bytearray" | KEY_WRAPPER
+                        "list" | "dict" | "set" | "bytearray" | "array.array" | KEY_WRAPPER
                     ) =>
             {
                 Some(NONE)
