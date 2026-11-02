@@ -15,6 +15,7 @@ mod function_fields;
 mod generator_protocol;
 mod importlib;
 mod iterators;
+mod lowlevel_threads;
 mod mapping_abc;
 mod module_type;
 mod namedtuple;
@@ -30,6 +31,7 @@ mod source_code;
 mod static_method;
 mod stdlib;
 mod super_object;
+mod thread_callback;
 mod thread_local;
 mod thread_lock;
 mod typing;
@@ -87,6 +89,7 @@ impl IteratorSlice<'_> {
 }
 
 pub(crate) struct Context {
+    threads: lowlevel_threads::Workers,
     heap: Heap,
     config: serde_json::Value,
     executable: PathBuf,
@@ -1385,16 +1388,17 @@ impl Context {
     }
 
     /// Materialize once and keep that exact dict as the module's binding storage.
-    fn module_globals(&mut self, scope: Id) -> Id {
+    fn module_globals(&mut self, scope: Id) -> Result<Id> {
         let scope = self.root_scope(scope);
+        self.check_thread_reporting_namespace(scope)?;
         let Value::Scope(frame) = self.heap.get_mut(scope) else {
             unreachable!("compiled scope handle")
         };
         if let Some(globals) = frame.exec_globals {
-            return globals.dict;
+            return Ok(globals.dict);
         }
         if let Some(dict) = frame.namespace {
-            return dict;
+            return Ok(dict);
         }
         let names = std::mem::take(&mut frame.names);
         let entries = names
@@ -1406,7 +1410,7 @@ impl Context {
             unreachable!()
         };
         frame.namespace = Some(dict);
-        dict
+        Ok(dict)
     }
 
     fn remove_binding(&mut self, scope: Id, name: &str, key: Id) -> Result<bool> {
@@ -1946,7 +1950,7 @@ impl Context {
         };
         self.bind(scope, "__package__", package);
         if name == "builtins" {
-            self.install_builtins(scope);
+            self.install_builtins(scope)?;
         } else if source.is_some() {
             let builtins = if name == "__main__" {
                 self.module("builtins")?
@@ -2088,6 +2092,10 @@ impl Context {
                         self.alloc(Value::TextFile(crate::objects::TextFile::standard(stderr)));
                     self.bind(scope, name, stream);
                     self.bind(scope, original, stream);
+                    if stderr && self.threads.system_module.is_none() {
+                        self.threads.system_module = Some(module);
+                        self.threads.default_stderr = Some(stream);
+                    }
                 }
                 let jit = stdlib::jit_module(self)?;
                 self.bind(scope, "_jit", jit);
@@ -2110,6 +2118,12 @@ impl Context {
                 self.publish_module("collections.abc", abc)?;
             }
             _ => {}
+        }
+        if name == "_thread" && source.is_none() {
+            for function in ["start_new_thread", "_count"] {
+                let value = self.builtin(&format!("_thread.{function}"));
+                self.bind(scope, function, value);
+            }
         }
         if let Some((path, body)) = source {
             let result = match body {

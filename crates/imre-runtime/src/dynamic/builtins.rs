@@ -1159,7 +1159,7 @@ pub(super) fn call(
                     args.len()
                 )));
             }
-            Ok(ctx.module_globals(ctx.heap.current_scope()))
+            ctx.module_globals(ctx.heap.current_scope())
         }
         "getattr" | "hasattr" => {
             positional(name, kwargs)?;

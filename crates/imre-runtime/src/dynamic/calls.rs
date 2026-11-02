@@ -43,6 +43,9 @@ pub(super) fn module_function(symbol: &str) -> Option<(&str, &str)> {
         {
             Some((module, function))
         }
+        "_thread" if super::lowlevel_threads::function_name(symbol).is_some() => {
+            Some((module, function))
+        }
         _ => None,
     }
 }
@@ -1809,13 +1812,24 @@ impl Context {
                         return Ok(self
                             .text("($module, function, iterable, /, initial=<unrepresentable>)"));
                     }
+                    "__doc__"
+                        if let Some(function) = super::lowlevel_threads::function_name(symbol) =>
+                    {
+                        return Ok(self.text(super::lowlevel_threads::doc(function)));
+                    }
+                    "__text_signature__" if symbol == "_thread.start_new_thread" => {
+                        return Ok(self.text("($module, function, args, kwargs={}, /)"));
+                    }
                     "__doc__" if symbol == "posix.getpid" => {
                         return Ok(self.text("Return the current process id."));
                     }
                     "__text_signature__"
                         if matches!(
                             symbol.as_str(),
-                            "posix.getpid" | "_thread.allocate" | "_thread.allocate_lock"
+                            "posix.getpid"
+                                | "_thread.allocate"
+                                | "_thread.allocate_lock"
+                                | "_thread._count"
                         ) =>
                     {
                         return Ok(self.text("($module, /)"));
@@ -1893,7 +1907,7 @@ impl Context {
                     return Ok(closure);
                 }
                 if name == "__globals__" {
-                    return Ok(self.module_globals(scope));
+                    return self.module_globals(scope);
                 }
                 if let Some(value) = self.function_attr(obj, fields, name)? {
                     return Ok(value);
@@ -2527,7 +2541,7 @@ impl Context {
                 ..
             } => {
                 if name == "__dict__" {
-                    return Ok(self.module_globals(scope));
+                    return self.module_globals(scope);
                 }
                 if name == "__class__" {
                     return Ok(constructor.unwrap_or_else(|| self.builtin("module")));
@@ -2780,6 +2794,7 @@ impl Context {
     /// Bypass the object's deletion hook, while honoring data descriptors on its class.
     pub(super) fn default_delete_attr(&mut self, obj: Id, name: &str) -> Result<()> {
         super::namespace::check_class_write(self, obj, name)?;
+        self.check_thread_reporting_binding(obj, name)?;
         if name == "__doc__" && matches!(self.heap.get(obj), Value::TupleGetter { .. }) {
             return super::namedtuple::set_document(self, obj, None).map(|_| ());
         }
@@ -3284,6 +3299,7 @@ impl Context {
                 format!("cannot set '{name}' attribute of immutable type '{class}'"),
             ));
         }
+        self.check_thread_reporting_binding(obj, name)?;
         if name == "__doc__" && matches!(self.heap.get(obj), Value::TupleGetter { .. }) {
             return super::namedtuple::set_document(self, obj, Some(value)).map(|_| ());
         }
@@ -4349,7 +4365,7 @@ impl Context {
                             ),
                         ));
                     }
-                    let globals = self.module_globals(scope);
+                    let globals = self.module_globals(scope)?;
                     return self.exec_source(code, globals, None, Some(callable));
                 }
                 // Root the scope, packed arguments, keyword names, and returning value.
@@ -4637,7 +4653,7 @@ impl Context {
             self.bind_local(scope, "__qualname__", qualname);
         }
         if self.scope_name(scope, "__module__").is_none() {
-            let namespace = self.module_globals(parent);
+            let namespace = self.module_globals(parent)?;
             if let Some(name) = self.dict_named_item(namespace, "__name__") {
                 self.bind_local(scope, "__module__", name);
             }

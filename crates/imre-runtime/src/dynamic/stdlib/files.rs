@@ -623,6 +623,9 @@ pub(super) fn text_method(
             Ok(NONE)
         }
         "close" | "__exit__" => {
+            if ctx.threads.default_stderr == Some(receiver) {
+                ctx.check_thread_reporter_mutable()?;
+            }
             file.close()?;
             Ok(NONE)
         }
