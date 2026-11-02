@@ -2601,13 +2601,13 @@ impl Context {
             }
             Value::Code(ref code) => match name {
                 "co_flags" => {
-                    let flags = code.flags.ok_or_else(|| {
-                        Error::new(
+                    if !code.flags_complete {
+                        return Err(Error::new(
                             "NotImplementedError",
                             "co_flags unavailable for this code object",
-                        )
-                    })?;
-                    return Ok(self.int(i64::from(flags)));
+                        ));
+                    }
+                    return Ok(self.int(i64::from(code.flags)));
                 }
                 "co_name" => return Ok(code.name),
                 "co_qualname" => return Ok(code.qualname),
