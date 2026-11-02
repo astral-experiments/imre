@@ -17,4 +17,6 @@ class Grandchild(Child):
     pass
 
 
-print(Child().value, Grandchild(42).value, Grandchild().tag)
+print(Child().value)
+print(Grandchild(42).value)
+print(Grandchild().tag)
