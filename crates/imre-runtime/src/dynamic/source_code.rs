@@ -2652,17 +2652,22 @@ impl Context {
         }
         let spellings = string_replacements(source, parsed.tokens());
         let lines = line_starts(source.match_indices('\n').map(|(offset, _)| offset + 1))?;
-        let invalid = imre_ast::repeated_keyword(parsed.syntax().into())
-            .map(|keyword| {
-                let name = keyword.arg.as_ref().unwrap();
-                (keyword.range(), format!("keyword argument repeated: {name}"))
-            })
+        let async_error = match parsed.syntax() {
+            ast::Mod::Module(module) => {
+                let error = imre_ast::async_generators::syntax_error(module);
+                if error.is_some() && imre_ast::misplaced_star_import(&module.body).is_some() {
+                    return Err(Error::new("SyntaxError", "import * only allowed at module level"));
+                }
+                error
+            }
+            _ => None,
+        };
+        let invalid = async_error
+            .map(|(range, msg)| (range, msg.to_owned()))
             .or_else(|| {
-                let ast::Mod::Module(module) = parsed.syntax() else {
-                    return None;
-                };
-                imre_ast::async_generators::syntax_error(&module.body)
-                    .map(|(range, message)| (range, message.to_owned()))
+                let keyword = imre_ast::repeated_keyword(parsed.syntax().into())?;
+                let name = keyword.arg.as_ref().unwrap();
+                Some((keyword.range(), format!("keyword argument repeated: {name}")))
             });
         if let Some((range, message)) = invalid {
             let position = |offset: usize| {

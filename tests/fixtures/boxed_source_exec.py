@@ -75,6 +75,16 @@ def async_generator_syntax():
             assert error.args == (message, (filename, line, start, None, line, end))
         else:
             raise AssertionError(source)
+    for body, expected in (
+        ("return 1\n    yield\n    g(x=1, x=2)", "'return' with value in async generator"),
+        ("g(x=1, x=2)\n    yield\n    return 1", "keyword argument repeated: x"),
+    ):
+        try:
+            compile("async def f():\n    " + body, filename, "exec")
+        except SyntaxError as error:
+            assert error.msg == expected
+        else:
+            raise AssertionError(body)
     compile("async def f():\n    def nested(): yield from ()\n    return nested", filename, "exec")
 
 

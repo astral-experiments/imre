@@ -4,10 +4,16 @@ use ruff_python_ast::{self as ast, Expr, Stmt};
 use ruff_text_size::{Ranged, TextRange};
 
 /// Find an illegal `yield from` or a valued return in an async generator, even in dead code.
-pub fn syntax_error(body: &[Stmt]) -> Option<(TextRange, &'static str)> {
+pub fn syntax_error(module: &ast::ModModule) -> Option<(TextRange, &'static str)> {
     let mut check = Check::default();
-    check.visit_body(body);
-    check.error
+    check.visit_body(&module.body);
+    let (range, message) = check.error?;
+    if crate::type_alias_error(&module.body).is_some()
+        || crate::repeated_keyword(module.into()).is_some_and(|kw| kw.start() < range.start())
+    {
+        return None;
+    }
+    Some((range, message))
 }
 
 #[derive(Default)]
@@ -23,6 +29,12 @@ struct Check {
 }
 
 impl Check {
+    fn outer_iterable(&mut self, clauses: &[ast::Comprehension]) {
+        if let Some(first) = clauses.first() {
+            self.visit_expr(&first.iter);
+        }
+    }
+
     fn record(&mut self, range: TextRange, message: &'static str) {
         if self.error.is_none_or(|(previous, _)| range.start() < previous.start())
         {
@@ -32,7 +44,7 @@ impl Check {
 
     fn scope(&mut self, body: &[Stmt], is_async: bool) {
         let outer = std::mem::replace(&mut self.current, is_async.then(AsyncBody::default));
-        self.visit_body(body);
+        stacker::maybe_grow(128 * 1024, 2 * 1024 * 1024, || self.visit_body(body));
         if let Some(AsyncBody {
             yields: true,
             valued_return: Some(range),
@@ -72,7 +84,7 @@ impl<'a> Visitor<'a> for Check {
                 {
                     body.valued_return.get_or_insert(r.range());
                 }
-                visitor::walk_stmt(self, stmt);
+                stacker::maybe_grow(128 * 1024, 2 * 1024 * 1024, || visitor::walk_stmt(self, stmt));
             }
         }
     }
@@ -100,10 +112,10 @@ impl<'a> Visitor<'a> for Check {
                 }
             }
             // Only the outermost iterable is evaluated in the enclosing scope.
-            Expr::Generator(g) => self.visit_expr(&g.generators[0].iter),
-            Expr::ListComp(c) => self.visit_expr(&c.generators[0].iter),
-            Expr::SetComp(c) => self.visit_expr(&c.generators[0].iter),
-            Expr::DictComp(c) => self.visit_expr(&c.generators[0].iter),
+            Expr::Generator(g) => self.outer_iterable(&g.generators),
+            Expr::ListComp(c) => self.outer_iterable(&c.generators),
+            Expr::SetComp(c) => self.outer_iterable(&c.generators),
+            Expr::DictComp(c) => self.outer_iterable(&c.generators),
             _ => stacker::maybe_grow(128 * 1024, 2 * 1024 * 1024, || visitor::walk_expr(self, expr)),
         }
     }
