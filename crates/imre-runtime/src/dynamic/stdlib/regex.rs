@@ -100,6 +100,20 @@ pub(in crate::dynamic) struct Pattern {
 }
 
 impl Pattern {
+    /// Scanner patterns use internal program state with no Python source to compare.
+    pub(in crate::dynamic) fn same_program(&self, other: &Self) -> bool {
+        self.source != NONE
+            && other.source != NONE
+            && self.flags == other.flags
+            && self.bytes == other.bytes
+            && self.engine_source == other.engine_source
+    }
+
+    pub(in crate::dynamic) fn program_hash(&self) -> i64 {
+        crate::python_hash::bytes(self.engine_source.as_bytes())
+            ^ self.flags
+            ^ i64::from(self.bytes)
+    }
     pub(in crate::dynamic) fn repr(&self, ctx: &Context) -> String {
         let mut source = ctx.repr(self.source);
         if let Some((end, _)) = source.char_indices().nth(200) {
@@ -618,6 +632,20 @@ fn leading_match_flags(mut pattern: &[u8], mut flags: i64) -> (&[u8], i64) {
 }
 
 fn compiled(ctx: &mut Context, id: Id, flags: Option<Id>) -> Result<Id> {
+    let module = ctx.module("re")?;
+    match ctx.lookup_attr(module, "_compile_cached") {
+        Ok(cache) => {
+            let raw = ctx.builtin("re._compile_uncached");
+            let flags = flags.unwrap_or_else(|| ctx.int(0));
+            ctx.call(cache, vec![raw, id, flags], Vec::new())
+        }
+        // Computed-only imports can expose the intrinsic module without its Python helpers.
+        Err(error) if ctx.is_attribute_error(&error) => compile_uncached(ctx, id, flags),
+        Err(error) => Err(error),
+    }
+}
+
+fn compile_uncached(ctx: &mut Context, id: Id, flags: Option<Id>) -> Result<Id> {
     let flags = flags
         .map(|value| ctx.as_integer(value))
         .transpose()?
@@ -631,7 +659,7 @@ fn compiled(ctx: &mut Context, id: Id, flags: Option<Id>) -> Result<Id> {
         }
         return Ok(id);
     }
-    let bytes = matches!(ctx.heap.get(id), Value::Bytes(_));
+    let bytes = matches!(ctx.heap.get(ctx.scalar_value(id)), Value::Bytes(_));
     if bytes && flags & UNICODE != 0 {
         return Err(Error::new(
             "ValueError",
@@ -662,7 +690,7 @@ fn compiled(ctx: &mut Context, id: Id, flags: Option<Id>) -> Result<Id> {
             "unsupported native regular expression flags",
         ));
     }
-    let spelling = match ctx.heap.get(id) {
+    let spelling = match ctx.heap.get(ctx.scalar_value(id)) {
         Value::Bytes(value) => value.as_slice(),
         _ => ctx.str_value(id)?.as_bytes(),
     };
@@ -876,6 +904,9 @@ pub(super) fn module_call(
     if name == "re._compile_scanner" {
         let [lexicon, flags] = bind(name, args, kwargs, ["lexicon", "flags"])?;
         return scanner::compile_lexicon(ctx, lexicon.ok_or_else(|| missing("lexicon"))?, flags);
+    }
+    if name == "re._compile_uncached" {
+        return compile_uncached(ctx, argument(args, 0)?, args.get(1).copied());
     }
     if name == "re.compile" {
         let [pattern, flags] = bind(name, args, kwargs, ["pattern", "flags"])?;

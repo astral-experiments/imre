@@ -2422,6 +2422,7 @@ def report(text):
             "boxed_re_lookahead.py",
             "boxed_re_split.py",
             "boxed_re_match_subscript.py",
+            "boxed_re_pattern_cache.py",
             "boxed_re_sub.py",
             "boxed_re_findall_empty.py",
             "boxed_memoryview_context.py",
