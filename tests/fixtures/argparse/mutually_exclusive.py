@@ -1,4 +1,5 @@
 import argparse
+from argparse import SUPPRESS as hidden_help
 import sys
 
 
@@ -42,7 +43,19 @@ def toggle(words: list[str]):
     print(repr(parser.parse_args(words)))
 
 
-if len(sys.argv) > 1 and sys.argv[1] == "empty":
+def suppressed(words: list[str]):
+    parser = argparse.ArgumentParser(prog="PROG")
+    hidden = parser.add_mutually_exclusive_group()
+    hidden.add_argument("--spam", help=argparse.SUPPRESS)
+    mode = parser.add_mutually_exclusive_group(required=True)
+    mode.add_argument("--secret", help=hidden_help)
+    mode.add_argument("--visible", help="==SUPPRESS==")
+    print(repr(parser.parse_args(words)))
+
+
+if len(sys.argv) > 1 and sys.argv[1] == "suppressed":
+    suppressed(sys.argv[2:])
+elif len(sys.argv) > 1 and sys.argv[1] == "empty":
     empty(sys.argv[2:])
 elif len(sys.argv) > 1 and sys.argv[1] == "child":
     child(sys.argv[2:])
