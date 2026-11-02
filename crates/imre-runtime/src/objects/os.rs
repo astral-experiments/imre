@@ -4,8 +4,6 @@
 #[cfg(target_os = "linux")]
 mod copy_range;
 mod credentials;
-#[cfg(target_os = "linux")]
-pub(crate) use copy_range::{copy_count, copy_file_range};
 pub(crate) use credentials::{credential_id, geteuid, getgid, getgroups, getuid};
 
 use super::exceptions::{Error, Filename, Kind, Result, finish};
@@ -508,6 +506,42 @@ fn transfer<E: From<Error>>(
         }
         dispatch()?;
     }
+}
+
+/// Copy a single file range, advancing only the descriptors without explicit offsets.
+#[cfg(target_os = "linux")]
+pub(crate) fn copy_file_range<E: From<Error>>(
+    src: i32,
+    dst: i32,
+    count: usize,
+    mut offset_src: Option<i64>,
+    mut offset_dst: Option<i64>,
+    dispatch: impl FnMut() -> std::result::Result<(), E>,
+) -> std::result::Result<usize, E> {
+    let offset_src = offset_src
+        .as_mut()
+        .map_or(std::ptr::null_mut(), std::ptr::from_mut);
+    let offset_dst = offset_dst
+        .as_mut()
+        .map_or(std::ptr::null_mut(), std::ptr::from_mut);
+    transfer(
+        || {
+            // SAFETY: each non-null pointer refers to a distinct, live, writable Linux loff_t.
+            let copied = unsafe {
+                libc::syscall(
+                    libc::SYS_copy_file_range,
+                    src,
+                    offset_src,
+                    dst,
+                    offset_dst,
+                    count,
+                    0_u32,
+                )
+            };
+            transferred(copied as isize)
+        },
+        dispatch,
+    )
 }
 
 /// Copy through the kernel, borrowing both descriptors and any explicit input offset.

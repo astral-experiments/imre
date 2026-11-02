@@ -4,6 +4,7 @@ use super::calls::parameter;
 use super::*;
 use crate::ir::PathOperation;
 
+mod glob;
 mod samefile;
 mod segments;
 mod stat;
@@ -1011,17 +1012,13 @@ impl Checker<'_> {
         ];
         let args = self.arguments_with(call, &params, Some(receiver), |checker, i, value| {
             if i == 0 {
-                checker.path_argument(value)
+                checker.expr(value)
             } else {
                 checker.expr_expected(value, params[i].ty)
             }
         })?;
-        Ok(self.ordered_path_operation(
-            PathOperation::Glob {
-                recursive: name == "rglob",
-            },
-            self.types.cursor(Type::Path),
-            args,
-        ))
+        let (scope, args) = self.held_path_arguments(args);
+        let pattern = call.arguments.find_argument_value("pattern", 0).unwrap();
+        Ok(scope.finish(self.glob_pattern(&args, args[1].clone(), name == "rglob", pattern)?))
     }
 }

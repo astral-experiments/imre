@@ -986,16 +986,15 @@ pub(super) fn descriptor(
                 3,
             )?
         else {
-            unreachable!("copy_file_range requires both descriptors and a count")
+            unreachable!("copy_file_range requires both descriptors and count")
         };
         let src = c_int(ctx, src)?;
         let dst = c_int(ctx, dst)?;
-        let count = native::copy_count(ssize_t(ctx, count)?)?;
-        let mut offset = |value: Option<Id>| {
-            value
-                .filter(|id| *id != NONE)
-                .map(|id| file_offset(ctx, id))
-                .transpose()
+        let count = usize::try_from(ssize_t(ctx, count)?)
+            .map_err(|_| Error::new("ValueError", "negative value for 'count' not allowed"))?;
+        let mut offset = |value| match value {
+            None | Some(NONE) => Ok(None),
+            Some(value) => file_offset(ctx, value).map(Some),
         };
         let offset_src = offset(offset_src)?;
         let offset_dst = offset(offset_dst)?;

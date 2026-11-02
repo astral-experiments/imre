@@ -733,6 +733,12 @@ pub(in crate::dynamic) fn decode_bytes(
     errors: Option<Id>,
 ) -> Result<Id> {
     let name = error_name(ctx, errors)?;
+    if matches!(codec, Codec::Ascii) && name == "surrogateescape" {
+        let bytes = ctx.bytes_like(input)?;
+        if !bytes.is_ascii() {
+            return Ok(ctx.text_codepoints(codec.decode_filesystem(bytes)?));
+        }
+    }
     if let Codec::Utf8 { signature } = codec
         && name == "surrogateescape"
     {

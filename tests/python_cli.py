@@ -1501,6 +1501,15 @@ def main():
         )
         compare("-B", shadow_script, extra={"IMREFLAGS": "--opt-level 0"}, native_timeout=300)
 
+        tokenize_script = root / "tokenize_entry.py"
+        tokenize_script.write_text(
+            "from io import StringIO\n"
+            "from tokenize import generate_tokens\n"
+            "for t in generate_tokens(StringIO('x += 1 # note').readline):\n"
+            "    print(t.string, t.exact_type)\n"
+        )
+        compare("-B", tokenize_script)
+
         ftp_script = root / "ftp_entry.py"
         ftp_script.write_text("import ftplib\nprint(ftplib.FTP().encoding, ftplib.parse257('257 \"home\"'))\n")
         compare("-B", ftp_script)
@@ -1919,6 +1928,16 @@ def main():
             extra={"PYTHONDONTWRITEBYTECODE": "1", "IMREFLAGS": "--bogus"},
         )
         compare("-B", "-c", "import sys\nsys.exit(37)", status=37)
+        compare(
+            "-B", "-c",
+            "import atexit, os\n"
+            "atexit.register(lambda: print('after shutdown', handler.stream is None))\n"
+            "import logging\n"
+            "handler = logging.FileHandler(os.devnull)\n"
+            "atexit.register(lambda: print('before shutdown', handler.stream is None))\n",
+            extra={"IMREFLAGS": "--opt-level 0"},
+            native_timeout=300,
+        )
         compare("-B", "-c", "print(list.__len__([1, 2]), tuple.__len__((3,)))")
         if os.name == "posix":
             for base in ("list", "tuple"):
@@ -2952,6 +2971,7 @@ def report(text):
             "boxed_queue.py",
             "boxed_shutil.py",
             "boxed_difflib.py",
+            "boxed_tokenize.py",
             "boxed_colorize.py",
             "boxed_string_new.py",
             "boxed_string_repeat.py",
@@ -3021,6 +3041,10 @@ def report(text):
             compare("-IB", str(fixtures / "boxed_geteuid_exports.py"), "os", "posix")
             plugin.write_bytes((fixtures / "boxed_pwd.py").read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")
+            plugin.write_bytes((fixtures / "boxed_posix_expanduser.py").read_bytes())
+            compare("-IB", "-c", imports + "arithmetic.current()")
+            compare("-B", "-c", imports + "arithmetic.current()",
+                    extra={"LC_ALL": "C", "PYTHONUTF8": "0", "PYTHONCOERCECLOCALE": "0"})
         if sys.platform == "linux":
             plugin.write_bytes((fixtures / "boxed_posix_fadvise.py").read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")

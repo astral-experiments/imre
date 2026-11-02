@@ -22,7 +22,7 @@ if sys.platform == "linux":
     from posix import F_LOCK, F_TEST, F_TLOCK, F_ULOCK, lockf
     from posix import MFD_CLOEXEC, memfd_create
     import posix as _posix
-    from posix import O_NOCTTY, copy_file_range, pipe2, ptsname
+    from posix import O_NOCTTY, pipe2, ptsname
     for _name in vars(_posix):
         if _name.startswith("RTLD_"):
             globals()[_name] = getattr(_posix, _name)
@@ -353,17 +353,21 @@ def removedirs(name):
         head, tail = path.split(head)
 
 
+_fs_encoding = sys.getfilesystemencoding()
+_fs_errors = sys.getfilesystemencodeerrors()
+
+
 def fsencode(filename):
     filename = fspath(filename)
     if isinstance(filename, str):
-        return filename.encode("utf-8", "surrogateescape")
+        return filename.encode(_fs_encoding, _fs_errors)
     return filename
 
 
 def fsdecode(filename):
     filename = fspath(filename)
     if isinstance(filename, bytes):
-        return filename.decode("utf-8", "surrogateescape")
+        return filename.decode(_fs_encoding, _fs_errors)
     return filename
 
 
@@ -424,7 +428,7 @@ class PathLike(abc.ABC):
     __class_getitem__ = classmethod(GenericAlias)
 
 
-_env_encoding = sys.getfilesystemencoding()
+_env_encoding = _fs_encoding
 
 
 def _encode_env(value):

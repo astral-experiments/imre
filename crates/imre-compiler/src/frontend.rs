@@ -10177,7 +10177,7 @@ impl<'a> Checker<'a> {
             if attribute.attr.as_str() == "format"
                 && matches!(receiver.ty, Type::Str | Type::StrLiteral(_))
             {
-                return self.named_format_call(Self::string_value(receiver), call);
+                return self.string_format_call(Self::string_value(receiver), call);
             }
             if attribute.attr.as_str() == "translate"
                 && matches!(receiver.ty, Type::Str | Type::StrLiteral(_))

@@ -1,45 +1,4 @@
-use super::{Error, Int, Kind, Result, c_int, finish, transfer, transferred};
-
-pub(crate) fn copy_count(count: isize) -> Result<usize> {
-    usize::try_from(count)
-        .map_err(|_| Error::new(Kind::ValueError, "negative value for 'count' not allowed"))
-}
-
-/// Copy between borrowed Linux file descriptors. Addressable offsets stay live across EINTR.
-pub(crate) fn copy_file_range<E: From<Error>>(
-    src: i32,
-    dst: i32,
-    count: usize,
-    mut offset_src: Option<i64>,
-    mut offset_dst: Option<i64>,
-    dispatch: impl FnMut() -> std::result::Result<(), E>,
-) -> std::result::Result<usize, E> {
-    crate::initialize_io();
-    let offset_src = offset_src
-        .as_mut()
-        .map_or(std::ptr::null_mut(), std::ptr::from_mut);
-    let offset_dst = offset_dst
-        .as_mut()
-        .map_or(std::ptr::null_mut(), std::ptr::from_mut);
-    transfer(
-        || {
-            // SAFETY: each non-null pointer is a separate writable loff_t for the duration of
-            // the syscall. The kernel validates the raw descriptors and retains no pointers.
-            transferred(unsafe {
-                libc::syscall(
-                    libc::SYS_copy_file_range,
-                    src,
-                    offset_src,
-                    dst,
-                    offset_dst,
-                    count,
-                    0u32,
-                )
-            } as isize)
-        },
-        dispatch,
-    )
-}
+use super::{Error, Int, Kind, Result, c_int, copy_file_range, finish};
 
 unsafe fn count_word(word: usize) -> Result<usize> {
     // SAFETY: the caller roots a native integer.
@@ -50,7 +9,8 @@ unsafe fn count_word(word: usize) -> Result<usize> {
             "Python int too large to convert to C ssize_t",
         )
     })?;
-    copy_count(value)
+    usize::try_from(value)
+        .map_err(|_| Error::new(Kind::ValueError, "negative value for 'count' not allowed"))
 }
 
 unsafe fn offset_word(word: usize) -> Result<Option<i64>> {

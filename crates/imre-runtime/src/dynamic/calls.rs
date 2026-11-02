@@ -1309,7 +1309,6 @@ impl Context {
                 if HashState::is_provider_class(name)
                     || builtins::is_builtin_type(name)
                     || builtins::is_iterator_type(name)
-                    || name == stdlib::fixed_structseq::UNRAISABLE_ARGS
                     || matches!(
                         name.as_str(),
                         "NoneType"
@@ -1438,20 +1437,7 @@ impl Context {
                 ..
             } => Ok(*class),
             Value::NamedTuple {
-                class:
-                    Some(
-                        class @ ("time.struct_time"
-                        | stdlib::fixed_structseq::UNRAISABLE_ARGS
-                        | stdlib::fixed_structseq::PASSWD
-                        | stdlib::fixed_structseq::HASH_INFO
-                        | stdlib::fixed_structseq::THREAD_INFO
-                        | stdlib::fixed_structseq::SCHED_PARAM
-                        | stdlib::fixed_structseq::TERMINAL_SIZE
-                        | stdlib::flags::TYPE
-                        | stdlib::os::stat::CLASS
-                        | stdlib::os::stat::VFS_CLASS),
-                    ),
-                ..
+                class: Some(class), ..
             } => Ok(self.builtin(class)),
             Value::Raised(error) => {
                 if let Some(class) = error.class() {
@@ -1595,20 +1581,7 @@ impl Context {
             (
                 name,
                 Value::NamedTuple {
-                    class:
-                        Some(
-                            class @ ("time.struct_time"
-                            | stdlib::fixed_structseq::UNRAISABLE_ARGS
-                            | stdlib::fixed_structseq::PASSWD
-                            | stdlib::fixed_structseq::HASH_INFO
-                            | stdlib::fixed_structseq::THREAD_INFO
-                            | stdlib::fixed_structseq::SCHED_PARAM
-                            | stdlib::fixed_structseq::TERMINAL_SIZE
-                            | stdlib::flags::TYPE
-                            | stdlib::os::stat::CLASS
-                            | stdlib::os::stat::VFS_CLASS),
-                        ),
-                    ..
+                    class: Some(class), ..
                 },
             ) if name == *class => true,
             (class, Value::Calendar { value, .. }) => {
@@ -3387,36 +3360,6 @@ impl Context {
                     }
                 }
             },
-            Value::File(ref handle)
-                if matches!(name, "raw" | "name" | "mode")
-                    && let super::stdlib::BinaryFile::Descriptor(fd) = handle.as_ref() =>
-            {
-                let raw = fd.raw;
-                return if name == "raw" {
-                    Ok(raw)
-                } else {
-                    self.lookup_attr(raw, name)
-                };
-            }
-            Value::File(ref handle)
-                if matches!(name, "name" | "mode")
-                    && let Some((path, mode)) = handle.path_metadata() =>
-            {
-                return Ok(if name == "name" {
-                    path
-                } else {
-                    self.text(mode)
-                });
-            }
-            Value::File(ref handle)
-                if name == "name"
-                    && let Some(fd) = handle.socket_reader_name() =>
-            {
-                return Ok(self.int(i64::from(fd)));
-            }
-            Value::File(ref handle) if name == "closed" => {
-                return Ok(if handle.closed() { TRUE } else { FALSE });
-            }
             Value::Native(ref class) if class == "socket.socket" && name == "__name__" => {
                 return Ok(self.text("socket"));
             }
@@ -3428,11 +3371,6 @@ impl Context {
             }
             Value::Socket(ref socket) if name == "type" => {
                 return Ok(self.int(i64::from(crate::objects::socket::kind(socket))));
-            }
-            Value::BufferedRandom(_, file_name) if name == "name" => return Ok(file_name),
-            Value::BufferedRandom(..) if name == "mode" => return Ok(self.text("rb+")),
-            Value::BufferedRandom(ref file, _) if name == "closed" => {
-                return Ok(if file.borrow().closed() { TRUE } else { FALSE });
             }
             Value::TextFile(ref file)
                 if name == "buffer"
@@ -3896,9 +3834,6 @@ impl Context {
                 if name == "__dict__" {
                     return self.module_globals(scope);
                 }
-                if name == "__class__" {
-                    return Ok(constructor.unwrap_or_else(|| self.builtin("module")));
-                }
                 if constructor.is_none() && stdlib::has_lazy_attributes(module) {
                     if let Some(value) = self.scope_name(scope, name) {
                         return Ok(value);
@@ -4030,27 +3965,10 @@ impl Context {
                 if let Some(i) = names.iter().position(|n| n == name) {
                     return Ok(values[i]);
                 }
-                if let Some(layout) = class.and_then(stdlib::os::stat::layout) {
-                    if name == "__class__" {
-                        return Ok(self.builtin(layout.class));
-                    }
-                    if let Some(n) = stdlib::os::stat::count_attribute(layout, name) {
-                        return Ok(self.int(n));
-                    }
-                }
-                if let Some(
-                    owner @ ("time.struct_time"
-                    | stdlib::fixed_structseq::UNRAISABLE_ARGS
-                    | stdlib::fixed_structseq::PASSWD
-                    | stdlib::fixed_structseq::HASH_INFO
-                    | stdlib::fixed_structseq::THREAD_INFO
-                    | stdlib::fixed_structseq::SCHED_PARAM
-                    | stdlib::fixed_structseq::TERMINAL_SIZE
-                    | stdlib::flags::TYPE),
-                ) = class
-                    && name == "__class__"
+                if let Some(layout) = class.and_then(stdlib::os::stat::layout)
+                    && let Some(n) = stdlib::os::stat::count_attribute(layout, name)
                 {
-                    return Ok(self.builtin(owner));
+                    return Ok(self.int(n));
                 }
                 if class == Some(stdlib::fixed_structseq::SCHED_PARAM)
                     && matches!(name, "__reduce__" | "__reduce_ex__" | "__replace__")
