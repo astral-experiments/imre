@@ -314,3 +314,22 @@ def current():
         else:
             raise AssertionError("invalid range accepted")
     assert re.fullmatch(r"[\w-]", "-") and re.fullmatch(rb"[\--0]", b"/")
+
+    import warnings
+
+    for spelling, data in (("[a&&b]", "a&xb"), (b"[a&&b]", b"a&xb")):
+        re.purge()
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", FutureWarning)
+            try:
+                re.compile(spelling)
+            except FutureWarning as exc:
+                assert str(exc) == "Possible set intersection at position 2"
+            else:
+                raise AssertionError("ambiguous class compiled without a warning")
+        with warnings.catch_warnings(record=True) as seen:
+            warnings.simplefilter("always", FutureWarning)
+            compiled = re.compile(spelling)
+            assert compiled is re.compile(spelling)
+            assert compiled.findall(data) == [data[:1], data[1:2], data[3:]]
+            assert len(seen) == 1 and seen[0].filename == __file__
