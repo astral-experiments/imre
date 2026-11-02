@@ -1,6 +1,6 @@
 //! Namespace-based class construction and object-valued slot descriptors.
 
-use super::{Context, Error, Id, NONE, Result, Value};
+use super::{Context, Error, FALSE, Id, NONE, Result, TRUE, Value};
 use ruff_python_stdlib::identifiers::is_identifier;
 
 impl Context {
@@ -754,28 +754,46 @@ impl Context {
         Ok(members)
     }
 
-    fn check_slot_receiver(&self, member: Id, receiver: Id) -> Result<Id> {
+    fn check_slot_receiver(&self, member: Id, receiver: Id) -> Result<(Id, bool)> {
         let Value::SlotMember { owner, name } = *self.heap.get(member) else {
             unreachable!()
         };
-        if let Value::Instance { class, .. } = *self.heap.get(receiver)
-            && self.direct_subclass(class, owner)
+        let finalizing = self.heap.get(owner).io_kind() == Some("TextIOWrapper")
+            && self.str_value(name)? == "_finalizing";
+        if matches!(self.heap.get(receiver), Value::Instance { class, .. } if self.direct_subclass(*class, owner))
+            || finalizing
+                && matches!(self.heap.get(receiver), Value::TextFile(_))
+                && self.builtins.get("_io.TextIOWrapper") == Some(&owner)
         {
-            return Ok(name);
+            return Ok((name, finalizing));
         }
+        let owner_name = if finalizing {
+            "_io.TextIOWrapper"
+        } else {
+            self.class_name(owner)
+        };
+        let receiver_name = self.type_name(receiver);
+        let prefix = if finalizing
+            && matches!(self.heap.get(receiver), Value::Instance { class, .. } if self.heap.get(*class).io_kind().is_some())
+        {
+            "_io."
+        } else {
+            ""
+        };
         Err(Error::new(
             "TypeError",
             format!(
-                "descriptor '{}' for '{}' objects doesn't apply to a '{}' object",
-                self.str_value(name)?,
-                self.class_name(owner),
-                self.type_name(receiver)
+                "descriptor '{}' for '{owner_name}' objects doesn't apply to a '{prefix}{receiver_name}' object",
+                self.str_value(name)?
             ),
         ))
     }
 
     pub(super) fn read_slot_member(&self, member: Id, receiver: Id) -> Result<Id> {
-        let name = self.check_slot_receiver(member, receiver)?;
+        let (name, finalizing) = self.check_slot_receiver(member, receiver)?;
+        if let Value::TextFile(file) = self.heap.get(receiver) {
+            return Ok(super::builtins::boolean(file.finalizing));
+        }
         let Value::Instance { member_values, .. } = self.heap.get(receiver) else {
             unreachable!()
         };
@@ -784,6 +802,7 @@ impl Context {
             .as_ref()
             .and_then(|values| values.get(&member))
             .copied()
+            .or_else(|| finalizing.then_some(FALSE))
             .ok_or_else(|| self.missing_attribute(receiver, name))
     }
 
@@ -793,7 +812,18 @@ impl Context {
         receiver: Id,
         value: Option<Id>,
     ) -> Result<()> {
-        let name = self.check_slot_receiver(member, receiver)?;
+        let (name, finalizing) = self.check_slot_receiver(member, receiver)?;
+        if finalizing {
+            let value = value
+                .ok_or_else(|| Error::new("TypeError", "can't delete numeric/char attribute"))?;
+            if !matches!(value, TRUE | FALSE) {
+                return Err(Error::new("TypeError", "attribute value type must be bool"));
+            }
+            if let Value::TextFile(file) = self.heap.get_mut(receiver) {
+                file.finalizing = value == TRUE;
+                return Ok(());
+            }
+        }
         let Value::Instance { member_values, .. } = self.heap.get_mut(receiver) else {
             unreachable!()
         };

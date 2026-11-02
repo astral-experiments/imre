@@ -119,6 +119,7 @@ pub(in crate::dynamic) fn standard_output(ctx: &mut Context, stderr: bool) -> Re
         ctx.alloc(Value::TextFile(super::super::value::BoxedTextFile {
             file,
             buffer: Some(buffer),
+            finalizing: false,
             line_buffering: stderr || crate::stdio_settings().stdout_line_buffered,
         })),
     )
@@ -552,6 +553,11 @@ fn class(
         NEWLINE_DECODER => newline_decoder::CLASS,
         _ => "_io._IOBase",
     };
+    if wrapper {
+        let name = ctx.text("_finalizing");
+        let member = ctx.alloc(Value::SlotMember { owner, name });
+        ctx.bind(scope, "_finalizing", member);
+    }
     let unsupported = ctx.scope_name(module, "UnsupportedOperation").unwrap();
     for &name in methods {
         let method = ctx.alloc(Value::IoMethod {

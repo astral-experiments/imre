@@ -381,6 +381,49 @@ def current():
         assert stream.truncate() == (b"\xc3\xa9", None)
         assert stream.truncate(marker)[1] is marker
 
+    class WarningBuffer(io.BytesIO):
+        def _dealloc_warn(self, source):
+            warnings.append(source is stream)
+            raise RuntimeError("ignored warning hook")
+
+        def close(self):
+            flushed.append(self.getvalue())
+            super().close()
+
+    warnings, flushed = [], []
+    for finalize in (False, True):
+        stream = io.TextIOWrapper(WarningBuffer(), encoding="ascii")
+        stream.__dict__["_finalizing"] = True
+        assert stream._finalizing is False
+        stream.write("pending")
+        if finalize:
+            stream.__del__()
+        else:
+            stream.close()
+        assert stream.closed
+    assert warnings == [True]
+    assert flushed == [b"pending", b"pending"]
+
+    del sys.modules["_io"]
+    try:
+        fresh = __import__("_io")
+        foreign = fresh.TextIOWrapper._finalizing
+        original = _io.TextIOWrapper._finalizing
+        with fresh.TextIOWrapper(fresh.BytesIO()) as fresh_stream:
+            foreign.__set__(fresh_stream, True)
+            assert foreign.__get__(fresh_stream) is True
+            for member, other in ((foreign, sys.stdout), (foreign, sys.stderr), (original, fresh_stream)):
+                for operation, args in ((member.__get__, ()), (member.__set__, (False,))):
+                    try:
+                        operation(other, *args)
+                    except TypeError as error:
+                        assert str(error) == "descriptor '_finalizing' for '_io.TextIOWrapper' objects doesn't apply to a '_io.TextIOWrapper' object"
+                    else:
+                        raise AssertionError("foreign finalizing member accepted the wrapper")
+            assert foreign.__get__(fresh_stream) is True
+    finally:
+        sys.modules["_io"] = _io
+
     print("wrapped binary streams")
 
 
