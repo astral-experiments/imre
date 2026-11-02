@@ -22,6 +22,7 @@ pub(super) struct Program {
     first_line: u32,
     generator: bool,
     locals: HashSet<String>,
+    reads: BTreeSet<String>,
     method_imports: Rc<std::collections::BTreeSet<String>>,
     private_names: Option<Rc<imre_ast::Names>>,
     instructions: Vec<(u32, Instruction)>,
@@ -240,6 +241,7 @@ struct CompiledStrings<'a, 'ctx> {
     constants: &'ctx mut HashMap<ruff_text_size::TextRange, Id>,
     roots: Vec<Id>,
     pending: Vec<&'a ast::Expr>,
+    reads: &'ctx mut BTreeSet<String>,
     exhausted: bool,
 }
 
@@ -310,6 +312,9 @@ impl<'a> CompiledStrings<'a, '_> {
             match expr {
                 ast::Expr::Name(name) => {
                     class_cell |= matches!(name.id.as_str(), "super" | "__class__");
+                    if name.ctx == ast::ExprContext::Load {
+                        self.reads.insert(name.id.to_string());
+                    }
                     self.heap.code_name(name.id.as_str());
                 }
                 ast::Expr::Attribute(attr) => {
@@ -370,9 +375,11 @@ impl Program {
         &'a mut self,
         heap: &mut value::Heap,
         shared: &mut HashMap<&'a str, Id>,
-    ) -> Result<Id> {
+    ) -> Result<(Id, &'a BTreeSet<String>)> {
         use ast::visitor::Visitor;
+        let mut nested_reads = BTreeSet::new();
         let mut strings = CompiledStrings {
+            reads: &mut self.reads,
             heap,
             shared,
             constants: &mut self.literals,
@@ -433,7 +440,8 @@ impl Program {
                     let child =
                         Rc::get_mut(&mut definition.body).expect("newly lowered child code");
                     strings.heap.code_name(&definition.binding);
-                    let roots = child.prepare_strings(strings.heap, strings.shared)?;
+                    let (roots, reads) = child.prepare_strings(strings.heap, strings.shared)?;
+                    nested_reads.extend(reads.iter().cloned());
                     if roots != NONE {
                         strings.keep(roots)?;
                     }
@@ -481,7 +489,15 @@ impl Program {
             }
         }
         (self.string_roots, self.class_cell) = strings.finish()?;
-        Ok(self.string_roots)
+        if self.class_attributes.is_some() {
+            // Methods skip the class namespace when resolving free variables.
+            self.reads.retain(|name| !self.locals.contains(name));
+            self.reads.extend(nested_reads);
+        } else {
+            self.reads.extend(nested_reads);
+            self.reads.retain(|name| !self.locals.contains(name));
+        }
+        Ok((self.string_roots, &self.reads))
     }
 
     fn new(filename: Rc<str>, name: &str) -> Self {
@@ -497,6 +513,7 @@ impl Program {
             first_line: 1,
             generator: false,
             locals: HashSet::new(),
+            reads: BTreeSet::new(),
             method_imports: Rc::default(),
             private_names: None,
             instructions: Vec::new(),
@@ -674,14 +691,21 @@ impl Program {
                     }
                     Instruction::From(module.to_owned(), s.level, names)
                 }
-                Stmt::FunctionDef(s) if !s.is_async && s.type_params.is_none() && !function => {
-                    if self.class_attributes.is_some()
+                Stmt::FunctionDef(s) if !s.is_async && s.type_params.is_none() => {
+                    if (function || self.class_attributes.is_some())
                         && (s.returns.is_some()
                             || s.parameters.iter().any(|p| p.annotation().is_some()))
                     {
-                        return Err(unsupported("annotated method definition"));
+                        return Err(unsupported(if function {
+                            "annotated nested function definition"
+                        } else {
+                            "annotated method definition"
+                        }));
                     }
                     let mut child = self.definition_body(&s.name, &s.decorator_list, line, lines);
+                    child
+                        .locals
+                        .extend(s.parameters.iter().map(|p| p.name().to_string()));
                     child.lower(s.body, lines, true, None)?;
                     self.locals.insert(s.name.to_string());
                     Instruction::Define(Definition {
@@ -2428,6 +2452,9 @@ impl Context {
                             }
                         }
                         sig["class_cell"] = serde_json::json!(child.class_cell);
+                        sig["scope_locals"] =
+                            serde_json::json!(child.locals.iter().collect::<BTreeSet<_>>());
+                        sig["scope_locals_complete"] = true.into();
                         sig
                     }
                 };
@@ -2441,7 +2468,23 @@ impl Context {
                     *existing
                 } else {
                     let parameters = self.text(sig.to_string());
+                    let freevars = if code.name != "<module>"
+                        && code.class_attributes.is_none()
+                        && child.class_attributes.is_none()
+                        && !child.class_cell
+                    {
+                        self.enclosing_freevars(scope, child.reads.iter().map(String::as_str))
+                    } else {
+                        None
+                    };
                     let id = self.box_source_code(child.clone(), Some(parameters));
+                    if let Some(names) = freevars {
+                        let Value::Code(nested) = self.heap.get_mut(id) else {
+                            unreachable!()
+                        };
+                        nested.freevars = names;
+                        nested.closure_supported = true;
+                    }
                     let Value::Code(parent) = self.heap.get_mut(owner) else {
                         unreachable!()
                     };
