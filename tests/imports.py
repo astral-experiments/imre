@@ -61,6 +61,27 @@ REJECTED = {
             "move = chdir\nmove('.')\npath('wrong')\n"
         ),
     }, "invalid-argument-type"),
+    "captured_chdir_checks_nested_missing_argument": ({
+        "main.py": (
+            "from os import chdir\ndef path(n: int) -> str:\n    return '.'\n"
+            "move = chdir\nmove(path())\n"
+        ),
+    }, "missing-argument"),
+    "captured_chdir_checks_user_overload": ({
+        "main.py": (
+            "from os import chdir\nfrom typing import overload\n"
+            "@overload\ndef path(n: int) -> str: return '.'\n"
+            "@overload\ndef path(n: int, m: int) -> str: return '.'\n"
+            "def path(n: int, m: int = 0) -> str: return '.'\n"
+            "move = chdir\nmove(path())\n"
+        ),
+    }, "no-matching-overload"),
+    "captured_chdir_checks_user_keyword": ({
+        "main.py": (
+            "from os import chdir\ndef path(n: int = 0) -> int:\n    return n\n"
+            "move = chdir\nmove('.')\npath(typo=1)\n"
+        ),
+    }, "unknown-argument"),
     "captured_chdir_preserves_callable_parameter": ({
         "main.py": (
             "from os import chdir\nfrom typing import Callable\n"
