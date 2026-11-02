@@ -900,6 +900,11 @@ def main() -> None:
                         archive.writestr(f"{pkg}/message.txt", b"hello")
             baseline = run([args.python, "-E", "-m", "main"], case)
             require_success(baseline)
+            if name in {"codeop_module", "codeop_named_helper"}:
+                # Run these checked modules with the late-import executable below.
+                require_success(run([compiler, "check", str(case / "main.py")], temporary))
+                checks += 1
+                continue
             for level in args.opt_levels:
                 executable = temporary / f"accepted-{name}-{level}"
                 command = [compiler, "build", str(case / "main.py"), "-o", str(executable),
@@ -916,11 +921,14 @@ def main() -> None:
         late_import = temporary / "late_import.py"
         late_import.write_text(
             "import builtins, sys\n"
+            "sys.path.insert(0, sys.argv[3])\n"
             "module = builtins.__import__(sys.argv[1])\n"
             "if sys.argv[2] == 'flags':\n"
             "    print(module.CommandCompiler().compiler.flags)\n"
-            "else:\n"
+            "elif sys.argv[2] == 'lookup':\n"
             "    print(module.opmap['POP_TOP'])\n"
+            "elif sys.argv[2] == 'current':\n"
+            "    module.current()\n"
         )
         for level in args.opt_levels:
             executable = temporary / f"late-import-{level}"
@@ -930,13 +938,16 @@ def main() -> None:
             if args.sanitize:
                 command.append("--sanitize")
             require_success(run(command, temporary, timeout=build_timeout))
-            for module, operation, expected in [
-                ("opcode", "lookup", "31"), ("_opcode_metadata", "lookup", "31"),
-                ("code", "flags", "16896"), ("codeop", "flags", "16896"),
+            for module, operation, path, expected in [
+                ("opcode", "lookup", temporary, "31\n"), ("_opcode_metadata", "lookup", temporary, "31\n"),
+                ("code", "flags", temporary, "16896\n"), ("codeop", "flags", temporary, "16896\n"),
+                ("main", "import", temporary / "codeop_module", ""),
+                ("main", "import", temporary / "codeop_named_helper", "16896\n"),
+                ("boxed_interactive_interpreter", "current", FIXTURES.parent, ""),
             ]:
-                result = run([str(executable), module, operation], temporary)
+                result = run([str(executable), module, operation, str(path)], temporary)
                 require_success(result)
-                assert result.stdout == expected + "\n", (module, level, result.stdout)
+                assert result.stdout == expected, (module, level, result.stdout)
                 checks += 1
 
         # These are build capabilities: CPython's flags depend on its build; Imre emits native code.

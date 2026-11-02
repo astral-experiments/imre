@@ -1891,7 +1891,6 @@ def report(text):
             "boxed_source_exec.py",
             "boxed_source_except.py",
             "boxed_interactive.py",
-            "boxed_interactive_interpreter.py",
             "boxed_relative_package_imports.py",
             "boxed_sys_getframe.py",
             "boxed_sys_audit.py",
