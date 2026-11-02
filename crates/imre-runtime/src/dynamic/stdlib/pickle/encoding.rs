@@ -225,7 +225,7 @@ fn legacy_global<'a>(module: &'a str, name: &'a str) -> Result<(&'a str, &'a str
             "map" => ("itertools", "imap"),
             "filter" => ("itertools", "ifilter"),
             "bool" | "bytes" | "complex" | "dict" | "float" | "frozenset" | "getattr" | "iter"
-            | "list" | "object" | "set" | "slice" | "super" | "tuple" | "type" | "Ellipsis"
+            | "list" | "next" | "object" | "set" | "slice" | "super" | "tuple" | "type" | "Ellipsis"
             | "NotImplemented" => ("__builtin__", name),
             _ => return Err(unsupported()),
         });
@@ -245,6 +245,9 @@ fn legacy_global<'a>(module: &'a str, name: &'a str) -> Result<(&'a str, &'a str
             _ => (module, name),
         });
     }
+    if module == "collections.abc" {
+        return Ok(("_abcoll", name));
+    }
     if module == "copyreg" {
         return Ok(("copy_reg", name));
     }
@@ -258,7 +261,6 @@ fn legacy_global<'a>(module: &'a str, name: &'a str) -> Result<(&'a str, &'a str
         "_pickle",
         "_socket",
         "_thread",
-        "collections.abc",
         "configparser",
         "dbm",
         "dbm.bsd",

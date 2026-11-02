@@ -229,6 +229,8 @@ impl BuiltinDescriptor {
             "str.istitle" => ("str", "istitle"),
             "float.__format__" => ("float", "__format__"),
             "collections._tuplegetter.__repr__" => (super::namedtuple::GETTER, "__repr__"),
+            "types.GenericAlias.__reduce__" => ("types.GenericAlias", "__reduce__"),
+            "generic_alias_iterator.__reduce__" => ("generic_alias_iterator", "__reduce__"),
             "object.__hash__" => ("object", "__hash__"),
             "object.__ne__" => ("object", "__ne__"),
             "object.__repr__" => ("object", "__repr__"),
@@ -466,6 +468,11 @@ impl BuiltinDescriptor {
                 } else {
                     "($self, /)"
                 })
+            }
+            "__doc__" | "__text_signature__"
+                if matches!(self.owner, "types.GenericAlias" | "generic_alias_iterator") =>
+            {
+                if name == "__doc__" { NONE } else { ctx.text("($self, /)") }
             }
             "__doc__" if self.name == "__getattribute__" => ctx.text("Return getattr(self, name)."),
             "__text_signature__" if self.name == "__getattribute__" => ctx.text("($self, name, /)"),

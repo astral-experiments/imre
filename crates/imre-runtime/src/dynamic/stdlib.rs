@@ -578,6 +578,9 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("_collections_abc", abc) if super::mapping_abc::bootstrapped(abc) => {
             super::mapping_abc::class(ctx, abc)?
         }
+        ("_collections_abc", "_CallableGenericAlias") => {
+            ctx.builtin("collections.abc._CallableGenericAlias")
+        }
         ("_collections_abc", "_check_methods") => ctx.builtin("_collections_abc._check_methods"),
         (
             "typing",
@@ -2149,6 +2152,11 @@ pub(super) fn call(
     }
     if name == "collections.abc._CallableGenericAlias" {
         return super::typing::abc_callable_alias(ctx, args, kwargs);
+    }
+    if let Some(owner @ ("types.GenericAlias" | "generic_alias_iterator")) =
+        name.strip_suffix(".__reduce__")
+    {
+        return super::typing::reduce_builtin_alias(ctx, owner, args, kwargs);
     }
     if name == "types.GenericAlias" {
         if !kwargs.is_empty() {

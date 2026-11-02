@@ -2720,6 +2720,7 @@ for name in ("md4", "ripemd160"):
             "boxed_typing_parameter_collector.py",
             "boxed_typing_alias_namespaces.py",
             "boxed_abc_callable_alias.py",
+            "boxed_generic_alias_reduce.py",
             "boxed_typing_variadic.py",
             "boxed_typing_tuple.py",
             "boxed_typing_async_collection_aliases.py",

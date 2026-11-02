@@ -284,6 +284,9 @@ impl Context {
         match self.heap.get(class) {
             Value::Native(kind) if name == "__sizeof__" => self.builtins.get(object_size::descriptor(kind)?).copied(),
             Value::Class { scope, .. } => self.namespace_binding(self.scope_data(*scope), name),
+            Value::Native(kind) if kind == "collections.abc._CallableGenericAlias" && name == "__reduce__" => {
+                self.module_value("_collections_abc", "_reduce_callable_generic_alias")
+            }
             // The native generic alias inherits the same subclass hook as source special forms.
             Value::Native(kind) if kind == "typing._GenericAlias" && name == "__init_subclass__" => {
                 self.classes.get("typing._Final").and_then(|&base| self.own_class_attr(base, name))

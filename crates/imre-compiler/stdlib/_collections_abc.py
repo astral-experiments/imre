@@ -2,8 +2,29 @@
 # abstractmethod is from Lib/abc.py at the same revision. See stdlib/docstrings/LICENSE.
 import sys
 from abc import ABCMeta as _ABCMeta
-from _collections_abc import Collection, Iterable, MutableMapping, Sized, _check_methods
+from _collections_abc import (
+    Callable, Collection, Iterable, MutableMapping, Sized,
+    _CallableGenericAlias, _check_methods,
+)
 from types import GenericAlias
+
+
+def _reduce_callable_generic_alias(self):
+    args = self.__args__
+    if not (len(args) == 2 and _is_param_expr(args[0])):
+        args = list(args[:-1]), args[-1]
+    return _CallableGenericAlias, (Callable, args)
+
+
+_reduce_callable_generic_alias.__name__ = "__reduce__"
+_reduce_callable_generic_alias.__qualname__ = "_CallableGenericAlias.__reduce__"
+
+
+def _is_param_expr(obj):
+    if obj is Ellipsis or isinstance(obj, list):
+        return True
+    cls = type(obj)
+    return cls.__module__ == "typing" and cls.__name__ in ("ParamSpec", "_ConcatenateGenericAlias")
 
 
 def abstractmethod(funcobj):
