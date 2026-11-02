@@ -4179,6 +4179,21 @@ impl Context {
                     .map(Some);
             }
 
+            // A float subtype inherits float's comparison slots independently. In particular,
+            // float.__ne__ need not call an overridden __eq__, and NaN is unequal to itself.
+            if matches!(name, "__eq__" | "__ne__")
+                && let Value::Instance { scalar: Some(scalar), .. } = self.heap.get(obj)
+                && let Value::Float(number) = self.heap.get(*scalar)
+            {
+                let other = self.scalar_value(other);
+                let equal = match self.heap.get(other) {
+                    Value::Float(right) => number == right,
+                    Value::Int(_) | Value::Bool(_) => crate::floats::compare(&self.as_int(other)?, *number) == 0,
+                    _ => return Ok(None),
+                };
+                return Ok(Some(builtins::boolean(equal == (name == "__eq__"))));
+            }
+
             if name == "__ne__"
                 && let Some(equal) = self.operator_slot(obj, "__eq__", other)?
             {

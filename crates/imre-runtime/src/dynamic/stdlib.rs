@@ -1880,6 +1880,9 @@ pub(super) fn call(
     if matches!(name, "enum.auto.__init__" | "enum.auto.__repr__") {
         return ctx.auto_method(name, args, kwargs);
     }
+    if matches!(name, "enum.Enum.__repr__" | "enum.Enum.__str__" | "enum.Enum.__format__") {
+        return ctx.float_enum_display(name, args, kwargs);
+    }
     if name == "enum.Enum.__copy__" {
         let [member] = builtins::bind_builtin_arguments("__copy__", args, kwargs, ["self"], 1)?;
         return Ok(member.unwrap());
