@@ -2131,6 +2131,9 @@ def report(text):
             compare("-IB", thread_fixture, native_args=("run", thread_fixture, "--runtime-imports", "--quiet"))
         class_locals = fixtures / "boxed_class_locals.py"
         compare("-IB", class_locals, native_args=("run", class_locals, "--runtime-imports", "--quiet"))
+        generic = fixtures / "module_generic_function.py"
+        compare("-IB", generic, native_args=("run", generic, "--quiet"))
+        compare("-IB", generic, native_args=("run", generic, "--runtime-imports", "--quiet"))
         hints_fixture = fixtures / "boxed_typing_get_type_hints.py"
         compare("-IB", hints_fixture, native_args=("run", hints_fixture, "--runtime-imports", "--quiet"))
         if sys.platform == "linux":

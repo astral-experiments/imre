@@ -210,6 +210,7 @@ impl Context {
                 .class()
                 .is_some_and(|class| self.class_instances_support_weakref(class)),
             Value::ParamSpec(_)
+            | Value::TypeVar(_)
             | Value::Class { .. }
             | Value::Function { .. }
             | Value::Module { .. }
