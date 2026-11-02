@@ -293,6 +293,13 @@ pub(super) fn named_class(ctx: &mut Context, module: &str, name: &str) -> Id {
     let class = ctx
         .allocate_class(name.to_owned(), scope, bases)
         .expect("native typing classes have a single base");
+    if key == "typing.Generic" {
+        // The native base provides neither instance dictionary nor weak-reference storage.
+        let Value::Scope(frame) = ctx.heap.get_mut(scope) else {
+            unreachable!()
+        };
+        frame.class_namespace.as_mut().unwrap().slot_names = Some([].into());
+    }
     ctx.classes.insert(key, class);
     class
 }

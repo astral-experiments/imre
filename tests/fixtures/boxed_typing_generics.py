@@ -25,6 +25,17 @@ class Accessor(t.Generic[T]):
     pass
 
 
+class Slotted(t.Generic[T]):
+    __slots__ = ("value",)
+
+
+assert "__slots__" not in vars(t.Generic)
+for obj in (Slotted(), Slotted[int]()):
+    obj.value = 7
+    assert obj.value == 7 and not hasattr(obj, "__dict__")
+assert hasattr(Accessor[int](), "__dict__")
+
+
 # Parameterizations share class attributes through their common origin.
 Accessor[int].marker = object()
 assert Accessor[str].marker is Accessor.marker
