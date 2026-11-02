@@ -711,6 +711,11 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("os" | "posix", "getuid" | "geteuid" | "getgid" | "getgroups") => {
             ctx.builtin(&format!("posix.{name}"))
         }
+        #[cfg(target_os = "linux")]
+        ("os", attr @ ("pathconf" | "fpathconf" | "pathconf_names")) => {
+            let posix = ctx.module("posix")?;
+            return ctx.lookup_attr(posix, attr);
+        }
         ("os" | "posix", "DirEntry") => ctx.builtin(os::scandir::ENTRY),
         ("os" | "posix", "terminal_size") => ctx.builtin(fixed_structseq::TERMINAL_SIZE),
         #[cfg(target_os = "linux")]
@@ -1714,6 +1719,10 @@ pub(super) fn call(
         && (os::is_descriptor_function(op) || os::is_process_function(op))
     {
         return os::descriptor(ctx, op, args, kwargs);
+    }
+    #[cfg(target_os = "linux")]
+    if matches!(name, "posix.pathconf" | "posix.fpathconf") {
+        return os::sysconf::pathconf(ctx, name, args, kwargs);
     }
     #[cfg(target_os = "linux")]
     if name == "posix.sysconf" {

@@ -55,6 +55,8 @@ pub(in crate::dynamic) fn install_capabilities(
                 "chown",
                 "listdir",
                 "scandir",
+                #[cfg(target_os = "linux")]
+                "pathconf",
                 "stat",
                 #[cfg(target_os = "linux")]
                 "statvfs",
