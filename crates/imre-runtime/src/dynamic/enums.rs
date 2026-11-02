@@ -148,8 +148,10 @@ impl Context {
             let skipped = (&limit - 1u8) ^ &mask;
             if value >= -&limit && (&value & skipped).is_zero() {
                 negative_alias = Some(self.alloc(Value::Int(bits)));
+                value += limit;
+            } else {
+                value += BigInt::one() << mask.bits().max(value.bits());
             }
-            value += BigInt::one() << mask.bits().max(value.bits());
         }
 
         let key = self.alloc(Value::Int(crate::Int::new(value.clone())));
