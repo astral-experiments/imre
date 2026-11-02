@@ -1788,6 +1788,7 @@ def report(text):
             "boxed_lowlevel_thread.py", "boxed_lowlevel_thread_roots.py",
             "boxed_thread_dangling.py", "boxed_threading_rlock.py", "boxed_indirect_threading_rlock.py",
             "boxed_threading_condition_event.py", "boxed_thread_captured_lock.py",
+            "boxed_thread_bound_lock.py",
             "boxed_thread_hash_update.py",
         ):
             thread_fixture = fixtures / name
