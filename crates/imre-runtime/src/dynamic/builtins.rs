@@ -1287,6 +1287,8 @@ pub(super) fn call(
                 };
                 let accepts = if owner == "int" {
                     ctx.builtin_slot_accepts(values[0], owner)
+                } else if owner == "typing.Union" {
+                    matches!(ctx.heap.get(values[0]), Value::Union(_))
                 } else if crate::objects::HashState::is_provider_class(owner) {
                     ctx.type_name(values[0]) == owner
                 } else {

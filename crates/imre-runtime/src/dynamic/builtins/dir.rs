@@ -41,7 +41,7 @@ fn object_names(ctx: &mut Context, object: Id) -> Result<Id> {
             ctx.builtin("object")
         }
         Value::Class { .. } | Value::Native(_) => object,
-        Value::Count { .. } | Value::Repeat(_) => ctx.exact_type(object)?,
+        Value::Count { .. } | Value::Repeat(_) | Value::Union(_) => ctx.exact_type(object)?,
         Value::NamedTuple {
             class: Some(class), ..
         } if crate::dynamic::stdlib::os::stat::layout(class).is_some()

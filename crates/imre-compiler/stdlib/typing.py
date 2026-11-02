@@ -1586,6 +1586,8 @@ def _specialize_generic_alias_uncached(alias, args):
             raise TypeError(f"{arg} is not valid as type argument")
         replacements[parameter] = arg
     args = tuple(_substitute_alias_argument(arg, replacements) for arg in alias.__args__)
+    if isinstance(alias, _typing.Union):
+        return _typing.Union[args]
     if isinstance(alias, _AnnotatedAlias):
         return alias.copy_with(args)
     return _typing._GenericAlias(alias.__origin__, args, name=alias._name, inst=alias._inst)

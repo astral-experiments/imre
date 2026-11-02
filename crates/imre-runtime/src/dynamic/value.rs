@@ -505,6 +505,10 @@ impl Context {
                 super::namespace::CLASS
             }
             Value::Instance { class, .. }
+            | Value::Class {
+                metaclass: Some(class),
+                ..
+            }
             | Value::Module {
                 constructor: Some(class),
                 ..

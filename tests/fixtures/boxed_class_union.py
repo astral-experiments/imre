@@ -44,6 +44,15 @@ def current():
     assert (int | str | 'A').__args__ == (int, str, ForwardRef('A'))
     assert ('A' | (int | str)).__args__ == (ForwardRef('A'), int, str)
     variable = TypeVar('Variable')
+    assert (variable | int)[int] is int
+    assert (list[variable] | int)[str].__args__ == (list[str], int)
+    try:
+        (variable | int)[int, str]
+    except TypeError:
+        pass
+    else:
+        raise AssertionError('union accepted too many type arguments')
+    assert repr(Union[current, int]) == f'{__name__}.{current.__qualname__} | int'
     assert (variable | 'A').__args__ == (variable, ForwardRef('A'))
     for operand in (int, list[int]):
         try:
@@ -100,6 +109,34 @@ def current():
         raise AssertionError("nested union comparison suppressed the member exception")
     union = int | str
     reverse = str | int
+    for name in ('__args__', '__parameters__', '__origin__'):
+        assert name in dir(union)
+        descriptor = vars(Union)[name]
+        assert descriptor.__objclass__ is Union
+        assert descriptor.__get__(union, Union) is getattr(union, name)
+    for base, message in ((Union, "type 'typing.Union' is not an acceptable base type"),
+                          (union, 'Cannot subclass int | str')):
+        try:
+            class Invalid(base):
+                pass
+        except TypeError as exc:
+            assert str(exc) == message
+        else:
+            raise AssertionError('union accepted as a base')
+
+    class UnhashableMeta(type):
+        __hash__ = None
+
+    class Unhashable(metaclass=UnhashableMeta):
+        pass
+
+    for value in (Unhashable, Union[int, Unhashable]):
+        try:
+            hash(value)
+        except TypeError as exc:
+            assert str(exc) == "unhashable type: 'UnhashableMeta'"
+        else:
+            raise AssertionError('expected a TypeError from an unhashable class')
     print(type(union) is UnionType is Union, get_origin(union) is Union)
     print(union.__args__ == (int, str), get_args(union) is union.__args__)
     print(getitem(Union, union.__args__) == union, (int | int) is int)

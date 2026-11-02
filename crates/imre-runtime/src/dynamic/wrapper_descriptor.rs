@@ -37,6 +37,13 @@ impl BuiltinDescriptor {
                 method: member.is_method(),
             });
         }
+        if symbol == "typing.Union.__mro_entries__" {
+            return Some(Self {
+                owner: "typing.Union",
+                name: "__mro_entries__",
+                method: true,
+            });
+        }
         let slots = match symbol.rsplit_once('.') {
             Some((stdlib::os::scandir::ENTRY, attr)) => Some((
                 stdlib::os::scandir::ENTRY,
@@ -247,6 +254,7 @@ impl BuiltinDescriptor {
                 matches!(ctx.heap.get(receiver), Value::DictIterator(iter) if iter.class_name() == owner)
             }
             "generator" => matches!(ctx.heap.get(receiver), Value::Generator { .. }),
+            "typing.Union" => matches!(ctx.heap.get(receiver), Value::Union(_)),
             "object" => true,
             "type" => ctx.is_type_object(receiver),
             "function" => matches!(ctx.heap.get(receiver), Value::Function { .. }),
