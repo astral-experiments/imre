@@ -118,11 +118,12 @@ pub(super) fn compile_lexicon(ctx: &mut Context, lexicon: Id, flags: Option<Id>)
         // The Python translator validates the phrase before alternation. Passing
         // raw source to the backend can change token priority (e.g. x$|z) or
         // interpret Python literals inside a set as Rust class operations.
-        let parsed = imre_regex::translate_with_flags(
+        let parsed = imre_regex::translate_for_runtime(
             ctx.str_value(phrase)?,
             flags & VERBOSE != 0,
             ascii,
             flags & DOTALL != 0,
+            flags & IGNORECASE == 0 || ascii,
         )
         .map_err(|message| {
             if syntax_diagnostic(ctx, phrase, flags).is_some() {
