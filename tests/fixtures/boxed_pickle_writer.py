@@ -51,7 +51,6 @@ def check_global_reduction():
 
 
 def current():
-    check_global_reduction()
     for protocol in range(6):
         sink = Sink()
         writer = Writer(sink, protocol=protocol)
@@ -87,6 +86,7 @@ def current():
     out.writer = pickle._Pickler(out, 5)
     out.writer.dump([1, 2])
     assert out.nested
+    check_global_reduction()
     print("pickle writer")
 
 
