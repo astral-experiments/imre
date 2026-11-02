@@ -418,6 +418,27 @@ impl Context {
             "class_parameter_scope" | "function_parameter_scope" => {
                 super::typing::parameter_scope(self, a, b, op == "class_parameter_scope")
             }
+            "method_parameter_scope" => {
+                let scope = super::typing::parameter_scope(self, a, b, false)?;
+                let cell = if let Some(param) = self.scope_name(scope, "__class__") {
+                    self.alloc(Value::Cell(Some(param)))
+                } else {
+                    self.scope_data(a)
+                        .class_cell
+                        .expect("method's enclosing class")
+                };
+                let Value::Scope(frame) = self.heap.get_mut(scope) else {
+                    unreachable!()
+                };
+                frame.class_cell = Some(cell);
+                frame.closure.cells.insert("__class__".to_owned(), cell);
+                Ok(scope)
+            }
+            "method_annotation_scope" => {
+                // Only annotations see the class dictionary ahead of the method's parameters.
+                let dict = self.class_annotation_dict_cell(b);
+                Ok(self.closure_environment(a, vec!["__classdict__".to_owned()], &[dict]))
+            }
             "class_annotation_environment" => self.class_annotation_environment(a, b),
             "class_annotation_locals" => {
                 let parent = self.scope_data(a).parent.expect("annotation globals");
@@ -1324,20 +1345,27 @@ impl Context {
         } else {
             scope
         };
+        // A generic method's parameter scope carries a real __class__ cell, so its
+        // other free variables can be captured normally alongside it.
+        let class_cell_available = self
+            .scope_data(scope)
+            .closure
+            .cells
+            .contains_key("__class__");
         let freevars = (metadata["scope_complete"].as_bool() == Some(true)
-            && metadata["class_cell"].as_bool() != Some(true))
-        .then(|| self.enclosing_freevars(lexical, reads))
-        .flatten()
-        .map(|mut freevars| {
-            if annotation_class {
-                freevars.push("__classdict__".to_owned());
-                if read_class {
-                    freevars.push("__class__".to_owned());
+            && (metadata["class_cell"].as_bool() != Some(true) || class_cell_available))
+            .then(|| self.enclosing_freevars(lexical, reads))
+            .flatten()
+            .map(|mut freevars| {
+                if annotation_class {
+                    freevars.push("__classdict__".to_owned());
+                    if read_class {
+                        freevars.push("__class__".to_owned());
+                    }
+                    freevars.sort();
                 }
-                freevars.sort();
-            }
-            freevars
-        });
+                freevars
+            });
         let closure_supported = freevars.is_some();
         let freevars = freevars.unwrap_or_default();
         let flags = metadata["code_flags"]

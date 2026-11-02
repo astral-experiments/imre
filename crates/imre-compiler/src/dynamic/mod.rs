@@ -25,6 +25,7 @@ struct Imports {
     runtime_imports: bool,
     uses_import_builtin: bool,
     declares_function_pack: bool,
+    in_function: bool,
     imports_logging: bool,
     sys_names: HashSet<String>,
     operator_names: HashSet<String>,
@@ -308,7 +309,22 @@ impl<'a> Visitor<'a> for Imports {
             }
             _ => {}
         }
+        let outer_function = self.in_function;
+        match s {
+            Stmt::FunctionDef(function) => {
+                if !outer_function && let Some(params) = function_type_params(function) {
+                    self.runtime_imports = true;
+                    self.declares_function_pack |= params
+                        .iter()
+                        .any(|p| matches!(p, ast::TypeParam::TypeVarTuple(_)));
+                }
+                self.in_function = true;
+            }
+            Stmt::ClassDef(_) => self.in_function = false,
+            _ => {}
+        }
         visitor::walk_stmt(self, s);
+        self.in_function = outer_function;
     }
     fn visit_expr(&mut self, e: &'a Expr) {
         if let Expr::Name(name) = e
@@ -398,7 +414,7 @@ impl<'a> Visitor<'a> for Imports {
     }
 }
 
-/// A module-level synchronous function can close over unbounded type parameters in a single body scope.
+/// A synchronous function can close over unbounded type parameters in a single body scope.
 pub(crate) fn function_type_params(function: &ast::StmtFunctionDef) -> Option<&ast::TypeParams> {
     use ast::AnyNodeRef::*;
     use ast::visitor::source_order::{SourceOrderVisitor, TraversalSignal};
@@ -454,20 +470,6 @@ fn imports(source: &str, kind: SourceKind) -> Result<Imports, String> {
     let mut imports = Imports::default();
     let mut body = parsed.into_syntax().body;
     imre_ast::lower(&mut body);
-    for stmt in &body {
-        if let Stmt::FunctionDef(function) = stmt
-            && let Some(params) = function_type_params(function)
-        {
-            imports.runtime_imports = true;
-            if params
-                .iter()
-                .any(|p| matches!(p, ast::TypeParam::TypeVarTuple(_)))
-            {
-                imports.declares_function_pack = true;
-                break;
-            }
-        }
-    }
     imports.visit_body(&body);
     Ok(imports)
 }

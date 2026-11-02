@@ -259,7 +259,8 @@ impl Function<'_, '_> {
                         {
                             self.unsupported("variadic type alias parameters");
                         }
-                        self.scope = self.parameter_scope(&outer, params, false);
+                        self.scope =
+                            self.parameter_scope(&outer, params, "function_parameter_scope");
                         let key = self.code_name(".type_params");
                         self.op("lookup", &[&self.scope.clone(), &key])
                     } else {
@@ -376,7 +377,8 @@ impl Function<'_, '_> {
                         DefinitionName::Binding(&v.name),
                         Some(&v.parameters),
                         v.returns.as_deref(),
-                        crate::dynamic::function_type_params(v).filter(|_| self.prefix.is_empty()),
+                        crate::dynamic::function_type_params(v)
+                            .filter(|_| self.prefix.is_empty() || self.class_locals.is_some()),
                         body,
                     );
                     if v.is_async && !generator {
@@ -395,7 +397,7 @@ impl Function<'_, '_> {
                     let outer = self.scope.clone();
                     let mut outer_class_locals = None;
                     let parameter_scope = v.type_params.as_deref().map(|params| {
-                        let scope = self.parameter_scope(&outer, params, true);
+                        let scope = self.parameter_scope(&outer, params, "class_parameter_scope");
                         self.scope = self.op("class_base_scope", &[&scope, &outer]);
                         outer_class_locals = self.class_locals.take();
                         scope
@@ -602,7 +604,12 @@ impl Function<'_, '_> {
         self.op("import", &[&self.scope.clone(), &name])
     }
 
-    fn parameter_scope(&mut self, outer: &str, params: &ast::TypeParams, class: bool) -> String {
+    fn parameter_scope(
+        &mut self,
+        outer: &str,
+        params: &ast::TypeParams,
+        operation: &str,
+    ) -> String {
         let names = self.op("dict", &[]);
         for param in params {
             if param.default().is_some()
@@ -619,12 +626,7 @@ impl Function<'_, '_> {
             };
             self.op("put", &[&names, &binding, &declaration]);
         }
-        let op = if class {
-            "class_parameter_scope"
-        } else {
-            "function_parameter_scope"
-        };
-        self.op(op, &[outer, &names])
+        self.op(operation, &[outer, &names])
     }
 
     pub(super) fn define(
@@ -707,9 +709,17 @@ impl Function<'_, '_> {
             crate::frontend::parameter_annotations(p, returns)
         });
         let outer = self.scope.clone();
-        let scope = type_params
-            .map(|params| self.parameter_scope(&outer, params, false))
-            .unwrap_or(outer);
+        let generic_method = self.class_locals.is_some() && type_params.is_some();
+        let scope = if let Some(params) = type_params {
+            let op = if generic_method {
+                "method_parameter_scope"
+            } else {
+                "function_parameter_scope"
+            };
+            self.parameter_scope(&outer, params, op)
+        } else {
+            outer.clone()
+        };
         let annotate = if entries.is_empty() {
             "0".into()
         } else {
@@ -718,11 +728,18 @@ impl Function<'_, '_> {
                 .as_ref()
                 .filter(|_| !self.source.string_annotations)
                 .cloned();
-            let reads = class_metadata::annotation_reads(
+            let mut reads = class_metadata::annotation_reads(
                 &entries,
                 class.as_ref(),
                 self.source.string_annotations,
             );
+            let method_annotation = generic_method && class.is_some();
+            let annotation_scope = if method_annotation {
+                reads.insert("__classdict__".to_owned());
+                self.op("method_annotation_scope", &[&scope, &outer])
+            } else {
+                scope.clone()
+            };
             use imre_ast::code_flags::*;
             let mut annotation_flags = OPTIMIZED | NEWLOCALS;
             if type_params.is_some() || self.in_function {
@@ -741,7 +758,7 @@ impl Function<'_, '_> {
                     "scope_reads": reads,
                     "scope_complete": true,
                     "scope_locals_complete": true,
-                    "annotation_class": class.is_some(),
+                    "annotation_class": class.is_some() && !method_annotation,
                 })
                 .to_string(),
             );
@@ -756,7 +773,7 @@ impl Function<'_, '_> {
             let aname = self.text("__annotate__");
             let aqname = self.text(&format!("{qualname}.__annotate__"));
             let defaults = self.op("dict", &[]);
-            self.checked(&format!("call i64 @imre_dyn_define(ptr %ctx, ptr {code}, i64 {}, i64 {aname}, i64 {sig}, i64 {defaults}, i64 {aqname}, i64 0, i64 0, i1 true)", scope))
+            self.checked(&format!("call i64 @imre_dyn_define(ptr %ctx, ptr {code}, i64 {}, i64 {aname}, i64 {sig}, i64 {defaults}, i64 {aqname}, i64 0, i64 0, i1 true)", annotation_scope))
         };
         let qualname = self.text(&qualname);
         let mut signature =
@@ -786,7 +803,9 @@ impl Function<'_, '_> {
                 &self.source.private_names
             ));
         }
-        if (params.is_some() || matches!(body, Body::YieldingLambda(_))) && uses_class_cell(&body) {
+        let reads_class =
+            (params.is_some() || matches!(body, Body::YieldingLambda(_))) && uses_class_cell(&body);
+        if reads_class {
             signature["class_cell"] = json!(true);
         }
         let generator = match &body {
@@ -913,6 +932,9 @@ impl Function<'_, '_> {
             if let Some(name) = signature[group].as_str() {
                 closure_names.locals.insert(name.to_owned());
             }
+        }
+        if reads_class {
+            closure_names.reads.insert("__class__".to_owned());
         }
         for name in closure_names.globals.iter().chain(&closure_names.nonlocals) {
             closure_names.locals.remove(name);
