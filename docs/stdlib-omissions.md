@@ -4,24 +4,53 @@ The compatibility table keeps every original test in its upstream denominator. E
 
 To add a decision, cite the assertion in the pinned CPython source, explain its impact on Python programs, and identify the public behavior that remains in scope. A failure, timeout or skip is evidence for review. The decision is made per original test.
 
-## Collections
+## Accepted omissions
 
-All eight originals below passed on stock CPython 3.14.5 and skipped at both Imre optimization levels in the unchanged 295-case OrderedDict file. The companion tests named in the table passed at both levels. [CPython source](https://github.com/python/cpython/blob/5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/test_ordered_dict.py) · [Imre revision](https://github.com/astral-experiments/imre/commit/b5af3ae9c19865f07fc3910132390a7ff1f32828)
+### `collections`
 
-### Accepted omissions
+These six OrderedDict originals passed on stock and skipped at both native levels in the unchanged 295-case file. [Tested Imre revision](https://github.com/astral-experiments/imre/commit/b5af3ae9c19865f07fc3910132390a7ff1f32828)
 
-| Original test | Occurrence | Decision | Related passing test in the same class |
+| Original CPython test | Occurrence | Decision and reason | Related paired original |
 | --- | ---: | --- | --- |
-| `test.test_ordered_dict.CPythonOrderedDictSubclassTests.test_ordered_dict_items_result_gc` | 1 | The subclass inherits a test of the C iterator's recycled tuple. Subclass item iteration preserves the key and value without prescribing when the collector tracks the result. [Upstream assertion](https://github.com/python/cpython/blob/5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/test_ordered_dict.py#L733-L742) | `test_views` |
-| `test.test_ordered_dict.CPythonOrderedDictSubclassTests.test_sizeof_exact` | 1 | This subclass inherits a byte-count formula for CPython's C object, table entries, nodes and iterators. A subclass can report a different footprint and still implement the sizing protocol. [Upstream assertion](https://github.com/python/cpython/blob/5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/test_ordered_dict.py#L887-L917) | `test_sizeof` |
-| `test.test_ordered_dict.CPythonOrderedDictTests.test_ordered_dict_items_result_gc` | 1 | The assertion inspects whether the collector tracks an item tuple after CPython recycles it. An iterator can return the same key and value using a fresh tuple. [Upstream assertion](https://github.com/python/cpython/blob/5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/test_ordered_dict.py#L733-L742) | `test_views` |
-| `test.test_ordered_dict.CPythonOrderedDictTests.test_sizeof_exact` | 1 | The expected bytes come from CPython's C structs, pointer widths, hash-table allocation and node sizes. Imre can report the size of its own representation. [Upstream assertion](https://github.com/python/cpython/blob/5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/test_ordered_dict.py#L887-L917) | `test_sizeof` |
-| `test.test_ordered_dict.PurePythonOrderedDictSubclassTests.test_ordered_dict_items_result_gc` | 1 | The pure-Python subclass checks the collector's tracking bit after its first item. A different tuple lifetime strategy can satisfy the subclass iteration contract. [Upstream assertion](https://github.com/python/cpython/blob/5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/test_ordered_dict.py#L733-L742) | `test_views` |
-| `test.test_ordered_dict.PurePythonOrderedDictTests.test_ordered_dict_items_result_gc` | 1 | The pure-Python provider runs the same tuple-tracking assertion. The required item values are observable regardless of the collector's tracking policy. [Upstream assertion](https://github.com/python/cpython/blob/5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/test_ordered_dict.py#L733-L742) | `test_views` |
+| `test.test_ordered_dict.CPythonOrderedDictSubclassTests.test_ordered_dict_items_result_gc` | 1 | The subclass inherits a test of the C iterator's recycled tuple. Subclass item iteration preserves the key and value without prescribing when the collector tracks the result. [Upstream assertion](https://github.com/python/cpython/blob/5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/test_ordered_dict.py#L733-L742) | `CPythonOrderedDictSubclassTests.test_views` |
+| `test.test_ordered_dict.CPythonOrderedDictSubclassTests.test_sizeof_exact` | 1 | This subclass inherits a byte-count formula for CPython's C object, table entries, nodes and iterators. A subclass can report a different footprint and still implement the sizing protocol. [Upstream assertion](https://github.com/python/cpython/blob/5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/test_ordered_dict.py#L887-L917) | `CPythonOrderedDictSubclassTests.test_sizeof` |
+| `test.test_ordered_dict.CPythonOrderedDictTests.test_ordered_dict_items_result_gc` | 1 | The assertion inspects whether the collector tracks an item tuple after CPython recycles it. An iterator can return the same key and value using a fresh tuple. [Upstream assertion](https://github.com/python/cpython/blob/5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/test_ordered_dict.py#L733-L742) | `CPythonOrderedDictTests.test_views` |
+| `test.test_ordered_dict.CPythonOrderedDictTests.test_sizeof_exact` | 1 | The expected bytes come from CPython's C structs, pointer widths, hash-table allocation and node sizes. Imre can report the size of its own representation. [Upstream assertion](https://github.com/python/cpython/blob/5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/test_ordered_dict.py#L887-L917) | `CPythonOrderedDictTests.test_sizeof` |
+| `test.test_ordered_dict.PurePythonOrderedDictSubclassTests.test_ordered_dict_items_result_gc` | 1 | The pure-Python subclass checks the collector's tracking bit after its first item. A different tuple lifetime strategy can satisfy the subclass iteration contract. [Upstream assertion](https://github.com/python/cpython/blob/5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/test_ordered_dict.py#L733-L742) | `PurePythonOrderedDictSubclassTests.test_views` |
+| `test.test_ordered_dict.PurePythonOrderedDictTests.test_ordered_dict_items_result_gc` | 1 | The pure-Python provider runs the same tuple-tracking assertion. The required item values are observable regardless of the collector's tracking policy. [Upstream assertion](https://github.com/python/cpython/blob/5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/test_ordered_dict.py#L733-L742) | `PurePythonOrderedDictTests.test_views` |
 
-### Reviewed cases still in scope
+### `io`
 
-| Original test | Occurrence | Decision | Related passing test in the same class |
+These two originals come from the SizeofTest mixin on CBufferedWriterTest. Stock passed both. The ordinary native runs reported the upstream CPython-specific skip at both optimization levels. [Tested Imre revision](https://github.com/astral-experiments/imre/commit/daf27ebdd244b9654a3183ab822fef2be8cf4c80)
+
+| Original CPython test | Occurrence | Decision and reason | Related paired original |
 | --- | ---: | --- | --- |
-| `test.test_ordered_dict.CPythonOrderedDictSubclassTests.test_weakref_list_is_not_traversed` | 1 | A subclass, a self-referential list and a weak reference go out of scope before collection. A crash would affect ordinary subclass users. [Upstream assertion](https://github.com/python/cpython/blob/5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/test_ordered_dict.py#L954-L971) | `test_reference_loop` |
-| `test.test_ordered_dict.CPythonOrderedDictTests.test_weakref_list_is_not_traversed` | 1 | The body creates a reference cycle containing a weak reference and calls the public collector. A crash in that sequence is observable in an ordinary program. [Upstream assertion](https://github.com/python/cpython/blob/5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/test_ordered_dict.py#L954-L971) | `test_reference_loop` |
+| `test.test_io.CBufferedWriterTest.test_buffer_freeing` | 1 | The test subtracts 4,096 bytes from the open writer’s reported size and expects that exact size after close. Imre must close the stream and release its resources. Its allocator can report a different change in `sys.getsizeof()`. [Upstream assertion](https://github.com/python/cpython/blob/5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/test_io.py#L1460-L1466) | `CBufferedWriterTest.test_context_manager` |
+| `test.test_io.CBufferedWriterTest.test_sizeof` | 1 | The assertion requires a writer with an 8,192-byte buffer to report exactly 4,096 bytes more than one with a 4,096-byte buffer. Imre supports the requested buffer capacity and can account for object storage differently. [Upstream assertion](https://github.com/python/cpython/blob/5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/test_io.py#L1449-L1457) | `CBufferedWriterTest.test_constructor` |
+
+### `pathlib`
+
+Stock passed the original. Both native runs reported its upstream CPython-specific skip and exited successfully. [Pinned startup helper](https://github.com/python/cpython/blob/5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/support/import_helper.py#L316-L335) · [Tested Imre revision](https://github.com/astral-experiments/imre/commit/dd3180cce8c6b613d4c14aea25ef3b633b85635b)
+
+| Original CPython test | Occurrence | Decision and reason | Related paired original |
+| --- | ---: | --- | --- |
+| `test.test_pathlib.test_pathlib.LazyImportTest.test_lazy_import` | 1 | A fresh interpreter started with `-S` must keep shutil out of `sys.modules` before and after importing pathlib. That assertion fixes CPython’s startup import order. Imre may load shutil earlier while providing the same path and file operations. [Upstream assertion](https://github.com/python/cpython/blob/5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/test_pathlib/test_pathlib.py#L86-L87) | `PathSubclassTest.test_copy_error_handling` |
+
+## Reviewed cases still in scope
+
+### `collections`
+
+Both originals passed on stock and skipped at both native levels in the unchanged OrderedDict file. Each exercises a failure that a Python program can observe.
+
+| Original CPython test | Occurrence | Decision and reason | Related paired original |
+| --- | ---: | --- | --- |
+| `test.test_ordered_dict.CPythonOrderedDictSubclassTests.test_weakref_list_is_not_traversed` | 1 | A subclass, a self-referential list and a weak reference go out of scope before collection. A crash would affect ordinary subclass users. [Upstream assertion](https://github.com/python/cpython/blob/5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/test_ordered_dict.py#L954-L971) | `CPythonOrderedDictSubclassTests.test_reference_loop` |
+| `test.test_ordered_dict.CPythonOrderedDictTests.test_weakref_list_is_not_traversed` | 1 | The body creates a reference cycle containing a weak reference and calls the public collector. A crash in that sequence is observable in an ordinary program. [Upstream assertion](https://github.com/python/cpython/blob/5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/test_ordered_dict.py#L954-L971) | `CPythonOrderedDictTests.test_reference_loop` |
+
+### `os`
+
+Stock passed the unchanged original. The native observations below come from separate filesystem controls. The unchanged native original has yet to run.
+
+| Original CPython test | Occurrence | Decision and reason | Related paired original |
+| --- | ---: | --- | --- |
+| `test.test_os.FileTests.test_rename` | 1 | The original requires an invalid destination to raise `TypeError` and checks that CPython’s reference count stays constant. Separate boxed controls verified the exception and the source file’s contents. We retain the mixed original while its ordinary compiled error path remains unverified. [Upstream assertion](https://github.com/python/cpython/blob/5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/test_os.py#L215-L220) | `TestPosixDirFd.test_rename_dir_fd` |
