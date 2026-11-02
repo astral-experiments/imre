@@ -991,6 +991,7 @@ pub(super) enum Value {
         owner: Id,
         name: &'static str,
     },
+    ProcessHandle(crate::objects::BoxedPopen),
     File(crate::shared::Shared<super::stdlib::BinaryFile>),
     TextFile(crate::objects::TextFile),
     RegexScanner {
@@ -1066,6 +1067,7 @@ impl Value {
                 super::stdlib::BinaryFile::Reader { .. } => "_io.BufferedReader",
                 super::stdlib::BinaryFile::Writer { .. } => "_io.BufferedWriter",
             },
+            Self::ProcessHandle(_) => "_imre_subprocess.Handle",
             Self::TextFile(_) => "_io.TextIOWrapper",
             Self::SequenceIterator { .. } => "iterator",
             Self::ReverseSequence { .. } => "reversed",
@@ -1179,6 +1181,7 @@ impl Value {
             | Self::Scope(_)
             | Self::ClassCell(_)
             | Self::LoopIterator { .. }
+            | Self::ProcessHandle(_)
             | Self::Yielded(_) => false,
             Self::Tuple(items) => !items.is_empty(),
             _ => true,
@@ -1539,6 +1542,7 @@ impl Value {
             | Self::PartialPlaceholder
             | Self::TokenMissing
             | Self::TextFile(_)
+            | Self::ProcessHandle(_)
             | Self::NamedFileCloser(_) => {}
             Self::BufferedRandom(_, name) => visit.push(*name),
         }

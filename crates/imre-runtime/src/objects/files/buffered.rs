@@ -129,6 +129,10 @@ impl Output {
         self.raw.inner.seek(offset)
     }
 
+    pub(super) fn into_file(self) -> File {
+        self.raw.inner
+    }
+
     pub(super) fn finish(mut self) -> (File, io::Result<()>) {
         let flushed = self.flush();
         (self.raw.inner, flushed)
@@ -351,6 +355,40 @@ impl Input {
         Ok(pos)
     }
 
+    /// read1 consumes available read-ahead or makes a single raw request without prefetching.
+    pub(super) fn read_once(&mut self, size: Option<usize>) -> Result<Bytes> {
+        let size = size.unwrap_or(self.raw.capacity());
+        let buffered = self.raw.buffer();
+        if !buffered.is_empty() {
+            let count = size.min(buffered.len());
+            let mut data = reserve(count)?;
+            data.extend_from_slice(&buffered[..count]);
+            self.raw.consume(count);
+            return Ok(data);
+        }
+        let mut data = reserve(size)?;
+        if size != 0 {
+            loop {
+                match self
+                    .raw
+                    .get_mut()
+                    .get_mut()
+                    .read_uninit(&mut data.spare_capacity_mut()[..size])
+                {
+                    Ok(n) => {
+                        // SAFETY: the raw read initialized precisely n bytes of spare capacity.
+                        unsafe { data.set_len(n) };
+                    }
+                    Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
+                    Err(e) if e.kind() == io::ErrorKind::WouldBlock => {}
+                    Err(e) => return Err(errno_error(e)),
+                }
+                break;
+            }
+        }
+        Ok(data)
+    }
+
     pub(super) fn read_into(&mut self, bytes: &mut [u8]) -> Result<usize> {
         self.raw.read(bytes).map_err(errno_error)
     }
@@ -432,8 +470,13 @@ impl Input {
     }
 
     pub(super) fn binary_line(&mut self) -> Result<Bytes> {
+        self.binary_line_limited(None)
+    }
+
+    pub(super) fn binary_line_limited(&mut self, size: Option<usize>) -> Result<Bytes> {
         let mut bytes = Vec::new();
-        self.raw
+        (&mut self.raw)
+            .take(size.map_or(u64::MAX, |n| n as u64))
             .read_until(b'\n', &mut bytes)
             .map_err(errno_error)?;
         Ok(bytes)

@@ -32,6 +32,7 @@ mod pipe_size;
 mod popen;
 mod shell_output;
 pub(super) use asynchronous::AsyncProcess;
+pub(crate) use popen::{BoxedPipe, BoxedPopen};
 pub(super) use popen::{Popen, retain_live_owner};
 
 #[cfg(target_os = "linux")]
@@ -310,6 +311,10 @@ impl CStrings {
     }
 
     fn from_environment(env: StringPairs) -> Result<Self> {
+        Self::from_pairs(env.iter().map(|(k, v)| (k.as_bytes(), v.as_bytes())))
+    }
+
+    fn from_pairs<'a>(env: impl ExactSizeIterator<Item = (&'a [u8], &'a [u8])>) -> Result<Self> {
         let mut strings = Vec::new();
         strings
             .try_reserve_exact(env.len())
@@ -324,9 +329,9 @@ impl CStrings {
             entry
                 .try_reserve_exact(size)
                 .map_err(|_| Error::allocation())?;
-            entry.extend_from_slice(key.as_bytes());
+            entry.extend_from_slice(key);
             entry.push(b'=');
-            entry.extend_from_slice(value.as_bytes());
+            entry.extend_from_slice(value);
             entry.push(0);
             strings.push(
                 CString::from_vec_with_nul(entry)
@@ -500,12 +505,12 @@ impl Launch {
     /// Prepares native launch data after validating nonempty argv and env names.
     #[cfg(test)]
     fn new(argv: Vec<CString>, env: Option<StringPairs>) -> Result<Self> {
-        Self::with_executable(argv, env, None)
+        Self::with_executable(argv, env.map(CStrings::from_environment).transpose()?, None)
     }
 
     fn with_executable(
         argv: Vec<CString>,
-        env: Option<StringPairs>,
+        env: Option<CStrings>,
         executable: Option<CString>,
     ) -> Result<Self> {
         let program = executable.as_ref().unwrap_or_else(|| &argv[0]);
@@ -514,16 +519,15 @@ impl Launch {
         } else {
             let inherited;
             let path = if let Some(env) = &env {
-                env.iter()
-                    .find(|(key, _)| key.as_str() == "PATH")
-                    .map(|(_, value)| value.as_bytes())
+                env.strings
+                    .iter()
+                    .find_map(|entry| entry.to_bytes().strip_prefix(b"PATH="))
             } else {
                 inherited = std::env::var_os("PATH");
                 inherited.as_deref().map(OsStrExt::as_bytes)
             };
             Some(PathSearch::new(path.unwrap_or(b"/bin:/usr/bin"), program)?)
         };
-        let env = env.map(CStrings::from_environment).transpose()?;
         Ok(Self {
             argv: CStrings::new(argv)?,
             executable,
@@ -629,7 +633,7 @@ impl Launch {
         mut self,
         cwd: Option<&CString>,
         streams: u32,
-        redirects: popen::Redirects,
+        redirects: popen::Redirects<'_>,
         attributes: ChildAttributes,
     ) -> io::Result<Child> {
         let descriptors = redirects.fds;
@@ -1096,7 +1100,7 @@ unsafe fn prepare_process(
     let (launch, cwd, _) = unsafe {
         let cmd = WordKind::new(5).acquire(args as usize);
         validate_command_shape(&cmd, &config)?;
-        prepare_command(&cmd, &config, || Ok(ChildAttributes::default()))?
+        prepare_command(&cmd, &config, None, || Ok(ChildAttributes::default()))?
     };
     Ok((launch, cwd))
 }
@@ -1134,11 +1138,14 @@ unsafe fn validate_command_shape(cmd: &OwnedWord, config: &popen::LaunchConfig) 
     }
 }
 
+type ByteEnvironment = Vec<(Vec<u8>, Vec<u8>)>;
+
 /// # Safety
 /// The exact optional directory and environment stay rooted across conversion.
 unsafe fn prepare_command(
     cmd: &OwnedWord,
     config: &popen::LaunchConfig,
+    byte_env: Option<ByteEnvironment>,
     child_attributes: impl FnOnce() -> Result<ChildAttributes>,
 ) -> Result<(Launch, Option<CString>, ChildAttributes)> {
     // SAFETY: the caller roots the exact argv, optional directory and environment.
@@ -1183,6 +1190,12 @@ unsafe fn prepare_command(
             argv.splice(..0, [shell.to_owned(), c"-c".to_owned()]);
         }
         let cwd = argv::optional_path(config.cwd, config.cwd_kind)?;
+        let env = match byte_env {
+            Some(pairs) => Some(CStrings::from_pairs(
+                pairs.iter().map(|(k, v)| (k.as_slice(), v.as_slice())),
+            )?),
+            None => env.map(CStrings::from_environment).transpose()?,
+        };
         Ok((
             Launch::with_executable(argv, env, executable)?,
             cwd,
