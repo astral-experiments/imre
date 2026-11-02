@@ -2628,6 +2628,9 @@ impl IntrinsicModule {
             (Self::Resource, "RLIMIT_CORE") => {
                 Intrinsic::ObjectRuntimeExport("resource.RLIMIT_CORE")
             }
+            (Self::Resource, "RLIMIT_NOFILE") => {
+                Intrinsic::ObjectRuntimeExport("resource.RLIMIT_NOFILE")
+            }
             (Self::Resource, "RLIMIT_STACK") => {
                 Intrinsic::ObjectRuntimeExport("resource.RLIMIT_STACK")
             }

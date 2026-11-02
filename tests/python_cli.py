@@ -2916,6 +2916,7 @@ def report(text):
             plugin.write_bytes((fixtures / "boxed_resource.py").read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")
             compare("-IB", "-c", imports + "arithmetic.core_limits_child()")
+            compare("-IB", "-c", imports + "arithmetic.nofile_limits_child()")
             shim = root / "secrets_entropy.so"
             subprocess.run(["cc", "-shared", "-fPIC", fixtures / "secrets_entropy.c", "-ldl", "-o", shim], check=True)
             probe = root / "entropy.py"
