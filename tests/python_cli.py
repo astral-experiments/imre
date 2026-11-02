@@ -922,6 +922,7 @@ def check_unittest_file_discovery(imre, root, run):
         "result = unittest.TestResult()\n"
         "suite.run(result)\n"
         "print(result.testsRun, [test.id() for test, error in result.failures], len(result.errors))\n"
+        "print([(test.id(), reason) for test, reason in result.skipped])\n"
     )
     for optimization in ("0", "3"):
         directory = root / ("late_tests_" + optimization)
@@ -944,10 +945,14 @@ def check_unittest_file_discovery(imre, root, run):
             "        self.assertIs(safe_repr, unittest.util.safe_repr)\n"
             "        self.assertEqual(safe_repr(None), 'None')\n"
         )
+        (directory / "test_skipped.py").write_text(
+            "import unittest\nraise unittest.SkipTest('unavailable module')\n"
+        )
         for command in ((sys.executable, "-B", entry), (executable,)):
             result = run(*command, directory)
             assert (result.returncode, result.stdout, result.stderr) == (
-                0, b"2 ['test_late.Late.test_body'] 0\n", b"",
+                0, b"3 ['test_late.Late.test_body'] 0\n"
+                b"[('unittest.loader.ModuleSkipped.test_skipped', 'unavailable module')]\n", b"",
             ), result
 
 
