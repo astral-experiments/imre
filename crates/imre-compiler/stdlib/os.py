@@ -21,6 +21,7 @@ if sys.platform == "linux":
             globals()[_name] = getattr(_posix, _name)
     del _name, _posix
     from posix import O_PATH, O_TMPFILE, fstatvfs, statvfs, statvfs_result
+    from posix import XATTR_CREATE, XATTR_REPLACE, XATTR_SIZE_MAX, getxattr, listxattr, removexattr, setxattr
     from posix import (
         sched_getscheduler, sched_param, SCHED_BATCH, SCHED_DEADLINE, SCHED_FIFO, SCHED_IDLE,
         SCHED_NORMAL, SCHED_OTHER, SCHED_RESET_ON_FORK, SCHED_RR,

@@ -332,6 +332,8 @@ mod mkfifo;
 pub(in crate::dynamic) mod scheduler;
 mod unlink;
 mod utime;
+#[cfg(target_os = "linux")]
+mod xattr;
 
 /// POSIX functions exported as the same builtins by both os and posix.
 pub(super) fn is_descriptor_function(name: &str) -> bool {
@@ -370,7 +372,11 @@ pub(super) fn is_descriptor_function(name: &str) -> bool {
             | "link"
             | "symlink"
     ) || (cfg!(unix) && matches!(name, "kill" | "getppid" | "waitstatus_to_exitcode"))
-        || (cfg!(target_os = "linux") && name == "sendfile")
+        || (cfg!(target_os = "linux")
+            && matches!(
+                name,
+                "sendfile" | "listxattr" | "setxattr" | "getxattr" | "removexattr"
+            ))
 }
 
 /// Convert an index argument before issuing the descriptor syscall.
@@ -409,22 +415,33 @@ fn path_or_fd(
     allow_fd: bool,
     warn_bool_fd: fn(&mut Context, Id) -> Result<()>,
 ) -> Result<(PathArg, Id)> {
+    let kinds = if allow_fd {
+        "string, bytes, os.PathLike or integer"
+    } else {
+        "string, bytes or os.PathLike"
+    };
+    convert_path(ctx, name, path, kinds, allow_fd.then_some(warn_bool_fd))
+}
+
+// An optional descriptor converter keeps __index__ errors distinct from path-type diagnostics.
+fn convert_path(
+    ctx: &mut Context,
+    name: &str,
+    path: Id,
+    kinds: &str,
+    fd_warning: Option<fn(&mut Context, Id) -> Result<()>>,
+) -> Result<(PathArg, Id)> {
     let spelling = matches!(
         ctx.heap.get(ctx.scalar_value(path)),
         Value::Str(_) | Value::SurrogateStr(_) | Value::Bytes(_)
     );
-    if allow_fd
+    if let Some(warn_bool_fd) = fd_warning
         && !spelling
         && let Some(index) = ctx.index_value(path)?
     {
         warn_bool_fd(ctx, path)?;
         return Ok((PathArg::Fd(native::directory_fd_number(&index)?), path));
     }
-    let kinds = if allow_fd {
-        "string, bytes, os.PathLike or integer"
-    } else {
-        "string, bytes or os.PathLike"
-    };
     let filename = posixpath::path_arg(ctx, path, &format!("{name}: path should be {kinds}"))?;
     let pathname = c_path(
         ctx,
@@ -694,6 +711,10 @@ pub(super) fn descriptor(
     }
     if matches!(name, "remove" | "unlink" | "rmdir") {
         return unlink::call(ctx, name, args, kwargs);
+    }
+    #[cfg(target_os = "linux")]
+    if matches!(name, "getxattr" | "setxattr" | "removexattr" | "listxattr") {
+        return xattr::call(ctx, name, args, kwargs);
     }
     if name == "utime" {
         return utime::call(ctx, args, kwargs);
