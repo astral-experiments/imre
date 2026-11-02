@@ -86,6 +86,16 @@ REJECTED = {
     "frozen_inherited_class_data": 'from dataclasses import dataclass\nclass Base:\n    items = [1]\n@dataclass(frozen=True)\nclass Child(Base):\n    n: int\nChild(1).items = [2]\n',
     "sibling_guard_field": SUBCLASS_LAYOUT + "def f(x: Base) -> str:\n    if isinstance(x, (A, B)): return x.label\n    return 'other'\n",
     "reassigned_subclass_field": SUBCLASS_LAYOUT + "def f(x: Base, replacement: Base) -> str:\n    if isinstance(x, A):\n        x = replacement\n        return x.label\n    return 'other'\n",
+    "init_hook_value_reads_uninitialized": """class Base:
+    value: int
+    def __init__(self) -> None:
+        self.value = self.make()
+    def make(self) -> int:
+        return 1
+class Child(Base):
+    def make(self) -> int:
+        return self.value
+""",
     "init_hook_skips_field": HOOK + "class Child(Build):\n    def prepare(self) -> None: pass\n",
     "init_hook_reads_before_write": HOOK + "class Child(Build):\n    def prepare(self) -> None: self.value = self.value + 1\n",
     "init_hook_leaks_receiver": HOOK + "def observe(value: Build) -> int: return value.value\nclass Child(Build):\n    def prepare(self) -> None: self.value = observe(self)\n",
