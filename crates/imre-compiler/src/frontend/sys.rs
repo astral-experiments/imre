@@ -860,7 +860,7 @@ impl Checker<'_> {
             ty: self.types.struct_sequence(
                 "sys.thread_info",
                 &["name", "lock", "version"],
-                vec![text, Type::None, text],
+                vec![text; 3],
             ),
             kind: ExprKind::Builtin(Builtin::SysThreadInfo, vec![]),
         }

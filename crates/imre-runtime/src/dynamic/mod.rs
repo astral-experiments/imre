@@ -3005,6 +3005,8 @@ impl Context {
                     "big"
                 });
                 self.bind(scope, "byteorder", byteorder);
+                let thread_info = stdlib::fixed_structseq::thread_info(self);
+                self.bind(scope, "thread_info", thread_info);
                 for name in [
                     "audit",
                     "addaudithook",
