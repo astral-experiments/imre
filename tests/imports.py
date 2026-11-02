@@ -16,6 +16,14 @@ IMPORT = "from helper import f\nprint(f(2))\n"
 
 
 REJECTED = {
+    "urlopen_keeps_typed_call_check": ({
+        "main.py": (
+            "from urllib.request import urlopen\n"
+            "def typed(n: int) -> int: return n\n"
+            "print(urlopen('data:,hello').read())\n"
+            "print(typed('wrong'))\n"
+        ),
+    }, "expected int, got str"),
     "unused_warn_preserves_typed_arguments": ({
         "main.py": (
             "from warnings import warn\n"
@@ -272,6 +280,17 @@ REJECTED = {
 }
 
 ACCEPTED = {
+    "urllib_request_and_error": {
+        "main.py": (
+            "import urllib.request\n"
+            "from urllib.error import URLError\n"
+            "from urllib.request import Request\n"
+            "with urllib.request.urlopen(Request('data:,one%20two')) as response:\n"
+            "    print(response.geturl(), response.read())\n"
+            "try: urllib.request.urlopen('nohandler://host')\n"
+            "except URLError as error: print(error.reason)\n"
+        ),
+    },
     "token_named_helper": {
         "main.py": "from helper import read\nprint(read())\n",
         "helper.py": "from token import EXACT_TOKEN_TYPES, tok_name\ndef read():\n    return tok_name[EXACT_TOKEN_TYPES[':=']]\n",
