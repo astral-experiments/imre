@@ -142,6 +142,19 @@ impl Calendar {
         zone: Option<&Self>,
     ) -> Result<Self, Error> {
         let (seconds, micros) = timestamp.timeval()?;
+        Self::from_timeval(seconds, micros, zone)
+    }
+
+    pub(crate) fn now(zone: Option<&Self>) -> Result<Self, Error> {
+        let micros = match SystemTime::now().duration_since(UNIX_EPOCH) {
+            Ok(delta) => delta.as_micros() as i128,
+            Err(e) => (-(e.duration().as_nanos() as i128)).div_euclid(1000),
+        };
+        let seconds = i64::try_from(micros.div_euclid(1_000_000)).map_err(|_| timed::overflow())?;
+        Self::from_timeval(seconds, micros.rem_euclid(1_000_000) as i32, zone)
+    }
+
+    fn from_timeval(seconds: i64, micros: i32, zone: Option<&Self>) -> Result<Self, Error> {
         let tm = timed::civil(seconds, zone.is_some())?;
         let year = tm.tm_year.checked_add(1900).ok_or_else(timed::overflow)?;
         let fields = [
@@ -239,4 +252,13 @@ impl Calendar {
         .expect("writing to a string succeeds");
         s
     }
+}
+
+/// # Safety
+/// A nonzero word holds a rooted fixed timezone for the duration of the call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_calendar_now(z: usize) -> *const Object {
+    // SAFETY: a present zone stays rooted until the calendar owns it.
+    let zone = (z != 0).then(|| Calendar(unsafe { retain(z as *const Object) }));
+    rc_result(Calendar::now(zone.as_ref()).map(|datetime| datetime.0))
 }

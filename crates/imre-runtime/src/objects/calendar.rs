@@ -738,21 +738,6 @@ pub unsafe extern "C" fn imre_calendar_datetime(
     rc_result(new_date([y, m, d, h, mi, s, u, f], zone))
 }
 /// # Safety
-/// The argument is a rooted exact fixed timezone, retained by the resulting datetime.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn imre_calendar_now(z: *const Object) -> *const Object {
-    // SAFETY: the caller roots this nonnull fixed zone until the new datetime owns it.
-    let zone = unsafe { retain(z) };
-    let epoch_us = match SystemTime::now().duration_since(UNIX_EPOCH) {
-        Ok(d) => d.as_micros() as i128,
-        Err(e) => (-(e.duration().as_nanos() as i128)).div_euclid(1000),
-    };
-    rc_result(date(
-        (EPOCH_ORD - 1) * DAY + epoch_us + offset(&zone),
-        Some(zone),
-    ))
-}
-/// # Safety
 /// The first argument is a rooted date, datetime or timedelta, and the second a rooted timedelta.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_calendar_shift(

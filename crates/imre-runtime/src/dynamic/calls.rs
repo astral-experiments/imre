@@ -2114,7 +2114,8 @@ impl Context {
                 _ => {}
             },
             Value::Native(ref class)
-                if class == "datetime.datetime" && matches!(name, "fromtimestamp" | "combine") =>
+                if class == "datetime.datetime"
+                    && matches!(name, "now" | "fromtimestamp" | "combine") =>
             {
                 return Ok(self.builtin(&format!("datetime.datetime.{name}")));
             }
