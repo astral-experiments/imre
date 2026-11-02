@@ -1404,6 +1404,16 @@ def main():
         )
         compare("-B", request_script)
 
+        parser_script = root / "parser_entry.py"
+        parser_script.write_text(
+            "from argparse import ArgumentParser\n"
+            "parser = ArgumentParser()\n"
+            "parser.add_argument('value', type=int)\n"
+            "print(parser.parse_args().value + 1)\n"
+        )
+        compare("-I", parser_script, "-h")
+        compare("-B", parser_script, "41")
+
         ftp_script = root / "ftp_entry.py"
         ftp_script.write_text("import ftplib\nprint(ftplib.FTP().encoding, ftplib.parse257('257 \"home\"'))\n")
         compare("-B", ftp_script)
