@@ -1749,15 +1749,14 @@ pub(super) fn call(
                     code,
                     ..
                 } = *ctx.heap.get(*method)
-                    && matches!(ctx.heap.get(cell), Value::ClassCell(Some(owner)) if owner == old)
+                    && matches!(ctx.heap.get(cell), Value::Cell(Some(owner)) if owner == old)
                 {
                     let parameters = ctx.code_object(code).parameters;
                     let sig: serde_json::Value =
                         serde_json::from_str(ctx.str_value(parameters)?)
                             .map_err(|e| Error::new("SystemError", e.to_string()))?;
                     if sig["class_cell"] == true {
-                        *ctx.heap.get_mut(cell) = Value::ClassCell(Some(*new));
-                        ctx.heap.weak_edge_removed(*old);
+                        ctx.heap.replace_cell(cell, Some(*new));
                         return Ok(TRUE);
                     }
                 }
@@ -1772,12 +1771,9 @@ pub(super) fn call(
             }
             ("members", [class], []) => {
                 if let Value::Class { scope, .. } = *ctx.heap.get(*class) {
-                    let names = ctx.scope_data(scope).names.clone();
-                    let entries = names
-                        .into_iter()
-                        .map(|(name, value)| (ctx.text(name), value))
-                        .collect();
-                    return Ok(ctx.dict(entries));
+                    let dictionary = ctx.class_namespace_dict(scope, false);
+                    let members = ctx.dict_entries(dictionary).expect("class dictionary").to_vec();
+                    return Ok(ctx.dict(members));
                 }
             }
             ("metadata", [mapping], []) => return ctx.mapping_proxy(*mapping),

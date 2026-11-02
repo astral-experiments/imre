@@ -641,7 +641,7 @@ pub(super) struct ClassNamespace {
     pub name_override: Option<Id>,
     /// Backing dictionary shared by live class namespace proxies.
     pub dictionary: Option<Id>,
-    /// Closure cell shared by runtime-source method annotation providers.
+    /// Closure cell shared by method annotation providers.
     pub annotation_dict_cell: Option<Id>,
     /// Scratch field dictionary used while a class body is executing.
     pub annotation_scratch: Option<Id>,
@@ -678,6 +678,15 @@ pub(super) struct Scope {
     pub exec_locals: Option<Id>,
     pub parent: Option<Id>,
     pub module: String,
+}
+
+impl Scope {
+    /// type.__qualname__ lives outside the finished class dictionary.
+    pub(super) fn binding_namespace(&self, name: &str) -> Option<Id> {
+        self.namespace.filter(|_| {
+            name != "__qualname__" || self.class_namespace.is_none() || self.class_body.is_some()
+        })
+    }
 }
 
 #[derive(Clone, Default)]
@@ -799,7 +808,6 @@ pub(super) enum Value {
     },
     Scope(Scope),
     Cell(Option<Id>),
-    ClassCell(Option<Id>),
     Super {
         start: Id,
         receiver: Id,
@@ -1111,7 +1119,7 @@ impl Value {
             }
             Self::ItemGetter(_) => "operator.itemgetter",
             Self::Code(_) => "code",
-            Self::Cell(_) | Self::ClassCell(_) => "cell",
+            Self::Cell(_) => "cell",
             Self::Generator { .. } => "generator",
             Self::Coroutine(_) => "coroutine",
             Self::CoroutineWrapper(_) => "coroutine_wrapper",
@@ -1188,7 +1196,6 @@ impl Value {
             | Self::Code(_)
             | Self::Native(_)
             | Self::Scope(_)
-            | Self::ClassCell(_)
             | Self::LoopIterator { .. }
             | Self::ProcessHandle(_)
             | Self::Yielded(_) => false,
@@ -1327,7 +1334,6 @@ impl Value {
                 }
                 visit.extend(scope.names.values());
             }
-            Self::ClassCell(class) => visit.extend(class),
             Self::Super {
                 start,
                 receiver,
@@ -2163,7 +2169,7 @@ impl Heap {
     }
 
     pub(super) fn replace_cell(&mut self, cell: Id, value: Option<Id>) -> Option<Id> {
-        let (Value::Cell(contents) | Value::ClassCell(contents)) = self.get_mut(cell) else {
+        let Value::Cell(contents) = self.get_mut(cell) else {
             unreachable!("compiled closure cell")
         };
         let previous = std::mem::replace(contents, value);
@@ -2185,7 +2191,7 @@ impl Heap {
             && (self.weak_edge(value)
                 || matches!(
                     self.get(value),
-                    Value::Function { .. } | Value::Cell(Some(_)) | Value::ClassCell(Some(_))
+                    Value::Function { .. } | Value::Cell(Some(_))
                 ))
             && !self.bound_in_active_frame(value)
         {

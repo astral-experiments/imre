@@ -191,7 +191,7 @@ impl Context {
 
     pub(super) fn own_class_attr(&self, class: Id, name: &str) -> Option<Id> {
         match self.heap.get(class) {
-            Value::Class { scope, .. } => self.scope_data(*scope).names.get(name).copied(),
+            Value::Class { scope, .. } => self.namespace_binding(self.scope_data(*scope), name),
             Value::Native(kind) if kind == "object" => match name {
                 "__hash__" => self.builtins.get("object.__hash__").copied(),
                 "__format__" => self.builtins.get("object.__format__").copied(),
@@ -1547,13 +1547,12 @@ impl Context {
         if let Some(class) = self.heap.get(obj).instance_class()
             && let Value::Class { scope, .. } = self.heap.get(class)
         {
-            let scope = self.scope_data(*scope);
-            if let Some(qualified) = scope.names.get("__qualname__") {
-                kind = self.str_value(*qualified).unwrap_or(kind);
+            if let Some(qualified) = self.namespace_binding(self.scope_data(*scope), "__qualname__") {
+                kind = self.str_value(qualified).unwrap_or(kind);
             }
-            module = match scope.names.get("__module__") {
-                Some(id) => self.str_value(*id).ok(),
-                None => Some(scope.module.as_str()),
+            module = match self.namespace_binding(self.scope_data(*scope), "__module__") {
+                Some(id) => self.str_value(id).ok(),
+                None => Some(self.scope_data(*scope).module.as_str()),
             }
             .filter(|name| !matches!(*name, "builtins" | "__main__"));
         }
@@ -2147,7 +2146,7 @@ impl Context {
                 }
                 _ => {}
             },
-            Value::Cell(contents) | Value::ClassCell(contents) if name == "cell_contents" => {
+            Value::Cell(contents) if name == "cell_contents" => {
                 return contents.ok_or_else(|| Error::new("ValueError", "Cell is empty"));
             }
             Value::Generator { code, .. } if name == "gi_code" => return Ok(code),
@@ -3400,7 +3399,7 @@ impl Context {
         if name == "__doc__" && matches!(self.heap.get(obj), Value::TupleGetter { .. }) {
             return super::namedtuple::set_document(self, obj, None).map(|_| ());
         }
-        if name == "cell_contents" && matches!(self.heap.get(obj), Value::Cell(_) | Value::ClassCell(_)) {
+        if name == "cell_contents" && matches!(self.heap.get(obj), Value::Cell(_)) {
             self.heap.replace_cell(obj, None);
             return Ok(());
         }
@@ -3677,7 +3676,7 @@ impl Context {
                 continue;
             };
             let frame = self.scope_data(*scope);
-            shadowed |= frame.names.contains_key(name);
+            shadowed |= self.namespace_binding(frame, name).is_some();
             let Some(slots) = frame
                 .class_namespace
                 .as_deref()
@@ -4091,7 +4090,7 @@ impl Context {
                 Some(value),
             );
         }
-        if name == "cell_contents" && matches!(self.heap.get(obj), Value::Cell(_) | Value::ClassCell(_)) {
+        if name == "cell_contents" && matches!(self.heap.get(obj), Value::Cell(_)) {
             self.heap.replace_cell(obj, Some(value));
             return Ok(());
         }
@@ -5496,6 +5495,12 @@ impl Context {
             .into_iter()
             .map(|name| (class_scope.names[&name], name))
             .collect::<Vec<_>>();
+        if let Some(dict) = class_scope.class_namespace.as_ref().and_then(|namespace| {
+            namespace.annotation_dict_cell.and(namespace.dictionary)
+        }) {
+            class_scope.namespace = Some(dict);
+            class_scope.names.retain(|name, _| name == "__qualname__");
+        }
         // A hook may replace an attribute and execute code that triggers collection.
         for &(value, _) in &members {
             self.heap.keep(value);
@@ -5672,7 +5677,7 @@ impl Context {
         let module = self.scope_data(parent).module.clone();
         let scope = self.scope(&module, Some(parent));
         let enum_kind = enum_namespace.as_ref().map(|state| state.kind);
-        let cell = self.alloc(Value::ClassCell(None));
+        let cell = self.alloc(Value::Cell(None));
         let Value::Scope(body_scope) = self.heap.get_mut(scope) else {
             unreachable!()
         };
@@ -5708,6 +5713,7 @@ impl Context {
         self.execute(code, scope, FrameOwner::Function(body))?;
         let explicit_annotations = self.scope_name(scope, "__annotations__")
             .is_some_and(|value| value != annotations);
+        let annotation_body = self.finish_annotation_body(scope)?;
         if let Value::Scope(frame) = self.heap.get_mut(scope) {
             if let Some(namespace) = &mut frame.class_namespace {
                 namespace.annotation_scratch = None;
@@ -5788,7 +5794,7 @@ impl Context {
         };
         *metaclass = class_meta;
         self.install_weakref_descriptor(class, scope);
-        *self.heap.get_mut(cell) = Value::ClassCell(Some(class));
+        self.heap.replace_cell(cell, Some(class));
         let Value::Scope(class_scope) = self.heap.get_mut(scope) else {
             unreachable!()
         };
@@ -5804,6 +5810,21 @@ impl Context {
                 .names
                 .entry("__doc__".to_owned())
                 .or_insert(NONE);
+        }
+        if let Some((cell, body)) = annotation_body {
+            // type.__new__ replaces the body namespace with the finished type's dictionary.
+            let dict = self.class_namespace_dict(scope, false);
+            let extras = self
+                .dict_entries(body)
+                .expect("class body dictionary")
+                .iter()
+                .copied()
+                .filter(|&(key, _)| self.string_storage(key).is_none())
+                .collect::<Vec<_>>();
+            for (key, value) in extras {
+                self.put_item(dict, key, value)?;
+            }
+            self.heap.replace_cell(cell, Some(dict));
         }
         self.initialize_class_members(class, scope)?;
         if let Some(kind) = enum_kind {

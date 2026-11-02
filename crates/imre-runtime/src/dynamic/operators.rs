@@ -2237,19 +2237,17 @@ impl Context {
     }
 
     fn qualified_class_name(&self, class: Id, scope: Id) -> String {
-        let scope = self.scope_data(scope);
-        let module = match scope.names.get("__module__") {
-            Some(&value) => self.str_value(value).ok(),
-            None => Some(scope.module.as_str()),
+        let module = match self.namespace_binding(self.scope_data(scope), "__module__") {
+            Some(value) => self.str_value(value).ok(),
+            None => Some(self.scope_data(scope).module.as_str()),
         };
         let name = self.class_name(class);
         match module {
             None | Some("builtins") => name.to_owned(),
             Some(module) => {
-                let qualname = scope
-                    .names
-                    .get("__qualname__")
-                    .and_then(|&value| self.str_value(value).ok())
+                let qualname = self
+                    .namespace_binding(self.scope_data(scope), "__qualname__")
+                    .and_then(|value| self.str_value(value).ok())
                     .unwrap_or(name);
                 format!("{module}.{qualname}")
             }
