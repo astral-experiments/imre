@@ -17,6 +17,11 @@ def mapping() -> dict[str, str]:
     return {"z": "é", "a": "λ"}
 
 
+def fail_option() -> bool:
+    print("failing constructor argument")
+    raise ValueError("stop")
+
+
 encoder = json.JSONEncoder(
     sort_keys=option("sort", True),
     ensure_ascii=option("ascii", False),
@@ -32,11 +37,6 @@ try:
 except ValueError as exc:
     print(str(exc))
 print(encoder.encode({}))
-
-
-def fail_option() -> bool:
-    print("failing constructor argument")
-    raise ValueError("stop")
 
 
 try:
