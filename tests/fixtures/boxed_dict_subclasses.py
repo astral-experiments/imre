@@ -119,6 +119,20 @@ def ordered_dictionary():
     assert moved.popitem(last=False) == ("b", 2)
 
 
+    for method, args in (
+        (OrderedDict.__init__, (object(),)),
+        (OrderedDict.__init__, ({},)),
+        (OrderedDict.__or__, ({}, OrderedDict())),
+        (OrderedDict.__ror__, ({}, OrderedDict())),
+        (OrderedDict.__ior__, ({}, {})),
+    ):
+        try:
+            method(*args)
+        except TypeError as error:
+            assert "requires a 'collections.OrderedDict' object" in str(error)
+        else:
+            raise AssertionError("ordered descriptor accepted a foreign receiver")
+
     class UnionChild(OrderedDict):
         def update(self, *args, **kwargs):
             raise AssertionError("union called update")

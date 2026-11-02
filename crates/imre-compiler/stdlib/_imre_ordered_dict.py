@@ -14,6 +14,12 @@ from _collections import (
 _ordered_dict_missing = object()
 
 
+def _ordered_dict_receiver(receiver, method):
+    if not issubclass(type(receiver), OrderedDict):
+        raise TypeError(f"descriptor '{method}' requires a 'collections.OrderedDict' object "
+                        f"but received a '{type(receiver).__name__}'")
+
+
 def _ordered_dict_update(target, other):
     if type(other) is dict:
         pairs = list(other.items())
@@ -30,9 +36,9 @@ def _ordered_dict_update(target, other):
 
 
 def _ordered_dict_union(left, right):
-    if not isinstance(left, dict) or not isinstance(right, dict):
+    if not issubclass(type(left), dict) or not issubclass(type(right), dict):
         return NotImplemented
-    cls = type(left) if isinstance(left, OrderedDict) else type(right)
+    cls = type(left) if issubclass(type(left), OrderedDict) else type(right)
     result = cls(left)
     _ordered_dict_update(result, right)
     return result
@@ -42,6 +48,7 @@ class OrderedDict(dict):
     __module__ = "collections"
 
     def __init__(self, /, *args, **kwargs):
+        _ordered_dict_receiver(self, "__init__")
         if len(args) > 1:
             raise TypeError(f"expected at most 1 argument, got {len(args)}")
         if args:
@@ -75,12 +82,15 @@ class OrderedDict(dict):
         return NotImplemented if equal is NotImplemented else not equal
 
     def __or__(self, other, /):
+        _ordered_dict_receiver(self, "__or__")
         return _ordered_dict_union(self, other)
 
     def __ror__(self, other, /):
+        _ordered_dict_receiver(self, "__ror__")
         return _ordered_dict_union(other, self)
 
     def __ior__(self, other, /):
+        _ordered_dict_receiver(self, "__ior__")
         _ordered_dict_update(self, other)
         return self
 
