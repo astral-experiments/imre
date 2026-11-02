@@ -91,6 +91,62 @@ pub(super) fn cycle_next(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]
     Ok(item)
 }
 
+pub(super) fn starmap_allocate(
+    ctx: &mut Context,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Id> {
+    let [class, function, source] = args else {
+        return Err(Error::new(
+            "TypeError",
+            "invalid starmap allocation arguments",
+        ));
+    };
+    let Some(&base) = ctx.classes.get("itertools.starmap") else {
+        return Err(Error::new("TypeError", "starmap type is not initialized"));
+    };
+    if !kwargs.is_empty()
+        || !matches!(ctx.heap.get(*class), Value::Class { ancestors, .. }
+            if (*class == base || ancestors.contains(&base))
+                && ancestors.iter().all(|a| !matches!(ctx.heap.get(*a), Value::Native(kind) if kind != "object")))
+    {
+        return Err(Error::new(
+            "TypeError",
+            "expected a starmap subclass with compatible layout",
+        ));
+    }
+    Ok(callable_iterator(ctx, base, *class, *function, *source))
+}
+
+/// Fetch one row, fully unpack it, then invoke the saved callable.
+pub(super) fn starmap_next(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    if kwargs.is_empty()
+        && let [receiver] = args
+        && let Some(base) = ctx.classes.get("itertools.starmap")
+        && let Value::Instance {
+            member_values: Some(values),
+            ..
+        } = ctx.heap.get(*receiver)
+        && let Some(state) = values.get(base)
+        && let Value::Tuple(pair) = ctx.heap.get(*state)
+    {
+        let (source, function) = (pair[0], pair[1]);
+        let mark = ctx.heap.temporary_mark();
+        let row = ctx
+            .next_result(source)?
+            .ok_or_else(|| Error::new("StopIteration", ""))?;
+        ctx.heap.keep(row);
+        let tuple = super::super::builtins::call(ctx, "tuple", &[row], &[])?;
+        // Converting a non-tuple releases the source row before the callable runs.
+        ctx.finish_call_operands(mark, tuple);
+        let args = ctx
+            .tuple_items(tuple)?
+            .expect("tuple constructor returned a tuple");
+        return ctx.call(function, args, Vec::new());
+    }
+    Err(Error::new("TypeError", "expected an initialized starmap"))
+}
+
 pub(super) fn filterfalse_allocate(
     ctx: &mut Context,
     args: &[Id],
@@ -109,18 +165,23 @@ pub(super) fn filterfalse_allocate(
         return Err(Error::new("TypeError", "expected a filterfalse subclass"));
     }
     let source = ctx.iterator(*iterable)?;
+    Ok(callable_iterator(ctx, *base, *class, *predicate, source))
+}
+
+/// Retain the callable and acquired source in a GC-traced, class-owned slot.
+fn callable_iterator(ctx: &mut Context, base: Id, class: Id, function: Id, source: Id) -> Id {
     ctx.heap.keep(source);
-    let state = ctx.alloc(Value::Tuple(vec![source, *predicate]));
+    let state = ctx.alloc(Value::Tuple(vec![source, function]));
     ctx.heap.keep(state);
-    let result = ctx.instance(*class, None);
+    let result = ctx.instance(class, None);
     let Value::Instance { member_values, .. } = ctx.heap.get_mut(result) else {
-        unreachable!("fresh filterfalse instance")
+        unreachable!("fresh iterator instance")
     };
     // The declaring class keys this private slot, so subclass descriptors cannot intercept it.
     member_values
         .get_or_insert_with(Default::default)
-        .insert(*base, state);
-    Ok(result)
+        .insert(base, state);
+    result
 }
 
 pub(super) fn filterfalse_state(

@@ -2113,6 +2113,8 @@ impl Context {
                     "repeat",
                     "_cycle_allocate",
                     "_cycle_next",
+                    "_starmap_allocate",
+                    "_starmap_next",
                     "_filterfalse_allocate",
                     "_filterfalse_state",
                     "_chain_allocate",
@@ -2340,6 +2342,11 @@ impl Context {
                 && let Some(external) = self.scope_name(scope, "_bootstrap_external")
             {
                 self.publish_module("importlib._bootstrap_external", external)?;
+            }
+            if name == "itertools"
+                && let Some(class) = self.scope_name(scope, "starmap")
+            {
+                self.classes.insert("itertools.starmap".into(), class);
             }
             if name == "itertools"
                 && let Some(owner) = self.scope_name(scope, "batched")
