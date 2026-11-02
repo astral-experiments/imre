@@ -118,6 +118,7 @@ fn launch(ctx: &mut Context, values: &[Id]) -> Result<Id> {
         errors,
         shell,
         start_new_session,
+        process_group,
         umask,
         pass_fds,
     ] = values
@@ -136,11 +137,14 @@ fn launch(ctx: &mut Context, values: &[Id]) -> Result<Id> {
     let pipesize = ctx.as_int(pipesize)?;
     // Child settings can run Python during both spawn selection and fork conversion.
     let default_fds = matches!(ctx.heap.get(pass_fds), Value::Tuple(fds) if fds.is_empty());
-    let default_umask = matches!(ctx.heap.get(umask), Value::Int(n) if n.as_small() == Some(-1));
+    let minus_one = |id| matches!(ctx.heap.get(id), Value::Int(n) if n.as_small() == Some(-1));
+    let default_group = process_group == NONE || minus_one(process_group);
+    let default_umask = minus_one(umask);
     let pipe_count = streams.iter().filter(|(mode, _)| *mode == 1).count();
     let pipe_options = pipe_count != 0 && ctx.as_int(bufsize)?.as_small() != Some(-1);
     let handles = (executable != NONE
         || start_new_session != FALSE
+        || !default_group
         || !default_umask
         || !default_fds
         || pipe_options)
@@ -230,6 +234,10 @@ fn launch(ctx: &mut Context, values: &[Id]) -> Result<Id> {
         Some(_) => Some(false),
         None => None,
     };
+    if direct == Some(true) && !default_group {
+        let inherited = ctx.int(-1);
+        direct = Some(ctx.checked_equal(process_group, inherited)?);
+    }
     if direct == Some(true) && !default_umask {
         let zero = ctx.int(0);
         let negative = ctx.binary("<", umask, zero)?;
@@ -280,12 +288,17 @@ fn launch(ctx: &mut Context, values: &[Id]) -> Result<Id> {
         (ctx.truth(close_fds)?, ctx.truth(restore_signals)?)
     };
     let new_session = direct != Some(true) && ctx.truth(start_new_session)?;
+    let group = if default_group || direct == Some(true) {
+        -1
+    } else {
+        os::c_int(ctx, process_group)?
+    };
     let umask = if default_umask || direct == Some(true) {
         -1
     } else {
         os::c_int(ctx, umask)?
     };
-    // fork_exec parses its umask before checking the normalized descriptor sequence.
+    // fork_exec parses process_group and umask before checking the normalized descriptors.
     let mut keep = Vec::new();
     if let Some(fds) = normalized {
         for fd in ctx.items(fds)? {
@@ -320,6 +333,7 @@ fn launch(ctx: &mut Context, values: &[Id]) -> Result<Id> {
         ctx.as_int(bufsize)?,
         pipesize,
         new_session,
+        group,
         umask,
         keep,
     );
