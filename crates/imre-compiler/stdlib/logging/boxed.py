@@ -90,8 +90,31 @@ def getHandlerNames():
 
 
 def _handle_error(record):
-    if raiseExceptions:
-        raise NotImplementedError("handler error diagnostics in runtime-loaded logging")
+    if not raiseExceptions or not sys.stderr:
+        return
+    exc = sys.exception()
+    try:
+        sys.stderr.write("--- Logging error ---\n")
+        traceback.print_exception(exc, limit=None, file=sys.stderr)
+        sys.stderr.write("Call stack:\n")
+        frame = exc.__traceback__.tb_frame
+        while frame and os.path.dirname(frame.f_code.co_filename) == __path__[0]:
+            frame = frame.f_back
+        if frame:
+            traceback.print_stack(frame, file=sys.stderr)
+        else:
+            sys.stderr.write("Logged from file %s, line %s\n" % (record.filename, record.lineno))
+        try:
+            sys.stderr.write("Message: %r\nArguments: %s\n" % (record.msg, record.args))
+        except RecursionError:
+            raise
+        except Exception:
+            sys.stderr.write("Unable to print the message and arguments - possible formatting error.\n"
+                             "Use the traceback above to help find the error.\n")
+    except OSError:
+        pass
+    finally:
+        del exc
 
 
 class FileHandler(StreamHandler):

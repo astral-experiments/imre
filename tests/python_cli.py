@@ -1741,6 +1741,7 @@ def report(text):
             "boxed_global.py",
             "boxed_logging.py",
             "boxed_logging_file.py",
+            "boxed_logging_file_error.py",
             "boxed_class_attribute.py",
             "boxed_request_strings.py",
             "boxed_str_maketrans.py",
