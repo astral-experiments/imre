@@ -1788,6 +1788,7 @@ def report(text):
             "boxed_typing_tuple.py",
             "boxed_typing_type.py",
             "boxed_typing_mapping.py",
+            "boxed_typing_regex_aliases.py",
             "boxed_formatter.py",
             "boxed_template_literals.py",
             "boxed_re_ascii.py",

@@ -792,7 +792,9 @@ class _SpecialGenericAlias(_NotIterable):
     """A named typing alias for a builtin collection."""
     __module__ = __name__
 
-    def __init__(self, origin, nparams, *, name, inst=True):
+    def __init__(self, origin, nparams, *, inst=True, name=None):
+        if name is None:
+            name = origin.__name__
         self.__origin__ = origin
         self._name = name
         self.__qualname__ = name
@@ -1280,3 +1282,12 @@ def dataclass_transform(
         }
         return cls_or_fn
     return decorator
+
+
+def __getattr__(attr):
+    if attr in {"Pattern", "Match"}:
+        import re
+        alias = _SpecialGenericAlias(getattr(re, attr), 1)
+        globals()[attr] = alias
+        return alias
+    raise AttributeError(f"module {__name__!r} has no attribute {attr!r}")
