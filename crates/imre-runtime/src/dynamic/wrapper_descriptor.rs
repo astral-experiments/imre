@@ -192,6 +192,9 @@ impl BuiltinDescriptor {
         }
         let (owner, name) = match symbol {
             "type.__init__" => ("type", "__init__"),
+            "super.__getattribute__" => ("super", "__getattribute__"),
+            "super.__init__" => ("super", "__init__"),
+            "super.__repr__" => ("super", "__repr__"),
             "object.__format__" => ("object", "__format__"),
             "object.__sizeof__" => ("object", "__sizeof__"),
             "dict.__sizeof__" => ("dict", "__sizeof__"),

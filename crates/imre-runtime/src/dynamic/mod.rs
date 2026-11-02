@@ -277,6 +277,7 @@ impl Context {
             ("bool", Value::Bool(_))
             | ("int", Value::Int(_) | Value::Bool(_))
             | ("float", Value::Float(_))
+            | ("super", Value::Super { .. })
             | ("complex", Value::Complex(_))
             | ("str", Value::Str(_) | Value::SurrogateStr(_))
             | ("bytes", Value::Bytes(_))
@@ -2092,6 +2093,19 @@ impl Context {
         }
         let value = self.alloc(Value::Native(name.to_owned()));
         self.builtins.insert(name.to_owned(), value);
+        if name == "super" {
+            let mut entries = Vec::new();
+            for name in ["__new__", "__repr__", "__getattribute__", "__init__"] {
+                let method = self.builtin(&format!("super.{name}"));
+                entries.push((self.heap.code_name(name), method));
+            }
+            for name in ["__thisclass__", "__self__", "__self_class__"] {
+                let field = self.readonly_member("super", name);
+                entries.push((self.heap.code_name(name), field));
+            }
+            let dictionary = self.dict(entries);
+            self.native_type_dicts.insert(value, dictionary);
+        }
         if name == deque::CLASS {
             deque::install(self);
         }

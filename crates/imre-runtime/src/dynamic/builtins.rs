@@ -216,7 +216,15 @@ pub(super) fn constructor_owner(name: &str) -> Option<&str> {
     let owner = name.strip_suffix(".__new__")?;
     (matches!(
         owner,
-        "object" | "dict" | "float" | "function" | "int" | "str" | "type" | super::thread_local::CLASS
+        "object"
+            | "dict"
+            | "float"
+            | "function"
+            | "int"
+            | "str"
+            | "super"
+            | "type"
+            | super::thread_local::CLASS
     ) || super::stdlib::itertools::cursor_type(owner).is_some()
         || is_exception(owner)
         || owner == super::stdlib::fixed_structseq::SCHED_PARAM
@@ -1268,12 +1276,18 @@ pub(super) fn call(
         let bound = ctx.lookup_attr(mapping, method)?;
         return ctx.call(bound, forwarded, Vec::new());
     }
-    if name == "object.__getattribute__" {
+    if let Some(owner @ ("object" | "super")) = name.strip_suffix(".__getattribute__") {
         let Some((&object, values)) = args.split_first() else {
-            return Err(type_error(
-                "descriptor '__getattribute__' of 'object' object needs an argument",
-            ));
+            return Err(type_error(format!(
+                "descriptor '__getattribute__' of '{owner}' object needs an argument"
+            )));
         };
+        if owner == "super" && !ctx.builtin_slot_accepts(object, owner) {
+            return Err(type_error(format!(
+                "descriptor '__getattribute__' requires a 'super' object but received a '{}'",
+                ctx.type_name(object)
+            )));
+        }
         if !kwargs.is_empty() {
             return Err(type_error(
                 "wrapper __getattribute__() takes no keyword arguments",
@@ -1286,7 +1300,11 @@ pub(super) fn call(
             )));
         };
         let attr = attribute_name(ctx, *key)?;
-        return ctx.default_get_attr(object, &attr);
+        return if owner == "super" {
+            ctx.super_getattribute(object, &attr)
+        } else {
+            ctx.default_get_attr(object, &attr)
+        };
     }
     if matches!(name, "setattr" | "object.__setattr__") {
         return set_attribute(ctx, name, args, kwargs);
@@ -1313,6 +1331,7 @@ pub(super) fn call(
             | "object.__ne__"
             | "mappingproxy.__repr__"
             | "mappingproxy.__str__"
+            | "super.__repr__"
     ) {
         let (owner, method) = name.split_once('.').unwrap();
         let Some((&receiver, rest)) = args.split_first() else {
@@ -1320,9 +1339,11 @@ pub(super) fn call(
                 "descriptor '{method}' of '{owner}' object needs an argument"
             )));
         };
-        if owner == "mappingproxy" && !matches!(ctx.heap.get(receiver), Value::MappingProxy(_)) {
+        if (owner == "mappingproxy" && !matches!(ctx.heap.get(receiver), Value::MappingProxy(_)))
+            || (owner == "super" && !ctx.builtin_slot_accepts(receiver, owner))
+        {
             return Err(type_error(format!(
-                "descriptor '{method}' requires a 'mappingproxy' object but received a '{}'",
+                "descriptor '{method}' requires a '{owner}' object but received a '{}'",
                 ctx.type_name(receiver)
             )));
         }
@@ -1355,6 +1376,9 @@ pub(super) fn call(
             }
             let repr = ctx.checked_format(receiver, true)?;
             return Ok(ctx.text(repr));
+        }
+        if owner == "super" {
+            return Ok(ctx.text(ctx.super_repr(receiver)));
         }
         if method == "__repr__" {
             return ctx.object_repr(receiver);
@@ -1420,6 +1444,8 @@ pub(super) fn call(
         && !is_exception(name)
     {
         return match owner {
+            "super" if method == "__new__" => ctx.super_new(args, kwargs),
+            "super" if method == "__init__" => ctx.super_init(args, kwargs),
             "int" | "float" | "str" | "bytes" if method == "__new__" => {
                 let Some((&class, values)) = args.split_first() else {
                     return Err(type_error(format!("{name}(): not enough arguments")));
