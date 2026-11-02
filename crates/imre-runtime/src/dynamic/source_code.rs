@@ -3217,6 +3217,7 @@ impl Context {
                 Ok(self.template_from_literal(strings, interpolations))
             }
             Expr::NoneLiteral(_) => Ok(NONE),
+            Expr::EllipsisLiteral(_) => Ok(value::ELLIPSIS),
             Expr::BooleanLiteral(v) => Ok(if v.value { TRUE } else { FALSE }),
             Expr::NumberLiteral(v) => {
                 let value = match &v.value {
