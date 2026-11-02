@@ -2842,7 +2842,7 @@ impl Context {
     }
 
     pub(super) fn get_item(&mut self, obj: Id, key: Id) -> Result<Id> {
-        if self.raw_read_window(obj).is_some() {
+        if self.raw_read_window(obj).is_some() && !self.view_is_readonly(obj)? {
             return self.raw_view_get(obj, key);
         }
         if matches!(self.heap.get(obj), Value::MemoryView { .. }) {
