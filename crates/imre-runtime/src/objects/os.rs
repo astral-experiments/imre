@@ -406,7 +406,7 @@ pub unsafe extern "C" fn imre_os_read(fd: usize, length: usize) -> *const crate:
                     "Python int too large to convert to C ssize_t",
                 )
             })?;
-            read(c_int(fd)?, length)
+            read(c_int(fd)?, length, super::stdlib::check_interrupt)
                 .map(|bytes| crate::BytesOwner::into_raw(crate::BytesOwner::new(bytes)))
         })(),
         std::ptr::null(),
@@ -423,23 +423,34 @@ pub unsafe extern "C" fn imre_os_write(fd: usize, bytes: *const crate::Bytes) ->
     let bytes = unsafe { &*bytes };
     finish(
         c_int(fd)
-            .and_then(|fd| write(fd, bytes))
+            .and_then(|fd| transfer(|| try_write(fd, bytes), super::stdlib::check_interrupt))
             .map(|n| Int::from_usize(n).into_raw()),
         0,
     )
 }
 
-/// Restart an interrupted descriptor transfer, but return any short success or other errno.
-fn transfer(mut syscall: impl FnMut() -> isize) -> Result<usize> {
+/// A nonnegative count is a complete result, even after a short write or at EOF.
+fn transferred(count: isize) -> Result<Option<usize>> {
+    if count >= 0 {
+        return Ok(Some(count as usize));
+    }
+    let error = io::Error::last_os_error();
+    if error.kind() == io::ErrorKind::Interrupted {
+        Ok(None)
+    } else {
+        Err(errno_error(error))
+    }
+}
+
+fn transfer<E: From<Error>>(
+    mut syscall: impl FnMut() -> Result<Option<usize>>,
+    mut dispatch: impl FnMut() -> std::result::Result<(), E>,
+) -> std::result::Result<usize, E> {
     loop {
-        let count = syscall();
-        if count >= 0 {
-            return Ok(count as usize);
+        if let Some(count) = syscall()? {
+            return Ok(count);
         }
-        let error = io::Error::last_os_error();
-        if error.kind() != io::ErrorKind::Interrupted {
-            return Err(errno_error(error));
-        }
+        dispatch()?;
     }
 }
 
@@ -457,16 +468,23 @@ pub(crate) fn sendfile(
         .map_or(std::ptr::null_mut(), std::ptr::from_mut);
     // SAFETY: a non-null offset points to our live, writable off_t throughout the call.
     // The kernel validates the raw descriptors and receives the count as size_t.
-    transfer(|| unsafe { libc::sendfile(out_fd, in_fd, offset, count as usize) })
+    transfer(
+        || transferred(unsafe { libc::sendfile(out_fd, in_fd, offset, count as usize) }),
+        || Ok(()),
+    )
 }
 
-pub(crate) fn read(fd: i32, length: isize) -> Result<Vec<u8>> {
+pub(crate) fn read<E: From<Error>>(
+    fd: i32,
+    length: isize,
+    dispatch: impl FnMut() -> std::result::Result<(), E>,
+) -> std::result::Result<Vec<u8>, E> {
     let length = usize::try_from(length)
         .map_err(|_| errno_error(io::Error::from_raw_os_error(libc::EINVAL)))?;
     #[cfg(target_os = "macos")]
     let length = length.min(i32::MAX as usize);
     if length > crate::MAX_BYTES_LEN {
-        return Err(Error::new(Kind::OverflowError, "byte string is too large"));
+        return Err(Error::new(Kind::OverflowError, "byte string is too large").into());
     }
     let mut bytes = Vec::<u8>::new();
     bytes
@@ -474,20 +492,23 @@ pub(crate) fn read(fd: i32, length: isize) -> Result<Vec<u8>> {
         .map_err(|_| Error::memory_error())?;
     // SAFETY: bytes has at least length writable bytes; read borrows the integer
     // descriptor and initializes the returned prefix without retaining either.
-    let count = transfer(|| unsafe { libc::read(fd, bytes.as_mut_ptr().cast(), length) })?;
+    let count = transfer(
+        || transferred(unsafe { libc::read(fd, bytes.as_mut_ptr().cast(), length) }),
+        dispatch,
+    )?;
     // SAFETY: read initialized exactly count bytes, including zero on EOF.
     unsafe { bytes.set_len(count) };
     crate::compact_bytes(&mut bytes);
     Ok(bytes)
 }
 
-pub(crate) fn write(fd: i32, data: &[u8]) -> Result<usize> {
+pub(crate) fn try_write(fd: i32, data: &[u8]) -> Result<Option<usize>> {
     crate::initialize_io();
     let length = data.len();
     #[cfg(target_os = "macos")]
     let length = length.min(i32::MAX as usize);
     // SAFETY: write borrows the descriptor; the byte slice stays live for each call.
-    transfer(|| unsafe { libc::write(fd, data.as_ptr().cast(), length) })
+    transferred(unsafe { libc::write(fd, data.as_ptr().cast(), length) })
 }
 
 /// Return a new non-inheritable descriptor for the same open file description.

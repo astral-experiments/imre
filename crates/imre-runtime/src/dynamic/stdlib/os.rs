@@ -870,16 +870,21 @@ pub(super) fn descriptor(
         let fd = c_int(ctx, *fd)?;
         return if name == "read" {
             let length = ssize_t(ctx, *data)?;
-            Ok(ctx.alloc(Value::Bytes(native::read(fd, length)?)))
+            let bytes = native::read(fd, length, || ctx.dispatch_signals())?;
+            Ok(ctx.alloc(Value::Bytes(bytes)))
         } else {
-            // The synchronous syscall borrows the buffer after fd conversion.
-            // It cannot reenter Python, so mutable storage cannot resize underneath it.
-            let bytes = match ctx.heap.get(ctx.scalar_value(*data)) {
-                Value::Array(array) => array.as_bytes(),
-                _ => ctx.bytes_like(*data)?,
-            };
-            let count = native::write(fd, bytes)?;
-            Ok(ctx.int(count as i64))
+            // Keep the exporter alive and its size fixed while a handler runs.
+            // Reborrow on retry so in-place changes made by the handler are visible.
+            ctx.with_buffer_export(*data, |ctx| loop {
+                let bytes = match ctx.heap.get(ctx.scalar_value(*data)) {
+                    Value::Array(array) => array.as_bytes(),
+                    _ => ctx.bytes_like(*data)?,
+                };
+                if let Some(count) = native::try_write(fd, bytes)? {
+                    return Ok(ctx.int(count as i64));
+                }
+                ctx.dispatch_signals()?;
+            })
         };
     }
     if name == "ftruncate" {

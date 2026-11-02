@@ -949,7 +949,7 @@ pub(crate) fn format_fixed_float(
     Ok(result)
 }
 
-fn check_interrupt() -> Result<(), Error> {
+pub(super) pub(super) fn check_interrupt() -> Result<(), Error> {
     if crate::signals::take_interrupt() {
         Err(Error::without_args(Kind::KeyboardInterrupt))
     } else {
