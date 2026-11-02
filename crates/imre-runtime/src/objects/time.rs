@@ -280,8 +280,9 @@ impl LocalTime {
         if !self.zone.is_empty() {
             self.tm.tm_zone = self.zone.as_mut_ptr().cast();
         }
-        let format = || format_clock(pattern, &self.tm);
-        Ok(crate::sys::with_startup_ctype(format).unwrap_or_else(format))
+        Ok(crate::sys::with_process_locale(|| {
+            format_clock(pattern, &self.tm)
+        }))
     }
 
     pub(crate) fn set_zone(&mut self, name: &str) {
@@ -332,7 +333,7 @@ unsafe extern "C" {
     ) -> usize;
 }
 
-fn format_clock(mut pattern: &[u32], clock: &libc::tm) -> Vec<u32> {
+pub(super) fn format_clock(mut pattern: &[u32], clock: &libc::tm) -> Vec<u32> {
     let mut result = Vec::new();
     let mut buffer = vec![0 as libc::wchar_t; 1024];
     while !pattern.is_empty() {

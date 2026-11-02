@@ -9,7 +9,7 @@ pub(crate) use intern::{canonical, intern_owner, try_intern_owner};
 use std::io::{self, Write};
 mod encoding;
 mod warnoptions;
-pub(crate) use encoding::{file_encoding, imre_sys_utf8_mode, with_startup_ctype};
+pub(crate) use encoding::{file_encoding, imre_sys_utf8_mode, set_locale, with_process_locale};
 pub(crate) use warnoptions::startup_warning_options;
 mod input;
 pub(super) use input::read_input_line;
@@ -17,7 +17,7 @@ mod encoding_names;
 pub(crate) use encoding_names::{default_encoding, filesystem_encoding, filesystem_errors};
 
 pub(super) fn initialize_encoding(isolated: bool, utf8: Option<bool>) {
-    encoding::settings(isolated, utf8);
+    encoding::initialize(isolated, utf8);
 }
 
 pub(super) struct StderrOutput {

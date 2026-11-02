@@ -510,7 +510,7 @@ impl Error {
         }
     }
 
-    pub(super) fn unicode_decode(
+    pub(crate) fn unicode_decode(
         codec: &str,
         bytes: crate::BytesOwner,
         bounds: std::ops::Range<usize>,

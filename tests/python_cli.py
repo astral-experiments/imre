@@ -1809,6 +1809,7 @@ def report(text):
             "boxed_codecs.py",
             "boxed_io_exports.py",
             "boxed_io_text_encoding.py",
+            "boxed_locale.py",
             "boxed_io_protocols.py",
             "boxed_selector_wide_fds.py",
             "boxed_select_selector.py",
