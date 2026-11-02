@@ -1437,6 +1437,7 @@ impl IntrinsicModule {
             }
             (Self::Csv, "Error") => Intrinsic::CsvError,
             (Self::Gzip, "BadGzipFile") => Intrinsic::BadGzipFile,
+            (Self::Re, "escape") => Intrinsic::ObjectRuntimeExport("re.escape"),
             (Self::Re, "compile") => Intrinsic::RegexCompile,
             (Self::Re, "search") => Intrinsic::RegexSearch,
             (Self::Re, "match") => Intrinsic::RegexMatchStart,
