@@ -201,11 +201,6 @@ pub(super) unsafe fn spawn(
     if redirects.oversized {
         return Err(popen::error_after_handles(pending, false, c_int_overflow()));
     }
-    let streams = if attributes.keep.is_empty() {
-        streams
-    } else {
-        streams & !(1 << 17) // pass_fds closes all other inherited descriptors
-    };
     let failure_site = redirects.failure_site.take();
     launch
         .spawn_tagged(cwd.as_ref(), streams, redirects, attributes)

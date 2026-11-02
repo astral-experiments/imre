@@ -52,6 +52,20 @@ impl BoxedPopen {
         launch_error::posix_spawn_capabilities().0
     }
 
+    pub(crate) fn spawn_closes_fds() -> bool {
+        launch_error::posix_spawn_capabilities().1
+    }
+
+    /// Distinct Python objects can convert to the same descriptor after set deduplication.
+    pub(crate) fn push_pass_fd(fds: &mut Vec<RawFd>, number: &Int) -> Result<()> {
+        let previous = fds.last().copied();
+        super::pass_fds::push(fds, number)?;
+        if previous == fds.last().copied() {
+            return Err(Error::new(Kind::ValueError, "bad value(s) in fds_to_keep"));
+        }
+        Ok(())
+    }
+
     /// Reserve the actual child and parent fds before any executable-path callbacks.
     pub(crate) fn prepare_handles(
         streams: &[(u32, Option<Int>); 3],
@@ -82,6 +96,7 @@ impl BoxedPopen {
         pipesize: Int,
         start_new_session: bool,
         umask: i32,
+        keep: Vec<RawFd>,
     ) -> std::result::Result<Self, BoxedLaunchError> {
         let mut words = Words::new(8);
         words
@@ -122,7 +137,6 @@ impl BoxedPopen {
             config.cwd = crate::BytesOwner::as_ptr(path).cast();
             config.cwd_kind = 8;
         }
-        let mask = Int::from(i64::from(umask));
         let mut site = None;
         let mut extras = LaunchExtras {
             pipe_size: handles.is_none().then_some((pipesize.0, 2)),
@@ -131,7 +145,12 @@ impl BoxedPopen {
             direct,
             search_path,
             environment: env,
-            child: (start_new_session || umask >= 0).then_some((0, mask.0, start_new_session)),
+            boxed_child: Some(ChildAttributes {
+                new_session: start_new_session,
+                mask: (umask >= 0).then_some(umask as libc::mode_t),
+                keep,
+                ..Default::default()
+            }),
             ..Default::default()
         };
         for (i, ((mode, fd), shift)) in streams.iter().zip([12, 0, 4]).enumerate() {

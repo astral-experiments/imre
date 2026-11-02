@@ -3653,7 +3653,10 @@ impl Context {
             }
             Value::Native(ref class)
                 if class == "set"
-                    && matches!(name, "discard" | "remove" | "difference_update" | "update") =>
+                    && matches!(
+                        name,
+                        "discard" | "pop" | "remove" | "difference_update" | "update"
+                    ) =>
             {
                 return Ok(self.builtin(&format!("set.{name}")));
             }

@@ -2747,6 +2747,7 @@ def report(text):
             "boxed_set_difference_update.py",
             "boxed_set_difference.py",
             "boxed_set_intersection.py",
+            "boxed_set_pop.py",
             "boxed_set_remove.py",
             "boxed_weakref.py",
             "boxed_public_weakref.py",
@@ -2911,6 +2912,8 @@ def report(text):
             plugin.write_bytes((fixtures / "boxed_subprocess_exports.py").read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")
             plugin.write_bytes((fixtures / "boxed_subprocess_interruptible_read.py").read_bytes())
+            compare("-IB", "-c", imports + "arithmetic.current()")
+            plugin.write_bytes((fixtures / "boxed_subprocess_pass_fds.py").read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")
             plugin.write_bytes((fixtures / "boxed_subprocess_buffering.py").read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")
