@@ -41,6 +41,13 @@ def current():
 
     obj = Subject()
     obj.events = []
+    def receiver():
+        obj.events.append('receiver')
+        return obj
+
+    exec("del receiver().descriptor", {"receiver": receiver})
+    assert obj.events == ['receiver', 'descriptor', 'descriptor']
+    obj.events.clear()
     obj.value = 1
     del obj.value
     delattr(obj, 'descriptor')
