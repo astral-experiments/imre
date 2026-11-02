@@ -27,6 +27,21 @@ impl Checker<'_> {
         self.bundled_mock_class(class, "Mock")
     }
 
+    /// Check the argument expressions before selecting the boxed constructor. A
+    /// type error inside an expression is independent of how Mock stores it.
+    pub(super) fn boxed_mock_keywords(&mut self, call: &ast::ExprCall) -> Result<bool, String> {
+        let mut boxed = false;
+        for keyword in &call.arguments.keywords {
+            let value = self.evaluated_argument(&keyword.value)?;
+            boxed |= match keyword.arg.as_deref() {
+                Some("name") => false,
+                Some("side_effect") => matches!(value.ty, Type::Callable(_) | Type::FunctionRef),
+                _ => true,
+            };
+        }
+        Ok(boxed)
+    }
+
     pub(super) fn bundled_mock_class(&self, class: usize, name: &str) -> bool {
         let record = &self.classes.declarations.definitions[class];
         let module = &self.graph.modules[record.definition.module];
