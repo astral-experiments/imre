@@ -2911,7 +2911,7 @@ impl Context {
                     "Cannot subclass special typing classes",
                 ));
             }
-            if let Some(name) = self.heap.get(base).hash_type() {
+            if let Some(name) = self.heap.get(base).heap_type() {
                 return Err(Error::new(
                     "TypeError",
                     format!("type '{name}' is not an acceptable base type"),
@@ -3073,7 +3073,7 @@ impl Context {
         }
         let class = self.alloc(Value::Class {
             io_kind: None,
-            hash_type: None,
+            heap_type: None,
             metaclass: None,
             namedtuple_fields,
             name,

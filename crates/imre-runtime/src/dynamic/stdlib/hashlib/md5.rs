@@ -12,10 +12,10 @@ pub(in crate::dynamic) fn install(ctx: &mut Context, module: Id, scope: Id) -> R
     ctx.bind(fields, "__doc__", NONE);
     let object = ctx.builtin("object");
     let owner = ctx.allocate_class("md5".into(), fields, vec![object])?;
-    let Value::Class { hash_type, .. } = ctx.heap.get_mut(owner) else {
+    let Value::Class { heap_type, .. } = ctx.heap.get_mut(owner) else {
         unreachable!()
     };
-    *hash_type = Some(CLASS);
+    *heap_type = Some(CLASS);
     let Value::Scope(frame) = ctx.heap.get_mut(fields) else {
         unreachable!()
     };
@@ -29,7 +29,7 @@ pub(in crate::dynamic) fn install(ctx: &mut Context, module: Id, scope: Id) -> R
         "block_size",
         "digest_size",
     ] {
-        let method = ctx.alloc(Value::HashMethod { owner, name });
+        let method = ctx.alloc(Value::HeapTypeMethod { owner, name });
         let member = if matches!(name, "name" | "block_size" | "digest_size") {
             ctx.alloc(Value::GetSetDescriptor {
                 get: method,
@@ -42,7 +42,7 @@ pub(in crate::dynamic) fn install(ctx: &mut Context, module: Id, scope: Id) -> R
         };
         ctx.bind(fields, name, member);
     }
-    let callable = ctx.alloc(Value::HashMethod { owner, name: "md5" });
+    let callable = ctx.alloc(Value::HeapTypeMethod { owner, name: "md5" });
     let factory = ctx.alloc(Value::Method {
         callable,
         receiver: module,
@@ -65,33 +65,6 @@ fn instance(ctx: &mut Context, owner: Id, state: Id) -> Id {
     hash
 }
 
-pub(in crate::dynamic) fn check_receiver(
-    ctx: &Context,
-    owner: Id,
-    name: &str,
-    receiver: Id,
-) -> Result<()> {
-    if ctx.heap.get(receiver).instance_class() == Some(owner) {
-        Ok(())
-    } else {
-        let actual = match ctx
-            .heap
-            .get(receiver)
-            .instance_class()
-            .and_then(|class| ctx.heap.get(class).hash_type())
-        {
-            Some(name) => name,
-            None => ctx.type_name(receiver),
-        };
-        Err(Error::new(
-            "TypeError",
-            format!(
-                "descriptor '{name}' for '{CLASS}' objects doesn't apply to a '{actual}' object"
-            ),
-        ))
-    }
-}
-
 pub(in crate::dynamic) fn call(
     ctx: &mut Context,
     owner: Id,
@@ -109,7 +82,7 @@ pub(in crate::dynamic) fn call(
         let state = super::fixed_hash(ctx, "md5", Some(CLASS), remaining, kwargs)?;
         return Ok(instance(ctx, owner, state));
     }
-    check_receiver(ctx, owner, name, receiver)?;
+    ctx.check_heap_method_receiver(owner, name, receiver)?;
     let state = ctx.scalar_value(receiver);
     if matches!(name, "name" | "block_size" | "digest_size") {
         return ctx.lookup_attr(state, name);

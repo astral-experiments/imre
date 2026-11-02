@@ -10,6 +10,7 @@ pub(in crate::dynamic) mod comparison;
 mod fromutc;
 mod iso_datetime;
 mod iso_time;
+pub(in crate::dynamic) mod isocalendar;
 mod reduction;
 pub(in crate::dynamic) mod render;
 mod strftime;
@@ -106,6 +107,7 @@ pub(in crate::dynamic) fn members(class: &str) -> Option<Members> {
                 "__sub__",
                 "__rsub__",
                 "ctime",
+                "isocalendar",
                 "isoformat",
                 "isoweekday",
                 "toordinal",
@@ -920,6 +922,7 @@ pub(super) fn call(
         }
         "date.today" | "date.fromtimestamp" => fromutc::date_constructor(ctx, method, args, kwargs),
         "date.fromisocalendar" => date_fromisocalendar(ctx, args, kwargs),
+        "date.isocalendar" => isocalendar::from_date(ctx, args, kwargs),
         "date.fromordinal" => date_fromordinal(ctx, args, kwargs),
         "date.isoformat" => render::date_isoformat(ctx, args, kwargs),
         "date.strftime" => strftime::format(ctx, "date", args, kwargs),

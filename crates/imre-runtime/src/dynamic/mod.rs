@@ -2676,7 +2676,7 @@ impl Context {
             scope,
             origin,
             initializing: source.is_some(),
-            locale_error: None,
+            module_state: None,
             constructor: None,
         });
         Ok((module, scope, name_id, origin))
@@ -2977,6 +2977,7 @@ impl Context {
                 self.bind(scope, "_GIL_MINSIZE", threshold);
             }
             "_datetime" => {
+                stdlib::datetime::isocalendar::install(self, module)?;
                 for name in ["date", "datetime", "time", "timedelta", "timezone"] {
                     let class = self.builtin(&format!("datetime.{name}"));
                     self.bind(scope, name, class);
