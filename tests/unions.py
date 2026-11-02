@@ -17,6 +17,7 @@ REJECTED = {
     "numeric_import_wrong_return": "from numbers import Number\ndef bad() -> int:\n    return 'wrong'\nprint(bad())\n",
     "numeric_registration": "from numbers import Number\nNumber.register(str)\n",
     "any_parameter_wrong_return": "from typing import Any\ndef bad(value: Any) -> int:\n    return 'wrong'\nprint(bad(3))\n",
+    "annotated_text_reassignment": "def bad() -> None:\n    value: str = 'text'\n    value = b'bytes'\n",
     "wrong_store": "value: str | bytes = 'ok'\nvalue = 1\n",
     "none_needs_optional": "value: str | bytes = None\n",
     "optional_argument": "def accept(value: str | bytes) -> None:\n    pass\ndef bad(value: str | None) -> None:\n    accept(value)\n",

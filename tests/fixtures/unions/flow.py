@@ -41,6 +41,24 @@ def optional_binding(value: str | bytes) -> str:
     return "none"
 
 
+def rebound_literals(fail: bool) -> None:
+    text = "original"
+    alias = text
+    try:
+        if fail:
+            raise ValueError(text)
+        print(text.upper())
+    except ValueError:
+        print(text.upper())
+    text = b"bytes"
+    print(text.decode() + alias)
+
+    data = b"first"
+    previous = data
+    data = "second"
+    print(data.upper() + previous.decode())
+
+
 run("original")
 run(b"initial bytes")
 print(guarded("text"))
@@ -48,3 +66,5 @@ print(guarded(b"bytes"))
 print(guarded(None))
 print(optional_binding("optional text"))
 print(optional_binding(b"optional bytes"))
+rebound_literals(False)
+rebound_literals(True)
