@@ -56,7 +56,19 @@ def escape(pattern):
         return pattern.translate(_special_chars_map).encode('latin1')
 
 
-from re import compile as _compile, split as _split
+from re import Pattern, compile as _compile_pattern, split as _split
+import copyreg
+
+
+def _compile(pattern, flags):
+    return _compile_pattern(pattern, flags)
+
+
+def _pickle(p):
+    return _compile, (p.pattern, p.flags)
+
+
+copyreg.pickle(Pattern, _pickle, _compile)
 
 
 # CPython checks a small FIFO before moving an entry in the larger LRU.
@@ -119,7 +131,7 @@ def sub(pattern, repl, string, *args, count=_zero_sentinel, flags=_zero_sentinel
             DeprecationWarning, stacklevel=2
         )
 
-    return _compile(pattern, flags).sub(repl, string, count)
+    return _compile_pattern(pattern, flags).sub(repl, string, count)
 sub.__text_signature__ = '(pattern, repl, string, count=0, flags=0)'
 
 def subn(pattern, repl, string, *args, count=_zero_sentinel, flags=_zero_sentinel):
@@ -149,7 +161,7 @@ def subn(pattern, repl, string, *args, count=_zero_sentinel, flags=_zero_sentine
             DeprecationWarning, stacklevel=2
         )
 
-    return _compile(pattern, flags).subn(repl, string, count)
+    return _compile_pattern(pattern, flags).subn(repl, string, count)
 subn.__text_signature__ = '(pattern, repl, string, count=0, flags=0)'
 
 def split(pattern, string, *args, maxsplit=_zero_sentinel, flags=_zero_sentinel):
