@@ -1344,6 +1344,7 @@ pub(super) fn method(
     }
     let predicate: Option<fn(&str) -> bool> = match name {
         "isalnum" => Some(crate::objects::python_alnum),
+        "isascii" => Some(str::is_ascii),
         "islower" => Some(|text| crate::objects::python_islower(text.chars())),
         "isspace" => Some(crate::objects::python_isspace),
         "isupper" => Some(crate::objects::python_isupper),
@@ -1360,6 +1361,15 @@ pub(super) fn method(
                 "str.{name}() takes no arguments ({} given)",
                 args.len()
             )));
+        }
+        if name == "isascii"
+            && matches!(
+                ctx.heap.get(ctx.scalar_value(receiver)),
+                Value::SurrogateStr(_)
+            )
+        {
+            // This representation always contains at least one non-ASCII surrogate.
+            return Ok(boolean(false));
         }
         if name == "islower"
             && let Value::SurrogateStr(points) = ctx.heap.get(ctx.scalar_value(receiver))

@@ -1735,6 +1735,7 @@ pub(crate) enum StrDescriptor {
     RStrip,
     IsAlnum,
     IsLower,
+    IsAscii,
 }
 impl StrDescriptor {
     pub(crate) fn named(name: &str) -> Option<Self> {
@@ -1744,6 +1745,7 @@ impl StrDescriptor {
             "lstrip" => Self::LStrip,
             "rstrip" => Self::RStrip,
             "isalnum" => Self::IsAlnum,
+            "isascii" => Self::IsAscii,
             "islower" => Self::IsLower,
             _ => return None,
         })
@@ -1755,6 +1757,7 @@ impl StrDescriptor {
             Self::LStrip => "lstrip",
             Self::RStrip => "rstrip",
             Self::IsAlnum => "isalnum",
+            Self::IsAscii => "isascii",
             Self::IsLower => "islower",
         }
     }
@@ -1828,6 +1831,7 @@ pub(crate) enum UrlProperty {
 #[derive(Clone, Copy)]
 pub(crate) enum TextPredicate {
     Alnum,
+    Ascii,
     Space,
     Lower,
     Upper,
