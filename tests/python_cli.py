@@ -2129,6 +2129,7 @@ def report(text):
             "boxed_time_timezone.py",
             "boxed_time_strftime.py",
             "boxed_codecs.py",
+            "boxed_wide_decode.py",
             "boxed_buffered_partial_write.py",
             "boxed_io_exports.py",
             "boxed_io_reimport.py",

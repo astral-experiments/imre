@@ -4,6 +4,7 @@ use std::collections::HashMap;
 mod bytes_escape;
 mod raw_unicode_escape;
 mod surrogate_utf8;
+mod wide_unicode;
 
 use super::{Context, Error, Id, NONE, Result, Value};
 use crate::objects::{Codec, CodecInfo, DecodeIssue, FixedUnicode, Object, StrEncoder};
@@ -148,14 +149,15 @@ pub(super) fn builtin_handler(
     let start = ctx.lookup_attr(*exception, "start")?;
     let end = ctx.lookup_attr(*exception, "end")?;
     let (start, end) = (ctx.as_integer(start)?, ctx.as_integer(end)?);
-    let pass_utf8 = if name == "surrogatepass" {
+    let (pass_utf8, pass_wide) = if name == "surrogatepass" {
         let encoding = ctx.lookup_attr(*exception, "encoding")?;
         let encoding = ctx.str_value(encoding)?;
-        ["utf-8", "utf_8", "utf8", "cp65001"]
+        let utf8 = ["utf-8", "utf_8", "utf8", "cp65001"]
             .iter()
-            .any(|key| encoding.eq_ignore_ascii_case(key))
+            .any(|key| encoding.eq_ignore_ascii_case(key));
+        (utf8, wide_unicode::surrogate_encoding(encoding))
     } else {
-        false
+        (false, None)
     };
     let Value::Bytes(bytes) = ctx.heap.get(ctx.scalar_value(object)) else {
         return Err(type_error(
@@ -169,12 +171,17 @@ pub(super) fn builtin_handler(
     if name == "surrogatepass" {
         // The validator stops at the leading byte. The handler inspects the
         // complete three-byte representation, even when end - start == 1.
-        if pass_utf8
+        let replacement = if pass_utf8
             && let Some([0xed, b @ 0xa0..=0xbf, c @ 0x80..=0xbf]) = bytes.get(start..start + 3)
         {
             let codepoint = 0xd000 + (u32::from(*b & 0x3f) << 6) + u32::from(*c & 0x3f);
+            Some((codepoint, 3))
+        } else {
+            pass_wide.and_then(|format| wide_unicode::surrogate(format, &bytes[start..]))
+        };
+        if let Some((codepoint, width)) = replacement {
             let text = ctx.text_codepoints(vec![codepoint]);
-            let index = ctx.alloc(Value::Int(crate::Int::from_usize(start + 3)));
+            let index = ctx.alloc(Value::Int(crate::Int::from_usize(start + width)));
             return Ok(ctx.alloc(Value::Tuple(vec![text, index])));
         }
         return ctx.op("raise", *exception, NONE, NONE);
@@ -425,6 +432,12 @@ pub(in crate::dynamic) fn decode_named(
         return Err(Error::new("ValueError", "embedded null character"));
     }
     let key = crate::objects::normalize_codec(spelling)?;
+    if let Some((format, bom)) = wide_unicode::encoding(&key) {
+        let name = error_name(ctx, errors)?.to_owned();
+        return ctx.with_buffer_export(input, |ctx| {
+            wide_unicode::decode(ctx, input, &name, format, bom)
+        });
+    }
     if key == "raw_unicode_escape" {
         let name = error_name(ctx, errors)?.to_owned();
         return ctx.with_buffer_export(input, |ctx| raw_unicode_escape::decode(ctx, input, &name));
