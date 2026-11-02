@@ -29,3 +29,14 @@ def current():
     with case.assertRaises(Failure) as caught:
         case.assertRegex("abc", "x", msg="detail")
     assert str(caught.exception) == "detail"
+
+    case.longMessage = True
+    assert case.assertNotRegex("abc", "x") is None
+    with case.assertRaises(Failure) as caught:
+        case.assertNotRegex(b"one two", re.compile(b"T.O", re.I), msg="detail")
+    assert str(caught.exception) == "Regex matched: b'two' matches b'T.O' in b'one two' : detail"
+    with case.assertRaises(Failure) as caught:
+        case.assertNotRegex("abc", "")
+    assert str(caught.exception) == "Regex matched: '' matches '' in 'abc'"
+    with case.assertRaises(TypeError):
+        case.assertNotRegex(b"abc", "a")

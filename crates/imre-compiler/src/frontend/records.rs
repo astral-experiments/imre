@@ -1001,7 +1001,8 @@ impl Checker<'_> {
     ) -> String {
         if matches!(
             name,
-            "assertIsInstance"
+            "assertNotRegex"
+                | "assertIsInstance"
                 | "assertNotIsInstance"
                 | "assertIsSubclass"
                 | "assertNotIsSubclass"
