@@ -119,6 +119,7 @@ impl Checker<'_> {
         };
         if matches!(a.attr.as_str(), "__module__" | "__name__" | "__qualname__")
             || (kind == Type::Calendar(C::Zone) && fixed_zone_method(a.attr.as_str()))
+            || (kind == Type::Calendar(C::DateTime) && a.attr.as_str() == "astimezone")
             || boxed_member(kind, a.attr.as_str())
         {
             return Err(self.object_runtime_export("datetime class member", a));
@@ -328,7 +329,9 @@ impl Checker<'_> {
         a: &ast::ExprAttribute,
     ) -> Result<Expr, String> {
         let name = a.attr.as_str();
-        if kind == C::Zone && (fixed_zone_method(name) || matches!(name, "min" | "max" | "utc")) {
+        if (kind == C::Zone && (fixed_zone_method(name) || matches!(name, "min" | "max" | "utc")))
+            || (kind == C::DateTime && name == "astimezone")
+        {
             return Err(self.object_runtime_export("timezone member", a));
         }
         if kind == C::DateTime && name == "tzinfo" {
@@ -398,10 +401,22 @@ impl Checker<'_> {
             ));
         }
         if kind == C::DateTime && name == "astimezone" {
-            let args = self.arguments(
+            if call.arguments.is_empty() {
+                return Err(self.object_runtime_export("system local timezone", call));
+            }
+            let zone = Type::Calendar(C::Zone);
+            let args = self.arguments_with(
                 call,
-                &[parameter("tz", Type::Calendar(C::Zone), None)],
+                &[parameter("tz", zone, None)],
                 Some(recv),
+                |c, _, e| {
+                    let value = c.expr(e)?;
+                    if value.ty == zone {
+                        Ok(value)
+                    } else {
+                        Err(c.object_runtime_export("datetime.astimezone timezone argument", e))
+                    }
+                },
             )?;
             return Ok(self.ordered_builtin(
                 Builtin::Calendar(Op::Astimezone),

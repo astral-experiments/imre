@@ -2085,6 +2085,13 @@ def report(text):
         fixtures = Path(__file__).with_name("fixtures")
         compare("-B", "-c", "from typing import Protocol as P; print(P.__name__)")
         compare("-B", fixtures / "typing_protocol_import.py")
+        compare(
+            "-IB", "-c",
+            "from datetime import datetime, timezone\n"
+            "d = datetime(2000, 1, 2, 3, tzinfo=timezone.utc)\n"
+            "print(d.astimezone(), d.astimezone(tz=None))",
+            extra={"TZ": "EST5"},
+        )
         compare("-IB", fixtures / "boxed_pickle_writer.py")
         compare("-IB", "-c", "import io; b = io.BytesIO(b'abc'); print(bytes(b.getbuffer()))")
         compare(
