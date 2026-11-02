@@ -16,8 +16,8 @@ pub(super) struct Socket {
     kind: i32,
     proto: i32,
     fd: RawFd,
-    // None blocks indefinitely; zero is nonblocking. Positive timeouts use nonblocking fds.
-    timeout: Option<Duration>,
+    // Python socket timeouts use signed nanoseconds: -1 blocks indefinitely, 0 is nonblocking.
+    timeout_ns: i64,
     readers: usize,
     close_requested: bool,
 }
@@ -361,7 +361,7 @@ fn handle(
         family,
         kind,
         proto,
-        timeout: (!blocking).then_some(Duration::ZERO),
+        timeout_ns: if blocking { -1 } else { 0 },
         readers: 0,
         close_requested: false,
     }))))
@@ -1573,12 +1573,23 @@ pub(crate) fn set_blocking_mode(s: &Object, blocking: bool) -> Result<()> {
 }
 
 pub(crate) fn get_timeout(s: &Object) -> Option<Duration> {
-    state(s, |s| s.timeout)
+    u64::try_from(state(s, |s| s.timeout_ns))
+        .ok()
+        .map(Duration::from_nanos)
 }
 
 pub(crate) fn set_timeout(s: &Object, timeout: Option<Duration>) -> Result<()> {
+    let timeout_ns = match timeout {
+        None => -1,
+        Some(duration) => i64::try_from(duration.as_nanos()).map_err(|_| {
+            Error::new(
+                Kind::OverflowError,
+                "timestamp too large to convert to C PyTime_t",
+            )
+        })?,
+    };
     // CPython updates timeout even when fcntl subsequently reports EBADF.
-    state(s, |s| s.timeout = timeout);
+    state(s, |s| s.timeout_ns = timeout_ns);
     set_blocking(fd(s), timeout.is_none()).map_err(errno_error)
 }
 
@@ -1590,11 +1601,12 @@ pub extern "C" fn imre_socket_getblocking(s: &Object) -> bool {
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_socket_dup(s: &Object) -> *const Object {
     let result = (|| {
-        let (raw, timeout, family, kind) = state(s, |s| (s.fd, s.timeout, s.family, s.kind));
+        let (raw, family, kind, proto) = state(s, |s| (s.fd, s.family, s.kind, s.proto));
+        let timeout = get_timeout(s);
         // SAFETY: the kernel validates even a closed fd; its copy is non-inheritable from creation.
         let copy =
             checked(unsafe { libc::fcntl(raw, libc::F_DUPFD_CLOEXEC, 0) }).map_err(errno_error)?;
-        let child = handle(copy, timeout.is_none(), family, kind, proto(s))?;
+        let child = handle(copy, timeout.is_none(), family, kind, proto)?;
         // socket.dup reapplies its source's blocking mode to the shared open file.
         set_timeout(&child, timeout)?;
         Ok(crate::ObjectOwner::into_raw(child))
