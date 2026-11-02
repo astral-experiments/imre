@@ -1,7 +1,8 @@
 from builtins import dict as _Dict
 from typing import Any, Callable
 
-class _SentinelObject: ...
+class _SentinelObject:
+    name: str
 
 class _Sentinel:
     def __getattr__(self, name: str) -> _SentinelObject: ...

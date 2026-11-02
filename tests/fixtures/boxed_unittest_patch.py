@@ -1,5 +1,5 @@
 import sys
-from unittest.mock import DEFAULT, patch, sentinel
+from unittest.mock import DEFAULT, Mock, patch, sentinel
 
 assert DEFAULT is sentinel.DEFAULT
 assert sentinel.value is sentinel.value and sentinel.value is not DEFAULT
@@ -64,5 +64,16 @@ main_module = sys.modules[__name__]
 with patch('__main__.open', with_default):
     assert main_module.open(7) == 7
 assert not hasattr(main_module, 'open')
+
+assert DEFAULT.name == "DEFAULT" and sentinel.alpha.name == "alpha"
+configured = Mock(return_value=42, side_effect=lambda: DEFAULT)
+assert configured() == 42
+configured.return_value = DEFAULT
+child = configured()
+assert child is configured() and isinstance(child, Mock)
+configured.return_value = DEFAULT
+assert configured() is not child
+configured.side_effect = lambda: None
+assert configured() is None
 
 print("patch restored")
