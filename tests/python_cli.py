@@ -1061,6 +1061,10 @@ def main():
             "Case.assertNotIsInstance(case, 1, str)",
             "check = case.assertIsInstance\ncheck(1, int)",
             "check = Case.assertNotIsInstance\ncheck(case, 1, str)",
+            "case.assertIsSubclass(bool, int)",
+            "Case.assertNotIsSubclass(case, int, str)",
+            "check = case.assertIsSubclass\ncheck(bool, int)",
+            "check = Case.assertNotIsSubclass\ncheck(case, int, str)",
         ):
             instance_check.write_text(
                 "from unittest import TestCase\nclass Case(TestCase): pass\ncase = Case()\n"
