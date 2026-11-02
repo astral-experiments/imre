@@ -519,6 +519,14 @@ pub(crate) fn compile(
             return Ok(None);
         }
         let mut names = imports.names;
+        // _io initializes io, and a computed import can select it without a source-level name.
+        if imports.uses_import_builtin
+            || names
+                .iter()
+                .any(|(level, name)| *level == 0 && name == "_io")
+        {
+            names.push((0, "io".to_owned()));
+        }
         // Importing array registers its type with MutableSequence. A runtime
         // __import__ can select array without naming it in a static import.
         if imports.uses_import_builtin
