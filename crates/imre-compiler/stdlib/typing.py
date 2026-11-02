@@ -2,7 +2,7 @@
 
 import builtins as _builtins
 import typing as _typing
-from _collections_abc import MutableMapping as _MutableMapping
+from _collections_abc import Mapping as _Mapping, MutableMapping as _MutableMapping
 from collections import defaultdict as _defaultdict
 from functools import lru_cache
 from typing import Any, Callable, Generic, Protocol, TypeVar
@@ -731,6 +731,7 @@ Type.__doc__ = \
     At this point the type checker knows that joe has type BasicUser.
     """
 DefaultDict = _SpecialGenericAlias(_defaultdict, 2, name="DefaultDict")
+Mapping = _SpecialGenericAlias(_Mapping, 2, name="Mapping")
 MutableMapping = _SpecialGenericAlias(_MutableMapping, 2, name="MutableMapping")
 
 
