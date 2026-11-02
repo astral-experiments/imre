@@ -196,7 +196,7 @@ fn version(
         return None;
     };
     let (cursor, source, reverse) = loop_source(test, initial)?;
-    if !block_readonly(body) || crate::list_specialization::contains_loop(body) {
+    if !block_readonly(body) || crate::ir::contains_loop(body) {
         return None;
     }
     let mut writes = vec![0; initial.len()];
