@@ -3559,6 +3559,10 @@ impl Context {
         }
     }
 
+    pub(super) fn class_instances_have_dict(&self, class: Id) -> bool {
+        self.instance_layout(class, "").dictionary
+    }
+
     /// Whether instances have a dictionary and whether this particular name addresses a slot.
     fn instance_layout(&self, class: Id, name: &str) -> InstanceLayout {
         let mut layout = InstanceLayout::default();

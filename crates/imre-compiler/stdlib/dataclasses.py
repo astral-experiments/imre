@@ -2,7 +2,9 @@ from _imre_dataclasses import (
     field_identifier as _field_identifier, is_defaultdict as _is_defaultdict,
     load_global as _load_global, loaded_module as _loaded_module,
     make_type as _make_type, members as _members, metadata as _metadata,
-    retarget_class_cell as _retarget_class_cell, slotted_type as _slotted_type,
+    native_iterator as _native_iterator, retarget_class_cell as _retarget_class_cell,
+    slot_bases as _slot_bases,
+    slotted_type as _slotted_type,
 )
 from types import FunctionType, GenericAlias, MemberDescriptorType
 
@@ -353,11 +355,7 @@ def _annotation_marker(cls, annotation):
 
 def _decorate(cls, params):
     own = _members(cls)
-    if params.slots:
-        if '__slots__' in own:
-            raise TypeError(f'{cls.__name__} already specifies __slots__')
-        if type(cls) is not type or cls.__bases__ != (object,):
-            raise NotImplementedError('boxed slotted dataclasses require an ordinary object-based class')
+    slot_bases = _slot_bases(cls) if params.slots else ()
     data = {}
     frozen_bases = []
     for base in cls.__mro__[-1:0:-1]:
@@ -501,7 +499,7 @@ def _decorate(cls, params):
     if params.slots:
         # Generated methods may retain this frame. The original descriptor snapshot owns the old class.
         own.clear()
-        cls, repaired_user_cell = _add_slots(cls, real_fields, params)
+        cls, repaired_user_cell = _add_slots(cls, real_fields, params, slot_bases)
         # CPython stops after repairing the first __class__ cell. A user method
         # can have a separate cell from the one shared by generated methods.
         if not repaired_user_cell:
@@ -518,10 +516,23 @@ def _dataclass_setstate(self, state):
         object.__setattr__(self, f.name, value)
 
 
-def _add_slots(cls, real_fields, params):
+def _add_slots(cls, real_fields, params, slot_bases):
     namespace = _members(cls)
-    slots = {f.name: f.doc for f in real_fields}
-    if params.weakref_slot:
+    if '__slots__' in namespace:
+        raise TypeError(f'{cls.__name__} already specifies __slots__')
+    inherited = set()
+    for base, implicit in slot_bases:
+        declared = base.__dict__.get('__slots__')
+        if declared is None:
+            inherited.update(implicit)
+        elif isinstance(declared, str):
+            inherited.add(declared)
+        elif _native_iterator(declared) or hasattr(declared, '__next__'):
+            raise TypeError(f"Slots of '{base.__name__}' cannot be determined")
+        else:
+            inherited.update(declared)
+    slots = {f.name: f.doc for f in real_fields if f.name not in inherited}
+    if params.weakref_slot and '__weakref__' not in inherited:
         slots['__weakref__'] = None
     namespace['__slots__'] = slots if any(doc is not None for doc in slots.values()) else tuple(slots)
     for f in real_fields:
@@ -537,7 +548,7 @@ def _add_slots(cls, real_fields, params):
         if '__setstate__' not in namespace:
             newcls.__setstate__ = _dataclass_setstate
 
-    for original in namespace.values():
+    for original in _members(newcls).values():
         member = original
         seen = {id(member): member}
         while not isinstance(member, type) and hasattr(member, '__wrapped__'):
