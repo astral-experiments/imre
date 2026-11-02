@@ -80,7 +80,7 @@ pub(crate) mod os;
 pub(crate) use os::os_separator;
 mod patchset;
 mod paths;
-pub(crate) use paths::{directory_entries, exists, is_file, path_utf8};
+pub(crate) use paths::{directory_entries, path_utf8};
 pub(crate) mod posixpath;
 mod processes;
 pub(crate) use processes::{BoxedPipe, BoxedPopen, change_environment, initial_environment};
