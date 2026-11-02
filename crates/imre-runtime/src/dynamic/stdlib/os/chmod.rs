@@ -34,8 +34,7 @@ pub(super) fn call(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> R
             let error = crate::objects::errno_error(io::Error::from_raw_os_error(libc::EFAULT));
             return Err(ctx.with_errno_filename(error.into(), filename)?);
         }
-        // SAFETY: fchmod checks the Python-supplied descriptor and does not take ownership.
-        PathArg::Fd(fd) => (unsafe { libc::fchmod(*fd, mode) }, false),
+        PathArg::Fd(fd) => (set_fd_mode(*fd, mode), false),
         PathArg::Name(name) if follow && dir_fd == libc::AT_FDCWD => {
             // SAFETY: name is a live, NUL-terminated pathname.
             (unsafe { libc::chmod(name.as_ptr(), mode) }, false)
@@ -75,4 +74,35 @@ pub(super) fn call(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> R
         return Err(ctx.with_errno_filename(error.into(), filename)?);
     }
     Ok(NONE)
+}
+
+/// Convert both arguments to C integers before auditing and changing the open inode.
+pub(super) fn fchmod(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    let [Some(fd), Some(mode)] =
+        builtins::bind_builtin_arguments("fchmod", args, kwargs, ["fd", "mode"], 2)?
+    else {
+        unreachable!("fchmod requires fd and mode")
+    };
+    let fd = c_int(ctx, fd)?;
+    let mode = c_int(ctx, mode)?;
+    let event_args = [
+        ctx.int(i64::from(fd)),
+        ctx.int(i64::from(mode)),
+        ctx.int(-1),
+    ];
+    audit::event(ctx, "os.chmod", &event_args)?;
+    loop {
+        if set_fd_mode(fd, mode as libc::mode_t) == 0 {
+            return Ok(NONE);
+        }
+        let error = io::Error::last_os_error();
+        if error.kind() != io::ErrorKind::Interrupted {
+            return Err(crate::objects::errno_error(error).into());
+        }
+    }
+}
+
+fn set_fd_mode(fd: i32, mode: libc::mode_t) -> i32 {
+    // SAFETY: fchmod validates the descriptor and borrows it only for this call.
+    unsafe { libc::fchmod(fd, mode) }
 }

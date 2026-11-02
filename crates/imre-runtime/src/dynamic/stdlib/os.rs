@@ -362,6 +362,7 @@ pub(super) fn is_descriptor_function(name: &str) -> bool {
             | "mkdir"
             | "mkfifo"
             | "chmod"
+            | "fchmod"
             | "chdir"
             | "utime"
             | "dup"
@@ -704,6 +705,9 @@ pub(super) fn descriptor(
     }
     if name == "chmod" {
         return chmod::call(ctx, args, kwargs);
+    }
+    if name == "fchmod" {
+        return chmod::fchmod(ctx, args, kwargs);
     }
     if matches!(name, "mkdir" | "mkfifo") {
         return create_node(ctx, name, args, kwargs);
