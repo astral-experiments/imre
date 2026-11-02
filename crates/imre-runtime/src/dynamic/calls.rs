@@ -2808,10 +2808,7 @@ impl Context {
                     }
                     "__get__" | "__set__" | "__delete__"
                         if name == "__get__"
-                            || matches!(
-                                owner,
-                                "int" | "typing.Union" | stdlib::hashlib::md5::CLASS
-                            )
+                            || matches!(owner, "int" | "typing.Union" | stdlib::hashlib::md5::CLASS)
                             || HashState::is_provider_class(owner) =>
                     {
                         let symbol = format!("getset_descriptor.{name}");
@@ -5188,10 +5185,7 @@ impl Context {
         let object = self.builtin("object");
         if let Value::Native(name) = self.heap.get(class)
             && (nonconstructible_result_type(name)
-                || matches!(
-                    name.as_str(),
-                    stdlib::os::scandir::ENTRY | "_io._BytesIOBuffer"
-                ))
+                || matches!(name.as_str(), stdlib::os::scandir::ENTRY | "_io._BytesIOBuffer"))
         {
             return Err(Error::new(
                 "TypeError",

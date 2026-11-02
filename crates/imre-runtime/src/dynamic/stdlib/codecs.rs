@@ -2,6 +2,7 @@
 use std::collections::HashMap;
 
 mod bytes_escape;
+mod encode_error;
 mod raw_unicode_escape;
 mod surrogate_utf8;
 mod utf16;
@@ -587,6 +588,18 @@ pub(in crate::dynamic) fn encode_text(
         .transpose()?
         .unwrap_or("strict");
     let encoder = StrEncoder::lookup(encoding, errors)?;
+    let errors = if let StrEncoder::Registered(codec) = encoder {
+        match encode_error::registered(ctx, codec, errors) {
+            Some(encode_error::Handler::Python(callback)) => {
+                let escape_prefix = errors == "surrogateescape";
+                return encode_error::encode(ctx, id, codec, callback, escape_prefix);
+            }
+            Some(encode_error::Handler::Builtin(name)) => name,
+            None => errors,
+        }
+    } else {
+        errors
+    };
     if let Ok(text) = ctx.str_value(id) {
         return Ok(encoder.encode_str(text, errors)?);
     }
@@ -597,8 +610,7 @@ pub(in crate::dynamic) fn encode_text(
             ctx.encode_utf8_codepoints(id, signature, &errors)
         }
         StrEncoder::Registered(codec)
-            if matches!(errors.as_str(), "strict" | "surrogateescape")
-                && !ctx.codec_entries.handlers.contains_key(&errors) =>
+            if matches!(errors.as_str(), "strict" | "surrogateescape") =>
         {
             ctx.encode_single_byte_codepoints(id, codec, errors == "surrogateescape")
         }
