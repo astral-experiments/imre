@@ -103,7 +103,10 @@ fn cumulative_weights(ctx: &mut Context, weights: Id) -> Result<Id> {
     while let Some(item) = ctx.next_item(iterator)? {
         ctx.heap.keep(item);
         let total = match previous {
-            Some(value) => ctx.binary("+", value, item)?,
+            Some(value) => match ctx.binary("+", value, item) {
+                Err(error) if ctx.is_stop_iteration(&error) => break,
+                result => result?,
+            },
             None => item,
         };
         append(ctx, cumulative, total)?;
@@ -114,9 +117,52 @@ fn cumulative_weights(ctx: &mut Context, weights: Id) -> Result<Id> {
     Ok(cumulative)
 }
 
+/// Run the integer-weights diagnostic with the original iteration exception active.
+fn weights_type_error(ctx: &mut Context, weights: Id, error: Error) -> Error {
+    let original = ctx.raised_instance(error.clone());
+    let previous = ctx.heap.replace_active(original);
+    ctx.heap.keep(previous);
+    let diagnostic = (|| -> Result<Error> {
+        let int = ctx.builtin("int");
+        if !ctx.instance_of(weights, int) {
+            // isinstance also recognizes an unrelated object's reported __class__.
+            match ctx.lookup_attr(weights, "__class__") {
+                Ok(class) if ctx.direct_subclass(class, int) => {}
+                Ok(_) => return Ok(error),
+                Err(missing) if ctx.is_attribute_error(&missing) => return Ok(error),
+                Err(failure) => return Err(failure),
+            }
+        }
+        let k = ctx.checked_format(weights, true)?;
+        let mut replacement = Error::new(
+            "TypeError",
+            format!("The number of choices must be a keyword argument: k={k}"),
+        );
+        replacement.context = original;
+        replacement.tracing().cause = Some(NONE);
+        Ok(replacement)
+    })();
+    ctx.heap.replace_active(previous);
+    diagnostic.unwrap_or_else(|mut failure| {
+        failure.context = original;
+        failure
+    })
+}
+
 /// Bisect on the original sequence, excluding its last boundary as in Random.choices.
 fn weighted_index(ctx: &mut Context, cumulative: Id, needle: Id, mut hi: i64) -> Result<i64> {
+    if let Some(kind @ ("dict" | "collections.defaultdict" | "mappingproxy")) =
+        ctx.builtin_type_name(cumulative)
+    {
+        // _bisect reads the sequence item slot, which exact native mappings do not supply.
+        return Err(Error::new("TypeError", format!("{kind} is not a sequence")));
+    }
+    if hi == -1 {
+        let length = builtins::call(ctx, "len", &[cumulative], &[])?;
+        hi = ctx.as_integer(length)?;
+    }
     let mut lo = 0;
+    let mark = ctx.heap.temporary_mark();
     while lo < hi {
         let mid = lo + (hi - lo) / 2;
         let key = ctx.int(mid);
@@ -128,6 +174,7 @@ fn weighted_index(ctx: &mut Context, cumulative: Id, needle: Id, mut hi: i64) ->
         } else {
             lo = mid + 1;
         }
+        ctx.heap.release_temporaries_since(mark);
     }
     Ok(lo)
 }
@@ -149,6 +196,7 @@ pub(super) fn choices(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -
     })?;
     let length = builtins::call(ctx, "len", &[population], &[])?;
     let n = ctx.as_integer(length)?;
+    let preparation = ctx.heap.temporary_mark();
     let cumulative = match (
         weights.filter(|&id| id != NONE),
         cumulative.filter(|&id| id != NONE),
@@ -160,24 +208,17 @@ pub(super) fn choices(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -
             ));
         }
         (Some(weights), None) => Some(match cumulative_weights(ctx, weights) {
-            Err(error)
-                if ctx.is_builtin_error(&error, "TypeError")
-                    && matches!(
-                        ctx.heap.get(ctx.scalar_value(weights)),
-                        Value::Int(_) | Value::Bool(_)
-                    ) =>
-            {
-                let k = ctx.checked_format(weights, true)?;
-                return Err(Error::new(
-                    "TypeError",
-                    format!("The number of choices must be a keyword argument: k={k}"),
-                ));
+            Err(error) if ctx.is_builtin_error(&error, "TypeError") => {
+                return Err(weights_type_error(ctx, weights, error));
             }
             result => result?,
         }),
         (None, supplied) => supplied,
     };
+    ctx.heap.release_temporaries_since(preparation);
     let weighted = if let Some(cumulative) = cumulative {
+        ctx.heap.keep(cumulative);
+        let operands = ctx.heap.temporary_mark();
         let length = builtins::call(ctx, "len", &[cumulative], &[])?;
         if ctx.as_integer(length)? != n {
             return Err(Error::new(
@@ -190,7 +231,9 @@ pub(super) fn choices(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -
         ctx.heap.keep(last);
         let zero = ctx.alloc(Value::Float(0.0));
         let total = ctx.binary("+", last, zero)?;
+        ctx.heap.release_temporaries_since(operands);
         ctx.heap.keep(total);
+        let zero = ctx.alloc(Value::Float(0.0));
         let nonpositive = ctx.binary("<=", total, zero)?;
         if ctx.truth(nonpositive)? {
             return Err(Error::new(
@@ -217,7 +260,9 @@ pub(super) fn choices(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -
             let draw = ctx.alloc(Value::Float(draw));
             let needle = ctx.binary("*", draw, total)?;
             ctx.heap.keep(needle);
-            weighted_index(ctx, cumulative, needle, n - 1)?
+            let index = weighted_index(ctx, cumulative, needle, n - 1)?;
+            ctx.heap.release_temporaries_since(mark);
+            index
         } else {
             (draw * n as f64).floor() as i64
         };
