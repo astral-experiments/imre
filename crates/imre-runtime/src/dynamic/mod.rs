@@ -2827,6 +2827,9 @@ impl Context {
                 self.bind(scope, attr, value);
             }
             for attr in [
+                "fsync",
+                #[cfg(target_os = "linux")]
+                "fdatasync",
                 "getegid",
                 #[cfg(target_os = "linux")]
                 "getresgid",

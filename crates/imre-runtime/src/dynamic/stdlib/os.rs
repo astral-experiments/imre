@@ -508,7 +508,10 @@ pub(super) fn is_descriptor_function(name: &str) -> bool {
     if name == "_exit" {
         return cfg!(unix);
     }
-    if matches!(name, "device_encoding" | "fchdir" | "pread" | "pwrite" | "readinto") {
+    if matches!(
+        name,
+        "device_encoding" | "fchdir" | "fsync" | "pread" | "pwrite" | "readinto"
+    ) {
         return cfg!(unix);
     }
     matches!(
@@ -564,6 +567,7 @@ pub(super) fn is_descriptor_function(name: &str) -> bool {
                     | "writev"
                     | "splice"
                     | "lockf"
+                    | "fdatasync"
                     | "mknod"
                     | "posix_fadvise"
                     | "posix_fallocate"
@@ -1001,17 +1005,26 @@ pub(super) fn descriptor(
     if name == "utime" {
         return utime::call(ctx, args, kwargs);
     }
-    if name == "fchdir" {
+    let fd_call: Option<unsafe extern "C" fn(i32) -> i32> = match name {
+        "fchdir" => Some(libc::fchdir),
+        "fsync" => Some(libc::fsync),
+        #[cfg(target_os = "linux")]
+        "fdatasync" => Some(libc::fdatasync),
+        _ => None,
+    };
+    if let Some(call) = fd_call {
         let [Some(fd)] = builtins::bind_builtin_arguments(name, args, kwargs, ["fd"], 1)? else {
-            unreachable!("fchdir requires a descriptor");
+            unreachable!("a descriptor is required");
         };
         stat::warn_bool_fd(ctx, fd)?;
         let fd = super::select::fd(ctx, fd)?;
-        let audit_fd = ctx.int(i64::from(fd));
-        super::audit::event(ctx, "os.chdir", &[audit_fd])?;
+        if name == "fchdir" {
+            let audit_fd = ctx.int(i64::from(fd));
+            super::audit::event(ctx, "os.chdir", &[audit_fd])?;
+        }
         loop {
-            // SAFETY: fchdir borrows the descriptor and checks it in the kernel.
-            if unsafe { libc::fchdir(fd) } == 0 {
+            // SAFETY: these calls borrow the descriptor and validate it in the kernel.
+            if unsafe { call(fd) } == 0 {
                 return Ok(NONE);
             }
             let error = std::io::Error::last_os_error();
