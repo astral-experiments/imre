@@ -2428,9 +2428,17 @@ def report(text):
         ):
             config_call.write_text(
                 "from logging.config import fileConfig as configure\nfrom logging import getLogger\n"
-                f"{setup}\n{call}\nprint(getLogger().level)\n"
+                f"{setup}\nresult = {call}\nassert result is None\nprint(getLogger().level)\n"
             )
             compare("-IB", config_call, native_args=("run", config_call, "--quiet"), native_timeout=600)
+        config_call.write_text(
+            "from io import StringIO\nfrom logging.config import fileConfig\n"
+            "def configure() -> None:\n"
+            f"    result = fileConfig(StringIO({ini!r}))\n    assert result is None\n"
+            "    level: int = 'wrong'\n    print(level)\nconfigure()\n"
+        )
+        bad_config = run(imre, "check", config_call)
+        assert bad_config.returncode != 0 and b"expected int" in bad_config.stderr, bad_config.stderr
         io_registration = fixtures / "io_abc_registration.py"
         compare("-IB", io_registration, native_args=("run", io_registration, "--quiet"))
         override_fixture = fixtures / "boxed_typing_override.py"

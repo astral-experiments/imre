@@ -179,20 +179,34 @@ impl Checker<'_> {
                 Some(Expr::absent(self.types.optional(Type::Str))),
             ),
         ];
-        let args = self.arguments_with(call, &parameters, None, |checker, index, node| {
-            let expected = parameters[index].ty;
-            // A defaults literal can mix value types. Check its entries as a document.
-            if index == 1 && matches!(node, ast::Expr::Dict(_)) {
-                checker.expr_expected(node, documents::MAP)?;
-                return Err(checker.scoped_builtin_error("logging.config.fileConfig", node));
+        let mut needs_objects = calls::has_unpacking(call);
+        if !needs_objects {
+            let args = self.arguments_with(call, &parameters, None, |checker, index, node| {
+                let expected = parameters[index].ty;
+                // A defaults literal can mix value types. Check its entries as a document.
+                if index == 1 && matches!(node, ast::Expr::Dict(_)) {
+                    needs_objects = true;
+                    return checker.expr_expected(node, documents::MAP);
+                }
+                let value = checker.expr_expected_if(node, expected, |_, _| true)?;
+                Ok(checker.coerce(value, expected, node).unwrap_or_else(|_| {
+                    needs_objects = true;
+                    // This argument list will be discarded after checking the remaining inputs.
+                    Expr::none()
+                }))
+            })?;
+            if !needs_objects {
+                return Ok(self.ordered_builtin(
+                    Builtin::Logging(Log::FileConfig),
+                    Type::None,
+                    args,
+                ));
             }
-            // Keep operand diagnostics; only an incompatible argument needs the configurator.
-            let value = checker.expr_expected_if(node, expected, |_, _| true)?;
-            checker
-                .coerce(value, expected, node)
-                .map_err(|_| checker.scoped_builtin_error("logging.config.fileConfig", node))
-        })?;
-        Ok(self.ordered_builtin(Builtin::Logging(Log::FileConfig), Type::None, args))
+        }
+        // The Python configurator also returns None. Keep checking the caller before fallback.
+        let error = self.scoped_builtin_error("logging.config.fileConfig", call);
+        self.defer_object_error(&error);
+        Ok(Expr::none())
     }
 
     pub(super) fn logging_level_map(&self, names: bool) -> Expr {
