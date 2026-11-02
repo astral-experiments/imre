@@ -1722,6 +1722,8 @@ def report(text):
         (resource_package / "__init__.py").write_text("print('resource package initialized')\n")
         (resource_package / "payload.bin").write_bytes(b"\x00\xff\r\n")
         fixtures = Path(__file__).with_name("fixtures")
+        override_fixture = fixtures / "boxed_typing_override.py"
+        compare("-IB", override_fixture, native_args=("run", override_fixture, "--runtime-imports", "--quiet"))
         final_fixture = fixtures / "boxed_typing_final.py"
         compare("-IB", final_fixture, native_args=("run", final_fixture, "--runtime-imports", "--quiet"))
         io_registration = fixtures / "io_abc_registration.py"
