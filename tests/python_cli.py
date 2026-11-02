@@ -1278,6 +1278,16 @@ print(found.value)
             (root / "linked-script.py").symlink_to("pkg/path0.py")
             compare("-B", "linked-script.py")
 
+            (root / "dangling-link").symlink_to("missing-target")
+            compare(
+                "-B", "-c",
+                "import os\n"
+                "from os.path import exists, getatime, getctime, getmtime, lexists\n"
+                "assert lexists(path=b'dangling-link') and not exists('dangling-link')\n"
+                "s = os.stat('.')\n"
+                "assert (getatime('.'), getctime('.'), getmtime('.')) == (s.st_atime, s.st_ctime, s.st_mtime)",
+            )
+
             byte_dir = root / os.fsdecode(b"dir-\xff")
             byte_dir.mkdir()
             (byte_dir / "main.py").write_text("import sys\nprint(sys.path[0])\n")
