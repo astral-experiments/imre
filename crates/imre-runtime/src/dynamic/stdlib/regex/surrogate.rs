@@ -39,7 +39,7 @@ impl Projection {
         method: &str,
         points: &[u32],
     ) -> Result<Self> {
-        if !matches!(method, "search" | "match" | "fullmatch")
+        if !matches!(method, "search" | "match" | "fullmatch" | "sub")
             || !source.is_some_and(|s| can_project(s, matcher))
         {
             return Err(Error::new(
