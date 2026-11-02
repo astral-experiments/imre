@@ -786,6 +786,7 @@ pub(super) struct ExecGlobals {
 #[derive(Clone)]
 pub(super) struct BoxedTextFile {
     pub(super) file: crate::objects::TextFile,
+    pub(super) finalizing: bool,
     pub(super) line_buffering: bool,
     pub(super) buffer: Option<Id>,
 }

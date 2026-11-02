@@ -3590,6 +3590,9 @@ impl Context {
             {
                 return Ok(self.text(encoding.as_str()));
             }
+            Value::TextFile(ref file) if name == "_finalizing" => {
+                return Ok(builtins::boolean(file.finalizing));
+            }
             Value::TextFile(_) if name == "write_through" => return Ok(FALSE),
             Value::TextFile(ref file) if name == "line_buffering" => {
                 return Ok(if file.line_buffering { TRUE } else { FALSE });
@@ -4773,6 +4776,10 @@ impl Context {
     }
 
     fn writable_attribute_member(&mut self, obj: Id, name: &str) -> Option<Id> {
+        if name == "_finalizing" && matches!(self.heap.get(obj), Value::TextFile(_)) {
+            let owner = self.builtin("_io.TextIOWrapper");
+            return self.own_class_attr(owner, name);
+        }
         if name == "cr_origin" && matches!(self.heap.get(obj), Value::Coroutine { .. }) {
             return Some(self.readonly_member("coroutine", "cr_origin"));
         }
