@@ -2881,6 +2881,7 @@ impl Context {
                     "ptsname",
                     "preadv",
                     "readv",
+                    "writev",
                     "splice",
                 ] {
                     let function = self.builtin(&format!("posix.{name}"));
@@ -2974,6 +2975,7 @@ impl Context {
                         "ptsname",
                         "preadv",
                         "readv",
+                        "writev",
                         "RWF_HIPRI",
                         "RWF_NOWAIT",
                         "O_NOCTTY",
