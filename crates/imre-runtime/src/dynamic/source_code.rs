@@ -14,6 +14,9 @@ use super::*;
 
 pub(super) struct Program {
     pub filename: Rc<str>,
+    // All nested code shares a source map. Prelinked suspended suites start in a synthetic header.
+    source_lines: Rc<[usize]>,
+    linked_body_line: Option<u32>,
     pub name: String,
     qualname: String,
     nested_global: bool,
@@ -1296,6 +1299,8 @@ impl Program {
             };
             let mut child = Self::new(self.filename.clone(), name, self.has_named_bindings);
             child.strip_docstrings = self.strip_docstrings;
+            child.source_lines = self.source_lines.clone();
+            child.linked_body_line = self.linked_body_line;
             child.qualname =
                 Self::qualified_name(&self.qualname, self.class_attributes.is_some(), name);
             child.method_imports = self.method_imports.clone();
@@ -1564,8 +1569,23 @@ impl Program {
         )
     }
 
+    pub(super) fn expression_line(&self, offset: ruff_text_size::TextSize) -> Option<u32> {
+        if self.source_lines.is_empty() {
+            return None;
+        }
+        let line = self
+            .source_lines
+            .partition_point(|&start| start <= offset.to_usize()) as u32;
+        Some(
+            self.linked_body_line
+                .map_or(line, |base| base + line.saturating_sub(2)),
+        )
+    }
+
     fn nested_program(&self, name: &str) -> Self {
         let mut child = Self::new(self.filename.clone(), name, self.has_named_bindings);
+        child.source_lines = self.source_lines.clone();
+        child.linked_body_line = self.linked_body_line;
         child.strip_docstrings = self.strip_docstrings;
         child
     }
@@ -1573,6 +1593,8 @@ impl Program {
     fn new(filename: Rc<str>, name: &str, has_named_bindings: bool) -> Self {
         Self {
             filename,
+            source_lines: Rc::default(),
+            linked_body_line: None,
             name: name.to_owned(),
             qualname: name.to_owned(),
             nested_global: false,
@@ -2645,13 +2667,21 @@ impl Context {
         } else {
             &source
         };
+        let normalized;
+        let source = if source.contains('\r') {
+            normalized = source.replace("\r\n", "\n").replace('\r', "\n");
+            normalized.as_str()
+        } else {
+            source
+        };
         let parsed = ruff_python_parser::parse(source, parser_mode.into())
             .map_err(|error| Error::new("SyntaxError", format!("{filename}: {error}")))?;
         if interactive && let ast::Mod::Module(module) = parsed.syntax() {
             check_single_input(&module.body, parsed.tokens())?;
         }
         let spellings = string_replacements(source, parsed.tokens());
-        let lines = line_starts(source.match_indices('\n').map(|(offset, _)| offset + 1))?;
+        let lines: Rc<[usize]> =
+            line_starts(source.match_indices('\n').map(|(offset, _)| offset + 1))?.into();
         let async_error = match parsed.syntax() {
             ast::Mod::Module(module) => {
                 let error = imre_ast::async_generators::syntax_error(module);
@@ -2730,6 +2760,7 @@ impl Context {
             return Err(error);
         }
         let mut code = Program::new(Rc::from(filename), "<module>", source.contains(":="));
+        code.source_lines = lines.clone();
         code.strip_docstrings = self.config["optimize"].as_i64().unwrap_or(0) >= 2;
         code.interactive = interactive;
         code.template_expressions = Rc::new(imre_ast::strings::template_expressions(
@@ -3428,7 +3459,8 @@ impl Context {
                 running: false,
             });
             Ok(if kind == FunctionKind::Coroutine {
-                self.alloc(Value::Coroutine(frame))
+                let origin = self.coroutine_origin();
+                self.alloc(Value::Coroutine { frame, origin })
             } else {
                 frame
             })
@@ -3484,13 +3516,16 @@ impl Context {
             .private_scope
             .or(postponed.then_some(("", true)))
             .map(|(owner, postponed)| Rc::new(imre_ast::lower_in(&mut def.body, owner, postponed)));
-        let lines = line_starts(source.match_indices('\n').map(|(offset, _)| offset + 1))?;
+        let lines: Rc<[usize]> =
+            line_starts(source.match_indices('\n').map(|(offset, _)| offset + 1))?.into();
         let mut program = Program::new(
             self.str_value(code.filename)?.into(),
             self.str_value(code.name)?,
             source.contains(":="),
         );
         program.strip_docstrings = self.config["optimize"].as_i64().unwrap_or(0) >= 2;
+        program.source_lines = lines.clone();
+        program.linked_body_line = Some(body_line);
         program.method_imports = Rc::new(signature.method_imports);
         program.template_expressions = Rc::new(template_expressions);
         program.private_names = private_names;
@@ -4870,9 +4905,19 @@ impl Context {
     }
 
     fn source_expr(&mut self, code: &Program, scope: Id, expr: &ast::Expr) -> Result<Id> {
-        let value = stacker::maybe_grow(128 * 1024, 2 * 1024 * 1024, || {
+        let position = imre_ast::expression_position(
+            expr,
+            &code.method_imports,
+            code.private_names.as_deref(),
+        );
+        let previous = self
+            .heap
+            .replace_expression(value::ExpressionPosition::Offset(position));
+        let result = stacker::maybe_grow(128 * 1024, 2 * 1024 * 1024, || {
             self.source_expr_inner(code, scope, expr)
-        })?;
+        });
+        self.heap.replace_expression(previous);
+        let value = result?;
         self.heap.keep(value);
         Ok(value)
     }

@@ -1349,6 +1349,19 @@ pub(super) fn call(
     if name == "sys.getsizeof" {
         return system_size::getsizeof(ctx, &args[1..], kwargs);
     }
+    if name == "sys.set_coroutine_origin_tracking_depth" {
+        let [depth] = builtins::bind_builtin_arguments(
+            "set_coroutine_origin_tracking_depth",
+            args,
+            kwargs,
+            ["depth"],
+            1,
+        )?;
+        let depth = index_c_int(ctx, depth.expect("required depth argument"))?;
+        ctx.threads.coroutine_origin_depth =
+            u32::try_from(depth).map_err(|_| Error::new("ValueError", "depth must be >= 0"))?;
+        return Ok(NONE);
+    }
     if name == "sys.set_asyncgen_hooks" {
         return asyncgen_hooks::set(ctx, &args[1..], kwargs);
     }
@@ -1464,6 +1477,7 @@ pub(super) fn call(
     if matches!(
         name,
         "sys.get_int_max_str_digits"
+            | "sys.get_coroutine_origin_tracking_depth"
             | "sys.getdefaultencoding"
             | "_locale.getencoding"
             | "sys.getfilesystemencoding"
@@ -1503,6 +1517,7 @@ pub(super) fn call(
             ));
         }
         return Ok(match name {
+            "sys.get_coroutine_origin_tracking_depth" => ctx.int(i64::from(ctx.threads.coroutine_origin_depth)),
             "posix._create_environ" => os::environment(ctx),
             "posix.getcwd" | "posix.getcwdb" => os::getcwd(ctx, name == "posix.getcwdb")?,
             "sys.getfilesystemencoding" => ctx

@@ -11,6 +11,31 @@ enum Element<'a> {
 
 impl Function<'_, '_> {
     pub(super) fn expr(&mut self, expr: &ast::Expr) -> String {
+        let position = imre_ast::expression_position(
+            expr,
+            &self.source.method_imports,
+            Some(&self.source.private_names),
+        );
+        let line = self.source.line(position);
+        let previous = self.expression_line;
+        if previous == line {
+            return self.expr_inner(expr);
+        }
+        self.expression_line = line;
+        self.line(&format!(
+            "call void @imre_dyn_expression_line(ptr %ctx, i32 {line})"
+        ));
+        let value = self.expr_inner(expr);
+        self.expression_line = previous;
+        if !self.terminated {
+            self.line(&format!(
+                "call void @imre_dyn_expression_line(ptr %ctx, i32 {previous})"
+            ));
+        }
+        value
+    }
+
+    fn expr_inner(&mut self, expr: &ast::Expr) -> String {
         match expr {
             ast::Expr::NoneLiteral(_) => "0".into(),
             ast::Expr::EllipsisLiteral(_) => "3".into(),

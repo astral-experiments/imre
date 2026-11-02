@@ -43,6 +43,7 @@ pub(super) fn module_function(symbol: &str) -> Option<(&str, &str)> {
         "operator" if stdlib::operator::Operation::named(function).is_some() => {
             Some(("_operator", function))
         }
+        "sys" if matches!(function, "get_coroutine_origin_tracking_depth" | "set_coroutine_origin_tracking_depth") => Some((module, function)),
         "_typing" if function == "_idfunc" => Some((module, function)),
         "encodings" if function == "search_function" => Some((module, function)),
         "posix"
@@ -2445,6 +2446,20 @@ impl Context {
             }
             Value::Native(ref symbol) if let Some((module, function)) = module_function(symbol) => {
                 match name {
+                    "__self__" if module == "sys" => {
+                        if let Some(original) = self.threads.system_module {
+                            return Ok(original);
+                        }
+                    }
+                    "__text_signature__" if symbol == "sys.set_coroutine_origin_tracking_depth" => {
+                        return Ok(self.text("($module, /, depth)"));
+                    }
+                    "__doc__" if symbol == "sys.get_coroutine_origin_tracking_depth" => {
+                        return Ok(self.text("Check status of origin tracking for coroutine objects in this thread."));
+                    }
+                    "__doc__" if symbol == "sys.set_coroutine_origin_tracking_depth" => {
+                        return Ok(self.text("Enable or disable origin tracking for coroutine objects in this thread.\n\nCoroutine objects will track 'depth' frames of traceback information\nabout where they came from, available in their cr_origin attribute.\n\nSet a depth of 0 to disable."));
+                    }
                     "__text_signature__" if symbol == "_typing._idfunc" => {
                         return Ok(self.text("($module, x, /)"));
                     }
@@ -2644,6 +2659,7 @@ impl Context {
                                 | "_thread.allocate"
                                 | "_thread.allocate_lock"
                                 | "_thread._count"
+                                | "sys.get_coroutine_origin_tracking_depth"
                         ) =>
                     {
                         return Ok(self.text("($module, /)"));
@@ -2728,7 +2744,11 @@ impl Context {
                 return contents.ok_or_else(|| Error::new("ValueError", "Cell is empty"));
             }
             Value::Generator { code, .. } if name == "gi_code" => return Ok(code),
-            Value::Coroutine(frame) if name == "cr_code" => {
+            Value::Coroutine { origin, .. } if name == "cr_origin" => return Ok(origin),
+            Value::Native(ref class) if class == "coroutine" && name == "cr_origin" => {
+                return Ok(self.readonly_member("coroutine", "cr_origin"));
+            }
+            Value::Coroutine { frame, .. } if name == "cr_code" => {
                 let Value::Generator { code, .. } = *self.heap.get(frame) else {
                     unreachable!("coroutine frame")
                 };
@@ -4675,6 +4695,9 @@ impl Context {
     }
 
     fn writable_attribute_member(&mut self, obj: Id, name: &str) -> Option<Id> {
+        if name == "cr_origin" && matches!(self.heap.get(obj), Value::Coroutine { .. }) {
+            return Some(self.readonly_member("coroutine", "cr_origin"));
+        }
         if name == "mapping" && matches!(self.heap.get(obj), Value::DictView { .. }) {
             return self.dict_view_mapping_member(obj);
         }

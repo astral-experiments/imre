@@ -1127,6 +1127,15 @@ pub(super) unsafe extern "C" fn imre_dyn_op_at(
     finish_at(ctx, result, unsafe { span.as_ref() })
 }
 
+/// Publish a continued expression's source line without changing its statement's GC roots.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_expression_line(ctx: *mut Context, line: u32) {
+    // SAFETY: generated code owns the active context for this frame.
+    let ctx = unsafe { &mut *ctx };
+    ctx.heap
+        .replace_expression(value::ExpressionPosition::Line(line));
+}
+
 /// Invoke a compiled call using the root mark taken before its operands were evaluated.
 #[unsafe(no_mangle)]
 pub(super) unsafe extern "C" fn imre_dyn_scoped_call_at(

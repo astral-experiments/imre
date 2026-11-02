@@ -29,6 +29,7 @@ declare void @imre_dyn_named_assignment(ptr, i64, i64, i64)
 declare void @imre_dyn_assignment_target(ptr, ptr, i64, i64)
 declare i64 @imre_dyn_op_at(ptr, ptr, i64, i64, i64, ptr)
 declare i64 @imre_dyn_scoped_call_at(ptr, i64, i64, i64, i64, ptr, i64)
+declare void @imre_dyn_expression_line(ptr, i32)
 declare void @imre_dyn_statement_with_exception(ptr, ptr, i64, ptr, i32, i64)
 ";
 
@@ -392,6 +393,7 @@ impl Output {
             exits: Vec::new(),
             caught: Vec::new(),
             simple_call: None,
+            expression_line: 0,
         };
         match body {
             Body::Namespace(stmts) => {
@@ -501,6 +503,7 @@ struct Function<'a, 'p> {
     exits: Vec<(Cleanup, String)>,
     caught: Vec<String>,
     simple_call: Option<ruff_text_size::TextRange>,
+    expression_line: usize,
 }
 
 #[derive(Clone)]
@@ -740,6 +743,7 @@ impl Function<'_, '_> {
     fn checkpoint(&mut self, node: &impl Ranged) {
         let (ptr, count) = self.live_handles();
         let line = self.source.line(node.start());
+        self.expression_line = line;
         self.line(&format!(
             "call void @imre_dyn_statement_with_exception(ptr %ctx, ptr {ptr}, i64 {count}, ptr {}, i32 {line}, i64 {})",
             self.source.file, self.caught.last().map_or("0", String::as_str)
