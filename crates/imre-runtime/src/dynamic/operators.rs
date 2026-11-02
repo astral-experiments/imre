@@ -2581,7 +2581,12 @@ impl Context {
                 self.text_codepoints(vec![point])
             }
             Value::Str(s) => {
-                let c = s.chars().nth(position(s.chars().count())?).unwrap();
+                let index = if (0..s.chars().size_hint().0 as i128).contains(&offset) {
+                    offset as usize
+                } else {
+                    position(s.chars().count())?
+                };
+                let c = s.chars().nth(index).unwrap();
                 self.text(c.to_string())
             }
             Value::Array(array) => {
@@ -2843,7 +2848,19 @@ impl Context {
         }
         let bounds = super::slice::sequence_components(self, parts)?;
         let len = match self.heap.get(obj) {
-            Value::Str(text) => text.chars().count(),
+            Value::Str(text) => match bounds {
+                // A forward slice with nonnegative bounds only needs to know that
+                // its stop is in range. The iterator's lower bound proves that
+                // for short prefixes without counting the rest of the string.
+                [start, Some(stop), step]
+                    if start.unwrap_or(0) >= 0
+                        && step.unwrap_or(1) > 0
+                        && (0..=text.chars().size_hint().0 as i64).contains(&stop) =>
+                {
+                    stop as usize
+                }
+                _ => text.chars().count(),
+            },
             Value::SurrogateStr(points) => points.len(),
             Value::Bytes(data) | Value::ByteArray(data) => data.len(),
             Value::List(items) | Value::Tuple(items) | Value::NamedTuple { values: items, .. } => {
