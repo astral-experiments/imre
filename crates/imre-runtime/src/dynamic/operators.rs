@@ -2571,6 +2571,9 @@ impl Context {
         if matches!(self.heap.get(obj), Value::Deque(_)) {
             return deque::IndexOp::Get.apply(self, obj, key, false);
         }
+        if let Value::RegexMatch(m) = self.heap.get(obj) {
+            return m.clone().group_item(self, key);
+        }
         if let Some(value) = super::union::subscribe(self, obj, key) {
             return value;
         }
