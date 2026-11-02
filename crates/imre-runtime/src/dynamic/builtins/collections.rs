@@ -1274,6 +1274,8 @@ pub(super) fn builtin_slot(
             )));
         }
         let text = match ctx.heap.get(storage) {
+            Value::Int(value) => super::super::operators::rendered_integer(value)?.into_string(),
+            Value::Bool(value) => if *value { "1" } else { "0" }.to_owned(),
             Value::Str(_) | Value::SurrogateStr(_) | Value::Bytes(_) => ctx.repr(storage),
             Value::ByteArray(bytes) => ctx.bytearray_repr(object, bytes),
             Value::List(_) | Value::Tuple(_) | Value::Set { .. } => {

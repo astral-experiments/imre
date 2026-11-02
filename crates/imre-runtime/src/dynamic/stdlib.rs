@@ -399,6 +399,10 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("math", "trunc" | "floor" | "ceil" | "modf") => ctx.builtin(&format!("math.{name}")),
         ("enum", "auto") => ctx.enum_auto_class()?,
         ("enum", "Enum" | "IntEnum" | "IntFlag" | "StrEnum") => {
+            ctx.builtin("enum.Enum.__repr__");
+            ctx.builtin("enum.Flag.__repr__");
+            ctx.builtin("enum.Enum.__str__");
+            ctx.builtin("enum.StrEnum.__str__");
             ctx.builtin("enum.Enum.__copy__");
             ctx.builtin("enum.Enum.__deepcopy__");
             ctx.builtin(&format!("enum.{name}"))
@@ -1816,6 +1820,11 @@ pub(super) fn call(
     }
     if matches!(name, "enum.auto.__init__" | "enum.auto.__repr__") {
         return ctx.auto_method(name, args, kwargs);
+    }
+    if matches!(name, "enum.Enum.__repr__" | "enum.Flag.__repr__" | "enum.global_flag_repr" | "enum.Enum.__str__" | "enum.StrEnum.__str__") {
+        let method = name.rsplit('.').next().unwrap();
+        let [member] = builtins::bind_builtin_arguments(method, args, kwargs, ["self"], 1)?;
+        return ctx.enum_format(name, member.unwrap());
     }
     if name == "enum.Enum.__copy__" {
         let [member] = builtins::bind_builtin_arguments("__copy__", args, kwargs, ["self"], 1)?;

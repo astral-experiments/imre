@@ -63,6 +63,11 @@ pub(super) fn flag_attribute(ctx: &mut Context, name: &str) -> Result<Id> {
                 ctx.bind(scope, short, value);
             }
         }
+        // RegexFlag explicitly selects object.__str__ to use its global enum repr.
+        let string = ctx.builtin("object.__str__");
+        ctx.bind(scope, "__str__", string);
+        let repr = ctx.builtin("enum.global_flag_repr");
+        ctx.bind(scope, "__repr__", repr);
         let base = ctx.builtin("enum.IntFlag");
         let class = ctx.allocate_class("RegexFlag".into(), scope, vec![base])?;
         ctx.populate_enum(class, Some(base))?;
