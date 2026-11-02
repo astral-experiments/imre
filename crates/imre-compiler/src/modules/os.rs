@@ -31,6 +31,7 @@ pub(super) fn symbol(name: &str) -> Option<Intrinsic> {
         }
     }
     Some(match name {
+        "access" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.access"),
         "urandom" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.urandom"),
         "utime" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.utime"),
         "chmod" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.chmod"),
