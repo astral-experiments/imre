@@ -2594,6 +2594,7 @@ def report(text):
             "boxed_float_arithmetic.py",
             "boxed_bytes_fields.py",
             "boxed_binary_subclass_lengths.py",
+            "boxed_binary_ljust.py",
             "boxed_binary_strip.py",
             "boxed_class_union.py",
             "boxed_bytes_octal.py",

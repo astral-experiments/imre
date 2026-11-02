@@ -420,6 +420,7 @@ pub(super) const BYTEARRAY_METHODS: &[&str] = &[
     "endswith",
     "extend",
     "hex",
+    "ljust",
     "lstrip",
     "reverse",
     "rstrip",
@@ -440,6 +441,7 @@ pub(super) const BYTES_METHODS: &[&str] = &[
     "hex",
     "index",
     "join",
+    "ljust",
     "lstrip",
     "rfind",
     "rsplit",
@@ -1640,6 +1642,7 @@ pub(super) fn call(
                     method,
                     "decode"
                         | "endswith"
+                        | "ljust"
                         | "lstrip"
                         | "rstrip"
                         | "split"

@@ -1632,9 +1632,67 @@ fn replace_points(ctx: &mut Context, receiver: Id, old: Id, new: Id, limit: usiz
     Ok(ctx.text_codepoints(result))
 }
 
-/// Justify a Unicode string using Python code point widths, including lone surrogates.
+/// Left-justify a binary sequence after converting the width, which may mutate either argument.
+fn binary_ljust(
+    ctx: &mut Context,
+    owner: &str,
+    receiver: Id,
+    width: usize,
+    fill: Option<Id>,
+) -> Result<Id> {
+    let fill = if let Some(id) = fill {
+        let storage = ctx.scalar_value(id);
+        match ctx.heap.get(storage) {
+            Value::Bytes(bytes) | Value::ByteArray(bytes) => match bytes.as_slice() {
+                [byte] => *byte,
+                _ => {
+                    return Err(type_error(format!(
+                        "ljust(): argument 2 must be a byte string of length 1, not a {} object of length {}",
+                        ctx.type_name(storage),
+                        bytes.len()
+                    )));
+                }
+            },
+            _ => {
+                let kind = if id == NONE {
+                    "None"
+                } else {
+                    ctx.type_name(id)
+                };
+                return Err(type_error(format!(
+                    "ljust() argument 2 must be a byte string of length 1, not {kind:.50}"
+                )));
+            }
+        }
+    } else {
+        b' '
+    };
+    if owner == "bytes" && width > crate::MAX_BYTES_LEN {
+        return Err(Error::new("OverflowError", "byte string is too large"));
+    }
+    let storage = ctx.scalar_value(receiver);
+    let source = ctx.bytes_like(storage)?;
+    if owner == "bytes" && receiver == storage && width <= source.len() {
+        return Ok(receiver);
+    }
+    let len = source.len().max(width);
+    let mut padded = Vec::new();
+    padded
+        .try_reserve_exact(len)
+        .map_err(|_| crate::Error::allocation())?;
+    padded.extend_from_slice(source);
+    padded.resize(len, fill);
+    Ok(ctx.alloc(if owner == "bytes" {
+        Value::Bytes(padded)
+    } else {
+        Value::ByteArray(padded)
+    }))
+}
+
+/// Justify binary data by byte count or Unicode text by code point count.
 fn justify(
     ctx: &mut Context,
+    owner: &str,
     receiver: Id,
     name: &str,
     args: &[Id],
@@ -1642,7 +1700,7 @@ fn justify(
 ) -> Result<Id> {
     if !kwargs.is_empty() {
         return Err(type_error(format!(
-            "str.{name}() takes no keyword arguments"
+            "{owner}.{name}() takes no keyword arguments"
         )));
     }
     let Some((&width, extra)) = args.split_first() else {
@@ -1657,6 +1715,9 @@ fn justify(
         )));
     }
     let width = crate::objects::zfill::width(&ctx.index_integer(width)?)?;
+    if owner != "str" {
+        return binary_ljust(ctx, owner, receiver, width, extra.first().copied());
+    }
     let fill = if let Some(&id) = extra.first() {
         match ctx.heap.get(ctx.scalar_value(id)) {
             Value::Str(s) => s
@@ -1787,7 +1848,14 @@ pub(super) fn method(
         || (owner == "bytearray"
             && matches!(
                 name,
-                "endswith" | "lstrip" | "rstrip" | "split" | "splitlines" | "startswith" | "strip"
+                "endswith"
+                    | "ljust"
+                    | "lstrip"
+                    | "rstrip"
+                    | "split"
+                    | "splitlines"
+                    | "startswith"
+                    | "strip"
             )) {
         let storage = ctx.scalar_value(receiver);
         if !matches!(
@@ -1817,8 +1885,11 @@ pub(super) fn method(
             encode_text_object(ctx, receiver, encoding, errors)
         };
     }
-    if owner == "str" && matches!(name, "center" | "ljust" | "rjust") {
-        return justify(ctx, receiver, name, args, kwargs);
+    if matches!(
+        (owner, name),
+        ("str", "center" | "ljust" | "rjust") | ("bytes" | "bytearray", "ljust")
+    ) {
+        return justify(ctx, owner, original_receiver, name, args, kwargs);
     }
     if name == "zfill" {
         let width = one_positional_arg("str.zfill", args, kwargs)?;
