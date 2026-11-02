@@ -20,6 +20,17 @@ enum LaunchApi {
     Run { discarded: bool },
 }
 
+/// POSIX platform options compare Python objects before any pipe is opened. A forwarded
+/// mapping can supply either option; closed keyword displays have already been expanded.
+pub(super) fn boxed_launch_keywords(call: &ast::ExprCall) -> bool {
+    call.arguments.keywords.iter().any(|kw| {
+        matches!(
+            kw.arg.as_deref(),
+            None | Some("startupinfo" | "creationflags")
+        )
+    })
+}
+
 fn integer_deadline(value: &ast::Expr) -> bool {
     let value = match value {
         ast::Expr::UnaryOp(unary)
