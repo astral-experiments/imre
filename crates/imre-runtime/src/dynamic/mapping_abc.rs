@@ -55,6 +55,11 @@ pub(super) fn class(ctx: &mut Context, name: &str) -> Result<Id> {
     if name == "Mapping" {
         ctx.bind(scope, "__reversed__", NONE);
     }
+    if matches!(name, "Iterable" | "Container") {
+        let alias = ctx.builtin("types.GenericAlias");
+        let method = super::method_decorator::class_method(ctx, alias)?;
+        ctx.bind(scope, "__class_getitem__", method);
+    }
     if structural_methods(name).is_some() {
         let function = ctx.builtin(&format!("abc.hook.{name}.__subclasshook__"));
         let hook = super::method_decorator::class_method(ctx, function)?;
@@ -77,14 +82,6 @@ pub(super) fn class(ctx: &mut Context, name: &str) -> Result<Id> {
     ctx.classes.insert(key, result);
     ctx.init_abstract_class(result, scope)?;
     Ok(result)
-}
-
-/// Iterable and Container supply the generic alias inherited by the collection ABCs.
-pub(super) fn is_generic_abc(ctx: &Context, class: Id) -> bool {
-    ["collections.abc.Iterable", "collections.abc.Container"]
-        .iter()
-        .filter_map(|&name| ctx.classes.get(name))
-        .any(|&base| ctx.direct_subclass(class, base))
 }
 
 /// A subclass of a collections ABC inherits its metaclass's registration method.
