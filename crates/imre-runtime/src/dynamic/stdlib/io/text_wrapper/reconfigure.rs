@@ -139,7 +139,7 @@ pub(super) fn call(
             let w = Wrapper::from_receiver(ctx, receiver)?;
             w.encoder.set(coder);
             w.writable.set(true);
-            w.write_start.set(true);
+            w.utf8_signature_pending.set(true);
         }
         let w = Wrapper::from_receiver(ctx, receiver)?;
         let old_encoding = w.encoding.replace(encoding);
@@ -152,9 +152,9 @@ pub(super) fn call(
             let zero = ctx.int(0);
             let beginning = ctx.checked_equal(position, zero)?;
             if !beginning {
-                Wrapper::from_receiver(ctx, receiver)?
-                    .write_start
-                    .set(false);
+                let w = Wrapper::from_receiver(ctx, receiver)?;
+                w.write_start.set(false);
+                w.utf8_signature_pending.set(false);
             }
         }
     }

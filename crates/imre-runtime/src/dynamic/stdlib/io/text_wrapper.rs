@@ -108,7 +108,10 @@ pub(in crate::dynamic) struct Wrapper {
     seekable: bool,
     telling: Cell<bool>,
     read1: bool,
+    // CPython's fast encoders track the stream start on the wrapper. UTF-8-SIG
+    // tracks its first write on each new incremental encoder, even across reentry.
     write_start: Cell<bool>,
+    utf8_signature_pending: Cell<bool>,
     output: RefCell<Vec<u8>>,
     input: RefCell<Reader>,
 }
@@ -280,6 +283,7 @@ fn initialize(ctx: &mut Context, receiver: Id, args: &[Id], kwargs: &[(String, I
         telling: Cell::new(seekable),
         read1,
         write_start: Cell::new(write_start),
+        utf8_signature_pending: Cell::new(write_start),
         output: RefCell::default(),
         input: RefCell::default(),
     };
@@ -400,6 +404,7 @@ impl Wrapper {
             }
             _ => unreachable!(),
         };
+        let write_through = self.write_through.get();
         let flush = self.line_buffering.get() && (has_lf || has_cr);
         let translated = if let Some(nl) = replacement
             && has_lf
@@ -432,7 +437,7 @@ impl Wrapper {
         let encoder = self.encoder.get();
         let signature = matches!(encoder.codec, StreamCodec::Utf16(0))
             && self.seekable
-            && self.write_start.replace(false);
+            && self.write_start.get();
         let encoded = match encoder.codec {
             StreamCodec::Utf16(order) => {
                 let errors = ctx.str_value(encoder.errors)?.to_owned();
@@ -442,7 +447,7 @@ impl Wrapper {
                     FixedUnicode::Utf16(Utf16Order::from_sign(order)),
                     &errors,
                     signature,
-                )?
+                )
             }
             StreamCodec::Utf32 { little } => {
                 let errors = ctx.str_value(encoder.errors)?.to_owned();
@@ -451,21 +456,29 @@ impl Wrapper {
                 } else {
                     FixedUnicode::Utf32Be
                 };
-                codecs::encode_fixed(ctx, translated, format, &errors, false)?
+                codecs::encode_fixed(ctx, translated, format, &errors, false)
             }
             StreamCodec::Registered(codec) => {
                 let encoding = if matches!(codec, Codec::Utf8 { signature: true })
-                    && !self.write_start.get()
+                    && !self.utf8_signature_pending.replace(false)
                 {
                     ctx.text("utf-8")
                 } else {
                     ctx.text(codec.name())
                 };
-                codecs::encode_text(ctx, translated, Some(encoding), Some(encoder.errors))?
+                codecs::encode_text(ctx, translated, Some(encoding), Some(encoder.errors))
             }
         };
 
-        self.write_start.set(false);
+        // A fast encoder clears the wrapper's start flag even when the error
+        // handler raises or installs a different encoder.
+        if !matches!(
+            encoder.codec,
+            StreamCodec::Registered(Codec::Utf8 { signature: true } | Codec::CodePage(_))
+        ) {
+            self.write_start.set(false);
+        }
+        let encoded = encoded?;
         if encoded.len() >= self.chunk_size.get() {
             while !self.output.borrow().is_empty() {
                 self.drain(ctx, receiver)?;
@@ -479,7 +492,7 @@ impl Wrapper {
             pending.extend_from_slice(&encoded);
             pending.len()
         };
-        if flush || self.write_through.get() || length >= self.chunk_size.get() {
+        if flush || write_through || length >= self.chunk_size.get() {
             self.drain(ctx, receiver)?;
         }
         if flush {
@@ -877,6 +890,7 @@ pub(super) fn call(
             }
             w.input.replace(input);
             w.write_start.set(beginning);
+            w.utf8_signature_pending.set(beginning);
             Ok(if wide_cookie.is_some() {
                 cookie
             } else {
