@@ -273,7 +273,13 @@ impl<'a> Visitor<'a> for Imports {
                 }
             }
             Stmt::ClassDef(class)
-                if class.type_params.is_some() || crate::classes::defines_pickle_reducer(class) =>
+                if class.type_params.is_some()
+                    || crate::classes::defines_pickle_reducer(class)
+                    || class.arguments.as_ref().is_some_and(|arguments| {
+                        arguments.keywords.iter().any(|keyword| {
+                            keyword.arg.as_deref().is_some_and(|name| name != "metaclass")
+                        })
+                    }) =>
             {
                 self.runtime_imports = true;
             }
@@ -427,6 +433,7 @@ pub(crate) fn compile(
     // An ordinary entry can import a package that uses the object runtime without
     // accessing sys.path or installation metadata in the entry itself.
     if !runtime_imports
+        && !(src.contains("class") && src.contains('='))
         && !(cfg!(unix) && src.contains("signal"))
         && ![
             "__future__",
