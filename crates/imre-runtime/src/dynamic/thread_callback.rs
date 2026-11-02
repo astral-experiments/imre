@@ -24,6 +24,7 @@ pub(super) struct Callback {
     signature: String,
     values: Vec<Argument>,
     config: serde_json::Value,
+    automatic_gc: Arc<std::sync::atomic::AtomicBool>,
 }
 
 fn unsupported() -> Error {
@@ -162,6 +163,7 @@ impl Callback {
                 signature: copy_label(signature)?,
                 values,
                 config: ctx.config.clone(),
+                automatic_gc: ctx.heap.automatic_gc.clone(),
             },
             roots,
         )))
@@ -169,6 +171,7 @@ impl Callback {
 
     pub(super) fn load(self) -> Result<(Context, Id, Vec<Id>)> {
         let mut ctx = ffi::new_context(self.config, std::iter::empty::<String>());
+        ctx.heap.automatic_gc = self.automatic_gc;
         let globals = ctx.scope(&self.module, None);
         let name = ctx.text(self.name);
         let qualname = ctx.text(self.qualname);
