@@ -1897,6 +1897,7 @@ def report(text):
             "boxed_lru_cache_metadata.py",
             "boxed_functools_cache.py",
             "boxed_functools_reduce.py",
+            "boxed_functools_singledispatch.py",
             "boxed_functools_partialmethod.py",
             "boxed_contextmanager.py",
             "boxed_total_ordering.py",
