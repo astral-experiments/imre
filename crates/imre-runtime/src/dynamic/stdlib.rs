@@ -2112,6 +2112,16 @@ pub(super) fn call(
         "hash.update" => (2, &[]),
         "hash.copy" => (1, &[]),
         "subprocess.run" => (1, &["text", "capture_output", "stdout", "stderr", "check"]),
+        "file.writelines" | "_IOBase.writelines" => {
+            let receiver = argument(args, 0)?;
+            return io::lines(
+                ctx,
+                receiver,
+                name.strip_prefix("_IOBase.").unwrap_or(name),
+                &args[1..],
+                kwargs,
+            );
+        }
         "file.seek" => (3, &["whence"]),
         "file.__exit__" => (4, &[]),
         "struct.unpack" | "file.read" | "file.read1" | "file.readline" | "file.readlines"

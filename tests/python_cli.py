@@ -2250,6 +2250,11 @@ except ImportError:
             "print(errno.errorcode is errorcode, errno.errorcode[errno.EADDRINUSE])\n",
         )
         (root / "chunks.bin").write_bytes(b"0a\r\n\xffx!\n")
+        compare(
+            "-IB", "-c",
+            "with open('written.bin', 'wb') as f:\n    f.writelines([b'a', b'b'])\n"
+            "with open('written.bin', 'rb') as f:\n    print(f.read())",
+        )
         plugin.write_bytes((Path(__file__).with_name("fixtures") / "boxed_io.py").read_bytes())
         compare("-IB", "-c", imports + "arithmetic.exercise('chunks.bin')")
         compare(
