@@ -3154,6 +3154,16 @@ impl Context {
             let hook = self.builtin("object.__init_subclass__");
             return self.bind_attribute(hook, NONE, class);
         }
+        if name == "__init__" {
+            let tuple = self.builtin("tuple");
+            if self.direct_subclass(obj, tuple) {
+                return Ok(self.builtin("object.__init__"));
+            }
+            if self.instance_of(obj, tuple) {
+                let init = self.builtin("object.__init__");
+                return self.bind_attribute(init, obj, tuple);
+            }
+        }
         let base = self.scalar_value(obj);
         if name == "__format__" {
             let owner = builtins::format_owner(self.type_name(base));
