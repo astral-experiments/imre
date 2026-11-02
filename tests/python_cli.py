@@ -3070,6 +3070,7 @@ for name in ("md4", "ripemd160"):
             "boxed_generator_delegation.py",
             "boxed_source_coroutine.py",
             "boxed_coroutine_origin.py",
+            "boxed_anext.py",
             "boxed_source_async_with.py",
             "boxed_with_control.py",
             "boxed_short_circuit.py",

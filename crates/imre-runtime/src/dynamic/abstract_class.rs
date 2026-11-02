@@ -135,7 +135,7 @@ impl Context {
                         matches!(name, "__iter__" | "__len__" | "__reversed__")
                     }
                     "memoryview" => matches!(name, "__iter__" | "__len__"),
-                    "coroutine" | "coroutine_wrapper" => {
+                    "coroutine" | "coroutine_wrapper" | "anext_awaitable" => {
                         super::generator_protocol::coroutine_method(kind, name)
                     }
                     _ => {

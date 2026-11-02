@@ -2,6 +2,15 @@ use super::source_code::{DelegateOutcome, GeneratorInput};
 use super::value::{Body, FrameOwner, Location};
 use super::{Context, Error, Id, NONE, Result, Value};
 
+pub(super) const ANEXT_METHODS: &[&str] = &[
+    "__await__",
+    "__iter__",
+    "__next__",
+    "send",
+    "throw",
+    "close",
+];
+
 pub(super) fn generator_method(name: &str) -> bool {
     matches!(name, "__iter__" | "__next__" | "send" | "throw" | "close")
 }
@@ -10,6 +19,7 @@ pub(super) fn coroutine_method(owner: &str, name: &str) -> bool {
     match owner {
         "coroutine" => matches!(name, "send" | "throw" | "close" | "__await__"),
         "coroutine_wrapper" => matches!(name, "send" | "throw" | "close" | "__iter__" | "__next__"),
+        "anext_awaitable" => ANEXT_METHODS.contains(&name),
         _ => false,
     }
 }
@@ -21,17 +31,25 @@ impl Context {
         awaitable: Id,
         context_method: Option<&str>,
     ) -> Result<Id> {
-        if let Value::Coroutine { frame, .. } = *self.heap.get(awaitable) {
-            if matches!(self.heap.get(frame), Value::Generator { running: false, offset: Some(ip), .. } if *ip != 0)
-            {
-                return Err(Error::new(
-                    "RuntimeError",
-                    "coroutine is being awaited already",
-                ));
-            }
+        if let Value::Coroutine { frame, .. } = *self.heap.get(awaitable)
+            && matches!(self.heap.get(frame), Value::Generator { running: false, offset: Some(ip), .. } if *ip != 0)
+        {
+            return Err(Error::new(
+                "RuntimeError",
+                "coroutine is being awaited already",
+            ));
+        }
+        self.get_await_iterator(awaitable, context_method)
+    }
+
+    /// Obtain the iterator for one awaitable, including a coroutine already driven by its owner.
+    fn get_await_iterator(&mut self, awaitable: Id, context_method: Option<&str>) -> Result<Id> {
+        if matches!(self.heap.get(awaitable), Value::Coroutine { .. }) {
             return Ok(self.alloc(Value::CoroutineWrapper(awaitable)));
         }
-        if self.is_generator_coroutine(awaitable) {
+        if matches!(self.heap.get(awaitable), Value::ANextAwaitable { .. })
+            || self.is_generator_coroutine(awaitable)
+        {
             return Ok(awaitable);
         }
         let Some(method) = self.bound_slot(awaitable, "__await__")? else {
@@ -60,6 +78,45 @@ impl Context {
             ));
         }
         Ok(iter)
+    }
+
+    /// Advance the wrapped awaitable and replace only delegated asynchronous exhaustion.
+    pub(super) fn call_anext_method(&mut self, method: &str, args: &[Id]) -> Result<Id> {
+        let receiver = args[0];
+        let Value::ANextAwaitable { wrapped, default } = *self.heap.get(receiver) else {
+            return Err(Error::new(
+                "TypeError",
+                format!(
+                    "descriptor '{method}' requires a 'anext_awaitable' object but received a '{}'",
+                    self.type_name(receiver)
+                ),
+            ));
+        };
+        if matches!(method, "__await__" | "__iter__") {
+            return Ok(receiver);
+        }
+        self.with_slot_depth("maximum recursion depth exceeded", |ctx| {
+            let iter = ctx.get_await_iterator(wrapped, None)?;
+            let result = if method == "__next__" {
+                ctx.next_result(iter)
+                    .and_then(|next| next.ok_or_else(|| ctx.exception("StopIteration", &[])))
+            } else {
+                // CPython's proxy forwards tuple arguments as a positional argument list.
+                let forwarded = match method {
+                    "send" => ctx.tuple_items(args[1])?.unwrap_or_else(|| vec![args[1]]),
+                    "throw" | "close" => args[1..].to_vec(),
+                    _ => unreachable!("known anext_awaitable method"),
+                };
+                ctx.lookup_attr(iter, method)
+                    .and_then(|fun| ctx.call(fun, forwarded, Vec::new()))
+            };
+            match result {
+                Err(error) if ctx.is_builtin_error(&error, "StopAsyncIteration") => {
+                    Err(ctx.exception("StopIteration", &[default]))
+                }
+                other => other,
+            }
+        })
     }
 
     fn is_generator_coroutine(&self, id: Id) -> bool {
