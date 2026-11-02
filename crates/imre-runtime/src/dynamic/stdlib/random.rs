@@ -233,6 +233,7 @@ pub(super) fn choices(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -
         let total = ctx.binary("+", last, zero)?;
         ctx.heap.release_temporaries_since(operands);
         ctx.heap.keep(total);
+        let validation = ctx.heap.temporary_mark();
         let zero = ctx.alloc(Value::Float(0.0));
         let nonpositive = ctx.binary("<=", total, zero)?;
         if ctx.truth(nonpositive)? {
@@ -241,9 +242,11 @@ pub(super) fn choices(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -
                 "Total of weights must be greater than zero",
             ));
         }
+        ctx.heap.release_temporaries_since(validation);
         if !super::math::as_double(ctx, total)?.is_finite() {
             return Err(Error::new("ValueError", "Total of weights must be finite"));
         }
+        ctx.heap.release_temporaries_since(validation);
         Some((cumulative, total))
     } else {
         None
