@@ -175,6 +175,10 @@ def current():
     nested = field(metadata=view).metadata
     assert list(nested) == ["code"] and list(nested.items()) == [("code", 9)]
     assert nested["code"] == 9 and len(nested) == 1
+    assert str(nested) == "{'code': 9}"
+    assert repr(nested) == "mappingproxy(mappingproxy({'code': 9}))"
+    backing["view"] = view
+    assert repr(view) == "mappingproxy({'code': 9, 'view': mappingproxy({...})})"
     assert InitVar[int].type is int
     assert repr(InitVar[int]) == "dataclasses.InitVar[int]"
     assert repr(InitVar[list[int]]) == "dataclasses.InitVar[list[int]]"
