@@ -51,7 +51,7 @@ pub(super) fn snapshot_locals(module: &Module, f: &Function) -> Vec<bool> {
     let mut assigned = vec![false; eligible.len()];
     let mut reads = vec![0; eligible.len()];
     let mut safe = reads.clone();
-    borrows::statements(&f.body, &mut |s| match s {
+    ir::walk_statements(&f.body, &mut |s| match s {
         Statement::Assign(slot, e) => {
             assigned[*slot] = true;
             eligible[*slot] &= packed_get(e).is_some() && e.ty == f.locals[*slot];
