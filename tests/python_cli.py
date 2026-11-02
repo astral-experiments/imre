@@ -1075,6 +1075,14 @@ def main():
             )
             compare("-B", instance_check, native_args=("run", instance_check, "--quiet"))
 
+        registration = root / "unittest_registration.py"
+        registration.write_text(
+            "from unittest import TestResult, registerResult, removeResult\n"
+            "result = TestResult()\nregisterResult(result)\n"
+            "print(removeResult(result), removeResult(result))\n"
+        )
+        compare("-B", registration, native_args=("run", registration, "--quiet"))
+
         temporary_read = root / "temporary_readinto.py"
         temporary_read.write_text(
             "from tempfile import TemporaryFile\n"
@@ -1630,6 +1638,7 @@ def report(text):
             "boxed_bytecache.py",
             "boxed_fnmatch.py",
             "boxed_unittest_cleanup.py",
+            "boxed_unittest_result_registry.py",
             "boxed_unittest_class_cleanup.py",
             "boxed_posixpath.py",
             "boxed_stat.py",
