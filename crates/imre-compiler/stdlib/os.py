@@ -5,7 +5,7 @@ import posixpath as path
 import stat as st
 from _collections_abc import _check_methods
 from _collections_abc import Mapping as _Mapping, MutableMapping as _MutableMapping
-from posix import access, environ as _environ, fspath, getcwd, getcwdb, listdir, mkdir, putenv, read, scandir, terminal_size, unsetenv, waitpid, write, WNOHANG
+from posix import _create_environ, access, environ as _environ, fspath, getcwd, getcwdb, listdir, mkdir, putenv, read, scandir, terminal_size, unsetenv, waitpid, write, WNOHANG
 from types import GenericAlias
 from posix import O_NONBLOCK, O_RDONLY, chdir, close, open, stat
 
@@ -374,6 +374,13 @@ class _Environ(_MutableMapping):
 environ = _Environ(_environ, _encode_env, _decode_env)
 supports_bytes_environ = True
 environb = _Environ(_environ, _check_bytes, bytes)
+
+
+def reload_environ():
+    data = _create_environ()
+    env_data = environ._data
+    env_data.clear()
+    env_data.update(data)
 
 
 def getenv(key, default=None):

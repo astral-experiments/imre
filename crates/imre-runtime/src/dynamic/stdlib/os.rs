@@ -66,7 +66,7 @@ pub(in crate::dynamic) fn install_capabilities(
     Ok(())
 }
 
-/// The posix module caches this dictionary. os.environ wraps the same byte keys and values.
+/// Copy current POSIX environment bytes for the cached dictionary or an explicit reload.
 pub(super) fn environment(ctx: &mut Context) -> Id {
     let entries = crate::objects::initial_environment()
         .into_iter()
