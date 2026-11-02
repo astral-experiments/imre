@@ -298,6 +298,10 @@ pub(crate) fn registered_imports(graph: &SourceGraph) -> RegisteredImports {
             calls.visit_body(&module.parsed.syntax().body);
         }
     }
+    calls
+        .imports
+        .targets
+        .extend_from_slice(&graph.doctest_imports);
     calls.imports
 }
 
