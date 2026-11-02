@@ -27,6 +27,7 @@ pub(super) struct Program {
     private_names: Option<Rc<imre_ast::Names>>,
     template_expressions: Rc<HashMap<ruff_text_size::TextSize, String>>,
     instructions: Vec<(u32, Instruction)>,
+    lambdas: HashMap<ruff_text_size::TextRange, (usize, Definition)>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -429,7 +430,9 @@ impl<'a> CompiledStrings<'a, '_> {
         self.keep(id)
     }
 
-    fn finish(mut self) -> Result<(Id, bool)> {
+    fn scan(&mut self) -> Result<(bool, Vec<&'a ast::ExprLambda>)> {
+        use ast::visitor::Visitor;
+        let mut lambdas = Vec::new();
         let mut class_cell = false;
         while let Some(expr) = self.pending.pop() {
             match expr {
@@ -442,6 +445,16 @@ impl<'a> CompiledStrings<'a, '_> {
                 }
                 ast::Expr::Attribute(attr) => {
                     self.heap.code_name(attr.attr.as_str());
+                }
+                ast::Expr::Lambda(lambda) => {
+                    lambdas
+                        .try_reserve(1)
+                        .map_err(|_| Error::new("MemoryError", ""))?;
+                    lambdas.push(lambda);
+                    if let Some(parameters) = &lambda.parameters {
+                        self.visit_parameters(parameters);
+                    }
+                    continue;
                 }
                 ast::Expr::StringLiteral(literal) => {
                     let id = self.text(literal.value.to_str().into())?;
@@ -474,17 +487,20 @@ impl<'a> CompiledStrings<'a, '_> {
                 }
                 _ => {}
             }
-            ast::visitor::walk_expr(&mut self, expr);
+            ast::visitor::walk_expr(self, expr);
         }
         if self.exhausted {
             return Err(Error::new("MemoryError", ""));
         }
-        let roots = if self.roots.is_empty() {
+        Ok((class_cell, lambdas))
+    }
+
+    fn finish(self) -> Id {
+        if self.roots.is_empty() {
             NONE
         } else {
             self.heap.alloc(Value::Tuple(self.roots))
-        };
-        Ok((roots, class_cell))
+        }
     }
 }
 
@@ -539,6 +555,7 @@ impl Program {
         heap: &mut value::Heap,
         shared: &mut SharedConstants<'a>,
         spellings: &TemplateReplacements,
+        line_at: &impl Fn(usize) -> u32,
     ) -> Result<(Id, &'a BTreeSet<String>)> {
         use ast::visitor::Visitor;
         let mut nested_reads = BTreeSet::new();
@@ -611,7 +628,7 @@ impl Program {
                         Rc::get_mut(&mut definition.body).expect("newly lowered child code");
                     strings.heap.code_name(&definition.binding);
                     let (roots, reads) =
-                        child.prepare_strings(strings.heap, strings.shared, spellings)?;
+                        child.prepare_strings(strings.heap, strings.shared, spellings, line_at)?;
                     nested_reads.extend(reads.iter().cloned());
                     if roots != NONE {
                         strings.keep(roots)?;
@@ -656,7 +673,55 @@ impl Program {
                 | Instruction::Delegate => {}
             }
         }
-        (self.string_roots, self.class_cell) = strings.finish()?;
+        let (class_cell, lambdas) = strings.scan()?;
+        self.class_cell = class_cell;
+        self.lambdas
+            .try_reserve(lambdas.len())
+            .map_err(|_| Error::new("MemoryError", ""))?;
+        for (site, lambda) in lambdas.into_iter().enumerate() {
+            let params = lambda.parameters.clone().unwrap_or_default();
+            let mut child = Self::new(self.filename.clone(), "<lambda>");
+            child.qualname =
+                Self::qualified_name(&self.qualname, self.class_attributes.is_some(), "<lambda>");
+            child.method_imports = self.method_imports.clone();
+            child.template_expressions = self.template_expressions.clone();
+            child.private_names = self.private_names.clone();
+            child
+                .locals
+                .extend(params.iter().map(|p| p.name().to_string()));
+            let line = line_at(lambda.start().to_usize());
+            child.first_line = line;
+            let end = match child.lower_suspension(*lambda.body.clone(), line, true)? {
+                Some(body) => Instruction::Return(Some(body)),
+                None => Instruction::ReturnSent,
+            };
+            child.instructions.push((line, end));
+            self.lambdas.insert(
+                lambda.range(),
+                (
+                    site,
+                    Definition {
+                        binding: "<lambda>".to_owned(),
+                        decorators: Vec::new(),
+                        body: Rc::new(child),
+                        kind: DefinitionKind::Function(params),
+                    },
+                ),
+            );
+        }
+        for (_, lambda) in self.lambdas.values_mut() {
+            let child = Rc::get_mut(&mut lambda.body).expect("newly lowered lambda");
+            let (roots, reads) =
+                child.prepare_strings(strings.heap, strings.shared, spellings, line_at)?;
+            if self.class_attributes.is_none() && !self.locals.contains("__class__") {
+                self.class_cell |= reads.contains("__class__") || reads.contains("super");
+            }
+            nested_reads.extend(reads.iter().cloned());
+            if roots != NONE {
+                strings.keep(roots)?;
+            }
+        }
+        self.string_roots = strings.finish();
         if self.class_attributes.is_some() {
             // Methods skip the class namespace when resolving free variables.
             self.reads.retain(|name| !self.locals.contains(name));
@@ -686,6 +751,7 @@ impl Program {
             private_names: None,
             template_expressions: Rc::default(),
             instructions: Vec::new(),
+            lambdas: HashMap::new(),
         }
     }
 
@@ -717,6 +783,16 @@ impl Program {
         Ok(None)
     }
 
+    fn qualified_name(parent: &str, class: bool, name: &str) -> String {
+        if parent == "<module>" {
+            name.to_owned()
+        } else if class {
+            format!("{parent}.{name}")
+        } else {
+            format!("{parent}.<locals>.{name}")
+        }
+    }
+
     fn definition_body(
         &self,
         name: &ast::Identifier,
@@ -729,14 +805,8 @@ impl Program {
             .as_ref()
             .map_or(name.as_str(), |p| p.definition(name));
         let mut child = Self::new(self.filename.clone(), original);
-        if self.name != "<module>" {
-            let separator = if self.class_attributes.is_some() {
-                "."
-            } else {
-                ".<locals>."
-            };
-            child.qualname = format!("{}{separator}{original}", self.qualname);
-        }
+        child.qualname =
+            Self::qualified_name(&self.qualname, self.class_attributes.is_some(), original);
         child.method_imports = self.method_imports.clone();
         child.private_names = self.private_names.clone();
         child.template_expressions = self.template_expressions.clone();
@@ -1260,7 +1330,12 @@ impl Context {
             parsed.syntax(),
         ));
         code.lower(parsed.into_syntax().body, &lines, false, None)?;
-        code.prepare_strings(&mut self.heap, &mut SharedConstants::default(), &spellings)?;
+        code.prepare_strings(
+            &mut self.heap,
+            &mut SharedConstants::default(),
+            &spellings,
+            &|offset| lines.partition_point(|n| *n <= offset) as u32,
+        )?;
         Ok(self.box_source_code(Rc::new(code), None))
     }
 
@@ -1597,6 +1672,7 @@ impl Context {
             }
             return Err(Self::undefined_source_name(self.str_value(text)?, text));
         }
+        let lines = line_starts(source.match_indices('\n').map(|(offset, _)| offset + 1))?;
         let mut program = Program::new(Rc::from("<string>"), "<module>");
         program.template_expressions = Rc::new(imre_ast::strings::template_expressions(
             source,
@@ -1606,7 +1682,12 @@ impl Context {
         program
             .instructions
             .push((1, Instruction::Return(Some(*parsed.into_syntax().body))));
-        program.prepare_strings(&mut self.heap, &mut SharedConstants::default(), &spellings)?;
+        program.prepare_strings(
+            &mut self.heap,
+            &mut SharedConstants::default(),
+            &spellings,
+            &|offset| lines.partition_point(|n| *n <= offset) as u32,
+        )?;
         let code = self.box_source_code(Rc::new(program), None);
         self.run_in_namespace(code, globals, Some(locals), None)
     }
@@ -1780,6 +1861,7 @@ impl Context {
         let Body::PendingGenerator { source, body_line } = &code.body else {
             return Ok(());
         };
+        let body_line = *body_line;
         let parsed = ruff_python_parser::parse_module(source)
             .map_err(|err| Error::new("SyntaxError", err.to_string()))?;
         let spellings = check_runtime_strings(source, parsed.tokens())?;
@@ -1815,7 +1897,14 @@ impl Context {
         for (line, _) in &mut program.instructions {
             *line = body_line + line.saturating_sub(2);
         }
-        program.prepare_strings(&mut self.heap, &mut SharedConstants::default(), &spellings)?;
+        program.prepare_strings(
+            &mut self.heap,
+            &mut SharedConstants::default(),
+            &spellings,
+            &|offset| {
+                body_line + (lines.partition_point(|n| *n <= offset) as u32).saturating_sub(2)
+            },
+        )?;
         let Value::Code(code) = self.heap.get_mut(id) else {
             unreachable!()
         };
@@ -2640,108 +2729,125 @@ impl Context {
                 self.bind(scope, "__static_attributes__", attrs);
             }
             Instruction::Define(definition) => {
-                let mut decorators = Vec::new();
-                for decorator in &definition.decorators {
-                    let value = eval(self, &decorator.expression)?;
-                    self.heap.keep(value);
-                    decorators.push(value);
-                }
-                let child = &definition.body;
-                let defaults = self.dict(vec![]);
-                let mut bases = None;
-                let sig = match &definition.kind {
-                    DefinitionKind::Class(args) => {
-                        let mut values = Vec::new();
-                        let mut total = None;
-                        if let Some(args) = args {
-                            for expression in &args.args {
-                                let base = eval(self, expression)?;
-                                self.heap.keep(base);
-                                values.push(base);
-                            }
-                            if let Some(keyword) = args.find_keyword("total") {
-                                let value = eval(self, &keyword.value)?;
-                                self.heap.keep(value);
-                                total = Some(value);
-                            }
-                        }
-                        bases = Some((self.alloc(Value::List(values)), total));
-                        serde_json::json!({})
-                    }
-                    DefinitionKind::Function(p) => {
-                        let mut sig = serde_json::json!({"posonly":[],"positional":[],"kwonly":[],"varargs":p.vararg.as_ref().map(|x|x.name.as_str()),"kwargs":p.kwarg.as_ref().map(|x|x.name.as_str())});
-                        for (group, args) in [
-                            ("posonly", &p.posonlyargs),
-                            ("positional", &p.args),
-                            ("kwonly", &p.kwonlyargs),
-                        ] {
-                            for arg in args {
-                                let n = arg.parameter.name.as_str();
-                                sig[group].as_array_mut().unwrap().push(n.into());
-                                if let Some(default) = &arg.default {
-                                    let v = eval(self, default)?;
-                                    let k = self.text(n);
-                                    self.put_item(defaults, k, v)?;
-                                }
-                            }
-                        }
-                        sig["class_cell"] = serde_json::json!(child.class_cell);
-                        sig["scope_locals"] =
-                            serde_json::json!(child.locals.iter().collect::<BTreeSet<_>>());
-                        sig["scope_locals_complete"] = true.into();
-                        sig
-                    }
-                };
-                let site = *ip - 1;
-                let code = if let Some((_, existing)) = self
-                    .code_object(owner)
-                    .nested
-                    .iter()
-                    .find(|(i, _)| *i == site)
-                {
-                    *existing
-                } else {
-                    let parameters = self.text(sig.to_string());
-                    let freevars = if code.name != "<module>"
-                        && code.class_attributes.is_none()
-                        && child.class_attributes.is_none()
-                        && !child.class_cell
-                    {
-                        self.enclosing_freevars(scope, child.reads.iter().map(String::as_str))
-                    } else {
-                        None
-                    };
-                    let id = self.box_source_code(child.clone(), Some(parameters));
-                    if let Some(names) = freevars {
-                        let Value::Code(nested) = self.heap.get_mut(id) else {
-                            unreachable!()
-                        };
-                        nested.freevars = names;
-                        nested.closure_supported = true;
-                    }
-                    let Value::Code(parent) = self.heap.get_mut(owner) else {
-                        unreachable!()
-                    };
-                    parent.nested.push((site, id));
-                    id
-                };
-                let frame = self.scope_data(scope);
-                let defining_scope = if frame.exec_locals.is_some() {
-                    frame.parent.expect("exec locals have a global frame")
-                } else {
-                    scope
-                };
-                let mut value = self.source_function(code, defining_scope, defaults);
-                if let Some((bases, total)) = bases {
-                    value = self.class(bases, value, total, false)?;
-                }
-                for decorator in decorators.into_iter().rev() {
-                    value = self.call(decorator, vec![value], Vec::new())?;
-                }
+                let value = self.source_definition(code, owner, scope, *ip - 1, definition)?;
                 self.bind_source_name(scope, &definition.binding, value)?;
             }
         }
         Ok(None)
+    }
+
+    /// Evaluate a definition's defaults and reuse its code object at this lexical site.
+    fn source_definition(
+        &mut self,
+        code: &Program,
+        owner: Id,
+        scope: Id,
+        site: usize,
+        definition: &Definition,
+    ) -> Result<Id> {
+        let eval = |ctx: &mut Self, e: &ast::Expr| ctx.source_expr(code, scope, e);
+        let mut decorators = Vec::new();
+        for decorator in &definition.decorators {
+            let value = eval(self, &decorator.expression)?;
+            self.heap.keep(value);
+            decorators.push(value);
+        }
+        let child = &definition.body;
+        let defaults = self.dict(vec![]);
+        let mut bases = None;
+        let sig = match &definition.kind {
+            DefinitionKind::Class(args) => {
+                let mut values = Vec::new();
+                let mut total = None;
+                if let Some(args) = args {
+                    for expression in &args.args {
+                        let base = eval(self, expression)?;
+                        self.heap.keep(base);
+                        values.push(base);
+                    }
+                    if let Some(keyword) = args.find_keyword("total") {
+                        let value = eval(self, &keyword.value)?;
+                        self.heap.keep(value);
+                        total = Some(value);
+                    }
+                }
+                bases = Some((self.alloc(Value::List(values)), total));
+                serde_json::json!({})
+            }
+            DefinitionKind::Function(p) => {
+                let mut sig = serde_json::json!({"posonly":[],"positional":[],"kwonly":[],"varargs":p.vararg.as_ref().map(|x|x.name.as_str()),"kwargs":p.kwarg.as_ref().map(|x|x.name.as_str())});
+                for (group, args) in [
+                    ("posonly", &p.posonlyargs),
+                    ("positional", &p.args),
+                    ("kwonly", &p.kwonlyargs),
+                ] {
+                    for arg in args {
+                        let n = arg.parameter.name.as_str();
+                        sig[group].as_array_mut().unwrap().push(n.into());
+                        if let Some(default) = &arg.default {
+                            let v = eval(self, default)?;
+                            let k = self.text(n);
+                            self.put_item(defaults, k, v)?;
+                        }
+                    }
+                }
+                sig["class_cell"] = serde_json::json!(child.class_cell);
+                sig["scope_locals"] =
+                    serde_json::json!(child.locals.iter().collect::<BTreeSet<_>>());
+                sig["scope_locals_complete"] = true.into();
+                sig
+            }
+        };
+        let code = if let Some((_, existing)) = self
+            .code_object(owner)
+            .nested
+            .iter()
+            .find(|(i, _)| *i == site)
+        {
+            *existing
+        } else {
+            let parameters = self.text(sig.to_string());
+            let freevars =
+                if code.name != "<module>" && child.class_attributes.is_none() && !child.class_cell
+                {
+                    // A function defined in a class captures an enclosing function's cells.
+                    let enclosing = if code.class_attributes.is_some() {
+                        self.scope_data(scope).parent.unwrap_or(scope)
+                    } else {
+                        scope
+                    };
+                    self.enclosing_freevars(enclosing, child.reads.iter().map(String::as_str))
+                } else {
+                    None
+                };
+            let id = self.box_source_code(child.clone(), Some(parameters));
+            if let Some(names) = freevars {
+                let Value::Code(nested) = self.heap.get_mut(id) else {
+                    unreachable!()
+                };
+                nested.freevars = names;
+                nested.closure_supported = true;
+            }
+            let Value::Code(parent) = self.heap.get_mut(owner) else {
+                unreachable!()
+            };
+            parent.nested.push((site, id));
+            id
+        };
+        let frame = self.scope_data(scope);
+        let defining_scope = if frame.exec_locals.is_some() {
+            frame.parent.expect("exec locals have a global frame")
+        } else {
+            scope
+        };
+        let mut value = self.source_function(code, defining_scope, defaults);
+        if let Some((bases, total)) = bases {
+            value = self.class(bases, value, total, false)?;
+        }
+        for decorator in decorators.into_iter().rev() {
+            value = self.call(decorator, vec![value], Vec::new())?;
+        }
+        Ok(value)
     }
 
     /// Unpack each level before binding its component targets from left to right.
@@ -2898,6 +3004,16 @@ impl Context {
         use ast::Expr;
         let eval = |ctx: &mut Self, e: &Expr| ctx.source_expr(code, scope, e);
         match expr {
+            Expr::Lambda(lambda) => {
+                let (site, definition) = &code.lambdas[&lambda.range()];
+                self.source_definition(
+                    code,
+                    self.heap.current_code(),
+                    scope,
+                    code.instructions.len() + site,
+                    definition,
+                )
+            }
             Expr::Name(n) => {
                 let name = n.id.as_str();
                 if code.class_attributes.is_some()
