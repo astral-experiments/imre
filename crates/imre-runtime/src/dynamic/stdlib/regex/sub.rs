@@ -147,7 +147,7 @@ fn callable_sub(
     let mut count = 0;
     while limit == 0 || count < limit {
         let text = subject_bytes(ctx, string, pattern.bytes)?;
-        let span = match split::next_span(pattern, text, previous, &mut caps) {
+        let span = match split::next_span(pattern, text, 0, previous, &mut caps) {
             Ok(Some(span)) => span,
             Ok(None) => break,
             Err(message) => return Err(pattern_error(ctx, pattern.source, pattern.flags, message)),
