@@ -554,6 +554,77 @@ pub(super) fn builtin_alias(ctx: &mut Context, origin: Id, args: Id) -> Id {
     )
 }
 
+/// Construct the collections.abc subclass of GenericAlias, including direct keyword calls.
+pub(super) fn abc_callable_alias(
+    ctx: &mut Context,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Id> {
+    const NAME: &str = "_CallableGenericAlias.__new__";
+    let fields = super::builtins::bind_method_arguments(NAME, args, kwargs, ["origin", "args"], 2)?;
+    let [Some(origin), Some(pair)] = fields else {
+        let missing: Vec<_> = ["origin", "args"]
+            .into_iter()
+            .zip(fields)
+            .filter_map(|(name, value)| value.is_none().then_some(name))
+            .collect();
+        return Err(super::calls::missing_arguments_error(
+            NAME,
+            "positional",
+            &missing,
+        ));
+    };
+    let tuple = ctx.builtin("tuple");
+    if !ctx.instance_of(pair, tuple) {
+        return Err(Error::new("TypeError", CALLABLE_SHAPE_ERROR));
+    }
+    let length = super::builtins::call(ctx, "len", &[pair], &[])?;
+    if ctx.as_integer(length)? != 2 {
+        return Err(Error::new("TypeError", CALLABLE_SHAPE_ERROR));
+    }
+    let args = ctx.unpack_items(pair, 2, None)?;
+    if matches!(ctx.heap.get(pair), Value::Tuple(_))
+        && !matches!(ctx.heap.get(args[0]), Value::List(_) | Value::Tuple(_))
+        && is_param_expr(ctx, args[0])
+    {
+        let parameters = native_parameters(ctx, pair);
+        return Ok(allocate_alias(
+            ctx,
+            AliasKind::AbcCallable,
+            origin,
+            pair,
+            parameters,
+            None,
+            true,
+        ));
+    }
+    callable_alias(ctx, AliasKind::AbcCallable, origin, args)
+}
+
+const CALLABLE_SHAPE_ERROR: &str = "Callable must be used as Callable[[arg, ...], result].";
+
+fn callable_alias(ctx: &mut Context, kind: AliasKind, origin: Id, args: Vec<Id>) -> Result<Id> {
+    let [parameters, result] = args.as_slice() else {
+        return Err(Error::new("TypeError", CALLABLE_SHAPE_ERROR));
+    };
+    let tuple = ctx.builtin("tuple");
+    let actual = if ctx.list_storage(*parameters).is_some() || ctx.instance_of(*parameters, tuple) {
+        let mut flat = ctx.items(*parameters)?;
+        flat.push(*result);
+        flat
+    } else if is_param_expr(ctx, *parameters) {
+        args
+    } else {
+        let expected = "Expected a list of types, an ellipsis, ParamSpec, or Concatenate";
+        if kind == AliasKind::AbcCallable {
+            let got = ctx.checked_format(*parameters, false)?;
+            return Err(Error::new("TypeError", format!("{expected}. Got {got}")));
+        }
+        return Err(Error::new("TypeError", expected));
+    };
+    alias(ctx, kind, origin, actual)
+}
+
 fn typing_alias_helper(ctx: &mut Context, name: &str, args: Vec<Id>) -> Result<Id> {
     let method = ctx.module_value("typing", name).ok_or_else(|| {
         Error::new(
@@ -643,9 +714,6 @@ pub(super) fn subscribe(ctx: &mut Context, target: Id, index: Id) -> Option<Resu
         Value::Class { .. } if ctx.classes.get("typing.Generic") == Some(&target) => {
             AliasKind::Generic
         }
-        Value::Class { .. } if ctx.classes.get("collections.abc.Callable") == Some(&target) => {
-            AliasKind::AbcCallable
-        }
         Value::Native(n) if n == "typing.Callable" => AliasKind::Callable,
         Value::Native(n)
             if matches!(
@@ -734,29 +802,9 @@ pub(super) fn subscribe(ctx: &mut Context, target: Id, index: Id) -> Option<Resu
                 }
             }
         }
-        if matches!(kind, AliasKind::Callable | AliasKind::AbcCallable) {
-            let [parameters, result] = args.as_slice() else {
-                return Err(Error::new(
-                    "TypeError",
-                    "Callable must be used as Callable[[arg, ...], result].",
-                ));
-            };
-            let actual = match ctx.heap.get(*parameters) {
-                Value::List(items) | Value::Tuple(items) => {
-                    let mut flat = items.clone();
-                    flat.push(*result);
-                    flat
-                }
-                _ if is_param_expr(ctx, *parameters) => args,
-                _ => {
-                    return Err(Error::new(
-                        "TypeError",
-                        "Expected a list of types, an ellipsis, ParamSpec, or Concatenate",
-                    ));
-                }
-            };
+        if kind == AliasKind::Callable {
             let origin = super::mapping_abc::class(ctx, "Callable")?;
-            return alias(ctx, kind, origin, actual);
+            return callable_alias(ctx, kind, origin, args);
         }
         alias(ctx, kind, target, args)
     })())
@@ -1174,6 +1222,15 @@ pub(super) fn attribute(ctx: &mut Context, value: Id, name: &str) -> Option<Resu
         return Some(Ok(member));
     }
     let attr = match ctx.heap.get(value) {
+        Value::Native(class) if class == "collections.abc._CallableGenericAlias"
+            && matches!(name, "__base__" | "__bases__" | "__mro__") =>
+        {
+            if name == "__base__" {
+                ctx.builtin("types.GenericAlias")
+            } else {
+                ctx.builtin_hierarchy_tuple(value, name)
+            }
+        }
         Value::Native(class)
             if matches!(
                 class.as_str(),
