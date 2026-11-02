@@ -825,6 +825,7 @@ pub(super) enum Value {
     HandlerLock(std::sync::Arc<crate::objects::logging::HandlerLock>),
     Socket(crate::ObjectOwner),
     Deque(Box<crate::objects::DequeRing<Id>>),
+    GenericAliasIterator(Option<Id>),
     SequenceIterator {
         source: Option<Id>,
         index: i64,
@@ -1188,6 +1189,7 @@ impl Value {
             Self::File(_) | Self::TextFile(_) => return self.native_io_class_name(),
             Self::ProcessHandle(_) => "_imre_subprocess.Handle",
             Self::BufferedRandom(..) => "_io.BufferedRandom",
+            Self::GenericAliasIterator(_) => "generic_alias_iterator",
             Self::SequenceIterator { .. } => "iterator",
             Self::ReverseSequence { .. } => "reversed",
             Self::Deque(_) => super::deque::CLASS,
@@ -1323,9 +1325,9 @@ impl Value {
     fn children(&self, visit: &mut MarkQueue<'_>) {
         match self {
             Self::Deque(ring) => visit.extend(&ring.items),
-            Self::SequenceIterator { source, .. } | Self::ReverseSequence { source, .. } => {
-                visit.extend(*source)
-            }
+            Self::SequenceIterator { source, .. }
+            | Self::ReverseSequence { source, .. }
+            | Self::GenericAliasIterator(source) => visit.extend(*source),
             Self::DequeIterator { deque, .. } => visit.push(*deque),
             Self::List(v) | Self::Tuple(v) => visit.extend(v.iter().rev()),
             Self::Set { entries, .. } => visit.extend(entries.iter().map(|&(key, _)| key)),
@@ -1550,8 +1552,12 @@ impl Value {
             Self::TypeAlias { name, definition } => {
                 visit.push(*name);
                 match *definition {
-                    super::typing::AliasDefinition::Lazy { evaluator, cached } => {
-                        visit.push(evaluator);
+                    super::typing::AliasDefinition::Lazy {
+                        parameters,
+                        evaluator,
+                        cached,
+                    } => {
+                        visit.extend([parameters, evaluator]);
                         visit.extend(cached);
                     }
                     super::typing::AliasDefinition::Eager { value, module } => {
