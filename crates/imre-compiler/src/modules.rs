@@ -1899,6 +1899,23 @@ impl IntrinsicModule {
             }
             (Self::Typing, "final") => Intrinsic::ObjectRuntimeExport("typing.final"),
             (Self::Typing, "Protocol") => Intrinsic::TYPING_PROTOCOL,
+            (Self::Typing, "SupportsInt") => Intrinsic::ObjectRuntimeExport("typing.SupportsInt"),
+            (Self::Typing, "SupportsFloat") => {
+                Intrinsic::ObjectRuntimeExport("typing.SupportsFloat")
+            }
+            (Self::Typing, "SupportsComplex") => {
+                Intrinsic::ObjectRuntimeExport("typing.SupportsComplex")
+            }
+            (Self::Typing, "SupportsBytes") => {
+                Intrinsic::ObjectRuntimeExport("typing.SupportsBytes")
+            }
+            (Self::Typing, "SupportsIndex") => {
+                Intrinsic::ObjectRuntimeExport("typing.SupportsIndex")
+            }
+            (Self::Typing, "SupportsAbs") => Intrinsic::ObjectRuntimeExport("typing.SupportsAbs"),
+            (Self::Typing, "SupportsRound") => {
+                Intrinsic::ObjectRuntimeExport("typing.SupportsRound")
+            }
             (Self::Typing, "runtime_checkable") => {
                 Intrinsic::ObjectRuntimeExport("typing.runtime_checkable")
             }

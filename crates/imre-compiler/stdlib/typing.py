@@ -8,6 +8,7 @@ from _collections_abc import Iterable as _Iterable
 from _collections_abc import Mapping as _Mapping, MutableMapping as _MutableMapping, Sequence as _Sequence
 from collections import defaultdict as _defaultdict
 from _collections_abc import AsyncIterator as _AsyncIterator, Awaitable as _Awaitable
+from abc import abstractmethod
 from annotationlib import ForwardRef, _make_forward_ref
 from functools import lru_cache
 from _typing import _idfunc
@@ -289,6 +290,84 @@ def _protocol_instance(cls, instance):
         if val is None and attr not in cls.__non_callable_proto_members__:
             return False
     return True
+
+
+# Runtime protocols from CPython 3.14.5 Lib/typing.py.
+@runtime_checkable
+class SupportsInt(Protocol):
+    """An ABC with one abstract method __int__."""
+
+    __slots__ = ()
+
+    @abstractmethod
+    def __int__(self) -> int:
+        pass
+
+
+@runtime_checkable
+class SupportsFloat(Protocol):
+    """An ABC with one abstract method __float__."""
+
+    __slots__ = ()
+
+    @abstractmethod
+    def __float__(self) -> float:
+        pass
+
+
+@runtime_checkable
+class SupportsComplex(Protocol):
+    """An ABC with one abstract method __complex__."""
+
+    __slots__ = ()
+
+    @abstractmethod
+    def __complex__(self) -> complex:
+        pass
+
+
+@runtime_checkable
+class SupportsBytes(Protocol):
+    """An ABC with one abstract method __bytes__."""
+
+    __slots__ = ()
+
+    @abstractmethod
+    def __bytes__(self) -> bytes:
+        pass
+
+
+@runtime_checkable
+class SupportsIndex(Protocol):
+    """An ABC with one abstract method __index__."""
+
+    __slots__ = ()
+
+    @abstractmethod
+    def __index__(self) -> int:
+        pass
+
+
+@runtime_checkable
+class SupportsAbs[T](Protocol):
+    """An ABC with one abstract method __abs__ that is covariant in its return type."""
+
+    __slots__ = ()
+
+    @abstractmethod
+    def __abs__(self) -> T:
+        pass
+
+
+@runtime_checkable
+class SupportsRound[T](Protocol):
+    """An ABC with one abstract method __round__ that is covariant in its return type."""
+
+    __slots__ = ()
+
+    @abstractmethod
+    def __round__(self, ndigits: int = 0) -> T:
+        pass
 
 
 class IO(Generic[AnyStr]):
