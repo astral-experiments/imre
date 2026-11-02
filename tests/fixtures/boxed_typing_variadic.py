@@ -1,9 +1,13 @@
 from types import GenericAlias
 from typing import Annotated, ForwardRef, List, NoDefault, Tuple, TypeVar, TypeVarTuple, Unpack, get_args, get_origin
+from weakref import ref
 
 
 def current():
     ts = TypeVarTuple("Ts")
+    assert ref(ts)() is ts
+    temporary = ref(TypeVarTuple("Temporary"))
+    assert temporary() is None
     assert ts is not TypeVarTuple("Ts")
     assert type(ts) is TypeVarTuple
     assert ts.__module__ == __name__
