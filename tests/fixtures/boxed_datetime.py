@@ -56,6 +56,28 @@ def test_module_exports():
     class Zone(datetime.tzinfo):
         pass
 
+    class SlottedZone(tzinfo):
+        __slots__ = ("tag",)
+
+    bare = tzinfo()
+    for name in ("tag", "__dict__", "utcoffset", "__repr__"):
+        try:
+            object.__setattr__(bare, name, 1)
+        except AttributeError as exc:
+            if name in ("tag", "__dict__"):
+                assert str(exc) == f"'datetime.tzinfo' object has no attribute '{name}' and no __dict__ for setting new attributes"
+            else:
+                assert str(exc) == f"'datetime.tzinfo' object attribute '{name}' is read-only"
+        else:
+            raise AssertionError(name)
+    assert not hasattr(bare, "__dict__")
+    slotted = SlottedZone()
+    slotted.tag = 1
+    assert slotted.tag == 1 and not hasattr(slotted, "__dict__")
+    writable = Zone()
+    writable.tag = 2
+    assert writable.__dict__ == {"tag": 2}
+
     assert isinstance(Zone(), _datetime.tzinfo)
     assert timezone.__mro__ == (timezone, datetime.tzinfo, object)
     try:

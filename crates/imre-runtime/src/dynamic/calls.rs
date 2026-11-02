@@ -4748,9 +4748,12 @@ impl Context {
         let Value::Instance { class, .. } = *self.heap.get(obj) else {
             return Ok(());
         };
-        if !matches!(self.heap.get(class), Value::Class { .. }) {
-            return Ok(());
-        }
+        // A bare tzinfo uses instance storage but has no instance dictionary.
+        let native_tzinfo = match self.heap.get(class) {
+            Value::Class { .. } => false,
+            Value::Native(kind) if kind == stdlib::datetime::TZINFO => true,
+            _ => return Ok(()),
+        };
         let layout = self.instance_layout(class, name);
         if layout.dictionary || layout.active_slot {
             return Ok(());
@@ -4758,7 +4761,9 @@ impl Context {
         let attribute = self.text(name);
         let quoted = self.repr(attribute);
         let kind = self.type_name(obj);
-        let message = if self.class_attr(class, name).is_some() {
+        let inherited =
+            native_tzinfo && (name == "__doc__" || crate::objects::OBJECT_METHODS.contains(&name));
+        let message = if inherited || self.class_attr(class, name).is_some() {
             format!("'{kind}' object attribute {quoted} is read-only")
         } else {
             format!(
