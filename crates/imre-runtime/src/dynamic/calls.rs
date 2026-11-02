@@ -2703,7 +2703,7 @@ impl Context {
                     {
                         return Ok(self.builtin(&format!("{class}.{name}")));
                     }
-                    _ if class == super::deque::CLASS && super::deque::METHODS.contains(&name) => {
+                    _ if class == super::deque::CLASS && super::deque::member(name).is_some() => {
                         return Ok(self.builtin(&format!("{class}.{name}")));
                     }
                     _ => {}

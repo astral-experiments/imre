@@ -14,6 +14,24 @@ def current():
         assert namespace[name] is getattr(deque, name)
     assert namespace["__repr__"].__objclass__ is deque
     assert namespace["__contains__"](queue, marker)
+    for name in ("__len__", "append", "__copy__", "__reversed__"):
+        descriptor = namespace[name]
+        assert descriptor.__objclass__ is deque and descriptor.__qualname__ == "deque." + name
+        assert descriptor.__get__(None, deque) is descriptor
+        bound = descriptor.__get__(queue)
+        assert bound.__self__ is queue and bound.__qualname__ == descriptor.__qualname__
+        if name == "__len__":
+            assert type(descriptor).__name__ == "wrapper_descriptor"
+            assert type(bound).__name__ == "method-wrapper" and bound() == 3
+        else:
+            assert type(descriptor).__name__ == "method_descriptor"
+            assert type(bound).__name__ == "builtin_function_or_method"
+        try:
+            descriptor.__get__([])
+        except TypeError as error:
+            assert name in str(error)
+        else:
+            raise AssertionError("bound deque descriptor to a list")
     try:
         namespace["append"] = None
     except TypeError:
