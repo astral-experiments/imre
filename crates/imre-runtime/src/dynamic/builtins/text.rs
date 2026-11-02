@@ -625,6 +625,13 @@ fn format_string(ctx: &mut Context, source: &str, fields: FormatSource<'_>) -> R
         next: usize,
         manual: bool,
     }
+    fn append_format_text(points: &mut Vec<u32>, text: &str) -> Result<()> {
+        points
+            .try_reserve(text.chars().count())
+            .map_err(|_| crate::Error::memory_error())?;
+        points.extend(text.chars().map(u32::from));
+        Ok(())
+    }
     fn render(
         ctx: &mut Context,
         s: &str,
@@ -636,6 +643,7 @@ fn format_string(ctx: &mut Context, source: &str, fields: FormatSource<'_>) -> R
             FormatString::from_raw_str(s).map_err(|e| Error::new("ValueError", e.to_string()))?;
         let single = parsed.format_parts.len() == 1;
         let mut output = String::new();
+        let mut codepoints = Vec::new();
         for part in parsed.format_parts {
             let FormatPart::Field {
                 field_name,
@@ -734,9 +742,23 @@ fn format_string(ctx: &mut Context, source: &str, fields: FormatSource<'_>) -> R
             if single {
                 return Ok(rendered);
             }
-            append_rendered_text(&mut output, ctx.str_value(rendered)?)?;
+            if let Value::SurrogateStr(field) = ctx.heap.get(ctx.scalar_value(rendered)) {
+                // Keep ordinary fields in UTF-8 until a field needs Python code points.
+                append_format_text(&mut codepoints, &output)?;
+                output.clear();
+                codepoints
+                    .try_reserve(field.len())
+                    .map_err(|_| crate::Error::memory_error())?;
+                codepoints.extend_from_slice(field);
+            } else {
+                append_rendered_text(&mut output, ctx.str_value(rendered)?)?;
+            }
         }
-        Ok(ctx.text(output))
+        if codepoints.is_empty() {
+            return Ok(ctx.text(output));
+        }
+        append_format_text(&mut codepoints, &output)?;
+        Ok(ctx.text_codepoints(codepoints))
     }
     render(ctx, source, fields, &mut Indices::default(), false)
 }
