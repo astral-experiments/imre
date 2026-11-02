@@ -56,6 +56,7 @@ pub(in crate::dynamic) fn clock_classmethod(symbol: &str) -> bool {
             | "datetime.datetime.fromisoformat"
             | "datetime.datetime.combine"
             | "datetime.datetime.strptime"
+            | "datetime.date.fromisoformat"
             | "datetime.date.strptime"
             | "datetime.date.today"
             | "datetime.date.fromtimestamp"
@@ -117,6 +118,7 @@ pub(in crate::dynamic) fn members(class: &str) -> Option<Members> {
                 "timetuple",
                 "strftime",
                 "strptime",
+                "fromisoformat",
                 "fromordinal",
                 "fromisocalendar",
                 "fromtimestamp",
@@ -887,7 +889,10 @@ pub(super) fn call(
             Ok(result)
         }
         "tzinfo.fromutc" | "timezone.fromutc" => fromutc::method(ctx, method, args, kwargs),
-        "datetime.fromisoformat" => iso_datetime::fromisoformat(ctx, args, kwargs),
+        "date.fromisoformat" => iso_datetime::fromisoformat(ctx, "datetime.date", args, kwargs),
+        "datetime.fromisoformat" => {
+            iso_datetime::fromisoformat(ctx, "datetime.datetime", args, kwargs)
+        }
         "datetime.astimezone" => fromutc::astimezone(ctx, args, kwargs),
         "timezone.utcoffset" | "timezone.dst" | "timezone.tzname" => {
             fixed_zone_method(ctx, method, args, kwargs)
