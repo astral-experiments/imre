@@ -290,6 +290,7 @@ pub(super) const BYTEARRAY_METHODS: &[&str] = &[
     "endswith",
     "extend",
     "reverse",
+    "split",
     "startswith",
 ];
 
@@ -301,6 +302,7 @@ pub(super) const BYTES_METHODS: &[&str] = &[
     "rfind",
     "rsplit",
     "rstrip",
+    "split",
     "startswith",
     "translate",
 ];
@@ -997,7 +999,7 @@ pub(super) fn call(
                 collections::builtin_slot(ctx, name, args, kwargs)
             }
             "bytes" | "bytearray" if method == "fromhex" => text::fromhex(ctx, name, args, kwargs),
-            "bytearray" if matches!(method, "decode" | "endswith" | "startswith") => {
+            "bytearray" if matches!(method, "decode" | "endswith" | "split" | "startswith") => {
                 text::method(ctx, owner, method, args, kwargs)
             }
             "str" | "bytes" => text::method(ctx, owner, method, args, kwargs),

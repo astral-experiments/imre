@@ -41,7 +41,7 @@ impl BuiltinDescriptor {
                 ][..],
             )),
             Some(("float", attr)) => Some(("float", attr, &["as_integer_ratio"][..])),
-            Some(("bytes", attr)) => Some(("bytes", attr, &["endswith"][..])),
+            Some(("bytes", attr)) => Some(("bytes", attr, builtins::BYTES_METHODS)),
             Some(("bytearray", attr)) => Some(("bytearray", attr, builtins::BYTEARRAY_METHODS)),
             Some(("BaseException", attr)) => Some(("BaseException", attr, &["with_traceback"][..])),
             Some(("frame", attr)) => Some(("frame", attr, &["clear"][..])),

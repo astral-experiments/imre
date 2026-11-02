@@ -1892,6 +1892,12 @@ impl IntrinsicModule {
             (Self::UrllibParse, "quote_plus") => Intrinsic::QuotePlus,
             (Self::UrllibParse, "urlencode") => Intrinsic::UrlEncode,
             (Self::UrllibParse, "unquote") => Intrinsic::Unquote,
+            (Self::UrllibParse, "parse_qs") => {
+                Intrinsic::ObjectRuntimeExport("urllib.parse.parse_qs")
+            }
+            (Self::UrllibParse, "unquote_to_bytes") => {
+                Intrinsic::ObjectRuntimeExport("urllib.parse.unquote_to_bytes")
+            }
             (Self::UrllibParse, "unquote_plus") => {
                 Intrinsic::ObjectRuntimeExport("urllib.parse.unquote_plus")
             }
