@@ -2645,6 +2645,7 @@ impl Context {
                     || (class == "bytes" && builtins::BYTES_METHODS.contains(&name))
                     || (class == "bytearray" && builtins::BYTEARRAY_METHODS.contains(&name))
                     || (class == "int" && matches!(name, "bit_length" | "to_bytes"))
+                    || (class == "float" && name == "as_integer_ratio")
                     || (class == "str"
                         && (name == "maketrans" || builtins::STR_METHODS.contains(&name))) =>
             {
@@ -4168,6 +4169,7 @@ impl Context {
                             | "StopIteration.__init__"
                             | "float.__format__"
                             | "float.__getformat__"
+                            | "float.as_integer_ratio"
                     )
                     || !name.contains('.')
                     || matches!(

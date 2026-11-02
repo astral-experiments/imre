@@ -69,6 +69,59 @@ fn native_format<const N: usize>(bytes: [u8; N], mut ieee_big: [u8; N]) -> &'sta
     }
 }
 
+/// Return the reduced integer ratio of the receiver's stored binary64 value.
+pub(super) fn as_integer_ratio(
+    ctx: &mut Context,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Id> {
+    let (&receiver, args) = args
+        .split_first()
+        .ok_or_else(|| type_error("unbound method float.as_integer_ratio() needs an argument"))?;
+    let Value::Float(value) = *ctx.heap.get(ctx.scalar_value(receiver)) else {
+        return Err(type_error(format!(
+            "descriptor 'as_integer_ratio' for 'float' objects doesn't apply to a '{}' object",
+            ctx.type_name(receiver)
+        )));
+    };
+    if !kwargs.is_empty() {
+        return Err(type_error(
+            "float.as_integer_ratio() takes no keyword arguments",
+        ));
+    }
+    if !args.is_empty() {
+        return Err(type_error(format!(
+            "float.as_integer_ratio() takes no arguments ({} given)",
+            args.len()
+        )));
+    }
+    if value.is_infinite() {
+        return Err(Error::new(
+            "OverflowError",
+            "cannot convert Infinity to integer ratio",
+        ));
+    }
+    if value.is_nan() {
+        return Err(Error::new(
+            "ValueError",
+            "cannot convert NaN to integer ratio",
+        ));
+    }
+    let (numerator, denominator) = if value.fract() == 0.0 {
+        let integer = crate::Int::new(crate::floats::float_to_integer(value)?);
+        (ctx.alloc(Value::Int(integer)), ctx.int(1))
+    } else {
+        // A non-integral binary64 has an odd numerator and a power-of-two denominator.
+        let (mantissa, exponent, sign) = num_traits::Float::integer_decode(value);
+        let zeros = mantissa.trailing_zeros();
+        let numerator = i64::from(sign) * ((mantissa >> zeros) as i64);
+        let power = -(exponent + zeros as i16);
+        let denominator = crate::Int::new(num_bigint::BigInt::from(1) << power);
+        (ctx.int(numerator), ctx.alloc(Value::Int(denominator)))
+    };
+    Ok(ctx.alloc(Value::Tuple(vec![numerator, denominator])))
+}
+
 /// Construct a boxed binary64 using Python's numeric slots or decimal text grammar.
 pub(super) fn construct(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
     if !kwargs.is_empty() {
