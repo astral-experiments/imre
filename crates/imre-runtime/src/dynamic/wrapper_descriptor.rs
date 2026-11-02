@@ -55,8 +55,8 @@ impl BuiltinDescriptor {
                 Some(("BaseException", attr, &["add_note", "with_traceback"][..]))
             }
             Some(("frame", attr)) => Some(("frame", attr, &["clear"][..])),
-            Some(("set", attr)) => Some(("set", attr, &["issubset", "update"][..])),
-            Some(("frozenset", attr)) => Some(("frozenset", attr, &["issubset"][..])),
+            Some(("set", attr)) => Some(("set", attr, &["__reduce__", "issubset", "update"][..])),
+            Some(("frozenset", attr)) => Some(("frozenset", attr, &["__reduce__", "issubset"][..])),
             Some(("list", attr)) => Some(("list", attr, builtins::LIST_METHODS)),
             Some(("range", attr)) => Some(("range", attr, range::METHODS)),
             Some((stdlib::os::stat::CLASS, attr)) => {
@@ -86,6 +86,7 @@ impl BuiltinDescriptor {
         }
         let (owner, name) = match symbol {
             "object.__format__" => ("object", "__format__"),
+            "object.__reduce__" => ("object", "__reduce__"),
             "object.__reduce_ex__" => ("object", "__reduce_ex__"),
             "int.__add__" => ("int", "__add__"),
             "int.__format__" => ("int", "__format__"),
@@ -128,6 +129,7 @@ impl BuiltinDescriptor {
             method: matches!(
                 name,
                 "__format__"
+                    | "__reduce__"
                     | "__reduce_ex__"
                     | "isascii"
                     | "isalpha"
@@ -297,6 +299,9 @@ impl BuiltinDescriptor {
             )),
             "__doc__" | "__text_signature__" if self.method => {
                 let value = match (self.name, name) {
+                    ("__reduce__" | "__reduce_ex__", "__doc__") if self.owner == "object" => "Helper for pickle.",
+                    ("__reduce__", _) if self.owner == "object" => "($self, /)",
+                    ("__reduce_ex__", _) if self.owner == "object" => "($self, protocol, /)",
                     ("__reduce__", "__doc__") if self.owner == stdlib::os::stat::CLASS => return Some(NONE),
                     ("__reduce__", _) if self.owner == stdlib::os::stat::CLASS => "($self, /)",
                     ("isascii", "__doc__") => {

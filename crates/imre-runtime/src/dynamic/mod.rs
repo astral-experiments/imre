@@ -1709,7 +1709,13 @@ impl Context {
             self.builtin("BaseException.with_traceback");
         }
         let methods = match name {
-            "object" => &["__hash__", "__format__", "__init_subclass__"],
+            "object" => &[
+                "__hash__",
+                "__format__",
+                "__init_subclass__",
+                "__reduce__",
+                "__reduce_ex__",
+            ],
             "dict" => builtins::DICT_METHODS,
             "function" => &["__call__"],
             "collections.defaultdict" => {
@@ -1726,8 +1732,8 @@ impl Context {
             "list" => builtins::LIST_METHODS,
             "method_descriptor" => &["__get__"],
             "tuple" => &["__repr__", "__getitem__"],
-            "set" => &["__repr__", "issubset", "update"],
-            "frozenset" => &["__repr__", "issubset"],
+            "set" => &["__repr__", "__reduce__", "issubset", "update"],
+            "frozenset" => &["__repr__", "__reduce__", "issubset"],
             "bytearray" => {
                 self.builtin("bytearray.fromhex");
                 builtins::BYTEARRAY_METHODS

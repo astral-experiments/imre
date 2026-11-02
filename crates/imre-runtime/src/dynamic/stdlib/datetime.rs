@@ -124,7 +124,6 @@ pub(in crate::dynamic) fn install_members(ctx: &mut Context, class: &str) {
     if class == "datetime.datetime" {
         ctx.builtin("datetime.date");
     }
-    ctx.builtin("object.__reduce_ex__");
     ctx.builtin(&format!("{class}.__new__"));
     for method in members.methods {
         ctx.builtin(&format!("{class}.{method}"));
