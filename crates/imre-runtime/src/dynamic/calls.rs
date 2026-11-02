@@ -301,7 +301,7 @@ impl Context {
                     .is_some_and(|members| members.owns(name))
                     || (kind == "function" && name == "__call__")
                     || (kind == "set" && name == "update")
-                    || (matches!(name, "__repr__" | "__reduce__" | "issubset")
+                    || (matches!(name, "__repr__" | "__reduce__" | "difference" | "issubset")
                         && matches!(kind.as_str(), "set" | "frozenset")) =>
             {
                 self.builtins.get(&format!("{kind}.{name}")).copied()
@@ -918,7 +918,10 @@ impl Context {
         if let Value::GenericAlias(alias) = self.heap.get(parent) {
             return Err(alias.kind.class_check_error("issubclass"));
         }
-        if let Some(check) = self.bound_slot(parent, "__subclasscheck__")? {
+        if let Some(check) = self.bound_slot(parent, "__subclasscheck__")?
+            && self.slot(parent, "__subclasscheck__")
+                != self.builtins.get("abc.__subclasscheck__").copied()
+        {
             let result = self.call(check, vec![child], Vec::new())?;
             return self.truth(result);
         }
@@ -2073,6 +2076,7 @@ impl Context {
                         let (format, width) = array.view_layout();
                         (format, width, array.len(), false)
                     }
+                    Value::ByteArray(bytes) => ("B", 1, bytes.len(), false),
                     _ => ("B", 1, self.bytes_like(owner)?.len(), true),
                 };
                 return Ok(match name {
@@ -2584,7 +2588,11 @@ impl Context {
                             self.text(format!("{}.{field}", owner.rsplit('.').next().unwrap()))
                         );
                     }
-                    "__get__" | "__set__" | "__delete__" if name == "__get__" || owner == "int" => {
+                    "__get__" | "__set__" | "__delete__"
+                        if name == "__get__"
+                            || owner == "int"
+                            || HashState::is_provider_class(owner) =>
+                    {
                         let symbol = format!("getset_descriptor.{name}");
                         let get = self.builtin(&symbol);
                         return Ok(self.alloc(Value::Method {
@@ -2599,16 +2607,11 @@ impl Context {
             Value::Native(ref class) if let Some(owner) = HashState::provider_class(class) => {
                 let (module, short) = owner.rsplit_once('.').unwrap();
                 match name {
-                    "name" | "block_size" | "digest_size" => {
+                    attr if let Some(field) = HashState::descriptor_name(owner, attr) => {
                         let key = format!("{owner}.{name}");
                         if let Some(&descriptor) = self.builtins.get(&key) {
                             return Ok(descriptor);
                         }
-                        let field = match name {
-                            "name" => "name",
-                            "block_size" => "block_size",
-                            _ => "digest_size",
-                        };
                         let get = self.builtin(&format!("{owner}.get_{field}"));
                         let descriptor = self.alloc(Value::GetSetDescriptor {
                             get,
@@ -2863,11 +2866,14 @@ impl Context {
                 });
             }
             Value::Native(ref symbol)
-                if matches!(name, "__self__" | "__qualname__" | "__module__")
-                    && let Some(owner) = builtins::constructor_owner(symbol) =>
+                if matches!(
+                    name,
+                    "__self__" | "__name__" | "__qualname__" | "__module__"
+                ) && let Some(owner) = builtins::constructor_owner(symbol) =>
             {
                 return Ok(match name {
                     "__self__" => self.builtin(&owner.to_owned()),
+                    "__name__" => self.text("__new__"),
                     "__qualname__" => {
                         let class = owner.rsplit('.').next().unwrap_or(owner);
                         self.text(format!("{class}.__new__"))
@@ -3093,6 +3099,9 @@ impl Context {
             Value::Hash(ref hash) => {
                 let owner = hash.lock().class_name();
                 match name {
+                    "__new__" if HashState::is_provider_class(owner) => {
+                        return Ok(self.builtin(&format!("{owner}.__new__")));
+                    }
                     "__init__" if HashState::is_provider_class(owner) => {
                         let init = self.builtin("object.__init__");
                         return Ok(self.alloc(Value::Method {
@@ -3107,6 +3116,19 @@ impl Context {
                     "name" => {
                         let name = hash.lock().name();
                         return Ok(self.text(name));
+                    }
+                    "_rate_bits" | "_capacity_bits" if owner.starts_with("_sha3.") => {
+                        let rate = hash.lock().block_size() * 8;
+                        let bits = if name == "_rate_bits" {
+                            rate
+                        } else {
+                            1600 - rate
+                        };
+                        return Ok(self.int(bits as i64));
+                    }
+                    "_suffix" if owner.starts_with("_sha3.") => {
+                        let suffix = if hash.lock().is_xof() { 0x1f } else { 0x06 };
+                        return Ok(self.alloc(Value::Bytes(vec![suffix])));
                     }
                     "digest_size" => {
                         let size = hash.lock().digest_size();
@@ -3277,7 +3299,8 @@ impl Context {
                 return Ok(self.builtin("set.copy"));
             }
             Value::Native(ref class)
-                if class == "set" && matches!(name, "discard" | "difference_update" | "update") =>
+                if class == "set"
+                    && matches!(name, "discard" | "remove" | "difference_update" | "update") =>
             {
                 return Ok(self.builtin(&format!("set.{name}")));
             }
@@ -3285,7 +3308,7 @@ impl Context {
                 if matches!(class.as_str(), "dict" | "list" | "tuple")
                     || (class == "function" && name == "__call__")
                     || builtins::is_enum_base(class)
-                    || (matches!(name, "__repr__" | "issubset")
+                    || (matches!(name, "__repr__" | "difference" | "issubset")
                         && matches!(class.as_str(), "set" | "frozenset"))
                     || (builtins::is_exception(class)
                         && matches!(
@@ -3604,7 +3627,7 @@ impl Context {
                 Value::Str(_) | Value::SurrogateStr(_) => return Ok(self.builtin("str.__new__")),
                 Value::Class { .. } | Value::Instance { .. } => {
                     let class = self.heap.get(base).instance_class().unwrap_or(base);
-                    if self.allocation_base(class) == self.builtins.get("object").copied() {
+                    if self.uses_object_new(self.allocation_base(class)) {
                         return Ok(self.builtin("object.__new__"));
                     }
                 }
@@ -4807,7 +4830,7 @@ impl Context {
                 Ok(builtins::boolean(!self.truth(equal)?))
             };
         }
-        if self.allocation_base(class) == self.builtins.get("object").copied() {
+        if self.uses_object_new(self.allocation_base(class)) {
             return Ok(if object == other {
                 FALSE
             } else {
@@ -4821,6 +4844,14 @@ impl Context {
                 self.type_name(object)
             ),
         ))
+    }
+
+    /// The decoder owns its native layout but inherits object.__new__.
+    fn uses_object_new(&self, base: Option<Id>) -> bool {
+        base == self.builtins.get("object").copied()
+            || base.is_some_and(|base| {
+                self.heap.get(base).io_kind() == Some(stdlib::io::NEWLINE_DECODER)
+            })
     }
 
     /// Allocate a plain instance without invoking its constructor or initializer.
@@ -4866,7 +4897,7 @@ impl Context {
             base
         };
         let new = self.class_attr(class, "__new__");
-        if base != object {
+        if !self.uses_object_new(Some(base)) {
             let name = self.class_name(class);
             let owner = if new.is_some_and(|new| !matches!(self.heap.get(new), Value::Native(_))) {
                 self.class_name(base)
@@ -5206,7 +5237,8 @@ impl Context {
             Value::Native(name) if name == "float.__new__" => self.new_float(&args, &kwargs),
             Value::Native(name)
                 if builtins::is_builtin(&name)
-                    || builtins::constructor_owner(&name).is_some()
+                    || builtins::constructor_owner(&name)
+                        .is_some_and(|owner| !HashState::is_provider_class(owner))
                     || matches!(
                         name.as_str(),
                         "BaseException.__init__"
@@ -5500,12 +5532,6 @@ impl Context {
                 metaclass,
                 ..
             } => {
-                if self.builtins.get("abc.ABCMeta") == Some(&callable) {
-                    return Err(Error::new(
-                        "NotImplementedError",
-                        "direct ABCMeta construction is unsupported",
-                    ));
-                }
                 if let Some(meta) = metaclass
                     && let Some(slot) = self.class_attr(meta, "__call__")
                 {
@@ -6020,6 +6046,33 @@ impl Context {
         Ok(())
     }
 
+    /// Bind ABCMeta.__new__'s positional-only parameters for direct and cooperating calls.
+    pub(super) fn abc_new(&mut self, args: &[Id], keywords: &[(String, Id)]) -> Result<Id> {
+        let [meta, name, bases, namespace] = args else {
+            const PARAMETERS: [&str; 4] = ["mcls", "name", "bases", "namespace"];
+            let name = "ABCMeta.__new__";
+            return Err(if args.len() < PARAMETERS.len() {
+                missing_arguments_error(name, "positional", &PARAMETERS[args.len()..])
+            } else {
+                excess_positional_error(name, 4, 0, args.len(), 0)
+            });
+        };
+        self.abc_new_from_namespace(*meta, *name, *bases, *namespace, keywords.to_vec())
+    }
+
+    /// Pass the actual namespace through the winning ABC metaclass before allocating the class.
+    pub(super) fn call_abc_new(
+        &mut self,
+        meta: Id,
+        name: Id,
+        bases: Id,
+        namespace: Id,
+        keywords: Vec<(String, Id)>,
+    ) -> Result<Id> {
+        let new = self.lookup_attr(meta, "__new__")?;
+        self.call(new, vec![meta, name, bases, namespace], keywords)
+    }
+
     /// Select the most derived compatible metaclass before executing a boxed class body.
     pub(super) fn select_class_metaclass(
         &mut self,
@@ -6052,7 +6105,7 @@ impl Context {
             )
         };
         for &base in bases {
-            let meta = if self.is_bundled_abc(base) {
+            let meta = if self.heap.get(base).instance_class().is_none() && self.is_bundled_abc(base) {
                 self.abc_meta()
             } else {
                 self.exact_type(base)?
@@ -6102,12 +6155,14 @@ impl Context {
             ));
         }
         // User metaclasses can customize their instances' calls and attributes while
-        // inheriting type's normal namespace preparation, allocation, and MRO.
+        // inheriting type's namespace preparation and MRO. ABCMeta subclasses can also
+        // override __new__ and delegate allocation to ABCMeta.__new__.
         if !is_abc
             && Some(winner) != typed_dict_meta
-            && (["__prepare__", "__new__", "__init__"]
-                .iter()
-                .any(|name| self.class_attr(winner, name).is_some())
+            && ((!self.is_abc_metaclass(winner) && self.class_attr(winner, "__new__").is_some())
+                || ["__prepare__", "__init__"]
+                    .iter()
+                    .any(|name| self.class_attr(winner, name).is_some())
                 || self
                     .class_attr(winner, "mro")
                     .is_some_and(|method| Some(&method) != self.builtins.get("type.mro"))
@@ -6131,16 +6186,6 @@ impl Context {
         parameterized: bool,
     ) -> Result<Id> {
         let (original, mut bases) = super::typing::resolve_bases(self, bases)?;
-        if self
-            .builtins
-            .get("abc.ABCMeta")
-            .is_some_and(|meta| bases.contains(meta))
-        {
-            return Err(Error::new(
-                "NotImplementedError",
-                "subclassing ABCMeta is unsupported",
-            ));
-        }
         let typed_dict_meta = self
             .module_value("typing", "_TypedDictMeta")
             .filter(|meta| {
@@ -6186,6 +6231,11 @@ impl Context {
         struct ClassBindings {
             #[serde(default)]
             scope_nonlocals: std::collections::HashSet<String>,
+            #[serde(default)]
+            needs_class_cell: bool,
+            #[serde(default)]
+            needs_dict_cell: bool,
+            static_attributes: Option<Vec<String>>,
         }
         let parameters = self.code_object(code).parameters;
         let bindings: ClassBindings = serde_json::from_str(self.str_value(parameters)?)
@@ -6212,14 +6262,18 @@ impl Context {
                 .unwrap_or_else(|| self.text("builtins"))
         };
         self.bind(scope, "__module__", module_name);
+        if let Ok(qualname) = self.lookup_attr(body, "__qualname__") {
+            self.bind(scope, "__qualname__", qualname);
+        }
+        if bindings.static_attributes.is_some() {
+            let first = self.int(i64::from(self.code_object(code).first_line));
+            self.bind(scope, "__firstlineno__", first);
+        }
         if parameterized {
             let params = self
                 .scope_name(parent, ".type_params")
                 .expect("class parameter scope");
             self.bind(scope, "__type_params__", params);
-        }
-        if let Ok(qualname) = self.lookup_attr(body, "__qualname__") {
-            self.bind(scope, "__qualname__", qualname);
         }
         let annotations = self.dict(Vec::new());
         self.bind_local(scope, "__annotations__", annotations);
@@ -6227,6 +6281,55 @@ impl Context {
             frame.class_namespace.get_or_insert_with(Default::default).annotation_scratch = Some(annotations);
         }
         self.execute(code, scope, FrameOwner::Function(body))?;
+        if let Some(names) = bindings.static_attributes {
+            let names = names.iter().map(|name| self.heap.code_name(name)).collect();
+            let attrs = self.alloc(Value::Tuple(names));
+            self.bind(scope, "__static_attributes__", attrs);
+        }
+        if let Some(meta) = class_meta
+            && self.is_abc_metaclass(meta)
+            && self.builtins.get("abc.ABCMeta") != Some(&meta)
+        {
+            let namespace = self.active_class_namespace(scope);
+            // A deferred class annotator owns these fields. Its scratch entries are placeholders.
+            if self.dict_named_item(namespace, "__annotations__") == Some(annotations)
+                && (self.dict_named_item(namespace, "__annotate_func__").is_some()
+                    || self.dict_entries(annotations).is_some_and(|items| items.is_empty()))
+            {
+                let key = self.text("__annotations__");
+                self.delete_item(namespace, key)?;
+            }
+            if bindings.needs_dict_cell {
+                let dict_cell = self.class_annotation_dict_cell(scope);
+                let key = self.text("__classdictcell__");
+                self.put_item(namespace, key, dict_cell)?;
+            }
+            if bindings.needs_class_cell {
+                let key = self.text("__classcell__");
+                self.put_item(namespace, key, cell)?;
+            }
+            if let Some(original) = original {
+                let key = self.text("__orig_bases__");
+                self.put_item(namespace, key, original)?;
+            }
+            let class_name = self.text(&name);
+            let bases = self.alloc(Value::Tuple(bases));
+            let class = self.call_abc_new(meta, class_name, bases, namespace, keywords)?;
+            if bindings.needs_class_cell && matches!(self.heap.get(class), Value::Class { .. }) {
+                match self.heap.get(cell) {
+                    Value::Cell(Some(contents)) if *contents == class => {}
+                    Value::Cell(None) => return Err(Error::new(
+                        "RuntimeError",
+                        "__class__ not set: was __classcell__ propagated to type.__new__()?",
+                    )),
+                    _ => return Err(Error::new(
+                        "TypeError",
+                        "__class__ set to a different class during class creation",
+                    )),
+                }
+            }
+            return Ok(class);
+        }
         let explicit_annotations = self.scope_name(scope, "__annotations__")
             .is_some_and(|value| value != annotations);
         let exposed_body = self.finish_class_namespace(scope)?;
@@ -6318,6 +6421,13 @@ impl Context {
         }
         if typed_dict_meta.is_none() {
             super::typing::class_parameters(self, scope, original, &bases)?;
+        }
+        if bases.iter().any(|&base| self.is_abc_metaclass(base))
+            && let Some(new) = self.namespace_binding(self.scope_data(scope), "__new__")
+            && matches!(self.heap.get(new), Value::Function { .. })
+        {
+            let new = super::method_decorator::static_method(self, new)?;
+            self.bind_local(scope, "__new__", new);
         }
         let float_enum = enum_kind
             .filter(|kind| kind.scalar_base().is_none())

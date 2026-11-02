@@ -106,6 +106,7 @@ pub(super) fn is_module(name: &str) -> bool {
     matches!(
         name,
         "_blake2"
+            | "_sha3"
             | "_datetime"
             | "_imre_ordered_dict"
             | "_opcode"
@@ -464,6 +465,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         (
             "_imp",
             "is_frozen"
+            | "extension_suffixes"
             | "_override_frozen_modules_for_tests"
             | "_override_multi_interp_extensions_check",
         )
@@ -669,7 +671,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("functools", "WRAPPER_ASSIGNMENTS") => tuple_text(ctx, functools::ASSIGNED),
         ("functools", "WRAPPER_UPDATES") => tuple_text(ctx, functools::UPDATED),
         ("posixpath", "dirname") => ctx.builtin("os.path.dirname"),
-        ("os" | "posix", "getcwd" | "getcwdb") if cfg!(unix) => {
+        ("os" | "posix", "getcwd" | "getcwdb" | "strerror") if cfg!(unix) => {
             ctx.builtin(&format!("posix.{name}"))
         }
         ("os" | "posix", "DirEntry") => ctx.builtin(os::scandir::ENTRY),
@@ -701,15 +703,6 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("os", "name") => ctx.text("posix"),
         ("posixpath", "sep") => ctx.text("/"),
         ("posixpath", "altsep") => NONE,
-        ("importlib.machinery", "EXTENSION_SUFFIXES") => {
-            let suffix = ctx.text(
-                ctx.config["archive_suffix"]
-                    .as_str()
-                    .unwrap_or(".imre.a")
-                    .to_owned(),
-            );
-            ctx.alloc(Value::List(vec![suffix]))
-        }
         ("operator", name)
             if matches!(name, "attrgetter" | "itemgetter")
                 || operator::Operation::named(name).is_some() =>
@@ -1546,6 +1539,25 @@ pub(super) fn call(
     if name == "posix.sched_getscheduler" {
         return os::scheduler::get_policy(ctx, args, kwargs);
     }
+    if name == "posix.strerror" {
+        if !kwargs.is_empty() {
+            return Err(Error::new(
+                "TypeError",
+                "posix.strerror() takes no keyword arguments",
+            ));
+        }
+        let [code] = args else {
+            return Err(Error::new(
+                "TypeError",
+                format!(
+                    "posix.strerror() takes exactly one argument ({} given)",
+                    args.len()
+                ),
+            ));
+        };
+        let code = os::c_int(ctx, *code)?;
+        return Ok(ctx.text_codepoints(crate::sys::strerror(code)?));
+    }
     if name == "posix.urandom" {
         return os::urandom(ctx, args, kwargs);
     }
@@ -1736,27 +1748,38 @@ pub(super) fn call(
                 let path = crate::objects::cache_paths::source_name(ctx.str_value(*path)?, prefix)?;
                 return Ok(ctx.text(path.to_string()));
             }
-            ("warn_legacy_load", [], []) => {
-                ctx.warn_legacy_load()?;
+            ("warn_legacy_load", [source_globals], []) => {
+                ctx.warn_legacy_load(*source_globals)?;
                 return Ok(NONE);
             }
-            ("warn_loader_deprecation", [globals, mismatch], []) => {
+            ("warn_loader_deprecation", [globals, mismatch, frozen], []) => {
                 let (line, message) = if ctx.truth(*mismatch)? {
                     (670, "Module globals; __loader__ != __spec__.loader")
                 } else {
                     (663, "Module globals is missing a __spec__.loader")
                 };
-                ctx.warn_external_loader(*globals, line, message)?;
+                let frozen = ctx.truth(*frozen)?;
+                ctx.warn_bootstrap_loader(*globals, line, message, frozen)?;
                 return Ok(NONE);
             }
-            ("warn_debug_override", [], []) => {
-                crate::objects::cache_paths::warn_debug_override()?;
+            ("warn_debug_override", [source_globals], []) => {
+                if *source_globals == NONE {
+                    crate::objects::cache_paths::warn_debug_override()?;
+                } else {
+                    ctx.warn_bootstrap_loader(
+                        *source_globals,
+                        258,
+                        crate::objects::cache_paths::DEBUG_OVERRIDE_WARNING,
+                        false,
+                    )?;
+                }
                 return Ok(NONE);
             }
-            ("import_module", [name], []) => {
+            ("import_module", [name] | [name, _], []) => {
                 let name = ctx.str_value(*name)?.to_owned();
+                let source_globals = args.get(1).copied().unwrap_or(NONE);
                 return ctx
-                    .find_module(&name)?
+                    .find_module_from(&name, source_globals)?
                     .ok_or_else(|| Context::missing_module(&name));
             }
             ("find_spec", [fullname, original], []) => {
@@ -2164,8 +2187,8 @@ pub(super) fn call(
     {
         return regex::search(ctx, method, args, kwargs);
     }
-    if name == "pattern.sub" {
-        return regex::pattern_sub(ctx, args, kwargs);
+    if let Some(method @ ("sub" | "subn")) = name.strip_prefix("pattern.") {
+        return regex::pattern_sub(ctx, method, args, kwargs);
     }
     if name == "pattern.split" {
         return regex::pattern_split(ctx, args, kwargs);

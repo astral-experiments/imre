@@ -1,12 +1,12 @@
 //! Unbuffered filesystem streams for runtime-loaded Python code.
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::io::ErrorKind;
 use std::os::fd::{AsRawFd, IntoRawFd, RawFd};
 use std::os::unix::fs::MetadataExt;
 use std::rc::Rc;
 
-use super::super::{builtins, files, os_error};
+use super::super::{builtins, files, os::stat::warn_bool_fd, os_error};
 use super::{Context, Error, Id, MemoryStream, NONE, Result, Value};
 use crate::objects::{BoxedPipe, os};
 
@@ -18,9 +18,9 @@ pub(super) const METHODS: &[&str] = &[
 
 pub(in crate::dynamic) struct RawFile {
     fd: Cell<Option<RawFd>>,
-    pipe: Option<BoxedPipe>,
-    closefd: bool,
-    mode: &'static str,
+    pipe: RefCell<Option<BoxedPipe>>,
+    closefd: Cell<bool>,
+    mode: Cell<RawMode>,
     blksize: Cell<i64>,
     repr_active: Cell<bool>,
 }
@@ -52,7 +52,7 @@ impl RawFile {
     pub(super) fn live_fd(&self) -> Option<RawFd> {
         self.fd
             .get()
-            .filter(|_| self.pipe.as_ref().is_none_or(|p| !p.closed()))
+            .filter(|_| self.pipe.borrow().as_ref().is_none_or(|p| !p.closed()))
     }
 
     fn access<T>(&self, operation: impl FnOnce(RawFd) -> Result<T>) -> Result<T> {
@@ -61,10 +61,10 @@ impl RawFile {
 
     pub(super) fn close(&self) -> Result<()> {
         if let Some(fd) = self.fd.take()
-            && self.closefd
+            && self.closefd.get()
         {
             self.blksize.set(super::DEFAULT_BUFFER_SIZE);
-            if let Some(pipe) = &self.pipe {
+            if let Some(pipe) = self.pipe.borrow().as_ref() {
                 pipe.close_raw()?;
             } else {
                 os::close(fd)?;
@@ -74,11 +74,11 @@ impl RawFile {
     }
 
     fn readable(&self) -> bool {
-        self.mode == "rb" || self.mode.ends_with('+')
+        self.mode.get().readable
     }
 
     fn writable(&self) -> bool {
-        self.mode != "rb"
+        self.mode.get().writable
     }
 
     fn check_direction(&self, read: bool) -> Result<()> {
@@ -112,31 +112,75 @@ pub(super) fn state(ctx: &Context, receiver: Id) -> Option<Rc<RawFile>> {
     }
 }
 
-pub(in crate::dynamic::stdlib) fn mode(raw: &str) -> Result<(u32, &'static str)> {
-    const INVALID: &str =
-        "Must have exactly one of create/read/write/append mode and at most one plus";
-    let mut selected = None;
-    let mut update = false;
-    for ch in raw.chars() {
-        let access = match ch {
-            'r' => (0, "rb", "rb+"),
-            'w' => (1, "wb", "rb+"),
-            'a' => (2, "ab", "ab+"),
-            'x' => (3, "xb", "xb+"),
-            'b' => continue,
-            '+' if !update => {
-                update = true;
-                continue;
+/// FileIO retains its access bits across explicit reinitialization.
+#[derive(Clone, Copy, Default)]
+struct RawMode {
+    readable: bool,
+    writable: bool,
+    appending: bool,
+    created: bool,
+}
+
+impl RawMode {
+    fn parse(&mut self, raw: &str) -> Result<u32> {
+        const INVALID: &str =
+            "Must have exactly one of create/read/write/append mode and at most one plus";
+        let mut selected = None;
+        let mut plus = false;
+        for ch in raw.chars() {
+            match ch {
+                'b' => continue,
+                '+' if !plus => {
+                    plus = true;
+                    self.readable = true;
+                    self.writable = true;
+                }
+                '+' => return Err(Error::new("ValueError", INVALID)),
+                'r' | 'w' | 'a' | 'x' if selected.is_some() => {
+                    return Err(Error::new("ValueError", INVALID));
+                }
+                'r' => {
+                    self.readable = true;
+                    selected = Some(0);
+                }
+                'w' => {
+                    self.writable = true;
+                    selected = Some(1);
+                }
+                'a' => {
+                    self.writable = true;
+                    self.appending = true;
+                    selected = Some(2);
+                }
+                'x' => {
+                    self.writable = true;
+                    self.created = true;
+                    selected = Some(3);
+                }
+                _ => return Err(Error::new("ValueError", format!("invalid mode: {raw}"))),
             }
-            '+' => return Err(Error::new("ValueError", INVALID)),
-            _ => return Err(Error::new("ValueError", format!("invalid mode: {raw}"))),
-        };
-        if selected.replace(access).is_some() {
-            return Err(Error::new("ValueError", INVALID));
+        }
+        selected.ok_or_else(|| Error::new("ValueError", INVALID))
+    }
+
+    fn spelling(self) -> &'static str {
+        match (self.created, self.appending, self.readable, self.writable) {
+            (true, _, true, _) => "xb+",
+            (true, _, false, _) => "xb",
+            (_, true, true, _) => "ab+",
+            (_, true, false, _) => "ab",
+            (_, _, true, true) => "rb+",
+            (_, _, true, false) => "rb",
+            (_, _, false, _) => "wb",
         }
     }
-    let (flags, single, both) = selected.ok_or_else(|| Error::new("ValueError", INVALID))?;
-    Ok((flags, if update { both } else { single }))
+}
+
+/// Parse a mode for a newly allocated raw stream.
+pub(in crate::dynamic::stdlib) fn mode(raw: &str) -> Result<(u32, &'static str)> {
+    let mut access = RawMode::default();
+    let flags = access.parse(raw)?;
+    Ok((flags, access.spelling()))
 }
 
 pub(in crate::dynamic::stdlib) fn validate_open_mode(mode: &str) -> Result<()> {
@@ -188,11 +232,21 @@ pub(in crate::dynamic::stdlib) fn check_open_string(
     name: &str,
     expected: &str,
 ) -> Result<()> {
+    check_string_arg(ctx, value, "open", name, expected)
+}
+
+fn check_string_arg(
+    ctx: &mut Context,
+    value: Id,
+    function: &str,
+    name: &str,
+    expected: &str,
+) -> Result<()> {
     let storage = ctx.string_storage(value).ok_or_else(|| {
         Error::new(
             "TypeError",
             format!(
-                "open() argument '{name}' must be {expected}, not {}",
+                "{function}() argument '{name}' must be {expected}, not {}",
                 if value == NONE {
                     "None"
                 } else {
@@ -243,13 +297,31 @@ fn descriptor_from_argument(ctx: &mut Context, file: Id) -> Option<RawFd> {
         .and_then(|n| RawFd::try_from(n).ok())
 }
 
+/// Pass FileIO only its operation and optional update marker, in that order.
+fn raw_open_mode(mode: &str) -> String {
+    let mut raw: String = mode.chars().filter(|c| "rwax".contains(*c)).collect();
+    if mode.contains('+') {
+        raw.push('+');
+    }
+    raw
+}
+
 /// Resolve the public open() arguments before opening the underlying file.
 pub(in crate::dynamic) fn open(
     ctx: &mut Context,
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
-    let [file, mode, buffering, encoding, errors, newline, closefd] = builtins::bind(
+    let [
+        file,
+        mode,
+        buffering,
+        encoding,
+        errors,
+        newline,
+        closefd,
+        opener,
+    ] = builtins::bind(
         "open",
         args,
         kwargs,
@@ -261,6 +333,7 @@ pub(in crate::dynamic) fn open(
             "errors",
             "newline",
             "closefd",
+            "opener",
         ],
     )?;
     let file = file.ok_or_else(|| Error::new("TypeError", "open requires a file"))?;
@@ -296,9 +369,10 @@ pub(in crate::dynamic) fn open(
     if binary {
         check_binary_options(encoding, errors, newline)?;
     }
+    let opener = opener.filter(|&v| v != NONE);
     if buffering == 0 {
-        let raw_mode = mode_text.replace('t', "");
-        return open_raw(ctx, raw_arg, raw_mode, binary, owns);
+        let raw_mode = raw_open_mode(mode_text);
+        return open_raw(ctx, raw_arg, raw_mode, binary, owns, opener);
     }
     let update = mode_text.contains('+');
     let text_output = !binary && !update && mode_text.contains(['w', 'a', 'x']);
@@ -309,7 +383,7 @@ pub(in crate::dynamic) fn open(
         && !update
         && !numeric
         && matches!(ctx.heap.get(ctx.scalar_value(raw_arg)), Value::Bytes(_));
-    if binary && update && buffering == 1 {
+    if binary && buffering == 1 {
         ctx.emit_builtin_warning(
             crate::objects::exceptions::Kind::RuntimeWarning,
             "line buffering (buffering=1) isn't supported in binary mode, the default buffer size will be used",
@@ -317,59 +391,52 @@ pub(in crate::dynamic) fn open(
         )?;
     }
     let fd = descriptor_from_argument(ctx, raw_arg);
-    if fd.is_some() || text_output || text_input_with_newline || binary_bytes_path || update {
+    if opener.is_some()
+        || fd.is_some()
+        || text_output
+        || text_input_with_newline
+        || binary_bytes_path
+        || update
+        || (binary && buffering == 1)
+    {
         if fd.is_some_and(|fd| fd < 0) {
             return Err(Error::new("ValueError", "negative file descriptor"));
         }
         let mode_text = mode.map(|v| ctx.str_value(v)).transpose()?.unwrap_or("r");
-        if fd.is_some() && update && !binary {
-            return Err(Error::new(
-                "NotImplementedError",
-                "buffered update descriptors are unsupported",
-            ));
-        }
         let reading = mode_text.contains('r');
-        let raw_mode = mode_text.replace('t', "");
-        if buffering > 0 && !update {
-            return Err(Error::new(
-                "ValueError",
-                "explicit buffer sizes are unsupported",
-            ));
-        }
+        let raw_mode = raw_open_mode(mode_text);
         ctx.module("io")?;
         let raw = ctx.instance(ctx.builtins["_io.FileIO"], None);
         initialize_file(
             ctx,
             raw,
             raw_arg,
-            self::mode(&raw_mode),
+            &raw_mode,
             owns,
             DescriptorLookup::Resolved(fd),
-            None,
+            opener,
             None,
         )?;
         let handle = state(ctx, raw).expect("initialized FileIO");
-        let buffer = if update {
-            let capacity = if buffering > 1 {
-                buffering as usize
-            } else {
-                crate::text_output::binary_capacity(handle.blksize.get().into())
-            };
-            let result = super::BufferedFd::update(raw, handle.clone(), capacity)
-                .and_then(|buffer| files::BinaryFile::Descriptor(buffer).into_value())
-                .and_then(|value| ctx.heap.alloc_file_writer(value));
-            if result.is_err() {
-                let _ = handle.close();
-            }
-            result?
+        let capacity = if buffering > 1 {
+            buffering as usize
         } else {
-            buffered_descriptor(ctx, raw, handle, reading)?
+            crate::text_output::binary_capacity(handle.blksize.get().into())
         };
+        let line_buffering =
+            buffering == 1 || (!binary && buffering < 0 && handle.fd.get().is_some_and(os::isatty));
+        let buffer = if update {
+            super::BufferedFd::update(raw, handle, capacity)
+        } else {
+            super::BufferedFd::new(raw, handle, reading, capacity)
+        }
+        .and_then(|buffer| allocate_buffer(ctx, buffer))
+        .map_err(|error| close_on_error(ctx, raw, error))?;
         if binary {
             return Ok(buffer);
         }
         let wrapper = ctx.builtins["_io.TextIOWrapper"];
-        let result = ctx
+        let stream = ctx
             .call(
                 wrapper,
                 vec![
@@ -377,21 +444,21 @@ pub(in crate::dynamic) fn open(
                     encoding.unwrap_or(NONE),
                     errors.unwrap_or(NONE),
                     newline.unwrap_or(NONE),
-                    builtins::boolean(buffering == 1),
+                    builtins::boolean(line_buffering),
                 ],
                 Vec::new(),
             )
-            .and_then(|stream| {
-                let mode = mode
-                    .map(|id| ctx.scalar_value(id))
-                    .unwrap_or_else(|| ctx.text("r"));
-                ctx.set_attr(stream, "mode", mode)?;
-                Ok(stream)
-            });
-        if result.is_err() {
-            let _ = state(ctx, raw).expect("initialized FileIO").close();
-        }
-        return result;
+            .map_err(|error| close_on_error(ctx, buffer, error))?;
+        // open() gives TextIOWrapper a new exact str preserving the caller's spelling.
+        let spelling = mode
+            .map(|id| ctx.str_value(id))
+            .transpose()?
+            .unwrap_or("r")
+            .to_owned();
+        let mode = ctx.text(spelling);
+        ctx.set_attr(stream, "mode", mode)
+            .map_err(|error| close_on_error(ctx, stream, error))?;
+        return Ok(stream);
     }
     let filename = if numeric {
         super::super::posixpath::fspath(ctx, raw_arg)?
@@ -437,7 +504,6 @@ pub(in crate::dynamic) fn open(
             "text files require UTF-8 encoding",
         ));
     }
-    let writing = mode.contains(['w', 'a', 'x']);
     let file = match mode {
         "r" | "rt" | "tr" => crate::objects::TextFile::open(path, 0)
             .map(|file| {
@@ -448,8 +514,7 @@ pub(in crate::dynamic) fn open(
             .and_then(files::BinaryFile::into_value),
     };
     match file {
-        Ok(file) if writing => ctx.heap.alloc_file_writer(file),
-        Ok(file) => Ok(ctx.alloc(file)),
+        Ok(file) => ctx.heap.alloc_file_writer(file),
         Err(error) => Err(ctx.with_open_filename(error, raw_arg)?),
     }
 }
@@ -460,6 +525,7 @@ fn open_raw(
     raw_mode: String,
     binary: bool,
     owns: bool,
+    opener: Option<Id>,
 ) -> Result<Id> {
     // CPython creates/truncates the raw file before rejecting unbuffered text.
     ctx.module("io")?;
@@ -468,13 +534,17 @@ fn open_raw(
     let mode = ctx.text(raw_mode);
     let file = ctx.call(
         class,
-        vec![filename, mode, builtins::boolean(owns)],
+        vec![
+            filename,
+            mode,
+            builtins::boolean(owns),
+            opener.unwrap_or(NONE),
+        ],
         Vec::new(),
     )?;
     if !binary {
-        let raw = state(ctx, file).unwrap();
-        raw.close()?;
-        return Err(Error::new("ValueError", "can't have unbuffered text I/O"));
+        let error = Error::new("ValueError", "can't have unbuffered text I/O");
+        return Err(close_on_error(ctx, file, error));
     }
     Ok(file)
 }
@@ -492,36 +562,43 @@ fn initialize(ctx: &mut Context, receiver: Id, args: &[Id], kwargs: &[(String, I
             "FileIO() missing required argument 'file' (pos 1)",
         )
     })?;
-    let selected_mode = mode(
-        mode_arg
-            .map(|v| ctx.str_value(v))
-            .transpose()?
-            .unwrap_or("r"),
-    );
+    let selected_mode = if let Some(mode) = mode_arg {
+        check_string_arg(ctx, mode, "FileIO", "mode", "str")?;
+        ctx.str_value(mode)?.to_owned()
+    } else {
+        String::from("r")
+    };
     let owns = closefd.map(|v| ctx.truth(v)).transpose()?.unwrap_or(true);
     initialize_file(
         ctx,
         receiver,
         path,
-        selected_mode,
+        &selected_mode,
         owns,
         DescriptorLookup::FromArgument,
-        opener,
+        opener.filter(|&id| id != NONE),
         None,
     )
 }
 
-fn buffered_descriptor(
-    ctx: &mut Context,
-    raw: Id,
-    handle: Rc<RawFile>,
-    reading: bool,
-) -> Result<Id> {
-    let capacity = crate::text_output::binary_capacity(handle.blksize.get().into());
-    let buffer =
-        files::BinaryFile::Descriptor(super::BufferedFd::new(raw, handle, reading, capacity))
-            .into_value()?;
-    ctx.heap.alloc_file_writer(buffer)
+/// Close the last successfully constructed layer and preserve a secondary close failure.
+fn close_on_error(ctx: &mut Context, layer: Id, error: Error) -> Error {
+    let original = ctx.raised_instance(error.clone());
+    ctx.heap.keep(original);
+    let result = ctx
+        .lookup_attr(layer, "close")
+        .and_then(|close| ctx.call(close, Vec::new(), Vec::new()));
+    if let Err(mut closing) = result {
+        closing.context = original;
+        closing
+    } else {
+        error
+    }
+}
+
+fn allocate_buffer(ctx: &mut Context, buffer: super::BufferedFd) -> Result<Id> {
+    let value = files::BinaryFile::Descriptor(buffer).into_value()?;
+    ctx.heap.alloc_file_writer(value)
 }
 
 impl Context {
@@ -538,7 +615,7 @@ impl Context {
             self,
             raw,
             name,
-            mode("wb"),
+            "wb",
             true,
             DescriptorLookup::Resolved(Some(fd)),
             None,
@@ -547,7 +624,9 @@ impl Context {
         // FileIO takes ownership of a passed descriptor only after successful initialization.
         let _ = file.into_raw_fd();
         let handle = state(self, raw).expect("initialized FileIO");
-        let result = buffered_descriptor(self, raw, handle.clone(), false);
+        let capacity = crate::text_output::binary_capacity(handle.blksize.get().into());
+        let result = super::BufferedFd::new(raw, handle.clone(), false, capacity)
+            .and_then(|buffer| allocate_buffer(self, buffer));
         if result.is_err() {
             handle.close()?;
         }
@@ -571,7 +650,7 @@ pub(in crate::dynamic) fn popen_pipe(
         ctx,
         raw,
         number,
-        self::mode(mode),
+        mode,
         true,
         DescriptorLookup::Resolved(Some(fd)),
         None,
@@ -586,112 +665,161 @@ pub(in crate::dynamic) fn popen_pipe(
         .alloc_file_writer(files::BinaryFile::Descriptor(buffer).into_value()?)
 }
 
+/// Validate an fd returned by a Python opener, which must be an actual integer.
+fn call_opener(ctx: &mut Context, callable: Id, path: Id, flags: Id) -> Result<RawFd> {
+    let result = ctx.call(callable, vec![path, flags], Vec::new())?;
+    let integer = ctx
+        .as_int(result)
+        .map_err(|_| Error::new("TypeError", "expected integer from opener"))?;
+    let fd = integer
+        .to_i64()
+        .and_then(|n| i32::try_from(n).ok())
+        .ok_or_else(|| Error::new("OverflowError", "Python int too large to convert to C int"))?;
+    if fd < 0 {
+        return Err(Error::new("ValueError", format!("opener returned {fd}")));
+    }
+    Ok(fd)
+}
+
+/// Translate the parsed FileIO mode into the flags passed to an opener.
+fn opener_flags(mode: u32, update: bool) -> i32 {
+    let access = if update {
+        libc::O_RDWR
+    } else if mode == 0 {
+        libc::O_RDONLY
+    } else {
+        libc::O_WRONLY
+    };
+    let create = match mode {
+        0 => 0,
+        1 => libc::O_CREAT | libc::O_TRUNC,
+        2 => libc::O_CREAT | libc::O_APPEND,
+        3 => libc::O_CREAT | libc::O_EXCL,
+        _ => unreachable!("parsed FileIO mode"),
+    };
+    access | create | libc::O_CLOEXEC
+}
+
+fn descriptor_block_size(ctx: &mut Context, path: Id, fd: RawFd) -> Result<i64> {
+    let mut stat = std::mem::MaybeUninit::<libc::stat>::uninit();
+    // SAFETY: fstat accepts any descriptor number and writes into this buffer.
+    let blksize = if unsafe { libc::fstat(fd, stat.as_mut_ptr()) } == 0 {
+        // SAFETY: fstat initialized stat on success.
+        let stat = unsafe { stat.assume_init() };
+        if stat.st_mode & libc::S_IFMT == libc::S_IFDIR {
+            let error = os_error(std::io::Error::from_raw_os_error(libc::EISDIR));
+            return Err(ctx.with_errno_filename(error, path)?);
+        }
+        file_block_size(stat.st_blksize)
+    } else {
+        let err = std::io::Error::last_os_error();
+        if err.raw_os_error() == Some(libc::EBADF) {
+            return Err(os_error(err));
+        }
+        super::DEFAULT_BUFFER_SIZE
+    };
+    Ok(blksize)
+}
+
 #[allow(clippy::too_many_arguments)]
 fn initialize_file(
     ctx: &mut Context,
     receiver: Id,
     path: Id,
-    selected_mode: Result<(u32, &'static str)>,
+    mode_text: &str,
     owns: bool,
     descriptor: DescriptorLookup,
     opener: Option<Id>,
     pipe: Option<BoxedPipe>,
 ) -> Result<Id> {
-    if let Some(raw) = state(ctx, receiver) {
+    // An opener, audit hook, or path protocol can reinitialize this same receiver.
+    let raw = if let Some(raw) = state(ctx, receiver) {
         raw.close()?;
-    }
-    if matches!(ctx.heap.get(path), Value::Bool(_)) {
-        let location = ctx.heap.current_location();
-        crate::objects::runtime_warning(
-            "_io",
-            location.as_ref().map_or("_io", |p| p.file.as_ref()),
-            location.as_ref().map_or(1, |p| p.line as isize),
-            "bool is used as a file descriptor",
-        )?;
-    }
+        *raw.pipe.borrow_mut() = pipe;
+        raw
+    } else {
+        let raw = Rc::new(RawFile {
+            fd: Cell::new(None),
+            closefd: Cell::new(true),
+            pipe: RefCell::new(pipe),
+            mode: Cell::new(RawMode::default()),
+            blksize: Cell::new(super::DEFAULT_BUFFER_SIZE),
+            repr_active: Cell::new(false),
+        });
+        let Value::Instance { memory_stream, .. } = ctx.heap.get_mut(receiver) else {
+            unreachable!("FileIO is an IOBase instance")
+        };
+        *memory_stream = Some(MemoryStream::Raw(raw.clone()));
+        raw
+    };
+    warn_bool_fd(ctx, path)?;
     let descriptor = match descriptor {
         DescriptorLookup::FromArgument => descriptor_from_argument(ctx, path),
         DescriptorLookup::Resolved(fd) => fd,
     };
-    let encoded;
     let pathname = match descriptor {
         Some(fd) if fd < 0 => return Err(Error::new("ValueError", "negative file descriptor")),
         Some(_) => None,
         None => {
             let spelling = super::super::posixpath::fspath(ctx, path)?;
-            let bytes: &[u8] = match ctx.heap.get(ctx.scalar_value(spelling)) {
-                Value::Str(text) => text.as_bytes(),
-                Value::Bytes(bytes) => bytes,
-                Value::SurrogateStr(_) => {
-                    encoded = ctx.encode_filesystem_string(spelling)?;
-                    &encoded
-                }
-                _ => unreachable!("filesystem spelling"),
-            };
-            if bytes.contains(&0) {
-                return Err(Error::new("ValueError", "embedded null byte"));
-            }
-            Some(bytes)
+            Some(super::super::os::c_path(
+                ctx,
+                spelling,
+                "embedded null byte",
+            )?)
         }
     };
-    // Once path conversion succeeds, a failed reinitialization drops the old stat.
-    if let Some(raw) = state(ctx, receiver) {
-        raw.blksize.set(super::DEFAULT_BUFFER_SIZE);
-    }
-    let (flags, mode) = selected_mode?;
-    let (fd, blksize) = if let Some(filename) = pathname {
-        if !owns {
-            return Err(Error::new(
-                "ValueError",
-                "Cannot use closefd=False with file name",
-            ));
-        }
-        if opener.is_some_and(|v| v != NONE) {
-            return Err(Error::new(
-                "TypeError",
-                "custom FileIO openers are unsupported",
-            ));
-        }
-        match crate::objects::open_raw_file(filename, flags, mode.ends_with('+')) {
-            Ok((file, metadata)) => (file.into_raw_fd(), file_block_size(metadata.blksize())),
-            Err(error) => return Err(ctx.with_errno_filename(error.into(), path)?),
-        }
-    } else {
-        let fd = descriptor.unwrap();
-        let mut stat = std::mem::MaybeUninit::<libc::stat>::uninit();
-        // SAFETY: fstat accepts any descriptor number and writes into this buffer.
-        let blksize = if unsafe { libc::fstat(fd, stat.as_mut_ptr()) } == 0 {
-            // SAFETY: fstat initialized stat on success.
-            let stat = unsafe { stat.assume_init() };
-            if stat.st_mode & libc::S_IFMT == libc::S_IFDIR {
-                let error = os_error(std::io::Error::from_raw_os_error(libc::EISDIR));
-                return Err(ctx.with_errno_filename(error, path)?);
-            }
-            file_block_size(stat.st_blksize)
+    // Only a pathname acquisition transfers ownership during initialization. A numeric
+    // argument remains the caller's if a later check or the name setter fails.
+    let mut acquired = false;
+    let initialized = (|| {
+        let mut access = raw.mode.get();
+        let parsed = access.parse(mode_text);
+        raw.mode.set(access);
+        let flags = parsed?;
+        let update = access.readable && access.writable;
+        let opener = if let Some(callable) = opener {
+            let spelling = ctx.text(mode_text);
+            let word = ctx.int(i64::from(opener_flags(flags, update)));
+            super::super::audit::event(ctx, "open", &[path, spelling, word])?;
+            Some((callable, word))
         } else {
-            let err = std::io::Error::last_os_error();
-            if err.raw_os_error() == Some(libc::EBADF) {
-                return Err(os_error(err));
-            }
-            super::DEFAULT_BUFFER_SIZE
+            None
         };
-        (fd, blksize)
-    };
-    let raw = Rc::new(RawFile {
-        fd: Cell::new(Some(fd)),
-        closefd: owns,
-        pipe,
-        mode,
-        blksize: Cell::new(blksize),
-        repr_active: Cell::new(false),
-    });
-    let Value::Instance { memory_stream, .. } = ctx.heap.get_mut(receiver) else {
-        unreachable!("FileIO is an IOBase instance")
-    };
-    *memory_stream = Some(MemoryStream::Raw(raw.clone()));
-    let initialized = ctx.set_attr(receiver, "name", path).and_then(|()| {
-        if descriptor.is_some() && flags == 2 {
-            // Append seeks a passed descriptor to EOF, but does not alter its OS flags.
+        let blksize = if let Some(filename) = pathname {
+            raw.closefd.set(true);
+            if !owns {
+                return Err(Error::new(
+                    "ValueError",
+                    "Cannot use closefd=False with file name",
+                ));
+            }
+            if let Some((callable, word)) = opener {
+                let fd = call_opener(ctx, callable, path, word)?;
+                raw.fd.set(Some(fd));
+                acquired = true;
+                os::INHERITABLE.update(fd, false)?;
+                descriptor_block_size(ctx, path, fd)?
+            } else {
+                let (file, metadata) =
+                    match crate::objects::open_raw_file(filename.as_bytes(), flags, update) {
+                        Ok(opened) => opened,
+                        Err(error) => return Err(ctx.with_errno_filename(error.into(), path)?),
+                    };
+                raw.fd.set(Some(file.into_raw_fd()));
+                acquired = true;
+                file_block_size(metadata.blksize())
+            }
+        } else {
+            let fd = descriptor.expect("numeric FileIO argument");
+            raw.closefd.set(owns);
+            raw.fd.set(Some(fd));
+            descriptor_block_size(ctx, path, fd)?
+        };
+        raw.blksize.set(blksize);
+        ctx.set_attr(receiver, "name", path)?;
+        if raw.mode.get().appending {
+            // Seek without changing kernel flags, including if the opener returned a pipe.
             let active_fd = raw.live_fd().unwrap_or(-1);
             // SAFETY: lseek accepts any descriptor number and retains no pointers.
             if unsafe { libc::lseek(active_fd, 0, libc::SEEK_END) } < 0 {
@@ -702,14 +830,16 @@ fn initialize_file(
             }
         }
         Ok(())
-    });
+    })();
     if let Err(error) = initialized {
-        if descriptor.is_some() {
-            // Only a successful initialization takes ownership of the supplied fd.
-            raw.fd.take();
-            raw.blksize.set(super::DEFAULT_BUFFER_SIZE);
-        } else {
-            raw.close()?;
+        raw.blksize.set(super::DEFAULT_BUFFER_SIZE);
+        if let Some(fd) = raw.fd.take()
+            && acquired
+            && let Err(close_error) = os::close(fd)
+        {
+            let mut close_error: Error = close_error.into();
+            close_error.context = ctx.raised_instance(error);
+            return Err(close_error);
         }
         return Err(error);
     }
@@ -799,8 +929,12 @@ pub(super) fn call(
     let is_closed = raw.as_ref().is_none_or(|raw| raw.live_fd().is_none());
     match name {
         "closed" => return Ok(builtins::boolean(is_closed)),
-        "closefd" => return Ok(builtins::boolean(raw.as_ref().is_none_or(|r| r.closefd))),
-        "mode" => return Ok(ctx.text(raw.as_ref().map_or("wb", |raw| raw.mode))),
+        "closefd" => {
+            return Ok(builtins::boolean(
+                raw.as_ref().is_none_or(|r| r.closefd.get()),
+            ));
+        }
+        "mode" => return Ok(ctx.text(raw.as_ref().map_or("wb", |raw| raw.mode.get().spelling()))),
         "_blksize" => {
             return Ok(ctx.int(
                 raw.as_ref()
@@ -848,8 +982,8 @@ pub(super) fn call(
             let shown: String = shown?;
             return Ok(ctx.text(format!(
                 "<{class} {shown} mode='{}' closefd={}>",
-                raw.mode,
-                if raw.closefd { "True" } else { "False" }
+                raw.mode.get().spelling(),
+                if raw.closefd.get() { "True" } else { "False" }
             )));
         }
         "close" if is_closed => return Ok(NONE),

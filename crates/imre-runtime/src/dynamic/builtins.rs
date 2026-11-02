@@ -213,7 +213,8 @@ pub(super) fn constructor_owner(name: &str) -> Option<&str> {
     (matches!(
         owner,
         "object" | "dict" | "float" | "function" | "int" | "str" | super::thread_local::CLASS
-    ) || is_exception(owner))
+    ) || is_exception(owner)
+        || crate::objects::HashState::is_provider_class(owner))
     .then_some(owner)
 }
 
@@ -369,7 +370,7 @@ pub(super) fn set_operator(method: &str) -> Option<&'static str> {
     })
 }
 
-pub(super) const MEMORYVIEW_METHODS: &[&str] = &["release"];
+pub(super) const MEMORYVIEW_METHODS: &[&str] = &["__enter__", "__exit__", "release"];
 
 pub(super) const BYTEARRAY_METHODS: &[&str] = &[
     "__repr__",
@@ -595,6 +596,8 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
                 "add"
                     | "copy"
                     | "discard"
+                    | "difference"
+                    | "remove"
                     | "difference_update"
                     | "update"
                     | "issuperset"
@@ -609,7 +612,13 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         Value::Set { frozen: true, .. }
             if matches!(
                 attr,
-                "copy" | "issuperset" | "issubset" | "__contains__" | "__reduce__" | "__repr__"
+                "copy"
+                    | "difference"
+                    | "issuperset"
+                    | "issubset"
+                    | "__contains__"
+                    | "__reduce__"
+                    | "__repr__"
             ) =>
         {
             "frozenset"
@@ -674,7 +683,7 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         Value::RegexPattern(_)
             if matches!(
                 attr,
-                "findall" | "finditer" | "match" | "fullmatch" | "search" | "split" | "sub" | "scanner"
+                "findall" | "finditer" | "match" | "fullmatch" | "search" | "split" | "sub" | "subn" | "scanner"
             ) =>
         {
             "pattern"
@@ -1242,18 +1251,28 @@ pub(super) fn call(
                 if values.len() != required {
                     return Err(type_error(format!("{message}, got {}", values.len())));
                 }
-                let Value::GetSetDescriptor { owner: "int", name: field, .. } = *ctx.heap.get(descriptor) else {
-                    return Err(type_error("expected an integer getset descriptor"));
+                let Value::GetSetDescriptor {
+                    owner, name: field, ..
+                } = *ctx.heap.get(descriptor)
+                else {
+                    return Err(type_error("expected a getset descriptor"));
                 };
-                if !ctx.builtin_slot_accepts(values[0], "int") {
+                let accepts = if owner == "int" {
+                    ctx.builtin_slot_accepts(values[0], owner)
+                } else if crate::objects::HashState::is_provider_class(owner) {
+                    ctx.type_name(values[0]) == owner
+                } else {
+                    return Err(type_error("expected a read-only getset descriptor"));
+                };
+                if !accepts {
                     return Err(type_error(format!(
-                        "descriptor '{field}' for 'int' objects doesn't apply to a '{}' object",
+                        "descriptor '{field}' for '{owner}' objects doesn't apply to a '{}' object",
                         ctx.type_name(values[0])
                     )));
                 }
                 Err(Error::new(
                     "AttributeError",
-                    format!("attribute '{field}' of 'int' objects is not writable"),
+                    format!("attribute '{field}' of '{owner}' objects is not writable"),
                 ))
             }
             "_int_getset" => integer::rational_field(ctx, method, args),
@@ -1320,9 +1339,18 @@ pub(super) fn call(
             "list" | "tuple" | "dict" | "set" | "frozenset" => {
                 collections::method(ctx, name, args, kwargs)
             }
-            "memoryview" if method == "release" => {
+            "memoryview" if MEMORYVIEW_METHODS.contains(&method) => {
                 positional(name, kwargs)?;
-                arity(name, args, 1, 1)?;
+                // CPython's __exit__ ignores any positional exception information.
+                let max_args = if method == "__exit__" { usize::MAX } else { 1 };
+                arity(name, args, 1, max_args)?;
+                let Value::MemoryView { owner, .. } = ctx.heap.get_mut(args[0]) else {
+                    return Err(type_error("expected memoryview"));
+                };
+                if method == "__enter__" {
+                    Context::memoryview_owner(*owner)?;
+                    return Ok(args[0]);
+                }
                 let exports = ctx
                     .buffer_exports
                     .iter()
@@ -1335,9 +1363,6 @@ pub(super) fn call(
                         format!("memoryview has {exports} exported {unit}"),
                     ));
                 }
-                let Value::MemoryView { owner, .. } = ctx.heap.get_mut(args[0]) else {
-                    return Err(type_error("expected memoryview"));
-                };
                 *owner = None;
                 Ok(NONE)
             }
@@ -1419,7 +1444,9 @@ pub(super) fn call(
         "type" => match args {
             [object] if kwargs.is_empty() => ctx.exact_type(*object),
             [_] => Err(type_error("type() takes no keyword arguments")),
-            [name, bases, namespace] => ctx.type_from_namespace(*name, *bases, *namespace, kwargs),
+            [name, bases, namespace] => {
+                ctx.type_from_namespace(None, *name, *bases, *namespace, kwargs)
+            }
             _ => Err(type_error("type() takes 1 or 3 arguments")),
         },
         "super" => {
@@ -1815,10 +1842,10 @@ pub(super) fn call(
             })?;
             ctx.check_buffer_exporter(object)?;
             let owner = match ctx.heap.get(ctx.scalar_value(object)) {
-                Value::Bytes(_) => object,
+                Value::Bytes(_) | Value::ByteArray(_) => object,
                 Value::MemoryView { owner, .. } => Context::memoryview_owner(*owner)?,
                 Value::Array(array) if array.view_layout().0 != "w" => object,
-                Value::Array(_) | Value::ByteArray(_) => {
+                Value::Array(_) => {
                     return Err(Error::new(
                         "NotImplementedError",
                         "memoryview of a mutable buffer is unsupported",
@@ -1832,8 +1859,8 @@ pub(super) fn call(
                 }
             };
             let storage = ctx.scalar_value(owner);
-            if let Value::Array(array) = ctx.heap.get_mut(storage) {
-                array.viewed = true;
+            if matches!(ctx.heap.get(storage), Value::Array(_) | Value::ByteArray(_)) {
+                ctx.heap.note_buffer_view(storage);
             }
             Ok(ctx.alloc(Value::MemoryView {
                 owner: Some(owner),

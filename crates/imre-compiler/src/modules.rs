@@ -310,10 +310,8 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
         )),
         "socketserver" => Some((
             "socketserver.py",
-            concat!(
-                include_str!("../stdlib/socketserver.py"),
-                "\n",
-                include_str!("../stdlib/socketserver_threading.py"),
+            include_str!(
+                "../../../benchmarks/cpython_stdlib/full/socketserver/upstream/Lib/socketserver.py"
             ),
         )),
         // CPython 3.14.5 Lib/string/__init__.py, blob eab5067c9b133ea1210efacd92eb5f69c2336236.
@@ -530,6 +528,7 @@ pub(crate) enum IntrinsicModule {
     SocketNative,
     Hashlib,
     Blake2,
+    Sha3,
     Hmac,
     Types,
     Base64,
@@ -573,6 +572,7 @@ pub(crate) enum Intrinsic {
     BuiltinsLast,
     BuiltinsLen,
     BuiltinsAscii,
+    BuiltinsHex,
     SysDisplayHook,
     ArgumentParser,
     ArgparseNamespace,
@@ -1023,6 +1023,7 @@ impl IntrinsicModule {
             "_socket" => Some(Self::SocketNative),
             "hashlib" => Some(Self::Hashlib),
             "_blake2" => Some(Self::Blake2),
+            "_sha3" => Some(Self::Sha3),
             "hmac" => Some(Self::Hmac),
             "base64" => Some(Self::Base64),
             "binascii" => Some(Self::Binascii),
@@ -1126,6 +1127,9 @@ impl IntrinsicModule {
         let symbol = match (self, name) {
             (Self::Array, "array") => Intrinsic::NominalClass("array.array"),
             (Self::Numbers, "Number") => Intrinsic::Number,
+            (Self::Imp, "extension_suffixes") => {
+                Intrinsic::ObjectRuntimeExport("_imp.extension_suffixes")
+            }
             (Self::Imp, "is_frozen") => Intrinsic::ObjectRuntimeExport("_imp.is_frozen"),
             (Self::Imp, "_override_frozen_modules_for_tests") => {
                 Intrinsic::ObjectRuntimeExport("_imp._override_frozen_modules_for_tests")
@@ -1162,6 +1166,7 @@ impl IntrinsicModule {
             (Self::CodecsNative, "encode") => Intrinsic::ObjectRuntimeExport("_codecs.encode"),
             (Self::Pickle, "dumps") => Intrinsic::ObjectRuntimeExport("pickle.dumps"),
             (Self::Pickle, "loads") => Intrinsic::ObjectRuntimeExport("pickle.loads"),
+            (Self::Pickle, "_loads") => Intrinsic::ObjectRuntimeExport("pickle._loads"),
             (Self::Pickle, "UnpicklingError") => {
                 Intrinsic::ObjectRuntimeExport("pickle.UnpicklingError")
             }
@@ -1187,6 +1192,9 @@ impl IntrinsicModule {
             }
             (Self::CollectionsAbc, "AsyncGenerator") => {
                 Intrinsic::ObjectRuntimeExport("collections.abc.AsyncGenerator")
+            }
+            (Self::CollectionsAbc, "ByteString") => {
+                Intrinsic::ObjectRuntimeExport("collections.abc.ByteString")
             }
             (Self::CollectionsAbc, "Buffer") => {
                 Intrinsic::ObjectRuntimeExport("collections.abc.Buffer")
@@ -1360,6 +1368,9 @@ impl IntrinsicModule {
             }
             (Self::ImportlibMetadata, "entry_points") => {
                 Intrinsic::ObjectRuntimeExport("importlib.metadata.entry_points")
+            }
+            (Self::ImportlibMachinery, "FileFinder") => {
+                Intrinsic::ObjectRuntimeExport("importlib.machinery.FileFinder")
             }
             (Self::ImportlibMachinery, "ModuleSpec") => Intrinsic::ModuleSpec,
             (Self::ImportlibMachinery, "all_suffixes") => {
@@ -1702,6 +1713,7 @@ impl IntrinsicModule {
             (Self::Builtins, "_") => Intrinsic::BuiltinsLast,
             (Self::Builtins, "len") => Intrinsic::BuiltinsLen,
             (Self::Builtins, "ascii") => Intrinsic::BuiltinsAscii,
+            (Self::Builtins, "hex") => Intrinsic::BuiltinsHex,
             (Self::Sys, "argv") => Intrinsic::Argv,
             (Self::Sys, "orig_argv") => Intrinsic::OrigArgv,
             (Self::Sys, "executable") => Intrinsic::SysExecutable,
@@ -1812,6 +1824,9 @@ impl IntrinsicModule {
             (Self::Typing | Self::CollectionsAbc, "Iterator") => Intrinsic::Iterator,
             (Self::Io, "UnsupportedOperation") => Intrinsic::UnsupportedOperation,
             (Self::Gzip, "open") => Intrinsic::GzipOpen,
+            (Self::Types, "new_class") => Intrinsic::ObjectRuntimeExport("types.new_class"),
+            (Self::Types, "prepare_class") => Intrinsic::ObjectRuntimeExport("types.prepare_class"),
+            (Self::Types, "resolve_bases") => Intrinsic::ObjectRuntimeExport("types.resolve_bases"),
             (Self::Types, "MappingProxyType") => {
                 Intrinsic::ObjectRuntimeExport("types.MappingProxyType")
             }
@@ -1827,6 +1842,14 @@ impl IntrinsicModule {
             (Self::Threading, "_RLock") => Intrinsic::ObjectRuntimeExport("threading._RLock"),
             (Self::Threading, "_PyRLock") => Intrinsic::ObjectRuntimeExport("threading._PyRLock"),
             (Self::Threading, "_CRLock") => Intrinsic::ObjectRuntimeExport("threading._CRLock"),
+            (Self::Threading, "Semaphore") => Intrinsic::ObjectRuntimeExport("threading.Semaphore"),
+            (Self::Threading, "BoundedSemaphore") => {
+                Intrinsic::ObjectRuntimeExport("threading.BoundedSemaphore")
+            }
+            (Self::Threading, "Barrier") => Intrinsic::ObjectRuntimeExport("threading.Barrier"),
+            (Self::Threading, "BrokenBarrierError") => {
+                Intrinsic::ObjectRuntimeExport("threading.BrokenBarrierError")
+            }
             (Self::Threading, "Condition") => Intrinsic::ObjectRuntimeExport("threading.Condition"),
             (Self::Threading, "Event") => Intrinsic::ObjectRuntimeExport("threading.Event"),
             (Self::Threading, "Thread") => Intrinsic::ObjectRuntimeExport("threading.Thread"),
@@ -2033,6 +2056,16 @@ impl IntrinsicModule {
                 _ => return None,
             }),
             (Self::Codecs, "getwriter") => Intrinsic::CodecGetWriter,
+            (Self::Sha3, "sha3_224") => Intrinsic::ObjectRuntimeExport("_sha3.sha3_224"),
+            (Self::Sha3, "sha3_256") => Intrinsic::ObjectRuntimeExport("_sha3.sha3_256"),
+            (Self::Sha3, "sha3_384") => Intrinsic::ObjectRuntimeExport("_sha3.sha3_384"),
+            (Self::Sha3, "sha3_512") => Intrinsic::ObjectRuntimeExport("_sha3.sha3_512"),
+            (Self::Sha3, "shake_128") => Intrinsic::ObjectRuntimeExport("_sha3.shake_128"),
+            (Self::Sha3, "shake_256") => Intrinsic::ObjectRuntimeExport("_sha3.shake_256"),
+            (Self::Sha3, "implementation") => {
+                Intrinsic::ObjectRuntimeExport("_sha3.implementation")
+            }
+            (Self::Sha3, "_GIL_MINSIZE") => Intrinsic::ObjectRuntimeExport("_sha3._GIL_MINSIZE"),
             (Self::Blake2, "blake2b") => Intrinsic::ObjectRuntimeExport("_blake2.blake2b"),
             (Self::Blake2, "blake2s") => Intrinsic::ObjectRuntimeExport("_blake2.blake2s"),
             (Self::Blake2, "_GIL_MINSIZE") => {
@@ -2115,6 +2148,12 @@ impl IntrinsicModule {
             (Self::Io, "SEEK_END") => Intrinsic::IntConstant(2),
             (Self::Io | Self::IoNative, "text_encoding") => {
                 Intrinsic::ObjectRuntimeExport("_io.text_encoding")
+            }
+            (Self::Io, "IncrementalNewlineDecoder") => {
+                Intrinsic::ObjectRuntimeExport("io.IncrementalNewlineDecoder")
+            }
+            (Self::IoNative, "IncrementalNewlineDecoder") => {
+                Intrinsic::ObjectRuntimeExport("_io.IncrementalNewlineDecoder")
             }
             (Self::Io, "TextIOWrapper") => Intrinsic::ObjectRuntimeExport("io.TextIOWrapper"),
             (Self::IoNative, "TextIOWrapper") => {
@@ -4538,6 +4577,7 @@ impl<'a> Loader<'a> {
                 module,
                 IntrinsicModule::Ast
                     | IntrinsicModule::Blake2
+                    | IntrinsicModule::Sha3
                     | IntrinsicModule::Atexit
                     | IntrinsicModule::SocketNative
                     | IntrinsicModule::Imp

@@ -47,13 +47,17 @@ def __get_builtin_constructor(name):
 
 
 __block_openssl_constructor = {'blake2b', 'blake2s'}
+__sha3_provider_names = {
+    'sha3_224', 'sha3_256', 'sha3_384', 'sha3_512',
+    'shake_128', 'shake_256',
+}
 
 
 def __hash_new(name, *args, **kwargs):
     """new(name, data=b'') - Return a new hashing object using the named algorithm;
     optionally initialized with data (which must be a bytes-like object).
     """
-    if name in __block_openssl_constructor:
+    if name in __block_openssl_constructor or name in __sha3_provider_names:
         return __get_builtin_constructor(name)(*args, **kwargs)
     return _native_new(name, *args, **kwargs)
 
@@ -62,10 +66,11 @@ new = __hash_new
 del __hash_new
 
 
-# Like CPython, bind the named constructors at module initialization. new()
-# still consults the live constructor cache on each BLAKE2 request.
-try:
-    blake2b = __get_builtin_constructor('blake2b')
-    blake2s = __get_builtin_constructor('blake2s')
-except ValueError:
-    pass
+# The named constructors keep the provider selected at import time. new()
+# looks up the live builtin constructor each time, as in CPython's fallback.
+for __func_name in __block_openssl_constructor | __sha3_provider_names:
+    try:
+        globals()[__func_name] = __get_builtin_constructor(__func_name)
+    except ValueError:
+        pass
+del __func_name

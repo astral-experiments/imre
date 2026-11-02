@@ -1,4 +1,5 @@
 from _imre_metadata import dedent, filenames as _filenames, zip_names as _zip_names, zip_open as _zip_open, zip_read as _zip_read
+import abc
 from os import fspath
 from os.path import basename, isfile as _is_file, join as _join
 import sys
@@ -22,7 +23,35 @@ def _basename(root):
     return basename(root.rstrip('/'))
 
 
-class Distribution:
+class DeprecatedNonAbstract:
+    def __new__(cls, *args, **kwargs):
+        # Some native builtin bases have no exposed class dictionary.
+        names = {
+            name for base in cls.__mro__ for name in getattr(base, '__dict__', ())
+        }
+        abstract = {
+            name for name in names
+            if getattr(getattr(cls, name), '__isabstractmethod__', False)
+        }
+        if abstract:
+            import warnings
+            warnings.warn(
+                f"Unimplemented abstract methods {abstract}",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+        return super().__new__(cls)
+
+
+class Distribution(DeprecatedNonAbstract):
+    @abc.abstractmethod
+    def read_text(self, filename):
+        pass
+
+    @abc.abstractmethod
+    def locate_file(self, path):
+        pass
+
     @classmethod
     def from_name(cls, name):
         if not name:

@@ -12,13 +12,13 @@ def _boxedResultDetail(error):
 
 
 def _addError(self, test, error):
-    if self.failfast:
+    if getattr(self, "failfast", False):
         self.stop()
     self.errors.append((test, _boxedResultDetail(error)))
 
 
 def _addFailure(self, test, error):
-    if self.failfast:
+    if getattr(self, "failfast", False):
         self.stop()
     self.failures.append((test, _boxedResultDetail(error)))
 
@@ -29,7 +29,7 @@ def _resultExpectedFailure(self, test, error):
 
 def _resultSubTest(self, test, subtest, error):
     if error is not None:
-        if self.failfast:
+        if getattr(self, "failfast", False):
             self.stop()
         problems = self.failures if issubclass(error[0], test.failureException) else self.errors
         problems.append((subtest, _boxedResultDetail(error)))
@@ -80,6 +80,12 @@ def _boxedResultInit(self, stream=None, descriptions=None, verbosity=None):
     self.collectedDurations = []
     self.buffer = False
     self.tb_locals = False
+
+
+def _wasSuccessful(self):
+    """Tells whether or not this result was a success."""
+    return (len(self.failures) == len(self.errors) == 0
+            and (not hasattr(self, "unexpectedSuccesses") or len(self.unexpectedSuccesses) == 0))
 
 
 def _printErrors(self):
@@ -259,6 +265,9 @@ TestResult.addSubTest = _resultSubTest
 TestResult.addError = _addError
 TestResult.addFailure = _addFailure
 TestResult._recordException = _recordBoxedException
+_wasSuccessful.__name__ = "wasSuccessful"
+_wasSuccessful.__qualname__ = "TestResult.wasSuccessful"
+TestResult.wasSuccessful = _wasSuccessful
 TestResult.printErrors = _printErrors
 TextTestResult.__init__ = _boxedTextResultInit
 TextTestResult.addSubTest = _textSubTest

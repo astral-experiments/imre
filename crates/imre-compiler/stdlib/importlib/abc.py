@@ -1,14 +1,36 @@
 """Abstract base classes for the native import system."""
 
 import abc
-import _frozen_importlib_external as _bootstrap_external
+from . import _bootstrap_external
 from ._abc import Loader
 from . import machinery
+
+try:
+    import _frozen_importlib
+except ImportError as exc:
+    if exc.name != '_frozen_importlib':
+        raise
+    _frozen_importlib = None
+try:
+    import _frozen_importlib_external
+except ImportError:
+    _frozen_importlib_external = _bootstrap_external
 
 __all__ = [
     "Loader", "MetaPathFinder", "PathEntryFinder", "ResourceLoader",
     "InspectLoader", "ExecutionLoader", "FileLoader",
 ]
+
+
+def _register(abstract_cls, *classes):
+    for cls in classes:
+        abstract_cls.register(cls)
+        if _frozen_importlib is not None:
+            try:
+                frozen_cls = getattr(_frozen_importlib, cls.__name__)
+            except AttributeError:
+                frozen_cls = getattr(_frozen_importlib_external, cls.__name__)
+            abstract_cls.register(frozen_cls)
 
 
 class MetaPathFinder(metaclass=abc.ABCMeta):
@@ -19,6 +41,9 @@ class MetaPathFinder(metaclass=abc.ABCMeta):
 class PathEntryFinder(metaclass=abc.ABCMeta):
     def invalidate_caches(self):
         pass
+
+
+_register(PathEntryFinder, machinery.FileFinder)
 
 
 class ResourceLoader(Loader):
@@ -49,7 +74,7 @@ class InspectLoader(Loader):
     load_module = _bootstrap_external._LoaderBasics.load_module
 
 
-InspectLoader.register(_bootstrap_external.NamespaceLoader)
+_register(InspectLoader, machinery.NamespaceLoader)
 
 
 class ExecutionLoader(InspectLoader):
@@ -73,4 +98,4 @@ class FileLoader(_bootstrap_external.FileLoader, ResourceLoader, ExecutionLoader
     pass
 
 
-FileLoader.register(machinery.SourceFileLoader)
+_register(FileLoader, machinery.SourceFileLoader)

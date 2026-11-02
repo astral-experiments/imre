@@ -291,6 +291,39 @@ pub(super) fn read_length(ctx: &mut Context, size: Option<Id>) -> Result<i64> {
     })
 }
 
+/// Validate a writable native destination before the file consumes any input.
+pub(super) fn readinto_target(ctx: &Context, object: Id) -> Result<Id> {
+    ctx.check_buffer_exporter(object)?;
+    let owner = match ctx.heap.get(object) {
+        Value::MemoryView {
+            owner: Some(owner), ..
+        } => *owner,
+        _ => object,
+    };
+    let target = ctx.scalar_value(owner);
+    if matches!(ctx.heap.get(target), Value::ByteArray(_) | Value::Array(_)) {
+        return Ok(target);
+    }
+    let kind = if object == NONE {
+        "None"
+    } else {
+        ctx.type_name(object)
+    };
+    Err(Error::new(
+        "TypeError",
+        format!("readinto() argument must be read-write bytes-like object, not {kind}"),
+    ))
+}
+
+pub(super) fn readinto_bytes(ctx: &mut Context, object: Id) -> Result<&mut [u8]> {
+    let target = readinto_target(ctx, object)?;
+    match ctx.heap.get_mut(target) {
+        Value::ByteArray(data) => Ok(data),
+        Value::Array(array) => array.as_bytes_mut(),
+        _ => unreachable!("validated writable buffer"),
+    }
+}
+
 pub(super) fn call(
     ctx: &mut Context,
     name: &str,
@@ -373,13 +406,8 @@ pub(super) fn call(
                     Ok(crate::dynamic::builtins::boolean(enabled))
                 }
                 ("file.read" | "file.readline", [] | [_]) | ("file.readinto", [_]) => {
-                    if let ("file.readinto", [buffer]) = (name, &args[1..])
-                        && !matches!(ctx.heap.get(*buffer), Value::ByteArray(_))
-                    {
-                        return Err(Error::new(
-                            "TypeError",
-                            "readinto() requires a writable bytes-like object",
-                        ));
+                    if let ("file.readinto", [buffer]) = (name, &args[1..]) {
+                        readinto_target(ctx, *buffer)?;
                     }
                     Err(Error::new("UnsupportedOperation", "read"))
                 }
@@ -526,12 +554,7 @@ pub(super) fn call(
         "file.fileno" => Ok(ctx.int(i64::from(f.as_raw_fd()))),
         "file.tell" => Ok(ctx.int(f.stream_position().map_err(os_error)? as i64)),
         "file.readinto" => {
-            let Value::ByteArray(buffer) = ctx.heap.get_mut(argument(args, 1)?) else {
-                return Err(Error::new(
-                    "TypeError",
-                    "readinto() requires a writable bytes-like object",
-                ));
-            };
+            let buffer = readinto_bytes(ctx, argument(args, 1)?)?;
             let mut count = 0;
             while count < buffer.len() {
                 match f.read(&mut buffer[count..]) {

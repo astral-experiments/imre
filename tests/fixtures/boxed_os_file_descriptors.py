@@ -4,9 +4,28 @@ import sys
 
 
 def current():
+    # Keep eager stdin finalizers reachable independently of the file under test.
+    stdin, buffer, raw_input = sys.stdin, sys.stdin.buffer, sys.stdin.buffer.raw
+    reader = open(__file__, "rb")
+    reader_fd = reader.fileno()
+    alias = reader
+    del reader
+    os.fstat(reader_fd)
+    del alias
+    try:
+        os.fstat(reader_fd)
+    except OSError as error:
+        assert error.errno == 9
+    else:
+        raise AssertionError("reader descriptor remained open after its last reference")
+    assert stdin is sys.stdin and buffer is stdin.buffer and raw_input is buffer.raw
+
     fd = os.open(path=__file__, flags=os.O_RDONLY)
     try:
         assert not os.get_inheritable(fd) and not os.isatty(fd)
+        borrowed = open(fd, "rb", closefd=False)
+        del borrowed
+        os.fstat(fd)
         duplicate = os.dup(fd)
         try:
             assert not os.get_inheritable(duplicate)

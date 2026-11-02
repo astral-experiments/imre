@@ -259,6 +259,23 @@ impl Context {
                 format!("_imp.{method}() takes no keyword arguments"),
             ));
         }
+        if method == "extension_suffixes" {
+            if !args.is_empty() {
+                return Err(Error::new(
+                    "TypeError",
+                    format!(
+                        "_imp.extension_suffixes() takes no arguments ({} given)",
+                        args.len()
+                    ),
+                ));
+            }
+            let suffix = self.config["archive_suffix"]
+                .as_str()
+                .unwrap_or(".imre.a")
+                .to_owned();
+            let suffix = self.text(suffix);
+            return Ok(self.alloc(Value::List(vec![suffix])));
+        }
         let [arg] = args else {
             return Err(Error::new(
                 "TypeError",
@@ -436,8 +453,16 @@ impl Context {
     }
 
     fn file_spec(&mut self, name: Id, origin: Id, locations: Id, loader: Id) -> Result<Id> {
-        let importlib = self.module("importlib")?;
-        let make = self.lookup_attr(importlib, "_file_spec")?;
+        let make = if self.bootstrap_file_spec != NONE
+            && matches!(
+                self.str_value(name)?,
+                "importlib" | "importlib._bootstrap" | "importlib._bootstrap_external"
+            ) {
+            self.bootstrap_file_spec
+        } else {
+            let importlib = self.module("importlib")?;
+            self.lookup_attr(importlib, "_file_spec")?
+        };
         self.call(make, vec![name, origin, locations, loader], vec![])
     }
 
@@ -461,10 +486,16 @@ impl Context {
         }
     }
 
-    pub(super) fn namespace_spec(&mut self, name: Id, locations: Id, module: Id) -> Result<Id> {
+    pub(super) fn namespace_spec(
+        &mut self,
+        name: Id,
+        locations: Id,
+        module: Id,
+        source_globals: Id,
+    ) -> Result<Id> {
         let importlib = self.module("importlib")?;
         let make = self.lookup_attr(importlib, "_namespace_spec")?;
-        self.call(make, vec![name, locations, module], vec![])
+        self.call(make, vec![name, locations, module, source_globals], vec![])
     }
 
     pub(super) fn initialize_source(
@@ -576,7 +607,7 @@ impl Context {
         let name = self.text(fullname);
         if matches!(body, SourceBody::Namespace) {
             let paths = self.location_list(&locations);
-            return self.namespace_spec(name, paths, NONE);
+            return self.namespace_spec(name, paths, NONE, NONE);
         }
         let origin = self.text(path.to_string_lossy());
         let locations = if locations.is_empty() {
