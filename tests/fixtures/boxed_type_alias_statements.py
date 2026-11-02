@@ -6,6 +6,14 @@ type Recursive = tuple[Forward, list[Recursive]]
 
 
 def current():
+    value = []
+    eager = TypeAliasType("Eager", value)
+    assert type(eager) is TypeAliasType and eager.__value__ is value
+    assert eager.__module__ == __name__ and eager.__name__ == "Eager"
+    assert eager.__type_params__ == eager.__parameters__ == ()
+    assert eager.evaluate_value(1) is value and eager.__reduce__() == "Eager"
+    assert TypeAliasType(name="N", value=None, type_params=()).__value__ is None
+
     assert type(Forward) is TypeAliasType
     assert Forward.__module__ == __name__ and Forward.__name__ == "Forward"
     assert Forward.__type_params__ == Forward.__parameters__ == ()
