@@ -1036,6 +1036,9 @@ impl IntrinsicModule {
             (Self::Ast, "Interpolation") => Intrinsic::ObjectRuntimeExport("ast.Interpolation"),
             (Self::Ast, "literal_eval") => Intrinsic::ObjectRuntimeExport("ast.literal_eval"),
             (Self::Gc, "collect") => Intrinsic::ObjectRuntimeExport("gc.collect"),
+            (Self::Gc, "disable") => Intrinsic::ObjectRuntimeExport("gc.disable"),
+            (Self::Gc, "enable") => Intrinsic::ObjectRuntimeExport("gc.enable"),
+            (Self::Gc, "isenabled") => Intrinsic::ObjectRuntimeExport("gc.isenabled"),
             (Self::Marshal, "loads") => Intrinsic::ObjectRuntimeExport("marshal.loads"),
             (Self::Codecs, "escape_decode") => {
                 Intrinsic::ObjectRuntimeExport("codecs.escape_decode")

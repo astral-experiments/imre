@@ -411,6 +411,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("tempfile", "TemporaryFile") | ("_imre_tempfile", "open_file") => {
             ctx.builtin("tempfile.TemporaryFile")
         }
+        ("gc", "enable" | "disable" | "isenabled") => ctx.builtin(&format!("gc.{name}")),
         ("unicodedata", "normalize") => ctx.builtin("unicodedata.normalize"),
         (
             "_imp",
@@ -1886,6 +1887,28 @@ pub(super) fn call(
     }
     if let Some(method) = name.strip_prefix("TextIOWrapper.") {
         return files::text_method(ctx, method, args, kwargs);
+    }
+    if matches!(name, "gc.enable" | "gc.disable" | "gc.isenabled") {
+        if !kwargs.is_empty() {
+            return Err(Error::new(
+                "TypeError",
+                format!("{name}() takes no keyword arguments"),
+            ));
+        }
+        if !args.is_empty() {
+            return Err(Error::new(
+                "TypeError",
+                format!("{name}() takes no arguments ({} given)", args.len()),
+            ));
+        }
+        let enabled = &ctx.heap.automatic_gc;
+        if name == "gc.isenabled" {
+            return Ok(builtins::boolean(
+                enabled.load(std::sync::atomic::Ordering::Relaxed),
+            ));
+        }
+        enabled.store(name == "gc.enable", std::sync::atomic::Ordering::Relaxed);
+        return Ok(NONE);
     }
     if name == "gc.collect" {
         if !args.is_empty() || !kwargs.is_empty() {
