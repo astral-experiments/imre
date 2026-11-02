@@ -106,9 +106,11 @@ pub(in crate::dynamic) fn members(class: &str) -> Option<Members> {
                 "__radd__",
                 "__sub__",
                 "__rsub__",
+                "__replace__",
                 "ctime",
                 "isocalendar",
                 "isoformat",
+                "replace",
                 "isoweekday",
                 "toordinal",
                 "weekday",
@@ -935,6 +937,8 @@ pub(super) fn call(
         | "datetime.time"
         | "datetime.timetz"
         | "datetime.utctimetuple"
+        | "date.replace"
+        | "date.__replace__"
         | "datetime.replace"
         | "datetime.__replace__"
         | "time.replace"
@@ -1425,6 +1429,11 @@ fn date_fromisocalendar(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)])
 
 fn date_from_ordinal(ctx: &mut Context, class: Id, ordinal: i32) -> Result<Id> {
     let fields = Calendar::ordinal_fields(ordinal)?;
+    date_from_fields(ctx, class, fields)
+}
+
+/// Call the receiving type with the three civil fields, including datetime subclasses.
+fn date_from_fields(ctx: &mut Context, class: Id, fields: [i32; 3]) -> Result<Id> {
     let args = fields.into_iter().map(|n| ctx.int(i64::from(n))).collect();
     ctx.call(class, args, vec![])
 }
@@ -1573,7 +1582,11 @@ fn clock_method(
         ));
     };
     let (value, tz) = match ctx.heap.get(ctx.scalar_value(receiver)) {
-        Value::Calendar { value, tzinfo, .. } if value.class() == kind => (value.clone(), *tzinfo),
+        Value::Calendar { value, tzinfo, .. }
+            if value.class() == kind || (kind == "date" && value.class() == "datetime") =>
+        {
+            (value.clone(), *tzinfo)
+        }
         _ => {
             return Err(Error::new(
                 "TypeError",
@@ -1648,6 +1661,24 @@ fn clock_method(
                 if kind == "time" { NONE } else { receiver },
             ),
         };
+    }
+    if kind == "date" {
+        let [year, month, day, ..] = value.fields();
+        let mut fields = [year, month, day].map(|n| n as i32);
+        let supplied = crate::dynamic::builtins::bind_method_arguments(
+            "replace",
+            rest,
+            kwargs,
+            ["year", "month", "day"],
+            3,
+        )?;
+        for (field, arg) in fields.iter_mut().zip(supplied) {
+            if let Some(id) = arg {
+                *field = c_int(ctx, id)?;
+            }
+        }
+        let class = ctx.exact_type(receiver)?;
+        return date_from_fields(ctx, class, fields);
     }
     if kind == "datetime" {
         let mut fields = value.fields().map(|n| n as i32);
