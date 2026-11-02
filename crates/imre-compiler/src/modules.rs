@@ -2134,6 +2134,10 @@ impl IntrinsicModule {
             (Self::Thread | Self::Threading, "TIMEOUT_MAX") => {
                 Intrinsic::ObjectRuntimeExport("_thread.TIMEOUT_MAX")
             }
+            #[cfg(unix)]
+            (Self::Thread, "interrupt_main") => {
+                Intrinsic::ObjectRuntimeExport("_thread.interrupt_main")
+            }
             (Self::Thread, "_count") => Intrinsic::ObjectRuntimeExport("_thread._count"),
             (Self::Thread, "start_new_thread") => {
                 Intrinsic::ObjectRuntimeExport("_thread.start_new_thread")

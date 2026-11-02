@@ -960,7 +960,10 @@ pub(super) fn call(
         return super::lowlevel_threads::call(ctx, name, args, kwargs);
     }
     #[cfg(unix)]
-    if matches!(name, "_signal.sigpending" | "_imre_signal.make_signals") {
+    if matches!(
+        name,
+        "_signal.sigpending" | "_imre_signal.make_signals" | "_thread.interrupt_main"
+    ) {
         return signal::call(ctx, name, args, kwargs);
     }
     if name == "_thread.get_ident"

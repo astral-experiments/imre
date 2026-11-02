@@ -5266,7 +5266,7 @@ impl Context {
                 }
                 let result = self.call_in_scope(scope, f, args, kwargs)?;
                 self.finish_call_operands(mark, result);
-                Ok(result)
+                self.check_call_return(result)
             }
             _ => Err(unsupported(format!(
                 "{:?}",
