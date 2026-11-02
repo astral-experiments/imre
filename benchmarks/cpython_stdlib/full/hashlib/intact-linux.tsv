@@ -48,8 +48,8 @@ ordinal	registered_id	cpython_empty	cpython_cached	native_empty_ordinary_O0	nati
 47	test.test_hashlib.HashLibTestCase.test_case_sha512_1	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	-
 48	test.test_hashlib.HashLibTestCase.test_case_sha512_2	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	-
 49	test.test_hashlib.HashLibTestCase.test_case_sha512_3	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	-
-50	test.test_hashlib.HashLibTestCase.test_case_shake128_vector	skipped 'Could not retrieve http://www.pythontest.net/hashlib/shake_128.txt'	ok	ERROR [1]	ERROR [1]	ERROR [1]	ERROR [1]	ok	ok	ok	ok	AttributeError: module 'urllib.request' has no attribute 'build_opener'
-51	test.test_hashlib.HashLibTestCase.test_case_shake256_vector	skipped 'Could not retrieve http://www.pythontest.net/hashlib/shake_256.txt'	ok	ERROR [1]	ERROR [1]	ERROR [1]	ERROR [1]	ok	ok	ok	ok	AttributeError: module 'urllib.request' has no attribute 'build_opener'
+50	test.test_hashlib.HashLibTestCase.test_case_shake128_vector	skipped 'Could not retrieve http://www.pythontest.net/hashlib/shake_128.txt'	ok	ERROR [1]	ERROR [1]	ERROR [1]	ERROR [1]	ok	ok	ok	ok	NotImplementedError: urllib.request has no default http handler
+51	test.test_hashlib.HashLibTestCase.test_case_shake256_vector	skipped 'Could not retrieve http://www.pythontest.net/hashlib/shake_256.txt'	ok	ERROR [1]	ERROR [1]	ERROR [1]	ERROR [1]	ok	ok	ok	ok	NotImplementedError: urllib.request has no default http handler
 52	test.test_hashlib.HashLibTestCase.test_case_shake_128_0	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	-
 53	test.test_hashlib.HashLibTestCase.test_case_shake_256_0	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	-
 54	test.test_hashlib.HashLibTestCase.test_clinic_signature	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	-
