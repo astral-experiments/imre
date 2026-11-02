@@ -2430,13 +2430,42 @@ impl Heap {
         {
             return Ok(None);
         }
-        let mut cycles = CycleSet::new(self.slots.len())?;
-        self.mark(roots);
-        let next = self.identify_cycles(&mut cycles);
-        for slot in &self.slots {
-            slot.trace.set(UNMARKED);
+        // If the roots keep every pending finalizer alive, no finalizer can run.
+        // Keep the visited links until the search ends so resetting a partial
+        // trace costs only the slots it touched, even after a large heap peak.
+        let mut remaining = self.ordinary_finalizers.len();
+        let mut visited = END;
+        let mut pending = MarkQueue {
+            slots: &self.slots,
+            next: END,
+            ordered: None,
+        };
+        self.mark_roots(roots, &mut pending);
+        while remaining != 0
+            && let Some(id) = pending.pop()
+        {
+            let slot = &self.slots[id as usize];
+            slot.trace.set(visited);
+            visited = id as usize;
+            if slot.finalization == Finalization::Pending {
+                remaining -= 1;
+            }
+            if remaining != 0 {
+                self.get(id).children(&mut pending);
+            }
         }
-        Ok(next)
+        let next = if remaining == 0 {
+            Ok(None)
+        } else {
+            CycleSet::new(self.slots.len()).map(|mut cycles| self.identify_cycles(&mut cycles))
+        };
+        while let Some(id) = pending.pop() {
+            self.slots[id as usize].trace.set(UNMARKED);
+        }
+        while visited != END {
+            visited = self.slots[visited].trace.replace(UNMARKED);
+        }
+        next
     }
 
     /// Track a disk writer in the activation whose locals or return value may own it.
