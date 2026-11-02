@@ -695,6 +695,20 @@ pub(super) struct ExecGlobals {
 }
 
 #[derive(Clone)]
+pub(super) struct BoxedTextFile {
+    pub(super) file: crate::objects::TextFile,
+    pub(super) buffer: Option<Id>,
+}
+
+impl std::ops::Deref for BoxedTextFile {
+    type Target = crate::objects::TextFile;
+
+    fn deref(&self) -> &Self::Target {
+        &self.file
+    }
+}
+
+#[derive(Clone)]
 pub(super) enum Value {
     None,
     Weak(super::weakref::Reference),
@@ -1003,7 +1017,7 @@ pub(super) enum Value {
     },
     ProcessHandle(crate::objects::BoxedPopen),
     File(crate::shared::Shared<super::stdlib::BinaryFile>),
-    TextFile(crate::objects::TextFile),
+    TextFile(BoxedTextFile),
     RegexScanner {
         pattern: Id,
         subject: Id,
@@ -1087,7 +1101,8 @@ impl Value {
                 super::stdlib::BinaryFile::Descriptor(fd) if fd.reading => "_io.BufferedReader",
                 super::stdlib::BinaryFile::Descriptor(_) => "_io.BufferedWriter",
                 super::stdlib::BinaryFile::Reader { .. } => "_io.BufferedReader",
-                super::stdlib::BinaryFile::Writer { .. } => "_io.BufferedWriter",
+                super::stdlib::BinaryFile::Writer { .. }
+                | super::stdlib::BinaryFile::Standard { .. } => "_io.BufferedWriter",
             },
             Self::ProcessHandle(_) => "_imre_subprocess.Handle",
             Self::BufferedRandom(..) => "_io.BufferedRandom",
@@ -1569,9 +1584,9 @@ impl Value {
             | Self::NoDefault
             | Self::PartialPlaceholder
             | Self::TokenMissing
-            | Self::TextFile(_)
             | Self::ProcessHandle(_)
             | Self::NamedFileCloser(_) => {}
+            Self::TextFile(file) => visit.extend(file.buffer),
             Self::BufferedRandom(_, name) => visit.push(*name),
         }
     }
