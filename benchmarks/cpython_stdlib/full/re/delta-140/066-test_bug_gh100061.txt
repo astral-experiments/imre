@@ -1,0 +1,109 @@
+66 test.test_re.ReTests.test_bug_gh100061, occurrence 1
+
+stock  5607950ef232dad16d75c0cf53101d9649d89115  CPython 3.14.5 Linux x86-64
+Actual process exit 0. Upstream test_re.py lines 2623–2641; SHA-256 879c8b562a5bddb413e73ad6d026a6199785bd08fa1c2c5db1ef831b4e1c47e2.
+Interpreter/compiler c27397da5541f67655be462e128ca3d3eb6e0a8eb0d39036896c9042529f4304; runtime (stock executable); executed ELF c27397da5541f67655be462e128ca3d3eb6e0a8eb0d39036896c9042529f4304.
+Complete raw stdout (raw/stock/reference/core/run.stdout, SHA-256 7c00edf4e31f7ba7906dd318fda06d975fb736a8e769e3107daad10e355038df)
+SELECT test.test_re.ReTests.test_bug_527371
+SELECT test.test_re.ReTests.test_bug_gh100061
+SELECT test.test_re.ReTests.test_empty_array
+SELECT test.test_re.ReTests.test_inline_flags
+SELECT test.test_re.ReTests.test_match_repr
+SELECT test.test_re.ReTests.test_pattern_compare_bytes
+ORIGINAL_MODULE /tmp/imre-re2/replay/stage/test/test_re.py
+SELECTED 6
+SUB_OK test.test_re.ReTests.test_inline_flags
+SUB_OK test.test_re.ReTests.test_inline_flags
+SUB_OK test.test_re.ReTests.test_inline_flags
+SUB_OK test.test_re.ReTests.test_inline_flags
+SUB_OK test.test_re.ReTests.test_inline_flags
+SUB_OK test.test_re.ReTests.test_inline_flags
+SUB_OK test.test_re.ReTests.test_inline_flags
+SUB_OK test.test_re.ReTests.test_inline_flags
+SUB_OK test.test_re.ReTests.test_inline_flags
+SUB_OK test.test_re.ReTests.test_inline_flags
+RAN 6
+Complete raw stderr (raw/stock/reference/core/run.stderr, SHA-256 36b1e582740c591619e8dfbac5c66b1ba11388c05580cb2e0d515caf23c3e4b1)
+test_bug_527371 (test.test_re.ReTests.test_bug_527371) ... ok
+test_bug_gh100061 (test.test_re.ReTests.test_bug_gh100061) ... ok
+test_empty_array (test.test_re.ReTests.test_empty_array) ... ok
+test_inline_flags (test.test_re.ReTests.test_inline_flags) ... ok
+test_match_repr (test.test_re.ReTests.test_match_repr) ... ok
+test_pattern_compare_bytes (test.test_re.ReTests.test_pattern_compare_bytes) ... ok
+
+----------------------------------------------------------------------
+Ran 6 tests in 0.002s
+
+OK
+
+O0  d7816c3e6e7379903cb09683a96b17c1420124ee  dev-debug0
+Actual process exit 0. Upstream test_re.py lines 2623–2641; SHA-256 879c8b562a5bddb413e73ad6d026a6199785bd08fa1c2c5db1ef831b4e1c47e2.
+Interpreter/compiler 5fc59d2e28200b091c860210009a95570b187af48df45ab8fde5fe25f66d63c5; runtime 37fc4870336b0927ffe5c2a16cd19aa24c71a12cb414cab088cbc7ed2b95fd57; executed ELF ae16b0a2e7ef294e14c80eccd9758d1f3240c02e8c568215ac741f4d8a4e492d.
+Complete raw stdout (raw/finalpublic/O0/core/run.stdout, SHA-256 7c00edf4e31f7ba7906dd318fda06d975fb736a8e769e3107daad10e355038df)
+SELECT test.test_re.ReTests.test_bug_527371
+SELECT test.test_re.ReTests.test_bug_gh100061
+SELECT test.test_re.ReTests.test_empty_array
+SELECT test.test_re.ReTests.test_inline_flags
+SELECT test.test_re.ReTests.test_match_repr
+SELECT test.test_re.ReTests.test_pattern_compare_bytes
+ORIGINAL_MODULE /tmp/imre-re2/replay/stage/test/test_re.py
+SELECTED 6
+SUB_OK test.test_re.ReTests.test_inline_flags
+SUB_OK test.test_re.ReTests.test_inline_flags
+SUB_OK test.test_re.ReTests.test_inline_flags
+SUB_OK test.test_re.ReTests.test_inline_flags
+SUB_OK test.test_re.ReTests.test_inline_flags
+SUB_OK test.test_re.ReTests.test_inline_flags
+SUB_OK test.test_re.ReTests.test_inline_flags
+SUB_OK test.test_re.ReTests.test_inline_flags
+SUB_OK test.test_re.ReTests.test_inline_flags
+SUB_OK test.test_re.ReTests.test_inline_flags
+RAN 6
+Complete raw stderr (raw/finalpublic/O0/core/run.stderr, SHA-256 dc95e685891c3007b96bf3b76fb09ae83c9364bdeff55031a65637134704044b)
+test_bug_527371 (test.test_re.ReTests.test_bug_527371) ... ok
+test_bug_gh100061 (test.test_re.ReTests.test_bug_gh100061) ... ok
+test_empty_array (test.test_re.ReTests.test_empty_array) ... ok
+test_inline_flags (test.test_re.ReTests.test_inline_flags) ... ok
+test_match_repr (test.test_re.ReTests.test_match_repr) ... ok
+test_pattern_compare_bytes (test.test_re.ReTests.test_pattern_compare_bytes) ... ok
+
+----------------------------------------------------------------------
+Ran 6 tests in 26.860s
+
+OK
+
+O3  d7816c3e6e7379903cb09683a96b17c1420124ee  dev-debug0
+Actual process exit 0. Upstream test_re.py lines 2623–2641; SHA-256 879c8b562a5bddb413e73ad6d026a6199785bd08fa1c2c5db1ef831b4e1c47e2.
+Interpreter/compiler 5fc59d2e28200b091c860210009a95570b187af48df45ab8fde5fe25f66d63c5; runtime 37fc4870336b0927ffe5c2a16cd19aa24c71a12cb414cab088cbc7ed2b95fd57; executed ELF e892b97e874c6323e0ef4979b6f68546e0f72a90f3db5a079d0bbef039dbcb3f.
+Complete raw stdout (raw/finalpublic/O3/core/run.stdout, SHA-256 7c00edf4e31f7ba7906dd318fda06d975fb736a8e769e3107daad10e355038df)
+SELECT test.test_re.ReTests.test_bug_527371
+SELECT test.test_re.ReTests.test_bug_gh100061
+SELECT test.test_re.ReTests.test_empty_array
+SELECT test.test_re.ReTests.test_inline_flags
+SELECT test.test_re.ReTests.test_match_repr
+SELECT test.test_re.ReTests.test_pattern_compare_bytes
+ORIGINAL_MODULE /tmp/imre-re2/replay/stage/test/test_re.py
+SELECTED 6
+SUB_OK test.test_re.ReTests.test_inline_flags
+SUB_OK test.test_re.ReTests.test_inline_flags
+SUB_OK test.test_re.ReTests.test_inline_flags
+SUB_OK test.test_re.ReTests.test_inline_flags
+SUB_OK test.test_re.ReTests.test_inline_flags
+SUB_OK test.test_re.ReTests.test_inline_flags
+SUB_OK test.test_re.ReTests.test_inline_flags
+SUB_OK test.test_re.ReTests.test_inline_flags
+SUB_OK test.test_re.ReTests.test_inline_flags
+SUB_OK test.test_re.ReTests.test_inline_flags
+RAN 6
+Complete raw stderr (raw/finalpublic/O3/core/run.stderr, SHA-256 094fc8640c09091d37d24b4a2373a5d841a7cec96ffdad2c0d74f7d2ce884b53)
+test_bug_527371 (test.test_re.ReTests.test_bug_527371) ... ok
+test_bug_gh100061 (test.test_re.ReTests.test_bug_gh100061) ... ok
+test_empty_array (test.test_re.ReTests.test_empty_array) ... ok
+test_inline_flags (test.test_re.ReTests.test_inline_flags) ... ok
+test_match_repr (test.test_re.ReTests.test_match_repr) ... ok
+test_pattern_compare_bytes (test.test_re.ReTests.test_pattern_compare_bytes) ... ok
+
+----------------------------------------------------------------------
+Ran 6 tests in 16.082s
+
+OK

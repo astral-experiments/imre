@@ -7,6 +7,12 @@ use imre_compiler::CompileOptions;
 use super::build_output::Verbosity;
 use super::{Allocator, USAGE};
 
+const DEFAULT_NATIVE_OPT_LEVEL: &str = match option_env!("IMRE_DEFAULT_NATIVE_OPT_LEVEL") {
+    None => "3",
+    Some(level) if matches!(level.as_bytes(), [b'0'..=b'3']) => level,
+    Some(_) => panic!("IMRE_DEFAULT_NATIVE_OPT_LEVEL expects 0, 1, 2, or 3"),
+};
+
 #[derive(Default)]
 pub(super) struct BuildOptions {
     pub source_path: Option<PathBuf>,
@@ -48,7 +54,7 @@ impl BuildOptions {
     fn initial() -> Self {
         Self {
             clang: cfg!(target_os = "macos").then(|| OsString::from("clang")),
-            optimization: "3".into(),
+            optimization: DEFAULT_NATIVE_OPT_LEVEL.into(),
             ..Self::default()
         }
     }
@@ -72,7 +78,7 @@ impl BuildOptions {
         use crate::python_command::Invocation;
         let flags = match &invocation {
             Invocation::Command(command) => &command.flags,
-            Invocation::Script { flags, .. } => flags,
+            Invocation::Module { flags, .. } | Invocation::Script { flags, .. } => flags,
         };
         let mut options = Self::initial();
         if !flags.isolated {
@@ -108,11 +114,24 @@ impl BuildOptions {
                 options.source_path = Some("-c".into());
                 options.compile.command = Some(command);
             }
+            Invocation::Module {
+                name,
+                flags,
+                executable,
+            } => {
+                options.source_path = Some("-m".into());
+                options.compile.module_entry = Some(name);
+                options.compile.script_startup = Some((flags, executable));
+            }
             Invocation::Script {
                 path,
                 flags,
                 executable,
             } => {
+                if path.is_dir() || imre_compiler::is_zip_path(&path) {
+                    options.compile.module_entry = Some("__main__".into());
+                    options.compile.path_entry = true;
+                }
                 options.source_path = Some(path);
                 options.compile.script_startup = Some((flags, executable));
             }

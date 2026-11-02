@@ -208,7 +208,20 @@ fn excessive_inferred_width<'a>(
     }
     impl<'a> Visitor<'a> for Inferred<'a> {
         fn visit_stmt(&mut self, stmt: &'a Stmt) {
-            if self.too_wide.is_some() || matches!(stmt, Stmt::FunctionDef(_) | Stmt::ClassDef(_)) {
+            if self.too_wide.is_some() || matches!(stmt, Stmt::FunctionDef(_)) {
+                return;
+            }
+            if let Stmt::ClassDef(class) = stmt {
+                if class.type_params.is_some() {
+                    return;
+                }
+                // An ordinary class evaluates its decorators and bases in the enclosing scope.
+                for decorator in &class.decorator_list {
+                    self.visit_decorator(decorator);
+                }
+                if let Some(arguments) = &class.arguments {
+                    self.visit_arguments(arguments);
+                }
                 return;
             }
             walk_stmt(self, stmt);
@@ -272,13 +285,13 @@ fn excessive_inferred_width<'a>(
 struct Displays<'a> {
     widths: Widths,
     executable_body: bool,
-    function_body: Option<TextSize>,
+    scope_body: Option<(TextSize, bool)>,
     error: Option<(&'a ast::ExprStarred, &'static str)>,
 }
 
 impl<'a> Visitor<'a> for Displays<'a> {
     fn visit_stmt(&mut self, stmt: &'a Stmt) {
-        let previous = (self.executable_body, self.function_body);
+        let previous = (self.executable_body, self.scope_body);
         if let Stmt::FunctionDef(function) = stmt {
             local_widths(function, &mut self.widths);
             self.executable_body = false;
@@ -290,20 +303,21 @@ impl<'a> Visitor<'a> for Displays<'a> {
                 ));
                 return;
             }
-            self.function_body = function.body.first().map(Ranged::start);
-        } else if matches!(stmt, Stmt::ClassDef(_)) {
-            self.executable_body = false;
+            self.scope_body = function.body.first().map(|s| (s.start(), true));
+        } else if let Stmt::ClassDef(class) = stmt {
+            // Generic class bases have a separate type parameter scope.
+            self.executable_body &= class.type_params.is_none();
+            self.scope_body = class.body.first().map(|s| (s.start(), false));
         }
         walk_stmt(self, stmt);
-        (self.executable_body, self.function_body) = previous;
+        (self.executable_body, self.scope_body) = previous;
     }
 
     fn visit_body(&mut self, body: &'a [Stmt]) {
-        if body
-            .first()
-            .is_some_and(|stmt| Some(stmt.start()) == self.function_body)
+        if let Some((start, executable)) = self.scope_body
+            && body.first().is_some_and(|stmt| stmt.start() == start)
         {
-            self.executable_body = true;
+            self.executable_body = executable;
         }
         ruff_python_ast::visitor::walk_body(self, body);
     }
@@ -374,6 +388,22 @@ pub(super) fn check(body: &[Stmt]) -> Result<Widths, (&ast::ExprStarred, &'stati
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn check_class_base_spreads_in_the_enclosing_scope() {
+        fn check(source: &str) -> Result<(), &'static str> {
+            let module = ruff_python_parser::parse_module(source).unwrap();
+            super::check(&module.syntax().body)
+                .map(|_| ())
+                .map_err(|(_, reason)| reason)
+        }
+
+        check("def make(parts):\n    class Child(Base[*parts, int]): pass\n").unwrap();
+        let fixed = "0,".repeat(150);
+        let oversized = format!("parts = ({fixed})\nclass Child(Base[*parts, *parts]): pass\n");
+        assert!(check(&oversized).unwrap_err().contains("inferred fields"));
+        assert!(check("class Child:\n    fields = (*[1],)\n").is_err());
+    }
+
     #[test]
     fn bound_fixed_tuple_doubling_inside_an_if_without_bounding_mutable_inputs() {
         let mut source = String::from(

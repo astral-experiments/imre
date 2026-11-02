@@ -1,6 +1,7 @@
-"""Compare one-request, synchronous TCPServer programs with real CPython sockets."""
+"""Compare typed and boxed TCPServer programs with real CPython sockets."""
 import argparse
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -8,6 +9,20 @@ import tempfile
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures/socketserver"
 REJECT = {
+    "runtime_server_keeps_argument_checks": (
+        "from socketserver import ThreadingTCPServer\n"
+        "def identity(value: int) -> int: return value\n"
+        "class Derived(ThreadingTCPServer): pass\n"
+        "identity('wrong')\n",
+        "invalid-argument-type",
+    ),
+    "runtime_server_value_keeps_argument_checks": (
+        "from socketserver import ThreadingTCPServer\n"
+        "def identity(value: int) -> int: return value\n"
+        "print(ThreadingTCPServer)\n"
+        "identity('wrong')\n",
+        "expected int, got str",
+    ),
     "timed_listener_subclass": (
         "from socketserver import TCPServer, BaseRequestHandler\n"
         "class Timed(TCPServer):\n"
@@ -106,6 +121,8 @@ def main():
     args = parser.parse_args()
     compiler = args.compiler.resolve()
     oracles = {source: observe([args.python, "-E", source]) for source in sorted(FIXTURES.glob("*.py"))}
+    threaded = FIXTURES.parent / "boxed_threading_tcp_server.py"
+    threaded_output = observe([args.python, "-E", threaded])
     with tempfile.TemporaryDirectory(prefix="imre-socketserver-") as tmp:
         root = Path(tmp)
         for name, (source, message) in REJECT.items():
@@ -120,13 +137,25 @@ def main():
         failure.write_text(CHECKED_ERROR)
         check_handler_error([args.python, "-E", failure], failure)
 
-        def build(source, level):
+        for fixture in (threaded, FIXTURES.parent / "boxed_socketserver_source.py"):
+            shutil.copyfile(fixture, root / fixture.name)
+        imported = root / "import_servers.py"
+        imported.write_text(
+            "import boxed_threading_tcp_server\n"
+            "from boxed_socketserver_source import current\n"
+            "current()\n"
+        )
+        imported_output = observe([args.python, "-E", imported])
+
+        def build(source, level, *options):
             binary = root / source.stem
             subprocess.run([compiler, "build", source, "--no-cache", "--runtime", args.runtime.resolve(),
-                            "--clang", args.clang, "--opt-level", level, "-o", binary], check=True, timeout=180)
+                            "--clang", args.clang, "--opt-level", level, *options, "-o", binary], check=True, timeout=180)
             return binary
 
         for level in args.opt_levels:
+            assert observe([build(imported, level)]) == imported_output
+            assert observe([build(threaded, level, "--runtime-imports")]) == threaded_output
             check_handler_error([build(failure, level)], failure)
             timed_binary = build(timed, level)
             assert observe([timed_binary]) == b"socketserver listener timeout only supports None\n"

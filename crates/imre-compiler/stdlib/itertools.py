@@ -1,12 +1,12 @@
 """Iterator tools for runtime-loaded Python."""
 
 
-import itertools as _itertools
+import _imre_itertools as _itertools
 from operator import index as _index
 from sys import maxsize as _maxsize
 
 
-def _make_chain(_get, _set, _allocate):
+def _make_chain(_advance, _set, _allocate):
     class chain:
         """Yield items from each iterable in order."""
 
@@ -24,26 +24,14 @@ def _make_chain(_get, _set, _allocate):
             return self
 
         def __next__(self):
-            while _get(self, False) is not None:
-                if _get(self, True) is None:
-                    try:
-                        active = iter(next(_get(self, False)))
-                        _set(self, True, active)
-                    except BaseException:
-                        _set(self, False, None)
-                        raise
-                try:
-                    return next(_get(self, True))
-                except StopIteration:
-                    _set(self, True, None)
-            raise StopIteration
+            return _advance(__class__, self)
 
 
     chain.__qualname__ = "chain"
     return chain
 
 
-chain = _make_chain(_itertools._chain_get, _itertools._chain_set, _itertools._chain_allocate)
+chain = _make_chain(_itertools._chain_next, _itertools._chain_set, _itertools._chain_allocate)
 
 
 def _make_cycle(_allocate, _advance):
@@ -165,7 +153,260 @@ def _make_filterfalse(_allocate, _state):
     return filterfalse
 
 
-filterfalse = _make_filterfalse(_itertools._filterfalse_allocate, _itertools._filterfalse_state)
+filterfalse = _make_filterfalse(_itertools._predicate_allocate, _itertools._predicate_state)
+
+
+def _make_starmap(_allocate, _advance):
+    class starmap:
+        """Apply a function to the arguments from each input row."""
+
+        __slots__ = ()
+
+        def __new__(cls, /, *args, **kwargs):
+            if cls is not __class__:
+                if not isinstance(cls, type):
+                    raise TypeError(f"itertools.starmap.__new__(X): X is not a type object ({type(cls).__name__})")
+                if not issubclass(cls, __class__):
+                    raise TypeError(f"itertools.starmap.__new__({cls.__name__}): {cls.__name__} is not a subtype of itertools.starmap")
+            if kwargs and (cls is __class__ or cls.__init__ is __class__.__init__ or cls.__init__ is object.__init__):
+                raise TypeError("starmap() takes no keyword arguments")
+            if len(args) != 2:
+                raise TypeError(f"starmap expected 2 arguments, got {len(args)}")
+            return _allocate(__class__, cls, args[0], iter(args[1]))
+
+        def __init__(self, *args, **kwargs):
+            if (args or kwargs) and type(self).__init__ is not __class__.__init__:
+                raise TypeError("object.__init__() takes exactly one argument (the instance to initialize)")
+
+        def __iter__(self):
+            if not isinstance(self, __class__):
+                raise TypeError("expected a starmap instance")
+            return self
+
+        def __next__(self):
+            return _advance(__class__, self)
+
+    starmap.__qualname__ = "starmap"
+    return starmap
+
+
+starmap = _make_starmap(_itertools._starmap_allocate, _itertools._starmap_next)
+
+
+def _make_takewhile(_allocate, _state):
+    class takewhile:
+        """Return successive input items while the predicate is true."""
+
+        __slots__ = ()
+
+        def __new__(cls, /, *args, **kwargs):
+            if cls is not __class__:
+                if not isinstance(cls, type):
+                    raise TypeError(f"itertools.takewhile.__new__(X): X is not a type object ({type(cls).__name__})")
+                if not issubclass(cls, __class__):
+                    raise TypeError(f"itertools.takewhile.__new__({cls.__name__}): {cls.__name__} is not a subtype of itertools.takewhile")
+            if kwargs and (cls is __class__ or cls.__init__ is __class__.__init__ or cls.__init__ is object.__init__):
+                raise TypeError("takewhile() takes no keyword arguments")
+            if len(args) != 2:
+                raise TypeError(f"takewhile expected 2 arguments, got {len(args)}")
+            return _allocate(__class__, cls, [args[0], False], args[1])
+
+        def __init__(self, *args, **kwargs):
+            if (args or kwargs) and type(self).__init__ is not __class__.__init__:
+                raise TypeError("object.__init__() takes exactly one argument (the instance to initialize)")
+
+        def __iter__(self):
+            if not isinstance(self, __class__):
+                raise TypeError("expected a takewhile instance")
+            return self
+
+        def __next__(self):
+            source, state = _state(__class__, self)
+            if not state[1]:
+                item = next(source)
+                if state[0](item):
+                    return item
+                # Only a false result stops future pulls; exceptions leave the cursor live.
+                state[1] = True
+            raise StopIteration
+
+    takewhile.__qualname__ = "takewhile"
+    return takewhile
+
+
+takewhile = _make_takewhile(_itertools._predicate_allocate, _itertools._predicate_state)
+
+
+def _make_dropwhile(_allocate, _state):
+    class dropwhile:
+        """Drop input items while the predicate is true, then yield all remaining items."""
+
+        __slots__ = ()
+
+        def __new__(cls, /, *args, **kwargs):
+            if cls is not __class__:
+                if not isinstance(cls, type):
+                    raise TypeError(f"itertools.dropwhile.__new__(X): X is not a type object ({type(cls).__name__})")
+                if not issubclass(cls, __class__):
+                    raise TypeError(f"itertools.dropwhile.__new__({cls.__name__}): {cls.__name__} is not a subtype of itertools.dropwhile")
+            if kwargs and (cls is __class__ or cls.__init__ is __class__.__init__ or cls.__init__ is object.__init__):
+                raise TypeError("dropwhile() takes no keyword arguments")
+            if len(args) != 2:
+                raise TypeError(f"dropwhile expected 2 arguments, got {len(args)}")
+            return _allocate(__class__, cls, [args[0], False], args[1])
+
+        def __init__(self, *args, **kwargs):
+            if (args or kwargs) and type(self).__init__ is not __class__.__init__:
+                raise TypeError("object.__init__() takes exactly one argument (the instance to initialize)")
+
+        def __iter__(self):
+            if not isinstance(self, __class__):
+                raise TypeError("expected a dropwhile instance")
+            return self
+
+        def __next__(self):
+            source, state = _state(__class__, self)
+            while True:
+                item = next(source)
+                if state[1]:
+                    return item
+                if not state[0](item):
+                    state[1] = True
+                    return item
+                del item
+
+    dropwhile.__qualname__ = "dropwhile"
+    return dropwhile
+
+
+dropwhile = _make_dropwhile(_itertools._predicate_allocate, _itertools._predicate_state)
+
+
+def _make_compress(_allocate, _state):
+    class compress:
+        """Yield each data item whose corresponding selector is true."""
+
+        __slots__ = ()
+
+        def __new__(cls, /, data, selectors):
+            if not isinstance(cls, type) or not issubclass(cls, __class__):
+                raise TypeError("expected a compress subclass")
+            # Acquire data first. The allocator then obtains the selectors iterator.
+            return _allocate(__class__, cls, iter(data), selectors)
+
+        def __init__(self, *args, **kwargs):
+            if (args or kwargs) and type(self).__init__ is not __class__.__init__:
+                raise TypeError("object.__init__() takes exactly one argument (the instance to initialize)")
+
+        def __iter__(self):
+            if not isinstance(self, __class__):
+                raise TypeError("expected a compress instance")
+            return self
+
+        def __next__(self):
+            selectors, data = _state(__class__, self)
+            while True:
+                item = next(data)
+                if next(selectors):
+                    return item
+                del item
+
+    compress.__qualname__ = "compress"
+    return compress
+
+
+compress = _make_compress(_itertools._predicate_allocate, _itertools._predicate_state)
+del _itertools
+
+
+class _TeeBlock:
+    # Forks only root their current block. Once all forks move past it, its
+    # items can be collected without retaining any preceding blocks.
+    __slots__ = ("source", "values", "filled", "following", "running")
+
+    def __init__(self, source):
+        self.source = source
+        self.values = [None] * 57
+        self.filled = 0
+        self.following = None
+        self.running = False
+
+
+class _tee:
+    __slots__ = ("_block", "_index", "__weakref__")
+
+    def __new__(cls, iterable, /):
+        if cls is not __class__:
+            raise TypeError("expected the itertools._tee class")
+        source = iter(iterable)
+        fork = object.__new__(cls)
+        if type(source) is cls:
+            fork._block = source._block
+            fork._index = source._index
+        else:
+            fork._block = _TeeBlock(source)
+            fork._index = 0
+        return fork
+
+    def __init__(self, *args, **kwargs):
+        # Reinitialization leaves the existing cursor in place.
+        pass
+
+    def __init_subclass__(cls):
+        raise TypeError("type 'itertools._tee' is not an acceptable base type")
+
+    def __copy__(self):
+        return type(self)(self)
+
+    def __reduce__(self):
+        raise TypeError("cannot pickle '_tee' object")
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        block = self._block
+        index = self._index
+        if index == len(block.values):
+            if block.following is None:
+                block.following = _TeeBlock(block.source)
+            self._block = block = block.following
+            self._index = index = 0
+        if index == block.filled:
+            if block.running:
+                raise RuntimeError("cannot re-enter the tee iterator")
+            block.running = True
+            try:
+                value = next(block.source)
+            except StopIteration:
+                pass
+            else:
+                block.values[index] = value
+                block.filled = index + 1
+            finally:
+                block.running = False
+            if index == block.filled:
+                raise StopIteration
+        self._index = index + 1
+        return block.values[index]
+
+
+def tee(iterable, n=2, /):
+    """Return n independent iterators sharing the same input stream."""
+    n = _ssize_index(n)
+    if n < 0:
+        raise ValueError("n must be >= 0")
+    if n == 0:
+        return ()
+    if n > _maxsize // 8:
+        raise MemoryError
+    forks = [None] * n
+    # Both tee() and the first fork acquire an iterator, as in CPython.
+    first = _tee(iter(iterable))
+    forks[0] = first
+    for i in range(1, n):
+        forks[i] = _tee(first)
+    return tuple(forks)
 
 
 class _Combination:

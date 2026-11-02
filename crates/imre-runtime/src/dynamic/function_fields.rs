@@ -12,7 +12,7 @@ pub(super) struct FunctionFields {
     pub annotate: Id,
     annotations: Option<Id>,
     type_params: Id,
-    dict: Id,
+    pub(super) dict: Id,
 }
 
 impl FunctionFields {
@@ -37,15 +37,13 @@ impl FunctionFields {
     }
 
     pub fn children(self, visit: &mut super::value::MarkQueue<'_>) {
-        visit.extend([
-            self.name,
-            self.qualname,
-            self.module,
-            self.doc,
-            self.annotate,
-            self.type_params,
-            self.dict,
-        ]);
+        visit.push(self.name);
+        visit.push(self.qualname);
+        visit.push(self.module);
+        visit.push(self.doc);
+        visit.push(self.annotate);
+        visit.push(self.type_params);
+        visit.push(self.dict);
         visit.extend(self.annotations);
     }
 }
@@ -151,7 +149,7 @@ impl Context {
     }
 
     pub(super) fn set_function_attr(&mut self, fun: Id, name: &str, value: Id) -> Result<()> {
-        if matches!(name, "__globals__" | "__closure__") {
+        if matches!(name, "__globals__" | "__builtins__" | "__closure__") {
             return Err(Error::new("AttributeError", "readonly attribute"));
         }
         let object = self.heap.get(value);

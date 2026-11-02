@@ -36,6 +36,21 @@ class Mapping:
 
 
 def current():
+    class Child(bytes):
+        pass
+
+    value = b"content"
+    assert value.__bytes__() is value and bytes.__bytes__.__objclass__ is bytes
+    assert bytes.__bytes__.__doc__ == "Convert this value to exact type bytes."
+    assert bytes.__bytes__.__text_signature__ == "($self, /)"
+    for short in (b"", b"x"):
+        item = Child(short)
+        assert item.__bytes__() is item.__bytes__()
+    child = Child(value)
+    result = bytes.__bytes__(child)
+    assert type(result) is bytes and result == value
+    assert result is not bytes.__bytes__(child)
+
     class Payload(bytes):
         def rstrip(self):
             return "override"
@@ -44,6 +59,34 @@ def current():
     assert bytes.rstrip(value) == b"a" and value.rstrip() == "override"
     assert bytes.decode(value) == "a " and bytes.rfind(value, b"a") == 0
     assert bytes.rsplit(value) == [b"a"]
+
+    class Convert:
+        def __bytes__(self):
+            return value
+
+        def __iter__(self):
+            return iter(b"fallback")
+
+    source = Convert()
+    source.__bytes__ = lambda: b"shadow"
+    assert bytes(source) is value and bytearray(source) == b"fallback"
+
+    class Text(str):
+        def __bytes__(self):
+            return b"hook"
+
+    assert bytes(Text("x")) == b"hook" and bytes(Text("x"), "ascii") == b"x"
+    for obj, error, message in (
+        (Wrong(), TypeError, "__bytes__ returned non-bytes (type bytearray)"),
+        (Broken(), LookupError, "binary conversion"),
+        (BindingError(), RuntimeError, "descriptor lookup"),
+    ):
+        try:
+            bytes(obj)
+        except error as exc:
+            assert str(exc) == message
+        else:
+            raise AssertionError("bytes accepted an invalid conversion")
 
     operand = Binary()
     operand.__bytes__ = lambda: b"shadow"

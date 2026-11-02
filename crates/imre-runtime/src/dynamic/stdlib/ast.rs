@@ -137,6 +137,7 @@ pub(in super::super) fn install(ctx: &mut Context, module: Id) {
         let class = ctx.alloc(Value::Class {
             namedtuple_fields: None,
             io_kind: None,
+            heap_type: None,
             metaclass: None,
             name: spec.name.into(),
             scope,

@@ -16,7 +16,50 @@ fn initialize(ty: Type, receiver: Option<Expr>, bound: Expr) -> Expr {
     }
 }
 
+/// These deque slots invoke Python protocols in the boxed runtime.
+fn boxed_method(name: &str) -> bool {
+    matches!(
+        name,
+        "rotate"
+            | "__repr__"
+            | "__add__"
+            | "__mul__"
+            | "__rmul__"
+            | "__imul__"
+            | "__lt__"
+            | "__le__"
+            | "__eq__"
+            | "__ne__"
+            | "__gt__"
+            | "__ge__"
+    )
+}
+
 impl Checker<'_> {
+    pub(super) fn boxed_deque_descriptor(&self, attr: &ast::ExprAttribute) -> bool {
+        boxed_method(attr.attr.as_str())
+            && self.resolve(&attr.value) == Some(Binding::Intrinsic(Intrinsic::Deque))
+    }
+
+    /// Check each supplied expression before handing the invocation to the native descriptor.
+    pub(super) fn boxed_deque_call(
+        &mut self,
+        name: &str,
+        call: &ast::ExprCall,
+    ) -> Result<Expr, String> {
+        for arg in &call.arguments.args {
+            let value = match arg {
+                ast::Expr::Starred(starred) => starred.value.as_ref(),
+                other => other,
+            };
+            self.evaluated_argument(value)?;
+        }
+        for keyword in &call.arguments.keywords {
+            self.evaluated_argument(&keyword.value)?;
+        }
+        Err(self.scoped_builtin_error(&format!("collections.deque.{name}"), call))
+    }
+
     /// A saved method owns the receiver that was evaluated at attribute access.
     /// Its adapter has the same typed arguments as the corresponding direct call.
     pub(super) fn deque_attribute(
@@ -26,6 +69,9 @@ impl Checker<'_> {
         element: Type,
     ) -> Result<Expr, String> {
         let name = attribute.attr.as_str();
+        if boxed_method(name) {
+            return Err(self.scoped_builtin_error(&format!("collections.deque.{name}"), attribute));
+        }
         let (builtin, parameters, returns) = match name {
             "maxlen" => {
                 return Ok(Expr {
@@ -355,6 +401,29 @@ impl Checker<'_> {
         element: Type,
     ) -> Result<Expr, String> {
         let name = attribute.attr.as_str();
+        if name == "rotate" {
+            let count = match call.arguments.args.as_ref() {
+                [] if call.arguments.keywords.is_empty() => Expr::integer(1),
+                [arg]
+                    if call.arguments.keywords.is_empty()
+                        && !matches!(arg, ast::Expr::Starred(_)) =>
+                {
+                    let value = self.expr(arg)?;
+                    if !matches!(value.ty, Type::Int | Type::Bool | Type::IntEnum(_)) {
+                        return Err(self.scoped_builtin_error("collections.deque.rotate", call));
+                    }
+                    self.index_value(value, arg)?
+                }
+                _ => return self.boxed_deque_call(name, call),
+            };
+            return Ok(Expr {
+                ty: Type::None,
+                kind: ExprKind::Builtin(Builtin::DequeRotate, vec![receiver, count]),
+            });
+        }
+        if boxed_method(name) {
+            return self.boxed_deque_call(name, call);
+        }
         if name == "__init__" {
             return self.deque_initialize(call, Some(element), Some(receiver));
         }

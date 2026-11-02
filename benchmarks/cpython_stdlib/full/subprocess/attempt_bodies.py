@@ -11,12 +11,11 @@ import tempfile
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from native_bodies import HERE, METHODS, PREAMBLE
+from native_bodies import HERE, METHODS, PREAMBLE, subprocess_method
 from suite_inventory import cases, load_suite, verify_files, verify_interpreter_tests
 from suite_native import (
     Toolchain,
     method_bytes,
-    native_method,
     run_in_fixtures,
     testcase_fixture,
 )
@@ -174,7 +173,7 @@ def main():
                 tc = SelectedToolchain()
             try:
                 owner, preamble = fixture(case, directory)
-                execute = native_method(tc, directory, SOURCE, owner, name, preamble)
+                execute = subprocess_method(tc, directory, SOURCE, owner, name, preamble)
             except (ValueError, RuntimeError) as exc:
                 last = str(exc).strip().splitlines()[-1]
                 rows[name] = {

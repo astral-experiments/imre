@@ -906,6 +906,13 @@ impl Checker<'_> {
                     )
                 })?;
                 Some(method.id)
+            } else if self
+                .graph
+                .logging_definition("StreamHandler")
+                .and_then(|def| self.classes.declarations.ids.get(&def))
+                .is_some_and(|&base| self.classes.declarations.subclass(self.graph, id, base))
+            {
+                return Err(self.object_builtin_error("StreamHandler.__repr__", at));
             } else {
                 None
             }
@@ -1006,6 +1013,11 @@ impl Checker<'_> {
                 | "assertIsSubclass"
                 | "assertNotIsSubclass"
                 | "assertNotHasAttr"
+                | "assertStartsWith"
+                | "assertNotStartsWith"
+                | "assertEndsWith"
+                | "assertNotEndsWith"
+                | "assertSequenceEqual"
         ) && self.unittest_case(class)
         {
             return self.object_runtime_export(name, node);
@@ -1111,6 +1123,51 @@ impl Checker<'_> {
         }
     }
 
+    /// Copy each concrete factory result before joining the virtual call's branches. The
+    /// factory itself keeps its exact dictionary type for every other caller.
+    pub(super) fn copied_factory_mapping(
+        &mut self,
+        call: &ast::ExprCall,
+        shape: (Type, Type),
+    ) -> Result<Option<Expr>, String> {
+        let ast::Expr::Attribute(copy) = &*call.func else {
+            return Ok(None);
+        };
+        if copy.attr.as_str() != "copy"
+            || !call.arguments.is_empty()
+            || shape.1 != Type::ObjectValue
+        {
+            return Ok(None);
+        }
+        let ast::Expr::Call(factory) = &*copy.value else {
+            return Ok(None);
+        };
+        let ast::Expr::Attribute(method) = &*factory.func else {
+            return Ok(None);
+        };
+        let Some(slot) = method
+            .value
+            .as_name_expr()
+            .and_then(|name| self.names.get(name.id.as_str()))
+        else {
+            return Ok(None);
+        };
+        let Type::Class(class) = self.locals[*slot] else {
+            return Ok(None);
+        };
+        if !factory.arguments.is_empty()
+            || !self.classes.declarations.definitions[class].has_literal_hook(method.attr.as_str())
+        {
+            return Ok(None);
+        }
+        let receiver = self.expr(&method.value)?;
+        self.dispatch_record(class, receiver, call, |checker, layout, receiver| {
+            let mapping = checker.direct_method_call(factory, method, layout, Some(receiver))?;
+            checker.fresh_mapping_copy(mapping, shape, call)
+        })
+        .map(Some)
+    }
+
     fn direct_method_call(
         &mut self,
         call: &ast::ExprCall,
@@ -1195,6 +1252,12 @@ impl Checker<'_> {
             && let Some(names) = self.unittest_loader_names(call, class, object)?
         {
             return Ok(names);
+        }
+        if attribute.attr.as_str() == "assertIsInstance"
+            && let Some(receiver) = &receiver
+            && let Some(checked) = self.unittest_text_instance(call, class, receiver)?
+        {
+            return Ok(checked);
         }
         if matches!(attribute.attr.as_str(), "assertIn" | "assertNotIn")
             && let Some(receiver) = &receiver
@@ -1594,6 +1657,11 @@ impl Checker<'_> {
         let materialized = self.immediate_constructor_input(call, class);
         let call = materialized.as_ref().unwrap_or(call);
         let signature = self.classes.methods[class]["__init__"].clone();
+        if let Some(&parent) = self.classes.forwarded_initializers.get(&signature.id)
+            && let Some(error) = self.forwarded_init_error(class, parent, call, &signature)?
+        {
+            return Ok(error);
+        }
         let mut scope = calls::ArgumentScope::default();
         let normalization = self.normalized_record_input(class);
         let args = if let Some((field, wrapper, template)) = normalization {
@@ -1751,6 +1819,37 @@ impl Checker<'_> {
         self.source_call(call, &signature, Some(receiver), 1)
     }
 
+    /// Call the lexical parent on the existing receiver, consuming the explicit first argument.
+    pub(super) fn call_direct_base_initializer(
+        &mut self,
+        call: &ast::ExprCall,
+    ) -> Result<Option<Expr>, String> {
+        let (Some(BaseInitializer::Record(base)), Some(class)) =
+            (self.super_initializer, self.class)
+        else {
+            return Ok(None);
+        };
+        let declarations = &self.classes.declarations.definitions;
+        let owner = &declarations[class];
+        let init = &owner.methods[owner.initializer.expect("initializer context")];
+        if !crate::classes::direct_base_init(
+            self.graph,
+            self.module,
+            declarations[base].definition,
+            init,
+            call,
+        ) {
+            return Ok(None);
+        }
+        let mut bound = call.clone();
+        bound.arguments.args = call.arguments.args.iter().skip(1).cloned().collect();
+        let receiver = call.arguments.args[0]
+            .as_name_expr()
+            .expect("checked direct base receiver");
+        self.call_record_base_initializer(base, &bound, self.names[receiver.id.as_str()])
+            .map(Some)
+    }
+
     pub(super) fn call_super_initializer(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
         if let Some(class) = self.class
             && !matches!(self.super_initializer, Some(BaseInitializer::Record(_)))
@@ -1813,6 +1912,15 @@ impl Checker<'_> {
                     "super().__init__ requires an explicit subclass initializer",
                 )
             })?;
+        self.call_record_base_initializer(base, call, self.names["self"])
+    }
+
+    fn call_record_base_initializer(
+        &mut self,
+        base: usize,
+        call: &ast::ExprCall,
+        receiver: usize,
+    ) -> Result<Expr, String> {
         calls::reject_unpacking(call, self.source)?;
         let signature = self.classes.methods[base]["__init__"].clone();
         if self.classes.declarations.definitions[base].generated_initializer
@@ -1826,7 +1934,7 @@ impl Checker<'_> {
         }
         let receiver = Expr {
             ty: Type::Class(base),
-            kind: ExprKind::Builtin(Builtin::RecordView, vec![self.local(self.names["self"])]),
+            kind: ExprKind::Builtin(Builtin::RecordView, vec![self.local(receiver)]),
         };
         let mut scope = calls::ArgumentScope::default();
         let args = if self.inference.is_some() {

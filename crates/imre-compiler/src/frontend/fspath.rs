@@ -90,7 +90,7 @@ impl Checker<'_> {
     }
 
     /// Preserve a matching path owner and convert the other arm with Python's startup codec.
-    fn filesystem_codec(
+    pub(super) fn filesystem_codec(
         &mut self,
         mut path: Expr,
         at: &ast::Expr,

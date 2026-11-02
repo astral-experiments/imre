@@ -1,8 +1,43 @@
 use std::ffi::CString;
 
-use super::{Context, Error, Id, NONE, Result};
+use crate::dynamic::value::NativeModuleState;
+
+use super::{Context, Error, Id, NONE, Result, Value};
+
+/// Bind setlocale to this module and keep its exception class across namespace edits.
+pub(in super::super) fn install(ctx: &mut Context, module: Id, scope: Id) -> Result<()> {
+    let fields = ctx.scope("locale", None);
+    let module_name = ctx.text("locale");
+    ctx.bind(fields, "__module__", module_name);
+    let qualname = ctx.text("Error");
+    ctx.bind(fields, "__qualname__", qualname);
+    ctx.bind(fields, "__doc__", NONE);
+    let base = ctx.builtin("Exception");
+    let class = ctx.allocate_class("Error".into(), fields, vec![base])?;
+    ctx.install_weakref_descriptor(class, fields);
+    let Value::Module { module_state, .. } = ctx.heap.get_mut(module) else {
+        unreachable!()
+    };
+    *module_state = Some(NativeModuleState::LocaleError(class));
+    ctx.bind(scope, "Error", class);
+
+    let callable = ctx.builtin("_locale.setlocale");
+    let function = ctx.alloc(Value::Method {
+        callable,
+        receiver: module,
+        explicit: false,
+    });
+    ctx.bind(scope, "setlocale", function);
+    Ok(())
+}
 
 pub(super) fn setlocale(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    let Some((&module, args)) = args.split_first() else {
+        return Err(Error::new(
+            "TypeError",
+            "setlocale requires a module receiver",
+        ));
+    };
     if !kwargs.is_empty() {
         return Err(Error::new(
             "TypeError",
@@ -46,7 +81,16 @@ pub(super) fn setlocale(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)])
             .map(|name| ctx.text(name))
             .map_err(|error| ctx.decode_error(error));
     }
-    let module = ctx.module("_locale")?;
+    let Value::Module {
+        module_state: Some(NativeModuleState::LocaleError(class)),
+        ..
+    } = *ctx.heap.get(module)
+    else {
+        return Err(Error::new(
+            "TypeError",
+            "setlocale requires a locale module",
+        ));
+    };
     let mut error = Error::new(
         "locale.Error",
         if name.is_none() {
@@ -55,6 +99,6 @@ pub(super) fn setlocale(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)])
             "unsupported locale setting"
         },
     );
-    error.class = ctx.lookup_attr(module, "Error")?;
+    error.class = class;
     Err(error)
 }

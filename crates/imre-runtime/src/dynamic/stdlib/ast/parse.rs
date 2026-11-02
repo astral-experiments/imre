@@ -227,13 +227,12 @@ impl Parser<'_> {
         source: &str,
         tokens: &ast::token::Tokens,
         syntax: impl Into<ast::ModRef<'a>>,
-    ) -> Result<()> {
-        self.replacements = crate::dynamic::source_code::check_runtime_strings(source, tokens)?;
+    ) {
+        self.replacements = crate::dynamic::source_code::string_replacements(source, tokens);
         if !self.literal {
             self.template_expressions =
                 imre_ast::strings::template_expressions(source, tokens, syntax);
         }
-        Ok(())
     }
 
     /// Ruff decodes both isolated surrogates and U+FFFD to its replacement character.
@@ -402,7 +401,20 @@ impl Parser<'_> {
             Expr::TString(mut v) if !self.literal => {
                 ("TemplateStr", vec![self.template_values(&mut v)?])
             }
-            Expr::StringLiteral(v) => ("Constant", vec![self.ctx.text(v.value.to_string()), NONE]),
+            Expr::StringLiteral(v) => {
+                let text = v.value.to_str();
+                let points = crate::dynamic::source_code::original_points(
+                    text,
+                    self.replacements
+                        .range(v.start()..v.end())
+                        .flat_map(|(_, points)| points.iter().copied()),
+                )?;
+                let value = match points {
+                    Some(points) => self.ctx.text_codepoints(points),
+                    None => self.ctx.text(text),
+                };
+                ("Constant", vec![value, NONE])
+            }
             Expr::BytesLiteral(v) => (
                 "Constant",
                 vec![
@@ -518,12 +530,13 @@ pub(super) fn parse(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> 
     let [src, filename, mode] =
         builtins::bind("parse", args, kwargs, ["source", "filename", "mode"])?;
     let copy = |text: &str| crate::Str::try_new(text).map_err(|_| crate::Error::allocation());
-    let source = copy(ctx.str_value(src.ok_or_else(|| {
+    let source = src.ok_or_else(|| {
         Error::new(
             "TypeError",
             "parse() missing 1 required positional argument: 'source'",
         )
-    })?)?)?;
+    })?;
+    let filename_id = filename;
     let filename = copy(
         filename
             .map(|f| ctx.str_value(f))
@@ -535,7 +548,32 @@ pub(super) fn parse(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> 
             .transpose()?
             .unwrap_or("exec"),
     )?;
-    parse_source(ctx, &source, &filename, &mode, false)
+    // compile validates mode before asking the tokenizer to decode source bytes.
+    if !matches!(mode.as_str(), "exec" | "eval" | "single" | "func_type") {
+        return Err(Error::new(
+            "ValueError",
+            "compile() mode must be 'exec', 'eval', 'single' or 'func_type'",
+        ));
+    }
+    let text;
+    let decoded;
+    let source = if ctx.string_storage(source).is_some() {
+        text = copy(ctx.str_value(source)?)?;
+        text.as_str()
+    } else {
+        let bytes = ctx.native_buffer_bytes(source).map_err(|_| {
+            Error::new(
+                "TypeError",
+                "compile() arg 1 must be a string, bytes or AST object",
+            )
+        })?;
+        decoded = crate::objects::decode_compile_source(bytes).map_err(|error| {
+            let filename_id = filename_id.unwrap_or_else(|| ctx.text("<unknown>"));
+            ctx.source_decode_error(error, filename_id)
+        })?;
+        decoded.as_str()
+    };
+    parse_source(ctx, source, &filename, &mode, false)
 }
 
 pub(super) fn parse_source(
@@ -578,7 +616,7 @@ pub(super) fn parse_source(
     match mode {
         "exec" => {
             let body = ruff_python_parser::parse_module(source).map_err(syntax)?;
-            parser.prepare_strings(source, body.tokens(), body.syntax())?;
+            parser.prepare_strings(source, body.tokens(), body.syntax());
             parser.function_starts = body
                 .tokens()
                 .iter()
@@ -603,7 +641,7 @@ pub(super) fn parse_source(
                     syntax(err)
                 }
             })?;
-            parser.prepare_strings(source, expr.tokens(), expr.syntax())?;
+            parser.prepare_strings(source, expr.tokens(), expr.syntax());
             let body = parser.expr(*expr.into_syntax().body)?;
             Ok(parsed_instance(parser.ctx, "Expression", &[body], None))
         }

@@ -5,7 +5,10 @@
   "module": "test.test_email",
   "files": {
     "LICENSE": "20cf39097c68baa17cc566b64e76d34ebf034044",
+    "Lib/email/_encoded_words.py": "05a34a4c10523369712c7134a9f092d11cad562b",
+    "Lib/email/_header_value_parser.py": "1367e34195bfdd923ca2459d9c991997d662ebfa",
     "Lib/email/_parseaddr.py": "6a7c5fa06d20b6edf1a5258662419765bd49d47f",
+    "Lib/email/errors.py": "6bc744bd59c5bb4d10512c39ef448fbd51019050",
     "Lib/email/utils.py": "3de1f0d24a15b0aa032c6b4a907dcf6ffd371ee9",
     "Lib/test/test_email/__init__.py": "5d708e6e97efe7b6b23db5e55b8094c38381fb69",
     "Lib/test/test_email/__main__.py": "4b14f773db42361fe286b9f9abb686f79a36115e",

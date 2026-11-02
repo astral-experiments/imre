@@ -60,6 +60,34 @@ def byte_chunks():
         yield b'a\x00' b'\xff', br'\n', b''
 
 
+def formatted_lifetime():
+    events = []
+    class Result(str):
+        def __del__(self):
+            events.append("release result")
+
+    class Operand:
+        def __format__(self, spec):
+            return Result("value")
+        def __del__(self):
+            events.append("release operand")
+
+    def observe(label):
+        events.append(label)
+        return ""
+
+    def fields():
+        yield f"{Operand()}{observe('second field')}", observe("after join")
+        yield f"{Operand()}"
+
+    stream = fields()
+    assert next(stream) == ("value", "")
+    assert events == ["release operand", "second field", "release result", "after join"]
+    result = next(stream)
+    assert type(result) is Result
+    assert events[-1] == "release operand"
+
+
 def formatted_field(value, width):
     yield f"{value = !a} {width:0{width}d}"
 
@@ -182,6 +210,40 @@ def delegate(child):
 
 
 def current():
+    seen = []
+    make = lambda value: (yield seen.append(value))
+    stream = make(7)
+    assert seen == []
+    assert next(stream) is None and seen == [7]
+    try:
+        stream.send(12)
+    except StopIteration as done:
+        assert done.value == 12
+    else:
+        raise AssertionError("lambda did not return the sent value")
+
+    original = StopIteration(19)
+    suspended = (lambda: (yield))()
+    next(suspended)
+    try:
+        suspended.throw(original)
+    except StopIteration as caught:
+        assert caught is original
+    else:
+        raise AssertionError("throw discarded the StopIteration")
+
+    nested = lambda: (lambda: (yield (3, 4)))
+    assert list(nested()()) == [(3, 4)]
+
+    class Private:
+        __token = 9
+        values = lambda self: (yield self.__token)
+        owner = lambda: (yield __class__)
+
+    assert list(Private().values()) == [9]
+    assert list(Private.owner()) == [Private]
+
+    formatted_lifetime()
     chain = iter([7, 8])
     for _ in range(96):
         chain = delegate(chain)

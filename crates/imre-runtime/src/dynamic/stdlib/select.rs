@@ -8,12 +8,12 @@ use crate::objects::{
 use std::{io, time::Duration};
 
 /// Convert an integer or the integer returned by a file object's fileno method.
-fn fd(ctx: &mut Context, object: Id) -> Result<i32> {
+pub(super) fn fd(ctx: &mut Context, object: Id) -> Result<i32> {
     let number = if let Ok(n) = ctx.as_int(object) {
         n
     } else {
         let method = ctx.lookup_attr(object, "fileno").map_err(|e| {
-            if e.kind == "AttributeError" {
+            if ctx.is_attribute_error(&e) {
                 Error::new(
                     "TypeError",
                     "argument must be an int, or have a fileno() method.",

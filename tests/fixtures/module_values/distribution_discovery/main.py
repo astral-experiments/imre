@@ -1,6 +1,6 @@
 import os
 import sys
-from importlib.metadata import Distribution, PackageNotFoundError, distribution, version
+from importlib.metadata import Distribution, DistributionFinder, MetadataPathFinder, PackageNotFoundError, distribution, version
 from pathlib import Path
 
 
@@ -19,6 +19,24 @@ assert dist.version == '5.1'
 assert version('Sample.Pkg') == dist.version
 assert dist.read_text('absent') is None
 assert [d.version for d in Distribution.discover(path=['second', 'first'])] == ['7.9', '5.1']
+context = DistributionFinder.Context(path=['second'], realm='private')
+assert context.name is None and context.realm == 'private'
+assert [d.version for d in MetadataPathFinder.find_distributions(context)] == ['7.9']
+
+
+class Provider(DistributionFinder):
+    def find_distributions(self, context):
+        assert context.realm == 'private'
+        return [Distribution.at('second/sample_pkg-0.dist-info')]
+
+
+provider = Provider()
+sys.meta_path.append(provider)
+try:
+    assert [d.version for d in Distribution.discover(path=[], realm='private')] == ['7.9']
+finally:
+    sys.meta_path.remove(provider)
+
 later = Distribution.discover(name='sample-pkg')
 sys.path = ['second'] + sys.path[1:]
 assert next(later).version == '7.9'

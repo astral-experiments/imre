@@ -1413,27 +1413,121 @@ impl Checker<'_> {
         ))
     }
 
+    pub(super) fn environ_item_type(&self, receiver: &ast::Expr) -> Option<Type> {
+        match self.resolve(receiver) {
+            Some(Binding::Intrinsic(Intrinsic::Environ)) => Some(Type::Str),
+            Some(Binding::Intrinsic(Intrinsic::EnvironBytes)) => Some(Type::Bytes),
+            _ => None,
+        }
+    }
+
+    /// A direct loop acquires its keys immediately. Each pull decodes just the
+    /// current key and looks up its value in the live process mapping.
+    pub(super) fn environ_items_loop(
+        &mut self,
+        expression: &ast::Expr,
+    ) -> Result<Option<Iteration>, String> {
+        let Some(call) = expression.as_call_expr() else {
+            return Ok(None);
+        };
+        let Some(method) = call.func.as_attribute_expr() else {
+            return Ok(None);
+        };
+        if method.attr.as_str() != "items" {
+            return Ok(None);
+        }
+        let Some(ty) = self.environ_item_type(&method.value) else {
+            return Ok(None);
+        };
+        if !call.arguments.is_empty() {
+            return Err(error(
+                self.source,
+                call,
+                "environment items() takes no arguments",
+            ));
+        }
+        let keys = operation(
+            ProcessOperation::EnvironKeys,
+            self.types.list(Type::Bytes),
+            vec![],
+        );
+        let mut input = self.prepare_container(keys, false, call, false)?;
+        let raw = input.value;
+        let key = self.hidden(ty);
+        let decoded = self.filesystem_codec(self.local(raw), expression, ty)?;
+        let pair_ty = self.types.tuple(vec![ty, ty]);
+        let pair = self.hidden(pair_ty);
+        let value = operation(
+            ProcessOperation::EnvironIndex {
+                bytes: ty == Type::Bytes,
+            },
+            ty,
+            vec![self.local(key)],
+        );
+        input.next.push(Statement::If(
+            self.local(input.ready),
+            vec![
+                Statement::Assign(key, decoded),
+                Statement::Assign(
+                    pair,
+                    Expr {
+                        ty: pair_ty,
+                        kind: ExprKind::Tuple(vec![self.local(key), value]),
+                    },
+                ),
+                Statement::Clear(key),
+                Statement::Clear(raw),
+            ],
+            vec![],
+        ));
+        input.clear.extend([key, pair]);
+        input.value = pair;
+        Ok(Some(Iteration::Prepared(input)))
+    }
+
     pub(super) fn environ_method(
         &mut self,
         attribute: &ast::ExprAttribute,
         call: &ast::ExprCall,
+        bytes: bool,
     ) -> Result<Expr, String> {
-        if attribute.attr.as_str() == "get" {
+        let name = attribute.attr.as_str();
+        if name == "get" && !bytes {
             return self.environ_get(call);
         }
-        self.reject_builtin_keywords(call)?;
-        if attribute.attr.as_str() != "copy" || !call.arguments.args.is_empty() {
-            return Err(error(
-                self.source,
-                call,
-                "os.environ accepts copy() or get(key, default=None)",
+        if name == "update" {
+            let field = if bytes { Type::Bytes } else { Type::Str };
+            let mut sources = Vec::new();
+            self.mapping_update_sources(call, field, field, &mut sources)?;
+            return Ok(operation(
+                ProcessOperation::EnvironUpdate { bytes },
+                Type::None,
+                sources,
             ));
         }
-        Ok(operation(
-            ProcessOperation::EnvironCopy,
-            self.types.dict(Type::Str, Type::Str),
+        self.reject_builtin_keywords(call)?;
+        match (name, call.arguments.args.as_slice()) {
+            ("copy", []) => Ok(self.environ_copy(bytes)),
+            ("clear", []) => Ok(operation(
+                ProcessOperation::EnvironClear,
+                Type::None,
+                vec![],
+            )),
+            _ => Err(error(
+                self.source,
+                call,
+                "unsupported environment mapping method or arguments",
+            )),
+        }
+    }
+
+    pub(super) fn environ_copy(&self, bytes: bool) -> Expr {
+        let field = if bytes { Type::Bytes } else { Type::Str };
+        operation(
+            ProcessOperation::EnvironCopy { bytes },
+            self.types.dict(field, field),
             vec![],
-        ))
+        )
     }
 
     pub(super) fn process_attribute(

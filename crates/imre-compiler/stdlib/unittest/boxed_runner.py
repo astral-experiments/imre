@@ -11,29 +11,14 @@ def _boxedResultDetail(error):
     return "".join(traceback.format_exception(kind, value, tb))
 
 
-class _CaseResultDispatch(TestResult):
-    # Case phases use private helpers; public callbacks and state belong to
-    # the observer supplied by the runner, even for a duck-typed result.
-    def __init__(self, observer):
-        self._observer = observer
-        for name in ("startTest", "stopTest", "addSuccess", "addError", "addFailure", "stop"):
-            setattr(self, name, getattr(observer, name))
-        if hasattr(observer, "addSkip"):
-            self.addSkip = observer.addSkip
-        self.skipped = getattr(observer, "skipped", ())
-
-    def __getattr__(self, name):
-        return getattr(self._observer, name)
-
-
 def _addError(self, test, error):
-    if self.failfast:
+    if getattr(self, "failfast", False):
         self.stop()
     self.errors.append((test, _boxedResultDetail(error)))
 
 
 def _addFailure(self, test, error):
-    if self.failfast:
+    if getattr(self, "failfast", False):
         self.stop()
     self.failures.append((test, _boxedResultDetail(error)))
 
@@ -44,29 +29,89 @@ def _resultExpectedFailure(self, test, error):
 
 def _resultSubTest(self, test, subtest, error):
     if error is not None:
-        if self.failfast:
+        if getattr(self, "failfast", False):
             self.stop()
         problems = self.failures if issubclass(error[0], test.failureException) else self.errors
         problems.append((subtest, _boxedResultDetail(error)))
 
 
+# Adapted from CPython 3.14.5 Lib/unittest/runner.py. See ../docstrings/LICENSE.
+def getDescription(self, test):
+    description = test.shortDescription()
+    if self.descriptions and description:
+        return "\n".join((str(test), description))
+    return str(test)
+
+
+def _textStartTest(self, test):
+    TestResult.startTest(self, test)
+    if self.showAll:
+        self.stream.write(self.getDescription(test))
+        self.stream.write(" ... ")
+        self.stream.flush()
+        self._newline = False
+
+
+def _write_status(self, test, status):
+    subtest = isinstance(test, case._SubTest)
+    if subtest or self._newline:
+        if not self._newline:
+            self.stream.writeln()
+        if subtest:
+            self.stream.write("  ")
+        self.stream.write(self.getDescription(test))
+        self.stream.write(" ... ")
+    self.stream.writeln(status)
+    self.stream.flush()
+    self._newline = True
+
+
+def _textStatus(self, test, short, status):
+    if self.showAll:
+        self._write_status(test, status)
+    elif self.dots:
+        self.stream.write(short)
+        self.stream.flush()
+
+
+def _textSuccess(self, test):
+    TestResult.addSuccess(self, test)
+    _textStatus(self, test, ".", "ok")
+
+
+def _textSkip(self, test, reason):
+    TestResult.addSkip(self, test, reason)
+    status = "skipped " + repr(reason) if self.showAll else ""
+    _textStatus(self, test, "s", status)
+
+
 def _textSubTest(self, test, subtest, error):
     if error is not None:
         if issubclass(error[0], subtest.failureException):
-            self._markSubTest(subtest._subDescription(), "F", "FAIL")
+            _textStatus(self, subtest, "F", "FAIL")
         else:
-            self._markSubTest(subtest._subDescription(), "E", "ERROR")
+            _textStatus(self, subtest, "E", "ERROR")
     _resultSubTest(self, test, subtest, error)
+
+
+def _textExpectedStatus(self, short, status):
+    if self.showAll:
+        self.stream.writeln(status)
+    elif self.dots:
+        self.stream.write(short)
+    else:
+        return
+    self.stream.flush()
 
 
 def _textExpectedFailure(self, test, error):
     _resultExpectedFailure(self, test, error)
-    self._mark("x", "expected failure")
+    _textExpectedStatus(self, "x", "expected failure")
 
 
 def _textUnexpectedSuccess(self, test):
     TestResult.addUnexpectedSuccess(self, test)
-    self._mark("u", "unexpected success")
+    _textExpectedStatus(self, "u", "unexpected success")
 
 
 def _recordBoxedException(self, case, exc, detail):
@@ -78,12 +123,12 @@ def _recordBoxedException(self, case, exc, detail):
 
 def _textError(self, test, error):
     _addError(self, test, error)
-    self._mark("E", "ERROR")
+    _textStatus(self, test, "E", "ERROR")
 
 
 def _textFailure(self, test, error):
     _addFailure(self, test, error)
-    self._mark("F", "FAIL")
+    _textStatus(self, test, "F", "FAIL")
 
 
 _resultInit = TestResult.__init__
@@ -92,32 +137,54 @@ _resultInit = TestResult.__init__
 def _boxedResultInit(self, stream=None, descriptions=None, verbosity=None):
     _resultInit(self)
     self.expectedFailures = []
+    self.collectedDurations = []
     self.buffer = False
     self.tb_locals = False
+
+
+def _wasSuccessful(self):
+    """Tells whether or not this result was a success."""
+    return (len(self.failures) == len(self.errors) == 0
+            and (not hasattr(self, "unexpectedSuccesses") or len(self.unexpectedSuccesses) == 0))
 
 
 def _printErrors(self):
     pass
 
 
+def printErrorList(self, flavour, errors):
+    for test, detail in errors:
+        self.stream.writeln(self.separator1)
+        self.stream.writeln(f"{flavour}: {self.getDescription(test)}")
+        self.stream.writeln(self.separator2)
+        self.stream.writeln("%s" % detail)
+        self.stream.flush()
+
+
 def _textPrintErrors(self):
-    if self.verbose:
+    if self.showAll or self.dots:
         self.stream.writeln()
-    self._reportProblems("ERROR", self._errorNames, self.errors)
-    self._reportProblems("FAIL", self._failureNames, self.failures)
-    if self.unexpectedSuccesses:
-        self.stream.writeln("=" * 70)
-        for test in self.unexpectedSuccesses:
-            name = str(test)
-            if self.descriptions:
-                description = test.shortDescription()
-                if description:
-                    name += "\n" + description
-            self.stream.writeln("UNEXPECTED SUCCESS: " + name)
+        self.stream.flush()
+    self.printErrorList("ERROR", self.errors)
+    self.printErrorList("FAIL", self.failures)
+    unexpected = getattr(self, "unexpectedSuccesses", ())
+    if unexpected:
+        self.stream.writeln(self.separator1)
+        for test in unexpected:
+            self.stream.writeln(f"UNEXPECTED SUCCESS: {self.getDescription(test)}")
+        self.stream.flush()
 
 
 def _wrappedStream(self):
     return sys.stderr if self._memory is None else self._memory
+
+
+class _StreamWrite:
+    # Keep instance overrides while delegating to the stream's current bound method.
+    def __get__(self, instance, owner):
+        if instance is None:
+            raise AttributeError(f"type object '{owner.__name__}' has no attribute 'write'")
+        return instance.stream.write
 
 
 def _streamAttribute(self, name):
@@ -129,9 +196,9 @@ def _streamAttribute(self, name):
 def _boxedRunnerInit(self, stream=None, descriptions=True, verbosity=1, failfast=False,
                      buffer=False, resultclass=None, warnings=None, *, tb_locals=False,
                      durations=None):
-    if buffer or tb_locals or durations is not None:
-        raise NotImplementedError("native TextTestRunner does not yet support output buffering, "
-                                  "local variables in tracebacks or durations")
+    if buffer or tb_locals:
+        raise NotImplementedError("native TextTestRunner does not yet support output buffering "
+                                  "or local variables in tracebacks")
     self.stream = _WritelnDecorator(sys.stderr if stream is None else stream)
     self.descriptions = descriptions
     self.verbosity = verbosity
@@ -156,12 +223,51 @@ _textResultInit = TextTestResult.__init__
 
 def _boxedTextResultInit(self, stream=None, descriptions=True, verbosity=1, *, durations=None):
     _textResultInit(self, stream, descriptions, verbosity)
+    self.showAll = verbosity > 1
+    self.dots = verbosity == 1
+    self._newline = True
     if isinstance(stream, _WritelnDecorator):
         self.stream = stream
     self.durations = durations
 
 
 from unittest import runner as _runnerModule
+
+
+# From CPython 3.14.5 Lib/unittest/{result,runner}.py. See ../docstrings/LICENSE.
+def addDuration(self, test, elapsed):
+    """Called when a test finished to run, regardless of its outcome.
+    *test* is the test case corresponding to the test method.
+    *elapsed* is the time represented in seconds, and it includes the
+    execution of cleanup functions.
+    """
+    # support for a TextTestRunner using an old TestResult class
+    if hasattr(self, "collectedDurations"):
+        # Pass test repr and not the test object itself to avoid resources leak
+        self.collectedDurations.append((str(test), elapsed))
+
+
+def _printDurations(self, result):
+    if not result.collectedDurations:
+        return
+    ls = sorted(result.collectedDurations, key=lambda x: x[1],
+                reverse=True)
+    if self.durations > 0:
+        ls = ls[:self.durations]
+    self.stream.writeln("Slowest test durations")
+    if hasattr(result, 'separator2'):
+        self.stream.writeln(result.separator2)
+    hidden = False
+    for test, elapsed in ls:
+        if self.verbosity < 2 and elapsed < 0.001:
+            hidden = True
+            continue
+        self.stream.writeln("%-10s %s" % ("%.3fs" % elapsed, test))
+    if hidden:
+        self.stream.writeln("\n(durations < 0.001s were hidden; "
+                            "use -v to show these durations)")
+    else:
+        self.stream.writeln("")
 
 
 def _runWithResult(self, test):
@@ -185,6 +291,8 @@ def _runWithResult(self, test):
                 stop()
         elapsed = time.time() - started
     result.printErrors()
+    if self.durations is not None:
+        self._printDurations(result)
     if hasattr(result, "separator2"):
         self.stream.writeln(result.separator2)
     run = result.testsRun
@@ -219,22 +327,37 @@ def _runWithResult(self, test):
 
 _WritelnDecorator.stream = property(_wrappedStream)
 _WritelnDecorator.__getattr__ = _streamAttribute
+_WritelnDecorator.write = _StreamWrite()
+TestResult.addDuration = addDuration
 TestResult.__init__ = _boxedResultInit
 TestResult.addExpectedFailure = _resultExpectedFailure
 TestResult.addSubTest = _resultSubTest
 TestResult.addError = _addError
 TestResult.addFailure = _addFailure
 TestResult._recordException = _recordBoxedException
+_wasSuccessful.__name__ = "wasSuccessful"
+_wasSuccessful.__qualname__ = "TestResult.wasSuccessful"
+TestResult.wasSuccessful = _wasSuccessful
 TestResult.printErrors = _printErrors
 TextTestResult.__init__ = _boxedTextResultInit
+getDescription.__qualname__ = "TextTestResult.getDescription"
+TextTestResult.getDescription = getDescription
+TextTestResult._write_status = _write_status
+TextTestResult.startTest = _textStartTest
+TextTestResult.addSuccess = _textSuccess
+TextTestResult.addSkip = _textSkip
 TextTestResult.addSubTest = _textSubTest
 TextTestResult.addExpectedFailure = _textExpectedFailure
 TextTestResult.addUnexpectedSuccess = _textUnexpectedSuccess
 TextTestResult.addError = _textError
 TextTestResult.addFailure = _textFailure
+printErrorList.__qualname__ = "TextTestResult.printErrorList"
+TextTestResult.printErrorList = printErrorList
 TextTestResult.printErrors = _textPrintErrors
+TextTestResult.separator1 = "=" * 70
 TextTestResult.separator2 = "----------------------------------------------------------------------"
 TextTestRunner.resultclass = TextTestResult
 TextTestRunner.__init__ = _boxedRunnerInit
 TextTestRunner._makeResult = _makeResult
+TextTestRunner._printDurations = _printDurations
 TextTestRunner.run = _runWithResult

@@ -1,0 +1,50 @@
+from unittest import TestCase
+from unittest.mock import DEFAULT, Mock
+
+check = TestCase()
+error = ValueError("from iterator")
+mock = Mock(return_value="fallback", side_effect=[1, DEFAULT, error, KeyError])
+assert mock() == 1
+assert mock() == "fallback"
+with check.assertRaises(ValueError) as raised:
+    mock("error")
+assert raised.exception is error
+mock.assert_called_with("error")
+with check.assertRaises(KeyError):
+    mock()
+with check.assertRaises(StopIteration):
+    mock(phase="done")
+mock.assert_called_with(phase="done")
+with check.assertRaises(AssertionError):
+    mock.assert_called_with(phase="earlier")
+assert mock.call_count == 5
+
+effects = iter([error])
+mock.side_effect = effects
+assert mock.side_effect is effects
+mock.side_effect = lambda: next(effects)
+assert mock() is error
+mock.side_effect = 42
+assert mock.side_effect == 42
+with check.assertRaises(TypeError):
+    mock()
+
+class Values:
+    __call__ = None
+
+    def __iter__(self):
+        return iter(["from iterable"])
+
+
+mock.side_effect = Values()
+assert mock() == "from iterable"
+with check.assertRaises(StopIteration):
+    mock()
+mock.side_effect = str.upper
+assert mock("item") == "ITEM"
+mock.side_effect = len
+assert mock([1, 2]) == 2
+items = []
+mock.side_effect = items.append
+assert mock("item") is None and items == ["item"]
+print("side effects checked")

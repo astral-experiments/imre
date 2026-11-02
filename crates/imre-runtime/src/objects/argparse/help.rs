@@ -9,7 +9,7 @@ use icu_properties::props::{EnumeratedProperty, GeneralCategory, GeneralCategory
 
 use super::super::python_whitespace;
 use super::exceptions::{Error, Kind as ExceptionKind};
-use super::{ArgumentGroup, Nargs, OptionSpec, Parser, Subcommands};
+use super::{ArgumentGroup, Metavar, Nargs, OptionSpec, Parser, Subcommands};
 
 /// Parse the positive decimal width accepted by shutil.get_terminal_size().
 fn positive_columns(value: &str) -> Option<usize> {
@@ -77,28 +77,47 @@ fn paint(enabled: bool, code: &str, text: &str) -> String {
     }
 }
 
+impl Metavar {
+    fn help_value(&self) -> String {
+        match self {
+            Self::Text(label) => label.clone(),
+            Self::Tuple { first, rest } => {
+                let mut text = String::from("(");
+                super::exceptions::push_string_repr(first, &mut text);
+                for label in rest {
+                    text.push_str(", ");
+                    super::exceptions::push_string_repr(label, &mut text);
+                }
+                if rest.is_empty() {
+                    text.push(',');
+                }
+                text.push(')');
+                text
+            }
+        }
+    }
+}
+
 impl OptionSpec {
     fn dest(&self) -> String {
         self.dest.clone()
     }
 
     fn label(&self, summary: bool, color: bool) -> String {
-        let mut metavar = if !self.has_choices {
-            if self.positional() {
-                self.dest()
-            } else {
-                self.dest().to_uppercase()
-            }
-        } else {
-            format!("{{{}}}", self.choices_text(",", false))
+        let (mut metavar, rest): (_, &[String]) = match &self.metavar {
+            Some(Metavar::Text(label)) => (label.clone(), &[]),
+            Some(Metavar::Tuple { first, rest }) => (first.clone(), rest),
+            None if self.has_choices => (format!("{{{}}}", self.choices_text(",", false)), &[]),
+            None if self.positional() => (self.dest(), &[]),
+            None => (self.dest().to_uppercase(), &[]),
         };
         if self.positional() {
             if summary {
-                metavar = self.nargs.label(&metavar);
+                metavar = self.nargs.label(&metavar, rest);
             }
             return paint(color, if summary { "32" } else { "1;32" }, &metavar);
         }
-        metavar = self.nargs.label(&metavar);
+        metavar = self.nargs.label(&metavar, rest);
         let option_color = |flag: &str, bold: bool| match (flag.chars().count() > 2, bold) {
             (true, true) => "1;36",
             (true, false) => "36",
@@ -329,7 +348,7 @@ impl OptionSpec {
         }
         let mut text = ProgramPrefix::default();
         self.nargs
-            .write_label(&mut text, &metavar)
+            .write_label(&mut text, &metavar, &[])
             .map_err(|_| Error::allocation())?;
         Ok(Cow::Owned(text.0))
     }
@@ -463,11 +482,11 @@ impl Parser {
         let Some(commands) = &mut self.subcommands else {
             return Ok(());
         };
-        let count = self
+        let positionals = self
             .options
             .iter()
-            .filter(|option| option.positional())
-            .count();
+            .filter(|option| option.positional() && option.help.is_some());
+        let count = positionals.clone().count();
         let mut parts = Vec::new();
         if count != 0 {
             parts
@@ -475,7 +494,7 @@ impl Parser {
                 .map_err(|_| Error::allocation())?;
             parts.push((len(&self.prog), Cow::Borrowed(self.prog.as_str())));
         }
-        for option in self.options.iter().filter(|o| o.positional()) {
+        for option in positionals {
             let label = option.prefix_label()?;
             parts.push((len(&label), label));
         }
@@ -599,7 +618,12 @@ impl Parser {
         positionals: &mut Vec<(usize, String)>,
     ) {
         let mut grouped = vec![Vec::new(); self.mutex_required.len()];
-        for (slot, option) in self.options.iter().enumerate() {
+        let visible = self
+            .options
+            .iter()
+            .enumerate()
+            .filter(|(_, option)| option.help.is_some());
+        for (slot, option) in visible.clone() {
             if !option.positional()
                 && let Some(id) = option.mutex
             {
@@ -608,7 +632,7 @@ impl Parser {
         }
         let mut used = vec![false; self.options.len()];
         for positional in [true, false] {
-            for (slot, option) in self.options.iter().enumerate() {
+            for (slot, option) in visible.clone() {
                 if option.positional() != positional || used[slot] {
                     continue;
                 }
@@ -710,10 +734,11 @@ impl Parser {
         let mut positionals = Vec::new();
         let mut grouped: Vec<_> = self.groups.iter().map(|_| Vec::new()).collect();
         for option in &self.options {
+            let Some(help) = &option.help else { continue };
             let row = (
                 option.label(false, false),
                 option.label(false, color),
-                ActionHelp::new(&option.help, &self.prog, Some(option)),
+                ActionHelp::new(help, &self.prog, Some(option)),
             );
             if let Some(group) = option.group {
                 grouped[group].push(row);
@@ -805,6 +830,10 @@ fn expand(template: &str, prog: &str, option: Option<&OptionSpec>) -> String {
             let value = match (name, option) {
                 ("prog", _) => prog.to_owned(),
                 ("dest", Some(option)) => option.dest(),
+                ("metavar", Some(option)) => option
+                    .metavar
+                    .as_ref()
+                    .map_or_else(|| "None".to_owned(), Metavar::help_value),
                 ("type", Some(option)) => option.converter.as_deref().unwrap_or("None").to_owned(),
                 ("default", Some(option)) if option.path_default => {
                     super::super::paths::normalize(option.default.as_deref().unwrap()).to_string()

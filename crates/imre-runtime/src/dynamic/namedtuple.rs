@@ -2,11 +2,12 @@
 
 use std::collections::HashSet;
 
-use super::{Context, Error, Id, NONE, Result, Value, builtins};
+use super::{Context, Error, Id, NONE, Result, TRUE, Value, builtins};
 use ruff_python_stdlib::{identifiers::is_identifier, keyword::is_keyword};
 
 pub(super) const GETTER: &str = "collections._tuplegetter";
 pub(super) const DOC_REPR: &str = "<member '__doc__' of 'collections._tuplegetter' objects>";
+pub(super) const MEMBER_SLOTS: &[&str] = &["__get__", "__set__", "__delete__"];
 pub(super) const GETTER_METHODS: &[&str] = &["__get__", "__set__", "__delete__", "__reduce__"];
 
 /// Return the shared native type attributes that describe the tuple field descriptor.
@@ -74,8 +75,42 @@ pub(super) fn doc_method(
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
     let Some((&member, rest)) = args.split_first() else {
-        return Err(Error::new("TypeError", "missing member descriptor"));
+        return Err(Error::new(
+            "TypeError",
+            format!("descriptor '{name}' of 'member_descriptor' object needs an argument"),
+        ));
     };
+    if MEMBER_SLOTS.contains(&name) {
+        let ty = ctx.exact_type(member)?;
+        if ty != ctx.builtin("member_descriptor") {
+            return Err(Error::new(
+                "TypeError",
+                format!(
+                    "descriptor '{name}' requires a 'member_descriptor' object but received a '{}'",
+                    ctx.class_name(ty)
+                ),
+            ));
+        }
+        if !kwargs.is_empty() {
+            return Err(Error::new(
+                "TypeError",
+                format!("wrapper {name}() takes no keyword arguments"),
+            ));
+        }
+        let count = rest.len();
+        let invalid = match name {
+            "__get__" if count == 0 => Some("__get__ expected at least 1 argument, got 0".into()),
+            "__get__" if count > 2 => {
+                Some(format!("__get__ expected at most 2 arguments, got {count}"))
+            }
+            "__set__" if count != 2 => Some(format!("__set__ expected 2 arguments, got {count}")),
+            "__delete__" if count != 1 => Some(format!("expected 1 argument, got {count}")),
+            _ => None,
+        };
+        if let Some(message) = invalid {
+            return Err(Error::new("TypeError", message));
+        }
+    }
     if let Value::SlotMember { owner, name: field } = *ctx.heap.get(member)
         && kwargs.is_empty()
     {
@@ -127,8 +162,7 @@ pub(super) fn doc_method(
             }
         }
         ("__set__", [obj, _]) | ("__delete__", [obj]) if let Some((owner, field)) = field => {
-            ctx.read_member(owner, field, *obj)?;
-            Err(Error::new("AttributeError", "readonly attribute"))
+            ctx.reject_member_write(owner, field, *obj).map(|()| NONE)
         }
         ("__set__", [obj, value]) => set_document(ctx, *obj, Some(*value)),
         ("__delete__", [obj]) => set_document(ctx, *obj, None),
@@ -278,7 +312,7 @@ fn collect(ctx: &mut Context, source: Id) -> Result<Vec<Id>> {
     Ok(items)
 }
 
-fn string(ctx: &mut Context, object: Id) -> Result<String> {
+pub(super) fn string(ctx: &mut Context, object: Id) -> Result<String> {
     let constructor = ctx.builtin("str");
     let value = ctx.call(constructor, vec![object], Vec::new())?;
     Ok(ctx.str_value(value)?.to_owned())
@@ -298,6 +332,32 @@ fn validate(name: &str) -> Result<()> {
         "ValueError",
         format!("Type names and field names {reason}: {repr}"),
     ))
+}
+
+/// Validate the type and field names after any requested renaming.
+pub(super) fn validate_fields(typename: &str, names: &[String], rename: bool) -> Result<()> {
+    validate(typename)?;
+    for name in names {
+        validate(name)?;
+    }
+    let mut unique = HashSet::new();
+    for name in names {
+        let message = if name.starts_with('_') && !rename {
+            "Field names cannot start with an underscore"
+        } else if !unique.insert(name) {
+            "Encountered duplicate field name"
+        } else {
+            continue;
+        };
+        return Err(Error::new(
+            "ValueError",
+            format!(
+                "{message}: {}",
+                crate::objects::exceptions::string_repr(name)
+            ),
+        ));
+    }
+    Ok(())
 }
 
 /// Allocate a fresh class for each call, even when its typename and fields match an earlier declaration.
@@ -341,27 +401,7 @@ pub(super) fn factory(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -
             }
         }
     }
-    validate(&typename)?;
-    for name in &names {
-        validate(name)?;
-    }
-    let mut unique = HashSet::new();
-    for name in &names {
-        let message = if name.starts_with('_') && !rename {
-            "Field names cannot start with an underscore"
-        } else if !unique.insert(name) {
-            "Encountered duplicate field name"
-        } else {
-            continue;
-        };
-        return Err(Error::new(
-            "ValueError",
-            format!(
-                "{message}: {}",
-                crate::objects::exceptions::string_repr(name)
-            ),
-        ));
-    }
+    validate_fields(&typename, &names, rename)?;
     let has_defaults = defaults.is_some_and(|id| id != NONE);
     let defaults = match defaults {
         Some(id) if id != NONE => collect(ctx, id)?,
@@ -380,34 +420,27 @@ pub(super) fn factory(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -
     let scope = ctx.scope(&module_name, None);
     ctx.heap.keep(scope);
     let name = ctx.text(&typename);
-    ctx.bind(scope, "__name__", name);
     ctx.bind(scope, "__qualname__", name);
     ctx.bind(scope, "__module__", module);
-    let field_ids: Vec<_> = names.iter().map(|n| ctx.text(n)).collect();
-    let offset = field_ids.len() - defaults.len();
-    let field_defaults = ctx.dict(
-        field_ids[offset..]
-            .iter()
-            .zip(&defaults)
-            .map(|(&k, &v)| (k, v))
-            .collect(),
-    );
-    ctx.bind(scope, "_field_defaults", field_defaults);
-    let fields = ctx.alloc(Value::Tuple(field_ids));
-    ctx.bind(scope, "_fields", fields);
-    ctx.bind(scope, "__match_args__", fields);
+    let fields = bind_field_metadata(ctx, scope, &names, &defaults);
     bind_fields(ctx, scope, &names);
     bind_repr(ctx, scope, name, fields)?;
+    let collections = ctx.module("collections")?;
+    let factory = ctx.lookup_attr(collections, "_namedtuple_replace")?;
+    let replace = ctx.call(factory, vec![name, fields], Vec::new())?;
+    ctx.bind(scope, "_replace", replace);
+    ctx.bind(scope, "__replace__", replace);
     let slots = ctx.alloc(Value::Tuple(Vec::new()));
     ctx.bind(scope, "__slots__", slots);
     let doc = ctx.text(format!("{typename}({})", names.join(", ")));
     ctx.bind(scope, "__doc__", doc);
     let make = ctx.builtin("_collections._make");
-    let make = ctx.alloc(Value::ClassMethod(make));
+    let make = super::method_decorator::class_method(ctx, make)?;
     ctx.bind(scope, "_make", make);
     let defaults = has_defaults.then(|| ctx.alloc(Value::Tuple(defaults)));
     bind_new(ctx, scope, &typename, &names, defaults)?;
     let tuple = ctx.builtin("tuple");
+    ctx.enable_class_annotation_provider(scope);
     let class = ctx.allocate_class(typename, scope, vec![tuple])?;
     let Value::Class {
         namedtuple_fields, ..
@@ -417,6 +450,31 @@ pub(super) fn factory(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -
     };
     *namedtuple_fields = Some(names.into());
     Ok(class)
+}
+
+/// Publish the field order and trailing defaults used by the generated constructor.
+pub(super) fn bind_field_metadata(
+    ctx: &mut Context,
+    scope: Id,
+    names: &[String],
+    defaults: &[Id],
+) -> Id {
+    let field_ids: Vec<_> = names.iter().map(|n| ctx.text(n)).collect();
+    let offset = field_ids.len() - defaults.len();
+    let field_defaults = ctx.dict(
+        field_ids[offset..]
+            .iter()
+            .zip(defaults)
+            .map(|(&k, &v)| (k, v))
+            .collect(),
+    );
+    ctx.bind(scope, "_field_defaults", field_defaults);
+    let fields = ctx.alloc(Value::Tuple(field_ids));
+    ctx.bind(scope, "_fields", fields);
+    if ctx.scope_name(scope, "__match_args__").is_none() {
+        ctx.bind(scope, "__match_args__", fields);
+    }
+    fields
 }
 
 /// Format the actual tuple payload against the declared field names.
@@ -444,7 +502,7 @@ pub(super) fn bind_new(
     typename: &str,
     names: &[String],
     defaults: Option<Id>,
-) -> Result<()> {
+) -> Result<Id> {
     let mut fields = String::new();
     for name in names {
         if !fields.is_empty() {
@@ -502,9 +560,17 @@ pub(super) fn bind_new(
     if let Some(defaults) = defaults {
         ctx.set_attr(new, "__defaults__", defaults)?;
     }
-    let descriptor = super::static_method::construct(ctx, new)?;
+    let descriptor = super::method_decorator::static_method(ctx, new)?;
     ctx.bind(scope, "__new__", descriptor);
-    Ok(())
+    let collections = ctx.module("collections")?;
+    let factory = ctx.lookup_attr(collections, "_namedtuple_getnewargs")?;
+    let name = ctx.text(typename);
+    let methods = ctx.call(factory, vec![name, TRUE], Vec::new())?;
+    ctx.heap.keep(methods);
+    let methods = ctx.unpack_items(methods, 2, None)?;
+    ctx.bind(scope, "__getnewargs__", methods[0]);
+    ctx.bind(scope, "_asdict", methods[1]);
+    Ok(new)
 }
 
 /// Allocate the requested tuple subtype from the iterable before invoking any initializer.
@@ -516,6 +582,20 @@ pub(super) fn allocate(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) 
         ));
     };
     let tuple = ctx.builtin("tuple");
+    // This native tuple subtype must allocate through its scalar constructor.
+    if matches!(ctx.heap.get(class), Value::Native(name) if name == super::stdlib::fixed_structseq::SCHED_PARAM)
+    {
+        return Err(Error::new(
+            "TypeError",
+            "tuple.__new__(posix.sched_param) is not safe, use posix.sched_param.__new__()",
+        ));
+    }
+    if ctx.heap.get(class).heap_type() == Some(super::stdlib::datetime::isocalendar::CLASS) {
+        return Err(Error::new(
+            "TypeError",
+            "tuple.__new__(datetime.IsoCalendarDate) is not safe, use datetime.IsoCalendarDate.__new__()",
+        ));
+    }
     let names = ctx.namedtuple_fields(class);
     if names.is_none() && !ctx.subclass(class, tuple) {
         return Err(ctx.invalid_new_subtype("tuple", class));

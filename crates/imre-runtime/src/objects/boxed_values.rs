@@ -148,6 +148,47 @@ pub unsafe extern "C" fn imre_box_value(kind: u32, word: usize) -> *const Object
     ))))
 }
 
+/// Test the original allocation's type without assuming a tuple element layout.
+///
+/// # Safety
+/// The caller roots the erased value and its payload for the duration of the call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_object_is_exact_tuple(value: *const Object) -> bool {
+    // SAFETY: a rooted kind-6 word owns its record and immutable generated metadata.
+    unsafe {
+        object(value)
+            .0
+            .with(super::exceptions::projected_word)
+            .is_some_and(|(kind, word)| {
+                kind.raw() == 6
+                    && records::descriptor(word as *const usize)
+                        .semantics
+                        .as_ref()
+                        .is_some_and(|s| s.kind == 1 && s.flags & records::EXACT_TUPLE != 0)
+            })
+    }
+}
+
+/// Acquire the original exact string from an erased object, SystemExit code, or module member.
+///
+/// # Safety
+/// The caller roots the native object for the duration of the call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_object_exact_text(value: *const Object) -> *const Str {
+    // SAFETY: the caller roots both the view and its projected word.
+    if let Some((kind, word)) = unsafe { object(value).0.with(super::exceptions::projected_word) }
+        && kind.raw() == 3
+    {
+        // SAFETY: kind 3 identifies a rooted exact string.
+        return StrOwner::into_raw(unsafe { StrOwner::acquire_word(word) });
+    }
+    Error::return_static_message(
+        super::exceptions::Kind::TypeError,
+        "expected an exact str",
+        std::ptr::null(),
+    )
+}
+
 /// Borrow the original memory stream for a concrete class check or checked projection.
 ///
 /// # Safety

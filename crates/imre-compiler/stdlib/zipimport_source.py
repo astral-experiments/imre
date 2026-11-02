@@ -1,5 +1,5 @@
 """Source package imports for the native module registry."""
-from _frozen_importlib_external import _zip_path_importers as _path_importers
+from _imre_importlib import _zip_path_importers as _path_importers
 
 _ENCODING_NAME_CHARS = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_."
 
@@ -53,6 +53,10 @@ class zipimporter(_ZipResourceLoader):
                     offset = line.find(marker, offset)
         return compile(text, filename, 'exec')
 
+    def create_module(self, spec):
+        # Use the standard module object allocated by module_from_spec.
+        return None
+
     def exec_module(self, module):
         exec(self.get_code(module.__name__), module.__dict__)
 
@@ -72,7 +76,10 @@ class zipimporter(_ZipResourceLoader):
             return None
         origin, loader = resolved
         if loader is None:
-            raise NotImplementedError('ZIP namespace packages are unsupported')
+            from _frozen_importlib import ModuleSpec
+            spec = ModuleSpec(fullname, None, is_package=True)
+            spec.submodule_search_locations.append(origin)
+            return spec
         locations = [origin.rpartition('/')[0]] if origin.endswith('/__init__.py') else None
         return _file_spec(fullname, origin, locations, loader)
 

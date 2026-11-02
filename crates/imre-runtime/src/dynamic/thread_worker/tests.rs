@@ -29,7 +29,15 @@ fn while_lock_held<T>(probe: impl FnOnce(&Arc<PrimitiveLock>) -> T) -> T {
 fn native_start_and_join_publish_the_worker_lifetime() {
     let ctx = context();
     let (worker, poll, alive, active, count) = while_lock_held(|lock| {
-        let worker = launch(&ctx, Operation::Acquire(Arc::clone(lock)), None).unwrap();
+        let worker = launch(
+            &ctx,
+            Operation::Acquire {
+                lock: Arc::clone(lock),
+                release: None,
+            },
+            None,
+        )
+        .unwrap();
         let poll = worker.handle.join(Some(Duration::ZERO));
         let alive = worker.handle.alive();
         let active = worker.active.load(Ordering::Acquire);
@@ -58,7 +66,15 @@ fn native_start_and_join_publish_the_worker_lifetime() {
 fn shutdown_joins_non_daemon_workers_and_leaves_daemon_workers_running() {
     let mut ctx = context();
     let (daemon, daemon_alive, non_daemon_joined) = while_lock_held(|lock| {
-        let daemon = launch(&ctx, Operation::Acquire(Arc::clone(lock)), None).unwrap();
+        let daemon = launch(
+            &ctx,
+            Operation::Acquire {
+                lock: Arc::clone(lock),
+                release: None,
+            },
+            None,
+        )
+        .unwrap();
         let normal = launch(&ctx, Operation::Empty, None).unwrap();
         for (worker, is_daemon) in [(&daemon, true), (&normal, false)] {
             ctx.workers.entries.push(Entry {

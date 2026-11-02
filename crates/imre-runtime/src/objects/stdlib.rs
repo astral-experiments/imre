@@ -949,34 +949,34 @@ pub(crate) fn format_fixed_float(
     Ok(result)
 }
 
+pub(super) fn check_interrupt() -> Result<(), Error> {
+    if crate::signals::take_interrupt() {
+        Err(Error::without_args(Kind::KeyboardInterrupt))
+    } else {
+        Ok(())
+    }
+}
+
+/// Slow edge of a typed loop's pending-signal check. Worker threads leave the
+/// main thread's SIGINT pending and continue without raising an exception.
+#[unsafe(no_mangle)]
+pub extern "C" fn imre_typed_interrupt() -> bool {
+    if let Err(error) = check_interrupt() {
+        error.raise();
+        true
+    } else {
+        false
+    }
+}
+
 /// Suspend the current native thread, rounding a positive timeout up to nanoseconds.
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_time_sleep(seconds: f64) {
-    let error = if seconds.is_nan() {
-        Some(Error::new(
-            Kind::ValueError,
-            "Invalid value NaN (not a number)",
-        ))
-    } else if !seconds.is_finite() || seconds.abs() >= i64::MAX as f64 / 1e9 {
-        Some(Error::new(
-            Kind::OverflowError,
-            "timestamp out of range for platform time_t",
-        ))
-    } else if seconds < 0.0 {
-        Some(Error::new(
-            Kind::ValueError,
-            "sleep length must be non-negative",
-        ))
-    } else {
-        None
-    };
-    if let Some(e) = error {
-        e.raise();
-        return;
+    let result = super::time::sleep_float_ns(seconds)
+        .and_then(|nanos| super::time::sleep_ns(nanos, check_interrupt));
+    if let Err(error) = result {
+        error.raise();
     }
-    let duration = std::time::Duration::from_secs(seconds.trunc() as u64)
-        + std::time::Duration::from_nanos((seconds.fract() * 1e9).ceil() as u64);
-    std::thread::sleep(duration);
 }
 
 /// Seconds since the Unix epoch, including the subsecond fraction.

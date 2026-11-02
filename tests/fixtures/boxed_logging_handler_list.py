@@ -1,4 +1,5 @@
 import gc
+import io
 import logging
 import weakref
 
@@ -8,6 +9,10 @@ def current():
     assert logging.NullHandler.__init__.__qualname__ == "Handler.__init__"
     assert not hasattr(logging, "_handler_init")
     registry = logging._handlerList
+    fallback = logging._defaultLastResort
+    assert logging.lastResort is fallback and type(fallback) is logging._StderrHandler
+    assert registry[0]() is fallback and registry[0].__callback__ is logging._removeHandlerRef
+    assert fallback.level == logging.WARNING and fallback.terminator == "\n"
     saved = registry[:]
     previous = logging.raiseExceptions
     events = []
@@ -41,6 +46,14 @@ def current():
             return super().release()
 
     try:
+        output = io.StringIO()
+        fallback_handler = logging.StreamHandler(output)
+        fallback_handler.setLevel(logging.ERROR)
+        logging.lastResort = fallback_handler
+        probe = logging.Logger("unhandled")
+        probe.warning("quiet")
+        probe.error("reported")
+        assert output.getvalue() == "reported\n"
         registry[:] = []
         handler = logging.NullHandler()
         handler.cycle = handler
@@ -97,6 +110,7 @@ def current():
         assert events[-1] == ("first", "release")
         second.close_error = None
     finally:
+        logging.lastResort = fallback
         logging.raiseExceptions = previous
         registry[:] = saved
     print("weak handler lifecycle and shutdown")

@@ -22,6 +22,16 @@ impl Checker<'_> {
                 "list accepts zero or one positional iterable",
             ));
         };
+        if let ast::Expr::Call(view) = source
+            && let ast::Expr::Attribute(method) = &*view.func
+            && method.attr.as_str() == "keys"
+            && self.resolve(&view.func).is_none()
+        {
+            // The same non-escaping view as a key union, exhausted immediately.
+            let (value, _) = self.union_operand(source)?;
+            let input = self.iteration_value(value, false, source)?;
+            return self.collect_list(input, false, element, call);
+        }
         if let Some(diff) = self.materialize_ndiff(source)? {
             if let Some(element) = element {
                 self.expect(element, Type::Str, source)?;

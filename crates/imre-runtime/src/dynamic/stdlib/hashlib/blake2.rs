@@ -175,10 +175,10 @@ pub(super) fn new(
             }};
         }
         let state = if large {
-            initialize!(blake2b_simd, Blake2b)
+            initialize!(blake2b_simd, blake2b)
         } else {
-            initialize!(blake2s_simd, Blake2s)
+            initialize!(blake2s_simd, blake2s)
         };
-        Ok(ctx.alloc(Value::Hash(Rc::new(RefCell::new(state)))))
+        Ok(ctx.alloc(Value::Hash(SharedHash::new(state))))
     })
 }

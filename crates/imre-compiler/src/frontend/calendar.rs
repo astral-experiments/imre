@@ -39,6 +39,8 @@ pub(super) fn format_builtin(name: &str, args: Vec<Expr>) -> Expr {
             ty: Type::Str,
             kind: ExprKind::Builtin(Builtin::Repr, args),
         }
+    } else if args[0].ty == Type::Calendar(C::Zone) {
+        op(Op::ZoneName, Type::Str, args)
     } else {
         op(Op::Text { iso: false }, Type::Str, args)
     };
@@ -84,8 +86,31 @@ pub(super) fn utc() -> Expr {
     op(Op::Utc, Type::Calendar(C::Zone), vec![])
 }
 
+fn fixed_zone_method(name: &str) -> bool {
+    matches!(name, "utcoffset" | "tzname" | "dst")
+}
+
+pub(super) fn boxed_comparison(receiver: Type, name: &str) -> bool {
+    matches!(receiver, Type::Calendar(C::Date | C::DateTime))
+        && matches!(
+            name,
+            "__eq__" | "__ne__" | "__lt__" | "__le__" | "__gt__" | "__ge__"
+        )
+}
+
+pub(super) fn boxed_date_arithmetic(receiver: Type, name: &str) -> bool {
+    receiver == Type::Calendar(C::Date)
+        && matches!(name, "__add__" | "__radd__" | "__sub__" | "__rsub__")
+}
+
+pub(super) fn date_isoformat(receiver: Type, name: &str) -> bool {
+    receiver == Type::Calendar(C::Date) && name == "isoformat"
+}
+
 pub(super) fn boxed_member(receiver: Type, name: &str) -> bool {
     match name {
+        "replace" | "__replace__" | "strptime" if receiver == Type::Calendar(C::Date) => true,
+        "utctimetuple" => receiver == Type::Calendar(C::DateTime),
         "min" | "max" | "resolution" | "__reduce__" | "__reduce_ex__" => {
             matches!(
                 receiver,
@@ -96,8 +121,18 @@ pub(super) fn boxed_member(receiver: Type, name: &str) -> bool {
             receiver,
             Type::Calendar(C::Date | C::DateTime) | Type::ClockTime
         ),
-        "ctime" | "isoweekday" => matches!(receiver, Type::Calendar(C::Date | C::DateTime)),
-        _ => false,
+        "__str__" | "__repr__" => receiver == Type::Calendar(C::Zone),
+        "__mod__" | "__rmod__" | "__divmod__" | "__rdivmod__" => {
+            receiver == Type::Calendar(C::Delta)
+        }
+        "fromisoformat" | "strptime" => {
+            matches!(receiver, Type::Calendar(C::DateTime) | Type::ClockTime)
+        }
+        "fromtimestamp" => receiver == Type::Calendar(C::Date),
+        "ctime" | "fromisocalendar" | "fromordinal" | "isocalendar" | "isoweekday" | "today" => {
+            matches!(receiver, Type::Calendar(C::Date | C::DateTime))
+        }
+        _ => boxed_comparison(receiver, name) || boxed_date_arithmetic(receiver, name),
     }
 }
 
@@ -112,7 +147,12 @@ impl Checker<'_> {
             Some(Binding::Intrinsic(Intrinsic::ClockTime)) => Type::ClockTime,
             _ => return Ok(None),
         };
-        if boxed_member(kind, a.attr.as_str()) {
+        if matches!(a.attr.as_str(), "__module__" | "__name__" | "__qualname__")
+            || (kind == Type::Calendar(C::Zone) && fixed_zone_method(a.attr.as_str()))
+            || (kind == Type::Calendar(C::DateTime) && a.attr.as_str() == "astimezone")
+            || date_isoformat(kind, a.attr.as_str())
+            || boxed_member(kind, a.attr.as_str())
+        {
             return Err(self.object_runtime_export("datetime class member", a));
         }
         if base != Some(Binding::Intrinsic(Intrinsic::Calendar(C::Zone))) {
@@ -320,6 +360,11 @@ impl Checker<'_> {
         a: &ast::ExprAttribute,
     ) -> Result<Expr, String> {
         let name = a.attr.as_str();
+        if (kind == C::Zone && (fixed_zone_method(name) || matches!(name, "min" | "max" | "utc")))
+            || (kind == C::DateTime && name == "astimezone")
+        {
+            return Err(self.object_runtime_export("timezone member", a));
+        }
         if kind == C::DateTime && name == "tzinfo" {
             let ty = self.types.optional(Type::Calendar(C::Zone));
             return Ok(op(Op::TzInfo, ty, vec![recv]));
@@ -387,10 +432,22 @@ impl Checker<'_> {
             ));
         }
         if kind == C::DateTime && name == "astimezone" {
-            let args = self.arguments(
+            if call.arguments.is_empty() {
+                return Err(self.object_runtime_export("system local timezone", call));
+            }
+            let zone = Type::Calendar(C::Zone);
+            let args = self.arguments_with(
                 call,
-                &[parameter("tz", Type::Calendar(C::Zone), None)],
+                &[parameter("tz", zone, None)],
                 Some(recv),
+                |c, _, e| {
+                    let value = c.expr(e)?;
+                    if value.ty == zone {
+                        Ok(value)
+                    } else {
+                        Err(c.object_runtime_export("datetime.astimezone timezone argument", e))
+                    }
+                },
             )?;
             return Ok(self.ordered_builtin(
                 Builtin::Calendar(Op::Astimezone),
@@ -398,37 +455,27 @@ impl Checker<'_> {
                 args,
             ));
         }
-        if kind == C::Zone && matches!(name, "utcoffset" | "tzname") {
-            let [e] = call.arguments.args.as_ref() else {
-                return Err(error(
-                    self.source,
-                    call,
-                    "timezone method requires one positional datetime or None",
-                ));
-            };
-            if !call.arguments.keywords.is_empty() {
-                return Err(error(
-                    self.source,
-                    call,
-                    "timezone method takes a positional argument",
-                ));
+        if kind == C::Zone && fixed_zone_method(name) {
+            if name != "dst"
+                && let [value] = call.arguments.args.as_ref()
+                && call.arguments.keywords.is_empty()
+            {
+                let arg = self.expr(value)?;
+                if matches!(arg.ty, Type::None | Type::Calendar(C::DateTime)) {
+                    let (operation, ty) = if name == "utcoffset" {
+                        (Op::ZoneOffset, Type::Calendar(C::Delta))
+                    } else {
+                        (Op::ZoneName, Type::Str)
+                    };
+                    return Ok(op(operation, ty, vec![recv, arg]));
+                }
             }
-            let arg = self.expr(e)?;
-            if !matches!(arg.ty, Type::None | Type::Calendar(C::DateTime)) {
-                return Err(error(
-                    self.source,
-                    e,
-                    "timezone method requires a datetime or None",
-                ));
-            }
-            let (operation, ty) = if name == "utcoffset" {
-                (Op::ZoneOffset, Type::Calendar(C::Delta))
-            } else {
-                (Op::ZoneName, Type::Str)
-            };
-            return Ok(op(operation, ty, vec![recv, arg]));
+            return Err(self.object_runtime_export("timezone method call", call));
         }
         if !call.arguments.is_empty() {
+            if date_isoformat(Type::Calendar(kind), name) {
+                return Err(self.object_runtime_export("date.isoformat call", call));
+            }
             return Err(error(
                 self.source,
                 call,

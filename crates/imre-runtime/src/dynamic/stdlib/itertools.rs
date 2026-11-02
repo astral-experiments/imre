@@ -1,4 +1,150 @@
-use super::{Context, Error, Id, Result, Value};
+use super::{Context, Error, Id, NONE, Result, Value};
+
+/// Advance the current child, obtaining another from the outer iterator only on exhaustion.
+pub(super) fn chain_next(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    let [base, receiver] = args else {
+        return Err(Error::new("TypeError", "expected a chain instance"));
+    };
+    if !matches!(ctx.heap.get(*receiver), Value::Instance { class, .. } if ctx.direct_subclass(*class, *base))
+    {
+        return Err(Error::new("TypeError", "expected a chain instance"));
+    }
+    if !kwargs.is_empty() {
+        return Err(Error::new(
+            "TypeError",
+            "chain.__next__() takes no keyword arguments",
+        ));
+    }
+    let roots = ctx.heap.temporary_mark();
+    ctx.heap.keep(*receiver);
+    let step = ctx.heap.temporary_mark();
+    let mut limit = ctx.heap.streaming_collection_limit();
+    let result = (|| loop {
+        let Value::Instance { fields, .. } = ctx.heap.get(*receiver) else {
+            return Err(Error::new("TypeError", "expected a chain instance"));
+        };
+        let (Some(&source), Some(&active)) = (fields.get("_sources"), fields.get("_active")) else {
+            return Err(Error::new("TypeError", "invalid chain state receiver"));
+        };
+        if source == NONE {
+            return Err(Error::new("StopIteration", ""));
+        }
+        let active = if active == NONE {
+            ctx.heap.keep(source);
+            let child = ctx
+                .next_item(source)
+                .and_then(|item| item.ok_or_else(|| Error::new("StopIteration", "")))
+                .inspect_err(|_| set_chain_field(ctx, *receiver, "_sources", NONE))?;
+            ctx.heap.keep(child);
+            let active = match ctx.iterator(child) {
+                Ok(active) => active,
+                Err(error) => {
+                    set_chain_field(ctx, *receiver, "_active", NONE);
+                    set_chain_field(ctx, *receiver, "_sources", NONE);
+                    return Err(error);
+                }
+            };
+            set_chain_field(ctx, *receiver, "_active", active);
+            active
+        } else {
+            active
+        };
+        // A callback can advance this same chain and replace either cursor.
+        ctx.heap.keep(active);
+        if let Some(item) = ctx.next_item(active)? {
+            return Ok(item);
+        }
+        set_chain_field(ctx, *receiver, "_active", NONE);
+        ctx.heap.release_temporaries_since(step);
+        ctx.collect_streaming_garbage(&mut limit);
+    })();
+    ctx.heap.release_temporaries_since(roots);
+    result
+}
+
+fn set_chain_field(ctx: &mut Context, receiver: Id, key: &str, value: Id) {
+    let Value::Instance { fields, .. } = ctx.heap.get_mut(receiver) else {
+        unreachable!("live chain instance")
+    };
+    if let Some(slot) = fields.get_mut(key) {
+        *slot = value;
+    } else {
+        fields.insert(key.to_owned(), value);
+    }
+}
+
+const COUNT: &str = "itertools.count";
+const REPEAT: &str = "itertools.repeat";
+
+pub(in crate::dynamic) fn cursor_type(name: &str) -> Option<&'static str> {
+    match name {
+        COUNT => Some(COUNT),
+        REPEAT => Some(REPEAT),
+        _ => None,
+    }
+}
+
+/// These slots are owned by the iterator types, in CPython's type-dictionary order.
+pub(in crate::dynamic) fn slots(owner: &str) -> impl Iterator<Item = &'static str> {
+    ["__repr__", "__getattribute__", "__iter__", "__next__"]
+        .into_iter()
+        .chain((owner == REPEAT).then_some("__length_hint__"))
+}
+
+pub(in crate::dynamic) fn install_namespace(ctx: &mut Context, class: Id, owner: &str) {
+    let doc = if owner == COUNT {
+        "Return a count object whose .__next__() method returns consecutive values.\n\nEquivalent to:\n    def count(firstval=0, step=1):\n        x = firstval\n        while 1:\n            yield x\n            x += step"
+    } else {
+        "repeat(object [,times]) -> create an iterator which returns the object\nfor the specified number of times.  If not specified, returns the object\nendlessly."
+    };
+    let fields = std::iter::once("__new__")
+        .chain(slots(owner))
+        .chain(["__doc__", "__module__"]);
+    let entries = fields
+        .map(|field| {
+            let value = match field {
+                "__doc__" => ctx.text(doc),
+                "__module__" => ctx.text("itertools"),
+                _ => ctx.builtin(&format!("{owner}.{field}")),
+            };
+            (ctx.text(field), value)
+        })
+        .collect();
+    let dictionary = ctx.dict(entries);
+    ctx.native_type_dicts.insert(class, dictionary);
+}
+
+/// Allocate the native cursor even when the constructor is inherited by a Python class.
+pub(in crate::dynamic) fn allocate(
+    ctx: &mut Context,
+    owner: &str,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Id> {
+    let Some((&class, args)) = args.split_first() else {
+        return Err(Error::new(
+            "TypeError",
+            format!("{owner}.__new__(): not enough arguments"),
+        ));
+    };
+    let base = ctx.builtin(owner);
+    if !ctx.is_type_object(class) || !ctx.subclass(class, base) {
+        return Err(ctx.invalid_new_subtype(owner, class));
+    }
+    let cursor = if owner == COUNT {
+        count(ctx, args, kwargs)?
+    } else {
+        repeat(ctx, args, kwargs)?
+    };
+    if class == base {
+        return Ok(cursor);
+    }
+    let instance = ctx.instance(class, None);
+    if let Value::Instance { scalar, .. } = ctx.heap.get_mut(instance) {
+        *scalar = Some(cursor);
+    }
+    Ok(instance)
+}
 
 /// The input's iterator is released on exhaustion. Only yielded objects enter the replay buffer.
 #[derive(Clone)]
@@ -91,39 +237,135 @@ pub(super) fn cycle_next(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]
     Ok(item)
 }
 
-pub(super) fn filterfalse_allocate(
+impl Context {
+    /// Freeze the exported iterator classes defined by this bundled module generation.
+    pub(in crate::dynamic) fn freeze_itertools_types(&mut self, module: Id) {
+        let classes: Vec<_> = self
+            .scope_bindings(module)
+            .filter_map(|(export, value)| {
+                let Value::Class { name, scope, .. } = self.heap.get(value) else {
+                    return None;
+                };
+                let visible = !export.starts_with('_')
+                    || matches!(export, "_grouper" | "_tee" | "_tee_dataobject");
+                (visible && name == export && self.root_scope(*scope) == module).then_some(*scope)
+            })
+            .collect();
+        for scope in classes {
+            if let Value::Scope(frame) = self.heap.get_mut(scope)
+                && let Some(namespace) = &mut frame.class_namespace
+            {
+                namespace.immutable_type = true;
+            }
+        }
+    }
+
+    pub(in crate::dynamic) fn itertools_layout(&self, class: Id) -> Option<&'static str> {
+        let Value::Class { scope, .. } = *self.heap.get(class) else {
+            return None;
+        };
+        self.scope_data(scope)
+            .class_namespace
+            .as_ref()?
+            .itertools_layout
+    }
+}
+
+pub(super) fn starmap_allocate(
     ctx: &mut Context,
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
-    let [base, class, predicate, iterable] = args else {
+    let [base, class, function, source] = args else {
         return Err(Error::new(
             "TypeError",
-            "invalid filterfalse allocation arguments",
+            "invalid starmap allocation arguments",
+        ));
+    };
+    if !kwargs.is_empty()
+        || ctx.itertools_layout(*base) != Some("itertools.starmap")
+        || !matches!(ctx.heap.get(*class), Value::Class { ancestors, .. }
+            if (*class == *base || ancestors.contains(base))
+                && ancestors.iter().all(|a| !matches!(ctx.heap.get(*a), Value::Native(kind) if kind != "object")))
+    {
+        return Err(Error::new(
+            "TypeError",
+            "expected a starmap subclass with compatible layout",
+        ));
+    }
+    Ok(iterator_instance(ctx, *base, *class, *source, *function))
+}
+
+/// Fetch one row, fully unpack it, then invoke the saved callable.
+pub(super) fn starmap_next(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    if kwargs.is_empty()
+        && let [base, receiver] = args
+        && ctx.itertools_layout(*base) == Some("itertools.starmap")
+        && let Value::Instance {
+            member_values: Some(values),
+            ..
+        } = ctx.heap.get(*receiver)
+        && let Some(state) = values.get(base)
+        && let Value::Tuple(pair) = ctx.heap.get(*state)
+        && let &[source, function] = pair.as_slice()
+    {
+        let mark = ctx.heap.temporary_mark();
+        let row = ctx
+            .next_result(source)?
+            .ok_or_else(|| Error::new("StopIteration", ""))?;
+        ctx.heap.keep(row);
+        let tuple = super::super::builtins::call(ctx, "tuple", &[row], &[])?;
+        // Converting a non-tuple releases the source row before the callable runs.
+        ctx.finish_call_operands(mark, tuple);
+        let args = ctx
+            .tuple_items(tuple)?
+            .expect("tuple constructor returned a tuple");
+        return ctx.call(function, args, Vec::new());
+    }
+    Err(Error::new("TypeError", "expected an initialized starmap"))
+}
+
+pub(super) fn predicate_allocate(
+    ctx: &mut Context,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Id> {
+    let [base, class, state, iterable] = args else {
+        return Err(Error::new(
+            "TypeError",
+            "invalid predicate iterator allocation arguments",
         ));
     };
     if !kwargs.is_empty()
         || !matches!(ctx.heap.get(*class), Value::Class { ancestors, .. }
         if *class == *base || ancestors.contains(base))
     {
-        return Err(Error::new("TypeError", "expected a filterfalse subclass"));
+        return Err(Error::new(
+            "TypeError",
+            "expected a predicate iterator subclass",
+        ));
     }
     let source = ctx.iterator(*iterable)?;
+    Ok(iterator_instance(ctx, *base, *class, source, *state))
+}
+
+/// Retain the source and cursor state in a GC-traced, class-owned slot.
+fn iterator_instance(ctx: &mut Context, base: Id, class: Id, source: Id, state: Id) -> Id {
     ctx.heap.keep(source);
-    let state = ctx.alloc(Value::Tuple(vec![source, *predicate]));
+    let state = ctx.alloc(Value::Tuple(vec![source, state]));
     ctx.heap.keep(state);
-    let result = ctx.instance(*class, None);
+    let result = ctx.instance(class, None);
     let Value::Instance { member_values, .. } = ctx.heap.get_mut(result) else {
-        unreachable!("fresh filterfalse instance")
+        unreachable!("fresh iterator instance")
     };
     // The declaring class keys this private slot, so subclass descriptors cannot intercept it.
     member_values
         .get_or_insert_with(Default::default)
-        .insert(*base, state);
-    Ok(result)
+        .insert(base, state);
+    result
 }
 
-pub(super) fn filterfalse_state(
+pub(super) fn predicate_state(
     ctx: &mut Context,
     args: &[Id],
     kwargs: &[(String, Id)],
@@ -139,7 +381,10 @@ pub(super) fn filterfalse_state(
     {
         return Ok(state);
     }
-    Err(Error::new("TypeError", "expected a filterfalse instance"))
+    Err(Error::new(
+        "TypeError",
+        "expected a predicate iterator instance",
+    ))
 }
 
 /// Build the shared repeat cursor, converting a supplied count exactly once.
@@ -179,7 +424,16 @@ fn number(ctx: &Context, id: Id) -> Result<()> {
     }
 }
 
-/// Retain both Python operands without performing the first addition.
+/// Extract a machine-sized Python integer, including subclasses, without invoking user hooks.
+pub(in crate::dynamic) fn machine_integer(ctx: &Context, value: Id) -> Option<i64> {
+    match ctx.heap.get(ctx.scalar_value(value)) {
+        Value::Int(number) => number.to_i64(),
+        Value::Bool(value) => Some(i64::from(*value)),
+        _ => None,
+    }
+}
+
+/// Retain slow-mode operands and normalize the native integer start like CPython.
 pub(super) fn count(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
     let [start, step] =
         super::super::builtins::bind_method_arguments("count", args, kwargs, ["start", "step"], 2)?;
@@ -187,11 +441,11 @@ pub(super) fn count(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> 
     let step = step.unwrap_or_else(|| ctx.int(1));
     number(ctx, current)?;
     number(ctx, step)?;
-    if let Value::Bool(b) = *ctx.heap.get(current)
-        && (matches!(ctx.heap.get(step), Value::Bool(true))
-            || matches!(ctx.heap.get(step), Value::Int(n) if n.as_small() == Some(1)))
+    if !matches!(ctx.heap.get(current), Value::Int(_))
+        && machine_integer(ctx, step) == Some(1)
+        && let Some(start) = machine_integer(ctx, current)
     {
-        current = ctx.int(i64::from(b));
+        current = ctx.int(start);
     }
     Ok(ctx.alloc(Value::Count { current, step }))
 }
@@ -210,52 +464,77 @@ pub(in crate::dynamic) fn advance(ctx: &mut Context, id: Id) -> Result<Id> {
 
 pub(super) fn method(
     ctx: &mut Context,
+    owner: &str,
     name: &str,
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
-    let (receiver, rest) = args.split_first().expect("bound itertools method");
-    if name == "__length_hint__" {
-        if !kwargs.is_empty() {
-            return Err(Error::new(
-                "TypeError",
-                "repeat.__length_hint__() takes no keyword arguments",
-            ));
-        }
-        if !rest.is_empty() {
-            return Err(Error::new(
-                "TypeError",
-                format!(
-                    "repeat.__length_hint__() takes no arguments ({} given)",
-                    rest.len()
-                ),
-            ));
-        }
-        let Value::Repeat(repeat) = ctx.heap.get(*receiver) else {
-            unreachable!("repeat method")
-        };
-        let n = repeat
-            .remaining
-            .ok_or_else(|| Error::new("TypeError", "len() of unsized object"))?;
-        return Ok(ctx.int(n as i64));
-    }
-    if !rest.is_empty() {
+    let Some((&receiver, rest)) = args.split_first() else {
         return Err(Error::new(
             "TypeError",
-            format!("expected 0 arguments, got {}", rest.len()),
+            format!("descriptor '{name}' of '{owner}' object needs an argument"),
+        ));
+    };
+    let storage = ctx.scalar_value(receiver);
+    if !matches!(
+        (owner, ctx.heap.get(storage)),
+        (COUNT, Value::Count { .. }) | (REPEAT, Value::Repeat(_))
+    ) {
+        return Err(Error::new(
+            "TypeError",
+            format!(
+                "descriptor '{name}' requires a '{owner}' object but received a '{}'",
+                ctx.type_name(receiver)
+            ),
         ));
     }
     if !kwargs.is_empty() {
-        return Err(Error::new(
-            "TypeError",
-            format!("wrapper {name}() takes no keyword arguments"),
-        ));
+        let message = if name == "__length_hint__" {
+            "repeat.__length_hint__() takes no keyword arguments".to_owned()
+        } else {
+            format!("wrapper {name}() takes no keyword arguments")
+        };
+        return Err(Error::new("TypeError", message));
+    }
+    if name == "__getattribute__" {
+        let [key] = rest else {
+            return Err(Error::new(
+                "TypeError",
+                format!("expected 1 argument, got {}", rest.len()),
+            ));
+        };
+        let attr = super::super::builtins::attribute_name(ctx, *key)?;
+        return ctx.default_get_attr(receiver, &attr);
+    }
+    if !rest.is_empty() {
+        let message = if name == "__length_hint__" {
+            format!(
+                "repeat.__length_hint__() takes no arguments ({} given)",
+                rest.len()
+            )
+        } else {
+            format!("expected 0 arguments, got {}", rest.len())
+        };
+        return Err(Error::new("TypeError", message));
     }
     match name {
-        "__iter__" => Ok(*receiver),
+        "__repr__" => {
+            let text = ctx.checked_cursor_slot_repr(receiver)?;
+            Ok(ctx.text(text))
+        }
+        "__iter__" => Ok(receiver),
         "__next__" => ctx
-            .next_result(*receiver)?
+            .next_result(storage)?
             .ok_or_else(|| Error::new("StopIteration", "")),
-        _ => unreachable!("itertools method"),
+        "__length_hint__" if let Value::Repeat(repeat) = ctx.heap.get(storage) => {
+            let n = repeat
+                .remaining
+                .ok_or_else(|| Error::new("TypeError", "len() of unsized object"))?;
+            Ok(ctx.int(n as i64))
+        }
+        _ => Err(Error::new(
+            "AttributeError",
+            format!("{owner} has no method '{name}'"),
+        )),
     }
 }

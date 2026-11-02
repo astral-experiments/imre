@@ -3,6 +3,7 @@
 import argparse
 import hashlib
 import json
+import os
 from pathlib import Path
 import re
 import shutil
@@ -186,11 +187,14 @@ def main():
         sources = [
             FIXTURES / name
             for name in (
+                "method_skips.py",
                 "discover.py", "lifecycle.py", "setup_fields.py", "identity.py",
-                "assert_identity.py", "empty.py", "module_loader.py", "main_hook.py",
-                "class_skips.py", "text_runner.py", "subtests.py",
+                "assert_identity.py", "optional_text.py", "empty.py", "module_loader.py", "main_hook.py",
+                "class_skips.py", "text_runner.py", "subtests.py", "loaded_init.py",
             )
         ]
+        if hasattr(os, "getuid"):
+            sources.append(FIXTURES / "credential_guard.py")
     with tempfile.TemporaryDirectory() as td:
         checks = sum(
             compare(a, source, Path(td), upstream=a.upstream_source is not None)
@@ -215,6 +219,12 @@ def main():
             # passing run that silently omitted its behavior.
             for definition, message in (
                 ("def load_tests():\n    pass", "module hooks"),
+                (
+                    "import os\nimport unittest\nclass Credential(TestCase):\n"
+                    "    @unittest.skipUnless((print('callee') or hasattr)(os, 'getuid'), 'requires getuid')\n"
+                    "    def test_uid(self):\n        pass",
+                    "unsupported method decorator",
+                ),
                 (
                     "class Custom(TestCase):\n    def run(self) -> None:\n        pass",
                     "custom result hooks",

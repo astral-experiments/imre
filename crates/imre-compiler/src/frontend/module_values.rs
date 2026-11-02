@@ -181,7 +181,7 @@ impl Checker<'_> {
             }
             let start = body.len();
             let initialized = self.globals.types.borrow().len();
-            let condition = self.expr(&skip.condition)?;
+            let condition = self.class_skip_condition(&skip.condition)?;
             self.expect(Type::Bool, condition.ty, &skip.condition)?;
             let flag = if skip.unless {
                 Expr {
@@ -633,6 +633,9 @@ impl Initialization {
                     continue;
                 }
                 body.extend(checked);
+            }
+            if checker.fault_enabled() && body.len() > start {
+                body.insert(start, checker.fault_line(statement));
             }
             checkpoints.push(Checkpoint {
                 statement: index,

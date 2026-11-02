@@ -349,6 +349,9 @@ impl Checker<'_> {
         returns: Option<Type>,
         pull: bool,
     ) -> Result<Expr, String> {
+        if matches!(*lambda.body, ast::Expr::Yield(_)) {
+            return Err(self.object_builtin_error("generator lambda", lambda));
+        }
         let declared = lambda.parameters.as_deref();
         if declared.is_some_and(|parameters| {
             parameters.vararg.is_some()
@@ -445,6 +448,8 @@ impl Checker<'_> {
             helper.expr(&lambda.body)?
         };
         let returns = body.ty;
+        let mut body = vec![Statement::Return(body)];
+        helper.fault_frame(&mut body, "<lambda>", lambda.start());
         self.helpers.finish(
             id,
             comprehensions::Helper {
@@ -453,7 +458,7 @@ impl Checker<'_> {
                     params,
                     returns,
                     locals: helper.locals,
-                    body: vec![Statement::Return(body)],
+                    body,
                 },
                 calls: helper.calls,
                 class_reads: helper.class_reads.into_inner(),

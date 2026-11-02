@@ -1,8 +1,12 @@
 import errno
-import os
-from os import read, write
 import posix
 import sys
+
+if sys.platform == "linux":
+    tmpfile_flag = vars(posix)["O_TMPFILE"]
+
+import os
+from os import read, write
 import tempfile
 
 
@@ -23,7 +27,70 @@ def expect_errno(operation, args, number):
         raise AssertionError("descriptor operation unexpectedly succeeded")
 
 
+def check_sendfile():
+    from os import sendfile
+
+    assert sendfile is os.sendfile and sendfile is posix.sendfile
+    with tempfile.TemporaryFile() as source, tempfile.TemporaryFile() as destination:
+        src = source.fileno()
+        dst = destination.fileno()
+        os.write(src, b"abcdef")
+        os.lseek(src, 4, os.SEEK_SET)
+        assert sendfile(out_fd=Index(dst), in_fd=Index(src), offset=Index(1), count=Index(2)) == 2
+        assert os.lseek(src, 0, os.SEEK_CUR) == 4
+        assert sendfile(dst, src, None, 0) == 0
+        assert sendfile(dst, src, None, 10) == 2
+        assert sendfile(dst, src, None, 1) == 0
+        assert os.lseek(src, 0, os.SEEK_CUR) == 6
+        os.lseek(dst, 0, os.SEEK_SET)
+        assert os.read(dst, 10) == b"bcef"
+        expect_errno(sendfile, (-1, src, None, 0), errno.EBADF)
+
+
+def check_copy_file_range():
+    from os import copy_file_range
+
+    assert copy_file_range is os.copy_file_range and copy_file_range is posix.copy_file_range
+    with tempfile.TemporaryFile() as source, tempfile.TemporaryFile() as destination:
+        src = source.fileno()
+        dst = destination.fileno()
+        os.write(src, b"abcdef")
+        os.write(dst, b"......")
+        os.lseek(src, 4, os.SEEK_SET)
+        os.lseek(dst, 0, os.SEEK_SET)
+        assert copy_file_range(
+            src=Index(src), dst=Index(dst), count=Index(2), offset_src=Index(1), offset_dst=Index(2)
+        ) == 2
+        assert os.lseek(src, 0, os.SEEK_CUR) == 4
+        assert os.lseek(dst, 0, os.SEEK_CUR) == 0
+        assert copy_file_range(src, dst, 0) == 0
+        assert copy_file_range(src, dst, 10, None, None) == 2
+        assert copy_file_range(src, dst, 1) == 0
+        assert os.lseek(src, 0, os.SEEK_CUR) == 6
+        assert os.lseek(dst, 0, os.SEEK_CUR) == 2
+        os.lseek(dst, 0, os.SEEK_SET)
+        assert os.read(dst, 10) == b"efbc.."
+        expect_errno(copy_file_range, (-1, dst, 0), errno.EBADF)
+        try:
+            copy_file_range(src, dst, -1, object())
+        except ValueError as error:
+            assert str(error) == "negative value for 'count' not allowed"
+        else:
+            raise AssertionError("negative count was accepted")
+
+
 def current():
+    if sys.platform == "linux":
+        check_tmpfile()
+        check_copy_file_range()
+        check_sendfile()
+    assert os.strerror is posix.strerror
+    try:
+        os.fstat(-1)
+    except OSError as error:
+        assert os.strerror(Index(error.errno)) == error.strerror
+    else:
+        raise AssertionError("fstat accepted a negative descriptor")
     assert os.read is posix.read and os.write is posix.write
     assert read is posix.read and write is posix.write
     if sys.platform == "linux" and sys.maxsize == 2**63 - 1:
@@ -84,3 +151,28 @@ def current():
     finally:
         os.close(reader)
     print("borrowed descriptors, short transfers and EOF passed")
+
+
+def check_tmpfile():
+    assert os.O_TMPFILE is posix.O_TMPFILE is tmpfile_flag
+    del posix.O_TMPFILE
+    try:
+        assert not hasattr(posix, "O_TMPFILE") and os.O_TMPFILE is tmpfile_flag
+    finally:
+        posix.O_TMPFILE = tmpfile_flag
+    assert os.O_TMPFILE != os.O_DIRECTORY and os.O_TMPFILE & os.O_DIRECTORY
+    with tempfile.TemporaryDirectory() as directory:
+        try:
+            tmp_fd = os.open(directory, os.O_TMPFILE | os.O_RDWR, 0o600)
+        except OSError as error:
+            # Linux can expose O_TMPFILE on a filesystem without anonymous file support.
+            if error.errno not in (errno.EOPNOTSUPP, errno.EISDIR, errno.ENOENT):
+                raise
+        else:
+            try:
+                assert os.fstat(tmp_fd).st_nlink == 0 and not os.listdir(directory)
+                assert os.write(tmp_fd, b"anonymous") == 9
+                os.lseek(tmp_fd, 0, os.SEEK_SET)
+                assert os.read(tmp_fd, 9) == b"anonymous"
+            finally:
+                os.close(tmp_fd)

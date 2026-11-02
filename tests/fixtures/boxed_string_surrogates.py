@@ -12,7 +12,50 @@ class EchoSpec:
         return spec
 
 
+def affixes():
+    word = Text("é\udfff🙂")
+    assert word.startswith("é") and word.endswith("🙂")
+    assert not word.startswith("é🙂") and not word.endswith("é🙂")
+    assert word.startswith(Text("\udfff🙂"), 1)
+    assert word.endswith("é\udfff", 0, -1)
+    assert not word.startswith("\udffe", 1) and not word.endswith("\udffe🙂")
+    assert not "é🙂".startswith("\udfff") and not "é🙂".endswith("\udfff")
+    assert word.startswith(("", 0), 3) and not word.startswith("", 4)
+    assert word.endswith(("\udfff", "🙂", 0))
+    try:
+        word.startswith(("\udffe", 0, "é"))
+    except TypeError:
+        pass
+    else:
+        raise AssertionError("accepted a non-string tuple member")
+
+    seen = []
+
+    class Bound:
+        def __init__(self, value):
+            self.value = value
+
+        def __index__(self):
+            seen.append(self.value)
+            if self.value is None:
+                raise RuntimeError("bound sentinel")
+            return self.value
+
+    large = 10 ** 100
+    assert word.startswith("é", Bound(-large), Bound(large))
+    assert seen == [-large, large]
+    assert not word.endswith("", large, None)
+    seen.clear()
+    try:
+        word.endswith(0, Bound(0), Bound(None))
+    except RuntimeError as error:
+        assert str(error) == "bound sentinel" and seen == [0, None]
+    else:
+        raise AssertionError("affix type checked before end bound")
+
+
 def current():
+    affixes()
     low = "\udcff"
     high = "\U0000d800"
     path = "dir/" + low
@@ -44,6 +87,8 @@ def current():
     assert r"\udcff" == "\\udcff"
     assert [ord(char) for char in low + high + replacement] == [0xdcff, 0xd800, 0xfffd]
     assert "é" + low + "中" == "é\udcff中"
+    assert "[{}]".format(low + high) == "[" + low + high + "]"
+    assert "🙂{}é{!s}中".format(subtype, high) == "🙂" + low + "é" + high + "中"
     text = "é" + high + low
     assert text[1] == chr(0xd800)
     assert text[::-1] == low + high + "é"
@@ -99,6 +144,9 @@ def current():
             raise AssertionError("malformed input accepted")
 
     class Mapped(str):
+        def lower(self):
+            return "override"
+
         def title(self):
             return "override"
 
@@ -106,7 +154,13 @@ def current():
             return "override"
 
     word = Mapped("AΣ\ud800ß")
-    assert word.title() == word.swapcase() == "override"
+    assert word.lower() == word.title() == word.swapcase() == "override"
+    lower = str.lower.__get__(word)
+    assert lower() == "aς\ud800ß" and type(lower()) is str
+    assert Text("A\ud800Σİ").lower() == "a\ud800σi\u0307"
+    assert "AΣ\u1acfA".lower() == "aς\u1acfa"
+    # These letters acquired lowercase mappings after Unicode 16.
+    assert "\ua7ce\U00016ea0".lower() == "\ua7ce\U00016ea0"
     title = str.title.__get__(word)
     swapcase = str.swapcase.__get__(word)
     assert title() == "Aς\ud800Ss" and type(title()) is str
@@ -114,11 +168,12 @@ def current():
     assert "A\ud800Σ".title() == "A\ud800Σ"
     assert "A\ud800Σ".swapcase() == "a\ud800σ"
     signed = Mapped("!")
+    assert str.lower(signed) is not str.lower(signed)
     assert str.title(signed) is not str.title(signed)
     assert str.swapcase(signed) is not str.swapcase(signed)
     assert str.title.__objclass__ is str
     assert str.swapcase.__text_signature__ == "($self, /)"
-    for method in (title, swapcase):
+    for method in (lower, title, swapcase):
         for args, kw in (((1,), {}), ((), {"unknown": True})):
             try:
                 method(*args, **kw)
@@ -136,3 +191,10 @@ def current():
         assert str(error) == "descriptor 'title' for 'str' objects doesn't apply to a 'Alias' object"
     else:
         raise AssertionError("accepted a non-string descriptor receiver")
+
+    # Match whole Python code points, including empty boundaries on either side of a surrogate.
+    pair = high + low
+    assert pair.replace(high, "x") == "x" + low
+    assert "aba".replace("a", high, count=1) == high + "ba"
+    assert pair.replace("", low) == low + high + low + low + low
+    assert pair.replace("missing", "x") is pair

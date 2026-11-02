@@ -1,3 +1,4 @@
+import os
 import sys
 import unittest
 
@@ -35,8 +36,29 @@ class OverriddenCase(PlatformCase):
 
 @unittest.skipUnless(True, reason("also unused"))
 class OrdinaryCase(unittest.TestCase):
+    @unittest.skipUnless(True, "enabled")
+    @unittest.skipIf(False, "available")
     def test_runs(self) -> None:
         print("ran ordinary case")
+
+
+shell = "/bin/sh"
+
+
+@unittest.skipUnless(shell and os.path.exists(shell), reason("requires shell"))
+class ShellCase(unittest.TestCase):
+    def test_shell(self):
+        print("shell body")
+
+
+def unreachable() -> bool:
+    raise AssertionError("evaluated short-circuited operand")
+
+
+@unittest.skipIf(shell or unreachable(), reason("shell present"))
+class SkippedShellCase(unittest.TestCase):
+    def test_unreachable(self):
+        self.fail("shell path is nonempty")
 
 
 if __name__ == "__main__":

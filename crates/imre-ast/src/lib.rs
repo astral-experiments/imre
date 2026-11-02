@@ -1,8 +1,13 @@
 //! Apply Python's lexical class-name mangling before lowering boxed modules.
 
+/// CPython 3.14.5's pyc magic number followed by CRLF in little-endian wire order.
+pub const PYC_MAGIC_NUMBER_TOKEN: u32 = 3627 | ((b'\r' as u32) << 16) | ((b'\n' as u32) << 24);
+
 pub mod exceptions;
 pub mod startup;
 pub mod strings;
+mod type_aliases;
+pub use type_aliases::{generic_class_arguments_error, type_alias_error};
 
 use std::cell::RefCell;
 use std::collections::{BTreeSet, HashMap, HashSet};
@@ -28,6 +33,8 @@ pub fn literal_tuple_element(expr: &ast::Expr) -> bool {
 }
 
 pub mod annotations;
+pub mod class_attributes;
+pub mod class_cell;
 pub mod code_flags;
 
 /// Names imported by the module scope disable method binding even after reassignment.
@@ -78,6 +85,47 @@ pub fn direct_method<'a>(
             spellings.and_then(|names| names.original.get(&name.start())).unwrap_or(&name.id).as_str()
         )))
     .then_some(field)
+}
+
+/// Check explicit keyword names before lowering can mangle class-private names.
+pub fn repeated_keyword(node: ast::AnyNodeRef<'_>) -> Option<&ast::Keyword> {
+    use ast::visitor::source_order::{SourceOrderVisitor, TraversalSignal};
+
+    struct Children<'a>(Vec<ast::AnyNodeRef<'a>>);
+    impl<'a> SourceOrderVisitor<'a> for Children<'a> {
+        fn enter_node(&mut self, node: ast::AnyNodeRef<'a>) -> TraversalSignal {
+            self.0.push(node);
+            TraversalSignal::Skip
+        }
+    }
+
+    let mut pending = Children(vec![node]);
+    while let Some(node) = pending.0.pop() {
+        let args = match node {
+            // A call's own keyword list is validated before its callable is compiled.
+            ast::AnyNodeRef::ExprCall(call) => Some(&call.arguments),
+            ast::AnyNodeRef::StmtClassDef(class) => class.arguments.as_deref(),
+            _ => None,
+        };
+        if let Some(args) = args {
+            for (index, keyword) in args.keywords.iter().enumerate() {
+                if let Some(name) = &keyword.arg
+                    && let Some(repeated) = args.keywords[index + 1..].iter().find(|other| {
+                        other
+                            .arg
+                            .as_ref()
+                            .is_some_and(|id| id.as_str() == name.as_str())
+                    })
+                {
+                    return Some(repeated);
+                }
+            }
+        }
+        let start = pending.0.len();
+        node.visit_source_order(&mut pending);
+        pending.0[start..].reverse();
+    }
+    None
 }
 
 #[derive(Default)]
@@ -257,6 +305,14 @@ impl Transformer for Mangler<'_> {
 
     fn visit_expr(&self, expr: &mut ast::Expr) {
         match expr {
+            ast::Expr::Lambda(lambda)
+                if !self.owner.is_empty() && matches!(*lambda.body, ast::Expr::Yield(_)) =>
+            {
+                self.names
+                    .borrow_mut()
+                    .owners
+                    .insert(lambda.body.start(), Name::new(self.owner));
+            }
             ast::Expr::Name(name) => self.remember(name.start(), &mut name.id),
             ast::Expr::Attribute(attr) => self.definition(&mut attr.attr),
             _ => {}

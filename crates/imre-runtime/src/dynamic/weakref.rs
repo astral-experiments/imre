@@ -34,6 +34,11 @@ pub(super) struct Reference {
 }
 
 impl Value {
+    fn is_weakrefable_native_base(&self) -> bool {
+        matches!(self, Self::Native(name)
+            if matches!(name.as_str(), "set" | "frozenset" | super::deque::CLASS))
+    }
+
     /// Return the reference payload for an exact ref, proxy, or Python reference subclass.
     pub(super) fn weak_reference(&self) -> Option<&Reference> {
         match self {
@@ -138,14 +143,13 @@ impl Context {
         std::iter::once(&class)
             .chain(ancestors)
             .any(|&base| match self.heap.get(base) {
-                Value::Native(name) => matches!(name.as_str(), "set" | "frozenset"),
                 Value::Class { scope, .. } => self
                     .scope_data(*scope)
                     .class_namespace
                     .as_deref()
                     .and_then(|namespace| namespace.slot_names.as_deref())
                     .is_none_or(|names| names.iter().any(|name| name == "__weakref__")),
-                _ => false,
+                base => base.is_weakrefable_native_base(),
             })
     }
 
@@ -159,8 +163,9 @@ impl Context {
         let Value::Class { ancestors, .. } = self.heap.get(class) else {
             return;
         };
-        if ancestors.iter().any(|&base| self.class_instances_support_weakref(base) ||
-            matches!(self.heap.get(base), Value::Native(name) if matches!(name.as_str(), "set" | "frozenset"))) {
+        if ancestors.iter().any(|&base| {
+            self.class_instances_support_weakref(base) || self.heap.get(base).is_weakrefable_native_base()
+        }) {
             return;
         }
         let descriptor = self.alloc(Value::WeakrefDescriptor(class));
@@ -209,13 +214,19 @@ impl Context {
             Value::Raised(error) => error
                 .class()
                 .is_some_and(|class| self.class_instances_support_weakref(class)),
-            Value::Class { .. }
+            Value::GenericAlias(_)
+            | Value::ParamSpec(_)
+            | Value::TypeVar(_)
+            | Value::TypeVarTuple { .. }
+            | Value::Class { .. }
             | Value::Function { .. }
             | Value::Module { .. }
             | Value::Method { .. }
             | Value::Code(_)
             | Value::Set { .. }
+            | Value::Deque(_)
             | Value::MemoryView { .. }
+            | Value::File(_)
             | Value::Partial { .. }
             | Value::HandlerLock(_)
             | Value::PrimitiveLock(_)

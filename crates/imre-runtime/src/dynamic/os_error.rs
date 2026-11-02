@@ -76,7 +76,7 @@ impl Args {
     }
 }
 
-fn subclass(code: i64) -> Option<&'static str> {
+pub(super) fn subclass(code: i64) -> Option<&'static str> {
     crate::objects::errno_entries().find_map(|(name, value)| {
         if i64::from(value) != code {
             return None;
@@ -238,6 +238,18 @@ impl Context {
         };
         error.message = result;
         eprintln!("{error}");
+    }
+
+    /// Test the stored OSError errno without invoking a Python attribute hook.
+    pub(super) fn has_errno(&self, error: &Error, errno: i32) -> bool {
+        let errno = i64::from(errno);
+        match error.os_args.as_deref() {
+            Some(Args::Native { source, .. }) => source.errno == errno,
+            Some(Args::Python(fields)) => fields.errno.is_some_and(|id| {
+                matches!(self.heap.get(id), Value::Int(value) if value.to_i64() == Some(errno))
+            }),
+            None => false,
+        }
     }
 
     pub(super) fn is_os_error(&self, error: &Error) -> bool {

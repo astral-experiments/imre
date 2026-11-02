@@ -191,6 +191,7 @@ pub(super) fn is_pipeline_expression(checker: &Checker<'_>, expression: &ast::Ex
         || matches!(expression, ast::Expr::Call(call)
             if checker.generator_signature(call).is_some()
             || checker.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::Chain))
+            || checker.is_chain_from_iterable(call)
             || checker.is_builtin_iter(call)
             || matches!(&*call.func, ast::Expr::Name(name)
                 if checker.resolve(&call.func).is_none()
@@ -278,6 +279,22 @@ impl Checker<'_> {
             && self.resolve(&call.func).is_none()
     }
 
+    fn is_chain_from_iterable(&self, call: &ast::ExprCall) -> bool {
+        let ast::Expr::Attribute(method) = &*call.func else {
+            return false;
+        };
+        let receiver = &*method.value;
+        let mut root = receiver;
+        while let ast::Expr::Attribute(attr) = root {
+            root = &attr.value;
+        }
+        method.attr.as_str() == "from_iterable"
+            && root
+                .as_name_expr()
+                .is_some_and(|n| !self.names.contains_key(n.id.as_str()))
+            && self.resolve(receiver) == Some(Binding::Intrinsic(Intrinsic::Chain))
+    }
+
     /// Recognizes only sealed constructor syntax at a direct consumer boundary.
     pub(super) fn pipeline_input(
         &mut self,
@@ -316,6 +333,9 @@ impl Checker<'_> {
         }
         if self.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::Chain)) {
             return Ok(Some(Iteration::Prepared(self.chain_input(call, element)?)));
+        }
+        if self.is_chain_from_iterable(call) {
+            return Ok(Some(Iteration::Prepared(self.chain_from_iterable(call)?)));
         }
         if let Some((signature, element)) = self.generator_signature(call) {
             let frame = self.source_call(call, &signature, None, 0)?;
@@ -730,6 +750,73 @@ impl Checker<'_> {
             eager_list: None,
             writes,
             clear,
+        })
+    }
+
+    /// Acquire the outer iterator at construction and each inner iterator on demand.
+    fn chain_from_iterable(&mut self, call: &ast::ExprCall) -> Result<Prepared, String> {
+        self.reject_builtin_keywords(call)?;
+        let [source] = call.arguments.args.as_ref() else {
+            return Err(error(
+                self.source,
+                call,
+                "chain.from_iterable requires one positional iterable",
+            ));
+        };
+        let input = self.expansion_input(source, None)?;
+        let mut outer = self.prepare_iteration(input, source, false)?;
+        outer.evaluate.append(&mut outer.acquire);
+        outer.eager_list = None;
+        if outer.elementless {
+            return Ok(outer);
+        }
+
+        let mut inner = self.prepare_container(self.local(outer.value), false, call, false)?;
+        let active = self.hidden(Type::Bool);
+        let done = self.hidden(Type::Bool);
+        outer.evaluate.extend([
+            Statement::Assign(active, Expr::boolean(false)),
+            Statement::Assign(done, Expr::boolean(false)),
+        ]);
+
+        // An outer failure or a non-iterable item permanently exhausts a chain.
+        // A failure while pulling an active inner iterator keeps that iterator.
+        let mut advance = vec![Statement::Assign(done, Expr::boolean(true))];
+        advance.append(&mut outer.next);
+        let mut exhausted: Vec<_> = outer.clear.iter().copied().map(Statement::Clear).collect();
+        exhausted.push(Statement::Break);
+        advance.push(Statement::If(
+            not(self.local(outer.ready)),
+            exhausted,
+            Vec::new(),
+        ));
+        advance.append(&mut inner.evaluate);
+        advance.append(&mut inner.acquire);
+        advance.extend([
+            Statement::Clear(outer.value),
+            Statement::Assign(active, Expr::boolean(true)),
+            Statement::Assign(done, Expr::boolean(false)),
+        ]);
+        let mut pull = vec![Statement::If(not(self.local(active)), advance, Vec::new())];
+        pull.append(&mut inner.next);
+        pull.push(Statement::If(
+            self.local(inner.ready),
+            vec![Statement::Break],
+            Vec::new(),
+        ));
+        pull.extend(inner.clear.iter().copied().map(Statement::Clear));
+        pull.push(Statement::Assign(active, Expr::boolean(false)));
+        outer.clear.extend(inner.clear);
+        outer.clear.extend([active, done]);
+        Ok(Prepared {
+            next: vec![
+                Statement::Assign(inner.ready, Expr::boolean(false)),
+                Statement::While(not(self.local(done)), pull, Vec::new()),
+            ],
+            value: inner.value,
+            ready: inner.ready,
+            elementless: inner.elementless,
+            ..outer
         })
     }
 
@@ -1222,7 +1309,7 @@ impl Checker<'_> {
 
     /// List cursors re-read the live length; reverse cursors capture only their
     /// starting index. Dict/set/string cursors use the rooted runtime protocol.
-    fn prepare_container(
+    pub(super) fn prepare_container(
         &mut self,
         iterable: Expr,
         items: bool,

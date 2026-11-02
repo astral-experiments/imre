@@ -1,9 +1,7 @@
 use super::*;
 use crate::StrOwner;
 use crate::objects::values::imre_sequence_equal;
-use crate::objects::{
-    imre_seq_append, imre_seq_borrow_index_proven, imre_seq_data_readonly, imre_seq_len,
-};
+use crate::objects::{imre_seq_append, imre_seq_data_readonly, imre_seq_len};
 use std::ptr;
 
 fn string(value: &str) -> StrOwner {
@@ -208,11 +206,7 @@ fn raw_reads_and_writes_respect_snapshots_and_copy_identity() {
             2
         );
         assert_eq!(imre_seq_len(crate::ObjectOwner::as_ptr(&diff)), 3);
-        let word = imre_seq_borrow_index_proven(crate::ObjectOwner::as_ptr(&diff), 0);
-        assert_eq!(
-            imre_seq_data_readonly(crate::ObjectOwner::as_ptr(&diff)).read(),
-            word
-        );
+        let word = imre_seq_data_readonly(crate::ObjectOwner::as_ptr(&diff)).read();
         assert_eq!((&*(word as *const Str)).as_str(), "  same");
         imre_seq_append(
             crate::ObjectOwner::as_ptr(&alias),

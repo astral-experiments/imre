@@ -6,7 +6,13 @@ use super::*;
 use crate::dynamic::builtins::bind;
 use crate::objects::{Calendar, CalendarNumber};
 
+pub(in crate::dynamic) mod comparison;
+mod fromutc;
+mod iso_datetime;
+mod iso_time;
+pub(in crate::dynamic) mod isocalendar;
 mod reduction;
+pub(in crate::dynamic) mod render;
 mod strftime;
 
 const FIELDS: [&str; 8] = [
@@ -19,6 +25,7 @@ const FIELDS: [&str; 8] = [
     "microsecond",
     "fold",
 ];
+const CLOCK_FIELDS: [&str; 6] = ["hour", "minute", "second", "microsecond", "tzinfo", "fold"];
 const UNITS: [&str; 7] = [
     "days",
     "seconds",
@@ -35,34 +42,126 @@ pub(in crate::dynamic) struct Members {
     pub(in crate::dynamic) methods: &'static [&'static str],
 }
 
+pub(in crate::dynamic) const TZINFO: &str = "datetime.tzinfo";
+
+pub(in crate::dynamic) fn clock_classmethod(symbol: &str) -> bool {
+    matches!(
+        symbol,
+        "datetime.time.fromisoformat"
+            | "datetime.time.strptime"
+            | "datetime.datetime.now"
+            | "datetime.datetime.fromtimestamp"
+            | "datetime.datetime.utcnow"
+            | "datetime.datetime.utcfromtimestamp"
+            | "datetime.datetime.fromisoformat"
+            | "datetime.datetime.combine"
+            | "datetime.datetime.strptime"
+            | "datetime.date.strptime"
+            | "datetime.date.today"
+            | "datetime.date.fromtimestamp"
+            | "datetime.date.fromordinal"
+            | "datetime.date.fromisocalendar"
+    )
+}
+
+pub(in crate::dynamic) fn tzinfo(ctx: &mut Context) -> Id {
+    ctx.builtin(TZINFO)
+}
+
 pub(in crate::dynamic) fn members(class: &str) -> Option<Members> {
     let (owner, fields, methods): (_, &[_], &[_]) = match class {
+        TZINFO => (
+            TZINFO,
+            &[],
+            &["__reduce__", "tzname", "utcoffset", "dst", "fromutc"],
+        ),
+        "datetime.timezone" => (
+            "datetime.timezone",
+            &[],
+            &[
+                "__getinitargs__",
+                "__repr__",
+                "__str__",
+                "utcoffset",
+                "dst",
+                "tzname",
+                "fromutc",
+            ],
+        ),
         "datetime.date" => (
             "datetime.date",
             &FIELDS[..3],
             &[
+                "__eq__",
+                "__ne__",
+                "__lt__",
+                "__le__",
+                "__gt__",
+                "__ge__",
                 "__format__",
                 "__reduce__",
                 "__repr__",
                 "__str__",
+                "__add__",
+                "__radd__",
+                "__sub__",
+                "__rsub__",
+                "__replace__",
                 "ctime",
+                "isocalendar",
+                "isoformat",
+                "replace",
                 "isoweekday",
                 "toordinal",
                 "weekday",
                 "timetuple",
                 "strftime",
+                "strptime",
+                "fromordinal",
+                "fromisocalendar",
+                "fromtimestamp",
+                "today",
             ],
         ),
         "datetime.datetime" => (
             "datetime.datetime",
             &["hour", "minute", "second", "microsecond", "fold", "tzinfo"],
             &[
+                "__add__",
+                "__radd__",
+                "__sub__",
+                "__rsub__",
+                "fromisoformat",
+                "astimezone",
+                "combine",
+                "now",
+                "fromtimestamp",
+                "utcnow",
+                "utcfromtimestamp",
                 "__reduce__",
                 "__reduce_ex__",
+                "__eq__",
+                "__ne__",
+                "__lt__",
+                "__le__",
+                "__gt__",
+                "__ge__",
+                "dst",
+                "tzname",
+                "utcoffset",
                 "__repr__",
                 "__str__",
                 "ctime",
+                "date",
+                "__replace__",
+                "isoformat",
+                "replace",
+                "time",
+                "timetz",
+                "timestamp",
                 "timetuple",
+                "utctimetuple",
+                "strptime",
             ],
         ),
         "datetime.time" => (
@@ -70,8 +169,22 @@ pub(in crate::dynamic) fn members(class: &str) -> Option<Members> {
             &["hour", "minute", "second", "microsecond", "fold", "tzinfo"],
             &[
                 "__format__",
+                "__replace__",
+                "fromisoformat",
+                "strptime",
+                "isoformat",
+                "replace",
                 "__reduce__",
                 "__reduce_ex__",
+                "__eq__",
+                "__ne__",
+                "__lt__",
+                "__le__",
+                "__gt__",
+                "__ge__",
+                "dst",
+                "tzname",
+                "utcoffset",
                 "__repr__",
                 "__str__",
                 "strftime",
@@ -82,6 +195,8 @@ pub(in crate::dynamic) fn members(class: &str) -> Option<Members> {
             &["days", "seconds", "microseconds"],
             &[
                 "__bool__",
+                "__pos__",
+                "__abs__",
                 "__neg__",
                 "__add__",
                 "__radd__",
@@ -93,6 +208,10 @@ pub(in crate::dynamic) fn members(class: &str) -> Option<Members> {
                 "__rtruediv__",
                 "__floordiv__",
                 "__rfloordiv__",
+                "__mod__",
+                "__rmod__",
+                "__divmod__",
+                "__rdivmod__",
                 "__reduce__",
                 "__repr__",
                 "__str__",
@@ -111,6 +230,7 @@ pub(in crate::dynamic) fn members(class: &str) -> Option<Members> {
 impl Members {
     pub(in crate::dynamic) fn owns(&self, name: &str) -> bool {
         matches!(name, "__new__" | "min" | "max" | "resolution")
+            || (self.owner == "datetime.timezone" && name == "utc")
             || self.fields.contains(&name)
             || self.methods.contains(&name)
     }
@@ -124,7 +244,16 @@ pub(in crate::dynamic) fn install_members(ctx: &mut Context, class: &str) {
     if class == "datetime.datetime" {
         ctx.builtin("datetime.date");
     }
-    ctx.builtin(&format!("{class}.__new__"));
+    if class == "datetime.timezone" {
+        ctx.builtin(TZINFO);
+        utc(ctx);
+        for (name, max) in [("min", false), ("max", true)] {
+            let id = store(ctx, Calendar::zone_limit(max), NONE);
+            ctx.builtins.insert(format!("{class}.{name}"), id);
+        }
+    } else {
+        ctx.builtin(&format!("{class}.__new__"));
+    }
     for method in members.methods {
         ctx.builtin(&format!("{class}.{method}"));
     }
@@ -145,9 +274,14 @@ pub(in crate::dynamic) fn install_members(ctx: &mut Context, class: &str) {
 }
 
 pub(in crate::dynamic) fn store(ctx: &mut Context, value: Calendar, tzinfo: Id) -> Id {
+    // A native-created zone (UTC or a parsed mail date) already owns its timedelta.
+    let tzoffset = value
+        .zone_offset()
+        .map_or(NONE, |offset| store(ctx, offset, NONE));
     ctx.alloc(Value::Calendar {
         value,
         tzinfo,
+        tzoffset,
         tzname: NONE,
     })
 }
@@ -172,8 +306,75 @@ fn calendar(ctx: &Context, obj: Id, class: &str) -> Option<Calendar> {
     }
 }
 
+pub(in crate::dynamic) fn type_name(ctx: &Context, value: Id) -> std::borrow::Cow<'_, str> {
+    if let Value::Calendar { value, .. } = ctx.heap.get(value) {
+        return format!("datetime.{}", value.class()).into();
+    }
+    ctx.heap
+        .get(value)
+        .instance_class()
+        .map(|class| ctx.class_name(class))
+        .or_else(|| ctx.builtin_type_name(value))
+        .unwrap_or_else(|| ctx.type_name(value))
+        .into()
+}
+
+/// Return a fixed zone's stored offset or name after validating its datetime argument.
+fn fixed_zone_method(
+    ctx: &mut Context,
+    method: &str,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Id> {
+    let name = method.rsplit('.').next().unwrap();
+    let Some((&receiver, rest)) = args.split_first() else {
+        return Err(Error::new(
+            "TypeError",
+            format!("unbound method {method}() needs an argument"),
+        ));
+    };
+    let (value, offset, name_object) = match ctx.heap.get(receiver) {
+        Value::Calendar {
+            value,
+            tzoffset,
+            tzname,
+            ..
+        } if *tzoffset != NONE => (value, *tzoffset, *tzname),
+        _ => {
+            let kind = type_name(ctx, receiver);
+            return Err(Error::new(
+                "TypeError",
+                format!(
+                    "descriptor '{name}' for 'datetime.timezone' objects doesn't apply to a '{kind}' object"
+                ),
+            ));
+        }
+    };
+    let dt = crate::dynamic::builtins::one_positional_arg(method, rest, kwargs)?;
+    if dt != NONE && calendar(ctx, dt, "datetime").is_none() {
+        let kind = type_name(ctx, dt);
+        return Err(Error::new(
+            "TypeError",
+            format!("{name}(dt) argument must be a datetime instance or None, not {kind}"),
+        ));
+    }
+    Ok(match name {
+        "utcoffset" => offset,
+        "dst" => NONE,
+        _ if name_object != NONE => name_object,
+        _ => ctx.text(value.text()),
+    })
+}
+
 fn zone(ctx: &Context, id: Id) -> Result<Option<Calendar>> {
-    if id == NONE {
+    // Custom zones live in the boxed clock's tzinfo field. Its native payload stores wall time.
+    if id == NONE
+        || ctx
+            .heap
+            .get(id)
+            .instance_class()
+            .is_some_and(|class| ctx.has_base(class, TZINFO))
+    {
         return Ok(None);
     }
     calendar(ctx, id, "timezone").map(Some).ok_or_else(|| {
@@ -181,10 +382,56 @@ fn zone(ctx: &Context, id: Id) -> Result<Option<Calendar>> {
             "TypeError",
             format!(
                 "tzinfo argument must be None or of a tzinfo subclass, not type '{}'",
-                ctx.type_name(id)
+                type_name(ctx, id)
             ),
         )
     })
+}
+
+/// Call the zone each time its name or offset is requested and preserve the returned Python object.
+pub(in crate::dynamic) fn call_tzinfo(
+    ctx: &mut Context,
+    zone: Id,
+    method: &str,
+    arg: Id,
+) -> Result<Id> {
+    if zone == NONE {
+        return Ok(NONE);
+    }
+    let callback = ctx.lookup_attr(zone, method)?;
+    let result = ctx.call(callback, vec![arg], vec![])?;
+    if result == NONE {
+        return Ok(NONE);
+    }
+    let expected = if method == "tzname" {
+        if ctx.string_storage(result).is_some() {
+            return Ok(result);
+        }
+        "a string"
+    } else {
+        if let Some(offset) = calendar(ctx, result, "timedelta") {
+            if offset.delta_microseconds().abs() < 86_400_000_000 {
+                return Ok(result);
+            }
+            let repr = ctx.builtin("repr");
+            let desc = ctx.call(repr, vec![result], vec![])?;
+            return Err(Error::new(
+                "ValueError",
+                format!(
+                    "offset must be a timedelta strictly between -timedelta(hours=24) and timedelta(hours=24), not {}",
+                    ctx.str_value(desc)?
+                ),
+            ));
+        }
+        "timedelta"
+    };
+    Err(Error::new(
+        "TypeError",
+        format!(
+            "tzinfo.{method}() must return None or {expected}, not '{}'",
+            type_name(ctx, result)
+        ),
+    ))
 }
 
 pub(super) fn number(ctx: &Context, id: Id) -> Option<CalendarNumber> {
@@ -247,7 +494,7 @@ fn field_type_error(ctx: &Context, owner: &str, field: &str, receiver: Id) -> Er
     )
 }
 
-fn delta_component(ctx: &mut Context, value: Id) -> Result<i32> {
+fn c_int(ctx: &mut Context, value: Id) -> Result<i32> {
     ctx.index_integer(value)?
         .to_i64()
         .and_then(|n| i32::try_from(n).ok())
@@ -273,7 +520,7 @@ fn split_delta_component(ctx: &mut Context, value: Id, unit: i32) -> Result<(Id,
             format!("divmod() returned a tuple of size {}", tuple.len()),
         ));
     };
-    let remainder = delta_component(ctx, *remainder)?;
+    let remainder = c_int(ctx, *remainder)?;
     if !(0..unit).contains(&remainder) {
         return Err(Error::new(
             "TypeError",
@@ -290,7 +537,7 @@ fn result_microseconds(ctx: &mut Context, result: Id) -> Result<crate::Int> {
     } else {
         let (seconds, micros) = split_delta_component(ctx, result, 1_000_000)?;
         let (days, seconds) = split_delta_component(ctx, seconds, 86_400)?;
-        let days = delta_component(ctx, days)?;
+        let days = c_int(ctx, days)?;
         let total =
             (i128::from(days) * 86_400 + i128::from(seconds)) * 1_000_000 + i128::from(micros);
         Ok(crate::Int::new(total.into()))
@@ -319,7 +566,98 @@ fn nearest_quotient(ctx: &Context, numerator: Id, denominator: Id) -> Result<cra
     )))
 }
 
-fn delta_binary(
+fn date_arithmetic(
+    ctx: &mut Context,
+    method: &str,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Id> {
+    let (owner, name) = method.split_once('.').unwrap();
+    let Some((&receiver, args)) = args.split_first() else {
+        return Err(Error::new(
+            "TypeError",
+            format!("descriptor '{name}' of 'datetime.{owner}' object needs an argument"),
+        ));
+    };
+    let scalar = ctx.scalar_value(receiver);
+    let (value, tzinfo) = match ctx.heap.get(scalar) {
+        Value::Calendar { value, tzinfo, .. }
+            if value.class() == owner || (owner == "date" && value.class() == "datetime") =>
+        {
+            (value.clone(), *tzinfo)
+        }
+        _ => {
+            let kind = match ctx.heap.get(receiver) {
+                Value::Calendar { value, .. } => format!("datetime.{}", value.class()),
+                _ => ctx.type_name(receiver).to_owned(),
+            };
+            return Err(Error::new(
+                "TypeError",
+                format!(
+                    "descriptor '{name}' requires a 'datetime.{owner}' object but received a '{kind}'"
+                ),
+            ));
+        }
+    };
+    if !kwargs.is_empty() {
+        return Err(Error::new(
+            "TypeError",
+            format!("wrapper {name}() takes no keyword arguments"),
+        ));
+    }
+    let &[other] = args else {
+        return Err(Error::new(
+            "TypeError",
+            format!("expected 1 argument, got {}", args.len()),
+        ));
+    };
+    // A datetime is a valid receiver for an explicit date descriptor, but date arithmetic
+    // declines it so that the datetime operand can handle its own semantics.
+    if value.class() != owner {
+        return Ok(crate::dynamic::value::NOT_IMPLEMENTED);
+    }
+    if matches!(name, "__sub__" | "__rsub__")
+        && let Some(other_value) = calendar(ctx, other, owner)
+        && other_value.class() == owner
+    {
+        let (left, right, a, b) = if name == "__sub__" {
+            (&value, &other_value, receiver, other)
+        } else {
+            (&other_value, &value, other, receiver)
+        };
+        let delta = if owner == "date" {
+            left.date_difference(right)?
+        } else if let Some(delta) = comparison::subtract(ctx, a, b)? {
+            delta
+        } else {
+            left.datetime_difference(right)?
+        };
+        return Ok(store(ctx, delta, NONE));
+    }
+    let Some(delta) = calendar(ctx, other, "timedelta") else {
+        return Ok(crate::dynamic::value::NOT_IMPLEMENTED);
+    };
+    if name == "__rsub__" {
+        return Ok(crate::dynamic::value::NOT_IMPLEMENTED);
+    }
+    let shifted = value.shift(&delta, name == "__sub__")?;
+    if receiver == scalar {
+        return Ok(store(ctx, shifted, tzinfo));
+    }
+    let class = ctx.exact_type(receiver)?;
+    let fields = shifted.fields();
+    let count = if owner == "date" { 3 } else { 7 };
+    let mut args: Vec<_> = fields[..count]
+        .iter()
+        .map(|&part| ctx.int(part as i64))
+        .collect();
+    if owner == "datetime" {
+        args.push(tzinfo);
+    }
+    ctx.call(class, args, Vec::new())
+}
+
+fn delta_arithmetic(
     ctx: &mut Context,
     method: &str,
     args: &[Id],
@@ -347,6 +685,24 @@ fn delta_binary(
             format!("wrapper {name}() takes no keyword arguments"),
         ));
     }
+    if matches!(name, "__neg__" | "__pos__" | "__abs__") {
+        if !args.is_empty() {
+            return Err(Error::new(
+                "TypeError",
+                format!("expected 0 arguments, got {}", args.len()),
+            ));
+        }
+        let micros = duration.delta_microseconds();
+        if micros == 0 {
+            return Ok(ctx.scalar_value(receiver));
+        }
+        let result = if name == "__neg__" || (name == "__abs__" && micros < 0) {
+            duration.negate_delta()?
+        } else {
+            duration
+        };
+        return Ok(store(ctx, result, NONE));
+    }
     let &[other] = args else {
         return Err(Error::new(
             "TypeError",
@@ -358,11 +714,29 @@ fn delta_binary(
             return Ok(crate::dynamic::value::NOT_IMPLEMENTED);
         };
         let result = match name {
-            "__sub__" => duration.shift_duration(&other, true),
-            "__rsub__" => other.shift_duration(&duration, true),
-            _ => duration.shift_duration(&other, false),
+            "__sub__" => duration.shift(&other, true),
+            "__rsub__" => other.shift(&duration, true),
+            _ => duration.shift(&other, false),
         }?;
         return Ok(store(ctx, result, NONE));
+    }
+    if matches!(name, "__mod__" | "__rmod__" | "__divmod__" | "__rdivmod__") {
+        let Some(other) = calendar(ctx, other, "timedelta") else {
+            return Ok(crate::dynamic::value::NOT_IMPLEMENTED);
+        };
+        let as_int = |value: &Calendar| crate::Int::new(value.delta_microseconds().into());
+        let (left, right) = if matches!(name, "__rmod__" | "__rdivmod__") {
+            (as_int(&other), as_int(&duration))
+        } else {
+            (as_int(&duration), as_int(&other))
+        };
+        let micros = crate::integer_binary(&left, &right, 4)?;
+        let remainder = store(ctx, Calendar::from_delta_microseconds(&micros)?, NONE);
+        if matches!(name, "__divmod__" | "__rdivmod__") {
+            let quotient = ctx.alloc(Value::Int(crate::integer_binary(&left, &right, 3)?));
+            return Ok(ctx.alloc(Value::Tuple(vec![quotient, remainder])));
+        }
+        return Ok(remainder);
     }
     scale_delta(ctx, name, &duration, other)
 }
@@ -438,6 +812,21 @@ pub(super) fn call(
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
+    if let Some((
+        kind @ ("date" | "datetime" | "time"),
+        operation @ ("__eq__" | "__ne__" | "__lt__" | "__le__" | "__gt__" | "__ge__"),
+    )) = method.split_once('.')
+    {
+        return comparison::rich_method(ctx, kind, operation, args, kwargs);
+    }
+    if let Some((kind, operation)) = method.split_once('.')
+        && matches!(
+            (kind, operation),
+            ("tzinfo", "__reduce__") | ("timezone", "__getinitargs__")
+        )
+    {
+        return reduction::reduce_zone(ctx, kind, operation, args, kwargs);
+    }
     if let Some((kind, operation @ ("__reduce__" | "__reduce_ex__"))) = method.split_once('.') {
         return reduction::reduce(ctx, kind, operation, args, kwargs);
     }
@@ -456,10 +845,114 @@ pub(super) fn call(
         return read_field(ctx, owner, name, *receiver);
     }
     match method {
+        "tzinfo" => {
+            let class = tzinfo(ctx);
+            Ok(ctx.instance(class, None))
+        }
+        "tzinfo.__new__" => {
+            let Some(&class) = args.first() else {
+                return Err(Error::new(
+                    "TypeError",
+                    "datetime.tzinfo.__new__(): not enough arguments",
+                ));
+            };
+            let base = tzinfo(ctx);
+            if !ctx.direct_subclass(class, base) {
+                return Err(ctx.invalid_new_subtype(TZINFO, class));
+            }
+            let object = ctx.builtin("object");
+            let owner = ctx.tzinfo_allocation_base(class, base, object);
+            let storage = match owner.map(|id| ctx.heap.get(id)) {
+                Some(Value::Native(kind)) if kind == TZINFO || kind == "property" => None,
+                Some(Value::Native(kind)) if kind == "list" => {
+                    Some(ctx.alloc(Value::List(Vec::new())))
+                }
+                Some(Value::Native(kind)) if kind == "bytearray" => {
+                    Some(ctx.alloc(Value::ByteArray(Vec::new())))
+                }
+                _ => {
+                    let name = ctx.class_name(class);
+                    return Err(Error::new(
+                        "TypeError",
+                        format!(
+                            "datetime.tzinfo.__new__({name}) is not safe, use {name}.__new__()"
+                        ),
+                    ));
+                }
+            };
+            let result = ctx.instance(class, None);
+            if let Value::Instance { scalar, .. } = ctx.heap.get_mut(result) {
+                *scalar = storage;
+            }
+            Ok(result)
+        }
+        "tzinfo.fromutc" | "timezone.fromutc" => fromutc::method(ctx, method, args, kwargs),
+        "datetime.fromisoformat" => iso_datetime::fromisoformat(ctx, args, kwargs),
+        "datetime.astimezone" => fromutc::astimezone(ctx, args, kwargs),
+        "timezone.utcoffset" | "timezone.dst" | "timezone.tzname" => {
+            fixed_zone_method(ctx, method, args, kwargs)
+        }
+        "tzinfo.utcoffset" | "tzinfo.dst" | "tzinfo.tzname" => {
+            let name = method.rsplit('.').next().unwrap();
+            let Some((&receiver, args)) = args.split_first() else {
+                return Err(Error::new(
+                    "TypeError",
+                    format!("unbound method {method}() needs an argument"),
+                ));
+            };
+            let class = tzinfo(ctx);
+            if !ctx.instance_of(receiver, class) {
+                return Err(Error::new(
+                    "TypeError",
+                    format!(
+                        "descriptor '{name}' for '{TZINFO}' objects doesn't apply to a '{}' object",
+                        ctx.type_name(receiver)
+                    ),
+                ));
+            }
+            let kind = ctx.type_name(receiver);
+            let kind = kind.strip_prefix("datetime.").unwrap_or(kind);
+            crate::dynamic::builtins::one_positional_arg(&format!("{kind}.{name}"), args, kwargs)?;
+            Err(Error::new(
+                "NotImplementedError",
+                format!("a tzinfo subclass must implement {name}()"),
+            ))
+        }
+        "date.__add__" | "date.__radd__" | "date.__sub__" | "date.__rsub__"
+        | "datetime.__add__" | "datetime.__radd__" | "datetime.__sub__" | "datetime.__rsub__" => {
+            date_arithmetic(ctx, method, args, kwargs)
+        }
+        "date.today" | "date.fromtimestamp" => fromutc::date_constructor(ctx, method, args, kwargs),
+        "date.fromisocalendar" => date_fromisocalendar(ctx, args, kwargs),
+        "date.isocalendar" => isocalendar::from_date(ctx, args, kwargs),
+        "date.fromordinal" => date_fromordinal(ctx, args, kwargs),
+        "date.isoformat" => render::date_isoformat(ctx, args, kwargs),
         "date.strftime" => strftime::format(ctx, "date", args, kwargs),
         "time.strftime" => strftime::format(ctx, "time", args, kwargs),
         "time" => time(ctx, args, kwargs),
-        "timedelta.__add__"
+        "time.fromisoformat" => time_fromisoformat(ctx, args, kwargs),
+        "time.strptime" => time_strptime(ctx, args, kwargs),
+        "date.strptime" | "datetime.strptime" => date_strptime(ctx, method, args, kwargs),
+        "datetime.date"
+        | "datetime.time"
+        | "datetime.timetz"
+        | "datetime.utctimetuple"
+        | "date.replace"
+        | "date.__replace__"
+        | "datetime.replace"
+        | "datetime.__replace__"
+        | "time.replace"
+        | "time.__replace__"
+        | "datetime.utcoffset"
+        | "time.utcoffset"
+        | "datetime.dst"
+        | "time.dst"
+        | "datetime.tzname"
+        | "time.tzname" => clock_method(ctx, method, args, kwargs),
+        "timedelta.__neg__"
+        | "timedelta.__pos__"
+        | "timedelta.__abs__"
+        | "timedelta.__add__"
         | "timedelta.__radd__"
         | "timedelta.__sub__"
         | "timedelta.__rsub__"
@@ -468,8 +961,15 @@ pub(super) fn call(
         | "timedelta.__truediv__"
         | "timedelta.__rtruediv__"
         | "timedelta.__floordiv__"
-        | "timedelta.__rfloordiv__" => delta_binary(ctx, method, args, kwargs),
+        | "timedelta.__rfloordiv__"
+        | "timedelta.__mod__"
+        | "timedelta.__rmod__"
+        | "timedelta.__divmod__"
+        | "timedelta.__rdivmod__" => delta_arithmetic(ctx, method, args, kwargs),
         "datetime.combine" => {
+            let (&class, args) = args
+                .split_first()
+                .ok_or_else(|| Error::new("TypeError", "datetime.combine requires a type"))?;
             let [day, clock, tz] = bind("combine", args, kwargs, ["date", "time", "tzinfo"])?;
             let day = required(day, "combine()", "date", 1)?;
             let invalid = |ctx: &Context, id: Id, pos: usize, class: &str| {
@@ -499,11 +999,8 @@ pub(super) fn call(
                 _ => return Err(invalid(ctx, clock, 2, "time")),
             };
             let tz = tz.unwrap_or(clock_tz);
-            Ok(store(
-                ctx,
-                day.combine(&clock, zone(ctx, tz)?.as_ref())?,
-                tz,
-            ))
+            let value = day.combine(&clock, zone(ctx, tz)?.as_ref())?;
+            fromutc::result_datetime(ctx, class, value, tz)
         }
         "timedelta" => {
             let args = bind(method, args, kwargs, UNITS)?;
@@ -537,57 +1034,33 @@ pub(super) fn call(
                 )
             })?;
             let tzname = name.unwrap_or(NONE);
-            let name = name
-                .map(|id| {
-                    ctx.str_value(id).map_err(|_| {
-                        Error::new(
-                            "TypeError",
-                            format!(
-                                "timezone() argument 2 must be str, not {}",
-                                if id == NONE {
-                                    "None"
-                                } else {
-                                    ctx.type_name(id)
-                                }
-                            ),
-                        )
-                    })
-                })
-                .transpose()?;
-            let zone = Calendar::zone(&offset, name)?;
-            Ok(if zone.is_utc() {
+            if let Some(name) = name
+                && ctx.string_storage(name).is_none()
+            {
+                let kind = if name == NONE { "None" } else { ctx.type_name(name) };
+                return Err(Error::new(
+                    "TypeError",
+                    format!("timezone() argument 2 must be str, not {kind}"),
+                ));
+            }
+            // Native calendar diagnostics can also retain names representable as UTF-8.
+            let native_name = name.and_then(|id| ctx.str_value(id).ok());
+            let zone = Calendar::zone(&offset, native_name)?;
+            Ok(if tzname == NONE && zone.is_utc() {
                 utc(ctx)
             } else {
                 ctx.alloc(Value::Calendar {
                     value: zone,
                     tzinfo: NONE,
+                    tzoffset: id,
                     tzname,
                 })
             })
         }
-        "datetime.now" => {
-            let [tz] =
-                crate::dynamic::builtins::bind_method_arguments("now", args, kwargs, ["tz"], 1)?;
-            let tz = tz.unwrap_or(NONE);
-            Ok(store(ctx, Calendar::now(zone(ctx, tz)?.as_ref())?, tz))
-        }
-        "datetime.fromtimestamp" => {
-            let [timestamp, tz] = bind("fromtimestamp", args, kwargs, ["timestamp", "tz"])?;
-            let tz = tz.unwrap_or(NONE);
-            let zone = zone(ctx, tz)?;
-            let id = required(timestamp, "fromtimestamp()", "timestamp", 1)?;
-            let timestamp = number(ctx, id).ok_or_else(|| {
-                Error::new(
-                    "TypeError",
-                    format!("argument must be int or float, not {}", ctx.type_name(id)),
-                )
-            })?;
-            Ok(store(
-                ctx,
-                Calendar::from_timestamp(&timestamp, zone.as_ref())?,
-                tz,
-            ))
-        }
+        "datetime.now"
+        | "datetime.fromtimestamp"
+        | "datetime.utcnow"
+        | "datetime.utcfromtimestamp" => fromutc::constructor(ctx, method, args, kwargs),
         "date" | "datetime" => {
             let values = if method == "date" {
                 let mut fields = [None; 9];
@@ -640,12 +1113,14 @@ pub(super) fn call(
                 }
             }
             let tz = values[7].unwrap_or(NONE);
-            let result = if method == "date" {
-                Calendar::date(fields[0], fields[1], fields[2])?
-            } else {
-                Calendar::datetime(fields, zone(ctx, tz)?.as_ref())?
-            };
-            Ok(store(ctx, result, tz))
+            if method == "datetime" {
+                return new_datetime(ctx, fields, tz);
+            }
+            Ok(store(
+                ctx,
+                Calendar::date(fields[0], fields[1], fields[2])?,
+                NONE,
+            ))
         }
         "date.__format__" | "time.__format__" => {
             if !kwargs.is_empty() {
@@ -683,7 +1158,10 @@ pub(super) fn call(
             let string = ctx.builtin("str");
             ctx.call(string, vec![*receiver], vec![])
         }
-        "date.__repr__"
+        "datetime.isoformat" | "time.isoformat" => render::isoformat(ctx, method, args, kwargs),
+        "timezone.__repr__"
+        | "timezone.__str__"
+        | "date.__repr__"
         | "datetime.__repr__"
         | "time.__repr__"
         | "timedelta.__repr__"
@@ -692,7 +1170,7 @@ pub(super) fn call(
         | "time.__str__"
         | "timedelta.__str__"
         | "timedelta.__bool__"
-        | "timedelta.__neg__"
+        | "datetime.timestamp"
         | "datetime.timetuple"
         | "date.timetuple"
         | "date.toordinal"
@@ -716,8 +1194,6 @@ pub(super) fn call(
             let value = calendar(ctx, args[0], class)
                 .ok_or_else(|| Error::new("TypeError", format!("expected datetime.{class}")))?;
             Ok(match operation {
-                "__neg__" if value.delta_parts() == (0, 0, 0) => ctx.scalar_value(args[0]),
-                "__neg__" => store(ctx, value.negate_delta()?, NONE),
                 "__bool__" => {
                     if value.delta_parts() == (0, 0, 0) {
                         FALSE
@@ -727,7 +1203,13 @@ pub(super) fn call(
                 }
                 "__repr__" => {
                     let receiver_class = ctx.exact_type(args[0])?;
-                    ctx.text(value.subtype_repr(ctx.class_name(receiver_class), class == "date"))
+                    render::repr(ctx, args[0], &value, receiver_class, class)?
+                }
+                "__str__" if class == "timezone" => {
+                    let Value::Calendar { tzname, .. } = *ctx.heap.get(args[0]) else {
+                        unreachable!()
+                    };
+                    if tzname == NONE { ctx.text(value.text()) } else { tzname }
                 }
                 "__str__" => {
                     if class != "timedelta" {
@@ -758,6 +1240,10 @@ pub(super) fn call(
                         value.text()
                     })
                 }
+                "timestamp" => {
+                    let seconds = render::timestamp(ctx, args[0], &value)?;
+                    ctx.alloc(Value::Float(seconds))
+                }
                 "total_seconds" => ctx.alloc(Value::Float(value.seconds())),
                 "toordinal" => ctx.int(value.ordinal()),
                 "ctime" => {
@@ -771,6 +1257,9 @@ pub(super) fn call(
                 "weekday" => ctx.int((value.ordinal() - 1) % 7),
                 "timetuple" => {
                     let mut fields = value.timetuple();
+                    if class == "datetime" {
+                        fields[8] = render::isdst(ctx, args[0])?;
+                    }
                     if class == "date" {
                         // date.timetuple() ignores any clock stored on a datetime receiver.
                         fields[3..6].fill(0);
@@ -790,7 +1279,7 @@ pub(super) fn call(
 
 /// Convert all integer-index operands before validating ranges and timezone, as in _datetime.
 fn time(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
-    let names = ["hour", "minute", "second", "microsecond", "tzinfo", "fold"];
+    let names = CLOCK_FIELDS;
     let count = args.len() + kwargs.len();
     if count > names.len() {
         return Err(Error::new(
@@ -844,12 +1333,438 @@ fn time(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
             _ => {}
         }
     }
+    new_time(ctx, fields, tz)
+}
+
+fn new_time(ctx: &mut Context, fields: [i32; 5], tz: Id) -> Result<Id> {
     let local = Calendar::time_micros(fields)?;
+    let native_zone = zone(ctx, tz)?;
     Ok(store(
         ctx,
-        Calendar::time(local, fields[4], zone(ctx, tz)?.as_ref())?,
+        Calendar::time(local, fields[4], native_zone.as_ref())?,
         tz,
     ))
+}
+
+fn calendar_class_args<'a>(
+    ctx: &mut Context,
+    owner: &'static str,
+    method: &str,
+    args: &'a [Id],
+) -> Result<(Id, &'a [Id])> {
+    let Some((&class, args)) = args.split_first() else {
+        return Err(Error::new(
+            "TypeError",
+            format!("descriptor '{method}' of '{owner}' object needs an argument"),
+        ));
+    };
+    validate_classmethod_receiver(ctx, owner, method, class)?;
+    Ok((class, args))
+}
+
+/// Validate the class before a calendar classmethod is bound or called directly.
+pub(in crate::dynamic) fn validate_classmethod_receiver(
+    ctx: &mut Context,
+    owner: &'static str,
+    method: &str,
+    class: Id,
+) -> Result<()> {
+    let base = ctx.builtin(owner);
+    let is_type = ctx.is_type_object(class);
+    if is_type && ctx.direct_subclass(class, base) {
+        return Ok(());
+    }
+    let kind = if is_type {
+        class
+    } else {
+        ctx.exact_type(class)?
+    };
+    let name = ctx.class_name(kind);
+    let name = &name[..name.floor_char_boundary(100)];
+    let message = if is_type {
+        format!("descriptor '{method}' requires a subtype of '{owner}' but received '{name}'")
+    } else {
+        format!("descriptor '{method}' for type '{owner}' needs a type, not a '{name}' as arg 2")
+    };
+    Err(Error::new("TypeError", message))
+}
+
+fn date_fromordinal(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    let (class, args) = calendar_class_args(ctx, "datetime.date", "fromordinal", args)?;
+    if !kwargs.is_empty() {
+        return Err(Error::new(
+            "TypeError",
+            "fromordinal() takes no keyword arguments",
+        ));
+    }
+    let &[ordinal] = args else {
+        return Err(Error::new(
+            "TypeError",
+            format!(
+                "fromordinal() takes exactly 1 argument ({} given)",
+                args.len()
+            ),
+        ));
+    };
+    let ordinal = ctx.index_c_int(ordinal)?;
+    date_from_ordinal(ctx, class, ordinal)
+}
+
+fn date_fromisocalendar(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    let (class, args) = calendar_class_args(ctx, "datetime.date", "fromisocalendar", args)?;
+    let argument = required_args("fromisocalendar", args, kwargs, &["year", "week", "day"])?;
+    let mut component = |i| {
+        ctx.index_c_int(argument(i)?).map_err(|err| {
+            let overflow = ctx.builtin("OverflowError");
+            if ctx.raised_error_matches(&err, overflow) {
+                Error::new("ValueError", "ISO calendar component out of range")
+            } else {
+                err
+            }
+        })
+    };
+    let ordinal = Calendar::iso_week_ordinal(component(0)?, component(1)?, component(2)?)?;
+    date_from_ordinal(ctx, class, ordinal)
+}
+
+fn date_from_ordinal(ctx: &mut Context, class: Id, ordinal: i32) -> Result<Id> {
+    let fields = Calendar::ordinal_fields(ordinal)?;
+    date_from_fields(ctx, class, fields)
+}
+
+/// Call the receiving type with the three civil fields, including datetime subclasses.
+fn date_from_fields(ctx: &mut Context, class: Id, fields: [i32; 3]) -> Result<Id> {
+    let args = fields.into_iter().map(|n| ctx.int(i64::from(n))).collect();
+    ctx.call(class, args, vec![])
+}
+
+fn strptime_args(
+    ctx: &mut Context,
+    owner: &'static str,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<(Id, Id, Id)> {
+    let (class, args) = calendar_class_args(ctx, owner, "strptime", args)?;
+    if !kwargs.is_empty() {
+        return Err(Error::new(
+            "TypeError",
+            "strptime() takes no keyword arguments",
+        ));
+    }
+    let &[text, format] = args else {
+        return Err(Error::new(
+            "TypeError",
+            format!(
+                "strptime() takes exactly 2 arguments ({} given)",
+                args.len()
+            ),
+        ));
+    };
+    for (i, &arg) in args.iter().enumerate() {
+        if ctx.string_storage(arg).is_none() {
+            let kind = if arg == NONE {
+                "None".into()
+            } else {
+                type_name(ctx, arg)
+            };
+            let text = string_argument_message("strptime", i + 1, &kind)
+                .map_err(|error| ctx.decode_error(error))?;
+            return Err(Error::new("TypeError", text));
+        }
+    }
+
+    Ok((class, text, format))
+}
+
+fn date_strptime(
+    ctx: &mut Context,
+    method: &str,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Id> {
+    let (owner, helper) = if method == "date.strptime" {
+        ("datetime.date", "_strptime_datetime_date")
+    } else {
+        ("datetime.datetime", "_strptime_datetime_datetime")
+    };
+    let (class, text, format) = strptime_args(ctx, owner, args, kwargs)?;
+    let module_mark = ctx.heap.temporary_mark();
+    let module = ctx.import_with_builtins("_strptime")?;
+    let parser_mark = ctx.heap.temporary_mark();
+    let result = ctx.lookup_attr(module, helper).and_then(|parser| {
+        ctx.heap.keep(parser);
+        ctx.call(parser, vec![class, text, format], vec![])
+    });
+    // Release the callable before its module, preserving the result or exception across finalizers.
+    for mark in [parser_mark, module_mark] {
+        let collect = ctx.heap.discard_truth_operands(mark, ctx.modules);
+        match &result {
+            Ok(value) => ctx.heap.keep(*value),
+            Err(error) => {
+                for value in error.roots() {
+                    ctx.heap.keep(value);
+                }
+            }
+        }
+        if collect {
+            ctx.collect_unreachable();
+        }
+    }
+    result
+}
+
+fn time_strptime(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    let (class, text, format) = strptime_args(ctx, "datetime.time", args, kwargs)?;
+    let module = ctx.module("_strptime")?;
+    let parser = ctx.lookup_attr(module, "_strptime_datetime_time")?;
+    ctx.call(parser, vec![class, text, format], vec![])
+}
+
+fn time_fromisoformat(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    let (class, args) = calendar_class_args(ctx, "datetime.time", "fromisoformat", args)?;
+    let name = ctx.class_qualname(class);
+    let input = crate::dynamic::builtins::one_positional_arg(
+        &format!("{name}.fromisoformat"),
+        args,
+        kwargs,
+    )?;
+    let Some(storage) = ctx.string_storage(input) else {
+        return Err(Error::new(
+            "TypeError",
+            "fromisoformat: argument must be str",
+        ));
+    };
+    let Some(([mut hour, minute, second, micros], offset)) =
+        ctx.str_value(storage).ok().and_then(iso_time::parse)
+    else {
+        let repr = crate::dynamic::builtins::call(ctx, "repr", &[input], &[])?;
+        return Err(Error::new(
+            "ValueError",
+            format!("Invalid isoformat string: {}", ctx.str_value(repr)?),
+        ));
+    };
+    if hour == 24 {
+        if (minute, second, micros) != (0, 0, 0) {
+            return Err(Error::new(
+                "ValueError",
+                "minute, second, and microsecond must be 0 when hour is 24",
+            ));
+        }
+        hour = 0;
+    }
+    let zone = iso_zone(ctx, offset)?;
+    time_for_class(ctx, class, [hour, minute, second, micros, 0], zone)
+}
+
+fn iso_zone(ctx: &mut Context, offset: Option<i64>) -> Result<Id> {
+    Ok(match offset {
+        None => NONE,
+        Some(0) => utc(ctx),
+        Some(us) => {
+            let delta = Calendar::from_delta_microseconds(&crate::Int::from(us))?;
+            store(ctx, Calendar::zone(&delta, None)?, NONE)
+        }
+    })
+}
+
+/// Read native civil fields even when the receiver overrides their descriptors.
+fn clock_method(
+    ctx: &mut Context,
+    method: &str,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Id> {
+    let (kind, operation) = method.split_once('.').unwrap();
+    let Some((&receiver, rest)) = args.split_first() else {
+        return Err(Error::new(
+            "TypeError",
+            format!("unbound method {method}() needs an argument"),
+        ));
+    };
+    let (value, tz) = match ctx.heap.get(ctx.scalar_value(receiver)) {
+        Value::Calendar { value, tzinfo, .. }
+            if value.class() == kind || (kind == "date" && value.class() == "datetime") =>
+        {
+            (value.clone(), *tzinfo)
+        }
+        _ => {
+            return Err(Error::new(
+                "TypeError",
+                format!(
+                    "descriptor '{operation}' for 'datetime.{kind}' objects doesn't apply to a '{}' object",
+                    type_name(ctx, receiver)
+                ),
+            ));
+        }
+    };
+    if !matches!(operation, "replace" | "__replace__") {
+        if !kwargs.is_empty() {
+            return Err(Error::new(
+                "TypeError",
+                format!("{method}() takes no keyword arguments"),
+            ));
+        }
+        if !rest.is_empty() {
+            return Err(Error::new(
+                "TypeError",
+                format!("{method}() takes no arguments ({} given)", rest.len()),
+            ));
+        }
+        return match operation {
+            "utctimetuple" => {
+                let mark = ctx.heap.temporary_mark();
+                let offset = call_tzinfo(ctx, tz, "utcoffset", receiver)?;
+                let utc = if offset == NONE {
+                    value
+                } else {
+                    // Subtract through the native slot, including Python subtype construction.
+                    let shifted =
+                        date_arithmetic(ctx, "datetime.__sub__", &[receiver, offset], &[])?;
+                    ctx.finish_call_operands(mark, shifted);
+                    calendar(ctx, shifted, "datetime").ok_or_else(|| {
+                        Error::new(
+                            "TypeError",
+                            "datetime subtype constructor did not return a datetime",
+                        )
+                    })?
+                };
+                let mut fields = utc.timetuple();
+                fields[8] = 0;
+                ctx.finish_call_operands(mark, NONE);
+                let time = ctx.module("time")?;
+                let factory = ctx.lookup_attr(time, "struct_time")?;
+                let values = fields.map(|n| ctx.int(n));
+                let fields = ctx.alloc(Value::Tuple(values.into()));
+                ctx.call(factory, vec![fields], Vec::new())
+            }
+            "date" => {
+                let [y, m, d, ..] = value.fields();
+                Ok(store(
+                    ctx,
+                    Calendar::date(y as i32, m as i32, d as i32)?,
+                    NONE,
+                ))
+            }
+            "time" => Ok(store(ctx, value.time_of_day()?, NONE)),
+            "timetz" => {
+                let [_, _, _, hour, minute, second, micros, fold] = value.fields();
+                new_time(
+                    ctx,
+                    [hour, minute, second, micros, fold].map(|n| n as i32),
+                    tz,
+                )
+            }
+            _ => call_tzinfo(
+                ctx,
+                tz,
+                operation,
+                if kind == "time" { NONE } else { receiver },
+            ),
+        };
+    }
+    if kind == "date" {
+        let [year, month, day, ..] = value.fields();
+        let mut fields = [year, month, day].map(|n| n as i32);
+        let supplied = crate::dynamic::builtins::bind_method_arguments(
+            "replace",
+            rest,
+            kwargs,
+            ["year", "month", "day"],
+            3,
+        )?;
+        for (field, arg) in fields.iter_mut().zip(supplied) {
+            if let Some(id) = arg {
+                *field = c_int(ctx, id)?;
+            }
+        }
+        let class = ctx.exact_type(receiver)?;
+        return date_from_fields(ctx, class, fields);
+    }
+    if kind == "datetime" {
+        let mut fields = value.fields().map(|n| n as i32);
+        let [year, month, day, hour, minute, second, micros, zone, fold] =
+            crate::dynamic::builtins::bind_method_arguments(
+                "replace",
+                rest,
+                kwargs,
+                [
+                    "year",
+                    "month",
+                    "day",
+                    "hour",
+                    "minute",
+                    "second",
+                    "microsecond",
+                    "tzinfo",
+                    "fold",
+                ],
+                8,
+            )?;
+        for (field, arg) in fields
+            .iter_mut()
+            .zip([year, month, day, hour, minute, second, micros, fold])
+        {
+            if let Some(id) = arg {
+                *field = c_int(ctx, id)?;
+            }
+        }
+        let class = ctx.exact_type(receiver)?;
+        return datetime_replace_fields(ctx, class, fields, zone.unwrap_or(tz));
+    }
+    let mut fields = value.clock_parts().map(|n| n as i32);
+    let [hour, minute, second, microsecond, tzinfo, fold] =
+        crate::dynamic::builtins::bind_method_arguments("replace", rest, kwargs, CLOCK_FIELDS, 5)?;
+    for (field, replacement) in fields
+        .iter_mut()
+        .zip([hour, minute, second, microsecond, fold])
+    {
+        if let Some(id) = replacement {
+            *field = c_int(ctx, id)?;
+        }
+    }
+    let tz = tzinfo.unwrap_or(tz);
+    let class = ctx.exact_type(receiver)?;
+    time_for_class(ctx, class, fields, tz)
+}
+
+fn time_for_class(ctx: &mut Context, class: Id, fields: [i32; 5], tz: Id) -> Result<Id> {
+    if class == ctx.builtin("datetime.time") {
+        return new_time(ctx, fields, tz);
+    }
+    clock_subclass(ctx, class, &fields[..4], tz, fields[4])
+}
+
+fn new_datetime(ctx: &mut Context, fields: [i32; 8], tz: Id) -> Result<Id> {
+    let zone = zone(ctx, tz);
+    // CPython reports civil-field errors before an invalid zone.
+    let value = Calendar::datetime(fields, zone.as_ref().ok().and_then(Option::as_ref))?;
+    zone?;
+    Ok(store(ctx, value, tz))
+}
+
+/// Construct a datetime from civil fields, calling a Python subtype with the public arguments.
+pub(super) fn datetime_replace_fields(
+    ctx: &mut Context,
+    class: Id,
+    fields: [i32; 8],
+    tz: Id,
+) -> Result<Id> {
+    if class == ctx.builtin("datetime.datetime") {
+        return new_datetime(ctx, fields, tz);
+    }
+    clock_subclass(ctx, class, &fields[..7], tz, fields[7])
+}
+
+fn clock_subclass(ctx: &mut Context, class: Id, fields: &[i32], tz: Id, fold: i32) -> Result<Id> {
+    let mut args: Vec<_> = fields.iter().map(|&n| ctx.int(i64::from(n))).collect();
+    args.push(tz);
+    // Older subtype constructors may predate the keyword-only fold argument.
+    let kwargs = if fold == 0 {
+        vec![]
+    } else {
+        vec![("fold".into(), ctx.int(i64::from(fold)))]
+    };
+    ctx.call(class, args, kwargs)
 }
 
 /// Allocate the native payload for the requested calendar subtype before its initializer runs.

@@ -16,6 +16,20 @@ assert __name__ == "__main__"
 assert globals()["__builtins__"] is __builtins__ is builtins
 assert builtins.len is original_len is len
 assert builtins.list is list and builtins.KeyError is KeyError
+assert builtins.SystemError is SystemError
+assert SystemError.__mro__ == (SystemError, Exception, BaseException, object)
+
+
+class RegistryError(LookupError, SystemError):
+    pass
+
+
+try:
+    raise RegistryError("codec")
+except SystemError as error:
+    assert isinstance(error, LookupError) and error.args == ("codec",)
+else:
+    raise AssertionError("SystemError failed to catch its subclass")
 
 namespace = {}
 exec("def measure(): return len('abc')", namespace)

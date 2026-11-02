@@ -75,3 +75,12 @@ try:
     hash(alias)
 except TypeError as error:
     print(str(error))
+
+assert repr(deque([1, 2])) == 'deque([1, 2])'
+assert repr([deque(['a'], maxlen=3)]) == "[deque(['a'], maxlen=3)]"
+
+
+rotated = deque([1, 2, 3], maxlen=3)
+rotated.rotate()
+rotated.rotate(-2)
+assert rotated[0] == 2 and rotated[1] == 3 and rotated[2] == 1

@@ -105,8 +105,10 @@ class Case(Base):
     events.append(('body', value))
     value = 'class'
     def label(self):
-        self.__seen = value
-        return super().label(), self.__seen
+        self.__seen: UnusedAnnotation = value
+        seen = {}
+        seen[0]: UnusedAnnotation = self.__seen
+        return super().label(), seen[0]
     def increment(self):
         self.previous += 1
     def nested(self):
@@ -167,6 +169,125 @@ class Case(Base):
     assert namespace["Broken"] is old and events[-2:] == ["decorated", "Broken"]
 
 
+def source_generic_classes():
+    from typing import Generic, TypedDict, get_args, get_type_hints
+
+    for name, message in [
+        ("__classdict__", "reserved name '__classdict__' cannot be used for type parameter"),
+        ("__debug__", "cannot assign to __debug__"),
+    ]:
+        try:
+            compile(f"class Bad[{name}]: pass", "reserved_parameter.py", "exec")
+        except SyntaxError as exc:
+            assert exc.args[0] == message
+        else:
+            raise AssertionError(f"accepted reserved type parameter {name}")
+
+    seen = []
+    def capture(value):
+        seen.append(value)
+        return value
+
+    ns = {"__name__": __name__, "capture": capture, "TypedDict": TypedDict}
+    code = compile("""class Box[T](list[T]):
+    item: capture(T)
+    def parameter(self):
+        return T
+""", "source_generic.py", "exec")
+    exec(code, ns)
+    box = ns["Box"]
+    (param,) = box.__type_params__
+    assert box.__bases__ == (list, Generic)
+    assert get_args(box.__orig_bases__[0]) == (param,)
+    assert box().parameter() is param and not seen
+    assert box.__annotations__ == {"item": param} and seen == [param]
+    exec(code, ns)
+    assert ns["Box"].__type_params__[0] is not param
+
+    exec("from __future__ import annotations\nclass Row[T](TypedDict):\n    item: T", ns)
+    row = ns["Row"]
+    ref = row.__annotations__["item"]
+    assert ref.__owner__ is row and ref.__forward_module__ == row.__module__
+    assert get_type_hints(row)["item"] is row.__type_params__[0]
+
+
+def module_annotations():
+    events = []
+    ns = {"events": events, "alias": int}
+    exec("""def note(value):
+    events.append(value)
+    return value
+x: note(alias) = note(1)
+if False:
+    missing: never()
+if True:
+    x: note(str)
+    other: note(bytes)
+""", ns)
+    provider = ns["__annotate__"]
+    assert ns["x"] == 1 and "other" not in ns and events == [1]
+    assert provider.__name__ == provider.__qualname__ == "__annotate__"
+    assert provider.__globals__ is ns and provider.__closure__ is None
+    assert ns["__conditional_annotations__"] == {0, 2, 3}
+    assert "__annotations__" not in ns
+    ns["alias"] = float
+    assert provider(1) == {"x": str, "other": bytes}
+    assert events == [1, float, str, bytes]
+    ns["__conditional_annotations__"].remove(2)
+    assert provider(2) == {"x": float, "other": bytes}
+    assert events == [1, float, str, bytes, float, bytes]
+    try:
+        provider(3)
+    except NotImplementedError:
+        pass
+    else:
+        raise AssertionError("unsupported annotation format")
+
+    ns, local = {"alias": bytes}, {"alias": str}
+    exec(compile("x: alias = alias", "split.py", "single"), ns, local)
+    assert local["x"] is str and "x" not in ns and "__annotate__" not in ns
+    provider = local["__annotate__"]
+    assert provider.__globals__ is ns
+    try:
+        provider(1)
+    except NameError as exc:
+        assert exc.name == "__conditional_annotations__"
+    else:
+        raise AssertionError("module annotation captured exec locals")
+    ns["__conditional_annotations__"] = local["__conditional_annotations__"]
+    assert provider(1) == {"x": bytes}
+
+    ns = {}
+    try:
+        exec("ok: int = 3\nbad: str = missing()", ns)
+    except NameError as exc:
+        assert exc.name == "missing"
+    else:
+        raise AssertionError("missing right-hand side")
+    assert ns["__conditional_annotations__"] == {0}
+    assert ns["__annotate__"](1) == {"ok": int} and "bad" not in ns
+    exec("x: unknown", ns)
+    try:
+        ns["__annotate__"](1)
+    except NameError as exc:
+        assert exc.name == "unknown"
+    else:
+        raise AssertionError("missing lazy annotation")
+
+    annotations = {"saved": "old"}
+    local = {"__annotations__": annotations}
+    ns = {"__annotations__": {"unrelated": "global"}}
+    exec("from __future__ import annotations\nx: missing() = 8", ns, local)
+    assert local["x"] == 8 and "__annotate__" not in local
+    assert local["__conditional_annotations__"] == set()
+    assert local["__annotations__"] is annotations
+    assert annotations == {"saved": "old", "x": "missing()"}
+    assert ns["__annotations__"] == {"unrelated": "global"}
+    local = {}
+    exec("from __future__ import annotations\nif False:\n x: missing()", ns, local)
+    assert local["__annotations__"] == {}
+
+
 def source_annotations():
     from types import FunctionType
 
@@ -221,13 +342,40 @@ def source_annotations():
     future = ns["F"].f
     assert future.__annotate__.__closure__ is None
     assert future.__annotations__ == {"n": "Missing", "obj": "'A'", "return": "tuple[int]"}
+    fallback = {"__annotations__": {}}
+    exec("""from __future__ import annotations
+def fields():
+    __annotations__ = {}
+    class Fields:
+        first: int
+        del __annotations__
+        second: Missing
+    return Fields, __annotations__
+""", fallback)
+    fields, outer = fallback["fields"]()
+    assert not outer and fallback["__annotations__"] == {"second": "Missing"}
+    assert fields.__annotate__ is None
+    exec("""class Declared:
+    try:
+        __annotations__
+    except NameError:
+        pass
+    else:
+        raise AssertionError("deferred fields exposed an annotation mapping during construction")
+    field: int
+class Empty(Declared): pass
+""", ns)
+    assert ns["Empty"].__annotate__ is None and ns["Empty"].__annotations__ == {}
     for expr in ("(tmp := int)", "(yield int)", "(await T)"):
-        try:
-            compile("def f(arg: " + expr + "): pass", "<annotations>", "exec")
-        except SyntaxError:
-            pass
-        else:
-            raise AssertionError("invalid annotation expression compiled")
+        for source in ("def f(arg: " + expr + "): pass",
+                       "def f(obj): obj.field: " + expr + " = 1",
+                       "def f(obj): obj[0]: " + expr + " = 1"):
+            try:
+                compile(source, "<annotations>", "exec")
+            except SyntaxError:
+                pass
+            else:
+                raise AssertionError("invalid annotation expression compiled")
 
 
 def source_test_cases():
@@ -416,6 +564,57 @@ def make(events):
     assert events == ["outer", 1, 3]
 
 
+def source_listcomp():
+    item = []
+    local = {"groups": [[item, item], []], "item": "outside"}
+    result = eval("[item for group in groups for item in group if item is not None]", {}, local)
+    assert len(result) == 2 and result[0] is result[1] is item
+    assert local["item"] == "outside" and "group" not in local
+
+
+def source_setcomp():
+    namespace = {}
+    exec("""
+def collect(values):
+    label = 'outer'
+    picked = {(label, n) for label, items in values if label for n in items if n % 2}
+    return picked, label
+
+def capture(items):
+    item = "outer"
+    functions = {(lambda: item) for item in items if (last := item)}
+    return item, last, tuple(f() for f in functions)
+""", namespace)
+    assert namespace["capture"]([1, 2]) == ("outer", 2, (2, 2))
+    assert namespace["collect"]([("a", [1, 2, 1]), ("", None), ("b", [3])]) == (
+        {("a", 1), ("b", 3)}, "outer"
+    )
+    local = {"label": "local", "items": [1, 2]}
+    assert eval("{(x, label) for x in items}", {"label": "global"}, local) == {
+        (1, "local"), (2, "local")
+    }
+    assert "x" not in local
+
+    functions = eval("{(lambda: (x, label)) for x in items}", {"label": "global"}, local)
+    assert len(functions) == 2
+    for function in functions:
+        assert function() == (2, "global")
+        assert function.__code__.co_freevars == ("x",)
+
+    events = []
+    def keys():
+        for value in [1, [], "too late"]:
+            events.append(value)
+            yield value
+
+    try:
+        eval("{value for value in keys()}", {"keys": keys})
+    except TypeError:
+        assert events == [1, []]
+    else:
+        raise AssertionError("an unhashable element must stop the comprehension")
+
+
 def named_bindings():
     namespace = {}
     exec("""def recipe(values):
@@ -478,15 +677,285 @@ def annotated(arg: (lambda: (shadowed, (shadowed := 4)))):
             raise AssertionError(text)
 
 
+def method_argument_lifetime():
+    import gc
+
+    events = []
+
+    class Target:
+        def __call__(self, value):
+            events.append(value)
+
+        def __del__(self):
+            events.append("released")
+
+    class Holder:
+        pass
+
+    holder = Holder()
+
+    def argument():
+        del holder.method
+        gc.collect()
+        events.append("argument")
+        return "called"
+
+    for source in ("holder.method(argument())", "holder.method(value=argument())"):
+        holder.method = Target()
+        exec(source, {"holder": holder, "argument": argument})
+        assert events == ["argument", "called", "released"], events
+        events.clear()
+
+
+def source_eval():
+    make = tuple
+    assert eval("make([2, 1])") == (2, 1)
+    assert eval("(make := 3)") == 3 and make is tuple
+    supplied = {"a": 9}
+    code = compile("a * 2", "<expr>", "eval")
+    assert eval(code, supplied) == 18
+    assert eval(code, globals=supplied, locals={"a": 1}) == 2
+    assert eval("len([])", {"__builtins__": {"len": lambda value: 17}}) == 17
+    try:
+        eval("a = 3")
+    except SyntaxError:
+        pass
+    else:
+        raise AssertionError("eval accepted a statement")
+
+
+def exec_caller_namespaces():
+    seen = []
+    value = 7
+    execute = exec
+    execute("seen.append(value)\nvalue = 99")
+    assert seen == [7] and value == 7
+
+    class C:
+        first = 11
+        exec("second = first + 1")
+        third = second
+
+    assert C.second == C.third == 12
+    separate = {}
+    assert exec(compile("40 + 2", "caller", "eval"), {}, separate) is None
+    exec("result = n", globals={"n": 8}, locals=separate, closure=None)
+    assert separate == {"result": 8}
+
+
+def starred_calls():
+    events = []
+
+    def mark(value):
+        events.append(value)
+        return value
+
+    def spread():
+        mark("iter")
+        yield 2
+
+    def collect(*values, label):
+        return values, label
+
+    scope = {"collect": collect, "mark": mark, "spread": spread}
+    exec("answer = collect(*spread(), label=mark(3))", scope)
+    assert scope["answer"] == ((2,), 3) and events == [3, "iter"]
+    events.clear()
+    exec("answer = collect(mark(1), *spread(), *(), label=mark(3))", scope)
+    assert scope["answer"] == ((1, 2), 3) and events == [1, "iter", 3]
+    events.clear()
+    exec("answer = (mark(1), *spread(), *(), mark(3))", scope)
+    assert scope["answer"] == (1, 2, 3) and events == [1, "iter", 3]
+    events.clear()
+    exec("answer = [mark(1), *spread(), *(), mark(3)]", scope)
+    assert scope["answer"] == [1, 2, 3] and events == [1, "iter", 3]
+    events.clear()
+    try:
+        eval("[mark(1), *2, mark(3)]", scope)
+    except TypeError as error:
+        assert str(error) == "Value after * must be an iterable, not int"
+    else:
+        raise AssertionError("accepted a noniterable in a starred list")
+    assert events == [1]
+
+    import gc
+    import weakref
+
+    cursor_refs = []
+
+    class Empty:
+        def __next__(self):
+            raise StopIteration
+
+    class Source:
+        def __iter__(self):
+            cursor = Empty()
+            cursor_refs.append(weakref.ref(cursor))
+            return cursor
+
+    def released():
+        gc.collect()
+        return cursor_refs[0]() is None
+
+    assert eval("(*source, released())", {"source": Source(), "released": released}) == (True,)
+    cursor_refs.clear()
+    assert eval("[*source, released()]", {"source": Source(), "released": released}) == [True]
+
+    for source in ("collect(**{}, label=1, label=2)", "collect(label=1, **{}, label=2)"):
+        events.clear()
+        try:
+            exec("mark(0)\n" + source, scope)
+        except SyntaxError as error:
+            assert error.msg == "keyword argument repeated: label" and not events
+            assert error.filename == "<string>" and (error.lineno, error.end_lineno) == (2, 2)
+            assert (error.offset, error.end_offset) == (24, 31)
+        else:
+            raise AssertionError("duplicate explicit keyword compiled")
+
+    try:
+        compile("x=1\rcollect(a=1, a=2)(b=1, b=2)", "<caller>", "exec")
+    except SyntaxError as error:
+        assert error.msg == "keyword argument repeated: b"
+        assert (error.lineno, error.offset, error.end_lineno, error.end_offset) == (2, 24, 2, 27)
+    else:
+        raise AssertionError("invalid outer call accepted")
+
+    class Options:
+        def keys(self):
+            return ["label"]
+
+        def __getitem__(self, key):
+            return mark(4)
+
+    scope["options"] = Options()
+    events.clear()
+    exec("answer = collect(*spread(), **options)", scope)
+    assert scope["answer"] == ((2,), 4) and events == [4, "iter"]
+
+    events.clear()
+    try:
+        exec("collect(*spread(), **options, label=mark(5), other=mark(6), **mark(7))", scope)
+    except TypeError as error:
+        assert "got multiple values for keyword argument 'label'" in str(error)
+        assert events == [4, 5, 6]
+    else:
+        raise AssertionError("duplicate keyword was accepted")
+
+    events.clear()
+    try:
+        exec("collect(*spread(), **{1: mark(5)})", scope)
+    except TypeError as error:
+        assert error.args == ("keywords must be strings",) and events == [5, "iter"]
+    else:
+        raise AssertionError("non-string keyword was accepted")
+
+    class NoIter:
+        __iter__ = None
+
+    class BrokenIter:
+        def __iter__(self):
+            raise TypeError("from iterator")
+
+    scope["no_iter"] = NoIter()
+    scope["broken_iter"] = BrokenIter()
+    for source, message in (
+        ("collect(*42)", f"{collect.__module__}.{collect.__qualname__}() argument after * must be an iterable, not int"),
+        ("collect(1, *42)", "Value after * must be an iterable, not int"),
+        ("collect(*no_iter)", "'NoIter' object is not iterable"),
+        ("collect(1, *broken_iter)", "from iterator"),
+    ):
+        try:
+            exec(source, scope)
+        except TypeError as error:
+            assert str(error) == message
+        else:
+            raise AssertionError("invalid positional unpack was accepted")
+
+    class BadHint:
+        def __iter__(self):
+            return iter(())
+
+        def __length_hint__(self):
+            raise LookupError("bad hint")
+
+    scope["bad_hint"] = BadHint()
+    exec("answer = collect(*bad_hint, label=0)", scope)
+    assert scope["answer"] == ((), 0)
+    try:
+        exec("collect(1, *bad_hint, label=0)", scope)
+    except LookupError as error:
+        assert error.args == ("bad hint",)
+    else:
+        raise AssertionError("starred length hint failure was lost")
+
+    def broken():
+        yield 0
+        raise ValueError("broken iterator")
+
+    scope["broken"] = broken
+    try:
+        exec("collect(*broken(), label=0)", scope)
+    except ValueError as error:
+        assert error.args == ("broken iterator",)
+    else:
+        raise AssertionError("starred iterator failure was lost")
+
+
+def caller_namespaces(argument):
+    snapshot = locals()
+    assert snapshot == {"argument": argument}
+    snapshot["argument"] = None
+    assert vars()["argument"] is argument
+
+    class Namespace:
+        mapping = locals()
+        mapping["name"] = "in class"
+        assert vars() is mapping
+        assert eval("name") == "in class"
+
+    Namespace.mapping["name"] = "later"
+    assert Namespace.name == "in class"
+    mapping = {}
+    assert eval("locals()", {}, mapping) is mapping
+    exec("class Loaded:\n    raw = locals()\n    raw['flag'] = 11\n    assert raw is vars()", mapping)
+    loaded = mapping["Loaded"]
+    loaded.raw["flag"] = 12
+    assert loaded.flag == 11
+
+    class WithMethod:
+        __classcell__ = None
+        def owner(self, value: int):
+            return __class__
+
+    assert WithMethod().owner(3) is WithMethod
+
+    def with_child():
+        before = eval("argument")
+        def nested():
+            return argument
+        return before, nested()
+
+    assert with_child() == (argument, argument)
+
+
 def current():
+    starred_calls()
+    caller_namespaces(3)
+    source_eval()
+    exec_caller_namespaces()
+    method_argument_lifetime()
     named_bindings()
     source_annotations()
+    module_annotations()
     source_genexpr()
+    source_listcomp()
+    source_setcomp()
     source_match()
     check_scope_directives()
     relative_import_hooks()
     source_name_deletion()
     source_classes()
+    source_generic_classes()
     source_test_cases()
     source_nested_functions()
     check_source_lambdas()

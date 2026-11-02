@@ -50,6 +50,7 @@ exception_kinds! {
         Exception = 1,
         RuntimeError = 10,
         RecursionError = 43,
+        PythonFinalizationError = 73,
         NotImplementedError = 37,
         TypeError = 13,
         ValueError = 8,
@@ -88,6 +89,7 @@ exception_kinds! {
         PermissionError = 21,
         AssertionError = 9,
         MemoryError = 15,
+        SystemError = 16,
         BufferError = 54,
         ReferenceError = 53,
         SystemExit = 32,
@@ -109,7 +111,6 @@ exception_kinds! {
         ResourceWarning = 91,
     }
     other {
-        SystemError = 16 => "SystemError",
         UnsupportedOperation = 19 => "UnsupportedOperation",
         SubprocessError = 25 => "SubprocessError",
         CalledProcessError = 26 => "CalledProcessError",
@@ -137,7 +138,6 @@ exception_kinds! {
 /// Resolves an unqualified exception name accepted by the checked frontend.
 pub fn builtin_id(name: &str) -> Option<u32> {
     let kind = match name {
-        "SystemError" => Kind::SystemError,
         "ExceptionGroup" => Kind::ExceptionGroup,
         _ => match boxed_builtin_kind(name)? {
             Kind::ChildProcessError | Kind::ProcessLookupError => return None,
@@ -216,7 +216,10 @@ impl Kind {
             }
             Self::RuntimeError => matches!(
                 self,
-                Self::RuntimeError | Self::NotImplementedError | Self::RecursionError
+                Self::RuntimeError
+                    | Self::NotImplementedError
+                    | Self::RecursionError
+                    | Self::PythonFinalizationError
             ),
             Self::ShutilError => matches!(self, Self::ShutilError | Self::SameFileError),
             Self::ConnectionError => matches!(

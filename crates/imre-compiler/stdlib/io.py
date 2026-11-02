@@ -1,9 +1,10 @@
 # Public I/O ABCs and protocols from CPython 3.14.5, Lib/io.py. See stdlib/docstrings/LICENSE.
 import _io
 import abc
-from _io import (BytesIO, DEFAULT_BUFFER_SIZE, FileIO, StringIO, TextIOWrapper,
-                 UnsupportedOperation, open, open_code, text_encoding)
+from _io import (BufferedRandom, BufferedReader, BufferedRWPair, BufferedWriter, BytesIO, DEFAULT_BUFFER_SIZE, FileIO,
+                 StringIO, TextIOWrapper, UnsupportedOperation, open, open_code, text_encoding)
 from _collections_abc import _check_methods
+from _io import IncrementalNewlineDecoder
 
 class IOBase(_io._IOBase, metaclass=abc.ABCMeta):
     __doc__ = _io._IOBase.__doc__
@@ -19,12 +20,12 @@ class TextIOBase(_io._TextIOBase, IOBase):
 
 RawIOBase.register(FileIO)
 
-for klass in (BytesIO, *_buffered_types):
+for klass in (BytesIO, BufferedReader, BufferedWriter, BufferedRWPair, BufferedRandom):
     BufferedIOBase.register(klass)
 
 for klass in (StringIO, TextIOWrapper):
     TextIOBase.register(klass)
-del klass, _buffered_types
+del klass
 
 GenericAlias = type(list[int])
 

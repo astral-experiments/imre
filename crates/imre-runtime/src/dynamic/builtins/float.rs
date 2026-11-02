@@ -75,26 +75,10 @@ pub(super) fn as_integer_ratio(
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
-    let (&receiver, args) = args
-        .split_first()
-        .ok_or_else(|| type_error("unbound method float.as_integer_ratio() needs an argument"))?;
+    let receiver = noargs_method_receiver(ctx, "float", "as_integer_ratio", args, kwargs)?;
     let Value::Float(value) = *ctx.heap.get(ctx.scalar_value(receiver)) else {
-        return Err(type_error(format!(
-            "descriptor 'as_integer_ratio' for 'float' objects doesn't apply to a '{}' object",
-            ctx.type_name(receiver)
-        )));
+        unreachable!("validated float receiver")
     };
-    if !kwargs.is_empty() {
-        return Err(type_error(
-            "float.as_integer_ratio() takes no keyword arguments",
-        ));
-    }
-    if !args.is_empty() {
-        return Err(type_error(format!(
-            "float.as_integer_ratio() takes no arguments ({} given)",
-            args.len()
-        )));
-    }
     if value.is_infinite() {
         return Err(Error::new(
             "OverflowError",

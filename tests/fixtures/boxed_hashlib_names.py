@@ -31,12 +31,16 @@ def current():
             raise AssertionError("hash class unexpectedly allowed mutation")
         assert h.name in repr(h) and cls.__module__ + "." + cls.__name__ in repr(h)
         assert f"0x{id(h):x}" in repr(alias) and repr(h) != repr(copied)
-        try:
-            cls()
-        except TypeError:
-            pass
+        if cls is getattr(hashlib, h.name):
+            assert cls.__module__ == "_sha3" and name == h.name
+            assert cls().name == name
         else:
-            raise AssertionError("hash class unexpectedly accepted direct construction")
+            try:
+                cls()
+            except TypeError:
+                pass
+            else:
+                raise AssertionError("hash class unexpectedly accepted direct construction")
         print(hashlib.new(name, string=b"abc").digest() == h.digest())
         print(h.name in hashlib.algorithms_available, h.name in hashlib.algorithms_guaranteed)
     # A provider may use its own native spelling for the constructor.
@@ -46,6 +50,21 @@ def current():
         print(name == constructor.__qualname__, constructor.__module__ == module.__name__)
         print(getattr(module, name) is constructor, type(constructor) is type(len))
         print(repr(constructor) == f"<built-in function {name}>")
+    cache = getattr(hashlib, "__builtin_constructor_cache")
+    calls = []
+
+    def factory(data=b"", *, usedforsecurity=True):
+        calls.append((data, usedforsecurity))
+        return hashlib.sha256(data)
+
+    cache["test-hash"] = factory
+    try:
+        result = hashlib.new("test-hash", b"abc", usedforsecurity=False)
+        assert result.hexdigest() == "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        assert calls == [(b"abc", False)]
+    finally:
+        del cache["test-hash"]
+
     available = hashlib.algorithms_available
     available.add("missing-hash")
     print(available is hashlib.algorithms_available, "missing-hash" in hashlib.algorithms_available,

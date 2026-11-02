@@ -28,8 +28,13 @@ pub(super) fn resolve(
         }
         path.push(id);
         let mut base: Option<usize> = None;
+        let mut mixin = None;
         if let Some(args) = &node.arguments {
             for argument in &args.args {
+                if graph.is_protocol_base(definition.module, argument) {
+                    graph.needs_object_runtime.set(true);
+                    return Err(module.error(argument, "Protocol bases require object lowering"));
+                }
                 if mapping_base(graph, definition.module, argument)
                     || (args.args.len() == 1
                         && graph
@@ -48,8 +53,14 @@ pub(super) fn resolve(
                     other => other,
                 };
                 match graph.resolve(definition.module, origin) {
+                    Some(Binding::Intrinsic(Intrinsic::PICKLER)) => {
+                        graph.needs_object_runtime.set(true);
+                        return Err(
+                            module.error(argument, "pickle.Pickler requires object lowering")
+                        );
+                    }
                     Some(Binding::Intrinsic(Intrinsic::ObjectRuntimeExport(
-                        "codecs.IncrementalDecoder",
+                        "codecs.IncrementalDecoder" | "codecs.CodecInfo",
                     ))) => {
                         graph.needs_object_runtime.set(true);
                         return Err(
@@ -62,7 +73,15 @@ pub(super) fn resolve(
                         | Intrinsic::BUFFERED_IO_BASE
                         | Intrinsic::TEXT_IO_BASE
                         | Intrinsic::ObjectRuntimeExport(
-                            "_io._IOBase"
+                            "io.BufferedReader"
+                            | "_io.BufferedReader"
+                            | "io.BufferedRandom"
+                            | "_io.BufferedRandom"
+                            | "io.BufferedWriter"
+                            | "_io.BufferedWriter"
+                            | "io.BufferedRWPair"
+                            | "_io.BufferedRWPair"
+                            | "_io._IOBase"
                             | "_io._RawIOBase"
                             | "_io._BufferedIOBase"
                             | "_io._TextIOBase",
@@ -95,16 +114,39 @@ pub(super) fn resolve(
                         if let Some(first) = base {
                             let parent: &Class = classes[first].as_ref().unwrap();
                             if !parent.bases.contains(&next) {
-                                return Err(module.error(
-                                    argument,
-                                    "multiple independent base classes are unsupported",
-                                ));
+                                let donor = classes[next].as_ref().unwrap();
+                                if args.args.len() != 2
+                                    || first == next
+                                    || !method_only_mixin(graph, donor)
+                                {
+                                    return Err(module.error(
+                                        argument,
+                                        "multiple independent base classes are unsupported",
+                                    ));
+                                }
+                                mixin = Some(next);
                             }
                         } else {
                             base = Some(next);
                         }
                     }
                     _ => {
+                        let origin = match argument {
+                            ast::Expr::Subscript(subscript) => &*subscript.value,
+                            other => other,
+                        };
+                        if graph
+                            .session
+                            .is_builtin_sequence_class(definition.module, origin)
+                        {
+                            let error = module
+                                .error(argument, "sequence subclasses require object lowering");
+                            graph
+                                .object_builtin_errors
+                                .borrow_mut()
+                                .insert(error.clone());
+                            return Err(error);
+                        }
                         return Err(
                             module.error(argument, "the base must be a known fixed-layout class")
                         );
@@ -112,15 +154,23 @@ pub(super) fn resolve(
                 }
             }
         }
-        let mut class = collect_class(
+        let mut decorators = DeferredMethodDecorators::default();
+        let class = collect_class(
             graph,
             module,
             definition,
             node,
-            base.map(|i| (i, classes[i].as_ref().unwrap())),
+            [base, mixin].map(|parent| parent.map(|id| (id, classes[id].as_ref().unwrap()))),
             exceptions.layouts.contains(&definition),
             &exceptions.ids,
-        )?;
+            &mut decorators,
+        );
+        if !decorators.has_runtime_method
+            && let Some(error) = decorators.unsupported
+        {
+            return Err(error);
+        }
+        let mut class = class?;
         if exceptions.layouts.contains(&definition) {
             let index = (exceptions.ids[&definition] - exceptions::FIRST_USER_EXCEPTION) as usize;
             let mro = &exceptions.named[index].ancestors;
@@ -153,6 +203,25 @@ pub(super) fn resolve(
     Ok(classes.into_iter().map(Option::unwrap).collect())
 }
 
+/// A trailing root mixin supplies ordinary methods without changing the receiver layout.
+fn method_only_mixin(graph: &SourceGraph, class: &Class) -> bool {
+    let node = &class.node;
+    node.decorator_list.is_empty()
+        && node.type_params.is_none()
+        && node.arguments.as_ref().is_none_or(|args| {
+            args.keywords.is_empty()
+                && (args.args.is_empty()
+                    || matches!(&*args.args, [base]
+                if graph.session.builtin_object_base(class.definition.module, base)))
+        })
+        && node.body.iter().all(|stmt| match stmt {
+            ast::Stmt::FunctionDef(f) => !f.name.starts_with("__") && f.decorator_list.is_empty(),
+            ast::Stmt::Expr(expr) => matches!(&*expr.value, ast::Expr::StringLiteral(_)),
+            ast::Stmt::Pass(_) => true,
+            _ => false,
+        })
+}
+
 /// Return the member and the name whose binding must be the builtin `super`.
 pub(crate) fn super_method(call: &ast::ExprCall) -> Option<(&ast::ExprAttribute, &ast::Expr)> {
     let method = call.func.as_attribute_expr()?;
@@ -163,6 +232,44 @@ pub(crate) fn super_method(call: &ast::ExprCall) -> Option<(&ast::ExprAttribute,
 
 pub(crate) fn super_init(call: &ast::ExprCall) -> bool {
     super_method(call).is_some_and(|(method, _)| method.attr.as_str() == "__init__")
+}
+
+/// Resolve an explicit initializer on the lexical parent and the current receiver.
+pub(crate) fn direct_base_init(
+    graph: &SourceGraph,
+    module: usize,
+    parent: DefinitionId,
+    initializer: &ast::StmtFunctionDef,
+    call: &ast::ExprCall,
+) -> bool {
+    let Some(method) = call.func.as_attribute_expr() else {
+        return false;
+    };
+    let Some(receiver) = initializer.parameters.iter_non_variadic_params().next() else {
+        return false;
+    };
+    if method.attr.as_str() != "__init__"
+        || !matches!(call.arguments.args.first(), Some(ast::Expr::Name(n)) if n.id.as_str() == receiver.name().as_str())
+        || graph.resolve(module, &method.value) != Some(Binding::Definition(parent))
+    {
+        return false;
+    }
+    let mut root = &*method.value;
+    while let ast::Expr::Attribute(attr) = root {
+        root = &attr.value;
+    }
+    let Some(root) = root.as_name_expr() else {
+        return false;
+    };
+    // A parameter or local variable with the same spelling takes precedence over the module binding.
+    !initializer
+        .parameters
+        .iter()
+        .any(|p| p.name() == root.id.as_str())
+        && !ast::helpers::any_over_body(
+            &initializer.body,
+            |expr| matches!(expr, ast::Expr::Name(n) if n.id == root.id && n.ctx != ast::ExprContext::Load),
+        )
 }
 
 /// Infer storage from an exact builtin value. The constructor still evaluates

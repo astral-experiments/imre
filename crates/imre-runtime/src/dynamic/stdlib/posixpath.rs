@@ -1,7 +1,3 @@
-use std::ffi::OsStr;
-use std::os::unix::ffi::OsStrExt;
-use std::path::Path;
-
 use super::{Context, Error, Id, NONE, Result, Value};
 
 fn spelling(ctx: &Context, value: Id) -> bool {
@@ -95,69 +91,6 @@ fn splitroot(ctx: &mut Context, path: Id) -> Result<Id> {
     let root = ctx.get_item(path, prefix)?;
     let tail = ctx.get_item(path, suffix)?;
     Ok(ctx.alloc(Value::Tuple(vec![drive, root, tail])))
-}
-
-fn stat_predicate(ctx: &mut Context, path: Id, operation: &str) -> Result<bool> {
-    let lstat = operation == "islink";
-    if !lstat
-        && !spelling(ctx, path)
-        && let Some(index) = ctx.index_value(path)?
-    {
-        let fd = index
-            .to_i64()
-            .and_then(|n| libc::c_int::try_from(n).ok())
-            .ok_or_else(|| {
-                Error::new(
-                    "OverflowError",
-                    if index.big().sign() == num_bigint::Sign::Minus {
-                        "fd is less than minimum"
-                    } else {
-                        "fd is greater than maximum"
-                    },
-                )
-            })?;
-        let mut stat = std::mem::MaybeUninit::<libc::stat>::uninit();
-        // SAFETY: fstat initializes the full buffer on success and never takes ownership of fd.
-        return Ok(unsafe {
-            if libc::fstat(fd, stat.as_mut_ptr()) != 0 {
-                false
-            } else {
-                let mode = stat.assume_init().st_mode & libc::S_IFMT;
-                match operation {
-                    "exists" => true,
-                    "isdir" => mode == libc::S_IFDIR,
-                    "isfile" => mode == libc::S_IFREG,
-                    _ => unreachable!("registered stat predicate"),
-                }
-            }
-        });
-    }
-    let value = path_arg(
-        ctx,
-        path,
-        if lstat {
-            "lstat: path should be string, bytes or os.PathLike"
-        } else {
-            "stat: path should be string, bytes, os.PathLike or integer"
-        },
-    )?;
-    let encoded;
-    let path = match ctx.heap.get(ctx.scalar_value(value)) {
-        Value::Str(text) => Path::new(text),
-        Value::SurrogateStr(_) => {
-            encoded = ctx.encode_filesystem_string(value)?;
-            Path::new(OsStr::from_bytes(&encoded))
-        }
-        Value::Bytes(bytes) => Path::new(OsStr::from_bytes(bytes)),
-        _ => unreachable!(),
-    };
-    Ok(match operation {
-        "exists" => crate::objects::exists(path),
-        "isdir" => path.is_dir(),
-        "isfile" => crate::objects::is_file(path),
-        "islink" => std::fs::symlink_metadata(path).is_ok_and(|m| m.file_type().is_symlink()),
-        _ => unreachable!("registered path predicate"),
-    })
 }
 
 /// Join unmatched components of two normalized POSIX spellings into a relative path.
@@ -326,21 +259,22 @@ pub(super) fn call(
         return Err(Error::new("TypeError", "expected one path argument"));
     };
     let path = *path;
-    match name.strip_prefix("_imre_posixpath.") {
-        Some("extension_start") => {
-            let cut = match ctx.heap.get(path) {
-                Value::Str(text) => text
-                    [..crate::objects::posixpath::extension_start(text.as_bytes())]
-                    .chars()
-                    .count(),
-                Value::Bytes(bytes) => crate::objects::posixpath::extension_start(bytes),
-                _ => return Err(Error::new("TypeError", "expected str or bytes")),
-            };
-            Ok(ctx.int(cut as i64))
-        }
-        Some(op @ ("exists" | "isdir" | "isfile" | "islink")) => Ok(
-            super::super::builtins::boolean(stat_predicate(ctx, path, op)?),
-        ),
-        _ => unreachable!(),
+    debug_assert_eq!(name, "_imre_posixpath.extension_start");
+    let cut = match ctx.heap.get(path) {
+        Value::Str(text) => text[..crate::objects::posixpath::extension_start(text.as_bytes())]
+            .chars()
+            .count(),
+        Value::Bytes(bytes) => crate::objects::posixpath::extension_start(bytes),
+        _ => return Err(Error::new("TypeError", "expected str or bytes")),
+    };
+    Ok(ctx.int(cut as i64))
+}
+
+pub(super) fn dirname(path: &str) -> &str {
+    let head = path.rfind('/').map_or("", |i| &path[..=i]);
+    if head.trim_start_matches('/').is_empty() {
+        head
+    } else {
+        head.trim_end_matches('/')
     }
 }

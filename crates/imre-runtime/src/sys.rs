@@ -2,6 +2,7 @@
 pub(crate) mod context_warnings;
 mod recursion;
 use super::{Int, LazyLock, Mutex, OUTPUT, Output, Str, flush_stdout, initialize_io};
+pub(crate) use recursion::{recursion_limit, set_recursion_limit};
 mod intern;
 use crate::StrOwner;
 use crate::objects::{Codec, errno_error};
@@ -9,7 +10,10 @@ pub(crate) use intern::{canonical, intern_owner, try_intern_owner};
 use std::io::{self, Write};
 mod encoding;
 mod warnoptions;
-pub(crate) use encoding::{file_encoding, imre_sys_utf8_mode, set_locale, with_process_locale};
+pub(crate) use encoding::{
+    file_encoding, imre_sys_utf8_mode, set_locale, strerror, with_errno_message,
+    with_process_locale,
+};
 pub(crate) use warnoptions::startup_warning_options;
 mod input;
 pub(super) use input::read_input_line;
@@ -21,7 +25,7 @@ pub(super) fn initialize_encoding(isolated: bool, utf8: Option<bool>) {
 }
 
 pub(super) struct StderrOutput {
-    stream: Output<io::Stderr>,
+    stream: Output,
     codec: Codec,
 }
 
@@ -57,7 +61,11 @@ impl Write for StderrOutput {
 static STDERR: LazyLock<Mutex<StderrOutput>> = LazyLock::new(|| {
     initialize_io();
     Mutex::new(StderrOutput {
-        stream: Output::with_stream(io::stderr(), super::STDIO_SETTINGS.stderr_capacity, true),
+        stream: Output::with_stream(
+            super::RawOutput::Stderr,
+            super::stdio_settings().stderr_capacity,
+            true,
+        ),
         codec: encoding::settings(false, None).codec,
     })
 });
@@ -204,8 +212,7 @@ pub(crate) fn write_standard_encoded(
         if !out.captures.is_empty() {
             return out.write_all(bytes);
         }
-        out.text
-            .write(&mut out.raw, bytes, out.line_buffered && newline)
+        out.write_chunk(bytes, out.line_buffered && newline)
     }
     if stderr {
         let mut err = STDERR.lock().unwrap_or_else(|p| p.into_inner());
@@ -217,23 +224,53 @@ pub(crate) fn write_standard_encoded(
     .map_err(errno_error)
 }
 
-/// Write through the binary layer without flushing previously buffered text.
-pub(crate) fn write_standard_buffer(stderr: bool, bytes: &[u8]) -> super::Result<()> {
+fn with_standard_output<T>(stderr: bool, operation: impl FnOnce(&mut Output) -> T) -> T {
     if stderr {
-        STDERR
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .stream
-            .raw
-            .write_all(bytes)
+        operation(&mut stderr_writer().stream)
     } else {
-        OUTPUT
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .raw
-            .write_all(bytes)
+        operation(&mut OUTPUT.lock().unwrap_or_else(|p| p.into_inner()))
     }
-    .map_err(errno_error)
+}
+
+/// Write bytes without flushing the text that precedes them.
+pub(crate) fn write_standard_buffer(stderr: bool, bytes: &[u8]) -> super::Result<()> {
+    with_standard_output(stderr, |out| out.raw.write_all(bytes)).map_err(errno_error)
+}
+
+pub(crate) fn flush_standard_buffer(stderr: bool) -> io::Result<()> {
+    with_standard_output(stderr, |out| out.raw.flush())
+}
+
+/// Text close attempts both flushes; either view discards any bytes left after close.
+pub(crate) fn close_standard_output(stderr: bool, flush_text: bool) -> io::Result<()> {
+    with_standard_output(stderr, |out| {
+        let text = if flush_text { out.flush() } else { Ok(()) };
+        let binary = out.raw.flush();
+        out.text = Default::default();
+        out.raw.buffer.clear();
+        out.raw.written = 0;
+        binary.and(text)
+    })
+}
+
+/// Seek after draining binary writes, or report their logical position without flushing.
+pub(crate) fn standard_buffer_position(
+    stderr: bool,
+    seek: Option<(i64, i32)>,
+) -> super::Result<i64> {
+    let fd = if stderr { 2 } else { 1 };
+    with_standard_output(stderr, |out| {
+        if let Some((offset, whence)) = seek {
+            out.raw.flush().map_err(errno_error)?;
+            crate::objects::os::seek(fd, offset, whence)
+        } else {
+            let offset = crate::objects::os::seek(fd, 0, libc::SEEK_CUR)?;
+            let buffered = out.raw.buffer.len() - out.raw.written;
+            offset
+                .checked_add(buffered as i64)
+                .ok_or_else(|| errno_error(io::Error::from_raw_os_error(libc::EOVERFLOW)))
+        }
+    })
 }
 
 /// Escaped displayhook bytes go to stdout.buffer ahead of any previously buffered text.
@@ -256,41 +293,56 @@ pub extern "C" fn imre_sys_platform() -> *const Str {
     StrOwner::into_raw(StrOwner::new(Str::new(platform)))
 }
 
-/// Return a field of sys.thread_info from the target that runs the program.
-/// A null pointer represents an unknown library version or thread provider.
+/// Field selectors 0 and 1 retain the original name and version ABI.
 #[unsafe(no_mangle)]
-pub extern "C" fn imre_sys_thread_text(version: u32) -> *const Str {
-    if version != 0 {
-        #[cfg(all(target_os = "linux", target_env = "gnu"))]
-        {
-            let mut buffer = [0u8; 256];
-            // SAFETY: confstr writes at most buffer.len() bytes, including the terminating nul.
-            let length = unsafe {
-                libc::confstr(
-                    libc::_CS_GNU_LIBPTHREAD_VERSION,
-                    buffer.as_mut_ptr().cast(),
-                    buffer.len(),
-                )
-            };
-            if (2..=buffer.len()).contains(&length)
-                && let Ok(value) = std::str::from_utf8(&buffer[..length - 1])
-            {
-                return StrOwner::into_raw(StrOwner::new(Str::new(value)));
-            }
-        }
-        return std::ptr::null();
-    }
+pub extern "C" fn imre_sys_thread_text(field: u32) -> *const Str {
+    let text = match field {
+        0 => thread_name().map(Str::new),
+        1 => thread_version().map(Str::new),
+        2 => thread_lock_backend().map(Str::new),
+        _ => None,
+    };
+    text.map_or(std::ptr::null(), |text| {
+        StrOwner::into_raw(StrOwner::new(text))
+    })
+}
 
-    let name = if cfg!(windows) {
-        "nt"
+pub(crate) fn thread_name() -> Option<&'static str> {
+    if cfg!(windows) {
+        Some("nt")
     } else if cfg!(all(unix, not(target_family = "wasm")))
         || cfg!(all(target_os = "emscripten", target_feature = "atomics"))
     {
-        "pthread"
+        Some("pthread")
     } else {
-        return std::ptr::null();
-    };
-    StrOwner::into_raw(StrOwner::new(Str::new(name)))
+        None
+    }
+}
+
+pub(crate) fn thread_lock_backend() -> Option<&'static str> {
+    // PrimitiveLock waits on a condition variable while holding its state mutex.
+    (thread_name() == Some("pthread")).then_some("mutex+cond")
+}
+
+pub(crate) fn thread_version() -> Option<String> {
+    #[cfg(all(target_os = "linux", target_env = "gnu"))]
+    {
+        let mut buffer = [0u8; 256];
+        // SAFETY: confstr writes at most buffer.len() bytes, including the terminating nul.
+        let length = unsafe {
+            libc::confstr(
+                libc::_CS_GNU_LIBPTHREAD_VERSION,
+                buffer.as_mut_ptr().cast(),
+                buffer.len(),
+            )
+        };
+        if (2..=buffer.len()).contains(&length)
+            && let Ok(value) = std::str::from_utf8(&buffer[..length - 1])
+        {
+            return Some(value.to_owned());
+        }
+    }
+    None
 }
 
 /// Return the OS interface Python exposes on the target that built this runtime.

@@ -110,6 +110,23 @@ class _AssertWarnsContext(_BoxedAssertionContext):
             self._raiseFailure("{} not triggered".format(exc_name))
 
 
+class _AssertNotWarnsContext(_AssertWarnsContext):
+
+    def __exit__(self, exc_type, exc_value, tb):
+        self.warnings_manager.__exit__(exc_type, exc_value, tb)
+        if exc_type is not None:
+            # let unexpected exceptions pass through
+            return
+        try:
+            exc_name = self.expected.__name__
+        except AttributeError:
+            exc_name = str(self.expected)
+        for m in self.warnings:
+            w = m.message
+            if isinstance(w, self.expected):
+                self._raiseFailure(f"{exc_name} triggered")
+
+
 def _boxedAssertion(self, context, method, expected, regex, args, kwargs):
     if not _is_subtype(expected, context._base_type):
         raise TypeError(method + "() arg 1 must be " + context._base_type_str)
@@ -140,6 +157,11 @@ def assertWarns(self, expected_warning, *args, **kwargs):
     return _boxedAssertion(self, _AssertWarnsContext, "assertWarns", expected_warning, None, args, kwargs)
 
 
+def _assertNotWarns(self, expected_warning, *args, **kwargs):
+    """The opposite of assertWarns. Private due to low demand."""
+    return _boxedAssertion(self, _AssertNotWarnsContext, "_assertNotWarns", expected_warning, None, args, kwargs)
+
+
 def assertWarnsRegex(self, expected_warning, expected_regex, *args, **kwargs):
     regex = re.compile(expected_regex) if expected_regex is not None else None
     return _boxedAssertion(self, _AssertWarnsContext, "assertWarnsRegex", expected_warning, regex, args, kwargs)
@@ -157,10 +179,27 @@ def assertRegex(self, text, expected_regex, msg=None):
         msg = self._formatMessage(msg, standardMsg)
         raise self.failureException(msg)
 
+
+def assertNotRegex(self, text, unexpected_regex, msg=None):
+    """Fail the test if the text matches the regular expression."""
+    if isinstance(unexpected_regex, (str, bytes)):
+        unexpected_regex = re.compile(unexpected_regex)
+    match = unexpected_regex.search(text)
+    if match:
+        standardMsg = 'Regex matched: %r matches %r in %r' % (
+            text[match.start() : match.end()],
+            unexpected_regex.pattern,
+            text)
+        # _formatMessage ensures the longMessage option is respected
+        msg = self._formatMessage(msg, standardMsg)
+        raise self.failureException(msg)
+
 TestCase.assertRegex = assertRegex
+TestCase.assertNotRegex = assertNotRegex
 TestCase.assertRaisesRegex = assertRaisesRegex
 TestCase._formatMessage = _boxed_format_message
 TestCase.assertRaises = assertRaises
+TestCase._assertNotWarns = _assertNotWarns
 TestCase.assertWarns = assertWarns
 TestCase.assertWarnsRegex = assertWarnsRegex
-del assertRegex, assertRaises, assertRaisesRegex, assertWarns, assertWarnsRegex
+del assertRegex, assertNotRegex, assertRaises, assertRaisesRegex, _assertNotWarns, assertWarns, assertWarnsRegex
