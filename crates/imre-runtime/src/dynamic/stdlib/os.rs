@@ -378,7 +378,7 @@ pub(super) fn is_descriptor_function(name: &str) -> bool {
     if name == "_exit" {
         return cfg!(unix);
     }
-    if name == "pread" {
+    if matches!(name, "pread" | "readinto") {
         return cfg!(unix);
     }
     matches!(
@@ -445,6 +445,37 @@ pub(super) fn c_int(ctx: &mut Context, value: Id) -> Result<i32> {
         .to_i64()
         .and_then(|n| i32::try_from(n).ok())
         .ok_or_else(|| Error::new("OverflowError", "Python int too large to convert to C int"))
+}
+
+fn readinto(ctx: &mut Context, fd: i32, dst: Id) -> Result<Id> {
+    let span = match ctx.writable_byte_span(dst) {
+        Ok(span) => span,
+        Err(error) if matches!(error.kind.as_ref(), "BufferError" | "ValueError") => None,
+        Err(error) => return Err(error),
+    };
+    let Some((storage, range)) = span else {
+        let kind = if dst == NONE {
+            "None"
+        } else {
+            ctx.type_name(dst)
+        };
+        return Err(Error::new(
+            "TypeError",
+            format!("readinto() argument 2 must be read-write bytes-like object, not {kind}"),
+        ));
+    };
+    // Keep the view and its storage exported while an interrupted read runs a handler.
+    ctx.with_buffer_export(dst, |ctx| {
+        ctx.with_buffer_export(storage, |ctx| {
+            loop {
+                let bytes = ctx.writable_storage_bytes(storage)?;
+                if let Some(count) = native::try_readinto(fd, &mut bytes[range.clone()])? {
+                    return Ok(ctx.int(count as i64));
+                }
+                ctx.dispatch_signals()?;
+            }
+        })
+    })
 }
 
 fn ssize_t(ctx: &mut Context, value: Id) -> Result<isize> {
@@ -1019,7 +1050,7 @@ pub(super) fn descriptor(
         let bytes = native::read(fd, length, Some(offset), || ctx.dispatch_signals())?;
         return Ok(ctx.alloc(Value::Bytes(bytes)));
     }
-    if matches!(name, "read" | "write") {
+    if matches!(name, "read" | "readinto" | "write") {
         let [fd, data] = args else {
             return Err(Error::new(
                 "TypeError",
@@ -1031,6 +1062,8 @@ pub(super) fn descriptor(
             let length = ssize_t(ctx, *data)?;
             let bytes = native::read(fd, length, None, || ctx.dispatch_signals())?;
             Ok(ctx.alloc(Value::Bytes(bytes)))
+        } else if name == "readinto" {
+            readinto(ctx, fd, *data)
         } else {
             // Keep the exporter alive and its size fixed while a handler runs.
             // Reborrow on retry so in-place changes made by the handler are visible.
