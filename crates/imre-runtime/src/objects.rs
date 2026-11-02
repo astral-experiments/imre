@@ -94,8 +94,8 @@ mod string_enums;
 mod structs;
 pub(crate) mod tempdirs;
 mod text;
-pub(crate) use text::translate;
 pub(crate) use text::{dedent, hexadecimal};
+pub(crate) use text::{translate, zfill};
 pub(crate) mod time;
 pub(crate) use text::{UrlInput, capitalize, urlquote, urlsplit};
 pub(crate) use text::{

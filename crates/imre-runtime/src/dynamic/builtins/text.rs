@@ -1285,6 +1285,24 @@ pub(super) fn method(
             Ok(ctx.alloc(Value::Bytes(b)))
         };
     }
+    if name == "zfill" {
+        let width = one_positional_arg("str.zfill", args, kwargs)?;
+        let width = crate::objects::zfill::width(&ctx.index_integer(width)?)?;
+        let storage = ctx.string_storage(receiver).unwrap();
+        let copy = storage != receiver;
+        let result = match ctx.heap.get(storage) {
+            Value::Str(text) => crate::objects::zfill::text(text, width, copy)?.map(Value::Str),
+            Value::SurrogateStr(points) => {
+                crate::objects::zfill::units(points, points.len(), width, copy)?
+                    .map(Value::SurrogateStr)
+            }
+            _ => unreachable!(),
+        };
+        return match result {
+            Some(value) => ctx.heap.fresh_string(value),
+            None => Ok(storage),
+        };
+    }
     if name == "expandtabs" {
         let [tabsize] = bind_method_arguments(name, args, kwargs, ["tabsize"], 1)?;
         let width = match tabsize {
