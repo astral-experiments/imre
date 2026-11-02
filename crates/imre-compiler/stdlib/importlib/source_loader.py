@@ -109,11 +109,6 @@ def source_from_cache(path):
     return _source_name(_cache_path(path), sys.pycache_prefix)
 
 
-def _get_cached(origin):
-    # The standalone runtime has no bytecode cache tag.
-    return origin if origin.endswith(".pyc") else None
-
-
 class _LoaderBasics:
     def is_package(self, fullname):
         filename = self.get_filename(fullname).rpartition(sep)[2]
