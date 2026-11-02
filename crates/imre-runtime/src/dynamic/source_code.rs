@@ -799,7 +799,13 @@ fn repeated_keyword(module: &ast::Mod) -> Option<&ast::Keyword> {
 
     let mut pending = Children(vec![module.into()]);
     while let Some(node) = pending.0.pop() {
-        if let ast::AnyNodeRef::Arguments(args) = node {
+        let args = match node {
+            // A call's own keyword list is validated before its callable is compiled.
+            ast::AnyNodeRef::ExprCall(call) => Some(&call.arguments),
+            ast::AnyNodeRef::StmtClassDef(class) => class.arguments.as_deref(),
+            _ => None,
+        };
+        if let Some(args) = args {
             for (index, keyword) in args.keywords.iter().enumerate() {
                 if let Some(name) = &keyword.arg
                     && let Some(repeated) = args.keywords[index + 1..].iter().find(|other| {
@@ -2042,8 +2048,15 @@ impl Context {
                 keyword.arg.as_ref().unwrap()
             );
             let position = |offset: usize| {
-                let line = lines.partition_point(|&start| start <= offset);
-                (line, offset - lines[line - 1] + 1)
+                let mut line = 1;
+                let mut line_start = 0;
+                for (at, newline) in source[..offset].match_indices(['\r', '\n']) {
+                    if newline == "\n" || !source[at + 1..].starts_with('\n') {
+                        line += 1;
+                        line_start = at + 1;
+                    }
+                }
+                (line, offset - line_start + 1)
             };
             let (line, column) = position(keyword.start().to_usize());
             let (end_line, end_column) = position(keyword.end().to_usize());

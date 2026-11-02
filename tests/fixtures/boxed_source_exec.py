@@ -558,6 +558,14 @@ def starred_calls():
         else:
             raise AssertionError("duplicate explicit keyword compiled")
 
+    try:
+        compile("x=1\rcollect(a=1, a=2)(b=1, b=2)", "<caller>", "exec")
+    except SyntaxError as error:
+        assert error.msg == "keyword argument repeated: b"
+        assert (error.lineno, error.offset, error.end_lineno, error.end_offset) == (2, 24, 2, 27)
+    else:
+        raise AssertionError("invalid outer call accepted")
+
     class Options:
         def keys(self):
             return ["label"]
