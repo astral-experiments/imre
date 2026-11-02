@@ -1432,6 +1432,12 @@ impl IntrinsicModule {
             (Self::Binascii, "Incomplete") => Intrinsic::BinasciiIncomplete,
             (Self::Hashlib, "file_digest") => Intrinsic::HashFileDigest,
             (Self::Hashlib, "new") => Intrinsic::HashNew,
+            (Self::Hashlib, "__get_builtin_constructor") => {
+                Intrinsic::ObjectRuntimeExport("hashlib.__get_builtin_constructor")
+            }
+            (Self::Hashlib, "__builtin_constructor_cache") => {
+                Intrinsic::ObjectRuntimeExport("hashlib.__builtin_constructor_cache")
+            }
             (Self::Hashlib, "algorithms_available") => {
                 Intrinsic::HashAlgorithms { guaranteed: false }
             }
