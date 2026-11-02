@@ -471,7 +471,7 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         Value::PrimitiveLock(_) if super::thread_lock::is_method(attr) => super::thread_lock::CLASS,
         Value::Bool(_) if attr == "__repr__" => "bool",
         Value::Int(_) if attr == "__repr__" => "int",
-        Value::Int(_) | Value::Bool(_) if matches!(attr, "__add__" | "bit_length" | "to_bytes") => "int",
+        Value::Int(_) | Value::Bool(_) if matches!(attr, "__add__" | "__index__" | "bit_length" | "to_bytes") => "int",
         Value::Float(_) if matches!(attr, "__repr__" | "as_integer_ratio") => "float",
         Value::Str(_) | Value::SurrogateStr(_) if STR_METHODS.contains(&attr) => "str",
         Value::Range(_) if super::range::METHODS.contains(&attr) => "range",
@@ -1273,7 +1273,9 @@ pub(super) fn call(
             "bytes" | "bytearray" if method == "translate" => {
                 translation::translate(ctx, owner, args, kwargs)
             }
-            "int" if method == "__add__" => collections::builtin_slot(ctx, name, args, kwargs),
+            "int" if matches!(method, "__add__" | "__index__") => {
+                collections::builtin_slot(ctx, name, args, kwargs)
+            }
             "str" if method == "__str__" => collections::builtin_slot(ctx, name, args, kwargs),
             "bool" | "int" | "float" | "str" | "bytes" | "bytearray" if method == "__repr__" => {
                 collections::builtin_slot(ctx, name, args, kwargs)

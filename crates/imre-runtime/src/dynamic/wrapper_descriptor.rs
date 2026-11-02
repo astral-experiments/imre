@@ -106,6 +106,7 @@ impl BuiltinDescriptor {
             "object.__reduce__" => ("object", "__reduce__"),
             "object.__reduce_ex__" => ("object", "__reduce_ex__"),
             "int.__add__" => ("int", "__add__"),
+            "int.__index__" => ("int", "__index__"),
             "bool.__repr__" => ("bool", "__repr__"),
             "int.__repr__" => ("int", "__repr__"),
             "float.__repr__" => ("float", "__repr__"),
@@ -327,6 +328,10 @@ impl BuiltinDescriptor {
             "__text_signature__" if matches!(self.name, "__neg__" | "__pos__" | "__abs__") => {
                 ctx.text("($self, /)")
             }
+            "__doc__" if self.name == "__index__" => ctx.text(
+                "Return self converted to an integer, if self is suitable for use as an index into a list.",
+            ),
+            "__text_signature__" if self.name == "__index__" => ctx.text("($self, /)"),
             "__doc__" if self.name == "__add__" => ctx.text("Return self+value."),
             "__doc__" if self.name == "__radd__" => ctx.text("Return value+self."),
             "__doc__" if self.name == "__sub__" => ctx.text("Return self-value."),

@@ -1308,7 +1308,7 @@ pub(super) fn builtin_slot(
         list_extend(ctx, storage, *value)?;
         return Ok(object);
     }
-    if matches!(method, "__repr__" | "__str__") {
+    if matches!(method, "__repr__" | "__str__" | "__index__") {
         if !kwargs.is_empty() {
             return Err(type_error(format!("wrapper {method}() takes no keyword arguments")));
         }
@@ -1317,6 +1317,9 @@ pub(super) fn builtin_slot(
                 "expected 0 arguments, got {}",
                 rest.len()
             )));
+        }
+        if method == "__index__" {
+            return Ok(integer::exact_value(ctx, object));
         }
         if method == "__str__" {
             return Ok(storage);

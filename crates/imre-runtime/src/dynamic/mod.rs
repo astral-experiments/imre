@@ -1955,6 +1955,7 @@ impl Context {
                 }
                 &[
                     "__add__",
+                    "__index__",
                     "bit_length",
                     "from_bytes",
                     "to_bytes",

@@ -11,6 +11,17 @@ pub(super) fn add(ctx: &mut Context, receiver: Id, other: Id) -> Result<Id> {
     Ok(ctx.alloc(Value::Int(sum)))
 }
 
+/// Return an exact int from a validated integer receiver without invoking subclass conversions.
+pub(super) fn exact_value(ctx: &mut Context, receiver: Id) -> Id {
+    let value = ctx.scalar_value(receiver);
+    match ctx.heap.get(value) {
+        Value::Int(_) if value == receiver => value,
+        Value::Int(number) => ctx.alloc(Value::Int(number.clone())),
+        Value::Bool(bit) => ctx.int(i64::from(*bit)),
+        _ => unreachable!("validated integer receiver"),
+    }
+}
+
 /// Both read-only rational fields use the stored integer, bypassing subclass conversions.
 pub(super) fn rational_field(ctx: &mut Context, field: &str, args: &[Id]) -> Result<Id> {
     let [receiver] = *args else {
@@ -19,9 +30,7 @@ pub(super) fn rational_field(ctx: &mut Context, field: &str, args: &[Id]) -> Res
     let value = ctx.scalar_value(receiver);
     match ctx.heap.get(value) {
         Value::Int(_) | Value::Bool(_) if field == "denominator" => Ok(ctx.int(1)),
-        Value::Int(_) if value == receiver => Ok(value),
-        Value::Int(number) => Ok(ctx.alloc(Value::Int(number.clone()))),
-        Value::Bool(bit) => Ok(ctx.int(i64::from(*bit))),
+        Value::Int(_) | Value::Bool(_) => Ok(exact_value(ctx, receiver)),
         _ => Err(type_error(format!(
             "descriptor '{field}' for 'int' objects doesn't apply to a '{}' object",
             ctx.type_name(receiver)
