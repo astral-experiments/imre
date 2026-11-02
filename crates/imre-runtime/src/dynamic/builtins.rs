@@ -218,6 +218,7 @@ pub(super) fn constructor_owner(name: &str) -> Option<&str> {
         "object" | "dict" | "float" | "function" | "int" | "str" | super::thread_local::CLASS
     ) || super::stdlib::itertools::cursor_type(owner).is_some()
         || is_exception(owner)
+        || owner == super::stdlib::fixed_structseq::SCHED_PARAM
         || crate::objects::HashState::is_provider_class(owner))
     .then_some(owner)
 }

@@ -575,6 +575,13 @@ pub(super) fn allocate(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) 
         ));
     };
     let tuple = ctx.builtin("tuple");
+    // This native tuple subtype must allocate through its scalar constructor.
+    if matches!(ctx.heap.get(class), Value::Native(name) if name == super::stdlib::fixed_structseq::SCHED_PARAM) {
+        return Err(Error::new(
+            "TypeError",
+            "tuple.__new__(posix.sched_param) is not safe, use posix.sched_param.__new__()",
+        ));
+    }
     let names = ctx.namedtuple_fields(class);
     if names.is_none() && !ctx.subclass(class, tuple) {
         return Err(ctx.invalid_new_subtype("tuple", class));
