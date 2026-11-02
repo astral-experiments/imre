@@ -5,6 +5,7 @@ use regex_syntax::ast::{Ast, ClassSet, ClassSetItem, parse::Parser};
 use regex_syntax::hir::{Class, ClassBytes, ClassBytesRange, Hir, Look};
 use std::cell::RefCell;
 
+#[derive(Debug, PartialEq)]
 enum Atom {
     Literal(u8, bool),
     Class(ClassBytes, bool),
@@ -91,6 +92,10 @@ impl LocaleMatcher {
             full: false,
             cached: RefCell::new(None),
         })
+    }
+
+    pub(super) fn same_program(&self, other: &Self) -> bool {
+        self.atoms == other.atoms
     }
 
     pub(super) fn full(&self) -> Self {

@@ -133,6 +133,10 @@ impl Pattern {
             (Some(a), Some(b)) if a.same_program(b) => {}
             _ => return false,
         }
+        #[cfg(target_os = "linux")]
+        if let (Matcher::Locale(a), Matcher::Locale(b)) = (&self.regex, &other.regex) {
+            return a.same_program(b);
+        }
         if self.engine_source == other.engine_source {
             return true;
         }
