@@ -143,6 +143,25 @@ def current():
                 item = [i]
             return NotImplemented
 
+    class Metadata:
+        def __init__(self):
+            self.values = {}
+
+        def __getitem__(self, key):
+            return self.values[key]
+
+        def __len__(self):
+            return len(self.values)
+
+        def __bool__(self):
+            raise AssertionError("proxy truth must use the mapping length")
+
+    metadata = Metadata()
+    view = field(metadata=metadata).metadata
+    assert not view
+    metadata.values["code"] = 7
+    assert view and len(view) == 1 and view["code"] == 7
+
     clearing = Clearing(code=7)
     clearing.left = [field(metadata=clearing).metadata]
     clearing.right = [field(metadata={"code": 7}).metadata]
@@ -153,6 +172,9 @@ def current():
     assert view == {"code": 7} and {"code": 7} == view
     backing["code"] = 9
     assert view != {"code": 7} and view["code"] == 9
+    nested = field(metadata=view).metadata
+    assert list(nested) == ["code"] and list(nested.items()) == [("code", 9)]
+    assert nested["code"] == 9 and len(nested) == 1
     assert InitVar[int].type is int
     assert repr(InitVar[int]) == "dataclasses.InitVar[int]"
     assert repr(InitVar[list[int]]) == "dataclasses.InitVar[list[int]]"
