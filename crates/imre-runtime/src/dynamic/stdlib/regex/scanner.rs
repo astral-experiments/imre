@@ -155,10 +155,6 @@ pub(super) fn compile_lexicon(ctx: &mut Context, lexicon: Id, flags: Option<Id>)
             source.truncate(source.len() - imre_regex::FINAL_NEWLINE_ANCHOR.len());
             source.push('$');
         }
-        if flags & IGNORECASE != 0 {
-            source = casefold::expand(&source, ascii)
-                .map_err(|message| pattern_error(ctx, phrase, flags, message))?;
-        }
         branches.push(format!("({source})"));
     }
     if branches.is_empty() {

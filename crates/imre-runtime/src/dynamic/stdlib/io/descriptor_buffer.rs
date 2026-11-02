@@ -1,14 +1,191 @@
 //! Buffer a selected FileIO descriptor without changing its identity or ownership.
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::io::{self, BufRead, BufReader, Read, Seek, SeekFrom, Write};
 use std::os::fd::RawFd;
 use std::rc::Rc;
 
 use super::super::{builtins, files, os_error};
-use super::file_io::RawFile;
-use super::{Context, Error, Id, NONE, Result, Value};
+use super::file_io::{self, RawFile};
+use super::{Context, Error, Id, MemoryStream, NONE, Result, TRUE, Value};
 use crate::objects::{BoxedPipe, Random};
 use crate::{BinaryOutput, BlockedWrite};
+
+pub(super) fn backing(ctx: &Context, receiver: Id) -> Option<Id> {
+    match ctx.heap.get(receiver) {
+        Value::File(_) => Some(receiver),
+        Value::Instance {
+            memory_stream: Some(MemoryStream::BufferedFile(buffer)),
+            ..
+        } => Some(*buffer),
+        _ => None,
+    }
+}
+
+/// Only a writer initialized with a caller's FileIO delegates finalization to its wrapper.
+fn writer_fallback(ctx: &Context, owner: Id) -> Option<(Id, &BufferedFd, &Cell<bool>)> {
+    let Value::Instance {
+        class,
+        memory_stream: Some(MemoryStream::BufferedFile(buffer)),
+        ..
+    } = ctx.heap.get(owner)
+    else {
+        return None;
+    };
+    let Value::File(file) = ctx.heap.get(*buffer) else {
+        return None;
+    };
+    let files::BinaryFile::Descriptor(fd) = file.as_ref() else {
+        return None;
+    };
+    Some((*class, fd, fd.drop_fallback.as_ref()?))
+}
+
+/// A Python finalizer can decline close, raise, or resurrect the writer.
+pub(in crate::dynamic) fn note_writer_finalizer(ctx: &Context, owner: Id) {
+    if let Some((_, _, armed)) = writer_fallback(ctx, owner) {
+        armed.set(false);
+    }
+}
+
+/// A live module global can reach Rust Drop without running its Python finalizer.
+/// Permit the native flush only while it still implements the writer's close.
+pub(in crate::dynamic) fn prepare_writer_shutdown(ctx: &Context) {
+    for &owner in ctx.heap.pending_finalizers() {
+        let Some((class, fd, armed)) = writer_fallback(ctx, owner) else {
+            continue;
+        };
+        if !armed.get() || fd.closed() {
+            continue;
+        }
+        let base = ctx.find_in_mro(class, |candidate| {
+            (ctx.heap.get(candidate).io_kind() == Some("BufferedWriter")).then_some(candidate)
+        });
+        let native = base.is_some_and(|base| {
+            ["__del__", "__getattribute__", "closed", "close", "flush"]
+                .iter()
+                .all(|name| ctx.class_attr(class, name) == ctx.class_attr(base, name))
+        }) && ["close", "flush"]
+            .iter()
+            .all(|name| ctx.raw_instance_field(owner, name).is_none())
+            && fd.check_raw(ctx, owner, "close").is_ok()
+            && fd.check_raw(ctx, owner, "flush").is_ok();
+        armed.set(native);
+    }
+}
+
+fn native_raw(ctx: &Context, raw: Id, methods: &[&str], owner: &str) -> Result<Rc<RawFile>> {
+    // Going straight to the descriptor is valid only while the Python raw methods
+    // are native. The instance dictionary can change after the buffer is created.
+    if ctx
+        .heap
+        .get(raw)
+        .instance_class()
+        .and_then(|class| ctx.heap.get(class).io_kind())
+        == Some("FileIO")
+        && !methods
+            .iter()
+            .any(|method| ctx.raw_instance_field(raw, method).is_some())
+        && let Some(handle) = file_io::state(ctx, raw)
+    {
+        return Ok(handle);
+    }
+    Err(Error::new(
+        "NotImplementedError",
+        format!("{owner} with Python raw methods is unsupported"),
+    ))
+}
+
+pub(super) fn ssize(ctx: &mut Context, value: Id) -> Result<i64> {
+    ctx.index_integer(value)?.to_i64().ok_or_else(|| {
+        Error::new(
+            "OverflowError",
+            "Python int too large to convert to C ssize_t",
+        )
+    })
+}
+
+/// Attach one buffered stream to a caller-owned native FileIO, without reopening its fd.
+pub(super) fn initialize(
+    ctx: &mut Context,
+    receiver: Id,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+    reading: bool,
+) -> Result<Id> {
+    let (owner, capability, methods): (_, _, &[&str]) = if reading {
+        (
+            "BufferedReader",
+            "readable",
+            &[
+                "close", "flush", "readable", "seekable", "isatty", "fileno", "tell", "seek",
+                "read", "readall", "readinto",
+            ],
+        )
+    } else {
+        (
+            "BufferedWriter",
+            "writable",
+            &[
+                "close", "flush", "writable", "seekable", "isatty", "fileno", "tell", "seek",
+                "write", "truncate",
+            ],
+        )
+    };
+    let [raw, capacity] =
+        builtins::bind_builtin_arguments(owner, args, kwargs, ["raw", "buffer_size"], 1)?;
+    let raw = raw.expect("required argument");
+    let capacity = capacity
+        .map(|n| ssize(ctx, n))
+        .transpose()?
+        .unwrap_or(super::DEFAULT_BUFFER_SIZE);
+    let method = ctx.lookup_attr(raw, capability)?;
+    if ctx.call(method, vec![], Vec::new())? != TRUE {
+        return Err(Error::new(
+            "UnsupportedOperation",
+            format!("File or stream is not {capability}."),
+        ));
+    }
+    if capacity <= 0 {
+        return Err(Error::new(
+            "ValueError",
+            "buffer size must be strictly positive",
+        ));
+    }
+    let handle = native_raw(ctx, raw, methods, owner)?;
+    if backing(ctx, receiver).is_some() {
+        return Err(Error::new(
+            "NotImplementedError",
+            format!("{owner} reinitialization is unsupported"),
+        ));
+    }
+    // Both standard Rust buffer constructors allocate infallibly.
+    if capacity as u64 > crate::text_output::binary_capacity(i128::MAX) as u64 {
+        return Err(Error::new(
+            "NotImplementedError",
+            format!("explicit {owner} buffers above 8 MiB are unsupported"),
+        ));
+    }
+    let mut fd = BufferedFd::new(raw, handle, reading, capacity as usize);
+    if !reading {
+        fd.drop_fallback = Some(Cell::new(true));
+    }
+    // Do not close the caller's file if allocating the backing value fails.
+    let pending = fd.buffer.take();
+    let value = files::BinaryFile::Descriptor(fd).into_value()?;
+    let Value::File(file) = &value else {
+        unreachable!()
+    };
+    let files::BinaryFile::Descriptor(fd) = file.as_ref() else {
+        unreachable!()
+    };
+    fd.buffer.replace(pending);
+    let buffer = ctx.alloc(value);
+    let Value::Instance { memory_stream, .. } = ctx.heap.get_mut(receiver) else {
+        unreachable!("uninitialized buffered instance")
+    };
+    *memory_stream = Some(MemoryStream::BufferedFile(buffer));
+    Ok(NONE)
+}
 
 struct Descriptor {
     handle: Rc<RawFile>,
@@ -224,6 +401,7 @@ pub(in crate::dynamic) struct BufferedFd {
     pub(in crate::dynamic) raw: Id,
     pub(in crate::dynamic) reading: bool,
     pub(in crate::dynamic) writing: bool,
+    drop_fallback: Option<Cell<bool>>,
     handle: Rc<RawFile>,
     buffer: RefCell<Option<Buffer>>,
 }
@@ -249,6 +427,7 @@ impl BufferedFd {
             reading,
             writing: !reading,
             handle,
+            drop_fallback: None,
             buffer: RefCell::new(Some(buffer)),
         }
     }
@@ -268,6 +447,7 @@ impl BufferedFd {
             handle,
             reading: true,
             writing: true,
+            drop_fallback: None,
             buffer: RefCell::new(Some(Buffer::Random(buffer))),
         })
     }
@@ -278,32 +458,76 @@ impl BufferedFd {
             handle,
             reading,
             writing: !reading,
+            drop_fallback: None,
             buffer: RefCell::new(Some(Buffer::Pipe(pipe))),
         }
     }
 
-    pub(super) fn uses_raw(&self, raw: &Rc<RawFile>) -> bool {
-        Rc::ptr_eq(raw, &self.handle)
+    /// Check the live raw after any argument conversion which can invoke Python.
+    fn check_raw(&self, ctx: &Context, receiver: Id, name: &str) -> Result<()> {
+        if matches!(ctx.heap.get(receiver), Value::File(_)) {
+            return Ok(());
+        }
+        let (owner, methods): (_, &[&str]) = if self.reading {
+            (
+                "BufferedReader",
+                match name {
+                    "read" => &["read", "readall", "readinto"],
+                    "read1" | "readline" | "readinto" => &["readinto"],
+                    "seek" => &["seek", "seekable", "tell"],
+                    "close" => &["flush", "close"],
+                    _ => std::slice::from_ref(&name),
+                },
+            )
+        } else {
+            (
+                "BufferedWriter",
+                match name {
+                    "flush" => &["write"],
+                    "seek" => &["write", "seek", "seekable", "tell"],
+                    "close" => &["close", "flush"],
+                    _ => std::slice::from_ref(&name),
+                },
+            )
+        };
+        let current = native_raw(ctx, self.raw, methods, owner)?;
+        if !Rc::ptr_eq(&current, &self.handle) {
+            return Err(Error::new(
+                "NotImplementedError",
+                format!("reinitialized {owner} raw FileIO is unsupported"),
+            ));
+        }
+        Ok(())
     }
 
     pub(in crate::dynamic) fn closed(&self) -> bool {
         self.handle.live_fd().is_none()
     }
 
-    fn close(&self, ctx: Option<&mut Context>) -> Result<()> {
+    fn close(&self, ctx: Option<&mut Context>, flush: bool) -> Result<()> {
         let pending = match self.buffer.borrow_mut().take() {
             Some(Buffer::Pipe(pipe)) => pipe.close().map_err(Into::into),
-            Some(Buffer::Random(mut file)) if !self.closed() => file.flush().map_err(os_error),
-            Some(Buffer::Writer(mut writer)) if !self.closed() => writer.flush().map_err(|error| {
-                if let Some(ctx) = ctx {
-                    buffer_error(ctx, error)
-                } else {
-                    os_error(error)
-                }
-            }),
+            Some(Buffer::Random(mut file)) if flush && !self.closed() => {
+                file.flush().map_err(os_error)
+            }
+            Some(Buffer::Writer(mut writer)) if flush && !self.closed() => {
+                writer.flush().map_err(|error| {
+                    if let Some(ctx) = ctx {
+                        buffer_error(ctx, error)
+                    } else {
+                        os_error(error)
+                    }
+                })
+            }
             _ => Ok(()),
         };
         self.handle.close().and(pending)
+    }
+
+    /// A BufferedWriter subclass has already had its one opportunity to flush.
+    pub(super) fn close_after_flush(&self, ctx: &Context, receiver: Id) -> Result<()> {
+        self.check_raw(ctx, receiver, "close")?;
+        self.close(None, false)
     }
 
     pub(in crate::dynamic) fn call(
@@ -316,8 +540,8 @@ impl BufferedFd {
     ) -> Result<Id> {
         let name = name.strip_prefix("file.").unwrap_or(name);
         if matches!((name, args), ("close", []) | ("__exit__", [_, _, _])) {
-            super::native_reader::check_raw(ctx, receiver, self, name)?;
-            self.close(Some(ctx))?;
+            self.check_raw(ctx, receiver, name)?;
+            self.close(Some(ctx), true)?;
             return Ok(NONE);
         }
         let closed = || {
@@ -328,6 +552,8 @@ impl BufferedFd {
                     "readline" => "readline of closed file",
                     "readinto" => "readinto of closed file",
                     "seek" => "seek of closed file",
+                    "write" => "write to closed file",
+                    "flush" if !self.reading => "flush of closed file",
                     "flush" | "__enter__" => "I/O operation on closed file.",
                     _ => "I/O operation on closed file",
                 },
@@ -345,6 +571,29 @@ impl BufferedFd {
         } else {
             None
         };
+        if name == "seek" && !self.reading {
+            let target = *args
+                .first()
+                .ok_or_else(|| Error::new("TypeError", "seek requires an offset"))?;
+            let whence =
+                files::buffered_whence(ctx, super::super::option(args, 1, kwargs, "whence")?)?;
+            if self.closed() {
+                return Err(closed());
+            }
+            // A failed seek on a pipe must leave pending bytes in the Python buffer.
+            if self.call(ctx, receiver, "seekable", &[], &[])? != TRUE {
+                return Err(Error::new(
+                    "UnsupportedOperation",
+                    "File or stream is not seekable.",
+                ));
+            }
+            let offset = files::buffered_offset(ctx, target)?;
+            self.check_raw(ctx, receiver, "seek")?;
+            let fd = self.handle.live_fd().ok_or_else(closed)?;
+            self.call(ctx, receiver, "flush", &[], &[])?;
+            let pos = crate::objects::os::seek(fd, offset, whence)?;
+            return Ok(ctx.int(pos));
+        }
         let seek = if name == "seek" {
             let offset = ctx
                 .index_integer(
@@ -368,7 +617,7 @@ impl BufferedFd {
         } else {
             None
         };
-        super::native_reader::check_raw(ctx, receiver, self, name)?;
+        self.check_raw(ctx, receiver, name)?;
         let fd = self.handle.live_fd().ok_or_else(closed)?;
         let mut slot = self.buffer.borrow_mut();
         let buffer = slot.as_mut().ok_or_else(closed)?;
@@ -489,7 +738,7 @@ impl BufferedFd {
                 if !self.writing {
                     return Err(Error::new("UnsupportedOperation", "write"));
                 }
-                let data = ctx.bytes_like(args[0])?;
+                let data = files::output_bytes(ctx, args[0])?;
                 let count = data.len();
                 match buffer {
                     Buffer::Pipe(pipe) => pipe.write(data)?,
@@ -509,6 +758,8 @@ impl BufferedFd {
 
 impl Drop for BufferedFd {
     fn drop(&mut self) {
-        let _ = self.close(None);
+        if self.drop_fallback.as_ref().is_none_or(Cell::get) && self.buffer.get_mut().is_some() {
+            let _ = self.close(None, true);
+        }
     }
 }

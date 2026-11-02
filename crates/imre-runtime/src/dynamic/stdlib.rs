@@ -1247,9 +1247,13 @@ pub(super) fn call(
         let (heap, roots) = ctx.heap_and_roots();
         return Ok(heap.intern(*value, roots));
     }
+    if name == "sys.set_int_max_str_digits" {
+        return flags::set_int_max_str_digits(ctx, &args[1..], kwargs);
+    }
     if matches!(
         name,
-        "sys.getdefaultencoding"
+        "sys.get_int_max_str_digits"
+            | "sys.getdefaultencoding"
             | "_locale.getencoding"
             | "sys.getfilesystemencoding"
             | "sys.getfilesystemencodeerrors"
@@ -1260,8 +1264,8 @@ pub(super) fn call(
             | "posix.getcwd"
             | "posix.getcwdb"
     ) {
-        // The JIT functions are bound to their actual module object.
-        let args = if name.starts_with("sys._jit.") {
+        // Strip the implicit receiver of functions bound to their module.
+        let args = if name.starts_with("sys._jit.") || name == "sys.get_int_max_str_digits" {
             args.get(1..).ok_or_else(|| {
                 Error::new("TypeError", format!("{name}() requires a module receiver"))
             })?
@@ -1291,6 +1295,9 @@ pub(super) fn call(
             "_locale.getencoding" => ctx.text(crate::sys::file_encoding(Some("locale"))),
             "posix.getpid" => ctx.int(i64::from(std::process::id())),
             "sys.getdefaultencoding" => ctx.default_encoding,
+            "sys.get_int_max_str_digits" => {
+                ctx.int(i64::from(crate::integer_text::decimal_digit_limit()))
+            }
             // As in typed SysJitPredicate, Imre compiles before the process starts.
             _ => FALSE,
         });
@@ -1879,6 +1886,9 @@ pub(super) fn call(
     }
     if matches!(name, "enum.auto.__init__" | "enum.auto.__repr__") {
         return ctx.auto_method(name, args, kwargs);
+    }
+    if matches!(name, "enum.Enum.__repr__" | "enum.Enum.__str__" | "enum.Enum.__format__") {
+        return ctx.float_enum_display(name, args, kwargs);
     }
     if name == "enum.Enum.__copy__" {
         let [member] = builtins::bind_builtin_arguments("__copy__", args, kwargs, ["self"], 1)?;

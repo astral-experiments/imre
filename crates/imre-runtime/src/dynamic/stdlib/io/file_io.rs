@@ -39,6 +39,15 @@ fn file_block_size(size: impl TryInto<i64>) -> i64 {
     }
 }
 
+/// Truncate a live raw or buffered disk descriptor without changing its position.
+pub(super) fn truncate_fd(fd: RawFd, size: i64) -> Result<()> {
+    // SAFETY: ftruncate accepts an integer descriptor and size.
+    if unsafe { libc::ftruncate(fd, size) } < 0 {
+        return Err(os_error(std::io::Error::last_os_error()));
+    }
+    Ok(())
+}
+
 fn closed() -> Error {
     Error::new("ValueError", "I/O operation on closed file")
 }
@@ -918,10 +927,7 @@ pub(super) fn call(
                 Some(n) => n,
                 None => os::seek(fd, 0, libc::SEEK_CUR)?,
             };
-            // SAFETY: ftruncate accepts an integer descriptor and size.
-            if unsafe { libc::ftruncate(fd, size) } < 0 {
-                return Err(os_error(std::io::Error::last_os_error()));
-            }
+            truncate_fd(fd, size)?;
             raw.blksize.set(super::DEFAULT_BUFFER_SIZE);
             Ok(ctx.int(size))
         });

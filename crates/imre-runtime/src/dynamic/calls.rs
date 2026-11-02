@@ -653,6 +653,7 @@ impl Context {
                 | Value::Native(_)
                 | Value::CodecDecoder(_)
                 | Value::IoMethod { .. }
+                | Value::IoOpen { .. }
                 | Value::Method { .. }
         ) || matches!(self.heap.get(value),Value::Weak(wr) if wr.kind != weakref::Kind::Proxy)
             || self.slot(value, "__call__").is_some()
@@ -749,6 +750,9 @@ impl Context {
                             | "object.__getattribute__"
                             | "enum.auto.__init__"
                             | "enum.auto.__repr__"
+                            | "enum.Enum.__repr__"
+                            | "enum.Enum.__str__"
+                            | "enum.Enum.__format__"
                             | "enum.Enum.__copy__"
                             | "enum.Enum.__deepcopy__"
                             | "object.__setattr__"
@@ -794,8 +798,16 @@ impl Context {
                 _ => false,
             };
             if method {
+                // A saved writelines method uses its receiver type in argument errors.
+                let callable = match self.heap.get(value) {
+                    Value::IoMethod {
+                        owner: defining,
+                        name: "writelines",
+                    } if self.direct_subclass(owner, *defining) => self.builtin("file.writelines"),
+                    _ => value,
+                };
                 return Ok(self.alloc(Value::Method {
-                    callable: value,
+                    callable,
                     receiver,
                     explicit: matches!(self.heap.get(value), Value::Cached { .. }),
                 }));
@@ -1062,7 +1074,9 @@ impl Context {
                     name: "__init__" | "__repr__" | "__iter__" | "__next__" | "__del__",
                     ..
                 } => "method-wrapper",
-                Value::Native(_) | Value::IoMethod { .. } => "builtin_function_or_method",
+                Value::Native(_) | Value::IoOpen { .. } | Value::IoMethod { .. } => {
+                    "builtin_function_or_method"
+                }
                 _ => return None,
             },
             Value::Native(name) if let Some(slot) = BuiltinDescriptor::lookup(name) => slot.class(),
@@ -1703,7 +1717,7 @@ impl Context {
                 return self.bind_attribute(descriptor, receiver, owner);
             }
         }
-        if self.heap.get(obj).native_io_class_name() == Some("_io.BufferedReader") {
+        if matches!(self.heap.get(obj), Value::File(_)) {
             let class = self.exact_type(obj)?;
             if let Some(member) = self.class_attr(class, name)
                 && matches!(
@@ -1750,10 +1764,16 @@ impl Context {
         } = self.heap.get(obj)
         {
             let (class, inline, namespace) = (*class, fields.get(name).copied(), *namespace);
-            if matches!(name, "name" | "value")
-                && let Some((_, member_name, value)) = self.enum_member(obj)
-            {
-                return Ok(if name == "name" { member_name } else { value });
+            if matches!(name, "name" | "value") {
+                if self.float_enum_names(class).is_some() {
+                    let attr = self.class_attr(class, name);
+                    if attr.is_none_or(|attr| matches!(self.heap.get(attr), Value::Instance { class: owner, .. } if *owner == class)) {
+                        let field = if name == "name" { "_name_" } else { "_value_" };
+                        return self.lookup_attr(obj, field);
+                    }
+                } else if let Some((_, member_name, value)) = self.enum_member(obj) {
+                    return Ok(if name == "name" { member_name } else { value });
+                }
             }
             let layout = self.instance_layout(class, name);
             if layout.active_slot {
@@ -1781,8 +1801,13 @@ impl Context {
             if for_call
                 && field.is_none()
                 && let Some(member) = member
-                && let Value::Native(symbol) = self.heap.get(member)
-                && BuiltinDescriptor::lookup(symbol).is_some()
+                && match self.heap.get(member) {
+                    Value::Native(symbol) => BuiltinDescriptor::lookup(symbol).is_some(),
+                    Value::IoMethod {
+                        name: "writelines", ..
+                    } => true,
+                    _ => false,
+                }
             {
                 return Ok(self.alloc(Value::Method {
                     callable: member,
@@ -2342,11 +2367,7 @@ impl Context {
                 explicit,
             } => match name {
                 "__self__" => return Ok(receiver),
-                _ if matches!(
-                    self.heap.get(callable),
-                    Value::IoMethod { name: "open", .. }
-                ) =>
-                {
+                _ if matches!(self.heap.get(callable), Value::IoOpen { .. }) => {
                     let original = self.builtin("open");
                     return self.lookup_attr(original, name);
                 }
@@ -5121,6 +5142,9 @@ impl Context {
                 }))
             }
             Value::CodecDecoder(codec) => stdlib::codecs::decode(self, codec, &args, &kwargs),
+            Value::IoOpen { reader, writer } => {
+                stdlib::io::open_from_module(self, reader, writer, &args, &kwargs)
+            }
             Value::IoMethod { owner, name } => stdlib::io::call(self, owner, name, &args, &kwargs),
             Value::Partial {
                 function,
@@ -6116,6 +6140,9 @@ impl Context {
         if typed_dict_meta.is_none() {
             super::typing::class_parameters(self, scope, original, &bases)?;
         }
+        let float_enum = enum_kind
+            .filter(|kind| kind.scalar_base().is_none())
+            .and_then(|_| self.float_enum_type(&bases));
         let object = self.builtin("object");
         let ordinary_slots = typed_dict_meta.is_none()
             && enum_kind.is_none()
@@ -6162,7 +6189,13 @@ impl Context {
         }
         self.initialize_class_members(class, scope)?;
         if let Some(kind) = enum_kind {
-            let scalar = kind.scalar_base().map(|base| self.builtin(base));
+            let scalar = if let Some((member_type, first_enum)) = float_enum {
+                self.bind(scope, "_member_type_", member_type);
+                self.install_float_enum_display(class, member_type, first_enum)?;
+                Some(member_type)
+            } else {
+                kind.scalar_base().map(|base| self.builtin(base))
+            };
             self.populate_enum(class, scalar)?;
         }
         // Look up the inherited hook after __set_name__, before publishing the class.

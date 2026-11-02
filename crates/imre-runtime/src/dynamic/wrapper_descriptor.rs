@@ -120,6 +120,7 @@ impl BuiltinDescriptor {
             "method_descriptor.__get__" => ("method_descriptor", "__get__"),
             "str.__repr__" => ("str", "__repr__"),
             "bytes.__repr__" => ("bytes", "__repr__"),
+            "dict.__ior__" => ("dict", "__ior__"),
             "dict.__eq__" => ("dict", "__eq__"),
             "dict.__repr__" => ("dict", "__repr__"),
             "mappingproxy.__repr__" => ("mappingproxy", "__repr__"),
@@ -326,6 +327,8 @@ impl BuiltinDescriptor {
             "__doc__" if self.name == "__rtruediv__" => ctx.text("Return value/self."),
             "__doc__" if self.name == "__floordiv__" => ctx.text("Return self//value."),
             "__doc__" if self.name == "__rfloordiv__" => ctx.text("Return value//self."),
+            "__doc__" if self.name == "__ior__" => ctx.text("Return self|=value."),
+            "__text_signature__" if self.name == "__ior__" => ctx.text("($self, value, /)"),
             "__doc__" if self.name == "__iadd__" => ctx.text("Implement self+=value."),
             "__text_signature__" if matches!(self.name, "__add__" | "__radd__" | "__sub__" | "__rsub__" | "__iadd__" | "__mul__" | "__rmul__" | "__truediv__" | "__rtruediv__" | "__floordiv__" | "__rfloordiv__") => {
                 ctx.text("($self, value, /)")

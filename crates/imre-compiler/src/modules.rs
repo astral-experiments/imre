@@ -59,6 +59,11 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
             "unittest/signals.py",
             include_str!("../stdlib/unittest/signals.py"),
         )),
+        // CPython 3.14.5 Lib/unittest/_log.py. See stdlib/docstrings/LICENSE.
+        "unittest._log" => Some((
+            "unittest/_log.py",
+            include_str!("../stdlib/unittest/_log.py"),
+        )),
         // CPython 3.14.5 Lib/unittest/util.py. See stdlib/docstrings/LICENSE.
         "unittest.util" => Some((
             "unittest/util.py",
@@ -328,7 +333,31 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
             "http/__init__.py",
             include_str!("../stdlib/http/__init__.py"),
         )),
-        "http.client" => Some(("http/client.py", include_str!("../stdlib/http/client.py"))),
+        "http.client" => {
+            static SOURCE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+            Some((
+                "http/client.py",
+                SOURCE.get_or_init(|| {
+                    const UPSTREAM: &str = include_str!(
+                        "../../../benchmarks/cpython_stdlib/full/http/upstream/Lib/http/client.py"
+                    );
+                    let transport = UPSTREAM
+                        .replace("import email.parser\n", "")
+                        // Match the same invalid newline bytes without regex lookahead.
+                        .replace(
+                            r"\n(?![ \t])|\r(?![ \t\n])",
+                            r"\n[^ \t]|\r[^ \t\n]|[\n\r]\Z",
+                        );
+                    concat!(
+                        include_str!("../stdlib/http/client.py"),
+                        "\n_parse_http_fields = HTTPMessage._parse\n",
+                    )
+                    .to_owned()
+                        + &transport
+                        + include_str!("../stdlib/http/boxed_headers.py")
+                }),
+            ))
+        }
         "http.server" => Some(("http/server.py", include_str!("../stdlib/http/server.py"))),
         "locale" => Some(("locale.py", include_str!("../stdlib/locale.py"))),
         "_imre_gettext_locale" => Some((
@@ -399,6 +428,8 @@ pub(crate) enum IntrinsicModule {
     ContextVars,
     ContextVarsNative,
     Importlib,
+    ImportlibAbc,
+    ImportlibLoaderAbc,
     ImportlibMachinery,
     ImportlibBootstrapExternal,
     ImportlibMetadata,
@@ -949,6 +980,8 @@ impl IntrinsicModule {
             "urllib" => Some(Self::Urllib),
             "urllib.parse" => Some(Self::UrllibParse),
             "importlib" => Some(Self::Importlib),
+            "importlib.abc" => Some(Self::ImportlibAbc),
+            "importlib._abc" => Some(Self::ImportlibLoaderAbc),
             "importlib.machinery" => Some(Self::ImportlibMachinery),
             "_frozen_importlib_external" | "importlib._bootstrap_external" => {
                 Some(Self::ImportlibBootstrapExternal)
@@ -1060,6 +1093,9 @@ impl IntrinsicModule {
         }
         if self == Self::Urllib && name == "parse" {
             return Some(Binding::IntrinsicModule(Self::UrllibParse));
+        }
+        if self == Self::ImportlibAbc && name == "machinery" {
+            return Some(Binding::IntrinsicModule(Self::ImportlibMachinery));
         }
         if self == Self::ImportlibResources && name == "abc" {
             return Some(Binding::IntrinsicModule(Self::ImportlibResourcesAbc));
@@ -1195,6 +1231,33 @@ impl IntrinsicModule {
             }
             (Self::Importlib, "invalidate_caches") => {
                 Intrinsic::ObjectRuntimeExport("importlib.invalidate_caches")
+            }
+            (Self::ImportlibAbc, "Loader") => {
+                Intrinsic::ObjectRuntimeExport("importlib.abc.Loader")
+            }
+            (Self::ImportlibAbc, "MetaPathFinder") => {
+                Intrinsic::ObjectRuntimeExport("importlib.abc.MetaPathFinder")
+            }
+            (Self::ImportlibAbc, "PathEntryFinder") => {
+                Intrinsic::ObjectRuntimeExport("importlib.abc.PathEntryFinder")
+            }
+            (Self::ImportlibAbc, "ResourceLoader") => {
+                Intrinsic::ObjectRuntimeExport("importlib.abc.ResourceLoader")
+            }
+            (Self::ImportlibAbc, "InspectLoader") => {
+                Intrinsic::ObjectRuntimeExport("importlib.abc.InspectLoader")
+            }
+            (Self::ImportlibAbc, "ExecutionLoader") => {
+                Intrinsic::ObjectRuntimeExport("importlib.abc.ExecutionLoader")
+            }
+            (Self::ImportlibAbc, "FileLoader") => {
+                Intrinsic::ObjectRuntimeExport("importlib.abc.FileLoader")
+            }
+            (Self::ImportlibLoaderAbc, "Loader") => {
+                Intrinsic::ObjectRuntimeExport("importlib._abc.Loader")
+            }
+            (Self::ImportlibUtil, "Loader") => {
+                Intrinsic::ObjectRuntimeExport("importlib.util.Loader")
             }
             (Self::ImportlibResourcesAbc, "ResourceReader") => {
                 Intrinsic::ObjectRuntimeExport("importlib.resources.abc.ResourceReader")
@@ -1971,6 +2034,10 @@ impl IntrinsicModule {
             (Self::Io, "BufferedReader") => Intrinsic::ObjectRuntimeExport("io.BufferedReader"),
             (Self::IoNative, "BufferedReader") => {
                 Intrinsic::ObjectRuntimeExport("_io.BufferedReader")
+            }
+            (Self::Io, "BufferedWriter") => Intrinsic::ObjectRuntimeExport("io.BufferedWriter"),
+            (Self::IoNative, "BufferedWriter") => {
+                Intrinsic::ObjectRuntimeExport("_io.BufferedWriter")
             }
             (Self::Io, "BytesIO") => Intrinsic::BytesIo,
             (Self::Io, "FileIO") => Intrinsic::ObjectRuntimeExport("io.FileIO"),
@@ -3288,6 +3355,8 @@ fn static_import_scopes(f: &ast::StmtFunctionDef, imports: &mut Vec<LocalStaticI
 
 fn importlib_child(name: &str) -> Option<IntrinsicModule> {
     match name {
+        "abc" => Some(IntrinsicModule::ImportlibAbc),
+        "_abc" => Some(IntrinsicModule::ImportlibLoaderAbc),
         "machinery" => Some(IntrinsicModule::ImportlibMachinery),
         "_bootstrap_external" => Some(IntrinsicModule::ImportlibBootstrapExternal),
         "metadata" => Some(IntrinsicModule::ImportlibMetadata),
@@ -3299,6 +3368,8 @@ fn importlib_child(name: &str) -> Option<IntrinsicModule> {
 
 fn importlib_child_name(module: IntrinsicModule) -> Option<&'static str> {
     match module {
+        IntrinsicModule::ImportlibAbc => Some("abc"),
+        IntrinsicModule::ImportlibLoaderAbc => Some("_abc"),
         IntrinsicModule::ImportlibMachinery => Some("machinery"),
         IntrinsicModule::ImportlibBootstrapExternal => Some("_bootstrap_external"),
         IntrinsicModule::ImportlibMetadata => Some("metadata"),
@@ -4302,6 +4373,10 @@ impl<'a> Loader<'a> {
                         } else {
                             Binding::Module(self.load_module(&child_name)?)
                         }
+                    } else if self.modules[target].is_bundled("http.client") {
+                        // The checked source defines fixed-layout headers. Other imports
+                        // are resolved by the full Python module at run time.
+                        Binding::ConditionalValue
                     } else {
                         return Err(format!(
                             "module {name:?} has no static binding {:?}",
@@ -4341,6 +4416,8 @@ impl<'a> Loader<'a> {
                     | IntrinsicModule::Atexit
                     | IntrinsicModule::SocketNative
                     | IntrinsicModule::Imp
+                    | IntrinsicModule::ImportlibAbc
+                    | IntrinsicModule::ImportlibLoaderAbc
                     | IntrinsicModule::ImportlibBootstrapExternal
                     | IntrinsicModule::ImportlibResourcesAbc
             );
@@ -4597,12 +4674,13 @@ impl<'a> Loader<'a> {
                 "unittest/__init__.py",
                 include_str!("../stdlib/unittest/__init__.py"),
             )),
+            "http.client" => Some(("http/client.py", include_str!("../stdlib/http/client.py"))),
             _ => bundled_runtime_source(name),
         };
         if let Some((filename, source)) = bundled {
             self.reject_stdlib_shadow(name)?;
             // token initializes its public tables from the live module globals.
-            self.needs_object_imports |= name == "token";
+            self.needs_object_imports |= matches!(name, "token" | "http.client");
             let pkgutil_source;
             let source = if name == "pkgutil" {
                 let paths = self.filesystem_search_path()?;

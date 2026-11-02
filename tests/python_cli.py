@@ -1838,6 +1838,8 @@ def report(text):
         compare("-IB", io_registration, native_args=("run", io_registration, "--quiet"))
         reader_fixture = fixtures / "io_buffered_reader_type.py"
         compare("-IB", reader_fixture, native_args=("run", reader_fixture, "--quiet"))
+        writer_fixture = fixtures / "io_buffered_writer_type.py"
+        compare("-IB", writer_fixture, native_args=("run", writer_fixture, "--quiet"))
         io_fixture = fixtures / "boxed_io_indirect_import.py"
         compare("-IB", io_fixture, native_args=("run", io_fixture, "--runtime-imports", "--quiet"))
         builtins_fixture = fixtures / "boxed_builtins_module.py"
@@ -2031,6 +2033,7 @@ def report(text):
             "boxed_locale_error.py",
             "boxed_io_protocols.py",
             "boxed_io_abc_registration.py",
+            "boxed_importlib_abc.py",
             "boxed_logging_handlers.py",
             "boxed_logging_handler_list.py",
             "boxed_logging_handler_filters.py",
@@ -2058,6 +2061,7 @@ def report(text):
             "boxed_socket_timeout.py",
             "boxed_urllib_data.py",
             "boxed_urllib_http_status.py",
+            "boxed_http_transport.py",
             "boxed_message_parameters.py",
             "boxed_unicodedata.py",
             "boxed_descriptors.py",
@@ -2106,6 +2110,7 @@ def report(text):
             "boxed_unittest_ordering.py",
             "boxed_unittest_assert_raises.py",
             "boxed_unittest_assert_warns.py",
+            "boxed_unittest_assert_logs.py",
             "boxed_unittest_assert_regex.py",
             "boxed_unittest_identity.py",
             "boxed_unittest_skip.py",
@@ -2148,6 +2153,7 @@ def report(text):
             "boxed_itertools_count.py",
             "boxed_enum_descriptors.py",
             "boxed_enum_auto.py",
+            "boxed_float_enum.py",
             "boxed_print_streams.py",
             "boxed_redirect_streams.py",
             "boxed_with_lookup.py",
@@ -2260,6 +2266,8 @@ def report(text):
             plugin.write_bytes((fixtures / "boxed_subprocess_fileio.py").read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")
             plugin.write_bytes((fixtures / "boxed_subprocess_buffering.py").read_bytes())
+            compare("-IB", "-c", imports + "arithmetic.current()")
+            plugin.write_bytes((fixtures / "boxed_subprocess_text.py").read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")
             plugin.write_bytes((fixtures / "boxed_os_chdir.py").read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")
