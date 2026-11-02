@@ -21,7 +21,97 @@ class ExitRecorder:
         return self.suppress
 
 
+def bound_handlers():
+    failure = KeyError("observed")
+    namespace = {"sys": sys, "lookup": failure, "previous": 42}
+    exec("""def run(failure, events, behavior):
+    try:
+        try:
+            raise failure
+        except KeyError as error:
+            assert error is failure
+            if behavior == "return":
+                return error
+            if behavior == "raise":
+                raise
+            error = 17
+    finally:
+        try:
+            events.append(error)
+        except UnboundLocalError:
+            events.append("cleared")
+
+def loop(failure, events):
+    for action in [1, 2]:
+        try:
+            raise failure
+        except KeyError as error:
+            events.append(error)
+            if action == 1:
+                continue
+            break
+    try:
+        events.append(error)
+    except UnboundLocalError:
+        events.append("cleared")
+
+def suspended(failure, events):
+    try:
+        try:
+            raise failure
+        except KeyError as error:
+            yield error
+            assert sys.exception() is error
+            raise
+    finally:
+        try:
+            events.append(error)
+        except UnboundLocalError:
+            events.append("cleared")
+
+try:
+    raise lookup
+except KeyError as previous:
+    assert previous is lookup
+""", namespace)
+    assert "previous" not in namespace
+    run = namespace["run"]
+    for action in ["fallthrough", "return", "raise"]:
+        events = []
+        try:
+            result = run(failure, events, action)
+        except KeyError as error:
+            assert action == "raise" and error is failure
+        else:
+            assert action != "raise"
+            assert result is (failure if action == "return" else None)
+        assert events == ["cleared"]
+    events = []
+    namespace["loop"](failure, events)
+    assert events == [failure, failure, "cleared"]
+    for action in ["resume", "close", "throw"]:
+        events = []
+        g = namespace["suspended"](failure, events)
+        assert next(g) is failure
+        if action == "close":
+            g.close()
+        else:
+            replacement = ValueError("replacement")
+            try:
+                if action == "throw":
+                    g.throw(replacement)
+                else:
+                    next(g)
+            except (KeyError, ValueError) as error:
+                assert error is (replacement if action == "throw" else failure)
+            else:
+                raise AssertionError("lost exception")
+        assert events == ["cleared"]
+        assert sys.exception() is None
+
+
 def current():
+    bound_handlers()
     namespace = {"optional_errors": Catch((ImportError,))}
     exec("""
 import sys
