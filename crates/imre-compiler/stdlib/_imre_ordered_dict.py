@@ -61,6 +61,9 @@ class OrderedDict(dict):
     def popitem(self, /, last=True):
         return _ordered_dict_popitem(self, last)
 
+    def __reduce__(self, /):
+        return type(self), (), self.__getstate__(), None, iter(self.items())
+
     def copy(self):
         return type(self)(self)
 
