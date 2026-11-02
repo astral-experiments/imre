@@ -15,7 +15,7 @@ def current():
     assert slot.__get__(f)() == bound() == f()
     expected = (1, (3,), 4, {"first": 9})
     assert slot(f, 1, 3, second=4, first=9) == expected
-    assert bound(*(1, 3), **{"second": 4, "first": 9}) == expected
+    assert bound(1, 3, second=4, first=9) == expected
 
     f.__call__ = None
     assert f.__call__ is None

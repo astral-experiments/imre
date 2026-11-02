@@ -1633,8 +1633,8 @@ impl Context {
         }
         let methods = match name {
             "object" => &["__hash__", "__format__", "__init_subclass__"],
-            "function" => &["__call__"],
             "dict" => builtins::DICT_METHODS,
+            "function" => &["__call__"],
             "collections.defaultdict" => {
                 self.builtin("dict");
                 &[
