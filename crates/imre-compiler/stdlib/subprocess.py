@@ -364,7 +364,11 @@ class Popen:
                 # The child may already have received SIGINT. Give it a brief chance
                 # to exit without holding the caller in an unbounded wait.
                 if self._sigint_wait_secs > 0:
-                    self._wait_after_keyboard_interrupt(None)
+                    try:
+                        self._wait(timeout=self._sigint_wait_secs)
+                    except TimeoutExpired:
+                        pass
+                self._sigint_wait_secs = 0
             else:
                 self.wait()
 
