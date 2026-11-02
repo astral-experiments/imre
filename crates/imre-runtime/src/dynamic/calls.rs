@@ -976,6 +976,7 @@ impl Context {
                             | super::thread_rlock::CLASS
                             | super::thread_lock::CLASS
                             | value::REGEX_PATTERN_TYPE
+                            | value::REGEX_MATCH_TYPE
                             | value::TEMPLATE_TYPE
                             | value::TEMPLATE_ITER_TYPE
                             | value::INTERPOLATION_TYPE
@@ -2223,6 +2224,7 @@ impl Context {
                     class.as_str(),
                     "array.array"
                         | value::REGEX_PATTERN_TYPE
+                        | value::REGEX_MATCH_TYPE
                         | "_contextvars.Context"
                         | "_contextvars.ContextVar"
                         | "_contextvars.Token"
@@ -2256,7 +2258,10 @@ impl Context {
                         return Ok(NONE);
                     }
                     "__new__"
-                        if matches!(class.as_str(), KEY_WRAPPER | value::REGEX_PATTERN_TYPE) =>
+                        if matches!(
+                            class.as_str(),
+                            KEY_WRAPPER | value::REGEX_PATTERN_TYPE | value::REGEX_MATCH_TYPE
+                        ) =>
                     {
                         return Ok(self.builtin("object.__new__"));
                     }
@@ -3671,6 +3676,7 @@ impl Context {
                         | KEY_WRAPPER
                         | stdlib::flags::TYPE
                         | value::REGEX_PATTERN_TYPE
+                        | value::REGEX_MATCH_TYPE
                 ))
         {
             return Err(Error::new(
@@ -4088,7 +4094,10 @@ impl Context {
         }
         let object = self.builtin("object");
         if let Value::Native(name) = self.heap.get(class)
-            && matches!(name.as_str(), KEY_WRAPPER | value::REGEX_PATTERN_TYPE)
+            && matches!(
+                name.as_str(),
+                KEY_WRAPPER | value::REGEX_PATTERN_TYPE | value::REGEX_MATCH_TYPE
+            )
         {
             return Err(Error::new(
                 "TypeError",
@@ -4410,6 +4419,7 @@ impl Context {
                         | HashState::XOF_CLASS
                         | KEY_WRAPPER
                         | value::REGEX_PATTERN_TYPE
+                        | value::REGEX_MATCH_TYPE
                 ) =>
             {
                 Err(Error::new(

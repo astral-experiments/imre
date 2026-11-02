@@ -2155,6 +2155,8 @@ impl Context {
             "re" => {
                 let pattern = self.builtin(value::REGEX_PATTERN_TYPE);
                 self.bind(scope, "Pattern", pattern);
+                let match_type = self.builtin(value::REGEX_MATCH_TYPE);
+                self.bind(scope, "Match", match_type);
             }
             "array" => {
                 let array = self.builtin("array.array");
