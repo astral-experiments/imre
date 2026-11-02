@@ -1,6 +1,13 @@
 """Base classes for the native codec registry."""
 
 
+from _codecs import _imre_codec_functions, lookup
+
+# Stateless functions backing the built-in encoding modules.
+ascii_encode, ascii_decode = _imre_codec_functions('ascii')
+latin_1_encode, latin_1_decode = _imre_codec_functions('latin-1')
+utf_8_encode = _imre_codec_functions('utf-8')[0]
+
 # CPython 3.14.5, Lib/codecs.py.
 BOM_UTF8 = b'\xef\xbb\xbf'
 BOM_UTF16_LE = b'\xff\xfe'
@@ -92,3 +99,156 @@ class IncrementalDecoder(object):
         state must have been returned by getstate().  The effect of
         setstate((b"", 0)) must be equivalent to reset().
         """
+
+
+class Codec:
+
+    """ Defines the interface for stateless encoders/decoders.
+
+        The .encode()/.decode() methods may use different error
+        handling schemes by providing the errors argument. These
+        string values are predefined:
+
+         'strict' - raise a ValueError error (or a subclass)
+         'ignore' - ignore the character and continue with the next
+         'replace' - replace with a suitable replacement character;
+                    Python will use the official U+FFFD REPLACEMENT
+                    CHARACTER for the builtin Unicode codecs on
+                    decoding and '?' on encoding.
+         'surrogateescape' - replace with private code points U+DCnn.
+         'xmlcharrefreplace' - Replace with the appropriate XML
+                               character reference (only for encoding).
+         'backslashreplace'  - Replace with backslashed escape sequences.
+         'namereplace'       - Replace with \\N{...} escape sequences
+                               (only for encoding).
+
+        The set of allowed values can be extended via register_error.
+
+    """
+    def encode(self, input, errors='strict'):
+
+        """ Encodes the object input and returns a tuple (output
+            object, length consumed).
+
+            errors defines the error handling to apply. It defaults to
+            'strict' handling.
+
+            The method may not store state in the Codec instance. Use
+            StreamWriter for codecs which have to keep state in order to
+            make encoding efficient.
+
+            The encoder must be able to handle zero length input and
+            return an empty object of the output object type in this
+            situation.
+
+        """
+        raise NotImplementedError
+
+    def decode(self, input, errors='strict'):
+
+        """ Decodes the object input and returns a tuple (output
+            object, length consumed).
+
+            input must be an object which provides the bf_getreadbuf
+            buffer slot. Python strings, buffer objects and memory
+            mapped files are examples of objects providing this slot.
+
+            errors defines the error handling to apply. It defaults to
+            'strict' handling.
+
+            The method may not store state in the Codec instance. Use
+            StreamReader for codecs which have to keep state in order to
+            make decoding efficient.
+
+            The decoder must be able to handle zero length input and
+            return an empty object of the output object type in this
+            situation.
+
+        """
+        raise NotImplementedError
+
+
+class StreamWriter(Codec):
+
+    def __init__(self, stream, errors='strict'):
+
+        """ Creates a StreamWriter instance.
+
+            stream must be a file-like object open for writing.
+
+            The StreamWriter may use different error handling
+            schemes by providing the errors keyword argument. These
+            parameters are predefined:
+
+             'strict' - raise a ValueError (or a subclass)
+             'ignore' - ignore the character and continue with the next
+             'replace'- replace with a suitable replacement character
+             'xmlcharrefreplace' - Replace with the appropriate XML
+                                   character reference.
+             'backslashreplace'  - Replace with backslashed escape
+                                   sequences.
+             'namereplace'       - Replace with \\N{...} escape sequences.
+
+            The set of allowed parameter values can be extended via
+            register_error.
+        """
+        self.stream = stream
+        self.errors = errors
+
+    def write(self, object):
+
+        """ Writes the object's contents encoded to self.stream.
+        """
+        data, consumed = self.encode(object, self.errors)
+        self.stream.write(data)
+
+    def writelines(self, list):
+
+        """ Writes the concatenated list of strings to the stream
+            using .write().
+        """
+        self.write(''.join(list))
+
+    def reset(self):
+
+        """ Resets the codec buffers used for keeping internal state.
+
+            Calling this method should ensure that the data on the
+            output is put into a clean state, that allows appending
+            of new fresh data without having to rescan the whole
+            stream to recover state.
+
+        """
+        pass
+
+    def seek(self, offset, whence=0):
+        self.stream.seek(offset, whence)
+        if whence == 0 and offset == 0:
+            self.reset()
+
+    def __getattr__(self, name,
+                    getattr=getattr):
+
+        """ Inherit all other methods from the underlying stream.
+        """
+        return getattr(self.stream, name)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, type, value, tb):
+        self.stream.close()
+
+    def __reduce_ex__(self, proto):
+        raise TypeError("can't serialize %s" % self.__class__.__name__)
+
+
+def getwriter(encoding):
+
+    """ Lookup up the codec for the given encoding and return
+        its StreamWriter class or factory function.
+
+        Raises a LookupError in case the encoding cannot be found.
+
+    """
+    return lookup(encoding).streamwriter

@@ -38,13 +38,12 @@ pub(super) use files::{BinaryFile, ReadSource};
 pub(super) use socket::{import_socket_constants, install_lowlevel_socket};
 pub(super) mod io;
 mod json;
-mod logging;
 mod marshal;
 mod math;
 mod metadata;
 pub(super) mod monitoring;
 pub(super) mod opcode;
-mod operator;
+pub(super) mod operator;
 mod ordered_dict;
 pub(super) mod os;
 pub(super) mod pickle;
@@ -117,6 +116,8 @@ pub(super) fn is_module(name: &str) -> bool {
             | "_datetime"
             | "_imre_itertools"
             | "_imre_ordered_dict"
+            | "operator"
+            | "_operator"
             | "_opcode"
             | "atexit"
             | "builtins"
@@ -174,7 +175,6 @@ pub(super) fn has_lazy_attributes(name: &str) -> bool {
             | "_imre_tokenize"
             | "_imre_pkgutil"
             | "fnmatch"
-            | "operator"
             | "platform"
             | "site"
             | "select"
@@ -185,11 +185,9 @@ pub(super) fn has_lazy_attributes(name: &str) -> bool {
             | "math"
             | "unicodedata"
             | "_json"
-            | "_imre_logging"
             | "_imre_subprocess"
             | "_imre_dataclasses"
             | "gc"
-            | "_imre_mock"
             | "marshal"
             | "pickle"
             | "zlib"
@@ -402,9 +400,6 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
     if module == "_imre_subprocess" && subprocess::function(name) {
         return Ok(ctx.builtin(&format!("{module}.{name}")));
     }
-    if module == "_imre_logging" && logging::is_function(name) {
-        return Ok(ctx.builtin(&format!("{module}.{name}")));
-    }
     if matches!((module, name), ("importlib", "machinery") | ("os", "path")) {
         return ctx.module(&format!("{module}.{name}"));
     }
@@ -429,6 +424,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             "encode" | "decode" | "register" | "unregister" | "lookup" | "escape_decode"
             | "utf_16_ex_decode",
         ) => ctx.builtin(&format!("codecs.{name}")),
+        ("_codecs", "_imre_codec_functions") => ctx.builtin("_codecs._imre_codec_functions"),
         ("_codecs", "_imre_native_search") => ctx.builtin("encodings.search_function"),
         ("_io", "open_code") => ctx.builtin("io.open_code"),
         ("math", "trunc" | "floor" | "ceil" | "modf" | "gcd" | "isnan" | "isqrt") => {
@@ -485,7 +481,6 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             | "warn_loader_deprecation"
             | "warn_legacy_load",
         )
-        | ("_imre_mock", "is_call_list" | "mark_call_list")
         | (
             "_imre_dataclasses",
             "field_identifier"
@@ -519,6 +514,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("types", "CoroutineType") => ctx.builtin("coroutine"),
         ("types", "MethodType") => ctx.builtin("method"),
         ("types", "MemberDescriptorType") => ctx.builtin("member_descriptor"),
+        ("types", "MethodWrapperType") => ctx.builtin("method-wrapper"),
         ("types", "MethodDescriptorType") => ctx.builtin("method_descriptor"),
         ("types", "FrameType") => ctx.builtin("frame"),
         ("types", "FunctionType") => ctx.builtin("function"),
@@ -566,6 +562,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             | "TypeAliasType"
             | "_new_typeddict"
             | "_UnpackGenericAlias"
+            | "_ConcatenateGenericAlias"
             | "_eval_type_expression"
             | "_protocol_mro"
             | "_protocol_member"
@@ -713,12 +710,6 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("os", "name") => ctx.text("posix"),
         ("posixpath", "sep") => ctx.text("/"),
         ("posixpath", "altsep") => NONE,
-        ("operator", name)
-            if matches!(name, "attrgetter" | "itemgetter")
-                || operator::Operation::named(name).is_some() =>
-        {
-            ctx.builtin(&format!("operator.{name}"))
-        }
         ("contextvars" | "_contextvars", "ContextVar" | "Context" | "Token" | "copy_context") => {
             ctx.builtin(&format!("_contextvars.{name}"))
         }
@@ -1043,7 +1034,7 @@ pub(super) fn call(
         let seconds = os::c_int(ctx, seconds)?;
         // SAFETY: alarm takes a value only. POSIX interprets the C int as unsigned.
         let remaining = unsafe { libc::alarm(seconds as libc::c_uint) };
-        return Ok(ctx.int(i64::from(remaining as libc::c_long)));
+        return Ok(ctx.int(remaining as libc::c_long));
     }
     if name == "_io.text_encoding" {
         return io::text_encoding(ctx, args, kwargs);
@@ -1871,29 +1862,6 @@ pub(super) fn call(
             }
         }
     }
-    if matches!(
-        name,
-        "_imre_mock.mark_call_list" | "_imre_mock.is_call_list"
-    ) {
-        let ([list], []) = (args, kwargs) else {
-            return Err(Error::new(
-                "TypeError",
-                format!("{name} expects one positional argument"),
-            ));
-        };
-        let list = ctx
-            .list_storage(*list)
-            .ok_or_else(|| Error::new("TypeError", "expected a list"))?;
-        if name == "_imre_mock.mark_call_list" {
-            ctx.heap.mock_call_lists.insert(list);
-            return Ok(TRUE);
-        }
-        return Ok(if ctx.heap.mock_call_lists.contains(&list) {
-            TRUE
-        } else {
-            FALSE
-        });
-    }
     if let Some(method) = name.strip_prefix("_imre_dataclasses.") {
         match (method, args, kwargs) {
             ("field_identifier", [_], []) => {
@@ -1974,9 +1942,6 @@ pub(super) fn call(
     }
     if let Some(operation) = name.strip_prefix("_imre_subprocess.") {
         return subprocess::call(ctx, operation, args, kwargs);
-    }
-    if let Some(function) = name.strip_prefix("_imre_logging.") {
-        return logging::call(ctx, function, args, kwargs);
     }
     if let Some(function) = name.strip_prefix("urllib.parse.") {
         return urllib::call(ctx, function, args, kwargs);
@@ -2061,6 +2026,9 @@ pub(super) fn call(
     }
     if let Some(method) = name.strip_prefix("time.") {
         return time::call(ctx, method, args, kwargs);
+    }
+    if name == "_codecs._imre_codec_functions" {
+        return codecs::entry_functions(ctx, args, kwargs);
     }
     if name == "encodings.search_function" {
         return codecs::native_search(ctx, args, kwargs);

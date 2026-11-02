@@ -82,12 +82,8 @@ fn apply(
             _ => {}
         }
     }
-    let callable = if matches!(ctx.heap.get(entry), Value::CodecInfo { .. }) {
-        ctx.lookup_attr(entry, operation)?
-    } else {
-        let items = ctx.tuple_items(entry)?.expect("verified codec tuple");
-        items[usize::from(operation == "decode")]
-    };
+    let items = ctx.tuple_items(entry)?.expect("verified codec tuple");
+    let callable = items[usize::from(operation == "decode")];
     let mut args = vec![input];
     if let Some(errors) = errors {
         let policy = spelling(ctx, Some(errors), "strict")?;
@@ -140,7 +136,7 @@ pub(in crate::dynamic::stdlib) fn transform(
     let encoding = spelling(ctx, encoding, "utf-8")?;
     error_name(ctx, errors)?;
     let key = crate::objects::normalize_codec(&encoding)?;
-    let wide = wide_unicode::encoding(&key);
+    let wide = FixedUnicode::encoding(&key);
     let native = name == "decode" && (wide.is_some() || key == "raw_unicode_escape");
     match lookup_transform(ctx, &encoding, native)? {
         Some(entry) => apply(ctx, entry, name, input, &encoding, errors, false),
@@ -161,7 +157,7 @@ pub(in crate::dynamic) fn encode_text_object(
     let entry = if shortcut(&key) {
         None
     } else {
-        lookup_transform(ctx, &name, FixedUnicode::by_key(&key).is_some())?
+        lookup_transform(ctx, &name, FixedUnicode::encoding(&key).is_some())?
     };
     let Some(entry) = entry else {
         let data = encode_text(ctx, input, encoding, errors)?;
@@ -211,7 +207,7 @@ pub(in crate::dynamic) fn decode_named(
     if ctx.bytes_like(input)?.is_empty() {
         return Ok(ctx.text(""));
     }
-    let wide = wide_unicode::encoding(&key);
+    let wide = FixedUnicode::encoding(&key);
     if shortcut(&key) {
         return if wide.is_some() {
             native_decode(ctx, wide, input, errors)

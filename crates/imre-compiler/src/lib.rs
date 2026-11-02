@@ -53,6 +53,7 @@ pub struct CommandFlags {
     pub safe_path: bool,
     pub no_user_site: bool,
     pub dont_write_bytecode: bool,
+    pub unbuffered: bool,
     /// A missing override lets the runtime select the mode from the startup locale.
     pub utf8_mode: Option<bool>,
     pub warn_default_encoding: bool,
@@ -76,6 +77,8 @@ pub struct CompileOptions {
     pub command: Option<PythonCommand>,
     /// Canonical import name requested by the interpreter's `-m` entry.
     pub module_entry: Option<String>,
+    /// Run __main__ from the command-line import path, retaining the operand as argv[0].
+    pub path_entry: bool,
     /// Flags and executable for a file launched through the Python command line.
     pub script_startup: Option<(CommandFlags, String)>,
     /// A file describing the branches to include in a closed executable.
@@ -293,6 +296,10 @@ fn object_fallback<T>(
                 &overloads,
                 !graph.needs_object_runtime.get()
                     && graph.object_builtin_errors.borrow().contains(&error),
+                graph
+                    .modules
+                    .iter()
+                    .position(|module| module.is_bundled("socketserver")),
             )?;
         }
         Ok(())

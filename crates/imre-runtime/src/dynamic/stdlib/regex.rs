@@ -196,7 +196,8 @@ impl Pattern {
                     .unwrap_or(&self.engine_source);
                 let full = format!(r"(?:{source})\z");
                 if let Matcher::Lookahead(matcher) = &self.regex {
-                    return lookahead::Lookahead::new(&full, matcher.groups.clone())
+                    return matcher
+                        .with_source(&full)
                         .map(|m| Matcher::Lookahead(Box::new(m)));
                 }
                 build_regex(&full, self.bytes, self.engine_flags(), &self.assertions)
@@ -540,6 +541,15 @@ fn repeated_literal_capture(pattern: &[u8], flags: i64, bytes: bool) -> Option<V
     Some([&pattern[..pattern.len() - rest.len()], literal, tail].concat())
 }
 
+fn locale_dependent(source: &str, flags: i64) -> bool {
+    flags & LOCALE != 0
+        && (flags & IGNORECASE != 0
+            || source
+                .as_bytes()
+                .windows(2)
+                .any(|pair| matches!(pair, br"\w" | br"\W" | br"\b" | br"\B")))
+}
+
 fn alphabet(bytes: bool, ascii: bool, flags: i64) -> imre_regex::Alphabet {
     use imre_regex::Alphabet;
     if bytes {
@@ -632,13 +642,7 @@ fn compiled(ctx: &mut Context, id: Id, flags: Option<Id>) -> Result<Id> {
         let matcher = build_regex(&source, bytes, flags, &[])?;
         Ok((source, matcher))
     };
-    let backtrack = |error| {
-        if bytes {
-            Err(error)
-        } else {
-            lookahead::compile(&source, flags, error)
-        }
-    };
+    let backtrack = |error| lookahead::compile(&source, flags, bytes, error);
     let global_verbose = source.starts_with("(?x)");
     let prepared = if let Some((raw, prefer_translation)) = raw_pattern(&source, ascii, flags) {
         let original = || {
@@ -691,13 +695,7 @@ fn compiled(ctx: &mut Context, id: Id, flags: Option<Id>) -> Result<Id> {
                     alphabet(bytes, ascii, flags),
                     flags & DOTALL != 0,
                 )?;
-                if flags & LOCALE != 0
-                    && (flags & IGNORECASE != 0
-                        || source
-                            .as_bytes()
-                            .windows(2)
-                            .any(|pair| matches!(pair, br"\w" | br"\W" | br"\b" | br"\B")))
-                {
+                if locale_dependent(&source, flags) {
                     return Err(original);
                 }
                 Some(groups)
@@ -917,12 +915,36 @@ impl Match {
             let value = crate::dynamic::copy_ids(&points[span.range()])?;
             return Ok(ctx.text_codepoints(value));
         }
-        let bytes = self.pattern(ctx).bytes;
-        let text = subject_bytes(ctx, self.subject, bytes)?;
-        // A bytearray may have changed size since the search.
-        let data = &text[span.start.min(text.len())..span.end.min(text.len())];
-        let value = group_value(data, bytes);
+        let value = group_value(self.captured_bytes(ctx, span)?, self.pattern(ctx).bytes);
         Ok(ctx.alloc(value))
+    }
+
+    fn captured_bytes<'a>(&self, ctx: &'a Context, span: Span) -> Result<&'a [u8]> {
+        let text = subject_bytes(ctx, self.subject, self.pattern(ctx).bytes)?;
+        // A bytearray may have changed size since the search.
+        Ok(&text[span.start.min(text.len())..span.end.min(text.len())])
+    }
+
+    pub(in crate::dynamic) fn repr(&self, ctx: &Context) -> Result<String> {
+        let span = self.spans[0].expect("a match owns group zero");
+        let quoted =
+            if let Value::SurrogateStr(points) = ctx.heap.get(ctx.scalar_value(self.subject)) {
+                super::super::operators::surrogate_repr(&points[span.range()])
+            } else {
+                let data = self.captured_bytes(ctx, span)?;
+                if self.pattern(ctx).bytes {
+                    let mut quoted = String::new();
+                    crate::objects::write_bytes_repr(&mut quoted, data);
+                    quoted
+                } else {
+                    let text = std::str::from_utf8(data).expect("capture is UTF-8");
+                    crate::objects::exceptions::string_repr(text).into_string()
+                }
+            };
+        let (start, end) = self.bounds(ctx, 0)?;
+        Ok(format!(
+            "<re.Match object; span=({start}, {end}), match={quoted:.50}>"
+        ))
     }
 
     fn bounds(&self, ctx: &Context, index: usize) -> Result<(i64, i64)> {
@@ -993,9 +1015,12 @@ fn subject_bytes(ctx: &Context, id: Id, bytes: bool) -> Result<&[u8]> {
         ctx.check_buffer_exporter(id)?;
     }
     match value {
-        Value::Bytes(_) | Value::ByteArray(_) | Value::MemoryView { owner: Some(_), .. } => {
+        Value::Bytes(_)
+        | Value::ByteArray(_)
+        | Value::Array(_)
+        | Value::MemoryView { owner: Some(_), .. } => {
             if bytes {
-                return ctx.bytes_like(id);
+                return ctx.native_buffer_bytes(id);
             }
             Err(Error::new(
                 "TypeError",
@@ -1098,7 +1123,7 @@ pub(super) fn search(
     if matches!(method, "scanner" | "finditer") {
         let buffer_view = match ctx.heap.get(ctx.scalar_value(string)) {
             // Keep the export alive for the scanner's lifetime. A Match keeps only the subject.
-            Value::ByteArray(_) => Some(ctx.new_memoryview(string)?),
+            Value::ByteArray(_) | Value::Array(_) => Some(ctx.new_memoryview(string)?),
             Value::MemoryView { .. } => {
                 return Err(Error::new(
                     "NotImplementedError",

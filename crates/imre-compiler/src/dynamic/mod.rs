@@ -185,61 +185,20 @@ fn boxed_unittest_cleanup(name: &str) -> bool {
 }
 
 fn boxed_operator(name: &str) -> bool {
-    matches!(
-        name,
-        "attrgetter"
-            | "__lt__"
-            | "__le__"
-            | "__eq__"
-            | "__ne__"
-            | "__ge__"
-            | "__gt__"
-            | "__and__"
-            | "__or__"
-            | "__sub__"
-            | "__xor__"
-            | "itemgetter"
-            | "lt"
-            | "le"
-            | "eq"
-            | "ne"
-            | "gt"
-            | "ge"
-            | "add"
-            | "sub"
-            | "mul"
-            | "matmul"
-            | "truediv"
-            | "floordiv"
-            | "mod"
-            | "lshift"
-            | "rshift"
-            | "and_"
-            | "xor"
-            | "or_"
-            | "iadd"
-            | "isub"
-            | "imul"
-            | "imatmul"
-            | "itruediv"
-            | "ifloordiv"
-            | "imod"
-            | "ipow"
-            | "ilshift"
-            | "irshift"
-            | "iand"
-            | "ixor"
-            | "ior"
-            | "neg"
-            | "pos"
-            | "invert"
-            | "contains"
-            | "getitem"
-            | "setitem"
-            | "delitem"
-            | "index"
-            | "length_hint"
-    )
+    macro_rules! operator_functions {
+        ($($function:literal => $operation:expr),* $(,)?) => { &[$($function),*] };
+    }
+    const FUNCTIONS: &[&str] = include!("../../../imre-runtime/native/operator-functions.rs");
+    matches!(name, "attrgetter" | "itemgetter")
+        || FUNCTIONS.contains(&name)
+        || name
+            .strip_prefix("__")
+            .and_then(|name| name.strip_suffix("__"))
+            .is_some_and(|alias| {
+                FUNCTIONS
+                    .iter()
+                    .any(|&name| name != "length_hint" && name.trim_end_matches('_') == alias)
+            })
 }
 
 impl<'a> Visitor<'a> for Imports {
@@ -249,7 +208,7 @@ impl<'a> Visitor<'a> for Imports {
                 for alias in &imp.names {
                     let name = alias.name.as_str();
                     let bound = alias.asname.as_ref().unwrap_or(&alias.name);
-                    if name == "__future__" {
+                    if matches!(name, "__future__" | "_operator") {
                         self.runtime_imports = true;
                     }
                     match name {
@@ -276,7 +235,8 @@ impl<'a> Visitor<'a> for Imports {
                 for a in &imp.names {
                     let suffix = a.name.as_str();
                     if imp.level == 0
-                        && (name == "unittest" && boxed_unittest_cleanup(suffix)
+                        && (name == "_operator"
+                            || name == "unittest" && boxed_unittest_cleanup(suffix)
                             || name == "hashlib" && (boxed_hashlib_kdf(suffix) || suffix == "*")
                             || name == "weakref" && suffix == "finalize"
                             || boxed_signal_export(name, suffix))
@@ -649,7 +609,11 @@ pub(crate) fn compile(
         .unwrap_or(root);
     let mut initial = Vec::new();
     let safe_path = startup.is_some_and(|(flags, _)| flags.safe_path);
-    if !safe_path {
+    if options.path_entry {
+        // CPython preserves the directory spelling, including symlinks, and searches
+        // an explicitly requested entry even when isolated startup omits the cwd.
+        initial.push(entry.clone());
+    } else if !safe_path {
         initial.push(root);
     }
     initial.extend(options.extension_paths.iter().map(|p| cwd.join(p)));
@@ -906,6 +870,13 @@ pub(crate) fn compile(
         "copyreg",
         "datetime",
         "encodings",
+        "encodings.ascii",
+        "encodings.latin_1",
+        "encodings.utf_8",
+        "encodings.utf_8_sig",
+        "encodings.cp1251",
+        "encodings.cp424",
+        "encodings.cp437",
         "enum",
         "genericpath",
         "hashlib",
@@ -955,11 +926,12 @@ pub(crate) fn compile(
         "warnoptions":startup.map(|(flags, _)| &flags.warnoptions),
         "xoptions":startup.map(|(flags, _)| &flags.xoptions),
         "faulthandler":startup.map(|(flags, _)| flags.faulthandler),
+        "unbuffered":startup.is_some_and(|(flags, _)| flags.unbuffered),
         "warn_default_encoding":startup.map(|(flags, _)| flags.warn_default_encoding),
         "optimize":startup.map_or(0, |(flags, _)| flags.optimize),
         "dont_write_bytecode":startup.is_some_and(|(flags, _)| flags.dont_write_bytecode),
         "executable":startup.map(|(_, executable)| executable),
-        "command":in_memory,"module_entry":module_entry,"paths":paths,
+        "command":in_memory,"module_entry":module_entry,"path_entry":options.path_entry,"paths":paths,
     });
     check_returns()?;
     let llvm_ir = emit::emit(

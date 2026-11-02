@@ -63,7 +63,7 @@ static STDERR: LazyLock<Mutex<StderrOutput>> = LazyLock::new(|| {
     Mutex::new(StderrOutput {
         stream: Output::with_stream(
             super::RawOutput::Stderr,
-            super::STDIO_SETTINGS.stderr_capacity,
+            super::stdio_settings().stderr_capacity,
             true,
         ),
         codec: encoding::settings(false, None).codec,
@@ -212,8 +212,7 @@ pub(crate) fn write_standard_encoded(
         if !out.captures.is_empty() {
             return out.write_all(bytes);
         }
-        out.text
-            .write(&mut out.raw, bytes, out.line_buffered && newline)
+        out.write_chunk(bytes, out.line_buffered && newline)
     }
     if stderr {
         let mut err = STDERR.lock().unwrap_or_else(|p| p.into_inner());

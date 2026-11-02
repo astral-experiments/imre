@@ -74,6 +74,18 @@ def current():
     assert calls == [(parent, "Redirected", (RedirectBase,), body, {})]
     assert calls[0][3] is body
 
+    calls.clear()
+    created = []
+    class Delegating(InitializingMeta):
+        def __new__(meta, name, bases, namespace):
+            created.append(name)
+            return super().__new__(meta, name, bases, namespace)
+
+    raw = type.__new__(Delegating, "Raw", (), {})
+    assert type(raw) is Delegating and not calls and not created
+    combined = Delegating("Combined", (), body)
+    assert created == ["Combined"] and calls == [(combined, "Combined", (), body, {})]
+
     reader = make_reader()
     cell = reader.__closure__[0]
     rebound = type("Rebound", (), {"__classcell__": cell})

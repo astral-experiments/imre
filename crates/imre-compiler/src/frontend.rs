@@ -6424,6 +6424,9 @@ impl<'a> Checker<'a> {
                 Intrinsic::UrlSplit => {
                     return Err(self.scoped_builtin_error("urllib.parse.urlsplit", expression));
                 }
+                Intrinsic::CodecGetWriter => {
+                    return Err(self.object_builtin_error("codecs.getwriter", expression));
+                }
                 Intrinsic::SplitResult { .. } => {
                     return Err(self.scoped_builtin_error("urllib.parse result class", expression));
                 }
@@ -8230,8 +8233,10 @@ impl<'a> Checker<'a> {
                 {
                     return Ok(value);
                 }
-                if attribute.attr.as_str() == "buffer"
-                    && self.types.payload(receiver.ty).unwrap_or(receiver.ty) == Type::TextIO
+                if matches!(
+                    attribute.attr.as_str(),
+                    "buffer" | "write_through" | "line_buffering"
+                ) && self.types.payload(receiver.ty).unwrap_or(receiver.ty) == Type::TextIO
                 {
                     return Err(self.scoped_builtin_error("text stream buffer", attribute));
                 }

@@ -154,8 +154,6 @@ pub(crate) struct Context {
     enum_scopes: HashMap<Id, Id>,
     signal_handlers: Vec<Id>,
     typing: typing::Registry,
-    // Python wrappers retain their registered logger for the lifetime of this heap.
-    logger_wrappers: HashMap<*const crate::objects::logging::Logger, Id>,
     builtins: HashMap<String, Id>,
     native_type_dicts: HashMap<Id, Id>,
     sources: HashMap<String, Vec<SourceModule>>,
@@ -651,6 +649,7 @@ impl Context {
             Value::Iterator { .. }
                 | Value::TemplateIter { .. }
                 | Value::RangeIterator(_)
+                | Value::GenericAliasIterator(_)
                 | Value::SequenceIterator { .. }
                 | Value::ReverseSequence { .. }
                 | Value::DequeIterator { .. }
@@ -708,6 +707,9 @@ impl Context {
             Value::Deque(ref ring) => {
                 let cursor = deque::iterator(id, ring, false);
                 return Ok(self.alloc(cursor));
+            }
+            Value::GenericAlias(ref alias) if alias.is_builtin_alias() => {
+                return Ok(self.alloc(Value::GenericAliasIterator(Some(id))));
             }
             Value::TypeVarTuple { .. } => {
                 let unpacked = typing::unpack_parameter(self, id)?;
@@ -802,6 +804,7 @@ impl Context {
         if matches!(
             value,
             Value::TemplateIter { .. }
+                | Value::GenericAliasIterator(_)
                 | Value::SequenceIterator { .. }
                 | Value::ReverseSequence { .. }
                 | Value::DequeIterator { .. }
@@ -1110,6 +1113,15 @@ impl Context {
         if let Value::Scandir(scan) = self.heap.get(id) {
             return stdlib::os::scandir::advance(self, scan.clone());
         }
+        if let Value::GenericAliasIterator(source) = self.heap.get_mut(id) {
+            let source = source.take();
+            return Ok(source.map(|source| {
+                let Value::GenericAlias(alias) = self.heap.get(source) else {
+                    unreachable!()
+                };
+                self.alloc(Value::GenericAlias(alias.unpacked_copy()))
+            }));
+        }
         if let Value::SequenceIterator { source, index } = *self.heap.get(id) {
             return self.next_sequence_item(id, source, index);
         }
@@ -1379,6 +1391,7 @@ impl Context {
             Value::AstWalk { .. }
                 | Value::Template { .. }
                 | Value::TemplateIter { .. }
+                | Value::GenericAliasIterator(_)
                 | Value::SequenceIterator { .. }
                 | Value::ReverseSequence { .. }
                 | Value::DequeIterator { .. }
@@ -1396,7 +1409,8 @@ impl Context {
                 | Value::Count { .. }
                 | Value::Repeat(_)
                 | Value::Enumerate { .. }
-        ) || self.slot(id, "__iter__").is_some()
+        ) || matches!(self.heap.get(id), Value::GenericAlias(alias) if alias.is_builtin_alias())
+            || self.slot(id, "__iter__").is_some()
             || self.slot(id, "__getitem__").is_some()
         {
             let iter = self.iterator(id)?;
@@ -2156,6 +2170,7 @@ impl Context {
                 &[
                     "__add__",
                     "__index__",
+                    "__trunc__",
                     "bit_length",
                     "from_bytes",
                     "to_bytes",
@@ -2166,6 +2181,7 @@ impl Context {
             "float" => &[
                 "__format__",
                 "__getformat__",
+                "__trunc__",
                 "as_integer_ratio",
                 "__repr__",
             ],
@@ -2905,14 +2921,8 @@ impl Context {
                     self.bind(scope, name, value);
                 }
             }
-            "operator" if source.is_none() => {
-                for name in [
-                    "lt", "le", "eq", "ne", "ge", "gt", "and_", "or_", "sub", "xor",
-                ] {
-                    let function = self.builtin(&format!("operator.{name}"));
-                    let alias = format!("__{}__", name.trim_end_matches('_'));
-                    self.bind(scope, &alias, function);
-                }
+            "operator" | "_operator" if source.is_none() => {
+                stdlib::operator::install(self, scope, name);
             }
             "errno" => stdlib::install_errno(self, scope)?,
             "atexit" => atexit::install(self, scope),
@@ -3144,11 +3154,6 @@ impl Context {
                 let name = self.text("_batched_state");
                 let member = self.alloc(Value::SlotMember { owner, name });
                 self.bind(scope, "_batched_state", member);
-            }
-            if name == "codecs"
-                && let Some(class) = self.scope_name(scope, "CodecInfo")
-            {
-                self.classes.insert("codecs.CodecInfo".into(), class);
             }
             if name == "re"
                 && let Some(class) = self.scope_name(scope, "PatternError")

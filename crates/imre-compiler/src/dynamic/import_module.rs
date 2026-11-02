@@ -12,13 +12,19 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
             const UPSTREAM: &str = include_str!(
                 "../../../../benchmarks/cpython_stdlib/full/types/upstream/Lib/types.py"
             );
-            let start = UPSTREAM.find("def new_class(").unwrap();
+            static SOURCE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
             Some((
                 "types.py",
-                UPSTREAM[start..]
-                    .split_once("def get_original_bases(")
-                    .unwrap()
-                    .0,
+                SOURCE.get_or_init(|| {
+                    let start = UPSTREAM.find("def new_class(").unwrap();
+                    let (helpers, _) = UPSTREAM[start..]
+                        .split_once("def get_original_bases(")
+                        .unwrap();
+                    format!(
+                        "{helpers}{}",
+                        include_str!("../../stdlib/types_original_bases.py")
+                    )
+                }),
             ))
         }
         "reprlib" => Some(("reprlib.py", include_str!("../../stdlib/reprlib.py"))),
@@ -108,10 +114,11 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
                     [
                         include_str!("../../stdlib/inspect.py"),
                         include_str!("../../stdlib/inspect_signature.py"),
-                        "import importlib.machinery\nimport linecache\nimport os\nimport sys",
+                        "import functools\nimport importlib.machinery\nimport linecache\nimport os\nimport sys",
                         section("def ismodule(object):", "def ispackage(object):"),
+                        section("def ismethoddescriptor(object):", "def isdatadescriptor(object):"),
                         section("def isfunction(object):", "def _has_code_flag("),
-                        section("def istraceback(object):", "def isbuiltin(object):"),
+                        section("def istraceback(object):", "def isabstract(object):"),
                         section("def getfile(object):", "class ClassFoundException("),
                         section("def _signature_bound_method(", "def _signature_is_builtin("),
                         section("class _void:", "class _ParameterKind("),

@@ -112,7 +112,7 @@ fn register_events(ctx: &mut Context, events: Id) -> Result<i64> {
     let read = ctx.binary("&", events, read)?;
     let write = ctx.int(WRITE);
     let write = ctx.binary("&", events, write)?;
-    Ok(i64::from(ctx.truth(read)?) * READ | i64::from(ctx.truth(write)?) * WRITE)
+    Ok((i64::from(ctx.truth(read)?) * READ) | (i64::from(ctx.truth(write)?) * WRITE))
 }
 
 fn poll_mask(n: i64) -> i16 {
@@ -192,8 +192,8 @@ impl Selector {
             if sets.wait(timeout)? {
                 for (fd, key) in &self.keys {
                     let fd = native_fd(fd)?;
-                    let events =
-                        i64::from(sets.ready(0, fd)) * READ | i64::from(sets.ready(1, fd)) * WRITE;
+                    let events = (i64::from(sets.ready(0, fd)) * READ)
+                        | (i64::from(sets.ready(1, fd)) * WRITE);
                     if events != 0 {
                         results
                             .try_reserve(1)

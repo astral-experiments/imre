@@ -473,7 +473,6 @@ impl Context {
             Value::Poll(_) => "select.poll",
             Value::Count { .. } => "count",
             Value::Repeat(_) => "repeat",
-            Value::CodecInfo { .. } => "CodecInfo",
             Value::Struct { .. } => "Struct",
             Value::NamedFileCloser(_) => "tempfile._TemporaryFileCloser",
             Value::BufferedRandom(..) => "_io.BufferedRandom",
@@ -534,36 +533,46 @@ impl Context {
         error
     }
 
-    /// Keep the decoder's original object and offsets when crossing into boxed Python.
-    pub(super) fn decode_error(&mut self, native: crate::Error) -> Error {
-        let decoded = native.decode_args().map(|args| {
-            let encoding = self.text(args.encoding);
-            let object = self.alloc(Value::Bytes(args.object.to_vec()));
-            let reason = self.text(args.reason);
-            let values = vec![
-                encoding,
-                object,
-                self.int(args.start),
-                self.int(args.end),
-                reason,
-            ];
-            let state = DecodeState {
-                encoding,
-                object,
-                start: args.start,
-                end: args.end,
-                reason,
-            };
-            (self.alloc(Value::Tuple(values)), state)
-        });
+    /// Preserve a native Unicode error's original arguments and its mutable member fields.
+    fn codec_exception(&mut self, native: crate::Error, state: Option<DecodeState>) -> Error {
         let mut error = Error::from(native);
-        if error.kind == "UnicodeDecodeError"
-            && let Some((values, state)) = decoded
+        if matches!(&*error.kind, "UnicodeDecodeError" | "UnicodeEncodeError")
+            && let Some(state) = state
         {
-            error.args = Some(values);
+            let start = self.int(state.start);
+            let end = self.int(state.end);
+            error.args = Some(self.alloc(Value::Tuple(vec![
+                state.encoding,
+                state.object,
+                start,
+                end,
+                state.reason,
+            ])));
             error.decode = Some(Box::new(state));
         }
         error
+    }
+
+    pub(super) fn decode_error(&mut self, native: crate::Error) -> Error {
+        let state = native.decode_args().map(|args| DecodeState {
+            encoding: self.text(args.encoding),
+            object: self.alloc(Value::Bytes(args.object.to_vec())),
+            start: args.start,
+            end: args.end,
+            reason: self.text(args.reason),
+        });
+        self.codec_exception(native, state)
+    }
+
+    pub(super) fn encode_error(&mut self, native: crate::Error, input: Id) -> Error {
+        let state = native.encode_args().map(|args| DecodeState {
+            encoding: self.text(args.encoding),
+            object: input,
+            start: args.start,
+            end: args.end,
+            reason: self.text(args.reason),
+        });
+        self.codec_exception(native, state)
     }
 
     /// A subsequent failure on the same decode updates only the byte range and reason.
@@ -667,7 +676,7 @@ pub(super) struct ClassNamespace {
     /// Scratch field dictionary used while a class body is executing.
     pub annotation_scratch: Option<Id>,
     /// Executed deferred sites in source order, including repeated field names.
-    pub annotation_sites: Option<Box<std::collections::BTreeMap<u32, (Id, Id)>>>,
+    pub annotation_sites: Option<std::collections::BTreeMap<u32, (Id, Id)>>,
     /// Class annotation attributes are served by the installed provider.
     pub provider_annotations: bool,
     /// Slot names consumed when the class is created, independent of later namespace mutations.
@@ -732,6 +741,7 @@ pub(super) struct ExecGlobals {
 #[derive(Clone)]
 pub(super) struct BoxedTextFile {
     pub(super) file: crate::objects::TextFile,
+    pub(super) line_buffering: bool,
     pub(super) buffer: Option<Id>,
 }
 
@@ -803,13 +813,6 @@ pub(super) enum Value {
         hash: Option<i64>,
     },
     ByteArray(Vec<u8>),
-    CodecInfo {
-        class: Id,
-        encode: Id,
-        entry: crate::objects::CodecInfo,
-        decode: Id,
-        text_encoding_override: Option<Id>,
-    },
     CodecEncoder(crate::objects::Codec),
     CodecDecoder(crate::objects::Codec),
     Hash(super::stdlib::hashlib::digest::SharedHash),
@@ -818,11 +821,11 @@ pub(super) enum Value {
         format: String,
         layout: std::rc::Rc<crate::objects::interpreter_stdlib::StructFormat>,
     },
-    LoggerHandle(std::rc::Rc<crate::objects::logging::Logger>),
     MetadataArchive(std::rc::Rc<crate::objects::ZipArchive>),
     HandlerLock(std::sync::Arc<crate::objects::logging::HandlerLock>),
     Socket(crate::ObjectOwner),
     Deque(Box<crate::objects::DequeRing<Id>>),
+    GenericAliasIterator(Option<Id>),
     SequenceIterator {
         source: Option<Id>,
         index: i64,
@@ -915,17 +918,16 @@ pub(super) enum Value {
     ParamSpec(super::paramspec::ParamSpec),
     ParamSpecMarker(super::paramspec::Marker, Id),
     ConstEvaluator(Id),
-    /// A statement-defined alias retains its evaluator even after caching a successful value.
     TypeAlias {
         name: Id,
-        evaluator: Id,
-        cached: Option<Id>,
+        definition: super::typing::AliasDefinition,
     },
     TypeVar(super::typing::TypeVariable),
     TypeVarTuple {
         name: Id,
         module: Id,
         default: Id,
+        declared: bool,
     },
     NoDefault,
     GenericAlias(super::typing::Alias),
@@ -934,7 +936,7 @@ pub(super) enum Value {
         class: Id,
         fields: indexmap::IndexMap<String, Id>,
         /// Storage addressed by the declaring member, independent of the instance dictionary.
-        member_values: Option<Box<HashMap<Id, Id>>>,
+        member_values: Option<HashMap<Id, Id>>,
         /// Exact ordinary instance dictionary once exposed or replaced.
         namespace: Option<Id>,
         dictionary: Option<Id>,
@@ -1187,6 +1189,7 @@ impl Value {
             Self::File(_) | Self::TextFile(_) => return self.native_io_class_name(),
             Self::ProcessHandle(_) => "_imre_subprocess.Handle",
             Self::BufferedRandom(..) => "_io.BufferedRandom",
+            Self::GenericAliasIterator(_) => "generic_alias_iterator",
             Self::SequenceIterator { .. } => "iterator",
             Self::ReverseSequence { .. } => "reversed",
             Self::Deque(_) => super::deque::CLASS,
@@ -1275,7 +1278,7 @@ impl Value {
 
     pub(super) fn instance_class(&self) -> Option<Id> {
         match self {
-            Self::Instance { class, .. } | Self::CodecInfo { class, .. } => Some(*class),
+            Self::Instance { class, .. } => Some(*class),
             Self::Class { metaclass, .. } => *metaclass,
             Self::Module { constructor, .. } => *constructor,
             Self::Raised(error) => error.class(),
@@ -1322,9 +1325,9 @@ impl Value {
     fn children(&self, visit: &mut MarkQueue<'_>) {
         match self {
             Self::Deque(ring) => visit.extend(&ring.items),
-            Self::SequenceIterator { source, .. } | Self::ReverseSequence { source, .. } => {
-                visit.extend(*source)
-            }
+            Self::SequenceIterator { source, .. }
+            | Self::ReverseSequence { source, .. }
+            | Self::GenericAliasIterator(source) => visit.extend(*source),
             Self::DequeIterator { deque, .. } => visit.push(*deque),
             Self::List(v) | Self::Tuple(v) => visit.extend(v.iter().rev()),
             Self::Set { entries, .. } => visit.extend(entries.iter().map(|&(key, _)| key)),
@@ -1542,16 +1545,25 @@ impl Value {
                 name,
                 module,
                 default,
+                ..
             } => visit.extend([*name, *module, *default]),
             Self::ParamSpec(p) => visit.extend([p.name, p.bound, p.default, p.namespace]),
             Self::ParamSpecMarker(_, origin) | Self::ConstEvaluator(origin) => visit.push(*origin),
-            Self::TypeAlias {
-                name,
-                evaluator,
-                cached,
-            } => {
-                visit.extend([*name, *evaluator]);
-                visit.extend(*cached);
+            Self::TypeAlias { name, definition } => {
+                visit.push(*name);
+                match *definition {
+                    super::typing::AliasDefinition::Lazy {
+                        parameters,
+                        evaluator,
+                        cached,
+                    } => {
+                        visit.extend([parameters, evaluator]);
+                        visit.extend(cached);
+                    }
+                    super::typing::AliasDefinition::Eager { value, module } => {
+                        visit.extend([value, module]);
+                    }
+                }
             }
             Self::TypeVar(var) => visit.extend([var.name, var.module, var.bound, var.constraints]),
             Self::GenericAlias(alias) => {
@@ -1690,16 +1702,6 @@ impl Value {
                 owner, unsupported, ..
             } => visit.extend([*owner, *unsupported]),
             Self::HashMethod { owner, .. } => visit.push(*owner),
-            Self::CodecInfo {
-                class,
-                encode,
-                decode,
-                text_encoding_override,
-                ..
-            } => {
-                visit.extend([*class, *encode, *decode]);
-                visit.extend(*text_encoding_override);
-            }
             Self::RegexScanner {
                 pattern,
                 subject,
@@ -1734,7 +1736,6 @@ impl Value {
             | Self::CodecDecoder(_)
             | Self::Struct { .. }
             | Self::Hash(_)
-            | Self::LoggerHandle(_)
             | Self::MetadataArchive(_)
             | Self::HandlerLock(_)
             | Self::ThreadHandle(_)
@@ -2162,8 +2163,6 @@ pub(super) struct Heap {
     free_head: usize,
     free_count: usize,
     pub(super) immutable_hashes: HashMap<Id, i64>,
-    // Call-history markers belong to list storage and expire when it is collected.
-    pub(super) mock_call_lists: HashSet<Id>,
     frames: Vec<Frame>,
     fault_generation: Cell<Option<u32>>,
     fault_workers: RefCell<Option<Weak<()>>>,
@@ -2254,7 +2253,6 @@ impl Heap {
             free_head: END,
             free_count: 0,
             immutable_hashes: HashMap::new(),
-            mock_call_lists: HashSet::new(),
             frames: vec![Frame::new(NONE, NONE, FrameOwner::Module(NONE), NONE)],
             fault_generation: Cell::new(None),
             fault_workers: RefCell::new(None),
@@ -3792,8 +3790,6 @@ impl Heap {
         self.interned
             .retain(|_, entry| self.slots[entry.id as usize].marked());
         let callbacks = self.clear_weak_targets(None, None);
-        self.mock_call_lists
-            .retain(|&list| self.slots[list as usize].marked());
         self.abc_registrations.retain(|&[owner, member]| {
             self.slots[owner as usize].marked() && self.slots[member as usize].marked()
         });
@@ -3984,21 +3980,6 @@ mod tests {
         heap.collect(std::iter::empty());
         assert!(heap.slots[owner as usize].value.is_none());
         assert!(heap.slots[child as usize].value.is_none());
-    }
-
-    #[test]
-    fn collected_mock_call_list_does_not_mark_a_reused_list_slot() {
-        let mut heap = Heap::new();
-        let list = heap.alloc(Value::List(Vec::new()));
-        heap.mock_call_lists.insert(list);
-        heap.frames.last_mut().unwrap().live.clear();
-
-        heap.collect([list].into_iter());
-        assert!(heap.mock_call_lists.contains(&list));
-        heap.collect(std::iter::empty());
-        let ordinary = heap.alloc(Value::List(Vec::new()));
-        assert_eq!(ordinary, list);
-        assert!(!heap.mock_call_lists.contains(&ordinary));
     }
 
     #[test]

@@ -4,22 +4,6 @@ use crate::objects::{FixedUnicode, Utf16Order};
 use FixedUnicode::{Utf16, Utf32Be, Utf32Le};
 use Utf16Order::{Big, Little};
 
-/// A codec without an explicit byte order strips one BOM or uses native order.
-pub(super) fn encoding(key: &str) -> Option<(FixedUnicode, bool)> {
-    match key {
-        "utf16" | "u16" | "utf_16" => Some((Utf16(Utf16Order::from_sign(0)), true)),
-        "utf32" | "u32" | "utf_32" => Some((
-            if cfg!(target_endian = "little") {
-                Utf32Le
-            } else {
-                Utf32Be
-            },
-            true,
-        )),
-        _ => FixedUnicode::by_key(key).map(|format| (format, false)),
-    }
-}
-
 pub(super) fn decode(
     ctx: &mut Context,
     input: Id,
@@ -42,14 +26,33 @@ pub(super) fn decode(
         (true, [0, 0, 0xfe, 0xff, ..]) => (false, 4),
         _ => (matches!(format, Utf32Le), 0),
     };
+    utf32_chunk(ctx, input, errors, little, start, true).map(|(text, _)| text)
+}
+
+/// Decode full code units and report the trailing byte offset to an incremental reader.
+pub(in crate::dynamic::stdlib) fn utf32_chunk(
+    ctx: &mut Context,
+    input: Id,
+    errors: &str,
+    little: bool,
+    start: usize,
+    final_chunk: bool,
+) -> Result<(Id, usize)> {
+    let data = ctx.bytes_like(input)?;
+    let size = data.len();
     let mut points = Vec::new();
-    let Some(issue) = utf32_prefix(little, &mut points, data, start)? else {
-        return Ok(ctx.text_codepoints(points));
+    let (mut consumed, issue) = utf32_prefix(little, &mut points, data, start, final_chunk)?;
+    let text = if let Some(issue) = issue {
+        let error = issue.error(data);
+        resume_decode(ctx, errors, points, error, |out, bytes, pos| {
+            let (end, issue) = utf32_prefix(little, out, bytes, pos, final_chunk)?;
+            consumed = end;
+            Ok(issue)
+        })?
+    } else {
+        ctx.text_codepoints(points)
     };
-    let error = issue.error(data);
-    resume_decode(ctx, errors, points, error, |out, bytes, pos| {
-        utf32_prefix(little, out, bytes, pos)
-    })
+    Ok((text, if final_chunk { size } else { consumed }))
 }
 
 fn utf32_unit(little: bool, data: &[u8]) -> Option<u32> {
@@ -66,7 +69,8 @@ fn utf32_prefix(
     points: &mut Vec<u32>,
     data: &[u8],
     mut start: usize,
-) -> Result<Option<DecodeIssue>> {
+    final_chunk: bool,
+) -> Result<(usize, Option<DecodeIssue>)> {
     points
         .try_reserve((data.len() - start) / 4)
         .map_err(|_| crate::Error::allocation())?;
@@ -77,6 +81,7 @@ fn utf32_prefix(
                 start + 4,
             ),
             Some(0x110000..) => ("code point not in range(0x110000)", start + 4),
+            None if !final_chunk => break,
             None => ("truncated data", data.len()),
             Some(scalar) => {
                 points.push(scalar);
@@ -84,14 +89,17 @@ fn utf32_prefix(
                 continue;
             }
         };
-        return Ok(Some(DecodeIssue {
-            encoding: if little { "utf-32-le" } else { "utf-32-be" },
+        return Ok((
             start,
-            end,
-            reason,
-        }));
+            Some(DecodeIssue {
+                encoding: if little { "utf-32-le" } else { "utf-32-be" },
+                start,
+                end,
+                reason,
+            }),
+        ));
     }
-    Ok(None)
+    Ok((start, None))
 }
 
 /// surrogatepass accepts UTF-name variants but does not consult arbitrary codec aliases.

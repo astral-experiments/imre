@@ -1,4 +1,5 @@
 import types
+from types import get_original_bases
 
 
 def helpers():
@@ -80,3 +81,21 @@ def current():
     assert result.__bases__ == (First, Second)
     assert result().answer == 42 and result().first() + result().second() == 3
     assert types.new_class("Empty").__module__ == "types"
+
+
+    class Sequence(list[int]):
+        pass
+
+    class Child(Sequence):
+        pass
+
+    assert get_original_bases(Sequence) == (list[int],)
+    assert get_original_bases(Child) == (Sequence,)
+    assert get_original_bases(int) == (object,)
+    assert get_original_bases(bool) == (int,)
+    try:
+        get_original_bases(object())
+    except TypeError as exc:
+        assert str(exc) == "Expected an instance of type, not 'object'"
+    else:
+        raise AssertionError("accepted a non-class")

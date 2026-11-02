@@ -1,5 +1,8 @@
 //! Compact machine arrays used by runtime-loaded Python modules.
+use std::ffi::{c_long, c_ulong};
 use std::rc::Rc;
+
+use num_traits::{Signed, ToPrimitive};
 
 use super::{Context, Error, Id, NONE, Result, Value, builtins};
 use crate::Int;
@@ -8,7 +11,13 @@ use crate::Int;
 enum Format {
     SignedByte,
     UnsignedByte,
+    Short,
+    UnsignedShort,
     Int,
+    UnsignedInt,
+    Long,
+    UnsignedLong,
+    Unicode,
     Float,
     Double,
     Wide,
@@ -19,7 +28,13 @@ impl Format {
         match self {
             Self::SignedByte => "b",
             Self::UnsignedByte => "B",
+            Self::Short => "h",
+            Self::UnsignedShort => "H",
             Self::Int => "i",
+            Self::UnsignedInt => "I",
+            Self::Long => "l",
+            Self::UnsignedLong => "L",
+            Self::Unicode => "u",
             Self::Float => "f",
             Self::Double => "d",
             Self::Wide => "w",
@@ -29,9 +44,15 @@ impl Format {
     fn width(self) -> usize {
         match self {
             Self::SignedByte | Self::UnsignedByte => 1,
+            Self::Short | Self::UnsignedShort => 2,
+            Self::Long | Self::UnsignedLong => size_of::<c_long>(),
             Self::Double => 8,
             _ => 4,
         }
+    }
+
+    fn unicode(self) -> bool {
+        matches!(self, Self::Unicode | Self::Wide)
     }
 
     fn encode(self, ctx: &mut Context, item: Id) -> Result<[u8; 8]> {
@@ -49,6 +70,51 @@ impl Format {
                 let long = ctx.index_c_long(item)?;
                 out[0] = u8::try_from(long)
                     .map_err(|_| integer_overflow(long, "unsigned byte integer"))?;
+            }
+            Self::Short => {
+                let n = ctx.index_c_long(item)?;
+                let n =
+                    i16::try_from(n).map_err(|_| integer_overflow(n, "signed short integer"))?;
+                out[..2].copy_from_slice(&n.to_ne_bytes());
+            }
+            Self::UnsignedShort => {
+                let n = ctx.index_c_int(item)?;
+                let n = u16::try_from(n)
+                    .map_err(|_| integer_overflow(i64::from(n), "unsigned short"))?;
+                out[..2].copy_from_slice(&n.to_ne_bytes());
+            }
+            Self::Long => {
+                let n = c_long::try_from(ctx.index_c_long(item)?).map_err(|_| {
+                    Error::new("OverflowError", "Python int too large to convert to C long")
+                })?;
+                out[..self.width()].copy_from_slice(&n.to_ne_bytes());
+            }
+            Self::UnsignedInt | Self::UnsignedLong => {
+                let n = ctx.index_integer(item)?;
+                if n.big().is_negative() {
+                    return Err(Error::new(
+                        "OverflowError",
+                        "can't convert negative value to unsigned int",
+                    ));
+                }
+                let n = n
+                    .big()
+                    .to_u64()
+                    .and_then(|n| c_ulong::try_from(n).ok())
+                    .ok_or_else(|| {
+                        Error::new(
+                            "OverflowError",
+                            "Python int too large to convert to C unsigned long",
+                        )
+                    })?;
+                if self == Self::UnsignedInt {
+                    let n = u32::try_from(n).map_err(|_| {
+                        Error::new("OverflowError", "unsigned int is greater than maximum")
+                    })?;
+                    out[..4].copy_from_slice(&n.to_ne_bytes());
+                } else {
+                    out[..self.width()].copy_from_slice(&n.to_ne_bytes());
+                }
             }
             Self::Int => {
                 let n = ctx.index_c_int(item)?;
@@ -70,30 +136,29 @@ impl Format {
                     out = x.to_ne_bytes();
                 }
             }
-            Self::Wide => {
-                let value = ctx.str_value(item).map_err(|_| {
+            Self::Wide | Self::Unicode => {
+                let (ch, len) = match ctx.heap.get(ctx.scalar_value(item)) {
+                    Value::Str(s) => (s.chars().next().map(u32::from), s.chars().count()),
+                    Value::SurrogateStr(s) => (s.first().copied(), s.len()),
+                    _ => {
+                        return Err(Error::new(
+                            "TypeError",
+                            format!(
+                                "array item must be a unicode character, not {}",
+                                ctx.type_name(item)
+                            ),
+                        ));
+                    }
+                };
+                let ch = ch.filter(|_| len == 1).ok_or_else(|| {
                     Error::new(
                         "TypeError",
                         format!(
-                            "array item must be a unicode character, not {}",
-                            ctx.type_name(item)
+                            "array item must be a unicode character, not a string of length {len}"
                         ),
                     )
                 })?;
-                let mut chars = value.chars();
-                let ch = chars
-                    .next()
-                    .filter(|_| chars.next().is_none())
-                    .ok_or_else(|| {
-                        Error::new(
-                            "TypeError",
-                            format!(
-                                "array item must be a unicode character, not a string of length {}",
-                                value.chars().count()
-                            ),
-                        )
-                    })?;
-                out[..4].copy_from_slice(&(ch as u32).to_ne_bytes());
+                out[..4].copy_from_slice(&ch.to_ne_bytes());
             }
         }
         Ok(out)
@@ -127,20 +192,18 @@ impl Array {
     }
 
     pub(super) fn view_layout(&self) -> (&'static str, usize) {
-        (self.format.code(), self.format.width())
+        (
+            if self.format.unicode() {
+                "w"
+            } else {
+                self.format.code()
+            },
+            self.format.width(),
+        )
     }
 
     pub(super) fn len(&self) -> usize {
         self.bytes.len() / self.format.width()
-    }
-
-    // Every supported integral element fits exactly in a double.
-    pub(super) fn numeric_item(&self, i: usize) -> Option<f64> {
-        match self.at(i).ok()? {
-            Value::Int(n) => n.as_small().map(|n| n as f64),
-            Value::Float(f) => Some(f),
-            _ => None,
-        }
     }
 
     pub(super) fn at(&self, index: usize) -> Result<Value> {
@@ -149,6 +212,21 @@ impl Array {
         Ok(match self.format {
             Format::SignedByte => Value::Int(Int::from(i64::from(element[0] as i8))),
             Format::UnsignedByte => Value::Int(Int::from(i64::from(element[0]))),
+            Format::Short => Value::Int(Int::from(i64::from(i16::from_ne_bytes(
+                element.try_into().unwrap(),
+            )))),
+            Format::UnsignedShort => Value::Int(Int::from(i64::from(u16::from_ne_bytes(
+                element.try_into().unwrap(),
+            )))),
+            Format::UnsignedInt => Value::Int(Int::from(i64::from(u32::from_ne_bytes(
+                element.try_into().unwrap(),
+            )))),
+            Format::Long => Value::Int(Int::from(
+                c_long::from_ne_bytes(element.try_into().unwrap()) as i64,
+            )),
+            Format::UnsignedLong => Value::Int(Int::new(
+                c_ulong::from_ne_bytes(element.try_into().unwrap()).into(),
+            )),
             Format::Int => Value::Int(Int::from(i64::from(i32::from_ne_bytes(
                 element.try_into().unwrap(),
             )))),
@@ -156,8 +234,11 @@ impl Array {
                 Value::Float(f64::from(f32::from_ne_bytes(element.try_into().unwrap())))
             }
             Format::Double => Value::Float(f64::from_ne_bytes(element.try_into().unwrap())),
-            Format::Wide => {
+            Format::Wide | Format::Unicode => {
                 let ch = u32::from_ne_bytes(element.try_into().unwrap());
+                if (0xd800..=0xdfff).contains(&ch) {
+                    return Ok(Value::SurrogateStr(vec![ch]));
+                }
                 Value::Str(
                     char::from_u32(ch)
                         .ok_or_else(|| {
@@ -245,11 +326,19 @@ pub(super) fn new(ctx: &mut Context, args: &[Id], kw: &[(String, Id)]) -> Result
     let format = match code {
         "b" => Format::SignedByte,
         "B" => Format::UnsignedByte,
+        "h" => Format::Short,
+        "H" => Format::UnsignedShort,
         "i" => Format::Int,
+        "I" => Format::UnsignedInt,
+        "l" => Format::Long,
+        "L" => Format::UnsignedLong,
+        // Imre's supported Linux and macOS targets store wchar_t as a 32-bit code point.
+        #[cfg(unix)]
+        "u" if size_of::<libc::wchar_t>() == 4 => Format::Unicode,
         "f" => Format::Float,
         "d" => Format::Double,
         "w" => Format::Wide,
-        "u" | "h" | "H" | "I" | "l" | "L" | "q" | "Q" => {
+        "u" | "q" | "Q" => {
             return Err(Error::new(
                 "NotImplementedError",
                 format!("unsupported array typecode '{code}'"),
@@ -268,6 +357,13 @@ pub(super) fn new(ctx: &mut Context, args: &[Id], kw: &[(String, Id)]) -> Result
             ));
         }
     };
+    if format == Format::Unicode {
+        ctx.emit_builtin_warning(
+            crate::objects::exceptions::Kind::DeprecationWarning,
+            "The 'u' type code is deprecated and will be removed in Python 3.16",
+            1,
+        )?;
+    }
     let mut array = Array {
         format,
         bytes: Rc::new(Vec::new()),
@@ -284,7 +380,10 @@ pub(super) fn new(ctx: &mut Context, args: &[Id], kw: &[(String, Id)]) -> Result
                 array.append_bytes(data)?;
             }
             Value::Array(other) if other.format == format => array = other.clone(),
-            Value::Array(other) if other.format == Format::Wide => {
+            Value::Array(other) if format.unicode() && other.format.unicode() => {
+                array.bytes = Rc::clone(&other.bytes);
+            }
+            Value::Array(other) if other.format.unicode() => {
                 return Err(Error::new(
                     "TypeError",
                     format!(
@@ -293,12 +392,17 @@ pub(super) fn new(ctx: &mut Context, args: &[Id], kw: &[(String, Id)]) -> Result
                     ),
                 ));
             }
-            Value::Str(text) if format == Format::Wide => {
+            Value::Str(text) if format.unicode() => {
                 for ch in text.chars() {
                     array.append_bytes(&(ch as u32).to_ne_bytes())?;
                 }
             }
-            Value::Str(_) => {
+            Value::SurrogateStr(points) if format.unicode() => {
+                for ch in points {
+                    array.append_bytes(&ch.to_ne_bytes())?;
+                }
+            }
+            Value::Str(_) | Value::SurrogateStr(_) => {
                 return Err(Error::new(
                     "TypeError",
                     format!(
@@ -338,6 +442,62 @@ pub(super) fn new(ctx: &mut Context, args: &[Id], kw: &[(String, Id)]) -> Result
     Ok(ctx.alloc(Value::Array(array)))
 }
 
+/// Append the bytes from one read before reporting an aligned size mismatch.
+fn from_file(ctx: &mut Context, receiver: Id, file: Id, count: Id) -> Result<Id> {
+    let count = ctx.index_integer(count)?.to_i64().ok_or_else(|| {
+        Error::new(
+            "OverflowError",
+            "Python int too large to convert to C ssize_t",
+        )
+    })?;
+    if count < 0 {
+        return Err(Error::new("ValueError", "negative count"));
+    }
+    let format = array_mut(ctx, receiver).format;
+    let size = count
+        .checked_mul(format.width() as i64)
+        .ok_or_else(|| Error::new("MemoryError", ""))?;
+    let read = ctx.lookup_attr(file, "read")?;
+    let size_arg = ctx.int(size);
+    let result = ctx.call(read, vec![size_arg], Vec::new())?;
+    let result = ctx.scalar_value(result);
+    let Value::Bytes(data) = ctx.heap.get(result) else {
+        return Err(Error::new("TypeError", "read() didn't return bytes"));
+    };
+    let len = data.len();
+    if len % format.width() != 0 {
+        return Err(Error::new(
+            "ValueError",
+            "bytes length not a multiple of item size",
+        ));
+    }
+    if len != 0 {
+        if ctx.buffer_is_exported(receiver)? {
+            return Err(Error::new(
+                "BufferError",
+                "cannot resize an array that is exporting buffers",
+            ));
+        }
+        let Some((Value::Bytes(data), Value::Array(target))) =
+            ctx.heap.source_and_target(result, receiver)
+        else {
+            unreachable!("validated bytes and array are distinct");
+        };
+        target.append_bytes(data)?;
+    }
+    if len != size as usize {
+        return Err(Error::new("EOFError", "read() didn't return enough bytes"));
+    }
+    Ok(NONE)
+}
+
+pub(super) fn has_method(name: &str) -> bool {
+    matches!(
+        name,
+        "tobytes" | "tolist" | "append" | "fromfile" | "byteswap"
+    )
+}
+
 pub(super) fn attribute(ctx: &mut Context, id: Id, name: &str) -> Option<Id> {
     let Value::Array(array) = ctx.heap.get(id) else {
         return None;
@@ -345,7 +505,7 @@ pub(super) fn attribute(ctx: &mut Context, id: Id, name: &str) -> Option<Id> {
     match name {
         "typecode" => Some(ctx.text(array.format.code())),
         "itemsize" => Some(ctx.int(array.format.width() as i64)),
-        "tobytes" | "tolist" | "append" => {
+        name if has_method(name) => {
             let callable = ctx.builtin(&format!("array.array.{name}"));
             Some(ctx.alloc(Value::Method {
                 callable,
@@ -376,6 +536,19 @@ pub(super) fn method(
         ));
     }
     match (name, args) {
+        ("fromfile", &[file, count]) => from_file(ctx, receiver, file, count),
+        ("byteswap", []) => {
+            let width = array.format.width();
+            if width > 1 {
+                for item in array_mut(ctx, receiver)
+                    .writable_bytes(0)?
+                    .chunks_exact_mut(width)
+                {
+                    item.reverse();
+                }
+            }
+            Ok(NONE)
+        }
         ("tobytes", []) => {
             let mut bytes = Vec::new();
             bytes

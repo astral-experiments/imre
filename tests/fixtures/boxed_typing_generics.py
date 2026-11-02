@@ -25,6 +25,22 @@ class Accessor(t.Generic[T]):
     pass
 
 
+# Parameterizations share class attributes through their common origin.
+Accessor[int].marker = object()
+assert Accessor[str].marker is Accessor.marker
+try:
+    del Accessor[int].marker
+except AttributeError:
+    pass
+else:
+    raise AssertionError("the attribute belongs to the origin")
+assert Accessor[int].marker is Accessor.marker
+del Accessor.marker
+Accessor[int].copy_with = "origin attribute"
+assert Accessor.copy_with == "origin attribute"
+assert Accessor[int].copy_with((str,)) == Accessor[str]
+
+
 class DictMixin(dict[K, V]):
     pass
 
@@ -323,6 +339,33 @@ assert item.__name__ == "Item" and item.__infer_variance__ is True
 assert "Item" not in box.__dict__ and "Item" not in globals()
 assert box.__bases__ == (t.Generic,) and box.__orig_bases__ == (t.Generic[item],)
 assert box.__parameters__ == (item,) and t.get_args(box[int]) == (int,)
+
+
+def fresh_variadic_class():
+    class Variadic[Item, *Items, **Signature]:
+        def parameters(self):
+            return Item, Items, Signature
+
+    return Variadic
+
+
+variadic = fresh_variadic_class()
+item, pack, signature = variadic.__type_params__
+assert type(pack) is t.TypeVarTuple and type(signature) is t.ParamSpec
+assert variadic.__parameters__ == variadic().parameters() == (item, pack, signature)
+assert all(left is not right for left, right in zip(variadic.__type_params__, fresh_variadic_class().__type_params__))
+assert (pack.__name__, signature.__name__) == ("Items", "Signature")
+assert pack.__module__ == signature.__module__ == "typing"
+assert signature.__infer_variance__ and signature.__bound__ is None
+assert pack.__default__ is signature.__default__ is t.NoDefault
+assert pack.evaluate_default is signature.evaluate_default is None
+assert t.get_origin(signature.args) is t.get_origin(signature.kwargs) is signature
+original, = variadic.__orig_bases__
+assert t.get_origin(original) is t.Generic
+first, unpacked, last = t.get_args(original)
+assert first is item and last is signature
+assert t.get_origin(unpacked) is t.Unpack and t.get_args(unpacked) == (pack,)
+assert t.TypeVarTuple("Manual").evaluate_default(1) is t.NoDefault
 
 
 class Hidden[__P]:

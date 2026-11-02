@@ -68,7 +68,15 @@ pub(in crate::dynamic) fn members(class: &str) -> Option<Members> {
         "datetime.timezone" => (
             "datetime.timezone",
             &[],
-            &["__getinitargs__", "utcoffset", "dst", "tzname", "fromutc"],
+            &[
+                "__getinitargs__",
+                "__repr__",
+                "__str__",
+                "utcoffset",
+                "dst",
+                "tzname",
+                "fromutc",
+            ],
         ),
         "datetime.date" => (
             "datetime.date",
@@ -972,25 +980,19 @@ pub(super) fn call(
                 )
             })?;
             let tzname = name.unwrap_or(NONE);
-            let name = name
-                .map(|id| {
-                    ctx.str_value(id).map_err(|_| {
-                        Error::new(
-                            "TypeError",
-                            format!(
-                                "timezone() argument 2 must be str, not {}",
-                                if id == NONE {
-                                    "None"
-                                } else {
-                                    ctx.type_name(id)
-                                }
-                            ),
-                        )
-                    })
-                })
-                .transpose()?;
-            let zone = Calendar::zone(&offset, name)?;
-            Ok(if zone.is_utc() {
+            if let Some(name) = name
+                && ctx.string_storage(name).is_none()
+            {
+                let kind = if name == NONE { "None" } else { ctx.type_name(name) };
+                return Err(Error::new(
+                    "TypeError",
+                    format!("timezone() argument 2 must be str, not {kind}"),
+                ));
+            }
+            // Native calendar diagnostics can also retain names representable as UTF-8.
+            let native_name = name.and_then(|id| ctx.str_value(id).ok());
+            let zone = Calendar::zone(&offset, native_name)?;
+            Ok(if tzname == NONE && zone.is_utc() {
                 utc(ctx)
             } else {
                 ctx.alloc(Value::Calendar {
@@ -1103,7 +1105,9 @@ pub(super) fn call(
             ctx.call(string, vec![*receiver], vec![])
         }
         "datetime.isoformat" | "time.isoformat" => render::isoformat(ctx, method, args, kwargs),
-        "date.__repr__"
+        "timezone.__repr__"
+        | "timezone.__str__"
+        | "date.__repr__"
         | "datetime.__repr__"
         | "time.__repr__"
         | "timedelta.__repr__"
@@ -1146,6 +1150,12 @@ pub(super) fn call(
                 "__repr__" => {
                     let receiver_class = ctx.exact_type(args[0])?;
                     render::repr(ctx, args[0], &value, receiver_class, class)?
+                }
+                "__str__" if class == "timezone" => {
+                    let Value::Calendar { tzname, .. } = *ctx.heap.get(args[0]) else {
+                        unreachable!()
+                    };
+                    if tzname == NONE { ctx.text(value.text()) } else { tzname }
                 }
                 "__str__" => {
                     if class != "timedelta" {

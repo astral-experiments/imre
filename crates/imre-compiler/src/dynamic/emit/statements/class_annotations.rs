@@ -64,7 +64,7 @@ impl Function<'_, '_> {
         let body = Body::ClassAnnotations(sites.into_values().collect(), bindings.globals);
         let code = self
             .output
-            .definition(self.source, String::new(), body, start);
+            .definition(self.source, String::new(), body, start, false);
         let environment = self.op(
             "class_annotation_environment",
             &[&self.scope.clone(), &offsets],

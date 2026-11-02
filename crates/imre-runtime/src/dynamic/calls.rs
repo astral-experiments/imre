@@ -39,6 +39,9 @@ pub(super) fn module_function(symbol: &str) -> Option<(&str, &str)> {
     }
     let (module, function) = symbol.split_once('.')?;
     match module {
+        "operator" if stdlib::operator::Operation::named(function).is_some() => {
+            Some(("_operator", function))
+        }
         "_typing" if function == "_idfunc" => Some((module, function)),
         "encodings" if function == "search_function" => Some((module, function)),
         "posix"
@@ -267,6 +270,10 @@ impl Context {
         }
         match self.heap.get(class) {
             Value::Class { scope, .. } => self.namespace_binding(self.scope_data(*scope), name),
+            // The native generic alias inherits the same subclass hook as source special forms.
+            Value::Native(kind) if kind == "typing._GenericAlias" && name == "__init_subclass__" => {
+                self.classes.get("typing._Final").and_then(|&base| self.own_class_attr(base, name))
+            }
             Value::Native(kind) if kind == "type" && name == "mro" => {
                 self.builtins.get("type.mro").copied()
             }
@@ -1088,7 +1095,9 @@ impl Context {
             "datetime.timezone" => stdlib::datetime::TZINFO,
             stdlib::flags::TYPE | stdlib::os::stat::CLASS | stdlib::os::stat::VFS_CLASS => "tuple",
             class if stdlib::fixed_structseq::fixed_type(class).is_some() => "tuple",
-            "typing._UnpackGenericAlias" => "typing._GenericAlias",
+            "typing._UnpackGenericAlias" | "typing._ConcatenateGenericAlias" => {
+                "typing._GenericAlias"
+            }
             HashState::XOF_CLASS => HashState::CLASS,
             "collections.defaultdict" => "dict",
             "odict_keys" => "dict_keys",
@@ -1308,6 +1317,7 @@ impl Context {
                             | "constevaluator"
                             | "typing.TypeVarTuple"
                             | "typing.TypeAliasType"
+                            | "typing._ConcatenateGenericAlias"
                             | "typing._UnpackGenericAlias"
                             | "NoDefaultType"
                             | "typing._GenericAlias"
@@ -1353,7 +1363,6 @@ impl Context {
         match self.heap.get(obj) {
             Value::Union(_) => Ok(super::union::class(self)),
             Value::Instance { class, .. }
-            | Value::CodecInfo { class, .. }
             | Value::Class {
                 metaclass: Some(class),
                 ..
@@ -1509,7 +1518,10 @@ impl Context {
             | (value::INTERPOLATION_TYPE, Value::Interpolation { .. })
             | ("tuple", Value::Tuple(_) | Value::NamedTuple { .. }) => true,
             ("typing._GenericAlias", Value::GenericAlias(alias))
-                if alias.kind == super::typing::AliasKind::Unpack =>
+                if matches!(
+                    alias.kind,
+                    super::typing::AliasKind::Unpack | super::typing::AliasKind::Concatenate
+                ) =>
             {
                 true
             }
@@ -1685,6 +1697,7 @@ impl Context {
         original: Option<Id>,
     ) -> Result<Id> {
         let obj = self.weak_proxy_target(obj)?;
+        let obj = super::typing::generic_attr_target(self, obj, name, false)?;
         if matches!(self.heap.get(obj), Value::ThreadLocal(_)) {
             return self
                 .local_attribute(obj, super::thread_local::Name::from_lookup(name, original));
@@ -1842,10 +1855,10 @@ impl Context {
                 return Ok(self.builtin("object.__new__"));
             }
         }
-        if let Some(&scope) = self.enum_scopes.get(&obj) {
-            if let Some(value) = self.enum_base_attribute(obj, scope, name)? {
-                return Ok(value);
-            }
+        if let Some(&scope) = self.enum_scopes.get(&obj)
+            && let Some(value) = self.enum_base_attribute(obj, scope, name)?
+        {
+            return Ok(value);
         }
         if matches!(name, "numerator" | "denominator") {
             let receiver = match self.heap.get(obj) {
@@ -2883,7 +2896,7 @@ impl Context {
             {
                 let class = class.as_str().to_owned();
                 let (module, short) = class.rsplit_once('.').unwrap();
-                if class == "array.array" && matches!(name, "append" | "tolist" | "tobytes") {
+                if class == "array.array" && super::array::has_method(name) {
                     return Ok(self.builtin(&format!("array.array.{name}")));
                 }
                 if class == super::namedtuple::GETTER
@@ -3126,7 +3139,14 @@ impl Context {
                 ) && let Some(owner) = builtins::constructor_owner(symbol) =>
             {
                 return Ok(match name {
-                    "__self__" => self.builtin(&owner.to_owned()),
+                    "__self__" => match self.builtins.get(owner) {
+                        Some(&class) => class,
+                        None => {
+                            // Creating the owner mutates the heap that holds its name.
+                            let owner = owner.to_owned();
+                            self.builtin(&owner)
+                        }
+                    },
                     "__name__" => self.text("__new__"),
                     "__qualname__" => {
                         let class = owner.rsplit('.').next().unwrap_or(owner);
@@ -3136,7 +3156,8 @@ impl Context {
                 });
             }
             Value::Native(ref class)
-                if matches!(class.as_str(), "int" | "float" | "function") && name == "__new__" =>
+                if matches!(class.as_str(), "int" | "float" | "function" | "type")
+                    && name == "__new__" =>
             {
                 return Ok(self.builtin(&format!("{class}.__new__")));
             }
@@ -3213,6 +3234,10 @@ impl Context {
                     && let Some(buffer) = file.buffer =>
             {
                 return Ok(buffer);
+            }
+            Value::TextFile(_) if name == "write_through" => return Ok(FALSE),
+            Value::TextFile(ref file) if name == "line_buffering" => {
+                return Ok(if file.line_buffering { TRUE } else { FALSE });
             }
             Value::TextFile(ref file) if name == "closed" => {
                 return Ok(if file.closed() { TRUE } else { FALSE });
@@ -3404,19 +3429,6 @@ impl Context {
                     _ => {}
                 }
             }
-            Value::CodecInfo {
-                ref entry,
-                encode,
-                decode,
-                text_encoding_override,
-                ..
-            } => match name {
-                "encode" => return Ok(encode),
-                "_is_text_encoding" => return Ok(text_encoding_override.unwrap_or(TRUE)),
-                "name" => return Ok(self.text(entry.codec().name())),
-                "decode" => return Ok(decode),
-                _ => {}
-            },
             Value::Hmac(mac) => match name {
                 "digest_size" => return Ok(mac.digest_size),
                 "block_size" => return Ok(mac.block_size),
@@ -3535,7 +3547,10 @@ impl Context {
             }
             Value::Native(ref class)
                 if class == "bool"
-                    && matches!(name, "__add__" | "__index__" | "bit_length" | "to_bytes") =>
+                    && matches!(
+                        name,
+                        "__add__" | "__index__" | "__trunc__" | "bit_length" | "to_bytes"
+                    ) =>
             {
                 return Ok(self.builtin(&format!("int.{name}")));
             }
@@ -3598,8 +3613,11 @@ impl Context {
                     || (name == "__repr__"
                         && matches!(class.as_str(), "bool" | "int" | "float"))
                     || (class == "int"
-                        && matches!(name, "__add__" | "__index__" | "bit_length" | "to_bytes"))
-                    || (class == "float" && name == "as_integer_ratio")
+                        && matches!(
+                            name,
+                            "__add__" | "__index__" | "__trunc__" | "bit_length" | "to_bytes"
+                        ))
+                    || (class == "float" && matches!(name, "__trunc__" | "as_integer_ratio"))
                     || (class == "str"
                         && (name == "maketrans" || builtins::STR_METHODS.contains(&name))) =>
             {
@@ -3870,7 +3888,9 @@ impl Context {
             } else {
                 self.exact_type(obj)?
             };
-            let hook = self.builtin("object.__init_subclass__");
+            let hook = self
+                .own_class_attr(class, name)
+                .unwrap_or_else(|| self.builtin("object.__init_subclass__"));
             return self.bind_attribute(hook, NONE, class);
         }
         if name == "__init__" {
@@ -3919,10 +3939,10 @@ impl Context {
                 Value::Function { .. } => return Ok(self.builtin("function.__new__")),
                 Value::ThreadLocal(_) => return Ok(self.builtin("_thread._local.__new__")),
                 Value::Str(_) | Value::SurrogateStr(_) => return Ok(self.builtin("str.__new__")),
-                Value::Instance { class, .. } => {
-                    if self.uses_object_new(self.allocation_base(*class)) {
-                        return Ok(self.builtin("object.__new__"));
-                    }
+                Value::Instance { class, .. }
+                    if self.uses_object_new(self.allocation_base(*class)) =>
+                {
+                    return Ok(self.builtin("object.__new__"));
                 }
                 _ => {}
             }
@@ -3936,33 +3956,6 @@ impl Context {
             }));
         }
         Err(self.missing_attribute(obj, name))
-    }
-    fn update_codec_text_encoding(
-        &mut self,
-        obj: Id,
-        name: &str,
-        value: Option<Id>,
-    ) -> Result<bool> {
-        if name != "_is_text_encoding" {
-            return Ok(false);
-        }
-        let Value::CodecInfo {
-            text_encoding_override,
-            ..
-        } = self.heap.get_mut(obj)
-        else {
-            return Ok(false);
-        };
-        let previous = std::mem::replace(text_encoding_override, value);
-        if previous.is_none() && value.is_none() {
-            return Err(self.missing_attribute(obj, name));
-        }
-        if let Some(old) = previous
-            && Some(old) != value
-        {
-            self.heap.weak_edge_removed(old);
-        }
-        Ok(true)
     }
 
     /// A missing T_OBJECT member reads as None, even after repeated deletions.
@@ -4135,7 +4128,6 @@ impl Context {
             return self.update_exception_field(obj, name, None);
         }
         if self.update_key_wrapper_field(obj, name, None)?
-            || self.update_codec_text_encoding(obj, name, None)?
             || self.update_os_field(obj, name, None)?
         {
             return Ok(());
@@ -4231,7 +4223,7 @@ impl Context {
                 }
             }
             Value::Native(_) if let Some(&scope) = self.enum_scopes.get(&obj) => {
-                return self.update_enum_base(scope, name, None);
+                self.update_enum_base(scope, name, None)
             }
             Value::Class { scope, .. } => {
                 if matches!(name, "__annotations__" | "__annotate__")
@@ -4612,6 +4604,7 @@ impl Context {
         value: Id,
     ) -> Result<()> {
         let obj = self.weak_proxy_target(obj)?;
+        let obj = super::typing::generic_attr_target(self, obj, name, true)?;
         if matches!(self.heap.get(obj), Value::DirEntry(_)) && matches!(name, "name" | "path") {
             return Err(Error::new("AttributeError", "readonly attribute"));
         }
@@ -4868,7 +4861,6 @@ impl Context {
             return self.update_exception_field(obj, name, Some(value));
         }
         if self.update_key_wrapper_field(obj, name, Some(value))?
-            || self.update_codec_text_encoding(obj, name, Some(value))?
             || self.update_os_field(obj, name, Some(value))?
         {
             return Ok(());
@@ -5413,6 +5405,23 @@ impl Context {
         }))
     }
 
+    /// Initialize a class returned by __new__ when it is an instance of the called metaclass.
+    pub(super) fn finish_type_call(
+        &mut self,
+        caller: Id,
+        result: Id,
+        args: Vec<Id>,
+        kwargs: Vec<(String, Id)>,
+    ) -> Result<Id> {
+        let actual = self.exact_type(result)?;
+        if self.direct_subclass(actual, caller)
+            && let Some(init) = self.class_attr(actual, "__init__")
+        {
+            self.call_initializer(init, result, actual, args, kwargs)?;
+        }
+        Ok(result)
+    }
+
     /// Invoke the initializer found on the type, including its descriptor binding.
     pub(super) fn call_initializer(
         &mut self,
@@ -5592,6 +5601,7 @@ impl Context {
             {
                 self.iterator_method(owner, slot, &args, &kwargs)
             }
+            Value::Native(name) if name == "type.__new__" => self.type_new(&args, &kwargs),
             Value::Native(name) if name == "type.mro" => self.type_mro(&args, &kwargs),
             Value::Native(ref name)
                 if let Some((owner, "__new__")) = name.rsplit_once('.')
@@ -5637,6 +5647,7 @@ impl Context {
                             | "float.__getformat__"
                             | "bool.__repr__"
                             | "float.__repr__"
+                            | "float.__trunc__"
                             | "float.as_integer_ratio"
                             | "getset_descriptor.__set__"
                             | "getset_descriptor.__delete__"
@@ -6026,10 +6037,14 @@ impl Context {
                     constructor
                 }
                 .or_else(|| {
-                    [("int", "int.__new__"), ("tuple", "tuple.__new__")]
-                        .into_iter()
-                        .find(|(base, _)| self.has_base(callable, base))
-                        .map(|(_, new)| self.builtin(new))
+                    [
+                        ("int", "int.__new__"),
+                        ("tuple", "tuple.__new__"),
+                        ("type", "type.__new__"),
+                    ]
+                    .into_iter()
+                    .find(|(base, _)| self.has_base(callable, base))
+                    .map(|(_, new)| self.builtin(new))
                 });
                 let string_base = ["str", "bytes"]
                     .into_iter()
@@ -6045,27 +6060,13 @@ impl Context {
                         .chain(args.iter().copied())
                         .collect();
                     let instance = self.call(allocate, positional, kwargs.clone())?;
+                    if self.has_base(callable, "type") {
+                        return self.finish_type_call(callable, instance, args, kwargs);
+                    }
                     if !self.instance_of(instance, callable) {
                         return Ok(instance);
                     }
                     instance
-                } else if self.has_base(callable, "type") {
-                    let [name, bases, namespace] = args.as_slice() else {
-                        return Err(Error::new(
-                            "TypeError",
-                            format!(
-                                "type.__new__() takes exactly 3 arguments ({} given)",
-                                args.len()
-                            ),
-                        ));
-                    };
-                    return self.type_from_namespace(
-                        Some(callable),
-                        *name,
-                        *bases,
-                        *namespace,
-                        &kwargs,
-                    );
                 } else if self.has_base(callable, "module") {
                     self.allocate_module(callable)
                 } else if let Some(kind) = string_base {
@@ -6510,8 +6511,8 @@ impl Context {
         self.abc_new_from_namespace(*meta, *name, *bases, *namespace, keywords.to_vec())
     }
 
-    /// Pass the actual namespace through the winning ABC metaclass before allocating the class.
-    pub(super) fn call_abc_new(
+    /// Call the winning metaclass constructor with the actual prepared namespace.
+    pub(super) fn call_metaclass_new(
         &mut self,
         meta: Id,
         name: Id,
@@ -6605,13 +6606,10 @@ impl Context {
                 "custom TypedDict metaclass construction is unsupported",
             ));
         }
-        // User metaclasses can customize their instances' calls and attributes while
-        // inheriting type's namespace preparation and MRO. ABCMeta subclasses can also
-        // override __new__ and delegate allocation to ABCMeta.__new__.
+        // Metaclasses can define __new__ while inheriting namespace preparation and MRO.
         if !is_abc
             && Some(winner) != typed_dict_meta
-            && ((!self.is_abc_metaclass(winner) && self.class_attr(winner, "__new__").is_some())
-                || self.class_attr(winner, "__prepare__").is_some()
+            && (self.class_attr(winner, "__prepare__").is_some()
                 || (self.is_abc_metaclass(winner) && self.class_attr(winner, "__init__").is_some())
                 || self
                     .class_attr(winner, "mro")
@@ -6752,9 +6750,10 @@ impl Context {
             self.bind(scope, "__static_attributes__", attrs);
         }
         if let Some(meta) = class_meta
+            && Some(meta) != typed_dict_meta
             && self.builtins.get("abc.ABCMeta") != Some(&meta)
-            && (self.is_abc_metaclass(meta)
-                || (Some(meta) != typed_dict_meta && self.class_attr(meta, "__init__").is_some()))
+            && (self.class_attr(meta, "__new__").is_some()
+                || self.class_attr(meta, "__init__").is_some())
         {
             let namespace = self.active_class_namespace(scope);
             // A deferred class annotator owns these fields. Its scratch entries are placeholders.
@@ -6784,11 +6783,7 @@ impl Context {
             }
             let class_name = self.text(&name);
             let bases = self.alloc(Value::Tuple(bases));
-            let class = if self.is_abc_metaclass(meta) {
-                self.call_abc_new(meta, class_name, bases, namespace, keywords)?
-            } else {
-                self.type_from_namespace(Some(meta), class_name, bases, namespace, &keywords)?
-            };
+            let class = self.call(meta, vec![class_name, bases, namespace], keywords)?;
             if bindings.needs_class_cell && matches!(self.heap.get(class), Value::Class { .. }) {
                 match self.heap.get(cell) {
                     Value::Cell(Some(contents)) if *contents == class => {}
@@ -7041,6 +7036,9 @@ impl Context {
                 vec![class, fields, total, annotate, parents],
                 Vec::new(),
             )?;
+        }
+        if module == "typing" && parent == globals && name == "_Final" {
+            self.classes.insert("typing._Final".into(), class);
         }
         Ok(class)
     }

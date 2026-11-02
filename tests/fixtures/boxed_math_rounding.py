@@ -57,6 +57,12 @@ class FloatOverride(float):
 
 
 def current():
+    assert float.__trunc__(Real(-1.75)) == -1
+    assert type(int.__trunc__(True)) is int
+    assert bool.__trunc__ is int.__trunc__
+    assert int.__trunc__.__objclass__ is int
+    assert float.__trunc__.__get__(2.5, float)() == 2
+
     pi = math.pi
     assert pi == 3.141592653589793 and vars(math)["pi"] is pi
     math.pi = None

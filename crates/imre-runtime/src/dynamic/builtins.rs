@@ -215,7 +215,7 @@ pub(super) fn constructor_owner(name: &str) -> Option<&str> {
     let owner = name.strip_suffix(".__new__")?;
     (matches!(
         owner,
-        "object" | "dict" | "float" | "function" | "int" | "str" | super::thread_local::CLASS
+        "object" | "dict" | "float" | "function" | "int" | "str" | "type" | super::thread_local::CLASS
     ) || super::stdlib::itertools::cursor_type(owner).is_some()
         || is_exception(owner)
         || owner == super::stdlib::fixed_structseq::SCHED_PARAM
@@ -299,6 +299,7 @@ pub(super) fn is_final_iterator_type(name: &str) -> bool {
             | "list_iterator"
             | "list_reverseiterator"
             | "tuple_iterator"
+            | "generic_alias_iterator"
             | "bytes_iterator"
             | "bytearray_iterator"
             | "range_iterator"
@@ -431,6 +432,7 @@ pub(super) const STR_METHODS: &[&str] = &[
     "__repr__",
     "__rmod__",
     "capitalize",
+    "center",
     "count",
     "encode",
     "endswith",
@@ -448,6 +450,7 @@ pub(super) const STR_METHODS: &[&str] = &[
     "istitle",
     "isupper",
     "join",
+    "ljust",
     "lower",
     "lstrip",
     "partition",
@@ -455,6 +458,7 @@ pub(super) const STR_METHODS: &[&str] = &[
     "removesuffix",
     "replace",
     "rfind",
+    "rjust",
     "rpartition",
     "rsplit",
     "rstrip",
@@ -493,11 +497,14 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         Value::Bool(_) if attr == "__repr__" => "bool",
         Value::Int(_) if attr == "__repr__" => "int",
         Value::Int(_) | Value::Bool(_)
-            if matches!(attr, "__add__" | "__index__" | "bit_length" | "to_bytes") =>
+            if matches!(
+                attr,
+                "__add__" | "__index__" | "__trunc__" | "bit_length" | "to_bytes"
+            ) =>
         {
             "int"
         }
-        Value::Float(_) if matches!(attr, "__repr__" | "as_integer_ratio") => "float",
+        Value::Float(_) if matches!(attr, "__repr__" | "__trunc__" | "as_integer_ratio") => "float",
         Value::Str(_) | Value::SurrogateStr(_) if STR_METHODS.contains(&attr) => "str",
         Value::Range(_) if super::range::METHODS.contains(&attr) => "range",
         Value::DictIterator(iter) if DictIterator::methods(iter.class_name()).contains(&attr) => {
@@ -1057,6 +1064,41 @@ impl Context {
     }
 }
 
+/// Validate a no-argument method descriptor before reading its native receiver.
+fn noargs_method_receiver(
+    ctx: &Context,
+    owner: &str,
+    method: &str,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Id> {
+    let Some((&receiver, rest)) = args.split_first() else {
+        return Err(type_error(format!(
+            "unbound method {owner}.{method}() needs an argument"
+        )));
+    };
+    if !ctx.builtin_slot_accepts(receiver, owner) {
+        let actual = ctx
+            .builtin_type_name(receiver)
+            .unwrap_or_else(|| ctx.type_name(receiver));
+        return Err(type_error(format!(
+            "descriptor '{method}' for '{owner}' objects doesn't apply to a '{actual}' object"
+        )));
+    }
+    if !kwargs.is_empty() {
+        return Err(type_error(format!(
+            "{owner}.{method}() takes no keyword arguments"
+        )));
+    }
+    if !rest.is_empty() {
+        return Err(type_error(format!(
+            "{owner}.{method}() takes no arguments ({} given)",
+            rest.len()
+        )));
+    }
+    Ok(receiver)
+}
+
 pub(super) fn call(
     ctx: &mut Context,
     name: &str,
@@ -1335,6 +1377,17 @@ pub(super) fn call(
             }
             "module" => ctx.module_method(method, args, kwargs),
             "float" if method == "__getformat__" => float::getformat(ctx, args, kwargs),
+            "int" | "float" if method == "__trunc__" => {
+                let receiver = noargs_method_receiver(ctx, owner, method, args, kwargs)?;
+                if owner == "int" {
+                    return Ok(integer::exact_value(ctx, receiver));
+                }
+                let Value::Float(value) = *ctx.heap.get(ctx.scalar_value(receiver)) else {
+                    unreachable!("validated float receiver")
+                };
+                let integer = crate::floats::float_to_integer(value)?;
+                Ok(ctx.alloc(Value::Int(crate::Int::new(integer))))
+            }
             "float" if method == "as_integer_ratio" => float::as_integer_ratio(ctx, args, kwargs),
             "getset_descriptor" if matches!(method, "__set__" | "__delete__") => {
                 if !kwargs.is_empty() {
@@ -1595,7 +1648,10 @@ pub(super) fn call(
             [object] if kwargs.is_empty() => ctx.exact_type(*object),
             [_] => Err(type_error("type() takes no keyword arguments")),
             [name, bases, namespace] => {
-                ctx.type_from_namespace(None, *name, *bases, *namespace, kwargs)
+                let class =
+                    ctx.type_from_namespace(None, *name, *bases, *namespace, kwargs, false)?;
+                let caller = ctx.builtin("type");
+                ctx.finish_type_call(caller, class, args.to_vec(), kwargs.to_vec())
             }
             _ => Err(type_error("type() takes 1 or 3 arguments")),
         },

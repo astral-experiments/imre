@@ -212,7 +212,11 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
         )),
         "unittest.mock" => Some((
             "unittest/mock.py",
-            include_str!("../stdlib/unittest/mock.py"),
+            concat!(
+                include_str!("../stdlib/unittest/mock.py"),
+                "\n",
+                include_str!("../stdlib/unittest/mock_calls.py"),
+            ),
         )),
         // CPython 3.14.5 Lib/weakref.py and Lib/_weakrefset.py.
         "weakref" => Some(("weakref.py", include_str!("../stdlib/weakref.py"))),
@@ -225,6 +229,34 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
         "encodings" => Some((
             "encodings/__init__.py",
             include_str!("../stdlib/encodings/__init__.py"),
+        )),
+        "encodings.ascii" => Some((
+            "encodings/ascii.py",
+            include_str!("../stdlib/encodings/writer_ascii.py"),
+        )),
+        "encodings.latin_1" => Some((
+            "encodings/latin_1.py",
+            include_str!("../stdlib/encodings/writer_latin_1.py"),
+        )),
+        "encodings.utf_8" => Some((
+            "encodings/utf_8.py",
+            include_str!("../stdlib/encodings/writer_utf_8.py"),
+        )),
+        "encodings.utf_8_sig" => Some((
+            "encodings/utf_8_sig.py",
+            include_str!("../stdlib/encodings/writer_utf_8_sig.py"),
+        )),
+        "encodings.cp1251" => Some((
+            "encodings/cp1251.py",
+            include_str!("../stdlib/encodings/writer_charmap.py"),
+        )),
+        "encodings.cp424" => Some((
+            "encodings/cp424.py",
+            include_str!("../stdlib/encodings/writer_charmap.py"),
+        )),
+        "encodings.cp437" => Some((
+            "encodings/cp437.py",
+            include_str!("../stdlib/encodings/writer_charmap.py"),
         )),
         "codeop" => Some(("codeop.py", include_str!("../stdlib/codeop.py"))),
         "keyword" => Some(("keyword.py", KEYWORD_SOURCE)),
@@ -952,6 +984,7 @@ pub(crate) enum Intrinsic {
 }
 
 impl Intrinsic {
+    pub(crate) const SOCKETSERVER_CLASS: Self = Self::ScopedObjectExport("socketserver classes");
     pub(crate) const PICKLER: Self = Self::ObjectRuntimeExport("pickle.Pickler");
     pub(crate) const IO_BASE: Self = Self::ObjectRuntimeExport("io.IOBase");
     pub(crate) const RAW_IO_BASE: Self = Self::ObjectRuntimeExport("io.RawIOBase");
@@ -1255,6 +1288,9 @@ impl IntrinsicModule {
                 Intrinsic::ObjectRuntimeExport("_codecs.unregister")
             }
             (Self::CodecsNative, "lookup") => Intrinsic::ObjectRuntimeExport("_codecs.lookup"),
+            (Self::CodecsNative, "_imre_codec_functions") => {
+                Intrinsic::ObjectRuntimeExport("_codecs._imre_codec_functions")
+            }
             (Self::CodecsNative, "_imre_native_search") => {
                 Intrinsic::ObjectRuntimeExport("_codecs._imre_native_search")
             }
@@ -1574,6 +1610,11 @@ impl IntrinsicModule {
                 Intrinsic::ObjectRuntimeExport("inspect.BoundArguments")
             }
             (Self::Inspect, "getmodule") => Intrinsic::ObjectRuntimeExport("inspect.getmodule"),
+            (Self::Inspect, "isroutine") => Intrinsic::ObjectRuntimeExport("inspect.isroutine"),
+            (Self::Inspect, "ismethodwrapper") => {
+                Intrinsic::ObjectRuntimeExport("inspect.ismethodwrapper")
+            }
+            (Self::Inspect, "isbuiltin") => Intrinsic::ObjectRuntimeExport("inspect.isbuiltin"),
             (Self::Inspect, "signature") => Intrinsic::ObjectRuntimeExport("inspect.signature"),
             (Self::Inspect, "getattr_static") => Intrinsic::InspectGetattrStatic,
             (Self::Inspect, "ismethoddescriptor") => Intrinsic::InspectIsMethodDescriptor,
@@ -1724,6 +1765,9 @@ impl IntrinsicModule {
             (Self::Fnmatch, "_translate") => Intrinsic::Fnmatch(FnmatchOperation::Parts),
             (Self::Functools, "cached_property") => Intrinsic::CachedProperty,
             (Self::Functools, "partial") => Intrinsic::Partial,
+            (Self::Functools, "singledispatchmethod") => {
+                Intrinsic::ObjectRuntimeExport("functools.singledispatchmethod")
+            }
             (Self::Functools, "partialmethod") => {
                 Intrinsic::ObjectRuntimeExport("functools.partialmethod")
             }
@@ -1895,6 +1939,7 @@ impl IntrinsicModule {
                 Intrinsic::ObjectRuntimeExport("typing.TypeAliasType")
             }
             (Self::Typing, "TypeVarTuple") => Intrinsic::ObjectRuntimeExport("typing.TypeVarTuple"),
+            (Self::Typing, "Concatenate") => Intrinsic::ObjectRuntimeExport("typing.Concatenate"),
             (Self::Typing, "Unpack") => Intrinsic::ObjectRuntimeExport("typing.Unpack"),
             (Self::Typing, "NoDefault") => Intrinsic::ObjectRuntimeExport("typing.NoDefault"),
             (Self::Typing, "T") => Intrinsic::ObjectRuntimeExport("typing.T"),
@@ -1936,6 +1981,23 @@ impl IntrinsicModule {
             }
             (Self::Typing, "final") => Intrinsic::ObjectRuntimeExport("typing.final"),
             (Self::Typing, "Protocol") => Intrinsic::TYPING_PROTOCOL,
+            (Self::Typing, "SupportsInt") => Intrinsic::ObjectRuntimeExport("typing.SupportsInt"),
+            (Self::Typing, "SupportsFloat") => {
+                Intrinsic::ObjectRuntimeExport("typing.SupportsFloat")
+            }
+            (Self::Typing, "SupportsComplex") => {
+                Intrinsic::ObjectRuntimeExport("typing.SupportsComplex")
+            }
+            (Self::Typing, "SupportsBytes") => {
+                Intrinsic::ObjectRuntimeExport("typing.SupportsBytes")
+            }
+            (Self::Typing, "SupportsIndex") => {
+                Intrinsic::ObjectRuntimeExport("typing.SupportsIndex")
+            }
+            (Self::Typing, "SupportsAbs") => Intrinsic::ObjectRuntimeExport("typing.SupportsAbs"),
+            (Self::Typing, "SupportsRound") => {
+                Intrinsic::ObjectRuntimeExport("typing.SupportsRound")
+            }
             (Self::Typing, "runtime_checkable") => {
                 Intrinsic::ObjectRuntimeExport("typing.runtime_checkable")
             }
@@ -1946,6 +2008,8 @@ impl IntrinsicModule {
             (Self::Typing, "is_protocol") => Intrinsic::ObjectRuntimeExport("typing.is_protocol"),
             (Self::Typing, "Annotated") => Intrinsic::ObjectRuntimeExport("typing.Annotated"),
             (Self::Typing, "ForwardRef") => Intrinsic::ObjectRuntimeExport("typing.ForwardRef"),
+            (Self::Typing, "TypeGuard") => Intrinsic::ObjectRuntimeExport("typing.TypeGuard"),
+            (Self::Typing, "TypeIs") => Intrinsic::ObjectRuntimeExport("typing.TypeIs"),
             (Self::Typing, "Required") => Intrinsic::ObjectRuntimeExport("typing.Required"),
             (Self::Typing, "NotRequired") => Intrinsic::ObjectRuntimeExport("typing.NotRequired"),
             (Self::Typing, "ReadOnly") => Intrinsic::ObjectRuntimeExport("typing.ReadOnly"),
@@ -1971,6 +2035,9 @@ impl IntrinsicModule {
             (Self::Typing | Self::CollectionsAbc, "Iterator") => Intrinsic::Iterator,
             (Self::Io, "UnsupportedOperation") => Intrinsic::UnsupportedOperation,
             (Self::Gzip, "open") => Intrinsic::GzipOpen,
+            (Self::Types, "get_original_bases") => {
+                Intrinsic::ObjectRuntimeExport("types.get_original_bases")
+            }
             (Self::Types, "new_class") => Intrinsic::ObjectRuntimeExport("types.new_class"),
             (Self::Types, "prepare_class") => Intrinsic::ObjectRuntimeExport("types.prepare_class"),
             (Self::Types, "resolve_bases") => Intrinsic::ObjectRuntimeExport("types.resolve_bases"),
@@ -1985,6 +2052,8 @@ impl IntrinsicModule {
             (Self::Codecs, "IncrementalDecoder") => {
                 Intrinsic::ObjectRuntimeExport("codecs.IncrementalDecoder")
             }
+            (Self::Codecs, "Codec") => Intrinsic::ObjectRuntimeExport("codecs.Codec"),
+            (Self::Codecs, "StreamWriter") => Intrinsic::ObjectRuntimeExport("codecs.StreamWriter"),
             (Self::Codecs, "CodecInfo") => Intrinsic::ObjectRuntimeExport("codecs.CodecInfo"),
             (Self::Threading, "_RLock") => Intrinsic::ObjectRuntimeExport("threading._RLock"),
             (Self::Threading, "_PyRLock") => Intrinsic::ObjectRuntimeExport("threading._PyRLock"),
@@ -2609,6 +2678,7 @@ impl IntrinsicModule {
             (Self::PosixPath, "join") => Intrinsic::PosixPath(PosixPathOperation::Join),
             (Self::PosixPath, "basename") => Intrinsic::PosixPath(PosixPathOperation::Basename),
             (Self::PosixPath, "dirname") => Intrinsic::PosixPath(PosixPathOperation::Dirname),
+            (Self::PosixPath, "ismount") => Intrinsic::ObjectRuntimeExport("posixpath.ismount"),
             (Self::PosixPath, "split") => Intrinsic::ObjectRuntimeExport("posixpath.split"),
             (Self::PosixPath, "splitext") => Intrinsic::PosixPath(PosixPathOperation::Splitext),
             (Self::PosixPath, "normpath") => Intrinsic::PosixPath(PosixPathOperation::Normpath),
@@ -2861,6 +2931,18 @@ impl SourceModule {
 
     /// A type-only import in a native stub does not add a member to the C module.
     fn export(&self, name: &str) -> Option<Binding> {
+        if self.is_bundled("socketserver")
+            && matches!(
+                name,
+                "DatagramRequestHandler"
+                    | "UDPServer"
+                    | "ThreadingMixIn"
+                    | "ThreadingTCPServer"
+                    | "ThreadingUDPServer"
+            )
+        {
+            return Some(Binding::Intrinsic(Intrinsic::SOCKETSERVER_CLASS));
+        }
         if self.is_bundled("unittest") {
             let export = match name {
                 "registerResult" => Some("unittest.registerResult"),
@@ -4809,6 +4891,9 @@ impl<'a> Loader<'a> {
                         && self.loading.contains(&def.module)
                     {
                         self.partial_value_imports.insert(def);
+                    }
+                    if binding == Binding::Intrinsic(Intrinsic::SOCKETSERVER_CLASS) {
+                        self.checked_builtin_imports.push((id, alias.range()));
                     }
                     self.needs_object_imports |= binding == Binding::ConditionalValue;
                     let local = alias.asname.as_ref().unwrap_or(&alias.name);

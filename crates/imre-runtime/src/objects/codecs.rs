@@ -334,6 +334,32 @@ impl FixedUnicode {
         }
     }
 
+    /// The unsuffixed stateless codecs use native order and prefix one BOM.
+    pub(crate) fn encoding(key: &str) -> Option<(Self, bool)> {
+        match key {
+            "utf16" | "u16" | "utf_16" => Some((Self::Utf16(Utf16Order::from_sign(0)), true)),
+            "utf32" | "u32" | "utf_32" => Some((
+                if cfg!(target_endian = "little") {
+                    Self::Utf32Le
+                } else {
+                    Self::Utf32Be
+                },
+                true,
+            )),
+            _ => Self::by_key(key).map(|format| (format, false)),
+        }
+    }
+
+    pub(crate) fn codec_name(self, signature: bool) -> &'static str {
+        if !signature {
+            return self.name();
+        }
+        match self {
+            Self::Utf16(_) => "utf-16",
+            Self::Utf32Le | Self::Utf32Be => "utf-32",
+        }
+    }
+
     pub(crate) fn name(self) -> &'static str {
         match self {
             Self::Utf16(order) => order.name(),
@@ -375,14 +401,17 @@ impl FixedUnicode {
 #[derive(Clone, Copy)]
 pub(crate) enum StrEncoder {
     Registered(Codec),
-    Fixed(FixedUnicode),
+    Wide {
+        format: FixedUnicode,
+        signature: bool,
+    },
 }
 
 impl StrEncoder {
     pub(crate) fn lookup(encoding: &str, errors: &str) -> Result<Self> {
         let key = encode_key(encoding, errors)?;
-        if let Some(encoder) = FixedUnicode::by_key(&key) {
-            Ok(Self::Fixed(encoder))
+        if let Some((format, signature)) = FixedUnicode::encoding(&key) {
+            Ok(Self::Wide { format, signature })
         } else {
             Ok(Self::Registered(Codec::by_key(&key, encoding)?))
         }
@@ -396,9 +425,15 @@ impl StrEncoder {
     ) -> Result<Cow<'a, [u8]>> {
         match self {
             Self::Registered(codec) => codec.encode(text, Some(errors), original),
-            Self::Fixed(encoder) => {
+            Self::Wide { format, signature } => {
                 let mut bytes = Vec::new();
-                encoder.append(&mut bytes, text.chars().map(u32::from))?;
+                format.append(
+                    &mut bytes,
+                    signature
+                        .then_some(0xfeff)
+                        .into_iter()
+                        .chain(text.chars().map(u32::from)),
+                )?;
                 Ok(Cow::Owned(bytes))
             }
         }

@@ -54,4 +54,22 @@ def current():
     assert pattern.search(subject, 3, 1) is None
     assert re.match(r"..", subject).span() == (0, 2)
     assert re.fullmatch(pattern=r".+z", string=subject, flags=re.I)[0] == subject
+    assert repr(match) == r"<re.Match object; span=(1, 3), match='\ud800\ue000'>"
+    long_match = re.search("é+'", "🐍" + "é" * 50 + "'")
+    assert repr(long_match) == '<re.Match object; span=(1, 52), match="' + "é" * 49 + ">"
+    data = bytearray(b"abcd")
+    retained = re.search(b"bc", data)
+    data[:] = b"aX"
+    expected = "<re.Match object; span=(1, 3), match=b'X'>"
+    assert str(retained) == repr(retained) == expected
+    assert repr([retained]) == "[" + expected + "]"
+    view = memoryview(b"abc")
+    retained = re.search(b"abc", view)
+    view.release()
+    try:
+        repr(retained)
+    except TypeError as error:
+        assert str(error) == "expected string or bytes-like object, got 'memoryview'"
+    else:
+        raise AssertionError("released subject accepted")
     print("text and bytes match groups passed")

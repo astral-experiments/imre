@@ -227,12 +227,36 @@ fn pack_address(ctx: &mut Context, addr: &native::InternetAddress) -> Result<Id>
 fn pack_socket_name(ctx: &mut Context, name: native::SocketName) -> Result<Id> {
     match name {
         native::SocketName::Internet(addr) => pack_address(ctx, &addr),
-        native::SocketName::UnnamedUnix => Ok(ctx.text("")),
+        native::SocketName::Unix(path) => {
+            if cfg!(target_os = "linux") && path.first() == Some(&0) {
+                return Ok(ctx.alloc(Value::Bytes(path)));
+            }
+            let codec = crate::objects::Codec::lookup(crate::sys::filesystem_encoding()?.as_str())?;
+            Ok(ctx.text_codepoints(codec.decode_filesystem(&path)?))
+        }
         native::SocketName::NoAddress => Ok(NONE),
     }
 }
 
-fn address(
+fn address(ctx: &mut Context, family: i32, arg: Id, name: &str) -> Result<native::SocketAddress> {
+    if family == libc::AF_UNIX {
+        let encoded;
+        let path = match ctx.heap.get(ctx.scalar_value(arg)) {
+            Value::Str(_) | Value::SurrogateStr(_) => {
+                encoded = ctx.encode_os_path(arg)?;
+                &encoded[..]
+            }
+            _ => {
+                ctx.check_buffer_exporter(arg)?;
+                ctx.native_buffer_bytes(arg)?
+            }
+        };
+        return Ok(native::SocketAddress::unix(path)?);
+    }
+    internet_address(ctx, family, arg, name).map(native::SocketAddress::Internet)
+}
+
+fn internet_address(
     ctx: &mut Context,
     family: i32,
     pair: Id,
@@ -950,7 +974,7 @@ pub(super) fn call(
         )?,
         "accept" => {
             let (child, peer) = native::accept(&s)?;
-            let peer = pack_address(ctx, &peer)?;
+            let peer = pack_socket_name(ctx, peer)?;
             let child = ctx.alloc(Value::Socket(child));
             return Ok(ctx.alloc(Value::Tuple(vec![child, peer])));
         }
