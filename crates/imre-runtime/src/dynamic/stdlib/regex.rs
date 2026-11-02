@@ -1450,8 +1450,16 @@ pub(super) fn search(
     let (start, end) = (byte(start), byte(end));
     if method == "findall" {
         // Keep the prefix for anchors and word boundaries before pos.
-        let text = text[..end].to_vec();
-        return findall(ctx, pattern, &text, start);
+        let text = &text[..end];
+        let mut captures = pattern.regex.create_captures();
+        return match split::next_span(pattern, text, start, None, &mut captures) {
+            Ok(Some(first)) => {
+                let text = text.to_vec();
+                findall(ctx, pattern, &text, first, &mut captures)
+            }
+            Ok(None) => Ok(ctx.alloc(Value::List(Vec::new()))),
+            Err(message) => Err(pattern.match_error(ctx, message)),
+        };
     }
     if matches!(method, "scanner" | "finditer") {
         let buffer_view = match ctx.heap.get(ctx.scalar_value(string)) {
@@ -1546,16 +1554,17 @@ pub(super) fn match_method(ctx: &mut Context, name: &str, args: &[Id]) -> Result
     })
 }
 
-/// Collect captures starting at a byte offset in the bounded subject.
-fn findall(ctx: &mut Context, pattern: &Pattern, text: &[u8], start: usize) -> Result<Id> {
+/// Collect the first match and the remaining captures from the bounded subject snapshot.
+fn findall(
+    ctx: &mut Context,
+    pattern: &Pattern,
+    text: &[u8],
+    mut span: Span,
+    captures: &mut Captures,
+) -> Result<Id> {
     let mut found = Vec::new();
-    let mut captures = pattern.regex.create_captures();
-    let mut previous = None;
-    while let Some(span) = split::next_span(pattern, text, start, previous, &mut captures)
-        .map_err(|message| pattern.match_error(ctx, message))?
-    {
-        previous = Some(span);
-        let fields: Vec<_> = group_spans(&captures)
+    loop {
+        let fields: Vec<_> = group_spans(captures)
             .map(|span| span.map(|s| &text[s.range()]))
             .collect();
         let value = match fields.as_slice() {
@@ -1571,6 +1580,12 @@ fn findall(ctx: &mut Context, pattern: &Pattern, text: &[u8], start: usize) -> R
             [] => unreachable!("every regex has an overall match"),
         };
         found.push(ctx.alloc(value));
+        let Some(next) = split::next_span(pattern, text, span.end, Some(span), captures)
+            .map_err(|message| pattern.match_error(ctx, message))?
+        else {
+            break;
+        };
+        span = next;
     }
     Ok(ctx.alloc(Value::List(found)))
 }
