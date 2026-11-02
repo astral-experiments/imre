@@ -156,10 +156,24 @@ fn decode(ctx: &mut Context, receiver: Id, text: Id, final_: bool) -> Result<Id>
     };
     // A delegate may have reinitialized this decoder. Read the live state after the call.
     let current = *state(ctx, receiver)?;
-    if !current.pending {
+    // CPython's LF-only fast path can return the actual str subclass. Its byte
+    // scan also sees 0x0d embedded in a wide code point such as U+0D00.
+    if !current.pending && (!current.translate || current.seen & (1 | 4) == 0) {
+        let cr_byte = |p: u32| p.to_ne_bytes().contains(&13);
         let only_lf = match ctx.heap.get(storage) {
-            Value::Str(s) if !s.contains('\r') => Some(s.contains('\n')),
-            Value::SurrogateStr(s) if !s.contains(&13) => Some(s.contains(&10)),
+            Value::Str(s)
+                if !s.contains('\r')
+                    && (!current.translate
+                        || s.is_ascii()
+                        || !s.chars().any(|c| cr_byte(c as u32))) =>
+            {
+                Some(s.contains('\n'))
+            }
+            Value::SurrogateStr(s)
+                if !s.contains(&13) && (!current.translate || !s.iter().copied().any(cr_byte)) =>
+            {
+                Some(s.contains(&10))
+            }
             _ => None,
         };
         if let Some(has_lf) = only_lf {
@@ -175,7 +189,7 @@ fn decode(ctx: &mut Context, receiver: Id, text: Id, final_: bool) -> Result<Id>
     }
     let mut pending = false;
     let mut seen = current.seen;
-    let mut changed = current.pending;
+    let mut changed = current.pending || current.translate;
     let mut iter = current
         .pending
         .then_some(13)
@@ -212,7 +226,6 @@ fn decode(ctx: &mut Context, receiver: Id, text: Id, final_: bool) -> Result<Id>
                     result.push(if current.translate { 10 } else { 13 });
                 }
             }
-            changed |= current.translate;
         } else {
             if c == 10 {
                 seen |= 2;

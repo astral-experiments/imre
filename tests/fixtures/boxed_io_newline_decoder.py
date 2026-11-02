@@ -1,5 +1,6 @@
 import _io
 import io
+from io import IncrementalNewlineDecoder
 
 
 class Delegate:
@@ -15,6 +16,10 @@ class Delegate:
     def setstate(self, state):
         assert state == (self, (1 << 63) - 1)
         return self
+
+
+class Derived(IncrementalNewlineDecoder):
+    pass
 
 
 class Text(str):
@@ -38,6 +43,10 @@ def current():
     assert wrapped.getstate() == (delegate, (1 << 64) - 1)
     assert wrapped.decode("\n\r\x00") == "\n\n\x00"
     assert wrapped.newlines == ("\r", "\n", "\r\n")
+    assert type(wrapped.decode(Text("x"))) is str
+    clean = Derived(None, True)
+    clean.tag = "subclass"
+    assert clean.tag == "subclass" and type(clean.decode(Text("\u0d00"))) is str
     assert wrapped.setstate((delegate, -1)) is delegate
     assert wrapped.decode("x") == "\nx"
     uninitialized = decoder.__new__(decoder)
