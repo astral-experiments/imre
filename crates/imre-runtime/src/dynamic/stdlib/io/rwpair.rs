@@ -87,37 +87,35 @@ fn initialize(ctx: &mut Context, owner: Id, receiver: Id, args: &[Id]) -> Result
 
     let new_writer = ctx.call(writer, vec![args[1], size], Vec::new());
     let mut pair = state(ctx, receiver);
-    pair.writer = new_writer.as_ref().ok().copied();
-    if new_writer.is_err() {
-        pair.reader = None;
+    match new_writer {
+        Ok(writer) => {
+            pair.writer = Some(writer);
+            store(ctx, receiver, pair);
+            Ok(NONE)
+        }
+        Err(error) => {
+            for id in error.roots() {
+                ctx.heap.keep(id);
+            }
+            let reader = pair.reader.take();
+            if let Some(reader) = reader {
+                ctx.heap.keep(reader);
+            }
+            pair.writer = None;
+            store(ctx, receiver, pair);
+            // Construction owns the private reader. Release its raw file before returning
+            // the writer's exception, as clearing the last reader reference does in CPython.
+            let _ = forward(ctx, reader, "close", &[]);
+            Err(error)
+        }
     }
-    store(ctx, receiver, pair);
-    new_writer.map(|_| NONE)
 }
 
 fn forward(ctx: &mut Context, stream: Option<Id>, name: &str, args: &[Id]) -> Result<Id> {
     let stream =
         stream.ok_or_else(|| Error::new("ValueError", "I/O operation on uninitialized object"))?;
-    match ctx.lookup_attr(stream, name) {
-        Ok(method) => ctx.call(method, args.to_vec(), Vec::new()),
-        Err(error) if name == "peek" && error.kind == "AttributeError" => {
-            // The native reader has FileIO storage but does not expose its own peek descriptor yet.
-            let handle = super::descriptor_buffer::backing(ctx, stream).and_then(|backing| {
-                if let Value::File(handle) = ctx.heap.get(backing) {
-                    Some(handle.clone())
-                } else {
-                    None
-                }
-            });
-            if let Some(handle) = handle
-                && let super::super::files::BinaryFile::Descriptor(fd) = handle.as_ref()
-            {
-                return fd.peek(ctx, stream, args);
-            }
-            Err(error)
-        }
-        Err(error) => Err(error),
-    }
+    let method = ctx.lookup_attr(stream, name)?;
+    ctx.call(method, args.to_vec(), Vec::new())
 }
 
 pub(super) fn call(

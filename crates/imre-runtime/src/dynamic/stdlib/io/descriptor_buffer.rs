@@ -503,40 +503,6 @@ impl BufferedFd {
         Ok(())
     }
 
-    /// Peek into the native FileIO reader owned by a BufferedRWPair without advancing it.
-    pub(super) fn peek(&self, ctx: &mut Context, reader: Id, args: &[Id]) -> Result<Id> {
-        if args.len() > 1 {
-            return Err(Error::new(
-                "TypeError",
-                format!("peek expected at most 1 argument, got {}", args.len()),
-            ));
-        }
-        if let Some(size) = args.first() {
-            ssize(ctx, *size)?;
-        }
-        self.check_raw(ctx, reader, "peek")?;
-        if self.closed() {
-            return Err(Error::new("ValueError", "peek of closed file"));
-        }
-        let mut slot = self.buffer.borrow_mut();
-        let Some(Buffer::Reader(input)) = slot.as_mut() else {
-            return Err(Error::new("ValueError", "peek of closed file"));
-        };
-        let data = loop {
-            match input.fill_buf() {
-                Ok(bytes) => {
-                    let mut data = builtins::zeroed_bytes(bytes.len() as i64)?;
-                    data.copy_from_slice(bytes);
-                    break data;
-                }
-                Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
-                Err(e) if e.kind() == io::ErrorKind::WouldBlock => break Vec::new(),
-                Err(e) => return Err(os_error(e)),
-            }
-        };
-        Ok(ctx.alloc(Value::Bytes(data)))
-    }
-
     pub(in crate::dynamic) fn closed(&self) -> bool {
         self.handle.live_fd().is_none()
     }
@@ -587,6 +553,7 @@ impl BufferedFd {
                 match name {
                     "read" | "read1" => "read of closed file",
                     "readline" => "readline of closed file",
+                    "peek" => "peek of closed file",
                     "readinto" => "readinto of closed file",
                     "seek" => "seek of closed file",
                     "write" => "write to closed file",
@@ -684,6 +651,14 @@ impl BufferedFd {
                     .seek(seek.expect("validated seek"))
                     .map_err(|err| buffer_error(ctx, err))?;
                 Ok(ctx.int(pos as i64))
+            }
+            "peek" => {
+                let data = match buffer {
+                    Buffer::Reader(reader) => crate::objects::peek_bytes(reader)?,
+                    Buffer::Pipe(pipe) => pipe.peek()?,
+                    Buffer::Writer(_) => unreachable!("peek requires a buffered reader"),
+                };
+                Ok(ctx.alloc(Value::Bytes(data)))
             }
             "read" | "read1" | "readline" => {
                 if !self.reading {

@@ -7,7 +7,7 @@ use files::{BinaryFile, ReadSource};
 
 pub(super) const METHODS: &[&str] = &[
     "__init__", "raw", "closed", "name", "mode", "readable", "seekable", "isatty", "fileno",
-    "flush", "close", "tell", "seek", "read", "read1", "readinto", "readline",
+    "flush", "close", "tell", "seek", "read", "read1", "readinto", "readline", "peek",
 ];
 
 fn validate(name: &str, count: usize, kwargs: &[(String, Id)]) -> Result<()> {
@@ -18,7 +18,7 @@ fn validate(name: &str, count: usize, kwargs: &[(String, Id)]) -> Result<()> {
         ));
     }
     let message = match name {
-        "read" | "read1" | "readline" if count > 1 => {
+        "read" | "read1" | "readline" | "peek" if count > 1 => {
             format!("{name} expected at most 1 argument, got {count}")
         }
         "readinto" if count != 1 => {
@@ -26,7 +26,7 @@ fn validate(name: &str, count: usize, kwargs: &[(String, Id)]) -> Result<()> {
         }
         "seek" if count == 0 => "seek expected at least 1 argument, got 0".into(),
         "seek" if count > 2 => format!("seek expected at most 2 arguments, got {count}"),
-        "read" | "read1" | "readline" | "readinto" | "seek" | "__exit__" => return Ok(()),
+        "read" | "read1" | "readline" | "peek" | "readinto" | "seek" | "__exit__" => return Ok(()),
         _ if count != 0 => format!("BufferedReader.{name}() takes no arguments ({count} given)"),
         _ => return Ok(()),
     };
@@ -44,6 +44,11 @@ pub(super) fn call(
         return descriptor_buffer::initialize(ctx, receiver, args, kwargs, true);
     }
     validate(name, args.len(), kwargs)?;
+    if name == "peek"
+        && let Some(&size) = args.first()
+    {
+        ssize(ctx, size)?;
+    }
     let target = if name == "readinto" {
         let id = ctx.scalar_value(args[0]);
         if !matches!(ctx.heap.get(id), Value::ByteArray(_)) {
@@ -121,6 +126,16 @@ pub(super) fn call(
                 ctx.type_name(receiver)
             ),
         ));
+    }
+    if name == "peek" {
+        let BinaryFile::Reader { slot, .. } = handle.as_ref() else {
+            unreachable!("readable receiver")
+        };
+        let mut slot = slot.borrow_mut();
+        let input = slot
+            .as_mut()
+            .ok_or_else(|| Error::new("ValueError", "peek of closed file"))?;
+        return Ok(ctx.alloc(Value::Bytes(crate::objects::peek_bytes(input)?)));
     }
     if name == "read1" {
         let size = args

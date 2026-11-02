@@ -15,6 +15,29 @@ dst = "imre-rw-out-" + str(os.getpid())
 with io.open(src, "wb") as source:
     source.write(b"ab\ncde")
 try:
+    class RejectSecondCheck(io.FileIO):
+        def writable(self):
+            self.calls = getattr(self, "calls", 0) + 1
+            return self.calls == 1
+
+    with io.FileIO(src, "r") as raw, RejectSecondCheck(dst, "w") as rejected:
+        try:
+            NativePair(raw, rejected, 2)
+        except io.UnsupportedOperation as exc:
+            assert str(exc) == "File or stream is not writable."
+        else:
+            raise AssertionError("writer initialization accepted a non-writable raw")
+        assert raw.closed and not rejected.closed and rejected.calls == 2
+
+    with io.BufferedReader(io.FileIO(src, "r"), 2) as reader:
+        assert reader.peek(0) == b"ab" and reader.read(1) == b"a"
+        assert io.BufferedReader.peek(reader, 99) == b"b" and reader.raw.tell() == 2
+    try:
+        reader.peek(0)
+    except ValueError as exc:
+        assert str(exc) == "peek of closed file"
+    else:
+        raise AssertionError("closed reader allowed peek")
     raw_in = io.FileIO(src, "r")
     raw_out = io.FileIO(dst, "w")
     with Pair(raw_in, raw_out, 4) as pair:
