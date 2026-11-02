@@ -15,7 +15,68 @@ class Wrapper(io.TextIOWrapper):
         super().__init__(raw, **kwargs)
 
 
+def check_repr():
+    for stream in (sys.stdin, sys.stdout, sys.stderr):
+        expected = f"<_io.TextIOWrapper name={stream.name!r} mode={stream.mode!r} encoding={stream.encoding!r}>"
+        assert repr(stream) == stream.__repr__() == expected
+
+    class Named(io.TextIOWrapper):
+        @property
+        def name(self):
+            if self.problem:
+                raise self.problem
+            return self.field() if isinstance(self.field, type) else self.field
+
+        @property
+        def encoding(self):
+            raise AssertionError("repr used the public encoding property")
+
+    class Reinit:
+        def __repr__(self):
+            io.TextIOWrapper.__init__(text, io.BytesIO(), encoding="ascii")
+            return "changed"
+
+    with Named(io.BytesIO(), encoding="utf-8") as text:
+        text.field = text
+        text.problem = KeyError("name lookup")
+        try:
+            repr(text)
+        except KeyError as error:
+            assert error is text.problem
+        else:
+            raise AssertionError("name error was swallowed")
+        text.problem = None
+        try:
+            repr(text)
+        except RuntimeError as error:
+            assert str(error) == "reentrant call inside Named.__repr__"
+        else:
+            raise AssertionError("recursive name did not raise")
+        text.field = Reinit()
+        assert repr(text) == "<Named name=changed encoding='ascii'>"
+
+        order = []
+
+        class Shown(str):
+            def __del__(self):
+                order.append("shown")
+
+        class Name:
+            def __repr__(self):
+                return holder.pop()
+
+            def __del__(self):
+                order.append("name")
+
+        holder = [Shown("rendered")]
+        text.field = Name
+        assert repr(text) == "<Named name=rendered encoding='ascii'>"
+        assert order == ["shown", "name"]
+        text.field = None
+
+
 def current():
+    check_repr()
     assert original_type is type(sys.stdout) is io.TextIOWrapper is _io.TextIOWrapper
     assert sys.stdout.truncate.__self__ is sys.stdout
     assert sys.stderr.truncate.__self__ is sys.stderr
