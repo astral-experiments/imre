@@ -1329,12 +1329,18 @@ pub(super) fn call(
                     return Err(type_error(format!("{message}, got {}", values.len())));
                 }
                 let Value::GetSetDescriptor {
-                    owner, name: field, ..
+                    get,
+                    owner,
+                    name: field,
+                    ..
                 } = *ctx.heap.get(descriptor)
                 else {
                     return Err(type_error("expected a getset descriptor"));
                 };
-                let accepts = if owner == "int" {
+                let accepts = if let Value::HashMethod { owner: class, .. } = *ctx.heap.get(get) {
+                    super::stdlib::hashlib::md5::check_receiver(ctx, class, field, values[0])?;
+                    true
+                } else if owner == "int" {
                     ctx.builtin_slot_accepts(values[0], owner)
                 } else if owner == "typing.Union" {
                     matches!(ctx.heap.get(values[0]), Value::Union(_))

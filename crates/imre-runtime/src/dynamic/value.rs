@@ -904,6 +904,8 @@ pub(super) enum Value {
     Class {
         /// Private layout tag for native I/O class generations.
         io_kind: Option<super::stdlib::io::NativeClass>,
+        /// Qualified name of a non-instantiable digest implementation type.
+        hash_type: Option<&'static str>,
         metaclass: Option<Id>,
         name: String,
         scope: Id,
@@ -1078,6 +1080,10 @@ pub(super) enum Value {
         random: Id,
         unsupported: Id,
     },
+    HashMethod {
+        owner: Id,
+        name: &'static str,
+    },
     IoMethod {
         owner: Id,
         name: &'static str,
@@ -1168,6 +1174,7 @@ impl Value {
             Self::Map { .. } => "map",
             Self::Filter { .. } => "filter",
             Self::Hash(state) => state.lock().class_name(),
+            Self::HashMethod { .. } => "method_descriptor",
             Self::Zip { .. } => "zip",
             Self::Array(_) => "array.array",
             Self::Bytes(_) => "bytes",
@@ -1242,6 +1249,13 @@ impl Value {
             Self::PythonFrame { .. } => "frame",
             _ => return None,
         })
+    }
+
+    pub(super) fn hash_type(&self) -> Option<&'static str> {
+        match self {
+            Self::Class { hash_type, .. } => *hash_type,
+            _ => None,
+        }
     }
 
     pub(super) fn io_kind(&self) -> Option<&'static str> {
@@ -1671,6 +1685,7 @@ impl Value {
             Self::IoMethod {
                 owner, unsupported, ..
             } => visit.extend([*owner, *unsupported]),
+            Self::HashMethod { owner, .. } => visit.push(*owner),
             Self::CodecInfo {
                 class,
                 encode,
