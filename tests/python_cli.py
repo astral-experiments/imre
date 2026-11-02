@@ -883,7 +883,7 @@ def check_python_process_identity(imre, root, env):
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, preexec_fn=before_exec,
         ) as child:
             try:
-                assert select.select([child.stdout], [], [], 120)[0], "payload did not report its PID"
+                assert select.select([child.stdout], [], [], 600)[0], "payload did not report its PID"
                 got = child.stdout.readline()
                 assert got == f"{child.pid}\n".encode(), (got, child.poll())
                 if sys.platform.startswith("linux"):

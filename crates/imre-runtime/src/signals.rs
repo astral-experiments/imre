@@ -49,6 +49,8 @@ pub(crate) fn install(number: i32, handler: Disposition) -> io::Result<Option<Di
     // SAFETY: initialize the mask and handler before passing the action to POSIX.
     let mut action: libc::sigaction = unsafe { std::mem::zeroed() };
     unsafe { libc::sigemptyset(&mut action.sa_mask) };
+    // Let C embedders supply an alternate signal stack, as CPython does.
+    action.sa_flags = libc::SA_ONSTACK;
     action.sa_sigaction = match handler {
         Disposition::Default => libc::SIG_DFL,
         Disposition::Ignore => libc::SIG_IGN,
