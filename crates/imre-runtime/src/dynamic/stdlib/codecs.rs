@@ -2,6 +2,7 @@
 use std::collections::HashMap;
 
 mod bytes_escape;
+mod encode_error;
 mod raw_unicode_escape;
 mod surrogate_utf8;
 mod utf16;
@@ -14,7 +15,7 @@ use crate::objects::{Codec, CodecInfo, DecodeIssue, FixedUnicode, Object, StrEnc
 
 #[derive(Default)]
 pub(in crate::dynamic) struct Registry {
-    entries: HashMap<*const Object, Id>,
+    entries: HashMap<*const Object, (CodecInfo, Id)>,
     initialized: bool,
     search_path: Vec<Id>,
     // None denotes an existing stateless native transform with no boxed CodecInfo.
@@ -26,9 +27,14 @@ pub(in crate::dynamic) struct Registry {
 
 impl Registry {
     pub(in crate::dynamic) fn roots(&self) -> impl Iterator<Item = &Id> {
-        // Each decoder is also reachable from its registry entry.
         self.entries
             .values()
+            .map(|(_, entry)| entry)
+            .chain(
+                self.functions
+                    .values()
+                    .flat_map(|(encode, decode)| [encode, decode]),
+            )
             .chain(self.handlers.values())
             .chain(&self.search_path)
             .chain(self.search_cache.values().filter_map(Option::as_ref))
@@ -456,10 +462,9 @@ pub(super) fn lookup_transform(
         if entry == NONE {
             continue;
         }
-        if !matches!(ctx.heap.get(entry), Value::CodecInfo { .. })
-            && !ctx
-                .tuple_items(entry)?
-                .is_some_and(|items| items.len() == 4)
+        if !ctx
+            .tuple_items(entry)?
+            .is_some_and(|items| items.len() == 4)
         {
             return Err(type_error("codec search functions must return 4-tuples"));
         }
@@ -487,51 +492,87 @@ fn cache_lookup(ctx: &mut Context, key: String, entry: Option<Id>) -> Result<Opt
     Ok(entry)
 }
 
+/// Fetch the stateless native transforms without searching the Python registry during import.
+pub(super) fn entry_functions(
+    ctx: &mut Context,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Id> {
+    let name = unary_arg("_imre_codec_functions", args, kwargs)?;
+    let codec = Codec::lookup(ctx.str_value(name)?)?;
+    let (encode, decode) = native_functions(ctx, codec)?;
+    Ok(ctx.alloc(Value::Tuple(vec![encode, decode])))
+}
+
+fn native_functions(ctx: &mut Context, codec: Codec) -> Result<(Id, Id)> {
+    if let Some(&functions) = ctx.codec_entries.functions.get(codec.name()) {
+        return Ok(functions);
+    }
+    ctx.codec_entries
+        .functions
+        .try_reserve(1)
+        .map_err(|_| crate::Error::allocation())?;
+    let functions = (
+        ctx.alloc(Value::CodecEncoder(codec)),
+        ctx.alloc(Value::CodecDecoder(codec)),
+    );
+    ctx.codec_entries.functions.insert(codec.name(), functions);
+    Ok(functions)
+}
+
 fn box_native_entry(ctx: &mut Context, entry: CodecInfo) -> Result<Id> {
     let key = entry.as_ptr();
-    if let Some(&id) = ctx.codec_entries.entries.get(&key) {
-        return Ok(id);
+    if let Some((_, id)) = ctx.codec_entries.entries.get(&key) {
+        return Ok(*id);
     }
+    let codec = entry.codec();
+    let suffix = match codec {
+        Codec::Ascii => "ascii",
+        Codec::Latin1 => "latin_1",
+        Codec::Utf8 { signature: false } => "utf_8",
+        Codec::Utf8 { signature: true } => "utf_8_sig",
+        Codec::CodePage(_) => codec.name(),
+    };
+    let module = ctx.module(&format!("encodings.{suffix}"))?;
+    let codecs = ctx.lookup_attr(module, "codecs")?;
+    let class = ctx.lookup_attr(codecs, "CodecInfo")?;
+    let writer = ctx.lookup_attr(module, "StreamWriter")?;
+    let (encode, decode) = match codec {
+        Codec::CodePage(_) => {
+            // getregentry creates fresh bound Codec methods for each alias entry.
+            let class = ctx.lookup_attr(module, "Codec")?;
+            let encoder = ctx.call(class, Vec::new(), Vec::new())?;
+            let decoder = ctx.call(class, Vec::new(), Vec::new())?;
+            (
+                ctx.lookup_attr(encoder, "encode")?,
+                ctx.lookup_attr(decoder, "decode")?,
+            )
+        }
+        Codec::Utf8 { signature: true } => {
+            let (_, decode) = native_functions(ctx, codec)?;
+            (ctx.lookup_attr(module, "encode")?, decode)
+        }
+        _ => native_functions(ctx, codec)?,
+    };
+    let name = ctx.text(codec.name());
+    let id = ctx.call(
+        class,
+        Vec::new(),
+        vec![
+            ("name".into(), name),
+            ("encode".into(), encode),
+            ("decode".into(), decode),
+            ("incrementalencoder".into(), NONE),
+            ("incrementaldecoder".into(), NONE),
+            ("streamreader".into(), NONE),
+            ("streamwriter".into(), writer),
+        ],
+    )?;
     ctx.codec_entries
         .entries
         .try_reserve(1)
         .map_err(|_| crate::Error::allocation())?;
-    // _codecs.lookup also works before application code imports the public module.
-    if !ctx.classes.contains_key("codecs.CodecInfo") {
-        ctx.module("codecs")?;
-    }
-    let class = ctx
-        .classes
-        .get("codecs.CodecInfo")
-        .copied()
-        .ok_or_else(|| Error::new("ImportError", "codecs.CodecInfo is unavailable"))?;
-    let codec = entry.codec();
-    let (encode, decode) = if let Some(&functions) = ctx.codec_entries.functions.get(codec.name()) {
-        functions
-    } else {
-        let functions = (
-            ctx.alloc(Value::CodecEncoder(codec)),
-            ctx.alloc(Value::CodecDecoder(codec)),
-        );
-        // Charmap methods belong to a per-entry Codec instance; built-ins and
-        // module-level functions are shared by all spellings of a codec.
-        if !matches!(codec, Codec::CodePage(_)) {
-            ctx.codec_entries
-                .functions
-                .try_reserve(1)
-                .map_err(|_| crate::Error::allocation())?;
-            ctx.codec_entries.functions.insert(codec.name(), functions);
-        }
-        functions
-    };
-    let id = ctx.alloc(Value::CodecInfo {
-        class,
-        entry,
-        encode,
-        decode,
-        text_encoding_override: None,
-    });
-    ctx.codec_entries.entries.insert(key, id);
+    ctx.codec_entries.entries.insert(key, (entry, id));
     Ok(id)
 }
 
@@ -550,8 +591,22 @@ pub(in crate::dynamic) fn encode_text(
         .transpose()?
         .unwrap_or("strict");
     let encoder = StrEncoder::lookup(encoding, errors)?;
+    let errors = if let StrEncoder::Registered(codec) = encoder {
+        match encode_error::registered(ctx, codec, errors) {
+            Some(encode_error::Handler::Python(callback)) => {
+                let escape_prefix = errors == "surrogateescape";
+                return encode_error::encode(ctx, id, codec, callback, escape_prefix);
+            }
+            Some(encode_error::Handler::Builtin(name)) => name,
+            None => errors,
+        }
+    } else {
+        errors
+    };
     if let Ok(text) = ctx.str_value(id) {
-        return Ok(encoder.encode_str(text, errors)?);
+        return encoder
+            .encode_str(text, errors)
+            .map_err(|error| ctx.encode_error(error, id));
     }
     let errors = errors.to_owned();
     match encoder {
@@ -560,13 +615,18 @@ pub(in crate::dynamic) fn encode_text(
             ctx.encode_utf8_codepoints(id, signature, &errors)
         }
         StrEncoder::Registered(codec)
-            if matches!(errors.as_str(), "strict" | "surrogateescape")
-                && !ctx.codec_entries.handlers.contains_key(&errors) =>
+            if matches!(
+                errors.as_str(),
+                "strict" | "surrogateescape" | "surrogatepass"
+            ) =>
         {
             ctx.encode_single_byte_codepoints(id, codec, errors == "surrogateescape")
         }
         StrEncoder::Registered(codec)
-            if matches!(errors.as_str(), "ignore" | "replace" | "backslashreplace") =>
+            if matches!(
+                errors.as_str(),
+                "ignore" | "replace" | "backslashreplace" | "namereplace" | "xmlcharrefreplace"
+            ) =>
         {
             // Apply the built-in handler to lone surrogates, then encode the scalar result.
             let replaced = ctx.encode_utf8_codepoints(id, false, &errors)?;

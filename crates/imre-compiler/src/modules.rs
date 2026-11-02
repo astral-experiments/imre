@@ -230,6 +230,34 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
             "encodings/__init__.py",
             include_str!("../stdlib/encodings/__init__.py"),
         )),
+        "encodings.ascii" => Some((
+            "encodings/ascii.py",
+            include_str!("../stdlib/encodings/writer_ascii.py"),
+        )),
+        "encodings.latin_1" => Some((
+            "encodings/latin_1.py",
+            include_str!("../stdlib/encodings/writer_latin_1.py"),
+        )),
+        "encodings.utf_8" => Some((
+            "encodings/utf_8.py",
+            include_str!("../stdlib/encodings/writer_utf_8.py"),
+        )),
+        "encodings.utf_8_sig" => Some((
+            "encodings/utf_8_sig.py",
+            include_str!("../stdlib/encodings/writer_utf_8_sig.py"),
+        )),
+        "encodings.cp1251" => Some((
+            "encodings/cp1251.py",
+            include_str!("../stdlib/encodings/writer_charmap.py"),
+        )),
+        "encodings.cp424" => Some((
+            "encodings/cp424.py",
+            include_str!("../stdlib/encodings/writer_charmap.py"),
+        )),
+        "encodings.cp437" => Some((
+            "encodings/cp437.py",
+            include_str!("../stdlib/encodings/writer_charmap.py"),
+        )),
         "codeop" => Some(("codeop.py", include_str!("../stdlib/codeop.py"))),
         "keyword" => Some(("keyword.py", KEYWORD_SOURCE)),
         "token" => Some(("token.py", include_str!("../stdlib/token.py"))),
@@ -1260,6 +1288,9 @@ impl IntrinsicModule {
                 Intrinsic::ObjectRuntimeExport("_codecs.unregister")
             }
             (Self::CodecsNative, "lookup") => Intrinsic::ObjectRuntimeExport("_codecs.lookup"),
+            (Self::CodecsNative, "_imre_codec_functions") => {
+                Intrinsic::ObjectRuntimeExport("_codecs._imre_codec_functions")
+            }
             (Self::CodecsNative, "_imre_native_search") => {
                 Intrinsic::ObjectRuntimeExport("_codecs._imre_native_search")
             }
@@ -1990,6 +2021,8 @@ impl IntrinsicModule {
             (Self::Codecs, "IncrementalDecoder") => {
                 Intrinsic::ObjectRuntimeExport("codecs.IncrementalDecoder")
             }
+            (Self::Codecs, "Codec") => Intrinsic::ObjectRuntimeExport("codecs.Codec"),
+            (Self::Codecs, "StreamWriter") => Intrinsic::ObjectRuntimeExport("codecs.StreamWriter"),
             (Self::Codecs, "CodecInfo") => Intrinsic::ObjectRuntimeExport("codecs.CodecInfo"),
             (Self::Threading, "_RLock") => Intrinsic::ObjectRuntimeExport("threading._RLock"),
             (Self::Threading, "_PyRLock") => Intrinsic::ObjectRuntimeExport("threading._PyRLock"),

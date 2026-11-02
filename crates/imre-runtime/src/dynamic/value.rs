@@ -473,7 +473,6 @@ impl Context {
             Value::Poll(_) => "select.poll",
             Value::Count { .. } => "count",
             Value::Repeat(_) => "repeat",
-            Value::CodecInfo { .. } => "CodecInfo",
             Value::Struct { .. } => "Struct",
             Value::NamedFileCloser(_) => "tempfile._TemporaryFileCloser",
             Value::BufferedRandom(..) => "_io.BufferedRandom",
@@ -534,36 +533,46 @@ impl Context {
         error
     }
 
-    /// Keep the decoder's original object and offsets when crossing into boxed Python.
-    pub(super) fn decode_error(&mut self, native: crate::Error) -> Error {
-        let decoded = native.decode_args().map(|args| {
-            let encoding = self.text(args.encoding);
-            let object = self.alloc(Value::Bytes(args.object.to_vec()));
-            let reason = self.text(args.reason);
-            let values = vec![
-                encoding,
-                object,
-                self.int(args.start),
-                self.int(args.end),
-                reason,
-            ];
-            let state = DecodeState {
-                encoding,
-                object,
-                start: args.start,
-                end: args.end,
-                reason,
-            };
-            (self.alloc(Value::Tuple(values)), state)
-        });
+    /// Preserve a native Unicode error's original arguments and its mutable member fields.
+    fn codec_exception(&mut self, native: crate::Error, state: Option<DecodeState>) -> Error {
         let mut error = Error::from(native);
-        if error.kind == "UnicodeDecodeError"
-            && let Some((values, state)) = decoded
+        if matches!(&*error.kind, "UnicodeDecodeError" | "UnicodeEncodeError")
+            && let Some(state) = state
         {
-            error.args = Some(values);
+            let start = self.int(state.start);
+            let end = self.int(state.end);
+            error.args = Some(self.alloc(Value::Tuple(vec![
+                state.encoding,
+                state.object,
+                start,
+                end,
+                state.reason,
+            ])));
             error.decode = Some(Box::new(state));
         }
         error
+    }
+
+    pub(super) fn decode_error(&mut self, native: crate::Error) -> Error {
+        let state = native.decode_args().map(|args| DecodeState {
+            encoding: self.text(args.encoding),
+            object: self.alloc(Value::Bytes(args.object.to_vec())),
+            start: args.start,
+            end: args.end,
+            reason: self.text(args.reason),
+        });
+        self.codec_exception(native, state)
+    }
+
+    pub(super) fn encode_error(&mut self, native: crate::Error, input: Id) -> Error {
+        let state = native.encode_args().map(|args| DecodeState {
+            encoding: self.text(args.encoding),
+            object: input,
+            start: args.start,
+            end: args.end,
+            reason: self.text(args.reason),
+        });
+        self.codec_exception(native, state)
     }
 
     /// A subsequent failure on the same decode updates only the byte range and reason.
@@ -804,13 +813,6 @@ pub(super) enum Value {
         hash: Option<i64>,
     },
     ByteArray(Vec<u8>),
-    CodecInfo {
-        class: Id,
-        encode: Id,
-        entry: crate::objects::CodecInfo,
-        decode: Id,
-        text_encoding_override: Option<Id>,
-    },
     CodecEncoder(crate::objects::Codec),
     CodecDecoder(crate::objects::Codec),
     Hash(super::stdlib::hashlib::digest::SharedHash),
@@ -1274,7 +1276,7 @@ impl Value {
 
     pub(super) fn instance_class(&self) -> Option<Id> {
         match self {
-            Self::Instance { class, .. } | Self::CodecInfo { class, .. } => Some(*class),
+            Self::Instance { class, .. } => Some(*class),
             Self::Class { metaclass, .. } => *metaclass,
             Self::Module { constructor, .. } => *constructor,
             Self::Raised(error) => error.class(),
@@ -1693,16 +1695,6 @@ impl Value {
                 owner, unsupported, ..
             } => visit.extend([*owner, *unsupported]),
             Self::HashMethod { owner, .. } => visit.push(*owner),
-            Self::CodecInfo {
-                class,
-                encode,
-                decode,
-                text_encoding_override,
-                ..
-            } => {
-                visit.extend([*class, *encode, *decode]);
-                visit.extend(*text_encoding_override);
-            }
             Self::RegexScanner {
                 pattern,
                 subject,
