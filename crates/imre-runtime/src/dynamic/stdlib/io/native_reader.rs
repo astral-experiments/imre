@@ -57,21 +57,6 @@ fn validate(owner: &str, name: &str, count: usize, kwargs: &[(String, Id)]) -> R
     Err(Error::new("TypeError", message))
 }
 
-/// A missing or failing raw warning hook must not interrupt flush or close.
-pub(super) fn dealloc_warn(ctx: &mut Context, receiver: Id, source: Id) {
-    let raw = if let Some(buffer) = backing(ctx, receiver)
-        && let Value::File(handle) = ctx.heap.get(buffer)
-        && let BinaryFile::Descriptor(fd) = handle.as_ref()
-    {
-        Some(fd.raw)
-    } else {
-        super::buffered_reader::initialized_raw(ctx, receiver)
-    };
-    if let Some(raw) = raw {
-        let _ = super::text_wrapper::invoke(ctx, raw, "_dealloc_warn", vec![source]);
-    }
-}
-
 /// A warning or flush override can replace the raw, even across backing types.
 pub(super) fn flush_and_close(ctx: &mut Context, receiver: Id) -> Result<Id> {
     let flush = super::text_wrapper::invoke(ctx, receiver, "flush", vec![]);
@@ -122,7 +107,7 @@ pub(super) fn call(
         return Ok(FALSE);
     }
     if name == "_dealloc_warn" {
-        dealloc_warn(ctx, receiver, args[0]);
+        super::buffered_io::dealloc_warn(ctx, receiver, args[0]);
         return Ok(NONE);
     }
     if super::buffered_reader::has_state(ctx, receiver) {
@@ -176,7 +161,7 @@ pub(super) fn call(
             return ctx.lookup_attr(fd.raw, name);
         }
         if receiver != buffer && name == "close" && !fd.closed() {
-            fd.warn_on_reader_close(ctx, receiver)?;
+            fd.warn_on_close(ctx, receiver)?;
             return flush_and_close(ctx, receiver);
         }
         return fd.call(ctx, receiver, name, args, kwargs);

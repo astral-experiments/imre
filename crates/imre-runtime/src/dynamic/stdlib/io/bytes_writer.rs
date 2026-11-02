@@ -432,6 +432,9 @@ impl Writer {
                 self.transfer(ctx, self.raw()?, None)
             }
             "close" => {
+                if ctx.raw_instance_field(receiver, "_finalizing") == Some(TRUE) {
+                    super::buffered_io::dealloc_warn(ctx, receiver, receiver);
+                }
                 // Public flush takes the lock itself and can be overridden.
                 drop(guard);
                 let flushed = invoke(ctx, receiver, "flush", vec![]);

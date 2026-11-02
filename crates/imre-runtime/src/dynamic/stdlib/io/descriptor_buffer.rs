@@ -669,11 +669,11 @@ impl BufferedFd {
         self.handle.live_fd().is_none()
     }
 
-    pub(super) fn warn_on_reader_close(&self, ctx: &mut Context, receiver: Id) -> Result<()> {
+    pub(super) fn warn_on_close(&self, ctx: &mut Context, receiver: Id) -> Result<()> {
         self.check_reentry(ctx)?;
         if ctx.raw_instance_field(receiver, "_finalizing") == Some(TRUE) {
             self.callback_active.set(true);
-            super::native_reader::dealloc_warn(ctx, receiver, receiver);
+            super::buffered_io::dealloc_warn(ctx, receiver, receiver);
             self.callback_active.set(false);
         }
         Ok(())
@@ -683,7 +683,11 @@ impl BufferedFd {
     fn check_reentry(&self, ctx: &Context) -> Result<()> {
         if self.callback_active.get() {
             let name = ctx.raw_instance_field(self.raw, "name");
-            let kind = if self.writing { "BufferedRandom" } else { "BufferedReader" };
+            let kind = match (self.reading, self.writing) {
+                (true, true) => "BufferedRandom",
+                (_, true) => "BufferedWriter",
+                _ => "BufferedReader",
+            };
             let value = name.map_or_else(
                 || format!("<_io.{kind}>"),
                 |id| format!("<_io.{kind} name={}>", ctx.repr(id)),

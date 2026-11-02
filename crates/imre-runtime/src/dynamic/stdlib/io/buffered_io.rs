@@ -106,3 +106,20 @@ pub(super) fn call(
     destination[range.start..range.start + count].copy_from_slice(bytes);
     Ok(ctx.int(count as i64))
 }
+
+/// A missing or failing raw warning hook must not interrupt flush or close.
+pub(super) fn dealloc_warn(ctx: &mut Context, receiver: Id, source: Id) {
+    let raw = if let Some(buffer) = super::descriptor_buffer::backing(ctx, receiver)
+        && let Value::File(handle) = ctx.heap.get(buffer)
+        && let super::super::files::BinaryFile::Descriptor(fd) = handle.as_ref()
+    {
+        Some(fd.raw)
+    } else if let Some(writer) = super::bytes_writer::state(ctx, receiver) {
+        writer.raw.get().filter(|_| writer.ready.get())
+    } else {
+        super::buffered_reader::initialized_raw(ctx, receiver)
+    };
+    if let Some(raw) = raw {
+        let _ = super::text_wrapper::invoke(ctx, raw, "_dealloc_warn", vec![source]);
+    }
+}

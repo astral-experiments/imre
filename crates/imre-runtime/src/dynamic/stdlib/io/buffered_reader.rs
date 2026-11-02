@@ -525,7 +525,7 @@ pub(super) fn call(ctx: &mut Context, receiver: Id, name: &str, args: &[Id]) -> 
                 let closed = ctx.lookup_attr(raw, "closed")?;
                 let closed = ctx.truth(closed)?;
                 if !closed && ctx.raw_instance_field(receiver, "_finalizing") == Some(TRUE) {
-                    super::native_reader::dealloc_warn(ctx, receiver, receiver);
+                    super::buffered_io::dealloc_warn(ctx, receiver, receiver);
                 }
                 Ok(closed)
             })?;
