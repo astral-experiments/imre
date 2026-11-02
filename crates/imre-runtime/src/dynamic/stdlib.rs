@@ -824,6 +824,13 @@ fn urlsafe_input(ctx: &mut Context, text: Id) -> Result<(Id, bool)> {
     Ok((data, false))
 }
 
+fn frame_depth(ctx: &mut Context, value: Id) -> Result<i32> {
+    ctx.index_integer(value)?
+        .to_i64()
+        .and_then(|n| i32::try_from(n).ok())
+        .ok_or_else(|| Error::new("OverflowError", "Python int too large to convert to C int"))
+}
+
 pub(super) fn call(
     ctx: &mut Context,
     name: &str,
@@ -1040,6 +1047,17 @@ pub(super) fn call(
         builtins::update_dict(ctx, dict, args.get(1).copied(), kwargs)?;
         return Ok(if receiver.is_some() { NONE } else { dict });
     }
+    if name == "sys._getframemodulename" {
+        let [depth] =
+            builtins::bind_method_arguments("_getframemodulename", &args[1..], kwargs, ["depth"], 1)?;
+        let depth = match depth {
+            Some(value) => frame_depth(ctx, value)?,
+            None => 0,
+        };
+        let argument = ctx.int(i64::from(depth));
+        audit::event(ctx, name, &[argument])?;
+        return Ok(ctx.heap.caller_module_at(depth.max(0) as usize).unwrap_or(NONE));
+    }
     if name == "sys._getframe" {
         if !kwargs.is_empty() {
             return Err(Error::new(
@@ -1049,13 +1067,7 @@ pub(super) fn call(
         }
         let depth = match &args[1..] {
             [] => 0,
-            [value] => ctx
-                .index_integer(*value)?
-                .to_i64()
-                .and_then(|n| i32::try_from(n).ok())
-                .ok_or_else(|| {
-                    Error::new("OverflowError", "Python int too large to convert to C int")
-                })?,
+            [value] => frame_depth(ctx, *value)?,
             extra => {
                 return Err(Error::new(
                     "TypeError",
