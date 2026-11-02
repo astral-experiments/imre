@@ -555,6 +555,7 @@ pub(super) fn is_descriptor_function(name: &str) -> bool {
             && matches!(
                 name,
                 "copy_file_range"
+                    | "get_terminal_size"
                     | "splice"
                     | "lockf"
                     | "mknod"
@@ -1203,6 +1204,36 @@ pub(super) fn descriptor(
         return Err(Error::new(
             "TypeError",
             format!("posix.{name}() takes no keyword arguments"),
+        ));
+    }
+    #[cfg(target_os = "linux")]
+    if name == "get_terminal_size" {
+        let fd = match args {
+            [] => libc::STDOUT_FILENO,
+            [fd] => c_int(ctx, *fd)?,
+            _ => {
+                return Err(Error::new(
+                    "TypeError",
+                    format!(
+                        "get_terminal_size expected at most 1 argument, got {}",
+                        args.len()
+                    ),
+                ));
+            }
+        };
+        let mut size = std::mem::MaybeUninit::<libc::winsize>::uninit();
+        // SAFETY: TIOCGWINSZ writes a winsize on success. The kernel validates the borrowed fd.
+        if unsafe { libc::ioctl(fd, libc::TIOCGWINSZ, size.as_mut_ptr()) } < 0 {
+            return Err(super::os_error(std::io::Error::last_os_error()));
+        }
+        // SAFETY: the successful ioctl initialized size.
+        let size = unsafe { size.assume_init() };
+        let columns = ctx.int(i64::from(size.ws_col));
+        let lines = ctx.int(i64::from(size.ws_row));
+        return Ok(super::fixed_structseq::record(
+            ctx,
+            super::fixed_structseq::TERMINAL_SIZE,
+            vec![columns, lines],
         ));
     }
     #[cfg(target_os = "linux")]
