@@ -146,6 +146,53 @@ fn should_pack(changed: usize, len: usize, occupied: impl FnOnce() -> usize) -> 
 }
 
 impl Sparse {
+    /// Build a bitmap only when it fits and all exceptions have the same payload.
+    fn to_binary(&self, at: usize, len: usize, row: &[usize]) -> Option<Binary> {
+        let words = len.div_ceil(BLOCK);
+        let descriptor_words = self
+            .pages
+            .values
+            .iter()
+            .map(|page| page.blocks.capacity())
+            .sum::<usize>()
+            .saturating_mul(size_of::<Block>() / size_of::<u64>());
+        let page_words = self
+            .pages
+            .values
+            .capacity()
+            .saturating_mul(size_of::<(usize, Page)>() / size_of::<u64>());
+        if words
+            > self
+                .len
+                .saturating_mul(row.len())
+                .saturating_add(descriptor_words)
+                .saturating_add(page_words)
+        {
+            return None;
+        }
+        if !self.iter(row.len()).all(|(_, old)| old == row) {
+            return None;
+        }
+        let mut bits = Vec::new();
+        let mut value = Vec::new();
+        if bits.try_reserve_exact(words).is_err() || value.try_reserve_exact(row.len()).is_err() {
+            return None;
+        }
+        bits.resize(words, 0);
+        value.extend_from_slice(row);
+        for (i, _) in self.iter(row.len()) {
+            let (block, bit) = position(i);
+            bits[block] |= bit;
+        }
+        let (block, bit) = position(at);
+        bits[block] |= bit;
+        Some(Binary {
+            row: value,
+            bits,
+            changed: self.len + 1,
+        })
+    }
+
     /// Resolve a logical block through a page key and a population count.
     fn block(&self, key: usize) -> Option<&Block> {
         let (key, bit) = position(key);
@@ -427,7 +474,6 @@ impl Overrides {
             }
             Self::Sparse(sparse) => sparse,
         };
-        let words = len.div_ceil(BLOCK);
         if !sparse.len.is_power_of_two()
             || sparse.len <= sparse.last_binary_probe
             || sparse.get(at, row.len()).is_some()
@@ -435,48 +481,10 @@ impl Overrides {
             return false;
         }
         sparse.last_binary_probe = sparse.len;
-        let descriptor_words = sparse
-            .pages
-            .values
-            .iter()
-            .map(|page| page.blocks.capacity())
-            .sum::<usize>()
-            .saturating_mul(size_of::<Block>() / size_of::<u64>());
-        let page_words = sparse
-            .pages
-            .values
-            .capacity()
-            .saturating_mul(size_of::<(usize, Page)>() / size_of::<u64>());
-        if words
-            > sparse
-                .len
-                .saturating_mul(row.len())
-                .saturating_add(descriptor_words)
-                .saturating_add(page_words)
-        {
+        let Some(binary) = sparse.to_binary(at, len, row) else {
             return false;
-        }
-        if !sparse.iter(row.len()).all(|(_, old)| old == row) {
-            return false;
-        }
-        let mut bits = Vec::new();
-        let mut value = Vec::new();
-        if bits.try_reserve_exact(words).is_err() || value.try_reserve_exact(row.len()).is_err() {
-            return false;
-        }
-        bits.resize(words, 0);
-        value.extend_from_slice(row);
-        for (i, _) in sparse.iter(row.len()) {
-            let (block, bit) = position(i);
-            bits[block] |= bit;
-        }
-        let (block, bit) = position(at);
-        bits[block] |= bit;
-        *self = Self::Binary(Binary {
-            row: value,
-            bits,
-            changed: sparse.len + 1,
-        });
+        };
+        *self = Self::Binary(binary);
         true
     }
 
