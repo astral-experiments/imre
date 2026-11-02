@@ -148,6 +148,28 @@ def current():
         print(str(exc))
     else:
         raise AssertionError("invalid timezone accepted")
+    test_calendar_ordering()
+
+
+def test_calendar_ordering():
+    leap = date(2000, 2, 29)
+    assert date(2000, 2, 28) < leap <= date(2000, 2, 29)
+    assert timedelta(microseconds=-1) < timedelta() < timedelta(days=1)
+    naive = dt(2000, 2, 29, 23)
+    assert naive < dt(2000, 3, 1) and naive >= dt(2000, 2, 29, 23, fold=1)
+    offset = timezone(timedelta(hours=2, microseconds=1))
+    local = dt(2000, 3, 1, 1, 0, 0, 1, offset, fold=1)
+    instant = dt(2000, 2, 29, 23, tzinfo=UTC)
+    assert instant <= local <= instant
+    assert dt(2000, 2, 29, 23, 0, 0, 1, UTC) > local
+    for left, right in ((naive, instant), (instant, naive), (leap, naive), (naive, leap),
+                        (offset, UTC), (leap, timedelta())):
+        try:
+            left < right
+        except TypeError as error:
+            print(str(error))
+        else:
+            raise AssertionError("ordered incompatible calendar operands")
 
 
 if __name__ == "__main__":
