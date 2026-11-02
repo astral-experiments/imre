@@ -1591,6 +1591,8 @@ def report(text):
         fixtures = Path(__file__).with_name("fixtures")
         final_fixture = fixtures / "boxed_typing_final.py"
         compare("-IB", final_fixture, native_args=("run", final_fixture, "--runtime-imports", "--quiet"))
+        io_fixture = fixtures / "boxed_io_indirect_import.py"
+        compare("-IB", io_fixture, native_args=("run", io_fixture, "--runtime-imports", "--quiet"))
         builtins_fixture = fixtures / "boxed_builtins_module.py"
         compare("-IB", builtins_fixture, native_args=("run", builtins_fixture, "--runtime-imports", "--quiet"))
         for name in (
@@ -1625,12 +1627,6 @@ def report(text):
             "-IB", "-c",
             "decoder = __import__(''.join(('co', 'decs'))).IncrementalDecoder\n"
             "print(decoder.__module__, decoder('replace').errors, decoder().getstate())",
-        )
-        compare(
-            "-IB", "-c",
-            "from builtins import __import__ as load\n"
-            "mod = load(''.join(('i', 'o')))\n"
-            "print(mod.Reader[bytes].__origin__ is mod.Reader, mod.Writer.__module__)",
         )
         for fixture in (
             "boxed_ast.py",
