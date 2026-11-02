@@ -1894,7 +1894,10 @@ impl Context {
                 && field.is_none()
                 && let Some(member) = member
                 && match self.heap.get(member) {
-                    Value::Native(symbol) => BuiltinDescriptor::lookup(symbol).is_some(),
+                    Value::Native(symbol) => {
+                        !stdlib::datetime::clock_classmethod(symbol)
+                            && BuiltinDescriptor::lookup(symbol).is_some()
+                    }
                     Value::IoMethod {
                         name: "writelines", ..
                     } => true,
