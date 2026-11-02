@@ -588,7 +588,7 @@ pub(crate) enum Intrinsic {
     ModuleType,
     GetSysconfigPath,
     OsPathExists,
-    OsDevnull,
+    StringConstant(&'static str),
     SysExit,
     ShlexSplit,
     ShlexQuote,
@@ -1900,7 +1900,8 @@ impl IntrinsicModule {
             (Self::Os, "fsdecode") => Intrinsic::FsDecode,
             (Self::Os, "fsencode") => Intrinsic::FsEncode,
             (Self::PosixPath, "normcase") => Intrinsic::PosixNormcase,
-            (Self::Os, "devnull") => Intrinsic::OsDevnull,
+            (Self::Os, "devnull") => Intrinsic::StringConstant("/dev/null"),
+            (Self::Os | Self::OsPath | Self::PosixPath, "extsep") => Intrinsic::StringConstant("."),
             (Self::GenericPath | Self::PosixPath, "commonprefix") => {
                 Intrinsic::ObjectRuntimeExport("genericpath.commonprefix")
             }

@@ -1,6 +1,7 @@
 """POSIX lexical operations shared by os.path and posixpath."""
-# os reads this constant while the two modules import each other.
+# os reads these constants while the two modules import each other.
 curdir = "."
+extsep = "."
 
 import os
 from _imre_posixpath import (
