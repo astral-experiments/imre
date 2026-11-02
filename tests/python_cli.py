@@ -2791,6 +2791,7 @@ def report(text):
             "boxed_json_encoder_accelerator.py",
             "boxed_json_quote.py",
             "boxed_deque.py",
+            "boxed_deque_iterator_reduction.py",
             "boxed_deque_deep_equal.py",
             "boxed_deque_cycle_callbacks.py",
             "boxed_deque_mixed_equal.py",

@@ -359,6 +359,7 @@ impl Context {
                     .is_some_and(|members| members.owns(name))
                     || (kind == stdlib::fixed_structseq::SCHED_PARAM
                         && matches!(name, "__reduce__" | "__replace__"))
+                    || (super::deque::iterator_class(kind).is_some() && super::deque::ITERATOR_METHODS.contains(&name))
                     || (kind == "function" && name == "__call__")
                     || (kind == "set" && name == "update")
                     || (matches!(name, "__repr__" | "__reduce__" | "difference" | "intersection" | "issubset" | "union")
@@ -2937,6 +2938,9 @@ impl Context {
                     "__name__" | "__qualname__" => {
                         return Ok(self.text(short.to_owned()));
                     }
+                    "__reduce_ex__" if class == super::deque::CLASS => {
+                        return Ok(self.builtin("object.__reduce_ex__"));
+                    }
                     "__dict__" if class == super::deque::CLASS => {
                         return super::deque::class_dictionary(self, obj);
                     }
@@ -2957,6 +2961,11 @@ impl Context {
                         && super::namedtuple::GETTER_METHODS.contains(&name) =>
                     {
                         return Ok(self.builtin(&format!("{class}.{name}")));
+                    }
+                    _ if super::deque::iterator_class(&class).is_some()
+                        && let Some(member) = self.class_attr(obj, name) =>
+                    {
+                        return Ok(member);
                     }
                     _ if class == super::deque::CLASS && super::deque::owns(name) => {
                         return Ok(self.builtin(&format!("{class}.{name}")));
@@ -3016,6 +3025,12 @@ impl Context {
             },
             Value::DirEntry(ref entry) if name == "name" => return Ok(entry.name),
             Value::DirEntry(ref entry) if name == "path" => return Ok(entry.path),
+            Value::DequeIterator { .. } => {
+                let class = self.exact_type(obj)?;
+                if let Some(member) = self.class_attr(class, name) {
+                    return self.bind_attribute(member, obj, class);
+                }
+            }
             Value::DirEntry(_) if matches!(name, "__new__" | "__reduce__" | "__reduce_ex__") => {
                 let method = self.builtin(&format!("object.{name}"));
                 let class = self.builtin(stdlib::os::scandir::ENTRY);

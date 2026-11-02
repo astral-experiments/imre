@@ -4,6 +4,17 @@ use super::{Context, Error, Id, NONE, Result, Value, builtins};
 pub(super) const CLASS: &str = "collections.deque";
 pub(super) const ITERATOR: &str = "collections._deque_iterator";
 pub(super) const REVERSE_ITERATOR: &str = "collections._deque_reverse_iterator";
+pub(super) const ITERATOR_METHODS: &[&str] =
+    &["__iter__", "__next__", "__length_hint__", "__reduce__"];
+
+pub(super) fn iterator_class(name: &str) -> Option<&'static str> {
+    match name {
+        ITERATOR => Some(ITERATOR),
+        REVERSE_ITERATOR => Some(REVERSE_ITERATOR),
+        _ => None,
+    }
+}
+
 pub(super) struct Member {
     pub(super) name: &'static str,
     pub(super) doc: &'static str,
@@ -20,7 +31,7 @@ impl Member {
     }
 
     pub(super) fn is_method(&self) -> bool {
-        !self.name.starts_with("__") || matches!(self.name, "__copy__" | "__reversed__")
+        !self.name.starts_with("__") || matches!(self.name, "__copy__" | "__reduce__" | "__reversed__")
     }
 }
 
@@ -89,6 +100,11 @@ const MEMBERS: &[Member] = &[
     Member::new(
         "popleft",
         "Remove and return the leftmost element.",
+        "($self, /)",
+    ),
+    Member::new(
+        "__reduce__",
+        "Return state information for pickling.",
         "($self, /)",
     ),
     Member::new(
@@ -172,12 +188,86 @@ impl IndexOp {
 }
 
 /// Capture the current length and generation for a live cursor in either direction.
-pub(super) fn iterator(deque: Id, ring: &crate::objects::DequeRing<Id>, reverse: bool) -> Value {
+pub(super) fn iterator(
+    deque: Id,
+    ring: &crate::objects::DequeRing<Id>,
+    reverse: bool,
+    consumed: usize,
+) -> Value {
     Value::DequeIterator {
         deque,
         state: ring.state,
-        remaining: ring.items.len(),
+        remaining: ring.items.len().saturating_sub(consumed),
         reverse,
+    }
+}
+
+/// The iterator factories parse positional arguments only and skip within the current ring.
+pub(super) fn construct_iterator(ctx: &mut Context, class: &str, args: &[Id]) -> Result<Id> {
+    let ([owner] | [owner, _]) = args else {
+        return Err(Error::new("TypeError", "expected a deque and optional index"));
+    };
+    let storage = ctx.scalar_value(*owner);
+    if !matches!(ctx.heap.get(storage), Value::Deque(_)) {
+        return Err(Error::new(
+            "TypeError",
+            format!("argument 1 must be collections.deque, not {}", ctx.type_name(*owner)),
+        ));
+    }
+    let consumed = match args.get(1) {
+        Some(&index) => {
+            let index = crate::signed_index(&ctx.index_integer(index)?).ok_or_else(|| {
+                Error::new("OverflowError", "Python int too large to convert to C ssize_t")
+            })?;
+            index.max(0) as usize
+        }
+        None => 0,
+    };
+    // The index conversion may have mutated the deque.
+    let Value::Deque(ring) = ctx.heap.get(storage) else {
+        unreachable!()
+    };
+    let cursor = iterator(*owner, ring, class == REVERSE_ITERATOR, consumed);
+    Ok(ctx.alloc(cursor))
+}
+
+pub(super) fn iterator_method(
+    ctx: &mut Context,
+    class: &str,
+    name: &str,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Id> {
+    let Some((&receiver, rest)) = args.split_first() else {
+        return Err(Error::new(
+            "TypeError",
+            format!("unbound method {class}.{name}() needs an argument"),
+        ));
+    };
+    if ctx.heap.get(receiver).intrinsic_type_name() != Some(class) {
+        return Err(Error::new("TypeError", format!("expected a {class} receiver")));
+    }
+    if !rest.is_empty() || !kwargs.is_empty() {
+        return Err(Error::new("TypeError", format!("{class}.{name}() takes no arguments")));
+    }
+    let Value::DequeIterator { deque, remaining, .. } = *ctx.heap.get(receiver) else {
+        unreachable!()
+    };
+    match name {
+        "__iter__" => Ok(receiver),
+        "__next__" => ctx.next_item(receiver)?.ok_or_else(|| Error::new("StopIteration", "")),
+        "__length_hint__" => Ok(ctx.int(remaining as i64)),
+        "__reduce__" => {
+            let Value::Deque(ring) = ctx.heap.get(ctx.scalar_value(deque)) else {
+                unreachable!()
+            };
+            // A mutation can shrink the deque before the cursor notices.
+            let consumed = ctx.int(ring.items.len() as i64 - remaining as i64);
+            let args = ctx.alloc(Value::Tuple(vec![deque, consumed]));
+            let factory = ctx.builtin(class);
+            Ok(ctx.alloc(Value::Tuple(vec![factory, args])))
+        }
+        _ => unreachable!("registered deque iterator method"),
     }
 }
 
@@ -600,6 +690,27 @@ fn remove(ctx: &mut Context, queue: Id, value: Id) -> Result<()> {
     Err(Error::new("ValueError", "deque.remove(x): x not in deque"))
 }
 
+/// Let pickle memoize the empty deque before consuming its items, including self-references.
+fn reduce(ctx: &mut Context, receiver: Id) -> Result<Id> {
+    let getstate = ctx.lookup_attr(receiver, "__getstate__")?;
+    let state = ctx.call(getstate, Vec::new(), Vec::new())?;
+    ctx.heap.keep(state);
+    let items = ctx.iterator(receiver)?;
+    ctx.heap.keep(items);
+    let Value::Deque(ring) = ctx.heap.get(ctx.scalar_value(receiver)) else {
+        unreachable!("validated deque receiver")
+    };
+    let args = if let Some(bound) = ring.maxlen {
+        let empty = ctx.alloc(Value::Tuple(Vec::new()));
+        let bound = ctx.int(bound as i64);
+        ctx.alloc(Value::Tuple(vec![empty, bound]))
+    } else {
+        ctx.alloc(Value::Tuple(Vec::new()))
+    };
+    let class = ctx.exact_type(receiver)?;
+    Ok(ctx.alloc(Value::Tuple(vec![class, args, state, items])))
+}
+
 pub(super) fn method(
     ctx: &mut Context,
     name: &str,
@@ -763,6 +874,7 @@ pub(super) fn method(
         ));
     }
     match name {
+        "__reduce__" => reduce(ctx, receiver),
         "clear" => {
             builtins::clear_container(ctx, storage);
             Ok(NONE)
@@ -800,7 +912,7 @@ pub(super) fn method(
             Ok(NONE)
         }
         "__iter__" | "__reversed__" => {
-            let iter = iterator(receiver, ring, name == "__reversed__");
+            let iter = iterator(receiver, ring, name == "__reversed__", 0);
             Ok(ctx.alloc(iter))
         }
         "pop" | "popleft" => {

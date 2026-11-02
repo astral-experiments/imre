@@ -44,6 +44,15 @@ def current():
     queue = deque((item for item in (marker, "middle", 3)))
     assert type(queue) is deque and isinstance(queue, deque)
     assert deque.__module__ == "collections"
+    assert deque.__reduce_ex__ is object.__reduce_ex__
+    for limit, expected_args in ((None, ()), (0, ((), 0)), (2, ((), 2))):
+        original = deque((None, 3), maxlen=limit)
+        for reduce in (original.__reduce__, lambda: original.__reduce_ex__(5)):
+            cls, args, state, items = reduce()
+            assert cls is deque and args == expected_args and state is None
+            if original:
+                original[0] = marker
+            assert list(items) == list(original)
     namespace = deque.__dict__
     assert type(namespace) is MappingProxyType and namespace is not deque.__dict__
     assert "__name__" not in namespace and "__str__" not in namespace
