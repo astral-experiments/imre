@@ -417,7 +417,7 @@ fn argument_count(owner: &str, name: &str, n: usize) -> Result<()> {
 }
 
 /// IOBase consumes the receiver's actual iterator and each writer override.
-fn lines(
+pub(super) fn lines(
     ctx: &mut Context,
     receiver: Id,
     name: &str,

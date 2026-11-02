@@ -283,20 +283,7 @@ pub(super) fn call(
         return Err(Error::new("TypeError", "expected a file"));
     };
     if name == "file.readlines" {
-        let hint = read_length(ctx, args.get(1).copied())?;
-        let iterator = ctx.iterator(first)?;
-        let mut lines = Vec::new();
-        let mut size = 0;
-        while let Some(line) = ctx.next_item(iterator)? {
-            lines.push(line);
-            if hint > 0 {
-                size += ctx.bytes_like(line)?.len();
-                if size > hint as usize {
-                    break;
-                }
-            }
-        }
-        return Ok(ctx.alloc(Value::List(lines)));
+        return super::io::lines(ctx, first, "readlines", &args[1..], kwargs);
     }
     let handle = handle.clone();
     let (slot, socket) = match handle.as_ref() {
