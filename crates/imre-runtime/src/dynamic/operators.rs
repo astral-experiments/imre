@@ -3797,6 +3797,74 @@ impl Context {
         Ok((result != value::NOT_IMPLEMENTED).then_some(result))
     }
 
+    /// Try divmod's numeric slots in order, including the inherited slot of integer subclasses.
+    pub(super) fn divmod(&mut self, a: Id, b: Id) -> Result<Id> {
+        let class = |value| {
+            self.heap.get(value).instance_class().or_else(|| {
+                self.builtin_type_name(value)
+                    .and_then(|name| self.builtins.get(name).copied())
+            })
+        };
+        let (left, right) = (class(a), class(b));
+        let python_slot = |value| {
+            self.slot(value, "__divmod__").is_some() || self.slot(value, "__rdivmod__").is_some()
+        };
+        let reflected_first = match (left, right) {
+            (Some(left), Some(right))
+                if left != right && self.direct_subclass(right, left) && python_slot(b) =>
+            {
+                !python_slot(a) || self.reflected_divmod_overridden(left, right)?
+            }
+            _ => false,
+        };
+        for reflected in [reflected_first, !reflected_first] {
+            if reflected && left == right {
+                continue;
+            }
+            let (receiver, hook, other) = if reflected {
+                (b, "__rdivmod__", a)
+            } else {
+                (a, "__divmod__", b)
+            };
+            if self.slot(receiver, hook).is_some() {
+                if let Some(result) = self.operator_slot(receiver, hook, other)? {
+                    return Ok(result);
+                }
+            } else if let (Ok(x), Ok(y)) = (self.as_int(a), self.as_int(b)) {
+                let quotient = self.alloc(Value::Int(crate::integer_binary(&x, &y, 3)?));
+                let remainder = self.alloc(Value::Int(crate::integer_binary(&x, &y, 4)?));
+                return Ok(self.alloc(Value::Tuple(vec![quotient, remainder])));
+            }
+        }
+        Err(Error::new(
+            "TypeError",
+            format!(
+                "unsupported operand type(s) for divmod(): '{}' and '{}'",
+                self.type_name(a),
+                self.type_name(b)
+            ),
+        ))
+    }
+
+    /// Compare the attributes on the two classes after applying descriptor binding.
+    fn reflected_divmod_overridden(&mut self, left: Id, right: Id) -> Result<bool> {
+        let right = match self.lookup_attr(right, "__rdivmod__") {
+            Ok(slot) => slot,
+            Err(error) if self.is_attribute_error(&error) => return Ok(false),
+            Err(error) => return Err(error),
+        };
+        let left = match self.lookup_attr(left, "__rdivmod__") {
+            Ok(slot) => slot,
+            Err(error) if self.is_attribute_error(&error) => return Ok(true),
+            Err(error) => return Err(error),
+        };
+        if left == right {
+            return Ok(false);
+        }
+        let different = self.binary("!=", left, right)?;
+        self.truth(different)
+    }
+
     /// Call a container subclass override or its inherited native comparison.
     fn container_compare_slot(
         &mut self,

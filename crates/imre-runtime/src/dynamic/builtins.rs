@@ -1214,16 +1214,7 @@ pub(super) fn call(
                     args.len()
                 )));
             };
-            let (Ok(left), Ok(right)) = (ctx.as_int(*a), ctx.as_int(*b)) else {
-                return Err(type_error(format!(
-                    "unsupported operand type(s) for divmod(): '{}' and '{}'",
-                    ctx.type_name(*a),
-                    ctx.type_name(*b)
-                )));
-            };
-            let quotient = ctx.alloc(Value::Int(crate::integer_binary(&left, &right, 3)?));
-            let remainder = ctx.alloc(Value::Int(crate::integer_binary(&left, &right, 4)?));
-            Ok(ctx.alloc(Value::Tuple(vec![quotient, remainder])))
+            ctx.divmod(*a, *b)
         }
         "hash" => {
             positional(name, kwargs)?;
