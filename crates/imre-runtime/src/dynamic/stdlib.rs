@@ -1606,12 +1606,13 @@ pub(super) fn call(
             ("field_identifier", [_], []) => {
                 return inspect::call(ctx, "_signature_identifier", args, kwargs);
             }
-            ("make_type", [name, members], []) => {
+            ("make_type", [name, bases, members], []) => {
                 let name = ctx.str_value(*name)?.to_owned();
                 if name.contains('\0') {
                     return Err(Error::new("ValueError", "type name must not contain null characters"));
                 }
-                return ctx.dataclass_from_namespace(name, *members, "types", false, true);
+                let bases = ctx.tuple_items(*bases)?.ok_or_else(|| Error::new("TypeError", "expected a tuple of bases"))?;
+                return ctx.dataclass_from_namespace(name, bases, *members, "types", false, true);
             }
             ("is_defaultdict", [obj], []) => {
                 // Boxed defaultdict exposes its factory on instances, including derived instances.

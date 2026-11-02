@@ -604,8 +604,6 @@ def make_dataclass(cls_name, fields, *, bases=(), namespace=None, init=True,
         raise NotImplementedError('implicit Any fields require deferred typing.Any resolution')
     if not isinstance(bases, tuple):
         raise TypeError('type.__new__() argument 2 must be tuple, not ' + type(bases).__name__)
-    if bases and (len(bases) != 1 or bases[0] is not object):
-        raise NotImplementedError('boxed make_dataclass requires ordinary object-root classes')
 
     members = {}
     if namespace is not None:
@@ -626,7 +624,7 @@ def make_dataclass(cls_name, fields, *, bases=(), namespace=None, init=True,
             members[key] = classmethod(value)
     if isinstance(members.get('__new__'), FunctionType):
         members['__new__'] = staticmethod(members['__new__'])
-    cls = _make_type(cls_name, members)
+    cls = _make_type(cls_name, bases, members)
 
     def annotate(format):
         # The field types are already values. Rendering strings requires annotationlib.
