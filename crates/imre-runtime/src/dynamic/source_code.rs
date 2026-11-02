@@ -1081,7 +1081,8 @@ impl Program {
             } else {
                 "<genexpr>"
             };
-            let mut child = self.nested_program(name);
+            let mut child = Self::new(self.filename.clone(), name, self.has_named_bindings);
+            child.strip_docstrings = self.strip_docstrings;
             child.qualname =
                 Self::qualified_name(&self.qualname, self.class_attributes.is_some(), name);
             child.method_imports = self.method_imports.clone();
