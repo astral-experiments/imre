@@ -1,5 +1,96 @@
 use super::{Context, Error, Id, Result, Value};
 
+/// The input's iterator is released on exhaustion. Only yielded objects enter the replay buffer.
+#[derive(Clone)]
+pub(in crate::dynamic) struct Cycle {
+    source: Option<Id>,
+    saved: Vec<Id>,
+    index: usize,
+}
+
+impl Cycle {
+    pub(in crate::dynamic) fn children(&self, visit: &mut crate::dynamic::value::MarkQueue<'_>) {
+        visit.extend(self.source);
+        visit.extend(&self.saved);
+    }
+}
+
+pub(super) fn cycle_allocate(
+    ctx: &mut Context,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Id> {
+    let [base, class, iterable] = args else {
+        return Err(Error::new(
+            "TypeError",
+            "invalid cycle allocation arguments",
+        ));
+    };
+    if !kwargs.is_empty()
+        || !matches!(ctx.heap.get(*class), Value::Class { ancestors, .. }
+        if *class == *base || ancestors.contains(base))
+    {
+        return Err(Error::new("TypeError", "expected a cycle subclass"));
+    }
+    let source = ctx.iterator(*iterable)?;
+    ctx.heap.keep(source);
+    let result = ctx.instance(*class, None);
+    let Value::Instance { cycle, .. } = ctx.heap.get_mut(result) else {
+        unreachable!("fresh cycle instance")
+    };
+    *cycle = Some(Box::new(Cycle {
+        source: Some(source),
+        saved: Vec::new(),
+        index: 0,
+    }));
+    Ok(result)
+}
+
+pub(super) fn cycle_next(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    let [receiver] = args else {
+        return Err(Error::new("TypeError", "expected a cycle instance"));
+    };
+    let Value::Instance {
+        cycle: Some(state), ..
+    } = ctx.heap.get(*receiver)
+    else {
+        return Err(Error::new("TypeError", "expected a cycle instance"));
+    };
+    if !kwargs.is_empty() {
+        return Err(Error::new(
+            "TypeError",
+            "cycle.__next__() takes no keyword arguments",
+        ));
+    }
+    // Advancing the source can call Python and reenter this same cycle.
+    let item = match state.source {
+        Some(source) => ctx.next_item(source)?,
+        None => None,
+    };
+    let Value::Instance {
+        cycle: Some(state), ..
+    } = ctx.heap.get_mut(*receiver)
+    else {
+        unreachable!("live cycle instance")
+    };
+    if let Some(item) = item {
+        state
+            .saved
+            .try_reserve(1)
+            .map_err(|_| crate::Error::allocation())?;
+        state.saved.push(item);
+        return Ok(item);
+    }
+    state.source = None;
+    let item = state
+        .saved
+        .get(state.index)
+        .copied()
+        .ok_or_else(|| Error::new("StopIteration", ""))?;
+    state.index = (state.index + 1) % state.saved.len();
+    Ok(item)
+}
+
 /// Build the shared repeat cursor, converting a supplied count exactly once.
 pub(super) fn repeat(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
     let missing = || {

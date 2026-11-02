@@ -83,7 +83,31 @@ def test_time_of_day():
     print(str(midnight), repr(clock), str(clock), str(combined))
 
 
+def test_now():
+    from time import time as timestamp
+
+    now = dt.now
+    east = timezone(timedelta(hours=5, minutes=30))
+    for args, kwargs, zone in (((), {}, None), ((None,), {}, None),
+                               ((UTC,), {}, UTC), ((), {"tz": east}, east)):
+        before = int(timestamp())
+        stamp = now(*args, **kwargs)
+        after = int(timestamp())
+        assert type(stamp) is dt and stamp.tzinfo is zone
+        assert 0 <= stamp.microsecond < 1000000
+        assert any(stamp.timetuple() == dt.fromtimestamp(sec, zone).timetuple()
+                   for sec in range(before, after + 1))
+    for args, kwargs in (((1,), {}), ((None, None), {}), ((), {"foo": 1}), ((None,), {"tz": None})):
+        try:
+            now(*args, **kwargs)
+        except TypeError as exc:
+            print(str(exc))
+        else:
+            raise AssertionError("invalid now() arguments accepted")
+
+
 def current():
+    test_now()
     test_time_of_day()
     test_http_date()
     test_cookie_timestamp()

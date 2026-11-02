@@ -456,7 +456,7 @@ impl Context {
             Value::CodecInfo { .. } => "CodecInfo",
             Value::Struct { .. } => "Struct",
             Value::NamedFileCloser(_) => "tempfile._TemporaryFileCloser",
-            Value::BufferedRandom(_) => "_io.BufferedRandom",
+            Value::BufferedRandom(..) => "_io.BufferedRandom",
             Value::NamedTuple {
                 class: Some(class), ..
             } => class,
@@ -840,6 +840,7 @@ pub(super) enum Value {
         scalar: Option<Id>,
         property: Option<Box<super::property::Property>>,
         weak_reference: Option<Box<super::weakref::Reference>>,
+        cycle: Option<Box<super::stdlib::itertools::Cycle>>,
         memory_stream: Option<super::stdlib::io::MemoryStream>,
     },
     Native(String),
@@ -980,7 +981,10 @@ pub(super) enum Value {
     },
     RegexPattern(std::rc::Rc<super::stdlib::regex::Pattern>),
     NamedFileCloser(crate::Shared<std::cell::RefCell<super::stdlib::tempfile::NamedCloser>>),
-    BufferedRandom(crate::Shared<std::cell::RefCell<crate::objects::FileState>>),
+    BufferedRandom(
+        crate::Shared<std::cell::RefCell<crate::objects::FileState>>,
+        Id,
+    ),
     RegexMatch(std::rc::Rc<super::stdlib::regex::Match>),
     Context(std::rc::Rc<HashMap<Id, Id>>),
     ContextVar {
@@ -1038,7 +1042,7 @@ impl Value {
                 super::stdlib::BinaryFile::Descriptor(fd) if fd.reading => "_io.BufferedReader",
                 super::stdlib::BinaryFile::Descriptor(_) => "_io.BufferedWriter",
                 super::stdlib::BinaryFile::Reader { .. } => "_io.BufferedReader",
-                super::stdlib::BinaryFile::Writer(_) => "_io.BufferedWriter",
+                super::stdlib::BinaryFile::Writer { .. } => "_io.BufferedWriter",
             },
             Self::TextFile(_) => "_io.TextIOWrapper",
             Self::SequenceIterator { .. } => "iterator",
@@ -1375,6 +1379,7 @@ impl Value {
                 dictionary,
                 scalar,
                 weak_reference,
+                cycle,
                 memory_stream,
                 property,
             } => {
@@ -1383,6 +1388,9 @@ impl Value {
                 }
                 if let Some(reference) = weak_reference {
                     visit.push(reference.callback);
+                }
+                if let Some(cycle) = cycle {
+                    cycle.children(visit);
                 }
                 match memory_stream {
                     Some(super::stdlib::io::MemoryStream::Bytes(stream)) => {
@@ -1458,6 +1466,8 @@ impl Value {
             Self::File(file) => {
                 if let super::stdlib::BinaryFile::Descriptor(fd) = file.as_ref() {
                     visit.push(fd.raw);
+                } else if let Some((path, _)) = file.path_metadata() {
+                    visit.push(path);
                 }
             }
             Self::None
@@ -1489,8 +1499,8 @@ impl Value {
             | Self::PartialPlaceholder
             | Self::TokenMissing
             | Self::TextFile(_)
-            | Self::NamedFileCloser(_)
-            | Self::BufferedRandom(_) => {}
+            | Self::NamedFileCloser(_) => {}
+            Self::BufferedRandom(_, name) => visit.push(*name),
         }
     }
 }
@@ -2516,6 +2526,10 @@ impl Heap {
         })
     }
 
+    pub fn current_code(&self) -> Id {
+        self.frames.last().unwrap().code
+    }
+
     pub fn current_scope(&self) -> Id {
         self.frames.last().unwrap().scope
     }
@@ -2803,14 +2817,26 @@ impl Heap {
         let active = self.caught_exception(caught);
         let frame = self.frames.last_mut().unwrap();
         frame.active = active;
-        if let Some(id) = frame.object
-            && let Some(Value::PythonFrame { lineno, .. }) = &mut self.slots[id as usize].value
-        {
-            *lineno = location.line;
-        }
+        let line = location.line;
         frame.location = Some(location);
         frame.live.clear();
         frame.live.extend(live);
+        self.set_statement_line(line);
+    }
+
+    /// A match statement can execute separate pattern and guard expressions in one step.
+    pub(super) fn set_statement_line(&mut self, line: u32) {
+        let frame = self.frames.last_mut().unwrap();
+        frame
+            .location
+            .as_mut()
+            .expect("active source location")
+            .line = line;
+        if let Some(id) = frame.object
+            && let Some(Value::PythonFrame { lineno, .. }) = &mut self.slots[id as usize].value
+        {
+            *lineno = line;
+        }
     }
 
     /// A discarded owner or the allocation threshold has requested a sweep.

@@ -5,10 +5,10 @@ use std::path::{Path, PathBuf};
 use regex_syntax::hir::{Class, HirKind};
 
 /// Use the same pinned Unicode version as the runtime's regex engine.
-fn write_alnum_table(out_dir: &Path) {
+fn write_class_table(out_dir: &Path, file: &str, pattern: &str) {
     let hir = regex_syntax::Parser::new()
-        .parse(r"[\p{L}\p{N}]")
-        .expect("valid Unicode alphanumeric class");
+        .parse(pattern)
+        .expect("valid Unicode class");
     let HirKind::Class(Class::Unicode(class)) = hir.kind() else {
         panic!("expected a Unicode character class");
     };
@@ -23,12 +23,13 @@ fn write_alnum_table(out_dir: &Path) {
         .unwrap();
     }
     table.push_str("]\n");
-    std::fs::write(out_dir.join("unicode_alnum.rs"), table).unwrap();
+    std::fs::write(out_dir.join(file), table).unwrap();
 }
 
 fn main() {
     let out_dir = PathBuf::from(std::env::var_os("OUT_DIR").unwrap());
-    write_alnum_table(&out_dir);
+    write_class_table(&out_dir, "unicode_alnum.rs", r"[\p{L}\p{N}]");
+    write_class_table(&out_dir, "unicode_alpha.rs", r"\p{L}");
     const SYMBOLS: &str = include_str!("native/errno-symbols.txt");
     println!("cargo:rerun-if-changed=native/errno-symbols.txt");
     let mut c = String::from(

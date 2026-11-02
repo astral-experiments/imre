@@ -39,9 +39,11 @@ pub(super) fn module_function(symbol: &str) -> Option<(&str, &str)> {
             Some(("_functools", function))
         }
         "_thread" if matches!(function, "allocate" | "allocate_lock") => Some((module, function)),
+        #[cfg(target_os = "linux")]
+        "_signal" if function == "sigpending" => Some((module, function)),
         "_contextvars" if function == "copy_context" => Some((module, function)),
         "_io" if function == "text_encoding" => Some((module, function)),
-        "zlib" if function == "adler32" => Some((module, function)),
+        "zlib" if matches!(function, "adler32" | "crc32") => Some((module, function)),
         "hashlib"
             if matches!(function, "new" | "file_digest")
                 || crate::objects::HashState::algorithms().any(|name| name == function) =>
@@ -1814,6 +1816,9 @@ impl Context {
                 match name {
                     "__name__" | "__qualname__" => return Ok(self.text(function.to_owned())),
                     "__module__" => return Ok(self.text(module.to_owned())),
+                    "__doc__" if symbol == "_signal.sigpending" => {
+                        return Ok(self.text("Examine pending signals.\n\nReturns a set of signal numbers that are pending for delivery to\nthe calling thread."));
+                    }
                     "__doc__" if symbol == "_thread.allocate" => {
                         return Ok(self.text("An obsolete synonym of allocate_lock()."));
                     }
@@ -1879,6 +1884,7 @@ impl Context {
                         if matches!(
                             symbol.as_str(),
                             "posix.getpid"
+                                | "_signal.sigpending"
                                 | "_thread.allocate"
                                 | "_thread.allocate_lock"
                                 | "_thread._count"
@@ -2097,6 +2103,7 @@ impl Context {
                 return stdlib::datetime::attribute(self, obj, &value.clone(), tzinfo, name);
             }
             Value::Native(ref class) if class == stdlib::os::stat::CLASS => match name {
+                "__reduce__" => return Ok(self.builtin("os.stat_result.__reduce__")),
                 field if let Some(id) = stdlib::os::stat::member(self, field) => return Ok(id),
                 "__module__" => return Ok(self.text("os")),
                 "__name__" | "__qualname__" => return Ok(self.text("stat_result")),
@@ -2114,7 +2121,8 @@ impl Context {
                 _ => {}
             },
             Value::Native(ref class)
-                if class == "datetime.datetime" && matches!(name, "fromtimestamp" | "combine") =>
+                if class == "datetime.datetime"
+                    && matches!(name, "now" | "fromtimestamp" | "combine") =>
             {
                 return Ok(self.builtin(&format!("datetime.datetime.{name}")));
             }
@@ -2390,6 +2398,16 @@ impl Context {
                 };
             }
             Value::File(ref handle)
+                if matches!(name, "name" | "mode")
+                    && let Some((path, mode)) = handle.path_metadata() =>
+            {
+                return Ok(if name == "name" {
+                    path
+                } else {
+                    self.text(mode)
+                });
+            }
+            Value::File(ref handle)
                 if name == "name"
                     && let Some(fd) = handle.socket_reader_name() =>
             {
@@ -2407,7 +2425,9 @@ impl Context {
             Value::Socket(ref socket) if name == "type" => {
                 return Ok(self.int(i64::from(crate::objects::socket::kind(socket))));
             }
-            Value::BufferedRandom(ref file) if name == "closed" => {
+            Value::BufferedRandom(_, file_name) if name == "name" => return Ok(file_name),
+            Value::BufferedRandom(..) if name == "mode" => return Ok(self.text("rb+")),
+            Value::BufferedRandom(ref file, _) if name == "closed" => {
                 return Ok(if file.borrow().closed() { TRUE } else { FALSE });
             }
             Value::TextFile(ref file) if name == "closed" => {
@@ -3948,6 +3968,7 @@ impl Context {
             dictionary,
             property,
             weak_reference: None,
+            cycle: None,
             memory_stream: None,
             fields: Default::default(),
             scalar: None,
@@ -4072,6 +4093,7 @@ impl Context {
             dictionary: None,
             property: None,
             weak_reference: None,
+            cycle: None,
             memory_stream: None,
         }))
     }
@@ -4118,6 +4140,7 @@ impl Context {
             scalar: Some(text),
             property: None,
             weak_reference: None,
+            cycle: None,
             memory_stream: None,
         }))
     }

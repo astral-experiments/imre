@@ -37,6 +37,8 @@ pub(in super::super) fn install_lowlevel_socket(ctx: &mut Context, scope: Id) ->
         let value = ctx.int(i64::from(value));
         ctx.bind(scope, name, value);
     }
+    let socket_type = attribute(ctx, "socket")?;
+    ctx.bind(scope, "SocketType", socket_type);
     for name in ["has_ipv6", "socket", "close", "error"] {
         let value = attribute(ctx, name)?;
         ctx.bind(scope, name, value);
@@ -409,7 +411,7 @@ pub(super) fn call(
             ));
         }
         let reader = super::ReadSource::Socket(native::SocketInput::try_new(s)?);
-        return Ok(ctx.alloc(super::BinaryFile::reader(reader).into_value()?));
+        return Ok(ctx.alloc(super::BinaryFile::reader(reader, None).into_value()?));
     }
     let max = match method {
         "bind" | "connect" | "listen" | "setblocking" | "shutdown" => 1,

@@ -525,6 +525,7 @@ pub(super) fn allocate(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) 
         dictionary: None,
         property: None,
         weak_reference: None,
+        cycle: None,
         memory_stream: None,
     }))
 }
@@ -555,6 +556,7 @@ pub(super) fn make(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> R
         scalar: None,
         property: None,
         weak_reference: None,
+        cycle: None,
         memory_stream: None,
     }))
 }

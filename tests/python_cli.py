@@ -777,6 +777,35 @@ def check_class_metadata_allocation(imre, run, flags):
 
 
 
+def check_pending_signals(imre, root, env):
+    import signal
+
+    fixture = Path(__file__).resolve().with_name("fixtures") / "boxed_signal_pending.py"
+    native = root / "signal-pending"
+    subprocess.run([imre, "build", fixture, "--runtime-imports", "-o", native], check=True, env=env)
+    for delivered, expected in (
+        (0, 0),
+        (signal.SIGUSR1, signal.SIGUSR1),
+        (signal.SIGUSR2, signal.SIGUSR2),
+        (signal.SIGRTMIN + 1, signal.SIGRTMIN + 1),
+        (signal.SIGUSR2, signal.SIGUSR1),
+    ):
+        def queue_before_exec():
+            if delivered:
+                signal.pthread_sigmask(signal.SIG_BLOCK, {delivered})
+                os.kill(os.getpid(), delivered)
+
+        result = subprocess.run(
+            [native, str(int(expected))], env=env, capture_output=True,
+            preexec_fn=queue_before_exec, timeout=30,
+        )
+        if delivered == expected:
+            assert result.returncode == 0 and result.stderr == b"", result
+            assert result.stdout == f"verified pending signals {int(expected)}\n".encode(), result
+        else:
+            assert result.returncode == 1 and b"unexpected pending signals" in result.stderr, result
+
+
 def check_marshal_allocation(exe):
     import resource
     import select
@@ -889,6 +918,7 @@ def main():
             )
 
         if sys.platform.startswith("linux"):
+            check_pending_signals(imre, root, env)
             marked_call_flags = marked_call_refusal_flags(root)
             check_bound_method_allocation(imre, run, marked_call_flags)
             check_ffi_result_roots(imre, root, run)
@@ -1587,6 +1617,7 @@ def report(text):
             "boxed_bytes_octal.py",
             "boxed_contextvars.py",
             "boxed_temporary_file.py",
+            "boxed_spooled_temporary_file.py",
             "boxed_named_temporary_file.py",
             "boxed_random.py",
             "boxed_secrets.py",
@@ -1620,6 +1651,7 @@ def report(text):
             "boxed_re_split.py",
             "boxed_re_findall_empty.py",
             "boxed_re_scanner.py",
+            "boxed_re_escape.py",
             "boxed_datetime.py",
             "boxed_dataclasses.py",
             "boxed_dataclass_init_annotations.py",
@@ -1632,6 +1664,7 @@ def report(text):
             "boxed_selector_wide_fds.py",
             "boxed_pipe_flags.py",
             "boxed_os_file_descriptors.py",
+            "boxed_os_descriptor_io.py",
             "boxed_os_stat.py",
             "boxed_os_terminal_size.py",
             "boxed_os_makedirs.py",
@@ -1641,6 +1674,7 @@ def report(text):
             "boxed_descriptors.py",
             "boxed_exception_repr.py",
             "boxed_warning_categories.py",
+            "boxed_warnings.py",
             "boxed_oserror.py",
             "boxed_type_identity.py",
             "boxed_singleton_types.py",
@@ -1709,6 +1743,7 @@ def report(text):
             "boxed_with_lookup.py",
             "boxed_itertools_repeat.py",
             "boxed_itertools_chain.py",
+            "boxed_itertools_cycle.py",
             "boxed_itertools_combinations.py",
             "boxed_itertools_permutations.py",
             "boxed_itertools_product.py",

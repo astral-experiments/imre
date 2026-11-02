@@ -47,6 +47,8 @@ pub(super) mod readiness;
 pub(super) mod regex;
 mod secrets;
 mod select;
+#[cfg(target_os = "linux")]
+pub(super) mod signal;
 mod socket;
 mod structure;
 mod traceback;
@@ -74,13 +76,17 @@ pub(super) fn jit_module(ctx: &mut Context) -> Result<Id> {
 }
 
 pub(super) fn is_module(name: &str) -> bool {
-    matches!(name, "builtins" | "errno" | "genericpath") || has_lazy_attributes(name)
+    matches!(name, "builtins" | "errno" | "genericpath")
+        || (cfg!(target_os = "linux") && matches!(name, "_signal" | "_imre_signal"))
+        || has_lazy_attributes(name)
 }
 
 /// These providers synthesize attributes on lookup. Their module dictionaries
 /// alone do not enumerate their exports.
 pub(super) fn has_lazy_attributes(name: &str) -> bool {
-    if cfg!(unix) && matches!(name, "zipimport" | "_imre_zipimport" | "_signal") {
+    if cfg!(unix) && matches!(name, "zipimport" | "_imre_zipimport")
+        || cfg!(all(unix, not(target_os = "linux"))) && name == "_signal"
+    {
         return true;
     }
     matches!(
@@ -267,6 +273,7 @@ fn instance(ctx: &mut Context, type_name: &str, fields: &[(&str, Id)]) -> Id {
         scalar: None,
         property: None,
         weak_reference: None,
+        cycle: None,
         memory_stream: None,
         fields: fields
             .iter()
@@ -368,13 +375,13 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         return Ok(ctx.int(i64::from(value)));
     }
     let id = match (module, name) {
-        #[cfg(unix)]
+        #[cfg(all(unix, not(target_os = "linux")))]
         ("_signal", "SIGINT") => ctx.int(i64::from(libc::SIGINT)),
-        #[cfg(unix)]
+        #[cfg(all(unix, not(target_os = "linux")))]
         ("_signal", "SIGALRM") => ctx.int(i64::from(libc::SIGALRM)),
-        #[cfg(unix)]
+        #[cfg(all(unix, not(target_os = "linux")))]
         ("_signal", "SIGTERM") => ctx.int(i64::from(libc::SIGTERM)),
-        #[cfg(unix)]
+        #[cfg(all(unix, not(target_os = "linux")))]
         ("_signal", "alarm") => ctx.builtin("_signal.alarm"),
         ("io" | "_io", "open_code") => ctx.builtin("io.open_code"),
         ("math", "trunc" | "floor" | "ceil" | "modf") => ctx.builtin(&format!("math.{name}")),
@@ -390,7 +397,9 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             | "finish_named" | "keep_named",
         ) => ctx.builtin(&format!("{module}.{name}")),
         ("locale" | "_locale", "getencoding") => ctx.builtin("_locale.getencoding"),
-        ("tempfile", "TemporaryFile") => ctx.builtin("tempfile.TemporaryFile"),
+        ("tempfile", "TemporaryFile") | ("_imre_tempfile", "open_file") => {
+            ctx.builtin("tempfile.TemporaryFile")
+        }
         ("unicodedata", "normalize") => ctx.builtin("unicodedata.normalize"),
         (
             "_imp",
@@ -439,6 +448,9 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("types", "CodeType") => ctx.builtin("code"),
         ("itertools", "count") => ctx.builtin("itertools.count"),
         ("itertools", "repeat") => ctx.builtin("itertools.repeat"),
+        ("itertools", "_cycle_allocate" | "_cycle_next") => {
+            ctx.builtin(&format!("itertools.{name}"))
+        }
         ("itertools", "_chain_allocate") => ctx.builtin("itertools._chain_allocate"),
         ("itertools", "_chain_get" | "_chain_set") => ctx.builtin(&format!("itertools.{name}")),
         (
@@ -491,7 +503,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         (
             "time",
             "time" | "monotonic" | "perf_counter" | "gmtime" | "localtime" | "mktime" | "strftime"
-            | "struct_time",
+            | "ctime" | "struct_time",
         ) => ctx.builtin(&format!("time.{name}")),
         ("datetime", "datetime" | "date" | "time" | "timedelta" | "timezone") => {
             ctx.builtin(&format!("datetime.{name}"))
@@ -522,7 +534,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             let items = options.into_iter().map(|option| ctx.text(option)).collect();
             ctx.alloc(Value::List(items))
         }
-        ("zlib", "adler32") => ctx.builtin("zlib.adler32"),
+        ("zlib", "adler32" | "crc32") => ctx.builtin(&format!("zlib.{name}")),
         (
             "binascii",
             "Error" | "Incomplete" | "a2b_base64" | "b2a_base64" | "a2b_hex" | "unhexlify",
@@ -847,6 +859,10 @@ pub(super) fn call(
     }
     if super::lowlevel_threads::function_name(name).is_some() {
         return super::lowlevel_threads::call(ctx, name, args, kwargs);
+    }
+    #[cfg(target_os = "linux")]
+    if matches!(name, "_signal.sigpending" | "_imre_signal.make_signals") {
+        return signal::call(ctx, name, args, kwargs);
     }
     if name == "_thread.get_ident"
         || (cfg!(any(target_os = "linux", target_os = "macos")) && name == "_thread.get_native_id")
@@ -1291,8 +1307,8 @@ pub(super) fn call(
     if let Some(method) = name.strip_prefix("binascii.") {
         return binascii::call(ctx, method, args, kwargs);
     }
-    if name == "zlib.adler32" {
-        return binascii::adler32(ctx, args, kwargs);
+    if let Some(method @ ("adler32" | "crc32")) = name.strip_prefix("zlib.") {
+        return binascii::checksum(ctx, method, args, kwargs);
     }
     if let Some(method) = name.strip_prefix("struct.Struct.") {
         return structure::method(ctx, method, args, kwargs);
@@ -1307,6 +1323,9 @@ pub(super) fn call(
     }
     if let Some(operation) = name.strip_prefix("_imre_metadata.") {
         return metadata::call(ctx, operation, args, kwargs);
+    }
+    if name == "os.stat_result.__reduce__" {
+        return os::stat::reduce(ctx, args, kwargs);
     }
     if name == os::stat::CLASS {
         return os::stat::construct(ctx, args, kwargs);
@@ -1369,6 +1388,12 @@ pub(super) fn call(
     }
     if name == "itertools.count" {
         return itertools::count(ctx, args, kwargs);
+    }
+    if name == "itertools._cycle_allocate" {
+        return itertools::cycle_allocate(ctx, args, kwargs);
+    }
+    if name == "itertools._cycle_next" {
+        return itertools::cycle_next(ctx, args, kwargs);
     }
     if name == "itertools._chain_allocate" {
         let [base, class, source] = args else {
