@@ -1950,6 +1950,7 @@ def report(text):
             "boxed_timedelta_floordiv.py",
             "boxed_timedelta_add_sub.py",
             "boxed_dataclasses.py",
+            "boxed_mapping_proxy_type.py",
             "boxed_make_dataclass.py",
             "boxed_dataclass_slots.py",
             "boxed_dataclass_init_annotations.py",
