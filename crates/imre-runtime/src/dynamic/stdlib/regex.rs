@@ -65,6 +65,9 @@ pub(super) fn flag_attribute(ctx: &mut Context, name: &str) -> Result<Id> {
                 ctx.bind(scope, short, value);
             }
         }
+        // CPython's RegexFlag explicitly uses object.__str__ to display its global name.
+        let string = ctx.builtin("object.__str__");
+        ctx.bind(scope, "__str__", string);
         let base = ctx.builtin("enum.IntFlag");
         let class = ctx.allocate_class("RegexFlag".into(), scope, vec![base])?;
         ctx.populate_enum(class, Some(base))?;

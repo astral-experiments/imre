@@ -1842,6 +1842,10 @@ impl Context {
                 builtins::BYTEARRAY_METHODS
             }
             "property" => property::METHODS,
+            "enum.IntEnum" | "enum.IntFlag" => {
+                self.builtin("int.__repr__");
+                &[]
+            }
             "memoryview" => builtins::MEMORYVIEW_METHODS,
             "bool" => &["__repr__"],
             "int" => &["__add__", "bit_length", "from_bytes", "to_bytes", "__format__", "__repr__"],

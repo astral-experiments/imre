@@ -210,6 +210,12 @@ impl Context {
                 };
                 self.builtins.get(&format!("{owner}.{name}")).copied()
             }
+            // ReprEnum keeps int.__repr__ for str(), independently of __repr__ on the enum.
+            Value::Native(kind)
+                if name == "__str__" && matches!(kind.as_str(), "enum.IntEnum" | "enum.IntFlag") =>
+            {
+                self.builtins.get("int.__repr__").copied()
+            }
             Value::Native(kind) if builtins::is_enum_base(kind) => {
                 self.builtins.get(&format!("enum.Enum.{name}")).copied()
             }
