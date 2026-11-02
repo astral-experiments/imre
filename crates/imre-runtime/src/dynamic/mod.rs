@@ -2690,21 +2690,6 @@ impl Context {
         source_globals: Id,
         source: Option<(PathBuf, importlib::SourceBody, Option<Id>)>,
     ) -> Result<()> {
-        #[cfg(target_os = "linux")]
-        if name == "posix" && source.is_none() {
-            for name in stdlib::os::xattr::FUNCTIONS {
-                let function = self.builtin(&format!("posix.{name}"));
-                self.bind(scope, name, function);
-            }
-            for (attr, n) in [
-                ("XATTR_CREATE", libc::XATTR_CREATE),
-                ("XATTR_REPLACE", libc::XATTR_REPLACE),
-                ("XATTR_SIZE_MAX", 65536),
-            ] {
-                let value = self.int(i64::from(n));
-                self.bind(scope, attr, value);
-            }
-        }
         if name == "_thread" && source.is_none() {
             let rlock = self.builtin(thread_rlock::CLASS);
             self.bind(scope, "RLock", rlock);
@@ -2805,6 +2790,7 @@ impl Context {
                     let value = self.int(i64::from(flag));
                     self.bind(scope, attr, value);
                 }
+                stdlib::os::xattr::initialize(self, scope);
             }
             #[cfg(unix)]
             "_signal" if source.is_none() => {

@@ -12,6 +12,21 @@ use crate::dynamic::stdlib::audit;
 pub(in crate::dynamic) const FUNCTIONS: [&str; 4] =
     ["getxattr", "setxattr", "listxattr", "removexattr"];
 
+pub(in crate::dynamic) fn initialize(ctx: &mut Context, scope: Id) {
+    for name in FUNCTIONS {
+        let function = ctx.builtin(&format!("posix.{name}"));
+        ctx.bind(scope, name, function);
+    }
+    for (attr, n) in [
+        ("XATTR_CREATE", libc::XATTR_CREATE),
+        ("XATTR_REPLACE", libc::XATTR_REPLACE),
+        ("XATTR_SIZE_MAX", 65536),
+    ] {
+        let value = ctx.int(i64::from(n));
+        ctx.bind(scope, attr, value);
+    }
+}
+
 fn bind<const N: usize>(
     op: &str,
     args: &[Id],
