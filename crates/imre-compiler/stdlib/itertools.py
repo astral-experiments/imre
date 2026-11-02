@@ -432,15 +432,21 @@ class _tee:
         raise TypeError("type 'itertools._tee' is not an acceptable base type")
 
     def __copy__(self):
+        if type(self) is not __class__:
+            raise TypeError("expected an itertools._tee instance")
         return type(self)(self)
 
     def __reduce__(self):
         raise TypeError("cannot pickle '_tee' object")
 
     def __iter__(self):
+        if type(self) is not __class__:
+            raise TypeError("expected an itertools._tee instance")
         return self
 
     def __next__(self):
+        if type(self) is not __class__:
+            raise TypeError("expected an itertools._tee instance")
         block = self._block
         index = self._index
         if index == len(block.values):
