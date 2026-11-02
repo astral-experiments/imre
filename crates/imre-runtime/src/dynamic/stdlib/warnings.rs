@@ -1,4 +1,4 @@
-use super::{Context, Error, NONE, Result, Value};
+use super::{Context, Error, Id, NONE, Result, Value};
 
 impl Context {
     pub(in crate::dynamic) fn encoding_warning(&mut self, level: i32) -> Result<()> {
@@ -14,6 +14,17 @@ impl Context {
         kind: crate::objects::exceptions::Kind,
         message: &str,
         level: i32,
+    ) -> Result<()> {
+        self.emit_builtin_warning_with_source(kind, message, level, NONE)
+    }
+
+    /// Preserve the source object in a captured resource warning.
+    pub(in crate::dynamic) fn emit_builtin_warning_with_source(
+        &mut self,
+        kind: crate::objects::exceptions::Kind,
+        message: &str,
+        level: i32,
+        source: Id,
     ) -> Result<()> {
         let category = kind.name();
         let (filename, line, module) = if let Some((loc, scope)) = self.heap.warning_frame(level) {
@@ -46,9 +57,11 @@ impl Context {
                 let message = self.text(message);
                 let category = self.builtin(category);
                 let level = self.int(i64::from(level));
-                return self
-                    .call(warn, vec![message, category, level], Vec::new())
-                    .map(|_| ());
+                let mut args = vec![message, category, level];
+                if source != NONE {
+                    args.push(source);
+                }
+                return self.call(warn, args, Vec::new()).map(|_| ());
             }
         }
         if !crate::objects::warnings::should_emit(

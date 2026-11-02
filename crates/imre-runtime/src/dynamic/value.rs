@@ -1294,7 +1294,7 @@ impl Value {
                     visit.extend([*value, *key]);
                 }
             }
-            Self::Scandir(scan) => visit.push(scan.source),
+            Self::Scandir(scan) => visit.push(scan.source.get()),
             Self::DirEntry(entry) => {
                 visit.extend([entry.name, entry.path]);
                 visit.extend(entry.cached_objects());
