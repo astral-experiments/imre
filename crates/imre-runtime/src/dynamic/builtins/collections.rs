@@ -817,18 +817,20 @@ pub(super) fn method(
             )),
             Some(_) => type_error(format!("unbound method {name}() needs an argument")),
             None if matches!(name, "set.difference_update" | "set.update")
-                || name.ends_with(".issubset") =>
+                || name.ends_with(".issubset")
+                || name.ends_with(".difference") =>
             {
                 type_error(format!("unbound method {name}() needs an argument"))
             }
             None => type_error("missing collection receiver"),
         })?;
-    let receiver = if let Some(kind) = name.strip_suffix(".issubset") {
+    let receiver = if let Some((kind, method @ ("difference" | "issubset"))) = name.split_once('.')
+    {
         let storage = ctx.scalar_value(object);
         if !matches!(ctx.heap.get(storage), Value::Set { frozen, .. } if *frozen == (kind == "frozenset"))
         {
             return Err(type_error(format!(
-                "descriptor 'issubset' for '{kind}' objects doesn't apply to a '{}' object",
+                "descriptor '{method}' for '{kind}' objects doesn't apply to a '{}' object",
                 ctx.type_name(object)
             )));
         }
@@ -915,6 +917,8 @@ pub(super) fn method(
         name,
         "dict.pop"
             | "dict.popitem"
+            | "set.difference"
+            | "frozenset.difference"
             | "set.issubset"
             | "frozenset.issubset"
             | "set.issuperset"
@@ -1087,6 +1091,7 @@ pub(super) fn method(
             }
             Ok(TRUE)
         }
+        "set.difference" | "frozenset.difference" => ctx.set_difference(receiver, args),
         "set.difference_update" => {
             for &source in args {
                 ctx.set_difference_update(receiver, source)?;

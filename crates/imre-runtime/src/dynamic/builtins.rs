@@ -595,6 +595,7 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
                 "add"
                     | "copy"
                     | "discard"
+                    | "difference"
                     | "difference_update"
                     | "update"
                     | "issuperset"
@@ -609,7 +610,13 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         Value::Set { frozen: true, .. }
             if matches!(
                 attr,
-                "copy" | "issuperset" | "issubset" | "__contains__" | "__reduce__" | "__repr__"
+                "copy"
+                    | "difference"
+                    | "issuperset"
+                    | "issubset"
+                    | "__contains__"
+                    | "__reduce__"
+                    | "__repr__"
             ) =>
         {
             "frozenset"

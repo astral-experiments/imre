@@ -2199,6 +2199,7 @@ def report(text):
             "boxed_set_operator_descriptors.py",
             "boxed_set_union.py",
             "boxed_set_difference_update.py",
+            "boxed_set_difference.py",
             "boxed_weakref.py",
             "boxed_public_weakref.py",
             "boxed_weakref_unraisable.py",
