@@ -18,8 +18,8 @@ pub(in crate::dynamic) fn install_capabilities(
         (
             "supports_dir_fd",
             &[
-                "access", "chmod", "link", "lstat", "mkdir", "mkfifo", "open", "readlink", "rmdir",
-                "stat", "symlink", "unlink", "utime",
+                "access", "chmod", "link", "lstat", "mkdir", "mkfifo", "open", "readlink",
+                "rename", "rmdir", "stat", "symlink", "unlink", "utime",
             ][..],
         ),
         (
@@ -338,6 +338,8 @@ pub(super) fn is_descriptor_function(name: &str) -> bool {
         "access"
             | "open"
             | "waitpid"
+            | "rename"
+            | "replace"
             | "readlink"
             | "scandir"
             | "remove"
@@ -663,6 +665,9 @@ pub(super) fn descriptor(
 ) -> Result<Id> {
     if name == "access" {
         return access(ctx, args, kwargs);
+    }
+    if matches!(name, "rename" | "replace") {
+        return links::rename(ctx, name, args, kwargs);
     }
     if name == "symlink" {
         return links::symlink(ctx, args, kwargs);
