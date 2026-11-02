@@ -2706,6 +2706,25 @@ impl Context {
         }
         if let Value::Code(code) = self.heap.get(self.heap.current_code()) {
             names.extend(code.freevars.iter().cloned());
+            // Some compiled functions retain their lexical environment because their entire
+            // closure cannot yet be cloned. Their statically resolved reads are still locals.
+            let frame = self.scope_data(local);
+            if !code.closure_supported
+                && frame.comprehension.is_none()
+                && let Some(parent) = frame.parent
+                && let Value::Str(signature) = self.heap.get(code.parameters)
+            {
+                #[derive(serde::Deserialize)]
+                struct Reads<'a> {
+                    #[serde(default, borrow)]
+                    scope_reads: Vec<&'a str>,
+                }
+                let reads: Reads = serde_json::from_str(signature)
+                    .map_err(|err| Error::new("SystemError", err.to_string()))?;
+                names.extend(reads.scope_reads.into_iter()
+                    .filter(|name| self.is_enclosing_freevar(parent, name) == Some(true))
+                    .map(str::to_owned));
+            }
         }
         let mut bindings = Vec::new();
         for name in names {

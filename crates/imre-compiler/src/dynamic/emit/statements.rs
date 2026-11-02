@@ -17,6 +17,7 @@ struct ClosureNames {
     globals: std::collections::BTreeSet<String>,
     nonlocals: std::collections::BTreeSet<String>,
     in_comprehension: bool,
+    include_nested_reads: bool,
     incomplete: bool,
     locals_incomplete: bool,
 }
@@ -45,6 +46,16 @@ impl<'a> Visitor<'a> for ClosureNames {
             ast::Stmt::FunctionDef(f) => {
                 self.locals.insert(f.name.to_string());
                 self.incomplete = true;
+                if self.include_nested_reads {
+                    // A name used only by a nested function can be free in this function too.
+                    let mut child = Self { include_nested_reads: true, ..Self::default() };
+                    child.visit_body(&f.body);
+                    child.locals.extend(f.parameters.iter().map(|param| param.name().to_string()));
+                    self.reads.extend(child.nonlocals);
+                    self.reads.extend(child.reads.into_iter().filter(|name| {
+                        !child.locals.contains(name) && !child.globals.contains(name)
+                    }));
+                }
                 // Loading a name or a literal cannot introduce a binding in the
                 // defining frame. Keep the conservative fallback for other expressions.
                 for decorator in &f.decorator_list {
@@ -718,7 +729,10 @@ impl Function<'_, '_> {
         } else {
             None
         };
-        let mut closure_names = ClosureNames::default();
+        let mut closure_names = ClosureNames {
+            include_nested_reads: matches!(&body, Body::Statements(_) | Body::GeneratorFunction(_)),
+            ..ClosureNames::default()
+        };
         match &body {
             Body::Statements(stmts) | Body::GeneratorFunction(stmts) => {
                 closure_names.visit_body(stmts)

@@ -668,6 +668,14 @@ def caller_namespaces(argument):
     mapping = {}
     assert eval("locals()", {}, mapping) is mapping
 
+    def with_child():
+        before = eval("argument")
+        def nested():
+            return argument
+        return before, nested()
+
+    assert with_child() == (argument, argument)
+
 
 def current():
     starred_calls()
