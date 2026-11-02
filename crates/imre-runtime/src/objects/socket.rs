@@ -11,6 +11,7 @@ use std::os::fd::{AsRawFd, FromRawFd, IntoRawFd, OwnedFd, RawFd};
 use std::ptr;
 
 pub(super) struct Socket {
+    family: i32,
     fd: RawFd,
     blocking: bool,
     readers: usize,
@@ -145,6 +146,10 @@ fn state<T>(s: &Object, f: impl FnOnce(&mut Socket) -> T) -> T {
     }
 }
 
+pub(crate) fn family(s: &Object) -> i32 {
+    state(s, |s| s.family)
+}
+
 pub(crate) fn fd(s: &Object) -> RawFd {
     state(s, |s| s.fd)
 }
@@ -210,7 +215,7 @@ fn setopt(fd: RawFd, level: i32, name: i32, value: i32) -> io::Result<()> {
     Ok(())
 }
 
-fn handle(raw: RawFd, blocking: bool) -> Result<crate::ObjectOwner> {
+fn handle(raw: RawFd, blocking: bool, family: i32) -> Result<crate::ObjectOwner> {
     // SAFETY: the kernel transferred a new fd; every path now has an owner.
     let fd = unsafe { OwnedFd::from_raw_fd(raw) };
     #[cfg(not(target_os = "linux"))]
@@ -223,6 +228,7 @@ fn handle(raw: RawFd, blocking: bool) -> Result<crate::ObjectOwner> {
     setopt(raw, libc::SOL_SOCKET, libc::SO_NOSIGPIPE, 1).map_err(errno_error)?;
     crate::ObjectOwner::try_new(Object(StorageCell::new(Storage::Socket(Socket {
         fd: fd.into_raw_fd(),
+        family,
         blocking,
         readers: 0,
         close_requested: false,
@@ -235,23 +241,33 @@ pub(crate) fn open(family: i32, ty: i32, proto: i32) -> Result<crate::ObjectOwne
     let family = if family == -1 { libc::AF_INET } else { family };
     let ty = if ty == -1 { libc::SOCK_STREAM } else { ty };
     let proto = if proto == -1 { 0 } else { proto };
-    if family != libc::AF_INET || ty != libc::SOCK_STREAM {
+    if !matches!(family, libc::AF_INET | libc::AF_INET6) || ty != libc::SOCK_STREAM {
         return Err(Error::new(
             Kind::NotImplementedError,
-            "only AF_INET stream sockets are supported",
+            "only Internet stream sockets are supported",
         ));
     }
     #[cfg(target_os = "linux")]
     let ty = ty | libc::SOCK_CLOEXEC;
     // SAFETY: socket takes only scalars, and handle acquires the fresh descriptor.
     let raw = checked(unsafe { libc::socket(family, ty, proto) }).map_err(errno_error)?;
-    handle(raw, true)
+    handle(raw, true, family)
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_socket_new(family: usize, ty: usize, proto: usize) -> *const Object {
     finish(
-        (|| open(c_int(family)?, c_int(ty)?, c_int(proto)?))().map(crate::ObjectOwner::into_raw),
+        (|| {
+            let family = c_int(family)?;
+            if family == libc::AF_INET6 {
+                return Err(Error::new(
+                    Kind::NotImplementedError,
+                    "typed socket addresses require AF_INET",
+                ));
+            }
+            open(family, c_int(ty)?, c_int(proto)?)
+        })()
+        .map(crate::ObjectOwner::into_raw),
         ptr::null(),
     )
 }
@@ -285,15 +301,15 @@ impl Drop for AddrInfoList {
     }
 }
 
-pub(crate) fn getaddrinfo(
-    host: Option<&str>,
-    service: Option<&str>,
+fn address_list(
+    host: Option<&[u8]>,
+    service: Option<&[u8]>,
     family: i32,
     ty: i32,
     protocol: i32,
     flags: i32,
-) -> Result<Vec<AddressInfo>> {
-    let text = |value: &str| {
+) -> Result<AddrInfoList> {
+    let text = |value: &[u8]| {
         CString::new(value).map_err(|_| {
             Error::new(
                 Kind::TypeError,
@@ -339,7 +355,25 @@ pub(crate) fn getaddrinfo(
             "getaddrinfo returned an empty list",
         ));
     }
-    let list = AddrInfoList(res);
+    Ok(AddrInfoList(res))
+}
+
+pub(crate) fn getaddrinfo(
+    host: Option<&str>,
+    service: Option<&str>,
+    family: i32,
+    ty: i32,
+    protocol: i32,
+    flags: i32,
+) -> Result<Vec<AddressInfo>> {
+    let list = address_list(
+        host.map(str::as_bytes),
+        service.map(str::as_bytes),
+        family,
+        ty,
+        protocol,
+        flags,
+    )?;
     let mut cursor = list.0;
     let mut rows = Vec::new();
     // SAFETY: all nodes and canonical names remain live until the list guard is dropped.
@@ -495,6 +529,119 @@ fn port_error(name: &str) -> Error {
     )
 }
 
+#[derive(Clone, Copy)]
+pub(crate) enum InternetAddress {
+    V4(libc::sockaddr_in),
+    V6(libc::sockaddr_in6),
+}
+
+impl InternetAddress {
+    fn ipv4(self) -> Result<libc::sockaddr_in> {
+        match self {
+            Self::V4(addr) => Ok(addr),
+            Self::V6(_) => Err(Error::new(
+                Kind::NotImplementedError,
+                "typed socket addresses require AF_INET",
+            )),
+        }
+    }
+
+    fn raw_parts(&self) -> (*const libc::sockaddr, libc::socklen_t) {
+        match self {
+            Self::V4(v) => ((v as *const libc::sockaddr_in).cast(), size_of_val(v) as _),
+            Self::V6(v) => ((v as *const libc::sockaddr_in6).cast(), size_of_val(v) as _),
+        }
+    }
+
+    /// Copy a kernel or resolver address. The caller guarantees `len` readable bytes.
+    unsafe fn read(addr: *const libc::sockaddr, len: libc::socklen_t) -> Result<Self> {
+        let len = len as usize;
+        if !addr.is_null() && len >= std::mem::offset_of!(libc::sockaddr, sa_data) {
+            // SAFETY: the family is in the common header. Check its size before reading its payload.
+            unsafe {
+                match i32::from((*addr).sa_family) {
+                    libc::AF_INET if len == size_of::<libc::sockaddr_in>() => {
+                        return Ok(Self::V4(*addr.cast()));
+                    }
+                    libc::AF_INET6 if len == size_of::<libc::sockaddr_in6>() => {
+                        return Ok(Self::V6(*addr.cast()));
+                    }
+                    _ => {}
+                }
+            }
+        }
+        Err(Error::new(
+            Kind::NotImplementedError,
+            "unsupported socket address",
+        ))
+    }
+}
+
+/// Format with the platform routine used by socket addresses, including compatible IPv4 forms.
+pub(crate) fn ipv6_text(ip: &libc::in6_addr) -> Result<String> {
+    unsafe extern "C" {
+        fn inet_ntop(
+            af: libc::c_int,
+            src: *const libc::c_void,
+            dst: *mut libc::c_char,
+            size: libc::socklen_t,
+        ) -> *const libc::c_char;
+    }
+    let mut text = [0; 46]; // INET6_ADDRSTRLEN, including the final NUL.
+    // SAFETY: AF_INET6 selects the initialized in6_addr and the buffer's exact capacity.
+    let ptr = unsafe {
+        inet_ntop(
+            libc::AF_INET6,
+            (ip as *const libc::in6_addr).cast(),
+            text.as_mut_ptr(),
+            text.len() as _,
+        )
+    };
+    if ptr.is_null() {
+        return Err(errno_error(io::Error::last_os_error()));
+    }
+    // SAFETY: success writes a terminated numeric address into text.
+    Ok(unsafe { CStr::from_ptr(ptr) }
+        .to_string_lossy()
+        .into_owned())
+}
+
+pub(crate) fn ipv6_address(
+    host: &[u8],
+    port: i32,
+    flowinfo: u32,
+    scope_id: u32,
+    name: &str,
+) -> Result<InternetAddress> {
+    if matches!(host, b"<broadcast>" | b"255.255.255.255") {
+        return Err(Error::new(Kind::OSError, "address family mismatched"));
+    }
+    let host = if host.is_empty() { b"::" } else { host };
+    let resolved = address_list(Some(host), None, libc::AF_INET6, libc::SOCK_DGRAM, 0, 0)?;
+    // SAFETY: address_list returned a non-null owned list; read checks the node's family and size.
+    let address = unsafe {
+        let first = &*resolved.0;
+        InternetAddress::read(first.ai_addr, first.ai_addrlen)?
+    };
+    let InternetAddress::V6(mut addr) = address else {
+        return Err(Error::new(
+            Kind::OSError,
+            "resolver returned a non-IPv6 address",
+        ));
+    };
+    let port = u16::try_from(port).map_err(|_| port_error(name))?;
+    if flowinfo > 0xfffff {
+        return Err(Error::new(
+            Kind::OverflowError,
+            format!("{name}(): flowinfo must be 0-1048575."),
+        ));
+    }
+    addr.sin6_port = port.to_be();
+    addr.sin6_flowinfo = flowinfo.to_be();
+    addr.sin6_scope_id = scope_id;
+    Ok(InternetAddress::V6(addr))
+}
+
 pub(crate) fn address(host: &str, port: i64, name: &str) -> Result<libc::sockaddr_in> {
     let ip = resolve(host)?;
     let port = u16::try_from(port).map_err(|_| port_error(name))?;
@@ -520,17 +667,12 @@ unsafe fn unpack(pair: *const usize, name: &str) -> Result<libc::sockaddr_in> {
     }
 }
 
-pub(crate) fn bind(s: &Object, addr: &libc::sockaddr_in) -> Result<()> {
-    // SAFETY: bind reads the initialized stack address during this call.
-    checked(unsafe {
-        libc::bind(
-            fd(s),
-            (addr as *const libc::sockaddr_in).cast(),
-            size_of_val(addr) as _,
-        )
-    })
-    .map(|_| ())
-    .map_err(errno_error)
+pub(crate) fn bind(s: &Object, addr: &InternetAddress) -> Result<()> {
+    let (ptr, len) = addr.raw_parts();
+    // SAFETY: addr owns the complete socket address through the syscall.
+    checked(unsafe { libc::bind(fd(s), ptr, len) })
+        .map(|_| ())
+        .map_err(errno_error)
 }
 
 /// # Safety
@@ -539,7 +681,7 @@ pub(crate) fn bind(s: &Object, addr: &libc::sockaddr_in) -> Result<()> {
 pub unsafe extern "C" fn imre_socket_bind(s: &Object, pair: *const usize) {
     // SAFETY: unpack borrows the declared fields.
     finish(
-        unsafe { unpack(pair, "bind") }.and_then(|addr| bind(s, &addr)),
+        unsafe { unpack(pair, "bind") }.and_then(|addr| bind(s, &InternetAddress::V4(addr))),
         (),
     );
 }
@@ -568,15 +710,10 @@ pub extern "C" fn imre_socket_shutdown(s: &Object, how: usize) {
     finish(c_int(how).and_then(|n| shutdown(s, n)), ());
 }
 
-fn connect(fd: RawFd, addr: &libc::sockaddr_in, blocking: bool) -> io::Result<()> {
-    // SAFETY: the kernel reads the supplied stack IPv4 address.
-    let result = checked(unsafe {
-        libc::connect(
-            fd,
-            (addr as *const libc::sockaddr_in).cast(),
-            size_of_val(addr) as _,
-        )
-    });
+fn connect(fd: RawFd, addr: &InternetAddress, blocking: bool) -> io::Result<()> {
+    let (ptr, len) = addr.raw_parts();
+    // SAFETY: addr owns the complete socket address through the syscall.
+    let result = checked(unsafe { libc::connect(fd, ptr, len) });
     match result {
         Err(e) if e.kind() == io::ErrorKind::Interrupted && blocking => {}
         other => return other.map(|_| ()),
@@ -618,12 +755,13 @@ fn connect(fd: RawFd, addr: &libc::sockaddr_in, blocking: bool) -> io::Result<()
 pub unsafe extern "C" fn imre_socket_connect(s: &Object, pair: *const usize) {
     // SAFETY: the call retains the exact address tuple.
     finish(
-        unsafe { unpack(pair, "connect") }.and_then(|addr| connect_address(s, &addr)),
+        unsafe { unpack(pair, "connect") }
+            .and_then(|addr| connect_address(s, &InternetAddress::V4(addr))),
         (),
     );
 }
 
-pub(crate) fn connect_address(s: &Object, addr: &libc::sockaddr_in) -> Result<()> {
+pub(crate) fn connect_address(s: &Object, addr: &InternetAddress) -> Result<()> {
     connect(fd(s), addr, state(s, |s| s.blocking)).map_err(errno_error)
 }
 
@@ -644,19 +782,20 @@ unsafe fn addr_tuple(layout: *const RecordDescriptor, addr: libc::sockaddr_in) -
 
 fn peer_call(
     mut call: impl FnMut(*mut libc::sockaddr, *mut libc::socklen_t) -> i32,
-) -> io::Result<(i32, libc::sockaddr_in)> {
+) -> io::Result<(i32, libc::sockaddr_storage, libc::socklen_t)> {
     // SAFETY: all fields have a valid zero representation before the kernel writes them.
-    let mut addr: libc::sockaddr_in = unsafe { std::mem::zeroed() };
+    let mut addr: libc::sockaddr_storage = unsafe { std::mem::zeroed() };
     let mut len = size_of_val(&addr) as libc::socklen_t;
     let ret = checked(call((&raw mut addr).cast(), &raw mut len))?;
-    Ok((ret, addr))
+    Ok((ret, addr, len))
 }
 
-pub(crate) fn sockname(s: &Object) -> Result<libc::sockaddr_in> {
-    // SAFETY: peer_call supplies a writable sockaddr and resets its capacity.
-    peer_call(|a, n| unsafe { libc::getsockname(fd(s), a, n) })
-        .map(|(_, a)| a)
-        .map_err(errno_error)
+pub(crate) fn sockname(s: &Object) -> Result<InternetAddress> {
+    // SAFETY: peer_call provides aligned storage and its capacity to getsockname.
+    let (_, addr, len) =
+        peer_call(|a, n| unsafe { libc::getsockname(fd(s), a, n) }).map_err(errno_error)?;
+    // SAFETY: the kernel initialized addr, and read validates its family and length.
+    unsafe { InternetAddress::read((&raw const addr).cast(), len) }
 }
 
 pub(crate) fn endpoint(addr: &libc::sockaddr_in) -> (Ipv4Addr, u16) {
@@ -675,14 +814,16 @@ pub unsafe extern "C" fn imre_socket_sockname(
 ) -> *mut usize {
     // SAFETY: the caller supplied the exact tuple layout.
     finish(
-        sockname(s).map(|addr| unsafe { addr_tuple(layout, addr) }),
+        sockname(s)
+            .and_then(InternetAddress::ipv4)
+            .map(|addr| unsafe { addr_tuple(layout, addr) }),
         ptr::null_mut(),
     )
 }
 
-pub(crate) fn accept(s: &Object) -> Result<(crate::ObjectOwner, libc::sockaddr_in)> {
+pub(crate) fn accept(s: &Object) -> Result<(crate::ObjectOwner, InternetAddress)> {
     let raw = fd(s);
-    let (child, addr) = retry(|| {
+    let (child, addr, len) = retry(|| {
         peer_call(|a, n| {
             // SAFETY: peer_call provides a fresh address and resets its capacity on every attempt.
             unsafe {
@@ -698,7 +839,10 @@ pub(crate) fn accept(s: &Object) -> Result<(crate::ObjectOwner, libc::sockaddr_i
         })
     })
     .map_err(errno_error)?;
-    Ok((handle(child, true)?, addr))
+    let child = handle(child, true, family(s))?;
+    // SAFETY: the kernel filled the supplied storage, and child owns its fd on errors.
+    let addr = unsafe { InternetAddress::read((&raw const addr).cast(), len) }?;
+    Ok((child, addr))
 }
 
 /// # Safety
@@ -709,7 +853,8 @@ pub unsafe extern "C" fn imre_socket_accept(
     layout: *const RecordDescriptor,
     addr_layout: *const RecordDescriptor,
 ) -> *mut usize {
-    let result = accept(s).map(|(child, a)| {
+    let result = accept(s).and_then(|(child, a)| {
+        let a = a.ipv4()?;
         // SAFETY: both descriptors match these transferred owners. No fallible syscall remains.
         unsafe {
             let pair = imre_record_new(layout);
@@ -718,7 +863,7 @@ pub unsafe extern "C" fn imre_socket_accept(
             pair.add(1)
                 .cast::<*mut usize>()
                 .write(addr_tuple(addr_layout, a));
-            pair
+            Ok(pair)
         }
     });
     finish(result, ptr::null_mut())
@@ -899,11 +1044,11 @@ pub extern "C" fn imre_socket_getblocking(s: &Object) -> bool {
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_socket_dup(s: &Object) -> *const Object {
     let result = (|| {
-        let (raw, blocking) = state(s, |s| (s.fd, s.blocking));
+        let (raw, blocking, family) = state(s, |s| (s.fd, s.blocking, s.family));
         // SAFETY: the kernel validates even a closed fd; its copy is non-inheritable from creation.
         let copy =
             checked(unsafe { libc::fcntl(raw, libc::F_DUPFD_CLOEXEC, 0) }).map_err(errno_error)?;
-        let child = handle(copy, blocking)?;
+        let child = handle(copy, blocking, family)?;
         // socket.dup reapplies its source's blocking mode to the shared open file.
         set_blocking(copy, blocking).map_err(errno_error)?;
         Ok(crate::ObjectOwner::into_raw(child))
@@ -1003,7 +1148,7 @@ mod tests {
         use std::os::unix::net::UnixDatagram;
 
         let (sender, socket) = UnixDatagram::pair().unwrap();
-        let receiver = super::handle(socket.into_raw_fd(), true)
+        let receiver = super::handle(socket.into_raw_fd(), true, libc::AF_UNIX)
             .ok()
             .expect("socket handle");
         sender.send(b"larger packet").unwrap();
@@ -1026,7 +1171,7 @@ mod tests {
         let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
         let mut sender = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
         let (socket, _) = listener.accept().unwrap();
-        let receiver = super::handle(socket.into_raw_fd(), true)
+        let receiver = super::handle(socket.into_raw_fd(), true, libc::AF_INET)
             .ok()
             .expect("socket handle");
         sender.write_all(&[0x5a; 258]).unwrap();

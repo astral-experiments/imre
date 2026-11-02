@@ -2035,6 +2035,7 @@ impl Context {
                 self.bind(scope, "devnull", devnull);
             }
             "errno" => stdlib::install_errno(self, scope)?,
+            "_socket" => stdlib::install_lowlevel_socket(self, scope)?,
             "_opcode" => {
                 // Imre emits native code and has no adaptive bytecode interpreter.
                 let disabled = self.int(0);
