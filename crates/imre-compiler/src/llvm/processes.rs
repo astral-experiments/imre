@@ -664,6 +664,18 @@ impl Emitter<'_, '_> {
                 })
             }
             ProcessOperation::Executable => self.call("imre_sys_executable", Type::Str, &[]),
+            ProcessOperation::EnvironSet { bytes } => {
+                let name = if bytes {
+                    "imre_environ_set_bytes"
+                } else {
+                    "imre_environ_set"
+                };
+                self.checked_line(format!(
+                    "call void @{name}(ptr {}, ptr {})",
+                    args[1].value.operand, args[0].value.operand
+                ));
+                none()
+            }
             ProcessOperation::EnvironGet if returns == Type::Str => self.call(
                 "imre_environ_get",
                 Type::Str,
