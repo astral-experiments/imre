@@ -53,6 +53,7 @@ pub struct CommandFlags {
     pub safe_path: bool,
     pub no_user_site: bool,
     pub dont_write_bytecode: bool,
+    pub unbuffered: bool,
     /// A missing override lets the runtime select the mode from the startup locale.
     pub utf8_mode: Option<bool>,
     pub warn_default_encoding: bool,
@@ -293,6 +294,10 @@ fn object_fallback<T>(
                 &overloads,
                 !graph.needs_object_runtime.get()
                     && graph.object_builtin_errors.borrow().contains(&error),
+                graph
+                    .modules
+                    .iter()
+                    .position(|module| module.is_bundled("socketserver")),
             )?;
         }
         Ok(())

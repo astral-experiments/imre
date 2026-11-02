@@ -271,6 +271,18 @@ class TestCase(_SuiteMember):
             standard = _inequality_message(repr(first), repr(second))
             raise self.failureException(self._formatMessage(msg, standard))
 
+    def _assertOptionalTextEqual(self, first: str | None, second: str | None, msg: str | None = None) -> None:
+        if first is None:
+            if second is None:
+                return
+            difference = _inequality_message("None", repr(second))
+        elif second is None:
+            difference = _inequality_message(repr(first), "None")
+        else:
+            self.assertMultiLineEqual(first, second, msg)
+            return
+        raise self.failureException(self._formatMessage(msg, difference))
+
     def _assertBytesEqual(self, first: bytes, second: bytes, msg: str | None = None) -> None:
         if first != second:
             standard = _inequality_message(repr(first), repr(second))

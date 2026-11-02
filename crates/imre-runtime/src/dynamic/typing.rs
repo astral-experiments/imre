@@ -21,6 +21,7 @@ pub(super) struct TypeVariable {
     pub covariant: bool,
     pub contravariant: bool,
     pub infer_variance: bool,
+    pub declared: bool,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -166,6 +167,25 @@ pub(super) fn forwards_to_origin(name: &str) -> bool {
     !(name.starts_with("__") && name.ends_with("__"))
 }
 
+/// Resolve ordinary attributes of parameterized typing generics on their origin.
+pub(super) fn generic_attr_target(ctx: &Context, mut obj: Id, name: &str, writing: bool) -> Result<Id> {
+    let mut depth = 0;
+    while let Value::GenericAlias(alias) = ctx.heap.get(obj)
+        && alias.kind == AliasKind::Generic
+        && match name {
+            "_name" | "_inst" => false,
+            "_nparams" | "_defaults" => !writing,
+            "copy_with" | "_determine_new_args" | "_make_substitution" => writing,
+            _ => forwards_to_origin(name),
+        }
+    {
+        depth += 1;
+        ctx.check_call_depth(depth)?;
+        obj = alias.origin;
+    }
+    Ok(obj)
+}
+
 #[derive(Default)]
 pub(super) struct Registry {
     alias_caches: [Option<Id>; 2],
@@ -246,6 +266,17 @@ pub(super) fn variables(ctx: &Context, args: &[Id]) -> Vec<Id> {
                 match ctx.heap.get(*parameters) {
                     Value::Tuple(members) => members.as_slice(),
                     _ => unreachable!(),
+                }
+            }
+            Value::Instance { class, .. }
+                if ctx.module_value("typing", "_AnnotatedAlias") == Some(*class) =>
+            {
+                match ctx
+                    .raw_instance_field(arg, "__parameters__")
+                    .map(|id| ctx.heap.get(id))
+                {
+                    Some(Value::Tuple(members)) => members.as_slice(),
+                    _ => continue,
                 }
             }
             _ => continue,
@@ -470,9 +501,6 @@ pub(super) fn subscribe(ctx: &mut Context, target: Id, index: Id) -> Option<Resu
         );
     }
     let kind = match ctx.heap.get(target) {
-        Value::Class { .. } if super::mapping_abc::is_generic_abc(ctx, target) => {
-            AliasKind::Builtin
-        }
         Value::Class { .. } if ctx.classes.get("typing.Generic") == Some(&target) => {
             AliasKind::Generic
         }
@@ -841,6 +869,17 @@ pub(super) fn attribute(ctx: &mut Context, value: Id, name: &str) -> Option<Resu
         return Some(Ok(member));
     }
     let attr = match ctx.heap.get(value) {
+        Value::Native(class) if class == "typing._GenericAlias" && name == "copy_with" => {
+            ctx.class_attr(ctx.module_value("typing", "_SpecialGenericAlias")?, name)?
+        }
+        Value::GenericAlias(alias) if alias.kind == AliasKind::Generic && name == "copy_with" => {
+            let callable = ctx.class_attr(ctx.module_value("typing", "_SpecialGenericAlias")?, name)?;
+            ctx.alloc(Value::Method {
+                callable,
+                receiver: value,
+                explicit: false,
+            })
+        }
         Value::TypeVar(_)
         | Value::ParamSpec(_)
         | Value::ParamSpecMarker(_, _)
@@ -876,6 +915,22 @@ pub(super) fn attribute(ctx: &mut Context, value: Id, name: &str) -> Option<Resu
         {
             let module = class.rsplit_once('.').unwrap().0.to_owned();
             ctx.text(module)
+        }
+        Value::Native(class) if name == "__reduce__" && class == "typing._GenericAlias" => {
+            ctx.module_value("typing", "_reduce_generic_alias")?
+        }
+        Value::Native(class) if name == "__reduce__" && class == "typing._CallableGenericAlias" => {
+            ctx.module_value("typing", "_reduce_callable_alias")?
+        }
+        Value::GenericAlias(alias)
+            if name == "__reduce__"
+                && matches!(alias.kind, AliasKind::Generic | AliasKind::Callable) =>
+        {
+            let class = ctx.builtin(alias.kind.class());
+            return Some(
+                ctx.lookup_attr(class, name)
+                    .and_then(|reducer| ctx.bind_attribute(reducer, value, class)),
+            );
         }
         Value::NoDefault if name == "__reduce__" => {
             let callable = ctx.builtin("typing.NoDefault.__reduce__");
@@ -940,6 +995,7 @@ pub(super) fn attribute(ctx: &mut Context, value: Id, name: &str) -> Option<Resu
             _ => return None,
         },
         Value::TypeVar(var) => match name {
+            "evaluate_bound" | "evaluate_constraints" | "evaluate_default" if var.declared => NONE,
             "__name__" => var.name,
             "__module__" => var.module,
             "__bound__" => var.bound,
@@ -1023,7 +1079,7 @@ pub(super) fn attribute(ctx: &mut Context, value: Id, name: &str) -> Option<Resu
             "__args__" => a.args,
             "__origin__" => a.origin,
             "__parameters__" => a.parameters,
-            attr if a.name.is_some() && forwards_to_origin(attr) => {
+            attr if a.kind != AliasKind::Generic && a.name.is_some() && forwards_to_origin(attr) => {
                 return Some(ctx.lookup_attr(a.origin, attr));
             }
             _ => return None,
@@ -1041,8 +1097,8 @@ pub(super) fn attribute(ctx: &mut Context, value: Id, name: &str) -> Option<Resu
     Some(Ok(attr))
 }
 
-/// Create fresh compiler-declared type variables in a lexical scope shared by the class body and methods.
-pub(super) fn class_parameter_scope(ctx: &mut Context, outer: Id, names: Id) -> Result<Id> {
+/// Create the lexical scope for a type parameter list at a class or function definition.
+pub(super) fn parameter_scope(ctx: &mut Context, outer: Id, names: Id, class: bool) -> Result<Id> {
     let enclosing = ctx.scope_data(outer);
     let parent = if enclosing.class_body.is_some() {
         enclosing.parent.unwrap_or(outer)
@@ -1055,10 +1111,16 @@ pub(super) fn class_parameter_scope(ctx: &mut Context, outer: Id, names: Id) -> 
     let mut params = Vec::new();
     for (binding, name) in ctx
         .dict_entries(names)
-        .expect("declared class type parameters")
+        .expect("declared type parameters")
         .to_vec()
     {
-        let param = typevar(ctx, &[name], &[("infer_variance".to_owned(), TRUE)], typing)?;
+        let param = typevar(
+            ctx,
+            &[name],
+            &[("infer_variance".to_owned(), TRUE)],
+            typing,
+            true,
+        )?;
         let binding = ctx.str_value(binding)?.to_owned();
         ctx.bind(scope, &binding, param);
         params.push(param);
@@ -1070,13 +1132,21 @@ pub(super) fn class_parameter_scope(ctx: &mut Context, outer: Id, names: Id) -> 
     frame.closure.declared_complete = true;
     let declared = ctx.alloc(Value::Tuple(params.clone()));
     ctx.bind(scope, ".type_params", declared);
-    let generic = named_class(ctx, "typing", "Generic");
-    let base = alias(ctx, AliasKind::Generic, generic, params)?;
-    ctx.bind(scope, ".generic_base", base);
+    if class {
+        let generic = named_class(ctx, "typing", "Generic");
+        let base = alias(ctx, AliasKind::Generic, generic, params)?;
+        ctx.bind(scope, ".generic_base", base);
+    }
     Ok(scope)
 }
 
-fn typevar(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)], module: Id) -> Result<Id> {
+fn typevar(
+    ctx: &mut Context,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+    module: Id,
+    declared: bool,
+) -> Result<Id> {
     let mut name = args.first().copied();
     let mut bound = NONE;
     let mut covariant = false;
@@ -1146,6 +1216,7 @@ fn typevar(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)], module: Id) 
         covariant,
         contravariant,
         infer_variance,
+        declared,
     })))
 }
 
@@ -1444,7 +1515,7 @@ pub(super) fn call(
     }
     if operation == "TypeVar" {
         let module = ctx.heap.caller_module();
-        return typevar(ctx, args, kwargs, module);
+        return typevar(ctx, args, kwargs, module, false);
     }
     if operation == "cast" {
         let [typ, value] = super::builtins::bind("cast()", args, kwargs, ["typ", "val"])?;
@@ -2109,6 +2180,12 @@ impl Context {
                     "Cannot subclass special typing classes",
                 ));
             }
+            if let Some(name) = self.heap.get(base).hash_type() {
+                return Err(Error::new(
+                    "TypeError",
+                    format!("type '{name}' is not an acceptable base type"),
+                ));
+            }
             if let Value::Native(name) = self.heap.get(base)
                 && (super::stdlib::fixed_structseq::fixed_type(name).is_some()
                     || crate::objects::HashState::is_provider_class(name)
@@ -2265,6 +2342,7 @@ impl Context {
         }
         let class = self.alloc(Value::Class {
             io_kind: None,
+            hash_type: None,
             metaclass: None,
             namedtuple_fields,
             name,

@@ -5,6 +5,19 @@ use super::*;
 
 const KEY_WRAPPER: &str = "functools.KeyWrapper";
 
+/// These native result types inherit object.__new__ but reject direct allocation.
+fn nonconstructible_result_type(name: &str) -> bool {
+    matches!(
+        name,
+        HashState::CLASS
+            | HashState::XOF_CLASS
+            | HashState::OPENSSL_CLASS
+            | KEY_WRAPPER
+            | value::REGEX_PATTERN_TYPE
+            | value::REGEX_MATCH_TYPE
+    )
+}
+
 pub(super) enum MappingOperation {
     Copy,
     Update,
@@ -26,6 +39,9 @@ pub(super) fn module_function(symbol: &str) -> Option<(&str, &str)> {
     }
     let (module, function) = symbol.split_once('.')?;
     match module {
+        "operator" if stdlib::operator::Operation::named(function).is_some() => {
+            Some(("_operator", function))
+        }
         "_typing" if function == "_idfunc" => Some((module, function)),
         "encodings" if function == "search_function" => Some((module, function)),
         "posix"
@@ -745,6 +761,7 @@ impl Context {
                 | Value::CodecDecoder(_)
                 | Value::IoMethod { .. }
                 | Value::IoOpen { .. }
+                | Value::HashMethod { .. }
                 | Value::Method { .. }
         ) || matches!(self.heap.get(value),Value::Weak(wr) if wr.kind != weakref::Kind::Proxy)
             || self.slot(value, "__call__").is_some()
@@ -833,6 +850,10 @@ impl Context {
                 | Value::Cached { .. }
                 | Value::Partial { .. }
                 | Value::IoMethod { .. } => true,
+                Value::HashMethod { owner, name } => {
+                    stdlib::hashlib::md5::check_receiver(self, *owner, name, receiver)?;
+                    true
+                }
                 Value::Native(name) => {
                     matches!(
                         name.as_str(),
@@ -1003,9 +1024,9 @@ impl Context {
 
     /// Consult ABC hooks and registrations without the public protocol argument guards.
     pub(super) fn abc_subclass_check(&mut self, child: Id, parent: Id) -> Result<bool> {
-        let protocol = self.is_protocol_declaration(parent);
+        let abc = self.is_bundled_abc(parent);
         let key = [parent, child];
-        if protocol && let Some(&result) = self.heap.protocol_subclass_cache.get(&key) {
+        if abc && let Some(&result) = self.heap.abc_subclass_cache.get(&key) {
             return Ok(result);
         }
         let result = if self.has_abc_subclass_hook(parent)
@@ -1013,14 +1034,18 @@ impl Context {
         {
             matched
         } else {
+            // A direct registry hit bypasses the positive cache in _abc.
+            if abc && self.heap.abc_registrations.contains(&[parent, child]) {
+                return Ok(true);
+            }
             self.subclass(child, parent)
         };
-        if protocol {
+        if abc {
             self.heap
-                .protocol_subclass_cache
+                .abc_subclass_cache
                 .try_reserve(1)
                 .map_err(|_| Error::new("MemoryError", ""))?;
-            self.heap.protocol_subclass_cache.insert(key, result);
+            self.heap.abc_subclass_cache.insert(key, result);
         }
         Ok(result)
     }
@@ -1198,9 +1223,10 @@ impl Context {
                     name: "__init__" | "__repr__" | "__iter__" | "__next__" | "__del__",
                     ..
                 } => "method-wrapper",
-                Value::Native(_) | Value::IoOpen { .. } | Value::IoMethod { .. } => {
-                    "builtin_function_or_method"
-                }
+                Value::Native(_)
+                | Value::IoOpen { .. }
+                | Value::IoMethod { .. }
+                | Value::HashMethod { .. } => "builtin_function_or_method",
                 _ => return None,
             },
             Value::Native(name) if let Some(slot) = BuiltinDescriptor::lookup(name) => slot.class(),
@@ -1525,23 +1551,13 @@ impl Context {
             }
         }
     }
-    pub(super) fn error_matches(&self, kind: &str, class: Id) -> bool {
-        self.error_kind_matches(kind, class, self.classes.get(kind).copied())
-    }
-
     pub(super) fn raised_error_matches(&self, error: &Error, class: Id) -> bool {
         match self.heap.get(class) {
             Value::Tuple(classes) => classes.iter().any(|&c| self.raised_error_matches(error, c)),
             _ if let Some(actual) = error.class() => self.subclass(actual, class),
             Value::Native(_) => {
                 let kind = error.kind.as_ref();
-                let builtin = self.builtins.get(kind).copied();
-                if self.classes.get(kind).copied() == builtin {
-                    self.error_matches(kind, class)
-                } else {
-                    // A user class with the same name cannot change a native error's ancestry.
-                    self.error_kind_matches(kind, class, builtin)
-                }
+                self.error_kind_matches(kind, class, self.builtins.get(kind).copied())
             }
             // Native operations on intrinsic file objects belong to the first I/O module.
             Value::Class { .. } if error.kind == "UnsupportedOperation" => self
@@ -1676,6 +1692,7 @@ impl Context {
         original: Option<Id>,
     ) -> Result<Id> {
         let obj = self.weak_proxy_target(obj)?;
+        let obj = super::typing::generic_attr_target(self, obj, name, false)?;
         if matches!(self.heap.get(obj), Value::ThreadLocal(_)) {
             return self
                 .local_attribute(obj, super::thread_local::Name::from_lookup(name, original));
@@ -1827,6 +1844,12 @@ impl Context {
 
     /// Keep non-data wrapper receiver checks at call time for direct method calls.
     fn default_attr_for_call(&mut self, obj: Id, name: &str, for_call: bool) -> Result<Id> {
+        if name == "__new__" {
+            let class = self.heap.get(obj).instance_class().unwrap_or(obj);
+            if self.heap.get(class).hash_type().is_some() {
+                return Ok(self.builtin("object.__new__"));
+            }
+        }
         if let Some(&scope) = self.enum_scopes.get(&obj) {
             if let Some(value) = self.enum_base_attribute(obj, scope, name)? {
                 return Ok(value);
@@ -2590,6 +2613,29 @@ impl Context {
                 explicit,
             } => match name {
                 "__self__" => return Ok(receiver),
+                _ if let Value::HashMethod {
+                    owner,
+                    name: method,
+                } = *self.heap.get(callable) =>
+                {
+                    match name {
+                        "__name__" => return Ok(self.text(method)),
+                        "__qualname__" if method == "md5" => return Ok(self.text(method)),
+                        "__qualname__" => {
+                            return Ok(self.text(format!("{}.{method}", self.class_name(owner))));
+                        }
+                        "__module__" if method == "md5" => return Ok(self.text("_md5")),
+                        "__text_signature__" if method == "md5" => {
+                            return Ok(self.text(
+                                "($module, /, data=b'', *, usedforsecurity=True, string=None)",
+                            ));
+                        }
+                        "__doc__" if method == "md5" => return Ok(self.text(
+                            "Return a new MD5 hash object; optionally initialized with a string.",
+                        )),
+                        _ => {}
+                    }
+                }
                 _ if matches!(self.heap.get(callable), Value::IoOpen { .. }) => {
                     let original = self.builtin("open");
                     return self.lookup_attr(original, name);
@@ -2716,15 +2762,42 @@ impl Context {
                     _ => {}
                 }
             }
+            Value::HashMethod {
+                owner,
+                name: member,
+            } => match name {
+                "__name__" => return Ok(self.text(member)),
+                "__objclass__" => return Ok(owner),
+                "__qualname__" => {
+                    return Ok(self.text(format!("{}.{member}", self.class_name(owner))));
+                }
+                "__get__" => {
+                    let callable = self.builtin("method_descriptor.__get__");
+                    return Ok(self.alloc(Value::Method {
+                        callable,
+                        receiver: obj,
+                        explicit: false,
+                    }));
+                }
+                _ => {}
+            },
             Value::GetSetDescriptor {
-                owner, name: field, ..
-            } if matches!(owner, "int" | "typing.Union")
+                get,
+                owner,
+                name: field,
+                ..
+            } if matches!(owner, "int" | "typing.Union" | stdlib::hashlib::md5::CLASS)
                 || HashState::is_provider_class(owner)
                 || owner == value::TEMPLATE_TYPE
                 || stdlib::datetime::members(owner).is_some() =>
             {
                 match name {
-                    "__objclass__" => return Ok(self.builtin(owner)),
+                    "__objclass__" => {
+                        if let Value::HashMethod { owner, .. } = *self.heap.get(get) {
+                            return Ok(owner);
+                        }
+                        return Ok(self.builtin(owner));
+                    }
                     "__name__" => return Ok(self.text(field)),
                     "__doc__" if owner == "int" => {
                         return Ok(
@@ -2738,7 +2811,7 @@ impl Context {
                     }
                     "__get__" | "__set__" | "__delete__"
                         if name == "__get__"
-                            || matches!(owner, "int" | "typing.Union")
+                            || matches!(owner, "int" | "typing.Union" | stdlib::hashlib::md5::CLASS)
                             || HashState::is_provider_class(owner) =>
                     {
                         let symbol = format!("getset_descriptor.{name}");
@@ -2751,6 +2824,11 @@ impl Context {
                     }
                     _ => {}
                 }
+            }
+            Value::Native(ref class)
+                if name == "__new__" && nonconstructible_result_type(class) =>
+            {
+                return Ok(self.builtin("object.__new__"));
             }
             Value::Native(ref class) if let Some(owner) = HashState::provider_class(class) => {
                 let (module, short) = owner.rsplit_once('.').unwrap();
@@ -2835,14 +2913,6 @@ impl Context {
                     "MISSING" if class == "_contextvars.Token" => return Ok(self.token_missing),
                     "__hash__" | "__doc__" | "__text_signature__" if class == KEY_WRAPPER => {
                         return Ok(NONE);
-                    }
-                    "__new__"
-                        if matches!(
-                            class.as_str(),
-                            KEY_WRAPPER | value::REGEX_PATTERN_TYPE | value::REGEX_MATCH_TYPE
-                        ) =>
-                    {
-                        return Ok(self.builtin("object.__new__"));
                     }
                     _ if class == KEY_WRAPPER
                         && BuiltinDescriptor::lookup(&format!("{class}.{name}")).is_some() =>
@@ -3017,7 +3087,6 @@ impl Context {
                         return Ok(self.builtin(parent));
                     }
                     "__bases__" | "__mro__" => return Ok(self.builtin_hierarchy_tuple(obj, name)),
-                    "utc" if !base => return Ok(stdlib::datetime::utc(self)),
                     _ => {}
                 }
             }
@@ -3152,6 +3221,10 @@ impl Context {
                     && let Some(buffer) = file.buffer =>
             {
                 return Ok(buffer);
+            }
+            Value::TextFile(_) if name == "write_through" => return Ok(FALSE),
+            Value::TextFile(ref file) if name == "line_buffering" => {
+                return Ok(if file.line_buffering { TRUE } else { FALSE });
             }
             Value::TextFile(ref file) if name == "closed" => {
                 return Ok(if file.closed() { TRUE } else { FALSE });
@@ -3474,12 +3547,18 @@ impl Context {
             }
             Value::Native(ref class)
                 if class == "bool"
-                    && matches!(name, "__add__" | "__index__" | "bit_length" | "to_bytes") =>
+                    && matches!(
+                        name,
+                        "__add__" | "__index__" | "__trunc__" | "bit_length" | "to_bytes"
+                    ) =>
             {
                 return Ok(self.builtin(&format!("int.{name}")));
             }
-            Value::Native(ref class) if class == "method_descriptor" && name == "__get__" => {
-                return Ok(self.builtin("method_descriptor.__get__"));
+            Value::Native(ref class)
+                if matches!(class.as_str(), "method_descriptor" | "wrapper_descriptor")
+                    && name == "__get__" =>
+            {
+                return Ok(self.builtin(&format!("{class}.__get__")));
             }
             Value::Native(ref class) if class == "collections.defaultdict" && name == "clear" => {
                 return Ok(self.builtin("dict.clear"));
@@ -3534,8 +3613,11 @@ impl Context {
                     || (name == "__repr__"
                         && matches!(class.as_str(), "bool" | "int" | "float"))
                     || (class == "int"
-                        && matches!(name, "__add__" | "__index__" | "bit_length" | "to_bytes"))
-                    || (class == "float" && name == "as_integer_ratio")
+                        && matches!(
+                            name,
+                            "__add__" | "__index__" | "__trunc__" | "bit_length" | "to_bytes"
+                        ))
+                    || (class == "float" && matches!(name, "__trunc__" | "as_integer_ratio"))
                     || (class == "str"
                         && (name == "maketrans" || builtins::STR_METHODS.contains(&name))) =>
             {
@@ -3687,8 +3769,11 @@ impl Context {
                 if let Some(value) = self.class_attr(obj, name) {
                     return self.bind_attribute(value, NONE, obj);
                 }
-                if name == "_abc_caches_clear" && self.is_protocol_declaration(obj) {
-                    let callable = self.builtin("abc._abc_caches_clear");
+                if matches!(name, "_abc_caches_clear" | "_abc_registry_clear")
+                    && metaclass_member.is_none()
+                    && self.is_bundled_abc(obj)
+                {
+                    let callable = self.builtin(&format!("abc.{name}"));
                     return Ok(self.alloc(Value::Method {
                         callable,
                         receiver: obj,
@@ -3914,6 +3999,18 @@ impl Context {
         }
     }
 
+    fn check_zone_constant_write(&self, obj: Id, name: &str) -> Result<()> {
+        if matches!(name, "utc" | "min" | "max")
+            && matches!(self.heap.get(obj), Value::Calendar { value, .. } if value.class() == "timezone")
+        {
+            return Err(Error::new(
+                "AttributeError",
+                format!("'datetime.timezone' object attribute '{name}' is read-only"),
+            ));
+        }
+        Ok(())
+    }
+
     pub(super) fn delete_attr(&mut self, obj: Id, name: &str) -> Result<()> {
         if let Value::Native(class) = self.heap.get(obj)
             && HashState::is_provider_class(class)
@@ -3976,9 +4073,16 @@ impl Context {
         if let Some(result) = super::paramspec::update(self, obj, name, None) {
             return result;
         }
+        self.check_zone_constant_write(obj, name)?;
         self.check_template_write(obj, name)?;
         super::namespace::check_class_write(self, obj, name)?;
         stdlib::io::check_class_write(self, obj, name)?;
+        if let Some(class) = self.heap.get(obj).hash_type() {
+            return Err(Error::new(
+                "TypeError",
+                format!("cannot set '{name}' attribute of immutable type '{class}'"),
+            ));
+        }
         self.check_thread_reporting_binding(obj, name)?;
         if name == "__doc__" && matches!(self.heap.get(obj), Value::TupleGetter { .. }) {
             return super::namedtuple::set_document(self, obj, None).map(|_| ());
@@ -4522,6 +4626,7 @@ impl Context {
         value: Id,
     ) -> Result<()> {
         let obj = self.weak_proxy_target(obj)?;
+        let obj = super::typing::generic_attr_target(self, obj, name, true)?;
         if matches!(self.heap.get(obj), Value::DirEntry(_)) && matches!(name, "name" | "path") {
             return Err(Error::new("AttributeError", "readonly attribute"));
         }
@@ -4609,9 +4714,16 @@ impl Context {
                 "custom ABCMeta construction and subclass checks are unsupported",
             ));
         }
+        self.check_zone_constant_write(obj, name)?;
         self.check_template_write(obj, name)?;
         super::namespace::check_class_write(self, obj, name)?;
         stdlib::io::check_class_write(self, obj, name)?;
+        if let Some(class) = self.heap.get(obj).hash_type() {
+            return Err(Error::new(
+                "TypeError",
+                format!("cannot set '{name}' attribute of immutable type '{class}'"),
+            ));
+        }
         if let Value::Native(class) = self.heap.get(obj)
             && (builtins::is_static_gc_type(class)
                 || stdlib::itertools::cursor_type(class).is_some()
@@ -4620,6 +4732,7 @@ impl Context {
                     class.as_str(),
                     HashState::CLASS
                         | HashState::XOF_CLASS
+                        | "datetime.timezone"
                         | "typing.TypeVar"
                         | KEY_WRAPPER
                         | stdlib::flags::TYPE
@@ -5116,7 +5229,7 @@ impl Context {
             || base.is_some_and(|base| {
                 matches!(
                     self.heap.get(base).io_kind(),
-                    Some(stdlib::io::NEWLINE_DECODER | "BufferedRWPair")
+                    Some(stdlib::io::NEWLINE_DECODER | "BufferedRWPair" | "BufferedReader")
                 )
             })
     }
@@ -5141,16 +5254,16 @@ impl Context {
                 ),
             ));
         }
+        if let Some(name) = self.heap.get(class).hash_type() {
+            return Err(Error::new(
+                "TypeError",
+                format!("cannot create '{name}' instances"),
+            ));
+        }
         let object = self.builtin("object");
         if let Value::Native(name) = self.heap.get(class)
-            && matches!(
-                name.as_str(),
-                KEY_WRAPPER
-                    | value::REGEX_PATTERN_TYPE
-                    | value::REGEX_MATCH_TYPE
-                    | stdlib::os::scandir::ENTRY
-                    | "_io._BytesIOBuffer"
-            )
+            && (nonconstructible_result_type(name)
+                || matches!(name.as_str(), stdlib::os::scandir::ENTRY | "_io._BytesIOBuffer"))
         {
             return Err(Error::new(
                 "TypeError",
@@ -5374,6 +5487,12 @@ impl Context {
             };
             return Err(non_callable_error(name));
         }
+        if let Some(name) = self.heap.get(callable).hash_type() {
+            return Err(Error::new(
+                "TypeError",
+                format!("cannot create '{name}' instances"),
+            ));
+        }
         let target = match self.heap.get(callable) {
             Value::Native(name) => Value::Native(copy_label(name)?),
             Value::Class {
@@ -5383,6 +5502,7 @@ impl Context {
                 namedtuple_fields,
                 metaclass,
                 io_kind,
+                hash_type,
             } => {
                 let mut copied_name = String::new();
                 copied_name
@@ -5397,6 +5517,7 @@ impl Context {
                 Value::Class {
                     metaclass: *metaclass,
                     io_kind: *io_kind,
+                    hash_type: *hash_type,
                     name: copied_name,
                     scope: *scope,
                     ancestors: copied_ancestors,
@@ -5530,6 +5651,7 @@ impl Context {
                             | "float.__getformat__"
                             | "bool.__repr__"
                             | "float.__repr__"
+                            | "float.__trunc__"
                             | "float.as_integer_ratio"
                             | "getset_descriptor.__set__"
                             | "getset_descriptor.__delete__"
@@ -5571,22 +5693,10 @@ impl Context {
             {
                 builtins::call(self, &name, &args, &kwargs)
             }
-            Value::Native(name)
-                if matches!(
-                    name.as_str(),
-                    HashState::CLASS
-                        | HashState::XOF_CLASS
-                        | HashState::OPENSSL_CLASS
-                        | KEY_WRAPPER
-                        | value::REGEX_PATTERN_TYPE
-                        | value::REGEX_MATCH_TYPE
-                ) =>
-            {
-                Err(Error::new(
-                    "TypeError",
-                    format!("cannot create '{name}' instances"),
-                ))
-            }
+            Value::Native(name) if nonconstructible_result_type(&name) => Err(Error::new(
+                "TypeError",
+                format!("cannot create '{name}' instances"),
+            )),
             Value::Native(name) => stdlib::call(self, &name, &args, &kwargs)
                 .map_err(|error| stdlib::io::qualify_error(self, error, None)),
             Value::StaticMethod { callable, .. } => self.call(callable, args, kwargs),
@@ -5599,6 +5709,9 @@ impl Context {
             }
             Value::CodecEncoder(codec) => stdlib::codecs::entry_encode(self, codec, &args, &kwargs),
             Value::CodecDecoder(codec) => stdlib::codecs::decode(self, codec, &args, &kwargs),
+            Value::HashMethod { owner, name } => {
+                stdlib::hashlib::md5::call(self, owner, name, &args, &kwargs)
+            }
             Value::IoOpen {
                 reader,
                 writer,
@@ -6928,10 +7041,9 @@ impl Context {
                 Vec::new(),
             )?;
         }
-        if module == "typing" && name == "_Final" {
+        if module == "typing" && parent == globals && name == "_Final" {
             self.classes.insert("typing._Final".into(), class);
         }
-        self.classes.insert(name, class);
         Ok(class)
     }
 }

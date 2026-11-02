@@ -24,6 +24,25 @@ def _cleanup():
     _process.cleanup()
 
 
+def _text_encoding():
+    import sys
+
+    if sys.flags.warn_default_encoding:
+        import warnings
+        frame = sys._getframe()
+        filename = frame.f_code.co_filename
+        stacklevel = 2
+        frame = frame.f_back
+        while frame is not None and frame.f_code.co_filename == filename:
+            stacklevel += 1
+            frame = frame.f_back
+        warnings.warn("'encoding' argument not specified.", EncodingWarning, stacklevel)
+    if sys.flags.utf8_mode:
+        return "utf-8"
+    from _locale import getencoding
+    return getencoding()
+
+
 def _decode(data, stream):
     if data is None:
         return None
@@ -79,10 +98,7 @@ class Popen:
         self.errors = errors
         self.text_mode = encoding or errors or text or universal_newlines
         if self.text_mode and encoding is None:
-            self.encoding = io.text_encoding(None, 2)
-            if self.encoding == "locale":
-                from _locale import getencoding
-                self.encoding = getencoding()
+            self.encoding = _text_encoding()
         line_buffering = self.text_mode and bufsize == 1
         if line_buffering:
             bufsize = -1
@@ -185,7 +201,18 @@ class Popen:
         else:
             self._communication_started = True
             if self.text_mode and input is not None:
+                # A false input closes stdin before encoding. A BOM produced
+                # from an empty string is still validated, but the pipe is closed.
+                if not input:
+                    try:
+                        self.stdin.close()
+                    except BrokenPipeError:
+                        pass
                 input = input.encode(self.stdin.encoding, self.stdin.errors)
+                if not input:
+                    input = None
+                elif not isinstance(input, (bytes, bytearray)):
+                    input = memoryview(input)
         out, err, expired, remaining = _process.communicate(self._handle, input, timeout, use_select)
         if expired:
             error = TimeoutExpired(self.args, timeout if remaining is None else remaining,

@@ -44,6 +44,8 @@ def current():
     assert r"\udcff" == "\\udcff"
     assert [ord(char) for char in low + high + replacement] == [0xdcff, 0xd800, 0xfffd]
     assert "é" + low + "中" == "é\udcff中"
+    assert "[{}]".format(low + high) == "[" + low + high + "]"
+    assert "🙂{}é{!s}中".format(subtype, high) == "🙂" + low + "é" + high + "中"
     text = "é" + high + low
     assert text[1] == chr(0xd800)
     assert text[::-1] == low + high + "é"

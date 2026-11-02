@@ -831,16 +831,6 @@ pub unsafe extern "C" fn imre_path_resolve(path: *const Object, strict: u32) -> 
     finish(result.map(new_path), std::ptr::null())
 }
 
-/// Follow symlinks and return false for every failed stat, including permission errors.
-pub(crate) fn exists(path: &std::path::Path) -> bool {
-    fs::metadata(path).is_ok()
-}
-
-/// Test the target of a filesystem spelling, following symlinks and suppressing stat errors.
-pub(crate) fn is_file(path: &std::path::Path) -> bool {
-    fs::metadata(path).is_ok_and(|metadata| metadata.is_file())
-}
-
 /// # Safety
 /// Root an exact Path with clear pending error state. Strict UTF-8 reads perform
 /// universal-newline conversion and close the descriptor before returning.

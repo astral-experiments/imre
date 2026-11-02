@@ -185,6 +185,16 @@ def current():
     assert not hasattr(posixpath, "linesep")
     assert os.extsep == os.path.extsep == posixpath.extsep == "."
     assert pathsep == ":"
+    assert os.defpath is posixpath.defpath and os.defpath == "/bin:/usr/bin"
+    assert os.get_exec_path({}) == ["/bin", "/usr/bin"]
+    assert os.get_exec_path({"PATH": ":/bin:"}) == ["", "/bin", ""]
+    assert os.get_exec_path({b"PATH": b"/tools/\xff"}) == [os.fsdecode(b"/tools/\xff")]
+    try:
+        os.get_exec_path({"PATH": "first", b"PATH": b"second"})
+    except ValueError as error:
+        assert str(error) == "env cannot contain 'PATH' and b'PATH' keys"
+    else:
+        raise AssertionError("accepted conflicting PATH keys")
     assert ":λ::some path:".split(pathsep) == ["", "λ", "", "some path", ""]
     assert os.path.splitext is posixpath.splitext and os.path.join is posixpath.join
     assert fspath is os.fspath is posix.fspath

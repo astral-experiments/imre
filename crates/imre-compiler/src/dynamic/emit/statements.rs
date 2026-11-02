@@ -212,6 +212,7 @@ impl Function<'_, '_> {
         let mut globals = Globals::default();
         globals.visit_body(suite);
         for name in globals.0 {
+            self.declared_globals.insert(name.to_owned());
             let name = self.code_name(name);
             self.op("declare_global", &[&self.scope.clone(), &name]);
         }
@@ -251,6 +252,8 @@ impl Function<'_, '_> {
                     let evaluator = self.define(
                         v.start(),
                         name.id.as_str(),
+                        false,
+                        None,
                         None,
                         None,
                         Body::TypeAlias(&v.value),
@@ -307,12 +310,14 @@ impl Function<'_, '_> {
                                 self.source,
                                 String::new(),
                                 Body::AnnotationValue(&v.annotation),
+                                false,
                             );
                             let code = self.output.definition(
                                 self.source,
                                 String::new(),
                                 Body::AnnotationThunk(value.clone(), v.annotation.range()),
                                 v.annotation.start(),
+                                false,
                             );
                             self.remember_annotation(v, name.id.as_str(), &value);
                             let name = self.text("__annotate__");
@@ -358,8 +363,10 @@ impl Function<'_, '_> {
                     let function = self.define(
                         v.decorator_list.first().map_or(v.start(), Ranged::start),
                         self.source.private_names.definition(&v.name),
+                        self.declared_globals.contains(v.name.as_str()),
                         Some(&v.parameters),
                         v.returns.as_deref(),
+                        crate::dynamic::function_type_params(v).filter(|_| self.prefix.is_empty()),
                         body,
                     );
                     if v.is_async && !generator {
@@ -378,21 +385,7 @@ impl Function<'_, '_> {
                     let outer = self.scope.clone();
                     let mut outer_class_locals = None;
                     let parameter_scope = v.type_params.as_deref().map(|params| {
-                        let names = self.op("dict", &[]);
-                        for param in params {
-                            let ast::TypeParam::TypeVar(typevar) = param else {
-                                self.unsupported("variadic class type parameters");
-                                continue;
-                            };
-                            if typevar.bound.is_some() || typevar.default.is_some() {
-                                self.unsupported("class type parameter bounds and defaults");
-                            }
-                            let binding = self.code_name(typevar.name.as_str());
-                            let name =
-                                self.code_name(self.source.private_names.definition(&typevar.name));
-                            self.op("put", &[&names, &binding, &name]);
-                        }
-                        let scope = self.op("class_parameter_scope", &[&outer, &names]);
+                        let scope = self.parameter_scope(&outer, params, true);
                         self.scope = self.op("class_base_scope", &[&scope, &outer]);
                         outer_class_locals = self.class_locals.take();
                         scope
@@ -414,6 +407,8 @@ impl Function<'_, '_> {
                     let init = self.define(
                         v.decorator_list.first().map_or(v.start(), Ranged::start),
                         self.source.private_names.definition(&v.name),
+                        self.declared_globals.contains(v.name.as_str()),
+                        None,
                         None,
                         None,
                         Body::Namespace(&v.body),
@@ -598,15 +593,43 @@ impl Function<'_, '_> {
         self.op("import", &[&self.scope.clone(), &name])
     }
 
+    fn parameter_scope(&mut self, outer: &str, params: &ast::TypeParams, class: bool) -> String {
+        let names = self.op("dict", &[]);
+        for param in params {
+            let ast::TypeParam::TypeVar(typevar) = param else {
+                self.unsupported("variadic class type parameters");
+                continue;
+            };
+            if typevar.bound.is_some() || typevar.default.is_some() {
+                self.unsupported("class type parameter bounds and defaults");
+            }
+            let binding = self.code_name(typevar.name.as_str());
+            let name = self.code_name(self.source.private_names.definition(&typevar.name));
+            self.op("put", &[&names, &binding, &name]);
+        }
+        let op = if class {
+            "class_parameter_scope"
+        } else {
+            "function_parameter_scope"
+        };
+        self.op(op, &[outer, &names])
+    }
+
     pub(super) fn define(
         &mut self,
         start: TextSize,
         name: &str,
+        global: bool,
         params: Option<&ast::Parameters>,
         returns: Option<&ast::Expr>,
+        type_params: Option<&ast::TypeParams>,
         body: Body<'_>,
     ) -> String {
-        let qualname = format!("{}{name}", self.prefix);
+        let qualname = if global {
+            name.to_owned()
+        } else {
+            format!("{}{name}", self.prefix)
+        };
         let prefix = if matches!(body, Body::Namespace(_)) {
             format!("{qualname}.")
         } else {
@@ -634,7 +657,7 @@ impl Function<'_, '_> {
                 if params.is_some_and(|p| p.kwarg.is_some()) {
                     flags |= VARKEYWORDS;
                 }
-                if self.prefix.contains(".<locals>.") {
+                if type_params.is_some() || self.in_function {
                     flags |= NESTED;
                 }
                 if !self.prefix.is_empty() && !self.prefix.ends_with(".<locals>.") {
@@ -669,6 +692,10 @@ impl Function<'_, '_> {
         let entries = params.map_or_else(Vec::new, |p| {
             crate::frontend::parameter_annotations(p, returns)
         });
+        let outer = self.scope.clone();
+        let scope = type_params
+            .map(|params| self.parameter_scope(&outer, params, false))
+            .unwrap_or(outer);
         let annotate = if entries.is_empty() {
             "0".into()
         } else {
@@ -684,7 +711,7 @@ impl Function<'_, '_> {
             );
             use imre_ast::code_flags::*;
             let mut annotation_flags = OPTIMIZED | NEWLOCALS;
-            if self.prefix.contains(".<locals>.") {
+            if type_params.is_some() || self.in_function {
                 annotation_flags |= NESTED;
             }
             if self.source.string_annotations {
@@ -709,11 +736,12 @@ impl Function<'_, '_> {
                 String::new(),
                 Body::Annotations(entries, class),
                 params.map_or(start, Ranged::start),
+                false,
             );
             let aname = self.text("__annotate__");
             let aqname = self.text(&format!("{qualname}.__annotate__"));
             let defaults = self.op("dict", &[]);
-            self.checked(&format!("call i64 @imre_dyn_def_from_site(ptr %ctx, ptr {code}, i64 {}, i64 {aname}, i64 {sig}, i64 {defaults}, i64 {aqname}, i64 0, i64 0, i1 true)", self.scope))
+            self.checked(&format!("call i64 @imre_dyn_def_from_site(ptr %ctx, ptr {code}, i64 {}, i64 {aname}, i64 {sig}, i64 {defaults}, i64 {aqname}, i64 0, i64 0, i1 true)", scope))
         };
         let qualname = self.text(&qualname);
         let mut signature =
@@ -803,11 +831,19 @@ impl Function<'_, '_> {
             let value_format = self.integer(1);
             self.op("put", &[&defaults, &format, &value_format]);
         }
-        let code = self.output.definition(self.source, prefix, body, start);
+        let in_function = self.in_function || !matches!(body, Body::Namespace(_));
+        let code = self
+            .output
+            .definition(self.source, prefix, body, start, in_function);
         signature["types"] = json!({});
         // A generator call returns a suspended frame, before it yields or returns a value.
+        let scalar = |expr: &ast::Expr| {
+            scalar_annotation(expr).filter(|name| {
+                !type_params.is_some_and(|params| params.iter().any(|p| p.name().as_str() == *name))
+            })
+        };
         if generator.is_none() {
-            signature["return_type"] = json!(returns.and_then(scalar_annotation));
+            signature["return_type"] = json!(returns.and_then(scalar));
         }
         if let Some(p) = params {
             self.output
@@ -820,12 +856,7 @@ impl Function<'_, '_> {
             ] {
                 for arg in args {
                     let name = arg.parameter.name.as_str();
-                    if let Some(ty) = arg
-                        .parameter
-                        .annotation
-                        .as_deref()
-                        .and_then(scalar_annotation)
-                    {
+                    if let Some(ty) = arg.parameter.annotation.as_deref().and_then(scalar) {
                         signature["types"][name] = json!(ty);
                     }
                     signature[group].as_array_mut().unwrap().push(json!(name));
@@ -869,7 +900,13 @@ impl Function<'_, '_> {
         signature["scope_locals_complete"] = json!(!closure_names.locals_incomplete);
         let sig = self.text(&signature.to_string());
         let name = self.code_name(name);
-        let function = self.checked(&format!("call i64 @imre_dyn_def_from_site(ptr %ctx, ptr {code}, i64 {}, i64 {name}, i64 {sig}, i64 {defaults}, i64 {qualname}, i64 {doc}, i64 {annotate}, i1 false)", self.scope));
+        let function = self.checked(&format!("call i64 @imre_dyn_def_from_site(ptr %ctx, ptr {code}, i64 {}, i64 {name}, i64 {sig}, i64 {defaults}, i64 {qualname}, i64 {doc}, i64 {annotate}, i1 false)", scope));
+        if type_params.is_some() {
+            let key = self.code_name(".type_params");
+            let params = self.op("lookup", &[&scope, &key]);
+            let key = self.code_name("__type_params__");
+            self.op("setattr", &[&function, &key, &params]);
+        }
         if let Some((source, line)) = generator {
             self.line(&format!("call void @imre_dyn_generator_body(ptr %ctx, i64 {function}, ptr {source}, i32 {line})"));
         }

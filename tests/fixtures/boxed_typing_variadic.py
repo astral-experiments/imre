@@ -1,4 +1,4 @@
-from typing import NoDefault, TypeVarTuple, Unpack, get_args, get_origin
+from typing import Annotated, ForwardRef, List, NoDefault, Tuple, TypeVar, TypeVarTuple, Unpack, get_args, get_origin
 
 
 def current():
@@ -25,6 +25,30 @@ def current():
     assert repr(unpacked) == "typing.Unpack[Ts]"
     assert unpacked[int, str] == (int, str)
     assert Unpack[tuple[int, str]].__typing_unpacked_tuple_args__ == (int, str)
+
+    t = TypeVar("T")
+    marker = List[Annotated[t, ts]]
+    assert marker.__parameters__ == (t,)
+    assert marker[int] == List[Annotated[int, ts]]
+    for origin in (tuple, Tuple):
+        variadic = Annotated[origin[t, Unpack[ts], t], "metadata"]
+        assert variadic[int] == Annotated[origin[int, int], "metadata"]
+        assert variadic[int, str, bool] == Annotated[origin[int, str, bool, int], "metadata"]
+        alias = variadic[t, *TypeVarTuple("Us")]
+        assert alias[bool, float] == Annotated[origin[bool, float, bool], "metadata"]
+
+    spread = Unpack[tuple["Target", None]]
+    builtin = Annotated[tuple[*ts], 1]
+    named = Annotated[Tuple[*ts], 1]
+    assert builtin["Target", None].__origin__.__args__ == (ForwardRef("Target"), type(None))
+    assert builtin[spread].__origin__.__args__ == ("Target", None)
+    assert named[spread].__origin__.__args__ == (ForwardRef("Target"), type(None))
+    try:
+        builtin[Unpack[tuple[None, ...]], Unpack[tuple[int, ...]]]
+    except TypeError as exc:
+        assert str(exc) == "More than one unpacked arbitrary-length tuple argument"
+    else:
+        raise AssertionError("accepted two arbitrary-length tuple arguments")
 
     for bad in (lambda: isinstance(0, ts), lambda: isinstance(0, NoDefault),
                 lambda: Unpack[int, str], lambda: type(NoDefault)(bad=True)):

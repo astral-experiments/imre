@@ -16,8 +16,8 @@ pub(super) struct Socket {
     kind: i32,
     proto: i32,
     fd: RawFd,
-    // None blocks indefinitely; zero is nonblocking. Positive timeouts use nonblocking fds.
-    timeout: Option<Duration>,
+    // Python socket timeouts use signed nanoseconds: -1 blocks indefinitely, 0 is nonblocking.
+    timeout_ns: i64,
     readers: usize,
     close_requested: bool,
 }
@@ -361,7 +361,7 @@ fn handle(
         family,
         kind,
         proto,
-        timeout: (!blocking).then_some(Duration::ZERO),
+        timeout_ns: if blocking { -1 } else { 0 },
         readers: 0,
         close_requested: false,
     }))))
@@ -1132,8 +1132,8 @@ pub(crate) fn ipv6_address(
     Ok(InternetAddress::V6(addr))
 }
 
-pub(crate) fn address(host: &str, port: i64, name: &str) -> Result<libc::sockaddr_in> {
-    let ip = hostbyname(host.as_bytes())?;
+pub(crate) fn address(host: &[u8], port: i32, name: &str) -> Result<libc::sockaddr_in> {
+    let ip = hostbyname(host)?;
     let port = u16::try_from(port).map_err(|_| port_error(name))?;
     // SAFETY: zero is a valid initial sockaddr_in, including target-specific padding.
     let mut addr: libc::sockaddr_in = unsafe { std::mem::zeroed() };
@@ -1153,7 +1153,7 @@ unsafe fn unpack(pair: *const usize, name: &str) -> Result<libc::sockaddr_in> {
     // SAFETY: the compiler verified and rooted both fields.
     unsafe {
         let port = c_int(*pair.add(1)).map_err(|_| port_error(name))?;
-        address(&**pair.cast::<*const Str>(), i64::from(port), name)
+        address((&**pair.cast::<*const Str>()).as_bytes(), port, name)
     }
 }
 
@@ -1297,6 +1297,10 @@ pub(crate) fn socket_name(s: &Object, peer: bool) -> Result<SocketName> {
         }
     })
     .map_err(errno_error)?;
+    unpack_socket_name(&addr, len)
+}
+
+fn unpack_socket_name(addr: &libc::sockaddr_storage, len: libc::socklen_t) -> Result<SocketName> {
     if len == 0 {
         return Ok(SocketName::NoAddress);
     }
@@ -1310,14 +1314,16 @@ pub(crate) fn socket_name(s: &Object, peer: bool) -> Result<SocketName> {
         #[cfg(target_vendor = "apple")]
         if len as usize > path_offset {
             // SAFETY: the initialized storage includes at least the first Unix path byte.
-            let unix = unsafe { &*(&raw const addr).cast::<libc::sockaddr_un>() };
+            let unix =
+                unsafe { &*(addr as *const libc::sockaddr_storage).cast::<libc::sockaddr_un>() };
             if unix.sun_path[0] == 0 {
                 return Ok(SocketName::UnnamedUnix);
             }
         }
     }
     // SAFETY: the kernel initialized addr, and read validates its family and length.
-    unsafe { InternetAddress::read((&raw const addr).cast(), len) }.map(SocketName::Internet)
+    unsafe { InternetAddress::read((addr as *const libc::sockaddr_storage).cast(), len) }
+        .map(SocketName::Internet)
 }
 
 pub(crate) fn endpoint(addr: &libc::sockaddr_in) -> (Ipv4Addr, u16) {
@@ -1426,21 +1432,27 @@ pub unsafe extern "C" fn imre_socket_recv(s: &Object, size: usize, flags: usize)
     finish(result, ptr::null())
 }
 
+/// Allocate initialized syscall output without touching every page of a large receive.
+fn zeroed_receive_buffer(size: usize) -> Result<Vec<u8>> {
+    if size == 0 {
+        return Ok(Vec::new());
+    }
+    let layout = std::alloc::Layout::array::<u8>(size).map_err(|_| Error::allocation())?;
+    // SAFETY: size is nonzero and layout describes exactly size bytes.
+    let data = unsafe { std::alloc::alloc_zeroed(layout) };
+    if data.is_null() {
+        return Err(Error::allocation());
+    }
+    // SAFETY: this initialized allocation has the layout Vec<u8> uses for size bytes.
+    Ok(unsafe { Vec::from_raw_parts(data, size, size) })
+}
+
 pub(crate) fn recv(s: &Object, size: usize, flags: i32) -> Result<Vec<u8>> {
     let mut bytes = Vec::<u8>::new();
     if size != 0 {
         if flags & libc::MSG_TRUNC != 0 {
             // Linux TCP can report discarded bytes without touching the buffer.
-            // Request zeroed storage without writing every page of a large receive.
-            let layout = std::alloc::Layout::array::<u8>(size).map_err(|_| Error::allocation())?;
-            // SAFETY: size is nonzero and layout describes exactly size bytes.
-            let data = unsafe { std::alloc::alloc_zeroed(layout) };
-            if data.is_null() {
-                return Err(Error::allocation());
-            }
-            // SAFETY: the global allocator supplies an initialized allocation
-            // with the layout that Vec<u8> uses for this capacity.
-            bytes = unsafe { Vec::from_raw_parts(data, size, size) };
+            bytes = zeroed_receive_buffer(size)?;
         } else {
             bytes
                 .try_reserve_exact(size)
@@ -1460,6 +1472,42 @@ pub(crate) fn recv(s: &Object, size: usize, flags: i32) -> Result<Vec<u8>> {
         }
     }
     Ok(bytes)
+}
+
+/// Receive one message and preserve the source address, including a missing stream peer.
+pub(crate) fn recv_from(s: &Object, size: usize, flags: i32) -> Result<(Vec<u8>, SocketName)> {
+    let mut bytes = zeroed_receive_buffer(size)?;
+    // SAFETY: zero initializes the entire socket-address storage, including padding.
+    let mut peer: libc::sockaddr_storage = unsafe { std::mem::zeroed() };
+    let raw = fd(s);
+    let (count, len) = socket_call(raw, libc::POLLIN, deadline(s), || {
+        let mut len = size_of_val(&peer) as libc::socklen_t;
+        // SAFETY: bytes and peer remain writable up to their respective capacities.
+        let count = unsafe {
+            libc::recvfrom(
+                raw,
+                bytes.as_mut_ptr().cast(),
+                size,
+                flags,
+                (&raw mut peer).cast(),
+                &mut len,
+            )
+        };
+        let count = usize::try_from(count).map_err(|_| io::Error::last_os_error())?;
+        Ok((count, len))
+    })
+    .map_err(errno_error)?;
+    // MSG_TRUNC may report the full datagram size even when fewer bytes were copied.
+    if count > size {
+        bytes
+            .try_reserve(count - size)
+            .map_err(|_| Error::allocation())?;
+    }
+    bytes.resize(count, 0);
+    if count < size / 2 {
+        crate::compact_bytes(&mut bytes);
+    }
+    Ok((bytes, unpack_socket_name(&peer, len)?))
 }
 
 pub(crate) fn recv_into(s: &Object, buffer: &mut [u8], flags: i32) -> Result<usize> {
@@ -1484,6 +1532,26 @@ unsafe fn receive(socket: &Object, buffer: *mut u8, len: usize, flags: i32) -> i
 
 pub(crate) fn send(socket: &Object, bytes: &[u8], flags: i32) -> Result<usize> {
     send_until(fd(socket), bytes, flags, deadline(socket))
+}
+
+/// Send one message to an Internet endpoint using the socket's existing timeout policy.
+pub(crate) fn send_to(
+    s: &Object,
+    bytes: &[u8],
+    flags: i32,
+    address: &InternetAddress,
+) -> Result<usize> {
+    #[cfg(not(target_vendor = "apple"))]
+    let flags = flags | libc::MSG_NOSIGNAL;
+    let raw = fd(s);
+    let (addr, len) = address.raw_parts();
+    socket_call(raw, libc::POLLOUT, deadline(s), || {
+        // SAFETY: the source slice and address live through each synchronous sendto.
+        let count =
+            unsafe { libc::sendto(raw, bytes.as_ptr().cast(), bytes.len(), flags, addr, len) };
+        usize::try_from(count).map_err(|_| io::Error::last_os_error())
+    })
+    .map_err(errno_error)
 }
 
 fn send_until(raw: RawFd, bytes: &[u8], flags: i32, until: Option<Deadline>) -> Result<usize> {
@@ -1573,12 +1641,23 @@ pub(crate) fn set_blocking_mode(s: &Object, blocking: bool) -> Result<()> {
 }
 
 pub(crate) fn get_timeout(s: &Object) -> Option<Duration> {
-    state(s, |s| s.timeout)
+    u64::try_from(state(s, |s| s.timeout_ns))
+        .ok()
+        .map(Duration::from_nanos)
 }
 
 pub(crate) fn set_timeout(s: &Object, timeout: Option<Duration>) -> Result<()> {
+    let timeout_ns = match timeout {
+        None => -1,
+        Some(duration) => i64::try_from(duration.as_nanos()).map_err(|_| {
+            Error::new(
+                Kind::OverflowError,
+                "timestamp too large to convert to C PyTime_t",
+            )
+        })?,
+    };
     // CPython updates timeout even when fcntl subsequently reports EBADF.
-    state(s, |s| s.timeout = timeout);
+    state(s, |s| s.timeout_ns = timeout_ns);
     set_blocking(fd(s), timeout.is_none()).map_err(errno_error)
 }
 
@@ -1590,11 +1669,12 @@ pub extern "C" fn imre_socket_getblocking(s: &Object) -> bool {
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_socket_dup(s: &Object) -> *const Object {
     let result = (|| {
-        let (raw, timeout, family, kind) = state(s, |s| (s.fd, s.timeout, s.family, s.kind));
+        let (raw, family, kind, proto) = state(s, |s| (s.fd, s.family, s.kind, s.proto));
+        let timeout = get_timeout(s);
         // SAFETY: the kernel validates even a closed fd; its copy is non-inheritable from creation.
         let copy =
             checked(unsafe { libc::fcntl(raw, libc::F_DUPFD_CLOEXEC, 0) }).map_err(errno_error)?;
-        let child = handle(copy, timeout.is_none(), family, kind, proto(s))?;
+        let child = handle(copy, timeout.is_none(), family, kind, proto)?;
         // socket.dup reapplies its source's blocking mode to the shared open file.
         set_timeout(&child, timeout)?;
         Ok(crate::ObjectOwner::into_raw(child))

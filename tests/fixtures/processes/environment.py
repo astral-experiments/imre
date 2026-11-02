@@ -50,6 +50,46 @@ print(second["IMRE_PROCESS_OVERRIDE"])
 print(os.environ.copy()["IMRE_PROCESS_OVERRIDE"])
 changed = subprocess.run(command, capture_output=True, encoding="utf-8", env=first, cwd=Path("directory"))
 print(changed.stdout)
+os.environ[marked("IMRE_PROCESS_OVERRIDE")] = marked("assigned λ")
+print(os.environ.get("IMRE_PROCESS_OVERRIDE"))
+print(subprocess.run(command, capture_output=True, encoding="utf-8").stdout)
+os.environb[b"IMRE_PROCESS_OVERRIDE"] = b"bytes assignment"
+print(os.environ.get("IMRE_PROCESS_OVERRIDE"))
+os.environb[b"IMRE_PROCESS_NEW_BYTES"] = b"\xff"
+print(dict(os.environb)[b"IMRE_PROCESS_NEW_BYTES"])
+del os.environb[b"IMRE_PROCESS_NEW_BYTES"]
+label = marked("IMRE_PROCESS_OVERRIDE")
+print(os.environ[label])
+del os.environ[label]
+print(subprocess.run(command, capture_output=True, encoding="utf-8").stdout)
+try:
+    os.environ[label]
+except KeyError as error:
+    assert error.args[0] is label
+    assert error.args[0] is not (label + "_")[:-1]
+    assert error.__suppress_context__
+try:
+    del os.environ[label]
+except KeyError as error:
+    assert error.args[0] is label
+    assert error.__suppress_context__
+byte_label = label.encode("utf-8")
+try:
+    del os.environb[byte_label]
+except KeyError as error:
+    assert error.args[0] is byte_label
+    assert error.__suppress_context__
+for invalid in ("", "bad=name", "bad\0name"):
+    try:
+        os.environ[invalid] = "rejected"
+    except (ValueError, OSError) as error:
+        print(str(error))
+try:
+    os.environ["IMRE_PROCESS_OVERRIDE"] = "bad\0value"
+except ValueError as error:
+    print(str(error))
+print(os.environ.get("IMRE_PROCESS_OVERRIDE"))
+
 empty = subprocess.run(command, capture_output=True, encoding="utf-8", env={})
 print(empty.stdout)
 # An explicit cwd selects CPython's fork/exec path, which accepts an empty name.

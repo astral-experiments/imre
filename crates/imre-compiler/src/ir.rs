@@ -2303,7 +2303,18 @@ pub(crate) enum ProcessOperation {
     EnvironCopy {
         bytes: bool,
     },
+    EnvironClear,
+    EnvironUpdate {
+        bytes: bool,
+    },
     EnvironGet,
+    EnvironIndex,
+    EnvironDelete {
+        bytes: bool,
+    },
+    EnvironSet {
+        bytes: bool,
+    },
     GetCwd,
     Fd(FdOperation),
     Credential(&'static str),

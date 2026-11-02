@@ -427,7 +427,9 @@ pub(super) const BYTES_METHODS: &[&str] = &[
 pub(super) const STR_METHODS: &[&str] = &[
     "__str__",
     "__format__",
+    "__mod__",
     "__repr__",
+    "__rmod__",
     "capitalize",
     "count",
     "encode",
@@ -435,6 +437,7 @@ pub(super) const STR_METHODS: &[&str] = &[
     "expandtabs",
     "find",
     "format",
+    "format_map",
     "index",
     "isalnum",
     "isascii",
@@ -490,11 +493,14 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         Value::Bool(_) if attr == "__repr__" => "bool",
         Value::Int(_) if attr == "__repr__" => "int",
         Value::Int(_) | Value::Bool(_)
-            if matches!(attr, "__add__" | "__index__" | "bit_length" | "to_bytes") =>
+            if matches!(
+                attr,
+                "__add__" | "__index__" | "__trunc__" | "bit_length" | "to_bytes"
+            ) =>
         {
             "int"
         }
-        Value::Float(_) if matches!(attr, "__repr__" | "as_integer_ratio") => "float",
+        Value::Float(_) if matches!(attr, "__repr__" | "__trunc__" | "as_integer_ratio") => "float",
         Value::Str(_) | Value::SurrogateStr(_) if STR_METHODS.contains(&attr) => "str",
         Value::Range(_) if super::range::METHODS.contains(&attr) => "range",
         Value::DictIterator(iter) if DictIterator::methods(iter.class_name()).contains(&attr) => {
@@ -560,10 +566,12 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
                     | "fileno"
                     | "close"
                     | "recv"
+                    | "recvfrom"
                     | "recv_into"
                     | "makefile"
                     | "send"
                     | "sendall"
+                    | "sendto"
                     | "shutdown"
                     | "getsockopt"
                     | "setsockopt"
@@ -718,7 +726,7 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         Value::RegexMatch(_)
             if matches!(
                 attr,
-                "group" | "groups" | "groupdict" | "start" | "end" | "span"
+                "group" | "groups" | "groupdict" | "expand" | "start" | "end" | "span"
             ) =>
         {
             "match"
@@ -1052,6 +1060,41 @@ impl Context {
     }
 }
 
+/// Validate a no-argument method descriptor before reading its native receiver.
+fn noargs_method_receiver(
+    ctx: &Context,
+    owner: &str,
+    method: &str,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Id> {
+    let Some((&receiver, rest)) = args.split_first() else {
+        return Err(type_error(format!(
+            "unbound method {owner}.{method}() needs an argument"
+        )));
+    };
+    if !ctx.builtin_slot_accepts(receiver, owner) {
+        let actual = ctx
+            .builtin_type_name(receiver)
+            .unwrap_or_else(|| ctx.type_name(receiver));
+        return Err(type_error(format!(
+            "descriptor '{method}' for '{owner}' objects doesn't apply to a '{actual}' object"
+        )));
+    }
+    if !kwargs.is_empty() {
+        return Err(type_error(format!(
+            "{owner}.{method}() takes no keyword arguments"
+        )));
+    }
+    if !rest.is_empty() {
+        return Err(type_error(format!(
+            "{owner}.{method}() takes no arguments ({} given)",
+            rest.len()
+        )));
+    }
+    Ok(receiver)
+}
+
 pub(super) fn call(
     ctx: &mut Context,
     name: &str,
@@ -1310,6 +1353,17 @@ pub(super) fn call(
             }
             "module" => ctx.module_method(method, args, kwargs),
             "float" if method == "__getformat__" => float::getformat(ctx, args, kwargs),
+            "int" | "float" if method == "__trunc__" => {
+                let receiver = noargs_method_receiver(ctx, owner, method, args, kwargs)?;
+                if owner == "int" {
+                    return Ok(integer::exact_value(ctx, receiver));
+                }
+                let Value::Float(value) = *ctx.heap.get(ctx.scalar_value(receiver)) else {
+                    unreachable!("validated float receiver")
+                };
+                let integer = crate::floats::float_to_integer(value)?;
+                Ok(ctx.alloc(Value::Int(crate::Int::new(integer))))
+            }
             "float" if method == "as_integer_ratio" => float::as_integer_ratio(ctx, args, kwargs),
             "getset_descriptor" if matches!(method, "__set__" | "__delete__") => {
                 if !kwargs.is_empty() {
@@ -1329,12 +1383,18 @@ pub(super) fn call(
                     return Err(type_error(format!("{message}, got {}", values.len())));
                 }
                 let Value::GetSetDescriptor {
-                    owner, name: field, ..
+                    get,
+                    owner,
+                    name: field,
+                    ..
                 } = *ctx.heap.get(descriptor)
                 else {
                     return Err(type_error("expected a getset descriptor"));
                 };
-                let accepts = if owner == "int" {
+                let accepts = if let Value::HashMethod { owner: class, .. } = *ctx.heap.get(get) {
+                    super::stdlib::hashlib::md5::check_receiver(ctx, class, field, values[0])?;
+                    true
+                } else if owner == "int" {
                     ctx.builtin_slot_accepts(values[0], owner)
                 } else if owner == "typing.Union" {
                     matches!(ctx.heap.get(values[0]), Value::Union(_))

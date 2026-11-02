@@ -2116,7 +2116,7 @@ impl Context {
                 defaultdict::METHODS
             }
             "list" => builtins::LIST_METHODS,
-            "method_descriptor" => &["__get__"],
+            "method_descriptor" | "wrapper_descriptor" => &["__get__"],
             "tuple" => &["__repr__", "__getitem__", "index"],
             "set" => &[
                 "__repr__",
@@ -2156,6 +2156,7 @@ impl Context {
                 &[
                     "__add__",
                     "__index__",
+                    "__trunc__",
                     "bit_length",
                     "from_bytes",
                     "to_bytes",
@@ -2166,6 +2167,7 @@ impl Context {
             "float" => &[
                 "__format__",
                 "__getformat__",
+                "__trunc__",
                 "as_integer_ratio",
                 "__repr__",
             ],
@@ -2848,6 +2850,7 @@ impl Context {
                 let native_new = self.builtin("hashlib.new");
                 self.bind(scope, "_native_new", native_new);
             }
+            "_md5" => stdlib::hashlib::md5::install(self, module, scope)?,
             "_sha3" => {
                 for name in [
                     "sha3_224",
@@ -2904,14 +2907,8 @@ impl Context {
                     self.bind(scope, name, value);
                 }
             }
-            "operator" if source.is_none() => {
-                for name in [
-                    "lt", "le", "eq", "ne", "ge", "gt", "and_", "or_", "sub", "xor",
-                ] {
-                    let function = self.builtin(&format!("operator.{name}"));
-                    let alias = format!("__{}__", name.trim_end_matches('_'));
-                    self.bind(scope, &alias, function);
-                }
+            "operator" | "_operator" if source.is_none() => {
+                stdlib::operator::install(self, scope, name);
             }
             "errno" => stdlib::install_errno(self, scope)?,
             "atexit" => atexit::install(self, scope),
