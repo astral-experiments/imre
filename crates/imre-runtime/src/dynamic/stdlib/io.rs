@@ -16,6 +16,7 @@ mod file_io;
 pub(super) use file_io::check_text_options;
 pub(in crate::dynamic) use file_io::{open, popen_pipe};
 mod text_wrapper;
+pub(super) use text_wrapper::text_options;
 
 #[derive(Clone)]
 pub(in crate::dynamic) enum MemoryStream {

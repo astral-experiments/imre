@@ -103,6 +103,8 @@ fn launch(ctx: &mut Context, values: &[Id]) -> Result<Id> {
         env,
         bufsize,
         pipesize,
+        encoding,
+        errors,
     ] = values
     else {
         return Err(Error::new("TypeError", "invalid Popen launch operands"));
@@ -112,6 +114,10 @@ fn launch(ctx: &mut Context, values: &[Id]) -> Result<Id> {
         redirect(ctx, stdout, 1)?,
         redirect(ctx, stderr, 2)?,
     ];
+    if (encoding != NONE || errors != NONE) && streams.iter().any(|(mode, _)| *mode == 1) {
+        // CPython opens text wrappers before the child can execute.
+        io::text_options(ctx, encoding, errors, NONE)?;
+    }
     let scalar = matches!(
         ctx.heap.get(ctx.scalar_value(args)),
         Value::Str(_) | Value::SurrogateStr(_) | Value::Bytes(_) | Value::DirEntry(_)
