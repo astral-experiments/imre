@@ -59,11 +59,15 @@ def _find_namespace_portions(name, path):
         return spec
 
 
-def _namespace_spec(name, locations, module):
-    spec = _ModuleSpec(name, None)
-    spec.submodule_search_locations = _bootstrap_external._NamespacePath(name, locations, _find_namespace_portions)
+def _namespace_spec(name, locations, module, source_globals):
+    # The installed finder supplies the spec and path. The importing core installs the loader.
+    finder = _bootstrap_external._finder_external
+    spec = finder._bootstrap.ModuleSpec(name, None)
+    spec.submodule_search_locations = finder._NamespacePath(name, locations, _find_namespace_portions)
     if module is not None:
-        _bootstrap._init_module_attrs(spec, module, override=True)
+        init_attrs = (finder._bootstrap._init_module_attrs if source_globals is None
+                      else source_globals["_init_module_attrs"])
+        init_attrs(spec, module, override=True)
         spec._initializing = False
     return spec
 

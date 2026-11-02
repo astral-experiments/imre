@@ -93,4 +93,30 @@ with fresh_imports("_frozen_importlib", "importlib._bootstrap"):
     else:
         raise AssertionError("disabled core bootstrap was imported")
 
+with tempfile.TemporaryDirectory() as root:
+    first = os.path.join(root, "first")
+    second = os.path.join(root, "second")
+    os.mkdir(first)
+    os.mkdir(second)
+    first_portion = os.path.join(first, "imre_portion")
+    second_portion = os.path.join(second, "imre_portion")
+    os.mkdir(first_portion)
+    sys.path.insert(0, second)
+    sys.path.insert(0, first)
+    try:
+        portion = source.import_module("imre_portion")
+        assert type(portion.__path__) is _frozen_importlib_external._NamespacePath
+        assert type(portion.__loader__) is external.NamespaceLoader
+        assert portion.__loader__ is portion.__spec__.loader
+        assert list(portion.__path__) == [first_portion]
+        os.mkdir(second_portion)
+        assert list(portion.__path__) == [first_portion]
+        source.invalidate_caches()
+        assert list(portion.__path__) == [first_portion, second_portion]
+    finally:
+        sys.path.remove(first)
+        sys.path.remove(second)
+        sys.modules.pop("imre_portion", None)
+
+
 print("fresh bootstrap providers ok")

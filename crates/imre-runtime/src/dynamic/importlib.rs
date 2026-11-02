@@ -486,10 +486,16 @@ impl Context {
         }
     }
 
-    pub(super) fn namespace_spec(&mut self, name: Id, locations: Id, module: Id) -> Result<Id> {
+    pub(super) fn namespace_spec(
+        &mut self,
+        name: Id,
+        locations: Id,
+        module: Id,
+        source_globals: Id,
+    ) -> Result<Id> {
         let importlib = self.module("importlib")?;
         let make = self.lookup_attr(importlib, "_namespace_spec")?;
-        self.call(make, vec![name, locations, module], vec![])
+        self.call(make, vec![name, locations, module, source_globals], vec![])
     }
 
     pub(super) fn initialize_source(
@@ -601,7 +607,7 @@ impl Context {
         let name = self.text(fullname);
         if matches!(body, SourceBody::Namespace) {
             let paths = self.location_list(&locations);
-            return self.namespace_spec(name, paths, NONE);
+            return self.namespace_spec(name, paths, NONE, NONE);
         }
         let origin = self.text(path.to_string_lossy());
         let locations = if locations.is_empty() {

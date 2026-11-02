@@ -137,6 +137,8 @@ pub(crate) struct Context {
     // The running frozen bootstrap keeps its globals even if its registry entry is replaced.
     bootstrap_globals: Id,
     bootstrap_file_spec: Id,
+    // The native path finder stays installed across fresh public bootstrap imports.
+    finder_external: Id,
     classes: HashMap<String, Id>,
     // The Python enum bases use native layouts but have writable class dictionaries.
     enum_scopes: HashMap<Id, Id>,
@@ -2331,7 +2333,14 @@ impl Context {
         let key = self.text(name);
         let modules = self.public_modules()?;
         self.put_item(modules, key, module)?;
-        if let Err(error) = self.run_initializer(name, module, scope, name_id, origin, source) {
+        if let Err(error) = self.run_initializer(
+            name,
+            module,
+            scope,
+            name_id,
+            source_globals,
+            source.map(|(path, body)| (path, body, origin)),
+        ) {
             // The executing script remains importable during interpreter shutdown.
             if name == "__main__" {
                 return Err(error);
@@ -2409,8 +2418,8 @@ impl Context {
         module: Id,
         scope: Id,
         name_id: Id,
-        origin: Option<Id>,
-        source: Option<(PathBuf, importlib::SourceBody)>,
+        source_globals: Id,
+        source: Option<(PathBuf, importlib::SourceBody, Option<Id>)>,
     ) -> Result<()> {
         if name == "_thread" && source.is_none() {
             let rlock = self.builtin(thread_rlock::CLASS);
@@ -2421,6 +2430,14 @@ impl Context {
             self.bind(scope, "BlockingIOError", error);
         }
         match name {
+            "_frozen_importlib_external" | "importlib._bootstrap_external" => {
+                let finder = if self.finder_external == NONE {
+                    module
+                } else {
+                    self.finder_external
+                };
+                self.bind(scope, "_finder_external", finder);
+            }
             "_imre_importlib" => {
                 // All bootstrap instances invalidate the finders used by the native path search.
                 if self.zip_path_importers == NONE {
@@ -2567,7 +2584,7 @@ impl Context {
             "_socket" => stdlib::install_lowlevel_socket(self, scope)?,
             "socket"
                 if source.is_none()
-                    || source.as_ref().is_some_and(|(path, _)| {
+                    || source.as_ref().is_some_and(|(path, _, _)| {
                         self.config["bundled_root"].as_str().is_some_and(|root| {
                             path == &std::path::Path::new(root).join("socket.py")
                         })
@@ -2718,11 +2735,12 @@ impl Context {
                 self.bind(scope, "get_native_id", id);
             }
         }
-        if let Some((path, body)) = source {
+        if let Some((path, body, origin)) = source {
             let result = match body {
                 importlib::SourceBody::Namespace if self.sources.contains_key("importlib") => {
-                    self.lookup_attr(module, "__path__")
-                        .and_then(|locations| self.namespace_spec(name_id, locations, module))
+                    self.lookup_attr(module, "__path__").and_then(|locations| {
+                        self.namespace_spec(name_id, locations, module, source_globals)
+                    })
                 }
                 importlib::SourceBody::Namespace => Ok(NONE),
                 importlib::SourceBody::Zip(loader) => self.initialize_source(
@@ -2760,6 +2778,14 @@ impl Context {
             };
             *initializing = false;
             result?;
+            if self.finder_external == NONE
+                && matches!(
+                    name,
+                    "_frozen_importlib_external" | "importlib._bootstrap_external"
+                )
+            {
+                self.finder_external = module;
+            }
             if name == "importlib"
                 && self.bootstrap_file_spec == NONE
                 && let Some(make_spec) = self.scope_name(scope, "_file_spec")
