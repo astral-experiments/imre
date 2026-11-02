@@ -44,7 +44,13 @@ static Slot slots[MAX_THREADS];
 /* A handler may inherit a small application-provided alternate stack. Keep
  * the bounded frame copies off that stack, including for a nested signal. */
 static struct { atomic_uint used; Frame frame; } scratch[MAX_THREADS];
-static _Thread_local Slot *local;
+#if defined(__linux__)
+/* The fatal handler must be able to read even an untouched thread's TLS
+ * without calling a resolver that might allocate. */
+static _Thread_local _Atomic(Slot *) local __attribute__((tls_model("initial-exec")));
+#else
+static _Thread_local _Atomic(Slot *) local;
+#endif
 static pthread_key_t key;
 static pthread_once_t key_once = PTHREAD_ONCE_INIT;
 static int key_ready;
@@ -70,7 +76,7 @@ static void drop_slot(void *value) {
     s->frames = NULL;
     s->depth = 0;
     s->capacity = 0;
-    local = NULL;
+    atomic_store_explicit(&local, NULL, memory_order_relaxed);
     unlock(s);
     free(frames);
     if (alt) {
@@ -86,7 +92,8 @@ static void drop_slot(void *value) {
 static void make_key(void) { key_ready = pthread_key_create(&key, drop_slot) == 0; }
 
 static Slot *thread_slot(void) {
-    if (local) return local;
+    Slot *current = atomic_load_explicit(&local, memory_order_relaxed);
+    if (current) return current;
     pthread_once(&key_once, make_key);
     if (!key_ready) return NULL;
     Frame *frames = calloc(1, sizeof(Frame));
@@ -101,7 +108,7 @@ static Slot *thread_slot(void) {
             s->pid = getpid();
             s->name[0] = 0;
             pthread_getname_np(s->thread, s->name, sizeof(s->name));
-            local = s;
+            atomic_store_explicit(&local, s, memory_order_relaxed);
             unlock(s);
             return s;
         }
@@ -151,17 +158,19 @@ void imre_fault_frame(size_t index, const char *file, size_t file_len,
     unlock(s);
 }
 void imre_fault_line(size_t index, uint32_t line) {
-    if (local) {
-        lock(local);
-        if (index < local->depth && index < local->capacity) local->frames[index].line = line;
-        unlock(local);
+    Slot *s = atomic_load_explicit(&local, memory_order_relaxed);
+    if (s) {
+        lock(s);
+        if (index < s->depth && index < s->capacity) s->frames[index].line = line;
+        unlock(s);
     }
 }
 void imre_fault_truncate(size_t depth) {
-    if (local) {
-        lock(local);
-        if (depth < local->depth) local->depth = depth;
-        unlock(local);
+    Slot *s = atomic_load_explicit(&local, memory_order_relaxed);
+    if (s) {
+        lock(s);
+        if (depth < s->depth) s->depth = depth;
+        unlock(s);
     }
 }
 
@@ -208,10 +217,16 @@ static void thread_header(int fd, pthread_t tid, const char *name, int current) 
 
 /* A single bounded stack copy guards the lifetime of a worker or a frame
  * that is returning on another thread while this report is being written. */
-static int dump_slot(Slot *s, int fd, pthread_t self, int all, int preceding, Frame *f) {
+static int dump_slot(Slot *s, int fd, int all, int preceding, Frame *f) {
     if (!try_lock(s)) return 0;
-    int current = s->frames && pthread_equal(s->thread, self);
-    if (!s->frames || s->pid != getpid() || (!current && (!all || !s->depth))) {
+#if defined(__linux__)
+    /* The caller's slot survives fork, even before it publishes its new PID. */
+    int current = s == atomic_load_explicit(&local, memory_order_relaxed);
+#else
+    /* Darwin may allocate on first TLS access. Keep the fatal path TLS-free. */
+    int current = s->frames && s->pid == getpid() && pthread_equal(s->thread, pthread_self());
+#endif
+    if (!s->frames || (!current && (!all || !s->depth || s->pid != getpid()))) {
         unlock(s);
         return 0;
     }
@@ -240,20 +255,19 @@ static int dump_slot(Slot *s, int fd, pthread_t self, int all, int preceding, Fr
     return current ? 2 : 1;
 }
 void imre_fault_dump(int fd, int all_threads) {
-    pthread_t self = pthread_self();
     size_t buf = 0;
     while (buf < MAX_THREADS &&
            atomic_exchange_explicit(&scratch[buf].used, 1, memory_order_acquire)) buf++;
     if (buf == MAX_THREADS) { LIT(fd, "  <traceback unavailable>\n"); return; }
     int preceding = 0, current = 0;
     for (size_t i = MAX_THREADS; i; i--) {
-        int which = dump_slot(&slots[i - 1], fd, self, all_threads, preceding, &scratch[buf].frame);
+        int which = dump_slot(&slots[i - 1], fd, all_threads, preceding, &scratch[buf].frame);
         if (which) preceding = 1;
         if (which == 2) current = 1;
     }
     if (!current) {
         if (preceding) LIT(fd, "\n");
-        if (all_threads) thread_header(fd, self, NULL, 1);
+        if (all_threads) thread_header(fd, pthread_self(), NULL, 1);
         else LIT(fd, "Stack (most recent call first):\n");
         LIT(fd, "  <no Python frame>\n");
     }
