@@ -241,10 +241,10 @@ impl Context {
                 self.builtins.get(&format!("{owner}.{name}")).copied()
             }
             Value::Native(kind) if kind == "collections.defaultdict" => {
-                let owner = match name {
-                    "__init__" | "__missing__" | "__repr__" | "copy" | "__copy__"
-                    | "__reduce__" => kind.as_str(),
-                    _ => "dict",
+                let owner = if super::defaultdict::METHODS.contains(&name) {
+                    kind.as_str()
+                } else {
+                    "dict"
                 };
                 self.builtins.get(&format!("{owner}.{name}")).copied()
             }
@@ -2657,6 +2657,12 @@ impl Context {
                     "__name__" | "__qualname__" => {
                         return Ok(self.text(short.to_owned()));
                     }
+                    "__dict__" if class == super::deque::CLASS => {
+                        return super::deque::class_dictionary(self, obj);
+                    }
+                    "__module__" if class == super::deque::CLASS => {
+                        return Ok(self.heap.code_name(module));
+                    }
                     "__module__" => return Ok(self.text(module.to_owned())),
                     "MISSING" if class == "_contextvars.Token" => return Ok(self.token_missing),
                     "__hash__" | "__doc__" | "__text_signature__" if class == KEY_WRAPPER => {
@@ -2680,7 +2686,7 @@ impl Context {
                     {
                         return Ok(self.builtin(&format!("{class}.{name}")));
                     }
-                    _ if class == super::deque::CLASS && super::deque::METHODS.contains(&name) => {
+                    _ if class == super::deque::CLASS && super::deque::member(name).is_some() => {
                         return Ok(self.builtin(&format!("{class}.{name}")));
                     }
                     _ => {}
@@ -3052,9 +3058,18 @@ impl Context {
                 return Ok(self.bind_native_classmethod(method, obj));
             }
             Value::Native(ref class)
-                if class == "collections.defaultdict" && name == "__module__" =>
+                if class == super::defaultdict::CLASS && name == "__dict__" =>
             {
-                return Ok(self.text("collections"));
+                return self.native_class_dictionary(
+                    obj,
+                    "<collections.defaultdict namespace>",
+                    super::defaultdict::METHODS.iter().copied(),
+                );
+            }
+            Value::Native(ref class)
+                if class == super::defaultdict::CLASS && name == "__module__" =>
+            {
+                return Ok(self.heap.code_name("collections"));
             }
             Value::Native(ref class)
                 if class == "collections.defaultdict"

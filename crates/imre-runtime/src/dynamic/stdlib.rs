@@ -1084,6 +1084,25 @@ pub(super) fn call(
         let tb = single_argument("clear_frames", "tb", args, kwargs)?;
         return traceback::clear_frames(ctx, tb);
     }
+    if let Some(method) = name.strip_prefix("collections.defaultdict.")
+        && matches!(method, "__missing__" | "copy" | "__copy__" | "__reduce__")
+    {
+        let Some(&receiver) = args.first() else {
+            return Err(Error::new(
+                "TypeError",
+                format!("unbound method defaultdict.{method}() needs an argument"),
+            ));
+        };
+        if ctx.defaultdict_factory(receiver).is_none() {
+            return Err(Error::new(
+                "TypeError",
+                format!(
+                    "descriptor '{method}' for 'collections.defaultdict' objects doesn't apply to a '{}' object",
+                    ctx.type_name(receiver)
+                ),
+            ));
+        }
+    }
     if name == "collections.defaultdict.__repr__" {
         let Some((&object, args)) = args.split_first() else {
             return Err(Error::new(
