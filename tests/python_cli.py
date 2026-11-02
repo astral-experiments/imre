@@ -1620,6 +1620,7 @@ def report(text):
             "boxed_temporary_file.py",
             "boxed_spooled_temporary_file.py",
             "boxed_named_temporary_file.py",
+            "boxed_tempfile_default_directory.py",
             "boxed_random.py",
             "boxed_secrets.py",
             "boxed_pkgutil.py",
