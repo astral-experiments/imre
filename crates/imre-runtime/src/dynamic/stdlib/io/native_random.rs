@@ -1,12 +1,36 @@
 //! BufferedRandom couples a seekable FileIO to a single read/write cursor.
-use super::{Context, Error, Id, Result, Value, descriptor_buffer, native_reader, native_writer};
+use super::{
+    Context, Error, Id, Result, Value, buffered_reader, descriptor_buffer, native_reader,
+    native_writer,
+};
 use crate::dynamic::stdlib::{builtins, tempfile};
 
 const OWNER: &str = "BufferedRandom";
 pub(super) const METHODS: &[&str] = &[
-    "__init__", "raw", "name", "mode", "closed", "readable", "writable", "seekable", "fileno",
-    "isatty", "peek", "read", "read1", "readinto", "readline", "write", "seek", "tell", "flush",
-    "close", "truncate",
+    "__init__",
+    "raw",
+    "name",
+    "mode",
+    "closed",
+    "readable",
+    "writable",
+    "seekable",
+    "fileno",
+    "isatty",
+    "_dealloc_warn",
+    "detach",
+    "readinto1",
+    "peek",
+    "read",
+    "read1",
+    "readinto",
+    "readline",
+    "write",
+    "seek",
+    "tell",
+    "flush",
+    "close",
+    "truncate",
 ];
 
 pub(super) fn call(
@@ -24,6 +48,28 @@ pub(super) fn call(
             ));
         }
         return descriptor_buffer::initialize(ctx, receiver, args, kwargs, OWNER);
+    }
+    if buffered_reader::has_state(ctx, receiver) {
+        if name == "write" {
+            super::argument_count(OWNER, name, args.len())?;
+            if !kwargs.is_empty() {
+                return Err(Error::new(
+                    "TypeError",
+                    "BufferedRandom.write() takes no keyword arguments",
+                ));
+            }
+            super::super::files::output_bytes(ctx, args[0])?;
+            return ctx.with_buffer_export(args[0], |ctx| {
+                buffered_reader::call(ctx, receiver, name, args)
+            });
+        }
+        return native_reader::call(ctx, OWNER, receiver, name, args, kwargs);
+    }
+    if name == "readinto1" {
+        return super::buffered_io::call(ctx, receiver, name, args, kwargs);
+    }
+    if name == "_dealloc_warn" {
+        return native_reader::call(ctx, OWNER, receiver, name, args, kwargs);
     }
     if let Value::BufferedRandom(file, path) = ctx.heap.get(receiver) {
         let file = file.clone();

@@ -113,3 +113,37 @@ try:
 finally:
     os.unlink(path)
 print("BufferedRandom checked")
+
+
+class ShortRaw(io.BytesIO):
+    def __init__(self, data):
+        super().__init__(data)
+        self.writes = []
+        self.refuse = False
+
+    def write(self, data):
+        if self.refuse:
+            self.refuse = False
+            raise OSError("retry me")
+        count = min(len(data), 2)
+        self.writes.append((self.tell(), bytes(data[:count])))
+        return super().write(data[:count])
+
+
+with ShortRaw(b"abcdefgh") as raw:
+    f = io.BufferedRandom(raw, 5)
+    assert f.raw is raw and f.read(1) == b"a" and raw.tell() == 5
+    assert f.write(b"123") == 3 and raw.writes == []
+    assert f.seek(-2, 1) == 2 and f.read1(2) == b"23"
+    raw.refuse = True
+    try:
+        f.flush()
+    except OSError as error:
+        assert error.args == ("retry me",)
+    else:
+        raise AssertionError("raw write failure lost")
+    f.flush()
+    assert raw.writes == [(1, b"12"), (3, b"3")]
+    assert raw.tell() == 4 and raw.getvalue() == b"a123efgh"
+    assert f.detach() is raw and not raw.closed
+print("BufferedRandom raw callbacks checked")

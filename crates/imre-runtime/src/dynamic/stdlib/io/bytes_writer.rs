@@ -99,58 +99,55 @@ struct RawWriter<'a> {
     error: Option<Error>,
 }
 
-impl RawWriter<'_> {
-    fn raw_write(&mut self, data: &[u8]) -> Result<Option<usize>> {
-        let ctx = &mut *self.ctx;
-        if let Some(stream) = native_writer(ctx, self.raw) {
-            stream.write(ctx, data)?;
-            return Ok(Some(data.len()));
-        }
-        let bytes = ctx.alloc(Value::Bytes(copy_bytes(data)?));
-        let view = ctx.alloc(Value::MemoryView {
-            owner: Some(bytes),
-            anonymous: true,
-            layout: None,
-            readonly: false,
-            hash: None,
-        });
-        // Attribute lookup itself can invoke Python and collect temporaries.
-        ctx.heap.keep(view);
-        let retry_mark = ctx.heap.temporary_mark();
-        let result = loop {
-            match invoke(ctx, self.raw, "write", vec![view]) {
-                Err(error) if ctx.has_errno(&error, libc::EINTR) => {
-                    ctx.heap.release_temporaries_since(retry_mark);
-                    continue;
-                }
-                result => break result?,
-            }
-        };
-        if result == NONE {
-            return Ok(None);
-        }
-        let count = ctx
-            .index_integer(result)
-            .ok()
-            .and_then(|n| n.to_i64())
-            .unwrap_or(-1);
-        if count < 0 || count as u64 > data.len() as u64 {
-            return Err(Error::new(
-                "OSError",
-                format!(
-                    "raw write() returned invalid length {count} (should have been between 0 and {})",
-                    data.len()
-                ),
-            ));
-        }
-        Ok(Some(count as usize))
+pub(super) fn raw_write(ctx: &mut Context, raw: Id, data: &[u8]) -> Result<Option<usize>> {
+    if let Some(stream) = native_writer(ctx, raw) {
+        stream.write(ctx, data)?;
+        return Ok(Some(data.len()));
     }
+    let bytes = ctx.alloc(Value::Bytes(copy_bytes(data)?));
+    let view = ctx.alloc(Value::MemoryView {
+        owner: Some(bytes),
+        anonymous: true,
+        layout: None,
+        readonly: false,
+        hash: None,
+    });
+    // Attribute lookup itself can invoke Python and collect temporaries.
+    ctx.heap.keep(view);
+    let retry_mark = ctx.heap.temporary_mark();
+    let result = loop {
+        match invoke(ctx, raw, "write", vec![view]) {
+            Err(error) if ctx.has_errno(&error, libc::EINTR) => {
+                ctx.heap.release_temporaries_since(retry_mark);
+                continue;
+            }
+            result => break result?,
+        }
+    };
+    if result == NONE {
+        return Ok(None);
+    }
+    let count = ctx
+        .index_integer(result)
+        .ok()
+        .and_then(|n| n.to_i64())
+        .unwrap_or(-1);
+    if count < 0 || count as u64 > data.len() as u64 {
+        return Err(Error::new(
+            "OSError",
+            format!(
+                "raw write() returned invalid length {count} (should have been between 0 and {})",
+                data.len()
+            ),
+        ));
+    }
+    Ok(Some(count as usize))
 }
 
 impl Write for RawWriter<'_> {
     fn write(&mut self, data: &[u8]) -> io::Result<usize> {
         let mark = self.ctx.heap.temporary_mark();
-        let result = self.raw_write(data);
+        let result = raw_write(self.ctx, self.raw, data);
         self.ctx.heap.release_temporaries_since(mark);
         match result {
             // CPython retries a zero result without consuming any input.

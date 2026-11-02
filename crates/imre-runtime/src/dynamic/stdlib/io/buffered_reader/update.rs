@@ -1,0 +1,181 @@
+//! A callback-backed BufferedRandom keeps pending writes in its read-ahead window.
+use super::super::{bytes_io, bytes_writer, descriptor_buffer};
+use super::{Cell, Context, Error, Id, NONE, Reader, Result, Value, index, invoke};
+
+#[derive(Default)]
+pub(super) struct Update {
+    pub(super) raw_offset: Cell<usize>,
+    // Bytes outside this range were read from the raw stream or have already been written.
+    pub(super) dirty: Cell<Option<(usize, usize)>>,
+}
+
+impl Reader {
+    pub(super) fn raw_offset(&self) -> usize {
+        self.update
+            .as_ref()
+            .map_or(self.end.get(), |u| u.raw_offset.get())
+    }
+
+    fn move_raw(&self, ctx: &mut Context, update: &Update, to: usize) -> Result<()> {
+        if update.raw_offset.get() == to {
+            return Ok(());
+        }
+        let offset = ctx.int(to as i64 - update.raw_offset.get() as i64);
+        let whence = ctx.int(1);
+        let result = invoke(ctx, self.raw()?, "seek", vec![offset, whence])?;
+        let pos = index(ctx, result)?;
+        if pos < 0 {
+            return Err(Error::new(
+                "OSError",
+                format!("Raw stream returned invalid position {pos}"),
+            ));
+        }
+        self.absolute.set(Some(pos));
+        update.raw_offset.set(to);
+        Ok(())
+    }
+
+    pub(super) fn write_back(&self, ctx: &mut Context) -> Result<()> {
+        let Some(update) = &self.update else {
+            return Ok(());
+        };
+        let Some((mut start, end)) = update.dirty.get() else {
+            return Ok(());
+        };
+        self.move_raw(ctx, update, start)?;
+        while start < end {
+            let data = bytes_io::copy_bytes(&ctx.bytes_like(self.buffer)?[start..end])?;
+            let Some(n) = bytes_writer::raw_write(ctx, self.raw()?, &data)? else {
+                return Err(descriptor_buffer::blocking_error(ctx, 0, 0));
+            };
+            start += n;
+            self.advance(n);
+            update.raw_offset.set(start);
+            update.dirty.set(Some((start, end)));
+        }
+        update.dirty.set(None);
+        Ok(())
+    }
+
+    pub(super) fn sync_update(&self, ctx: &mut Context) -> Result<()> {
+        if let Some(update) = &self.update {
+            self.write_back(ctx)?;
+            self.move_raw(ctx, update, self.pos.get())?;
+        }
+        Ok(())
+    }
+
+    fn buffer_input(
+        &self,
+        ctx: &mut Context,
+        input: Id,
+        offset: usize,
+        count: usize,
+        update: &Update,
+    ) -> Result<()> {
+        if count == 0 {
+            return Ok(());
+        }
+        let bytes = bytes_io::copy_bytes(&ctx.native_buffer_bytes(input)?[offset..offset + count])?;
+        let start = self.pos.get();
+        let end = start + count;
+        let Value::ByteArray(buffer) = ctx.heap.get_mut(self.buffer) else {
+            unreachable!()
+        };
+        buffer[start..end].copy_from_slice(&bytes);
+        let (first, last) = update.dirty.get().unwrap_or((start, end));
+        update.dirty.set(Some((first.min(start), last.max(end))));
+        self.pos.set(end);
+        if self.end.get() != 0 {
+            self.end.set(self.end.get().max(end));
+        }
+        Ok(())
+    }
+
+    fn write_input(&self, ctx: &mut Context, input: Id, update: &Update) -> Result<Id> {
+        let size = ctx.native_buffer_bytes(input)?.len();
+        if size <= self.size - self.pos.get() {
+            self.buffer_input(ctx, input, 0, size, update)?;
+            return Ok(ctx.int(size as i64));
+        }
+        if let Err(error) = self.write_back(ctx) {
+            let blocking = ctx.builtin("BlockingIOError");
+            if !ctx.raised_error_matches(&error, blocking) {
+                return Err(error);
+            }
+            // Make space occupied by previously written bytes available to the new input.
+            let Some((start, end)) = update.dirty.get() else {
+                return Err(error);
+            };
+            let pos = self.pos.get();
+            if start > pos {
+                return Err(error);
+            }
+            let Value::ByteArray(buffer) = ctx.heap.get_mut(self.buffer) else {
+                unreachable!()
+            };
+            buffer.copy_within(start..end, 0);
+            self.end.set(0);
+            self.pos.set(pos - start);
+            update
+                .raw_offset
+                .set(update.raw_offset.get().saturating_sub(start));
+            update.dirty.set(Some((0, end - start)));
+            let accepted = size.min(self.size - self.pos.get());
+            self.buffer_input(ctx, input, 0, accepted, update)?;
+            return if accepted == size {
+                Ok(ctx.int(size as i64))
+            } else {
+                Err(descriptor_buffer::blocking_error(ctx, 0, accepted))
+            };
+        }
+        self.move_raw(ctx, update, self.pos.get())?;
+        self.reset();
+        let mut written = 0;
+        while size - written > self.size {
+            let data = bytes_io::copy_bytes(&ctx.native_buffer_bytes(input)?[written..])?;
+            let Some(n) = bytes_writer::raw_write(ctx, self.raw()?, &data)? else {
+                self.buffer_input(ctx, input, written, self.size, update)?;
+                return Err(descriptor_buffer::blocking_error(
+                    ctx,
+                    0,
+                    written + self.size,
+                ));
+            };
+            written += n;
+            self.advance(n);
+        }
+        self.buffer_input(ctx, input, written, size - written, update)?;
+        Ok(ctx.int(size as i64))
+    }
+
+    pub(super) fn update_call(&self, ctx: &mut Context, op: &str, args: &[Id]) -> Result<Id> {
+        self.check_open(
+            ctx,
+            match op {
+                "write" => "write to closed file",
+                "flush" => "flush of closed file",
+                _ => "truncate of closed file",
+            },
+        )?;
+        self.with_lock(|| {
+            if op == "write" {
+                return self.write_input(ctx, args[0], self.update.as_ref().unwrap());
+            }
+            self.sync_update(ctx)?;
+            self.reset();
+            if op == "truncate" {
+                let raw = self.raw()?;
+                let result = invoke(ctx, raw, op, vec![args.first().copied().unwrap_or(NONE)])?;
+                self.absolute.set(
+                    invoke(ctx, raw, "tell", vec![])
+                        .and_then(|v| index(ctx, v))
+                        .ok()
+                        .filter(|p| *p >= 0),
+                );
+                return Ok(result);
+            }
+            Ok(NONE)
+        })
+    }
+}
