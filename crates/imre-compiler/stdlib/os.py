@@ -3,7 +3,7 @@ import abc
 import sys
 import posixpath as path
 import stat as st
-from posix import geteuid
+from posix import chown, fchown, geteuid, getgid, getgroups, getuid, lchown
 from posix import _exit
 from posix import pread
 from _collections_abc import _check_methods

@@ -2724,8 +2724,14 @@ impl Context {
         }
         #[cfg(unix)]
         if source.is_none() && matches!(name, "os" | "posix") {
-            let geteuid = self.builtin("posix.geteuid");
-            self.bind(scope, "geteuid", geteuid);
+            let posix = if name == "os" { Some(self.module("posix")?) } else { None };
+            for attr in ["chown", "fchown", "lchown", "getuid", "geteuid", "getgid", "getgroups"] {
+                let value = match posix {
+                    Some(posix) => self.lookup_attr(posix, attr)?,
+                    None => self.builtin(&format!("posix.{attr}")),
+                };
+                self.bind(scope, attr, value);
+            }
         }
         match name {
             "_frozen_importlib_external" | "importlib._bootstrap_external" => {
