@@ -34,7 +34,7 @@ impl FileState {
         let Some(Stream::Random(file)) = &mut self.stream else {
             return Err(Error::new(Kind::ValueError, "read of closed file"));
         };
-        let size = size.unwrap_or(file.capacity());
+        let size = file.read_once_size(size);
         let mut data = Vec::new();
         data.try_reserve_exact(size)
             .map_err(|_| Error::allocation())?;
@@ -229,8 +229,14 @@ impl<F: Read + Write + Seek> Random<F> {
         super::peek_bytes(self)
     }
 
-    pub(crate) fn capacity(&self) -> usize {
-        self.buffer.len()
+    /// A read1 with read-ahead returns only the buffered prefix, regardless of the limit.
+    pub(crate) fn read_once_size(&self, limit: Option<usize>) -> usize {
+        let size = limit.unwrap_or(self.buffer.len());
+        if self.pos < self.read_end {
+            size.min(self.read_end - self.pos)
+        } else {
+            size
+        }
     }
 
     /// Read buffered data or issue a single raw read without reading ahead.

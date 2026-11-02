@@ -63,6 +63,8 @@ try:
         tf.writelines([b"a\n",b"c\n"])
         tf.seek(0)
         assert tf.peek(0) == b"a\nc\n" and tf.tell() == 0
+        assert tf.read1(sys.maxsize) == b"a\nc\n"
+        tf.seek(0)
         assert list(tf) == [b"a\n",b"c\n"]
         assert r.truncate(tf,2) == 2
     with io.FileIO(path, "r") as read:
@@ -94,6 +96,8 @@ try:
                 return raw_truncate(size)
             raw.truncate = truncate
             assert stream.truncate(2) == 2 and calls == [(2, 2)]
+            assert stream.seek(0) == 0 and stream.peek() == b"aZ"
+            assert stream.read1(sys.maxsize) == b"aZ" and stream.tell() == 2
         assert raw.closed
     oldio = sys.modules.pop("_io")
     try:

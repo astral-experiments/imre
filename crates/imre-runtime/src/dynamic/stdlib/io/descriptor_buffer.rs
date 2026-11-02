@@ -789,12 +789,8 @@ impl BufferedFd {
                     let bytes = match buffer {
                         Buffer::Reader(r) => read_once(r, size)?,
                         Buffer::Random(file) => {
-                            let size = if size < 0 {
-                                file.capacity() as i64
-                            } else {
-                                size
-                            };
-                            let mut bytes = builtins::zeroed_bytes(size)?;
+                            let size = file.read_once_size(usize::try_from(size).ok());
+                            let mut bytes = builtins::zeroed_bytes(size as i64)?;
                             let count = file.read_once(&mut bytes).map_err(os_error)?;
                             bytes.truncate(count);
                             bytes
