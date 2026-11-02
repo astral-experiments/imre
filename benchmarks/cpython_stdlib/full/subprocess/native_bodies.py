@@ -30,6 +30,7 @@ METHODS = {
         "test_communicate_stdout": "bytes",
         "test_communicate_stderr": "bytes",
         "test_communicate_returns": "bytes",
+        "test_communicate_timeout": None,
         "test_communicate_timeout_large_output": None,
         "test_post_timeout_communicate_sends_input": "int",
     },
