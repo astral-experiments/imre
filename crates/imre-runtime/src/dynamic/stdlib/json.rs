@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet};
 use super::{Context, Error, FALSE, Id, NONE, Result, TRUE, Value};
 use crate::objects::{
     DecodedJson, JsonNumber, decode_json, decode_json_bytes, owned_bytes_input,
-    write_json_fragment, write_json_string,
+    write_json_codepoints, write_json_fragment, write_json_string,
 };
 use crate::{Str, StrOwner};
 
@@ -70,6 +70,38 @@ fn parse(ctx: &mut Context, text: &str) -> Result<Id> {
     )?)
 }
 
+#[derive(Default)]
+struct Output {
+    text: String,
+    /// Raw surrogates in order, each with its insertion offset in the UTF-8 text.
+    surrogates: Vec<(usize, u32)>,
+}
+
+impl Output {
+    fn finish(self, ctx: &mut Context) -> Result<Id> {
+        if self.surrogates.is_empty() {
+            return Ok(ctx.text(self.text));
+        }
+        let mut points = Vec::new();
+        points
+            .try_reserve_exact(
+                self.text
+                    .chars()
+                    .count()
+                    .saturating_add(self.surrogates.len()),
+            )
+            .map_err(|_| crate::Error::allocation())?;
+        let mut previous = 0;
+        for (offset, point) in self.surrogates {
+            points.extend(self.text[previous..offset].chars().map(u32::from));
+            points.push(point);
+            previous = offset;
+        }
+        points.extend(self.text[previous..].chars().map(u32::from));
+        Ok(ctx.alloc(Value::SurrogateStr(points)))
+    }
+}
+
 struct Encoder {
     ascii: bool,
     allow_nan: Id,
@@ -81,7 +113,7 @@ struct Encoder {
     default: Option<Id>,
     stream: Option<Id>,
     active: HashSet<Id>,
-    output: String,
+    output: Output,
 }
 
 /// Encode to an owned string or write fragments to a Python text stream.
@@ -164,13 +196,13 @@ pub(super) fn encode(
         default: option("default").filter(|v| *v != NONE),
         stream,
         active: HashSet::new(),
-        output: String::new(),
+        output: Output::default(),
     };
     encoder.value(ctx, id, 0)?;
     Ok(if stream.is_some() {
         NONE
     } else {
-        ctx.text(encoder.output)
+        encoder.output.finish(ctx)?
     })
 }
 
@@ -178,10 +210,10 @@ impl Encoder {
     /// Deliver each completed fragment before running later user code.
     fn emit(&mut self, ctx: &mut Context) -> Result<()> {
         if let Some(stream) = self.stream
-            && !self.output.is_empty()
+            && !self.output.text.is_empty()
         {
             let roots = ctx.heap.temporary_mark();
-            let chunk = ctx.text(std::mem::take(&mut self.output));
+            let chunk = std::mem::take(&mut self.output).finish(ctx)?;
             let write = ctx.lookup_attr(stream, "write")?;
             ctx.call(write, super::super::copy_ids(&[chunk])?, Vec::new())?;
             ctx.heap.release_temporaries_since(roots);
@@ -197,19 +229,25 @@ impl Encoder {
 
     fn value_inner(&mut self, ctx: &mut Context, id: Id, depth: usize) -> Result<()> {
         match ctx.heap.get(ctx.scalar_value(id)) {
-            Value::None => write_json_fragment(&mut self.output, "null")?,
+            Value::None => write_json_fragment(&mut self.output.text, "null")?,
             Value::Bool(value) => {
-                write_json_fragment(&mut self.output, if *value { "true" } else { "false" })?
+                write_json_fragment(&mut self.output.text, if *value { "true" } else { "false" })?
             }
             Value::Int(value) => write_json_fragment(
-                &mut self.output,
+                &mut self.output.text,
                 &crate::integer_text::decimal_string(value)?,
             )?,
             Value::Float(value) => write_json_fragment(
-                &mut self.output,
+                &mut self.output.text,
                 &float_text(ctx, id, *value, self.allow_nan)?,
             )?,
-            Value::Str(value) => write_json_string(&mut self.output, value, self.ascii)?,
+            Value::Str(value) => write_json_string(&mut self.output.text, value, self.ascii)?,
+            Value::SurrogateStr(points) => write_json_codepoints(
+                &mut self.output.text,
+                &mut self.output.surrogates,
+                points,
+                self.ascii,
+            )?,
             _ => {
                 if self.active.len() >= 512 {
                     return Err(Error::new(
@@ -249,7 +287,7 @@ impl Encoder {
                     _ => None,
                 };
                 if let Some(empty) = empty {
-                    write_json_fragment(&mut self.output, empty)?;
+                    write_json_fragment(&mut self.output.text, empty)?;
                     ctx.heap.release_temporaries_since(roots);
                     return self.emit(ctx);
                 }
@@ -260,7 +298,7 @@ impl Encoder {
                     _ if streaming && sequence => self.stream_array(ctx, id, depth)?,
                     _ if streaming => self.stream_object(ctx, id, depth)?,
                     Value::List(_) | Value::Tuple(_) | Value::NamedTuple { .. } => {
-                        write_json_fragment(&mut self.output, "[")?;
+                        write_json_fragment(&mut self.output.text, "[")?;
                         let mut i = 0;
                         while let Value::List(items)
                         | Value::Tuple(items)
@@ -305,7 +343,7 @@ impl Encoder {
     /// Write a separator and the indentation before a sequence item or object member.
     fn separator(&mut self, after_first: bool, depth: usize) -> Result<()> {
         if after_first {
-            write_json_fragment(&mut self.output, &self.item_separator)?;
+            write_json_fragment(&mut self.output.text, &self.item_separator)?;
         }
         self.newline(depth)
     }
@@ -322,13 +360,13 @@ impl Encoder {
             self.newline(depth)?;
             self.emit(ctx)?;
         }
-        write_json_fragment(&mut self.output, delimiter)?;
+        write_json_fragment(&mut self.output.text, delimiter)?;
         Ok(())
     }
 
     fn newline(&mut self, depth: usize) -> Result<()> {
         if let Some(indent) = &self.indent {
-            crate::objects::JsonIndent::Text(indent).write_newline(&mut self.output, depth)?;
+            crate::objects::JsonIndent::Text(indent).write_newline(&mut self.output.text, depth)?;
         }
         Ok(())
     }
@@ -349,7 +387,7 @@ impl Encoder {
         if ctx.truth(self.sort_keys)? {
             super::builtins::sort_values(ctx, &mut entries, false, |(key, _)| key)?;
         }
-        write_json_fragment(&mut self.output, "{")?;
+        write_json_fragment(&mut self.output.text, "{")?;
         let mut nonempty = false;
         for (key, value) in entries {
             self.member(ctx, &mut nonempty, key, value, depth + 1)?;
@@ -379,7 +417,7 @@ impl Encoder {
         if ctx.truth(self.sort_keys)? {
             super::builtins::call(ctx, "list.sort", &[items], &[])?;
         }
-        write_json_fragment(&mut self.output, "{")?;
+        write_json_fragment(&mut self.output.text, "{")?;
         let mut i = 0;
         let mut nonempty = false;
         while let Value::List(pairs) = ctx.heap.get(items) {
@@ -397,7 +435,7 @@ impl Encoder {
     /// Pull the next item only after its predecessor has reached the stream.
     fn stream_array(&mut self, ctx: &mut Context, id: Id, depth: usize) -> Result<()> {
         let iter = ctx.iterator(id)?;
-        write_json_fragment(&mut self.output, "[")?;
+        write_json_fragment(&mut self.output.text, "[")?;
         let mut i = 0;
         loop {
             let roots = ctx.heap.temporary_mark();
@@ -416,7 +454,7 @@ impl Encoder {
 
     /// Stream mapping items as they arrive, materializing them only for a requested sort.
     fn stream_object(&mut self, ctx: &mut Context, id: Id, depth: usize) -> Result<()> {
-        write_json_fragment(&mut self.output, "{")?;
+        write_json_fragment(&mut self.output.text, "{")?;
         self.emit(ctx)?;
         let sort_keys = ctx.truth(self.sort_keys)?;
         let method = ctx.lookup_attr(id, "items")?;
@@ -451,23 +489,25 @@ impl Encoder {
         value: Id,
         depth: usize,
     ) -> Result<()> {
+        enum Key<'a> {
+            Text(&'a str),
+            Codepoints(&'a [u32]),
+        }
         let number;
-        let text: &str = match ctx.heap.get(ctx.scalar_value(key)) {
-            Value::Str(text) => text,
+        let text = match ctx.heap.get(ctx.scalar_value(key)) {
+            Value::Str(text) => Key::Text(text),
+            Value::SurrogateStr(points) => Key::Codepoints(points),
             Value::Int(n) => {
                 number = crate::integer_text::decimal_string(n)?;
-                &number
+                Key::Text(&number)
             }
             Value::Float(n) => {
                 number = float_text(ctx, key, *n, self.allow_nan)?;
-                &number
+                Key::Text(&number)
             }
-            Value::None => "null",
-            Value::Bool(true) => "true",
-            Value::Bool(false) => "false",
-            Value::SurrogateStr(_) => {
-                return Err(Error::new("TypeError", "unsupported JSON object key"));
-            }
+            Value::None => Key::Text("null"),
+            Value::Bool(true) => Key::Text("true"),
+            Value::Bool(false) => Key::Text("false"),
             _ => {
                 if ctx.truth(self.skipkeys)? {
                     return Ok(());
@@ -481,7 +521,15 @@ impl Encoder {
             .stream
             .is_some()
             .then(|| std::mem::take(&mut self.output));
-        write_json_string(&mut self.output, text, self.ascii)?;
+        match text {
+            Key::Text(text) => write_json_string(&mut self.output.text, text, self.ascii)?,
+            Key::Codepoints(points) => write_json_codepoints(
+                &mut self.output.text,
+                &mut self.output.surrogates,
+                points,
+                self.ascii,
+            )?,
+        }
         if let Some(separator) = separator {
             // A rejected key doesn't write the pending separator.
             let encoded = std::mem::replace(&mut self.output, separator);
@@ -489,7 +537,7 @@ impl Encoder {
             self.output = encoded;
         }
         self.emit(ctx)?;
-        write_json_fragment(&mut self.output, &self.key_separator)?;
+        write_json_fragment(&mut self.output.text, &self.key_separator)?;
         self.emit(ctx)?;
         self.value(ctx, value, depth)
     }
