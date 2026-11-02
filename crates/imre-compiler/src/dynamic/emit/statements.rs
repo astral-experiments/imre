@@ -647,7 +647,10 @@ impl Function<'_, '_> {
         let code = self.output.definition(self.source, prefix, body, start);
         let defaults = self.op("dict", &[]);
         signature["types"] = json!({});
-        signature["return_type"] = json!(returns.and_then(scalar_annotation));
+        // A generator call returns a suspended frame, before it yields or returns a value.
+        if generator.is_none() {
+            signature["return_type"] = json!(returns.and_then(scalar_annotation));
+        }
         if let Some(p) = params {
             self.output
                 .interned_identifiers
