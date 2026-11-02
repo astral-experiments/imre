@@ -1574,6 +1574,10 @@ pub(super) fn call(
         return os::descriptor(ctx, op, args, kwargs);
     }
     #[cfg(target_os = "linux")]
+    if name == "posix.sysconf" {
+        return os::sysconf::call(ctx, args, kwargs);
+    }
+    #[cfg(target_os = "linux")]
     if name == "posix.sched_getscheduler" {
         return os::scheduler::get_policy(ctx, args, kwargs);
     }
