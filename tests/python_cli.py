@@ -1770,6 +1770,7 @@ def report(text):
             "boxed_sys_hash_info.py",
             "boxed_sys_flags.py",
             "boxed_sys_jit.py",
+            "boxed_sys_monitoring_events.py",
             "boxed_bytes_add.py",
             "boxed_binary_iterators.py",
             "boxed_array.py",

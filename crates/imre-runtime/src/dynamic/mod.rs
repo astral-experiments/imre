@@ -2256,6 +2256,8 @@ impl Context {
                 self.bind(scope, "__stdin__", stdin);
                 let jit = stdlib::jit_module(self)?;
                 self.bind(scope, "_jit", jit);
+                let monitoring = stdlib::monitoring::module(self)?;
+                self.bind(scope, "monitoring", monitoring);
             }
             "re" => {
                 let pattern = self.builtin(value::REGEX_PATTERN_TYPE);

@@ -37,6 +37,7 @@ mod logging;
 mod marshal;
 mod math;
 mod metadata;
+pub(super) mod monitoring;
 mod operator;
 mod ordered_dict;
 pub(super) mod os;
