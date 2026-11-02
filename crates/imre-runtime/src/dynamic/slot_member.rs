@@ -344,7 +344,7 @@ impl Context {
             }
             let value =
                 if key == "__new__" && matches!(self.heap.get(value), Value::Function { .. }) {
-                    super::static_method::construct(self, value)?
+                    super::method_decorator::static_method(self, value)?
                 } else {
                     value
                 };
