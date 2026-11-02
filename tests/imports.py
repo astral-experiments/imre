@@ -1004,8 +1004,8 @@ def main() -> None:
                            *build_flags]
                 if args.sanitize:
                     command.append("--sanitize")
-                # Optimizing CPython's bundled address parser takes longer than a typical import.
-                timeout = 300 if name == "email_address_parsers" and level > 0 else build_timeout
+                # Optimizing the bundled address parser and warnings modules can take several minutes.
+                timeout = 300 if name in {"email_address_parsers", "warn_named_helper"} and level > 0 else build_timeout
                 require_success(run(command, temporary, timeout=timeout))
                 result = run([str(executable)], temporary)
                 require_success(result)
