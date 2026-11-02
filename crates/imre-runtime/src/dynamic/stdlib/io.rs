@@ -13,7 +13,10 @@ pub(in crate::dynamic) use descriptor_buffer::{
 mod bytes_io;
 mod docstrings;
 mod file_io;
-pub(super) use file_io::check_text_options;
+pub(super) use file_io::{
+    check_binary_options, check_open_string, check_text_options, mode as fileio_mode,
+    validate_open_mode,
+};
 pub(in crate::dynamic) use file_io::{open, popen_pipe};
 mod text_wrapper;
 pub(super) use text_wrapper::text_options;

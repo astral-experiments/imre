@@ -164,7 +164,7 @@ pub(crate) fn find_default_directory() -> Result<PathBuf> {
 
 /// Linux can create an unnamed inode directly. Other filesystems use exclusive
 /// creation followed by unlink, leaving the descriptor as its only owner.
-pub(super) fn anonymous_file(directory: Option<&str>) -> Result<fs::File> {
+pub(crate) fn anonymous_file(directory: Option<&str>) -> Result<fs::File> {
     let directory = directory.map_or_else(default_directory, |value| Ok(Str::from(value)))?;
     anonymous_file_in(
         Path::new(directory.as_str()),

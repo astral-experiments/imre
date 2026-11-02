@@ -116,7 +116,7 @@ pub(super) fn state(ctx: &Context, receiver: Id) -> Option<Rc<RawFile>> {
     }
 }
 
-fn mode(raw: &str) -> Result<(u32, &'static str)> {
+pub(in crate::dynamic::stdlib) fn mode(raw: &str) -> Result<(u32, &'static str)> {
     const INVALID: &str =
         "Must have exactly one of create/read/write/append mode and at most one plus";
     let mut selected = None;
@@ -143,7 +143,7 @@ fn mode(raw: &str) -> Result<(u32, &'static str)> {
     Ok((flags, if update { both } else { single }))
 }
 
-fn validate_open_mode(mode: &str) -> Result<()> {
+pub(in crate::dynamic::stdlib) fn validate_open_mode(mode: &str) -> Result<()> {
     let binary = mode.contains('b');
     if mode
         .chars()
@@ -166,7 +166,32 @@ fn validate_open_mode(mode: &str) -> Result<()> {
     Ok(())
 }
 
-fn check_open_string(ctx: &mut Context, value: Id, name: &str, expected: &str) -> Result<()> {
+pub(in crate::dynamic::stdlib) fn check_binary_options(
+    encoding: Option<Id>,
+    errors: Option<Id>,
+    newline: Option<Id>,
+) -> Result<()> {
+    for (name, value, article) in [
+        ("encoding", encoding, "an"),
+        ("errors", errors, "an"),
+        ("newline", newline, "a"),
+    ] {
+        if value.is_some() {
+            return Err(Error::new(
+                "ValueError",
+                format!("binary mode doesn't take {article} {name} argument"),
+            ));
+        }
+    }
+    Ok(())
+}
+
+pub(in crate::dynamic::stdlib) fn check_open_string(
+    ctx: &mut Context,
+    value: Id,
+    name: &str,
+    expected: &str,
+) -> Result<()> {
     let storage = ctx.string_storage(value).ok_or_else(|| {
         Error::new(
             "TypeError",
@@ -273,18 +298,7 @@ pub(in crate::dynamic) fn open(
     validate_open_mode(mode_text)?;
     let binary = mode_text.contains('b');
     if binary {
-        for (name, value, article) in [
-            ("encoding", encoding, "an"),
-            ("errors", errors, "an"),
-            ("newline", newline, "a"),
-        ] {
-            if value.is_some() {
-                return Err(Error::new(
-                    "ValueError",
-                    format!("binary mode doesn't take {article} {name} argument"),
-                ));
-            }
-        }
+        check_binary_options(encoding, errors, newline)?;
     }
     if buffering == 0 {
         let raw_mode = mode_text.replace('t', "");
@@ -491,8 +505,8 @@ fn buffered_descriptor(
 }
 
 impl Context {
-    /// Wrap mkstemp's read/write descriptor in a write-only buffered Python stream.
-    pub(in crate::dynamic) fn named_temporary_writer(
+    /// Expose a secure temporary file's read/write descriptor through a write-only buffer.
+    pub(in crate::dynamic) fn temporary_writer(
         &mut self,
         file: std::fs::File,
         name: Id,
