@@ -147,6 +147,14 @@ pub(super) fn initialize(
         .map(|n| ssize(ctx, n))
         .transpose()?
         .unwrap_or(super::DEFAULT_BUFFER_SIZE);
+    // Only the native FileIO path may bypass Python raw methods. Preserve its
+    // method checks after argument conversion, as well as the writer/random paths.
+    if owner == "BufferedReader"
+        && file_io::state(ctx, raw).is_none()
+        && backing(ctx, receiver).is_none()
+    {
+        return super::buffered_reader::initialize(ctx, receiver, raw, capacity);
+    }
     for &capability in capabilities {
         let method = ctx.lookup_attr(raw, capability)?;
         if ctx.call(method, vec![], Vec::new())? != TRUE {

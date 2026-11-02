@@ -1011,7 +1011,7 @@ pub(super) fn call(
     if name == "write" {
         ctx.bytes_like(args[0])?;
     }
-    if name == "readinto" && !matches!(ctx.heap.get(args[0]), Value::ByteArray(_)) {
+    if name == "readinto" && ctx.writable_byte_span(args[0])?.is_none() {
         return Err(Error::new(
             "TypeError",
             format!(
@@ -1086,9 +1086,7 @@ pub(super) fn call(
         }
         "readinto" => {
             raw.check_direction(true)?;
-            let Value::ByteArray(buf) = ctx.heap.get_mut(args[0]) else {
-                unreachable!()
-            };
+            let buf = files::readinto_bytes(ctx, args[0])?;
             Ok(read_into(fd, buf)?.map_or(NONE, |n| ctx.int(n as i64)))
         }
         "write" => {

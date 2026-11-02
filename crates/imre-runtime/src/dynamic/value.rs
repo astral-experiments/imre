@@ -777,6 +777,7 @@ pub(super) enum Value {
     SurrogateStr(Vec<u32>),
     Array(super::array::Array),
     Bytes(Vec<u8>),
+    RawReadWindow(super::raw_read_window::Window),
     /// A contiguous view retains its original exporter until release.
     MemoryView {
         owner: Option<Id>,
@@ -1142,6 +1143,7 @@ impl Value {
             Self::Zip { .. } => "zip",
             Self::Array(_) => "array.array",
             Self::Bytes(_) => "bytes",
+            Self::RawReadWindow(_) => "_imre_raw_read_window",
             Self::MemoryView { .. } => "memoryview",
             Self::ByteArray(_) => "bytearray",
             Self::File(_) | Self::TextFile(_) => return self.native_io_class_name(),
@@ -1341,6 +1343,7 @@ impl Value {
             }
             Self::Yielded(item) => visit.push(*item),
             Self::Slice(parts) => visit.extend(parts),
+            Self::RawReadWindow(window) => visit.push(window.backing),
             Self::MemoryView { owner, .. } => visit.extend(owner),
             Self::Template {
                 strings,
@@ -1526,6 +1529,11 @@ impl Value {
                 }
                 match memory_stream {
                     Some(super::stdlib::io::MemoryStream::BufferedFile(file)) => visit.push(*file),
+                    Some(super::stdlib::io::MemoryStream::Reader(reader)) => {
+                        visit.extend(reader.raw.get());
+                        visit.push(reader.buffer);
+                    }
+                    Some(super::stdlib::io::MemoryStream::UninitializedReader(raw)) => visit.extend(raw),
                     Some(super::stdlib::io::MemoryStream::BufferedBytes(writer)) => visit.extend(writer.raw.get()),
                     Some(super::stdlib::io::MemoryStream::Pair(pair)) => {
                         visit.extend(pair.reader);

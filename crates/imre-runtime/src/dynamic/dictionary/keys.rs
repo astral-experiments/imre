@@ -504,7 +504,7 @@ impl Context {
             let owner = Self::memoryview_owner(owner)?;
             if matches!(
                 self.heap.get(self.scalar_value(owner)),
-                Value::Array(_) | Value::ByteArray(_)
+                Value::Array(_) | Value::ByteArray(_) | Value::RawReadWindow(_)
             ) {
                 return Err(Error::new(
                     "ValueError",

@@ -35,6 +35,7 @@ mod os_error;
 mod paramspec;
 mod property;
 mod range;
+mod raw_read_window;
 mod slice;
 mod slot_member;
 mod source_code;
@@ -369,6 +370,7 @@ impl Context {
 
     fn bytes_like(&self, id: Id) -> Result<&[u8]> {
         match self.buffer_storage(id)? {
+            Value::RawReadWindow(w) => self.window_bytes(*w),
             Value::Bytes(data) | Value::ByteArray(data) => Ok(data),
             Value::Array(array) if matches!(self.heap.get(id), Value::MemoryView { .. }) => {
                 Ok(array.as_bytes())

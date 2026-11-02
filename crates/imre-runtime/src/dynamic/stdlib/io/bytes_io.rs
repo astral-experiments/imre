@@ -259,18 +259,7 @@ pub(super) fn call(
             Ok(NONE)
         }
         "readinto" => {
-            let id = args[0];
-            let Value::ByteArray(buffer) = ctx.heap.get_mut(id) else {
-                let kind = if id == NONE {
-                    "None"
-                } else {
-                    ctx.type_name(id)
-                };
-                return Err(Error::new(
-                    "TypeError",
-                    format!("{name}() argument must be read-write bytes-like object, not {kind}"),
-                ));
-            };
+            let buffer = super::super::files::readinto_bytes(ctx, args[0])?;
             let count = stream.file.borrow_mut().read_into(buffer)?;
             Ok(ctx.int(count as i64))
         }
