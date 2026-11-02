@@ -137,6 +137,18 @@ fn launch(ctx: &mut Context, values: &[Id]) -> Result<Id> {
     for &item in &items {
         ctx.heap.keep(item);
     }
+    // CPython's dirname probe can call __fspath__ before the actual executable conversion.
+    let probed_directory = if executable != NONE && BoxedPopen::probes_executable() {
+        let probe = posixpath::fspath(ctx, executable)?;
+        Some(match ctx.heap.get(ctx.scalar_value(probe)) {
+            Value::Str(s) => s.contains('/'),
+            Value::SurrogateStr(s) => s.contains(&u32::from('/')),
+            Value::Bytes(s) => s.contains(&b'/'),
+            _ => unreachable!("fspath returns str or bytes"),
+        })
+    } else {
+        None
+    };
     let env = environment(ctx, env)?;
     let mut argv = Vec::new();
     argv.try_reserve_exact(items.len())
@@ -160,6 +172,7 @@ fn launch(ctx: &mut Context, values: &[Id]) -> Result<Id> {
     let child = BoxedPopen::launch(
         argv,
         alternate,
+        probed_directory,
         streams,
         ctx.truth(close_fds)?,
         ctx.truth(restore_signals)?,

@@ -52,8 +52,14 @@ fn uses_posix_spawn(has_directory: bool, cwd: bool, streams: u32, fds: [RawFd; 3
     {
         return false;
     }
+    let (spawn, closefrom) = posix_spawn_capabilities();
+    spawn && (closefrom || streams & (1 << 17) != 0)
+}
+
+/// Whether CPython probes the executable directory and can close descriptors during spawn.
+pub(super) fn posix_spawn_capabilities() -> (bool, bool) {
     static CAPABILITIES: std::sync::OnceLock<(bool, bool)> = std::sync::OnceLock::new();
-    let &(spawn, closefrom) = CAPABILITIES.get_or_init(|| {
+    *CAPABILITIES.get_or_init(|| {
         let spawn = match std::env::var_os("_PYTHON_SUBPROCESS_USE_POSIX_SPAWN").as_deref() {
             Some(value) if value == "0" => false,
             Some(value) if value == "1" => true,
@@ -69,8 +75,7 @@ fn uses_posix_spawn(has_directory: bool, cwd: bool, streams: u32, fds: [RawFd; 3
             .is_null()
         };
         (spawn, closefrom)
-    });
-    spawn && (closefrom || streams & (1 << 17) != 0)
+    })
 }
 
 #[cfg(all(target_os = "linux", target_env = "gnu"))]
@@ -132,7 +137,9 @@ pub(super) unsafe fn spawn(
     // SAFETY: the caller roots the command until both launch APIs finish validation.
     let direct = allow_spawn
         && uses_posix_spawn(
-            unsafe { has_directory(cmd, config) },
+            redirects
+                .probed_directory
+                .unwrap_or_else(|| unsafe { has_directory(cmd, config) }),
             !config.cwd.is_null(),
             streams,
             redirects.fds,
@@ -152,7 +159,7 @@ pub(super) unsafe fn spawn(
         return Err(popen::error_after_handles(pending, !direct, error));
     }
     // SAFETY: validation and copying complete before the command may fork.
-    let (launch, cwd, attributes) = unsafe {
+    let (mut launch, cwd, attributes) = unsafe {
         prepare_command(cmd, config, redirects.environment.take(), || {
             let attributes = child_attributes(direct)?;
             if redirects.oversized && !direct {
@@ -163,6 +170,8 @@ pub(super) unsafe fn spawn(
     }
     .map_err(|e| popen::error_after_handles(pending, !direct, e))?;
     if direct {
+        // posix_spawn executes the path from the final conversion, even if it is now bare.
+        launch.search = None;
         let error = match launch.argv.strings.first() {
             None => Some("posix_spawn: argv must not be empty"),
             Some(arg) if arg.as_bytes().is_empty() => {

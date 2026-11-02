@@ -72,6 +72,7 @@ pub(super) struct Redirects<'a> {
     pub(super) oversized: bool,
     pub(super) prepared: Option<ChildPipes>,
     pub(super) environment: Option<ByteEnvironment>,
+    pub(super) probed_directory: Option<bool>,
     pub(super) failure_site: Option<&'a mut Option<(launch_error::Site, bool)>>,
 }
 
@@ -82,6 +83,7 @@ impl Default for Redirects<'_> {
             oversized: false,
             prepared: None,
             environment: None,
+            probed_directory: None,
             failure_site: None,
         }
     }
@@ -224,6 +226,7 @@ struct LaunchExtras<'a> {
     pipe_size: Option<(usize, u32)>,
     environment: Option<ByteEnvironment>,
     failure_site: Option<&'a mut Option<(launch_error::Site, bool)>>,
+    probed_directory: Option<bool>,
     warn_line_buffering: Option<&'a mut dyn FnMut() -> Result<()>>,
 }
 
@@ -492,6 +495,7 @@ unsafe fn spawn(config: &LaunchConfig, mut extras: LaunchExtras<'_>) -> Result<P
         prepared: Some(prepared),
         environment: extras.environment,
         failure_site: extras.failure_site,
+        probed_directory: extras.probed_directory,
     };
     // SAFETY: the compiler supplies the same exact owners as subprocess.run.
     let child =

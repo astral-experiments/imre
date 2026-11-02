@@ -32,10 +32,15 @@ pub(crate) struct BoxedCommunication {
 }
 
 impl BoxedPopen {
+    pub(crate) fn probes_executable() -> bool {
+        launch_error::posix_spawn_capabilities().0
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn launch(
         argv: Vec<Vec<u8>>,
         executable: Option<Vec<u8>>,
+        probed_directory: Option<bool>,
         streams: [(u32, Option<Int>); 3],
         close_fds: bool,
         restore_signals: bool,
@@ -86,6 +91,7 @@ impl BoxedPopen {
         let mut site = None;
         let mut extras = LaunchExtras {
             failure_site: Some(&mut site),
+            probed_directory,
             warn_line_buffering: Some(warn_line_buffering),
             environment: env,
             pipe_size: Some((pipesize.0, 2)),
