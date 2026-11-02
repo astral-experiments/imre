@@ -2330,6 +2330,17 @@ impl Context {
                 self.bind(scope, "_bootstrap_external", external);
             }
             "io" => stdlib::io::install(self, scope),
+            "_json" => {
+                for name in ["encode_basestring", "encode_basestring_ascii"] {
+                    let callable = self.builtin(&format!("_json.{name}"));
+                    let function = self.alloc(Value::Method {
+                        callable,
+                        receiver: module,
+                        explicit: false,
+                    });
+                    self.bind(scope, name, function);
+                }
+            }
             "_locale" => stdlib::locale::install(self, module, scope)?,
             "pickle" => stdlib::pickle::install(self, scope)?,
             "urllib.parse" => stdlib::urllib::initialize(self, scope),

@@ -16,6 +16,18 @@ def current():
     assert JSONEncoder is encoder.JSONEncoder and JSONEncoder.__module__ == "json.encoder"
     assert encoder.py_encode_basestring_ascii('a"\n\U0001d120') == '"a\\"\\n\\ud834\\udd20"'
 
+    original_module = sys.modules.pop("_json")
+    try:
+        fresh = importlib.import_module("_json")
+    finally:
+        sys.modules["_json"] = original_module
+    assert fresh is not original_module
+    for name in ("encode_basestring", "encode_basestring_ascii"):
+        quote = getattr(fresh, name)
+        assert quote.__self__ is fresh and getattr(quote.__self__, name) is quote
+        assert quote is not getattr(original_module, name)
+        assert quote("a") == '"a"'
+
     # The pure escaper still consults the live escape table for code-point strings.
     original_escape = encoder.ESCAPE_DCT["\n"]
     try:
