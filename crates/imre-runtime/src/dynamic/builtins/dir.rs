@@ -1,5 +1,5 @@
 use super::{Context, Error, Id, NONE, Result, Value, collections, type_error};
-use crate::dynamic::typing::{AliasKind, forwards_to_origin};
+use crate::dynamic::typing::{Alias, AliasKind, literal_origin};
 use std::collections::BTreeSet;
 
 /// Apply the type's special method and sort a fresh list, preserving duplicates and comparison errors.
@@ -38,17 +38,7 @@ fn object_names(ctx: &mut Context, object: Id) -> Result<Id> {
     let mut keys = Vec::new();
     let class = match ctx.heap.get(object) {
         Value::GenericAlias(alias) if matches!(alias.kind, AliasKind::Literal(_)) => {
-            let origin = alias.origin;
-            names.extend(alias.literal_fields().map(|(name, _)| name.to_owned()));
-            names.insert("__mro_entries__".to_owned());
-            let origin_names = call(ctx, &[origin], &[])?;
-            for key in ctx.items(origin_names)? {
-                let name = ctx.str_value(key)?;
-                if forwards_to_origin(name) {
-                    names.insert(name.to_owned());
-                }
-            }
-            ctx.builtin("object")
+            return literal_names(ctx, alias.clone());
         }
         Value::ParamSpec(_) => {
             names.extend(super::super::paramspec::names().map(str::to_owned));
@@ -121,6 +111,34 @@ fn object_names(ctx: &mut Context, object: Id) -> Result<Id> {
         ctx.put_item(dictionary, key, NONE)?;
     }
     Ok(dictionary)
+}
+
+/// Literal delegates non-dunder names to its origin, including custom Python directory hooks.
+fn literal_names(ctx: &mut Context, alias: Alias) -> Result<Id> {
+    let origin = literal_origin(ctx, alias.origin)?;
+    let origin_names = call(ctx, &[origin], &[])?;
+    ctx.heap.keep(origin_names);
+    let fields = alias.literal_fields().map(|(name, _)| name);
+    let entries = fields
+        .into_iter()
+        .chain(["__class__", "__mro_entries__"])
+        .map(|name| (ctx.text(name), NONE))
+        .collect();
+    let names = ctx.dict(entries);
+    ctx.heap.keep(names);
+    let marker = ctx.text("__");
+    ctx.heap.keep(marker);
+    for name in ctx.items(origin_names)? {
+        for method in ["startswith", "endswith"] {
+            let check = ctx.lookup_attr(name, method)?;
+            let matches = ctx.call(check, vec![marker], Vec::new())?;
+            if !ctx.truth(matches)? {
+                ctx.put_item(names, name, NONE)?;
+                break;
+            }
+        }
+    }
+    Ok(names)
 }
 
 /// Collect each Python class's own names without evaluating class values or descriptors.

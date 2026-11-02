@@ -16,9 +16,21 @@ def current():
 
     alias = type(ssl_mode)(Origin(), (1,))
     names = dir(alias)
-    assert {"__args__", "__parameters__", "__origin__", "_inst", "_name", "__mro_entries__", "__class__"} <= set(names)
+    fields = {"__args__", "__parameters__", "__origin__", "_inst", "_name"}
+    assert fields | {"__mro_entries__", "__class__"} <= set(names)
     assert names.count("marker") == 1 and "__hidden__" not in names
     assert alias.marker is Origin.marker and alias._name is None and alias._inst is True
+
+    class InvalidOrigin:
+        def __dir__(self):
+            return [42]
+
+    try:
+        dir(type(alias)(InvalidOrigin(), (1,)))
+    except AttributeError as error:
+        assert "startswith" in str(error)
+    else:
+        raise AssertionError("invalid origin directory name")
 
     class Key:
         def __hash__(self):
