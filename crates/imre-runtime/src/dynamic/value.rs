@@ -264,22 +264,67 @@ impl Context {
         if let Some(object) = frame.object {
             return Ok(Some((location, object)));
         }
-        let (scope, code, owner) = (frame.scope, frame.code, frame.owner);
-        let globals = self.module_globals(scope)?;
-        let object = self.alloc(Value::PythonFrame {
-            scope,
-            code,
-            globals,
-            lineno: location.line,
-        });
-        if let FrameOwner::Generator(id) = owner {
-            let Value::Generator { frame, .. } = self.heap.get_mut(id) else {
-                unreachable!()
+        // An escaped ordinary frame owns its caller even after both functions return.
+        // Materialize the missing prefix iteratively, stopping at a cached frame or
+        // a generator whose resumer is meaningful only during this activation.
+        let start = self.heap.frames[..=index]
+            .iter()
+            .rposition(|frame| {
+                frame.object.is_some()
+                    || (matches!(frame.owner, FrameOwner::Generator(_)) && frame.location.is_some())
+            })
+            .unwrap_or(0);
+        let mut previous = NONE;
+        for position in start..=index {
+            let frame = &self.heap.frames[position];
+            if let Some(object) = frame.object {
+                previous = object;
+                continue;
+            }
+            let Some(line) = frame.location.as_ref().map(|loc| loc.line) else {
+                continue;
             };
-            *frame = Some(object);
+            if frame.code == NONE {
+                continue;
+            }
+            let (scope, code, owner) = (frame.scope, frame.code, frame.owner);
+            let globals = self.module_globals(scope)?;
+            let object = self.alloc(Value::PythonFrame {
+                scope,
+                code,
+                globals,
+                back: (!matches!(owner, FrameOwner::Generator(_))).then_some(previous),
+                lineno: line,
+            });
+            if let FrameOwner::Generator(id) = owner {
+                let Value::Generator { frame, .. } = self.heap.get_mut(id) else {
+                    unreachable!()
+                };
+                *frame = Some(object);
+            }
+            self.heap.frames[position].object = Some(object);
+            previous = object;
         }
-        self.heap.frames[index].object = Some(object);
-        Ok(Some((location, object)))
+        Ok(Some((location, previous)))
+    }
+
+    /// A suspended or finished generator has no resumer; an active one may have a new caller.
+    pub(super) fn generator_frame_back(&mut self, object: Id) -> Result<Id> {
+        let Some(index) = self
+            .heap
+            .frames
+            .iter()
+            .rposition(|frame| frame.object == Some(object))
+        else {
+            return Ok(NONE);
+        };
+        let Some(caller) = self.heap.frames[..index]
+            .iter()
+            .rposition(|frame| frame.code != NONE && frame.location.is_some())
+        else {
+            return Ok(NONE);
+        };
+        Ok(self.materialize_frame(caller)?.map_or(NONE, |(_, id)| id))
     }
 
     pub(super) fn record_exception_frame(&mut self, error: &mut Error, span: Option<&[u32; 4]>) {
@@ -800,6 +845,8 @@ pub(super) enum Value {
         scope: Id,
         code: Id,
         globals: Id,
+        // Ordinary frames retain their caller. Generator frames resolve their live resumer.
+        back: Option<Id>,
         lineno: u32,
     },
     Method {
@@ -1346,8 +1393,12 @@ impl Value {
                 scope,
                 code,
                 globals,
+                back,
                 ..
-            } => visit.extend([*scope, *code, *globals]),
+            } => {
+                visit.extend([*scope, *code, *globals]);
+                visit.extend(*back);
+            }
             Self::IoMethod { owner, .. } => visit.push(*owner),
             Self::CodecInfo { decode, .. } => visit.push(*decode),
             Self::RegexPattern(pattern) => visit.push(pattern.source),

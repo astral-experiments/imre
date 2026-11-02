@@ -1653,6 +1653,12 @@ impl Context {
                 let owner = self.builtin("frame");
                 return self.bind_attribute(method, obj, owner);
             }
+            Value::PythonFrame { back, .. } if name == "f_back" => {
+                return match back {
+                    Some(caller) => Ok(caller),
+                    None => self.generator_frame_back(obj),
+                };
+            }
             Value::PythonFrame { globals, .. } if name == "f_globals" => return Ok(globals),
             Value::PythonFrame { code, .. } if name == "f_code" => {
                 if !self.audit_hooks.is_empty() {
