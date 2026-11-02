@@ -158,3 +158,29 @@ with io.BytesIO(b"abcdef") as raw:
     assert f.write(b"ABC") == 3
     assert raw.getvalue() == b"ABCdef"
     f.close()
+
+
+class Reenter(io.BytesIO):
+    target = None
+
+    @property
+    def closed(self):
+        if self.target is not None:
+            target = self.target
+            self.target = None
+            try:
+                target.write(b"X")
+            except RuntimeError:
+                self.rejected = True
+            else:
+                raise AssertionError("reentrant write accepted")
+        return super().closed
+
+
+with Reenter() as raw:
+    f = io.BufferedRandom(raw, 4)
+    raw.target = f
+    assert f.write(b"A") == 1 and raw.rejected
+    f.flush()
+    assert raw.getvalue() == b"A"
+    f.close()

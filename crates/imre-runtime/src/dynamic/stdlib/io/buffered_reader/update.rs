@@ -159,18 +159,22 @@ impl Reader {
     }
 
     pub(super) fn update_call(&self, ctx: &mut Context, op: &str, args: &[Id]) -> Result<Id> {
+        if op == "write" {
+            return self.with_lock(|| {
+                // The raw closed property can call this same writer.
+                self.check_open(ctx, "write to closed file")?;
+                self.write_input(ctx, args[0], self.update.as_ref().unwrap())
+            });
+        }
         self.check_open(
             ctx,
-            match op {
-                "write" => "write to closed file",
-                "flush" => "flush of closed file",
-                _ => "truncate of closed file",
+            if op == "flush" {
+                "flush of closed file"
+            } else {
+                "truncate of closed file"
             },
         )?;
         self.with_lock(|| {
-            if op == "write" {
-                return self.write_input(ctx, args[0], self.update.as_ref().unwrap());
-            }
             self.sync_update(ctx)?;
             if op == "truncate" {
                 let raw = self.raw()?;
