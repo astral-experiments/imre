@@ -2130,6 +2130,44 @@ def _prepare_typevartuple(pack, alias, args):
             + (fill,) * (len(params) - right - left - index - 1) + args[end:])
 
 
+def _variadic_class_getitem_uncached(cls, args, constructor):
+    if not isinstance(args, tuple):
+        args = (args,)
+    args = tuple(_type_convert(arg) for arg in args)
+    parameters = cls.__parameters__
+    for index, param in enumerate(parameters):
+        prepare = getattr(param, "__typing_prepare_subst__", None)
+        if prepare is not None:
+            args = prepare(cls, args)
+        elif isinstance(param, _typing.TypeVarTuple):
+            args = _prepare_typevartuple(param, cls, args)
+        elif isinstance(param, _typing.TypeVar) and index >= len(args):
+            if index == len(args) and param.has_default():
+                args += (param.__default__,)
+            else:
+                raise TypeError(f"Too few arguments for {cls}; actual {len(args)}, expected at least {index + 1}")
+
+    actual, expected = len(args), len(parameters)
+    if actual > expected:
+        raise TypeError(f"Too many arguments for {cls}; actual {actual}, expected {expected}")
+    if actual < expected and not parameters[actual].has_default():
+        required = expected - sum(p.has_default() for p in parameters)
+        raise TypeError(f"Too few arguments for {cls}; actual {actual}, expected at least {required}")
+    flattened = tuple(item for param, arg in zip(parameters, args)
+                      for item in (arg if isinstance(param, _typing.TypeVarTuple) else (arg,)))
+    return constructor(cls, flattened)
+
+
+_cached_variadic_class_getitem = lru_cache(_variadic_class_getitem_uncached)
+
+
+def _variadic_class_getitem(cls, args, constructor):
+    try:
+        return _cached_variadic_class_getitem(cls, args, constructor)
+    except TypeError:
+        return _variadic_class_getitem_uncached(cls, args, constructor)
+
+
 def _specialize_generic_alias_uncached(alias, args):
     from types import GenericAlias
     if type(alias) is not GenericAlias and (alias.__origin__ is Generic or alias.__origin__ is Protocol):

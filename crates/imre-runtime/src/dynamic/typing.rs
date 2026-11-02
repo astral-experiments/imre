@@ -788,7 +788,19 @@ pub(super) fn subscribe(ctx: &mut Context, target: Id, index: Id) -> Option<Resu
                 }
             } else {
                 let params = ctx.lookup_attr(target, "__parameters__")?;
-                let required = ctx.items(params)?.len();
+                let parameters = ctx.items(params)?;
+                if parameters
+                    .iter()
+                    .any(|&id| matches!(ctx.heap.get(id), Value::TypeVarTuple { .. }))
+                {
+                    let constructor = ctx.builtin("typing._GenericAlias");
+                    return typing_alias_helper(
+                        ctx,
+                        "_variadic_class_getitem",
+                        vec![target, index, constructor],
+                    );
+                }
+                let required = parameters.len();
                 if args.len() != required {
                     let which = if args.len() < required { "few" } else { "many" };
                     return Err(Error::new(
