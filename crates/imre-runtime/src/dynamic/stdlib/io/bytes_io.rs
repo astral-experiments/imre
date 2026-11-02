@@ -74,7 +74,7 @@ impl BytesIo {
         Ok(value)
     }
 
-    fn write(&self, data: &[u8]) -> Result<()> {
+    pub(super) fn write(&self, data: &[u8]) -> Result<()> {
         self.file.borrow_mut().write_bytes(data)?;
         if !data.is_empty() {
             self.snapshot.set(None);

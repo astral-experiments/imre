@@ -6,7 +6,7 @@ use files::BinaryFile;
 
 pub(super) const METHODS: &[&str] = &[
     "__init__", "raw", "closed", "name", "mode", "writable", "seekable", "isatty", "fileno",
-    "flush", "close", "tell", "seek", "write", "truncate",
+    "flush", "close", "tell", "seek", "write", "truncate", "detach",
 ];
 
 /// Path and standard writers own their fd internally and have no Python FileIO to delegate to.
@@ -67,6 +67,12 @@ pub(super) fn call(
     if name == "__exit__" {
         let close = ctx.lookup_attr(receiver, "close")?;
         return ctx.call(close, vec![], Vec::new());
+    }
+    if let Some(writer) = super::bytes_writer::state(ctx, receiver) {
+        return writer.call(ctx, receiver, name, args);
+    }
+    if name == "detach" {
+        return Err(Error::new("UnsupportedOperation", "detach"));
     }
     let Some(buffer) = descriptor_buffer::backing(ctx, receiver) else {
         return if name == "raw" {
