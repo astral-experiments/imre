@@ -789,7 +789,7 @@ pub(super) enum Value {
         text_encoding_override: Option<Id>,
     },
     CodecDecoder(crate::objects::Codec),
-    Hash(crate::objects::SharedHash),
+    Hash(super::stdlib::hashlib::digest::SharedHash),
     Hmac(Hmac),
     Struct {
         format: String,

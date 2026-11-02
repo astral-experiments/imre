@@ -2357,6 +2357,7 @@ def report(text):
             "boxed_zlib.py",
             "boxed_hashlib_names.py",
             "bytes/hashlib_sha3_provider.py",
+            "bytes/hashlib_kdf.py",
             "boxed_hashlib_file_digest.py",
             "boxed_standard_base64.py",
             "boxed_csv.py",

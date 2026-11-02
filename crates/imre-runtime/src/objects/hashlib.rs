@@ -2,7 +2,6 @@
 
 use std::cell::RefCell;
 use std::ptr;
-use std::sync::{Arc, Mutex, MutexGuard};
 
 use md5::Md5;
 use num_traits::{Signed, ToPrimitive};
@@ -15,20 +14,6 @@ use sha3::{Sha3_224, Sha3_256, Sha3_384, Sha3_512, Shake128, Shake256};
 use super::exceptions::{Error, Kind, Result, finish};
 use super::{Bytes, Object, Storage, StorageCell, Str, object};
 use crate::{BytesOwner, Int, ObjectOwner};
-
-/// Boxed hash handles share one digest state, including across native workers.
-#[derive(Clone)]
-pub(crate) struct SharedHash(Arc<Mutex<State>>);
-
-impl SharedHash {
-    pub(crate) fn new(state: State) -> Self {
-        Self(Arc::new(Mutex::new(state)))
-    }
-
-    pub(crate) fn lock(&self) -> MutexGuard<'_, State> {
-        self.0.lock().unwrap_or_else(|poison| poison.into_inner())
-    }
-}
 
 #[derive(Clone)]
 pub(crate) struct State {
@@ -203,6 +188,7 @@ impl State {
     }
 
     pub(crate) const CLASS: &'static str = "hashlib._Hash";
+    pub(crate) const OPENSSL_CLASS: &'static str = "_hashlib.HASH";
     pub(crate) const XOF_CLASS: &'static str = "hashlib._HashXOF";
 
     pub(crate) fn public_constructor(algorithm: &str) -> Option<&'static str> {
@@ -220,6 +206,9 @@ impl State {
     }
 
     pub(crate) fn provider_class(class: &str) -> Option<&'static str> {
+        if class == Self::OPENSSL_CLASS {
+            return Some(Self::OPENSSL_CLASS);
+        }
         let (_, name) = class.rsplit_once('.')?;
         Self::public_constructor(name).filter(|&qualified| qualified == class)
     }
@@ -459,7 +448,7 @@ pub(super) fn clear_algorithms() {
     GUARANTEED.with(RefCell::take);
 }
 
-fn hex_text(digest: &[u8]) -> Result<Str> {
+pub(crate) fn hex_text(digest: &[u8]) -> Result<Str> {
     const HEX: &[u8; 16] = b"0123456789abcdef";
     let mut result = Str::try_with_capacity(digest.len() * 2).map_err(|_| Error::allocation())?;
     for &byte in digest {
