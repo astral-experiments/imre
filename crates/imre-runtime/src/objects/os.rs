@@ -375,9 +375,12 @@ pub(crate) fn waitpid<E: From<Error>>(
 
 /// Apply a POSIX lock relative to the borrowed descriptor's current position.
 #[cfg(target_os = "linux")]
-pub(crate) fn lockf(fd: i32, command: i32, length: libc::off_t) -> Result<()> {
+pub(crate) fn lockf(fd: i32, command: i32, length: libc::off_t) -> io::Result<()> {
     // SAFETY: lockf takes only integers and retains no pointers or descriptor ownership.
-    checked(unsafe { libc::lockf(fd, command, length) }).map(|_| ())
+    if unsafe { libc::lockf(fd, command, length) } < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(())
 }
 
 /// Close the descriptor once, including when the kernel reports an interrupt.

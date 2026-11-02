@@ -1213,7 +1213,13 @@ pub(super) fn descriptor(
         let audit_command = ctx.int(i64::from(command));
         let audit_length = ctx.int(length);
         super::audit::event(ctx, "os.lockf", &[audit_fd, audit_command, audit_length])?;
-        native::lockf(fd, command, length)?;
+        if let Err(error) = native::lockf(fd, command, length) {
+            if error.kind() == std::io::ErrorKind::Interrupted {
+                // A raising signal handler takes precedence over EINTR. Do not retry the lock.
+                ctx.dispatch_signals()?;
+            }
+            return Err(super::os_error(error));
+        }
         return Ok(NONE);
     }
     if name == "ftruncate" {
