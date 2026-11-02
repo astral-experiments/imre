@@ -104,6 +104,12 @@ def current():
         else:
             raise AssertionError("invalid struct input accepted")
 
+    record = struct.Struct(">lbb")
+    assert record.size == 6
+    encoded = b"\xff\xff\xff\xff\x80\x7f"
+    assert record.unpack(encoded) == (-1, -128, 127)
+    assert record.pack(-1, Field(-128), 127) == encoded
+
     class HookOverflow(OverflowError):
         pass
 
