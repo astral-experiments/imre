@@ -724,6 +724,17 @@ def starred_calls():
     events.clear()
     exec("answer = (mark(1), *spread(), *(), mark(3))", scope)
     assert scope["answer"] == (1, 2, 3) and events == [1, "iter", 3]
+    events.clear()
+    exec("answer = [mark(1), *spread(), *(), mark(3)]", scope)
+    assert scope["answer"] == [1, 2, 3] and events == [1, "iter", 3]
+    events.clear()
+    try:
+        eval("[mark(1), *2, mark(3)]", scope)
+    except TypeError as error:
+        assert str(error) == "Value after * must be an iterable, not int"
+    else:
+        raise AssertionError("accepted a noniterable in a starred list")
+    assert events == [1]
 
     import gc
     import weakref
@@ -745,6 +756,8 @@ def starred_calls():
         return cursor_refs[0]() is None
 
     assert eval("(*source, released())", {"source": Source(), "released": released}) == (True,)
+    cursor_refs.clear()
+    assert eval("[*source, released()]", {"source": Source(), "released": released}) == [True]
 
     for source in ("collect(**{}, label=1, label=2)", "collect(label=1, **{}, label=2)"):
         events.clear()

@@ -4873,6 +4873,46 @@ impl Context {
         Ok(merged)
     }
 
+    fn source_sequence_items(
+        &mut self,
+        code: &Program,
+        scope: Id,
+        elements: &[ast::Expr],
+    ) -> Result<Vec<Id>> {
+        let mut items = Vec::with_capacity(elements.len());
+        for item in elements {
+            if let ast::Expr::Starred(star) = item {
+                let mark = self.heap.temporary_mark();
+                let first = items.len();
+                let expanded = self
+                    .source_expr(code, scope, &star.value)
+                    .and_then(|iterable| self.extend_source_items(&mut items, iterable, None));
+                // Only yielded values outlive this operand. Release the iterator before
+                // evaluating the next element or dispatching a weakref callback.
+                let collect = self.heap.discard_truth_operands(mark, self.modules);
+                match &expanded {
+                    Ok(()) => {
+                        for &value in &items[first..] {
+                            self.heap.keep(value);
+                        }
+                    }
+                    Err(error) => {
+                        for root in error.roots() {
+                            self.heap.keep(root);
+                        }
+                    }
+                }
+                if collect {
+                    self.collect_unreachable();
+                }
+                expanded?;
+            } else {
+                items.push(self.source_expr(code, scope, item)?);
+            }
+        }
+        Ok(items)
+    }
+
     fn extend_source_items(
         &mut self,
         args: &mut Vec<Id>,
@@ -5127,48 +5167,14 @@ impl Context {
                 Ok(self.alloc(value))
             }
             Expr::List(v) => {
-                let items = v
-                    .elts
-                    .iter()
-                    .map(|x| eval(self, x))
-                    .collect::<Result<_>>()?;
+                let items = self.source_sequence_items(code, scope, &v.elts)?;
                 Ok(self.alloc(Value::List(items)))
             }
             Expr::Tuple(v) => {
                 if let Some(&id) = code.literals.get(&v.range()) {
                     return Ok(id);
                 }
-                let mut items = Vec::with_capacity(v.elts.len());
-                for item in &v.elts {
-                    if let Expr::Starred(star) = item {
-                        let mark = self.heap.temporary_mark();
-                        let first = items.len();
-                        let expanded = eval(self, &star.value).and_then(|iterable| {
-                            self.extend_source_items(&mut items, iterable, None)
-                        });
-                        // Only yielded values outlive this operand. Release the iterator before
-                        // evaluating the next tuple element or dispatching a weakref callback.
-                        let collect = self.heap.discard_truth_operands(mark, self.modules);
-                        match &expanded {
-                            Ok(()) => {
-                                for &value in &items[first..] {
-                                    self.heap.keep(value);
-                                }
-                            }
-                            Err(error) => {
-                                for root in error.roots() {
-                                    self.heap.keep(root);
-                                }
-                            }
-                        }
-                        if collect {
-                            self.collect_unreachable();
-                        }
-                        expanded?;
-                    } else {
-                        items.push(eval(self, item)?);
-                    }
-                }
+                let items = self.source_sequence_items(code, scope, &v.elts)?;
                 Ok(self
                     .heap
                     .packed_tuple(items, v.elts.iter().all(imre_ast::literal_tuple_element)))
