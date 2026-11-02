@@ -92,6 +92,7 @@ def current():
     assert get_original_bases(Sequence) == (list[int],)
     assert get_original_bases(Child) == (Sequence,)
     assert get_original_bases(int) == (object,)
+    assert get_original_bases(bool) == (int,)
     try:
         get_original_bases(object())
     except TypeError as exc:
