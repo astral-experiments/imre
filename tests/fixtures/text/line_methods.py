@@ -96,7 +96,8 @@ except TypeError as err:
     print(err)
 unbound_ascii = str.isascii
 for text in ("", "\0\x7f", "ascii\x80", "🦊"):
-    print(text.isascii(), unbound_ascii(text))
+    print(text.isascii())
+    print(unbound_ascii(text))
 try:
     unbound_ascii(3)
 except TypeError as err:
