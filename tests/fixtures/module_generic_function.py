@@ -19,7 +19,16 @@ def identity[int](value: int, /) -> int:
     return value
 
 
+def variadic[*Ts, **P](*args: *Ts, **kwargs: P.kwargs):
+    return Ts, P
+
+
 value = []
 assert echo() is T
 assert echo(value) is value
 assert identity(value) is value
+
+pack, signature = variadic.__type_params__
+assert variadic() == (pack, signature)
+assert variadic.__annotations__["args"].__args__ == (pack,)
+assert variadic.__annotations__["kwargs"].__origin__ is signature

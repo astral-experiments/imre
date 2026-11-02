@@ -24,6 +24,7 @@ struct Imports {
     explicit_roots: Vec<PathBuf>,
     runtime_imports: bool,
     uses_import_builtin: bool,
+    declares_function_pack: bool,
     imports_logging: bool,
     sys_names: HashSet<String>,
     operator_names: HashSet<String>,
@@ -397,7 +398,7 @@ impl<'a> Visitor<'a> for Imports {
     }
 }
 
-/// A module-level synchronous function can close over unbounded TypeVars in a single body scope.
+/// A module-level synchronous function can close over unbounded type parameters in a single body scope.
 pub(crate) fn function_type_params(function: &ast::StmtFunctionDef) -> Option<&ast::TypeParams> {
     use ast::AnyNodeRef::*;
     use ast::visitor::source_order::{SourceOrderVisitor, TraversalSignal};
@@ -405,11 +406,12 @@ pub(crate) fn function_type_params(function: &ast::StmtFunctionDef) -> Option<&a
     let params = function.type_params.as_deref()?;
     let mut names = HashSet::new();
     if function.is_async
-        || !params.iter().all(|p| {
-            matches!(p, ast::TypeParam::TypeVar(v)
-        if v.bound.is_none() && v.default.is_none()
-            && !matches!(v.name.as_str(), "__classdict__" | "__debug__")
-            && names.insert(v.name.as_str()))
+        || params.iter().any(|param| {
+            let name = param.name().as_str();
+            param.default().is_some()
+                || matches!(param, ast::TypeParam::TypeVar(var) if var.bound.is_some())
+                || matches!(name, "__classdict__" | "__debug__")
+                || !names.insert(name)
         })
     {
         return None;
@@ -452,9 +454,20 @@ fn imports(source: &str, kind: SourceKind) -> Result<Imports, String> {
     let mut imports = Imports::default();
     let mut body = parsed.into_syntax().body;
     imre_ast::lower(&mut body);
-    imports.runtime_imports = body.iter().any(|stmt| {
-        matches!(stmt, Stmt::FunctionDef(function) if function_type_params(function).is_some())
-    });
+    for stmt in &body {
+        if let Stmt::FunctionDef(function) = stmt
+            && let Some(params) = function_type_params(function)
+        {
+            imports.runtime_imports = true;
+            if params
+                .iter()
+                .any(|p| matches!(p, ast::TypeParam::TypeVarTuple(_)))
+            {
+                imports.declares_function_pack = true;
+                break;
+            }
+        }
+    }
     imports.visit_body(&body);
     Ok(imports)
 }
@@ -692,6 +705,7 @@ pub(crate) fn compile(
     let mut frozen_imports = Imports::default();
     let mut work = VecDeque::from([("__main__".to_owned(), false, first)]);
     let mut uses_import_builtin = false;
+    let mut declares_function_pack = false;
     let mut bundled_only = false;
     loop {
         let (owner, package, imports) = if let Some(next) = work.pop_front() {
@@ -700,6 +714,10 @@ pub(crate) fn compile(
             // Collect late imports and their bundled dependencies after the explicit
             // file graph, without parsing unrelated modules in project directories.
             let mut imports = Imports::default();
+            // Iterating a declared function pack imports typing.Unpack on demand.
+            if declares_function_pack && !seen.contains("typing") {
+                imports.add(0, "typing");
+            }
             if uses_import_builtin && !seen.contains("pprint") {
                 imports.names.push((0, "pprint".to_owned()));
             }
@@ -741,6 +759,7 @@ pub(crate) fn compile(
         {
             return Ok(None);
         }
+        declares_function_pack |= imports.declares_function_pack;
         let mut names = imports.names;
         if owner == "importlib" {
             // Filesystem modules can import the loader protocols through either public module.
