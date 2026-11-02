@@ -1,5 +1,17 @@
 # EnvironTests on Linux
 
+[Linux results by original case ID](linux-results.json)
+
+| Run | O0 | O3 |
+| --- | ---: | ---: |
+| Stock CPython 3.14.5 (full module, one reference run) | 32/32 | same reference |
+| Ordinary Imre (retained class) | 0 executed | 0 executed |
+| Boxed Imre (retained class) | 32/32 | 32/32 |
+
+Stock and both boxed runs had zero skips. The boxed runner discovered the same 32 IDs in the same order as stock. Each case restored both Python mapping views and the environment inherited by a fresh process. Both intentionally incorrect `test_items` runs reported an assertion failure and passed their cleanup checks.
+
+The ordinary compiler stops before discovery at `mapping_tests.py:31`, where `BasicTestMappingProtocol.__init__` calls `unittest.TestCase.__init__(self, *args, **kw)`. The typed setup and teardown probes supply a constructor and exercise real environment mutation with native children. Only complete-class runs enter the totals.
+
 The entry passes the real `test.test_os.EnvironTests` class to `unittest.defaultTestLoader.loadTestsFromTestCase`. Every original case, including methods inherited from `mapping_tests.BasicTestMappingProtocol`, runs alone in a fresh executable process. Its original setup, teardown, cleanup and module teardown run inside that process. The parent checks that its own bytes environment never changes; each test process records the NUL-delimited output of `/usr/bin/env -0` before and after the unittest run. Each child also compares independent dictionary copies of both Python mapping views before and after the original. Only the comparison status is emitted. A case can earn a verified pass only if the text view, byte view and process environment are restored, the parent environment is unchanged, all 32 IDs match the pinned reference in order and the original reports success. A missing or failed audit leaves the original unittest outcome visible and the case unverified. The child receives a small, known environment so results do not expose caller environment values.
 
 Use a pristine CPython source directory at commit `5607950ef232dad16d75c0cf53101d9649d89115` and its built CPython 3.14.5 interpreter. Run the supervisor using CPython 3.11 or newer. The staged package uses hard links to the original test helpers, falling back to copies across filesystems. This keeps ordinary-mode imports inside the first-party module root. The retained-class layout includes the complete upstream support package and mapping_tests.py. A full layout stages the entire test package; put the work directory on the same filesystem as the CPython checkout to minimize disk use. The supervisor verifies the Git blobs for the affected test sources and records the native toolchain hashes and commands.
