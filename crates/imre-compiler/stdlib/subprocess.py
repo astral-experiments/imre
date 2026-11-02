@@ -159,7 +159,7 @@ class Popen:
         replaced = self._replacement_output is not None or (not self._communication_started and not same_stdin)
         if single_pipe:
             reader = self.stdout or self.stderr
-            if isinstance(reader, io.TextIOWrapper) or (replaced and reader):
+            if reader:
                 data = reader.read()
                 reader.close()
                 self.wait()

@@ -261,6 +261,10 @@ impl BoxedPipe {
         })
     }
 
+    pub(crate) fn take_read_ahead(&self) -> Result<Vec<u8>> {
+        self.with_file(FileState::take_pipe_read_ahead)
+    }
+
     pub(crate) fn peek(&self) -> Result<Vec<u8>> {
         self.with_file(|file| file.peek_pipe())
     }

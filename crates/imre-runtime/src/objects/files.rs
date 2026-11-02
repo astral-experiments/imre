@@ -147,6 +147,10 @@ impl FileState {
         }
     }
 
+    pub(super) fn take_pipe_read_ahead(&mut self) -> Result<Bytes> {
+        self.input()?.take_read_ahead()
+    }
+
     pub(super) fn read_pipe_once(&mut self, size: Option<usize>) -> Result<Bytes> {
         self.input()?.read_once(size)
     }

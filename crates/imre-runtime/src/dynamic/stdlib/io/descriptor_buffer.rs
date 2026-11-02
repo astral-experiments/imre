@@ -450,7 +450,7 @@ pub(in crate::dynamic) struct BufferedFd {
     pub(in crate::dynamic) writing: bool,
     drop_fallback: Option<Cell<bool>>,
     handle: Rc<RawFile>,
-    truncating: Cell<bool>,
+    busy: Cell<bool>,
     buffer: RefCell<Option<Buffer>>,
 }
 
@@ -489,7 +489,7 @@ impl BufferedFd {
             writing: !reading,
             handle,
             drop_fallback: None,
-            truncating: Cell::new(false),
+            busy: Cell::new(false),
             buffer: RefCell::new(Some(buffer)),
         })
     }
@@ -510,7 +510,7 @@ impl BufferedFd {
             reading: true,
             writing: true,
             drop_fallback: None,
-            truncating: Cell::new(false),
+            busy: Cell::new(false),
             buffer: RefCell::new(Some(Buffer::Random(buffer))),
         })
     }
@@ -522,7 +522,7 @@ impl BufferedFd {
             reading,
             writing: !reading,
             drop_fallback: None,
-            truncating: Cell::new(false),
+            busy: Cell::new(false),
             buffer: RefCell::new(Some(Buffer::Pipe(pipe))),
         }
     }
@@ -578,13 +578,14 @@ impl BufferedFd {
         self.handle.live_fd().is_none()
     }
 
-    /// A Python raw truncate or size conversion can call back into its own buffer.
+    /// Python raw methods and signal handlers can call back into a currently active buffer.
     fn check_reentry(&self, ctx: &Context) -> Result<()> {
-        if self.truncating.get() {
+        if self.busy.get() {
+            let class = if self.writing { "BufferedRandom" } else { "BufferedReader" };
             let name = ctx.raw_instance_field(self.raw, "name");
             let value = name.map_or_else(
-                || "<_io.BufferedRandom>".to_owned(),
-                |id| format!("<_io.BufferedRandom name={}>", ctx.repr(id)),
+                || format!("<_io.{class}>"),
+                |id| format!("<_io.{class} name={}>", ctx.repr(id)),
             );
             return Err(Error::new(
                 "RuntimeError",
@@ -606,7 +607,7 @@ impl BufferedFd {
             };
             file.flush().map_err(os_error)?;
         }
-        self.truncating.set(true);
+        self.busy.set(true);
         let result = ctx
             .lookup_attr(self.raw, "truncate")
             .and_then(|truncate| ctx.call(truncate, vec![size], Vec::new()));
@@ -617,7 +618,7 @@ impl BufferedFd {
                 .lookup_attr(self.raw, "tell")
                 .and_then(|tell| ctx.call(tell, Vec::new(), Vec::new()));
         }
-        self.truncating.set(false);
+        self.busy.set(false);
         result
     }
 
@@ -750,6 +751,21 @@ impl BufferedFd {
         if name == "truncate" {
             return self.truncate(ctx, args.first().copied().unwrap_or(NONE));
         }
+        if name == "read" && size == Some(-1) && self.reading {
+            self.check_reentry(ctx)?;
+            // The public BufferedReader and Popen share this pipe's read-ahead. Consume
+            // it once and release the file and buffer borrows before dispatching Python.
+            let prefix = match self.buffer.borrow().as_ref() {
+                Some(Buffer::Pipe(pipe)) => Some(pipe.take_read_ahead()?),
+                _ => None,
+            };
+            if let Some(bytes) = prefix {
+                self.busy.set(true);
+                let result = file_io::read(ctx, &self.handle, -1, false, bytes);
+                self.busy.set(false);
+                return result;
+            }
+        }
         let mut slot = self.buffer.borrow_mut();
         let buffer = slot.as_mut().ok_or_else(closed)?;
         match name {
@@ -775,12 +791,10 @@ impl BufferedFd {
             }
             "tell" => Ok(ctx.int(buffer.position().map_err(os_error)? as i64)),
             "peek" => {
+                self.check_reentry(ctx)?;
                 let data = match buffer {
                     Buffer::Reader(reader) => crate::objects::peek_bytes(reader)?,
-                    Buffer::Random(reader) => {
-                        self.check_reentry(ctx)?;
-                        reader.peek()?
-                    }
+                    Buffer::Random(reader) => reader.peek()?,
                     Buffer::Pipe(pipe) => pipe.peek()?,
                     Buffer::Writer(_) => unreachable!("peek requires a buffered reader"),
                 };
@@ -842,7 +856,7 @@ impl BufferedFd {
                 Ok(ctx.alloc(Value::Bytes(data)))
             }
             "readinto" if args.len() == 1 => {
-                if self.truncating.get() {
+                if self.busy.get() {
                     files::readinto_target(ctx, args[0])?;
                     self.check_reentry(ctx)?;
                 }
