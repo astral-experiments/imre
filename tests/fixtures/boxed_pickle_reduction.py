@@ -206,6 +206,25 @@ def check_object_reducer():
     import copy
     import copyreg
 
+    class Legacy:
+        def __getnewargs__(self):
+            raise AssertionError("legacy reduction requested new arguments")
+
+    legacy = Legacy()
+    for protocol in (0, 1):
+        assert legacy.__reduce_ex__(protocol) == (copyreg._reconstructor, (Legacy, object, None))
+        legacy.value = [7]
+        constructor, args, state = legacy.__reduce_ex__(protocol)
+        assert constructor is copyreg._reconstructor and args == (Legacy, object, None)
+        assert state is legacy.__dict__ and state["value"] is legacy.value
+        del legacy.value
+        try:
+            Plain({}).__reduce_ex__(protocol)
+        except TypeError as error:
+            assert "__slots__" in str(error)
+        else:
+            raise AssertionError("legacy reduction accepted slots without a custom state hook")
+
     plain = Plain({})
     for protocol in (2, 3, 4, 5):
         constructor, args, state, listitems, dictitems = plain.__reduce_ex__(protocol)
