@@ -25,6 +25,14 @@ fn setting_flag(
     Ok(Wrapper::from_receiver(ctx, receiver).is_ok_and(|w| get(&w)))
 }
 
+fn release_option(ctx: &mut Context, old: Id, new: Id) -> Result<()> {
+    if old != new {
+        ctx.heap.weak_edge_removed(old);
+        super::super::release_child(ctx, Some(old))?;
+    }
+    Ok(())
+}
+
 pub(super) fn call(
     ctx: &mut Context,
     receiver: Id,
@@ -142,10 +150,11 @@ pub(super) fn call(
             w.utf8_signature_pending.set(true);
         }
         let w = Wrapper::from_receiver(ctx, receiver)?;
-        let old_encoding = w.encoding.replace(encoding);
-        let old_errors = w.errors.replace(errors);
-        ctx.heap.weak_edge_removed(old_encoding);
-        ctx.heap.weak_edge_removed(old_errors);
+        release_option(ctx, w.encoding.replace(encoding), encoding)?;
+        // Either removed str subclass can reenter reconfigure or reinitialize the wrapper.
+        let w = Wrapper::from_receiver(ctx, receiver)?;
+        release_option(ctx, w.errors.replace(errors), errors)?;
+        let w = Wrapper::from_receiver(ctx, receiver)?;
         if w.writable.get() && w.seekable {
             w.write_start.set(true);
             let position = Wrapper::invoke_buffer(ctx, receiver, "tell", vec![])?;

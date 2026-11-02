@@ -1,6 +1,8 @@
 //! A BufferedRWPair owns separate buffered streams of its native module generation.
 
-use super::{Context, Error, FALSE, Id, MemoryStream, NONE, NativeClass, Result, TRUE, Value};
+use super::{
+    Context, Error, FALSE, Id, MemoryStream, NONE, NativeClass, Result, TRUE, Value, release_child,
+};
 
 pub(super) const METHODS: &[&str] = &[
     "__init__",
@@ -39,16 +41,6 @@ fn store(ctx: &mut Context, receiver: Id, pair: Pair) {
         unreachable!("validated BufferedRWPair receiver")
     };
     *memory_stream = Some(MemoryStream::Pair(pair));
-}
-
-fn release_child(ctx: &mut Context, child: Option<Id>) -> Result<()> {
-    if let Some(child) = child {
-        let (heap, roots) = ctx.heap_and_roots();
-        if heap.released_last_finalizer_ref(child, roots)? {
-            ctx.dispatch_finalizer(child);
-        }
-    }
-    Ok(())
 }
 
 /// CPython's exact pair deallocator clears its weakrefs, reader, then writer.
