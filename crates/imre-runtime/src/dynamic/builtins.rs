@@ -1661,13 +1661,15 @@ pub(super) fn call(
             "bytearray" if BYTEARRAY_METHODS.contains(&method) => {
                 text::bytearray_method(ctx, name, method, args, kwargs)
             }
-            "tuple" if method == "__getitem__" => {
+            "tuple" | "mappingproxy" if method == "__getitem__" => {
                 let (&receiver, args) = args.split_first().ok_or_else(|| {
-                    type_error("descriptor '__getitem__' of 'tuple' object needs an argument")
+                    type_error(format!(
+                        "descriptor '__getitem__' of '{owner}' object needs an argument"
+                    ))
                 })?;
-                if !ctx.builtin_slot_accepts(receiver, "tuple") {
+                if !ctx.builtin_slot_accepts(receiver, owner) {
                     return Err(type_error(format!(
-                        "descriptor '__getitem__' requires a 'tuple' object but received a '{}'",
+                        "descriptor '__getitem__' requires a '{owner}' object but received a '{}'",
                         ctx.type_name(receiver)
                     )));
                 }
@@ -1682,6 +1684,9 @@ pub(super) fn call(
                         args.len()
                     )));
                 };
+                if owner == "mappingproxy" {
+                    return ctx.get_item(receiver, *key);
+                }
                 ctx.sequence_subscript(receiver, *key)
             }
             "set" | "frozenset" if set_operator(method).is_some() => {

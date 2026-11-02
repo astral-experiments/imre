@@ -250,6 +250,7 @@ impl BuiltinDescriptor {
             "dict.__ior__" => ("dict", "__ior__"),
             "dict.__eq__" => ("dict", "__eq__"),
             "dict.__repr__" => ("dict", "__repr__"),
+            "mappingproxy.__getitem__" => ("mappingproxy", "__getitem__"),
             "mappingproxy.__hash__" => ("mappingproxy", "__hash__"),
             "mappingproxy.__repr__" => ("mappingproxy", "__repr__"),
             "mappingproxy.__str__" => ("mappingproxy", "__str__"),
@@ -511,6 +512,12 @@ impl BuiltinDescriptor {
             "__doc__" if self.name == "__call__" => ctx.text("Call self as a function."),
             "__text_signature__" if self.name == "__call__" => {
                 ctx.text("($self, /, *args, **kwargs)")
+            }
+            "__doc__" if self.name == "__getitem__" && self.owner == "mappingproxy" => {
+                ctx.text("Return self[key].")
+            }
+            "__text_signature__" if self.name == "__getitem__" && self.owner == "mappingproxy" => {
+                ctx.text("($self, key, /)")
             }
             "__doc__" if self.name == "__hash__" => ctx.text("Return hash(self)."),
             "__doc__" if self.name == "__repr__" => ctx.text("Return repr(self)."),
