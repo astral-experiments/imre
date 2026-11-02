@@ -3131,11 +3131,6 @@ impl Context {
                 explicit: false,
             }));
         }
-        // Imported Python modules share ModuleType's fallback after ordinary attributes.
-        if let Value::Module { scope, .. } = *self.heap.get(obj) {
-            let class = self.builtin("module");
-            return self.module_instance_attribute(obj, class, scope, name);
-        }
         Err(self.missing_attribute(obj, name))
     }
     /// A missing T_OBJECT member reads as None, even after repeated deletions.
