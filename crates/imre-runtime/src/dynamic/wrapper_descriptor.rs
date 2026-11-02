@@ -82,6 +82,7 @@ impl BuiltinDescriptor {
         }
         let (owner, name) = match symbol {
             "object.__format__" => ("object", "__format__"),
+            "object.__reduce__" => ("object", "__reduce__"),
             "object.__reduce_ex__" => ("object", "__reduce_ex__"),
             "int.__format__" => ("int", "__format__"),
             "str.__format__" => ("str", "__format__"),
@@ -123,6 +124,7 @@ impl BuiltinDescriptor {
             method: matches!(
                 name,
                 "__format__"
+                    | "__reduce__"
                     | "__reduce_ex__"
                     | "isascii"
                     | "isalpha"
@@ -268,6 +270,9 @@ impl BuiltinDescriptor {
             )),
             "__doc__" | "__text_signature__" if self.method => {
                 let value = match (self.name, name) {
+                    ("__reduce__" | "__reduce_ex__", "__doc__") if self.owner == "object" => "Helper for pickle.",
+                    ("__reduce__", _) if self.owner == "object" => "($self, /)",
+                    ("__reduce_ex__", _) if self.owner == "object" => "($self, protocol, /)",
                     ("__reduce__", "__doc__") if self.owner == stdlib::os::stat::CLASS => return Some(NONE),
                     ("__reduce__", _) if self.owner == stdlib::os::stat::CLASS => "($self, /)",
                     ("isascii", "__doc__") => {

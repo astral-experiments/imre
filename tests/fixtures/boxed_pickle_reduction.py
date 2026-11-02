@@ -110,7 +110,39 @@ def consume(streams):
             raise AssertionError("accepted invalid pickle")
 
 
+def check_object_reducer():
+    class Child(WithoutProtocol):
+        def reduce_from_super(self):
+            return super().__reduce_ex__(4)
+
+    obj = Child()
+    assert Child.__reduce_ex__ is object.__reduce_ex__
+    assert obj.reduce_from_super() == (str, (37,))
+    obj.__reduce__ = lambda: (int, (12,))
+    assert object.__reduce_ex__(obj, 2) == (int, (12,))
+
+    events = []
+    class Reducer:
+        def __get__(self, instance, owner):
+            events.append(instance is None)
+            if instance is None:
+                raise LookupError("class reducer lookup")
+            return lambda: (str, (37,))
+
+    class WithDescriptor:
+        __reduce__ = Reducer()
+
+    try:
+        WithDescriptor().__reduce_ex__(5)
+    except LookupError as error:
+        assert str(error) == "class reducer lookup"
+    else:
+        raise AssertionError("ignored an error inspecting the class reducer")
+    assert events == [False, True]
+
+
 def produce():
+    check_object_reducer()
     assert _codecs.encode is codecs.encode and codecs.encode.__module__ == "_codecs"
     for protocol in range(pickle.HIGHEST_PROTOCOL + 1):
         check_floats(protocol)
