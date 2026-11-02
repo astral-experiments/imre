@@ -190,7 +190,7 @@ impl Context {
             return x == y;
         }
         (0..left.layout.len).all(|i| match (left.item(i), right.item(i)) {
-            (Some(Value::Int(x)), Some(Value::Int(y))) => x == y,
+            (Some(Value::Int(x)), Some(Value::Int(y))) => x.cmp(&y).is_eq(),
             (Some(Value::Float(x)), Some(Value::Float(y))) => x == y,
             (Some(Value::Int(n)), Some(Value::Float(f)))
             | (Some(Value::Float(f)), Some(Value::Int(n))) => crate::floats::compare(&n, f) == 0,
