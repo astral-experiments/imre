@@ -95,11 +95,13 @@ with warnings.catch_warnings(record=True) as caught:
 assert child is modules['pkg.replace_parent'] and modules['pkg'] == 42
 assert len(caught) == 1 and caught[0].category is ImportWarning
 assert str(caught[0].message) == message
+assert caught[0].filename == '<frozen importlib._bootstrap>' and caught[0].lineno == 1353
 
 modules['pkg'] = original
 del modules['pkg.replace_parent']
 with warnings.catch_warnings():
-    warnings.simplefilter('error', ImportWarning)
+    warnings.simplefilter('ignore', ImportWarning)
+    warnings.filterwarnings('error', category=ImportWarning, module=r'^importlib[.]_bootstrap$', lineno=1353)
     try:
         import_module('pkg.replace_parent')
     except ImportWarning as exc:

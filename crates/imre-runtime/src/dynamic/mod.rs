@@ -1746,8 +1746,20 @@ impl Context {
             "property" => property::METHODS,
             "memoryview" => builtins::MEMORYVIEW_METHODS,
             "bool" => &["__repr__"],
-            "int" => &["__add__", "bit_length", "from_bytes", "to_bytes", "__format__", "__repr__"],
-            "float" => &["__format__", "__getformat__", "as_integer_ratio", "__repr__"],
+            "int" => &[
+                "__add__",
+                "bit_length",
+                "from_bytes",
+                "to_bytes",
+                "__format__",
+                "__repr__",
+            ],
+            "float" => &[
+                "__format__",
+                "__getformat__",
+                "as_integer_ratio",
+                "__repr__",
+            ],
             "bytes" => {
                 self.builtin("bytes.fromhex");
                 builtins::BYTES_METHODS
@@ -2136,15 +2148,11 @@ impl Context {
                 }
                 let exception = self.raised_instance(error);
                 self.with_import_exception(exception, |ctx| {
-                    ctx.emit_builtin_warning(
-                        crate::objects::exceptions::Kind::ImportWarning,
-                        &format!(
-                            "Cannot set an attribute on {} for child module {}",
-                            string_repr(parent_name),
-                            string_repr(child)
-                        ),
-                        1,
-                    )
+                    ctx.warn_child_binding(&format!(
+                        "Cannot set an attribute on {} for child module {}",
+                        string_repr(parent_name),
+                        string_repr(child)
+                    ))
                 })?;
             }
         }
