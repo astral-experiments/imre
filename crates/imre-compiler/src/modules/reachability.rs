@@ -335,7 +335,16 @@ impl<'a> Visitor<'a> for References<'_> {
             }
             if matches!(name.as_str(), "assertEqual" | "assertListEqual") {
                 if name == "assertEqual" {
-                    self.found.attributes.insert("assertDictEqual".into());
+                    self.found.attributes.extend(
+                        [
+                            "assertDictEqual",
+                            "_getAssertEqualityFunc",
+                            "_type_equality_funcs",
+                            "_assertOptionalTextEqual",
+                        ]
+                        .into_iter()
+                        .map(str::to_owned),
+                    );
                 }
                 self.found.attributes.extend(
                     [

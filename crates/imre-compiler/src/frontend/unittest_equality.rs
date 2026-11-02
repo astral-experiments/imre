@@ -120,6 +120,21 @@ impl Checker<'_> {
         if !self.unittest_case(class) || self.classes.methods[class].contains_key(name) {
             return Ok(None);
         }
+        let record = &self.classes.declarations.definitions[class];
+        let shadowed = |member: &str| {
+            record.static_bindings.contains_key(member)
+                || record.fields.iter().any(|field| field.name == member)
+        };
+        if shadowed(name) {
+            return Ok(None);
+        }
+        if name == "assertEqual"
+            && ["_getAssertEqualityFunc", "_type_equality_funcs"]
+                .iter()
+                .any(|member| shadowed(member) || self.classes.methods[class].contains_key(*member))
+        {
+            return Err(self.object_runtime_export("custom unittest equality dispatch", call));
+        }
         let (a, b) = if name == "assertListEqual" {
             ("list1", "list2")
         } else {
@@ -159,6 +174,33 @@ impl Checker<'_> {
                 .map(|arg| self.expr(arg))
                 .transpose()?
                 .is_some_and(|arg| arg.ty == optional_text);
+        if name == "assertEqual" && matches!(ty, Type::Str | Type::StrLiteral(_)) {
+            if shadowed("assertMultiLineEqual") {
+                return Err(self.object_runtime_export("custom unittest text comparator", call));
+            }
+            if self
+                .bundled_case_method_owner(class, "assertMultiLineEqual")
+                .is_none()
+            {
+                // Bind assertEqual's arguments before looking up the user's comparator.
+                // A mixed-type pair can select a different equality function altogether.
+                let right_type = right
+                    .map(|arg| self.expr(arg))
+                    .transpose()?
+                    .map(|arg| arg.ty);
+                if !matches!(right_type, Some(Type::Str | Type::StrLiteral(_))) {
+                    return Err(self.object_runtime_export("custom unittest text comparator", call));
+                }
+                let base = self
+                    .bundled_case_method_owner(class, "_assertOptionalTextEqual")
+                    .ok_or_else(|| {
+                        self.object_runtime_export("custom unittest text comparator", call)
+                    })?;
+                let method = self.classes.methods[base]["_assertOptionalTextEqual"].clone();
+                let receiver = self.coerce(receiver.clone(), Type::Class(base), call)?;
+                return self.source_call(call, &method, Some(receiver), 1).map(Some);
+            }
+        }
         let mut owner = class;
         let method =
             if matches!(ty, Type::List(_) | Type::ListInt) {
