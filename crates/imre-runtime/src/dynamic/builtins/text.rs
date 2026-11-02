@@ -65,7 +65,15 @@ pub(super) fn construct(
                     "int() base must be >= 2 and <= 36, or 0",
                 ));
             }
-            let number = match value.map(|id| ctx.heap.get(id)) {
+            let storage = if let Some(value) = value.filter(|_| base.is_none()) {
+                if let Some(integer) = ctx.numeric_int(value)? {
+                    return Ok(integer);
+                }
+                Some(ctx.scalar_value(value))
+            } else {
+                value
+            };
+            let number = match storage.map(|id| ctx.heap.get(id)) {
                 None => crate::Int::from(0),
                 Some(Value::Str(s)) => crate::integer_text::parse_radix(s, radix as u32)?,
                 Some(Value::Bytes(b) | Value::ByteArray(b)) => {
@@ -76,8 +84,12 @@ pub(super) fn construct(
                         "int() can't convert non-string with explicit base",
                     ));
                 }
-                Some(Value::Float(f)) => crate::Int::new(crate::floats::float_to_integer(*f)?),
-                _ => ctx.as_int(value.unwrap())?,
+                _ => {
+                    return Err(type_error(format!(
+                        "int() argument must be a string, a bytes-like object or a real number, not '{}'",
+                        ctx.type_name(value.unwrap())
+                    )));
+                }
             };
             Ok(ctx.alloc(Value::Int(number)))
         }
@@ -401,6 +413,37 @@ pub(super) fn bytearray_method(
         return Ok(NONE);
     }
     let argument = one_positional_arg(name, args, kwargs)?;
+    if method == "resize" {
+        let size = crate::signed_index(&ctx.index_integer(argument)?).ok_or_else(|| {
+            Error::new(
+                "OverflowError",
+                "Python int too large to convert to C ssize_t",
+            )
+        })?;
+        let size = usize::try_from(size).map_err(|_| {
+            Error::new(
+                "ValueError",
+                format!("Can only resize to positive sizes, got {size}"),
+            )
+        })?;
+        // __index__ may have resized the receiver or changed its active exports.
+        let storage = ctx.scalar_value(receiver);
+        let current = ctx.bytes_like(storage)?.len();
+        if size != current {
+            ctx.check_bytearray_resize(storage)?;
+            // CPython also needs room for the trailing NUL.
+            if size == isize::MAX as usize {
+                return Err(Error::new("MemoryError", ""));
+            }
+            let Value::ByteArray(data) = ctx.heap.get_mut(storage) else {
+                unreachable!()
+            };
+            data.try_reserve_exact(size.saturating_sub(current))
+                .map_err(|_| Error::new("MemoryError", ""))?;
+            data.resize(size, 0);
+        }
+        return Ok(NONE);
+    }
     let byte;
     let extra = if method == "append" {
         byte = [ctx.byte_value(argument)?];

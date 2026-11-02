@@ -1501,6 +1501,15 @@ def main():
         )
         compare("-B", shadow_script, extra={"IMREFLAGS": "--opt-level 0"}, native_timeout=300)
 
+        tokenize_script = root / "tokenize_entry.py"
+        tokenize_script.write_text(
+            "from io import StringIO\n"
+            "from tokenize import generate_tokens\n"
+            "for t in generate_tokens(StringIO('x += 1 # note').readline):\n"
+            "    print(t.string, t.exact_type)\n"
+        )
+        compare("-B", tokenize_script)
+
         ftp_script = root / "ftp_entry.py"
         ftp_script.write_text("import ftplib\nprint(ftplib.FTP().encoding, ftplib.parse257('257 \"home\"'))\n")
         compare("-B", ftp_script)
@@ -1561,9 +1570,11 @@ def main():
         locale_script = root / "get_locale.py"
         locale_script.write_text(
             "from _locale import LC_ALL, setlocale\n"
-            "from locale import getlocale\n"
+            "from locale import getlocale, getpreferredencoding\n"
             "setlocale(LC_ALL, 'C')\n"
             "print(getlocale(), getlocale(category=LC_ALL))\n"
+            "print(getpreferredencoding(False), getpreferredencoding(do_setlocale=True))\n"
+            "assert setlocale(LC_ALL) == 'C'\n"
         )
         compare("-B", locale_script)
 
@@ -1919,6 +1930,16 @@ def main():
             extra={"PYTHONDONTWRITEBYTECODE": "1", "IMREFLAGS": "--bogus"},
         )
         compare("-B", "-c", "import sys\nsys.exit(37)", status=37)
+        compare(
+            "-B", "-c",
+            "import atexit, os\n"
+            "atexit.register(lambda: print('after shutdown', handler.stream is None))\n"
+            "import logging\n"
+            "handler = logging.FileHandler(os.devnull)\n"
+            "atexit.register(lambda: print('before shutdown', handler.stream is None))\n",
+            extra={"IMREFLAGS": "--opt-level 0"},
+            native_timeout=300,
+        )
         compare("-B", "-c", "print(list.__len__([1, 2]), tuple.__len__((3,)))")
         if os.name == "posix":
             for base in ("list", "tuple"):
@@ -2518,6 +2539,63 @@ def report(text):
         ):
             monitoring_entry.write_text(program)
             compare("-EB", monitoring_entry, native_args=("run", monitoring_entry, "--quiet"))
+        shadow = root / "hmac_shadow"
+        shadow.mkdir()
+        (shadow / "hmac.py").write_text("marker = 'local'\n")
+        shadow_entry = shadow / "entry.py"
+        shadow_entry.write_text(
+            "import sys\n"
+            "from importlib.machinery import SourceFileLoader\n"
+            "from importlib.util import module_from_spec, spec_from_file_location\n"
+            "sys.modules['_hashlib'] = sys.modules['_operator'] = None\n"
+            "loader = SourceFileLoader('hmac', sys.argv[1])\n"
+            "module = module_from_spec(spec_from_file_location('hmac', sys.argv[1], loader=loader))\n"
+            "sys.modules['hmac'] = module\n"
+            "loader.exec_module(module)\n"
+            "assert __import__('hmac') is module and module.marker == 'local'\n"
+            "for name in ('digest', '_digest_native', 'compare_digest', 'new', 'HMAC'):\n"
+            "    assert not hasattr(module, name)\n"
+        )
+        local_hmac = shadow / "hmac.py"
+        compare(
+            "-IB", shadow_entry, local_hmac,
+            native_args=("run", shadow_entry, "--module-root", shadow, "--runtime-imports", "--quiet", "--", local_hmac),
+        )
+
+        # Only exercise legacy-provider policy when the host OpenSSL can load it.
+        policy = root / "hmac-legacy.cnf"
+        policy.write_text(
+            "openssl_conf = init\n[init]\nproviders = providers\nalg_section = properties\n"
+            "[providers]\ndefault = default_provider\nlegacy = legacy_provider\n"
+            "[default_provider]\nactivate = 1\n[legacy_provider]\nactivate = 1\n"
+            "[properties]\ndefault_properties = provider=legacy\n"
+        )
+        policy_env = {"OPENSSL_CONF": str(policy)}
+        legacy_capabilities = """import _hashlib
+for name in ("md4", "ripemd160"):
+    print(_hashlib.new(name, b"abc").hexdigest())
+for name in ("md4", "ripemd160"):
+    try:
+        _hashlib.hmac_digest(b"k", b"m", name)
+    except ValueError as exc:
+        print(type(exc).__name__, str(exc))
+    else:
+        print("MAC permitted")
+"""
+        probe = run(sys.executable, "-IB", "-c", legacy_capabilities, extra=policy_env)
+        if probe.returncode == 0:
+            lines = probe.stdout.splitlines()
+            assert lines[:2] == [
+                b"a448017aaf21d8525fc10ae87aa6729d",
+                b"8eb208f7e05d987a9b044a8e98c6b087f15a0bfc",
+            ]
+            if lines[2:] == [b"ValueError [digital envelope routines] unsupported"] * 2:
+                hmac_entry = fixtures / "bytes/hmac_digest.py"
+                compare(
+                    "-IB", hmac_entry, "legacy-policy", extra=policy_env,
+                    native_args=("run", hmac_entry, "--runtime-imports", "--quiet", "--", "legacy-policy"),
+                )
+
         compare("-IB", fixtures / "boxed_unittest_named_loader.py")
         compare("-IB", fixtures / "boxed_unittest_patch.py")
         call_args = fixtures / "unittest_mock_call_args.py"
@@ -2585,6 +2663,7 @@ def report(text):
             "boxed_int_to_bytes.py",
             "boxed_int_rational_fields.py",
             "boxed_int_from_bytes.py",
+            "boxed_int_conversion.py",
             "boxed_divmod_slots.py",
             "boxed_complex.py",
             "boxed_float.py",
@@ -2719,6 +2798,7 @@ def report(text):
             "boxed_os_descriptor_io.py",
             "boxed_os_ftruncate.py",
             "boxed_os_lockf.py",
+            "boxed_os_mknod.py",
             "boxed_os_pread.py",
             "boxed_os_pwrite.py",
             "boxed_os_readinto.py",
@@ -2860,6 +2940,7 @@ def report(text):
             "boxed_with_lookup.py",
             "boxed_itertools_repeat.py",
             "boxed_itertools_type_namespaces.py",
+            "boxed_itertools_immutable_types.py",
             "boxed_itertools_cursor_repr.py",
             "boxed_itertools_chain.py",
             "boxed_itertools_cycle.py",
@@ -2935,6 +3016,8 @@ def report(text):
             "bytes/hashlib_md5_provider.py",
             "bytes/hashlib_sha3_provider.py",
             "bytes/hashlib_kdf.py",
+            "bytes/hmac_digest.py",
+            "bytes/hmac_digest_fallback.py",
             "boxed_hashlib_file_digest.py",
             "boxed_standard_base64.py",
             "boxed_csv.py",
@@ -2953,6 +3036,7 @@ def report(text):
             "boxed_queue.py",
             "boxed_shutil.py",
             "boxed_difflib.py",
+            "boxed_tokenize.py",
             "boxed_colorize.py",
             "boxed_string_new.py",
             "boxed_string_repeat.py",
@@ -2965,6 +3049,8 @@ def report(text):
             plugin.write_bytes((fixtures / fixture).read_bytes())
             if fixture == "boxed_slice_deep_repr.py":
                 check_slice_stack(imre, imports, root, env)
+            elif fixture == "boxed_codec_registry.py":
+                compare("-IB", "-c", imports)
             else:
                 compare("-IB", "-c", imports + "arithmetic.current()")
             if fixture == "boxed_json_module_doc.py":
@@ -3022,7 +3108,15 @@ def report(text):
             compare("-IB", str(fixtures / "boxed_geteuid_exports.py"), "os", "posix")
             plugin.write_bytes((fixtures / "boxed_pwd.py").read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")
+            plugin.write_bytes((fixtures / "boxed_posix_expanduser.py").read_bytes())
+            compare("-IB", "-c", imports + "arithmetic.current()")
+            compare("-B", "-c", imports + "arithmetic.current()",
+                    extra={"LC_ALL": "C", "PYTHONUTF8": "0", "PYTHONCOERCECLOCALE": "0"})
         if sys.platform == "linux":
+            plugin.write_bytes((fixtures / "boxed_os_spawn.py").read_bytes())
+            libc, version = platform.libc_ver()
+            child_callbacks = libc == "glibc" and tuple(map(int, version.split(".")[:2])) >= (2, 32)
+            compare("-IB", "-c", imports + f"arithmetic.current({child_callbacks})")
             plugin.write_bytes((fixtures / "boxed_posix_fadvise.py").read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")
             plugin.write_bytes((fixtures / "boxed_posix_fallocate.py").read_bytes())

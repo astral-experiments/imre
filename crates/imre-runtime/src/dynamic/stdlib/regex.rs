@@ -888,7 +888,24 @@ fn compile_uncached(ctx: &mut Context, id: Id, flags: Option<Id>) -> Result<Id> 
         inline_verbose,
     ) {
         Ok(pattern) => pattern,
-        Err(message) => return Err(pattern_error(ctx, id, flags, message)),
+        Err(message) => {
+            if spelling.windows(3).any(|w| w == b"(?(")
+                && let Some((msg, offset)) = imre_regex::numeric_condition_diagnostic(
+                    &flags::original_spelling(spelling, bytes),
+                    flags & VERBOSE != 0,
+                    alphabet(bytes, bytes || flags & ASCII != 0, flags),
+                    flags & DOTALL != 0,
+                    flags::scoped_verbose,
+                    group_names::valid,
+                    crate::integer_text::decimal_digit_limit() as usize,
+                )
+            {
+                let original = pattern_spelling(ctx, id, &projections)?;
+                let start = flags::original_spelling(&original[..parsed.skip], bytes).chars().count();
+                return Err(pattern_error_at(ctx, id, msg, Some(start + offset)));
+            }
+            return Err(pattern_error(ctx, id, flags, message));
+        }
     };
     if let Some(name) = pattern.invalid_group_name(spelling) {
         if let Some((message, position)) = syntax_diagnostic(ctx, id, flags) {

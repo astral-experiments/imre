@@ -127,6 +127,7 @@ pub(super) fn is_module(name: &str) -> bool {
             | "errno"
             | "faulthandler"
             | "genericpath"
+            | "hmac"
             | "urllib.parse"
             | "io"
             | "itertools"
@@ -203,7 +204,6 @@ pub(super) fn has_lazy_attributes(name: &str) -> bool {
             | "random"
             | "secrets"
             | "hashlib"
-            | "hmac"
             | "re"
             | "importlib"
             | "importlib.machinery"
@@ -441,7 +441,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         (
             "codecs" | "_codecs",
             "encode" | "decode" | "register" | "unregister" | "lookup" | "escape_decode"
-            | "utf_16_ex_decode",
+            | "utf_8_decode" | "utf_16_ex_decode",
         ) => ctx.builtin(&format!("codecs.{name}")),
         ("_codecs", "_imre_codec_functions") => ctx.builtin("_codecs._imre_codec_functions"),
         ("_codecs", "_imre_native_search") => ctx.builtin("encodings.search_function"),
@@ -559,9 +559,10 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("collections" | "_collections", "_tuplegetter") => ctx.builtin(super::namedtuple::GETTER),
         ("collections", "defaultdict") => ctx.builtin("collections.defaultdict"),
         ("types", "GenericAlias") => ctx.builtin("types.GenericAlias"),
-        ("_typing", "_get_alias_kind" | "_eval_type_expression" | "_validate_forward_ref") => {
-            ctx.builtin(&format!("typing.{name}"))
-        }
+        (
+            "_typing",
+            "_get_alias_kind" | "_eval_type_expression" | "_validate_forward_ref" | "_install_generic_alias_iter",
+        ) => ctx.builtin(&format!("typing.{name}")),
         ("_typing", "_get_args") => ctx.builtin("typing.get_args"),
         ("_typing", "_get_origin") => ctx.builtin("typing.get_origin"),
         ("_typing", "_idfunc") => ctx.builtin("_typing._idfunc"),
@@ -724,6 +725,8 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         }
         ("os" | "posix", "listdir") if cfg!(unix) => ctx.builtin("posix.listdir"),
         ("os" | "posix", "fspath") => ctx.builtin("posix.fspath"),
+        #[cfg(target_os = "linux")]
+        ("posix", "_spawn_exec") => ctx.builtin("posix._spawn_exec"),
         ("os" | "posix", name)
             if os::is_descriptor_function(name) || os::is_process_function(name) =>
         {
@@ -1703,6 +1706,10 @@ pub(super) fn call(
     if let Some(op @ ("stat" | "lstat" | "fstat")) = name.strip_prefix("posix.") {
         return os::stat::call(ctx, op, args, kwargs);
     }
+    #[cfg(target_os = "linux")]
+    if name == "posix._spawn_exec" {
+        return os::spawn_exec(ctx, args, kwargs);
+    }
     if let Some(op) = name.strip_prefix("posix.")
         && (os::is_descriptor_function(op) || os::is_process_function(op))
     {
@@ -2214,6 +2221,7 @@ pub(super) fn call(
         return match function {
             "encode" | "decode" => codecs::transform(ctx, function, args, kwargs),
             "escape_decode" => codecs::escape_decode(ctx, args, kwargs),
+            "utf_8_decode" => codecs::utf8_decode(ctx, args, kwargs),
             "utf_16_ex_decode" => codecs::utf16_extended(ctx, args, kwargs),
             "lookup" => codecs::lookup(ctx, args, kwargs),
             "register" | "unregister" => codecs::search_registry(ctx, function, args, kwargs),
@@ -2270,7 +2278,8 @@ pub(super) fn call(
         return tempfile::open(ctx, args, kwargs);
     }
     if let Some(method) = name.strip_prefix("BufferedRandom.") {
-        return tempfile::method(ctx, method, args, kwargs);
+        let receiver = argument(args, 0)?;
+        return tempfile::method(ctx, receiver, method, &args[1..], kwargs);
     }
     if let Some(method) = name.strip_prefix("TextIOWrapper.") {
         return files::text_method(ctx, method, args, kwargs);
@@ -2458,6 +2467,7 @@ pub(super) fn call(
         "_imre_json.surrogate_text" => (1, &[]),
         "_imre_json.is_constants_lookup" => (2, &[]),
         "_imre_json.scan_once" => (3, &[]),
+        "hmac._digest_native" => (3, &[]),
         "hmac.new" | "hmac.HMAC" => (3, &["key", "msg", "digestmod"]),
         "hmac.HMAC.update" => (2, &[]),
         "hmac.HMAC.digest" | "hmac.HMAC.hexdigest" | "hmac.HMAC.copy" => (1, &[]),
@@ -2559,6 +2569,7 @@ pub(super) fn call(
             };
             ctx.alloc(Value::Bytes(result))
         }
+        "hmac._digest_native" => return hmac::digest_native(ctx, args),
         "hmac.new" | "hmac.HMAC" => return hmac::new(ctx, args, kwargs),
         method if method.starts_with("hmac.HMAC.") => return hmac::method(ctx, method, args),
         "hash.update" | "hash.copy" => {
@@ -2766,10 +2777,18 @@ pub(super) fn call(
             }
             return Err(ctx.exception("SystemExit", args));
         }
-        name if name.starts_with("os.path.")
-            || matches!(name, "file.__enter__" | "file.__exit__") =>
-        {
-            return files::call(ctx, name, args, kwargs);
+        "os.path.dirname" => {
+            let path = ctx.str_value(argument(args, 0)?)?;
+            return Ok(ctx.text(posixpath::dirname(path).to_owned()));
+        }
+        "file.__enter__" | "file.__exit__" => {
+            let receiver = argument(args, 0)?;
+            return files::binary_method(
+                ctx,
+                receiver,
+                name.trim_start_matches("file."),
+                &args[1..],
+            );
         }
         "match.groups" | "match.groupdict" => {
             let receiver = argument(args, 0)?;

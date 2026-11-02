@@ -267,6 +267,12 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
         "codeop" => Some(("codeop.py", include_str!("../stdlib/codeop.py"))),
         "keyword" => Some(("keyword.py", KEYWORD_SOURCE)),
         "token" => Some(("token.py", include_str!("../stdlib/token.py"))),
+        "tokenize" => Some((
+            "tokenize.py",
+            include_str!(
+                "../../../benchmarks/cpython_stdlib/full/linecache/upstream/Lib/tokenize.py"
+            ),
+        )),
         "collections" => {
             static SOURCE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
             Some(("collections/__init__.py", SOURCE.get_or_init(|| {
@@ -1866,6 +1872,9 @@ impl IntrinsicModule {
             (Self::Locale | Self::LocaleNative, "getencoding") => {
                 Intrinsic::SysEncoding(SysEncoding::Locale)
             }
+            (Self::Locale, "getpreferredencoding") => {
+                Intrinsic::ObjectRuntimeExport("locale.getpreferredencoding")
+            }
             (Self::Locale, "getlocale") => Intrinsic::ObjectRuntimeExport("locale.getlocale"),
             (Self::Locale, "setlocale") => Intrinsic::ObjectRuntimeExport("locale.setlocale"),
             (Self::LocaleNative, "setlocale") => {
@@ -2129,6 +2138,15 @@ impl IntrinsicModule {
             (Self::Types, "TracebackType") => Intrinsic::NominalClass("traceback"),
             (Self::Types, "FrameType") => Intrinsic::NominalClass("frame"),
             (Self::Types, "CodeType") => Intrinsic::NominalClass("code"),
+            (Self::Codecs, "getincrementaldecoder") => {
+                Intrinsic::ObjectRuntimeExport("codecs.getincrementaldecoder")
+            }
+            (Self::Codecs | Self::CodecsNative, "utf_8_decode") => {
+                Intrinsic::ObjectRuntimeExport("codecs.utf_8_decode")
+            }
+            (Self::Codecs, "BufferedIncrementalDecoder") => {
+                Intrinsic::ObjectRuntimeExport("codecs.BufferedIncrementalDecoder")
+            }
             (Self::Codecs, "IncrementalDecoder") => {
                 Intrinsic::ObjectRuntimeExport("codecs.IncrementalDecoder")
             }
@@ -2406,6 +2424,7 @@ impl IntrinsicModule {
             }
             (Self::Hashlib, "md5") => Intrinsic::ObjectRuntimeExport("hashlib.md5"),
             (Self::Hashlib, "sha1") => Intrinsic::Sha1,
+            (Self::Hmac, "digest") => Intrinsic::ObjectRuntimeExport("hmac.digest"),
             (Self::Hmac, "new") => Intrinsic::ObjectRuntimeExport("hmac.new"),
             (Self::Hmac, "HMAC") => Intrinsic::ObjectRuntimeExport("hmac.HMAC"),
             (Self::Hmac, "compare_digest") => Intrinsic::HmacCompareDigest,
@@ -2727,6 +2746,16 @@ impl IntrinsicModule {
             (Self::Os, "removedirs") if cfg!(unix) => {
                 Intrinsic::ObjectRuntimeExport("os.removedirs")
             }
+            (Self::Os, "spawnv") if cfg!(target_os = "linux") => {
+                Intrinsic::ObjectRuntimeExport("os.spawnv")
+            }
+            (Self::Os, "spawnl") if cfg!(target_os = "linux") => {
+                Intrinsic::ObjectRuntimeExport("os.spawnl")
+            }
+            (Self::Os, "P_WAIT") if cfg!(target_os = "linux") => Intrinsic::IntConstant(0),
+            (Self::Os, "P_NOWAIT" | "P_NOWAITO") if cfg!(target_os = "linux") => {
+                Intrinsic::IntConstant(1)
+            }
             (Self::Os, "walk") if cfg!(unix) => Intrinsic::ObjectRuntimeExport("os.walk"),
             (Self::Os, "fwalk") if cfg!(unix) => Intrinsic::ObjectRuntimeExport("os.fwalk"),
             (Self::Os, "F_OK") => Intrinsic::AccessMode(0),
@@ -2793,6 +2822,7 @@ impl IntrinsicModule {
             (Self::PosixPath, "join") => Intrinsic::PosixPath(PosixPathOperation::Join),
             (Self::PosixPath, "basename") => Intrinsic::PosixPath(PosixPathOperation::Basename),
             (Self::PosixPath, "dirname") => Intrinsic::PosixPath(PosixPathOperation::Dirname),
+            (Self::PosixPath, "expanduser") => Intrinsic::ObjectRuntimeExport("posixpath.expanduser"),
             (Self::PosixPath, "ismount") => Intrinsic::ObjectRuntimeExport("posixpath.ismount"),
             (Self::PosixPath, "split") => Intrinsic::ObjectRuntimeExport("posixpath.split"),
             (Self::PosixPath, "splitext") => Intrinsic::PosixPath(PosixPathOperation::Splitext),

@@ -3,6 +3,10 @@ pub(in crate::dynamic) mod device;
 #[cfg(target_os = "linux")]
 pub(in crate::dynamic) mod eventfd;
 pub(in crate::dynamic) mod scandir;
+#[cfg(target_os = "linux")]
+mod spawn_child;
+#[cfg(target_os = "linux")]
+mod spawn_plain;
 pub(in crate::dynamic) mod stat;
 #[cfg(target_os = "linux")]
 pub(super) mod statvfs;
@@ -24,8 +28,23 @@ pub(in crate::dynamic) fn install_capabilities(
         (
             "supports_dir_fd",
             &[
-                "access", "chmod", "chown", "link", "lstat", "mkdir", "mkfifo", "open", "readlink",
-                "rename", "rmdir", "stat", "symlink", "unlink", "utime",
+                "access",
+                "chmod",
+                "chown",
+                "link",
+                "lstat",
+                "mkdir",
+                "mkfifo",
+                #[cfg(target_os = "linux")]
+                "mknod",
+                "open",
+                "readlink",
+                "rename",
+                "rmdir",
+                "stat",
+                "symlink",
+                "unlink",
+                "utime",
             ][..],
         ),
         (
@@ -147,6 +166,28 @@ pub(super) fn memfd_create(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id
 
 pub(super) fn is_process_function(name: &str) -> bool {
     cfg!(unix) && matches!(name, "execv" | "WIFSTOPPED")
+}
+
+/// Spawn directly for plain arguments, or let the child run the captured Python callable.
+#[cfg(target_os = "linux")]
+pub(super) fn spawn_exec(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    let [Some(path), Some(argv), Some(exec)] =
+        builtins::bind_builtin_arguments("_spawn_exec", args, kwargs, ["path", "args", "exec"], 3)?
+    else {
+        unreachable!("all three arguments are required")
+    };
+    if ctx.finalizing.load(std::sync::atomic::Ordering::Acquire) {
+        return Err(Error::new(
+            "PythonFinalizationError",
+            "can't fork at interpreter shutdown",
+        ));
+    }
+    super::audit::event(ctx, "os.fork", &[])?;
+    let pid = match spawn_plain::try_spawn(ctx, path, argv, exec)? {
+        Some(pid) => pid,
+        None => spawn_child::fork_for_child_callbacks(ctx)?,
+    };
+    Ok(ctx.int(i64::from(pid)))
 }
 
 /// Resolve arguments before auditing, then replace this process using the captured bytes.
@@ -502,7 +543,15 @@ pub(super) fn is_descriptor_function(name: &str) -> bool {
             | "symlink"
     ) || (cfg!(unix) && matches!(name, "kill" | "getppid" | "waitstatus_to_exitcode"))
         || (cfg!(target_os = "linux")
-            && matches!(name, "lockf" | "posix_fadvise" | "posix_fallocate" | "sendfile"))
+            && matches!(
+                name,
+                "copy_file_range"
+                    | "lockf"
+                    | "mknod"
+                    | "posix_fadvise"
+                    | "posix_fallocate"
+                    | "sendfile"
+            ))
 }
 
 /// Retry a POSIX call that returns its error number directly instead of setting errno.
@@ -931,6 +980,10 @@ pub(super) fn descriptor(
     if name == "fchmod" {
         return chmod::fchmod(ctx, args, kwargs);
     }
+    #[cfg(target_os = "linux")]
+    if name == "mknod" {
+        return device::mknod(ctx, args, kwargs);
+    }
     if matches!(name, "mkdir" | "mkfifo") {
         return create_node(ctx, name, args, kwargs);
     }
@@ -971,6 +1024,34 @@ pub(super) fn descriptor(
     }
     if name == "open" {
         return open(ctx, args, kwargs);
+    }
+    #[cfg(target_os = "linux")]
+    if name == "copy_file_range" {
+        let [Some(src), Some(dst), Some(count), offset_src, offset_dst] =
+            builtins::bind_builtin_arguments(
+                name,
+                args,
+                kwargs,
+                ["src", "dst", "count", "offset_src", "offset_dst"],
+                3,
+            )?
+        else {
+            unreachable!("copy_file_range requires both descriptors and count")
+        };
+        let src = c_int(ctx, src)?;
+        let dst = c_int(ctx, dst)?;
+        let count = usize::try_from(ssize_t(ctx, count)?)
+            .map_err(|_| Error::new("ValueError", "negative value for 'count' not allowed"))?;
+        let mut offset = |value| match value {
+            None | Some(NONE) => Ok(None),
+            Some(value) => file_offset(ctx, value).map(Some),
+        };
+        let offset_src = offset(offset_src)?;
+        let offset_dst = offset(offset_dst)?;
+        let copied = native::copy_file_range(src, dst, count, offset_src, offset_dst, || {
+            ctx.dispatch_signals()
+        })?;
+        return Ok(ctx.int(copied as i64));
     }
     #[cfg(target_os = "linux")]
     if name == "sendfile" {

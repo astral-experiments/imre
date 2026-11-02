@@ -945,6 +945,11 @@ def main() -> None:
             passed += 1
         cases = [(name, source, None) for name, source in ACCEPTED.items()]
         for fixture in sorted((Path(__file__).parent / "fixtures/files").glob("*.py")):
+            if fixture.stem == "copy_file_range" and (
+                sys.platform != "linux"
+                or run([args.python, "-c", "import os, sys; sys.exit(not hasattr(os, 'copy_file_range'))"], temporary).returncode
+            ):
+                continue
             source = fixture.read_text(encoding="utf-8")
             cases.append((fixture.stem, source, None))
             if fixture.stem == "zipimport_resources":

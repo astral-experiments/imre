@@ -1,6 +1,8 @@
 //! POSIX descriptors are integers in the program's descriptor table. A call
 //! can observe a closed number or a number subsequently reused by the kernel.
 
+#[cfg(target_os = "linux")]
+mod copy_range;
 mod credentials;
 pub(crate) use credentials::{credential_id, geteuid, getgid, getgroups, getuid};
 
@@ -17,6 +19,11 @@ pub(crate) mod scandir;
 pub(super) mod stat_result;
 pub(crate) use links::{link_at, readlink_at, symlink_at};
 pub(crate) use stat_result::float_seconds;
+
+#[unsafe(no_mangle)]
+pub extern "C" fn imre_os_getpid() -> usize {
+    Int::from_usize(std::process::id() as usize).into_raw()
+}
 
 /// The target's primary or alternate separator, shared by typed and boxed imports.
 pub(crate) fn os_separator(alternate: bool) -> Option<&'static str> {
@@ -504,6 +511,42 @@ fn transfer<E: From<Error>>(
         }
         dispatch()?;
     }
+}
+
+/// Copy a single file range, advancing only the descriptors without explicit offsets.
+#[cfg(target_os = "linux")]
+pub(crate) fn copy_file_range<E: From<Error>>(
+    src: i32,
+    dst: i32,
+    count: usize,
+    mut offset_src: Option<i64>,
+    mut offset_dst: Option<i64>,
+    dispatch: impl FnMut() -> std::result::Result<(), E>,
+) -> std::result::Result<usize, E> {
+    let offset_src = offset_src
+        .as_mut()
+        .map_or(std::ptr::null_mut(), std::ptr::from_mut);
+    let offset_dst = offset_dst
+        .as_mut()
+        .map_or(std::ptr::null_mut(), std::ptr::from_mut);
+    transfer(
+        || {
+            // SAFETY: each non-null pointer refers to a distinct, live, writable Linux loff_t.
+            let copied = unsafe {
+                libc::syscall(
+                    libc::SYS_copy_file_range,
+                    src,
+                    offset_src,
+                    dst,
+                    offset_dst,
+                    count,
+                    0_u32,
+                )
+            };
+            transferred(copied as isize)
+        },
+        dispatch,
+    )
 }
 
 /// Copy through the kernel, borrowing both descriptors and any explicit input offset.

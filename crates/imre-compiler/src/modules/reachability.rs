@@ -35,6 +35,11 @@ impl References<'_> {
     /// Root an implicit index method only if argument binding can reach conversion.
     fn invokes_index(&self, call: &ast::ExprCall) -> bool {
         let arity = match self.graph.resolve(self.module, &call.func) {
+            Some(Binding::Intrinsic(Intrinsic::Fd(crate::ir::FdOperation::CopyFileRange))) => {
+                // Every descriptor, count and explicit offset may invoke the index protocol.
+                return call.arguments.args.iter().any(|arg| !literal(arg))
+                    || call.arguments.keywords.iter().any(|kw| !literal(&kw.value));
+            }
             Some(Binding::Intrinsic(
                 intrinsic @ (Intrinsic::SysSetRecursionLimit
                     | Intrinsic::SysGetFrameModuleName

@@ -305,26 +305,56 @@ impl Context {
             return Ok(None);
         };
         let result = self.call(index, Vec::new(), Vec::new())?;
+        let number = self.integer_slot_result(result, "__index__")?;
+        Ok(Some((result, number)))
+    }
+
+    fn integer_slot_result(&mut self, result: Id, slot: &str) -> Result<crate::Int> {
         let number = self.as_int(result).map_err(|_| {
             Error::new(
                 "TypeError",
                 format!(
-                    "__index__ returned non-int (type {})",
+                    "{slot} returned non-int (type {})",
                     self.type_name(result)
                 ),
             )
         })?;
         if !matches!(self.heap.get(result), Value::Int(_)) {
+            self.heap.reserve_temporaries(1)?;
+            self.heap.keep(result);
             self.emit_builtin_warning(
                 crate::objects::exceptions::Kind::DeprecationWarning,
                 &format!(
-                    "__index__ returned non-int (type {}).  The ability to return an instance of a strict subclass of int is deprecated, and may be removed in a future version of Python.",
+                    "{slot} returned non-int (type {}).  The ability to return an instance of a strict subclass of int is deprecated, and may be removed in a future version of Python.",
                     self.type_name(result)
                 ),
                 1,
             )?;
         }
-        Ok(Some((result, number)))
+        Ok(number)
+    }
+
+    /// Apply the numeric conversion used by int(x) before attempting to parse text.
+    pub(super) fn numeric_int(&mut self, value: Id) -> Result<Option<Id>> {
+        if matches!(self.heap.get(value), Value::Int(_)) {
+            return Ok(Some(value));
+        }
+        let (result, number) = if let Some(method) = self.bound_slot(value, "__int__")? {
+            let result = self.call(method, Vec::new(), Vec::new())?;
+            (result, self.integer_slot_result(result, "__int__")?)
+        } else if let Value::Float(number) = *self.heap.get(self.scalar_value(value)) {
+            let integer = crate::floats::float_to_integer(number)?;
+            return Ok(Some(self.alloc(Value::Int(crate::Int::new(integer)))));
+        } else if let Some(index) = self.index_result(value)? {
+            index
+        } else {
+            return Ok(None);
+        };
+        Ok(Some(if matches!(self.heap.get(result), Value::Int(_)) {
+            result
+        } else {
+            self.alloc(Value::Int(number))
+        }))
     }
 
     /// Convert a bytearray element using the index protocol and the inclusive byte bounds.

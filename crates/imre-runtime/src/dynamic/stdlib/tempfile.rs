@@ -6,7 +6,7 @@ use std::os::fd::AsRawFd;
 use std::os::unix::ffi::{OsStrExt, OsStringExt};
 use std::path::{Path, PathBuf};
 
-use super::{Context, Error, Id, NONE, Result, Value, argument};
+use super::{Context, Error, Id, NONE, Result, Value};
 use crate::objects::{FileState, errno_error};
 
 /// Decode a POSIX spelling as a Python filesystem string, including surrogate escapes.
@@ -210,15 +210,14 @@ pub(super) fn open(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> R
 /// Applies a boxed operation to the same buffered stream used by the native file ABI.
 pub(super) fn method(
     ctx: &mut Context,
+    receiver: Id,
     name: &str,
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
-    let receiver = argument(args, 0)?;
     let Value::BufferedRandom(owner, file_name) = ctx.heap.get(receiver).clone() else {
         return Err(Error::new("TypeError", "expected a buffered random file"));
     };
-    let args = &args[1..];
     let arity = match name {
         "read" | "truncate" => 0..=1,
         "write" | "readinto" => 1..=1,

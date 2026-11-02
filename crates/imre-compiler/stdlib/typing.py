@@ -1130,6 +1130,78 @@ def assert_never(arg, /):
     raise AssertionError(f"Expected code to be unreachable, but got: {value}")
 
 
+# Runtime overload registration from CPython 3.14.5 Lib/typing.py.
+def _overload_dummy(*args, **kwds):
+    """Helper for @overload to raise when called."""
+    raise NotImplementedError(
+        "You should not call an overloaded function. "
+        "A series of @overload-decorated functions "
+        "outside a stub module should always be followed "
+        "by an implementation that is not @overload-ed.")
+
+
+# {module: {qualname: {firstlineno: func}}}
+_overload_registry = _defaultdict(functools.partial(_defaultdict, dict))
+
+
+def overload(func):
+    """Decorator for overloaded functions/methods.
+
+    In a stub file, place two or more stub definitions for the same
+    function in a row, each decorated with @overload.
+
+    For example::
+
+        @overload
+        def utf8(value: None) -> None: ...
+        @overload
+        def utf8(value: bytes) -> bytes: ...
+        @overload
+        def utf8(value: str) -> bytes: ...
+
+    In a non-stub file (i.e. a regular .py file), do the same but
+    follow it with an implementation.  The implementation should *not*
+    be decorated with @overload::
+
+        @overload
+        def utf8(value: None) -> None: ...
+        @overload
+        def utf8(value: bytes) -> bytes: ...
+        @overload
+        def utf8(value: str) -> bytes: ...
+        def utf8(value):
+            ...  # implementation goes here
+
+    The overloads for a function can be retrieved at runtime using the
+    get_overloads() function.
+    """
+    # classmethod and staticmethod
+    f = getattr(func, "__func__", func)
+    try:
+        _overload_registry[f.__module__][f.__qualname__][f.__code__.co_firstlineno] = func
+    except AttributeError:
+        # Not a normal function; ignore.
+        pass
+    return _overload_dummy
+
+
+def get_overloads(func):
+    """Return all defined overloads for *func* as a sequence."""
+    # classmethod and staticmethod
+    f = getattr(func, "__func__", func)
+    if f.__module__ not in _overload_registry:
+        return []
+    mod_dict = _overload_registry[f.__module__]
+    if f.__qualname__ not in mod_dict:
+        return []
+    return list(mod_dict[f.__qualname__].values())
+
+
+def clear_overloads():
+    """Clear all overloads in the registry."""
+    _overload_registry.clear()
+
+
 # Runtime decorator from CPython 3.14.5 Lib/typing.py. See stdlib/docstrings/LICENSE.
 def final(f):
     """Decorator to indicate final methods and final classes.
@@ -1784,6 +1856,12 @@ def _paramspec_prepare_subst(self, alias, args):
     return args
 
 
+@_typing_runtime._install_generic_alias_iter
+class _GenericAlias:
+    def __iter__(self):
+        yield Unpack[self]
+
+
 def _concatenate_copy_with(self, params):
     if isinstance(params[-1], (list, tuple)):
         return (*params[:-1], *params[-1])
@@ -1816,7 +1894,7 @@ def _alias_type_arg(arg, message="Parameters to generic types must be types."):
 
 
 def _is_parameterized_typing_alias(value):
-    return type(value) in (_typing._GenericAlias, _typing._CallableGenericAlias, _typing._LiteralGenericAlias)
+    return _typing_runtime._get_alias_kind(value) == "typing"
 
 
 def _named_alias_bases(alias, bases):
@@ -2150,23 +2228,34 @@ def _variadic_class_getitem_uncached(cls, args, constructor):
         args = (args,)
     args = tuple(_type_convert(arg) for arg in args)
     parameters = cls.__parameters__
-    for index, param in enumerate(parameters):
+    for param in parameters:
         prepare = getattr(param, "__typing_prepare_subst__", None)
         if prepare is not None:
             args = prepare(cls, args)
         elif isinstance(param, _typing.TypeVarTuple):
             args = _prepare_typevartuple(param, cls, args)
-        elif isinstance(param, _typing.TypeVar) and index >= len(args):
-            if index == len(args) and param.has_default():
-                args += (param.__default__,)
+        elif isinstance(param, _typing.TypeVar):
+            # An earlier preparation hook may have changed the class parameters.
+            for index, current in enumerate(cls.__parameters__):
+                if current is param or current == param:
+                    break
             else:
-                raise TypeError(f"Too few arguments for {cls}; actual {len(args)}, expected at least {index + 1}")
+                raise ValueError("sequence.index(x): x not in sequence")
+            actual = len(args)
+            if index >= actual:
+                default = param.__default__ if index == actual else _typing.NoDefault
+                if default is _typing.NoDefault:
+                    raise TypeError(f"Too few arguments for {cls}; actual {actual}, expected at least {index + 1}")
+                args = args + (default,)
 
-    actual, expected = len(args), len(parameters)
+    expected = len(cls.__parameters__)
+    if not expected:
+        raise TypeError(f"{cls} is not a generic class")
+    actual = len(args)
     if actual > expected:
         raise TypeError(f"Too many arguments for {cls}; actual {actual}, expected {expected}")
-    if actual < expected and not parameters[actual].has_default():
-        required = expected - sum(p.has_default() for p in parameters)
+    if actual < expected and not cls.__parameters__[actual].has_default():
+        required = expected - sum(p.has_default() for p in cls.__parameters__)
         raise TypeError(f"Too few arguments for {cls}; actual {actual}, expected at least {required}")
     flattened = tuple(item for param, arg in zip(parameters, args)
                       for item in (arg if isinstance(param, _typing.TypeVarTuple) else (arg,)))
@@ -2180,7 +2269,8 @@ def _variadic_class_getitem(cls, args, constructor):
     try:
         return _cached_variadic_class_getitem(cls, args, constructor)
     except TypeError:
-        return _variadic_class_getitem_uncached(cls, args, constructor)
+        pass
+    return _variadic_class_getitem_uncached(cls, args, constructor)
 
 
 def _specialize_generic_alias_uncached(alias, args):
@@ -2216,26 +2306,30 @@ def _specialize_generic_alias_uncached(alias, args):
         if _typing.get_origin(arg) is Unpack:
             raise TypeError(f"{arg} is not valid as type argument")
         replacements[parameter] = arg
-    # Generic class aliases retain a ParamSpec argument as a nested tuple.
-    # Callable aliases flatten tuple arguments separately below.
-    parameter_tuples = type(alias) is _typing._GenericAlias and alias.__origin__ is not _typing.get_origin(Callable)
-    args = _substitute_alias_arguments(alias.__args__, replacements, parameter_tuples=parameter_tuples)
+
+    def substituted_args(*, parameter_tuples=False):
+        return _substitute_alias_arguments(alias.__args__, replacements, parameter_tuples=parameter_tuples)
+
     if type(alias) is GenericAlias:
-        return _rebuild_builtin_alias(alias, args)
+        return _rebuild_builtin_alias(alias, substituted_args())
     if isinstance(alias, _typing.Union):
-        return _typing.Union[args]
+        return _typing.Union[substituted_args()]
     if isinstance(alias, (_AnnotatedAlias, _typing._ConcatenateGenericAlias)):
-        return alias.copy_with(args)
+        return alias.copy_with(substituted_args())
     if type(alias) is _typing._CallableGenericAlias:
         # typing flattens each substituted tuple, even one in the result position.
-        flat = tuple(item for arg in args for item in (arg if isinstance(arg, tuple) else (arg,)))
+        flat = tuple(item for arg in substituted_args() for item in (arg if isinstance(arg, tuple) else (arg,)))
         return _typing._CallableGenericAlias(alias.__origin__, flat, name="Callable")
     if alias.__origin__ is _typing.get_origin(Callable):
         # collections.abc.Callable rebuilds its argument list separately from its result.
+        args = substituted_args()
         if not isinstance(args[0], (tuple, list)):
             args = (args[:-1], args[-1])
         return alias.__origin__[args]
-    return _typing._GenericAlias(alias.__origin__, args, name=alias._name, inst=alias._inst)
+    constructor = _typing._GenericAlias
+    # Only a generic class alias stores a ParamSpec expression as a nested tuple.
+    args = substituted_args(parameter_tuples=type(alias) is constructor)
+    return constructor(alias.__origin__, args, name=alias._name, inst=alias._inst)
 
 
 _cached_generic_specialization = lru_cache(_specialize_generic_alias_uncached)

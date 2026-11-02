@@ -364,6 +364,16 @@ def check_global_names(protocol):
     finally:
         _operator.getitem = getitem
 
+    from itertools import chain, filterfalse
+
+    for cls, legacy_name in ((chain, "chain"), (filterfalse, "ifilterfalse")):
+        for fix_imports in (True, False):
+            data = pickle.dumps(cls, protocol, fix_imports=fix_imports)
+            if protocol < 3:
+                name = legacy_name if fix_imports else cls.__name__
+                assert ("citertools\n" + name + "\n").encode() in data
+            assert pickle.loads(data, fix_imports=fix_imports) is cls
+
     from collections import OrderedDict, UserDict, UserList, UserString
     from datetime import date, datetime, timedelta
 

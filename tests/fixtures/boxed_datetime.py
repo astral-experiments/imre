@@ -561,6 +561,28 @@ def test_fromordinal():
     assert Parts.fromordinal(2**31 - 1) == (5879611, 7, 11)
 
 
+def test_date_replace():
+    import copy
+
+    class Day(date):
+        def __new__(cls, year, month, day):
+            if year == 10000:
+                return (year, month, day)
+            return date.__new__(cls, year, month, day)
+
+        @property
+        def year(self):
+            raise AssertionError("replace read Python year")
+
+    original = Day(2024, 2, 29)
+    result = original.replace(2020, day=28)
+    assert type(result) is Day and result == date(2020, 2, 28)
+    assert copy.replace(original, year=10000) == (10000, 2, 29)
+    assert original.__replace__(day=27) == date(2024, 2, 27)
+    stamp = dt(2024, 2, 29, 23, 59, tzinfo=UTC, fold=1)
+    assert date.replace(stamp, 2020) == dt(2020, 2, 29)
+
+
 def test_isocalendar():
     import _datetime
     import datetime
@@ -1036,6 +1058,7 @@ def current():
     test_timedelta_positive_and_absolute()
     test_timedelta_remainder()
     test_fromordinal()
+    test_date_replace()
     test_isocalendar()
     test_fromisocalendar()
     test_date_clock_constructors()

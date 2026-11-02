@@ -845,9 +845,7 @@ impl BufferedFd {
         receiver: Id,
         name: &str,
         args: &[Id],
-        kwargs: &[(String, Id)],
     ) -> Result<Id> {
-        let name = name.strip_prefix("file.").unwrap_or(name);
         if matches!((name, args), ("close", []) | ("__exit__", [_, _, _])) {
             self.check_reentry(ctx)?;
             self.check_raw(ctx, receiver, name)?;
@@ -890,16 +888,6 @@ impl BufferedFd {
             None
         };
         if name == "seek" {
-            if !kwargs.is_empty() {
-                return Err(Error::new(
-                    "TypeError",
-                    format!(
-                        "{}.seek() takes no keyword arguments",
-                        ctx.type_name(receiver)
-                    ),
-                ));
-            }
-            super::argument_count(ctx.type_name(receiver), name, args.len())?;
             let target = args[0];
             let whence = files::buffered_whence(ctx, args.get(1).copied())?;
             if self.closed() {

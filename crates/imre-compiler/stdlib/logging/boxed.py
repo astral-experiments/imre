@@ -1153,6 +1153,10 @@ def log(level, msg, *args, **kwargs):
         basicConfig()
     root.log(level, msg, *args, **kwargs)
 
+
+import atexit
+atexit.register(shutdown)
+
 # Warnings integration
 
 _warnings_showwarning = None

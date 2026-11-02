@@ -115,9 +115,7 @@ pub(super) fn call(
             }
             _ => {}
         }
-        let mut operands = vec![receiver];
-        operands.extend_from_slice(args);
-        return tempfile::method(ctx, name, &operands, kwargs);
+        return tempfile::method(ctx, receiver, name, args, kwargs);
     }
     match name {
         "peek" | "read" | "read1" | "readinto" | "readline" => {

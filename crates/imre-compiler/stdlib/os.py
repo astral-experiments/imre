@@ -36,7 +36,7 @@ if sys.platform == "linux":
         sched_getscheduler, sched_param, SCHED_BATCH, SCHED_DEADLINE, SCHED_FIFO, SCHED_IDLE,
         SCHED_NORMAL, SCHED_OTHER, SCHED_RESET_ON_FORK, SCHED_RR,
     )
-    from posix import major, makedev, minor
+    from posix import major, makedev, minor, mknod
     from posix import EFD_CLOEXEC, EFD_NONBLOCK, EFD_SEMAPHORE, eventfd, eventfd_read, eventfd_write
 
 if sys.platform == "linux":
@@ -285,6 +285,44 @@ def makedirs(name, mode=0o777, exist_ok=False):
 from posix import WIFSTOPPED, execv
 
 
+# Adapted from CPython 3.14.5, Lib/os.py. See stdlib/docstrings/LICENSE.
+if sys.platform == "linux":
+    from posix import _spawn_exec
+
+    P_WAIT = 0
+    P_NOWAIT = P_NOWAITO = 1
+
+    def spawnv(mode, file, args):
+        """Execute file with args in a child. Return its exit code or its PID for P_NOWAIT.
+
+        On Linux, child-side Python callbacks require a single-threaded process
+        that glibc can verify. Otherwise they raise NotImplementedError before fork.
+        """
+        func = execv
+        if not isinstance(args, (tuple, list)):
+            raise TypeError("argv must be a tuple or a list")
+        if not args or not args[0]:
+            raise ValueError("argv first element cannot be empty")
+        pid = _spawn_exec(file, args, func)
+        if pid == 0:
+            # A child that needs Python conversions or audit hooks runs the captured execv.
+            try:
+                func(file, args)
+            except:
+                _exit(127)
+        elif mode == P_NOWAIT:
+            return pid
+        else:
+            while True:
+                _, status = waitpid(pid, 0)
+                if not WIFSTOPPED(status):
+                    return waitstatus_to_exitcode(status)
+
+    def spawnl(mode, file, *args):
+        """Execute file with the given arguments. Return its exit code or its PID for P_NOWAIT."""
+        return spawnv(mode, file, args)
+
+
 # From CPython 3.14.5, Lib/os.py. See stdlib/docstrings/LICENSE.
 def get_exec_path(env=None):
     """Returns the sequence of directories that will be searched for the
@@ -353,17 +391,21 @@ def removedirs(name):
         head, tail = path.split(head)
 
 
+_fs_encoding = sys.getfilesystemencoding()
+_fs_errors = sys.getfilesystemencodeerrors()
+
+
 def fsencode(filename):
     filename = fspath(filename)
     if isinstance(filename, str):
-        return filename.encode("utf-8", "surrogateescape")
+        return filename.encode(_fs_encoding, _fs_errors)
     return filename
 
 
 def fsdecode(filename):
     filename = fspath(filename)
     if isinstance(filename, bytes):
-        return filename.decode("utf-8", "surrogateescape")
+        return filename.decode(_fs_encoding, _fs_errors)
     return filename
 
 
@@ -424,7 +466,7 @@ class PathLike(abc.ABC):
     __class_getitem__ = classmethod(GenericAlias)
 
 
-_env_encoding = sys.getfilesystemencoding()
+_env_encoding = _fs_encoding
 
 
 def _encode_env(value):

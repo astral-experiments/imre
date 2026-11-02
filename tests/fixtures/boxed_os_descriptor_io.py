@@ -47,9 +47,42 @@ def check_sendfile():
         expect_errno(sendfile, (-1, src, None, 0), errno.EBADF)
 
 
+def check_copy_file_range():
+    from os import copy_file_range
+
+    assert copy_file_range is os.copy_file_range and copy_file_range is posix.copy_file_range
+    with tempfile.TemporaryFile() as source, tempfile.TemporaryFile() as destination:
+        src = source.fileno()
+        dst = destination.fileno()
+        os.write(src, b"abcdef")
+        os.write(dst, b"......")
+        os.lseek(src, 4, os.SEEK_SET)
+        os.lseek(dst, 0, os.SEEK_SET)
+        assert copy_file_range(
+            src=Index(src), dst=Index(dst), count=Index(2), offset_src=Index(1), offset_dst=Index(2)
+        ) == 2
+        assert os.lseek(src, 0, os.SEEK_CUR) == 4
+        assert os.lseek(dst, 0, os.SEEK_CUR) == 0
+        assert copy_file_range(src, dst, 0) == 0
+        assert copy_file_range(src, dst, 10, None, None) == 2
+        assert copy_file_range(src, dst, 1) == 0
+        assert os.lseek(src, 0, os.SEEK_CUR) == 6
+        assert os.lseek(dst, 0, os.SEEK_CUR) == 2
+        os.lseek(dst, 0, os.SEEK_SET)
+        assert os.read(dst, 10) == b"efbc.."
+        expect_errno(copy_file_range, (-1, dst, 0), errno.EBADF)
+        try:
+            copy_file_range(src, dst, -1, object())
+        except ValueError as error:
+            assert str(error) == "negative value for 'count' not allowed"
+        else:
+            raise AssertionError("negative count was accepted")
+
+
 def current():
     if sys.platform == "linux":
         check_tmpfile()
+        check_copy_file_range()
         check_sendfile()
     assert os.strerror is posix.strerror
     try:

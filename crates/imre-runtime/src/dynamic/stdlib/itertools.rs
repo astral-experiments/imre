@@ -238,6 +238,28 @@ pub(super) fn cycle_next(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]
 }
 
 impl Context {
+    /// Freeze the exported iterator classes defined by this bundled module generation.
+    pub(in crate::dynamic) fn freeze_itertools_types(&mut self, module: Id) {
+        let classes: Vec<_> = self
+            .scope_bindings(module)
+            .filter_map(|(export, value)| {
+                let Value::Class { name, scope, .. } = self.heap.get(value) else {
+                    return None;
+                };
+                let visible = !export.starts_with('_')
+                    || matches!(export, "_grouper" | "_tee" | "_tee_dataobject");
+                (visible && name == export && self.root_scope(*scope) == module).then_some(*scope)
+            })
+            .collect();
+        for scope in classes {
+            if let Value::Scope(frame) = self.heap.get_mut(scope)
+                && let Some(namespace) = &mut frame.class_namespace
+            {
+                namespace.immutable_type = true;
+            }
+        }
+    }
+
     pub(in crate::dynamic) fn itertools_layout(&self, class: Id) -> Option<&'static str> {
         let Value::Class { scope, .. } = *self.heap.get(class) else {
             return None;

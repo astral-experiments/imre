@@ -163,6 +163,24 @@ impl Context {
             self.workers.reporting = Some((scope, self.scope_name(scope, "excepthook")));
         }
     }
+
+    /// A surviving main thread keeps its pthread identity, but receives a new Linux TID.
+    #[cfg(target_os = "linux")]
+    pub(super) fn refresh_main_thread_after_fork(&mut self) {
+        if let Some((_, main)) = self.workers.main {
+            let tid = self.int(crate::objects::locks::native_thread_id() as i64);
+            if let Err(error) = self.set_attr(main, "_native_id", tid) {
+                super::unraisable::report(
+                    self,
+                    error,
+                    false,
+                    None,
+                    "Exception ignored updating the main thread after fork",
+                );
+            }
+        }
+    }
+
     /// The worker owns no parent-heap pointers. Complete the default Thread.run
     /// cleanup on the interpreter thread, also for a finished but unjoined worker.
     pub(super) fn reap_thread_operands(&mut self) {

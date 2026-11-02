@@ -36,6 +36,7 @@ def current():
     other.release()
     data.append(100)
     assert bytes(data) == b"Abcd"
+    resize_buffer()
     unsigned_cast()
     print("bytearray memoryview")
 
@@ -110,3 +111,39 @@ def unsigned_cast():
             pass
         else:
             raise AssertionError("accepted invalid cast")
+
+
+def resize_buffer():
+    import sys
+
+    class Buffer(bytearray):
+        pass
+
+    data = Buffer(b"abcdef")
+    assert bytearray.resize(data, 3) is None
+    assert data.resize(6) is None and data == b"abc\x00\x00\x00"
+
+    class Size:
+        def __index__(self):
+            data.resize(1)
+            return 4
+
+    assert data.resize(Size()) is None and data == b"a\x00\x00\x00"
+    view = memoryview(data)
+    assert data.resize(4) is None
+    for n, exception in [(3, BufferError), (5, BufferError), (-1, ValueError),
+                         (sys.maxsize, BufferError), (sys.maxsize + 1, OverflowError)]:
+        try:
+            data.resize(n)
+        except exception:
+            assert bytes(view) == b"a\x00\x00\x00"
+        else:
+            raise AssertionError("accepted invalid resize")
+    view.release()
+    try:
+        data.resize(sys.maxsize)
+    except MemoryError:
+        assert len(data) == 4
+    else:
+        raise AssertionError("allocated maximum-sized bytearray")
+    assert data.resize(0) is None and not data

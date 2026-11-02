@@ -2,7 +2,7 @@ use std::cell::RefCell;
 use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
 use std::os::fd::{AsRawFd, RawFd};
 
-use super::{Context, Error, FALSE, Id, NONE, Result, TRUE, Value, argument, option, os_error};
+use super::{Context, Error, FALSE, Id, NONE, Result, TRUE, Value, argument, os_error};
 
 /// Binary handles retain their access mode after close.
 pub(in crate::dynamic) enum BinaryFile {
@@ -166,15 +166,6 @@ impl AsRawFd for ReadSource {
     }
 }
 
-fn dirname(path: &str) -> &str {
-    let head = path.rfind('/').map_or("", |i| &path[..=i]);
-    if head.trim_start_matches('/').is_empty() {
-        head
-    } else {
-        head.trim_end_matches('/')
-    }
-}
-
 /// Borrow a binary writer's input, including the native bytes of an array.
 pub(super) fn output_bytes(ctx: &Context, value: Id) -> Result<&[u8]> {
     match ctx.heap.get(value) {
@@ -255,111 +246,80 @@ pub(super) fn readinto_error(ctx: &mut Context, error: std::io::Error, count: us
     }
 }
 
-pub(super) fn call(
+pub(super) fn binary_method(
     ctx: &mut Context,
+    receiver: Id,
     name: &str,
     args: &[Id],
-    kwargs: &[(String, Id)],
 ) -> Result<Id> {
-    let first = argument(args, 0)?;
-    if name == "os.path.dirname" {
-        return Ok(ctx.text(dirname(ctx.str_value(first)?).to_owned()));
-    }
-    let Value::File(handle) = ctx.heap.get(first) else {
+    let Value::File(handle) = ctx.heap.get(receiver) else {
         return Err(Error::new("TypeError", "expected a file"));
     };
-    if name == "file.readlines" {
-        return super::io::lines(ctx, first, "readlines", &args[1..], kwargs);
-    }
     let handle = handle.clone();
     let (slot, socket) = match handle.as_ref() {
-        BinaryFile::Descriptor(file) => return file.call(ctx, first, name, &args[1..], kwargs),
+        BinaryFile::Descriptor(file) => return file.call(ctx, receiver, name, args),
         BinaryFile::Standard { file, .. } => {
-            return standard_buffer_method(ctx, file, first, name, &args[1..], kwargs);
+            return standard_buffer_method(ctx, file, receiver, name, args);
         }
         BinaryFile::Reader { slot, path } => (slot, path.is_none()),
         BinaryFile::Writer { file, .. } => {
-            if name == "file.seek" {
-                let value = option(args, 2, kwargs, "whence")?;
-                let whence = value
-                    .map(|v| ctx.index_integer(v))
-                    .transpose()?
-                    .map_or(Some(0), |v| v.to_i64().and_then(|n| i32::try_from(n).ok()))
-                    .ok_or_else(|| {
-                        Error::new("OverflowError", "Python int too large to convert to C int")
-                    })?;
-                let offset = ctx.index_integer(argument(args, 1)?)?;
+            if name == "seek" {
+                let whence = whence_argument(ctx, args.get(1).copied())?;
+                let offset = ctx.index_integer(argument(args, 0)?)?;
                 let pos = file.borrow_mut().seek_disk(&offset, i64::from(whence))?;
                 return Ok(ctx.int(pos as i64));
             }
-            // Converting a size can close this same writer.
-            match (name, &args[1..]) {
-                ("file.read", [size]) => {
-                    crate::objects::FileState::check_writer_read_size(&ctx.index_integer(*size)?)?;
-                }
-                ("file.readline", [size]) if read_length(ctx, Some(*size))? == 0 => {
-                    return Ok(ctx.alloc(Value::Bytes(Vec::new())));
-                }
-                _ => {}
-            }
             let mut file = file.borrow_mut();
-            return match (name, &args[1..]) {
-                ("file.write", [value]) => {
+            return match (name, args) {
+                ("write", [value]) => {
                     let bytes = output_bytes(ctx, *value)?;
                     file.write_bytes(bytes)?;
                     Ok(ctx.int(bytes.len() as i64))
                 }
-                ("file.flush", []) => {
+                ("flush", []) => {
                     file.flush()?;
                     Ok(NONE)
                 }
-                ("file.close", []) | ("file.__exit__", [_, _, _]) => {
+                ("close", []) | ("__exit__", [_, _, _]) => {
                     file.close().map_err(crate::objects::errno_error)?;
                     Ok(NONE)
                 }
-                ("file.__enter__", []) if file.closed() => {
+                ("__enter__", []) if file.closed() => {
                     Err(Error::new("ValueError", "I/O operation on closed file."))
                 }
-                ("file.__enter__", []) => Ok(first),
-                ("file.fileno", []) => Ok(ctx.int(i64::from(file.fileno()?))),
-                ("file.tell", []) => Ok(ctx.int(file.tell()? as i64)),
-                ("file.readable" | "file.writable" | "file.seekable" | "file.isatty", []) => {
-                    let fd = file.fileno()?;
-                    let enabled = match name {
-                        "file.writable" => true,
-                        "file.seekable" => file.tell().is_ok(),
-                        // SAFETY: the borrowed writer keeps its file descriptor open.
-                        "file.isatty" => unsafe { libc::isatty(fd) != 0 },
-                        _ => false,
-                    };
-                    Ok(crate::dynamic::builtins::boolean(enabled))
+                ("__enter__", []) => Ok(receiver),
+                ("fileno", []) => Ok(ctx.int(i64::from(file.fileno()?))),
+                ("tell", []) => Ok(ctx.int(file.tell()? as i64)),
+                ("writable", []) => {
+                    file.fileno()?;
+                    Ok(TRUE)
                 }
-                ("file.read" | "file.readline", [] | [_]) | ("file.readinto", [_]) => {
-                    if let ("file.readinto", [buffer]) = (name, &args[1..]) {
-                        readinto_target(ctx, *buffer)?;
-                    }
-                    Err(Error::new("UnsupportedOperation", "read"))
+                ("seekable", []) => {
+                    file.fileno()?;
+                    Ok(crate::dynamic::builtins::boolean(file.tell().is_ok()))
                 }
+                ("isatty", []) => Ok(crate::dynamic::builtins::boolean(
+                    crate::objects::os::isatty(file.fileno()?),
+                )),
                 _ => Err(Error::new(
                     "TypeError",
-                    format!("invalid arguments to {name}"),
+                    format!("invalid arguments to file.{name}"),
                 )),
             };
         }
     };
     // A Python size conversion may read from or close this same handle.
     let length = match name {
-        "file.read" | "file.readline" => Some(read_length(ctx, args.get(1).copied())?),
+        "read" | "readline" => Some(read_length(ctx, args.first().copied())?),
         _ => None,
     };
-    if socket && name == "file.tell" {
+    if socket && name == "tell" {
         // SocketIO.tell() calls its unsupported raw seek even after close.
         return Err(Error::new("UnsupportedOperation", "seek"));
     }
-    if name == "file.seek" {
-        let target = argument(args, 1)?;
-        let value = option(args, 2, kwargs, "whence")?;
-        let whence = buffered_whence(ctx, value)?;
+    if name == "seek" {
+        let target = argument(args, 0)?;
+        let whence = buffered_whence(ctx, args.get(1).copied())?;
         {
             let mut slot = slot.borrow_mut();
             let reader = slot
@@ -411,10 +371,7 @@ pub(super) fn call(
         return Ok(ctx.int(reader.seek(pos).map_err(os_error)? as i64));
     }
     let mut slot = slot.borrow_mut();
-    if name == "file.write" {
-        return Err(Error::new("UnsupportedOperation", "write"));
-    }
-    if matches!(name, "file.__exit__" | "file.close") {
+    if matches!(name, "__exit__" | "close") {
         if let Some(ReadSource::Socket(mut raw)) = slot.take() {
             raw.close().map_err(os_error)?;
         }
@@ -422,16 +379,16 @@ pub(super) fn call(
     }
     let reader = slot.as_mut().ok_or_else(|| {
         let message = match name {
-            "file.read" => "read of closed file",
-            "file.readline" => "readline of closed file",
-            "file.readinto" => "readinto of closed file",
-            "file.__enter__" | "file.flush" => "I/O operation on closed file.",
+            "read" => "read of closed file",
+            "readline" => "readline of closed file",
+            "readinto" => "readinto of closed file",
+            "__enter__" | "flush" => "I/O operation on closed file.",
             _ => "I/O operation on closed file",
         };
         Error::new("ValueError", message)
     });
     if let Some(length) = length {
-        if name == "file.read" && length < -1 {
+        if name == "read" && length < -1 {
             return Err(Error::new(
                 "ValueError",
                 "read length must be non-negative or -1",
@@ -439,7 +396,7 @@ pub(super) fn call(
         }
         let mut bytes = Vec::new();
         let mut input = reader?.take(u64::try_from(length).unwrap_or(u64::MAX));
-        let requested = if name == "file.read" {
+        let requested = if name == "read" {
             usize::try_from(length).ok()
         } else {
             None
@@ -452,7 +409,7 @@ pub(super) fn call(
                 .try_reserve_exact(size)
                 .map_err(|_| Error::new("MemoryError", ""))?;
         }
-        if name == "file.readline" {
+        if name == "readline" {
             input.read_until(b'\n', &mut bytes)
         } else {
             input.read_to_end(&mut bytes)
@@ -465,11 +422,10 @@ pub(super) fn call(
     }
     let f = reader?;
     match name {
-        "file.__enter__" => Ok(first),
-        "file.readable" => Ok(TRUE),
-        "file.writable" => Ok(FALSE),
-        "file.seekable" => Ok(crate::dynamic::builtins::boolean(f.seekable())),
-        "file.isatty" => {
+        "__enter__" => Ok(receiver),
+        "readable" => Ok(TRUE),
+        "seekable" => Ok(crate::dynamic::builtins::boolean(f.seekable())),
+        "isatty" => {
             use std::io::IsTerminal;
             Ok(
                 if matches!(f, ReadSource::File(file) if file.get_ref().is_terminal()) {
@@ -479,11 +435,11 @@ pub(super) fn call(
                 },
             )
         }
-        "file.flush" => Ok(NONE),
-        "file.fileno" => Ok(ctx.int(i64::from(f.as_raw_fd()))),
-        "file.tell" => Ok(ctx.int(f.stream_position().map_err(os_error)? as i64)),
-        "file.readinto" => {
-            let buffer = readinto_bytes(ctx, argument(args, 1)?)?;
+        "flush" => Ok(NONE),
+        "fileno" => Ok(ctx.int(i64::from(f.as_raw_fd()))),
+        "tell" => Ok(ctx.int(f.stream_position().map_err(os_error)? as i64)),
+        "readinto" => {
+            let buffer = readinto_bytes(ctx, argument(args, 0)?)?;
             let mut count = 0;
             while count < buffer.len() {
                 match f.read(&mut buffer[count..]) {
@@ -497,7 +453,7 @@ pub(super) fn call(
         }
         _ => Err(Error::new(
             "AttributeError",
-            format!("unknown native file method {name}"),
+            format!("unknown native file method file.{name}"),
         )),
     }
 }
@@ -548,12 +504,8 @@ fn standard_buffer_method(
     receiver: Id,
     name: &str,
     args: &[Id],
-    kwargs: &[(String, Id)],
 ) -> Result<Id> {
-    if matches!(
-        (name, args),
-        ("file.close", []) | ("file.__exit__", [_, _, _])
-    ) {
+    if matches!((name, args), ("close", []) | ("__exit__", [_, _, _])) {
         if !file.closed() {
             if file.standard_writer()? {
                 ctx.check_thread_reporter_mutable()?;
@@ -563,7 +515,7 @@ fn standard_buffer_method(
         return Ok(NONE);
     }
     match (name, args) {
-        ("file.write", [value]) => {
+        ("write", [value]) => {
             let data = output_bytes(ctx, *value)?;
             if file.closed() {
                 return Err(Error::new("ValueError", "write to closed file"));
@@ -571,28 +523,22 @@ fn standard_buffer_method(
             crate::sys::write_standard_buffer(file.standard_writer()?, data)?;
             Ok(ctx.int(data.len() as i64))
         }
-        ("file.flush", []) => {
+        ("flush", []) => {
             if file.closed() {
                 return Err(Error::new("ValueError", "flush of closed file"));
             }
             crate::sys::flush_standard_buffer(file.standard_writer()?).map_err(os_error)?;
             Ok(NONE)
         }
-        ("file.tell" | "file.seekable", []) => {
+        ("tell" | "seekable", []) => {
             let position = crate::sys::standard_buffer_position(file.standard_writer()?, None);
-            if name == "file.seekable" {
+            if name == "seekable" {
                 Ok(crate::dynamic::builtins::boolean(position.is_ok()))
             } else {
                 Ok(ctx.int(position?))
             }
         }
-        ("file.seek", [target] | [target, _]) => {
-            if !kwargs.is_empty() {
-                return Err(Error::new(
-                    "TypeError",
-                    "BufferedWriter.seek() takes no keyword arguments",
-                ));
-            }
+        ("seek", [target] | [target, _]) => {
             let whence = buffered_whence(ctx, args.get(1).copied())?;
             if file.closed() {
                 return Err(Error::new("ValueError", "seek of closed file"));
@@ -610,24 +556,21 @@ fn standard_buffer_method(
             )?;
             Ok(ctx.int(pos))
         }
-        ("file.fileno", []) => Ok(ctx.int(if file.standard_writer()? { 2 } else { 1 })),
-        ("file.writable" | "file.readable", []) => {
+        ("fileno", []) => Ok(ctx.int(if file.standard_writer()? { 2 } else { 1 })),
+        ("writable", []) => {
             file.standard_writer()?;
-            Ok(crate::dynamic::builtins::boolean(name == "file.writable"))
+            Ok(TRUE)
         }
-        ("file.isatty", []) => Ok(crate::dynamic::builtins::boolean(
+        ("isatty", []) => Ok(crate::dynamic::builtins::boolean(
             crate::objects::os::isatty(file.fileno()?),
         )),
-        ("file.__enter__", []) => {
+        ("__enter__", []) => {
             file.standard_writer()?;
             Ok(receiver)
         }
-        ("file.read" | "file.readline", [] | [_]) | ("file.readinto", [_]) => {
-            Err(Error::new("UnsupportedOperation", "read"))
-        }
         _ => Err(Error::new(
             "TypeError",
-            format!("invalid arguments to {name}"),
+            format!("invalid arguments to file.{name}"),
         )),
     }
 }

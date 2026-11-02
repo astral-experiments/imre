@@ -2661,8 +2661,13 @@ impl<'a> Checker<'a> {
         if let Some(method) = self.boxed_set_method(attribute, Some(receiver.ty)) {
             return Err(self.object_builtin_error(method, attribute));
         }
-        if receiver.ty == Type::CodecInfo && attribute.attr.as_str() == "_is_text_encoding" {
-            return Err(self.object_builtin_error("CodecInfo._is_text_encoding", attribute));
+        if receiver.ty == Type::CodecInfo
+            && matches!(
+                attribute.attr.as_str(),
+                "_is_text_encoding" | "incrementaldecoder"
+            )
+        {
+            return Err(self.object_builtin_error(attribute.attr.as_str(), attribute));
         }
         if receiver.ty == Type::BinaryIO && matches!(attribute.attr.as_str(), "name" | "mode") {
             return Err(self.object_builtin_error("binary file metadata", attribute));
@@ -4901,11 +4906,12 @@ impl<'a> Checker<'a> {
                     if let ast::Expr::Attribute(attr) = target {
                         let receiver = self.expr(&attr.value)?;
                         if receiver.ty == Type::CodecInfo
-                            && attr.attr.as_str() == "_is_text_encoding"
+                            && matches!(
+                                attr.attr.as_str(),
+                                "_is_text_encoding" | "incrementaldecoder"
+                            )
                         {
-                            return Err(
-                                self.object_builtin_error("CodecInfo._is_text_encoding", attr)
-                            );
+                            return Err(self.object_builtin_error(attr.attr.as_str(), attr));
                         }
                         if matches!(receiver.ty, Type::Popen(..)) && attr.attr.as_str() == "poll" {
                             statements.push(Statement::Expr(Expr {
@@ -9014,7 +9020,10 @@ impl<'a> Checker<'a> {
                     return self.credential_call(call, name);
                 }
                 Some(Binding::Intrinsic(Intrinsic::Fd(
-                    op @ (ir::FdOperation::Pipe2 | ir::FdOperation::Read | ir::FdOperation::Write),
+                    op @ (ir::FdOperation::Pipe2
+                    | ir::FdOperation::Read
+                    | ir::FdOperation::Write
+                    | ir::FdOperation::CopyFileRange),
                 ))) => {
                     return self.fd_call(call, op);
                 }
@@ -9345,6 +9354,18 @@ impl<'a> Checker<'a> {
             }
             Some(Binding::Intrinsic(Intrinsic::ScopedObjectExport(name))) => {
                 return Err(self.scoped_builtin_error(name, call));
+            }
+            Some(Binding::Intrinsic(Intrinsic::ObjectRuntimeExport("posix.getpid")))
+                if call.arguments.is_empty()
+                    && self
+                        .graph
+                        .session
+                        .is_stdlib_function(self.module, &call.func, "os", "getpid") =>
+            {
+                return Ok(Expr {
+                    ty: Type::Int,
+                    kind: ExprKind::Builtin(Builtin::Process(ir::ProcessOperation::GetPid), vec![]),
+                });
             }
             Some(Binding::Intrinsic(Intrinsic::ObjectRuntimeExport(name))) => {
                 return Err(self.object_runtime_export(name, call));
@@ -10174,7 +10195,7 @@ impl<'a> Checker<'a> {
             if attribute.attr.as_str() == "format"
                 && matches!(receiver.ty, Type::Str | Type::StrLiteral(_))
             {
-                return self.named_format_call(Self::string_value(receiver), call);
+                return self.string_format_call(Self::string_value(receiver), call);
             }
             if attribute.attr.as_str() == "translate"
                 && matches!(receiver.ty, Type::Str | Type::StrLiteral(_))
