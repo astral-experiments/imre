@@ -346,7 +346,9 @@ fn object_fallback<T>(
                 || !entry.optional_imports.is_empty()
                 || !graph.needs_object_runtime.get()
                     && graph.object_builtin_errors.borrow().contains(&error);
-            let checked_calls = if all_calls {
+            let checked_calls = if graph.check_method_factories.get() {
+                analysis::FallbackCalls::DecoratorFactories
+            } else if all_calls {
                 analysis::FallbackCalls::All
             } else if entry.has_entry_guard() {
                 analysis::FallbackCalls::Entry(graph.entry)
