@@ -320,6 +320,28 @@ impl CStrings {
         super::errno_error(io::Error::last_os_error())
     }
 
+    /// Fork with the inherited environment and descriptors; failed execs exit with 127.
+    #[cfg(target_os = "linux")]
+    pub(crate) fn fork_execv(command: Option<(&CStr, &Self)>) -> Result<libc::pid_t> {
+        let image = command.map(|(path, argv)| (path.as_ptr(), argv.pointers.as_ptr()));
+        let _guard = ENVIRONMENT.lock().unwrap();
+        // SAFETY: the environment lock excludes concurrent changes at fork. The
+        // child only calls async-signal-safe functions on the inherited C arrays
+        // and never returns to Rust to drop the guard or the arrays' owners.
+        unsafe {
+            match libc::fork() {
+                0 => {
+                    if let Some((path, argv)) = image {
+                        libc::execv(path, argv);
+                    }
+                    libc::_exit(127)
+                }
+                -1 => Err(super::errno_error(io::Error::last_os_error())),
+                pid => Ok(pid),
+            }
+        }
+    }
+
     fn from_environment(env: StringPairs) -> Result<Self> {
         Self::from_pairs(env.iter().map(|(k, v)| (k.as_bytes(), v.as_bytes())))
     }

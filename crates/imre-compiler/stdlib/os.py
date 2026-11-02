@@ -285,6 +285,44 @@ def makedirs(name, mode=0o777, exist_ok=False):
 from posix import WIFSTOPPED, execv
 
 
+# Adapted from CPython 3.14.5, Lib/os.py. See stdlib/docstrings/LICENSE.
+if sys.platform == "linux":
+    from posix import _spawn_exec
+
+    P_WAIT = 0
+    P_NOWAIT = P_NOWAITO = 1
+
+    def spawnv(mode, file, args):
+        """Execute file with args in a child. Return its exit code or its PID for P_NOWAIT.
+
+        On Linux, child-side Python callbacks require a single-threaded process
+        that glibc can verify. Otherwise they raise NotImplementedError before fork.
+        """
+        func = execv
+        if not isinstance(args, (tuple, list)):
+            raise TypeError("argv must be a tuple or a list")
+        if not args or not args[0]:
+            raise ValueError("argv first element cannot be empty")
+        pid = _spawn_exec(file, args, func)
+        if pid == 0:
+            # A child that needs Python conversions or audit hooks runs the captured execv.
+            try:
+                func(file, args)
+            except:
+                _exit(127)
+        elif mode == P_NOWAIT:
+            return pid
+        else:
+            while True:
+                _, status = waitpid(pid, 0)
+                if not WIFSTOPPED(status):
+                    return waitstatus_to_exitcode(status)
+
+    def spawnl(mode, file, *args):
+        """Execute file with the given arguments. Return its exit code or its PID for P_NOWAIT."""
+        return spawnv(mode, file, args)
+
+
 # From CPython 3.14.5, Lib/os.py. See stdlib/docstrings/LICENSE.
 def get_exec_path(env=None):
     """Returns the sequence of directories that will be searched for the

@@ -2739,6 +2739,16 @@ impl IntrinsicModule {
             (Self::Os, "removedirs") if cfg!(unix) => {
                 Intrinsic::ObjectRuntimeExport("os.removedirs")
             }
+            (Self::Os, "spawnv") if cfg!(target_os = "linux") => {
+                Intrinsic::ObjectRuntimeExport("os.spawnv")
+            }
+            (Self::Os, "spawnl") if cfg!(target_os = "linux") => {
+                Intrinsic::ObjectRuntimeExport("os.spawnl")
+            }
+            (Self::Os, "P_WAIT") if cfg!(target_os = "linux") => Intrinsic::IntConstant(0),
+            (Self::Os, "P_NOWAIT" | "P_NOWAITO") if cfg!(target_os = "linux") => {
+                Intrinsic::IntConstant(1)
+            }
             (Self::Os, "walk") if cfg!(unix) => Intrinsic::ObjectRuntimeExport("os.walk"),
             (Self::Os, "fwalk") if cfg!(unix) => Intrinsic::ObjectRuntimeExport("os.fwalk"),
             (Self::Os, "F_OK") => Intrinsic::AccessMode(0),
