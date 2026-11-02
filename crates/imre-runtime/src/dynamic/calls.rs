@@ -49,6 +49,7 @@ pub(super) fn module_function(symbol: &str) -> Option<(&str, &str)> {
         "_io" if function == "text_encoding" => Some((module, function)),
         #[cfg(target_os = "linux")]
         "resource" if function == "getrlimit" => Some((module, function)),
+        "gc" if matches!(function, "enable" | "disable" | "isenabled") => Some((module, function)),
         "zlib" if matches!(function, "adler32" | "crc32") => Some((module, function)),
         "hashlib"
             if matches!(function, "new" | "file_digest")
@@ -2051,6 +2052,15 @@ impl Context {
                     "__text_signature__" if symbol == "resource.getrlimit" => {
                         return Ok(self.text("($module, resource, /)"));
                     }
+                    "__doc__" if module == "gc" => {
+                        let doc = match function {
+                            "enable" => "Enable automatic garbage collection.",
+                            "disable" => "Disable automatic garbage collection.",
+                            "isenabled" => "Returns true if automatic garbage collection is enabled.",
+                            _ => unreachable!("registered GC control"),
+                        };
+                        return Ok(self.text(doc));
+                    }
                     "__doc__" if symbol == "posix.getpid" => {
                         return Ok(self.text("Return the current process id."));
                     }
@@ -2058,6 +2068,9 @@ impl Context {
                         if matches!(
                             symbol.as_str(),
                             "posix.getpid"
+                                | "gc.enable"
+                                | "gc.disable"
+                                | "gc.isenabled"
                                 | "_signal.sigpending"
                                 | "_thread.allocate"
                                 | "_thread.allocate_lock"

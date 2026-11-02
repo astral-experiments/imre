@@ -1930,6 +1930,7 @@ def report(text):
             "boxed_weakref.py",
             "boxed_public_weakref.py",
             "boxed_gc_collect.py",
+            "boxed_gc_controls.py",
             "boxed_gc_finalizers.py",
             "boxed_weakref_subclass.py",
             "boxed_proxy_truth.py",

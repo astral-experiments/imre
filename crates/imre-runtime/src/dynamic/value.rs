@@ -3,6 +3,8 @@
 use std::cell::Cell;
 use std::collections::{HashMap, HashSet};
 use std::fmt;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use super::Context;
 use crate::objects::exceptions::ExitStatus;
@@ -1937,6 +1939,8 @@ pub(super) struct Heap {
     pub(super) mock_call_lists: HashSet<Id>,
     frames: Vec<Frame>,
     next_collection: usize,
+    // Worker heaps share the interpreter’s automatic cyclic collection setting.
+    pub(super) automatic_gc: Arc<AtomicBool>,
     weak: HashMap<Id, Vec<Id>>,
     // A dead proxy is still observable after its registry entry disappears.
     pub(super) has_weak_values: bool,
@@ -2023,6 +2027,7 @@ impl Heap {
             mock_call_lists: HashSet::new(),
             frames: vec![Frame::new(NONE, NONE, FrameOwner::Module(NONE), NONE)],
             next_collection: 4096,
+            automatic_gc: Arc::new(AtomicBool::new(true)),
             weak: HashMap::new(),
             has_weak_values: false,
             collect_next_statement: false,
@@ -2916,7 +2921,7 @@ impl Heap {
         caught: Id,
     ) -> Option<WeakCallbacks> {
         self.publish_statement(live, location, caught);
-        self.collect_if_due(globals)
+        self.collect_if_due(globals, self.automatic_gc.load(Ordering::Relaxed))
     }
 
     pub(super) fn publish_statement(&mut self, live: &[Id], location: Location, caught: Id) {
@@ -2954,12 +2959,13 @@ impl Heap {
     pub(super) fn collect_if_due(
         &mut self,
         globals: impl Iterator<Item = Id>,
+        automatic_gc: bool,
     ) -> Option<WeakCallbacks> {
         let cycles_due = self.cycles_due();
         if !std::mem::take(&mut self.collect_next_statement) && !cycles_due {
             return None;
         }
-        if cycles_due {
+        if cycles_due && automatic_gc {
             self.mark(globals);
             self.sweep()
         } else {
