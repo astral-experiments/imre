@@ -17,6 +17,34 @@ def current():
     assert module.ForwardRef is annotationlib.ForwardRef
     print(module.Format.VALUE, module.Format.FORWARDREF.value, module.Format.STRING.value)
 
+    def field(format, exc=NotImplementedError):
+        if format > 2:
+            raise exc
+        return {"x": UnboundFieldType}
+
+    def limit(format, exc=NotImplementedError):
+        if format > 2:
+            raise exc
+        return UnboundFieldType
+
+    assert module.call_annotate_function(field, module.Format.STRING) == {"x": "UnboundFieldType"}
+    ref = module.call_evaluate_function(limit, module.Format.FORWARDREF, owner=field)
+    assert type(ref) is module.ForwardRef and ref.__owner__ is field
+    assert module.call_evaluate_function(limit, 4) == "UnboundFieldType"
+
+    class Opaque:
+        def __repr__(self):
+            raise AssertionError("rendered an opaque FORWARDREF operand")
+    token = Opaque()
+    def unknown(format, item=token, exc=NotImplementedError):
+        if format > 2:
+            raise exc
+        range[1]
+        return UnboundFieldType[item]
+    ref = module.call_evaluate_function(unknown, module.Format.FORWARDREF)
+    assert ref.__forward_arg__ == "UnboundFieldType[__annotationlib_name_1__]"
+    assert ref.__extra_names__["__annotationlib_name_1__"] is token
+
     assert typing.evaluate_forward_ref is evaluate_forward_ref
     class RawMeta(type):
         def __eq__(cls, other):
