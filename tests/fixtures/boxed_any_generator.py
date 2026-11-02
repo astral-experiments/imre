@@ -1,4 +1,36 @@
+def generator_slots():
+    marker = object()
+    def values():
+        yield marker
+        return marker
+    cursor = values()
+    step = cursor.__next__
+    slot = type(cursor).__next__
+    assert cursor.__iter__() is cursor
+    assert slot.__objclass__ is type(cursor)
+    assert slot.__get__(cursor)() is marker
+    try:
+        step()
+    except StopIteration as error:
+        assert error.value is marker
+    else:
+        raise AssertionError("generator lost its return value")
+    try:
+        step()
+    except StopIteration as error:
+        assert error.args == ()
+    else:
+        raise AssertionError("exhausted generator produced a value")
+    try:
+        slot(iter([marker]))
+    except TypeError as error:
+        print(error)
+    else:
+        raise AssertionError("generator descriptor accepted another iterator")
+
+
 def current():
+    generator_slots()
     seen = []
 
     def observe(value):

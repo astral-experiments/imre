@@ -2,6 +2,10 @@ use super::source_code::{DelegateOutcome, GeneratorInput};
 use super::value::{Body, FrameOwner, Location};
 use super::{Context, Error, Id, NONE, Result, Value};
 
+pub(super) fn generator_method(name: &str) -> bool {
+    matches!(name, "__iter__" | "__next__" | "send" | "throw" | "close")
+}
+
 pub(super) fn coroutine_method(owner: &str, name: &str) -> bool {
     match owner {
         "coroutine" => matches!(name, "send" | "throw" | "close" | "__await__"),
