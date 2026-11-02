@@ -6289,9 +6289,6 @@ impl<'a> Checker<'a> {
                 Intrinsic::Chdir => {
                     return Err(self.scoped_builtin_error("posix.chdir", expression));
                 }
-                Intrinsic::ScopedObjectRuntimeExport(name) => {
-                    return Err(self.scoped_builtin_error(name, expression));
-                }
                 Intrinsic::TracebackFormatter(name) => {
                     return Err(self.object_export_error(name, expression));
                 }
@@ -9015,9 +9012,6 @@ impl<'a> Checker<'a> {
             Some(Binding::Intrinsic(Intrinsic::Fd(op))) => return self.fd_call(call, op),
             Some(Binding::Intrinsic(Intrinsic::Credential(name))) => {
                 return self.credential_call(call, name);
-            }
-            Some(Binding::Intrinsic(Intrinsic::ScopedObjectRuntimeExport(name))) => {
-                return Err(self.scoped_builtin_error(name, call));
             }
             Some(Binding::Intrinsic(Intrinsic::Chdir)) => {
                 // The boxed provider performs path and fd conversion. Check the operands

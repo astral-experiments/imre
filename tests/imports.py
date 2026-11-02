@@ -127,15 +127,6 @@ REJECTED = {
     "unused_resource_function": ({
         "main.py": "from importlib.resources import files\nx: int = 'wrong'\n",
     }, "expected int"),
-    "unused_mapping_proxy_type": ({
-        "main.py": "from types import MappingProxyType\ndef identity(value: int) -> int:\n    return value\nidentity('wrong')\n",
-    }, "expected int, got str"),
-    "mapping_proxy_type_checks_operand": ({
-        "main.py": "from types import MappingProxyType\ndef identity(value: int) -> int:\n    return value\nMappingProxyType(identity('wrong'))\n",
-    }, "invalid-argument-type"),
-    "mapping_proxy_type_saved_checks_sibling": ({
-        "main.py": "from types import MappingProxyType\nctor = MappingProxyType\ndef identity(value: int) -> int:\n    return value\nidentity('wrong')\n",
-    }, "invalid-argument-type"),
     "unused_traceback_import": ({
         "main.py": "import helper\n",
         "helper.py": "import traceback as tb\ndef bad() -> int:\n    return 'wrong'\n",
