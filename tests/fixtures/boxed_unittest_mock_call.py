@@ -2,6 +2,8 @@ from unittest import mock
 from unittest.mock import ANY, Mock, call
 
 assert mock.call is call
+assert call._format("payload") == ("_format", ("payload",), {})
+assert repr(call.fetch()._format("payload")) == "call.fetch()._format('payload')"
 
 client = Mock()
 client.fetch(1).read(size=2)
@@ -31,6 +33,13 @@ for sequence, unordered in (
         raise AssertionError(f"wrong call sequence matched: {sequence!r}")
 
 assert call.fetch(1).read() != call.fetch(2).read()
+unusual = Mock()
+getattr(unusual.branch, "").leaf(1)
+getattr(unusual.branch, "()")(2)
+unusual.branch()(3)
+assert [item[0] for item in unusual.mock_calls] == ["branch.leaf", "branch()", "branch", "branch()"]
+assert [item[0] for item in unusual.method_calls] == ["branch..leaf", "branch.()", "branch"]
+
 history = client.mock_calls
 client.reset_mock()
 assert len(history) == 3 and client.mock_calls == []

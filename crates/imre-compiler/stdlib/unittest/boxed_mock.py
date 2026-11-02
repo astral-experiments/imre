@@ -60,6 +60,12 @@ _tuple_call_names = {
 }
 
 
+def _format_recorded_call(value, name):
+    parts = [repr(arg) for arg in value.args]
+    parts.extend(key + "=" + repr(arg) for key, arg in value.kwargs.items())
+    return name + "(" + ", ".join(parts) + ")"
+
+
 class _Call(tuple):
     def __new__(cls, value=(), name="", parent=None, two=False, from_kall=True):
         name, args, kwargs = _call_parts(value, len(value), name)
@@ -118,20 +124,15 @@ class _Call(tuple):
             raise AttributeError(attr)
         return object.__getattribute__(self, attr)
 
-    def _format(self, name):
-        parts = [repr(value) for value in self.args]
-        parts.extend(key + "=" + repr(value) for key, value in self.kwargs.items())
-        return name + "(" + ", ".join(parts) + ")"
-
     def __repr__(self):
         if not self._mock_from_kall:
             name = self._mock_name or "call"
             return "call" + name if name.startswith("()") else name
         name = self[0] if len(self) == 3 else ""
         if not name:
-            return self._format("call")
+            return _format_recorded_call(self, "call")
         prefix = "call" if name.startswith("()") else "call."
-        return self._format(prefix + name)
+        return _format_recorded_call(self, prefix + name)
 
     def call_list(self):
         calls = []
@@ -294,17 +295,24 @@ class Mock(_FixedMock):
 
         current = node
         path = ""
-        method = True
+        separator = ""
+        method_suffix = ""
         while hasattr(current, "_owner"):
-            path = current._suffix + path
+            suffix = current._suffix
+            name = suffix.removeprefix(".")
+            # mock_calls skips empty ancestor names and joins a leading "()"
+            # without a dot, even when it was reached as a literal attribute.
+            if name or current is node:
+                path = name + separator + path
+                separator = "" if name == "()" else "."
             parent = current._owner
-            name = path.removeprefix(".")
-            parent.mock_calls.append(_Call((name, args, kwargs)))
-            # Return-value calls propagate to mock_calls, but only attribute
-            # children contribute to method_calls on their owning chain.
-            method = method and current._suffix != "()"
-            if method:
-                parent.method_calls.append(_Call((name, args, kwargs)))
+            if suffix == "()":
+                method_suffix = None
+            if method_suffix is not None:
+                # Only real return-value edges stop method_calls propagation.
+                method_suffix = suffix + method_suffix
+                parent.method_calls.append(_Call((method_suffix[1:], args, kwargs)))
+            parent.mock_calls.append(_Call((path, args, kwargs)))
             current = parent._node
 
         effect = node.side_effect
@@ -384,7 +392,7 @@ class Mock(_FixedMock):
             assert len(expected) == len(actual)
             if all([left == right for left, right in zip(expected, actual)]):
                 return
-        raise AssertionError(expected._format(self._name()) + " call not found")
+        raise AssertionError(_format_recorded_call(expected, self._name()) + " call not found")
 
 
 class MagicMock(Mock):
