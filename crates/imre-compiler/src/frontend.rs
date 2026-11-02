@@ -10930,19 +10930,19 @@ impl<'a> Checker<'a> {
     /// Text uses UTF-8 and defaults to reading; explicit modes stay literal.
     fn open(&mut self, call: &ast::ExprCall, gzip: bool) -> Result<Expr, String> {
         let args = &call.arguments;
-        // A raw descriptor can return a short count or None on a nonblocking write.
-        // The ordinary buffered BinaryIO ABI cannot represent those results.
+        // The typed BinaryIO ABI carries neither raw write results nor a buffer size.
         if !gzip
             && self.unshadowed_builtin(&call.func, "open")
             && args.len() == 3
             && let Some(path) = args.find_argument_value("file", 0)
             && let Some(ast::Expr::StringLiteral(mode)) = args.find_argument_value("mode", 1)
+            && let Some(size) = args.find_argument_value("buffering", 2)
             && paths::is_raw_binary_mode(mode.value.to_str())
-            && let Some(ast::Expr::NumberLiteral(size)) = args.find_argument_value("buffering", 2)
-            && matches!(&size.value, ast::Number::Int(n) if n.as_i64() == Some(0))
+            && (matches!(mode.value.to_str(), "wb" | "bw" | "ab" | "ba" | "xb" | "bx")
+                || matches!(size, ast::Expr::NumberLiteral(size) if matches!(&size.value, ast::Number::Int(n) if n.as_i64() == Some(0))))
             && self.expr(path)?.ty == Type::Str
         {
-            return Err(self.object_builtin_error("unbuffered binary open", call));
+            return Err(self.object_builtin_error("binary open with buffering", call));
         }
         let (path, mode) = match call.arguments.args.as_ref() {
             [path] if !gzip => (path, "r"),
