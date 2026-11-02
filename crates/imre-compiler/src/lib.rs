@@ -989,7 +989,7 @@ def first(stream: Stream) -> str:
         let llvm = compile(source, &CompileOptions::default()).unwrap();
         assert!(llvm.contains("define i32 @main(i32 %argc, ptr %argv)"));
         assert!(llvm.contains("call void @imre_args_init(i32 %argc, ptr %argv)"));
-        assert_eq!(llvm.matches("call void @imre_args_clear()").count(), 2);
+        assert_eq!(llvm.matches("call void @imre_args_clear()").count(), 1);
     }
 
     #[test]

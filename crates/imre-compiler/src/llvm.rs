@@ -1790,8 +1790,6 @@ impl Emitter<'_, '_> {
         self.loops.clear();
         self.temporaries.clear();
         self.cleanups.clear();
-        self.return_exit = self.label();
-        self.error_exit = self.label();
         let params = function
             .params
             .iter()
@@ -1852,6 +1850,13 @@ impl Emitter<'_, '_> {
             })
             .collect();
         self.directory_slot_count = directory_slots.len();
+        let separate_exits = entry || !directory_slots.is_empty();
+        self.return_exit = self.label();
+        self.error_exit = if separate_exits {
+            self.label()
+        } else {
+            self.return_exit.clone()
+        };
         if !directory_slots.is_empty() {
             self.line("%directory_frame = alloca ptr");
             self.line("store ptr null, ptr %directory_frame");
@@ -1971,9 +1976,35 @@ impl Emitter<'_, '_> {
             self.jump(&self.return_exit.clone());
         }
         self.start(&self.return_exit.clone());
-        self.with_directory_frame(|out, frame| {
-            out.line(format!("call void @imre_object_release(ptr {frame})"));
-        });
+        let failed = if separate_exits {
+            self.with_directory_frame(|out, frame| {
+                out.line(format!("call void @imre_object_release(ptr {frame})"));
+            });
+            let returned = self.current.clone();
+            let cleanup = self.label();
+            self.jump(&cleanup);
+            self.start(&self.error_exit.clone());
+            self.with_directory_frame(|out, frame| {
+                for &slot in &directory_slots {
+                    let value = out.borrow_slot(slot);
+                    let pointer = out.optional_object_pointer(&value);
+                    out.line(format!(
+                        "call void @imre_error_frame_keep_directory(ptr {frame}, ptr {pointer})"
+                    ));
+                }
+                out.line(format!(
+                    "call void @imre_error_attach_directory_frame(ptr {frame})"
+                ));
+            });
+            let raised = self.current.clone();
+            self.jump(&cleanup);
+            self.start(&cleanup);
+            entry.then(|| {
+                self.instruction(format!("phi i1 [false, %{returned}], [true, %{raised}]"))
+            })
+        } else {
+            None
+        };
         self.cleanup(&cleanup_slots);
         if let Some(leave) = leave_frame {
             self.line(leave);
@@ -1982,7 +2013,7 @@ impl Emitter<'_, '_> {
             self.line("call void @imre_fault_truncate(i64 %fault_depth)");
             self.line("store i64 %fault_depth, ptr @imre_typed_fault_depth");
         }
-        if entry {
+        if let Some(failed) = failed {
             if self.has_extensions {
                 self.line("call void @imre_extension_clear()");
             }
@@ -2000,7 +2031,14 @@ impl Emitter<'_, '_> {
             if self.uses_sys_argv {
                 self.line("call void @imre_args_clear()");
             }
+            let report = self.label();
+            let flush = self.label();
+            self.branch(&failed, &report, &flush);
+            self.start(&flush);
             let status = self.instruction("call i32 @imre_finish_stdio()");
+            self.line(format!("ret i32 {status}"));
+            self.start(&report);
+            let status = self.instruction("call i32 @imre_error_unhandled()");
             self.line(format!("ret i32 {status}"));
         } else {
             let value = self.instruction(format!(
@@ -2008,50 +2046,6 @@ impl Emitter<'_, '_> {
                 function.returns.llvm()
             ));
             self.line(format!("ret {returns} {value}"));
-        }
-        self.start(&self.error_exit.clone());
-        self.with_directory_frame(|out, frame| {
-            for &slot in &directory_slots {
-                let value = out.borrow_slot(slot);
-                let pointer = out.optional_object_pointer(&value);
-                out.line(format!(
-                    "call void @imre_error_frame_keep_directory(ptr {frame}, ptr {pointer})"
-                ));
-            }
-            out.line(format!(
-                "call void @imre_error_attach_directory_frame(ptr {frame})"
-            ));
-        });
-        self.cleanup(&cleanup_slots);
-        if let Some(leave) = leave_frame {
-            self.line(leave);
-        }
-        if fault_frame {
-            self.line("call void @imre_fault_truncate(i64 %fault_depth)");
-            self.line("store i64 %fault_depth, ptr @imre_typed_fault_depth");
-        }
-        if entry {
-            if self.has_extensions {
-                self.line("call void @imre_extension_clear()");
-            }
-            self.cleanup_globals();
-            if self.uses_linecache {
-                self.line("call void @imre_linecache_clear()");
-            }
-            if self.changes_stdout {
-                self.line("call void @imre_sys_stdout_clear()");
-            }
-            if self.uses_builtins_last {
-                self.line("call void @imre_builtins_clear()");
-            }
-            self.line("call void @imre_clear_literals()");
-            if self.uses_sys_argv {
-                self.line("call void @imre_args_clear()");
-            }
-            let status = self.instruction("call i32 @imre_error_unhandled()");
-            self.line(format!("ret i32 {status}"));
-        } else {
-            self.line(format!("ret {returns} {}", function.returns.initial()));
         }
         self.code.push_str("}\n");
         self.code.insert_str(allocas_at, &self.entry_allocas);
@@ -10494,7 +10488,7 @@ print(show("x"))
     }
 
     #[test]
-    fn string_constants_are_rooted_once_and_cleared_on_both_main_exits() {
+    fn string_constants_are_rooted_once_and_cleared_before_main_returns() {
         let llvm = compile(
             "def text() -> str:\n    return 'shared'\nprint('shared')\nprint(text())\n",
             &CompileOptions {
@@ -10523,7 +10517,10 @@ print(show("x"))
         assert!(body.contains("@imre_str_retain("));
         let main = llvm.split_once("define i32 @main(").unwrap().1;
         assert_eq!(main.matches("call void @imre_init_literals()").count(), 1);
-        assert_eq!(main.matches("call void @imre_clear_literals()").count(), 2);
+        assert_eq!(main.matches("call void @imre_clear_literals()").count(), 1);
+        let (_, exits) = main.split_once("call void @imre_clear_literals()").unwrap();
+        assert!(exits.contains("call i32 @imre_finish_stdio()"));
+        assert!(exits.contains("call i32 @imre_error_unhandled()"));
     }
 
     /// Classifies only assignments to a source slot, excluding its argument and
