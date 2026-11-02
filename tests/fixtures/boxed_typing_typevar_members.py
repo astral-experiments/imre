@@ -1,10 +1,12 @@
+from inspect import getattr_static
 from typing import TypeVar
 
 
 def current():
     variable = TypeVar("T", covariant=True)
     for name in ("__covariant__", "__contravariant__", "__infer_variance__"):
-        member = getattr(TypeVar, name)
+        member = getattr_static(variable, name)
+        assert member is getattr_static(TypeVar, name) is getattr(TypeVar, name)
         assert type(member).__name__ == "member_descriptor"
         assert member.__objclass__ is TypeVar and member.__name__ == name
         assert member.__get__(None, TypeVar) is member

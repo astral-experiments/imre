@@ -1795,6 +1795,11 @@ impl Context {
         } else if name == stdlib::datetime::TZINFO {
             stdlib::datetime::install_members(self, name);
         }
+        if name == "typing.TypeVar" {
+            for field in typing::VARIANCE_FIELDS {
+                self.readonly_member("typing.TypeVar", field);
+            }
+        }
         if builtins::is_exception(name) {
             self.builtin(&format!("{}.__new__", builtins::exception_new_owner(name)));
             self.builtin(builtins::exception_initializer(name));

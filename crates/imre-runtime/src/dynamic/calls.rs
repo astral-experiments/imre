@@ -218,6 +218,11 @@ impl Context {
             {
                 Some(NONE)
             }
+            Value::Native(kind)
+                if kind == "typing.TypeVar" && super::typing::VARIANCE_FIELDS.contains(&name) =>
+            {
+                self.builtins.get(&format!("{kind}.{name}")).copied()
+            }
             Value::Native(kind) if builtins::is_exception(kind) => match name {
                 name if kind == "BaseException"
                     && let Some(symbol) = builtins::base_exception_method(name) =>
@@ -995,11 +1000,12 @@ impl Context {
     }
 
     fn member_receiver_error(&self, owner: &str, field: &str, ty: Id) -> Error {
+        let name = self.class_name(ty);
+        let name = &name[..name.floor_char_boundary(100)];
         Error::new(
             "TypeError",
             format!(
-                "descriptor '{field}' for '{owner}' objects doesn't apply to a '{}' object",
-                self.class_name(ty)
+                "descriptor '{field}' for '{owner}' objects doesn't apply to a '{name}' object"
             ),
         )
     }
@@ -3882,7 +3888,8 @@ impl Context {
             return Some(member);
         }
         if matches!(self.heap.get(obj), Value::TypeVar(_)) {
-            return super::typing::variance_member(self, name);
+            let owner = self.builtin("typing.TypeVar");
+            return self.own_class_attr(owner, name);
         }
         let member = self.slot(obj, name)?;
         if let Value::Instance { class, .. } = *self.heap.get(obj)
