@@ -937,10 +937,15 @@ pub(super) fn module_call(
     let [pattern, string, flags] = bind(name, args, kwargs, ["pattern", "string", "flags"])?;
     let string = string.ok_or_else(|| missing("string"))?;
     let pattern = compiled(ctx, pattern.ok_or_else(|| missing("pattern"))?, flags)?;
-    if let Some(method @ ("search" | "finditer" | "findall")) = name.strip_prefix("re.") {
-        return search(ctx, method, &[pattern, string], &[]);
+    match name.strip_prefix("re.") {
+        Some(method @ ("match" | "fullmatch" | "search" | "finditer" | "findall")) => {
+            search(ctx, method, &[pattern, string], &[])
+        }
+        _ => Err(Error::new(
+            "AttributeError",
+            format!("no regex operation {name}"),
+        )),
     }
-    call(ctx, name, &[pattern, string])
 }
 
 /// Hide the terminal dollar's synthetic capture and its consumed newline.
@@ -1343,45 +1348,34 @@ pub(super) fn search(
     }))))
 }
 
-pub(super) fn call(ctx: &mut Context, name: &str, args: &[Id]) -> Result<Id> {
-    let first = argument(args, 0)?;
-    if name.starts_with("match.") {
-        let m = matched(ctx, first)?;
-        if name == "match.group" {
-            if args.len() == 1 {
-                return m.group(ctx, 0, NONE);
-            }
-            let mut values = Vec::with_capacity(args.len() - 1);
-            for &group in &args[1..] {
-                values.push(m.group_item(ctx, group)?);
-            }
-            return Ok(if values.len() == 1 {
-                values[0]
-            } else {
-                ctx.alloc(Value::Tuple(values))
-            });
+pub(super) fn match_method(ctx: &mut Context, name: &str, args: &[Id]) -> Result<Id> {
+    let m = matched(ctx, argument(args, 0)?)?;
+    if name == "match.group" {
+        if args.len() == 1 {
+            return m.group(ctx, 0, NONE);
         }
-        let index = args.get(1).map_or(Ok(0), |&id| m.group_index(ctx, id))?;
-        let (start, end) = m.bounds(ctx, index)?;
-        return Ok(match name {
-            "match.start" => ctx.int(start),
-            "match.end" => ctx.int(end),
-            "match.span" => {
-                let start = ctx.int(start);
-                let end = ctx.int(end);
-                ctx.alloc(Value::Tuple(vec![start, end]))
-            }
-            _ => unreachable!(),
+        let mut values = Vec::with_capacity(args.len() - 1);
+        for &group in &args[1..] {
+            values.push(m.group_item(ctx, group)?);
+        }
+        return Ok(if values.len() == 1 {
+            values[0]
+        } else {
+            ctx.alloc(Value::Tuple(values))
         });
     }
-    match name {
-        "re.match" => search(ctx, "match", args, &[]),
-        "re.fullmatch" => search(ctx, "fullmatch", args, &[]),
-        _ => Err(Error::new(
-            "AttributeError",
-            format!("no regex operation {name}"),
-        )),
-    }
+    let index = args.get(1).map_or(Ok(0), |&id| m.group_index(ctx, id))?;
+    let (start, end) = m.bounds(ctx, index)?;
+    Ok(match name {
+        "match.start" => ctx.int(start),
+        "match.end" => ctx.int(end),
+        "match.span" => {
+            let start = ctx.int(start);
+            let end = ctx.int(end);
+            ctx.alloc(Value::Tuple(vec![start, end]))
+        }
+        _ => unreachable!(),
+    })
 }
 
 /// Collect captures starting at a byte offset in the bounded subject.
