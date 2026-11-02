@@ -149,7 +149,7 @@ impl Alias {
 }
 
 /// Walk nested Literal origins without consuming native stack frames.
-pub(super) fn literal_origin(ctx: &Context, mut origin: Id) -> Result<Id> {
+pub(super) fn literal_origin(ctx: &Context, mut origin: Id) -> Result<(Id, usize)> {
     let mut depth = 0;
     while let Value::GenericAlias(alias) = ctx.heap.get(origin)
         && matches!(alias.kind, AliasKind::Literal(_))
@@ -158,7 +158,7 @@ pub(super) fn literal_origin(ctx: &Context, mut origin: Id) -> Result<Id> {
         ctx.check_call_depth(depth)?;
         origin = alias.origin;
     }
-    Ok(origin)
+    Ok((origin, depth))
 }
 
 /// Typing aliases delegate non-dunder attribute names to the origin.
@@ -937,7 +937,7 @@ pub(super) fn attribute(ctx: &mut Context, value: Id, name: &str) -> Option<Resu
                 field
             } else if forwards_to_origin(name) {
                 let origin = literal_origin(ctx, a.origin);
-                return Some(origin.and_then(|origin| ctx.lookup_attr(origin, name)));
+                return Some(origin.and_then(|(origin, _)| ctx.lookup_attr(origin, name)));
             } else {
                 return None;
             }

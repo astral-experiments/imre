@@ -17,7 +17,9 @@ def current():
     alias = type(ssl_mode)(Origin(), (1,))
     names = dir(alias)
     fields = {"__args__", "__parameters__", "__origin__", "_inst", "_name"}
-    assert fields | {"__mro_entries__", "__class__"} <= set(names)
+    methods = {"__format__", "__getstate__", "__init_subclass__", "__mro_entries__"}
+    assert fields | methods | {"__class__"} <= set(names)
+    assert all(callable(getattr(alias, name)) for name in methods)
     assert names.count("marker") == 1 and "__hidden__" not in names
     assert alias.marker is Origin.marker and alias._name is None and alias._inst is True
 

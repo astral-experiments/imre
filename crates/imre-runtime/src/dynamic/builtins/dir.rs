@@ -115,13 +115,28 @@ fn object_names(ctx: &mut Context, object: Id) -> Result<Id> {
 
 /// Literal delegates non-dunder names to its origin, including custom Python directory hooks.
 fn literal_names(ctx: &mut Context, alias: Alias) -> Result<Id> {
-    let origin = literal_origin(ctx, alias.origin)?;
-    let origin_names = call(ctx, &[origin], &[])?;
+    let (origin, nested) = literal_origin(ctx, alias.origin)?;
+    let mut names = call(ctx, &[origin], &[])?;
+    // Each enclosing alias filters the sorted dir() of the preceding alias.
+    for _ in 0..nested {
+        let merged = merge_literal_names(ctx, &alias, names)?;
+        names = collections::sorted(ctx, &[merged], &[])?;
+    }
+    merge_literal_names(ctx, &alias, names)
+}
+
+fn merge_literal_names(ctx: &mut Context, alias: &Alias, origin_names: Id) -> Result<Id> {
     ctx.heap.keep(origin_names);
     let fields = alias.literal_fields().map(|(name, _)| name);
     let entries = fields
         .into_iter()
-        .chain(["__class__", "__mro_entries__"])
+        .chain([
+            "__class__",
+            "__format__",
+            "__getstate__",
+            "__init_subclass__",
+            "__mro_entries__",
+        ])
         .map(|name| (ctx.text(name), NONE))
         .collect();
     let names = ctx.dict(entries);
