@@ -18,7 +18,6 @@ pub(super) fn is_method(name: &str) -> bool {
             | "_is_owned"
             | "_release_save"
             | "_acquire_restore"
-            | "_at_fork_reinit"
     )
 }
 
@@ -153,10 +152,6 @@ pub(super) fn method(
             let depth = ctx.int(depth as isize as i64);
             let owner = ctx.alloc(Value::Int(crate::Int::from_usize(owner)));
             Ok(ctx.alloc(Value::Tuple(vec![depth, owner])))
-        }
-        "_at_fork_reinit" => {
-            lock.reset();
-            Ok(NONE)
         }
         "release" | "__exit__" => {
             lock.release()?;

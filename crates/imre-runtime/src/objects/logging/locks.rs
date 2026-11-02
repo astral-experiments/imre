@@ -117,7 +117,7 @@ impl HandlerLock {
     }
 
     /// Reinitialize ownership, as Handler._at_fork_reinit requests in the child.
-    pub(crate) fn reset(&self) {
+    fn reset(&self) {
         *self.owner.lock().unwrap() = None;
         self.available.notify_all();
     }
