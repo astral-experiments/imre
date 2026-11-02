@@ -18,9 +18,9 @@ from suite_inventory import cases, load_suite, verify_files, verify_interpreter_
 # its original assertions (or, in CONTROL, its retry loop) actually observe.
 OPERATIONS = {
     "test.test_subprocess.ProcessTestCase.test_communicate_epipe":
-        "send 1 MiB through a pipe to an exiting child and return without propagating EPIPE",
+        "attempt to write 1 MiB to an exiting child and return without propagating EPIPE",
     "test.test_subprocess.ProcessTestCase.test_communicate_epipe_only_stdin":
-        "wait for the child and communicate 1 MiB through its stdin pipe without propagating EPIPE",
+        "reap the child and attempt to write 1 MiB to its stdin pipe without propagating EPIPE",
     "test.test_subprocess.ProcessTestCase.test_communicate_pipe_buf":
         "communicate across three pipes under backpressure and compare all echoed stdout bytes",
     "test.test_subprocess.ProcessTestCase.test_communicate_pipe_fd_leak":

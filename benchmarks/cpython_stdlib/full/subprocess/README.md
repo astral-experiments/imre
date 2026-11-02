@@ -123,8 +123,7 @@ memoryview to an Imre `-c` child, checks the 18 echoed bytes and that stderr is
 original fixture hooks. [Linux receipt](memoryview-input-linux.json)
 
 Four default-poll `ProcessTestCase` methods previously had host-driven native
-operation evidence. Their bodies now run in Imre. The two EPIPE originals send
-1 MiB to an exiting child. The pipe-buffer original checks the echo under
+operation evidence. Their bodies now run in Imre. The two EPIPE originals check that communicating with a 1 MiB input returns without a broken-pipe exception. The pipe-buffer original checks the echo under
 backpressure, and the descriptor-leak original checks all seven nonempty pipe
 configurations. Pinned CPython supplies the original fixture hooks and their
 selected zero-exit command. The stderr-only original already had native-body
