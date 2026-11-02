@@ -1,5 +1,6 @@
-# decoder.py and scanner.py are unmodified CPython 3.14.5 sources at
+# decoder.py and scanner.py come from CPython 3.14.5 at
 # 5607950ef232dad16d75c0cf53101d9649d89115 (see licenses/CPython.txt).
+# Both scanner factories use the same token parser.
 from . import decoder
 from .decoder import JSONDecoder, JSONDecodeError
 from _imre_json import loads as _native_loads
