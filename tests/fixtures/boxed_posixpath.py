@@ -85,6 +85,8 @@ def current():
     assert os.path.realpath(os.fsencode(__file__), strict=os.path.ALLOW_MISSING) == os.fsencode(os.path.realpath(__file__))
     assert module_file in os.listdir(Path(module_dir))
     assert os.fsencode(module_file) in os.listdir(Path(os.fsencode(module_dir)))
+    assert os.path.join(Path("root"), "dirA") == "root/dirA"
+    assert os.path.join("root", Path("/other"), Path("child")) == "/other/child"
     assert os.path.isabs(Path(b"/test"))
     assert os.path.relpath(Path("/a/./b"), start="/a/c") == "../b"
     assert os.path.relpath(Path(b"/a/\xff"), start=b"/a") == b"\xff"
