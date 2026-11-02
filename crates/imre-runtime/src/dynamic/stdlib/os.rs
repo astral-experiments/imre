@@ -2,6 +2,8 @@
 pub(in crate::dynamic) mod device;
 #[cfg(target_os = "linux")]
 pub(in crate::dynamic) mod eventfd;
+#[cfg(target_os = "linux")]
+mod readv;
 pub(in crate::dynamic) mod scandir;
 #[cfg(target_os = "linux")]
 mod spawn_child;
@@ -556,6 +558,7 @@ pub(super) fn is_descriptor_function(name: &str) -> bool {
                 name,
                 "copy_file_range"
                     | "get_terminal_size"
+                    | "readv"
                     | "splice"
                     | "lockf"
                     | "mknod"
@@ -1389,7 +1392,7 @@ pub(super) fn descriptor(
         let bytes = native::read(fd, length, Some(offset), || ctx.dispatch_signals())?;
         return Ok(ctx.alloc(Value::Bytes(bytes)));
     }
-    if matches!(name, "read" | "readinto" | "write") {
+    if matches!(name, "read" | "readinto" | "write") || (cfg!(target_os = "linux") && name == "readv") {
         let [fd, data] = args else {
             return Err(Error::new(
                 "TypeError",
@@ -1397,6 +1400,10 @@ pub(super) fn descriptor(
             ));
         };
         let fd = c_int(ctx, *fd)?;
+        #[cfg(target_os = "linux")]
+        if name == "readv" {
+            return readv::readv(ctx, fd, *data);
+        }
         return if name == "read" {
             let length = ssize_t(ctx, *data)?;
             let bytes = native::read(fd, length, None, || ctx.dispatch_signals())?;
