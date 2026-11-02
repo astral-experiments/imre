@@ -65,6 +65,24 @@ impl Context {
         lineage
     }
 
+    /// Type metadata lives on the metaclass, outside the class's instance attributes.
+    pub(super) fn builtin_hierarchy_tuple(&mut self, class: Id, name: &str) -> Id {
+        let key = format!("{name}:{}", self.class_name(class));
+        if let Some(&tuple) = self.builtins.get(&key) {
+            return tuple;
+        }
+        let lineage = self.base_lineage(class, true);
+        // The classes exported directly by builtins have at most one direct base.
+        let types = if name == "__bases__" {
+            lineage.get(1).copied().into_iter().collect()
+        } else {
+            lineage
+        };
+        let tuple = self.alloc(Value::Tuple(types));
+        self.builtins.insert(key, tuple);
+        tuple
+    }
+
     /// Merge the base lineages in C3 order so cooperative methods visit each base once.
     pub(super) fn linearized_bases(&mut self, bases: &[Id], published: bool) -> Result<Vec<Id>> {
         if bases.is_empty() {

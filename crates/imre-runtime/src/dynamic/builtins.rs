@@ -216,11 +216,15 @@ pub(super) fn is_builtin_type(name: &str) -> bool {
         || is_enum_base(name)
 }
 
+/// The native classes exported directly by the builtins module.
+pub(super) fn is_exported_type(name: &str) -> bool {
+    TYPES.contains(&name) || imre_ast::exceptions::boxed_builtin_kind(name).is_some()
+}
+
 /// Static builtin types have a GC-capable metaclass, but are never themselves tracked.
 pub(super) fn is_static_gc_type(name: &str) -> bool {
-    TYPES.contains(&name)
+    is_exported_type(name)
         || name == super::stdlib::flags::TYPE
-        || imre_ast::exceptions::boxed_builtin_kind(name).is_some()
         || (is_iterator_type(name) && !name.contains('.'))
         || matches!(
             name,
