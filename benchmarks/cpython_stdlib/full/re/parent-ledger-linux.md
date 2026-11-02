@@ -37,6 +37,24 @@ The separate replay of ordinal 158, `test.test_re.ReTests.test_symbolic_groups`,
 
 **139 of 165 after ordinal 122.** `test.test_re.ReTests.test_pattern_compare_bytes`, occurrence 1, passed at both native optimization levels on public `fd73f631466c6d440fd2b84838ffa2d9fc329fa8`. The parent clears the regex cache, compares and hashes separately compiled bytes patterns, then compares text and bytes patterns with `BytesWarning` promoted to an error. The public O0 and O3 runs reported one pass in 1.728s and 2.908s, respectively, with zero skips and zero subtests. The 139-key replay packet has SHA-256 `650fe7403fcce82be592c04cd596acdf25a01d4ea9ccfa2ed30488671b339479`. [Pattern caching and comparison](https://github.com/astral-experiments/imre/pull/4174) · [Selected terminal records](parent-replay-terminals-linux.tsv)
 
+**Ordinal 147 reached its timing assertion.** Each optimized-runtime build linked a Cargo release runtime with debug information disabled and a same-revision Cargo dev compiler. Python code generation ran separately at O0 and O3. Both `c88c4bf3` release-runtime baselines raised the same missing-clock error as the dev-runtime baselines. After `time.get_clock_info` landed at `d21a657056f1ccea4f01d5654bdf541be6e660ac`, the unmodified stopwatch measured 0.321735s at O0 and 0.275684s at O3 for the ten regex operations. Both exceeded the original 0.1s threshold. Each public lane reported one failure, zero skips and zero subtests. [Native clock information](https://github.com/astral-experiments/imre/pull/4202) · [Unittest wall times and raw results](parent-replay-terminals-linux.tsv)
+
+The next timing change, published at `2a0ad34695006d693080ed35d3dadf8836a73427`, recognizes pending finalizers kept alive through instance fields. On the change's pre-merge head `0f221c6b4e06310c8b8496d55ae7fc28557bc718`, the release-runtime stopwatch measured 0.112961s at O0 and 0.126698s at O3. Both candidate runs still failed the original assertion. The practical union below gives ordinal 147 zero credit. [Finalizer lifetime change](https://github.com/astral-experiments/imre/pull/4229)
+
+## Seven practical parents and six regressions
+
+**142 of 165 on public `d7816c3e6e7379903cb09683a96b17c1420124ee`.** The six parents in the baseline table passed together at ordinary O0 and O3, and the independently selected `test_symbolic_groups` passed in both modes. Each mode freshly compiled the selected driver to an object and linked the corresponding public runtime. Three previously uncredited registrations added to the 139-key checkpoint.
+
+| Ordinal | New `ReTests` parent, occurrence 1 | Check reached on public O0 and O3 |
+| ---: | --- | --- |
+| 66 | `test_bug_gh100061` | Atomic groups and possessive repeats respect the negative lookahead and the winning span. |
+| 99 | `test_inline_flags` | Global flags across verbose layout, case and line matching, and all ten original subtests pass. |
+| 158 | `test_symbolic_groups` | Named references and conditionals compile for text and bytes. The 200-group pattern matches `xc8yz` at span `(0, 5)`. |
+
+The runtime changes landed separately. The six-parent run reported `Ran 6 tests in 26.860s` at O0 and `Ran 6 tests in 16.082s` at O3. The ordinal 158 runs reported `Ran 1 test in 2.463s` and `Ran 1 test in 1.351s`. All four reported `OK` and had zero skips. [Atomic and possessive matches](https://github.com/astral-experiments/imre/pull/4203) · [Global regex flags](https://github.com/astral-experiments/imre/pull/4204) · [Symbolic conditionals](https://github.com/astral-experiments/imre/pull/4208)
+
+CPython and both public builds also passed six existing regression parents, `test_expand`, `test_keep_buffer`, `test_match_getitem`, `test_re_split`, `test_qualified_re_split` and `test_re_subn`. CPython reported `Ran 6 tests in 0.015s`, O0 `Ran 6 tests in 12.702s` and O3 `Ran 6 tests in 15.148s`, each with `OK`. Across all three selections, each public build recorded 13 distinct passing parents and 18 successful subtests, ten in `test_inline_flags` and eight in `test_re_split`. The 142-key packet has SHA-256 `6c1450df06492369b88ece10b7a6a61f2abf653944d26ad537805485e9f2cf59`. [Raw terminals for all selections](parent-replay-terminals-linux.tsv)
+
 ## Reproduce the historical join
 
 The upstream source is CPython commit `5607950ef232dad16d75c0cf53101d9649d89115`. The SHA-256 of `Lib/test/test_re.py` is `879c8b562a5bddb413e73ad6d026a6199785bd08fa1c2c5db1ef831b4e1c47e2`. The following command checks the complement against loader order and reconstructs the historical key digest. Run from the Imre root with the staged CPython test tree and interpreter from the capture replay instructions. [Upstream source](https://github.com/python/cpython/blob/5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/test_re.py)
