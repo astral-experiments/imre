@@ -2640,6 +2640,7 @@ def report(text):
             "boxed_os_fdopen.py",
             "boxed_binary_bytes_paths.py",
             "boxed_buffered_readlines.py",
+            "boxed_os_eventfd.py",
             "boxed_os_descriptor_io.py",
             "boxed_os_ftruncate.py",
             "boxed_os_pread.py",
