@@ -393,6 +393,25 @@ fn tokenize(
                 class(&mut input, &mut output, &mut escapes)?;
                 can_repeat = true;
             }
+            '\\' if lookahead
+                && alphabet == Alphabet::Unicode
+                && matches!(input.peek(), Some('b' | 'B')) =>
+            {
+                // Python words contain Unicode letters, numbers and underscore.
+                // Test both sides without consuming either adjacent character.
+                let word = r"[\p{L}\p{N}_]";
+                let (after_word, after_nonword) = if input.next() == Some('b') {
+                    ('!', '=')
+                } else {
+                    ('=', '!')
+                };
+                write!(
+                    output,
+                    "(?:(?<={word})(?{after_word}{word})|(?<!{word})(?{after_nonword}{word}))"
+                )
+                .unwrap();
+                can_repeat = false;
+            }
             '\\' if lookahead && matches!(input.peek(), Some('1'..='9')) => {
                 let first = input.next().unwrap();
                 let mut id = (first as u8 - b'0') as usize;

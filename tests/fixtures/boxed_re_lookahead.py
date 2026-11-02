@@ -53,3 +53,11 @@ def current():
             pass
         else:
             raise AssertionError(invalid)
+
+    # Python classifies marks, connector punctuation other than _, and join controls as non-word.
+    boundary = re.compile(r"\b(?=(.))")
+    assert [(m.start(), m.group(1)) for m in boundary.finditer("é\u0301中\u203f_")] == [
+        (0, "é"), (1, "\u0301"), (2, "中"), (3, "\u203f"), (4, "_")]
+    assert boundary.search("a中", 1) is None
+    assert re.fullmatch(r"\B(?=$)", "").span() == (0, 0)
+    assert [m.start() for m in re.finditer(r"\B(?=.)", "a_\u200d!")] == [1, 3]
