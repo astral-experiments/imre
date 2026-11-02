@@ -47,7 +47,7 @@ pub(super) fn module_function(symbol: &str) -> Option<(&str, &str)> {
         "_contextvars" if function == "copy_context" => Some((module, function)),
         "_io" if function == "text_encoding" => Some((module, function)),
         #[cfg(target_os = "linux")]
-        "resource" if function == "getrlimit" => Some((module, function)),
+        "resource" if matches!(function, "getrlimit" | "setrlimit") => Some((module, function)),
         "gc" if matches!(function, "enable" | "disable" | "isenabled") => Some((module, function)),
         "zlib" if matches!(function, "adler32" | "crc32") => Some((module, function)),
         "hashlib"
@@ -2251,7 +2251,10 @@ impl Context {
                     "__text_signature__" if symbol == "fcntl.fcntl" => {
                         return Ok(self.text("($module, fd, cmd, arg=0, /)"));
                     }
-                    "__doc__" if symbol == "resource.getrlimit" => return Ok(NONE),
+                    "__doc__" if module == "resource" => return Ok(NONE),
+                    "__text_signature__" if symbol == "resource.setrlimit" => {
+                        return Ok(self.text("($module, resource, limits, /)"));
+                    }
                     "__text_signature__" if symbol == "resource.getrlimit" => {
                         return Ok(self.text("($module, resource, /)"));
                     }

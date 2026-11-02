@@ -593,7 +593,9 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         #[cfg(target_os = "linux")]
         ("fcntl", "fcntl") => ctx.builtin("fcntl.fcntl"),
         #[cfg(target_os = "linux")]
-        ("resource", "getrlimit") => ctx.builtin("resource.getrlimit"),
+        ("resource", "getrlimit" | "setrlimit") => ctx.builtin(&format!("resource.{name}")),
+        #[cfg(target_os = "linux")]
+        ("resource", "RLIMIT_CORE") => ctx.int(i64::from(libc::RLIMIT_CORE)),
         #[cfg(target_os = "linux")]
         ("resource", "RLIMIT_STACK") => ctx.int(i64::from(libc::RLIMIT_STACK)),
         #[cfg(target_os = "linux")]
@@ -1347,8 +1349,10 @@ pub(super) fn call(
         return fcntl::call(ctx, args, kwargs);
     }
     #[cfg(target_os = "linux")]
-    if name == "resource.getrlimit" {
-        return resource::getrlimit(ctx, args, kwargs);
+    match name {
+        "resource.getrlimit" => return resource::getrlimit(ctx, args, kwargs),
+        "resource.setrlimit" => return resource::setrlimit(ctx, args, kwargs),
+        _ => {}
     }
     if name == "random.random" {
         if !kwargs.is_empty() {

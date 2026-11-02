@@ -2235,6 +2235,8 @@ impl IntrinsicModule {
             (Self::Fcntl, "F_GETPIPE_SZ") => Intrinsic::ObjectRuntimeExport("fcntl.F_GETPIPE_SZ"),
             (Self::Fcntl, "F_SETPIPE_SZ") => Intrinsic::ObjectRuntimeExport("fcntl.F_SETPIPE_SZ"),
             (Self::Resource, "getrlimit") => Intrinsic::ObjectRuntimeExport("resource.getrlimit"),
+            (Self::Resource, "setrlimit") => Intrinsic::ObjectRuntimeExport("resource.setrlimit"),
+            (Self::Resource, "RLIMIT_CORE") => Intrinsic::ObjectRuntimeExport("resource.RLIMIT_CORE"),
             (Self::Resource, "RLIMIT_STACK") => {
                 Intrinsic::ObjectRuntimeExport("resource.RLIMIT_STACK")
             }
