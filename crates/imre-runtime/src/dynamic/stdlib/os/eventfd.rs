@@ -1,6 +1,4 @@
-use num_traits::{Signed, ToPrimitive};
-
-use super::{Context, Error, Id, NONE, Result, Value, builtins, c_int};
+use super::{Context, Id, NONE, Result, Value, builtins, c_int, unsigned};
 
 pub(in crate::dynamic) fn initialize(ctx: &mut Context, scope: Id) {
     for name in ["eventfd", "eventfd_read", "eventfd_write"] {
@@ -15,20 +13,6 @@ pub(in crate::dynamic) fn initialize(ctx: &mut Context, scope: Id) {
         let flag = ctx.int(i64::from(flag));
         ctx.bind(scope, name, flag);
     }
-}
-
-fn unsigned(ctx: &mut Context, id: Id, max: u64, kind: &str) -> Result<u64> {
-    let integer = ctx.index_integer(id)?;
-    let n = integer.big();
-    if n.is_negative() {
-        return Err(Error::new("ValueError", "Cannot convert negative int"));
-    }
-    n.to_u64().filter(|&n| n <= max).ok_or_else(|| {
-        Error::new(
-            "OverflowError",
-            format!("Python int too large for C unsigned {kind}"),
-        )
-    })
 }
 
 fn descriptor(ctx: &mut Context, id: Id) -> Result<i32> {
