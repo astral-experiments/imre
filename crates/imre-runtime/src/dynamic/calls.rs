@@ -638,6 +638,9 @@ impl Context {
     }
 
     pub(super) fn callable(&self, value: Id) -> bool {
+        if matches!(self.heap.get(value), Value::ConstEvaluator(_)) {
+            return true;
+        }
         matches!(
             self.heap.get(value),
             Value::Class { .. }
@@ -1058,6 +1061,9 @@ impl Context {
             Value::Repeat(_) => "itertools.repeat",
             Value::TupleGetter { .. } => super::namedtuple::GETTER,
             Value::TypeVar(_) => "typing.TypeVar",
+            Value::ParamSpec(_) => "typing.ParamSpec",
+            Value::ParamSpecMarker(kind, _) => kind.class(),
+            Value::ConstEvaluator(_) => "constevaluator",
             Value::TypeVarTuple { .. } => "typing.TypeVarTuple",
             Value::GenericAlias(alias) => alias.kind.class(),
             Value::Socket(_) => "socket.socket",
@@ -1158,6 +1164,10 @@ impl Context {
                             | "traceback"
                             | "frame"
                             | "typing.TypeVar"
+                            | "typing.ParamSpec"
+                            | "typing.ParamSpecArgs"
+                            | "typing.ParamSpecKwargs"
+                            | "constevaluator"
                             | "typing.TypeVarTuple"
                             | "typing._UnpackGenericAlias"
                             | "NoDefaultType"
@@ -1875,6 +1885,9 @@ impl Context {
             && let Some(message) = self.import_error_message(obj, None)
         {
             return Ok(message);
+        }
+        if let Some(value) = super::paramspec::attribute(self, obj, name) {
+            return value;
         }
         if let Some(value) = super::typing::attribute(self, obj, name) {
             return value;
@@ -3626,6 +3639,9 @@ impl Context {
 
     /// Bypass the object's deletion hook, while honoring data descriptors on its class.
     pub(super) fn default_delete_attr(&mut self, obj: Id, name: &str) -> Result<()> {
+        if let Some(result) = super::paramspec::update(self, obj, name, None) {
+            return result;
+        }
         self.check_template_write(obj, name)?;
         super::namespace::check_class_write(self, obj, name)?;
         stdlib::io::check_class_write(self, obj, name)?;
@@ -4228,6 +4244,9 @@ impl Context {
     }
 
     pub(super) fn default_set_attr(&mut self, obj: Id, name: &str, value: Id) -> Result<()> {
+        if let Some(result) = super::paramspec::update(self, obj, name, Some(value)) {
+            return result;
+        }
         if self.builtins.get("abc.ABCMeta") == Some(&obj)
             && matches!(
                 name,
@@ -4970,6 +4989,9 @@ impl Context {
         args: Vec<Id>,
         kwargs: Vec<(String, Id)>,
     ) -> Result<Id> {
+        if let Value::ConstEvaluator(value) = *self.heap.get(callable) {
+            return super::paramspec::eval(self, value, &args, &kwargs);
+        }
         // Binding a descriptor can call Python before it returns its target.
         if matches!(self.heap.get(callable), Value::Instance { .. }) {
             return self.with_slot_depth(

@@ -199,7 +199,9 @@ pub(super) fn variables(ctx: &Context, args: &[Id]) -> Vec<Id> {
     let mut vars = Vec::new();
     for &arg in args {
         let members = match ctx.heap.get(arg) {
-            Value::TypeVar(_) | Value::TypeVarTuple { .. } => std::slice::from_ref(&arg),
+            Value::TypeVar(_) | Value::ParamSpec(_) | Value::TypeVarTuple { .. } => {
+                std::slice::from_ref(&arg)
+            }
             Value::GenericAlias(Alias { parameters, .. })
             | Value::Union(super::union::Union { parameters, .. }) => {
                 match ctx.heap.get(*parameters) {
@@ -528,7 +530,7 @@ pub(super) fn subscribe(ctx: &mut Context, target: Id, index: Id) -> Option<Resu
                 ));
             };
             let actual = match ctx.heap.get(*parameters) {
-                Value::Ellipsis => args,
+                Value::Ellipsis | Value::ParamSpec(_) => args,
                 Value::List(items) | Value::Tuple(items) => {
                     let mut flat = items.clone();
                     flat.push(*result);
@@ -587,7 +589,10 @@ pub(super) fn resolve_bases(ctx: &mut Context, bases: Id) -> Result<(Option<Id>,
 fn alias_bases(ctx: &mut Context, id: Id, bases: Id) -> Result<Id> {
     if matches!(
         ctx.heap.get(id),
-        Value::TypeVar(_) | Value::TypeVarTuple { .. }
+        Value::TypeVar(_)
+            | Value::ParamSpec(_)
+            | Value::ParamSpecMarker(_, _)
+            | Value::TypeVarTuple { .. }
     ) {
         return Err(Error::new(
             "TypeError",
@@ -782,7 +787,11 @@ pub(super) fn bind_generic_parameters(
 
 pub(super) fn attribute(ctx: &mut Context, value: Id, name: &str) -> Option<Result<Id>> {
     let attr = match ctx.heap.get(value) {
-        Value::TypeVar(_) | Value::TypeVarTuple { .. } | Value::GenericAlias(_)
+        Value::TypeVar(_)
+        | Value::ParamSpec(_)
+        | Value::ParamSpecMarker(_, _)
+        | Value::TypeVarTuple { .. }
+        | Value::GenericAlias(_)
             if name == "__mro_entries__" =>
         {
             let callable = ctx.builtin("typing.alias_mro_entries");
@@ -1280,6 +1289,26 @@ pub(super) fn call(
         ctx.enable_class_annotation_provider(scope);
         return Ok(class);
     }
+    match operation {
+        "ParamSpec" => return super::paramspec::construct(ctx, args, kwargs),
+        "ParamSpecArgs" => {
+            return super::paramspec::construct_marker(
+                ctx,
+                super::paramspec::Marker::Args,
+                args,
+                kwargs,
+            );
+        }
+        "ParamSpecKwargs" => {
+            return super::paramspec::construct_marker(
+                ctx,
+                super::paramspec::Marker::Kwargs,
+                args,
+                kwargs,
+            );
+        }
+        _ => {}
+    }
     if operation == "TypeVarTuple" {
         let [name, default] = super::builtins::bind_method_arguments(
             "typevartuple",
@@ -1373,6 +1402,36 @@ pub(super) fn call(
             "TypeError",
             "TypeVar.has_default() takes no arguments",
         )),
+        ("ParamSpec.has_default", [spec]) if let Value::ParamSpec(p) = ctx.heap.get(*spec) => Ok(
+            super::builtins::boolean(!matches!(ctx.heap.get(p.default), Value::NoDefault)),
+        ),
+        ("ParamSpec.__reduce__", [spec]) if let Value::ParamSpec(p) = ctx.heap.get(*spec) => {
+            Ok(p.name)
+        }
+        (
+            "ParamSpecArgs.__eq__"
+            | "ParamSpecKwargs.__eq__"
+            | "ParamSpecArgs.__ne__"
+            | "ParamSpecKwargs.__ne__",
+            [left, right],
+        ) => {
+            let (owner, method) = operation.split_once('.').unwrap();
+            let owner = format!("typing.{owner}");
+            if !matches!(ctx.heap.get(*left), Value::ParamSpecMarker(kind, _) if kind.class() == owner)
+            {
+                let actual = match ctx.heap.get(*left) {
+                    Value::ParamSpec(_) | Value::ParamSpecMarker(_, _) | Value::TypeVar(_)
+                    | Value::TypeVarTuple { .. } => ctx.builtin_type_name(*left).unwrap(),
+                    _ => ctx.type_name(*left),
+                };
+                return Err(Error::new(
+                    "TypeError",
+                    format!("descriptor '{method}' requires a '{owner}' object but received a '{actual}'"),
+                ));
+            }
+            let op = if method == "__eq__" { "==" } else { "!=" };
+            super::paramspec::compare(ctx, op, *left, *right)
+        }
         ("TypeVarTuple.has_default", [pack])
             if let Value::TypeVarTuple { default, .. } = ctx.heap.get(*pack) =>
         {
@@ -1443,6 +1502,7 @@ pub(super) fn call(
             }
         }
         ("get_origin", [v]) => Ok(match ctx.heap.get(*v) {
+            Value::ParamSpecMarker(_, origin) => *origin,
             Value::Instance { .. }
                 if ctx
                     .module_value("typing", "_SpecialGenericAlias")
@@ -1610,7 +1670,11 @@ impl Context {
                 }
                 Ok(false)
             }
-            Value::TypeVar(_) | Value::TypeVarTuple { .. } | Value::NoDefault => Err(Error::new(
+            Value::TypeVar(_)
+            | Value::ParamSpec(_)
+            | Value::ParamSpecMarker(_, _)
+            | Value::TypeVarTuple { .. }
+            | Value::NoDefault => Err(Error::new(
                 "TypeError",
                 "isinstance() arg 2 must be a type, a tuple of types, or a union",
             )),
@@ -1770,6 +1834,10 @@ impl Context {
                     || matches!(
                         name.as_str(),
                         "typing.TypeVar"
+                            | "typing.ParamSpec"
+                            | "typing.ParamSpecArgs"
+                            | "typing.ParamSpecKwargs"
+                            | "constevaluator"
                             | "typing.TypeVarTuple"
                             | "NoDefaultType"
                             | "datetime.timezone"

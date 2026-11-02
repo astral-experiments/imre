@@ -488,6 +488,12 @@ impl Context {
         key: Id,
         parents: &mut SmallVec<[HashFrame; 2]>,
     ) -> Result<ControlFlow<i64, Id>> {
+        if let Value::ParamSpecMarker(kind, _) = self.heap.get(key) {
+            return Err(Error::new(
+                "TypeError",
+                format!("unhashable type: '{}'", kind.class()),
+            ));
+        }
         if let Value::Union(union) = *self.heap.get(key) {
             return union.hash(self).map(ControlFlow::Break);
         }

@@ -28,6 +28,7 @@ mod namespace_repr;
 mod object_state;
 mod operators;
 mod os_error;
+mod paramspec;
 mod property;
 mod range;
 mod slice;
