@@ -16,6 +16,7 @@ from collections.abc import Callable as _ABCCallable
 from _collections_abc import AsyncIterator as _AsyncIterator, Awaitable as _Awaitable
 from abc import abstractmethod
 from annotationlib import ForwardRef, _make_forward_ref
+from annotationlib import annotations_to_string as _annotation_strings, type_repr as _annotation_type_repr
 from functools import lru_cache
 from _typing import _idfunc
 from typing import Any, Callable, Generic, Protocol, TypeVar, Union
@@ -484,30 +485,6 @@ def _typeddict_qualifiers(tp):
         else:
             break
     return qualifiers
-
-
-def _annotation_type_repr(value):
-    # Equivalent to annotationlib.type_repr for the supported runtime values.
-    from types import BuiltinFunctionType, FunctionType
-
-    if value is None:
-        return "None"
-    if value is type(None):
-        return "NoneType"
-    if isinstance(value, (type, FunctionType, BuiltinFunctionType)):
-        return (value.__qualname__ if value.__module__ == "builtins" else
-                f"{value.__module__}.{value.__qualname__}")
-    if value is ...:
-        return "..."
-    from string.templatelib import Template
-    if isinstance(value, Template):
-        raise NotImplementedError("template annotation strings require AST unparsing")
-    return repr(value)
-
-
-def _annotation_strings(annotations):
-    return {name: value if isinstance(value, str) else _annotation_type_repr(value)
-            for name, value in annotations.items()}
 
 
 class _TypedDictSymbol:

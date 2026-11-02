@@ -4,7 +4,7 @@ import enum
 import sys
 import types
 
-__all__ = ["Format", "ForwardRef", "get_annotations"]
+__all__ = ["Format", "ForwardRef", "get_annotations", "annotations_to_string", "type_repr"]
 
 
 class Format(enum.IntEnum):
@@ -12,6 +12,38 @@ class Format(enum.IntEnum):
     VALUE_WITH_FAKE_GLOBALS = 2
     FORWARDREF = 3
     STRING = 4
+
+
+def type_repr(value):
+    """Convert a Python value to a format suitable for use with the STRING format.
+
+    This is intended as a helper for tools that support the STRING format but do
+    not have access to the code that originally produced the annotations. It uses
+    repr() for most objects.
+
+    """
+    if value is None:
+        return "None"
+    if value is type(None):
+        return "NoneType"
+    if isinstance(value, (type, types.FunctionType, types.BuiltinFunctionType)):
+        return (value.__qualname__ if value.__module__ == "builtins" else
+                f"{value.__module__}.{value.__qualname__}")
+    if value is ...:
+        return "..."
+    from string.templatelib import Template
+    if isinstance(value, Template):
+        raise NotImplementedError("template annotation strings require AST unparsing")
+    return repr(value)
+
+
+def annotations_to_string(annotations):
+    """Convert an annotation dict containing values to approximately the STRING format.
+
+    Always returns a fresh a dictionary.
+    """
+    return {name: value if isinstance(value, str) else type_repr(value)
+            for name, value in annotations.items()}
 
 
 def _make_forward_ref(arg, module=None, owner=None, *, is_class=False):
@@ -74,9 +106,8 @@ class ForwardRef:
             else:
                 # Preserve literal tokens and render captured values only when
                 # the caller asks to see them. Their repr can execute user code.
-                from typing import _annotation_type_repr
                 rendered = "".join(
-                    part if type(part) is str else _annotation_type_repr(part[1])
+                    part if type(part) is str else type_repr(part[1])
                     for part in self.__ast_node__
                 )
             self.__resolved_str_cache__ = rendered
@@ -348,8 +379,7 @@ def get_annotations(
             # But if we didn't get it, we use __annotations__ instead.
             ann = _get_dunder_annotations(obj)
             if ann is not None:
-                from typing import _annotation_strings
-                return _annotation_strings(ann)
+                return annotations_to_string(ann)
         case Format.VALUE_WITH_FAKE_GLOBALS:
             raise ValueError("The VALUE_WITH_FAKE_GLOBALS format is for internal use only")
         case _:
