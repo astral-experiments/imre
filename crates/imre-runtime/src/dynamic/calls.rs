@@ -996,7 +996,9 @@ impl Context {
         }
         if matches!(self.heap.get(parent), Value::Native(name) if name == "typing.Callable") {
             let origin = super::mapping_abc::class(self, "Callable")?;
-            return self.python_subclass_check(child, origin);
+            let result =
+                self.call_typing_helper("_special_alias_subclasscheck", vec![origin, child])?;
+            return self.truth(result);
         }
         if let Value::GenericAlias(alias) = self.heap.get(parent) {
             return Err(alias.kind.class_check_error("issubclass"));

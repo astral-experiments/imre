@@ -144,6 +144,16 @@ def callable_classes():
     for item in (lambda: 1, len, list.append, [].append, Concrete().__call__, type, staticmethod(len)):
         assert isinstance(item, Callable) and issubclass(type(item), Callable)
     assert issubclass(Masked, Callable) and isinstance(Masked(), Callable)
+    from typing import List, Type
+    assert issubclass(TypingCallable, TypingCallable) and issubclass(Type, TypingCallable)
+    assert not issubclass(List, TypingCallable)
+    try:
+        issubclass(TypingCallable[..., int], TypingCallable)
+    except TypeError as exc:
+        assert str(exc) == "Subscripted generics cannot be used with class and instance checks"
+    else:
+        raise AssertionError("accepted a parameterized typing alias")
+
     assert Callable.register(InstanceOnly) is InstanceOnly
     assert isinstance(value, TypingCallable) and issubclass(InstanceOnly, Callable)
     try:
