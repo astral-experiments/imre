@@ -624,6 +624,7 @@ pub(crate) fn compile(
     for name in [
         "__hello__",
         "ast",
+        "codecs",
         "genericpath",
         "platform",
         "re",

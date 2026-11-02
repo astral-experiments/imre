@@ -1497,6 +1497,11 @@ def report(text):
 
             result = subprocess.run([executable, source], capture_output=True, preexec_fn=small_stack)
             assert (result.returncode, result.stdout) == (0, b"7\n"), result.stderr
+        compare(
+            "-IB", "-c",
+            "decoder = __import__(''.join(('co', 'decs'))).IncrementalDecoder\n"
+            "print(decoder.__module__, decoder('replace').errors, decoder().getstate())",
+        )
         for fixture in (
             "boxed_ast.py",
             "boxed_ast_visitors.py",
