@@ -1041,6 +1041,8 @@ impl Context {
                             | "_contextvars.Token"
                             | stdlib::os::stat::CLASS
                             | "array.array"
+                            | "selectors.PollSelector"
+                            | "selectors.SelectSelector"
                             | super::deque::CLASS
                             | "weakref.ReferenceType"
                             | "weakref.ProxyType"
@@ -1205,6 +1207,7 @@ impl Context {
                 matches!(self.heap.get(class), Value::Native(name) if name == "object")
                     || self.raised_error_matches(error, class)
             }
+            (name, Value::Selector(handle)) if name == handle.borrow().class_name() => true,
             ("array.array", Value::Array(_))
             | ("bytearray", Value::ByteArray(_))
             | ("memoryview", Value::MemoryView { .. })
@@ -1228,7 +1231,6 @@ impl Context {
             | ("range", Value::Range(_))
             | ("map", Value::Map { .. })
             | ("filter", Value::Filter { .. })
-            | ("selectors.PollSelector", Value::Selector(_))
             | ("_contextvars.ContextVar", Value::ContextVar { .. })
             | ("_contextvars.Context", Value::Context(_))
             | ("functools.partial", Value::Partial { .. })
