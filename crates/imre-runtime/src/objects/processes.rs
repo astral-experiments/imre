@@ -1066,6 +1066,45 @@ pub unsafe extern "C" fn imre_environ_set(key: *const Str, value: *const Str) {
     finish(unsafe { set_environment_text(&*key, &*value) }, ());
 }
 
+/// Remove POSIX names in mapping order. Entries remain raw bytes, including names
+/// inherited with an undecodable spelling.
+#[unsafe(no_mangle)]
+pub extern "C" fn imre_environ_clear() {
+    for (key, _) in initial_environment() {
+        if let Err(error) = cstring(&key).and_then(|key| change_environment(&key, None)) {
+            error.raise();
+            return;
+        }
+    }
+}
+
+/// # Safety
+/// The caller roots an exact dict[str, str] or dict[bytes, bytes] matching `bytes`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_environ_update(mapping: *const Object, bytes: u32) {
+    // SAFETY: the exact dictionary stays rooted. Its items iterator owns its cursor.
+    let items =
+        unsafe { crate::ObjectOwner::from_raw(super::mappings::imre_dict_iter(mapping, 1)) };
+    let update = || {
+        while let Some((key, item)) = super::mappings::pull(&items)? {
+            let value = item.expect("dictionary items have values");
+            // SAFETY: the item owns both words with the caller's exact homogeneous types.
+            unsafe {
+                if bytes != 0 {
+                    set_environment_bytes(
+                        &*(key.word as *const Bytes),
+                        &*(value.word as *const Bytes),
+                    )?;
+                } else {
+                    set_environment_text(&*(key.word as *const Str), &*(value.word as *const Str))?;
+                }
+            }
+        }
+        Ok(())
+    };
+    finish(update(), ());
+}
+
 /// Returns the first matching value, or the supplied nullable default.
 ///
 /// # Safety

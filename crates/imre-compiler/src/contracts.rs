@@ -367,6 +367,8 @@ impl Builtin {
                 | ProcessOperation::Release
                 | ProcessOperation::EnvironCopy { .. }
                 | ProcessOperation::EnvironSet { .. }
+                | ProcessOperation::EnvironClear
+                | ProcessOperation::EnvironUpdate { .. }
                 | ProcessOperation::EnvironGet
                 | ProcessOperation::GetCwd
                 | ProcessOperation::Fd(_)
@@ -1096,6 +1098,8 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "int_lshift"
                 | "int_rshift"
                 | "imre_flush_stdout"
+                | "imre_environ_clear"
+                | "imre_environ_update"
                 | "imre_environ_get"
                 | "imre_getcwd"
                 | "imre_os_linesep"

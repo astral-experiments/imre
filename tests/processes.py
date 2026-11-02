@@ -269,6 +269,7 @@ def main() -> None:
                     "limited": name in {"cleanup", "stdin_fds", "timeouts"},
                     "descriptor": descriptor if name == "stdin_fds" else None,
                     "empty_name": name == "environment",
+                    "invalid": (b"IMRE_RAW_BASELINE", b"\xff") if name == "environment_restore" else None,
                     "high_fds": name == "select_high_fds",
                 }
                 reference = run([python, "-E", "-B", str(source), *arguments], reference_dir, **options)

@@ -9474,12 +9474,11 @@ impl<'a> Checker<'a> {
             return self.process_check_output(call);
         }
         if let ast::Expr::Attribute(attribute) = &*call.func
-            && matches!(
-                self.resolve(&attribute.value),
-                Some(Binding::Intrinsic(Intrinsic::Environ))
-            )
+            && let Some(Binding::Intrinsic(
+                mapping @ (Intrinsic::Environ | Intrinsic::EnvironBytes),
+            )) = self.resolve(&attribute.value)
         {
-            return self.environ_method(attribute, call);
+            return self.environ_method(attribute, call, mapping == Intrinsic::EnvironBytes);
         }
         if let ast::Expr::Attribute(attr) = call.func.as_ref() {
             self.calendar_class_attribute(attr)?;
