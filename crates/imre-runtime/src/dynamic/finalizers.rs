@@ -54,17 +54,23 @@ impl Context {
             }
         } else if let Some(slot) = self.slot(owner, "__del__") {
             self.heap.keep(slot);
-            if let Ok(Some(method)) = self.bound_slot(owner, "__del__") {
+            // CPython calls method descriptors unbound, including ordinary
+            // functions. Only custom descriptors resolve __get__ before the call.
+            let unbound = matches!(self.heap.get(slot), Value::Function { .. })
+                || matches!(self.heap.get(slot), Value::Native(name)
+                    if super::wrapper_descriptor::BuiltinDescriptor::lookup(name).is_some());
+            let target = if unbound {
+                Some((slot, vec![owner]))
+            } else {
+                self.bound_slot(owner, "__del__")
+                    .ok()
+                    .flatten()
+                    .map(|method| (method, Vec::new()))
+            };
+            if let Some((method, args)) = target {
                 self.heap.keep(method);
-                // CPython calls ordinary function slots unbound. Other descriptors
-                // report the callable produced by descriptor binding.
-                let deallocator = if matches!(self.heap.get(slot), Value::Function { .. }) {
-                    slot
-                } else {
-                    method
-                };
-                if let Err(error) = self.call(method, Vec::new(), Vec::new()) {
-                    super::unraisable::deallocator(self, error, deallocator);
+                if let Err(error) = self.call(method, args, Vec::new()) {
+                    super::unraisable::deallocator(self, error, method);
                 }
             }
         }

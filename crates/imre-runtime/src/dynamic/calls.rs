@@ -922,6 +922,7 @@ impl Context {
                 if HashState::is_provider_class(name)
                     || builtins::is_builtin_type(name)
                     || builtins::is_iterator_type(name)
+                    || name == stdlib::fixed_structseq::UNRAISABLE_ARGS
                     || matches!(
                         name.as_str(),
                         "NoneType"

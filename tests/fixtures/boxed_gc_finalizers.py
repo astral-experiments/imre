@@ -111,6 +111,7 @@ def check_unraisable():
         del obj
         gc.collect()
         event, = failures
+        assert type(type(event)) is type and isinstance(event, tuple)
         assert event.exc_type is ValueError and event.exc_value is problem
         assert event.exc_traceback is problem.__traceback__
         assert event.object is None
