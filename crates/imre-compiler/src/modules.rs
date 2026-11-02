@@ -294,6 +294,7 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
             "_imre_gettext_locale.py",
             include_str!("../stdlib/_imre_gettext_locale.py"),
         )),
+        "getopt" => Some(("getopt.py", include_str!("../stdlib/getopt.py"))),
         "gettext" => Some(("gettext.py", include_str!("../stdlib/gettext.py"))),
         "uuid" => Some(("uuid.py", include_str!("../stdlib/uuid.py"))),
         _ => None,
