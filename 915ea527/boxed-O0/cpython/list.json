@@ -1,0 +1,25 @@
+{
+  "pin": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "driver_sha256": "eaefc98e61968fe154c1d7e72894775b9d0b61d2015736754c7d94b5ee5e77da",
+  "module_sha256": "6325b930f5fc9aa8537640423d410e2237811952ae41c097fbb03100cf26f0af",
+  "pyio_sha256": "1beee84c68ef6f7acb649dd5aada4c2f34f0476b01c293efe4afd9d0fe2d3ff1",
+  "lane": "reference",
+  "argv": [
+    "/workspace/scratch/io-reference/cpython/python",
+    "-EB",
+    "/workspace/scratch/imre-io/native-random-evidence/whole-registration/combined_entry.py",
+    "list"
+  ],
+  "exit": 0,
+  "bound_seconds": 700,
+  "queue_plus_run_seconds": 3.3493032840015076,
+  "stdout_sha256": "9fafe66494ab441e1fda8122769461fe8c58653a76df7ae73a696e380d0db5f1",
+  "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "reported": [
+    "registered 667"
+  ],
+  "unique_ids": 667,
+  "missing": [],
+  "unexpected": [],
+  "identical_order": true
+}

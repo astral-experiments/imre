@@ -1,0 +1,3342 @@
+{
+  "count": 667,
+  "unique": 667,
+  "source_sha256": "6325b930f5fc9aa8537640423d410e2237811952ae41c097fbb03100cf26f0af",
+  "cases": [
+    {
+      "id": "test.test_io.CIOTest.test_BufferedIOBase_destructor",
+      "ordinal": 1,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CIOTest.test_BufferedIOBase_readinto",
+      "ordinal": 2,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CIOTest.test_IOBase_destructor",
+      "ordinal": 3,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CIOTest.test_IOBase_finalize",
+      "ordinal": 4,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CIOTest.test_RawIOBase_destructor",
+      "ordinal": 5,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CIOTest.test_RawIOBase_read",
+      "ordinal": 6,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CIOTest.test_RawIOBase_read_bounds_checking",
+      "ordinal": 7,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CIOTest.test_RawIOBase_readall",
+      "ordinal": 8,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CIOTest.test_TextIOBase_destructor",
+      "ordinal": 9,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CIOTest.test_append_mode_tell",
+      "ordinal": 10,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CIOTest.test_array_writes",
+      "ordinal": 11,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CIOTest.test_bad_opener_negative_1",
+      "ordinal": 12,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CIOTest.test_bad_opener_other_negative",
+      "ordinal": 13,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CIOTest.test_buffered_file_io",
+      "ordinal": 14,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CIOTest.test_buffered_readinto_mixin",
+      "ordinal": 15,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CIOTest.test_close_assert",
+      "ordinal": 16,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CIOTest.test_close_flushes",
+      "ordinal": 17,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CIOTest.test_closefd",
+      "ordinal": 18,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CIOTest.test_closefd_attr",
+      "ordinal": 19,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CIOTest.test_destructor",
+      "ordinal": 20,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CIOTest.test_fileio_closefd",
+      "ordinal": 21,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CIOTest.test_flush_error_on_close",
+      "ordinal": 22,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CIOTest.test_fspath_support",
+      "ordinal": 23,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CIOTest.test_garbage_collection",
+      "ordinal": 24,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CIOTest.test_invalid_newline",
+      "ordinal": 25,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CIOTest.test_invalid_operations",
+      "ordinal": 26,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CIOTest.test_large_file_ops",
+      "ordinal": 27,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CIOTest.test_multi_close",
+      "ordinal": 28,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CIOTest.test_next_nonsizeable",
+      "ordinal": 29,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CIOTest.test_no_closefd_with_filename",
+      "ordinal": 30,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CIOTest.test_nonbuffered_textio",
+      "ordinal": 31,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CIOTest.test_open_handles_NUL_chars",
+      "ordinal": 32,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CIOTest.test_opener",
+      "ordinal": 33,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CIOTest.test_opener_invalid_fd",
+      "ordinal": 34,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CIOTest.test_optional_abilities",
+      "ordinal": 35,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CIOTest.test_raw_bytes_io",
+      "ordinal": 36,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CIOTest.test_raw_file_io",
+      "ordinal": 37,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CIOTest.test_read_closed",
+      "ordinal": 38,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CIOTest.test_readline",
+      "ordinal": 39,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CIOTest.test_readline_nonsizeable",
+      "ordinal": 40,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CIOTest.test_startup_optimization",
+      "ordinal": 41,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CIOTest.test_types_have_dict",
+      "ordinal": 42,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CIOTest.test_unbounded_file",
+      "ordinal": 43,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CIOTest.test_with_open",
+      "ordinal": 44,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CIOTest.test_write_readline_races",
+      "ordinal": 45,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyIOTest.test_BufferedIOBase_destructor",
+      "ordinal": 46,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyIOTest.test_BufferedIOBase_readinto",
+      "ordinal": 47,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyIOTest.test_IOBase_destructor",
+      "ordinal": 48,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyIOTest.test_RawIOBase_destructor",
+      "ordinal": 49,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyIOTest.test_RawIOBase_read",
+      "ordinal": 50,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyIOTest.test_RawIOBase_read_bounds_checking",
+      "ordinal": 51,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyIOTest.test_RawIOBase_readall",
+      "ordinal": 52,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyIOTest.test_TextIOBase_destructor",
+      "ordinal": 53,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyIOTest.test_append_mode_tell",
+      "ordinal": 54,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyIOTest.test_array_writes",
+      "ordinal": 55,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyIOTest.test_bad_opener_negative_1",
+      "ordinal": 56,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyIOTest.test_bad_opener_other_negative",
+      "ordinal": 57,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyIOTest.test_buffered_file_io",
+      "ordinal": 58,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyIOTest.test_buffered_readinto_mixin",
+      "ordinal": 59,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyIOTest.test_close_assert",
+      "ordinal": 60,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyIOTest.test_close_flushes",
+      "ordinal": 61,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyIOTest.test_closefd",
+      "ordinal": 62,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyIOTest.test_closefd_attr",
+      "ordinal": 63,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyIOTest.test_destructor",
+      "ordinal": 64,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyIOTest.test_fileio_closefd",
+      "ordinal": 65,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyIOTest.test_flush_error_on_close",
+      "ordinal": 66,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyIOTest.test_fspath_support",
+      "ordinal": 67,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyIOTest.test_garbage_collection",
+      "ordinal": 68,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyIOTest.test_invalid_newline",
+      "ordinal": 69,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyIOTest.test_invalid_operations",
+      "ordinal": 70,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyIOTest.test_large_file_ops",
+      "ordinal": 71,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyIOTest.test_multi_close",
+      "ordinal": 72,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyIOTest.test_next_nonsizeable",
+      "ordinal": 73,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyIOTest.test_no_closefd_with_filename",
+      "ordinal": 74,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyIOTest.test_nonbuffered_textio",
+      "ordinal": 75,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyIOTest.test_open_handles_NUL_chars",
+      "ordinal": 76,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyIOTest.test_opener",
+      "ordinal": 77,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyIOTest.test_opener_invalid_fd",
+      "ordinal": 78,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyIOTest.test_optional_abilities",
+      "ordinal": 79,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyIOTest.test_raw_bytes_io",
+      "ordinal": 80,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyIOTest.test_raw_file_io",
+      "ordinal": 81,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyIOTest.test_read_closed",
+      "ordinal": 82,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyIOTest.test_readline",
+      "ordinal": 83,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyIOTest.test_readline_nonsizeable",
+      "ordinal": 84,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyIOTest.test_startup_optimization",
+      "ordinal": 85,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyIOTest.test_types_have_dict",
+      "ordinal": 86,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyIOTest.test_unbounded_file",
+      "ordinal": 87,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyIOTest.test_with_open",
+      "ordinal": 88,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyIOTest.test_write_readline_races",
+      "ordinal": 89,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.APIMismatchTest.test_RawIOBase_io_in_pyio_match",
+      "ordinal": 90,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.APIMismatchTest.test_RawIOBase_pyio_in_io_match",
+      "ordinal": 91,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedReaderTest.test_args_error",
+      "ordinal": 92,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedReaderTest.test_bad_readinto_type",
+      "ordinal": 93,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedReaderTest.test_bad_readinto_value",
+      "ordinal": 94,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedReaderTest.test_buffer_freeing",
+      "ordinal": 95,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedReaderTest.test_buffering",
+      "ordinal": 96,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedReaderTest.test_close_error_on_close",
+      "ordinal": 97,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedReaderTest.test_constructor",
+      "ordinal": 98,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedReaderTest.test_context_manager",
+      "ordinal": 99,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedReaderTest.test_detach",
+      "ordinal": 100,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedReaderTest.test_error_through_destructor",
+      "ordinal": 101,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedReaderTest.test_fileno",
+      "ordinal": 102,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedReaderTest.test_flush_error_on_close",
+      "ordinal": 103,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedReaderTest.test_garbage_collection",
+      "ordinal": 104,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedReaderTest.test_initialization",
+      "ordinal": 105,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedReaderTest.test_invalid_args",
+      "ordinal": 106,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedReaderTest.test_misbehaved_io",
+      "ordinal": 107,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedReaderTest.test_misbehaved_io_read",
+      "ordinal": 108,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedReaderTest.test_multi_close",
+      "ordinal": 109,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedReaderTest.test_no_extraneous_read",
+      "ordinal": 110,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedReaderTest.test_nonnormalized_close_error_on_close",
+      "ordinal": 111,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedReaderTest.test_override_destructor",
+      "ordinal": 112,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedReaderTest.test_pickling_subclass",
+      "ordinal": 113,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedReaderTest.test_read",
+      "ordinal": 114,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedReaderTest.test_read1",
+      "ordinal": 115,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedReaderTest.test_read1_arbitrary",
+      "ordinal": 116,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedReaderTest.test_read_all",
+      "ordinal": 117,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedReaderTest.test_read_non_blocking",
+      "ordinal": 118,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedReaderTest.test_read_on_closed",
+      "ordinal": 119,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedReaderTest.test_read_past_eof",
+      "ordinal": 120,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedReaderTest.test_readinto",
+      "ordinal": 121,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedReaderTest.test_readinto1",
+      "ordinal": 122,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedReaderTest.test_readinto1_array",
+      "ordinal": 123,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedReaderTest.test_readinto_array",
+      "ordinal": 124,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedReaderTest.test_readlines",
+      "ordinal": 125,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedReaderTest.test_readonly_attributes",
+      "ordinal": 126,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedReaderTest.test_recursive_repr",
+      "ordinal": 127,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedReaderTest.test_repr",
+      "ordinal": 128,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedReaderTest.test_seek_character_device_file",
+      "ordinal": 129,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedReaderTest.test_sizeof",
+      "ordinal": 130,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedReaderTest.test_tell_character_device_file",
+      "ordinal": 131,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedReaderTest.test_threads",
+      "ordinal": 132,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedReaderTest.test_truncate_on_read_only",
+      "ordinal": 133,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedReaderTest.test_uninitialized",
+      "ordinal": 134,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedReaderTest.test_unseekable",
+      "ordinal": 135,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedReaderTest.test_buffering",
+      "ordinal": 136,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedReaderTest.test_close_error_on_close",
+      "ordinal": 137,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedReaderTest.test_constructor",
+      "ordinal": 138,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedReaderTest.test_context_manager",
+      "ordinal": 139,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedReaderTest.test_detach",
+      "ordinal": 140,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedReaderTest.test_error_through_destructor",
+      "ordinal": 141,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedReaderTest.test_fileno",
+      "ordinal": 142,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedReaderTest.test_flush_error_on_close",
+      "ordinal": 143,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedReaderTest.test_invalid_args",
+      "ordinal": 144,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedReaderTest.test_misbehaved_io",
+      "ordinal": 145,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedReaderTest.test_multi_close",
+      "ordinal": 146,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedReaderTest.test_no_extraneous_read",
+      "ordinal": 147,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedReaderTest.test_nonnormalized_close_error_on_close",
+      "ordinal": 148,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedReaderTest.test_override_destructor",
+      "ordinal": 149,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedReaderTest.test_pickling_subclass",
+      "ordinal": 150,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedReaderTest.test_read",
+      "ordinal": 151,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedReaderTest.test_read1",
+      "ordinal": 152,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedReaderTest.test_read1_arbitrary",
+      "ordinal": 153,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedReaderTest.test_read_all",
+      "ordinal": 154,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedReaderTest.test_read_non_blocking",
+      "ordinal": 155,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedReaderTest.test_read_on_closed",
+      "ordinal": 156,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedReaderTest.test_read_past_eof",
+      "ordinal": 157,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedReaderTest.test_readinto",
+      "ordinal": 158,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedReaderTest.test_readinto1",
+      "ordinal": 159,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedReaderTest.test_readinto1_array",
+      "ordinal": 160,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedReaderTest.test_readinto_array",
+      "ordinal": 161,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedReaderTest.test_readlines",
+      "ordinal": 162,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedReaderTest.test_readonly_attributes",
+      "ordinal": 163,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedReaderTest.test_recursive_repr",
+      "ordinal": 164,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedReaderTest.test_repr",
+      "ordinal": 165,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedReaderTest.test_seek_character_device_file",
+      "ordinal": 166,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedReaderTest.test_tell_character_device_file",
+      "ordinal": 167,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedReaderTest.test_threads",
+      "ordinal": 168,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedReaderTest.test_truncate_on_read_only",
+      "ordinal": 169,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedReaderTest.test_uninitialized",
+      "ordinal": 170,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedReaderTest.test_unseekable",
+      "ordinal": 171,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedWriterTest.test_args_error",
+      "ordinal": 172,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedWriterTest.test_buffer_freeing",
+      "ordinal": 173,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedWriterTest.test_close_error_on_close",
+      "ordinal": 174,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedWriterTest.test_constructor",
+      "ordinal": 175,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedWriterTest.test_context_manager",
+      "ordinal": 176,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedWriterTest.test_destructor",
+      "ordinal": 177,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedWriterTest.test_detach",
+      "ordinal": 178,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedWriterTest.test_detach_flush",
+      "ordinal": 179,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedWriterTest.test_error_through_destructor",
+      "ordinal": 180,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedWriterTest.test_fileno",
+      "ordinal": 181,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedWriterTest.test_flush",
+      "ordinal": 182,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedWriterTest.test_flush_error_on_close",
+      "ordinal": 183,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedWriterTest.test_garbage_collection",
+      "ordinal": 184,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedWriterTest.test_initialization",
+      "ordinal": 185,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedWriterTest.test_invalid_args",
+      "ordinal": 186,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedWriterTest.test_max_buffer_size_removal",
+      "ordinal": 187,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedWriterTest.test_misbehaved_io",
+      "ordinal": 188,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedWriterTest.test_multi_close",
+      "ordinal": 189,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedWriterTest.test_nonnormalized_close_error_on_close",
+      "ordinal": 190,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedWriterTest.test_override_destructor",
+      "ordinal": 191,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedWriterTest.test_pickling_subclass",
+      "ordinal": 192,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedWriterTest.test_readonly_attributes",
+      "ordinal": 193,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedWriterTest.test_recursive_repr",
+      "ordinal": 194,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedWriterTest.test_repr",
+      "ordinal": 195,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedWriterTest.test_sizeof",
+      "ordinal": 196,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedWriterTest.test_slow_close_from_thread",
+      "ordinal": 197,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedWriterTest.test_threads",
+      "ordinal": 198,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedWriterTest.test_truncate",
+      "ordinal": 199,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedWriterTest.test_truncate_after_write",
+      "ordinal": 200,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedWriterTest.test_uninitialized",
+      "ordinal": 201,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedWriterTest.test_unseekable",
+      "ordinal": 202,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedWriterTest.test_write",
+      "ordinal": 203,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedWriterTest.test_write_and_rewind",
+      "ordinal": 204,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedWriterTest.test_write_error_on_close",
+      "ordinal": 205,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedWriterTest.test_write_non_blocking",
+      "ordinal": 206,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedWriterTest.test_write_overflow",
+      "ordinal": 207,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedWriterTest.test_writelines",
+      "ordinal": 208,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedWriterTest.test_writelines_error",
+      "ordinal": 209,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedWriterTest.test_writelines_userlist",
+      "ordinal": 210,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedWriterTest.test_writes",
+      "ordinal": 211,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedWriterTest.test_writes_and_flushes",
+      "ordinal": 212,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedWriterTest.test_writes_and_seeks",
+      "ordinal": 213,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedWriterTest.test_writes_and_truncates",
+      "ordinal": 214,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedWriterTest.test_close_error_on_close",
+      "ordinal": 215,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedWriterTest.test_constructor",
+      "ordinal": 216,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedWriterTest.test_context_manager",
+      "ordinal": 217,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedWriterTest.test_destructor",
+      "ordinal": 218,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedWriterTest.test_detach",
+      "ordinal": 219,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedWriterTest.test_detach_flush",
+      "ordinal": 220,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedWriterTest.test_error_through_destructor",
+      "ordinal": 221,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedWriterTest.test_fileno",
+      "ordinal": 222,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedWriterTest.test_flush",
+      "ordinal": 223,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedWriterTest.test_flush_error_on_close",
+      "ordinal": 224,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedWriterTest.test_invalid_args",
+      "ordinal": 225,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedWriterTest.test_max_buffer_size_removal",
+      "ordinal": 226,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedWriterTest.test_misbehaved_io",
+      "ordinal": 227,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedWriterTest.test_multi_close",
+      "ordinal": 228,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedWriterTest.test_nonnormalized_close_error_on_close",
+      "ordinal": 229,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedWriterTest.test_override_destructor",
+      "ordinal": 230,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedWriterTest.test_pickling_subclass",
+      "ordinal": 231,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedWriterTest.test_readonly_attributes",
+      "ordinal": 232,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedWriterTest.test_recursive_repr",
+      "ordinal": 233,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedWriterTest.test_repr",
+      "ordinal": 234,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedWriterTest.test_slow_close_from_thread",
+      "ordinal": 235,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedWriterTest.test_threads",
+      "ordinal": 236,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedWriterTest.test_truncate",
+      "ordinal": 237,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedWriterTest.test_truncate_after_write",
+      "ordinal": 238,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedWriterTest.test_uninitialized",
+      "ordinal": 239,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedWriterTest.test_unseekable",
+      "ordinal": 240,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedWriterTest.test_write",
+      "ordinal": 241,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedWriterTest.test_write_and_rewind",
+      "ordinal": 242,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedWriterTest.test_write_error_on_close",
+      "ordinal": 243,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedWriterTest.test_write_non_blocking",
+      "ordinal": 244,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedWriterTest.test_write_overflow",
+      "ordinal": 245,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedWriterTest.test_writelines",
+      "ordinal": 246,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedWriterTest.test_writelines_error",
+      "ordinal": 247,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedWriterTest.test_writelines_userlist",
+      "ordinal": 248,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedWriterTest.test_writes",
+      "ordinal": 249,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedWriterTest.test_writes_and_flushes",
+      "ordinal": 250,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedWriterTest.test_writes_and_seeks",
+      "ordinal": 251,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedWriterTest.test_writes_and_truncates",
+      "ordinal": 252,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedRWPairTest.test_close_and_closed",
+      "ordinal": 253,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedRWPairTest.test_constructor",
+      "ordinal": 254,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedRWPairTest.test_constructor_max_buffer_size_removal",
+      "ordinal": 255,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedRWPairTest.test_constructor_with_not_readable",
+      "ordinal": 256,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedRWPairTest.test_constructor_with_not_writeable",
+      "ordinal": 257,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedRWPairTest.test_detach",
+      "ordinal": 258,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedRWPairTest.test_isatty",
+      "ordinal": 259,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedRWPairTest.test_peek",
+      "ordinal": 260,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedRWPairTest.test_read",
+      "ordinal": 261,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedRWPairTest.test_read1",
+      "ordinal": 262,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedRWPairTest.test_readable",
+      "ordinal": 263,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedRWPairTest.test_reader_close_error_on_close",
+      "ordinal": 264,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedRWPairTest.test_reader_writer_close_error_on_close",
+      "ordinal": 265,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedRWPairTest.test_readinto",
+      "ordinal": 266,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedRWPairTest.test_readlines",
+      "ordinal": 267,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedRWPairTest.test_seekable",
+      "ordinal": 268,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedRWPairTest.test_uninitialized",
+      "ordinal": 269,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedRWPairTest.test_weakref_clearing",
+      "ordinal": 270,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedRWPairTest.test_write",
+      "ordinal": 271,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedRWPairTest.test_writeable",
+      "ordinal": 272,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedRWPairTest.test_writer_close_error_on_close",
+      "ordinal": 273,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedRWPairTest.test_close_and_closed",
+      "ordinal": 274,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedRWPairTest.test_constructor",
+      "ordinal": 275,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedRWPairTest.test_constructor_max_buffer_size_removal",
+      "ordinal": 276,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedRWPairTest.test_constructor_with_not_readable",
+      "ordinal": 277,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedRWPairTest.test_constructor_with_not_writeable",
+      "ordinal": 278,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedRWPairTest.test_detach",
+      "ordinal": 279,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedRWPairTest.test_isatty",
+      "ordinal": 280,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedRWPairTest.test_peek",
+      "ordinal": 281,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedRWPairTest.test_read",
+      "ordinal": 282,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedRWPairTest.test_read1",
+      "ordinal": 283,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedRWPairTest.test_readable",
+      "ordinal": 284,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedRWPairTest.test_reader_close_error_on_close",
+      "ordinal": 285,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedRWPairTest.test_reader_writer_close_error_on_close",
+      "ordinal": 286,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedRWPairTest.test_readinto",
+      "ordinal": 287,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedRWPairTest.test_readlines",
+      "ordinal": 288,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedRWPairTest.test_seekable",
+      "ordinal": 289,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedRWPairTest.test_uninitialized",
+      "ordinal": 290,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedRWPairTest.test_weakref_clearing",
+      "ordinal": 291,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedRWPairTest.test_write",
+      "ordinal": 292,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedRWPairTest.test_writeable",
+      "ordinal": 293,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedRWPairTest.test_writer_close_error_on_close",
+      "ordinal": 294,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedRandomTest.test_args_error",
+      "ordinal": 295,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedRandomTest.test_buffer_freeing",
+      "ordinal": 296,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedRandomTest.test_buffering",
+      "ordinal": 297,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedRandomTest.test_close_error_on_close",
+      "ordinal": 298,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedRandomTest.test_constructor",
+      "ordinal": 299,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedRandomTest.test_context_manager",
+      "ordinal": 300,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedRandomTest.test_destructor",
+      "ordinal": 301,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedRandomTest.test_detach",
+      "ordinal": 302,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedRandomTest.test_detach_flush",
+      "ordinal": 303,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedRandomTest.test_error_through_destructor",
+      "ordinal": 304,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedRandomTest.test_fileno",
+      "ordinal": 305,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedRandomTest.test_flush",
+      "ordinal": 306,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedRandomTest.test_flush_and_peek",
+      "ordinal": 307,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedRandomTest.test_flush_and_read",
+      "ordinal": 308,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedRandomTest.test_flush_and_readinto",
+      "ordinal": 309,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedRandomTest.test_flush_and_write",
+      "ordinal": 310,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedRandomTest.test_flush_error_on_close",
+      "ordinal": 311,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedRandomTest.test_garbage_collection",
+      "ordinal": 312,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedRandomTest.test_interleaved_read_write",
+      "ordinal": 313,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedRandomTest.test_interleaved_readline_write",
+      "ordinal": 314,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedRandomTest.test_invalid_args",
+      "ordinal": 315,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedRandomTest.test_max_buffer_size_removal",
+      "ordinal": 316,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedRandomTest.test_misbehaved_io",
+      "ordinal": 317,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedRandomTest.test_multi_close",
+      "ordinal": 318,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedRandomTest.test_no_extraneous_read",
+      "ordinal": 319,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedRandomTest.test_nonnormalized_close_error_on_close",
+      "ordinal": 320,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedRandomTest.test_override_destructor",
+      "ordinal": 321,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedRandomTest.test_pickling_subclass",
+      "ordinal": 322,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedRandomTest.test_read",
+      "ordinal": 323,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedRandomTest.test_read1",
+      "ordinal": 324,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedRandomTest.test_read1_after_write",
+      "ordinal": 325,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedRandomTest.test_read1_arbitrary",
+      "ordinal": 326,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedRandomTest.test_read_all",
+      "ordinal": 327,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedRandomTest.test_read_and_write",
+      "ordinal": 328,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedRandomTest.test_read_non_blocking",
+      "ordinal": 329,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedRandomTest.test_read_on_closed",
+      "ordinal": 330,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedRandomTest.test_read_past_eof",
+      "ordinal": 331,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedRandomTest.test_readinto",
+      "ordinal": 332,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedRandomTest.test_readinto1",
+      "ordinal": 333,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedRandomTest.test_readinto1_array",
+      "ordinal": 334,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedRandomTest.test_readinto_array",
+      "ordinal": 335,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedRandomTest.test_readlines",
+      "ordinal": 336,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedRandomTest.test_readonly_attributes",
+      "ordinal": 337,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedRandomTest.test_recursive_repr",
+      "ordinal": 338,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedRandomTest.test_repr",
+      "ordinal": 339,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedRandomTest.test_seek_and_tell",
+      "ordinal": 340,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedRandomTest.test_seek_character_device_file",
+      "ordinal": 341,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedRandomTest.test_sizeof",
+      "ordinal": 342,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedRandomTest.test_slow_close_from_thread",
+      "ordinal": 343,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedRandomTest.test_tell_character_device_file",
+      "ordinal": 344,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedRandomTest.test_threads",
+      "ordinal": 345,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedRandomTest.test_truncate",
+      "ordinal": 346,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedRandomTest.test_truncate_after_read_or_write",
+      "ordinal": 347,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedRandomTest.test_truncate_after_write",
+      "ordinal": 348,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedRandomTest.test_uninitialized",
+      "ordinal": 349,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedRandomTest.test_write",
+      "ordinal": 350,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedRandomTest.test_write_after_readahead",
+      "ordinal": 351,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedRandomTest.test_write_and_rewind",
+      "ordinal": 352,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedRandomTest.test_write_error_on_close",
+      "ordinal": 353,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedRandomTest.test_write_non_blocking",
+      "ordinal": 354,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedRandomTest.test_write_overflow",
+      "ordinal": 355,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedRandomTest.test_write_rewind_write",
+      "ordinal": 356,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedRandomTest.test_writelines",
+      "ordinal": 357,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedRandomTest.test_writelines_error",
+      "ordinal": 358,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedRandomTest.test_writelines_userlist",
+      "ordinal": 359,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedRandomTest.test_writes",
+      "ordinal": 360,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedRandomTest.test_writes_and_flushes",
+      "ordinal": 361,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedRandomTest.test_writes_and_peek",
+      "ordinal": 362,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedRandomTest.test_writes_and_read1s",
+      "ordinal": 363,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedRandomTest.test_writes_and_readintos",
+      "ordinal": 364,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedRandomTest.test_writes_and_reads",
+      "ordinal": 365,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedRandomTest.test_writes_and_seeks",
+      "ordinal": 366,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CBufferedRandomTest.test_writes_and_truncates",
+      "ordinal": 367,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedRandomTest.test_buffering",
+      "ordinal": 368,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedRandomTest.test_close_error_on_close",
+      "ordinal": 369,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedRandomTest.test_constructor",
+      "ordinal": 370,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedRandomTest.test_context_manager",
+      "ordinal": 371,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedRandomTest.test_destructor",
+      "ordinal": 372,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedRandomTest.test_detach",
+      "ordinal": 373,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedRandomTest.test_detach_flush",
+      "ordinal": 374,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedRandomTest.test_error_through_destructor",
+      "ordinal": 375,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedRandomTest.test_fileno",
+      "ordinal": 376,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedRandomTest.test_flush",
+      "ordinal": 377,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedRandomTest.test_flush_and_peek",
+      "ordinal": 378,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedRandomTest.test_flush_and_read",
+      "ordinal": 379,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedRandomTest.test_flush_and_readinto",
+      "ordinal": 380,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedRandomTest.test_flush_and_write",
+      "ordinal": 381,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedRandomTest.test_flush_error_on_close",
+      "ordinal": 382,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedRandomTest.test_interleaved_read_write",
+      "ordinal": 383,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedRandomTest.test_interleaved_readline_write",
+      "ordinal": 384,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedRandomTest.test_invalid_args",
+      "ordinal": 385,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedRandomTest.test_max_buffer_size_removal",
+      "ordinal": 386,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedRandomTest.test_misbehaved_io",
+      "ordinal": 387,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedRandomTest.test_multi_close",
+      "ordinal": 388,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedRandomTest.test_no_extraneous_read",
+      "ordinal": 389,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedRandomTest.test_nonnormalized_close_error_on_close",
+      "ordinal": 390,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedRandomTest.test_override_destructor",
+      "ordinal": 391,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedRandomTest.test_pickling_subclass",
+      "ordinal": 392,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedRandomTest.test_read",
+      "ordinal": 393,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedRandomTest.test_read1",
+      "ordinal": 394,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedRandomTest.test_read1_after_write",
+      "ordinal": 395,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedRandomTest.test_read1_arbitrary",
+      "ordinal": 396,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedRandomTest.test_read_all",
+      "ordinal": 397,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedRandomTest.test_read_and_write",
+      "ordinal": 398,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedRandomTest.test_read_non_blocking",
+      "ordinal": 399,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedRandomTest.test_read_on_closed",
+      "ordinal": 400,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedRandomTest.test_read_past_eof",
+      "ordinal": 401,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedRandomTest.test_readinto",
+      "ordinal": 402,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedRandomTest.test_readinto1",
+      "ordinal": 403,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedRandomTest.test_readinto1_array",
+      "ordinal": 404,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedRandomTest.test_readinto_array",
+      "ordinal": 405,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedRandomTest.test_readlines",
+      "ordinal": 406,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedRandomTest.test_readonly_attributes",
+      "ordinal": 407,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedRandomTest.test_recursive_repr",
+      "ordinal": 408,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedRandomTest.test_repr",
+      "ordinal": 409,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedRandomTest.test_seek_and_tell",
+      "ordinal": 410,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedRandomTest.test_seek_character_device_file",
+      "ordinal": 411,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedRandomTest.test_slow_close_from_thread",
+      "ordinal": 412,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedRandomTest.test_tell_character_device_file",
+      "ordinal": 413,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedRandomTest.test_threads",
+      "ordinal": 414,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedRandomTest.test_truncate",
+      "ordinal": 415,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedRandomTest.test_truncate_after_read_or_write",
+      "ordinal": 416,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedRandomTest.test_truncate_after_write",
+      "ordinal": 417,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedRandomTest.test_uninitialized",
+      "ordinal": 418,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedRandomTest.test_write",
+      "ordinal": 419,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedRandomTest.test_write_after_readahead",
+      "ordinal": 420,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedRandomTest.test_write_and_rewind",
+      "ordinal": 421,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedRandomTest.test_write_error_on_close",
+      "ordinal": 422,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedRandomTest.test_write_non_blocking",
+      "ordinal": 423,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedRandomTest.test_write_overflow",
+      "ordinal": 424,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedRandomTest.test_write_rewind_write",
+      "ordinal": 425,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedRandomTest.test_writelines",
+      "ordinal": 426,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedRandomTest.test_writelines_error",
+      "ordinal": 427,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedRandomTest.test_writelines_userlist",
+      "ordinal": 428,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedRandomTest.test_writes",
+      "ordinal": 429,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedRandomTest.test_writes_and_flushes",
+      "ordinal": 430,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedRandomTest.test_writes_and_peek",
+      "ordinal": 431,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedRandomTest.test_writes_and_read1s",
+      "ordinal": 432,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedRandomTest.test_writes_and_readintos",
+      "ordinal": 433,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedRandomTest.test_writes_and_reads",
+      "ordinal": 434,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedRandomTest.test_writes_and_seeks",
+      "ordinal": 435,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyBufferedRandomTest.test_writes_and_truncates",
+      "ordinal": 436,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.StatefulIncrementalDecoderTest.test_decoder",
+      "ordinal": 437,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CIncrementalNewlineDecoderTest.test_newline_bytes",
+      "ordinal": 438,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CIncrementalNewlineDecoderTest.test_newline_decoder",
+      "ordinal": 439,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CIncrementalNewlineDecoderTest.test_translate",
+      "ordinal": 440,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CIncrementalNewlineDecoderTest.test_uninitialized",
+      "ordinal": 441,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyIncrementalNewlineDecoderTest.test_newline_bytes",
+      "ordinal": 442,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyIncrementalNewlineDecoderTest.test_newline_decoder",
+      "ordinal": 443,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyIncrementalNewlineDecoderTest.test_translate",
+      "ordinal": 444,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CTextIOWrapperTest.test_append_bom",
+      "ordinal": 445,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CTextIOWrapperTest.test_basic_io",
+      "ordinal": 446,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CTextIOWrapperTest.test_bufio_write_through",
+      "ordinal": 447,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CTextIOWrapperTest.test_close_error_on_close",
+      "ordinal": 448,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CTextIOWrapperTest.test_constructor",
+      "ordinal": 449,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CTextIOWrapperTest.test_create_at_shutdown_with_encoding",
+      "ordinal": 450,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CTextIOWrapperTest.test_create_at_shutdown_without_encoding",
+      "ordinal": 451,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CTextIOWrapperTest.test_default_encoding",
+      "ordinal": 452,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CTextIOWrapperTest.test_del__CHUNK_SIZE_SystemError",
+      "ordinal": 453,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CTextIOWrapperTest.test_destructor",
+      "ordinal": 454,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CTextIOWrapperTest.test_detach",
+      "ordinal": 455,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CTextIOWrapperTest.test_encoded_writes",
+      "ordinal": 456,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CTextIOWrapperTest.test_encoding",
+      "ordinal": 457,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CTextIOWrapperTest.test_encoding_errors_reading",
+      "ordinal": 458,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CTextIOWrapperTest.test_encoding_errors_writing",
+      "ordinal": 459,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CTextIOWrapperTest.test_error_through_destructor",
+      "ordinal": 460,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CTextIOWrapperTest.test_errors_property",
+      "ordinal": 461,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CTextIOWrapperTest.test_flush_error_on_close",
+      "ordinal": 462,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CTextIOWrapperTest.test_garbage_collection",
+      "ordinal": 463,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CTextIOWrapperTest.test_illegal_decoder",
+      "ordinal": 464,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CTextIOWrapperTest.test_illegal_encoder",
+      "ordinal": 465,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CTextIOWrapperTest.test_initialization",
+      "ordinal": 466,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CTextIOWrapperTest.test_internal_buffer_size",
+      "ordinal": 467,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CTextIOWrapperTest.test_issue119506",
+      "ordinal": 468,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CTextIOWrapperTest.test_issue1395_1",
+      "ordinal": 469,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CTextIOWrapperTest.test_issue1395_2",
+      "ordinal": 470,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CTextIOWrapperTest.test_issue1395_3",
+      "ordinal": 471,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CTextIOWrapperTest.test_issue1395_4",
+      "ordinal": 472,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CTextIOWrapperTest.test_issue1395_5",
+      "ordinal": 473,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CTextIOWrapperTest.test_issue142594",
+      "ordinal": 474,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CTextIOWrapperTest.test_issue2282",
+      "ordinal": 475,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CTextIOWrapperTest.test_issue22849",
+      "ordinal": 476,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CTextIOWrapperTest.test_issue25862",
+      "ordinal": 477,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CTextIOWrapperTest.test_issue35928",
+      "ordinal": 478,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CTextIOWrapperTest.test_line_buffering",
+      "ordinal": 479,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CTextIOWrapperTest.test_multi_close",
+      "ordinal": 480,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CTextIOWrapperTest.test_multibyte_seek_and_tell",
+      "ordinal": 481,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CTextIOWrapperTest.test_newlines",
+      "ordinal": 482,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CTextIOWrapperTest.test_newlines_input",
+      "ordinal": 483,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CTextIOWrapperTest.test_newlines_output",
+      "ordinal": 484,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CTextIOWrapperTest.test_non_text_encoding_codecs_are_rejected",
+      "ordinal": 485,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CTextIOWrapperTest.test_nonnormalized_close_error_on_close",
+      "ordinal": 486,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CTextIOWrapperTest.test_override_destructor",
+      "ordinal": 487,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CTextIOWrapperTest.test_pickling_subclass",
+      "ordinal": 488,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CTextIOWrapperTest.test_rawio",
+      "ordinal": 489,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CTextIOWrapperTest.test_rawio_write_through",
+      "ordinal": 490,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CTextIOWrapperTest.test_read_by_chunk",
+      "ordinal": 491,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CTextIOWrapperTest.test_read_byteslike",
+      "ordinal": 492,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CTextIOWrapperTest.test_read_non_blocking",
+      "ordinal": 493,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CTextIOWrapperTest.test_read_nonbytes",
+      "ordinal": 494,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CTextIOWrapperTest.test_read_one_by_one",
+      "ordinal": 495,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CTextIOWrapperTest.test_readlines",
+      "ordinal": 496,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CTextIOWrapperTest.test_readonly_attributes",
+      "ordinal": 497,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CTextIOWrapperTest.test_reconfigure_defaults",
+      "ordinal": 498,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CTextIOWrapperTest.test_reconfigure_encoding_read",
+      "ordinal": 499,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CTextIOWrapperTest.test_reconfigure_errors",
+      "ordinal": 500,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CTextIOWrapperTest.test_reconfigure_line_buffering",
+      "ordinal": 501,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CTextIOWrapperTest.test_reconfigure_locale",
+      "ordinal": 502,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CTextIOWrapperTest.test_reconfigure_newline",
+      "ordinal": 503,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CTextIOWrapperTest.test_reconfigure_write",
+      "ordinal": 504,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CTextIOWrapperTest.test_reconfigure_write_fromascii",
+      "ordinal": 505,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CTextIOWrapperTest.test_reconfigure_write_non_seekable",
+      "ordinal": 506,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CTextIOWrapperTest.test_reconfigure_write_through",
+      "ordinal": 507,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CTextIOWrapperTest.test_recursive_repr",
+      "ordinal": 508,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CTextIOWrapperTest.test_repr",
+      "ordinal": 509,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CTextIOWrapperTest.test_rwpair_cleared_before_textio",
+      "ordinal": 510,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CTextIOWrapperTest.test_seek_and_tell",
+      "ordinal": 511,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CTextIOWrapperTest.test_seek_append_bom",
+      "ordinal": 512,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CTextIOWrapperTest.test_seek_bom",
+      "ordinal": 513,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CTextIOWrapperTest.test_seek_with_encoder_state",
+      "ordinal": 514,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CTextIOWrapperTest.test_seeking",
+      "ordinal": 515,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CTextIOWrapperTest.test_seeking_too",
+      "ordinal": 516,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CTextIOWrapperTest.test_subclass_repr",
+      "ordinal": 517,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CTextIOWrapperTest.test_tell_after_readline_with_cr",
+      "ordinal": 518,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CTextIOWrapperTest.test_telling",
+      "ordinal": 519,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CTextIOWrapperTest.test_threads_write",
+      "ordinal": 520,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CTextIOWrapperTest.test_uninitialized",
+      "ordinal": 521,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CTextIOWrapperTest.test_unreadable",
+      "ordinal": 522,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CTextIOWrapperTest.test_unseekable",
+      "ordinal": 523,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CTextIOWrapperTest.test_writelines",
+      "ordinal": 524,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CTextIOWrapperTest.test_writelines_error",
+      "ordinal": 525,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CTextIOWrapperTest.test_writelines_userlist",
+      "ordinal": 526,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyTextIOWrapperTest.test_append_bom",
+      "ordinal": 527,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyTextIOWrapperTest.test_basic_io",
+      "ordinal": 528,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyTextIOWrapperTest.test_bufio_write_through",
+      "ordinal": 529,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyTextIOWrapperTest.test_close_error_on_close",
+      "ordinal": 530,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyTextIOWrapperTest.test_constructor",
+      "ordinal": 531,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyTextIOWrapperTest.test_create_at_shutdown_with_encoding",
+      "ordinal": 532,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyTextIOWrapperTest.test_create_at_shutdown_without_encoding",
+      "ordinal": 533,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyTextIOWrapperTest.test_default_encoding",
+      "ordinal": 534,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyTextIOWrapperTest.test_destructor",
+      "ordinal": 535,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyTextIOWrapperTest.test_detach",
+      "ordinal": 536,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyTextIOWrapperTest.test_encoded_writes",
+      "ordinal": 537,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyTextIOWrapperTest.test_encoding",
+      "ordinal": 538,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyTextIOWrapperTest.test_encoding_errors_reading",
+      "ordinal": 539,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyTextIOWrapperTest.test_encoding_errors_writing",
+      "ordinal": 540,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyTextIOWrapperTest.test_error_through_destructor",
+      "ordinal": 541,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyTextIOWrapperTest.test_errors_property",
+      "ordinal": 542,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyTextIOWrapperTest.test_flush_error_on_close",
+      "ordinal": 543,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyTextIOWrapperTest.test_illegal_decoder",
+      "ordinal": 544,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyTextIOWrapperTest.test_illegal_encoder",
+      "ordinal": 545,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyTextIOWrapperTest.test_issue1395_1",
+      "ordinal": 546,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyTextIOWrapperTest.test_issue1395_2",
+      "ordinal": 547,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyTextIOWrapperTest.test_issue1395_3",
+      "ordinal": 548,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyTextIOWrapperTest.test_issue1395_4",
+      "ordinal": 549,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyTextIOWrapperTest.test_issue1395_5",
+      "ordinal": 550,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyTextIOWrapperTest.test_issue2282",
+      "ordinal": 551,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyTextIOWrapperTest.test_issue22849",
+      "ordinal": 552,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyTextIOWrapperTest.test_issue25862",
+      "ordinal": 553,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyTextIOWrapperTest.test_issue35928",
+      "ordinal": 554,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyTextIOWrapperTest.test_line_buffering",
+      "ordinal": 555,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyTextIOWrapperTest.test_multi_close",
+      "ordinal": 556,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyTextIOWrapperTest.test_multibyte_seek_and_tell",
+      "ordinal": 557,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyTextIOWrapperTest.test_newlines",
+      "ordinal": 558,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyTextIOWrapperTest.test_newlines_input",
+      "ordinal": 559,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyTextIOWrapperTest.test_newlines_output",
+      "ordinal": 560,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyTextIOWrapperTest.test_non_text_encoding_codecs_are_rejected",
+      "ordinal": 561,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyTextIOWrapperTest.test_nonnormalized_close_error_on_close",
+      "ordinal": 562,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyTextIOWrapperTest.test_override_destructor",
+      "ordinal": 563,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyTextIOWrapperTest.test_pickling_subclass",
+      "ordinal": 564,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyTextIOWrapperTest.test_rawio",
+      "ordinal": 565,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyTextIOWrapperTest.test_rawio_write_through",
+      "ordinal": 566,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyTextIOWrapperTest.test_read_by_chunk",
+      "ordinal": 567,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyTextIOWrapperTest.test_read_byteslike",
+      "ordinal": 568,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyTextIOWrapperTest.test_read_non_blocking",
+      "ordinal": 569,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyTextIOWrapperTest.test_read_nonbytes",
+      "ordinal": 570,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyTextIOWrapperTest.test_read_one_by_one",
+      "ordinal": 571,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyTextIOWrapperTest.test_readlines",
+      "ordinal": 572,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyTextIOWrapperTest.test_readonly_attributes",
+      "ordinal": 573,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyTextIOWrapperTest.test_reconfigure_defaults",
+      "ordinal": 574,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyTextIOWrapperTest.test_reconfigure_encoding_read",
+      "ordinal": 575,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyTextIOWrapperTest.test_reconfigure_errors",
+      "ordinal": 576,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyTextIOWrapperTest.test_reconfigure_line_buffering",
+      "ordinal": 577,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyTextIOWrapperTest.test_reconfigure_locale",
+      "ordinal": 578,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyTextIOWrapperTest.test_reconfigure_newline",
+      "ordinal": 579,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyTextIOWrapperTest.test_reconfigure_write",
+      "ordinal": 580,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyTextIOWrapperTest.test_reconfigure_write_fromascii",
+      "ordinal": 581,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyTextIOWrapperTest.test_reconfigure_write_non_seekable",
+      "ordinal": 582,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyTextIOWrapperTest.test_reconfigure_write_through",
+      "ordinal": 583,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyTextIOWrapperTest.test_recursive_repr",
+      "ordinal": 584,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyTextIOWrapperTest.test_repr",
+      "ordinal": 585,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyTextIOWrapperTest.test_seek_and_tell",
+      "ordinal": 586,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyTextIOWrapperTest.test_seek_append_bom",
+      "ordinal": 587,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyTextIOWrapperTest.test_seek_bom",
+      "ordinal": 588,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyTextIOWrapperTest.test_seek_with_encoder_state",
+      "ordinal": 589,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyTextIOWrapperTest.test_seeking",
+      "ordinal": 590,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyTextIOWrapperTest.test_seeking_too",
+      "ordinal": 591,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyTextIOWrapperTest.test_subclass_repr",
+      "ordinal": 592,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyTextIOWrapperTest.test_tell_after_readline_with_cr",
+      "ordinal": 593,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyTextIOWrapperTest.test_telling",
+      "ordinal": 594,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyTextIOWrapperTest.test_threads_write",
+      "ordinal": 595,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyTextIOWrapperTest.test_uninitialized",
+      "ordinal": 596,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyTextIOWrapperTest.test_unreadable",
+      "ordinal": 597,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyTextIOWrapperTest.test_unseekable",
+      "ordinal": 598,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyTextIOWrapperTest.test_writelines",
+      "ordinal": 599,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyTextIOWrapperTest.test_writelines_error",
+      "ordinal": 600,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyTextIOWrapperTest.test_writelines_userlist",
+      "ordinal": 601,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CMiscIOTest.test___all__",
+      "ordinal": 602,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CMiscIOTest.test_abc_inheritance",
+      "ordinal": 603,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CMiscIOTest.test_abc_inheritance_official",
+      "ordinal": 604,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CMiscIOTest.test_abcs",
+      "ordinal": 605,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CMiscIOTest.test_attributes",
+      "ordinal": 606,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CMiscIOTest.test_blockingioerror",
+      "ordinal": 607,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CMiscIOTest.test_check_encoding_errors",
+      "ordinal": 608,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CMiscIOTest.test_check_encoding_warning",
+      "ordinal": 609,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CMiscIOTest.test_create_fail",
+      "ordinal": 610,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CMiscIOTest.test_create_writes",
+      "ordinal": 611,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CMiscIOTest.test_daemon_threads_shutdown_stderr_deadlock",
+      "ordinal": 612,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CMiscIOTest.test_daemon_threads_shutdown_stdout_deadlock",
+      "ordinal": 613,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CMiscIOTest.test_io_after_close",
+      "ordinal": 614,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CMiscIOTest.test_nonblock_pipe_write_bigbuf",
+      "ordinal": 615,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CMiscIOTest.test_nonblock_pipe_write_smallbuf",
+      "ordinal": 616,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CMiscIOTest.test_open_allargs",
+      "ordinal": 617,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CMiscIOTest.test_open_pipe_with_append",
+      "ordinal": 618,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CMiscIOTest.test_pickling",
+      "ordinal": 619,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CMiscIOTest.test_readinto_buffer_overflow",
+      "ordinal": 620,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CMiscIOTest.test_removed_u_mode",
+      "ordinal": 621,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CMiscIOTest.test_text_encoding",
+      "ordinal": 622,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CMiscIOTest.test_warn_on_dealloc",
+      "ordinal": 623,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CMiscIOTest.test_warn_on_dealloc_fd",
+      "ordinal": 624,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyMiscIOTest.test___all__",
+      "ordinal": 625,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyMiscIOTest.test_abc_inheritance",
+      "ordinal": 626,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyMiscIOTest.test_abc_inheritance_official",
+      "ordinal": 627,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyMiscIOTest.test_abcs",
+      "ordinal": 628,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyMiscIOTest.test_attributes",
+      "ordinal": 629,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyMiscIOTest.test_blockingioerror",
+      "ordinal": 630,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyMiscIOTest.test_check_encoding_errors",
+      "ordinal": 631,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyMiscIOTest.test_check_encoding_warning",
+      "ordinal": 632,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyMiscIOTest.test_create_fail",
+      "ordinal": 633,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyMiscIOTest.test_create_writes",
+      "ordinal": 634,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyMiscIOTest.test_io_after_close",
+      "ordinal": 635,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyMiscIOTest.test_nonblock_pipe_write_bigbuf",
+      "ordinal": 636,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyMiscIOTest.test_nonblock_pipe_write_smallbuf",
+      "ordinal": 637,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyMiscIOTest.test_open_allargs",
+      "ordinal": 638,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyMiscIOTest.test_open_pipe_with_append",
+      "ordinal": 639,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyMiscIOTest.test_pickling",
+      "ordinal": 640,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyMiscIOTest.test_removed_u_mode",
+      "ordinal": 641,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyMiscIOTest.test_text_encoding",
+      "ordinal": 642,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyMiscIOTest.test_warn_on_dealloc",
+      "ordinal": 643,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PyMiscIOTest.test_warn_on_dealloc_fd",
+      "ordinal": 644,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CSignalsTest.test_interrupted_read_retry_buffered",
+      "ordinal": 645,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CSignalsTest.test_interrupted_read_retry_text",
+      "ordinal": 646,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CSignalsTest.test_interrupted_write_buffered",
+      "ordinal": 647,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CSignalsTest.test_interrupted_write_retry_buffered",
+      "ordinal": 648,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CSignalsTest.test_interrupted_write_retry_text",
+      "ordinal": 649,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CSignalsTest.test_interrupted_write_text",
+      "ordinal": 650,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CSignalsTest.test_interrupted_write_unbuffered",
+      "ordinal": 651,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CSignalsTest.test_reentrant_write_buffered",
+      "ordinal": 652,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.CSignalsTest.test_reentrant_write_text",
+      "ordinal": 653,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PySignalsTest.test_interrupted_read_retry_buffered",
+      "ordinal": 654,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PySignalsTest.test_interrupted_read_retry_text",
+      "ordinal": 655,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PySignalsTest.test_interrupted_write_buffered",
+      "ordinal": 656,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PySignalsTest.test_interrupted_write_retry_buffered",
+      "ordinal": 657,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PySignalsTest.test_interrupted_write_retry_text",
+      "ordinal": 658,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PySignalsTest.test_interrupted_write_text",
+      "ordinal": 659,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.PySignalsTest.test_interrupted_write_unbuffered",
+      "ordinal": 660,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.TestIOCTypes.test_class_hierarchy",
+      "ordinal": 661,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.TestIOCTypes.test_disallow_instantiation",
+      "ordinal": 662,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.TestIOCTypes.test_immutable_types",
+      "ordinal": 663,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.TestIOCTypes.test_stringio_setstate",
+      "ordinal": 664,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.TestIOCTypes.test_subclassing",
+      "ordinal": 665,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.ProtocolsTest.test_reader_subclass",
+      "ordinal": 666,
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_io.ProtocolsTest.test_writer_subclass",
+      "ordinal": 667,
+      "occurrence": 1
+    }
+  ]
+}
