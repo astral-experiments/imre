@@ -81,4 +81,24 @@ def current():
         raise AssertionError("writer exception")
     assert chunks == ['{', '"' + key + '"', ': ', '"\udfff"']
 
+    class Key:
+        @property
+        def __class__(self):
+            return Record
+
+    for streaming, expected_name in [(False, "Key"), (True, "Record")]:
+        output = StringIO()
+        try:
+            data = {"first": 1, Key(): 2}
+            if streaming:
+                json.dump(data, output)
+            else:
+                json.dumps(data)
+        except TypeError as exc:
+            assert exc.args == ("keys must be str, int, float, bool or None, not " + expected_name,)
+        else:
+            raise AssertionError("invalid key")
+        if streaming:
+            assert output.getvalue() == '{"first": 1'
+
     print("encoded container subclasses")
