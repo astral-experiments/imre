@@ -21,6 +21,13 @@ class SparseSequence:
 def current():
     case = TestCase()
     case.failureException = Failure
+    assert case.assertListEqual(list1=[1], list2=[1]) is None
+    with case.assertRaises(Failure) as caught:
+        case.assertListEqual([1], (1,))
+    assert str(caught.exception) == "Second sequence is not a list: (1,)"
+    with case.assertRaises(Failure) as caught:
+        case.assertListEqual([1], [2], msg="changed list")
+    print(str(caught.exception))
     compare = case.assertSequenceEqual
     assert compare([], ()) is None
     assert compare([1, 2], (1, 2)) is None
