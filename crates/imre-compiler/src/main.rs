@@ -206,21 +206,6 @@ fn run() -> Result<ExitCode, String> {
         .then(run_program::CompileChildren::prepare)
         .transpose()
         .map_err(|error| format!("Could not prepare compiler child waits: {error}"))?;
-    let run_image = |directory, options: &imre_compiler::CompileOptions| {
-        #[cfg(unix)]
-        if let Some(disposition) = child_disposition {
-            disposition
-                .restore()
-                .map_err(|error| format!("Could not restore SIGCHLD: {error}"))?;
-        }
-        run_program(
-            &output,
-            directory,
-            &source_path,
-            args,
-            options.python_startup().map(|(flags, _)| flags),
-        )
-    };
     if lto_linker.is_some() && (runtime.is_none() || target.is_none()) {
         return Err("--lto-linker requires explicit --runtime and --target".to_owned());
     }
@@ -272,6 +257,25 @@ fn run() -> Result<ExitCode, String> {
         None
     };
     let split = native.is_some() && !whole_program;
+    if split {
+        options.bundled_provider_archive =
+            bundled_native.and_then(|toolchain| toolchain.provider_archive(&optimization));
+    }
+    let run_image = |directory| {
+        #[cfg(unix)]
+        if let Some(disposition) = child_disposition {
+            disposition
+                .restore()
+                .map_err(|error| format!("Could not restore SIGCHLD: {error}"))?;
+        }
+        run_program(
+            &output,
+            directory,
+            &source_path,
+            args,
+            options.python_startup().map(|(flags, _)| flags),
+        )
+    };
     let native_lld = if lto_linker.is_some()
         || link.args.iter().any(|arg| {
             arg.as_encoded_bytes().starts_with(b"-fuse-ld=")
@@ -311,7 +315,11 @@ fn run() -> Result<ExitCode, String> {
             && let Some((file, sources)) = executable_cache.and_then(|cache| cache.lookup())
         {
             validate_paths(
-                sources.files.iter().map(|(p, _, _)| p.as_path()),
+                sources
+                    .files
+                    .iter()
+                    .map(|(p, _, _)| p.as_path())
+                    .chain(options.bundled_provider_archive.as_deref()),
                 &runtime,
                 &output,
                 None,
@@ -323,7 +331,7 @@ fn run() -> Result<ExitCode, String> {
             progress.cached(label);
             if let Some(directory) = run_directory {
                 progress.running(&source_path);
-                return run_image(directory, &options);
+                return run_image(directory);
             }
             return Ok(ExitCode::SUCCESS);
         }
@@ -341,8 +349,6 @@ fn run() -> Result<ExitCode, String> {
         Units(Vec<CodegenUnit>),
     }
     let (code, input_paths, sources, extension_archives) = if split {
-        options.bundled_provider_archive =
-            bundled_native.and_then(|toolchain| toolchain.provider_archive(&optimization));
         let c = imre_compiler::compile_file_units(&source_path, module_root.as_deref(), &options)?;
         (
             Code::Units(c.units),
@@ -539,7 +545,7 @@ fn run() -> Result<ExitCode, String> {
         drop(temporary);
         drop(scratch);
         drop(stage);
-        return run_image(directory, &options);
+        return run_image(directory);
     }
     Ok(ExitCode::SUCCESS)
 }

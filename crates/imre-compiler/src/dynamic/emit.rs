@@ -101,7 +101,7 @@ pub(super) fn provider(
     }
     let mut ir = format!("{ABI}\n{}\n{}", output.constants, output.functions);
     let mut hash = blake3::Hasher::new();
-    for field in [name, filename, source, &ir] {
+    for field in [std::env::consts::ARCH, name, filename, source, &ir] {
         hash.update(&(field.len() as u64).to_le_bytes());
         hash.update(field.as_bytes());
     }
