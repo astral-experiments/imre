@@ -911,7 +911,7 @@ def check_os_abort(imre, run):
         "signal.signal(signal.SIGABRT, signal.SIG_IGN)\n"
         "os.abort()\n"
     )
-    result = run(imre, "-c", source)
+    result = run(imre, "-c", source, timeout=600)
     assert result.returncode == -signal.SIGABRT, result
 
 
