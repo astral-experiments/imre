@@ -2,7 +2,7 @@ use std::cell::RefCell;
 use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
 use std::os::fd::{AsRawFd, RawFd};
 
-use super::{Context, Error, FALSE, Id, NONE, Result, TRUE, Value, argument, option, os_error};
+use super::{Context, Error, FALSE, Id, NONE, Result, TRUE, Value, argument, os_error};
 
 /// Binary handles retain their access mode after close.
 pub(in crate::dynamic) enum BinaryFile {
@@ -251,41 +251,23 @@ pub(super) fn binary_method(
     receiver: Id,
     name: &str,
     args: &[Id],
-    kwargs: &[(String, Id)],
 ) -> Result<Id> {
     let Value::File(handle) = ctx.heap.get(receiver) else {
         return Err(Error::new("TypeError", "expected a file"));
     };
     let handle = handle.clone();
     let (slot, socket) = match handle.as_ref() {
-        BinaryFile::Descriptor(file) => return file.call(ctx, receiver, name, args, kwargs),
+        BinaryFile::Descriptor(file) => return file.call(ctx, receiver, name, args),
         BinaryFile::Standard { file, .. } => {
-            return standard_buffer_method(ctx, file, receiver, name, args, kwargs);
+            return standard_buffer_method(ctx, file, receiver, name, args);
         }
         BinaryFile::Reader { slot, path } => (slot, path.is_none()),
         BinaryFile::Writer { file, .. } => {
             if name == "seek" {
-                let value = option(args, 1, kwargs, "whence")?;
-                let whence = value
-                    .map(|v| ctx.index_integer(v))
-                    .transpose()?
-                    .map_or(Some(0), |v| v.to_i64().and_then(|n| i32::try_from(n).ok()))
-                    .ok_or_else(|| {
-                        Error::new("OverflowError", "Python int too large to convert to C int")
-                    })?;
+                let whence = whence_argument(ctx, args.get(1).copied())?;
                 let offset = ctx.index_integer(argument(args, 0)?)?;
                 let pos = file.borrow_mut().seek_disk(&offset, i64::from(whence))?;
                 return Ok(ctx.int(pos as i64));
-            }
-            // Converting a size can close this same writer.
-            match (name, args) {
-                ("read", [size]) => {
-                    crate::objects::FileState::check_writer_read_size(&ctx.index_integer(*size)?)?;
-                }
-                ("readline", [size]) if read_length(ctx, Some(*size))? == 0 => {
-                    return Ok(ctx.alloc(Value::Bytes(Vec::new())));
-                }
-                _ => {}
             }
             let mut file = file.borrow_mut();
             return match (name, args) {
@@ -308,23 +290,17 @@ pub(super) fn binary_method(
                 ("__enter__", []) => Ok(receiver),
                 ("fileno", []) => Ok(ctx.int(i64::from(file.fileno()?))),
                 ("tell", []) => Ok(ctx.int(file.tell()? as i64)),
-                ("readable" | "writable" | "seekable" | "isatty", []) => {
-                    let fd = file.fileno()?;
-                    let enabled = match name {
-                        "writable" => true,
-                        "seekable" => file.tell().is_ok(),
-                        // SAFETY: the borrowed writer keeps its file descriptor open.
-                        "isatty" => unsafe { libc::isatty(fd) != 0 },
-                        _ => false,
-                    };
-                    Ok(crate::dynamic::builtins::boolean(enabled))
+                ("writable", []) => {
+                    file.fileno()?;
+                    Ok(TRUE)
                 }
-                ("read" | "readline", [] | [_]) | ("readinto", [_]) => {
-                    if let ("readinto", [buffer]) = (name, args) {
-                        readinto_target(ctx, *buffer)?;
-                    }
-                    Err(Error::new("UnsupportedOperation", "read"))
+                ("seekable", []) => {
+                    file.fileno()?;
+                    Ok(crate::dynamic::builtins::boolean(file.tell().is_ok()))
                 }
+                ("isatty", []) => Ok(crate::dynamic::builtins::boolean(
+                    crate::objects::os::isatty(file.fileno()?),
+                )),
                 _ => Err(Error::new(
                     "TypeError",
                     format!("invalid arguments to file.{name}"),
@@ -343,8 +319,7 @@ pub(super) fn binary_method(
     }
     if name == "seek" {
         let target = argument(args, 0)?;
-        let value = option(args, 1, kwargs, "whence")?;
-        let whence = buffered_whence(ctx, value)?;
+        let whence = buffered_whence(ctx, args.get(1).copied())?;
         {
             let mut slot = slot.borrow_mut();
             let reader = slot
@@ -396,9 +371,6 @@ pub(super) fn binary_method(
         return Ok(ctx.int(reader.seek(pos).map_err(os_error)? as i64));
     }
     let mut slot = slot.borrow_mut();
-    if name == "write" {
-        return Err(Error::new("UnsupportedOperation", "write"));
-    }
     if matches!(name, "__exit__" | "close") {
         if let Some(ReadSource::Socket(mut raw)) = slot.take() {
             raw.close().map_err(os_error)?;
@@ -452,7 +424,6 @@ pub(super) fn binary_method(
     match name {
         "__enter__" => Ok(receiver),
         "readable" => Ok(TRUE),
-        "writable" => Ok(FALSE),
         "seekable" => Ok(crate::dynamic::builtins::boolean(f.seekable())),
         "isatty" => {
             use std::io::IsTerminal;
@@ -533,7 +504,6 @@ fn standard_buffer_method(
     receiver: Id,
     name: &str,
     args: &[Id],
-    kwargs: &[(String, Id)],
 ) -> Result<Id> {
     if matches!((name, args), ("close", []) | ("__exit__", [_, _, _])) {
         if !file.closed() {
@@ -569,12 +539,6 @@ fn standard_buffer_method(
             }
         }
         ("seek", [target] | [target, _]) => {
-            if !kwargs.is_empty() {
-                return Err(Error::new(
-                    "TypeError",
-                    "BufferedWriter.seek() takes no keyword arguments",
-                ));
-            }
             let whence = buffered_whence(ctx, args.get(1).copied())?;
             if file.closed() {
                 return Err(Error::new("ValueError", "seek of closed file"));
@@ -593,9 +557,9 @@ fn standard_buffer_method(
             Ok(ctx.int(pos))
         }
         ("fileno", []) => Ok(ctx.int(if file.standard_writer()? { 2 } else { 1 })),
-        ("writable" | "readable", []) => {
+        ("writable", []) => {
             file.standard_writer()?;
-            Ok(crate::dynamic::builtins::boolean(name == "writable"))
+            Ok(TRUE)
         }
         ("isatty", []) => Ok(crate::dynamic::builtins::boolean(
             crate::objects::os::isatty(file.fileno()?),
@@ -603,9 +567,6 @@ fn standard_buffer_method(
         ("__enter__", []) => {
             file.standard_writer()?;
             Ok(receiver)
-        }
-        ("read" | "readline", [] | [_]) | ("readinto", [_]) => {
-            Err(Error::new("UnsupportedOperation", "read"))
         }
         _ => Err(Error::new(
             "TypeError",
