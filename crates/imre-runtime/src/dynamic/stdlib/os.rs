@@ -114,6 +114,33 @@ pub(super) fn c_path(ctx: &mut Context, path: Id, nul_error: &str) -> Result<CSt
     CString::new(encoded_path(ctx, path)?).map_err(|_| Error::new("ValueError", nul_error))
 }
 
+/// Create an anonymous Linux file using CPython's filesystem-name and unsigned-mask converters.
+#[cfg(target_os = "linux")]
+pub(super) fn memfd_create(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    use num_traits::ToPrimitive;
+    use rustix::fs::MemfdFlags;
+    use std::os::fd::IntoRawFd;
+
+    let [Some(name), flags] =
+        builtins::bind_builtin_arguments("memfd_create", args, kwargs, ["name", "flags"], 1)?
+    else {
+        unreachable!("memfd_create requires a name")
+    };
+    let path = posixpath::fspath(ctx, name)?;
+    let name = c_path(ctx, path, "embedded null byte")?;
+    let flags = if let Some(flags) = flags {
+        let flags = ctx.index_integer(flags)?;
+        (&*flags.big() & num_bigint::BigInt::from(u32::MAX))
+            .to_u32()
+            .expect("flags masked to 32 bits")
+    } else {
+        libc::MFD_CLOEXEC
+    };
+    let fd = rustix::fs::memfd_create(name.as_c_str(), MemfdFlags::from_bits_retain(flags))
+        .map_err(|e| super::os_error(e.into()))?;
+    Ok(ctx.int(i64::from(fd.into_raw_fd())))
+}
+
 /// Read cryptographically secure bytes from the operating system.
 pub(super) fn urandom(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
     if !kwargs.is_empty() {

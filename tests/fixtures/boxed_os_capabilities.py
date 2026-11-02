@@ -37,6 +37,17 @@ def current():
     assert mkfifo not in supports_fd and mkfifo not in supports_follow_symlinks
     if sys.platform == "linux":
         assert mkfifo in supports_dir_fd
+        from os import MFD_CLOEXEC, memfd_create
+        assert memfd_create is posix.memfd_create and MFD_CLOEXEC == posix.MFD_CLOEXEC
+        for flags, inherited in ((0, True), (MFD_CLOEXEC + (1 << 70), False)):
+            fd = memfd_create(b"test", flags=flags)
+            try:
+                assert os.get_inheritable(fd) is inherited
+                with open(fd, "wb", closefd=False) as stream:
+                    stream.write(b"memfd")
+                    assert stream.tell() == 5
+            finally:
+                os.close(fd)
     assert os.mkdir is posix.mkdir and os.mkdir in supports_dir_fd
     directory = os.path.dirname(__file__) or "."
     fd = os.open(directory, os.O_RDONLY)
