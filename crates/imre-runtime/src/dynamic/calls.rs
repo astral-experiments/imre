@@ -50,6 +50,7 @@ pub(super) fn module_function(symbol: &str) -> Option<(&str, &str)> {
         "resource" if matches!(function, "getrlimit" | "setrlimit") => Some((module, function)),
         "gc" if matches!(function, "enable" | "disable" | "isenabled") => Some((module, function)),
         "zlib" if matches!(function, "adler32" | "crc32") => Some((module, function)),
+        "_hashlib" if !function.contains('.') => Some((module, function)),
         "hashlib"
             if matches!(function, "new" | "file_digest")
                 || crate::objects::HashState::algorithms().any(|name| name == function) =>
@@ -5296,6 +5297,7 @@ impl Context {
                     name.as_str(),
                     HashState::CLASS
                         | HashState::XOF_CLASS
+                        | HashState::OPENSSL_CLASS
                         | KEY_WRAPPER
                         | value::REGEX_PATTERN_TYPE
                         | value::REGEX_MATCH_TYPE

@@ -1,7 +1,64 @@
 use super::{Context, Error, Id, NONE, Result, Value, argument, builtins};
-use crate::objects::{HashState, SharedHash};
+use crate::objects::HashState;
+use digest::SharedHash;
 
 mod blake2;
+pub(crate) mod digest;
+mod kdf;
+pub(crate) mod openssl;
+
+pub(in crate::dynamic) fn install_openssl(ctx: &mut Context, scope: Id) -> Result<()> {
+    let provider = openssl::required()?;
+    for name in ["HASH", "new", "get_fips_mode", "pbkdf2_hmac", "scrypt"] {
+        if name != "scrypt" || provider.has_scrypt() {
+            let function = ctx.builtin(&format!("_hashlib.{name}"));
+            ctx.bind(scope, name, function);
+        }
+    }
+    let names = ctx.alloc(Value::Set {
+        entries: Default::default(),
+        frozen: true,
+    });
+    let mut constructors = Vec::new();
+    for &name in digest::NAMES {
+        let attr = format!("openssl_{name}");
+        let constructor = ctx.builtin(&format!("_hashlib.{attr}"));
+        ctx.bind(scope, &attr, constructor);
+        let key = ctx.text(name);
+        constructors.push((constructor, key));
+        if provider.digest(name).is_ok() {
+            builtins::set_add(ctx, names, key)?;
+        }
+    }
+    let constructors = ctx.dict(constructors);
+    let constructors = ctx.alloc(Value::MappingProxy(constructors));
+    ctx.bind(scope, "_constructors", constructors);
+    ctx.bind(scope, "openssl_md_meth_names", names);
+    Ok(())
+}
+
+pub(super) fn call_openssl(
+    ctx: &mut Context,
+    name: &str,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Id> {
+    match name {
+        "pbkdf2_hmac" => kdf::pbkdf2_hmac(ctx, args, kwargs),
+        "scrypt" => kdf::scrypt(ctx, args, kwargs),
+        "get_fips_mode" => {
+            if !args.is_empty() || !kwargs.is_empty() {
+                return Err(Error::new(
+                    "TypeError",
+                    "get_fips_mode() takes no arguments",
+                ));
+            }
+            let provider = openssl::required()?;
+            Ok(ctx.int(i64::from(provider.fips_mode())))
+        }
+        _ => digest::construct(ctx, name, args, kwargs),
+    }
+}
 
 /// Borrows the bytes of a boxed hash input, including mutable buffers.
 pub(super) fn buffer(ctx: &Context, id: Id) -> Result<&[u8]> {
@@ -118,10 +175,10 @@ pub(super) fn method(ctx: &mut Context, name: &str, args: &[Id]) -> Result<Id> {
     let value = match name {
         "hash.update" => {
             let data = buffer(ctx, argument(args, 1)?)?;
-            hash.lock().update(data);
+            hash.lock().update(data)?;
             return Ok(NONE);
         }
-        "hash.copy" => Value::Hash(SharedHash::new(hash.lock().clone())),
+        "hash.copy" => Value::Hash(hash.lock().copy()?),
         _ => unreachable!("registered hash method"),
     };
     Ok(ctx.alloc(value))
@@ -138,15 +195,9 @@ pub(super) fn digest(
     };
     let hash = hash.clone();
     let positional = &args[1..];
-    let hex = method == "hexdigest";
-    let value = if hash.lock().is_xof() {
+    let length = if hash.lock().is_xof() {
         let [length] = builtins::bind_builtin_arguments(method, positional, kwargs, ["length"], 1)?;
-        let length = ctx.index_integer(length.expect("bound required length"))?;
-        if hex {
-            Value::Str(hash.lock().xof_hexdigest(&length)?.to_string())
-        } else {
-            Value::Bytes(hash.lock().xof_digest(&length)?)
-        }
+        Some(ctx.index_integer(length.expect("bound required length"))?)
     } else {
         if !kwargs.is_empty() {
             return Err(Error::new(
@@ -163,15 +214,9 @@ pub(super) fn digest(
                 ),
             ));
         }
-        if hex {
-            Value::Str(hash.lock().hexdigest()?.to_string())
-        } else {
-            Value::Bytes(
-                hash.lock()
-                    .fixed_digest(method, |data| Ok(data.to_vec()))?,
-            )
-        }
+        None
     };
+    let value = hash.lock().digest(method, length.as_ref())?;
     Ok(ctx.alloc(value))
 }
 
@@ -320,7 +365,7 @@ fn read_chunks(ctx: &mut Context, file: Id, digest: Id, buf: Id, view: Option<Id
             let Value::Hash(state) = ctx.heap.get(digest) else {
                 unreachable!()
             };
-            state.lock().update(&bytes[..end as usize]);
+            state.lock().update(&bytes[..end as usize])?;
         }
         ctx.heap.release_temporaries_since(step);
         ctx.heap.reserve_slot_or_request_collection();

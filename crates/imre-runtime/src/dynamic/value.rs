@@ -786,7 +786,7 @@ pub(super) enum Value {
         decode: Id,
     },
     CodecDecoder(crate::objects::Codec),
-    Hash(crate::objects::SharedHash),
+    Hash(super::stdlib::hashlib::digest::SharedHash),
     Hmac(Hmac),
     Struct {
         format: String,
