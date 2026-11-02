@@ -3,6 +3,7 @@ import importlib
 import ntpath
 import os
 import pathlib
+import pickle
 import sys
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from urllib.request import pathname2url
@@ -14,7 +15,10 @@ def current():
     path_types = importlib.import_module(name)
     assert path_types is sys.modules[name] and path_types is pathlib.types
     assert importlib.import_module(name) is path_types
+    assert "pathlib._local" not in sys.modules and "_local" not in vars(pathlib)
     for flavour in (PurePosixPath, PureWindowsPath):
+        legacy_global = b"cpathlib._local\n" + flavour.__name__.encode() + b"\n."
+        assert pickle.loads(legacy_global) is flavour
         pure = flavour("child")
         assert isinstance(flavour.parser, path_types._PathParser)
         assert not isinstance(pure, path_types._PathParser)
