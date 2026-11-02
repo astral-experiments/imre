@@ -1,5 +1,5 @@
 from annotationlib import Format, ForwardRef
-from typing import Annotated, ReadOnly, get_type_hints
+from typing import Annotated, ReadOnly, Unpack, get_args, get_origin, get_type_hints
 
 
 class Target:
@@ -58,6 +58,33 @@ def current():
     assert type(callback_error) is NameError and callback_error.name == "callback_name"
     assert callback_error.args == ("user callback",)
     assert get_type_hints(fn, format=Format.FORWARDREF) == {"a": Target, "return": type(None)}
+
+    class Deferred(Parent):
+        missing: Unknown
+
+    assert get_type_hints(Deferred, format=4)["missing"] == "Unknown"
+    class_hints = get_type_hints(Deferred, format=Format.FORWARDREF)
+    assert class_hints["item"] is Target and class_hints["missing"].__forward_arg__ == "Unknown"
+
+    Deferred.__annotations__ = {"nested": "'Missing'", "arg": list["Missing"]}
+    hints = get_type_hints(Deferred, format=Format.FORWARDREF)
+    ref = hints["nested"]
+    assert ref.__owner__ is Deferred and ref.__forward_is_class__ and not ref.__forward_is_argument__
+    arg, = hints["arg"].__args__
+    assert arg.__owner__ is None and arg.__forward_is_argument__ and not arg.__forward_is_class__
+
+    for expr, fmt, expected in [(int, Format.VALUE, int), ("int", Format.VALUE, int),
+                                ("Missing", Format.FORWARDREF, ForwardRef("Missing"))]:
+        Deferred.__annotations__ = {"packed": tuple[*tuple[expr, ...]]}
+        packed, = get_args(get_type_hints(Deferred, format=fmt)["packed"])
+        assert get_origin(packed) is Unpack and get_args(packed) == (tuple[expected, ...],)
+
+    def unresolved(arg: Unknown) -> None:
+        pass
+
+    hints = get_type_hints(unresolved, format=Format.FORWARDREF)
+    assert hints["arg"].__owner__ is unresolved and hints["return"] is type(None)
+    assert get_type_hints(unresolved, format=Format.STRING) == {"arg": "Unknown", "return": "None"}
 
     def register(content: Target, path):
         pass
