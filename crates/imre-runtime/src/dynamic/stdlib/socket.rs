@@ -1050,6 +1050,7 @@ pub(super) fn call(
                     ));
                 }
             };
+            ctx.check_buffer_exporter(data)?;
             ctx.native_buffer_bytes(data)?;
             let count = ctx.with_buffer_export(data, |ctx| {
                 let flags = flags
