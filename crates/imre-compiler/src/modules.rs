@@ -1399,6 +1399,9 @@ impl IntrinsicModule {
             (Self::Typing, "dataclass_transform") => {
                 Intrinsic::ObjectRuntimeExport("typing.dataclass_transform")
             }
+            (Self::Typing, "no_type_check_decorator") => {
+                Intrinsic::ObjectRuntimeExport("typing.no_type_check_decorator")
+            }
             (Self::Typing, "final") => Intrinsic::ObjectRuntimeExport("typing.final"),
             (Self::Typing, "is_protocol") => Intrinsic::ObjectRuntimeExport("typing.is_protocol"),
             (Self::Typing, "TypedDict") => Intrinsic::ObjectRuntimeExport("typing.TypedDict"),
