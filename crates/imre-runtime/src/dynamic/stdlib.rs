@@ -124,6 +124,7 @@ pub(super) fn is_module(name: &str) -> bool {
             | "urllib.parse"
             | "io"
             | "itertools"
+            | "warnings"
     ) || (cfg!(target_os = "linux") && matches!(name, "_signal" | "_imre_signal"))
         || has_lazy_attributes(name)
 }
@@ -215,7 +216,6 @@ pub(super) fn has_lazy_attributes(name: &str) -> bool {
             | "contextlib"
             | "contextvars"
             | "_contextvars"
-            | "warnings"
             | "subprocess"
             | "socket"
             | "_socket"
@@ -813,7 +813,6 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             "email.utils",
             "parsedate_to_datetime" | "format_datetime" | "formatdate" | "_has_surrogates",
         )
-        | ("warnings", "warn")
         | (
             "fnmatch",
             "fnmatch" | "fnmatchcase" | "filter" | "filterfalse" | "translate" | "_translate",
@@ -1806,17 +1805,14 @@ pub(super) fn call(
                 ctx.warn_bootstrap_loader(*globals, line, message, frozen)?;
                 return Ok(NONE);
             }
-            ("warn_debug_override", [source_globals], []) => {
-                if *source_globals == NONE {
-                    crate::objects::cache_paths::warn_debug_override()?;
-                } else {
-                    ctx.warn_bootstrap_loader(
-                        *source_globals,
-                        258,
-                        crate::objects::cache_paths::DEBUG_OVERRIDE_WARNING,
-                        false,
-                    )?;
-                }
+            ("warn_debug_override", [globals, frozen], []) => {
+                let frozen = ctx.truth(*frozen)?;
+                ctx.warn_bootstrap_loader(
+                    *globals,
+                    258,
+                    crate::objects::cache_paths::DEBUG_OVERRIDE_WARNING,
+                    frozen,
+                )?;
                 return Ok(NONE);
             }
             ("native_spec_info", [name, path, bundled], []) => {
@@ -2330,7 +2326,7 @@ pub(super) fn call(
         "file.truncate" => (2, &[]),
         "file.__exit__" => (4, &[]),
         "struct.unpack" | "file.read" | "file.read1" | "file.readline" | "file.readlines"
-        | "file.readinto" | "file.write" | "warnings.warn" => (2, &[]),
+        | "file.readinto" | "file.write" => (2, &[]),
         "match.group" => (usize::MAX, &[]),
         "collections.defaultdict.__missing__" => (2, &[]),
         "match.groups" | "match.groupdict" => (2, &["default"]),
@@ -2639,10 +2635,6 @@ pub(super) fn call(
             let items =
                 ctx.dict_iterator(receiver, super::value::DictViewKind::Items, false, false);
             ctx.alloc(Value::Tuple(vec![class, args, NONE, NONE, items]))
-        }
-        "warnings.warn" => {
-            eprintln!("Warning: {}", ctx.str_value(argument(args, 0)?)?);
-            NONE
         }
         "sys.exception" => ctx.heap.active_exception(),
         "scanner.match" | "scanner.search" => {

@@ -760,7 +760,7 @@ impl Context {
     }
 
     pub(super) fn bind_attribute(&mut self, value: Id, receiver: Id, owner: Id) -> Result<Id> {
-        if matches!(self.heap.get(value), Value::Native(name) if matches!(name.as_str(), "datetime.time.fromisoformat" | "dict.fromkeys" | "int.from_bytes" | "float.__getformat__" | "bytes.fromhex" | "bytearray.fromhex"))
+        if matches!(self.heap.get(value), Value::Native(name) if matches!(name.as_str(), "dict.fromkeys" | "int.from_bytes" | "float.__getformat__" | "bytes.fromhex" | "bytearray.fromhex") || stdlib::datetime::clock_classmethod(name))
         {
             return Ok(self.bind_native_classmethod(value, owner));
         }
@@ -1832,7 +1832,11 @@ impl Context {
             && stdlib::datetime::members(kind).is_some()
             && let Some(value) = self.class_attr(obj, name)
         {
-            return self.bind_attribute(value, NONE, obj);
+            if matches!(self.heap.get(value), Value::Native(symbol) if stdlib::datetime::clock_classmethod(symbol))
+            {
+                return Ok(self.bind_native_classmethod(value, obj));
+            }
+            return Ok(value);
         }
         if let Value::Union(union) = *self.heap.get(obj) {
             match name {
@@ -1890,7 +1894,10 @@ impl Context {
                 && field.is_none()
                 && let Some(member) = member
                 && match self.heap.get(member) {
-                    Value::Native(symbol) => BuiltinDescriptor::lookup(symbol).is_some(),
+                    Value::Native(symbol) => {
+                        !stdlib::datetime::clock_classmethod(symbol)
+                            && BuiltinDescriptor::lookup(symbol).is_some()
+                    }
                     Value::IoMethod {
                         name: "writelines", ..
                     } => true,
@@ -2619,12 +2626,6 @@ impl Context {
                     }
                     _ => {}
                 }
-            }
-            Value::Native(ref class)
-                if class == "datetime.datetime"
-                    && matches!(name, "now" | "fromtimestamp" | "combine") =>
-            {
-                return Ok(self.builtin(&format!("datetime.datetime.{name}")));
             }
             Value::GetSetDescriptor {
                 owner, name: field, ..
