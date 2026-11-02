@@ -2712,6 +2712,10 @@ impl Context {
     ) -> Result<()> {
         #[cfg(target_os = "linux")]
         if source.is_none() && matches!(name, "os" | "posix") {
+            for name in ["major", "minor", "makedev"] {
+                let function = self.builtin(&format!("posix.{name}"));
+                self.bind(scope, name, function);
+            }
             stdlib::os::eventfd::initialize(self, scope);
         }
         if name == "_thread" && source.is_none() {

@@ -1,4 +1,6 @@
 #[cfg(target_os = "linux")]
+pub(in crate::dynamic) mod device;
+#[cfg(target_os = "linux")]
 pub(in crate::dynamic) mod eventfd;
 pub(in crate::dynamic) mod scandir;
 pub(in crate::dynamic) mod stat;
