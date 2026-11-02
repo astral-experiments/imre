@@ -2,6 +2,10 @@
 import _imre_subprocess as _process
 import selectors
 
+__all__ = ["Popen", "PIPE", "STDOUT", "call", "check_call", "getstatusoutput",
+           "getoutput", "check_output", "run", "CalledProcessError", "DEVNULL",
+           "SubprocessError", "TimeoutExpired", "CompletedProcess"]
+
 _PopenSelector = selectors.PollSelector
 
 PIPE = -1
@@ -189,6 +193,35 @@ def check_call(*popenargs, **kwargs):
             cmd = popenargs[0]
         raise CalledProcessError(code, cmd)
     return 0
+
+
+def check_output(*popenargs, timeout=None, **kwargs):
+    for key in ("stdout", "check"):
+        if key in kwargs:
+            raise ValueError(f"{key} argument not allowed, it will be overridden.")
+    if "input" in kwargs and kwargs["input"] is None:
+        # Explicit None supplies EOF, like an empty input in the corresponding mode.
+        text = (kwargs.get("text") or kwargs.get("universal_newlines")
+                or kwargs.get("encoding") or kwargs.get("errors"))
+        kwargs["input"] = "" if text else b""
+    return run(*popenargs, stdout=PIPE, timeout=timeout, check=True, **kwargs).stdout
+
+
+def getstatusoutput(cmd, *, encoding=None, errors=None):
+    try:
+        output = check_output(cmd, shell=True, text=True, stderr=STDOUT,
+                              encoding=encoding, errors=errors)
+        status = 0
+    except CalledProcessError as exc:
+        output = exc.output
+        status = exc.returncode
+    if output.endswith("\n"):
+        output = output[:-1]
+    return status, output
+
+
+def getoutput(cmd, *, encoding=None, errors=None):
+    return getstatusoutput(cmd, encoding=encoding, errors=errors)[1]
 
 
 class CompletedProcess:

@@ -1441,6 +1441,9 @@ impl IntrinsicModule {
             (Self::TomliW, "dump") => Intrinsic::TomliDump,
             (Self::Enum, "Enum") => Intrinsic::StandardEnum,
             (Self::Dataclasses, "is_dataclass") => Intrinsic::IsDataclass,
+            (Self::Subprocess, "__all__") if cfg!(unix) => {
+                Intrinsic::ObjectRuntimeExport("subprocess.__all__")
+            }
             (Self::Subprocess, "PIPE") => Intrinsic::Pipe,
             (Self::Subprocess, "DEVNULL") => Intrinsic::Devnull,
             (Self::Subprocess, "check_output") => Intrinsic::CheckOutput,
