@@ -2167,14 +2167,8 @@ impl Context {
         if builtins::is_enum_base(name) {
             self.install_enum_base(value, name);
         }
-        if let Some(constants) = crate::objects::Calendar::class_constants(name) {
-            stdlib::datetime::install_members(self, name);
-            for (field, value) in ["min", "max", "resolution"].into_iter().zip(constants) {
-                let id = stdlib::datetime::store(self, value, NONE);
-                self.builtins.insert(format!("{name}.{field}"), id);
-            }
-        } else if matches!(name, "datetime.timezone" | stdlib::datetime::TZINFO) {
-            stdlib::datetime::install_members(self, name);
+        if let Some(members) = stdlib::datetime::members(name) {
+            members.install(self, value);
         }
         if let Some(class) = typing::ParameterClass::lookup(name) {
             class.install(self, value);
