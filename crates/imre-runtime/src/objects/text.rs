@@ -10,7 +10,7 @@ pub(crate) mod urlsplit;
 pub(crate) mod zfill;
 
 pub(crate) use expandtabs::expand_tabs;
-pub(crate) use lowercase::{capitalize, python_islower};
+pub(crate) use lowercase::{capitalize, python_islower, python_istitle};
 pub(super) use lowercase::{lowercase, lowercase_chars};
 pub(crate) use normalization::normalize_unicode;
 
@@ -326,6 +326,16 @@ pub unsafe extern "C" fn imre_str_is_ascii(value: *const Str) -> u32 {
 pub unsafe extern "C" fn imre_str_is_lower(value: *const Str) -> u32 {
     // SAFETY: the caller supplies a rooted, exact UTF-8 string.
     u32::from(python_islower(unsafe { &*value }.chars()))
+}
+
+/// Tests a native string with Python's titlecase predicate.
+///
+/// # Safety
+/// The caller roots the immutable string for the duration of the call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_str_is_title(value: *const Str) -> u32 {
+    // SAFETY: the caller supplies a rooted, exact UTF-8 string.
+    u32::from(python_istitle(unsafe { &*value }.chars()))
 }
 
 /// Returns whether the string has a cased character and every cased character is uppercase.

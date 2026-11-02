@@ -77,6 +77,7 @@ impl BuiltinDescriptor {
             "str.isdigit" => ("str", "isdigit"),
             "str.islower" => ("str", "islower"),
             "str.zfill" => ("str", "zfill"),
+            "str.istitle" => ("str", "istitle"),
             "float.__format__" => ("float", "__format__"),
             "object.__hash__" => ("object", "__hash__"),
             "object.__repr__" => ("object", "__repr__"),
@@ -106,7 +107,7 @@ impl BuiltinDescriptor {
             name,
             method: matches!(
                 name,
-                "__format__" | "isascii" | "isalpha" | "isdigit" | "islower" | "zfill"
+                "__format__" | "isascii" | "isalpha" | "isdigit" | "islower" | "istitle" | "zfill"
             ),
         })
     }
@@ -245,7 +246,10 @@ impl BuiltinDescriptor {
                     ("islower", "__doc__") => {
                         "Return True if the string is a lowercase string, False otherwise.\n\nA string is lowercase if all cased characters in the string are lowercase and\nthere is at least one cased character in the string."
                     }
-                    ("isascii" | "isalpha" | "isdigit" | "islower", _) => "($self, /)",
+                    ("istitle", "__doc__") => {
+                        "Return True if the string is a title-cased string, False otherwise.\n\nIn a title-cased string, upper- and title-case characters may only\nfollow uncased characters and lowercase characters only cased ones."
+                    }
+                    ("isascii" | "isalpha" | "isdigit" | "islower" | "istitle", _) => "($self, /)",
                     ("zfill", "__doc__") => {
                         "Pad a numeric string with zeros on the left, to fill a field of the given width.\n\nThe string is never truncated."
                     }

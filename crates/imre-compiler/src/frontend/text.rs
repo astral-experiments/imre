@@ -275,6 +275,7 @@ impl Checker<'_> {
                     "isdigit" => ir::TextPredicate::Digit,
                     "isspace" => ir::TextPredicate::Space,
                     "islower" => ir::TextPredicate::Lower,
+                    "istitle" => ir::TextPredicate::Title,
                     "isupper" => ir::TextPredicate::Upper,
                     _ => unreachable!("resolved text predicate"),
                 };
