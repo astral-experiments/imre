@@ -131,7 +131,7 @@ enum FormatPart {
     DefaultDictFactory(Id, usize),
     DefaultDictName(Id, usize),
     DefaultDictEnd(String),
-    SetMembers(Vec<Id>, usize),
+    SnapshotMembers(Vec<Id>, usize),
     Fields(Id, usize),
     Leave(Id, &'static str),
     ContextEnd(Id),
@@ -140,14 +140,14 @@ enum FormatPart {
 }
 
 impl FormatPart {
-    /// Snapshot the member identities before any element repr can mutate the set.
-    fn set_members(entries: &[(Id, Id)]) -> Result<Self> {
+    /// Snapshot members before an element's repr can mutate the container.
+    fn snapshot(items: impl ExactSizeIterator<Item = Id>) -> Result<Self> {
         let mut members = Vec::new();
         members
-            .try_reserve_exact(entries.len())
-            .map_err(|_| Error::new("MemoryError", ""))?;
-        members.extend(entries.iter().map(|&(key, _)| key));
-        Ok(Self::SetMembers(members, 0))
+            .try_reserve_exact(items.len())
+            .map_err(render_allocation)?;
+        members.extend(items);
+        Ok(Self::SnapshotMembers(members, 0))
     }
 
     /// Values a suspended renderer will read after a Python callback returns.
@@ -166,7 +166,7 @@ impl FormatPart {
             | Self::Fields(id, _)
             | Self::Leave(id, _)
             | Self::ContextEnd(id) => heap.keep(*id),
-            Self::SetMembers(members, index) => {
+            Self::SnapshotMembers(members, index) => {
                 // One traced owner keeps the snapshot alive across every following callback.
                 let tuple = heap.alloc(Value::Tuple(std::mem::take(members)));
                 *self = Self::Sequence(tuple, *index);
@@ -1558,7 +1558,12 @@ impl Context {
                         else {
                             return Ok(output);
                         };
-                        ("{", end, "set(...)", Part::set_members(entries)?)
+                        (
+                            "{",
+                            end,
+                            "set(...)",
+                            Part::snapshot(entries.iter().map(|&(key, _)| key))?,
+                        )
                     }
                     Value::List(_) => ("[", "]", "[...]", Part::Sequence(storage, 0)),
                     Value::Tuple(items) => (
@@ -1594,13 +1599,16 @@ impl Context {
         const SLICE_FRAME_WORDS: usize = 78;
         // Nested list and tuple repr use 128 bytes per level in CPython 3.14 on x86-64.
         const SEQUENCE_FRAME_WORDS: usize = 16;
+        // A pinned x86-64 CPython deque also formats a temporary list; each
+        // nested deque uses 832 bytes, including its ordinary sequence frame.
+        const EXTRA_DEQUE_FRAME_WORDS: usize = 104 - SEQUENCE_FRAME_WORDS;
         const STACK_MARGIN_WORDS: usize = 2048;
         let stack_words = checked
             .then(stacker::remaining_stack)
             .flatten()
             .map(|bytes| (bytes / size_of::<usize>()).saturating_sub(2 * STACK_MARGIN_WORDS));
         let slice_budget = stack_words.map(|words| words / SLICE_FRAME_WORDS);
-        let sequence_budget = stack_words.map(|words| words / SEQUENCE_FRAME_WORDS);
+        let mut extra_deque_words = 0usize;
         let mut slice_depth = 0usize;
         let mut namedtuple_depth = 0usize;
         // Pinned CPython 3.14 uses 192 native bytes per nested builtin alias with
@@ -1661,6 +1669,9 @@ impl Context {
                     append_rendered_text(&mut output, ")")?;
                 }
                 Part::Leave(id, end) => {
+                    if matches!(ctx.heap.get(id), Value::Deque(_)) {
+                        extra_deque_words -= EXTRA_DEQUE_FRAME_WORDS;
+                    }
                     ancestors.remove(&id);
                     let last = active.pop();
                     debug_assert_eq!(last, Some(id));
@@ -1705,12 +1716,12 @@ impl Context {
                         )?;
                     }
                 }
-                Part::SetMembers(members, index) => {
+                Part::SnapshotMembers(members, index) => {
                     if let Some(&member) = members.get(index) {
                         if index != 0 {
                             append_rendered_text(&mut output, ", ")?;
                         }
-                        push_frame(&mut work, Part::SetMembers(members, index + 1))?;
+                        push_frame(&mut work, Part::SnapshotMembers(members, index + 1))?;
                         push_frame(&mut work, Part::Value(member, true))?;
                     }
                 }
@@ -2079,6 +2090,24 @@ impl Context {
                             append_rendered_text(&mut output, ")")?;
                             continue;
                         }
+                        Value::Deque(ring) => {
+                            if ancestors.contains(&id) {
+                                append_rendered_text(&mut output, "[...]")?;
+                                continue;
+                            }
+                            let end = if let Some(maxlen) = ring.maxlen {
+                                push_frame(&mut work, Part::Suffix(format!(", maxlen={maxlen})")))?;
+                                "]"
+                            } else {
+                                "])"
+                            };
+                            (
+                                "deque([",
+                                end,
+                                "[...]",
+                                Part::snapshot(ring.items.iter().copied())?,
+                            )
+                        }
                         Value::List(_) => ("[", "]", "[...]", Part::Sequence(storage, 0)),
                         Value::Tuple(items) => (
                             "(",
@@ -2173,13 +2202,20 @@ impl Context {
                         append_rendered_text(&mut output, placeholder)?;
                         continue;
                     }
-                    if matches!(ctx.heap.get(storage), Value::List(_) | Value::Tuple(_))
-                        && sequence_budget.is_some_and(|limit| active.len() >= limit)
+                    if matches!(
+                        ctx.heap.get(storage),
+                        Value::List(_) | Value::Tuple(_) | Value::Deque(_)
+                    ) && stack_words.is_some_and(|limit|
+                        active.len() * SEQUENCE_FRAME_WORDS + extra_deque_words >= limit
+                    )
                     {
                         return Err(Error::new(
                             "RecursionError",
                             "maximum recursion depth exceeded while getting the repr of an object",
                         ));
+                    }
+                    if matches!(ctx.heap.get(storage), Value::Deque(_)) {
+                        extra_deque_words += EXTRA_DEQUE_FRAME_WORDS;
                     }
                     push_frame(&mut active, id)?;
                     append_rendered_text(&mut output, start)?;
@@ -2190,7 +2226,10 @@ impl Context {
                             let Value::Set { entries, .. } = ctx.heap.get(storage) else {
                                 unreachable!()
                             };
-                            push_frame(&mut work, Part::set_members(entries)?)?;
+                            push_frame(
+                                &mut work,
+                                Part::snapshot(entries.iter().map(|&(key, _)| key))?,
+                            )?;
                         }
                         part => push_frame(&mut work, part)?,
                     }
