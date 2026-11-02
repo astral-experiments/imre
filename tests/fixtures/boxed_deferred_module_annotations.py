@@ -1,3 +1,5 @@
+# Module annotation code starts at the first statement, even with leading comments.
+
 import sys
 from annotationlib import Format, ForwardRef, get_annotations
 
@@ -38,6 +40,7 @@ else:
 def current():
     global Later
     module = sys.modules[__name__]
+    assert __annotate__.__code__.co_firstlineno == 3
     assert before == {} and __conditional_annotations__ == {0, 2, 3, 4, 5, 6}
     try:
         __annotate__(1)

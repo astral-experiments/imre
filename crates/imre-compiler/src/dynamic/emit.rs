@@ -152,6 +152,29 @@ impl Output {
             .any(|t| t.kind() == ast::token::TokenKind::TStringStart);
         let template_expressions =
             imre_ast::strings::template_expressions(source, parsed.tokens(), parsed.syntax());
+        // CPython starts the module provider at the first statement, excluding its decorators.
+        let module_start = parsed
+            .syntax()
+            .body
+            .first()
+            .map(|stmt| {
+                let last = match stmt {
+                    ast::Stmt::FunctionDef(stmt) => stmt.decorator_list.last(),
+                    ast::Stmt::ClassDef(stmt) => stmt.decorator_list.last(),
+                    _ => None,
+                };
+                last.and_then(|decorator| {
+                    parsed.tokens().after(decorator.end()).iter().find(|token| {
+                        use ast::token::TokenKind;
+                        matches!(
+                            token.kind(),
+                            TokenKind::Async | TokenKind::Def | TokenKind::Class
+                        )
+                    })
+                })
+                .map_or_else(|| stmt.start(), Ranged::start)
+            })
+            .unwrap_or_default();
         let mut body = parsed.into_syntax().body;
         let method_imports = imre_ast::module_imports(&body);
         let private_names = imre_ast::lower(&mut body);
@@ -169,6 +192,7 @@ impl Output {
             return Err(format!("{}:{error}", path.display()));
         }
         let location = SourceMap {
+            module_start,
             docs,
             unit,
             has_templates,
@@ -217,6 +241,7 @@ enum Body<'a> {
 }
 
 struct SourceMap<'a> {
+    module_start: ruff_text_size::TextSize,
     docs: Option<crate::modules::doctest::SealedDocs>,
     unit: usize,
     has_templates: bool,

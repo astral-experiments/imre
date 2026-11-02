@@ -1002,7 +1002,7 @@ impl Function<'_, '_> {
                 self.source,
                 String::new(),
                 Body::ModuleAnnotations(entries),
-                0.into(),
+                self.source.module_start,
                 false,
             );
             let name = self.text("__annotate__");
