@@ -75,7 +75,7 @@ struct Definition {
 
 enum DefinitionKind {
     Function(Box<ast::Parameters>),
-    Class(Vec<ast::Expr>),
+    Class(Option<Box<ast::Arguments>>),
 }
 
 /// CPython records self.X stores from code units immediately enclosed by a class.
@@ -444,11 +444,8 @@ impl Program {
                         DefinitionKind::Function(parameters) => {
                             strings.visit_parameters(parameters)
                         }
-                        DefinitionKind::Class(bases) => {
-                            for base in bases {
-                                strings.visit_expr(base);
-                            }
-                        }
+                        DefinitionKind::Class(Some(args)) => strings.visit_arguments(args),
+                        DefinitionKind::Class(None) => {}
                     }
                 }
                 Instruction::ClassStart | Instruction::ClassEnd => {}
@@ -692,16 +689,16 @@ impl Program {
                     })
                 }
                 Stmt::ClassDef(mut s) if s.type_params.is_none() => {
-                    let bases = match s.arguments {
-                        Some(args)
-                            if !args.keywords.is_empty()
-                                || args.args.iter().any(|a| matches!(a, ast::Expr::Starred(_))) =>
-                        {
-                            return Err(unsupported("class keywords or expanded bases"));
-                        }
-                        Some(args) => args.args.into_iter().collect(),
-                        None => Vec::new(),
-                    };
+                    if let Some(args) = &s.arguments
+                        && (args
+                            .keywords
+                            .iter()
+                            .any(|kw| kw.arg.as_deref() != Some("total"))
+                            || args.keywords.len() > 1
+                            || args.args.iter().any(|a| matches!(a, ast::Expr::Starred(_))))
+                    {
+                        return Err(unsupported("class keywords or expanded bases"));
+                    }
                     let mut child = self.definition_body(&s.name, &s.decorator_list, line, lines);
                     let spellings = child.private_names.get_or_insert_with(|| {
                         Rc::new(imre_ast::lower_in(&mut s.body, &child.name, false))
@@ -720,7 +717,7 @@ impl Program {
                         binding: s.name.to_string(),
                         decorators: s.decorator_list.into_iter().collect(),
                         body: Rc::new(child),
-                        kind: DefinitionKind::Class(bases),
+                        kind: DefinitionKind::Class(s.arguments),
                     })
                 }
                 Stmt::Break(_) => {
@@ -2400,14 +2397,22 @@ impl Context {
                 let defaults = self.dict(vec![]);
                 let mut bases = None;
                 let sig = match &definition.kind {
-                    DefinitionKind::Class(expressions) => {
+                    DefinitionKind::Class(args) => {
                         let mut values = Vec::new();
-                        for expression in expressions {
-                            let base = eval(self, expression)?;
-                            self.heap.keep(base);
-                            values.push(base);
+                        let mut total = None;
+                        if let Some(args) = args {
+                            for expression in &args.args {
+                                let base = eval(self, expression)?;
+                                self.heap.keep(base);
+                                values.push(base);
+                            }
+                            if let Some(keyword) = args.find_keyword("total") {
+                                let value = eval(self, &keyword.value)?;
+                                self.heap.keep(value);
+                                total = Some(value);
+                            }
                         }
-                        bases = Some(self.alloc(Value::List(values)));
+                        bases = Some((self.alloc(Value::List(values)), total));
                         serde_json::json!({})
                     }
                     DefinitionKind::Function(p) => {
@@ -2455,9 +2460,8 @@ impl Context {
                     scope
                 };
                 let mut value = self.source_function(code, defining_scope, defaults);
-                if let Some(bases) = bases {
-                    let name = self.heap.code_name(&child.name);
-                    value = self.class(name, bases, value, false)?;
+                if let Some((bases, total)) = bases {
+                    value = self.class(bases, value, total, false)?;
                 }
                 for decorator in decorators.into_iter().rev() {
                     value = self.call(decorator, vec![value], Vec::new())?;
