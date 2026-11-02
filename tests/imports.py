@@ -16,6 +16,13 @@ IMPORT = "from helper import f\nprint(f(2))\n"
 
 
 REJECTED = {
+    "second_base_has_storage": ({
+        "main.py": (
+            "class Left:\n    def __init__(self, x: int): self.left = x\n"
+            "class Right:\n    def __init__(self, y: int): self.right = y\n"
+            "class Both(Left, Right): pass\n"
+        ),
+    }, "multiple independent base classes"),
     "optional_import_keeps_typed_call_check": ({
         "main.py": (
             "import http.client\n"
@@ -316,6 +323,28 @@ REJECTED = {
 }
 
 ACCEPTED = {
+    "imported_method_mixin": {
+        "helper.py": (
+            "OFFSET = 7\n"
+            "class Methods(object):\n"
+            "    def common(self) -> int: return 99\n"
+            "    def extra(self) -> int: return OFFSET\n"
+        ),
+        "main.py": (
+            "from helper import Methods\n"
+            "OFFSET = 200\n"
+            "class Storage:\n"
+            "    def __init__(self, value: int): self.value = value\n"
+            "    def common(self) -> int: return self.value\n"
+            "class Child(Storage, Methods): pass\n"
+            "class Override(Child):\n"
+            "    def extra(self) -> int: return 12\n"
+            "def via(m: Methods) -> int: return m.common() + m.extra()\n"
+            "print(via(Child(4)))\n"
+            "print(via(Override(4)))\n"
+            "print(issubclass(Override, Methods))\n"
+        ),
+    },
     "urllib_request_and_error": {
         "main.py": (
             "import urllib.request\n"
