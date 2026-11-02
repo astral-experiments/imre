@@ -7,6 +7,7 @@ import sys as _sys
 import typing as _typing
 from _collections_abc import Generator as _Generator, Iterable as _Iterable
 from _collections_abc import Mapping as _Mapping, MutableMapping as _MutableMapping, Sequence as _Sequence
+from _collections_abc import Reversible as _Reversible, Sized as _Sized
 from collections import Counter as _Counter, defaultdict as _defaultdict
 from collections.abc import Callable as _ABCCallable
 from _collections_abc import AsyncIterator as _AsyncIterator, Awaitable as _Awaitable
@@ -1833,6 +1834,8 @@ class _SpecialGenericAlias(_NotIterable):
         if 0 < missing <= len(self._defaults):
             args += self._defaults[-missing:]
         elif missing:
+            if not self._nparams:
+                raise TypeError(f"{self} is not a generic class")
             expected = f"at least {self._nparams - len(self._defaults)}" if self._defaults else self._nparams
             count = "many" if len(args) > self._nparams else "few"
             raise TypeError(f"Too {count} arguments for {self}; actual {len(args)}, expected {expected}")
@@ -1932,6 +1935,8 @@ Sequence = _SpecialGenericAlias(_Sequence, 1)
 Mapping = _SpecialGenericAlias(_Mapping, 2, name="Mapping")
 MutableMapping = _SpecialGenericAlias(_MutableMapping, 2, name="MutableMapping")
 Iterable = _SpecialGenericAlias(_Iterable, 1, name="Iterable")
+Reversible = _SpecialGenericAlias(_Reversible, 1)
+Sized = _SpecialGenericAlias(_Sized, 0)
 
 
 # Reconstruction callables and arguments used by CPython's typing alias reducers.
