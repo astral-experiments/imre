@@ -11,6 +11,7 @@ from _collections_abc import Mapping as _Mapping, MutableMapping as _MutableMapp
 from _collections_abc import Reversible as _Reversible, Sized as _Sized
 from collections.abc import ByteString as _ByteString
 from collections import Counter as _Counter, defaultdict as _defaultdict
+from collections import ChainMap as _ChainMap, OrderedDict as _OrderedDict, deque as _deque
 from collections.abc import Callable as _ABCCallable
 from _collections_abc import AsyncIterator as _AsyncIterator, Awaitable as _Awaitable
 from abc import abstractmethod
@@ -1964,8 +1965,11 @@ Type.__doc__ = \
 
     At this point the type checker knows that joe has type BasicUser.
     """
+Deque = _SpecialGenericAlias(_deque, 1, name="Deque")
 Counter = _SpecialGenericAlias(_Counter, 1)
 DefaultDict = _SpecialGenericAlias(_defaultdict, 2, name="DefaultDict")
+OrderedDict = _SpecialGenericAlias(_OrderedDict, 2)
+ChainMap = _SpecialGenericAlias(_ChainMap, 2)
 Sequence = _SpecialGenericAlias(_Sequence, 1)
 Mapping = _SpecialGenericAlias(_Mapping, 2, name="Mapping")
 MutableMapping = _SpecialGenericAlias(_MutableMapping, 2, name="MutableMapping")
