@@ -405,9 +405,12 @@ impl Context {
                 Ok(scope)
             }
             "class" | "parameterized_class" => {
-                let metaclass = self.dict_named_item(a, "metaclass");
-                let total = self.dict_named_item(a, "total");
-                self.class(b, c, metaclass, total, op == "parameterized_class")
+                let keywords = if a == NONE {
+                    Vec::new()
+                } else {
+                    self.keyword_args(a)?
+                };
+                self.class(b, c, keywords, op == "parameterized_class")
             }
             "coroutine_function" => {
                 let Value::Function { code, .. } = *self.heap.get(a) else {

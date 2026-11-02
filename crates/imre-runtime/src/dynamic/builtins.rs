@@ -1122,7 +1122,16 @@ pub(super) fn call(
         let [class, rest @ ..] = args else {
             return Err(type_error("missing class for __init_subclass__"));
         };
-        if !rest.is_empty() || !kwargs.is_empty() {
+        if !kwargs.is_empty() {
+            let name = ctx
+                .own_class_attr(*class, "__qualname__")
+                .and_then(|id| ctx.str_value(id).ok())
+                .unwrap_or_else(|| ctx.class_name(*class));
+            return Err(type_error(format!(
+                "{name}.__init_subclass__() takes no keyword arguments"
+            )));
+        }
+        if !rest.is_empty() {
             return Err(type_error(format!(
                 "{}.__init_subclass__() takes no arguments",
                 ctx.class_name(*class)
