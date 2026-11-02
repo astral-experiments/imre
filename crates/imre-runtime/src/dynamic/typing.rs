@@ -1391,19 +1391,20 @@ impl Context {
                 ));
             }
             if let Value::Native(name) = self.heap.get(base)
-                && matches!(
-                    name.as_str(),
-                    "typing.TypeVar"
-                        | "typing.TypeVarTuple"
-                        | "NoDefaultType"
-                        | "slice"
-                        | "NoneType"
-                        | "NotImplementedType"
-                        | "ellipsis"
-                        | super::namedtuple::GETTER
-                        | "functools.KeyWrapper"
-                        | "member_descriptor"
-                )
+                && (crate::objects::HashState::is_provider_class(name)
+                    || matches!(
+                        name.as_str(),
+                        "typing.TypeVar"
+                            | "typing.TypeVarTuple"
+                            | "NoDefaultType"
+                            | "slice"
+                            | "NoneType"
+                            | "NotImplementedType"
+                            | "ellipsis"
+                            | super::namedtuple::GETTER
+                            | "functools.KeyWrapper"
+                            | "member_descriptor"
+                    ))
             {
                 return Err(Error::new(
                     "TypeError",

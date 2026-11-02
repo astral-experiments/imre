@@ -6488,6 +6488,21 @@ impl<'a> Checker<'a> {
             ast::Expr::Named(value) => return self.named_expression(value, None),
             ast::Expr::If(value) => return self.conditional(value, None),
             ast::Expr::NoneLiteral(_) => (Type::None, ExprKind::None),
+            ast::Expr::Name(_) | ast::Expr::Attribute(_)
+                if matches!(
+                    self.resolve(expression),
+                    Some(Binding::Intrinsic(Intrinsic::NamedHash(
+                        "blake2b" | "blake2s"
+                    )))
+                ) =>
+            {
+                self.graph.needs_object_runtime.set(true);
+                return Err(self.classified_error(
+                    FailureKind::ObjectOperation,
+                    expression,
+                    "a BLAKE2 constructor used as a type requires native object dispatch",
+                ));
+            }
             ast::Expr::Name(name) if name.id == "__debug__" => (
                 Type::Bool,
                 ExprKind::Bool(self.graph.python_optimization() == 0),

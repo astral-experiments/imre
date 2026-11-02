@@ -10,6 +10,18 @@ pub(super) struct BuiltinDescriptor {
 
 impl BuiltinDescriptor {
     pub(super) fn lookup(symbol: &str) -> Option<Self> {
+        if let Some((class, attr)) = symbol.rsplit_once('.')
+            && let Some(owner) = crate::objects::HashState::provider_class(class)
+            && let Some(&name) = ["copy", "update", "digest", "hexdigest"]
+                .iter()
+                .find(|&&name| name == attr)
+        {
+            return Some(Self {
+                owner,
+                name,
+                method: true,
+            });
+        }
         let slots = match symbol.rsplit_once('.') {
             Some((stdlib::os::scandir::ENTRY, attr)) => Some((
                 stdlib::os::scandir::ENTRY,
@@ -105,6 +117,9 @@ impl BuiltinDescriptor {
             return Ok(descriptor);
         }
         let accepts = match self.owner {
+            class if crate::objects::HashState::is_provider_class(class) => {
+                ctx.type_name(receiver) == class
+            }
             "object" => true,
             "functools.KeyWrapper" => matches!(ctx.heap.get(receiver), Value::KeyWrapper { .. }),
             super::namespace::CLASS => {

@@ -21,6 +21,9 @@ struct InstanceLayout {
 
 /// Metadata for native callables owned by these module objects.
 pub(super) fn module_function(symbol: &str) -> Option<(&str, &str)> {
+    if HashState::is_provider_class(symbol) {
+        return None;
+    }
     let (module, function) = symbol.split_once('.')?;
     match module {
         "posix"
@@ -948,7 +951,8 @@ impl Context {
                 if name == "typing.Callable" {
                     return Some("typing._CallableType");
                 }
-                if builtins::is_builtin_type(name)
+                if HashState::is_provider_class(name)
+                    || builtins::is_builtin_type(name)
                     || builtins::is_iterator_type(name)
                     || matches!(
                         name.as_str(),
@@ -1125,7 +1129,12 @@ impl Context {
             }
         }
         match (name, self.heap.get(value)) {
-            (HashState::CLASS, Value::Hash(_)) => true,
+            (HashState::CLASS, Value::Hash(state)) => {
+                !HashState::is_provider_class(state.borrow().class_name())
+            }
+            (class, Value::Hash(state)) if HashState::is_provider_class(class) => {
+                state.borrow().class_name() == class
+            }
             (HashState::XOF_CLASS, Value::Hash(state)) => state.borrow().class_name() == name,
             (_, Value::Raised(error)) => {
                 matches!(self.heap.get(class), Value::Native(name) if name == "object")
@@ -2022,6 +2031,69 @@ impl Context {
             {
                 return Ok(self.builtin(&format!("datetime.datetime.{name}")));
             }
+            Value::GetSetDescriptor {
+                owner, name: field, ..
+            } if HashState::is_provider_class(owner) => match name {
+                "__objclass__" => return Ok(self.builtin(owner)),
+                "__name__" => return Ok(self.text(field)),
+                "__qualname__" => {
+                    return Ok(self.text(format!("{}.{field}", owner.rsplit_once('.').unwrap().1)));
+                }
+                "__get__" => {
+                    let get = self.builtin("getset_descriptor.__get__");
+                    return Ok(self.alloc(Value::Method {
+                        callable: get,
+                        receiver: obj,
+                        explicit: false,
+                    }));
+                }
+                _ => {}
+            },
+            Value::Native(ref class) if let Some(owner) = HashState::provider_class(class) => {
+                let (module, short) = owner.rsplit_once('.').unwrap();
+                match name {
+                    "name" | "block_size" | "digest_size" => {
+                        let key = format!("{owner}.{name}");
+                        if let Some(&descriptor) = self.builtins.get(&key) {
+                            return Ok(descriptor);
+                        }
+                        let field = match name {
+                            "name" => "name",
+                            "block_size" => "block_size",
+                            _ => "digest_size",
+                        };
+                        let get = self.builtin(&format!("{owner}.get_{field}"));
+                        let descriptor = self.alloc(Value::GetSetDescriptor {
+                            get,
+                            set: None,
+                            owner,
+                            name: field,
+                        });
+                        self.builtins.insert(key, descriptor);
+                        return Ok(descriptor);
+                    }
+                    "__init__" => return Ok(self.builtin("object.__init__")),
+                    "__new__" | "copy" | "update" | "digest" | "hexdigest" => {
+                        return Ok(self.builtin(&format!("{owner}.{name}")));
+                    }
+                    "__module__" => return Ok(self.text(module)),
+                    "__name__" | "__qualname__" => return Ok(self.text(short)),
+                    "__base__" => return Ok(self.builtin("object")),
+                    "__bases__" | "__mro__" => {
+                        let base = self.builtin("object");
+                        let objects = if name == "__mro__" {
+                            vec![obj, base]
+                        } else {
+                            vec![base]
+                        };
+                        return Ok(self.alloc(Value::Tuple(objects)));
+                    }
+                    attr if let Some(value) = HashState::class_constant(owner, attr) => {
+                        return Ok(self.int(value as i64));
+                    }
+                    _ => {}
+                }
+            }
             Value::Native(ref class)
                 if matches!(
                     class.as_str(),
@@ -2301,21 +2373,35 @@ impl Context {
                 "size" => return Ok(self.int(layout.size as i64)),
                 _ => {}
             },
-            Value::Hash(ref hash) => match name {
-                "name" => {
-                    let name = hash.borrow().name();
-                    return Ok(self.text(name));
+            Value::Hash(ref hash) => {
+                let owner = hash.borrow().class_name();
+                match name {
+                    "__init__" if HashState::is_provider_class(owner) => {
+                        let init = self.builtin("object.__init__");
+                        return Ok(self.alloc(Value::Method {
+                            callable: init,
+                            receiver: obj,
+                            explicit: false,
+                        }));
+                    }
+                    attr if let Some(value) = HashState::class_constant(owner, attr) => {
+                        return Ok(self.int(value as i64));
+                    }
+                    "name" => {
+                        let name = hash.borrow().name();
+                        return Ok(self.text(name));
+                    }
+                    "digest_size" => {
+                        let size = hash.borrow().digest_size();
+                        return Ok(self.int(size as i64));
+                    }
+                    "block_size" => {
+                        let size = hash.borrow().block_size();
+                        return Ok(self.int(size as i64));
+                    }
+                    _ => {}
                 }
-                "digest_size" => {
-                    let size = hash.borrow().digest_size();
-                    return Ok(self.int(size as i64));
-                }
-                "block_size" => {
-                    let size = hash.borrow().block_size();
-                    return Ok(self.int(size as i64));
-                }
-                _ => {}
-            },
+            }
             Value::CodecInfo { ref entry, decode } => match name {
                 "name" => return Ok(self.text(entry.codec().name())),
                 "decode" => return Ok(decode),
@@ -2730,6 +2816,15 @@ impl Context {
     }
 
     pub(super) fn delete_attr(&mut self, obj: Id, name: &str) -> Result<()> {
+        if let Value::Native(class) = self.heap.get(obj)
+            && HashState::is_provider_class(class)
+        {
+            return Err(Error::new(
+                "TypeError",
+                format!("cannot set '{name}' attribute of immutable type '{class}'"),
+            ));
+        }
+
         self.delete_named_attr(obj, name, None)
     }
 
@@ -3274,10 +3369,11 @@ impl Context {
     pub(super) fn default_set_attr(&mut self, obj: Id, name: &str, value: Id) -> Result<()> {
         super::namespace::check_class_write(self, obj, name)?;
         if let Value::Native(class) = self.heap.get(obj)
-            && matches!(
-                class.as_str(),
-                HashState::CLASS | HashState::XOF_CLASS | KEY_WRAPPER
-            )
+            && (HashState::is_provider_class(class)
+                || matches!(
+                    class.as_str(),
+                    HashState::CLASS | HashState::XOF_CLASS | KEY_WRAPPER
+                ))
         {
             return Err(Error::new(
                 "TypeError",

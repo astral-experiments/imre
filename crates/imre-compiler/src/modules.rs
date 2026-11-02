@@ -1340,6 +1340,8 @@ impl IntrinsicModule {
             (Self::Hashlib, "sha224") => Intrinsic::NamedHash("sha224"),
             (Self::Hashlib, "sha384") => Intrinsic::NamedHash("sha384"),
             (Self::Hashlib, "sha512") => Intrinsic::NamedHash("sha512"),
+            (Self::Hashlib, "blake2b") => Intrinsic::NamedHash("blake2b"),
+            (Self::Hashlib, "blake2s") => Intrinsic::NamedHash("blake2s"),
             (Self::Hashlib, "sha3_224") => Intrinsic::NamedHash("sha3_224"),
             (Self::Hashlib, "sha3_256") => Intrinsic::NamedHash("sha3_256"),
             (Self::Hashlib, "sha3_384") => Intrinsic::NamedHash("sha3_384"),

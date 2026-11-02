@@ -474,6 +474,11 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             ctx.builtin(&format!("datetime.{name}"))
         }
         ("socket", name) => return socket::attribute(ctx, name),
+        ("hashlib", name)
+            if let Some(class) = crate::objects::HashState::public_constructor(name) =>
+        {
+            ctx.builtin(class)
+        }
         ("hashlib", name) if crate::objects::HashState::algorithms().any(|alg| alg == name) => {
             ctx.alloc(Value::Native(format!("hashlib.{name}")))
         }
@@ -1528,6 +1533,14 @@ pub(super) fn call(
     }
     if let Some(method) = name.strip_prefix("contextvars.") {
         return contextvars::call(ctx, method, args, kwargs);
+    }
+    if name == "getset_descriptor.__get__" {
+        return hashlib::descriptor_get(ctx, args, kwargs);
+    }
+    if let Some((class, method)) = name.rsplit_once('.')
+        && crate::objects::HashState::is_provider_class(class)
+    {
+        return hashlib::provider_method(ctx, class, method, args, kwargs);
     }
     if let Some(algorithm) = name.strip_prefix("hashlib.")
         && crate::objects::HashState::algorithms().any(|name| name == algorithm)
