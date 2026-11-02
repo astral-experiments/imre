@@ -524,14 +524,6 @@ fn box_native_entry(ctx: &mut Context, entry: CodecInfo) -> Result<Id> {
     if let Some((_, id)) = ctx.codec_entries.entries.get(&key) {
         return Ok(*id);
     }
-    if !ctx.classes.contains_key("codecs.CodecInfo") {
-        ctx.module("codecs")?;
-    }
-    let class = ctx
-        .classes
-        .get("codecs.CodecInfo")
-        .copied()
-        .ok_or_else(|| Error::new("ImportError", "codecs.CodecInfo is unavailable"))?;
     let codec = entry.codec();
     let suffix = match codec {
         Codec::Ascii => "ascii",
@@ -541,6 +533,8 @@ fn box_native_entry(ctx: &mut Context, entry: CodecInfo) -> Result<Id> {
         Codec::CodePage(_) => codec.name(),
     };
     let module = ctx.module(&format!("encodings.{suffix}"))?;
+    let codecs = ctx.lookup_attr(module, "codecs")?;
+    let class = ctx.lookup_attr(codecs, "CodecInfo")?;
     let writer = ctx.lookup_attr(module, "StreamWriter")?;
     let (encode, decode) = match codec {
         Codec::CodePage(_) => {
@@ -562,8 +556,16 @@ fn box_native_entry(ctx: &mut Context, entry: CodecInfo) -> Result<Id> {
     let name = ctx.text(codec.name());
     let id = ctx.call(
         class,
-        vec![encode, decode, NONE, writer],
-        vec![("name".into(), name)],
+        Vec::new(),
+        vec![
+            ("name".into(), name),
+            ("encode".into(), encode),
+            ("decode".into(), decode),
+            ("incrementalencoder".into(), NONE),
+            ("incrementaldecoder".into(), NONE),
+            ("streamreader".into(), NONE),
+            ("streamwriter".into(), writer),
+        ],
     )?;
     ctx.codec_entries
         .entries
