@@ -15,6 +15,7 @@ fn nonconstructible_result_type(name: &str) -> bool {
             | KEY_WRAPPER
             | value::REGEX_PATTERN_TYPE
             | value::REGEX_MATCH_TYPE
+            | value::REGEX_SCANNER_TYPE
     )
 }
 
@@ -1405,6 +1406,7 @@ impl Context {
                             | super::thread_lock::CLASS
                             | value::REGEX_PATTERN_TYPE
                             | value::REGEX_MATCH_TYPE
+                            | value::REGEX_SCANNER_TYPE
                             | value::TEMPLATE_TYPE
                             | value::TEMPLATE_ITER_TYPE
                             | value::INTERPOLATION_TYPE
@@ -3141,6 +3143,7 @@ impl Context {
                     "array.array"
                         | value::REGEX_PATTERN_TYPE
                         | value::REGEX_MATCH_TYPE
+                        | value::REGEX_SCANNER_TYPE
                         | "_contextvars.Context"
                         | "_contextvars.ContextVar"
                         | "_contextvars.Token"
@@ -4232,7 +4235,7 @@ impl Context {
     /// Subclasses keep their writable namespaces when the defining type is immutable.
     fn check_immutable_type_write(&self, obj: Id, attr: &str) -> Result<()> {
         if let Value::Native(class) = self.heap.get(obj)
-            && super::deque::iterator_class(class).is_some()
+            && (super::deque::iterator_class(class).is_some() || class == value::REGEX_SCANNER_TYPE)
         {
             return Err(Error::new(
                 "TypeError",
