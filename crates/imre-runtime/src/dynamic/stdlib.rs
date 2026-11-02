@@ -265,6 +265,23 @@ fn argument(args: &[Id], index: usize) -> Result<Id> {
         .ok_or_else(|| Error::new("TypeError", "missing required argument"))
 }
 
+/// Name the actual type for C diagnostics without consulting Python attribute hooks.
+pub(in crate::dynamic) fn diagnostic_type_name(ctx: &Context, value: Id) -> std::borrow::Cow<'_, str> {
+    if matches!(ctx.heap.get(value), Value::Struct { .. }) {
+        return "_struct.Struct".into();
+    }
+    if let Value::Calendar { value, .. } = ctx.heap.get(value) {
+        return format!("datetime.{}", value.class()).into();
+    }
+    ctx.heap
+        .get(value)
+        .instance_class()
+        .map(|class| ctx.class_name(class))
+        .or_else(|| ctx.builtin_type_name(value))
+        .unwrap_or_else(|| ctx.type_name(value))
+        .into()
+}
+
 /// PyArg formats at most 50 bytes of tp_name before decoding the entire diagnostic as UTF-8.
 fn string_argument_message(
     function: &str,

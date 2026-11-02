@@ -730,8 +730,8 @@ impl Encoder {
                 return error;
             }
             if let Some(owner) = items_owner {
-                let owner = ctx.type_name(owner);
-                let result = ctx.type_name(source);
+                let owner = super::diagnostic_type_name(ctx, owner);
+                let result = super::diagnostic_type_name(ctx, source);
                 Error::new(
                     "TypeError",
                     format!(

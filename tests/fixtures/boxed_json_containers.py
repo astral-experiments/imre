@@ -22,13 +22,16 @@ def current():
         def __iter__(self):
             raise TypeError("iterator unavailable")
 
+    from functools import partial
+
     class BadItems(dict):
         def items(self):
-            return None
+            return self["bad"]
 
     for value, expected in (
         (BadList([1]), "_iterencode_list needs a sequence"),
-        (BadItems(a=1), "BadItems.items() returned a non-iterable (type NoneType)"),
+        (BadItems(bad=None), "BadItems.items() returned a non-iterable (type NoneType)"),
+        (BadItems(bad=partial(int)), "BadItems.items() returned a non-iterable (type functools.partial)"),
     ):
         try:
             json.dumps([value])
