@@ -3414,14 +3414,18 @@ impl Context {
             }
             Value::Native(ref class)
                 if class == "mappingproxy"
-                    && (matches!(name, "__contains__" | "__getitem__" | "__hash__" | "__repr__" | "__str__")
-                        || builtins::MAPPING_PROXY_METHODS.contains(&name)) =>
+                    && (matches!(
+                        name,
+                        "__contains__" | "__getitem__" | "__hash__" | "__repr__" | "__str__"
+                    ) || builtins::MAPPING_PROXY_METHODS.contains(&name)) =>
             {
                 return Ok(self.builtin(&format!("{class}.{name}")));
             }
             Value::MappingProxy(_)
-                if matches!(name, "__contains__" | "__getitem__" | "__hash__" | "__repr__" | "__str__")
-                    || builtins::MAPPING_PROXY_METHODS.contains(&name) =>
+                if matches!(
+                    name,
+                    "__contains__" | "__getitem__" | "__hash__" | "__repr__" | "__str__"
+                ) || builtins::MAPPING_PROXY_METHODS.contains(&name) =>
             {
                 let descriptor = self.builtin(&format!("mappingproxy.{name}"));
                 let owner = self.builtin("mappingproxy");

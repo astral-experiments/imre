@@ -394,7 +394,14 @@ const SET_OPERATORS: &[&str] = &[
 /// Methods for the two native real number classes.
 pub(super) fn real_methods(owner: &str) -> &'static [&'static str] {
     match owner {
-        "int" => &["__abs__", "__float__", "__int__", "__lt__", "__round__", "__trunc__"],
+        "int" => &[
+            "__abs__",
+            "__float__",
+            "__int__",
+            "__lt__",
+            "__round__",
+            "__trunc__",
+        ],
         "float" => &["__abs__", "__float__", "__int__", "__round__", "__trunc__"],
         _ => &[],
     }
@@ -1448,10 +1455,12 @@ pub(super) fn call(
                 let class = ctx.exact_type(receiver)?;
                 let init = ctx.class_attr(class, "__init__");
                 if init.is_none_or(|init| Some(&init) == ctx.builtins.get("object.__init__")) {
-                    let new = ctx.class_attr(class, "__new__").map(|slot| match *ctx.heap.get(slot) {
-                        Value::StaticMethod { callable, .. } => callable,
-                        _ => slot,
-                    });
+                    let new =
+                        ctx.class_attr(class, "__new__")
+                            .map(|slot| match *ctx.heap.get(slot) {
+                                Value::StaticMethod { callable, .. } => callable,
+                                _ => slot,
+                            });
                     let tuple = ctx.builtin("tuple");
                     if ctx.instance_of(receiver, tuple)
                         || new.is_some_and(|new| Some(&new) != ctx.builtins.get("object.__new__"))
@@ -1486,12 +1495,17 @@ pub(super) fn call(
                 }
                 positional(name, kwargs)?;
                 let [other] = rest else {
-                    return Err(type_error(format!("expected 1 argument, got {}", rest.len())));
+                    return Err(type_error(format!(
+                        "expected 1 argument, got {}",
+                        rest.len()
+                    )));
                 };
                 if owner == "object" || !ctx.builtin_slot_accepts(*other, "int") {
                     return Ok(NOT_IMPLEMENTED);
                 }
-                Ok(boolean(ctx.as_int(receiver)?.cmp(&ctx.as_int(*other)?).is_lt()))
+                Ok(boolean(
+                    ctx.as_int(receiver)?.cmp(&ctx.as_int(*other)?).is_lt(),
+                ))
             }
             "super" if method == "__new__" => ctx.super_new(args, kwargs),
             "super" if method == "__init__" => ctx.super_init(args, kwargs),
