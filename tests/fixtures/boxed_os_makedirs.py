@@ -24,6 +24,9 @@ def current():
             assert error.filename == name
         else:
             raise AssertionError('existing directory accepted')
+        os.removedirs(name)
+        assert not os.path.exists(os.path.join(root, 'parent'))
+        assert os.path.isdir(root)
     finally:
         os.umask(previous)
         shutil.rmtree(root)
