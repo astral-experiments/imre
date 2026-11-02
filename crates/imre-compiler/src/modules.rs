@@ -1650,6 +1650,10 @@ impl IntrinsicModule {
             }
             (Self::Zipfile, "ZipFile") => Intrinsic::ZipFile,
             (Self::Zipfile, "ZipInfo") => Intrinsic::ZipInfo,
+            (Self::Io, "__all__") => Intrinsic::ObjectRuntimeExport("io.__all__"),
+            (Self::Io | Self::IoNative, "BlockingIOError") => {
+                Intrinsic::ObjectRuntimeExport("io.BlockingIOError")
+            }
             (Self::Io, "SEEK_SET") => Intrinsic::IntConstant(0),
             (Self::Io, "SEEK_CUR") => Intrinsic::IntConstant(1),
             (Self::Io, "SEEK_END") => Intrinsic::IntConstant(2),
