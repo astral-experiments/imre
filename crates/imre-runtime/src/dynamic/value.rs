@@ -2752,6 +2752,10 @@ impl Heap {
             .nth((level.max(1) - 1) as usize)
     }
 
+    pub fn current_location(&self) -> Option<Location> {
+        self.frames.last()?.location.clone()
+    }
+
     /// Trace the same roots for collection and for a weak interning lookup between collections.
     fn mark(&self, globals: impl Iterator<Item = Id>) {
         let mut pending = MarkQueue {

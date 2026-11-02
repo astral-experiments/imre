@@ -573,6 +573,7 @@ pub(crate) enum Intrinsic {
     BuiltinsLast,
     BuiltinsLen,
     BuiltinsAscii,
+    BuiltinsHex,
     SysDisplayHook,
     ArgumentParser,
     ArgparseNamespace,
@@ -1126,6 +1127,9 @@ impl IntrinsicModule {
         let symbol = match (self, name) {
             (Self::Array, "array") => Intrinsic::NominalClass("array.array"),
             (Self::Numbers, "Number") => Intrinsic::Number,
+            (Self::Imp, "extension_suffixes") => {
+                Intrinsic::ObjectRuntimeExport("_imp.extension_suffixes")
+            }
             (Self::Imp, "is_frozen") => Intrinsic::ObjectRuntimeExport("_imp.is_frozen"),
             (Self::Imp, "_override_frozen_modules_for_tests") => {
                 Intrinsic::ObjectRuntimeExport("_imp._override_frozen_modules_for_tests")
@@ -1702,6 +1706,7 @@ impl IntrinsicModule {
             (Self::Builtins, "_") => Intrinsic::BuiltinsLast,
             (Self::Builtins, "len") => Intrinsic::BuiltinsLen,
             (Self::Builtins, "ascii") => Intrinsic::BuiltinsAscii,
+            (Self::Builtins, "hex") => Intrinsic::BuiltinsHex,
             (Self::Sys, "argv") => Intrinsic::Argv,
             (Self::Sys, "orig_argv") => Intrinsic::OrigArgv,
             (Self::Sys, "executable") => Intrinsic::SysExecutable,
@@ -1812,6 +1817,9 @@ impl IntrinsicModule {
             (Self::Typing | Self::CollectionsAbc, "Iterator") => Intrinsic::Iterator,
             (Self::Io, "UnsupportedOperation") => Intrinsic::UnsupportedOperation,
             (Self::Gzip, "open") => Intrinsic::GzipOpen,
+            (Self::Types, "new_class") => Intrinsic::ObjectRuntimeExport("types.new_class"),
+            (Self::Types, "prepare_class") => Intrinsic::ObjectRuntimeExport("types.prepare_class"),
+            (Self::Types, "resolve_bases") => Intrinsic::ObjectRuntimeExport("types.resolve_bases"),
             (Self::Types, "MappingProxyType") => {
                 Intrinsic::ObjectRuntimeExport("types.MappingProxyType")
             }

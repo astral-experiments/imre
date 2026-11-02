@@ -1,7 +1,7 @@
 """Abstract base classes for the native import system."""
 
 import abc
-import _frozen_importlib_external as _bootstrap_external
+from . import _bootstrap_external
 from ._abc import Loader
 from . import machinery
 

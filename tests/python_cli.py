@@ -1955,6 +1955,18 @@ def report(text):
             "reference = union.__args__[-1]\n"
             "print(type(reference).__name__, reference.__forward_arg__)",
         )
+        hex_entry = root / "hex_entry.py"
+        for program in (
+            "class Offset:\n    def __index__(self): return -(1 << 100)\nprint(hex(Offset()))",
+            "formatter = hex\nprint(formatter(31))",
+            "import builtins\nprint(builtins.hex(31))",
+            "from builtins import hex as formatter\nprint(formatter(31))",
+            "import warnings\nclass Flag:\n    def __index__(self): return True\n"
+            "warnings.simplefilter('error', DeprecationWarning)\n"
+            "try: hex(Flag())\nexcept DeprecationWarning as warning: print(warning)",
+        ):
+            hex_entry.write_text(program)
+            compare("-IB", hex_entry, native_args=("run", hex_entry, "--quiet"))
         monitoring_entry = root / "monitoring_entry.py"
         (root / "monitoring_helper.py").write_text(
             "from sys import monitoring\ndef line_mask():\n    return monitoring.events.LINE\n"
@@ -2084,6 +2096,7 @@ def report(text):
             "boxed_timedelta_add_sub.py",
             "boxed_dataclasses.py",
             "boxed_mapping_proxy_type.py",
+            "boxed_types_new_class.py",
             "boxed_make_dataclass.py",
             "boxed_dataclass_slots.py",
             "boxed_dataclass_init_annotations.py",
@@ -2098,6 +2111,7 @@ def report(text):
             "boxed_buffered_partial_write.py",
             "boxed_io_exports.py",
             "boxed_io_reimport.py",
+            "boxed_fileio_opener.py",
             "boxed_io_text_encoding.py",
             "boxed_locale.py",
             "boxed_locale_error.py",
@@ -2123,6 +2137,7 @@ def report(text):
             "boxed_posix_session.py",
             "boxed_os_stat.py",
             "boxed_os_terminal_size.py",
+            "boxed_os_fchmod.py",
             "boxed_os_makedirs.py",
             "boxed_os_walk.py",
             "boxed_select.py",
@@ -2146,6 +2161,7 @@ def report(text):
             "boxed_oserror.py",
             "boxed_type_identity.py",
             "boxed_type_namespace.py",
+            "boxed_abc_namespace.py",
             "boxed_singleton_types.py",
             "boxed_singleton_subclass.py",
             "boxed_function_closure_cells.py",
@@ -2176,6 +2192,7 @@ def report(text):
             "boxed_module_dir.py",
             "boxed_unittest_assert_almost_equal.py",
             "boxed_unittest_assert_count_equal.py",
+            "boxed_unittest_assert_set_equal.py",
             "boxed_unittest_membership.py",
             "boxed_unittest_endswith.py",
             "boxed_unittest_sequence_equal.py",

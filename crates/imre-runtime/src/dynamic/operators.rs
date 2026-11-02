@@ -300,7 +300,7 @@ impl Context {
             return Ok(None);
         };
         let result = self.call(index, Vec::new(), Vec::new())?;
-        self.as_int(result).map(|n| Some((result, n))).map_err(|_| {
+        let number = self.as_int(result).map_err(|_| {
             Error::new(
                 "TypeError",
                 format!(
@@ -308,7 +308,18 @@ impl Context {
                     self.type_name(result)
                 ),
             )
-        })
+        })?;
+        if !matches!(self.heap.get(result), Value::Int(_)) {
+            self.emit_builtin_warning(
+                crate::objects::exceptions::Kind::DeprecationWarning,
+                &format!(
+                    "__index__ returned non-int (type {}).  The ability to return an instance of a strict subclass of int is deprecated, and may be removed in a future version of Python.",
+                    self.type_name(result)
+                ),
+                1,
+            )?;
+        }
+        Ok(Some((result, number)))
     }
 
     /// Convert a bytearray element using the index protocol and the inclusive byte bounds.
