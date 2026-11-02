@@ -8063,6 +8063,12 @@ impl<'a> Checker<'a> {
                         kind: ExprKind::Builtin(Builtin::TextClosed, vec![receiver]),
                     });
                 }
+                if attribute.attr.as_str() == "object"
+                    && let Type::Class(class) = receiver.ty
+                    && self.bundled_mock_class(class, "_PatchFactory")
+                {
+                    return Err(self.object_runtime_export("unittest.mock.patch.object", attribute));
+                }
                 if let Some(field) = self.setup_field(receiver.ty, attribute.attr.as_str()) {
                     return self.read_setup_field(receiver, attribute, field);
                 }
