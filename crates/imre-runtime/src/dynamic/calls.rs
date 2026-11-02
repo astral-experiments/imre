@@ -970,6 +970,7 @@ impl Context {
                             | stdlib::os::scandir::ITER
                             | super::thread_rlock::CLASS
                             | super::thread_lock::CLASS
+                            | value::REGEX_PATTERN_TYPE
                             | value::TEMPLATE_TYPE
                             | value::TEMPLATE_ITER_TYPE
                             | value::INTERPOLATION_TYPE
@@ -2192,6 +2193,7 @@ impl Context {
                 if matches!(
                     class.as_str(),
                     "array.array"
+                        | value::REGEX_PATTERN_TYPE
                         | "_contextvars.Context"
                         | "_contextvars.ContextVar"
                         | "_contextvars.Token"
@@ -2224,7 +2226,11 @@ impl Context {
                     "__hash__" | "__doc__" | "__text_signature__" if class == KEY_WRAPPER => {
                         return Ok(NONE);
                     }
-                    "__new__" if class == KEY_WRAPPER => return Ok(self.builtin("object.__new__")),
+                    "__new__"
+                        if matches!(class.as_str(), KEY_WRAPPER | value::REGEX_PATTERN_TYPE) =>
+                    {
+                        return Ok(self.builtin("object.__new__"));
+                    }
                     _ if class == KEY_WRAPPER
                         && BuiltinDescriptor::lookup(&format!("{class}.{name}")).is_some() =>
                     {
@@ -3590,7 +3596,11 @@ impl Context {
                 || HashState::is_provider_class(class)
                 || matches!(
                     class.as_str(),
-                    HashState::CLASS | HashState::XOF_CLASS | KEY_WRAPPER | stdlib::flags::TYPE
+                    HashState::CLASS
+                        | HashState::XOF_CLASS
+                        | KEY_WRAPPER
+                        | stdlib::flags::TYPE
+                        | value::REGEX_PATTERN_TYPE
                 ))
         {
             return Err(Error::new(
@@ -4002,10 +4012,12 @@ impl Context {
             ));
         }
         let object = self.builtin("object");
-        if matches!(self.heap.get(class), Value::Native(name) if name == KEY_WRAPPER) {
+        if let Value::Native(name) = self.heap.get(class)
+            && matches!(name.as_str(), KEY_WRAPPER | value::REGEX_PATTERN_TYPE)
+        {
             return Err(Error::new(
                 "TypeError",
-                format!("cannot create '{KEY_WRAPPER}' instances"),
+                format!("cannot create '{name}' instances"),
             ));
         }
         let base = self.allocation_base(class).unwrap_or(class);
@@ -4319,7 +4331,10 @@ impl Context {
             Value::Native(name)
                 if matches!(
                     name.as_str(),
-                    HashState::CLASS | HashState::XOF_CLASS | KEY_WRAPPER
+                    HashState::CLASS
+                        | HashState::XOF_CLASS
+                        | KEY_WRAPPER
+                        | value::REGEX_PATTERN_TYPE
                 ) =>
             {
                 Err(Error::new(

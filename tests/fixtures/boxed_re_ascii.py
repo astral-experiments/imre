@@ -4,6 +4,23 @@ import re
 def current():
     ascii_digits = re.compile(r"-?\d+", flags=re.ASCII)
     unicode_digits = re.compile(r"-?\d+")
+    from re import Pattern
+    assert type(ascii_digits) is Pattern is re.Pattern
+    assert type(re.compile(b"x")) is Pattern
+    assert isinstance(unicode_digits, Pattern)
+    assert not isinstance(unicode_digits.match("1"), Pattern)
+    assert type(Pattern) is type
+    assert repr(Pattern) == "<class 're.Pattern'>"
+    assert (Pattern.__module__, Pattern.__name__, Pattern.__qualname__) == ("re", "Pattern", "Pattern")
+    assert Pattern[str].__origin__ is Pattern
+    assert Pattern.__new__ is object.__new__
+    for construct in (lambda: Pattern(), lambda: Pattern.__new__(Pattern)):
+        try:
+            construct()
+        except TypeError as error:
+            assert str(error) == "cannot create 're.Pattern' instances"
+        else:
+            raise AssertionError("constructed a pattern without compiling")
     print(re.A is re.ASCII, re.U is re.UNICODE)
     print(ascii_digits.pattern, ascii_digits.flags, unicode_digits.flags)
     for text in ("200", "-404", "+12", "1_2", "٢٠٠", "-１２", "200\n"):
