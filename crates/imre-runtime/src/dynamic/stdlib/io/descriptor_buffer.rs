@@ -57,8 +57,13 @@ pub(in crate::dynamic) fn prepare_writer_shutdown(ctx: &Context) {
         if !armed.get() || fd.closed() {
             continue;
         }
+        let owner = if fd.reading {
+            "BufferedRandom"
+        } else {
+            "BufferedWriter"
+        };
         let base = ctx.find_in_mro(class, |candidate| {
-            (ctx.heap.get(candidate).io_kind() == Some("BufferedWriter")).then_some(candidate)
+            (ctx.heap.get(candidate).io_kind() == Some(owner)).then_some(candidate)
         });
         let native = base.is_some_and(|base| {
             ["__del__", "__getattribute__", "closed", "close", "flush"]
@@ -72,6 +77,11 @@ pub(in crate::dynamic) fn prepare_writer_shutdown(ctx: &Context) {
         armed.set(native);
     }
 }
+
+const RANDOM_RAW_METHODS: &[&str] = &[
+    "close", "flush", "readable", "writable", "seekable", "isatty", "fileno", "tell", "seek",
+    "read", "readall", "readinto", "write", "truncate",
+];
 
 fn native_raw(ctx: &Context, raw: Id, methods: &[&str], owner: &str) -> Result<Rc<RawFile>> {
     // Going straight to the descriptor is valid only while the Python raw methods
@@ -110,26 +120,25 @@ pub(super) fn initialize(
     receiver: Id,
     args: &[Id],
     kwargs: &[(String, Id)],
-    reading: bool,
+    owner: &str,
 ) -> Result<Id> {
-    let (owner, capability, methods): (_, _, &[&str]) = if reading {
-        (
-            "BufferedReader",
-            "readable",
+    let (capabilities, methods): (&[&str], &[&str]) = match owner {
+        "BufferedReader" => (
+            &["readable"],
             &[
                 "close", "flush", "readable", "seekable", "isatty", "fileno", "tell", "seek",
                 "read", "readall", "readinto",
             ],
-        )
-    } else {
-        (
-            "BufferedWriter",
-            "writable",
+        ),
+        "BufferedWriter" => (
+            &["writable"],
             &[
                 "close", "flush", "writable", "seekable", "isatty", "fileno", "tell", "seek",
                 "write", "truncate",
             ],
-        )
+        ),
+        "BufferedRandom" => (&["seekable", "readable", "writable"], RANDOM_RAW_METHODS),
+        _ => unreachable!("sealed buffered class"),
     };
     let [raw, capacity] =
         builtins::bind_builtin_arguments(owner, args, kwargs, ["raw", "buffer_size"], 1)?;
@@ -138,12 +147,14 @@ pub(super) fn initialize(
         .map(|n| ssize(ctx, n))
         .transpose()?
         .unwrap_or(super::DEFAULT_BUFFER_SIZE);
-    let method = ctx.lookup_attr(raw, capability)?;
-    if ctx.call(method, vec![], Vec::new())? != TRUE {
-        return Err(Error::new(
-            "UnsupportedOperation",
-            format!("File or stream is not {capability}."),
-        ));
+    for &capability in capabilities {
+        let method = ctx.lookup_attr(raw, capability)?;
+        if ctx.call(method, vec![], Vec::new())? != TRUE {
+            return Err(Error::new(
+                "UnsupportedOperation",
+                format!("File or stream is not {capability}."),
+            ));
+        }
     }
     if capacity <= 0 {
         return Err(Error::new(
@@ -151,7 +162,7 @@ pub(super) fn initialize(
             "buffer size must be strictly positive",
         ));
     }
-    if !reading && super::bytes_writer::is_bytes_io(ctx, raw) {
+    if owner == "BufferedWriter" && super::bytes_writer::is_bytes_io(ctx, raw) {
         return super::bytes_writer::initialize(ctx, receiver, raw, capacity as usize);
     }
     let handle = native_raw(ctx, raw, methods, owner)?;
@@ -168,8 +179,12 @@ pub(super) fn initialize(
             format!("explicit {owner} buffers above 8 MiB are unsupported"),
         ));
     }
-    let mut fd = BufferedFd::new(raw, handle, reading, capacity as usize);
-    if !reading {
+    let mut fd = if owner == "BufferedRandom" {
+        BufferedFd::update(raw, handle, capacity as usize)?
+    } else {
+        BufferedFd::new(raw, handle, owner == "BufferedReader", capacity as usize)
+    };
+    if owner != "BufferedReader" {
         fd.drop_fallback = Some(Cell::new(true));
     }
     // Do not close the caller's file if allocating the backing value fails.
@@ -468,10 +483,19 @@ impl BufferedFd {
 
     /// Check the live raw after any argument conversion which can invoke Python.
     fn check_raw(&self, ctx: &Context, receiver: Id, name: &str) -> Result<()> {
+        if !matches!(
+            name,
+            "fileno" | "readable" | "writable" | "isatty" | "seekable"
+        ) && let Some(Buffer::Random(file)) = &*self.buffer.borrow()
+        {
+            file.check_reentry()?;
+        }
         if matches!(ctx.heap.get(receiver), Value::File(_)) {
             return Ok(());
         }
-        let (owner, methods): (_, &[&str]) = if self.reading {
+        let (owner, methods): (_, &[&str]) = if self.reading && self.writing {
+            ("BufferedRandom", RANDOM_RAW_METHODS)
+        } else if self.reading {
             (
                 "BufferedReader",
                 match name {
@@ -501,6 +525,27 @@ impl BufferedFd {
             ));
         }
         Ok(())
+    }
+
+    pub(super) fn truncate(&self, ctx: &mut Context, receiver: Id, args: &[Id]) -> Result<Id> {
+        self.call(ctx, receiver, "flush", &[], &[])?;
+        let truncate = ctx.lookup_attr(self.raw, "truncate")?;
+        let callback = self.reading
+            && args.first().is_some_and(|&size| {
+                size != NONE && !matches!(ctx.heap.get(size), Value::Int(_) | Value::Bool(_))
+            });
+        if callback {
+            ctx.heap.keep(truncate);
+            let name = ctx.lookup_attr(self.raw, "name")?;
+            if let Some(Buffer::Random(file)) = &mut *self.buffer.borrow_mut() {
+                file.truncate_guard(Some(ctx.repr(name)));
+            }
+        }
+        let result = ctx.call(truncate, args.to_vec(), Vec::new());
+        if callback && let Some(Buffer::Random(file)) = &mut *self.buffer.borrow_mut() {
+            file.truncate_guard(None);
+        }
+        result
     }
 
     pub(in crate::dynamic) fn closed(&self) -> bool {

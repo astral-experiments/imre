@@ -5,6 +5,7 @@ use super::{Context, Error, FALSE, Id, NONE, Result, TRUE, Value};
 
 mod buffered_io;
 mod descriptor_buffer;
+mod native_random;
 mod native_reader;
 mod native_writer;
 pub(in crate::dynamic) use descriptor_buffer::{
@@ -213,8 +214,6 @@ pub(in super::super) fn install(ctx: &mut Context, module: Id) {
         let value = ctx.int(origin);
         ctx.bind(module, name, value);
     }
-    let buffered_random = ctx.builtin("_io.BufferedRandom");
-    ctx.bind(module, "_buffered_random", buffered_random);
 }
 
 /// Construct a low-level module's native I/O classes before io.py declares its ABCs.
@@ -271,6 +270,7 @@ pub(in super::super) fn install_native(ctx: &mut Context, module: Id, module_obj
         buffered,
         native_writer::METHODS,
     );
+    let random = class(ctx, module, "BufferedRandom", buffered, native_random::METHODS);
     let bytes_io = class(ctx, module, "BytesIO", buffered, bytes_io::METHODS);
     let text = class(
         ctx,
@@ -308,7 +308,7 @@ pub(in super::super) fn install_native(ctx: &mut Context, module: Id, module_obj
             .insert("_io.open.__self__".into(), module_object);
         ctx.builtin("open")
     } else {
-        let callable = ctx.alloc(Value::IoOpen { reader, writer });
+        let callable = ctx.alloc(Value::IoOpen { reader, writer, random });
         ctx.alloc(Value::Method {
             callable,
             receiver: module_object,
@@ -322,6 +322,7 @@ pub(in super::super) fn install_native(ctx: &mut Context, module: Id, module_obj
             ("_io._RawIOBase", raw),
             ("_io._BufferedIOBase", buffered),
             ("_io._TextIOBase", text),
+            ("_io.BufferedRandom", random),
             ("_io.BufferedReader", reader),
             ("_io.BufferedWriter", writer),
             ("_io.FileIO", file),
@@ -374,6 +375,7 @@ fn class(
         "StringIO" => "_io.StringIO",
         "FileIO" => "_io.FileIO",
         "TextIOWrapper" => "_io.TextIOWrapper",
+        "BufferedRandom" => "_io.BufferedRandom",
         "BufferedReader" => "_io.BufferedReader",
         "BufferedWriter" => "_io.BufferedWriter",
         "BytesIO" => "_io.BytesIO",
@@ -388,7 +390,7 @@ fn class(
             && matches!(name, "mode" | "closefd" | "_blksize")
             || matches!(
                 descriptor_owner,
-                "_io.BufferedReader" | "_io.BufferedWriter"
+                "_io.BufferedReader" | "_io.BufferedWriter" | "_io.BufferedRandom"
             ) && matches!(name, "raw" | "mode" | "name")
             || wrapper && text_wrapper::property(name)
         {
@@ -637,6 +639,7 @@ pub(in super::super) fn open_from_module(
     ctx: &mut Context,
     reader: Id,
     writer: Id,
+    random: Id,
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
@@ -645,6 +648,7 @@ pub(in super::super) fn open_from_module(
     };
     let file = open(ctx, arguments, kwargs)?;
     let class = match ctx.heap.get(file).native_io_class_name() {
+        Some("_io.BufferedRandom") => random,
         Some("_io.BufferedReader") => reader,
         Some("_io.BufferedWriter") => writer,
         _ => return Ok(file),
@@ -676,7 +680,7 @@ pub(in super::super) fn call(
         Some("_BufferedIOBase")
     } else if text {
         Some("_TextIOBase")
-    } else if matches!(owner_kind, Some("BufferedReader" | "BufferedWriter")) {
+    } else if matches!(owner_kind, Some("BufferedReader" | "BufferedWriter" | "BufferedRandom")) {
         owner_kind
     } else if bytes_io {
         Some("BytesIO")
@@ -685,7 +689,7 @@ pub(in super::super) fn call(
     };
     let Some((&receiver, rest)) = args.split_first() else {
         let message = match (descriptor, name) {
-            (Some(class @ ("BytesIO" | "BufferedReader" | "BufferedWriter")), "__init__") => {
+            (Some(class @ ("BytesIO" | "BufferedReader" | "BufferedWriter" | "BufferedRandom")), "__init__") => {
                 format!("descriptor '__init__' of '_io.{class}' object needs an argument")
             }
             (Some(class), _) => format!("unbound method {class}.{name}() needs an argument"),
@@ -703,7 +707,7 @@ pub(in super::super) fn call(
     else {
         let actual = ctx.type_name(receiver);
         let message = match (descriptor, name) {
-            (Some(class @ ("BytesIO" | "BufferedReader" | "BufferedWriter")), "__init__") => {
+            (Some(class @ ("BytesIO" | "BufferedReader" | "BufferedWriter" | "BufferedRandom")), "__init__") => {
                 format!(
                     "descriptor '__init__' requires a '_io.{class}' object but received a '{actual}'"
                 )
@@ -716,8 +720,9 @@ pub(in super::super) fn call(
         return Err(Error::new("TypeError", message));
     };
     match owner_kind {
-        Some("BufferedReader") => return native_reader::call(ctx, receiver, name, rest, kwargs),
-        Some("BufferedWriter") => return native_writer::call(ctx, receiver, name, rest, kwargs),
+        Some("BufferedRandom") => return native_random::call(ctx, receiver, name, rest, kwargs),
+        Some("BufferedReader") => return native_reader::call(ctx, "BufferedReader", receiver, name, rest, kwargs),
+        Some("BufferedWriter") => return native_writer::call(ctx, "BufferedWriter", receiver, name, rest, kwargs),
         _ => {}
     }
     if raw && matches!(name, "write" | "readinto") {
@@ -789,11 +794,14 @@ pub(in super::super) fn call(
                     | "BufferedWriter"
             )
         });
+    if layout == Some("BufferedRandom") && matches!(name, "__enter__" | "__exit__") {
+        return native_random::call(ctx, receiver, name, rest, kwargs);
+    }
     if layout == Some("BufferedReader") && matches!(name, "__enter__" | "__exit__" | "writable") {
-        return native_reader::call(ctx, receiver, name, rest, kwargs);
+        return native_reader::call(ctx, "BufferedReader", receiver, name, rest, kwargs);
     }
     if layout == Some("BufferedWriter") && matches!(name, "__enter__" | "__exit__" | "readable") {
-        return native_writer::call(ctx, receiver, name, rest, kwargs);
+        return native_writer::call(ctx, "BufferedWriter", receiver, name, rest, kwargs);
     }
     if layout == Some("TextIOWrapper") {
         if matches!(ctx.heap.get(receiver), Value::TextFile(_)) {

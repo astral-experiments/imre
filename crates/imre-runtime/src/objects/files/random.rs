@@ -20,6 +20,22 @@ pub(crate) struct Random<F = File> {
 }
 
 impl FileState {
+    /// Return buffered bytes or make one read through the retained anonymous file.
+    pub(crate) fn random_read_once(&mut self, size: Option<usize>) -> Result<Bytes> {
+        let Some(Stream::Random(file)) = &mut self.stream else {
+            return Err(Error::new(Kind::ValueError, "read of closed file"));
+        };
+        file.check_reentry()?;
+        let size = size.unwrap_or(file.capacity());
+        let mut data = Vec::new();
+        data.try_reserve_exact(size)
+            .map_err(|_| Error::allocation())?;
+        data.resize(size, 0);
+        let count = file.read_once(&mut data).map_err(errno_error)?;
+        data.truncate(count);
+        Ok(data)
+    }
+
     /// Whether truncate is invoking the size object's index protocol on this stream.
     pub(crate) fn random_truncating(&self) -> bool {
         matches!(&self.stream, Some(Stream::Random(file)) if file.truncating_name.is_some())
@@ -27,15 +43,10 @@ impl FileState {
 
     /// A size object's index method can call back into the same buffered stream.
     pub(crate) fn check_random_reentry(&self) -> Result<()> {
-        if let Some(Stream::Random(file)) = &self.stream
-            && let Some(name) = &file.truncating_name
-        {
-            return Err(Error::new(
-                Kind::RuntimeError,
-                format!("reentrant call inside <_io.BufferedRandom name={name}>"),
-            ));
+        match &self.stream {
+            Some(Stream::Random(file)) => file.check_reentry(),
+            _ => Ok(()),
         }
-        Ok(())
     }
 
     /// Flush and rewind to the logical cursor before converting the optional Python size.
@@ -60,6 +71,22 @@ impl FileState {
             file.file.set_len(size).map_err(errno_error)?;
         }
         Ok(())
+    }
+}
+
+impl<F> Random<F> {
+    pub(crate) fn check_reentry(&self) -> Result<()> {
+        if let Some(name) = &self.truncating_name {
+            return Err(Error::new(
+                Kind::RuntimeError,
+                format!("reentrant call inside <_io.BufferedRandom name={name}>"),
+            ));
+        }
+        Ok(())
+    }
+
+    pub(crate) fn truncate_guard(&mut self, name: Option<String>) {
+        self.truncating_name = name;
     }
 }
 
