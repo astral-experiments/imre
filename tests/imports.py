@@ -276,6 +276,10 @@ ACCEPTED = {
             "assert compiler.flags == codeop.PyCF_DONT_IMPLY_DEDENT | codeop.PyCF_ALLOW_INCOMPLETE_INPUT\n"
         ),
     },
+    "warn_named_helper": {
+        "main.py": "from helper import current\ncurrent()\n",
+        "helper.py": (FIXTURES.parent / "boxed_warnings.py").read_text(),
+    },
     "codeop_named_helper": {
         "main.py": "from helper import flags\nprint(flags())\n",
         "helper.py": (

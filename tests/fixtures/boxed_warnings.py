@@ -1,12 +1,14 @@
 import sys
 import warnings
+from warnings import warn
 
 
 def emit():
-    warnings.warn("from the caller", DeprecationWarning, stacklevel=2)
+    warn("from the caller", DeprecationWarning, 2)
 
 
 def current():
+    assert warn is warnings.warn
     with warnings.catch_warnings(record=True) as captured:
         warnings.simplefilter("always", DeprecationWarning)
         line = sys._getframe().f_lineno + 1
