@@ -1,29 +1,15 @@
 //! Relative references keep explicit empty query and fragment delimiters.
 use super::*;
 
-fn uses_relative(scheme: &str) -> bool {
-    matches!(
-        scheme,
-        "" | "ftp"
-            | "http"
-            | "gopher"
-            | "nntp"
-            | "imap"
-            | "wais"
-            | "file"
-            | "https"
-            | "shttp"
-            | "mms"
-            | "prospero"
-            | "rtsp"
-            | "rtsps"
-            | "rtspu"
-            | "sftp"
-            | "svn"
-            | "svn+ssh"
-            | "ws"
-            | "wss"
-    )
+pub(crate) const USES_RELATIVE: &[&str] = &[
+    "", "ftp", "http", "gopher", "nntp", "imap", "wais", "file", "https", "shttp", "mms",
+    "prospero", "rtsp", "rtsps", "rtspu", "sftp", "svn", "svn+ssh", "ws", "wss",
+];
+
+pub(crate) enum JoinOption<'a> {
+    AllowFragments,
+    UsesRelative(&'a str),
+    UsesNetloc(&'a str),
 }
 
 fn resolve_path(base: &str, target: &str) -> Result<String> {
@@ -75,28 +61,36 @@ fn resolve_path(base: &str, target: &str) -> Result<String> {
     Ok(path)
 }
 
-fn join(base: &str, url: &str, fragments: bool) -> Result<String> {
+/// Resolve nonempty inputs, consulting the caller's scheme registries in Python order.
+/// None preserves the relative URL object when its scheme precludes joining.
+pub(crate) fn join_reference<E: From<Error>>(
+    base: &str,
+    url: &str,
+    mut option: impl FnMut(JoinOption<'_>) -> std::result::Result<bool, E>,
+) -> std::result::Result<Option<String>, E> {
     let clean_base = clean(base, false)?;
+    let base = split(&clean_base, "", option(JoinOption::AllowFragments)?)?;
     let clean_url = clean(url, false)?;
-    let base = split(&clean_base, "", fragments)?;
-    let target = split(&clean_url, "", fragments)?;
+    let target = split(&clean_url, "", option(JoinOption::AllowFragments)?)?;
     let scheme = if target.scheme.is_empty() {
         &base.scheme
     } else {
         &target.scheme
     };
-    if scheme != &base.scheme || !uses_relative(scheme) {
-        let mut unchanged = String::new();
-        unchanged
-            .try_reserve_exact(url.len())
-            .map_err(|_| Error::allocation())?;
-        unchanged.push_str(url);
-        return Ok(unchanged);
+    if scheme != &base.scheme || (!scheme.is_empty() && !option(JoinOption::UsesRelative(scheme))?)
+    {
+        return Ok(None);
     }
     let mut netloc = target.netloc;
-    if scheme.is_empty() || uses_netloc(scheme) {
+    if scheme.is_empty() || option(JoinOption::UsesNetloc(scheme))? {
         if netloc.is_some_and(|n| !n.is_empty()) {
-            return unsplit(scheme, netloc, target.path, target.query, target.fragment);
+            return Ok(Some(unsplit(
+                scheme,
+                netloc,
+                target.path,
+                target.query,
+                target.fragment,
+            )?));
         }
         netloc = base.netloc;
     }
@@ -106,10 +100,16 @@ fn join(base: &str, url: &str, fragments: bool) -> Result<String> {
         } else {
             (base.query, target.fragment.or(base.fragment))
         };
-        return unsplit(scheme, netloc, base.path, query, fragment);
+        return Ok(Some(unsplit(scheme, netloc, base.path, query, fragment)?));
     }
     let path = resolve_path(base.path, target.path)?;
-    unsplit(scheme, netloc, &path, target.query, target.fragment)
+    Ok(Some(unsplit(
+        scheme,
+        netloc,
+        &path,
+        target.query,
+        target.fragment,
+    )?))
 }
 
 /// # Safety
@@ -156,12 +156,16 @@ pub unsafe extern "C" fn imre_url_join(
                 ));
             }
             // SAFETY: Both nonempty operands now have identical layouts.
-            let result = join(
-                unsafe { decoded(base, base_bytes)? },
-                unsafe { decoded(url, url_bytes)? },
-                fragments != 0,
-            )?;
-            owned(&result, base_bytes)
+            let base = unsafe { decoded(base, base_bytes)? };
+            let url = unsafe { decoded(url, url_bytes)? };
+            let result = join_reference(base, url, |option| -> Result<bool> {
+                Ok(match option {
+                    JoinOption::AllowFragments => fragments != 0,
+                    JoinOption::UsesRelative(scheme) => USES_RELATIVE.contains(&scheme),
+                    JoinOption::UsesNetloc(scheme) => uses_netloc(scheme),
+                })
+            })?;
+            owned(result.as_deref().unwrap_or(url), base_bytes)
         })(),
         0,
     )

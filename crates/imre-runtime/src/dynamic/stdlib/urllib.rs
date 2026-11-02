@@ -4,6 +4,7 @@ use super::{Context, Error, Id, NONE, Result, Value};
 use crate::dynamic::builtins::bind;
 use crate::objects::{UrlInput, urlquote, urlsplit};
 
+mod join;
 mod quote;
 mod urlencode;
 
@@ -17,6 +18,7 @@ const SPLIT_BYTES: &str = "SplitResultBytes";
 /// Bind the mutable scheme registry once, in this module's Python namespace.
 pub(in crate::dynamic) fn initialize(ctx: &mut Context, scope: Id) {
     for (name, schemes) in [
+        ("uses_relative", urlsplit::join::USES_RELATIVE),
         ("uses_netloc", urlsplit::USES_NETLOC),
         (
             "uses_params",
@@ -30,7 +32,7 @@ pub(in crate::dynamic) fn initialize(ctx: &mut Context, scope: Id) {
         let registry = ctx.alloc(Value::List(items));
         ctx.bind(scope, name, registry);
     }
-    for name in ["urlparse", "urlunparse", PARSE, PARSE_BYTES] {
+    for name in ["urljoin", "urlparse", "urlunparse", PARSE, PARSE_BYTES] {
         let operation = ctx.builtin(&format!("urllib.parse.{name}"));
         ctx.bind(scope, name, operation);
     }
@@ -65,6 +67,16 @@ pub(super) fn call(
     match name {
         "quote" | "quote_plus" | "quote_from_bytes" => quote::call(ctx, name, args, kwargs),
         "urlencode" => urlencode::call(ctx, args, kwargs),
+        "urljoin" => {
+            let [base, url, fragments] =
+                bind(name, args, kwargs, ["base", "url", "allow_fragments"])?;
+            join::join(
+                ctx,
+                required(base, name, "base")?,
+                required(url, name, "url")?,
+                fragments,
+            )
+        }
         "unquote" => {
             let [text, encoding, errors] =
                 bind(name, args, kwargs, ["string", "encoding", "errors"])?;

@@ -1546,6 +1546,12 @@ impl IntrinsicModule {
             (Self::PosixPath, "splitext") => Intrinsic::PosixPath(PosixPathOperation::Splitext),
             (Self::PosixPath, "normpath") => Intrinsic::PosixPath(PosixPathOperation::Normpath),
             (Self::PosixPath, "abspath") => Intrinsic::PosixPath(PosixPathOperation::Abspath),
+            (Self::UrllibParse, "uses_relative") => {
+                Intrinsic::ObjectRuntimeExport("urllib.parse.uses_relative")
+            }
+            (Self::UrllibParse, "uses_netloc") => {
+                Intrinsic::ObjectRuntimeExport("urllib.parse.uses_netloc")
+            }
             (Self::UrllibParse, "quote") => Intrinsic::Quote,
             (Self::UrllibParse, "quote_from_bytes") => Intrinsic::QuoteFromBytes,
             (Self::UrllibParse, "quote_plus") => Intrinsic::QuotePlus,
