@@ -1972,6 +1972,10 @@ impl Context {
                         ));
                     }
                     match ctx.heap.get(storage) {
+                        Value::RegexMatch(m) => {
+                            append_rendered_text(&mut output, &m.repr(&ctx)?)?;
+                            continue;
+                        }
                         Value::Method {
                             callable,
                             receiver,
