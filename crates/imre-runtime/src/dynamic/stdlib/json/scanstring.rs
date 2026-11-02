@@ -113,7 +113,10 @@ fn string_body(ctx: &mut Context, storage: Id, body: Range<usize>) -> Result<Id>
     Ok(ctx.text_codepoints(points))
 }
 
-fn decoded_points<I: Iterator<Item = u32> + Clone>(body: I, bound: usize) -> Result<Vec<u32>> {
+pub(super) fn decoded_points<I: Iterator<Item = u32> + Clone>(
+    body: I,
+    bound: usize,
+) -> std::result::Result<Vec<u32>, crate::Error> {
     let mut points = Vec::new();
     points
         .try_reserve_exact(bound)
