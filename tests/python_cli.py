@@ -975,35 +975,43 @@ def check_boxed_unittest_main_reporting(imre, root, run):
     assert built.returncode == 0, built
     passed = run(executable, "-v", "Cases.test_pass")
     assert passed.returncode == 0, passed
-    assert "test_pass (__main__.Cases.test_pass) ... ok" in passed.stderr.splitlines(), passed
+    assert b"test_pass (__main__.Cases.test_pass) ... ok" in passed.stderr.splitlines(), passed
     failed = run(executable, "-v", "Cases.test_failure")
-    assert failed.returncode == 1 and "(item=1) ... FAIL" in failed.stderr, failed
-    assert failed.stderr.rstrip().endswith("FAILED (failures=1)"), failed
+    assert failed.returncode == 1 and b"(item=1) ... FAIL" in failed.stderr, failed
+    assert failed.stderr.rstrip().endswith(b"FAILED (failures=1)"), failed
 
 
 def check_unittest_main_names(imre, root, run):
     source = root / "selected_tests.py"
     source.write_text(
+        "import sys\n"
         "import unittest\n"
         "class Cases(unittest.TestCase):\n"
         "    def test_a(self): print('a')\n"
         "    def test_b(self): print('b')\n"
+        "assert sys.modules['__main__'].Cases is Cases\n"
         "unittest.main()\n"
     )
     executable = root / "selected_tests"
-    built = run(imre, "build", source, "--runtime-imports", "--no-cache", "-o", executable)
+    built = run(imre, "build", source, "--module-root", root, "--runtime-imports", "--no-cache", "-o", executable)
     assert built.returncode == 0, built
-    for args, output in [((), "a\nb\n"), (("Cases.test_b", "Cases.test_a"), "b\na\n"),
-                         (("-vk", "test_b", "Cases"), "b\n")]:
+    for args, output in [((), b"a\nb\n"), (("Cases.test_b", "Cases.test_a"), b"b\na\n"),
+                         (("-vk", "test_b", "Cases"), b"b\n")]:
         result = run(executable, *args)
         assert result.returncode == 0 and result.stdout == output, result
+    for flags, progress in [((), b".\n"), (("-v",), b"test_b (__main__.Cases.test_b) ... ok\n\n"),
+                            (("-q",), b""), (("-vq",), b"")]:
+        result = run(executable, *flags, "Cases.test_b")
+        assert result.returncode == 0 and result.stdout == b"b\n", result
+        assert result.stderr.split(b"-" * 70, 1)[0] == progress, result
     extra = run(executable, "Cases", "-v", "Cases.test_b")
-    assert extra.returncode == 2 and not extra.stdout and "unrecognized arguments" in extra.stderr, extra
+    assert extra.returncode == 2 and not extra.stdout and b"unrecognized arguments" in extra.stderr, extra
     for flags in [("-k", "-1"), ("-k=two words",)]:
         filtered = run(executable, *flags, "Cases")
         assert filtered.returncode == 5 and not filtered.stdout, filtered
     missing = run(executable, "-v", "Cases.test_missing")
-    assert missing.returncode == 1 and "_FailedTest" in missing.stderr, missing
+    assert missing.returncode == 1 and b"ERROR: test_missing (unittest.loader._FailedTest.test_missing)" in missing.stderr, missing
+    assert b"Ran 1 test" in missing.stderr and b"FAILED (errors=1)" in missing.stderr, missing
 
 
 def check_unittest_file_discovery(imre, root, run):
