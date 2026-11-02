@@ -119,7 +119,8 @@ class SourceFileLoader:
         code = _registered_code(self.name, path)
         if code is not None:
             return code
-        return compile(self.get_data(path), path, "exec")
+        source = self.get_data(path)
+        return self.source_to_code(source, path)
 
     def exec_module(self, module):
         exec(self.get_code(module.__name__), module.__dict__)
