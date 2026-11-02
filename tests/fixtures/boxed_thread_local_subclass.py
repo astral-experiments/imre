@@ -41,3 +41,16 @@ def current():
     print(object.__getattribute__(state, "__dict__")["hidden"], hasattr(state, "hidden"))
     delattr(state, "flag")
     print(state.flag, other.__dict__)
+
+    class Initialized(local):
+        def __init__(self, marker, *, token):
+            assert not self.__dict__
+            self.values = (marker, token)
+
+    class Child(Initialized):
+        pass
+
+    marker = object()
+    active = Child(marker, token=marker)
+    assert active.values[0] is active.values[1] is marker
+    assert local.__new__(Child, marker, token=marker).__dict__ == {}

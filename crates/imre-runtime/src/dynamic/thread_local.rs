@@ -78,14 +78,20 @@ pub(super) fn allocate(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) 
     if !ctx.subclass(class, base) {
         return Err(ctx.invalid_new_subtype(CLASS, class));
     }
-    ctx.check_local_initializer(class)?;
-    if !args.is_empty() || !kwargs.is_empty() {
+    if (!args.is_empty() || !kwargs.is_empty()) && ctx.local_initializer(class).is_none() {
         return Err(Error::new(
             "TypeError",
             "Initialization arguments are not supported",
         ));
     }
-    let storage = ctx.alloc(Value::ThreadLocal(Default::default()));
+    // The normal class call runs the creator's __init__ after __new__ returns.
+    let mut local = Dictionaries {
+        args: args.to_vec(),
+        kwargs: kwargs.to_vec(),
+        ..Default::default()
+    };
+    local.insert(ctx.dict(Vec::new()));
+    let storage = ctx.alloc(Value::ThreadLocal(local));
     if class == base {
         return Ok(storage);
     }
@@ -94,7 +100,6 @@ pub(super) fn allocate(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) 
         unreachable!()
     };
     *scalar = Some(storage);
-    ctx.local_dict(object)?;
     Ok(object)
 }
 
@@ -154,12 +159,16 @@ thread_local! { static THREAD: Arc<()> = Arc::new(()); }
 
 /// A thread owns its token. Once it exits, its dictionary may be collected.
 #[derive(Clone, Default)]
-pub(super) struct Dictionaries(Vec<(Weak<()>, Id)>);
+pub(super) struct Dictionaries {
+    threads: Vec<(Weak<()>, Id)>,
+    args: Vec<Id>,
+    kwargs: Vec<(String, Id)>,
+}
 
 impl Dictionaries {
     fn current(&self) -> Option<Id> {
         THREAD.with(|thread| {
-            self.0
+            self.threads
                 .iter()
                 .find(|(owner, _)| owner.as_ptr() == Arc::as_ptr(thread))
                 .map(|(_, dict)| *dict)
@@ -167,29 +176,25 @@ impl Dictionaries {
     }
 
     fn insert(&mut self, dict: Id) {
-        self.0.retain(|(owner, _)| owner.strong_count() != 0);
-        self.0.push((THREAD.with(Arc::downgrade), dict));
+        self.threads.retain(|(owner, _)| owner.strong_count() != 0);
+        self.threads.push((THREAD.with(Arc::downgrade), dict));
     }
 
     pub(super) fn live(&self) -> impl Iterator<Item = Id> {
-        self.0
+        self.threads
             .iter()
             .filter(|(owner, _)| owner.strong_count() != 0)
             .map(|(_, dict)| *dict)
+            .chain(self.args.iter().copied())
+            .chain(self.kwargs.iter().map(|(_, value)| *value))
     }
 }
 
 impl Context {
-    fn check_local_initializer(&self, class: Id) -> Result<()> {
-        if self.class_attr(class, "__init__").is_some_and(
-            |init| !matches!(self.heap.get(init), Value::Native(name) if name == "object.__init__"),
-        ) {
-            return Err(Error::new(
-                "NotImplementedError",
-                "thread-local subclasses with custom initialization require per-thread initialization",
-            ));
-        }
-        Ok(())
+    fn local_initializer(&self, class: Id) -> Option<Id> {
+        self.class_attr(class, "__init__").filter(
+            |&init| !matches!(self.heap.get(init), Value::Native(name) if name == "object.__init__"),
+        )
     }
 
     fn local_dict(&mut self, obj: Id) -> Result<Id> {
@@ -200,15 +205,28 @@ impl Context {
         if let Some(dict) = local.current() {
             return Ok(dict);
         }
-        // A subclass can gain an initializer after its first instance was created.
-        if let Some(class) = self.heap.get(obj).instance_class() {
-            self.check_local_initializer(class)?;
-        }
         let dict = self.dict(Vec::new());
         let Value::ThreadLocal(local) = self.heap.get_mut(storage) else {
             unreachable!()
         };
+        // Recursive access in __init__ must see this thread's in-progress dictionary.
         local.insert(dict);
+        if let Some(class) = self.heap.get(obj).instance_class()
+            && let Some(init) = self.local_initializer(class)
+        {
+            let Value::ThreadLocal(local) = self.heap.get(storage) else {
+                unreachable!()
+            };
+            let args = local.args.clone();
+            let kwargs = local.kwargs.clone();
+            if let Err(error) = self.call_initializer(init, obj, class, args, kwargs) {
+                let Value::ThreadLocal(local) = self.heap.get_mut(storage) else {
+                    unreachable!()
+                };
+                local.threads.retain(|&(_, id)| id != dict);
+                return Err(error);
+            }
+        }
         Ok(dict)
     }
 
@@ -348,6 +366,9 @@ impl Context {
         }
     }
 }
+
+#[cfg(test)]
+mod initialization_tests;
 
 #[cfg(test)]
 mod tests {

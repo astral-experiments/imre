@@ -4907,6 +4907,29 @@ impl Context {
         }))
     }
 
+    /// Invoke the initializer found on the type, including its descriptor binding.
+    pub(super) fn call_initializer(
+        &mut self,
+        init: Id,
+        instance: Id,
+        class: Id,
+        args: Vec<Id>,
+        kwargs: Vec<(String, Id)>,
+    ) -> Result<()> {
+        let init = self.bind_attribute(init, instance, class)?;
+        let result = self.call(init, args, kwargs)?;
+        if result != NONE {
+            return Err(Error::new(
+                "TypeError",
+                format!(
+                    "__init__() should return None, not '{}'",
+                    self.type_name(result)
+                ),
+            ));
+        }
+        Ok(())
+    }
+
     /// Count a generated NamedTuple repr frame like a runtime-loaded Python call.
     pub(super) fn check_call_depth(&self, additional: usize) -> Result<()> {
         if self.call_depth + additional >= 1000 {
@@ -5532,17 +5555,7 @@ impl Context {
                 };
                 let actual = self.exact_type(instance)?;
                 if let Some(init) = self.class_attr(actual, "__init__") {
-                    let init = self.bind_attribute(init, instance, actual)?;
-                    let result = self.call(init, args, kwargs)?;
-                    if result != NONE {
-                        return Err(Error::new(
-                            "TypeError",
-                            format!(
-                                "__init__() should return None, not '{}'",
-                                self.type_name(result)
-                            ),
-                        ));
-                    }
+                    self.call_initializer(init, instance, actual, args, kwargs)?;
                 } else if new.is_none()
                     && !native_tzinfo_new
                     && string_base.is_none()
