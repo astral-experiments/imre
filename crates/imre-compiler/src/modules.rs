@@ -314,7 +314,12 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
                 "\n",
                 include_str!("../stdlib/contextlib_nullcontext.py"),
                 "\n",
+                "class _BaseExitStack:\n",
+                include_str!("../stdlib/contextlib_exitstack_base.inc"),
+                "\n",
                 include_str!("../stdlib/contextlib_exitstack.py"),
+                "\n",
+                include_str!("../stdlib/contextlib_async_exitstack.py"),
                 "\n",
                 include_str!("../stdlib/contextlib_redirect.py"),
                 "\n",
@@ -1714,6 +1719,9 @@ impl IntrinsicModule {
                 Intrinsic::ObjectRuntimeExport("contextlib.redirect_stderr")
             }
             (Self::Contextlib, "suppress") => Intrinsic::ObjectRuntimeExport("contextlib.suppress"),
+            (Self::Contextlib, "AsyncExitStack") => {
+                Intrinsic::ObjectRuntimeExport("contextlib.AsyncExitStack")
+            }
             (Self::Contextlib, "AbstractAsyncContextManager") => {
                 Intrinsic::ObjectRuntimeExport("contextlib.AbstractAsyncContextManager")
             }
@@ -5262,7 +5270,11 @@ impl<'a> Loader<'a> {
             .then_some((
                 CONTEXTLIB_EXIT_STACK,
                 concat!(
+                    // The typed layout uses one inheritance chain for the two stack bases.
                     "from contextlib import AbstractContextManager\n",
+                    "class _BaseExitStack(AbstractContextManager):\n",
+                    include_str!("../stdlib/contextlib_exitstack_base.inc"),
+                    "\n",
                     include_str!("../stdlib/contextlib_exitstack.py")
                 ),
             )),

@@ -1331,11 +1331,12 @@ def main():
         assert expected.returncode == actual.returncode == 0, (expected.stderr, actual.stderr)
         assert actual.stdout == expected.stdout and actual.stderr == expected.stderr == b""
 
-        exit_stack = Path(__file__).with_name("fixtures") / "boxed_exit_stack.py"
-        expected = run(sys.executable, "-B", exit_stack)
-        actual = run(imre, "run", exit_stack, "--runtime-imports", "--quiet")
-        assert expected.returncode == actual.returncode == 0, (expected.stderr, actual.stderr)
-        assert actual.stdout == expected.stdout and actual.stderr == expected.stderr == b""
+        for fixture in ("boxed_exit_stack.py", "boxed_async_exit_stack.py"):
+            exit_stack = Path(__file__).with_name("fixtures") / fixture
+            expected = run(sys.executable, "-B", exit_stack)
+            actual = run(imre, "run", exit_stack, "--runtime-imports", "--quiet")
+            assert expected.returncode == actual.returncode == 0, (expected.stderr, actual.stderr)
+            assert actual.stdout == expected.stdout and actual.stderr == expected.stderr == b""
 
         exit_stack_import = root / "stack.py"
         exit_stack_import.write_text("from contextlib import ExitStack\n"
