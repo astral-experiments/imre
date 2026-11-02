@@ -24,7 +24,7 @@ pub(super) mod flags;
 mod fnmatch;
 mod formatters;
 pub(super) mod functools;
-mod hashlib;
+pub(super) mod hashlib;
 mod hmac;
 mod inspect;
 pub(super) mod itertools;
@@ -104,6 +104,9 @@ pub(super) fn jit_module(ctx: &mut Context) -> Result<Id> {
 }
 
 pub(super) fn is_module(name: &str) -> bool {
+    if name == "_hashlib" {
+        return hashlib::openssl::provider().is_some();
+    }
     matches!(
         name,
         "_blake2"
@@ -2066,6 +2069,9 @@ pub(super) fn call(
     }
     if let Some(class) = crate::objects::HashState::provider_class(name) {
         return hashlib::hash(ctx, class.rsplit_once('.').unwrap().1, args, kwargs);
+    }
+    if let Some(function) = name.strip_prefix("_hashlib.") {
+        return hashlib::call_openssl(ctx, function, args, kwargs);
     }
     if let Some(algorithm) = name.strip_prefix("hashlib.")
         && crate::objects::HashState::algorithms().any(|name| name == algorithm)

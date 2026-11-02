@@ -2606,6 +2606,7 @@ impl Context {
                 let pi = self.alloc(Value::Float(std::f64::consts::PI));
                 self.bind(scope, "pi", pi);
             }
+            "_hashlib" if source.is_none() => stdlib::hashlib::install_openssl(self, scope)?,
             "hashlib" => {
                 let native_new = self.builtin("hashlib.new");
                 self.bind(scope, "_native_new", native_new);
