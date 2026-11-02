@@ -1804,10 +1804,10 @@ impl Context {
 
     /// Keep non-data wrapper receiver checks at call time for direct method calls.
     fn default_attr_for_call(&mut self, obj: Id, name: &str, for_call: bool) -> Result<Id> {
-        if let Some(&scope) = self.enum_scopes.get(&obj) {
-            if let Some(value) = self.enum_base_attribute(obj, scope, name)? {
-                return Ok(value);
-            }
+        if let Some(&scope) = self.enum_scopes.get(&obj)
+            && let Some(value) = self.enum_base_attribute(obj, scope, name)?
+        {
+            return Ok(value);
         }
         if matches!(name, "numerator" | "denominator") {
             let receiver = match self.heap.get(obj) {
@@ -2993,7 +2993,14 @@ impl Context {
                 ) && let Some(owner) = builtins::constructor_owner(symbol) =>
             {
                 return Ok(match name {
-                    "__self__" => self.builtin(&owner.to_owned()),
+                    "__self__" => match self.builtins.get(owner) {
+                        Some(&class) => class,
+                        None => {
+                            // Creating the owner mutates the heap that holds its name.
+                            let owner = owner.to_owned();
+                            self.builtin(&owner)
+                        }
+                    },
                     "__name__" => self.text("__new__"),
                     "__qualname__" => {
                         let class = owner.rsplit('.').next().unwrap_or(owner);
@@ -3769,10 +3776,10 @@ impl Context {
                 Value::Function { .. } => return Ok(self.builtin("function.__new__")),
                 Value::ThreadLocal(_) => return Ok(self.builtin("_thread._local.__new__")),
                 Value::Str(_) | Value::SurrogateStr(_) => return Ok(self.builtin("str.__new__")),
-                Value::Instance { class, .. } => {
-                    if self.uses_object_new(self.allocation_base(*class)) {
-                        return Ok(self.builtin("object.__new__"));
-                    }
+                Value::Instance { class, .. }
+                    if self.uses_object_new(self.allocation_base(*class)) =>
+                {
+                    return Ok(self.builtin("object.__new__"));
                 }
                 _ => {}
             }
@@ -4062,7 +4069,7 @@ impl Context {
                 }
             }
             Value::Native(_) if let Some(&scope) = self.enum_scopes.get(&obj) => {
-                return self.update_enum_base(scope, name, None);
+                self.update_enum_base(scope, name, None)
             }
             Value::Class { scope, .. } => {
                 if matches!(name, "__annotations__" | "__annotate__")

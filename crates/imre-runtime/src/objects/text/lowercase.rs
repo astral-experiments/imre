@@ -84,7 +84,7 @@ enum Case {
     Upper,
     Capitalize,
     Title,
-    SwapCase,
+    Swap,
 }
 
 /// Apply a full mapping to an original scalar. Only title consults its immediate
@@ -105,9 +105,9 @@ fn mapped_char(
     };
     let mapping = if title {
         unicode_case_mapping::to_titlecase(ch)
-    } else if case == Case::Upper || (case == Case::SwapCase && contains(&LOWERCASE, ch)) {
+    } else if case == Case::Upper || (case == Case::Swap && contains(&LOWERCASE, ch)) {
         unicode_case_mapping::to_uppercase(ch)
-    } else if case == Case::SwapCase && !contains(&UPPERCASE, ch) {
+    } else if case == Case::Swap && !contains(&UPPERCASE, ch) {
         // Titlecase digraphs are cased but neither lowercase nor uppercase.
         [0; 3]
     } else if ch == 'Σ' && final_sigma() {
@@ -139,7 +139,7 @@ fn case_chars(source: &str, case: Case) -> impl Iterator<Item = char> {
 
 /// Titlecase or swap the case of a scalar string using the pinned Unicode tables.
 pub(crate) fn case_map(source: &str, title: bool) -> super::Result<String> {
-    let case = if title { Case::Title } else { Case::SwapCase };
+    let case = if title { Case::Title } else { Case::Swap };
     let mut result = String::new();
     result
         .try_reserve_exact(source.len())
@@ -155,7 +155,7 @@ pub(crate) fn case_map(source: &str, title: bool) -> super::Result<String> {
 
 /// Surrogates survive as code points and form uncased boundaries for both title and sigma.
 pub(crate) fn case_map_points(points: &[u32], title: bool) -> super::Result<Vec<u32>> {
-    let case = if title { Case::Title } else { Case::SwapCase };
+    let case = if title { Case::Title } else { Case::Swap };
     let mut result = Vec::new();
     result
         .try_reserve_exact(points.len())
@@ -188,6 +188,7 @@ pub(crate) fn case_map_points(points: &[u32], title: bool) -> super::Result<Vec<
 /// The caller roots the immutable string storage for this call.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_str_case_map(source: *const Str, title: u32) -> *const Str {
+    // SAFETY: the caller keeps the immutable Str alive for this borrow.
     let source = unsafe { &*source };
     let result = if source.is_empty() {
         super::try_owned_string("")

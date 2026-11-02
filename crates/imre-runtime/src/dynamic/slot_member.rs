@@ -761,7 +761,7 @@ impl Context {
         };
         let name = self.str_value(name)?;
         member_values
-            .as_deref()
+            .as_ref()
             .and_then(|values| values.get(&member))
             .copied()
             .ok_or_else(|| self.missing_attribute(receiver, name))
@@ -783,7 +783,7 @@ impl Context {
                 .insert(member, value)
         } else {
             let previous = member_values
-                .as_deref_mut()
+                .as_mut()
                 .and_then(|values| values.remove(&member));
             if previous.is_none() {
                 return Err(Error::new(

@@ -663,7 +663,7 @@ pub(super) struct ClassNamespace {
     /// Scratch field dictionary used while a class body is executing.
     pub annotation_scratch: Option<Id>,
     /// Executed deferred sites in source order, including repeated field names.
-    pub annotation_sites: Option<Box<std::collections::BTreeMap<u32, (Id, Id)>>>,
+    pub annotation_sites: Option<std::collections::BTreeMap<u32, (Id, Id)>>,
     /// Class annotation attributes are served by the installed provider.
     pub provider_annotations: bool,
     /// Slot names consumed when the class is created, independent of later namespace mutations.
@@ -918,7 +918,7 @@ pub(super) enum Value {
         class: Id,
         fields: indexmap::IndexMap<String, Id>,
         /// Storage addressed by the declaring member, independent of the instance dictionary.
-        member_values: Option<Box<HashMap<Id, Id>>>,
+        member_values: Option<HashMap<Id, Id>>,
         /// Exact ordinary instance dictionary once exposed or replaced.
         namespace: Option<Id>,
         dictionary: Option<Id>,

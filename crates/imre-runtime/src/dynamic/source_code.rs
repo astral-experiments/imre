@@ -349,16 +349,16 @@ impl NamedBindings {
                     "assignment expression within a comprehension cannot be used in a class body",
                 ));
             }
-            if let Some((kind, directive)) = program.directives.get(&name) {
-                if offset < *directive {
-                    return Err(Error::new(
-                        "SyntaxError",
-                        format!(
-                            "name '{name}' is assigned to before {} declaration",
-                            kind.keyword()
-                        ),
-                    ));
-                }
+            if let Some((kind, directive)) = program.directives.get(&name)
+                && offset < *directive
+            {
+                return Err(Error::new(
+                    "SyntaxError",
+                    format!(
+                        "name '{name}' is assigned to before {} declaration",
+                        kind.keyword()
+                    ),
+                ));
             }
             if name == "__debug__" {
                 return Err(Error::new("SyntaxError", "cannot assign to __debug__"));
