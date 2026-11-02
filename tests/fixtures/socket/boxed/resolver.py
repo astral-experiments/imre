@@ -30,3 +30,16 @@ except UnicodeEncodeError as exc:
     assert exc.encoding == "utf-8"
 else:
     raise AssertionError("surrogate service was accepted")
+
+loopback = "127.0.0.1"
+assert socket.gethostbyname(bytearray(b"127.0.0.1")) == loopback
+name, aliases, addresses = socket.gethostbyaddr(loopback)
+assert name and isinstance(aliases, list) and loopback in addresses
+
+assert socket.herror is _socket.herror
+try:
+    raise socket.herror(1, "host lookup failed")
+except socket.gaierror:
+    raise AssertionError("herror matched its sibling gaierror")
+except OSError as exc:
+    assert type(exc) is socket.herror and exc.errno == 1
