@@ -417,6 +417,7 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         Value::HandlerLock(_) if super::thread_rlock::is_method(attr) => super::thread_rlock::CLASS,
         Value::PrimitiveLock(_) if super::thread_lock::is_method(attr) => super::thread_lock::CLASS,
         Value::Int(_) | Value::Bool(_) if matches!(attr, "__add__" | "bit_length" | "to_bytes") => "int",
+        Value::Int(_) if attr == "__repr__" => "int",
         Value::Float(_) if attr == "as_integer_ratio" => "float",
         Value::Str(_) | Value::SurrogateStr(_) if STR_METHODS.contains(&attr) => "str",
         Value::Range(_) if super::range::METHODS.contains(&attr) => "range",
@@ -1124,7 +1125,7 @@ pub(super) fn call(
                 translation::translate(ctx, owner, args, kwargs)
             }
             "int" if method == "__add__" => collections::builtin_slot(ctx, name, args, kwargs),
-            "str" | "bytes" | "bytearray" if method == "__repr__" => {
+            "int" | "str" | "bytes" | "bytearray" if method == "__repr__" => {
                 collections::builtin_slot(ctx, name, args, kwargs)
             }
             "bytes" | "bytearray" if method == "fromhex" => text::fromhex(ctx, name, args, kwargs),

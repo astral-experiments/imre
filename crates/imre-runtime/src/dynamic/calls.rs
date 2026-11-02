@@ -207,7 +207,15 @@ impl Context {
                 self.builtins.get(&format!("{owner}.{name}")).copied()
             }
             Value::Native(kind) if builtins::is_enum_base(kind) => {
-                self.builtins.get(&format!("enum.Enum.{name}")).copied()
+                let symbol = match (kind.as_str(), name) {
+                    ("enum.IntEnum" | "enum.IntFlag", "__str__" | "_value_repr_") => "int.__repr__",
+                    ("enum.IntFlag", "__repr__") => "enum.Flag.__repr__",
+                    ("enum.StrEnum", "_value_repr_") => "str.__repr__",
+                    ("enum.Enum", "_value_repr_") => return Some(NONE),
+                    ("enum.StrEnum", "__str__") => "enum.StrEnum.__str__",
+                    _ => return self.builtins.get(&format!("enum.Enum.{name}")).copied(),
+                };
+                self.builtins.get(symbol).copied()
             }
             Value::Native(kind)
                 if name == "__hash__"
@@ -735,6 +743,11 @@ impl Context {
                             | "object.__getattribute__"
                             | "enum.auto.__init__"
                             | "enum.auto.__repr__"
+                            | "enum.Enum.__repr__"
+                            | "enum.Enum.__str__"
+                            | "enum.Flag.__repr__"
+                            | "enum.global_flag_repr"
+                            | "enum.StrEnum.__str__"
                             | "enum.Enum.__copy__"
                             | "enum.Enum.__deepcopy__"
                             | "object.__setattr__"
@@ -2970,7 +2983,7 @@ impl Context {
                     || (class == "memoryview" && builtins::MEMORYVIEW_METHODS.contains(&name))
                     || (class == "bytes" && builtins::BYTES_METHODS.contains(&name))
                     || (class == "bytearray" && builtins::BYTEARRAY_METHODS.contains(&name))
-                    || (class == "int" && matches!(name, "__add__" | "bit_length" | "to_bytes"))
+                    || (class == "int" && matches!(name, "__add__" | "__repr__" | "bit_length" | "to_bytes"))
                     || (class == "float" && name == "as_integer_ratio")
                     || (class == "str"
                         && (name == "maketrans" || builtins::STR_METHODS.contains(&name))) =>

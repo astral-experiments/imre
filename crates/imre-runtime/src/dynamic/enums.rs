@@ -253,6 +253,14 @@ impl Context {
                 .collect(),
             None => fields.names.clone().into_iter().collect(),
         };
+        // EnumType keeps the enum repr when an integer mixin supplies the inherited slot.
+        if !self.scope_data(scope).names.contains_key("__repr__")
+            && let Some(&int_repr) = self.builtins.get("int.__repr__")
+            && self.class_attr(class, "__repr__") == Some(int_repr)
+        {
+            let repr = self.builtin("enum.Enum.__repr__");
+            self.bind(scope, "__repr__", repr);
+        }
         let names = self.dict(Vec::new());
         let values = self.dict(Vec::new());
         self.bind(scope, "_member_map_", names);
@@ -350,6 +358,45 @@ impl Context {
             self.raw_instance_field(member, "_value_")
                 .unwrap_or(*scalar),
         ))
+    }
+
+    pub(super) fn enum_format(&mut self, method: &str, member: Id) -> Result<Id> {
+        if method == "enum.StrEnum.__str__" {
+            return self.string_storage(member).ok_or_else(|| Error::new("TypeError", "expected str"));
+        }
+        if method == "enum.global_flag_repr" {
+            return Ok(self.text(self.repr(member)));
+        }
+        let class = self.lookup_attr(member, "__class__")?;
+        let repr = if method == "enum.Enum.__str__" {
+            None
+        } else {
+            let hook = self.lookup_attr(class, "_value_repr_")?;
+            Some(if self.truth(hook)? { hook } else { self.builtin("repr") })
+        };
+        let mut parts = Vec::new();
+        if let Some(repr) = repr {
+            // Keep the chosen callable while name formatting runs Python.
+            self.heap.keep(repr);
+            parts.push(self.text("<"));
+        }
+        let name = self.lookup_attr(class, "__name__")?;
+        parts.push(builtins::call(self, "str", &[name], &[])?);
+        let label = self.lookup_attr(member, "_name_")?;
+        if method != "enum.Flag.__repr__" || label != NONE {
+            parts.push(self.text("."));
+            parts.push(builtins::call(self, "str", &[label], &[])?);
+        }
+        if let Some(repr) = repr {
+            parts.push(self.text(": "));
+            let value = self.lookup_attr(member, "_value_")?;
+            let rendered = self.call(repr, vec![value], Vec::new())?;
+            parts.push(builtins::call(self, "str", &[rendered], &[])?);
+            parts.push(self.text(">"));
+        }
+        let empty = self.text("");
+        let parts = self.alloc(Value::List(parts));
+        builtins::call(self, "str.join", &[empty, parts], &[])
     }
 
     pub(super) fn enum_member(&self, member: Id) -> Option<(&str, Id, Id)> {
