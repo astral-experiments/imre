@@ -650,7 +650,9 @@ fn standard_buffer_method(
             file.standard_writer()?;
             Ok(crate::dynamic::builtins::boolean(name == "file.writable"))
         }
-        ("file.isatty", []) => Ok(crate::dynamic::builtins::boolean(file.isatty()?)),
+        ("file.isatty", []) => Ok(crate::dynamic::builtins::boolean(crate::objects::os::isatty(
+            file.fileno()?,
+        ))),
         ("file.__enter__", []) => {
             file.standard_writer()?;
             Ok(receiver)
