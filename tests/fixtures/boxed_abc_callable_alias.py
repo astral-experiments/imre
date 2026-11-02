@@ -14,9 +14,10 @@ def current():
 
     p = ParamSpec("P")
     for parameters in (p, Concatenate[int, p], ...):
-        direct = cls(origin=Callable, args=(parameters, str))
+        pair = (parameters, str)
+        direct = cls(origin=Callable, args=pair)
         assert type(direct) is cls and direct.__origin__ is Callable
-        assert direct.__args__ == (parameters, str)
+        assert direct.__args__ is pair
         assert direct == Callable[parameters, str]
 
     direct = cls(list, ((int, str), float))

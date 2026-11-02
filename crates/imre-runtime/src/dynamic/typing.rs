@@ -534,8 +534,18 @@ pub(super) fn abc_callable_alias(
     if !ctx.instance_of(pair, tuple) {
         return Err(Error::new("TypeError", CALLABLE_SHAPE_ERROR));
     }
-    let pair = ctx.items(pair)?;
-    callable_alias(ctx, AliasKind::AbcCallable, origin, pair)
+    let length = super::builtins::call(ctx, "len", &[pair], &[])?;
+    if ctx.as_integer(length)? != 2 {
+        return Err(Error::new("TypeError", CALLABLE_SHAPE_ERROR));
+    }
+    let args = ctx.unpack_items(pair, 2, None)?;
+    if matches!(ctx.heap.get(pair), Value::Tuple(_))
+        && !matches!(ctx.heap.get(args[0]), Value::List(_) | Value::Tuple(_))
+        && is_param_expr(ctx, args[0])
+    {
+        return Ok(allocate_alias(ctx, AliasKind::AbcCallable, origin, pair, None, true));
+    }
+    callable_alias(ctx, AliasKind::AbcCallable, origin, args)
 }
 
 const CALLABLE_SHAPE_ERROR: &str = "Callable must be used as Callable[[arg, ...], result].";
@@ -1157,12 +1167,15 @@ pub(super) fn attribute(ctx: &mut Context, value: Id, name: &str) -> Option<Resu
         return Some(Ok(member));
     }
     let attr = match ctx.heap.get(value) {
-        Value::Native(class) if class == "collections.abc._CallableGenericAlias" => match name {
-            "__base__" => ctx.builtin("types.GenericAlias"),
-            "__bases__" | "__mro__" => ctx.builtin_hierarchy_tuple(value, name),
-            "__module__" => ctx.text("collections.abc"),
-            _ => return None,
-        },
+        Value::Native(class) if class == "collections.abc._CallableGenericAlias"
+            && matches!(name, "__base__" | "__bases__" | "__mro__") =>
+        {
+            if name == "__base__" {
+                ctx.builtin("types.GenericAlias")
+            } else {
+                ctx.builtin_hierarchy_tuple(value, name)
+            }
+        }
         Value::Native(class)
             if matches!(
                 class.as_str(),
