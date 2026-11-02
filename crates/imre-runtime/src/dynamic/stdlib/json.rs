@@ -1,7 +1,7 @@
 mod notes;
 mod scanstring;
-pub(super) use scanstring::scanstring;
 use notes::Location;
+pub(super) use scanstring::scanstring;
 
 use std::collections::{HashMap, HashSet};
 

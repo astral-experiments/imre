@@ -2125,6 +2125,15 @@ def report(text):
             "print(first is urlsplit('http://host/a'), first is urlsplit(b'http://host/a'))\n"
         )
         compare("-IB", split_entry, native_args=("run", split_entry, "--quiet"))
+        regex_entry = root / "regex_entry.py"
+        for program in (
+            "import re as rx\nprint(rx.split(b'(:+)', b'a::b:c', maxsplit=1))",
+            "from re import subn as replace\nprint(replace('x*', '!', 'abxd', count=3))",
+            "import re\npattern = re.compile(b'(:*)')\nprint(pattern.split(b':a:b', 2))",
+            "from re import compile as make\nreplace = make('x*').subn\nprint(replace('!', 'abxd', 3))",
+        ):
+            regex_entry.write_text(program)
+            compare("-IB", regex_entry, native_args=("run", regex_entry, "--quiet"))
         hex_entry = root / "hex_entry.py"
         for program in (
             "class Offset:\n    def __index__(self): return -(1 << 100)\nprint(hex(Offset()))",
@@ -2249,6 +2258,7 @@ def report(text):
             "boxed_typing_tuple.py",
             "boxed_typing_async_collection_aliases.py",
             "boxed_typing_type.py",
+            "boxed_type_alias_statements.py",
             "boxed_typing_mapping.py",
             "boxed_typing_iterable.py",
             "boxed_typing_regex_aliases.py",
@@ -2289,6 +2299,7 @@ def report(text):
             "boxed_wide_decode.py",
             "boxed_buffered_partial_write.py",
             "boxed_io_exports.py",
+            "boxed_io_unsupported_operation.py",
             "boxed_io_reimport.py",
             "boxed_fileio_opener.py",
             "boxed_open_opener.py",
@@ -2479,6 +2490,7 @@ def report(text):
             "boxed_sequence_order.py",
             "boxed_tuple_index.py",
             "boxed_json_containers.py",
+            "boxed_json_scanner.py",
             "boxed_json_decoder.py",
             "boxed_json_module_doc.py",
             "boxed_json_encoder.py",

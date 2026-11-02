@@ -595,9 +595,7 @@ pub(super) fn whence_argument(ctx: &mut Context, value: Option<Id>) -> Result<i3
             .index_integer(value)?
             .to_i64()
             .and_then(|n| i32::try_from(n).ok())
-            .ok_or_else(|| {
-                Error::new("OverflowError", "Python int too large to convert to C int")
-            }),
+            .ok_or_else(|| Error::new("OverflowError", "Python int too large to convert to C int")),
     }
 }
 

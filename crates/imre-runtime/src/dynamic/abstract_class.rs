@@ -129,7 +129,10 @@ impl Context {
         self.bind(scope, "__qualname__", qualname);
         let callable = self.builtin("abc.ABCMeta.__new__");
         let dictionary = self.dict(Vec::new());
-        let new = self.alloc(Value::StaticMethod { callable, dictionary });
+        let new = self.alloc(Value::StaticMethod {
+            callable,
+            dictionary,
+        });
         self.bind(scope, "__new__", new);
         let register = self.builtin("abc.register");
         self.bind(scope, "register", register);
@@ -146,7 +149,9 @@ impl Context {
     }
 
     pub(super) fn is_abc_metaclass(&self, class: Id) -> bool {
-        self.builtins.get("abc.ABCMeta").is_some_and(|&abc| self.direct_subclass(class, abc))
+        self.builtins
+            .get("abc.ABCMeta")
+            .is_some_and(|&abc| self.direct_subclass(class, abc))
     }
 
     pub(super) fn is_bundled_abc(&self, class: Id) -> bool {

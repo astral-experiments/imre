@@ -1,5 +1,5 @@
 import json
-from datetime import UTC, date, datetime as dt, time, timedelta, timezone
+from datetime import UTC, date, datetime as dt, time, timedelta, timezone, tzinfo
 
 
 def test_module_exports():
@@ -527,6 +527,88 @@ def test_fixed_timezone_methods():
             raise AssertionError("fixed timezone accepted a plain date")
 
 
+def test_custom_tzinfo():
+    offset = timedelta(seconds=29, microseconds=7)
+    calls = []
+
+    class Zone(tzinfo):
+        def utcoffset(self, value):
+            calls.append(value)
+            return offset
+
+    zone = Zone()
+    day = date(2000, 1, 2)
+    clock = time(0, 0, 29, 7, zone)
+    local = dt.combine(day, clock)
+    assert clock.tzinfo is local.tzinfo is zone
+    assert dt(2000, 1, 2, tzinfo=zone).tzinfo is zone and not calls
+    assert clock.utcoffset() is offset and local.utcoffset() is offset
+    assert len(calls) == 2 and calls[0] is None and calls[1] is local
+    assert clock.isoformat() == "00:00:29.000007+00:00:29.000007"
+    assert str(local) == "2000-01-02 00:00:29.000007+00:00:29.000007"
+
+    instant = dt(2000, 1, 2, tzinfo=UTC)
+    later = dt(2000, 1, 2, microsecond=1, tzinfo=UTC)
+    assert local == instant and instant == local and hash(local) == hash(instant)
+    assert local < later and later > local
+    try:
+        dt.combine(day, clock, tzinfo=Zone)
+    except TypeError:
+        pass
+    else:
+        raise AssertionError("accepted a tzinfo class instead of an instance")
+
+
+def test_explicit_zone_conversion():
+    calls = []
+
+    class Zone(tzinfo):
+        def utcoffset(self, value):
+            return timedelta(minutes=-30)
+
+        def dst(self, value):
+            calls.append((value.hour, value.minute))
+            return timedelta(0)
+
+    zone = Zone()
+    result = dt.fromtimestamp(0, zone)
+    assert result.tzinfo is zone and (result.day, result.hour, result.minute) == (31, 23, 30)
+    assert calls == [(0, 0), (23, 30)]
+
+    class Child(dt):
+        pass
+
+    class Hook(Zone):
+        def fromutc(self, value):
+            return type(value), value.tzinfo is self, value.hour
+
+    assert Child.fromtimestamp(0, Hook()) == (Child, True, 0)
+    child = Child(2000, 1, 2)
+    assert child.fromtimestamp(0, Hook()) == (Child, True, 0)
+    assert type(child.combine(child, time())) is Child
+
+
+def test_astimezone_subtype():
+    constructed = []
+
+    class Child(dt):
+        def __new__(cls, *args, **kwargs):
+            value = dt.__new__(cls, *args, **kwargs)
+            constructed.append((value, value.tzinfo))
+            return value
+
+    class Target(tzinfo):
+        def fromutc(self, value):
+            return value
+
+    source = timezone(timedelta(hours=1))
+    target = Target()
+    result = Child(2000, 1, 1, 6, tzinfo=source, fold=1).astimezone(target)
+    intermediate, constructor_zone = constructed[1]
+    assert constructor_zone is source and result is intermediate
+    assert result.tzinfo is target and (result.hour, result.fold) == (5, 0)
+
+
 def test_tzinfo_reduction():
     from datetime import tzinfo
 
@@ -600,6 +682,9 @@ def current():
     test_calendar_strftime()
     test_calendar_reduction()
     test_fixed_timezone_methods()
+    test_custom_tzinfo()
+    test_explicit_zone_conversion()
+    test_astimezone_subtype()
     test_tzinfo_reduction()
     test_calendar_format()
     test_timedelta_negation()

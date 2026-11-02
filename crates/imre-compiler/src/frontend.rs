@@ -6152,6 +6152,9 @@ impl<'a> Checker<'a> {
     }
 
     fn typed_expr(&mut self, expression: &ast::Expr) -> Result<Expr, String> {
+        if let Some(method) = self.graph.boxed_pattern_method(self.module, expression) {
+            return Err(self.scoped_builtin_error(method, expression));
+        }
         if let ast::Expr::Attribute(attribute) = expression
             && let Some(field) = self.mime_attribute(attribute)
         {
@@ -6393,6 +6396,9 @@ impl<'a> Checker<'a> {
                 }
                 Intrinsic::CachedProperty => {
                     return Err(self.object_runtime_export("functools.cached_property", expression));
+                }
+                Intrinsic::ScopedObjectExport(name) => {
+                    return Err(self.scoped_builtin_error(name, expression));
                 }
                 Intrinsic::ObjectRuntimeExport(name) => {
                     return Err(self.object_runtime_export(name, expression));
@@ -7659,10 +7665,17 @@ impl<'a> Checker<'a> {
                 }
                 if matches!(
                     (self.resolve(&attribute.value), attribute.attr.as_str()),
-                    (Some(Binding::Intrinsic(Intrinsic::SplitResult { bytes: false })), "_encoded_counterpart")
-                    | (Some(Binding::Intrinsic(Intrinsic::SplitResult { bytes: true })), "_decoded_counterpart")
+                    (
+                        Some(Binding::Intrinsic(Intrinsic::SplitResult { bytes: false })),
+                        "_encoded_counterpart"
+                    ) | (
+                        Some(Binding::Intrinsic(Intrinsic::SplitResult { bytes: true })),
+                        "_decoded_counterpart"
+                    )
                 ) {
-                    return Err(self.scoped_builtin_error("urllib.parse result counterpart", attribute));
+                    return Err(
+                        self.scoped_builtin_error("urllib.parse result counterpart", attribute)
+                    );
                 }
                 if let Some((_, declaration)) = self.namedtuple_factory(&attribute.value) {
                     return self.namedtuple_class_attribute(attribute, &declaration);
@@ -8350,6 +8363,9 @@ impl<'a> Checker<'a> {
     }
 
     fn call(&mut self, mut call: &ast::ExprCall) -> Result<Expr, String> {
+        if let Some(method) = self.graph.boxed_pattern_method(self.module, &call.func) {
+            return Err(self.scoped_builtin_error(method, call));
+        }
         if let Some(local) = self.local_class(&call.func)?
             && let Some(base) = local.base
             && !local.abstract_methods.is_empty()
@@ -9095,6 +9111,9 @@ impl<'a> Checker<'a> {
             }
             Some(Binding::Intrinsic(Intrinsic::CachedProperty)) => {
                 return Err(self.object_runtime_export("functools.cached_property", call));
+            }
+            Some(Binding::Intrinsic(Intrinsic::ScopedObjectExport(name))) => {
+                return Err(self.scoped_builtin_error(name, call));
             }
             Some(Binding::Intrinsic(Intrinsic::ObjectRuntimeExport(name))) => {
                 return Err(self.object_runtime_export(name, call));
@@ -10920,11 +10939,14 @@ impl<'a> Checker<'a> {
             {
                 (Builtin::HashType, Type::BuiltinClass)
             }
-            name @ ("type" | "id") if args.len() == 1
-                && self.types.is_url_split_result(args[0].ty)
-                && self.unshadowed_builtin(&call.func, name) =>
+            name @ ("type" | "id")
+                if args.len() == 1
+                    && self.types.is_url_split_result(args[0].ty)
+                    && self.unshadowed_builtin(&call.func, name) =>
             {
-                return Err(self.scoped_builtin_error("urllib.parse.urlsplit result identity", call));
+                return Err(
+                    self.scoped_builtin_error("urllib.parse.urlsplit result identity", call)
+                );
             }
             "id" if args.len() == 1
                 && args[0].ty == Type::Hash

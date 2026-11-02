@@ -61,6 +61,8 @@ pub(super) fn format(
     let points = ctx.string_codepoints(storage)?.into_owned();
     let mut pattern = Vec::new();
     let mut zone_name = None;
+    let mut offsets = [None, None];
+    let arg = if kind == "time" { NONE } else { receiver };
     let mut copied = 0;
     let mut i = 0;
     while i + 1 < points.len() {
@@ -72,14 +74,18 @@ pub(super) fn format(
         let code = char::from_u32(points[i]);
         i += 1;
         let replacement = match code {
-            Some('z') => offset(ctx, tzinfo, false),
-            Some(':') if points.get(i) == Some(&u32::from(b'z')) => {
-                i += 1;
-                offset(ctx, tzinfo, true)
+            Some('z' | ':') if code == Some('z') || points.get(i) == Some(&u32::from(b'z')) => {
+                let colon = code == Some(':');
+                i += usize::from(colon);
+                let slot = &mut offsets[usize::from(colon)];
+                if slot.is_none() {
+                    *slot = Some(render::offset_text(ctx, tzinfo, arg, colon)?);
+                }
+                slot.as_ref().unwrap().clone()
             }
             Some('Z') => {
                 if zone_name.is_none() {
-                    zone_name = Some(escaped_name(ctx, tzinfo)?);
+                    zone_name = Some(escaped_name(ctx, tzinfo, arg)?);
                 }
                 pattern.extend_from_slice(&points[copied..start]);
                 pattern.extend_from_slice(zone_name.as_ref().unwrap());
@@ -124,22 +130,19 @@ pub(super) fn format(
     ctx.call(strftime, vec![pattern, tuple], vec![])
 }
 
-fn offset(ctx: &Context, zone: Id, colon: bool) -> String {
-    match ctx.heap.get(zone) {
-        Value::Calendar { value, .. } => value.strftime_offset(colon),
-        _ => String::new(),
-    }
-}
-
-fn escaped_name(ctx: &mut Context, zone: Id) -> Result<Vec<u32>> {
-    let Value::Calendar { value, tzname, .. } = ctx.heap.get(zone) else {
-        return Ok(Vec::new());
-    };
-    let name = if *tzname == NONE {
-        ctx.text(value.text())
+fn escaped_name(ctx: &mut Context, zone: Id, arg: Id) -> Result<Vec<u32>> {
+    let name = if let Value::Calendar { value, tzname, .. } = ctx.heap.get(zone) {
+        if *tzname == NONE {
+            ctx.text(value.text())
+        } else {
+            *tzname
+        }
     } else {
-        *tzname
+        call_tzinfo(ctx, zone, "tzname", arg)?
     };
+    if name == NONE {
+        return Ok(Vec::new());
+    }
     let replace = ctx.lookup_attr(name, "replace")?;
     let percent = ctx.text("%");
     let escaped = ctx.text("%%");

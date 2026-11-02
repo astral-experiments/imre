@@ -295,7 +295,11 @@ fn shuffle_slice<T>(values: &mut [T]) -> Result<()> {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_random_shuffle_int_list(list: *const crate::List) {
     // SAFETY: swapping existing owners cannot invoke user code.
-    unsafe { (&*list).0.with_mut(|values| finish(shuffle_slice(values), ())) };
+    unsafe {
+        (&*list)
+            .0
+            .with_mut(|values| finish(shuffle_slice(values), ()))
+    };
 }
 
 /// # Safety
