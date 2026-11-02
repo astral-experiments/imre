@@ -126,6 +126,24 @@ REJECTED = {
             "deque.__repr__(queue('wrong'))\n"
         ),
     }, "expected int, got str"),
+    "source_method_factory_checks_calls": ({
+        "helper.py": HELPER,
+        "main.py": (
+            "import helper\n"
+            "class Case:\n"
+            "    @helper.f('wrong')\n"
+            "    def method(self): pass\n"
+        ),
+    }, "invalid-argument-type"),
+    "method_decorator_must_be_callable": ({
+        "helper.py": HELPER,
+        "main.py": (
+            "import helper\n"
+            "class Case:\n"
+            "    @helper.f(7)\n"
+            "    def method(self): pass\n"
+        ),
+    }, "call-non-callable"),
     "saved_deque_repr_keeps_checked_calls": ({
         "main.py": (
             "from collections import deque\ndef identity(n: int) -> int:\n    return n\n"
@@ -972,6 +990,24 @@ ACCEPTED = {
         ),
         "orchard/__init__.py": "print('parent init')\n",
         "orchard/leaf.py": "print('leaf init')\nmarker = __name__\n",
+    },
+    "source_method_factories": {
+        "factory.py": (
+            "def label(n: int):\n"
+            "    print('factory', n)\n"
+            "    def apply(value):\n"
+            "        print('apply', n)\n"
+            "        return n\n"
+            "    return apply\n"
+        ),
+        "main.py": (
+            "import factory as labels\n"
+            "class Result:\n"
+            "    @labels.label(2)\n"
+            "    @labels.label(3)\n"
+            "    def value(self): pass\n"
+            "print(Result().value)\n"
+        ),
     },
     "conditional_function_export": {
         "main.py": (
