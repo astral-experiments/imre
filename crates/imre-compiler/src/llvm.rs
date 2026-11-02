@@ -44,8 +44,16 @@ mod units;
 use units::Output;
 pub(crate) use units::emit_units;
 
+enum LlvmType {
+    I1,
+    I8,
+    I64,
+    Double,
+    Ptr,
+}
+
 impl Type {
-    fn llvm(self) -> &'static str {
+    fn llvm_type(self) -> LlvmType {
         match self {
             Self::Int
             | Self::IntEnum(_)
@@ -53,9 +61,9 @@ impl Type {
             | Self::Enum(_)
             | Self::Optional(_)
             | Self::Union(_)
-            | Self::StringIterable => "i64",
-            Self::Float => "double",
-            Self::Bool => "i1",
+            | Self::StringIterable => LlvmType::I64,
+            Self::Float => LlvmType::Double,
+            Self::Bool => LlvmType::I1,
             Self::Str
             | Self::ForwardRef(_)
             | Self::AnnotationValue(_)
@@ -146,114 +154,27 @@ impl Type {
             | Self::BytesIO
             | Self::BinaryIO
             | Self::VarTuple(_)
-            | Self::Tuple(_) => "ptr",
-            Self::None => "i8",
+            | Self::Tuple(_) => LlvmType::Ptr,
+            Self::None => LlvmType::I8,
+        }
+    }
+
+    fn llvm(self) -> &'static str {
+        match self.llvm_type() {
+            LlvmType::I1 => "i1",
+            LlvmType::I8 => "i8",
+            LlvmType::I64 => "i64",
+            LlvmType::Double => "double",
+            LlvmType::Ptr => "ptr",
         }
     }
 
     fn initial(self) -> &'static str {
-        match self {
-            Self::Int => "1",
-            Self::Float => "0.0",
-            Self::Str
-            | Self::ForwardRef(_)
-            | Self::AnnotationValue(_)
-            | Self::CmpKey(..)
-            | Self::BuiltinClass
-            | Self::StrLiteral(_)
-            | Self::Bytes
-            | Self::ListInt
-            | Self::Class(_)
-            | Self::Callable(_)
-            | Self::List(_)
-            | Self::Dict(_)
-            | Self::ChainMap(_)
-            | Self::Set(_)
-            | Self::Deque(_)
-            | Self::FrozenStrings
-            | Self::StringKeys
-            | Self::NativeModule
-            | Self::ModuleNamespace
-            | Self::Iterator
-            | Self::Cursor(_)
-            | Self::ByteOutput
-            | Self::TupleBuffer
-            | Self::Exception
-            | Self::NamedException(_)
-            | Self::ObjectValue
-            | Self::ReadOnlyObjectMapping
-            | Self::ImportException
-            | Self::TimeoutExpired
-            | Self::Path
-            | Self::PurePath(_)
-            | Self::ModuleSpec(_)
-            | Self::SysImplementation
-            | Self::CompletedProcess(..)
-            | Self::EventLoop
-            | Self::Coroutine(_)
-            | Self::Task(_)
-            | Self::TaskGroup
-            | Self::Document(_)
-            | Self::GeneratorContext
-            | Self::DirectoryContext(_)
-            | Self::Semaphore
-            | Self::Popen(..)
-            | Self::ActivePopen
-            | Self::AsyncProcess(_)
-            | Self::TextIO
-            | Self::StringIO
-            | Self::HandlerLock
-            | Self::LogFormatter
-            | Self::LogRecord
-            | Self::Logger
-            | Self::LogManager
-            | Self::TimedFileHandler
-            | Self::CacheState(_)
-            | Self::ProcessSelectorClass
-            | Self::ClockTime
-            | Self::FunctionRef
-            | Self::OverloadStub
-            | Self::Calendar(_)
-            | Self::PlainObject
-            | Self::StrDescriptor(_)
-            | Self::Placeholder(_)
-            | Self::SimpleNamespace(_)
-            | Self::PathInfo
-            | Self::CodecInfo
-            | Self::Poll
-            | Self::Socket
-            | Self::CodecWriterClass
-            | Self::CodecWriter
-            | Self::TextOutput
-            | Self::Hash
-            | Self::JsonDecoder
-            | Self::ZipFile
-            | Self::ZipInfo
-            | Self::Context
-            | Self::ContextMissing
-            | Self::WeakProxy(_)
-            | Self::ContextVar(_)
-            | Self::ContextToken(_)
-            | Self::CsvReader
-            | Self::Patch(_)
-            | Self::RegexPattern
-            | Self::JsonRoot
-            | Self::JsonValue
-            | Self::JsonObject
-            | Self::RegexMatch
-            | Self::SourceModule
-            | Self::BytesIO
-            | Self::BinaryIO
-            | Self::VarTuple(_)
-            | Self::Tuple(_) => "null",
-            Self::Bool
-            | Self::None
-            | Self::IntEnum(_)
-            | Self::StrEnum(_)
-            | Self::Enum(_)
-            | Self::Optional(_)
-            | Self::Union(_)
-            | Self::StringIterable => "0",
+        match self.llvm_type() {
+            LlvmType::I64 if self == Self::Int => "1",
+            LlvmType::Double => "0.0",
+            LlvmType::Ptr => "null",
+            LlvmType::I1 | LlvmType::I8 | LlvmType::I64 => "0",
         }
     }
 }
@@ -8107,108 +8028,14 @@ impl Emitter<'_, '_> {
     }
 
     fn word(&mut self, value: &Value) -> String {
-        match value.ty {
-            Type::Int
-            | Type::IntEnum(_)
-            | Type::StrEnum(_)
-            | Type::Enum(_)
-            | Type::Optional(_)
-            | Type::Union(_)
-            | Type::StringIterable => value.operand.clone(),
-            Type::Float => self.instruction(format!("bitcast double {} to i64", value.operand)),
-            Type::Bool => self.instruction(format!("zext i1 {} to i64", value.operand)),
-            Type::None => "0".to_owned(),
-            Type::Str
-            | Type::ForwardRef(_)
-            | Type::FunctionRef
-            | Type::AnnotationValue(_)
-            | Type::CmpKey(..)
-            | Type::BuiltinClass
-            | Type::StrLiteral(_)
-            | Type::Bytes
-            | Type::ListInt
-            | Type::Class(_)
-            | Type::Callable(_)
-            | Type::List(_)
-            | Type::Dict(_)
-            | Type::ChainMap(_)
-            | Type::Set(_)
-            | Type::Deque(_)
-            | Type::FrozenStrings
-            | Type::StringKeys
-            | Type::Iterator
-            | Type::Cursor(_)
-            | Type::ByteOutput
-            | Type::TupleBuffer
-            | Type::Exception
-            | Type::NamedException(_)
-            | Type::ObjectValue
-            | Type::ReadOnlyObjectMapping
-            | Type::ImportException
-            | Type::TimeoutExpired
-            | Type::Path
-            | Type::PurePath(_)
-            | Type::TextIO
-            | Type::StringIO
-            | Type::HandlerLock
-            | Type::SourceModule
-            | Type::BytesIO
-            | Type::BinaryIO
-            | Type::EventLoop
-            | Type::Coroutine(_)
-            | Type::Task(_)
-            | Type::TaskGroup
-            | Type::Document(_)
-            | Type::GeneratorContext
-            | Type::DirectoryContext(_)
-            | Type::Semaphore
-            | Type::Popen(..)
-            | Type::ActivePopen
-            | Type::AsyncProcess(_)
-            | Type::NativeModule
-            | Type::ModuleNamespace
-            | Type::LogFormatter
-            | Type::LogRecord
-            | Type::Logger
-            | Type::LogManager
-            | Type::TimedFileHandler
-            | Type::CacheState(_)
-            | Type::ProcessSelectorClass
-            | Type::ClockTime
-            | Type::Calendar(_)
-            | Type::StrDescriptor(_)
-            | Type::Placeholder(_)
-            | Type::OverloadStub
-            | Type::PlainObject
-            | Type::SimpleNamespace(_)
-            | Type::PathInfo
-            | Type::CodecInfo
-            | Type::Poll
-            | Type::Socket
-            | Type::CodecWriterClass
-            | Type::CodecWriter
-            | Type::TextOutput
-            | Type::Hash
-            | Type::JsonDecoder
-            | Type::ZipFile
-            | Type::ZipInfo
-            | Type::Context
-            | Type::ContextMissing
-            | Type::WeakProxy(_)
-            | Type::ContextVar(_)
-            | Type::ContextToken(_)
-            | Type::CsvReader
-            | Type::Patch(_)
-            | Type::RegexPattern
-            | Type::JsonRoot
-            | Type::JsonValue
-            | Type::JsonObject
-            | Type::RegexMatch
-            | Type::ModuleSpec(_)
-            | Type::SysImplementation
-            | Type::CompletedProcess(..)
-            | Type::VarTuple(_)
-            | Type::Tuple(_) => self.instruction(format!("ptrtoint ptr {} to i64", value.operand)),
+        match value.ty.llvm_type() {
+            LlvmType::I64 => value.operand.clone(),
+            LlvmType::Double => {
+                self.instruction(format!("bitcast double {} to i64", value.operand))
+            }
+            LlvmType::I1 => self.instruction(format!("zext i1 {} to i64", value.operand)),
+            LlvmType::Ptr => self.instruction(format!("ptrtoint ptr {} to i64", value.operand)),
+            LlvmType::I8 => "0".to_owned(),
         }
     }
 
@@ -8221,108 +8048,12 @@ impl Emitter<'_, '_> {
 
     /// Changes only the compiler view of a word, leaving its ownership unchanged.
     fn decode_word(&mut self, word: String, ty: Type) -> Value {
-        let operand = match ty {
-            Type::Int
-            | Type::IntEnum(_)
-            | Type::StrEnum(_)
-            | Type::Enum(_)
-            | Type::Optional(_)
-            | Type::Union(_)
-            | Type::StringIterable => word,
-            Type::Float => self.instruction(format!("bitcast i64 {word} to double")),
-            Type::Bool => self.instruction(format!("trunc i64 {word} to i1")),
-            Type::None => "0".to_owned(),
-            Type::Str
-            | Type::ForwardRef(_)
-            | Type::FunctionRef
-            | Type::AnnotationValue(_)
-            | Type::CmpKey(..)
-            | Type::BuiltinClass
-            | Type::StrLiteral(_)
-            | Type::Bytes
-            | Type::ListInt
-            | Type::Class(_)
-            | Type::Callable(_)
-            | Type::List(_)
-            | Type::Dict(_)
-            | Type::ChainMap(_)
-            | Type::Set(_)
-            | Type::Deque(_)
-            | Type::FrozenStrings
-            | Type::StringKeys
-            | Type::Iterator
-            | Type::Cursor(_)
-            | Type::ByteOutput
-            | Type::TupleBuffer
-            | Type::Exception
-            | Type::NamedException(_)
-            | Type::ObjectValue
-            | Type::ReadOnlyObjectMapping
-            | Type::ImportException
-            | Type::TimeoutExpired
-            | Type::Path
-            | Type::PurePath(_)
-            | Type::TextIO
-            | Type::StringIO
-            | Type::HandlerLock
-            | Type::SourceModule
-            | Type::BytesIO
-            | Type::BinaryIO
-            | Type::EventLoop
-            | Type::Coroutine(_)
-            | Type::Task(_)
-            | Type::TaskGroup
-            | Type::Document(_)
-            | Type::GeneratorContext
-            | Type::DirectoryContext(_)
-            | Type::Semaphore
-            | Type::Popen(..)
-            | Type::ActivePopen
-            | Type::AsyncProcess(_)
-            | Type::NativeModule
-            | Type::ModuleNamespace
-            | Type::LogFormatter
-            | Type::LogRecord
-            | Type::Logger
-            | Type::LogManager
-            | Type::TimedFileHandler
-            | Type::CacheState(_)
-            | Type::ProcessSelectorClass
-            | Type::ClockTime
-            | Type::Calendar(_)
-            | Type::StrDescriptor(_)
-            | Type::Placeholder(_)
-            | Type::OverloadStub
-            | Type::PlainObject
-            | Type::SimpleNamespace(_)
-            | Type::PathInfo
-            | Type::CodecInfo
-            | Type::Poll
-            | Type::Socket
-            | Type::CodecWriterClass
-            | Type::CodecWriter
-            | Type::TextOutput
-            | Type::Hash
-            | Type::JsonDecoder
-            | Type::ZipFile
-            | Type::ZipInfo
-            | Type::Context
-            | Type::ContextMissing
-            | Type::WeakProxy(_)
-            | Type::ContextVar(_)
-            | Type::ContextToken(_)
-            | Type::CsvReader
-            | Type::Patch(_)
-            | Type::RegexPattern
-            | Type::JsonRoot
-            | Type::JsonValue
-            | Type::JsonObject
-            | Type::RegexMatch
-            | Type::ModuleSpec(_)
-            | Type::SysImplementation
-            | Type::CompletedProcess(..)
-            | Type::VarTuple(_)
-            | Type::Tuple(_) => self.instruction(format!("inttoptr i64 {word} to ptr")),
+        let operand = match ty.llvm_type() {
+            LlvmType::I64 => word,
+            LlvmType::Double => self.instruction(format!("bitcast i64 {word} to double")),
+            LlvmType::I1 => self.instruction(format!("trunc i64 {word} to i1")),
+            LlvmType::Ptr => self.instruction(format!("inttoptr i64 {word} to ptr")),
+            LlvmType::I8 => "0".to_owned(),
         };
         Value {
             ty,
@@ -9023,10 +8754,10 @@ fn record_name(ty: Type) -> String {
 /// types; booleans/None use word storage so descriptor offsets stay uniform
 /// within the runtime's existing 64-bit ABI.
 fn storage_type(ty: Type) -> &'static str {
-    match ty.llvm() {
-        "ptr" => "ptr",
-        "double" => "double",
-        _ => "i64",
+    match ty.llvm_type() {
+        LlvmType::Ptr => "ptr",
+        LlvmType::Double => "double",
+        LlvmType::I1 | LlvmType::I8 | LlvmType::I64 => "i64",
     }
 }
 
