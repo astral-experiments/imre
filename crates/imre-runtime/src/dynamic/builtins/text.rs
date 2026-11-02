@@ -397,24 +397,75 @@ pub(in super::super) fn zeroed_bytes(size: i64) -> Result<Vec<u8>> {
     Ok(data)
 }
 
-/// Parse the sign and bounded precision of a fixed-point or percentage field.
-fn fixed_float_spec(spec: &str) -> Option<(u32, bool, u8)> {
-    let prefix = spec.strip_suffix(['f', '%'])?;
-    let (digits, sign) = match prefix.as_bytes().first() {
-        Some(&sign @ (b'+' | b' ')) => (&prefix[1..], sign),
-        Some(b'-') => (&prefix[1..], 0),
-        _ => (prefix, 0),
-    };
-    let precision = if digits.is_empty() {
-        6
-    } else {
-        let digits = digits.strip_prefix('.')?;
-        if !digits.bytes().all(|byte| byte.is_ascii_digit()) {
-            return None;
+struct FixedFloatSpec {
+    sign: u8,
+    width: usize,
+    zero: bool,
+    precision: u32,
+    percent: bool,
+}
+
+impl FixedFloatSpec {
+    /// Parse the supported sign, decimal width and bounded precision for f and %.
+    fn parse(spec: &str) -> Result<Option<Self>> {
+        let Some(prefix) = spec.strip_suffix(['f', '%']) else {
+            return Ok(None);
+        };
+        let (digits, sign) = match prefix.as_bytes().first() {
+            Some(&sign @ (b'+' | b' ')) => (&prefix[1..], sign),
+            Some(b'-') => (&prefix[1..], 0),
+            _ => (prefix, 0),
+        };
+        let (width, places) = digits.split_once('.').unwrap_or((digits, "6"));
+        let Ok(precision) = places.parse::<u32>() else {
+            return Ok(None);
+        };
+        if precision > 1000
+            || !width
+                .bytes()
+                .chain(places.bytes())
+                .all(|b| b.is_ascii_digit())
+        {
+            return Ok(None);
         }
-        digits.parse().ok()?
-    };
-    (precision <= 1000).then_some((precision, spec.ends_with('%'), sign))
+        let zero = width.starts_with('0');
+        let width = if width.is_empty() {
+            0
+        } else {
+            width
+                .parse::<isize>()
+                .map_err(|_| Error::new("ValueError", "Too many decimal digits in format string"))?
+                as usize
+        };
+        Ok(Some(Self {
+            sign,
+            width,
+            zero,
+            precision,
+            percent: spec.ends_with('%'),
+        }))
+    }
+
+    /// Pad the rounded ASCII result, keeping a numeric sign ahead of zero fill.
+    fn render(&self, number: f64) -> Result<String> {
+        let text =
+            crate::objects::format_fixed_float(number, self.precision, self.percent, self.sign)?;
+        if self.width <= text.len() {
+            return Ok(text.into_string());
+        }
+        let head = usize::from(self.zero && text.starts_with(['+', '-', ' ']));
+        let mut padded = String::new();
+        padded
+            .try_reserve_exact(self.width)
+            .map_err(|_| Error::new("MemoryError", ""))?;
+        padded.push_str(&text[..head]);
+        padded.extend(std::iter::repeat_n(
+            if self.zero { '0' } else { ' ' },
+            self.width - text.len(),
+        ));
+        padded.push_str(&text[head..]);
+        Ok(padded)
+    }
 }
 
 /// Convert a numeric formatting operand to binary64, checking large integers first.
@@ -493,12 +544,10 @@ pub(super) fn builtin_format(
     if ctx.string_storage(value).is_some() && spec == "s" {
         return Ok(value);
     }
-    if let Some((precision, percent, sign)) = fixed_float_spec(spec) {
+    if let Some(field) = FixedFloatSpec::parse(spec)? {
         let number = float_operand(ctx, value)?
             .ok_or_else(|| type_error(format!("unsupported format string {spec:?}")))?;
-        return Ok(ctx.text(
-            crate::objects::format_fixed_float(number, precision, percent, sign)?.into_string(),
-        ));
+        return Ok(ctx.text(field.render(number)?));
     }
     if matches!(
         ctx.heap.get(ctx.scalar_value(value)),
