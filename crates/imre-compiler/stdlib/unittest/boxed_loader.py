@@ -224,6 +224,8 @@ def main():
     if extras:
         print("unrecognized arguments: " + " ".join(extras), file=sys.stderr)
         sys.exit(2)
+    runner.showAll = runner.verbose > 1
+    runner.dots = runner.verbose == 1
     if patterns:
         defaultTestLoader.testNamePatterns = patterns
     module = __import__("__main__")
