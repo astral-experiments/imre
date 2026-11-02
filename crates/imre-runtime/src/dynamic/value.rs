@@ -1069,6 +1069,7 @@ pub(super) enum Value {
     Count {
         current: Id,
         step: Id,
+        fast: bool,
     },
     Repeat(crate::objects::Repeat<Id>),
     Map {
@@ -1380,7 +1381,7 @@ impl Value {
             Self::DictIterator(iter) => visit.extend(iter.dict),
             Self::FormatIterator { input, .. } => visit.push(*input),
             Self::ThreadLocal(local) => visit.extend(local.live()),
-            Self::Count { current, step } => visit.extend([*current, *step]),
+            Self::Count { current, step, .. } => visit.extend([*current, *step]),
             Self::Repeat(repeat) => visit.push(repeat.value),
             Self::TupleGetter { doc, .. } => visit.extend(doc),
             Self::ItemGetter(keys) => visit.push(*keys),
