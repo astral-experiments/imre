@@ -468,6 +468,41 @@ pub(super) fn encoder_call(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id
     Ok(ctx.alloc(Value::Tuple(vec![text])))
 }
 
+/// Exact JSON scalars have no Python callbacks or child references.
+fn scalar_entries(ctx: &Context, entries: &[(Id, Id)]) -> bool {
+    let scalar = |id| {
+        matches!(
+            ctx.heap.get(id),
+            Value::None
+                | Value::Bool(_)
+                | Value::Int(_)
+                | Value::Float(_)
+                | Value::Str(_)
+                | Value::SurrogateStr(_)
+        )
+    };
+    entries
+        .iter()
+        .all(|&(key, value)| scalar(key) && scalar(value))
+}
+
+/// Test whether dropping an encoder callback result can run observable cleanup.
+fn observe_release(ctx: &Context, result: Id) -> bool {
+    if !ctx.heap.observes_released_roots() {
+        return false;
+    }
+    if let Value::Dict(entries) = ctx.heap.get(result) {
+        // An ordered node can still own a key removed through a dict descriptor.
+        if !entries.ordered_nodes().is_empty() {
+            return true;
+        }
+        if scalar_entries(ctx, entries) {
+            return false;
+        }
+    }
+    ctx.heap.could_own_finalizer(result, true)
+}
+
 impl Encoder {
     /// Keep the object in the caller's marker dictionary until its encoding succeeds.
     fn mark(&self, ctx: &mut Context, object: Id) -> Result<Option<(Id, Id)>> {
@@ -613,8 +648,7 @@ impl Encoder {
                             .map(|e| ctx.raised_instance(e));
                         // Dropping the replacement can run Python before we annotate an
                         // error or remove the original object's circular-reference marker.
-                        let collect = ctx.heap.observes_released_roots()
-                            && ctx.heap.could_own_finalizer(result, true);
+                        let collect = observe_release(ctx, result);
                         ctx.heap.release_temporaries_since(mark);
                         if let Some(exception) = error {
                             ctx.heap.keep(exception);
@@ -692,18 +726,7 @@ impl Encoder {
         if matches!(ctx.heap.get(id), Value::DefaultDict { .. }) {
             return self.object_items(ctx, id, depth);
         }
-        let scalar = |id| {
-            matches!(
-                ctx.heap.get(id),
-                Value::None
-                    | Value::Bool(_)
-                    | Value::Int(_)
-                    | Value::Float(_)
-                    | Value::Str(_)
-                    | Value::SurrogateStr(_)
-            )
-        };
-        if self.quote.is_some() || !entries.iter().all(|&(k, v)| scalar(k) && scalar(v)) {
+        if self.quote.is_some() || !scalar_entries(ctx, entries) {
             return if self.sort_keys == FALSE {
                 self.live_object(ctx, id, depth)
             } else {
