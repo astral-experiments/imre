@@ -1,5 +1,6 @@
 import gc
 import itertools
+import pickle
 import weakref
 from itertools import accumulate
 
@@ -120,6 +121,10 @@ def current():
         pass
     else:
         raise AssertionError('lost native cursor state')
+
+    assert pickle.dumps(accumulate, protocol=0) == b'citertools\naccumulate\np0\n.'
+    for protocol in (0, 1, 2, 3, 5):
+        assert pickle.loads(pickle.dumps(accumulate, protocol)) is accumulate
 
     class WithArgs(accumulate):
         def __getnewargs_ex__(self):

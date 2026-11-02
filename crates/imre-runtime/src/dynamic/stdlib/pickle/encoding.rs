@@ -230,6 +230,9 @@ fn legacy_global<'a>(module: &'a str, name: &'a str) -> Result<(&'a str, &'a str
             _ => return Err(unsupported()),
         });
     }
+    if (module, name) == ("itertools", "accumulate") {
+        return Ok((module, name));
+    }
     if module == "collections" {
         return Ok(match name {
             "UserDict" => ("UserDict", "IterableUserDict"),
