@@ -2064,11 +2064,13 @@ def _rebuild_builtin_alias(alias, args):
     return next(iter(result)) if alias.__unpacked__ else result
 
 
-def _substitute_alias_arguments(args, replacements):
+def _substitute_alias_arguments(args, replacements, *, parameter_tuples=False):
     result = []
     for arg in args:
         if _is_unpacked_typevartuple(arg):
             result.extend(replacements[arg.__args__[0]])
+        elif parameter_tuples and isinstance(arg, tuple):
+            result.append(_substitute_alias_arguments(arg, replacements, parameter_tuples=True))
         else:
             result.append(_substitute_alias_argument(arg, replacements))
     return tuple(result)
@@ -2210,7 +2212,10 @@ def _specialize_generic_alias_uncached(alias, args):
         if _typing.get_origin(arg) is Unpack:
             raise TypeError(f"{arg} is not valid as type argument")
         replacements[parameter] = arg
-    args = _substitute_alias_arguments(alias.__args__, replacements)
+    # Generic class aliases retain a ParamSpec argument as a nested tuple.
+    # Callable aliases flatten tuple arguments separately below.
+    parameter_tuples = type(alias) is _typing._GenericAlias and alias.__origin__ is not _typing.get_origin(Callable)
+    args = _substitute_alias_arguments(alias.__args__, replacements, parameter_tuples=parameter_tuples)
     if type(alias) is GenericAlias:
         return _rebuild_builtin_alias(alias, args)
     if isinstance(alias, _typing.Union):
