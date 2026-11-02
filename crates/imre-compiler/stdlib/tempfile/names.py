@@ -267,20 +267,6 @@ def mktemp(suffix="", prefix=template, dir=None):
                           "No usable temporary filename found")
 
 
-class _NamedFileCloser:
-    """Keep the runtime guard alive while the named file or its methods are in use."""
-
-    def __init__(self, guard, name):
-        self.guard = guard
-        self.name = name
-
-    def close(self):
-        _finish_named(self.guard, self.name, False)
-
-    def cleanup(self):
-        _finish_named(self.guard, self.name, True)
-
-
 # From CPython 3.14.5 Lib/tempfile.py. See ../docstrings/LICENSE.
 class _TemporaryFileCloser:
     """A separate object allowing proper closing of a temporary file's
@@ -289,6 +275,7 @@ class _TemporaryFileCloser:
 
     cleanup_called = False
     close_called = False
+    _native_guard = None
 
     def __init__(
         self,
@@ -307,6 +294,10 @@ class _TemporaryFileCloser:
     def cleanup(self, windows=(_os.name == 'nt'), unlink=_os.unlink):
         if not self.cleanup_called:
             self.cleanup_called = True
+            if self._native_guard is not None:
+                # The Python closer now owns unlinking. A later native guard drop
+                # must not unlink a replacement at the same path.
+                _keep_named(self._native_guard)
             try:
                 if not self.close_called:
                     self.close_called = True
@@ -354,14 +345,6 @@ class _TemporaryFileWrapper:
             delete_on_close,
             warn_message=f"Implicitly cleaning up {self!r}",
         )
-
-    @classmethod
-    def _from_named_file(cls, file, name, guard):
-        wrapper = cls.__new__(cls)
-        wrapper.file = file
-        wrapper.name = name
-        wrapper._closer = _NamedFileCloser(guard, name)
-        return wrapper
 
     def __repr__(self):
         file = self.__dict__['file']
@@ -443,7 +426,8 @@ def NamedTemporaryFile(mode="w+b", buffering=-1, encoding=None, newline=None,
         raise ValueError("binary mode doesn't take a newline argument")
     (file, closer), name = _create_file(dir, prefix, suffix, output_type, _open_named, delete_on_close)
     try:
-        wrapper = _TemporaryFileWrapper._from_named_file(file, name, closer)
+        wrapper = _TemporaryFileWrapper(file, name, delete, delete_on_close)
+        wrapper._closer._native_guard = closer
         if not delete:
             _keep_named(closer)
         return wrapper
