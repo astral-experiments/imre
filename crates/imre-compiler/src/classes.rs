@@ -824,6 +824,25 @@ fn collect_class(
             }
             ast::Stmt::Expr(value) if matches!(&*value.value, ast::Expr::StringLiteral(_)) => {}
             ast::Stmt::Pass(_) => {}
+            ast::Stmt::If(branch)
+                if branch
+                    .body
+                    .iter()
+                    .chain(branch.elif_else_clauses.iter().flat_map(|arm| &arm.body))
+                    .all(|statement| {
+                        matches!(statement, ast::Stmt::FunctionDef(method)
+                        if !method.is_async && method.type_params.is_none())
+                    }) =>
+            {
+                // Class layout cannot select a method until the class suite runs.
+                // The object emitter evaluates the test and binds only the chosen definitions.
+                let error = module.error(
+                    branch,
+                    "conditional method definitions require native class construction",
+                );
+                graph.conditional_method_error.replace(Some(error.clone()));
+                return Err(error);
+            }
             _ => {
                 return Err(module.error(
                     statement,
