@@ -57,6 +57,13 @@ def current():
                 assert reader.read() == b"\xe9\r\n"
         assert not os.path.exists(path)
 
+    try:
+        NamedTemporaryFile("w", dir="missing-directory", errors=1)
+    except TypeError as error:
+        assert str(error) == "open() argument 'errors' must be str or None, not int"
+    else:
+        raise AssertionError("invalid error handler type accepted")
+
     before = set(os.listdir("."))
     try:
         NamedTemporaryFile("w", dir=".", encoding="bad-encoding", delete=False)

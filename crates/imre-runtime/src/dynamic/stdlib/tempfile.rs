@@ -145,6 +145,10 @@ pub(super) fn path_operation(
         ));
     }
     match (name, args) {
+        ("check_text_options", &[encoding, errors, newline]) => {
+            super::io::check_text_options(ctx, Some(encoding), Some(errors), Some(newline))?;
+            Ok(NONE)
+        }
         ("open_named", &[name, on_close]) => open_named(ctx, name, on_close, false),
         ("open_named", &[name, on_close, writer]) => {
             let write_only = ctx.truth(writer)?;

@@ -180,6 +180,25 @@ fn check_open_string(ctx: &mut Context, value: Id, name: &str, expected: &str) -
     Ok(())
 }
 
+/// Convert open()'s optional text arguments before any path or descriptor is acquired.
+pub(in crate::dynamic::stdlib) fn check_text_options(
+    ctx: &mut Context,
+    encoding: Option<Id>,
+    errors: Option<Id>,
+    newline: Option<Id>,
+) -> Result<()> {
+    for (name, id) in [
+        ("encoding", encoding),
+        ("errors", errors),
+        ("newline", newline),
+    ] {
+        if let Some(id) = id.filter(|&id| id != NONE) {
+            check_open_string(ctx, id, name, "str or None")?;
+        }
+    }
+    Ok(())
+}
+
 enum DescriptorLookup {
     FromArgument,
     Resolved(Option<RawFd>),
@@ -227,15 +246,7 @@ pub(in crate::dynamic) fn open(
     let encoding = encoding.filter(|&v| v != NONE);
     let errors = errors.filter(|&v| v != NONE);
     let newline = newline.filter(|&v| v != NONE);
-    for (name, id) in [
-        ("encoding", encoding),
-        ("errors", errors),
-        ("newline", newline),
-    ] {
-        if let Some(id) = id {
-            check_open_string(ctx, id, name, "str or None")?;
-        }
-    }
+    check_text_options(ctx, encoding, errors, newline)?;
     let owns = closefd.map(|v| ctx.truth(v)).transpose()?.unwrap_or(true);
     // Numeric inputs reach FileIO before Python attempts their index or filesystem protocol.
     let numeric = matches!(

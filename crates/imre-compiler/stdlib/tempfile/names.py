@@ -7,7 +7,7 @@ import os as _os
 import errno as _errno
 from _thread import allocate_lock as _allocate_lock
 
-from _imre_tempfile import abspath as _abspath
+from _imre_tempfile import abspath as _abspath, check_text_options as _check_text_options
 from _imre_tempfile import finish_named as _finish_named, keep_named as _keep_named, open_named as _open_named
 from _imre_tempfile import mkdir as _mkdir, open_file as _open_file, random_name as _random_name
 
@@ -423,6 +423,7 @@ def NamedTemporaryFile(mode="w+b", buffering=-1, encoding=None, newline=None,
         raise NotImplementedError("NamedTemporaryFile supports default buffering")
     if text_write:
         encoding = _io.text_encoding(encoding)
+        _check_text_options(encoding, errors, newline)
     else:
         if encoding is not None:
             raise ValueError("binary mode doesn't take an encoding argument")
