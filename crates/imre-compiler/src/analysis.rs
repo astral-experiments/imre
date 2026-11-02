@@ -414,6 +414,17 @@ impl Session {
         Ok(copy)
     }
 
+    /// Whether this definition needs Python argument binding in a suspended generator frame.
+    pub(crate) fn is_untyped_generator_local(
+        &self,
+        module: usize,
+        function: &ruff_python_ast::StmtFunctionDef,
+    ) -> bool {
+        let index =
+            ty_python_core::semantic_index(&self.db, self.db.program_file(self.files[module]));
+        untyped_generator_local(index, function).is_some()
+    }
+
     /// Fold a local import only while that statement is the sole binding reaching this read.
     pub(crate) fn has_import_binding(
         &self,
@@ -1014,6 +1025,21 @@ fn runtime_argument(
     let Some(callee) = call.func.inferred_type(&model) else {
         return false;
     };
+    if rule == "too-many-positional-arguments"
+        && call.arguments.args.iter().any(|arg| arg.range() == range)
+        && matches!(callee, Type::FunctionLiteral(_))
+        && let Some(ty_python_semantic::types::TypeDefinition::Function(definition)) =
+            callee.definition(db, &model.program_environment())
+        && definition.file(db) == file.file(db)
+        && let ty_python_core::definition::DefinitionKind::Function(function) = definition.kind(db)
+    {
+        let index = ty_python_core::semantic_index(db, file);
+        if let Some(scope) = untyped_generator_local(index, function.node(&parsed))
+            && index.try_expression_scope_id(call.func.as_ref()) == Some(scope)
+        {
+            return true;
+        }
+    }
     let uses_runtime_provider = |ty: Type<'_>| {
         ty.definition(db, &model.program_environment())
             .and_then(|definition| definition.definition())
@@ -1053,6 +1079,26 @@ fn resolves_to_stdlib_function(
             .resolve_module(Some(owner), 0)
             .and_then(|m| m.file(db))
             == Some(def.file(db))
+}
+
+/// An unannotated local function in a generator binds its arguments when iteration reaches the call.
+fn untyped_generator_local(
+    index: &ty_python_core::SemanticIndex,
+    function: &ruff_python_ast::StmtFunctionDef,
+) -> Option<ty_python_core::FileScopeId> {
+    if !function.decorator_list.is_empty()
+        || function.type_params.is_some()
+        || function.returns.is_some()
+        || function.parameters.iter().any(|p| p.annotation().is_some())
+    {
+        return None;
+    }
+    let local =
+        index.try_node_scope(ty_python_core::scope::NodeWithScopeRef::Function(function))?;
+    index
+        .scope(local)
+        .parent()
+        .filter(|scope| scope.is_generator_function(index))
 }
 
 /// A context manager wraps a suspended generator. Its preserved annotation
