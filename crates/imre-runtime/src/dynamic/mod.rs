@@ -1811,6 +1811,7 @@ impl Context {
         let methods = match name {
             "object" => &[
                 "__hash__",
+                "__ne__",
                 "__format__",
                 "__init_subclass__",
                 "__getstate__",
