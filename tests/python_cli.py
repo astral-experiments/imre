@@ -975,6 +975,8 @@ def check_unittest_main_names(imre, root, run):
                          (("-vk", "test_b", "Cases"), "b\n")]:
         result = run(executable, *args)
         assert result.returncode == 0 and result.stdout == output, result
+        if "-vk" in args:
+            assert "test_b (__main__.Cases.test_b) ... ok" in result.stderr.splitlines(), result
     extra = run(executable, "Cases", "-v", "Cases.test_b")
     assert extra.returncode == 2 and not extra.stdout and "unrecognized arguments" in extra.stderr, extra
     for flags in [("-k", "-1"), ("-k=two words",)]:
