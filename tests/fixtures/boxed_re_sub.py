@@ -9,6 +9,24 @@ def current():
     assert re.subn(pattern, "_", "éx") == ("____", 4)
     assert pattern.subn("_", "éx", 1) == ("_éx", 1)
     assert re.compile(b"x").subn(b"x", bytearray(b"x-x")) == (b"x-x", 2)
+    expand = re.search(r"(?P<word>é)(x)?", "!é").expand
+    assert expand(template=r"\g<0>/\g<word>/\2") == "é/é/"
+    assert expand(br"\2") == b""
+    source = bytearray(b"x-y")
+    match = re.search(br"(?P<letter>y)", source)
+    source[-1] = ord("z")
+    assert match.expand(bytearray(br"<\1\g<letter>>")) == b"<zz>"
+    for template, error, message in (
+        (r"\g<absent>", IndexError, "unknown group name 'absent'"),
+        (r"\3", re.PatternError, "invalid group reference 3 at position 1"),
+        (br"\1", TypeError, "sequence item 1: expected a bytes-like object, str found"),
+    ):
+        try:
+            expand(template)
+        except error as exc:
+            assert str(exc) == message
+        else:
+            raise AssertionError("invalid expansion accepted")
     pairs = re.compile(r"(a)?b")
     assert pairs.subn(r"<\1>", "ab-b") == ("<a>-<>", 2)
     assert pairs.subn(r"<\1>", "no match") == ("no match", 0)

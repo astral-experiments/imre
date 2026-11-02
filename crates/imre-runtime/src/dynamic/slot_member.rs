@@ -107,18 +107,11 @@ impl Context {
             let implicit = self.alloc(Value::Tuple(implicit));
             entries.push(self.alloc(Value::Tuple(vec![base, implicit])));
         }
-        // An ordinary object-based class cannot participate in exception-name dispatch.
-        // A subsequent annotation, descriptor, or base-class hook can still raise.
-        let Value::Class { name, .. } = self.heap.get(old) else {
+        if !matches!(self.heap.get(old), Value::Class { .. }) {
             return Err(Error::new(
                 "TypeError",
                 "expected an ordinary dataclass type",
             ));
-        };
-        let name = name.clone();
-        if self.classes.get(&name) == Some(&old) {
-            self.classes.remove(&name);
-            self.heap.weak_edge_removed(old);
         }
         Ok(self.alloc(Value::Tuple(entries)))
     }

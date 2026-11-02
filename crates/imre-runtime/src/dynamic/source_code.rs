@@ -3538,8 +3538,20 @@ impl Context {
                         self.checkpoint(roots, location, caught);
                     }
                 }
-                let transfer = if inject {
-                    let (mut error, _) = cursor.thrown.take().expect("injected exception");
+                #[cfg(unix)]
+                let interrupt = if inject {
+                    None
+                } else {
+                    self.dispatch_signals().err()
+                };
+                #[cfg(not(unix))]
+                let interrupt: Option<Error> = None;
+                let raised = if inject {
+                    cursor.thrown.take().map(|(error, _)| error)
+                } else {
+                    interrupt
+                };
+                let transfer = if let Some(mut error) = raised {
                     self.record_exception_frame(&mut error, None);
                     if cursor.protected.is_empty() {
                         return Err(error);

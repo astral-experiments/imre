@@ -679,7 +679,7 @@ impl BufferedFd {
         Ok(())
     }
 
-    /// A raw warning or truncate callback can call back into its own buffer.
+    /// A raw method or Python signal handler can call back into its own buffer.
     fn check_reentry(&self, ctx: &Context) -> Result<()> {
         if self.callback_active.get() {
             let name = ctx.raw_instance_field(self.raw, "name");
@@ -851,6 +851,21 @@ impl BufferedFd {
         let fd = self.handle.live_fd().ok_or_else(closed)?;
         if name == "truncate" {
             return self.truncate(ctx, args.first().copied().unwrap_or(NONE));
+        }
+        if name == "read" && size == Some(-1) && self.reading {
+            self.check_reentry(ctx)?;
+            // The public BufferedReader and Popen share this pipe's read-ahead. Consume
+            // it once and release the file and buffer borrows before dispatching Python.
+            let prefix = match self.buffer.borrow().as_ref() {
+                Some(Buffer::Pipe(pipe)) => Some(pipe.take_read_ahead()?),
+                _ => None,
+            };
+            if let Some(bytes) = prefix {
+                self.callback_active.set(true);
+                let result = file_io::read(ctx, &self.handle, -1, false, bytes);
+                self.callback_active.set(false);
+                return result;
+            }
         }
         let mut slot = self.buffer.borrow_mut();
         let buffer = slot.as_mut().ok_or_else(closed)?;

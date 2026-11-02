@@ -170,3 +170,17 @@ def current():
     watched = ref(owner, witness)
     del owner
     assert watched() is None and watched.__callback__ is None and seen == [True, False]
+
+    class Key:
+        owners = {}
+
+    Key.owners[Key] = None
+    held = Key.owners
+    callbacks = []
+    key = ref(Key, callbacks.append)
+    del Key
+    gc.collect()
+    assert key() in held and not callbacks
+    del held
+    gc.collect()
+    assert key() is None and callbacks == [key]

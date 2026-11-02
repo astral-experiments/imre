@@ -32,6 +32,9 @@ def current():
     assert child.level == logging.NOTSET and child.getEffectiveLevel() == logging.INFO
 
     handler = logging.StreamHandler(stream)
+    assert repr(handler) == "<StreamHandler (NOTSET)>"
+    stream.name = 2
+    assert repr(handler) == "<StreamHandler 2 (NOTSET)>"
     handler.name = "access-stream"
     assert logging.getHandlerByName("access-stream") is handler
     handler.name = "renamed-stream"

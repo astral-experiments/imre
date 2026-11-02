@@ -625,13 +625,17 @@ impl Error {
         }
     }
 
-    /// Use Python's argument-free MemoryError when an operation exhausts memory.
-    pub(crate) fn memory_error() -> Self {
+    pub(super) fn without_args(kind: Kind) -> Self {
         Self {
-            kind: Kind::MemoryError,
+            kind,
             payload: Some(Payload::Empty),
             cause: None,
         }
+    }
+
+    /// Use Python's argument-free MemoryError when an operation exhausts memory.
+    pub(crate) fn memory_error() -> Self {
+        Self::without_args(Kind::MemoryError)
     }
 
     pub(super) fn key(key: OwnedWord) -> Self {
@@ -1133,12 +1137,19 @@ pub(super) fn raise_timeout(error: super::processes::TimeoutError) {
 
 /// Return the visible parent and whether it was installed as an explicit cause.
 fn display_parent(owner: &crate::ObjectOwner) -> Option<(crate::ObjectOwner, bool)> {
+    exception_parent(owner, false)
+}
+
+fn exception_parent(
+    owner: &crate::ObjectOwner,
+    include_hidden: bool,
+) -> Option<(crate::ObjectOwner, bool)> {
     // SAFETY: the owner roots the exception and this borrow cannot call Python.
     unsafe {
         owner.0.with(|s| {
             let e = s.exception();
             e.cause().cloned().map(|cause| (cause, true)).or_else(|| {
-                if e.suppress_context {
+                if e.suppress_context && !include_hidden {
                     None
                 } else {
                     e.details.as_deref()?.display_context.clone()
@@ -1287,7 +1298,8 @@ fn attach_display_context(value: &crate::ObjectOwner, active: crate::ObjectOwner
         if !detach {
             detach = group_owns_exception(&node, value)?;
         }
-        let Some((next, explicit)) = display_parent(&node) else {
+        // Even suppressed contexts own their parents and can participate in a cycle.
+        let Some((next, explicit)) = exception_parent(&node, true) else {
             break;
         };
         if crate::ObjectOwner::ptr_eq(&next, value) {
@@ -1325,6 +1337,27 @@ fn attach_display_context(value: &crate::ObjectOwner, active: crate::ObjectOwner
             Ok(())
         })
     }
+}
+
+/// Re-raise a missing encoded key with its original spelling, as in os._Environ.
+pub(super) fn raise_key_from_none(key: OwnedWord, encoded: OwnedWord) {
+    let missing = new_exception(Kind::KeyError, Payload::Key(encoded));
+    if let Some(active) = active_exception()
+        && let Err(error) = attach_display_context(&missing, active)
+    {
+        error.raise();
+        return;
+    }
+    let error = crate::ObjectOwner::new(Object(StorageCell::new(Storage::Exception(Exception {
+        kind: Kind::KeyError,
+        payload: Payload::Key(key),
+        suppress_context: true,
+        details: Some(crate::Shared::new(ExceptionDetails {
+            display_context: Some((missing, false)),
+            ..Default::default()
+        })),
+    }))));
+    replace_pending(Some(error));
 }
 
 fn publish_raised(value: crate::ObjectOwner) {
@@ -2488,8 +2521,14 @@ pub extern "C" fn imre_error_unhandled() -> i32 {
         }
         return status_after_flush(status, stdout, stderr.and(crate::sys::flush_stderr()));
     }
+    let interrupted = kind_of(&pending) == Kind::KeyboardInterrupt;
     write_exception_chain(pending);
-    status_after_flush(1, stdout, stderr.and(crate::sys::flush_stderr()))
+    let status = status_after_flush(1, stdout, stderr.and(crate::sys::flush_stderr()));
+    if interrupted {
+        crate::signals::exit_interrupt()
+    } else {
+        status
+    }
 }
 
 /// Print the handled exception without changing the active handler or the process exit status.
@@ -2785,6 +2824,34 @@ mod tests {
         assert_eq!(*message(&error), expected);
         drop(error);
         assert!(weak.upgrade().is_none());
+    }
+
+    #[test]
+    fn translated_environment_key_keeps_its_hidden_bytes_context() {
+        let key = StrOwner::new(Str::from("missing"));
+        let encoded = crate::BytesOwner::new(b"missing".to_vec());
+        // SAFETY: each owner remains live for the acquisition of its exact word kind.
+        unsafe {
+            raise_key_from_none(
+                WordKind::new(3).acquire(StrOwner::as_ptr(&key) as usize),
+                WordKind::new(8).acquire(crate::BytesOwner::as_ptr(&encoded) as usize),
+            );
+        }
+        let raised = take_error(Kind::KeyError);
+        assert!(display_parent(&raised).is_none());
+        // SAFETY: the exception is rooted while copying its hidden context owner.
+        let context = unsafe {
+            raised.0.with(|s| {
+                let error = s.exception();
+                assert!(error.suppress_context && error.cause().is_none());
+                error.display_context().unwrap().0.clone()
+            })
+        };
+        assert_eq!(kind_of(&context), Kind::KeyError);
+        assert_eq!(message(&context).as_str(), "b'missing'");
+        // Reversing the chain cuts the original implicit link, even when hidden.
+        assert!(attach_display_context(&context, raised.clone()).is_ok());
+        assert!(exception_parent(&raised, true).is_none());
     }
 
     #[test]

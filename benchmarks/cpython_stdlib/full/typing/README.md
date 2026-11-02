@@ -32,6 +32,10 @@ The gate compares normal and reachable-only imported module effects, exercises t
 
 [Raw unchanged-suite entry checks](startup-linux.json) cover ordinary and reachable-only compilation, for both importing and invoking the upstream runner. On the exact #650 parent, reachable-only warnings startup advances from the missing `typing.overload` import to `test.support.import_helper:2 import _imp`. Ordinary warnings startup still stops at the earlier `importlib` import on that parent. Both typing modes still require a starred tuple display at `test_typing.py:696`. No whole-suite entry executes a test.
 
+## Intact suite discovery
+
+The [whole-module receipts](intact-discovery/README.md) compare stock CPython with ordinary module invocation, boxed direct import, filesystem discovery and static direct import on public Imre `06c9fd7d`.
+
 ## Literal aliases
 
 All 15 original methods in CPython 3.14.5’s `LiteralTests` passed on public Imre `e3ff3e59` at O0 and O3 with runtime imports. The runner loaded the unchanged class and its base under the original module name. On baseline `d172f092`, 14 of the same methods passed at both levels. The one new pass is `test_dir`, suite ordinal 280. Previously `dir(Literal[1, 2, 3])` raised `NotImplementedError` before entering its subtests. On the reviewed head `aaad9b9b` and the public squash, all three original membership checks passed for `__args__`, `__parameters__`, and `__origin__`. [Method outcomes](literal-linux.tsv) · [Subtest events](literal-subtests-linux.tsv) · [Product change](https://github.com/astral-experiments/imre/pull/4018)

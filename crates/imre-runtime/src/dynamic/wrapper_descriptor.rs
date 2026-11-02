@@ -168,6 +168,8 @@ impl BuiltinDescriptor {
             "float.__repr__" => ("float", "__repr__"),
             "int.__format__" => ("int", "__format__"),
             "str.__format__" => ("str", "__format__"),
+            "str.__mod__" => ("str", "__mod__"),
+            "str.__rmod__" => ("str", "__rmod__"),
             "str.isascii" => ("str", "isascii"),
             "str.isalpha" => ("str", "isalpha"),
             "str.isdigit" => ("str", "isdigit"),
@@ -184,6 +186,7 @@ impl BuiltinDescriptor {
             "function.__call__" => ("function", "__call__"),
             "classmethod.__get__" => ("classmethod", "__get__"),
             "method_descriptor.__get__" => ("method_descriptor", "__get__"),
+            "wrapper_descriptor.__get__" => ("wrapper_descriptor", "__get__"),
             "str.__str__" => ("str", "__str__"),
             "str.__repr__" => ("str", "__repr__"),
             "bytes.__repr__" => ("bytes", "__repr__"),
@@ -300,7 +303,9 @@ impl BuiltinDescriptor {
             "memoryview" => matches!(ctx.heap.get(receiver), Value::MemoryView { .. }),
             "slice" => matches!(ctx.heap.get(receiver), Value::Slice(_)),
             "member_descriptor" => ctx.exact_type(receiver)? == ctx.builtin("member_descriptor"),
-            "method_descriptor" => ctx.builtin_type_name(receiver) == Some("method_descriptor"),
+            "method_descriptor" | "wrapper_descriptor" => {
+                ctx.builtin_type_name(receiver) == Some(self.owner)
+            }
             "dict" => ctx.dict_storage(receiver).is_some(),
             "mappingproxy" => matches!(ctx.heap.get(receiver), Value::MappingProxy(_)),
             deque::CLASS => matches!(ctx.heap.get(receiver), Value::Deque(_)),
@@ -429,12 +434,14 @@ impl BuiltinDescriptor {
             "__doc__" if self.name == "__rmul__" => ctx.text("Return value*self."),
             "__doc__" if self.name == "__truediv__" => ctx.text("Return self/value."),
             "__doc__" if self.name == "__rtruediv__" => ctx.text("Return value/self."),
+            "__doc__" if self.name == "__mod__" => ctx.text("Return self%value."),
+            "__doc__" if self.name == "__rmod__" => ctx.text("Return value%self."),
             "__doc__" if self.name == "__floordiv__" => ctx.text("Return self//value."),
             "__doc__" if self.name == "__rfloordiv__" => ctx.text("Return value//self."),
             "__doc__" if self.name == "__ior__" => ctx.text("Return self|=value."),
             "__text_signature__" if self.name == "__ior__" => ctx.text("($self, value, /)"),
             "__doc__" if self.name == "__iadd__" => ctx.text("Implement self+=value."),
-            "__text_signature__" if matches!(self.name, "__add__" | "__radd__" | "__sub__" | "__rsub__" | "__iadd__" | "__mul__" | "__rmul__" | "__truediv__" | "__rtruediv__" | "__floordiv__" | "__rfloordiv__") => {
+            "__text_signature__" if matches!(self.name, "__add__" | "__radd__" | "__sub__" | "__rsub__" | "__iadd__" | "__mul__" | "__rmul__" | "__truediv__" | "__rtruediv__" | "__mod__" | "__rmod__" | "__floordiv__" | "__rfloordiv__") => {
                 ctx.text("($self, value, /)")
             }
             "__text_signature__" if self.name == "endswith" => {
@@ -531,6 +538,7 @@ pub(super) fn descriptor_get(
     };
     let slot = match ctx.heap.get(descriptor) {
         Value::ClassMethod { .. } if class == "classmethod" => None,
+        Value::HashMethod { .. } if class == "method_descriptor" => None,
         Value::Native(symbol)
             if let Some(slot) = BuiltinDescriptor::lookup(symbol)
                 && slot.class() == class =>
@@ -563,6 +571,12 @@ pub(super) fn descriptor_get(
         [receiver] | [receiver, _] => {
             if let Some(slot) = slot {
                 return slot.bind(ctx, descriptor, receiver);
+            }
+            if let Value::HashMethod { owner, .. } = *ctx.heap.get(descriptor) {
+                if receiver == NONE {
+                    return Ok(descriptor);
+                }
+                return ctx.bind_attribute(descriptor, receiver, owner);
             }
             let owner = match arguments.get(1) {
                 None | Some(&NONE) => ctx.exact_type(receiver)?,

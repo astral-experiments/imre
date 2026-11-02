@@ -408,11 +408,20 @@ fn worker_target(ctx: &Context, target: Id, args: Id, kwargs: Id) -> Result<(Ope
     if let Value::Method {
         callable, receiver, ..
     } = *ctx.heap.get(target)
-        && let Value::Native(symbol) = ctx.heap.get(callable)
         && let Value::Tuple(pos) | Value::List(pos) = ctx.heap.get(args)
         && matches!(ctx.heap.get(kwargs), Value::Dict(entries) if entries.is_empty())
     {
-        let operation = match (ctx.heap.get(receiver), pos.as_slice()) {
+        let (symbol, storage) = match ctx.heap.get(callable) {
+            Value::Native(symbol) => (symbol.as_str(), receiver),
+            Value::HashMethod {
+                owner,
+                name: "update",
+            } if ctx.heap.get(receiver).instance_class() == Some(*owner) => {
+                ("hash.update", ctx.scalar_value(receiver))
+            }
+            _ => ("", receiver),
+        };
+        let operation = match (ctx.heap.get(storage), pos.as_slice()) {
             (Value::PrimitiveLock(lock), []) if symbol == "_thread.lock.acquire" => {
                 Some(Operation::Acquire {
                     lock: Arc::clone(lock),
@@ -420,7 +429,7 @@ fn worker_target(ctx: &Context, target: Id, args: Id, kwargs: Id) -> Result<(Ope
                 })
             }
             (value @ Value::Hash(hash), [id])
-                if super::builtins::method_name(value, "update").as_ref() == Some(symbol) =>
+                if super::builtins::method_name(value, "update").as_deref() == Some(symbol) =>
             {
                 if let Value::Bytes(data) = ctx.heap.get(*id) {
                     Some(Operation::UpdateHash {

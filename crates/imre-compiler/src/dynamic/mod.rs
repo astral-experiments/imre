@@ -430,6 +430,53 @@ impl<'a> Visitor<'a> for Imports {
     }
 }
 
+/// A module-level synchronous function can close over unbounded TypeVars in a single body scope.
+pub(crate) fn function_type_params(function: &ast::StmtFunctionDef) -> Option<&ast::TypeParams> {
+    use ast::AnyNodeRef::*;
+    use ast::visitor::source_order::{SourceOrderVisitor, TraversalSignal};
+
+    let params = function.type_params.as_deref()?;
+    let mut names = HashSet::new();
+    if function.is_async
+        || !params.iter().all(|p| {
+            matches!(p, ast::TypeParam::TypeVar(v)
+        if v.bound.is_none() && v.default.is_none()
+            && !matches!(v.name.as_str(), "__classdict__" | "__debug__")
+            && names.insert(v.name.as_str()))
+        })
+    {
+        return None;
+    }
+
+    struct BodyScope(bool);
+    impl<'a> SourceOrderVisitor<'a> for BodyScope {
+        fn enter_node(&mut self, node: ast::AnyNodeRef<'a>) -> TraversalSignal {
+            self.0 |= matches!(
+                node,
+                StmtFunctionDef(_)
+                    | StmtClassDef(_)
+                    | StmtTypeAlias(_)
+                    | StmtNonlocal(_)
+                    | ExprLambda(_)
+                    | ExprGenerator(_)
+                    | ExprListComp(_)
+                    | ExprSetComp(_)
+                    | ExprDictComp(_)
+                    | ExprYield(_)
+                    | ExprYieldFrom(_)
+            );
+            if self.0 {
+                TraversalSignal::Skip
+            } else {
+                TraversalSignal::Traverse
+            }
+        }
+    }
+    let mut body = BodyScope(false);
+    body.visit_body(&function.body);
+    (!body.0).then_some(params)
+}
+
 fn imports(source: &str, kind: SourceKind) -> Result<Imports, String> {
     let normalized = crate::normalize_source(source, kind)?;
     crate::analysis::check_source_complexity(&normalized).map_err(str::to_owned)?;
@@ -438,6 +485,9 @@ fn imports(source: &str, kind: SourceKind) -> Result<Imports, String> {
     let mut imports = Imports::default();
     let mut body = parsed.into_syntax().body;
     imre_ast::lower(&mut body);
+    imports.runtime_imports = body.iter().any(|stmt| {
+        matches!(stmt, Stmt::FunctionDef(function) if function_type_params(function).is_some())
+    });
     imports.visit_body(&body);
     Ok(imports)
 }

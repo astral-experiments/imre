@@ -1413,27 +1413,57 @@ impl Checker<'_> {
         ))
     }
 
+    pub(super) fn environ_item_type(&self, receiver: &ast::Expr) -> Option<Type> {
+        match self.resolve(receiver) {
+            Some(Binding::Intrinsic(Intrinsic::Environ)) => Some(Type::Str),
+            Some(Binding::Intrinsic(Intrinsic::EnvironBytes)) => Some(Type::Bytes),
+            _ => None,
+        }
+    }
+
     pub(super) fn environ_method(
         &mut self,
         attribute: &ast::ExprAttribute,
         call: &ast::ExprCall,
+        bytes: bool,
     ) -> Result<Expr, String> {
-        if attribute.attr.as_str() == "get" {
+        let name = attribute.attr.as_str();
+        if name == "get" && !bytes {
             return self.environ_get(call);
         }
-        self.reject_builtin_keywords(call)?;
-        if attribute.attr.as_str() != "copy" || !call.arguments.args.is_empty() {
-            return Err(error(
-                self.source,
-                call,
-                "os.environ accepts copy() or get(key, default=None)",
+        if name == "update" {
+            let field = if bytes { Type::Bytes } else { Type::Str };
+            let mut sources = Vec::new();
+            self.mapping_update_sources(call, field, field, &mut sources)?;
+            return Ok(operation(
+                ProcessOperation::EnvironUpdate { bytes },
+                Type::None,
+                sources,
             ));
         }
-        Ok(operation(
-            ProcessOperation::EnvironCopy,
-            self.types.dict(Type::Str, Type::Str),
+        self.reject_builtin_keywords(call)?;
+        match (name, call.arguments.args.as_slice()) {
+            ("copy", []) => Ok(self.environ_copy(bytes)),
+            ("clear", []) => Ok(operation(
+                ProcessOperation::EnvironClear,
+                Type::None,
+                vec![],
+            )),
+            _ => Err(error(
+                self.source,
+                call,
+                "unsupported environment mapping method or arguments",
+            )),
+        }
+    }
+
+    pub(super) fn environ_copy(&self, bytes: bool) -> Expr {
+        let field = if bytes { Type::Bytes } else { Type::Str };
+        operation(
+            ProcessOperation::EnvironCopy { bytes },
+            self.types.dict(field, field),
             vec![],
-        ))
+        )
     }
 
     pub(super) fn process_attribute(

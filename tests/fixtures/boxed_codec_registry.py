@@ -30,6 +30,19 @@ def custom_escape(name):
         return (None, lambda value: ("custom", len(value)), None, None)
 
 
+def decode_live(view):
+    assert view.readonly and view.obj is None
+    source[0] = 120
+    assert view[::2].tobytes() == b"xc"
+    retained.append(view)
+    return ("ok", len(view))
+
+
+def live_codec(name):
+    if name == "live_view":
+        return (None, decode_live, None, None)
+
+
 assert codecs.register is _codecs.register
 assert codecs.unregister is _codecs.unregister
 assert codecs.lookup is _codecs.lookup
@@ -94,3 +107,15 @@ finally:
     codecs.unregister(custom_escape)
 
 assert codecs.decode(br"\u0042", "raw-unicode-escape") == "B"
+
+source = bytearray(b"abc")
+retained = []
+codecs.register(live_codec)
+try:
+    assert source.decode("live-view") == "ok"
+    source[1] = 121
+    assert retained[0].tobytes() == b"xyc"
+    source.append(122)
+finally:
+    retained.clear()
+    codecs.unregister(live_codec)
