@@ -1885,8 +1885,8 @@ impl Context {
                     *base = tuple;
                 }
             }
-            let fields = self.scope_name(scope, "__annotations__");
-            let (fields, provider) = if fields.is_none()
+            let explicit = self.scope_name(scope, "__annotations__");
+            let (fields, provider) = if explicit.is_none()
                 && let Some(original) = self.scope_name(scope, "__annotate_func__")
             {
                 let annotate = self.call_typing_helper("_namedtuple_annotate", vec![original])?;
@@ -1895,7 +1895,7 @@ impl Context {
                 let fields = self.call(annotate, vec![forwardref], Vec::new())?;
                 (Some(fields), Some(annotate))
             } else {
-                (fields, None)
+                (explicit, None)
             };
             let mut named_fields = Vec::new();
             if let Some(fields) = fields {
@@ -1908,6 +1908,19 @@ impl Context {
                     named_fields.push(super::namedtuple::string(self, key)?);
                 }
             }
+            let annotate = if let Some(provider) = provider {
+                provider
+            } else {
+                let annotate = self
+                    .call_typing_helper("_make_eager_annotate", explicit.into_iter().collect())?;
+                self.heap.keep(annotate);
+                if explicit.is_some() {
+                    let key = self.heap.code_name("__annotations__");
+                    self.remove_binding(scope, "__annotations__", key)?;
+                }
+                self.enable_class_annotation_provider(scope);
+                annotate
+            };
             let mut defaults = Vec::new();
             for field in &named_fields {
                 if let Some(value) = self.scope_name(scope, field) {
@@ -1958,10 +1971,8 @@ impl Context {
             let defaults = self.alloc(Value::Tuple(defaults));
             let new =
                 super::namedtuple::bind_new(self, scope, name, &named_fields, Some(defaults))?;
-            if let Some(annotate) = provider {
-                self.bind_local(scope, "__annotate_func__", annotate);
-                self.set_attr(new, "__annotate__", annotate)?;
-            }
+            self.bind_local(scope, "__annotate_func__", annotate);
+            self.set_attr(new, "__annotate__", annotate)?;
             if self.scope_name(scope, "__repr__").is_none() {
                 let name = self.text(name);
                 super::namedtuple::bind_repr(self, scope, name, fields)?;

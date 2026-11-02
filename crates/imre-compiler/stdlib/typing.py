@@ -610,7 +610,9 @@ def _call_annotate(annotate, format, owner=None):
 _sentinel = object()
 
 
-def _make_eager_annotate(types):
+def _make_eager_annotate(types=_sentinel):
+    if types is _sentinel:
+        return lambda format: {}
     checked = {key: _type_check(value, f"field {key} annotation must be a type")
                for key, value in types.items()}
 

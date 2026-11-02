@@ -6495,6 +6495,8 @@ impl Context {
             needs_class_cell: bool,
             #[serde(default)]
             needs_dict_cell: bool,
+            #[serde(default)]
+            postponed_annotations: bool,
             static_attributes: Option<Vec<String>>,
         }
         let parameters = self.code_object(code).parameters;
@@ -6536,7 +6538,9 @@ impl Context {
             self.bind(scope, "__type_params__", params);
         }
         let annotations = self.dict(Vec::new());
-        self.bind_local(scope, "__annotations__", annotations);
+        if bindings.postponed_annotations || self.namedtuple_base(&bases).is_none() {
+            self.bind_local(scope, "__annotations__", annotations);
+        }
         if let Value::Scope(frame) = self.heap.get_mut(scope) {
             frame
                 .class_namespace

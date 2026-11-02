@@ -722,6 +722,10 @@ impl Function<'_, '_> {
             signature["code_flags"] = json!(flags);
         }
         if let Body::Namespace(stmts) = &body {
+            signature["postponed_annotations"] = json!(
+                self.source.string_annotations
+                    && imre_ast::annotations::has_variable_annotation(stmts)
+            );
             signature["needs_class_cell"] = json!(imre_ast::class_cell::needed(
                 stmts,
                 self.source.string_annotations
