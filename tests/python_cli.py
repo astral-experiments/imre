@@ -2457,6 +2457,8 @@ def report(text):
             plugin.write_bytes((fixtures / "boxed_os_scandir.py").read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")
         if sys.platform == "linux":
+            plugin.write_bytes((fixtures / "boxed_posix_sched_param.py").read_bytes())
+            compare("-IB", "-c", imports + "arithmetic.current()")
             plugin.write_bytes((fixtures / "boxed_posix_sched_getscheduler.py").read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")
             plugin.write_bytes((fixtures / "boxed_fcntl.py").read_bytes())

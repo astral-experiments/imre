@@ -31,7 +31,9 @@ pub(super) fn module_function(symbol: &str) -> Option<(&str, &str)> {
             if !function.contains('.')
                 && !matches!(
                     symbol,
-                    stdlib::os::scandir::ENTRY | stdlib::os::scandir::ITER
+                    stdlib::os::scandir::ENTRY
+                        | stdlib::os::scandir::ITER
+                        | stdlib::fixed_structseq::SCHED_PARAM
                 ) =>
         {
             Some((module, function))
@@ -313,6 +315,8 @@ impl Context {
                         | weakref::REFERENCE_TYPE
                 ) || stdlib::datetime::members(kind)
                     .is_some_and(|members| members.owns(name))
+                    || (kind == stdlib::fixed_structseq::SCHED_PARAM
+                        && matches!(name, "__reduce__" | "__replace__"))
                     || (kind == "function" && name == "__call__")
                     || (kind == "set" && name == "update")
                     || (matches!(name, "__repr__" | "__reduce__" | "difference" | "issubset" | "union")
@@ -1300,6 +1304,7 @@ impl Context {
                         class @ ("time.struct_time"
                         | stdlib::fixed_structseq::UNRAISABLE_ARGS
                         | stdlib::fixed_structseq::HASH_INFO
+                        | stdlib::fixed_structseq::SCHED_PARAM
                         | stdlib::fixed_structseq::TERMINAL_SIZE
                         | stdlib::flags::TYPE
                         | stdlib::os::stat::CLASS
@@ -1452,6 +1457,7 @@ impl Context {
                             class @ ("time.struct_time"
                             | stdlib::fixed_structseq::UNRAISABLE_ARGS
                             | stdlib::fixed_structseq::HASH_INFO
+                            | stdlib::fixed_structseq::SCHED_PARAM
                             | stdlib::fixed_structseq::TERMINAL_SIZE
                             | stdlib::flags::TYPE
                             | stdlib::os::stat::CLASS
@@ -3601,12 +3607,21 @@ impl Context {
                     owner @ ("time.struct_time"
                     | stdlib::fixed_structseq::UNRAISABLE_ARGS
                     | stdlib::fixed_structseq::HASH_INFO
+                    | stdlib::fixed_structseq::SCHED_PARAM
                     | stdlib::fixed_structseq::TERMINAL_SIZE
                     | stdlib::flags::TYPE),
                 ) = class
                     && name == "__class__"
                 {
                     return Ok(self.builtin(owner));
+                }
+                if class == Some(stdlib::fixed_structseq::SCHED_PARAM)
+                    && matches!(name, "__reduce__" | "__reduce_ex__" | "__replace__")
+                {
+                    let owner = self.builtin(stdlib::fixed_structseq::SCHED_PARAM);
+                    if let Some(member) = self.class_attr(owner, name) {
+                        return self.bind_attribute(member, obj, owner);
+                    }
                 }
                 if class == Some(stdlib::flags::TYPE)
                     && let Some(value) = stdlib::flags::type_attribute(self, name, false)
@@ -5309,6 +5324,9 @@ impl Context {
                 "TypeError",
                 "cannot create 'sys.flags' instances",
             )),
+            Value::Native(ref name) if let Some(method) = name.strip_prefix("posix.sched_param.") => {
+                stdlib::fixed_structseq::sched_param_method(self, method, &args, &kwargs)
+            }
             Value::Native(name) if let Some(class) = stdlib::fixed_structseq::fixed_type(&name) => {
                 stdlib::fixed_structseq::construct(self, class, &args, &kwargs)
             }
