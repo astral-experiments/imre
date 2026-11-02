@@ -24,6 +24,8 @@ class Item:
 # ownership, evaluation order, control-flow rebinding, and boxed escape paths.
 ACCEPTED = {
     "dict_copy_constructor": 'original = {"one": 1}\nvalues: dict[str, int] = dict(original)\n',
+    "set_empty_without_context": "values = set()\nprint(type(values) is set, len(values))\n",
+    "set_iterable_constructor": "values: set[int] = set([1, 2])\nprint(type(values) is set, sorted(values))\n",
     "set_literal_expansion": "values = {1}\nexpanded = {*values}\nexpanded.add(2)\nprint(len(values))\nprint(1 in expanded)\nprint(2 in expanded)\n",
     "dict_literal_expansion": 'values = {"one": 1}\ncopy = {**values}\ncopy["one"] = 2\nprint(values["one"])\nprint(copy["one"])\n',
     "dict_values_iteration": """
@@ -316,8 +318,6 @@ REJECTED = {
             counts: Counter[str]
         box = decode("{}", Box)
     """,
-    "set_empty_without_context": "values = set()\n",
-    "set_iterable_constructor": "values: set[int] = set([1, 2])\n",
     "set_copy_wrong_element": "original = {1, 2}\nvalues: set[str] = set(original)\n",
     "set_bool_annotation": "values: set[bool] = set()\n",
     "set_bool_literal": "values = {True, False}\n",
