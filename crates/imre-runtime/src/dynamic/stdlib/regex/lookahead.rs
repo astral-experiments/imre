@@ -1,7 +1,7 @@
 //! Match translated text lookaheads with their ordinary numbered capture slots.
 use std::cell::OnceCell;
 
-use fancy_regex::Regex;
+use fancy_regex::{CompileError, Error, Regex, RegexBuilder};
 use regex_automata::util::captures::{Captures, GroupInfo};
 use regex_automata::util::primitives::NonMaxUsize;
 use regex_automata::{Anchored, Input, PatternID};
@@ -28,6 +28,9 @@ pub(super) fn compile(
     )
     .map_err(|_| original)?;
     if flags & IGNORECASE != 0 {
+        if source.contains(r"\k<") || source.contains("(?(") {
+            return Err("case-insensitive lookahead group references are unsupported".into());
+        }
         // Normalized literal punctuation is escaped. Substituting same-width group
         // openers lets the normal case folder read literals at their original offsets.
         let syntax = source
@@ -69,8 +72,8 @@ pub(super) fn compile(
 
 pub(super) struct Lookahead {
     search: Regex,
-    anchored: OnceCell<Result<Regex, String>>,
-    nonempty: OnceCell<Result<Regex, String>>,
+    anchored: OnceCell<Result<Regex, Error>>,
+    nonempty: OnceCell<Result<Regex, Error>>,
     pub(super) groups: GroupInfo,
 }
 
@@ -95,28 +98,31 @@ impl Lookahead {
         nonempty: bool,
         captures: &mut Captures,
     ) -> Result<(), String> {
+        captures.clear();
         let regex = if nonempty || input.get_anchored() == Anchored::Yes {
             let cache = if nonempty {
                 &self.nonempty
             } else {
                 &self.anchored
             };
-            cache
-                .get_or_init(|| {
-                    // The private G anchor pins the start to pos. Rejecting that same
-                    // offset at the end retries consuming alternatives after an empty match.
-                    let end = if nonempty { r"(?!\G)" } else { "" };
-                    Regex::new(&format!(r"\G(?:{}){end}", self.search.as_str()))
-                        .map_err(|e| e.to_string())
-                })
-                .as_ref()
-                .map_err(Clone::clone)?
+            match cache.get_or_init(|| {
+                RegexBuilder::new(&format!(r"\G(?:{})", self.search.as_str()))
+                    .find_not_empty(nonempty)
+                    .build()
+            }) {
+                Ok(regex) => regex,
+                Err(Error::CompileError(err))
+                    if nonempty && matches!(**err, CompileError::PatternCanNeverMatch) =>
+                {
+                    return Ok(());
+                }
+                Err(err) => return Err(err.to_string()),
+            }
         } else {
             &self.search
         };
         let text = std::str::from_utf8(&input.haystack()[..input.end()])
             .expect("lookahead is only compiled for text patterns");
-        captures.clear();
         if let Some(found) = regex
             .captures_from_pos(text, input.start())
             .map_err(|e| e.to_string())?
