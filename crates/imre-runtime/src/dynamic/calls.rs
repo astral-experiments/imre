@@ -57,6 +57,60 @@ pub(super) fn module_function(symbol: &str) -> Option<(&str, &str)> {
     }
 }
 
+fn excess_positional_error(
+    name: &str,
+    allowed: usize,
+    defaults: usize,
+    given: usize,
+    keywords: usize,
+) -> Error {
+    let limit = if defaults == 0 {
+        allowed.to_string()
+    } else {
+        format!("from {} to {allowed}", allowed as isize - defaults as isize)
+    };
+    let unit = if allowed == 1 && defaults == 0 {
+        "argument"
+    } else {
+        "arguments"
+    };
+    let (count, verb) = if keywords == 0 {
+        (given.to_string(), if given == 1 { "was" } else { "were" })
+    } else {
+        let positional_unit = if given == 1 { "argument" } else { "arguments" };
+        let keyword_unit = if keywords == 1 {
+            "argument"
+        } else {
+            "arguments"
+        };
+        (
+            format!(
+                "{given} positional {positional_unit} (and {keywords} keyword-only {keyword_unit})"
+            ),
+            "were",
+        )
+    };
+    Error::new(
+        "TypeError",
+        format!("{name}() takes {limit} positional {unit} but {count} {verb} given"),
+    )
+}
+
+fn missing_arguments_error(name: &str, kind: &str, missing: &[&str]) -> Error {
+    let count = missing.len();
+    let unit = if count == 1 { "argument" } else { "arguments" };
+    let names = match missing {
+        [one] => format!("'{one}'"),
+        [one, two] => format!("'{one}' and '{two}'"),
+        [rest @ .., last] => format!("'{}', and '{last}'", rest.join("', '")),
+        [] => unreachable!(),
+    };
+    Error::new(
+        "TypeError",
+        format!("{name}() missing {count} required {kind} {unit}: {names}"),
+    )
+}
+
 /// Build a non-callable diagnostic while keeping allocation failure catchable.
 fn non_callable_error(name: &str) -> Error {
     let suffix = "' object is not callable";
@@ -4971,6 +5025,7 @@ impl Context {
                 for (n, &v) in pos.iter().zip(&args) {
                     self.bind_argument(local, n, v)?;
                 }
+                let given = args.len();
                 if let Some(n) = sig["varargs"].as_str() {
                     let extra = if pos.is_empty() {
                         args
@@ -4979,11 +5034,6 @@ impl Context {
                     };
                     let extra = self.alloc(Value::Tuple(extra));
                     self.bind_argument(local, n, extra)?;
-                } else if args.len() > pos.len() {
-                    return Err(Error::new(
-                        "TypeError",
-                        format!("too many positional arguments to {name}"),
-                    ));
                 }
                 let mut extra = Vec::new();
                 for (n, v) in kwargs {
@@ -5023,34 +5073,56 @@ impl Context {
                 } else {
                     self.items(defaults)?
                 };
+                if given > pos.len() && !sig["varargs"].is_string() {
+                    let bound = &self.scope_data(local).names;
+                    let keywords = kwonly.iter().filter(|n| bound.contains_key(*n)).count();
+                    return Err(excess_positional_error(
+                        &name,
+                        pos.len(),
+                        default_values.len(),
+                        given,
+                        keywords,
+                    ));
+                }
+                let mut missing = Vec::new();
                 for (index, n) in pos.iter().enumerate() {
                     if !self.scope_data(local).names.contains_key(n) {
                         let offset = index + default_values.len();
-                        let val = offset
+                        if let Some(&val) = offset
                             .checked_sub(pos.len())
                             .and_then(|i| default_values.get(i))
-                            .copied()
-                            .ok_or_else(|| {
-                                Error::new("TypeError", format!("{name} requires argument {n:?}"))
-                            })?;
-                        self.bind_argument(local, n, val)?;
+                        {
+                            self.bind_argument(local, n, val)?;
+                        } else {
+                            missing
+                                .try_reserve(1)
+                                .map_err(|_| Error::new("MemoryError", ""))?;
+                            missing.push(n.as_str());
+                        }
                     }
+                }
+                if !missing.is_empty() {
+                    return Err(missing_arguments_error(&name, "positional", &missing));
                 }
                 for n in &kwonly {
                     if !self.scope_data(local).names.contains_key(n) {
-                        let val = self
-                            .dict_entries(kwdefaults)
-                            .and_then(|entries| {
-                                entries.iter().find_map(|&(key, value)| {
-                                    matches!(self.heap.get(key), Value::Str(text) if text == n)
-                                        .then_some(value)
-                                })
+                        let val = self.dict_entries(kwdefaults).and_then(|entries| {
+                            entries.iter().find_map(|&(key, value)| {
+                                matches!(self.heap.get(key), Value::Str(text) if text == n).then_some(value)
                             })
-                            .ok_or_else(|| {
-                                Error::new("TypeError", format!("{name} requires argument {n:?}"))
-                            })?;
-                        self.bind_argument(local, n, val)?;
+                        });
+                        if let Some(val) = val {
+                            self.bind_argument(local, n, val)?;
+                        } else {
+                            missing
+                                .try_reserve(1)
+                                .map_err(|_| Error::new("MemoryError", ""))?;
+                            missing.push(n.as_str());
+                        }
                     }
+                }
+                if !missing.is_empty() {
+                    return Err(missing_arguments_error(&name, "keyword-only", &missing));
                 }
                 if let Some(types) = sig["types"].as_object() {
                     for (param, expected) in types {
