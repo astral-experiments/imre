@@ -24,7 +24,23 @@ class Sink:
 
 def current():
     assert pickle.bytes_types == (bytes, bytearray)
+    for name in ("Pickler", "Unpickler", "dump", "load", "dumps", "loads", "HIGHEST_PROTOCOL", "STOP"):
+        assert name in pickle.__all__ and hasattr(pickle, name)
+    assert "bytes_types" not in pickle.__all__
     for protocol in range(6):
+        stream = io.BytesIO()
+        assert pickle.dump((b"head", 3), stream, protocol) is None
+        stream.write(pickle._dumps(b"tail", protocol))
+        stream.seek(0)
+        assert pickle.load(stream) == (b"head", 3)
+        assert pickle.Unpickler(stream).load() == b"tail"
+        try:
+            pickle.load(stream)
+        except EOFError:
+            pass
+        else:
+            raise AssertionError("accepted an exhausted pickle stream")
+
         sink = Sink()
         writer = Writer(sink, protocol=protocol)
         obj = [Item()]
