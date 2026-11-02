@@ -1,6 +1,6 @@
 use super::*;
 
-/// Substitute literal replacement text without allocating a Python match for each occurrence.
+/// Substitute matches in order, retaining the allocation-free match path for literal replacements.
 pub(in crate::dynamic::stdlib) fn pattern_sub(
     ctx: &mut Context,
     args: &[Id],
@@ -35,10 +35,9 @@ pub(in crate::dynamic::stdlib) fn pattern_sub(
     };
     let pattern = Rc::clone(pattern);
     if ctx.callable(repl) {
-        return Err(Error::new(
-            "NotImplementedError",
-            "callable regex replacements are unsupported",
-        ));
+        return ctx.with_buffer_export(string, |ctx| {
+            callable_sub(ctx, &pattern, receiver, string, repl, limit)
+        });
     }
     let (replacement, replacement_is_bytes) = match ctx.heap.get(ctx.scalar_value(repl)) {
         Value::Str(s) => (s.as_bytes(), false),
@@ -121,6 +120,109 @@ pub(in crate::dynamic::stdlib) fn pattern_sub(
     } else {
         ctx.text(String::from_utf8(output).expect("text regex spans end on UTF-8 boundaries"))
     })
+}
+
+/// Capture each intervening slice before the callback can change the subject. Keep
+/// the returned objects themselves until every callback has run, as CPython joins last.
+fn callable_sub(
+    ctx: &mut Context,
+    pattern: &Pattern,
+    receiver: Id,
+    string: Id,
+    repl: Id,
+    limit: isize,
+) -> Result<Id> {
+    let length = subject_bytes(ctx, string, pattern.bytes)?.len();
+    let mut pieces = Vec::new();
+    let mut add = |item| -> Result<()> {
+        pieces
+            .try_reserve(1)
+            .map_err(|_| Error::new("MemoryError", ""))?;
+        pieces.push(item);
+        Ok(())
+    };
+    let mut caps = pattern.regex.create_captures();
+    let mut previous = None;
+    let mut cursor = 0;
+    let mut count = 0;
+    while limit == 0 || count < limit {
+        let text = subject_bytes(ctx, string, pattern.bytes)?;
+        let span = match split::next_span(pattern, text, previous, &mut caps) {
+            Ok(Some(span)) => span,
+            Ok(None) => break,
+            Err(message) => return Err(pattern_error(ctx, pattern.source, pattern.flags, message)),
+        };
+        if cursor < span.start {
+            let gap = group_value(&text[cursor..span.start], pattern.bytes);
+            add(ctx.alloc(gap))?;
+        }
+        let mark = ctx.heap.temporary_mark();
+        let matched = ctx.alloc(Value::RegexMatch(Rc::new(Match {
+            pattern: receiver,
+            subject: string,
+            spans: group_spans(&caps).collect(),
+        })));
+        let item = ctx.call(repl, vec![matched], Vec::new())?;
+        ctx.heap.release_temporaries_since(mark);
+        if item != NONE {
+            ctx.heap.keep(item);
+            add(item)?;
+        }
+        previous = Some(span);
+        cursor = span.end;
+        count += 1;
+    }
+    if previous.is_none() && matches!(ctx.heap.get(string), Value::Str(_) | Value::Bytes(_)) {
+        return Ok(string);
+    }
+    if cursor < length {
+        let tail = group_value(
+            &subject_bytes(ctx, string, pattern.bytes)?[cursor..],
+            pattern.bytes,
+        );
+        add(ctx.alloc(tail))?;
+    }
+
+    let invalid = |ctx: &Context, i: usize, item: Id| {
+        let expected = if pattern.bytes {
+            "a bytes-like object"
+        } else {
+            "str instance"
+        };
+        Error::new(
+            "TypeError",
+            format!(
+                "sequence item {i}: expected {expected}, {} found",
+                ctx.type_name(item)
+            ),
+        )
+    };
+    if pattern.bytes {
+        if let [item] = pieces.as_slice()
+            && matches!(ctx.heap.get(*item), Value::Bytes(_))
+        {
+            return Ok(*item);
+        }
+        let mut output = Vec::new();
+        for (i, item) in pieces.into_iter().enumerate() {
+            ctx.check_buffer_exporter(item)?;
+            let data = match ctx.heap.get(ctx.scalar_value(item)) {
+                Value::Array(array) => array.as_bytes(),
+                _ => ctx.bytes_like(item).map_err(|_| invalid(ctx, i, item))?,
+            };
+            append(&mut output, data)?;
+        }
+        return Ok(ctx.alloc(Value::Bytes(output)));
+    }
+    for (i, &item) in pieces.iter().enumerate() {
+        if ctx.string_storage(item).is_none() {
+            return Err(invalid(ctx, i, item));
+        }
+    }
+    let parts = ctx.alloc(Value::List(pieces));
+    let empty = ctx.text("");
+    let join = ctx.lookup_attr(empty, "join")?;
+    ctx.call(join, vec![parts], Vec::new())
 }
 
 fn append(output: &mut Vec<u8>, piece: &[u8]) -> Result<()> {
