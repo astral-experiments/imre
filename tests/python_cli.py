@@ -1544,6 +1544,11 @@ def report(text):
     view = fields.items()
     fields.update(count=len(text.splitlines(keepends=True)))
     print("{{{name}}}: {count}".format(**fields))
+    for template in ("{absent}", "{name:{width}}", "{it's missing}"):
+        try:
+            template.format(**fields)
+        except KeyError as err:
+            print(str(err), err.args)
     print("%(name)s/%(count)d" % fields)
     for key, value in view:
         print(key, value)
