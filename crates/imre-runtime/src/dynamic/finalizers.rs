@@ -5,11 +5,12 @@ impl Context {
     /// Functions and classes can keep the namespace in a cycle. The normal collector
     /// clears weak references and calls the finalizers while that namespace is intact.
     pub(super) fn release_main_at_shutdown(&mut self) -> Result<()> {
-        let key = self.heap.code_name("__main__");
-        if let Some(module) = self.registered_module(key)?
-            && matches!(self.heap.get(module), Value::Module { name, .. } if name == "__main__")
-        {
-            super::builtins::remove_dict_item(self, self.modules, key)?;
+        // A colliding key in sys.modules can run Python during a dictionary lookup.
+        if let Some(index) = self.stored_entries(self.modules).iter().position(|&(key, module)| {
+            matches!(self.heap.get(key), Value::Str(name) if name == "__main__")
+                && matches!(self.heap.get(module), Value::Module { name, .. } if name == "__main__")
+        }) {
+            super::builtins::remove_table_entry(self, self.modules, index)?;
         }
         self.collect_full()?;
         Ok(())
