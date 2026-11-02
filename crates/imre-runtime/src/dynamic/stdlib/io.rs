@@ -21,6 +21,34 @@ pub(in crate::dynamic) enum MemoryStream {
 
 const DEFAULT_BUFFER_SIZE: i64 = 128 * 1024;
 
+// CPython 3.14.5 Lib/io.py, in wildcard import order.
+const PUBLIC_NAMES: &[&str] = &[
+    "BlockingIOError",
+    "open",
+    "open_code",
+    "IOBase",
+    "RawIOBase",
+    "FileIO",
+    "BytesIO",
+    "StringIO",
+    "BufferedIOBase",
+    "BufferedReader",
+    "BufferedWriter",
+    "BufferedRWPair",
+    "BufferedRandom",
+    "TextIOBase",
+    "TextIOWrapper",
+    "UnsupportedOperation",
+    "SEEK_SET",
+    "SEEK_CUR",
+    "SEEK_END",
+    "DEFAULT_BUFFER_SIZE",
+    "text_encoding",
+    "IncrementalNewlineDecoder",
+    "Reader",
+    "Writer",
+];
+
 /// Select the default text encoding from the interpreter's startup configuration.
 pub(super) fn text_encoding(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
     if !kwargs.is_empty() {
@@ -108,6 +136,9 @@ pub(super) fn open_code(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)])
 
 /// Install canonical class objects so subclasses inherit the same methods across imports.
 pub(in super::super) fn install(ctx: &mut Context, module: Id) {
+    let names = PUBLIC_NAMES.iter().map(|&name| ctx.text(name)).collect();
+    let exports = ctx.alloc(Value::List(names));
+    ctx.bind(module, "__all__", exports);
     let open = ctx.builtin("open");
     ctx.bind(module, "open", open);
     let text_encoding = ctx.builtin("_io.text_encoding");

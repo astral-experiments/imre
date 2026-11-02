@@ -2031,6 +2031,10 @@ impl Context {
             let rlock = self.builtin(thread_rlock::CLASS);
             self.bind(scope, "RLock", rlock);
         }
+        if matches!(name, "io" | "_io") {
+            let error = self.builtin("BlockingIOError");
+            self.bind(scope, "BlockingIOError", error);
+        }
         match name {
             "abc" => {
                 let meta = self.abc_meta();
