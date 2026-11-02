@@ -57,8 +57,8 @@ fn native_layout_reduce(
     protocol: i32,
     cursor: Option<(Id, &'static str)>,
 ) -> Result<Id> {
-    let copyreg = ctx.module("copyreg")?;
     if protocol < 2 {
+        let copyreg = ctx.module("copyreg")?;
         let reducer = ctx.lookup_attr(copyreg, "_reduce_ex_with_base")?;
         ctx.heap.keep(reducer);
         let reported_class = ctx.lookup_attr(receiver, "__class__")?;
@@ -77,6 +77,16 @@ fn native_layout_reduce(
             Vec::new(),
         );
     }
+    reduce_newobj(ctx, receiver, class, cursor)
+}
+
+/// Consult the class's constructor argument hooks before collecting binary-protocol state.
+fn reduce_newobj(
+    ctx: &mut Context,
+    receiver: Id,
+    class: Id,
+    cursor: Option<(Id, &'static str)>,
+) -> Result<Id> {
     let extended = ctx.class_attr(class, "__getnewargs_ex__");
     let hook = extended.or_else(|| ctx.class_attr(class, "__getnewargs__"));
     let Some(hook) = hook else {
@@ -85,6 +95,7 @@ fn native_layout_reduce(
     let method = ctx.bind_attribute(hook, receiver, class)?;
     let args = ctx.call(method, Vec::new(), Vec::new())?;
     ctx.heap.keep(args);
+    let copyreg = ctx.module("copyreg")?;
     let reducer = ctx.lookup_attr(copyreg, "_reduce_newobj")?;
     let extended = super::super::builtins::boolean(extended.is_some());
     ctx.call(reducer, vec![receiver, args, extended], Vec::new())
@@ -121,13 +132,7 @@ fn default_instance_reduce(ctx: &mut Context, receiver: Id, protocol: i32) -> Re
         let protocol = ctx.int(i64::from(protocol));
         return ctx.call(reducer, vec![receiver, protocol], Vec::new());
     }
-    if ctx.class_attr(class, "__getnewargs_ex__").is_some()
-        || ctx.class_attr(class, "__getnewargs__").is_some()
-    {
-        return Err(unsupported_reducer(ctx, receiver));
-    }
-
-    reduce_without_newargs(ctx, receiver, class, None)
+    reduce_newobj(ctx, receiver, class, None)
 }
 
 fn reduce_without_newargs(
