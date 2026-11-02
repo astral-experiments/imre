@@ -12,7 +12,11 @@ def current():
         ('$', 'a\n'),
         (b'a*?', b'\xffa'),
     ):
-        print(re.compile(pattern).findall(text))
+        compiled = re.compile(pattern)
+        expected = compiled.findall(text)
+        assert re.findall(pattern=pattern, string=text) == re.findall(compiled, text) == expected
+        print(expected)
+    assert re.findall(r"(a)|(b)", "Ab!", flags=re.I) == [("A", ""), ("", "b")]
     for source, text in [(r'(a)(?P<tail>b){0}', 'a'), (b'(a)(?P<tail>b){0,0}?', b'a')]:
         for flags in (0, re.VERBOSE):
             pattern = re.compile(source, flags)
