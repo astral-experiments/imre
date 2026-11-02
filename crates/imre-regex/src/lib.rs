@@ -140,15 +140,38 @@ pub fn translate_for_runtime(
 /// Translate a boxed pattern with its byte and Unicode escape rules.
 pub fn translate_pattern(
     pattern: &str,
+    verbose: bool,
+    alphabet: Alphabet,
+    dotall: bool,
+    literal_guards: bool,
+) -> Result<FixedPattern, String> {
+    let (output, groups) = tokenize(pattern, verbose, alphabet, dotall, literal_guards, false)?;
+    analyze(output, groups)
+}
+
+/// Normalize a text pattern requiring a lookahead without accepting backend-specific syntax.
+pub fn lookahead_source(
+    pattern: &str,
+    verbose: bool,
+    alphabet: Alphabet,
+    dotall: bool,
+) -> Result<(String, Vec<Option<String>>), String> {
+    tokenize(pattern, verbose, alphabet, dotall, false, true)
+}
+
+fn tokenize(
+    pattern: &str,
     mut verbose: bool,
     alphabet: Alphabet,
     mut dotall: bool,
     literal_guards: bool,
-) -> Result<FixedPattern, String> {
+    lookahead: bool,
+) -> Result<(String, Vec<Option<String>>), String> {
     let mut escapes = Escapes {
         alphabet,
         bracketed_word: false,
     };
+    let mut has_lookahead = false;
     let mut literal_brace = false;
     let mut input = pattern.chars().peekable();
     let mut output = String::new();
@@ -176,11 +199,25 @@ pub fn translate_pattern(
                     verbose = true;
                     continue;
                 }
-                outer_prefixes.push((may_backtrack, dotall, verbose));
+                let assertion = if lookahead && extension {
+                    input.next_if(|c| matches!(c, '=' | '!'))
+                } else {
+                    None
+                };
+                let atomic_assertion = assertion == Some('=');
+                outer_prefixes.push((may_backtrack, dotall, verbose, atomic_assertion));
                 may_backtrack = false;
                 output.push('(');
                 if extension {
-                    if input.next_if_eq(&':').is_some() {
+                    if let Some(assertion) = assertion {
+                        has_lookahead = true;
+                        output.push('?');
+                        output.push(assertion);
+                        if atomic_assertion {
+                            // CPython commits to the first successful positive assertion.
+                            output.push_str("(?>");
+                        }
+                    } else if input.next_if_eq(&':').is_some() {
                         output.push_str("?:");
                     } else if matches!(input.peek(), Some('x' | '-')) {
                         let enable = input.next_if_eq(&'-').is_none();
@@ -197,7 +234,7 @@ pub fn translate_pattern(
                         dotall = true;
                     } else if input.next_if_eq(&'>').is_some() {
                         atomic_delimited(&mut input, &mut output, dotall, verbose, &mut escapes)?;
-                        (may_backtrack, dotall, verbose) = outer_prefixes.pop().unwrap();
+                        (may_backtrack, dotall, verbose, _) = outer_prefixes.pop().unwrap();
                         can_repeat = true;
                         continue;
                     } else if input.next_if_eq(&'P').is_some() && input.next_if_eq(&'<').is_some() {
@@ -206,7 +243,8 @@ pub fn translate_pattern(
                             match input.next() {
                                 Some('>') if !name.is_empty() => break,
                                 Some(c)
-                                    if c == '_'
+                                    if lookahead && c != '>'
+                                        || c == '_'
                                         || c.is_ascii_alphabetic()
                                         || !name.is_empty() && c.is_ascii_digit() =>
                                 {
@@ -215,7 +253,11 @@ pub fn translate_pattern(
                                 _ => return Err("expected an ASCII Python capture name".into()),
                             }
                         }
-                        write!(output, "?P<{name}>").unwrap();
+                        // The text lookahead backend uses the original Python names
+                        // separately, including identifiers outside its own name syntax.
+                        if !lookahead {
+                            write!(output, "?P<{name}>").unwrap();
+                        }
                         groups.push(Some(name));
                     } else {
                         return Err("unsupported regex group, assertion, or inline flag".into());
@@ -231,17 +273,22 @@ pub fn translate_pattern(
                 // An empty character class is an unreachable branch that keeps
                 // these alternatives separate without adding a capture.
                 output.push_str(if may_backtrack { r"|[^\s\S]|" } else { "|" });
-                if let Some((outer, _, _)) = outer_prefixes.last_mut() {
+                if let Some((outer, ..)) = outer_prefixes.last_mut() {
                     *outer = true; // The enclosing prefix now contains a choice.
                 }
                 may_backtrack = false;
                 can_repeat = false;
             }
             ')' => {
-                if let Some((backtrack, previous_dotall, previous_verbose)) = outer_prefixes.pop() {
+                if let Some((backtrack, previous_dotall, previous_verbose, atomic_assertion)) =
+                    outer_prefixes.pop()
+                {
                     may_backtrack |= backtrack;
                     dotall = previous_dotall;
                     verbose = previous_verbose;
+                    if atomic_assertion {
+                        output.push(')');
+                    }
                 }
                 output.push(c);
                 can_repeat = true;
@@ -249,6 +296,11 @@ pub fn translate_pattern(
             '.' | '^' => {
                 output.push(c);
                 can_repeat = c == '.';
+            }
+            '$' if lookahead => {
+                // Literals are escaped, so the runtime can lower this anchor using its line mode.
+                output.push('$');
+                can_repeat = false;
             }
             '$' if input.peek().is_none()
                 || verbose && next_token(&mut input.clone(), true)?.is_none() =>
@@ -307,11 +359,21 @@ pub fn translate_pattern(
             }
         }
     }
-    if literal_brace && escapes.bracketed_word && alphabet == Alphabet::UnicodeIgnoreCase {
+    if (literal_brace || lookahead)
+        && escapes.bracketed_word
+        && alphabet == Alphabet::UnicodeIgnoreCase
+    {
         return Err(
             "case-insensitive Unicode word sets inside bracket expressions are unsupported".into(),
         );
     }
+    if lookahead && !has_lookahead {
+        return Err("expected a Python lookahead assertion".into());
+    }
+    Ok((output, groups))
+}
+
+fn analyze(output: String, groups: Vec<Option<String>>) -> Result<FixedPattern, String> {
     let output = preserve_zero_repeat_groups(output)?;
     let hir = regex_syntax::Parser::new()
         .parse(&output)

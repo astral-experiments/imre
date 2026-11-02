@@ -149,11 +149,62 @@ def check_generic_bases():
     assert Fixed.__required_keys__ == {"value"} and Fixed.__optional_keys__ == {"extra"}
     assert type(Fixed()) is dict
 
+    class Pair[K, V](TypedDict):
+        first: K
+
+    class Reversed[V, K](Pair[K, V]):
+        second: V
+
+    parent_key, _ = Pair.__type_params__
+    value, key = Reversed.__type_params__
+    assert (value.__name__, key.__name__) == ("V", "K")
+    assert Reversed.__parameters__ == (value, key)
+    assert Reversed.__orig_bases__ == (Pair[key, value], Generic[value, key])
+    assert Reversed.__annotations__ == {"first": parent_key, "second": value}
+    assert parent_key is not key
+
+
+def check_deferred_fields():
+    from annotationlib import Format
+    from typing import Final, NotRequired, get_args
+
+    class Row(TypedDict):
+        field: NotRequired[Later]
+
+    assert Row.__optional_keys__ == {"field"} and not Row.__required_keys__
+    assert Row.__annotate__(Format.STRING) == {"field": "NotRequired[Later]"}
+    ref, = get_args(Row.__annotate__(Format.FORWARDREF)["field"])
+    assert ref.__forward_arg__ == "Later" and ref.__owner__ is Row
+    assert ref.evaluate(globals={"Later": bytes}, locals={"Later": str}) is str
+    try:
+        Row.__annotations__
+    except NameError:
+        pass
+    else:
+        raise AssertionError("VALUE accepted an unbound closure cell")
+
+    Later = Final
+    try:
+        Row.__annotations__
+    except TypeError:
+        pass
+    else:
+        raise AssertionError("VALUE accepted a bare Final")
+
+    Later = int
+    saved = Row.__annotations__
+    assert saved == {"field": NotRequired[int]}
+    Later = bytes
+    assert Row.__annotations__ is saved
+    assert Row.__annotate__(Format.VALUE) == {"field": NotRequired[bytes]}
+    assert ref.evaluate(locals={"Later": str}) is bytes
+
 
 def current():
     check_inheritance()
     check_required_keys()
     check_generic_bases()
+    check_deferred_fields()
 
     class Film(TypedDict):
         title: str

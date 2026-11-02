@@ -1,7 +1,9 @@
 //! Built-ins used by native Python code whose values are known at runtime.
 
 use super::Context;
-use super::value::{ELLIPSIS, Error, FALSE, Id, NONE, NOT_IMPLEMENTED, Result, TRUE, Value};
+use super::value::{
+    DictIterator, ELLIPSIS, Error, FALSE, Id, NONE, NOT_IMPLEMENTED, Result, TRUE, Value,
+};
 
 mod collections;
 mod dir;
@@ -105,6 +107,7 @@ const FUNCTIONS: &[&str] = &[
     "format",
     "compile",
     "exec",
+    "eval",
     "iter",
     "next",
 ];
@@ -203,7 +206,8 @@ pub(super) fn native_implementation(symbol: &str) -> &str {
 /// Static constructors retain their declaring type as `__self__` even on instances.
 pub(super) fn constructor_owner(name: &str) -> Option<&str> {
     let owner = name.strip_suffix(".__new__")?;
-    (matches!(owner, "object" | "float" | "int" | "str") || is_exception(owner)).then_some(owner)
+    (matches!(owner, "object" | "dict" | "float" | "int" | "str") || is_exception(owner))
+        .then_some(owner)
 }
 
 pub(super) fn is_builtin_type(name: &str) -> bool {
@@ -214,11 +218,15 @@ pub(super) fn is_builtin_type(name: &str) -> bool {
         || is_enum_base(name)
 }
 
+/// The native classes exported directly by the builtins module.
+pub(super) fn is_exported_type(name: &str) -> bool {
+    TYPES.contains(&name) || imre_ast::exceptions::boxed_builtin_kind(name).is_some()
+}
+
 /// Static builtin types have a GC-capable metaclass, but are never themselves tracked.
 pub(super) fn is_static_gc_type(name: &str) -> bool {
-    TYPES.contains(&name)
+    is_exported_type(name)
         || name == super::stdlib::flags::TYPE
-        || imre_ast::exceptions::boxed_builtin_kind(name).is_some()
         || (is_iterator_type(name) && !name.contains('.'))
         || matches!(
             name,
@@ -249,6 +257,9 @@ pub(super) fn is_static_gc_type(name: &str) -> bool {
 
 /// Native iterator classes implement both iterator slots in the runtime.
 pub(super) fn is_iterator_type(name: &str) -> bool {
+    if DictIterator::class(name).is_some() {
+        return true;
+    }
     matches!(
         name,
         "iterator"
@@ -261,9 +272,6 @@ pub(super) fn is_iterator_type(name: &str) -> bool {
             | "bytearray_iterator"
             | "range_iterator"
             | "longrange_iterator"
-            | "dict_keyiterator"
-            | "dict_valueiterator"
-            | "dict_itemiterator"
             | "callable_iterator"
             | "fieldnameiterator"
             | "formatteriterator"
@@ -294,6 +302,8 @@ pub(super) fn is_enum_base(name: &str) -> bool {
 }
 
 pub(super) const DICT_METHODS: &[&str] = &[
+    "__eq__",
+    "__new__",
     "__repr__",
     "__init__",
     "__len__",
@@ -363,6 +373,7 @@ pub(super) const STR_METHODS: &[&str] = &[
     "expandtabs",
     "find",
     "format",
+    "index",
     "isalnum",
     "isascii",
     "isalpha",
@@ -414,10 +425,15 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         Value::ThreadLocal(_) if super::thread_local::is_method(attr) => super::thread_local::CLASS,
         Value::HandlerLock(_) if super::thread_rlock::is_method(attr) => super::thread_rlock::CLASS,
         Value::PrimitiveLock(_) if super::thread_lock::is_method(attr) => super::thread_lock::CLASS,
-        Value::Int(_) | Value::Bool(_) if matches!(attr, "bit_length" | "to_bytes") => "int",
-        Value::Float(_) if attr == "as_integer_ratio" => "float",
+        Value::Bool(_) if attr == "__repr__" => "bool",
+        Value::Int(_) if attr == "__repr__" => "int",
+        Value::Int(_) | Value::Bool(_) if matches!(attr, "__add__" | "bit_length" | "to_bytes") => "int",
+        Value::Float(_) if matches!(attr, "__repr__" | "as_integer_ratio") => "float",
         Value::Str(_) | Value::SurrogateStr(_) if STR_METHODS.contains(&attr) => "str",
         Value::Range(_) if super::range::METHODS.contains(&attr) => "range",
+        Value::DictIterator(iter) if DictIterator::methods(iter.class_name()).contains(&attr) => {
+            iter.class_name()
+        }
         Value::RangeIterator(iter)
             if matches!(attr, "__iter__" | "__next__" | "__length_hint__") =>
         {
@@ -440,7 +456,7 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         Value::Property(_) if super::property::METHODS.contains(&attr) => "property",
         Value::ClassMethod(_) if attr == "__get__" => "classmethod",
         Value::StaticMethod { .. } if attr == "__get__" => "staticmethod",
-        Value::Generator { .. } if matches!(attr, "send" | "throw" | "close") => "generator",
+        Value::Generator { .. } if super::generator_protocol::generator_method(attr) => "generator",
         Value::Coroutine(_) if super::generator_protocol::coroutine_method("coroutine", attr) => {
             "coroutine"
         }
@@ -466,10 +482,10 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         } if attr == "geturl" => "urllib.parse.ParseResult",
         Value::Struct { .. } if matches!(attr, "pack" | "unpack") => "struct.Struct",
         Value::Hash(state)
-            if crate::objects::HashState::is_provider_class(state.borrow().class_name())
+            if crate::objects::HashState::is_provider_class(state.lock().class_name())
                 && matches!(attr, "update" | "copy" | "digest" | "hexdigest") =>
         {
-            state.borrow().class_name()
+            state.lock().class_name()
         }
         Value::Hash(_) if matches!(attr, "update" | "copy" | "digest" | "hexdigest") => "hash",
         Value::Hmac(_) if matches!(attr, "update" | "copy" | "digest" | "hexdigest") => "hmac.HMAC",
@@ -481,6 +497,7 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
                     | "accept"
                     | "connect"
                     | "getsockname"
+                    | "getpeername"
                     | "fileno"
                     | "close"
                     | "recv"
@@ -492,6 +509,7 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
                     | "getsockopt"
                     | "setsockopt"
                     | "setblocking"
+                    | "get_inheritable"
                     | "getblocking"
                     | "__enter__"
                     | "__exit__"
@@ -589,8 +607,10 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
                     | "read"
                     | "fileno"
                     | "readline"
+                    | "readlines"
                     | "readinto"
                     | "write"
+                    | "writelines"
                     | "flush"
                     | "close"
                     | "__enter__"
@@ -917,6 +937,10 @@ impl Context {
         args: Vec<Id>,
         kwargs: Vec<(String, Id)>,
     ) -> Result<Id> {
+        if scope != NONE && matches!(self.heap.get(callable), Value::Native(name) if name == "eval")
+        {
+            return self.eval_source(scope, &args, &kwargs);
+        }
         if scope != NONE
             && args.is_empty()
             && kwargs.is_empty()
@@ -993,13 +1017,20 @@ pub(super) fn call(
     if matches!(
         name,
         "object.__hash__" | "object.__repr__" | "object.__str__"
+            | "mappingproxy.__repr__" | "mappingproxy.__str__"
     ) {
-        let method = name.trim_start_matches("object.");
+        let (owner, method) = name.split_once('.').unwrap();
         let Some((&receiver, rest)) = args.split_first() else {
             return Err(type_error(format!(
-                "descriptor '{method}' of 'object' object needs an argument"
+                "descriptor '{method}' of '{owner}' object needs an argument"
             )));
         };
+        if owner == "mappingproxy" && !matches!(ctx.heap.get(receiver), Value::MappingProxy(_)) {
+            return Err(type_error(format!(
+                "descriptor '{method}' requires a 'mappingproxy' object but received a '{}'",
+                ctx.type_name(receiver)
+            )));
+        }
         if !kwargs.is_empty() {
             return Err(type_error(format!(
                 "wrapper {method}() takes no keyword arguments"
@@ -1010,6 +1041,13 @@ pub(super) fn call(
                 "expected 0 arguments, got {}",
                 rest.len()
             )));
+        }
+        if owner == "mappingproxy" {
+            if method == "__str__" {
+                return call(ctx, "str", &[receiver], &[]);
+            }
+            let repr = ctx.checked_format(receiver, true)?;
+            return Ok(ctx.text(repr));
         }
         if method == "__repr__" {
             return ctx.object_repr(receiver);
@@ -1076,6 +1114,9 @@ pub(super) fn call(
                 arity(name, args, min, max)?;
                 ctx.call_coroutine_method(owner, method, args)
             }
+            "generator" if matches!(method, "__iter__" | "__next__") => {
+                ctx.iterator_method(owner, method, args, kwargs)
+            }
             "generator" if method == "send" => {
                 let [generator, value] = args else {
                     return Err(type_error("generator.send() takes exactly one argument"));
@@ -1117,7 +1158,8 @@ pub(super) fn call(
             "bytes" | "bytearray" if method == "translate" => {
                 translation::translate(ctx, owner, args, kwargs)
             }
-            "str" | "bytes" | "bytearray" if method == "__repr__" => {
+            "int" if method == "__add__" => collections::builtin_slot(ctx, name, args, kwargs),
+            "bool" | "int" | "float" | "str" | "bytes" | "bytearray" if method == "__repr__" => {
                 collections::builtin_slot(ctx, name, args, kwargs)
             }
             "bytes" | "bytearray" if method == "fromhex" => text::fromhex(ctx, name, args, kwargs),
@@ -1242,6 +1284,10 @@ pub(super) fn call(
             let class = ctx.builtin("object");
             Ok(ctx.instance(class, None))
         }
+        "mappingproxy" => {
+            let [mapping] = bind_builtin_arguments(name, args, kwargs, ["mapping"], 1)?;
+            ctx.mapping_proxy(mapping.expect("required mapping"))
+        }
         "type" => {
             let [object] = args else {
                 return Err(if args.len() == 3 {
@@ -1267,8 +1313,9 @@ pub(super) fn call(
         "compile" => {
             positional(name, kwargs)?;
             arity(name, args, 3, 3)?;
-            ctx.compile_source(args[0], args[1], args[2])
+            ctx.compile_source(args[0], args[1], args[2], false)
         }
+        "eval" => ctx.eval_source(ctx.heap.current_scope(), args, kwargs),
         "exec" => {
             positional(name, kwargs)?;
             arity(name, args, 2, 3)?;
@@ -1289,6 +1336,11 @@ pub(super) fn call(
             }
             let scalar = ctx.scalar_value(value);
             match ctx.heap.get(scalar) {
+                Value::Calendar {
+                    value: duration, ..
+                } if duration.class() == "timedelta" => {
+                    super::stdlib::call(ctx, "datetime.timedelta.__abs__", &[value], &[])
+                }
                 Value::Float(number) => Ok(ctx.alloc(Value::Float(number.abs()))),
                 Value::Complex(number) => {
                     let magnitude = number.real.hypot(number.imag);
@@ -1732,7 +1784,10 @@ pub(super) fn call(
             {
                 return ctx.prepare_fromlist(result, list);
             }
-            ctx.module(name.split('.').next().unwrap())
+            match name.split_once('.') {
+                Some((top, _)) => ctx.module(top),
+                None => Ok(result),
+            }
         }
         "complex" => ctx.new_complex(args, kwargs),
         "float" => float::construct(ctx, args, kwargs),

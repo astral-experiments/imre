@@ -270,6 +270,39 @@ def test_timedelta_negation():
     assert timedelta.__neg__(custom) == timedelta(days=-1)
 
 
+def test_timedelta_positive_and_absolute():
+    zero = timedelta()
+    assert +zero is zero and abs(zero) is zero
+    tiny = timedelta(microseconds=-1)
+    for value, magnitude in (
+        (tiny, timedelta(microseconds=1)),
+        (timedelta.min, timedelta(days=999999999)),
+        (timedelta.max, timedelta.max),
+    ):
+        positive, absolute = +value, abs(value)
+        assert positive == value and absolute == magnitude
+        assert positive is not value and absolute is not value
+
+    class Inherited(timedelta):
+        def __neg__(self):
+            raise AssertionError("abs called subclass __neg__")
+
+    class Override(Inherited):
+        def __pos__(self):
+            return "positive"
+
+        def __abs__(self):
+            return "absolute"
+
+    value = Inherited(microseconds=-1)
+    assert type(+value) is type(abs(value)) is timedelta
+    assert +value == tiny and abs(value) == timedelta(microseconds=1)
+    custom = Override(days=-1)
+    assert +custom == "positive" and abs(custom) == "absolute"
+    assert timedelta.__pos__(custom) == timedelta(days=-1)
+    assert timedelta.__abs__(custom) == timedelta(days=1)
+
+
 def test_calendar_format():
     class Day(date):
         def __str__(self):
@@ -357,10 +390,47 @@ def test_calendar_reduction():
     assert super(Mixed, item).__reduce_ex__(4) == 4
 
 
+def test_calendar_strftime():
+    calls = []
+
+    class Name(str):
+        def replace(self, old, new):
+            calls.append((old, new))
+            return super().replace(old, new)
+
+    class Moment(dt):
+        def timetuple(self):
+            return (7, 1, 2, 3, 4, 5, 1, 2, -1)
+
+        @property
+        def microsecond(self):
+            raise AssertionError("strftime read the Python attribute")
+
+        def utcoffset(self):
+            raise AssertionError("strftime used a receiver method")
+
+        def tzname(self):
+            raise AssertionError("strftime used a receiver method")
+
+    zone = timezone(timedelta(seconds=-75, microseconds=-2), Name("west%Y"))
+    stamp = Moment(2001, 2, 3, 8, 9, 10, 123, zone)
+    assert stamp.strftime(format="%F %C %T %f") == "0007-01-02 00 03:04:05 000123"
+    assert stamp.strftime("%%Z/%:z/%z") == "%Z/-00:01:15.000002/-000115.000002"
+    assert calls == []
+    assert stamp.strftime("%Z %Z %%f") == "west%Y west%Y %f"
+    assert calls == [("%", "%%")]
+    clock = time(8, 9, 10, 456, UTC)
+    assert clock.strftime("%F %H:%M:%S.%f %z %:z %Z") == "1900-01-01 08:09:10.000456 +0000 +00:00 UTC"
+    assert date(2000, 1, 1).strftime("\ud800%f\0%Z\udcff") == "\ud800000000\0\udcff"
+    assert time().strftime("%z%:z%Z") == ""
+
+
 def current():
+    test_calendar_strftime()
     test_calendar_reduction()
     test_calendar_format()
     test_timedelta_negation()
+    test_timedelta_positive_and_absolute()
     test_subclass_construction()
     test_now()
     test_time_of_day()

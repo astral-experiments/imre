@@ -230,10 +230,13 @@ fn legacy_global<'a>(module: &'a str, name: &'a str) -> Result<(&'a str, &'a str
             "zip" => ("itertools", "izip"),
             "map" => ("itertools", "imap"),
             "filter" => ("itertools", "ifilter"),
-            "bool" | "bytes" | "complex" | "dict" | "float" | "frozenset" | "getattr" | "list"
-            | "object" | "set" | "slice" | "tuple" | "type" => ("__builtin__", name),
+            "bool" | "bytes" | "complex" | "dict" | "float" | "frozenset" | "getattr" | "iter"
+            | "list" | "object" | "set" | "slice" | "tuple" | "type" => ("__builtin__", name),
             _ => return Err(unsupported()),
         });
+    }
+    if module == "copyreg" {
+        return Ok(("copy_reg", name));
     }
     const LEGACY_MODULES: &[&str] = &[
         "_bz2",
@@ -248,7 +251,6 @@ fn legacy_global<'a>(module: &'a str, name: &'a str) -> Result<(&'a str, &'a str
         "collections",
         "collections.abc",
         "configparser",
-        "copyreg",
         "dbm",
         "dbm.bsd",
         "dbm.dumb",

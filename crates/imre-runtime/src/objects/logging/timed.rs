@@ -252,8 +252,9 @@ impl Handler {
         let format = std::ffi::CString::new(self.period.suffix()).unwrap();
         let mut buf = [0u8; 128];
         // SAFETY: civil initialized the tm; every possible date suffix fits in the output.
-        let n =
-            unsafe { libc::strftime(buf.as_mut_ptr().cast(), buf.len(), format.as_ptr(), &clock) };
+        let n = crate::sys::with_process_locale(|| unsafe {
+            libc::strftime(buf.as_mut_ptr().cast(), buf.len(), format.as_ptr(), &clock)
+        });
         let suffix = std::str::from_utf8(&buf[..n]).expect("the rotation suffix is ASCII");
         let destination = format!("{}.{suffix}", self.filename);
         if Path::new(&destination).exists() {

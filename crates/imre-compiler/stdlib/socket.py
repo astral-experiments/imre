@@ -4,8 +4,11 @@ import _socket
 import os
 from _socket import close, error, has_ipv6, socket
 
+_GLOBAL_DEFAULT_TIMEOUT = object()
+
 for _name in ("NI_DGRAM", "NI_NAMEREQD", "NI_NOFQDN", "NI_NUMERICHOST", "NI_NUMERICSERV",
-              "gaierror", "getnameinfo", "if_indextoname", "if_nameindex", "if_nametoindex"):
+              "gaierror", "getnameinfo", "getservbyname", "getservbyport",
+              "if_indextoname", "if_nameindex", "if_nametoindex"):
     if hasattr(_socket, _name):
         globals()[_name] = getattr(_socket, _name)
 del _name
@@ -40,6 +43,17 @@ def getaddrinfo(host, port, family=0, type=0, proto=0, flags=0):
              protocol, canonname, sockaddr)
             for af, kind, protocol, canonname, sockaddr
             in _socket.getaddrinfo(host, port, family, type, proto, flags)]
+
+
+if hasattr(_socket, "socketpair"):
+    def socketpair(family=None, type=SOCK_STREAM, proto=0):
+        """Create a pair of connected sockets."""
+        if family is None:
+            try:
+                family = AF_UNIX
+            except NameError:
+                family = AF_INET
+        return _socket.socketpair(family, type, proto)
 
 
 def create_server(address, *, family=AF_INET, backlog=None, reuse_port=False,

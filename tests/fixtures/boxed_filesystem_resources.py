@@ -43,6 +43,8 @@ assert target.is_file() and target.read_bytes() == b'hello\n'
 # The source loader owns the location even if the module changes its metadata.
 data.__file__ = 'wrong/__init__.py'
 assert resources.read_text('data', 'nested/message.txt') == 'hello\n'
+assert resources.read_binary(data, 'nested', 'message.txt') == b'hello\n'
+assert resources.read_binary('data', 'nested/message.txt') == b'hello\n'
 assert not (root / 'absent').is_file()
 try:
     (root / 'absent').open('rb')
@@ -88,6 +90,7 @@ assert (root / 'dir').is_dir()
 message = root / 'message.txt'
 assert message.is_file() and not list(message.iterdir())
 assert message.read_bytes() == b'caf\xc3\xa9\n'
+assert resources.read_binary(data, 'message.txt') == b'caf\xc3\xa9\n'
 assert message.read_text(encoding='utf-8') == 'café\n'
 try:
     (root / 'absent').read_bytes()

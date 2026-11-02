@@ -27,6 +27,14 @@ def check_error(kind, callback, *args, **kwargs):
 
 def check():
     assert _opcode.stack_effect is stack_effect
+    assert stack_effect.__doc__ == "Compute the stack effect of the opcode."
+    assert _opcode.has_free.__doc__ == (
+        "Return True if the opcode accesses a free variable, False otherwise.\n\n"
+        "Note that 'free' in this context refers to names in the current scope\n"
+        "that are referenced by inner scopes or names in outer scopes that are\n"
+        "referenced from this scope. It does not include references to global\n"
+        "or builtin scopes."
+    )
     assert stack_effect(31) == -1  # POP_TOP
     assert stack_effect(49, Index(3)) == -2  # BUILD_SLICE
     assert stack_effect(Index(118), 515) == 5  # UNPACK_EX

@@ -149,3 +149,49 @@ pub fn template_format_spec(
         _ => Err("nested t-string format spec"),
     }
 }
+
+/// Return the first result of checking module, function and class docstrings.
+pub fn find_docstring<'a, T>(
+    body: &'a [ast::Stmt],
+    module_docstring: bool,
+    check: impl Fn(&'a ast::ExprStringLiteral) -> Option<T>,
+) -> Option<T> {
+    use ast::visitor::{Visitor, walk_stmt};
+
+    struct Docs<F, T> {
+        check: F,
+        found: Option<T>,
+    }
+    impl<F, T> Docs<F, T> {
+        fn check<'a>(&mut self, body: &'a [ast::Stmt])
+        where
+            F: Fn(&'a ast::ExprStringLiteral) -> Option<T>,
+        {
+            if let Some(ast::Stmt::Expr(first)) = body.first()
+                && let ast::Expr::StringLiteral(text) = first.value.as_ref()
+            {
+                self.found = (self.check)(text);
+            }
+        }
+    }
+    impl<'a, T, F: Fn(&'a ast::ExprStringLiteral) -> Option<T>> Visitor<'a> for Docs<F, T> {
+        fn visit_stmt(&mut self, stmt: &'a ast::Stmt) {
+            if self.found.is_some() {
+                return;
+            }
+            match stmt {
+                ast::Stmt::ClassDef(c) => self.check(&c.body),
+                ast::Stmt::FunctionDef(f) => self.check(&f.body),
+                _ => {}
+            }
+            stacker::maybe_grow(128 * 1024, 2 * 1024 * 1024, || walk_stmt(self, stmt));
+        }
+        fn visit_expr(&mut self, _: &'a ast::Expr) {}
+    }
+    let mut docs = Docs { check, found: None };
+    if module_docstring {
+        docs.check(body);
+    }
+    docs.visit_body(body);
+    docs.found
+}

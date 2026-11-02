@@ -387,32 +387,9 @@ impl Context {
                 code.coroutine = true;
                 Ok(a)
             }
-            "annotate" | "annotate_deferred" => {
+            "annotate" => {
                 if let Some(mapping) = self.scope_name(a, "__annotations__") {
-                    if op == "annotate_deferred" {
-                        let thunks = if let Some(dict) = self
-                            .scope_data(a)
-                            .class_namespace
-                            .as_ref()
-                            .and_then(|c| c.annotation_thunks)
-                        {
-                            dict
-                        } else {
-                            let dict = self.dict(Vec::new());
-                            let Value::Scope(scope) = self.heap.get_mut(a) else {
-                                unreachable!()
-                            };
-                            scope
-                                .class_namespace
-                                .get_or_insert_with(Default::default)
-                                .annotation_thunks = Some(dict);
-                            dict
-                        };
-                        self.put_item(thunks, b, c)?;
-                        self.put_item(mapping, b, NONE)?;
-                    } else {
-                        self.put_item(mapping, b, c)?;
-                    }
+                    self.put_item(mapping, b, c)?;
                 }
                 Ok(NONE)
             }
@@ -435,8 +412,14 @@ impl Context {
                 .next_item(a)?
                 .ok_or_else(|| Error::new("StopIteration", "")),
             "not" => Ok(flag(!self.truth(a)?)),
-            "neg" if matches!(self.heap.get(a), Value::Calendar { value, .. } if value.class() == "timedelta") => {
-                stdlib::call(self, "datetime.timedelta.__neg__", &[a], &[])
+            "neg" | "pos" if matches!(self.heap.get(a), Value::Calendar { value, .. } if value.class() == "timedelta") =>
+            {
+                let method = if op == "neg" {
+                    "datetime.timedelta.__neg__"
+                } else {
+                    "datetime.timedelta.__pos__"
+                };
+                stdlib::call(self, method, &[a], &[])
             }
             "neg" | "pos" if let Value::Float(f) = self.heap.get(a) => {
                 Ok(self.alloc(Value::Float(if op == "neg" { -*f } else { *f })))
@@ -688,6 +671,8 @@ pub(super) fn new_context<S: Into<String>>(
         codec_entries: Default::default(),
         frozen_override: 0,
         modules: NONE,
+        import_missing: NONE,
+        bootstrap_globals: NONE,
         classes: HashMap::new(),
         typing: super::typing::Registry::default(),
         logger_wrappers: HashMap::new(),
@@ -699,6 +684,8 @@ pub(super) fn new_context<S: Into<String>>(
         slot_depth: 0,
     };
     ctx.modules = ctx.dict(Vec::new());
+    let object = ctx.builtin("object");
+    ctx.import_missing = ctx.instance(object, None);
     let args = args.into_iter().map(|s| ctx.text(s)).collect();
     ctx.argv = ctx.alloc(Value::List(args));
     let paths: Vec<String> =
@@ -736,7 +723,8 @@ pub(super) unsafe extern "C" fn imre_dyn_register(
 pub(super) unsafe extern "C" fn imre_dyn_finish(ctx: *mut Context) -> i32 {
     // SAFETY: main transfers its unique allocation from imre_dyn_new exactly once.
     let mut ctx = unsafe { Box::from_raw(ctx) };
-    let status = match ctx.module("__main__") {
+    let result = ctx.module("sys").and_then(|_| ctx.module("__main__"));
+    let status = match result {
         Ok(_) => 0,
         Err(e) if e.kind == "SystemExit" => match e.exit_status {
             Some(status) => status.report(),
@@ -1394,6 +1382,8 @@ impl Context {
                     self.argv,
                     self.sys_path,
                     self.modules,
+                    self.import_missing,
+                    self.bootstrap_globals,
                     self.default_encoding,
                     self.token_missing,
                 ]),
@@ -1423,8 +1413,12 @@ impl Context {
 
     /// Run deferred callbacks when a native loop reaches a collection point.
     pub(super) fn collect_garbage(&mut self) {
+        let automatic_gc = self
+            .heap
+            .automatic_gc
+            .load(std::sync::atomic::Ordering::Relaxed);
         if self.heap.has_ordinary_finalizers() {
-            if self.heap.cycles_due() {
+            if automatic_gc && self.heap.cycles_due() {
                 let _ = self.collect_full();
                 return;
             }
@@ -1442,7 +1436,7 @@ impl Context {
             }
         }
         let (heap, roots) = self.heap_and_roots();
-        if let Some(callbacks) = heap.collect_if_due(roots) {
+        if let Some(callbacks) = heap.collect_if_due(roots, automatic_gc) {
             self.run_weak_callbacks(callbacks);
         }
     }

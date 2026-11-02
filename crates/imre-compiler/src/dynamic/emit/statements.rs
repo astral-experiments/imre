@@ -59,7 +59,6 @@ impl<'a> Visitor<'a> for ClosureNames {
                 if let Some(args) = &c.arguments {
                     self.visit_arguments(args);
                 }
-                self.locals_incomplete |= c.type_params.is_some();
             }
             ast::Stmt::Global(g) => {
                 self.globals.extend(g.names.iter().map(ToString::to_string));
@@ -694,12 +693,14 @@ impl Function<'_, '_> {
             Body::Expression(expr) => closure_names.visit_expr(expr),
             _ => closure_names.incomplete = true,
         }
-        if let (Body::Statements(stmts), Some(params), None) = (&body, params, returns)
-            && let Some((names, lock_only)) = worker::parameters(stmts, params)
-        {
-            signature["thread_parameters"] = json!(names);
-            if lock_only {
-                signature["thread_worker_locks"] = json!(names);
+        if let (Body::Statements(stmts), Some(params), None) = (&body, params, returns) {
+            if let Some((names, lock_only)) = worker::parameters(stmts, params) {
+                signature["thread_parameters"] = json!(names);
+                if lock_only {
+                    signature["thread_worker_locks"] = json!(names);
+                }
+            } else if let Some(names) = worker::captured_locks(stmts, params) {
+                signature["thread_captured_locks"] = json!(names);
             }
         }
         let code = self.output.definition(self.source, prefix, body, start);
