@@ -1966,6 +1966,25 @@ impl IntrinsicModule {
                 Intrinsic::ObjectRuntimeExport("typing.AsyncContextManager")
             }
             (Self::Typing, "Awaitable") => Intrinsic::ObjectRuntimeExport("typing.Awaitable"),
+            (Self::Typing, "AbstractSet") => Intrinsic::ObjectRuntimeExport("typing.AbstractSet"),
+            (Self::Typing, "AsyncGenerator") => {
+                Intrinsic::ObjectRuntimeExport("typing.AsyncGenerator")
+            }
+            (Self::Typing, "AsyncIterable") => {
+                Intrinsic::ObjectRuntimeExport("typing.AsyncIterable")
+            }
+            (Self::Typing, "Collection") => Intrinsic::ObjectRuntimeExport("typing.Collection"),
+            (Self::Typing, "Container") => Intrinsic::ObjectRuntimeExport("typing.Container"),
+            (Self::Typing, "Coroutine") => Intrinsic::ObjectRuntimeExport("typing.Coroutine"),
+            (Self::Typing, "Hashable") => Intrinsic::ObjectRuntimeExport("typing.Hashable"),
+            (Self::Typing, "ItemsView") => Intrinsic::ObjectRuntimeExport("typing.ItemsView"),
+            (Self::Typing, "KeysView") => Intrinsic::ObjectRuntimeExport("typing.KeysView"),
+            (Self::Typing, "MappingView") => Intrinsic::ObjectRuntimeExport("typing.MappingView"),
+            (Self::Typing, "MutableSequence") => {
+                Intrinsic::ObjectRuntimeExport("typing.MutableSequence")
+            }
+            (Self::Typing, "MutableSet") => Intrinsic::ObjectRuntimeExport("typing.MutableSet"),
+            (Self::Typing, "ValuesView") => Intrinsic::ObjectRuntimeExport("typing.ValuesView"),
             (Self::Typing, "AsyncIterator") => {
                 Intrinsic::ObjectRuntimeExport("typing.AsyncIterator")
             }

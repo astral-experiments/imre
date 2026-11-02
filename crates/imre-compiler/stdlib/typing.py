@@ -5,6 +5,7 @@ import builtins as _builtins
 import functools
 import sys as _sys
 import typing as _typing
+import _collections_abc as _abc
 from _collections_abc import Generator as _Generator, Iterable as _Iterable
 from _collections_abc import Mapping as _Mapping, MutableMapping as _MutableMapping, Sequence as _Sequence
 from _collections_abc import Reversible as _Reversible, Sized as _Sized
@@ -1920,6 +1921,19 @@ Tuple.__doc__ = \
     To specify a variable-length tuple of homogeneous type, use Tuple[T, ...].
     """
 Awaitable = _SpecialGenericAlias(_Awaitable, 1)
+AbstractSet = _SpecialGenericAlias(_abc.Set, 1, name="AbstractSet")
+AsyncGenerator = _SpecialGenericAlias(_abc.AsyncGenerator, 2, defaults=(type(None),))
+AsyncIterable = _SpecialGenericAlias(_abc.AsyncIterable, 1)
+Collection = _SpecialGenericAlias(_abc.Collection, 1)
+Container = _SpecialGenericAlias(_abc.Container, 1)
+Coroutine = _SpecialGenericAlias(_abc.Coroutine, 3)
+Hashable = _SpecialGenericAlias(_abc.Hashable, 0)
+ItemsView = _SpecialGenericAlias(_abc.ItemsView, 2)
+KeysView = _SpecialGenericAlias(_abc.KeysView, 1)
+MappingView = _SpecialGenericAlias(_abc.MappingView, 1)
+MutableSequence = _SpecialGenericAlias(_abc.MutableSequence, 1)
+MutableSet = _SpecialGenericAlias(_abc.MutableSet, 1)
+ValuesView = _SpecialGenericAlias(_abc.ValuesView, 1)
 AsyncIterator = _SpecialGenericAlias(_AsyncIterator, 1)
 Generator = _SpecialGenericAlias(_Generator, 3, defaults=(type(None), type(None)))
 List = _SpecialGenericAlias(list, 1, name="List", inst=False)
