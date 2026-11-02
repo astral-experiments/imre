@@ -35,6 +35,39 @@ def current():
     assert type(object.__new__(Custom)) is Custom
     assert type(object.__new__(object)) is object
 
+    from collections import UserDict
+    from collections.abc import Collection, Container, Iterable, Mapping, MutableMapping, Sized
+
+    for base in (Collection, Container, Iterable, Mapping, MutableMapping, Sized):
+        assert base.__new__ is object.__new__
+
+    from collections.abc import Callable
+
+    for abstract in (Mapping, Callable):
+        try:
+            object.__new__(abstract)
+        except TypeError:
+            pass
+        else:
+            raise AssertionError("object.__new__ instantiated an abstract class")
+
+    class Data(UserDict):
+        def __init__(self):
+            raise AssertionError("explicit allocation called __init__")
+
+    data = Data.__new__(Data)
+    assert type(data) is Data and not hasattr(data, "data")
+
+    class MappingList(MutableMapping, list):
+        pass
+
+    try:
+        object.__new__(MappingList)
+    except TypeError as error:
+        assert "is not safe" in str(error)
+    else:
+        raise AssertionError("mapping ABC hid the native list layout")
+
     from typing import Generic, Protocol, TypeVar
 
     parameter = TypeVar("parameter")
