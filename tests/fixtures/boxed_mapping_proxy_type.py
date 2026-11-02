@@ -5,6 +5,28 @@ from types import MappingProxyType
 def current():
     values = {'a': 1}
     view = MappingProxyType(mapping=values)
+    for name in ("keys", "values", "items", "get", "copy"):
+        method = getattr(view, name)
+        assert method.__self__ is view
+        assert getattr(MappingProxyType, name).__get__(view).__self__ is view
+        try:
+            getattr(MappingProxyType, name)(values)
+        except TypeError:
+            pass
+        else:
+            raise AssertionError("accepted the backing dict as a proxy receiver")
+    assert view.get("a") == 1
+    copied = view.copy()
+    copied.clear()
+    assert view["a"] == 1
+
+    class Lookup(dict):
+        def get(self, *args):
+            return args
+
+    custom = MappingProxyType(Lookup())
+    assert custom.get("a") == ("a", None)
+    assert custom.get("a", 2) == ("a", 2)
     assert type(view) is type(field(metadata=values).metadata) is MappingProxyType
     assert MappingProxyType.__module__ == 'builtins'
     assert MappingProxyType.__name__ == 'mappingproxy'

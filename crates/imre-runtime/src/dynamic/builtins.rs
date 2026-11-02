@@ -207,6 +207,8 @@ pub(super) fn native_implementation(symbol: &str) -> &str {
     }
 }
 
+pub(super) const MAPPING_PROXY_METHODS: &[&str] = &["keys", "values", "items", "get", "copy"];
+
 /// Static constructors retain their declaring type as `__self__` even on instances.
 pub(super) fn constructor_owner(name: &str) -> Option<&str> {
     let owner = name.strip_suffix(".__new__")?;
@@ -1041,6 +1043,32 @@ pub(super) fn call(
         let note = one_positional_arg(name, args, kwargs)?;
         ctx.add_exception_note(exception, note)?;
         return Ok(NONE);
+    }
+    if let Some(method) = name.strip_prefix("mappingproxy.")
+        && MAPPING_PROXY_METHODS.contains(&method)
+    {
+        let Some((&proxy, rest)) = args.split_first() else {
+            return Err(type_error(format!("unbound method {name}() needs an argument")));
+        };
+        let Value::MappingProxy(mapping) = *ctx.heap.get(proxy) else {
+            return Err(type_error(format!(
+                "descriptor '{method}' for 'mappingproxy' objects doesn't apply to a '{}' object",
+                ctx.type_name(proxy)
+            )));
+        };
+        if !kwargs.is_empty() {
+            return Err(type_error(format!("{name}() takes no keyword arguments")));
+        }
+        let forwarded = match (method, rest) {
+            ("get", [key]) => vec![*key, NONE],
+            ("get", [key, default]) => vec![*key, *default],
+            ("get", []) => return Err(type_error("get expected at least 1 argument, got 0")),
+            ("get", _) => return Err(type_error(format!("get expected at most 2 arguments, got {}", rest.len()))),
+            (_, []) => Vec::new(),
+            _ => return Err(type_error(format!("{name}() takes no arguments ({} given)", rest.len()))),
+        };
+        let bound = ctx.lookup_attr(mapping, method)?;
+        return ctx.call(bound, forwarded, Vec::new());
     }
     if name == "object.__getattribute__" {
         let Some((&object, values)) = args.split_first() else {
