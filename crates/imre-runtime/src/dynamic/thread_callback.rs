@@ -310,6 +310,8 @@ impl Callback {
                     let symbol = [
                         "_thread._count",
                         "sys.exit",
+                        "sys.get_coroutine_origin_tracking_depth",
+                        "sys.set_coroutine_origin_tracking_depth",
                         "gc.enable",
                         "gc.disable",
                         "gc.isenabled",
