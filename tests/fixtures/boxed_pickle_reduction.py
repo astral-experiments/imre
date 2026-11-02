@@ -364,6 +364,13 @@ def check_global_names(protocol):
     finally:
         _operator.getitem = getitem
 
+    for fix_imports in (True, False):
+        data = pickle.dumps(super, protocol, fix_imports=fix_imports)
+        if protocol < 3:
+            module = b"__builtin__" if fix_imports else b"builtins"
+            assert b"c" + module + b"\nsuper\n" in data
+        assert pickle.loads(data, fix_imports=fix_imports) is super
+
     from itertools import chain, filterfalse
 
     for cls, legacy_name in ((chain, "chain"), (filterfalse, "ifilterfalse")):
