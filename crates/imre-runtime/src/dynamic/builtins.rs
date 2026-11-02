@@ -351,6 +351,7 @@ pub(super) fn format_owner(class: &str) -> &'static str {
 
 pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
     let owner = match value {
+        Value::MemoryView(_) if super::memoryview::METHODS.contains(&attr) => "memoryview",
         Value::Scandir(_) if super::stdlib::os::scandir::ITER_METHODS.contains(&attr) => {
             super::stdlib::os::scandir::ITER
         }
@@ -515,6 +516,11 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
             ) =>
         {
             "selectors"
+        }
+        Value::File(handle)
+            if handle.is_reader() && matches!(attr, "peek" | "read1" | "readinto1") =>
+        {
+            "file"
         }
         Value::File(_)
             if matches!(
@@ -940,6 +946,10 @@ pub(super) fn call(
                 };
                 arity(name, args, min, max)?;
                 ctx.call_coroutine_method(owner, method, args)
+            }
+            "memoryview" if super::memoryview::METHODS.contains(&method) => {
+                positional(name, kwargs)?;
+                ctx.view_method(method, args)
             }
             "generator" if method == "send" => {
                 let [generator, value] = args else {
@@ -1416,6 +1426,7 @@ pub(super) fn call(
                     collections::entries(ctx, values)?.len()
                 }
                 Value::Deque(ring) => ring.items.len(),
+                Value::MemoryView(_) => ctx.byte_view(args[0])?.len,
                 Value::Array(array) => array.len(),
                 Value::Str(v) => v.chars().count(),
                 Value::SurrogateStr(points) => points.len(),
@@ -1477,6 +1488,11 @@ pub(super) fn call(
         }
         "dict" | "list" | "tuple" | "set" | "frozenset" => {
             collections::construct(ctx, name, args, kwargs)
+        }
+        "memoryview" => {
+            positional(name, kwargs)?;
+            arity(name, args, 1, 1)?;
+            ctx.clone_byte_view(args[0])
         }
         "int" | "bool" | "str" | "bytes" | "bytearray" | "repr" | "ascii" => {
             text::construct(ctx, name, args, kwargs)

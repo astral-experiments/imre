@@ -4,6 +4,7 @@ use super::super::builtins::zeroed_bytes;
 use super::{Context, Error, FALSE, Id, NONE, Result, TRUE, Value};
 
 mod buffered_io;
+mod buffered_reader;
 mod descriptor_buffer;
 pub(in crate::dynamic) use descriptor_buffer::BufferedFd;
 mod bytes_io;
@@ -14,6 +15,8 @@ mod text_wrapper;
 #[derive(Clone)]
 pub(in crate::dynamic) enum MemoryStream {
     Text(crate::objects::TextFile),
+    Reader(std::rc::Rc<buffered_reader::Reader>),
+    UninitializedReader(Option<Id>),
     Bytes(std::rc::Rc<bytes_io::BytesIo>),
     Wrapper(std::rc::Rc<text_wrapper::Wrapper>),
     Raw(std::rc::Rc<file_io::RawFile>),
@@ -153,6 +156,14 @@ pub(in super::super) fn install(ctx: &mut Context, module: Id) {
     ctx.builtins.insert("_io.FileIO".into(), file);
     let buffered = class(ctx, module, "BufferedIOBase", io, buffered_io::METHODS);
     ctx.builtins.insert("_io._BufferedIOBase".into(), buffered);
+    let reader = class(
+        ctx,
+        module,
+        "BufferedReader",
+        buffered,
+        buffered_reader::METHODS,
+    );
+    ctx.builtins.insert("_io.BufferedReader".into(), reader);
     let bytes_io = class(ctx, module, "BytesIO", buffered, bytes_io::METHODS);
     ctx.builtins.insert("_io.BytesIO".into(), bytes_io);
     let text = class(
@@ -193,7 +204,10 @@ fn class(ctx: &mut Context, module: Id, name: &str, base: Id, methods: &[&'stati
         .allocate_class(name.into(), scope, vec![base])
         .expect("a single I/O base has a linearization");
     let module_name = ctx.text(
-        if matches!(name, "StringIO" | "BytesIO" | "TextIOWrapper" | "FileIO") {
+        if matches!(
+            name,
+            "StringIO" | "BytesIO" | "TextIOWrapper" | "BufferedReader" | "FileIO"
+        ) {
             "_io"
         } else {
             "io"
@@ -203,12 +217,14 @@ fn class(ctx: &mut Context, module: Id, name: &str, base: Id, methods: &[&'stati
     let qualname = ctx.text(name);
     ctx.bind(scope, "__qualname__", qualname);
     let wrapper = name == "TextIOWrapper";
+    let reader = name == "BufferedReader";
     let descriptor_owner = match name {
         "TextIOBase" => "_io._TextIOBase",
         "StringIO" => "_io.StringIO",
         "FileIO" => "_io.FileIO",
         "TextIOWrapper" => "_io.TextIOWrapper",
         "BytesIO" => "_io.BytesIO",
+        "BufferedReader" => "_io.BufferedReader",
         _ => "_io._IOBase",
     };
     for &name in methods {
@@ -219,6 +235,7 @@ fn class(ctx: &mut Context, module: Id, name: &str, base: Id, methods: &[&'stati
         ) || descriptor_owner == "_io.FileIO"
             && matches!(name, "mode" | "closefd" | "_blksize")
             || wrapper && text_wrapper::property(name)
+            || reader && matches!(name, "raw" | "mode" | "name")
         {
             let set = (wrapper && name == "_CHUNK_SIZE").then(|| {
                 ctx.alloc(Value::IoMethod {
@@ -421,6 +438,15 @@ pub(in super::super) fn call(
                 && ctx.instance_of(receiver, file))
     {
         return file_io::call(ctx, receiver, name, rest, kwargs);
+    }
+    if ctx.builtins.get("_io.BufferedReader") == Some(&owner) {
+        if let Value::File(handle) = ctx.heap.get(receiver) {
+            if name == "closed" {
+                return Ok(if handle.closed() { TRUE } else { FALSE });
+            }
+            return super::files::call(ctx, &format!("file.{name}"), args, kwargs);
+        }
+        return buffered_reader::call(ctx, receiver, name, rest, kwargs);
     }
     if ctx.builtins.get("_io._BufferedIOBase") == Some(&owner) {
         return buffered_io::call(ctx, receiver, name, rest, kwargs);

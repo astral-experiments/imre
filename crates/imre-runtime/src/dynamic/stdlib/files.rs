@@ -22,6 +22,14 @@ pub(in crate::dynamic) enum BinaryFile {
 }
 
 impl BinaryFile {
+    pub(in crate::dynamic) fn is_reader(&self) -> bool {
+        match self {
+            Self::Descriptor(fd) => fd.reading,
+            Self::Reader { .. } => true,
+            Self::Writer { .. } => false,
+        }
+    }
+
     /// Opens the documented read, truncate, append, or exclusive-create mode.
     pub(in crate::dynamic) fn open(path: &str, name: Id, mode: &str) -> Result<Self> {
         let (flags, mode) = match mode {
@@ -499,6 +507,18 @@ pub(super) fn call(
         };
         return Ok(ctx.int(reader.seek(pos).map_err(os_error)? as i64));
     }
+    let single = match name {
+        "file.peek" | "file.read1" => Some(match args.get(1) {
+            None => -1,
+            Some(&id) => ctx.index_integer(id)?.to_i64().ok_or_else(|| {
+                Error::new(
+                    "OverflowError",
+                    "Python int too large to convert to C ssize_t",
+                )
+            })?,
+        }),
+        _ => None,
+    };
     let mut slot = slot.borrow_mut();
     if name == "file.write" {
         return Err(Error::new("UnsupportedOperation", "write"));
@@ -519,6 +539,26 @@ pub(super) fn call(
         };
         Error::new("ValueError", message)
     });
+    if let Some(size) = single {
+        let reader = reader?;
+        if name == "file.peek" {
+            let bytes = reader.fill_buf().map_err(os_error)?;
+            let mut out = Vec::new();
+            out.try_reserve_exact(bytes.len())
+                .map_err(|_| crate::Error::allocation())?;
+            out.extend_from_slice(bytes);
+            return Ok(ctx.alloc(Value::Bytes(out)));
+        }
+        let size = if size < 0 { 128 * 1024 } else { size };
+        let mut bytes = super::super::builtins::zeroed_bytes(size)?;
+        let count = match reader {
+            ReadSource::File(file) if file.buffer().is_empty() => file.get_mut().read(&mut bytes),
+            _ => reader.read(&mut bytes),
+        }
+        .map_err(os_error)?;
+        bytes.truncate(count);
+        return Ok(ctx.alloc(Value::Bytes(bytes)));
+    }
     if let Some(length) = length {
         if name == "file.read" && length < -1 {
             return Err(Error::new(
@@ -571,18 +611,27 @@ pub(super) fn call(
         "file.flush" => Ok(NONE),
         "file.fileno" => Ok(ctx.int(i64::from(f.as_raw_fd()))),
         "file.tell" => Ok(ctx.int(f.stream_position().map_err(os_error)? as i64)),
-        "file.readinto" => {
-            let Value::ByteArray(buffer) = ctx.heap.get_mut(argument(args, 1)?) else {
+        "file.readinto" | "file.readinto1" => {
+            let Some((target, range)) = ctx.writable_byte_span(argument(args, 1)?) else {
                 return Err(Error::new(
                     "TypeError",
                     "readinto() requires a writable bytes-like object",
                 ));
             };
+            let Value::ByteArray(bytes) = ctx.heap.get_mut(target) else {
+                unreachable!()
+            };
+            let buffer = &mut bytes[range];
             let mut count = 0;
             while count < buffer.len() {
                 match f.read(&mut buffer[count..]) {
                     Ok(0) => break,
-                    Ok(n) => count += n,
+                    Ok(n) => {
+                        count += n;
+                        if name == "file.readinto1" {
+                            break;
+                        }
+                    }
                     Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
                     Err(e) => return Err(os_error(e)),
                 }

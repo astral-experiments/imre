@@ -725,6 +725,7 @@ pub(super) enum Value {
     SurrogateStr(Vec<u32>),
     Array(super::array::Array),
     Bytes(Vec<u8>),
+    MemoryView(Option<super::memoryview::View>),
     ByteArray(Vec<u8>),
     CodecInfo {
         entry: crate::objects::CodecInfo,
@@ -1041,6 +1042,7 @@ impl Value {
             Self::Array(_) => "array.array",
             Self::Bytes(_) => "bytes",
             Self::ByteArray(_) => "bytearray",
+            Self::MemoryView(_) => "memoryview",
             Self::File(file) => match file.as_ref() {
                 super::stdlib::BinaryFile::Descriptor(fd) if fd.reading => "_io.BufferedReader",
                 super::stdlib::BinaryFile::Descriptor(_) => "_io.BufferedWriter",
@@ -1165,6 +1167,11 @@ impl Value {
 
     fn children(&self, visit: &mut MarkQueue<'_>) {
         match self {
+            Self::MemoryView(view) => {
+                if let Some(view) = view {
+                    visit.extend([view.backing, view.exporter]);
+                }
+            }
             Self::Deque(ring) => visit.extend(&ring.items),
             Self::SequenceIterator { source, .. } | Self::ReverseSequence { source, .. } => {
                 visit.extend(*source)
@@ -1399,6 +1406,13 @@ impl Value {
                 match memory_stream {
                     Some(super::stdlib::io::MemoryStream::Bytes(stream)) => {
                         visit.extend(stream.snapshot.get())
+                    }
+                    Some(super::stdlib::io::MemoryStream::UninitializedReader(raw)) => {
+                        visit.extend(raw.iter().copied());
+                    }
+                    Some(super::stdlib::io::MemoryStream::Reader(reader)) => {
+                        visit.push(reader.buffer);
+                        visit.extend(reader.raw.get())
                     }
                     Some(super::stdlib::io::MemoryStream::Wrapper(stream)) => {
                         stream.children(visit)

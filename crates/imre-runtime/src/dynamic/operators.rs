@@ -409,6 +409,7 @@ impl Context {
                 context: Some(bindings),
                 ..
             } => !bindings.is_empty(),
+            Value::MemoryView(_) => self.byte_view(id)?.len != 0,
             Value::Array(array) => array.len() != 0,
             Value::Range(range) => range.len.as_small() != Some(0),
             Value::Instance { .. } | Value::Raised(_) => {
@@ -2357,6 +2358,10 @@ impl Context {
                 crate::objects::write_bytes_repr(&mut output, bytes);
                 output
             }
+            Value::MemoryView(view) => format!(
+                "<{}memory at 0x{id:x}>",
+                if view.is_none() { "released " } else { "" }
+            ),
             Value::ByteArray(bytes) => self.bytearray_repr(id, bytes),
             Value::Instance {
                 dictionary: Some(backing),
@@ -2537,6 +2542,9 @@ impl Context {
     }
 
     pub(super) fn get_item(&mut self, obj: Id, key: Id) -> Result<Id> {
+        if matches!(self.heap.get(obj), Value::MemoryView(_)) {
+            return self.view_get_item(obj, key);
+        }
         let target = self.weak_proxy_target(obj)?;
         if target != obj {
             return self.proxy_subscript(target, |ctx| ctx.get_item(target, key));
@@ -2758,6 +2766,9 @@ impl Context {
     }
 
     pub(super) fn put_item(&mut self, obj: Id, key: Id, val: Id) -> Result<()> {
+        if matches!(self.heap.get(obj), Value::MemoryView(_)) {
+            return self.view_put_item(obj, key, val);
+        }
         let target = self.weak_proxy_target(obj)?;
         if target != obj {
             return self.proxy_subscript(target, |ctx| ctx.put_item(target, key, val));

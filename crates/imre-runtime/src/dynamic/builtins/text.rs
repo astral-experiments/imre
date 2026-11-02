@@ -370,6 +370,9 @@ pub(super) fn bytearray_method(
 }
 
 pub(in super::super) fn bytes_from_iterable(ctx: &mut Context, obj: Id) -> Result<Vec<u8>> {
+    if matches!(ctx.heap.get(obj), Value::MemoryView(_)) {
+        return ctx.view_snapshot(obj);
+    }
     if let Value::Bytes(data) | Value::ByteArray(data) = ctx.heap.get(ctx.scalar_value(obj)) {
         return super::super::copy_ids(data);
     }

@@ -71,7 +71,7 @@ pub(in crate::dynamic) struct Wrapper {
     input: RefCell<Reader>,
 }
 
-fn invoke(ctx: &mut Context, obj: Id, name: &str, args: Vec<Id>) -> Result<Id> {
+pub(super) fn invoke(ctx: &mut Context, obj: Id, name: &str, args: Vec<Id>) -> Result<Id> {
     let mark = ctx.heap.temporary_mark();
     ctx.heap.keep(obj);
     let result = ctx
