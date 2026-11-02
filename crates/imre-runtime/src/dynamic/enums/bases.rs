@@ -28,6 +28,12 @@ impl Context {
         self.bind(scope, "__repr__", repr);
         let string = self.builtin(string);
         self.bind(scope, "__str__", string);
+        let format = if member_type == "object" {
+            self.builtin("enum.Enum.__format__")
+        } else {
+            self.builtin(&format!("{member_type}.__format__"))
+        };
+        self.bind(scope, "__format__", format);
         if kind == "enum.Enum" {
             for name in ["__copy__", "__deepcopy__"] {
                 let method = self.builtin(&format!("enum.Enum.{name}"));
@@ -54,7 +60,7 @@ impl Context {
                 let members = self
                     .class_attr(class, "_member_map_")
                     .ok_or_else(|| self.missing_attribute(class, "_member_map_"))?;
-                self.alloc(Value::MappingProxy(members))
+                self.mapping_proxy(members)?
             }
             "__name__" | "__qualname__" => {
                 let short = self
