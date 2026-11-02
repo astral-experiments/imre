@@ -499,7 +499,9 @@ impl Wrapper {
                 {
                     return Ok(ctx.text(part));
                 }
-                if line {
+                if line && input.decoded_chunk_nonempty == Some(true) {
+                    // A consumed line chunk is discarded. An empty decoder result
+                    // stays installed if the next refill raises.
                     input.decoded_chunk_nonempty = None;
                 }
             }

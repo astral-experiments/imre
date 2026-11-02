@@ -100,13 +100,19 @@ def native_utf32():
     for data, expected in ((b'\0' * 4, 'Stream does not start with BOM'),
                            (b'\0', 'truncated data')):
         stream = io.TextIOWrapper(io.BytesIO(data), encoding='utf-32')
-        stream._CHUNK_SIZE = 1
+        stream._CHUNK_SIZE = 4
         try:
-            stream.read(1)
+            stream.readline()
         except UnicodeDecodeError as exc:
             assert (exc.start, exc.end, exc.reason) == (0, len(data), expected)
         else:
             raise AssertionError('bad UTF-32 input accepted')
+        try:
+            stream.reconfigure(encoding='ascii')
+        except io.UnsupportedOperation:
+            assert len(data) == 1  # A partial code unit had already buffered input.
+        else:
+            assert len(data) == 4  # The first decode failed immediately.
 
     class Pipe(io.BytesIO):
         def seekable(self):
