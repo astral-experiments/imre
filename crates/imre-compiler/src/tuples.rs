@@ -9,8 +9,8 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::ir::{
-    Builtin, Expr, ExprKind, Function, Module, Statement, TUPLE_PROBE_ARITY, Type, children,
-    children_mut,
+    Builtin, ChildMut, Expr, ExprKind, Function, Module, Statement, TUPLE_PROBE_ARITY, Type,
+    children, children_mut, statement_children_mut,
 };
 
 struct Producer {
@@ -332,8 +332,7 @@ fn expand_assignment(
     targets: &[usize],
     locals: &mut Vec<Type>,
     producers: &[Option<Producer>],
-    output: &mut Vec<Statement>,
-) {
+) -> Statement {
     let mut staged_output = Vec::new();
     let mut arguments = Vec::new();
     let elements = match value.kind {
@@ -351,7 +350,7 @@ fn expand_assignment(
                     new_local(locals, ty)
                 })
                 .collect::<Vec<_>>();
-            expand_assignment(*value, &staged, locals, producers, &mut body);
+            body.push(expand_assignment(*value, &staged, locals, producers));
             let mut body = vec![Statement::Scope { body, clear }];
             body.extend(
                 targets
@@ -359,11 +358,10 @@ fn expand_assignment(
                     .zip(&staged)
                     .map(|(&target, &source)| Statement::Move(target, source)),
             );
-            output.push(Statement::Scope {
+            return Statement::Scope {
                 body,
                 clear: staged,
-            });
-            return;
+            };
         }
         ExprKind::Tuple(elements) => elements,
         ExprKind::Call(id, args) => {
@@ -400,10 +398,10 @@ fn expand_assignment(
         staged_output.push(Statement::Move(target, source));
     }
     arguments.extend(staged);
-    output.push(Statement::Scope {
+    Statement::Scope {
         body: staged_output,
         clear: arguments,
-    });
+    }
 }
 
 fn substitute_parameters(expression: &mut Expr, bindings: &HashMap<usize, usize>) {
@@ -422,83 +420,22 @@ fn rewrite_block(
 ) {
     let mut output = Vec::new();
     for mut statement in std::mem::take(statements) {
-        match &mut statement {
-            Statement::Assign(slot, value) => {
-                rewrite_expression(value, locals, components, producers);
-                if let Some(targets) = &components[*slot] {
-                    let Statement::Assign(_, value) = statement else {
-                        unreachable!()
-                    };
-                    expand_assignment(value, targets, locals, producers, &mut output);
-                    continue;
-                }
-            }
-            Statement::Clear(slot) => {
-                if let Some(fields) = &components[*slot] {
-                    output.extend(fields.iter().copied().map(Statement::Clear));
-                    continue;
-                }
-            }
-            Statement::SetItem(a, b, c) | Statement::AugmentItem(a, b, _, c) => {
-                for value in [a, b, c] {
-                    rewrite_expression(value, locals, components, producers);
-                }
-            }
-            Statement::SetField(a, _, b) | Statement::AugmentField(a, _, _, b) => {
-                rewrite_expression(a, locals, components, producers);
-                rewrite_expression(b, locals, components, producers);
-            }
-            Statement::Expr(value) | Statement::Return(value) | Statement::Assert(value) => {
-                rewrite_expression(value, locals, components, producers);
-            }
-            Statement::If(condition, yes, no) => {
-                rewrite_expression(condition, locals, components, producers);
-                rewrite_block(yes, locals, components, producers);
-                rewrite_block(no, locals, components, producers);
-            }
-            Statement::While(condition, body, orelse) => {
-                rewrite_expression(condition, locals, components, producers);
-                rewrite_block(body, locals, components, producers);
-                rewrite_block(orelse, locals, components, producers);
-            }
-            Statement::Scope { body, clear } => {
-                rewrite_block(body, locals, components, producers);
-                rewrite_cleanup(clear, components);
-            }
-            Statement::Try {
-                body,
-                handlers,
-                orelse,
-                finalbody,
-            } => {
-                for body in [body, orelse, finalbody] {
-                    rewrite_block(body, locals, components, producers);
-                }
-                for handler in handlers {
-                    rewrite_block(&mut handler.body, locals, components, producers);
-                }
-            }
-            Statement::Raise(value) => {
-                if let Some(value) = value {
-                    rewrite_expression(value, locals, components, producers);
-                }
-            }
-            Statement::For {
-                args, body, orelse, ..
-            } => {
-                for arg in args {
-                    rewrite_expression(arg, locals, components, producers);
-                }
-                rewrite_block(body, locals, components, producers);
-                rewrite_block(orelse, locals, components, producers);
-            }
-            Statement::Move(..)
-            | Statement::IterNext { .. }
-            | Statement::Break
-            | Statement::Continue
-            | Statement::Exhaust => {}
+        statement_children_mut(&mut statement, |child| match child {
+            ChildMut::Expression(value) => rewrite_expression(value, locals, components, producers),
+            ChildMut::Suite(body) => rewrite_block(body, locals, components, producers),
+        });
+        if let Statement::Scope { clear, .. } = &mut statement {
+            rewrite_cleanup(clear, components);
         }
-        output.push(statement);
+        match statement {
+            Statement::Assign(slot, value) if let Some(targets) = &components[slot] => {
+                output.push(expand_assignment(value, targets, locals, producers));
+            }
+            Statement::Clear(slot) if let Some(fields) = &components[slot] => {
+                output.extend(fields.iter().copied().map(Statement::Clear));
+            }
+            statement => output.push(statement),
+        }
     }
     *statements = output;
 }
@@ -603,9 +540,8 @@ mod tests {
                 },
             ),
         };
-        let mut output = Vec::new();
-        expand_assignment(value, &[0, 1], &mut locals, &[Some(producer)], &mut output);
-        let [Statement::Scope { body, clear }] = output.as_slice() else {
+        let output = expand_assignment(value, &[0, 1], &mut locals, &[Some(producer)]);
+        let Statement::Scope { body, clear } = &output else {
             panic!("argument and component owners require one cleanup scope");
         };
         let [
