@@ -38,8 +38,11 @@ def _ordered_dict_update(target, other):
         target[key] = value
 
 
-def _ordered_dict_update_args(target, args, kwargs):
+def _ordered_dict_update_args(target, args, kwargs, method):
+    _ordered_dict_receiver(target, method)
     if len(args) > 1:
+        if method == "update":
+            raise TypeError(f"update() takes at most 1 positional argument ({len(args)} given)")
         raise TypeError(f"expected at most 1 argument, got {len(args)}")
     if args:
         _ordered_dict_update(target, args[0])
@@ -60,12 +63,10 @@ class OrderedDict(dict):
     __module__ = "collections"
 
     def __init__(self, /, *args, **kwargs):
-        _ordered_dict_receiver(self, "__init__")
-        _ordered_dict_update_args(self, args, kwargs)
+        _ordered_dict_update_args(self, args, kwargs, "__init__")
 
     def update(self, /, *args, **kwargs):
-        _ordered_dict_receiver(self, "update")
-        _ordered_dict_update_args(self, args, kwargs)
+        _ordered_dict_update_args(self, args, kwargs, "update")
 
     def __setitem__(self, key, value, /):
         _ordered_dict_receiver(self, "__setitem__")
