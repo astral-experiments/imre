@@ -1123,6 +1123,51 @@ impl Checker<'_> {
         }
     }
 
+    /// Copy each concrete factory result before joining the virtual call's branches. The
+    /// factory itself keeps its exact dictionary type for every other caller.
+    pub(super) fn copied_factory_mapping(
+        &mut self,
+        call: &ast::ExprCall,
+        shape: (Type, Type),
+    ) -> Result<Option<Expr>, String> {
+        let ast::Expr::Attribute(copy) = &*call.func else {
+            return Ok(None);
+        };
+        if copy.attr.as_str() != "copy"
+            || !call.arguments.is_empty()
+            || shape.1 != Type::ObjectValue
+        {
+            return Ok(None);
+        }
+        let ast::Expr::Call(factory) = &*copy.value else {
+            return Ok(None);
+        };
+        let ast::Expr::Attribute(method) = &*factory.func else {
+            return Ok(None);
+        };
+        let Some(slot) = method
+            .value
+            .as_name_expr()
+            .and_then(|name| self.names.get(name.id.as_str()))
+        else {
+            return Ok(None);
+        };
+        let Type::Class(class) = self.locals[*slot] else {
+            return Ok(None);
+        };
+        if !factory.arguments.is_empty()
+            || !self.classes.declarations.definitions[class].has_literal_hook(method.attr.as_str())
+        {
+            return Ok(None);
+        }
+        let receiver = self.expr(&method.value)?;
+        self.dispatch_record(class, receiver, call, |checker, layout, receiver| {
+            let mapping = checker.direct_method_call(factory, method, layout, Some(receiver))?;
+            checker.fresh_mapping_copy(mapping, shape, call)
+        })
+        .map(Some)
+    }
+
     fn direct_method_call(
         &mut self,
         call: &ast::ExprCall,
