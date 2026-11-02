@@ -51,34 +51,8 @@ impl<'a> Cursor<'a> {
     }
 
     fn string(&mut self) -> Result<(), Failure> {
-        let start = self.pos;
-        self.pos += 1;
-        while let Some(byte) = self.peek() {
-            self.pos += 1;
-            match byte {
-                b'"' => return Ok(()),
-                0..=31 => return Err((self.pos - 1, "Invalid control character at")),
-                b'\\' => match self.peek() {
-                    Some(b'u') => {
-                        let end = self.pos + 5;
-                        // CPython requires a character after the four hex digits.
-                        if end >= self.source.len()
-                            || !self.source.as_bytes()[self.pos + 1..end]
-                                .iter()
-                                .all(u8::is_ascii_hexdigit)
-                        {
-                            return Err((self.pos, r"Invalid \uXXXX escape"));
-                        }
-                        self.pos = end;
-                    }
-                    Some(b'"' | b'\\' | b'/' | b'b' | b'f' | b'n' | b'r' | b't') => self.pos += 1,
-                    Some(_) => return Err((self.pos - 1, r"Invalid \escape")),
-                    None => break,
-                },
-                _ => {}
-            }
-        }
-        Err((start, "Unterminated string starting at"))
+        self.pos = string_end(self.source.as_bytes(), self.pos + 1, self.pos, true)?;
+        Ok(())
     }
 
     fn container(&mut self, object: bool) -> Result<(), Failure> {
@@ -130,6 +104,42 @@ impl<'a> Cursor<'a> {
             }
         }
     }
+}
+
+/// Token boundaries use bytes in a UTF-8 document and code points in a wide Python string.
+/// Only ASCII syntax participates, so both use the same escape and error rules.
+pub(crate) fn string_end<T: Copy + Into<u32>>(
+    units: &[T],
+    mut at: usize,
+    start: usize,
+    strict: bool,
+) -> Result<usize, Failure> {
+    let byte = |unit: &T| u8::try_from((*unit).into()).unwrap_or(0xff);
+    while let Some(point) = units.get(at) {
+        at += 1;
+        match byte(point) {
+            b'"' => return Ok(at),
+            0..=31 if strict => return Err((at - 1, "Invalid control character at")),
+            b'\\' => match units.get(at).map(byte) {
+                Some(b'u') => {
+                    let end = at + 5;
+                    if end >= units.len()
+                        || !units[at + 1..end]
+                            .iter()
+                            .all(|p| byte(p).is_ascii_hexdigit())
+                    {
+                        return Err((at, r"Invalid \uXXXX escape"));
+                    }
+                    at = end;
+                }
+                Some(b'"' | b'\\' | b'/' | b'b' | b'f' | b'n' | b'r' | b't') => at += 1,
+                Some(_) => return Err((at - 1, r"Invalid \escape")),
+                None => break,
+            },
+            _ => {}
+        }
+    }
+    Err((start, "Unterminated string starting at"))
 }
 
 #[cold]

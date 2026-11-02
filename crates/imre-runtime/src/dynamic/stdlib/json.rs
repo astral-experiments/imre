@@ -1,4 +1,6 @@
 mod notes;
+mod scanstring;
+pub(super) use scanstring::scanstring;
 use notes::Location;
 
 use std::collections::{HashMap, HashSet};
@@ -167,6 +169,17 @@ impl Output {
     }
 }
 
+fn string_argument(ctx: &Context, input: Id) -> Result<Id> {
+    ctx.string_storage(input).ok_or_else(|| {
+        let name = ctx.type_name(input);
+        let name = &name[..name.floor_char_boundary(80)];
+        Error::new(
+            "TypeError",
+            format!("first argument must be a string, not {name}"),
+        )
+    })
+}
+
 /// Quote a Python string with the native JSON encoder's escaping rules.
 pub(super) fn encode_basestring(
     ctx: &mut Context,
@@ -192,14 +205,7 @@ pub(super) fn encode_basestring(
             format!("{name}() takes exactly one argument ({} given)", args.len()),
         ));
     };
-    let storage = ctx.string_storage(*input).ok_or_else(|| {
-        let name = ctx.type_name(*input);
-        let name = &name[..name.floor_char_boundary(80)];
-        Error::new(
-            "TypeError",
-            format!("first argument must be a string, not {name}"),
-        )
-    })?;
+    let storage = string_argument(ctx, *input)?;
     let mut output = Output::default();
     output.quote(
         ctx.heap.get(storage),

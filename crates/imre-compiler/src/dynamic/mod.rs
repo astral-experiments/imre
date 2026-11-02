@@ -549,6 +549,13 @@ pub(crate) fn compile(
             return Ok(None);
         }
         let mut names = imports.names;
+        // The native string scanner imports the decoder's exception on a syntax error.
+        if names
+            .iter()
+            .any(|(level, name)| *level == 0 && name == "_json")
+        {
+            names.push((0, "json.decoder".to_owned()));
+        }
         // A late import of native pickle also needs its bundled reader and dependencies.
         if imports.uses_import_builtin {
             names.push((0, "pickle".to_owned()));
