@@ -2197,6 +2197,7 @@ def report(text):
             "boxed_os_fchmod.py",
             "boxed_os_makedirs.py",
             "boxed_os_walk.py",
+            "boxed_os_fwalk.py",
             "boxed_select.py",
             "boxed_urlsplit.py",
             "boxed_urllib_request.py",
