@@ -366,6 +366,7 @@ fn emit_program(
         output,
         code: String::new(),
         entry_allocas: String::new(),
+        mapping_words: 0,
         strings: Vec::new(),
         string_literals: BTreeMap::new(),
         uses_string_interning: false,
@@ -588,6 +589,7 @@ struct Emitter<'a, 'module> {
     output: &'a mut Output,
     code: String,
     entry_allocas: String,
+    mapping_words: usize,
     strings: Vec<Vec<u8>>,
     string_literals: BTreeMap<Vec<u8>, usize>,
     uses_string_interning: bool,
@@ -1758,6 +1760,7 @@ impl Emitter<'_, '_> {
         borrows: &FunctionBorrows,
     ) -> Result<String, String> {
         self.entry_allocas.clear();
+        self.mapping_words = 0;
         self.locals = function.locals.clone();
         byte_outputs::select(function, &mut self.locals);
         self.borrowed_locals = borrows.locals.clone();
@@ -1871,11 +1874,6 @@ impl Emitter<'_, '_> {
             function.returns.llvm(),
             function.returns.initial()
         ));
-        // Runtime out-parameters always write full words, including for bool
-        // and None payloads. Results are loaded only after a successful call;
-        // each call transfers them before another call can reuse this storage.
-        self.line("%mapping_key_word = alloca i64");
-        self.line("%mapping_value_word = alloca i64");
         for (slot, &ty) in function.locals.iter().enumerate() {
             self.line(format!("%local{slot} = alloca {}", ty.llvm()));
             // Parameters initialize exactly once below. ASan can relocate their
@@ -2048,6 +2046,13 @@ impl Emitter<'_, '_> {
             self.line(format!("ret {returns} {value}"));
         }
         self.code.push_str("}\n");
+        // Mapping calls transfer their output words before another call can reuse them.
+        for name in ["%mapping_key_word", "%mapping_value_word"]
+            .into_iter()
+            .take(self.mapping_words)
+        {
+            writeln!(self.entry_allocas, "  {name} = alloca i64").unwrap();
+        }
         self.code.insert_str(allocas_at, &self.entry_allocas);
         if self.cleanup_limit_hit {
             return Err("Imre: finally cleanup expansion exceeds the compiler limit".to_owned());
@@ -7887,6 +7892,7 @@ impl Emitter<'_, '_> {
         returns: Type,
     ) -> Value {
         let key = self.mapping_read_key(args[0].value.ty, &args[1].value);
+        self.mapping_words = self.mapping_words.max(1);
         let call = format!(
             "call i32 @{function}(ptr {}, i64 {key}, ptr %mapping_key_word)",
             args[0].value.operand
@@ -7954,6 +7960,7 @@ impl Emitter<'_, '_> {
             debug_assert_ne!(ready, value);
         }
         let iterator = self.borrow_slot(iterator);
+        self.mapping_words = self.mapping_words.max(1 + usize::from(value.is_some()));
         let value_output = if value.is_some() {
             "%mapping_value_word"
         } else {
