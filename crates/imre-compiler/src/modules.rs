@@ -1175,6 +1175,12 @@ impl IntrinsicModule {
             (Self::ImportlibResourcesAbc, "ResourceReader") => {
                 Intrinsic::ObjectRuntimeExport("importlib.resources.abc.ResourceReader")
             }
+            (Self::ImportlibResourcesAbc, "Traversable") => {
+                Intrinsic::ObjectRuntimeExport("importlib.resources.abc.Traversable")
+            }
+            (Self::ImportlibResourcesAbc, "TraversalError") => {
+                Intrinsic::ObjectRuntimeExport("importlib.resources.abc.TraversalError")
+            }
             (Self::ImportlibResourcesAbc, "TraversableResources") => {
                 Intrinsic::ObjectRuntimeExport("importlib.resources.abc.TraversableResources")
             }
