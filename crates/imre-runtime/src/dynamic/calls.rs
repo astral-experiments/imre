@@ -2585,6 +2585,20 @@ impl Context {
                     "__text_signature__" if symbol == "resource.getrlimit" => {
                         return Ok(self.text("($module, resource, /)"));
                     }
+                    "__doc__" if symbol == "posix.getegid" => {
+                        return Ok(self.text("Return the current process's effective group id."));
+                    }
+                    "__doc__" if symbol == "posix.getresgid" => {
+                        return Ok(self.text("Return a tuple of the current process's real, effective, and saved group ids."));
+                    }
+                    "__doc__" if symbol == "posix.getresuid" => {
+                        return Ok(self.text("Return a tuple of the current process's real, effective, and saved user ids."));
+                    }
+                    "__text_signature__"
+                        if matches!(symbol.as_str(), "posix.getegid" | "posix.getresgid" | "posix.getresuid") =>
+                    {
+                        return Ok(self.text("($module, /)"));
+                    }
                     "__doc__" if module == "gc" => {
                         let doc = match function {
                             "enable" => "Enable automatic garbage collection.",
