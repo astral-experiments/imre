@@ -2087,6 +2087,14 @@ def report(text):
         generic = fixtures / "module_generic_function.py"
         compare("-IB", generic, native_args=("run", generic, "--quiet"))
         compare("-IB", generic, native_args=("run", generic, "--runtime-imports", "--quiet"))
+        reveal = fixtures / "typing_reveal_type.py"
+        for command in ((sys.executable, "-IB", reveal),
+                        (imre, "run", reveal, "--quiet"),
+                        (imre, "run", reveal, "--runtime-imports", "--quiet")):
+            result = run(*command)
+            assert (result.returncode, result.stdout, result.stderr) == (
+                0, b"", b"Runtime type is 'Marker'\nRuntime type is 'type'\n",
+            ), result
         hints_fixture = fixtures / "boxed_typing_get_type_hints.py"
         compare("-IB", hints_fixture, native_args=("run", hints_fixture, "--runtime-imports", "--quiet"))
         if sys.platform == "linux":
