@@ -1243,6 +1243,11 @@ def main():
             "check = Case.assertNotIsSubclass\ncheck(case, int, str)",
             "case.assertIsInstance(1, int)",
             "case.assertNotHasAttr(Case, 'absent')",
+            "case.assertNotStartsWith('abc', 'bc')",
+            "check = case.assertNotEndsWith\ncheck('abc', 'ab')\n"
+            "try: check('abc', ('ab', 'c'))\nexcept AssertionError as exc: print(str(exc))",
+            "case.assertSequenceEqual([1, 2], (1, 2))\n"
+            "try: case.assertSequenceEqual([1, 2], [1])\nexcept AssertionError as exc: print(str(exc))",
             "Case.assertNotIsInstance(case, 1, str)",
             "check = case.assertIsInstance\ncheck(1, int)",
             "check = Case.assertNotIsInstance\ncheck(case, 1, str)",
@@ -1967,6 +1972,7 @@ def report(text):
             "boxed_unittest_assert_count_equal.py",
             "boxed_unittest_membership.py",
             "boxed_unittest_endswith.py",
+            "boxed_unittest_sequence_equal.py",
             "boxed_unittest_instance.py",
             "boxed_unittest_subclass.py",
             "boxed_unittest_not_has_attr.py",

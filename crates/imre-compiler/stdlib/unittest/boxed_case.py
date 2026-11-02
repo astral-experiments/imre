@@ -3,6 +3,9 @@ from collections import ChainMap
 import warnings
 from unittest import SkipTest, TestCase, _enterCleanupContext
 
+DIFF_OMITTED = ('\nDiff is %s characters long. '
+                 'Set self.maxDiff to None to see it.')
+
 _module_cleanups = []
 
 
