@@ -401,6 +401,10 @@ impl Context {
             Value::Set { entries: v, .. }
             | Value::Dict(v)
             | Value::DefaultDict { entries: v, .. } => !v.is_empty(),
+            Value::MappingProxy(_) => {
+                let length = builtins::call(self, "len", &[id], &[])?;
+                self.truth(length)?
+            }
             Value::DictView { dict, .. } => !self
                 .dict_entries(*dict)
                 .expect("dict view backing")
@@ -465,8 +469,8 @@ impl Context {
         self.equal_inner(a, b, usize::MAX, &mut false)
     }
 
-    /// Unwrap proxy layers before the existing mapping comparison or reflected Python slot.
-    fn mapping_comparison_target(&self, mut value: Id) -> Id {
+    /// Return the wrapped object without recursing through nested read-only views.
+    pub(super) fn mapping_proxy_target(&self, mut value: Id) -> Id {
         while let Value::MappingProxy(mapping) = *self.heap.get(value) {
             value = mapping;
         }
@@ -527,8 +531,8 @@ impl Context {
                     }
                     break 'current same_receivers;
                 }
-                let left = self.mapping_comparison_target(a);
-                let right = self.mapping_comparison_target(b);
+                let left = self.mapping_proxy_target(a);
+                let right = self.mapping_proxy_target(b);
                 let (a, b) = if right != b { (right, left) } else { (left, b) };
                 if a == b {
                     break 'current true;
@@ -2593,8 +2597,8 @@ impl Context {
                 .ok_or_else(|| Error::new("TypeError", "enum member names must be a dictionary"))?;
             return self.get_item(names, key);
         }
-        if let Value::MappingProxy(dict) = *self.heap.get(obj) {
-            return self.get_item(dict, key);
+        if matches!(self.heap.get(obj), Value::MappingProxy(_)) {
+            return self.get_item(self.mapping_proxy_target(obj), key);
         }
         if let Value::Context(bindings) = self.heap.get(obj) {
             self.context_key(key)?;
@@ -4133,8 +4137,8 @@ impl Context {
             return deque::compare(self, op, a, b).map(|result| Some(builtins::boolean(result)));
         }
         let (a, b) = if matches!(op, "==" | "!=") {
-            let left = self.mapping_comparison_target(a);
-            let right = self.mapping_comparison_target(b);
+            let left = self.mapping_proxy_target(a);
+            let right = self.mapping_proxy_target(b);
             if left != a || right != b {
                 // A mapping hook can drop the containers that own either original proxy.
                 self.heap.reserve_temporaries(2)?;
