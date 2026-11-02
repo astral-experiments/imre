@@ -587,7 +587,12 @@ ACCEPTED = {
     },
     "filesystem_resources": {
         "main.py": (FIXTURES.parent / "boxed_filesystem_resources.py").read_text(),
-        "data/__init__.py": "",
+        "data/__init__.py": (
+            "from importlib.resources import files\n"
+            "def wrapper(): return files(None)\n"
+            "def regular(): return files(None)\n"
+        ),
+        "data/child.py": "def call(function): return function()\n",
         "data/nested/message.txt": "hello\n",
     },
     "materialize_resources": {

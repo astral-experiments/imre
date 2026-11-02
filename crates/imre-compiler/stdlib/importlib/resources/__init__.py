@@ -1,22 +1,37 @@
 """Read resources exposed by a package's loader."""
 
 from importlib import import_module
+import sys
 import warnings
 
 _missing = object()
 
 
+def _resolve_anchor(anchor):
+    if isinstance(anchor, str):
+        return import_module(anchor)
+    if anchor is not _missing and anchor is not None:
+        return anchor
+
+    frame = sys._getframe()
+    filename = frame.f_code.co_filename
+    while frame is not None:
+        code = frame.f_code
+        # CPython excludes this file and singledispatch's wrapper by name.
+        if code.co_filename != filename and code.co_name != 'wrapper':
+            return _resolve_anchor(frame.f_globals['__name__'])
+        frame = frame.f_back
+    raise StopIteration
+
+
 def files(anchor=_missing, *, package=_missing):
-    """Return the Traversable root provided by an explicit anchor's reader."""
+    """Return the Traversable root for an anchor, defaulting to the calling module."""
     if package is not _missing:
         if anchor is not _missing:
             raise TypeError("files() received both anchor and package")
         warnings.warn("First parameter to files is renamed to 'anchor'", DeprecationWarning, stacklevel=2)
         anchor = package
-    if anchor is _missing or anchor is None:
-        raise NotImplementedError("inferring the resource anchor from the calling frame is unsupported")
-    if isinstance(anchor, str):
-        anchor = import_module(anchor)
+    anchor = _resolve_anchor(anchor)
     from ._adapters import wrap_spec
 
     spec = wrap_spec(anchor)
