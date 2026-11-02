@@ -119,11 +119,15 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
         "copyreg" => Some(("copyreg.py", include_str!("../stdlib/copyreg.py"))),
         "warnings" => Some((
             "warnings.py",
-            include_str!("../../../benchmarks/cpython_stdlib/full/warnings/upstream/Lib/warnings.py"),
+            include_str!(
+                "../../../benchmarks/cpython_stdlib/full/warnings/upstream/Lib/warnings.py"
+            ),
         )),
         "_py_warnings" => Some((
             "_py_warnings.py",
-            include_str!("../../../benchmarks/cpython_stdlib/full/warnings/upstream/Lib/_py_warnings.py"),
+            include_str!(
+                "../../../benchmarks/cpython_stdlib/full/warnings/upstream/Lib/_py_warnings.py"
+            ),
         )),
         "re" => Some(("re.py", include_str!("../stdlib/re.py"))),
         "decimal" => Some(("decimal.py", include_str!("../stdlib/decimal.py"))),
