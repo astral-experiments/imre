@@ -373,6 +373,8 @@ pub(super) const STR_METHODS: &[&str] = &[
     "format",
     "isalnum",
     "isascii",
+    "isalpha",
+    "isdigit",
     "islower",
     "isspace",
     "isupper",
