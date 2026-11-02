@@ -53,6 +53,9 @@ def current():
     alias = list[T]
     assert alias.__reduce__() == (GenericAlias, (list, (T,)))
     iterator = iter(alias)
+    for owner in (GenericAlias, type(iterator)):
+        assert owner.__reduce__.__doc__ is None
+        assert owner.__reduce__.__text_signature__ == "($self, /)"
     assert iterator.__reduce__() == (iter, (alias,))
     starred = next(iterator)
     assert iterator.__reduce__() == (iter, ((),))

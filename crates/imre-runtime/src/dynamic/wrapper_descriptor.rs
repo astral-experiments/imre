@@ -603,8 +603,8 @@ impl BuiltinDescriptor {
                 let value = match (self.name, name) {
                     ("utctimetuple", "__doc__") if self.owner == "datetime.datetime" => "Return UTC time tuple, compatible with time.localtime().",
                     ("utctimetuple", _) if self.owner == "datetime.datetime" => "($self, /)",
-                    ("__reduce__", "__doc__") if self.owner == "builtin_function_or_method" => return Some(NONE),
-                    ("__reduce__", _) if self.owner == "builtin_function_or_method" => "($self, /)",
+                    ("__reduce__", "__doc__") if matches!(self.owner, "builtin_function_or_method" | "types.GenericAlias" | "generic_alias_iterator") => return Some(NONE),
+                    ("__reduce__", _) if matches!(self.owner, "builtin_function_or_method" | "types.GenericAlias" | "generic_alias_iterator") => "($self, /)",
                     ("__reduce__", "__doc__") if self.owner == stdlib::datetime::TZINFO => "-> (cls, state)",
                     ("__reduce__", _) if self.owner == stdlib::datetime::TZINFO => "($self, /)",
                     ("tzname", "__doc__") if self.owner == "datetime.timezone" => "If name is specified when timezone is created, returns the name.  Otherwise returns offset as 'UTC(+|-)HH:MM'.",
