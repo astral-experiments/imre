@@ -43,9 +43,9 @@ pub(super) mod os;
 pub(super) mod pickle;
 mod pkgutil;
 mod posixpath;
+mod random;
 pub(super) mod readiness;
 pub(super) mod regex;
-mod secrets;
 mod select;
 #[cfg(target_os = "linux")]
 pub(super) mod signal;
@@ -680,7 +680,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         | ("struct", "Struct" | "calcsize" | "pack" | "unpack" | "error")
         | ("base64", "urlsafe_b64encode" | "urlsafe_b64decode")
         | ("json", "dump" | "dumps" | "loads")
-        | ("random", "random")
+        | ("random", "random" | "choice")
         | ("codecs", "encode" | "decode" | "lookup" | "register_error" | "lookup_error")
         | ("gc", "collect")
         | ("marshal", "loads")
@@ -1205,8 +1205,8 @@ pub(super) fn call(
         }
         return Ok(ctx.alloc(Value::Float(crate::objects::imre_random_float())));
     }
-    if name == "secrets.choice" {
-        return secrets::choice(ctx, args, kwargs);
+    if matches!(name, "random.choice" | "secrets.choice") {
+        return random::choice(ctx, args, kwargs, name == "secrets.choice");
     }
     if name == "_collections_abc._check_methods" {
         if let Some((key, _)) = kwargs.iter().find(|(key, _)| key != "C") {
