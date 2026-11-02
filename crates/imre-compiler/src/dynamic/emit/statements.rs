@@ -288,7 +288,7 @@ impl Function<'_, '_> {
                         .iter()
                         .map(|d| self.expr(&d.expression))
                         .collect::<Vec<_>>();
-                    let generator = is_generator(&v.body);
+                    let generator = imre_ast::code_flags::is_generator(&v.body);
                     let body = if v.is_async {
                         Body::Unsupported(stmt, "async function")
                     } else if generator {
@@ -557,11 +557,7 @@ impl Function<'_, '_> {
                 }
                 let kind = match &body {
                     Body::GeneratorFunction(_) | Body::Generator(..) => GENERATOR,
-                    Body::Expression(expr) => {
-                        let mut yields = Yields::default();
-                        yields.visit_expr(expr);
-                        if yields.0 { GENERATOR } else { 0 }
-                    }
+                    Body::Expression(expr) if yields_in_expression(expr) => GENERATOR,
                     Body::Unsupported(ast::Stmt::FunctionDef(f), _) if f.is_async => {
                         if is_generator(&f.body) {
                             ASYNC_GENERATOR
@@ -1129,31 +1125,6 @@ fn relative_import(package: &str, level: u32, name: &str) -> Option<String> {
     } else {
         format!("{base}.{name}")
     })
-}
-
-#[derive(Default)]
-struct Yields(bool);
-impl<'a> Visitor<'a> for Yields {
-    fn visit_stmt(&mut self, stmt: &'a ast::Stmt) {
-        if !self.0 && !matches!(stmt, ast::Stmt::FunctionDef(_) | ast::Stmt::ClassDef(_)) {
-            visitor::walk_stmt(self, stmt);
-        }
-    }
-    fn visit_expr(&mut self, expr: &'a ast::Expr) {
-        match expr {
-            ast::Expr::Yield(_) | ast::Expr::YieldFrom(_) => self.0 = true,
-            ast::Expr::Lambda(_) => {}
-            _ if !self.0 => visitor::walk_expr(self, expr),
-            _ => {}
-        }
-    }
-}
-
-/// A call to a generator must never run the statements before its first yield.
-fn is_generator(body: &[ast::Stmt]) -> bool {
-    let mut yields = Yields::default();
-    yields.visit_body(body);
-    yields.0
 }
 
 /// A nested function can close over the declaring class through its enclosing method.
