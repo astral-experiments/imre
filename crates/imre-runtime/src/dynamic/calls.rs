@@ -3013,7 +3013,7 @@ impl Context {
                 return Ok(self.builtin(&format!("object.{name}")));
             }
             Value::Native(ref class)
-                if DictIterator::METHODS.contains(&name)
+                if DictIterator::methods(class).contains(&name)
                     && DictIterator::class(class).is_some() =>
             {
                 return Ok(self.builtin(&format!("{class}.{name}")));
@@ -4617,7 +4617,7 @@ impl Context {
             }
             Value::Native(ref name)
                 if let Some((owner, slot)) = name.split_once('.')
-                    && DictIterator::METHODS.contains(&slot)
+                    && DictIterator::methods(owner).contains(&slot)
                     && DictIterator::class(owner).is_some() =>
             {
                 self.iterator_method(owner, slot, &args, &kwargs)

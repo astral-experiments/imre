@@ -44,7 +44,7 @@ impl BuiltinDescriptor {
                 Some((members.owner, attr, members.methods))
             }
             Some((owner, attr)) if let Some(class) = DictIterator::class(owner) => {
-                Some((class, attr, DictIterator::METHODS))
+                Some((class, attr, DictIterator::methods(class)))
             }
             Some(("generator", attr)) => Some(("generator", attr, &["__iter__", "__next__"][..])),
             Some(("float", attr)) => Some(("float", attr, &["as_integer_ratio"][..])),

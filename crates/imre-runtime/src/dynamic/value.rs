@@ -1582,7 +1582,14 @@ impl DictIterator {
     const VALUES: [&str; 2] = ["dict_valueiterator", "dict_reversevalueiterator"];
     const ITEMS: [&str; 2] = ["dict_itemiterator", "dict_reverseitemiterator"];
     const ORDERED: &str = "odict_iterator";
-    pub(super) const METHODS: &[&str] = &["__iter__", "__next__"];
+
+    pub(super) fn methods(class: &str) -> &'static [&'static str] {
+        if class == Self::ORDERED {
+            &["__iter__", "__next__", "__reduce__"]
+        } else {
+            &["__iter__", "__next__"]
+        }
+    }
 
     pub(super) fn class_name(&self) -> &'static str {
         if self.order_state.is_some() {

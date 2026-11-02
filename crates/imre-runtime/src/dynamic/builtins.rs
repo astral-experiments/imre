@@ -424,7 +424,9 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         Value::Float(_) if attr == "as_integer_ratio" => "float",
         Value::Str(_) | Value::SurrogateStr(_) if STR_METHODS.contains(&attr) => "str",
         Value::Range(_) if super::range::METHODS.contains(&attr) => "range",
-        Value::DictIterator(iter) if DictIterator::METHODS.contains(&attr) => iter.class_name(),
+        Value::DictIterator(iter) if DictIterator::methods(iter.class_name()).contains(&attr) => {
+            iter.class_name()
+        }
         Value::RangeIterator(iter)
             if matches!(attr, "__iter__" | "__next__" | "__length_hint__") =>
         {
