@@ -129,14 +129,14 @@ branches. Skipped tests count toward the suite size only.
 | `re` | 125 | 165 | Earlier native runs verified 125 distinct originals. On the later public build, the full 165-case run passed 72 with fd 0 closed. The ordinary-stdin run finished one successful case before it stopped. The closed-fd result adds no cases to the table. |
 | `shutil` | 61 | 223 | All 15 Linux sendfile originals passed at O0 and O3 on the public d399550c merge using unchanged classes and fixtures. Together with earlier copy and archive cases, 61 originals have passed. The intact suite still stops while importing tarfile. |
 | `socket` | 61 | 746 | Earlier and focused cases total 61. Four native modes pass 14/19 resolver originals, including the new service database lookup. The 746-case discovery run executed no test bodies. |
-| `subprocess` | 165 | 353 | The intact public module finished all 353 originals. Both O0 and O3 recorded 151 passes, 15 failures, 141 errors and 46 skips. Fourteen other originals passed at both levels in focused runs on other revisions. |
+| `subprocess` | 177 | 353 | The intact public run passed 151 of 353 originals. Fourteen other cases passed in earlier runs. Two later public builds passed 12 more cwd-related originals, with matching setup, success and teardown callbacks. Five selected cases still fail at alternate executable selection. |
 | `tempfile` | 84 | 118 | Thirty selected filesystem cases ran in all four public native modes, with 27 passes and three skips. Seven previous errors now pass. Six of those cases had already passed on other builds. |
 | `textwrap` | 68 | 68 | Complete suite on `main`, all 68 passed. |
 | `threading` | 83 | 228 | All 228 original registrations ran in ordinary and boxed builds at both levels. Each passed 83, skipped 32 and reported failures on 113 IDs. The bound worker callback still blocks 58 Bunch fixture cases. |
 | `typing` | 107 | 712 | The public TypedDict class now runs all 32 originals at both levels, with 25 passes, one failure and six erroring IDs. Its overlap with the earlier 107 distinct cases is still being reconciled. |
-| `unittest` | 194 | 1,090 | The intact package registered 244 originals and started 213, with 160 passes at both optimization levels. Another 34 original MockTest methods passed in focused runs on the reviewed head of public #3718, including all 204 lifecycle callbacks. The complete mock module still stops during import. |
+| `unittest` | 275 | 1,090 | The intact package passed 160 cases. On public #3601, the unchanged test_assertions and test_case files ran all 150 originals with runtime imports. Their 109 paired passes added 81 distinct cases. Another 34 original mock methods passed in focused runs. |
 | `urllib` | 145 | 178 | On macOS and Linux, 67/77 parser cases and 75/101 request cases matched the pinned callbacks at O0 and O3. Three historical passes bring the total to 145. A further parser case matched 54 subtest outcomes and one subtest skip without a parent success callback. |
-| **Total** | **5,152** | **13,328** | **3 complete suites on `main`** |
+| **Total** | **5,245** | **13,328** | **3 complete suites on `main`** |
 
 See the [standard library coverage report](docs/stdlib.md) for the Linux test
 results and import coverage recorded in this repository.
