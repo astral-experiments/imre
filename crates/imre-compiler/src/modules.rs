@@ -1624,6 +1624,9 @@ impl IntrinsicModule {
                 Intrinsic::ObjectRuntimeExport("inspect.BoundArguments")
             }
             (Self::Inspect, "getmodule") => Intrinsic::ObjectRuntimeExport("inspect.getmodule"),
+            (Self::Inspect, "isdatadescriptor") => {
+                Intrinsic::ObjectRuntimeExport("inspect.isdatadescriptor")
+            }
             (Self::Inspect, "isroutine") => Intrinsic::ObjectRuntimeExport("inspect.isroutine"),
             (Self::Inspect, "ismethodwrapper") => {
                 Intrinsic::ObjectRuntimeExport("inspect.ismethodwrapper")

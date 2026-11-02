@@ -43,6 +43,13 @@ pub(super) fn call(
     };
     let mut obj = super::single_argument(name, param, args, kwargs)?;
     match name {
+        "_native_data_descriptor" => {
+            return Ok(if ctx.native_data_descriptor(obj) {
+                TRUE
+            } else {
+                FALSE
+            });
+        }
         "_signature_identifier" => {
             // A str subclass can replace either the method or attribute lookup.
             if let Value::Instance { class, .. } = *ctx.heap.get(obj) {

@@ -105,6 +105,16 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
                         let begin = UPSTREAM.find(start).unwrap();
                         UPSTREAM[begin..].split_once(end).unwrap().0
                     };
+                    // Some native descriptors implement assignment in the runtime without a
+                    // Python-visible setter on their type.
+                    let descriptors = section(
+                        "def ismethoddescriptor(object):",
+                        "if hasattr(types, 'MemberDescriptorType'):",
+                    )
+                    .replace(
+                        "or hasattr(tp, \"__delete__\")",
+                        "or hasattr(tp, \"__delete__\") or _native_data_descriptor(object)",
+                    );
                     let classes = section("_POSITIONAL_ONLY         = ", "class BufferFlags(")
                         .replace("name.isidentifier()", "_signature_identifier(name)")
                         .replace(
@@ -116,7 +126,7 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
                         include_str!("../../stdlib/inspect_signature.py"),
                         "import functools\nimport importlib.machinery\nimport linecache\nimport os\nimport sys",
                         section("def ismodule(object):", "def ispackage(object):"),
-                        section("def ismethoddescriptor(object):", "def isdatadescriptor(object):"),
+                        &descriptors,
                         section("def isfunction(object):", "def _has_code_flag("),
                         section("def istraceback(object):", "def isabstract(object):"),
                         section("def getfile(object):", "class ClassFoundException("),

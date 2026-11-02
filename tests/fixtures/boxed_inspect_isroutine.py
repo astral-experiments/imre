@@ -1,6 +1,7 @@
 import functools
 import inspect
 import types
+from inspect import isdatadescriptor
 
 
 def function(value):
@@ -36,6 +37,11 @@ def current():
     assert type(bound) is types.MethodWrapperType
     assert inspect.ismethodwrapper(bound) and bound(6) == 7
     assert inspect.isbuiltin([].append)
+    assert isdatadescriptor is inspect.isdatadescriptor
+    assert isdatadescriptor(DataDescriptor())
+    assert isdatadescriptor(int.numerator)
+    assert not inspect.isdatadescriptor(Descriptor())
+    assert not inspect.isdatadescriptor(DataDescriptor)
     for routine in (function, bound, type(function).__call__, list.append, [].append,
                     Callable.__call__, obj.__call__, Callable.render, obj.render, Descriptor()):
         assert inspect.isroutine(routine)
