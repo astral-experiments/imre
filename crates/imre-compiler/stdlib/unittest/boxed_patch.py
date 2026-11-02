@@ -1,6 +1,7 @@
 """Attribute patching on live Python objects, including module namespaces."""
 
 import builtins
+from contextlib import ContextDecorator
 from functools import wraps
 from importlib import import_module
 from types import ModuleType
@@ -101,4 +102,22 @@ def _patch_attribute(self, target, new=DEFAULT, *, create=False):
     return _patch(target, new, create)
 
 
+class _BoxedDictionaryPatch(_DictionaryPatch, ContextDecorator):
+    def __init__(self, in_dict, values=(), clear=False, **kwargs):
+        updates = dict(values)
+        updates.update(kwargs)
+        super().__init__(in_dict, updates, clear)
+
+    def _enter(self):
+        if isinstance(self.in_dict, str):
+            self.in_dict = _patch_owner(self.in_dict)
+        return super()._enter()
+
+    __enter__ = _enter
+
+    def __exit__(self, *exc_info):
+        return self._exit()
+
+
 _PatchFactory.__call__ = _patch_attribute
+_PatchFactory.dict = staticmethod(_BoxedDictionaryPatch)
