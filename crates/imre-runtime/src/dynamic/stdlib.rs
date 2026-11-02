@@ -583,8 +583,8 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("inspect", "_is_coroutine_mark") => inspect::marker(ctx),
         (
             "time",
-            "time" | "time_ns" | "monotonic" | "perf_counter" | "sleep" | "gmtime" | "localtime"
-            | "mktime" | "strftime" | "ctime" | "struct_time" | "tzset",
+            "get_clock_info" | "time" | "time_ns" | "monotonic" | "perf_counter" | "sleep"
+            | "gmtime" | "localtime" | "mktime" | "strftime" | "ctime" | "struct_time" | "tzset",
         ) => ctx.builtin(&format!("time.{name}")),
         ("socket", name) => return socket::attribute(ctx, name),
         ("hashlib", name)
