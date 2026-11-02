@@ -1,6 +1,7 @@
 """Compare typed and boxed TCPServer programs with real CPython sockets."""
 import argparse
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -11,7 +12,7 @@ REJECT = {
     "runtime_server_keeps_argument_checks": (
         "from socketserver import ThreadingTCPServer\n"
         "def identity(value: int) -> int: return value\n"
-        "print(ThreadingTCPServer)\n"
+        "class Derived(ThreadingTCPServer): pass\n"
         "identity('wrong')\n",
         "invalid-argument-type",
     ),
@@ -129,6 +130,16 @@ def main():
         failure.write_text(CHECKED_ERROR)
         check_handler_error([args.python, "-E", failure], failure)
 
+        for fixture in (threaded, FIXTURES.parent / "boxed_socketserver_source.py"):
+            shutil.copyfile(fixture, root / fixture.name)
+        imported = root / "import_servers.py"
+        imported.write_text(
+            "import boxed_threading_tcp_server\n"
+            "from boxed_socketserver_source import current\n"
+            "current()\n"
+        )
+        imported_output = observe([args.python, "-E", imported])
+
         def build(source, level, *options):
             binary = root / source.stem
             subprocess.run([compiler, "build", source, "--no-cache", "--runtime", args.runtime.resolve(),
@@ -136,7 +147,7 @@ def main():
             return binary
 
         for level in args.opt_levels:
-            assert observe([build(threaded, level)]) == threaded_output
+            assert observe([build(imported, level)]) == imported_output
             assert observe([build(threaded, level, "--runtime-imports")]) == threaded_output
             check_handler_error([build(failure, level)], failure)
             timed_binary = build(timed, level)
