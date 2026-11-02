@@ -1909,6 +1909,7 @@ def report(text):
             "boxed_selector_wide_fds.py",
             "boxed_select_selector.py",
             "boxed_pipe_flags.py",
+            "boxed_os_environb.py",
             "boxed_os_file_descriptors.py",
             "boxed_buffered_readlines.py",
             "boxed_os_descriptor_io.py",
