@@ -45,4 +45,24 @@ def current():
     assert write(b"ok") == 2 and os.path.exists(path)
     del write
     assert not os.path.exists(path)
-    print("named binary writers checked")
+
+    for mode in ("w", "wt", "tw"):
+        with NamedTemporaryFile(mode, dir=".", encoding="latin-1", newline="\r\n") as writer:
+            path = writer.name
+            assert writer.mode == mode and writer.file.name == path
+            assert writer.writable() and not writer.readable()
+            assert writer.write("é\n") == 2
+            writer.flush()
+            with open(path, "rb") as reader:
+                assert reader.read() == b"\xe9\r\n"
+        assert not os.path.exists(path)
+
+    before = set(os.listdir("."))
+    try:
+        NamedTemporaryFile("w", dir=".", encoding="bad-encoding", delete=False)
+    except LookupError:
+        pass
+    else:
+        raise AssertionError("unknown encoding accepted")
+    assert set(os.listdir(".")) == before
+    print("named writers checked")
