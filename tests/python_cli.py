@@ -2025,6 +2025,7 @@ def report(text):
             "boxed_source_coroutine.py",
             "boxed_with_control.py",
             "boxed_short_circuit.py",
+            "boxed_doctest_suite.py",
             "boxed_slice.py",
             "boxed_binascii.py",
             "boxed_zlib.py",
