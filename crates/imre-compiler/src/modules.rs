@@ -2007,6 +2007,8 @@ impl IntrinsicModule {
             (Self::Typing, "is_protocol") => Intrinsic::ObjectRuntimeExport("typing.is_protocol"),
             (Self::Typing, "Annotated") => Intrinsic::ObjectRuntimeExport("typing.Annotated"),
             (Self::Typing, "ForwardRef") => Intrinsic::ObjectRuntimeExport("typing.ForwardRef"),
+            (Self::Typing, "TypeGuard") => Intrinsic::ObjectRuntimeExport("typing.TypeGuard"),
+            (Self::Typing, "TypeIs") => Intrinsic::ObjectRuntimeExport("typing.TypeIs"),
             (Self::Typing, "Required") => Intrinsic::ObjectRuntimeExport("typing.Required"),
             (Self::Typing, "NotRequired") => Intrinsic::ObjectRuntimeExport("typing.NotRequired"),
             (Self::Typing, "ReadOnly") => Intrinsic::ObjectRuntimeExport("typing.ReadOnly"),
