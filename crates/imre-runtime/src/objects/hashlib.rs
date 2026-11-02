@@ -17,6 +17,8 @@ use crate::{BytesOwner, Int, ObjectOwner};
 
 #[derive(Clone)]
 pub(crate) enum State {
+    Blake2b(blake2b_simd::State, usize),
+    Blake2s(blake2s_simd::State, usize),
     Md5(Md5),
     Sha1(Sha1),
     Sha224(Sha224),
@@ -38,6 +40,24 @@ pub(crate) struct Provider {
 }
 
 const PROVIDERS: &[Provider] = &[
+    Provider {
+        name: "blake2b",
+        aliases: &[],
+        create: |data| {
+            let mut state = blake2b_simd::State::new();
+            state.update(data);
+            State::Blake2b(state, 64)
+        },
+    },
+    Provider {
+        name: "blake2s",
+        aliases: &[],
+        create: |data| {
+            let mut state = blake2s_simd::State::new();
+            state.update(data);
+            State::Blake2s(state, 32)
+        },
+    },
     Provider {
         name: "md5",
         aliases: &["ssl3-md5", "1.2.840.113549.2.5"],
@@ -116,7 +136,9 @@ impl State {
                 // Python maps canonical SHA-3 names exactly; OpenSSL accepts its
                 // hyphenated names and OIDs independently of ASCII case.
                 provider.name == name
-                    || (!provider.name.contains('_') && provider.name.eq_ignore_ascii_case(name))
+                    || (!provider.name.contains('_')
+                        && !provider.name.starts_with("blake2")
+                        && provider.name.eq_ignore_ascii_case(name))
                     || provider
                         .aliases
                         .iter()
@@ -128,9 +150,37 @@ impl State {
     pub(crate) const CLASS: &'static str = "hashlib._Hash";
     pub(crate) const XOF_CLASS: &'static str = "hashlib._HashXOF";
 
+    pub(crate) fn public_constructor(algorithm: &str) -> Option<&'static str> {
+        match algorithm {
+            "blake2b" => Some("hashlib.blake2b"),
+            "blake2s" => Some("hashlib.blake2s"),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn provider_class(class: &str) -> Option<&'static str> {
+        Self::public_constructor(class.strip_prefix("hashlib.")?)
+    }
+
+    pub(crate) fn is_provider_class(class: &str) -> bool {
+        Self::provider_class(class).is_some()
+    }
+
+    pub(crate) fn class_constant(class: &str, attr: &str) -> Option<usize> {
+        match (class, attr) {
+            ("hashlib.blake2b", "SALT_SIZE" | "PERSON_SIZE") => Some(16),
+            ("hashlib.blake2s", "SALT_SIZE" | "PERSON_SIZE") => Some(8),
+            ("hashlib.blake2b", "MAX_DIGEST_SIZE" | "MAX_KEY_SIZE") => Some(64),
+            ("hashlib.blake2s", "MAX_DIGEST_SIZE" | "MAX_KEY_SIZE") => Some(32),
+            _ => None,
+        }
+    }
+
     pub(crate) fn class_name(&self) -> &'static str {
         // XOFs have no fixed digest size; their digest methods take a length.
-        if self.digest_size() == 0 {
+        if let Some(class) = Self::public_constructor(self.name()) {
+            class
+        } else if self.digest_size() == 0 {
             Self::XOF_CLASS
         } else {
             Self::CLASS
@@ -139,6 +189,9 @@ impl State {
 
     pub(crate) fn repr(&self, identity: usize) -> impl std::fmt::Display {
         std::fmt::from_fn(move |f| {
+            if Self::is_provider_class(self.class_name()) {
+                return write!(f, "<{} object at {identity:#x}>", self.class_name());
+            }
             write!(
                 f,
                 "<{} {} object @ {identity:#x}>",
@@ -154,6 +207,8 @@ impl State {
 
     pub(crate) fn name(&self) -> &'static str {
         match self {
+            Self::Blake2b(_, _) => "blake2b",
+            Self::Blake2s(_, _) => "blake2s",
             Self::Md5(_) => "md5",
             Self::Sha1(_) => "sha1",
             Self::Sha224(_) => "sha224",
@@ -171,6 +226,12 @@ impl State {
 
     pub(crate) fn update(&mut self, data: &[u8]) {
         match self {
+            Self::Blake2b(h, _) => {
+                h.update(data);
+            }
+            Self::Blake2s(h, _) => {
+                h.update(data);
+            }
             Self::Md5(h) => h.update(data),
             Self::Sha1(h) => h.update(data),
             Self::Sha224(h) => h.update(data),
@@ -188,6 +249,8 @@ impl State {
 
     pub(crate) fn block_size(&self) -> usize {
         match self {
+            Self::Blake2b(_, _) => blake2b_simd::BLOCKBYTES,
+            Self::Blake2s(_, _) => blake2s_simd::BLOCKBYTES,
             Self::Md5(_) => Md5::block_size(),
             Self::Sha1(_) => Sha1::block_size(),
             Self::Sha224(_) => Sha224::block_size(),
@@ -205,6 +268,7 @@ impl State {
 
     pub(crate) fn digest_size(&self) -> usize {
         match self {
+            Self::Blake2b(_, n) | Self::Blake2s(_, n) => *n,
             Self::Md5(_) => Md5::output_size(),
             Self::Sha1(_) => Sha1::output_size(),
             Self::Sha224(_) => Sha224::output_size(),
@@ -225,6 +289,8 @@ impl State {
         result: impl FnOnce(&[u8]) -> Result<T>,
     ) -> Result<T> {
         match self {
+            Self::Blake2b(h, _) => result(h.finalize().as_bytes()),
+            Self::Blake2s(h, _) => result(h.finalize().as_bytes()),
             Self::Md5(h) => result(&h.clone().finalize()),
             Self::Sha1(h) => result(&h.clone().finalize()),
             Self::Sha224(h) => result(&h.clone().finalize()),

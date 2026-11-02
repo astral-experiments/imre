@@ -2362,6 +2362,11 @@ impl Context {
                 };
                 format!("{variance}{}", self.display(var.name))
             }
+            Value::GetSetDescriptor { owner, name, .. }
+                if crate::objects::HashState::is_provider_class(owner) =>
+            {
+                format!("<attribute '{name}' of '{owner}' objects>")
+            }
             Value::WeakrefDescriptor(owner) => format!(
                 "<attribute '__weakref__' of '{}' objects>",
                 self.weakref_descriptor_owner(*owner)

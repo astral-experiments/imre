@@ -1,5 +1,6 @@
 use super::super::value::Hmac;
 use super::{Context, Error, FALSE, Id, NONE, Result, TRUE, Value, argument, option};
+use crate::objects::HashState;
 use crate::objects::hmac::{compare_bytes, compare_text};
 
 fn hash_call(ctx: &mut Context, hash: Id, method: &str, args: Vec<Id>) -> Result<Id> {
@@ -44,8 +45,11 @@ pub(super) fn new(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Re
     }
     let factory = match ctx.heap.get(digest) {
         Value::Str(name) => {
-            let name = name.to_ascii_lowercase();
-            let provider = crate::objects::HashState::provider(&name)?;
+            // HMAC accepts mixed-case SHA3_ spellings in addition to the provider's own aliases.
+            let name = HashState::algorithms()
+                .find(|alg| alg.starts_with("sha3_") && alg.eq_ignore_ascii_case(name))
+                .unwrap_or(name);
+            let provider = HashState::provider(name)?;
             super::attribute(ctx, "hashlib", provider.name)?
         }
         Value::Module { .. } => ctx.lookup_attr(digest, "new")?,

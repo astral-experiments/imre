@@ -4,6 +4,8 @@ use std::rc::Rc;
 use super::{Context, Error, Id, NONE, Result, Value, argument, builtins};
 use crate::objects::HashState;
 
+mod blake2;
+
 /// Borrows the bytes of a boxed hash input, including mutable buffers.
 pub(super) fn buffer(ctx: &Context, id: Id) -> Result<&[u8]> {
     match ctx.heap.get(ctx.scalar_value(id)) {
@@ -26,6 +28,13 @@ fn hash_input(
     string: Option<Id>,
 ) -> Result<&[u8]> {
     ctx.optional_truth(flag, true)?;
+    data_argument(data, string)?
+        .map(|id| buffer(ctx, id))
+        .transpose()
+        .map(Option::unwrap_or_default)
+}
+
+fn data_argument(data: Option<Id>, string: Option<Id>) -> Result<Option<Id>> {
     if data.is_some() && string.is_some() {
         return Err(Error::new(
             "TypeError",
@@ -33,10 +42,7 @@ fn hash_input(
              parameter is slated for removal in a future version.",
         ));
     }
-    data.or(string)
-        .map(|id| buffer(ctx, id))
-        .transpose()
-        .map(Option::unwrap_or_default)
+    Ok(data.or(string))
 }
 
 pub(super) fn hash(
@@ -45,6 +51,9 @@ pub(super) fn hash(
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
+    if matches!(name, "blake2b" | "blake2s") {
+        return blake2::new(ctx, name, args, kwargs);
+    }
     let [data, flag, string] = builtins::bind_method_arguments(
         name,
         args,
@@ -84,6 +93,23 @@ pub(super) fn new(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Re
                 "__hash_new() missing 1 required positional argument: 'name'",
             )
         })?;
+    let blake = match ctx.str_value(name) {
+        Ok("blake2b") => Some("blake2b"),
+        Ok("blake2s") => Some("blake2s"),
+        _ => None,
+    };
+    if let Some(name) = blake {
+        let args = args.get(1..).unwrap_or_default();
+        if kwargs.iter().any(|(key, _)| key == "name") {
+            let remaining: Vec<_> = kwargs
+                .iter()
+                .filter(|(key, _)| key != "name")
+                .cloned()
+                .collect();
+            return blake2::new(ctx, name, args, &remaining);
+        }
+        return blake2::new(ctx, name, args, kwargs);
+    }
     let [_, data, flag, string] = super::builtins::bind_method_arguments(
         "new",
         args,
@@ -322,4 +348,148 @@ fn read_chunks(ctx: &mut Context, file: Id, digest: Id, buf: Id, view: Option<Id
         ctx.heap.reserve_slot_or_request_collection();
         ctx.collect_garbage();
     }
+}
+
+/// Unbound descriptors validate the exact recipient before operating on its storage.
+pub(super) fn provider_method(
+    ctx: &mut Context,
+    class: &str,
+    method_name: &str,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Id> {
+    let short = class.rsplit_once('.').unwrap().1;
+    if method_name == "__new__" {
+        let Some((&receiver, rest)) = args.split_first() else {
+            return Err(Error::new(
+                "TypeError",
+                format!("{class}.__new__(): not enough arguments"),
+            ));
+        };
+        let ty = ctx.builtin(class);
+        if receiver != ty {
+            if ctx.builtin_type_name(receiver) != Some("type") {
+                return Err(Error::new(
+                    "TypeError",
+                    format!(
+                        "{class}.__new__(X): X is not a type object ({})",
+                        ctx.type_name(receiver)
+                    ),
+                ));
+            }
+            let found = ctx.class_name(receiver);
+            return Err(Error::new(
+                "TypeError",
+                format!("{class}.__new__({found}): {found} is not a subtype of {class}"),
+            ));
+        }
+        return ctx.call(ty, rest.to_vec(), kwargs.to_vec());
+    }
+    let Some((&receiver, rest)) = args.split_first() else {
+        return Err(Error::new(
+            "TypeError",
+            format!("unbound method {short}.{method_name}() needs an argument"),
+        ));
+    };
+    if ctx.type_name(receiver) != class {
+        return Err(Error::new(
+            "TypeError",
+            format!(
+                "descriptor '{method_name}' for '{class}' objects doesn't apply to a '{}' object",
+                ctx.type_name(receiver)
+            ),
+        ));
+    }
+    if let Some(attr @ ("name" | "block_size" | "digest_size")) = method_name.strip_prefix("get_") {
+        return ctx.lookup_attr(receiver, attr);
+    }
+    match method_name {
+        "copy" | "update" | "digest" | "hexdigest" => {
+            let xof = matches!(ctx.heap.get(receiver), Value::Hash(h) if h.borrow().is_xof());
+            if xof && matches!(method_name, "digest" | "hexdigest") {
+                return digest(ctx, method_name, args, kwargs);
+            }
+            if !kwargs.is_empty() {
+                return Err(Error::new(
+                    "TypeError",
+                    format!("{short}.{method_name}() takes no keyword arguments"),
+                ));
+            }
+            if method_name == "update" && rest.len() != 1 {
+                return Err(Error::new(
+                    "TypeError",
+                    format!(
+                        "{short}.update() takes exactly one argument ({} given)",
+                        rest.len()
+                    ),
+                ));
+            }
+            if method_name != "update" && !rest.is_empty() {
+                return Err(Error::new(
+                    "TypeError",
+                    format!(
+                        "{short}.{method_name}() takes no arguments ({} given)",
+                        rest.len()
+                    ),
+                ));
+            }
+            match method_name {
+                "copy" => method(ctx, "hash.copy", args),
+                "update" => method(ctx, "hash.update", args),
+                _ => digest(ctx, method_name, args, kwargs),
+            }
+        }
+        _ => Err(Error::new("AttributeError", method_name)),
+    }
+}
+
+pub(super) fn descriptor_get(
+    ctx: &mut Context,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Id> {
+    let (&descriptor, rest) = args
+        .split_first()
+        .ok_or_else(|| Error::new("TypeError", "expected a getset descriptor"))?;
+    let Value::GetSetDescriptor {
+        get, owner, name, ..
+    } = *ctx.heap.get(descriptor)
+    else {
+        return Err(Error::new("TypeError", "expected a getset descriptor"));
+    };
+    if !kwargs.is_empty() {
+        return Err(Error::new(
+            "TypeError",
+            "wrapper __get__() takes no keyword arguments",
+        ));
+    }
+    if rest.is_empty() {
+        return Err(Error::new(
+            "TypeError",
+            "__get__ expected at least 1 argument, got 0",
+        ));
+    }
+    if rest.len() > 2 {
+        return Err(Error::new(
+            "TypeError",
+            format!("__get__ expected at most 2 arguments, got {}", rest.len()),
+        ));
+    }
+    let receiver = rest[0];
+    if receiver == NONE {
+        if rest.get(1).copied().unwrap_or(NONE) == NONE {
+            return Err(Error::new("TypeError", "__get__(None, None) is invalid"));
+        }
+        return Ok(descriptor);
+    }
+    if HashState::is_provider_class(owner) && ctx.type_name(receiver) != owner {
+        return Err(Error::new(
+            "TypeError",
+            format!(
+                "descriptor '{name}' for '{owner}' objects doesn't apply to a '{}' object",
+                ctx.type_name(receiver)
+            ),
+        ));
+    }
+    ctx.call(get, vec![receiver], Vec::new())
 }
