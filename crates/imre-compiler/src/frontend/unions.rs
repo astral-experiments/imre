@@ -783,24 +783,31 @@ impl Checker<'_> {
         }
     }
 
-    /// An exact type check on an erased local can prove the native string layout.
-    pub(super) fn exact_object_text<'n>(
+    /// Recognize exact builtin type comparisons on a local with an erased payload.
+    pub(super) fn exact_object_type<'n>(
         &self,
         compare: &'n ast::ExprCompare,
-    ) -> Option<(&'n ast::Expr, bool)> {
+    ) -> Option<(&'n ast::Expr, KnownClass, bool)> {
         let [op @ (ast::CmpOp::Is | ast::CmpOp::IsNot)] = compare.ops.as_ref() else {
             return None;
         };
         let [left, right] = compare.operands.as_ref() else {
             return None;
         };
-        let (call, text) = if self.unshadowed_builtin(right, "str") {
-            (left.as_call_expr()?, right)
-        } else if self.unshadowed_builtin(left, "str") {
-            (right.as_call_expr()?, left)
+        let (call, name) = if let Some(call) = left.as_call_expr() {
+            (call, right)
         } else {
-            return None;
+            (right.as_call_expr()?, left)
         };
+        let identifier = name.as_name_expr()?.id.as_str();
+        let class = match identifier {
+            "str" => KnownClass::Str,
+            "tuple" => KnownClass::Tuple,
+            _ => return None,
+        };
+        if !self.unshadowed_builtin(name, identifier) {
+            return None;
+        }
         let [value] = call.arguments.args.as_ref() else {
             return None;
         };
@@ -818,11 +825,8 @@ impl Checker<'_> {
                 .graph
                 .session
                 .is_known_class(self.module, &call.func, KnownClass::Type)
-            && self
-                .graph
-                .session
-                .is_known_class(self.module, text, KnownClass::Str))
-        .then_some((value, *op == ast::CmpOp::Is))
+            && self.graph.session.is_known_class(self.module, name, class))
+        .then_some((value, class, *op == ast::CmpOp::Is))
     }
 
     /// A later walrus write invalidates earlier tests even inside the same and/or.
@@ -834,7 +838,8 @@ impl Checker<'_> {
     ) -> HashMap<String, Vec<(Vec<InstanceType>, bool)>> {
         match test {
             ast::Expr::Compare(compare)
-                if let Some((expr, positive)) = self.exact_object_text(compare)
+                if let Some((expr, KnownClass::Str, positive)) =
+                    self.exact_object_type(compare)
                     && let Some(name) = expr.as_name_expr() =>
             {
                 HashMap::from([(
