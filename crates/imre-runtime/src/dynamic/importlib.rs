@@ -258,6 +258,23 @@ impl Context {
                 format!("_imp.{method}() takes no keyword arguments"),
             ));
         }
+        if method == "extension_suffixes" {
+            if !args.is_empty() {
+                return Err(Error::new(
+                    "TypeError",
+                    format!(
+                        "_imp.extension_suffixes() takes no arguments ({} given)",
+                        args.len()
+                    ),
+                ));
+            }
+            let suffix = self.config["archive_suffix"]
+                .as_str()
+                .unwrap_or(".imre.a")
+                .to_owned();
+            let suffix = self.text(suffix);
+            return Ok(self.alloc(Value::List(vec![suffix])));
+        }
         let [arg] = args else {
             return Err(Error::new(
                 "TypeError",

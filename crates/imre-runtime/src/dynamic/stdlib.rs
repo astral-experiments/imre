@@ -464,6 +464,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         (
             "_imp",
             "is_frozen"
+            | "extension_suffixes"
             | "_override_frozen_modules_for_tests"
             | "_override_multi_interp_extensions_check",
         )
@@ -698,15 +699,6 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("os", "name") => ctx.text("posix"),
         ("posixpath", "sep") => ctx.text("/"),
         ("posixpath", "altsep") => NONE,
-        ("importlib.machinery", "EXTENSION_SUFFIXES") => {
-            let suffix = ctx.text(
-                ctx.config["archive_suffix"]
-                    .as_str()
-                    .unwrap_or(".imre.a")
-                    .to_owned(),
-            );
-            ctx.alloc(Value::List(vec![suffix]))
-        }
         ("operator", name)
             if matches!(name, "attrgetter" | "itemgetter")
                 || operator::Operation::named(name).is_some() =>

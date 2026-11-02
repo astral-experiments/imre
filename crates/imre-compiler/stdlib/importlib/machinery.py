@@ -1,11 +1,5 @@
-import sys
-
 from ._bootstrap import ModuleSpec
-from ._bootstrap_external import SourceFileLoader
-from importlib.machinery import EXTENSION_SUFFIXES
-
-SOURCE_SUFFIXES = [".py", ".pyw"] if sys.platform == "win32" else [".py"]
-BYTECODE_SUFFIXES = [".pyc"]
+from ._bootstrap_external import BYTECODE_SUFFIXES, EXTENSION_SUFFIXES, SOURCE_SUFFIXES, SourceFileLoader
 
 
 def all_suffixes():

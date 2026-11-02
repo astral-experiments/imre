@@ -1,3 +1,4 @@
+import _imp
 import importlib
 import os
 import sys
@@ -42,6 +43,12 @@ with fresh_imports("_frozen_importlib", "_frozen_importlib_external"):
     assert machinery.ModuleSpec is core.ModuleSpec and machinery.ModuleSpec is not frozen_machinery.ModuleSpec
     assert machinery.SourceFileLoader is external.SourceFileLoader
     assert machinery.SourceFileLoader is not frozen_machinery.SourceFileLoader
+    for key in ("SOURCE_SUFFIXES", "BYTECODE_SUFFIXES", "EXTENSION_SUFFIXES"):
+        assert getattr(machinery, key) is getattr(external, key)
+        assert getattr(frozen_machinery, key) is getattr(_frozen_importlib_external, key)
+        assert getattr(machinery, key) is not getattr(frozen_machinery, key)
+    ext = _imp.extension_suffixes()
+    assert ext == machinery.EXTENSION_SUFFIXES and ext is not machinery.EXTENSION_SUFFIXES
     with warnings.catch_warnings():
         warnings.filterwarnings("error", category=DeprecationWarning,
                                 module=r"^importlib[.]_bootstrap_external$", lineno=258)

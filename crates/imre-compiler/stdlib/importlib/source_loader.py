@@ -1,5 +1,6 @@
 """Load Python modules from registered code or filesystem source."""
 
+import _imp
 import sys
 
 from _imre_importlib import (
@@ -13,6 +14,11 @@ from _imre_importlib import (
     warn_loader_deprecation as _warn_loader_deprecation,
 )
 from os import fspath as _fspath, sep
+
+
+SOURCE_SUFFIXES = [".py", ".pyw"] if sys.platform == "win32" else [".py"]
+BYTECODE_SUFFIXES = [".pyc"]
+EXTENSION_SUFFIXES = _imp.extension_suffixes()
 
 
 _is_frozen = __name__ == "_frozen_importlib_external"
