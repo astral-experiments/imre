@@ -154,9 +154,6 @@ impl Sparse {
     }
 
     pub(super) fn get(&self, at: usize, width: usize) -> Option<&[usize]> {
-        if self.len == 0 || at < self.first || at > self.last {
-            return None;
-        }
         let (key, bit) = position(at);
         let block = self.block(key)?;
         if block.mask & bit == 0 {
@@ -415,6 +412,7 @@ impl Overrides {
 
     pub(super) fn get(&self, at: usize, width: usize) -> Option<&[usize]> {
         match self {
+            Self::Sparse(edits) if edits.len == 0 || at < edits.first || at > edits.last => None,
             Self::Sparse(edits) => edits.get(at, width),
             Self::Binary(edits) => edits.contains(at).then_some(edits.row.as_slice()),
         }
