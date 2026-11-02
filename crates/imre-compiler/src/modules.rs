@@ -1380,6 +1380,9 @@ impl IntrinsicModule {
                 Intrinsic::NominalClass("collections.abc.MutableMapping")
             }
             (Self::AnnotationLib, "ForwardRef") => Intrinsic::ForwardRef,
+            (Self::AnnotationLib, "annotations_to_string") => {
+                Intrinsic::ObjectRuntimeExport("annotationlib.annotations_to_string")
+            }
             (Self::AnnotationLib, "get_annotations") => Intrinsic::GetAnnotations,
             (Self::AnnotationLib, "type_repr") => Intrinsic::AnnotationTypeRepr,
             (Self::AnnotationFormat, "VALUE") => Intrinsic::AnnotationFormat(1),
