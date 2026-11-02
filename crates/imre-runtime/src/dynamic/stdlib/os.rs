@@ -364,6 +364,7 @@ pub(super) fn is_descriptor_function(name: &str) -> bool {
             | "read"
             | "write"
             | "close"
+            | "closerange"
             | "get_blocking"
             | "set_blocking"
             | "get_inheritable"
@@ -912,6 +913,18 @@ pub(super) fn descriptor(
                 }
             })
         };
+    }
+    if name == "closerange" {
+        let [low, high] = args else {
+            return Err(Error::new(
+                "TypeError",
+                format!("closerange expected 2 arguments, got {}", args.len()),
+            ));
+        };
+        let low = c_int(ctx, *low)?;
+        let high = c_int(ctx, *high)?;
+        native::close_range(low, high);
+        return Ok(NONE);
     }
     if name == "ftruncate" {
         let [fd, length] = args else {
