@@ -1621,6 +1621,21 @@ impl Checker<'_> {
             ([], [keyword]) if keyword.arg.as_ref().is_some_and(|name| name == "args") => {
                 Some(&keyword.value)
             }
+            (args, keywords)
+                if !args.iter().any(ast::Expr::is_starred_expr)
+                    && match (args.len(), keywords.len()) {
+                        (2, 0) => true,
+                        (0 | 1, 1) => keywords[0].arg.as_deref() == Some("namespace"),
+                        (0, 2) => {
+                            call.arguments.find_keyword("args").is_some()
+                                && call.arguments.find_keyword("namespace").is_some()
+                        }
+                        _ => false,
+                    } =>
+            {
+                // A supplied namespace keeps its identity and existing attributes.
+                return Err(self.scoped_builtin_error(method, call));
+            }
             _ => {
                 return Err(error(
                     self.source,
