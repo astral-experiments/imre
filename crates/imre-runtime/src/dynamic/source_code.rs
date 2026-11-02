@@ -2606,7 +2606,7 @@ impl Context {
     }
 
     /// Attach the filename after tokenization, just as compile does for string input.
-    fn source_decode_error(
+    pub(super) fn source_decode_error(
         &mut self,
         error: crate::objects::SourceDecodeError,
         filename: Id,
@@ -2635,7 +2635,7 @@ impl Context {
             let lineno = range.as_ref().map_or(0, |r| r.line);
             let name = self
                 .str_value(filename)
-                .expect("compile validated its filename");
+                .expect("source filename was validated");
             let basename = name
                 .rsplit(std::path::MAIN_SEPARATOR)
                 .next()
