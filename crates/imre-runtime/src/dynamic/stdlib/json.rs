@@ -7,7 +7,7 @@ pub(super) use scanstring::scanstring;
 
 use std::collections::HashMap;
 
-use super::{Context, Error, FALSE, Id, NONE, Result, TRUE, Value};
+use super::{Context, Error, FALSE, Id, NONE, Result, TRUE, Value, required_args};
 use crate::objects::{
     DecodedJson, JsonNumber, JsonTokenError, decode_json_tokens_at, write_json_codepoints,
     write_json_fragment, write_json_string,
@@ -360,7 +360,7 @@ pub(super) fn encoder_call(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id
     else {
         return Err(bad_state());
     };
-    let argument = encoder_state::required_args(
+    let argument = required_args(
         "_iterencode",
         positional,
         kwargs,
