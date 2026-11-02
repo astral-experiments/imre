@@ -2236,7 +2236,7 @@ impl Context {
                 if ((builtins::is_builtin_type(class) && !class.contains('.'))
                     || matches!(
                         class.as_str(),
-                        "function" | "traceback" | "frame" | "mappingproxy"
+                        "cell" | "function" | "traceback" | "frame" | "mappingproxy"
                     ))
                     && matches!(name, "__name__" | "__qualname__" | "__module__") =>
             {

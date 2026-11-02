@@ -70,6 +70,7 @@ def make():
 
 def current():
     assert CellType is types.CellType
+    assert (CellType.__module__, CellType.__name__, CellType.__qualname__) == ("builtins", "cell", "cell")
     empty = CellType()
     assert type(empty) is CellType
     try:
