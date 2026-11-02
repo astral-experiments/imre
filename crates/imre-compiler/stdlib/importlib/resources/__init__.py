@@ -45,6 +45,18 @@ def _get_resource(anchor, path_names):
     return files(anchor).joinpath(*path_names)
 
 
+def open_binary(anchor, *path_names):
+    """Open for binary reading the *resource* within *package*."""
+    return _get_resource(anchor, path_names).open('rb')
+
+
+def open_text(anchor, *path_names, encoding=_missing, errors='strict'):
+    """Open for text reading the *resource* within *package*."""
+    encoding = _get_encoding_arg(path_names, encoding)
+    resource = _get_resource(anchor, path_names)
+    return resource.open('r', encoding=encoding, errors=errors)
+
+
 def read_binary(anchor, *path_names):
     """Read and return contents of *resource* within *package* as bytes."""
     return _get_resource(anchor, path_names).read_bytes()
@@ -52,11 +64,16 @@ def read_binary(anchor, *path_names):
 
 def read_text(anchor, *path_names, encoding=_missing, errors='strict'):
     """Read a text resource, defaulting to UTF-8 for a single path component."""
+    encoding = _get_encoding_arg(path_names, encoding)
+    return _get_resource(anchor, path_names).read_text(encoding=encoding, errors=errors)
+
+
+def _get_encoding_arg(path_names, encoding):
     if encoding is _missing:
         if len(path_names) > 1:
             raise TypeError("'encoding' argument required with multiple path names")
-        encoding = 'utf-8'
-    return _get_resource(anchor, path_names).read_text(encoding=encoding, errors=errors)
+        return 'utf-8'
+    return encoding
 
 
 def path(anchor, *path_names):
