@@ -1,4 +1,4 @@
-use super::super::value::Hmac;
+use super::super::value::{Hmac, NOT_IMPLEMENTED};
 use super::{Context, Error, FALSE, Id, NONE, Result, TRUE, Value, argument, option};
 use crate::objects::HashState;
 use crate::objects::hmac::{compare_bytes, compare_text};
@@ -97,6 +97,46 @@ pub(super) fn new(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Re
         digest_size,
         block_size,
     })))
+}
+
+/// Called for strings and built-in functions, before Python tries its other providers.
+pub(super) fn digest_native(ctx: &mut Context, args: &[Id]) -> Result<Id> {
+    let key = argument(args, 0)?;
+    let msg = argument(args, 1)?;
+    let digest = argument(args, 2)?;
+    // Argument Clinic acquires both buffers before it checks the supplied constructor.
+    ctx.check_buffer_exporter(key)?;
+    let key = ctx.native_buffer_bytes(key)?;
+    ctx.check_buffer_exporter(msg)?;
+    let msg = ctx.native_buffer_bytes(msg)?;
+    if i32::try_from(key.len()).is_err() || i32::try_from(msg.len()).is_err() {
+        return Err(Error::new("OverflowError", "HMAC input is too long"));
+    }
+    let name = match ctx.heap.get(ctx.scalar_value(digest)) {
+        Value::Str(name) => name.as_str(),
+        Value::Native(symbol)
+            if ctx.builtins.get(symbol) == Some(&digest)
+                && let Some(name) = symbol.strip_prefix("_hashlib.openssl_")
+                && super::hashlib::digest::NAMES.contains(&name) =>
+        {
+            name
+        }
+        // These five public built-ins are separate native objects in Imre.
+        // Try their configured provider; a failed lookup calls the supplied object in Python.
+        Value::Native(symbol)
+            if let Some(name) = symbol.strip_prefix("hashlib.")
+                && matches!(name, "sha1" | "sha224" | "sha256" | "sha384" | "sha512") =>
+        {
+            name
+        }
+        _ => return Ok(NOT_IMPLEMENTED),
+    };
+    if let Some(provider) = super::hashlib::openssl::provider()
+        && let Some(mac) = provider.hmac(name, key, msg)?
+    {
+        return Ok(ctx.alloc(Value::Bytes(mac)));
+    }
+    Ok(NOT_IMPLEMENTED)
 }
 
 pub(super) fn method(ctx: &mut Context, name: &str, args: &[Id]) -> Result<Id> {
