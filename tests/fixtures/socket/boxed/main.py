@@ -3,3 +3,4 @@ sys.path
 import transport
 import stream
 import ipv6_stream
+import dualstack

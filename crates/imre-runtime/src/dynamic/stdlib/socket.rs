@@ -2,39 +2,57 @@
 use super::{Context, Error, Id, NONE, Result, Value, argument, option};
 use crate::objects::socket as native;
 
+const CONSTANTS: &[(&str, i32)] = &[
+    ("AF_INET", libc::AF_INET),
+    ("AF_INET6", libc::AF_INET6),
+    ("AF_UNSPEC", libc::AF_UNSPEC),
+    ("AF_UNIX", libc::AF_UNIX),
+    ("SOCK_STREAM", libc::SOCK_STREAM),
+    ("SOL_SOCKET", libc::SOL_SOCKET),
+    ("IPPROTO_TCP", libc::IPPROTO_TCP),
+    ("IPPROTO_IPV6", libc::IPPROTO_IPV6),
+    ("IPV6_V6ONLY", libc::IPV6_V6ONLY),
+    ("SO_REUSEADDR", libc::SO_REUSEADDR),
+    ("SO_SNDBUF", libc::SO_SNDBUF),
+    ("TCP_NODELAY", libc::TCP_NODELAY),
+    ("SHUT_RD", libc::SHUT_RD),
+    ("SHUT_WR", libc::SHUT_WR),
+    ("SHUT_RDWR", libc::SHUT_RDWR),
+    ("SOMAXCONN", libc::SOMAXCONN),
+];
+
+/// Seed the low-level module once so normal module assignment and deletion remain observable.
+pub(in super::super) fn install_lowlevel_socket(ctx: &mut Context, scope: Id) -> Result<()> {
+    for &(name, value) in CONSTANTS {
+        let value = ctx.int(i64::from(value));
+        ctx.bind(scope, name, value);
+    }
+    for name in ["has_ipv6", "socket", "error"] {
+        let value = attribute(ctx, name)?;
+        ctx.bind(scope, name, value);
+    }
+    Ok(())
+}
+
 pub(super) fn attribute(ctx: &mut Context, name: &str) -> Result<Id> {
-    let value = match name {
+    if let Some(&(_, value)) = CONSTANTS.iter().find(|&&(key, _)| key == name) {
+        return Ok(ctx.int(i64::from(value)));
+    }
+    match name {
         // IPv6 is compiled in on the supported Linux and macOS targets, independently of
         // whether a particular process can create or bind an IPv6 socket.
-        "has_ipv6" => return Ok(super::TRUE),
-        "AF_INET" => libc::AF_INET,
-        "AF_INET6" => libc::AF_INET6,
-        "AF_UNSPEC" => libc::AF_UNSPEC,
-        "AF_UNIX" => libc::AF_UNIX,
-        "SOCK_STREAM" => libc::SOCK_STREAM,
-        "SOL_SOCKET" => libc::SOL_SOCKET,
-        "IPPROTO_TCP" => libc::IPPROTO_TCP,
-        "SO_REUSEADDR" => libc::SO_REUSEADDR,
-        "SO_SNDBUF" => libc::SO_SNDBUF,
-        "TCP_NODELAY" => libc::TCP_NODELAY,
-        "SHUT_RD" => libc::SHUT_RD,
-        "SHUT_WR" => libc::SHUT_WR,
-        "SHUT_RDWR" => libc::SHUT_RDWR,
-        "SOMAXCONN" => libc::SOMAXCONN,
-        "socket" => return Ok(ctx.builtin("socket.socket")),
+        "has_ipv6" => Ok(super::TRUE),
+        "socket" => Ok(ctx.builtin("socket.socket")),
         "getaddrinfo" | "getfqdn" | "gaierror" => {
-            return Ok(ctx.alloc(Value::Native(format!("socket.{name}"))));
+            Ok(ctx.alloc(Value::Native(format!("socket.{name}"))))
         }
-        "error" => return Ok(ctx.alloc(Value::Native("OSError".into()))),
-        "timeout" => return Ok(ctx.alloc(Value::Native("TimeoutError".into()))),
-        _ => {
-            return Err(Error::new(
-                "AttributeError",
-                format!("module 'socket' has no attribute '{name}'"),
-            ));
-        }
-    };
-    Ok(ctx.int(i64::from(value)))
+        "error" => Ok(ctx.builtin("OSError")),
+        "timeout" => Ok(ctx.alloc(Value::Native("TimeoutError".into()))),
+        _ => Err(Error::new(
+            "AttributeError",
+            format!("module 'socket' has no attribute '{name}'"),
+        )),
+    }
 }
 
 fn integer(ctx: &Context, id: Id) -> Result<i32> {

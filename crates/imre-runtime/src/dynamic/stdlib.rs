@@ -28,6 +28,7 @@ pub(super) mod itertools;
 pub(super) mod tempfile;
 mod time;
 pub(super) use files::{BinaryFile, ReadSource};
+pub(super) use socket::install_lowlevel_socket;
 pub(super) mod io;
 mod json;
 mod logging;
@@ -155,6 +156,7 @@ pub(super) fn has_lazy_attributes(name: &str) -> bool {
             | "warnings"
             | "subprocess"
             | "socket"
+            | "_socket"
             | "urllib"
             | "urllib.parse"
     )

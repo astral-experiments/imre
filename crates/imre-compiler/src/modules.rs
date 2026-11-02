@@ -369,6 +369,7 @@ pub(crate) enum IntrinsicModule {
     Thread,
     Codecs,
     Socket,
+    SocketNative,
     Hashlib,
     Hmac,
     Types,
@@ -825,6 +826,7 @@ impl IntrinsicModule {
             "_thread" => Some(Self::Thread),
             "codecs" => Some(Self::Codecs),
             "socket" => Some(Self::Socket),
+            "_socket" => Some(Self::SocketNative),
             "hashlib" => Some(Self::Hashlib),
             "hmac" => Some(Self::Hmac),
             "base64" => Some(Self::Base64),
@@ -1305,6 +1307,33 @@ impl IntrinsicModule {
             (Self::Codecs, "BOM_UTF16_BE") => Intrinsic::CodecBom(b"\xfe\xff"),
             (Self::Codecs, "BOM_UTF32_LE") => Intrinsic::CodecBom(b"\xff\xfe\0\0"),
             (Self::Codecs, "BOM_UTF32_BE") => Intrinsic::CodecBom(b"\0\0\xfe\xff"),
+            (Self::SocketNative, name) => Intrinsic::ObjectRuntimeExport(match name {
+                "has_ipv6" => "_socket.has_ipv6",
+                "AF_INET" => "_socket.AF_INET",
+                "AF_INET6" => "_socket.AF_INET6",
+                "AF_UNSPEC" => "_socket.AF_UNSPEC",
+                "AF_UNIX" => "_socket.AF_UNIX",
+                "SOCK_STREAM" => "_socket.SOCK_STREAM",
+                "SOL_SOCKET" => "_socket.SOL_SOCKET",
+                "IPPROTO_TCP" => "_socket.IPPROTO_TCP",
+                "IPPROTO_IPV6" => "_socket.IPPROTO_IPV6",
+                "IPV6_V6ONLY" => "_socket.IPV6_V6ONLY",
+                "SO_REUSEADDR" => "_socket.SO_REUSEADDR",
+                "SO_SNDBUF" => "_socket.SO_SNDBUF",
+                "TCP_NODELAY" => "_socket.TCP_NODELAY",
+                "SHUT_RD" => "_socket.SHUT_RD",
+                "SHUT_WR" => "_socket.SHUT_WR",
+                "SHUT_RDWR" => "_socket.SHUT_RDWR",
+                "SOMAXCONN" => "_socket.SOMAXCONN",
+                "socket" => "_socket.socket",
+                "error" => "_socket.error",
+                _ => return None,
+            }),
+            (Self::Socket, "has_dualstack_ipv6") => {
+                Intrinsic::ObjectRuntimeExport("socket.has_dualstack_ipv6")
+            }
+            (Self::Socket, "IPPROTO_IPV6") => Intrinsic::ObjectRuntimeExport("socket.IPPROTO_IPV6"),
+            (Self::Socket, "IPV6_V6ONLY") => Intrinsic::ObjectRuntimeExport("socket.IPV6_V6ONLY"),
             (Self::Socket, "has_ipv6") => Intrinsic::ObjectRuntimeExport("socket.has_ipv6"),
             (Self::Socket, "AF_INET6") => Intrinsic::ObjectRuntimeExport("socket.AF_INET6"),
             (Self::Socket, "getfqdn") => Intrinsic::SocketGetFqdn,
@@ -3543,6 +3572,7 @@ impl<'a> Loader<'a> {
             self.needs_object_imports |= matches!(
                 module,
                 IntrinsicModule::Ast
+                    | IntrinsicModule::SocketNative
                     | IntrinsicModule::Imp
                     | IntrinsicModule::ImportlibBootstrapExternal
             );
