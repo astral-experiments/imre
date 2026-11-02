@@ -7,7 +7,7 @@ from _collections_abc import _check_methods
 from _collections_abc import Mapping as _Mapping, MutableMapping as _MutableMapping
 from posix import _create_environ, access, environ as _environ, fspath, getcwd, getcwdb, getppid, kill, listdir, mkdir, putenv, read, scandir, terminal_size, unsetenv, waitpid, write, WNOHANG
 from types import GenericAlias
-from posix import O_NONBLOCK, O_RDONLY, chdir, close, open, stat
+from posix import O_NONBLOCK, O_RDONLY, chdir, close, open, rmdir, stat
 
 try:
     from posix import waitstatus_to_exitcode
@@ -307,6 +307,29 @@ def get_exec_path(env=None):
     if path_list is None:
         path_list = defpath
     return path_list.split(pathsep)
+
+
+def removedirs(name):
+    """removedirs(name)
+
+    Super-rmdir; remove a leaf directory and all empty intermediate
+    ones.  Works like rmdir except that, if the leaf directory is
+    successfully removed, directories corresponding to rightmost path
+    segments will be pruned away until either the whole path is
+    consumed or an error occurs.  Errors during this latter phase are
+    ignored -- they generally mean that a directory was not empty.
+
+    """
+    rmdir(name)
+    head, tail = path.split(name)
+    if not tail:
+        head, tail = path.split(head)
+    while head and tail:
+        try:
+            rmdir(head)
+        except OSError:
+            break
+        head, tail = path.split(head)
 
 
 def fsencode(filename):
