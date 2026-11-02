@@ -5602,13 +5602,6 @@ impl Context {
         if typed_dict_meta.is_none() {
             super::typing::class_parameters(self, scope, original, &bases)?;
         }
-        // type.__new__ implicitly wraps only plain functions stored under this name.
-        if let Some(function) = self.scope_name(scope, "__init_subclass__")
-            && matches!(self.heap.get(function), Value::Function { .. })
-        {
-            let method = self.alloc(Value::ClassMethod(function));
-            self.bind_local(scope, "__init_subclass__", method);
-        }
         let class = self.allocate_class(name.clone(), scope, bases)?;
         let Value::Class { metaclass, .. } = self.heap.get_mut(class) else {
             unreachable!()
