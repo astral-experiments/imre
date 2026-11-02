@@ -122,6 +122,11 @@ impl Array {
         self.bytes.as_slice()
     }
 
+    /// Detach a copied array before mutating its fixed-size native representation.
+    pub(super) fn as_bytes_mut(&mut self) -> Result<&mut [u8]> {
+        Ok(self.writable_bytes(0)?.as_mut_slice())
+    }
+
     pub(super) fn view_layout(&self) -> (&'static str, usize) {
         (self.format.code(), self.format.width())
     }

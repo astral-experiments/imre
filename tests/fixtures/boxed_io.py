@@ -1,3 +1,4 @@
+from array import array
 import gc
 import io
 import sys
@@ -399,6 +400,21 @@ def exercise(path):
                 raise AssertionError("writelines accepted zero arguments")
     with open(path + ".writelines", "rb") as reader:
         assert reader.read() == b"prefix!"
+
+    with open(path + ".array", "wb") as writer:
+        writer.write(b"abc")
+    target = array("i", b"x" * 8)
+    independent = array("i", target)
+    view = memoryview(target)
+    with open(path + ".array", "rb") as reader:
+        assert reader.readinto(target) == 3
+        assert bytes(view) == b"abcxxxxx"
+        reader.seek(1)
+        assert reader.readinto(view) == 2
+        assert reader.readinto(view) == 0
+    assert target.tobytes() == b"bccxxxxx"
+    view.release()
+    assert independent.tobytes() == b"xxxxxxxx"
 
     lines = path + ".lines"
     with open(lines, "w") as output:
