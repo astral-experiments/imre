@@ -310,10 +310,8 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
         )),
         "socketserver" => Some((
             "socketserver.py",
-            concat!(
-                include_str!("../stdlib/socketserver.py"),
-                "\n",
-                include_str!("../stdlib/socketserver_threading.py"),
+            include_str!(
+                "../../../benchmarks/cpython_stdlib/full/socketserver/upstream/Lib/socketserver.py"
             ),
         )),
         // CPython 3.14.5 Lib/string/__init__.py, blob eab5067c9b133ea1210efacd92eb5f69c2336236.
