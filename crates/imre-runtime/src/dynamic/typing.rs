@@ -1655,6 +1655,18 @@ pub(super) fn call(
             Value::Union(u) => u.args,
             _ => ctx.alloc(Value::Tuple(vec![])),
         }),
+        ("Union.__origin__", [receiver]) => {
+            ctx.read_member("typing.Union", "__origin__", *receiver)
+        }
+        ("Union.__parameters__", [receiver]) => {
+            ctx.read_member("typing.Union", "__parameters__", *receiver)
+        }
+        ("Union.__mro_entries__", [id, _]) if matches!(ctx.heap.get(*id), Value::Union(_)) => {
+            Err(Error::new(
+                "TypeError",
+                format!("Cannot subclass {}", ctx.checked_format(*id, true)?),
+            ))
+        }
         ("alias_mro_entries", [id, bases]) => alias_bases(ctx, *id, *bases),
         ("overload", [v]) => {
             if let Some((key, line)) = ctx.overload_key(*v) {
@@ -2084,6 +2096,12 @@ impl Context {
         layout: ClassLayout,
     ) -> Result<Vec<Id>> {
         for &base in &bases {
+            if self.classes.get("typing.Union") == Some(&base) {
+                return Err(Error::new(
+                    "TypeError",
+                    "type 'typing.Union' is not an acceptable base type",
+                ));
+            }
             if matches!(self.heap.get(base), Value::Native(name) if name == "typing._UnpackGenericAlias")
             {
                 return Err(Error::new(

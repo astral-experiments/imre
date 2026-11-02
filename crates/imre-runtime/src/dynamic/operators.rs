@@ -1788,6 +1788,16 @@ impl Context {
                         append_rendered_text(&mut output, "[")?;
                         push_frame(&mut work, Part::Text("]"))?;
                         push_frame(&mut work, Part::TypeList(id, 0, items.len()))?;
+                    } else if let Value::Function { fields, .. } = ctx.heap.get(id)
+                        && fields.module != NONE
+                        && (ctx.dict_named_item(fields.dict, "__origin__").is_none()
+                            || ctx.dict_named_item(fields.dict, "__args__").is_none())
+                    {
+                        push_frame(&mut work, Part::Value(fields.qualname, false))?;
+                        if ctx.str_value(fields.module).ok() != Some("builtins") {
+                            push_frame(&mut work, Part::Text("."))?;
+                            push_frame(&mut work, Part::Value(fields.module, false))?;
+                        }
                     } else if !typing::append_type_label(&ctx, id, &mut output)? {
                         push_frame(&mut work, Part::Value(id, true))?;
                     }

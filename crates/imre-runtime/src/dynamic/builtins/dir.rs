@@ -47,6 +47,7 @@ fn object_names(ctx: &mut Context, object: Id) -> Result<Id> {
         Value::Class { .. } | Value::Native(_) => object,
         Value::Count { .. }
         | Value::Repeat(_)
+        | Value::Union(_)
         | Value::Dict(_)
         | Value::List(_)
         | Value::Str(_)
