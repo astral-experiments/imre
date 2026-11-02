@@ -638,7 +638,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             | "realpath_parts" | "realpath_parent" | "realpath_kind" | "realpath_readlink"
             | "realpath_notdir" | "realpath_loop",
         )
-        | ("_imre_zipimport", "exists" | "index" | "read" | "contains")
+        | ("_imre_zipimport", "exists" | "index" | "read" | "contains" | "invalidate")
         | ("platform", "system" | "node" | "release" | "version" | "machine" | "mac_ver")
         | ("struct", "Struct" | "calcsize" | "unpack" | "error")
         | ("base64", "urlsafe_b64encode" | "urlsafe_b64decode")

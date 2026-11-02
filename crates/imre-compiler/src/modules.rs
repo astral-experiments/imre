@@ -995,6 +995,9 @@ impl IntrinsicModule {
             (Self::Importlib, "import_module") => {
                 Intrinsic::RegisteredImport("importlib.import_module")
             }
+            (Self::Importlib, "invalidate_caches") => {
+                Intrinsic::ObjectRuntimeExport("importlib.invalidate_caches")
+            }
             (Self::ImportlibMetadata, "PackageNotFoundError") => Intrinsic::PackageNotFoundError,
             (Self::ImportlibMetadata, "entry_points") => {
                 Intrinsic::Declaration("importlib.metadata.entry_points")
