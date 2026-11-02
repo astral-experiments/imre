@@ -49,6 +49,29 @@ def path(anchor, *path_names):
     return as_file(_get_resource(anchor, path_names))
 
 
+def is_resource(anchor, *path_names):
+    """Return ``True`` if there is a resource named *name* in the package,
+
+    Otherwise returns ``False``.
+    """
+    return _get_resource(anchor, path_names).is_file()
+
+
+def contents(anchor, *path_names):
+    """Return an iterable over the named resources within the package.
+
+    The iterable returns :class:`str` resources (e.g. files).
+    The iterable does not recurse into subdirectories.
+    """
+    warnings.warn(
+        "importlib.resources.contents is deprecated. "
+        "Use files(anchor).iterdir() instead.",
+        DeprecationWarning,
+        stacklevel=1,
+    )
+    return (resource.name for resource in _get_resource(anchor, path_names).iterdir())
+
+
 def as_file(path):
     """Provide a pathlib.Path for the duration of a context manager."""
     from importlib.resources._as_file import as_file as materialize
