@@ -154,6 +154,7 @@ impl BuiltinDescriptor {
             Some((class, attr)) if let Some(layout) = stdlib::os::stat::layout(class) => {
                 Some((layout.class, attr, &["__reduce__"][..]))
             }
+            Some((namespace::CLASS, attr)) => Some((namespace::CLASS, attr, &["__replace__"][..])),
             Some(("typing.TypeAliasType", attr)) => {
                 Some(("typing.TypeAliasType", attr, &["__reduce__"][..]))
             }
@@ -356,9 +357,7 @@ impl BuiltinDescriptor {
             "function" => matches!(ctx.heap.get(receiver), Value::Function { .. }),
             "classmethod" => matches!(ctx.heap.get(receiver), Value::ClassMethod { .. }),
             "functools.KeyWrapper" => matches!(ctx.heap.get(receiver), Value::KeyWrapper { .. }),
-            super::namespace::CLASS => {
-                ctx.instance_of(receiver, ctx.classes[super::namespace::CLASS])
-            }
+            super::namespace::CLASS => namespace::instance_class(ctx, receiver).is_some(),
             "frame" => matches!(ctx.heap.get(receiver), Value::PythonFrame { .. }),
             "BaseException" => matches!(ctx.heap.get(receiver), Value::Raised(_)),
             class @ (stdlib::fixed_structseq::SCHED_PARAM
@@ -426,6 +425,12 @@ impl BuiltinDescriptor {
                     ("__length_hint__", _) => "Private method returning an estimate of len(list(it)).",
                     _ => "Return state information for pickling.",
                 })
+            }
+            "__doc__" if self.owner == namespace::CLASS && self.name == "__replace__" => ctx.text(
+                "Return a copy of the namespace object with new values for the specified attributes.",
+            ),
+            "__text_signature__" if self.owner == namespace::CLASS && self.name == "__replace__" => {
+                ctx.text("($self, /, **changes)")
             }
             "__doc__" | "__text_signature__" if self.owner == defaultdict::CLASS => {
                 let (doc, signature) = defaultdict::metadata(self.name)?;
