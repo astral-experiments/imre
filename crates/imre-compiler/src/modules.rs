@@ -1951,6 +1951,8 @@ impl IntrinsicModule {
             (Self::Typing, "VT") => Intrinsic::ObjectRuntimeExport("typing.VT"),
             (Self::Typing, "Type") => Intrinsic::ObjectRuntimeExport("typing.Type"),
             (Self::Typing, "Tuple") => Intrinsic::ObjectRuntimeExport("typing.Tuple"),
+            (Self::Typing, "Set") => Intrinsic::ObjectRuntimeExport("typing.Set"),
+            (Self::Typing, "FrozenSet") => Intrinsic::ObjectRuntimeExport("typing.FrozenSet"),
             (Self::Typing, "Dict") => Intrinsic::ObjectRuntimeExport("typing.Dict"),
             (Self::Typing, "Generator") => Intrinsic::ObjectRuntimeExport("typing.Generator"),
             (Self::Typing, "Reversible") => Intrinsic::ObjectRuntimeExport("typing.Reversible"),
