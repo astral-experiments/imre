@@ -2151,6 +2151,7 @@ def report(text):
             "boxed_itertools_count.py",
             "boxed_enum_descriptors.py",
             "boxed_enum_auto.py",
+            "boxed_global_enum.py",
             "boxed_float_enum.py",
             "boxed_print_streams.py",
             "boxed_redirect_streams.py",

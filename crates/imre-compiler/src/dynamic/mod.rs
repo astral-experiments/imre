@@ -729,6 +729,7 @@ pub(crate) fn compile(
         "codecs",
         "copyreg",
         "datetime",
+        "enum",
         "genericpath",
         "hashlib",
         "itertools",
