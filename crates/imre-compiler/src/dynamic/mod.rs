@@ -65,9 +65,7 @@ fn literal_path(expr: &Expr) -> Option<PathBuf> {
 // Ordinary files keep their typed ModuleSpec diagnostics unless the graph
 // requests the source importer. Explicit runtime imports can use the boxed class.
 fn typed_machinery_export(name: &str) -> bool {
-    crate::modules::IntrinsicModule::ImportlibMachinery
-        .symbol(name)
-        .is_some()
+    name == "ModuleSpec"
 }
 
 impl Imports {
