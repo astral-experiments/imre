@@ -30,7 +30,7 @@ if sys.platform == "linux":
     from posix import RWF_APPEND, RWF_DSYNC, RWF_HIPRI, RWF_NOWAIT, RWF_SYNC, preadv, pwritev
     from posix import SPLICE_F_MORE, SPLICE_F_MOVE, SPLICE_F_NONBLOCK, splice
     import posix as _posix
-    from posix import O_NOCTTY, get_terminal_size, pipe2, ptsname, readv, writev
+    from posix import O_NOCTTY, get_terminal_size, pipe2, ptsname, readv, ttyname, writev
     for _name in vars(_posix):
         if _name.startswith("RTLD_") or _name.startswith("POSIX_SPAWN_") or _name in (
             "posix_spawn", "posix_spawnp", "sched_get_priority_min", "sched_get_priority_max", "sched_yield",
