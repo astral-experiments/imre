@@ -27,7 +27,7 @@ pub(super) fn construct(
                 "Template.__new__ only accepts *args arguments",
             ));
         }
-        return ctx.template_literal(args);
+        return ctx.template_from_parts(args);
     }
     let [value, expression, conversion, format_spec] =
         builtins::bind_builtin_arguments("Interpolation", args, kwargs, INTERPOLATION_FIELDS, 1)?;
@@ -96,7 +96,7 @@ impl Context {
         self.concat_strings(left, right)
     }
 
-    pub(super) fn template_literal(&mut self, parts: &[Id]) -> Result<Id> {
+    fn template_from_parts(&mut self, parts: &[Id]) -> Result<Id> {
         let empty = self.heap.string_literal("")?;
         let mut strings = Vec::new();
         let mut interpolations = Vec::new();

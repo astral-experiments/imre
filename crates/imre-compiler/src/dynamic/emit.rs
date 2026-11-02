@@ -18,7 +18,6 @@ declare ptr @imre_dyn_new(i32, ptr, ptr)
 declare void @imre_dyn_register(ptr, ptr, ptr, ptr)
 declare i32 @imre_dyn_finish(ptr)
 declare i64 @imre_dyn_lit(ptr, i32, ptr, i64)
-declare i64 @imre_dyn_op(ptr, ptr, i64, i64, i64)
 declare i64 @imre_dyn_def_from_site(ptr, ptr, i64, i64, i64, i64, i64, i64, i64, i1)
 declare void @imre_dyn_generator_body(ptr, i64, ptr, i32)
 declare i1 @imre_dyn_failed(ptr)
@@ -393,19 +392,13 @@ impl Function<'_, '_> {
     fn op_at(&mut self, name: &str, args: &[&str], span: Option<[usize; 4]>) -> String {
         let op = self.output.data(name.as_bytes());
         let arg = |index| *args.get(index).unwrap_or(&"0");
-        let fixed = format!(
-            "ptr %ctx, ptr {op}, i64 {}, i64 {}, i64 {}",
+        let position = span.map_or_else(|| "null".into(), |span| self.output.position(span));
+        self.checked(&format!(
+            "call i64 @imre_dyn_op_at(ptr %ctx, ptr {op}, i64 {}, i64 {}, i64 {}, ptr {position})",
             arg(0),
             arg(1),
             arg(2)
-        );
-        let invocation = if let Some(span) = span {
-            let position = self.output.position(span);
-            format!("call i64 @imre_dyn_op_at({fixed}, ptr {position})")
-        } else {
-            format!("call i64 @imre_dyn_op({fixed})")
-        };
-        self.checked(&invocation)
+        ))
     }
 
     fn lit(&mut self, kind: i32, bytes: &[u8]) -> String {

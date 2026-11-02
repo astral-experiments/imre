@@ -151,10 +151,6 @@ impl Context {
                 };
                 self.template_interpolation(a, b, conversion, spec)
             }
-            "template_literal" => {
-                let parts = self.items(a)?;
-                self.template_literal(&parts)
-            }
             "build_template" => {
                 let interpolations = self.items(b)?;
                 Ok(self.template_from_literal(a, interpolations))
@@ -865,18 +861,6 @@ pub(super) unsafe extern "C" fn imre_dyn_lit(
     };
     let value = value.map(|v| ctx.alloc(v));
     finish(ctx, value)
-}
-
-#[unsafe(no_mangle)]
-pub(super) unsafe extern "C" fn imre_dyn_op(
-    ctx: *mut Context,
-    opcode: *const c_char,
-    a: Id,
-    b: Id,
-    c: Id,
-) -> Id {
-    // SAFETY: legacy call sites pass the same handles, without an instruction position.
-    unsafe { imre_dyn_op_at(ctx, opcode, a, b, c, std::ptr::null()) }
 }
 
 #[unsafe(no_mangle)]
