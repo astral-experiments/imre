@@ -2723,7 +2723,7 @@ impl Context {
     ) -> Result<()> {
         #[cfg(target_os = "linux")]
         if source.is_none() && matches!(name, "os" | "posix") {
-            for name in ["major", "minor", "makedev"] {
+            for name in ["major", "minor", "makedev", "mknod"] {
                 let function = self.builtin(&format!("posix.{name}"));
                 self.bind(scope, name, function);
             }

@@ -28,8 +28,23 @@ pub(in crate::dynamic) fn install_capabilities(
         (
             "supports_dir_fd",
             &[
-                "access", "chmod", "chown", "link", "lstat", "mkdir", "mkfifo", "open", "readlink",
-                "rename", "rmdir", "stat", "symlink", "unlink", "utime",
+                "access",
+                "chmod",
+                "chown",
+                "link",
+                "lstat",
+                "mkdir",
+                "mkfifo",
+                #[cfg(target_os = "linux")]
+                "mknod",
+                "open",
+                "readlink",
+                "rename",
+                "rmdir",
+                "stat",
+                "symlink",
+                "unlink",
+                "utime",
             ][..],
         ),
         (
@@ -530,7 +545,12 @@ pub(super) fn is_descriptor_function(name: &str) -> bool {
         || (cfg!(target_os = "linux")
             && matches!(
                 name,
-                "copy_file_range" | "lockf" | "posix_fadvise" | "posix_fallocate" | "sendfile"
+                "copy_file_range"
+                    | "lockf"
+                    | "mknod"
+                    | "posix_fadvise"
+                    | "posix_fallocate"
+                    | "sendfile"
             ))
 }
 
@@ -959,6 +979,10 @@ pub(super) fn descriptor(
     }
     if name == "fchmod" {
         return chmod::fchmod(ctx, args, kwargs);
+    }
+    #[cfg(target_os = "linux")]
+    if name == "mknod" {
+        return device::mknod(ctx, args, kwargs);
     }
     if matches!(name, "mkdir" | "mkfifo") {
         return create_node(ctx, name, args, kwargs);
