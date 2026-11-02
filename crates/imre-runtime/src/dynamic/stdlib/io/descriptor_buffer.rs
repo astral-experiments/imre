@@ -847,7 +847,6 @@ impl BufferedFd {
         args: &[Id],
         kwargs: &[(String, Id)],
     ) -> Result<Id> {
-        let name = name.strip_prefix("file.").unwrap_or(name);
         if matches!((name, args), ("close", []) | ("__exit__", [_, _, _])) {
             self.check_reentry(ctx)?;
             self.check_raw(ctx, receiver, name)?;
