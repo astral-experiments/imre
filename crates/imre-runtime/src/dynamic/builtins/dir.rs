@@ -36,6 +36,10 @@ fn object_names(ctx: &mut Context, object: Id) -> Result<Id> {
     let mut names = BTreeSet::new();
     let mut keys = Vec::new();
     let class = match ctx.heap.get(object) {
+        Value::ParamSpec(_) => {
+            names.extend(super::super::paramspec::names().map(str::to_owned));
+            ctx.builtin("object")
+        }
         Value::Class { .. } | Value::Native(_) => object,
         Value::NamedTuple {
             class: Some(class), ..

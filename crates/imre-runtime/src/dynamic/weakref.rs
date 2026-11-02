@@ -209,7 +209,8 @@ impl Context {
             Value::Raised(error) => error
                 .class()
                 .is_some_and(|class| self.class_instances_support_weakref(class)),
-            Value::Class { .. }
+            Value::ParamSpec(_)
+            | Value::Class { .. }
             | Value::Function { .. }
             | Value::Module { .. }
             | Value::Method { .. }

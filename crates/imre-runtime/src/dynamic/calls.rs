@@ -624,6 +624,9 @@ impl Context {
     }
 
     pub(super) fn callable(&self, value: Id) -> bool {
+        if matches!(self.heap.get(value), Value::ConstEvaluator(_)) {
+            return true;
+        }
         matches!(
             self.heap.get(value),
             Value::Class { .. }
@@ -1017,6 +1020,9 @@ impl Context {
             Value::Repeat(_) => "itertools.repeat",
             Value::TupleGetter { .. } => super::namedtuple::GETTER,
             Value::TypeVar(_) => "typing.TypeVar",
+            Value::ParamSpec(_) => "typing.ParamSpec",
+            Value::ParamSpecMarker(kind, _) => kind.class(),
+            Value::ConstEvaluator(_) => "constevaluator",
             Value::TypeVarTuple { .. } => "typing.TypeVarTuple",
             Value::GenericAlias(alias) => alias.kind.class(),
             Value::Socket(_) => "socket.socket",
@@ -1115,6 +1121,10 @@ impl Context {
                             | "traceback"
                             | "frame"
                             | "typing.TypeVar"
+                            | "typing.ParamSpec"
+                            | "typing.ParamSpecArgs"
+                            | "typing.ParamSpecKwargs"
+                            | "constevaluator"
                             | "typing.TypeVarTuple"
                             | "typing._UnpackGenericAlias"
                             | "NoDefaultType"
@@ -1798,6 +1808,9 @@ impl Context {
             && let Some(message) = self.import_error_message(obj, None)
         {
             return Ok(message);
+        }
+        if let Some(value) = super::paramspec::attribute(self, obj, name) {
+            return value;
         }
         if let Some(value) = super::typing::attribute(self, obj, name) {
             return value;
@@ -3492,6 +3505,9 @@ impl Context {
 
     /// Bypass the object's deletion hook, while honoring data descriptors on its class.
     pub(super) fn default_delete_attr(&mut self, obj: Id, name: &str) -> Result<()> {
+        if let Some(result) = super::paramspec::update(self, obj, name, None) {
+            return result;
+        }
         self.check_template_write(obj, name)?;
         super::namespace::check_class_write(self, obj, name)?;
         stdlib::io::check_class_write(self, obj, name)?;
@@ -3499,7 +3515,9 @@ impl Context {
         if name == "__doc__" && matches!(self.heap.get(obj), Value::TupleGetter { .. }) {
             return super::namedtuple::set_document(self, obj, None).map(|_| ());
         }
-        if name == "cell_contents" && matches!(self.heap.get(obj), Value::Cell(_) | Value::ClassCell(_)) {
+        if name == "cell_contents"
+            && matches!(self.heap.get(obj), Value::Cell(_) | Value::ClassCell(_))
+        {
             self.heap.replace_cell(obj, None);
             return Ok(());
         }
@@ -4076,6 +4094,9 @@ impl Context {
     }
 
     pub(super) fn default_set_attr(&mut self, obj: Id, name: &str, value: Id) -> Result<()> {
+        if let Some(result) = super::paramspec::update(self, obj, name, Some(value)) {
+            return result;
+        }
         if self.builtins.get("abc.ABCMeta") == Some(&obj)
             && matches!(
                 name,
@@ -4191,7 +4212,9 @@ impl Context {
                 Some(value),
             );
         }
-        if name == "cell_contents" && matches!(self.heap.get(obj), Value::Cell(_) | Value::ClassCell(_)) {
+        if name == "cell_contents"
+            && matches!(self.heap.get(obj), Value::Cell(_) | Value::ClassCell(_))
+        {
             self.heap.replace_cell(obj, Some(value));
             return Ok(());
         }
@@ -4755,6 +4778,9 @@ impl Context {
         args: Vec<Id>,
         kwargs: Vec<(String, Id)>,
     ) -> Result<Id> {
+        if let Value::ConstEvaluator(value) = *self.heap.get(callable) {
+            return super::paramspec::eval(self, value, &args, &kwargs);
+        }
         // Binding a descriptor can call Python before it returns its target.
         if matches!(self.heap.get(callable), Value::Instance { .. }) {
             return self.with_slot_depth(
@@ -5553,7 +5579,8 @@ impl Context {
                     if !self.scope_data(local).names.contains_key(n) {
                         let val = self.dict_entries(kwdefaults).and_then(|entries| {
                             entries.iter().find_map(|&(key, value)| {
-                                matches!(self.heap.get(key), Value::Str(text) if text == n).then_some(value)
+                                matches!(self.heap.get(key), Value::Str(text) if text == n)
+                                    .then_some(value)
                             })
                         });
                         if let Some(val) = val {
@@ -5881,7 +5908,8 @@ impl Context {
             frame.class_namespace.get_or_insert_with(Default::default).annotation_scratch = Some(annotations);
         }
         self.execute(code, scope, FrameOwner::Function(body))?;
-        let explicit_annotations = self.scope_name(scope, "__annotations__")
+        let explicit_annotations = self
+            .scope_name(scope, "__annotations__")
             .is_some_and(|value| value != annotations);
         if let Value::Scope(frame) = self.heap.get_mut(scope) {
             if let Some(namespace) = &mut frame.class_namespace {

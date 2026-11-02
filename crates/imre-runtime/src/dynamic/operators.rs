@@ -1324,6 +1324,9 @@ impl Context {
 
     /// Invoke the special method once and preserve an accepted string subclass.
     pub(super) fn repr_override(&mut self, id: Id) -> Result<Option<Id>> {
+        if let Some(result) = super::paramspec::repr(self, id) {
+            return result.map(Some);
+        }
         let Some((class, slot)) = self.format_slot(id, "__repr__") else {
             return Ok(None);
         };
@@ -3642,6 +3645,13 @@ impl Context {
     }
 
     pub(super) fn binary(&mut self, op: &str, a: Id, b: Id) -> Result<Id> {
+        if matches!(op, "==" | "!=")
+            && let (Value::ParamSpecMarker(left, _), Value::ParamSpecMarker(right, _)) =
+                (self.heap.get(a), self.heap.get(b))
+            && left == right
+        {
+            return super::paramspec::compare(self, op, a, b);
+        }
         self.binary_operation(op, a, b, false)
     }
 
@@ -3676,7 +3686,12 @@ impl Context {
                 });
             }
         }
-        if op == "|" && matches!(self.heap.get(a), Value::Union(_) | Value::TypeVar(_)) {
+        if op == "|"
+            && matches!(
+                self.heap.get(a),
+                Value::Union(_) | Value::TypeVar(_) | Value::ParamSpec(_)
+            )
+        {
             return super::union::make(self, &[a, b]);
         }
         if let Some(result) = self.binary_special(op, a, b)? {
