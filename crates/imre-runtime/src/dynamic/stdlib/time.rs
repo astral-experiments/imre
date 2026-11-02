@@ -149,6 +149,53 @@ fn tuple_time(ctx: &mut Context, value: Id, name: &str) -> Result<LocalTime> {
     Ok(local)
 }
 
+/// Return a fresh namespace for the clock selected by the platform.
+#[cfg(target_os = "linux")]
+fn get_clock_info(ctx: &mut Context, args: &[Id]) -> Result<Id> {
+    let [arg] = args else {
+        return Err(Error::new(
+            "TypeError",
+            format!(
+                "get_clock_info() takes exactly 1 argument ({} given)",
+                args.len()
+            ),
+        ));
+    };
+    let text = ctx.string_storage(*arg).ok_or_else(|| {
+        let kind = if *arg == NONE {
+            "None"
+        } else {
+            ctx.type_name(*arg)
+        };
+        Error::new(
+            "TypeError",
+            format!("get_clock_info() argument 1 must be str, not {kind}"),
+        )
+    })?;
+    // PyArg's 's' format encodes the entire string strictly before checking for NUL.
+    let encoded;
+    let name = match ctx.heap.get(text) {
+        Value::Str(s) => s.as_bytes(),
+        _ => {
+            encoded = ctx.encode_utf8_codepoints(text, false, "strict")?;
+            encoded.as_slice()
+        }
+    };
+    if name.contains(&0) {
+        return Err(Error::new("ValueError", "embedded null character"));
+    }
+    let info = crate::objects::time::clock_info(name)?;
+    let class = crate::dynamic::namespace::class(ctx)?;
+    let result = ctx.instance(class, None);
+    let implementation = ctx.text(info.implementation);
+    ctx.set_attr(result, "implementation", implementation)?;
+    ctx.set_attr(result, "monotonic", builtins::boolean(info.monotonic))?;
+    ctx.set_attr(result, "adjustable", builtins::boolean(!info.monotonic))?;
+    let resolution = ctx.alloc(Value::Float(info.resolution));
+    ctx.set_attr(result, "resolution", resolution)?;
+    Ok(result)
+}
+
 pub(super) fn call(
     ctx: &mut Context,
     name: &str,
@@ -175,6 +222,8 @@ pub(super) fn call(
         ));
     }
     match name {
+        #[cfg(target_os = "linux")]
+        "get_clock_info" => get_clock_info(ctx, args),
         "sleep" => {
             let [seconds] = args else {
                 return Err(Error::new(

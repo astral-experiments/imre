@@ -12,6 +12,11 @@ use std::ffi::CStr;
 use std::io;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+#[cfg(target_os = "linux")]
+mod clock_info;
+#[cfg(target_os = "linux")]
+pub(crate) use clock_info::clock_info;
+
 pub(crate) use super::stdlib::imre_wall_time as wall_time;
 
 /// A signal delivered to the sleeping thread interrupts the native wait. A

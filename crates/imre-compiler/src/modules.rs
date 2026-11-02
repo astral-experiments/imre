@@ -1553,6 +1553,8 @@ impl IntrinsicModule {
             (Self::Time, "ctime") => Intrinsic::ObjectRuntimeExport("time.ctime"),
             (Self::Time, "time_ns") => Intrinsic::ObjectRuntimeExport("time.time_ns"),
             (Self::Time, "monotonic") => Intrinsic::ObjectRuntimeExport("time.monotonic"),
+            #[cfg(target_os = "linux")]
+            (Self::Time, "get_clock_info") => Intrinsic::ObjectRuntimeExport("time.get_clock_info"),
             (Self::Time, "perf_counter") => Intrinsic::ObjectRuntimeExport("time.perf_counter"),
             (Self::Time, "struct_time") => Intrinsic::StructTime,
             (Self::Time, "mktime") => Intrinsic::Mktime,

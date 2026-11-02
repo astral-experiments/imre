@@ -583,6 +583,8 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             "time" | "time_ns" | "monotonic" | "perf_counter" | "sleep" | "gmtime" | "localtime"
             | "mktime" | "strftime" | "ctime" | "struct_time" | "tzset",
         ) => ctx.builtin(&format!("time.{name}")),
+        #[cfg(target_os = "linux")]
+        ("time", "get_clock_info") => ctx.builtin("time.get_clock_info"),
         ("socket", name) => return socket::attribute(ctx, name),
         ("hashlib", name)
             if name != "md5"
