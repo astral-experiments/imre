@@ -5226,7 +5226,14 @@ impl<'a> Loader<'a> {
             "selectors" if cfg!(any(target_os = "linux", target_os = "macos")) => {
                 Some(("selectors.py", include_str!("../stdlib/selectors.py")))
             }
-            "doctest" => Some(("doctest.py", include_str!("../stdlib/doctest.py"))),
+            "doctest" => Some((
+                "doctest.py",
+                concat!(
+                    include_str!("../stdlib/doctest.py"),
+                    "\n",
+                    include_str!("../stdlib/doctest_typed.py"),
+                ),
+            )),
             "keyword" => Some(("keyword.py", KEYWORD_SOURCE)),
             "pkgutil" => Some(("pkgutil.py", include_str!("../stdlib/pkgutil.py"))),
             "zipimport" if cfg!(unix) => Some((
