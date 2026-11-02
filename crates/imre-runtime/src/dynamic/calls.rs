@@ -2846,7 +2846,10 @@ impl Context {
             {
                 return Ok(match name {
                     "__self__" => self.builtin(&owner.to_owned()),
-                    "__qualname__" => self.text(symbol.clone()),
+                    "__qualname__" => {
+                        let class = owner.rsplit('.').next().unwrap_or(owner);
+                        self.text(format!("{class}.__new__"))
+                    }
                     _ => NONE,
                 });
             }

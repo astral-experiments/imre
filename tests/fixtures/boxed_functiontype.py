@@ -20,6 +20,8 @@ def current():
     new = original.__new__
     assert new is types.FunctionType.__new__ and new.__self__ is types.FunctionType
     assert new.__qualname__ == "function.__new__" and new.__module__ is None
+    from _thread import _local
+    assert _local.__new__.__qualname__ == "_local.__new__"
     direct = new(types.FunctionType, original.__code__, namespace, argdefs=(1,), kwdefaults={"y": 5})
     assert direct() == 13 and direct.__globals__ is namespace
     for args in ((), (original,), (dict,)):
