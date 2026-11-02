@@ -108,6 +108,7 @@ impl Imports {
                 "_imp"
                     | "_hashlib"
                     | "atexit"
+                    | "faulthandler"
                     | "code"
                     | "codeop"
                     | "json"
@@ -150,6 +151,7 @@ fn boxed_sys_export(name: &str) -> bool {
             | "path_hooks"
             | "path_importer_cache"
             | "modules"
+            | "_xoptions"
             | "version_info"
             | "implementation"
             | "exit"
@@ -498,6 +500,7 @@ pub(crate) fn compile(
             "hashlib",
             "_imp",
             "atexit",
+            "faulthandler",
             "code",
             "weakref",
             "pathlib",
@@ -899,6 +902,8 @@ pub(crate) fn compile(
         "context_aware_warnings":startup.map(|(flags, _)| flags.context_aware_warnings),
         "utf8_mode":startup.and_then(|(flags, _)| flags.utf8_mode),
         "warnoptions":startup.map(|(flags, _)| &flags.warnoptions),
+        "xoptions":startup.map(|(flags, _)| &flags.xoptions),
+        "faulthandler":startup.map(|(flags, _)| flags.faulthandler),
         "warn_default_encoding":startup.map(|(flags, _)| flags.warn_default_encoding),
         "optimize":startup.map_or(0, |(flags, _)| flags.optimize),
         "dont_write_bytecode":startup.is_some_and(|(flags, _)| flags.dont_write_bytecode),

@@ -445,6 +445,8 @@ impl Checker<'_> {
             helper.expr(&lambda.body)?
         };
         let returns = body.ty;
+        let mut body = vec![Statement::Return(body)];
+        helper.fault_frame(&mut body, "<lambda>", lambda.start());
         self.helpers.finish(
             id,
             comprehensions::Helper {
@@ -453,7 +455,7 @@ impl Checker<'_> {
                     params,
                     returns,
                     locals: helper.locals,
-                    body: vec![Statement::Return(body)],
+                    body,
                 },
                 calls: helper.calls,
                 class_reads: helper.class_reads.into_inner(),

@@ -855,6 +855,58 @@ def check_class_metadata_allocation(imre, run, flags):
 
 
 
+def check_faulthandler(imre, root, env):
+    import resource
+    import select
+    import signal
+
+    source = root / "fault.py"
+    source.write_text(
+        "import sys\n"
+        "assert 'faulthandler' in sys.modules\n"
+        "import faulthandler, os\n"
+        "assert sys._xoptions == {'faulthandler': '0'} and faulthandler.is_enabled()\n"
+        "if 'disable' in sys.argv: assert faulthandler.disable()\n"
+        "def wait_for_signal():\n"
+        "    os.write(1, (str(os.getpid()) + '\\n').encode())\n"
+        "    input()\n"
+        "wait_for_signal()\n"
+    )
+
+    def no_core():
+        resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
+
+    cmd = [imre, "-X", "faulthandler=0", "-I", source]
+    for send, args in ((os.kill, []), (os.killpg, []), (os.kill, ["disable"])):
+        # Keep the parent writer open while communicate() drains the traceback.
+        reader, writer = os.pipe()
+        with (
+            os.fdopen(reader, "rb") as stdin,
+            os.fdopen(writer, "wb"),
+            subprocess.Popen(
+                [*cmd, *args], cwd=root, env=env, preexec_fn=no_core, start_new_session=True,
+                stdin=stdin, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            ) as child,
+        ):
+            try:
+                assert select.select([child.stdout], [], [], 600)[0], "interpreter did not report its PID"
+                reported = os.read(child.stdout.fileno(), 64)
+                assert reported == f"{child.pid}\n".encode(), (reported, child.pid)
+                send(child.pid, signal.SIGABRT)
+                out, err = child.communicate(timeout=10)
+            finally:
+                if child.poll() is None:
+                    os.killpg(child.pid, signal.SIGKILL)
+        assert child.returncode == -signal.SIGABRT and not out, (child.returncode, out, err)
+        if args:
+            assert not err, err
+        else:
+            assert b"Fatal Python error: Aborted" in err, err
+            assert f'File "{source}", line 9 in <module>\n'.encode() in err, err
+            # The signal may arrive during the PID write or the blocking input.
+            assert any(f'File "{source}", line {n} in wait_for_signal\n'.encode() in err for n in (7, 8)), err
+
+
 def check_pending_signals(imre, root, env):
     import signal
 
@@ -1087,6 +1139,8 @@ def main():
                 timeout=60,
             )
 
+        if sys.platform == "darwin" or sys.platform.startswith("linux"):
+            check_faulthandler(imre, root, env)
         if sys.platform.startswith("linux"):
             check_pending_signals(imre, root, env)
             marked_call_flags = marked_call_refusal_flags(root)

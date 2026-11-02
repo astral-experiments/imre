@@ -294,6 +294,8 @@ fn launch(ctx: &Context, operation: Operation, detached_label: Option<String>) -
     let count = Arc::clone(&ctx.threads.count);
     let active = Arc::new(AtomicBool::new(true));
     let worker_active = Arc::clone(&active);
+    let fault_workers =
+        matches!(operation, Operation::Python(_)).then(|| ctx.heap.begin_fault_worker());
     let thread = thread::Builder::new()
         .spawn(move || {
             // A failed bootstrap publishes no identity and contributes nothing to the live count.
@@ -302,6 +304,9 @@ fn launch(ctx: &Context, operation: Operation, detached_label: Option<String>) -
             let (python, acquire) = match operation {
                 Operation::Python(callback) => match callback.load() {
                     Ok((mut worker, function, arguments)) => {
+                        worker
+                            .heap
+                            .observe_fault_workers(fault_workers.as_ref().expect("Python worker"));
                         worker.threads.count = Arc::clone(&count);
                         worker.threads.private_context = true;
                         (Some((worker, function, arguments)), None)
