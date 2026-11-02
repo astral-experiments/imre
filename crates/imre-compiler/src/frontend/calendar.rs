@@ -92,6 +92,7 @@ fn fixed_zone_method(name: &str) -> bool {
 
 pub(super) fn boxed_member(receiver: Type, name: &str) -> bool {
     match name {
+        "utctimetuple" => receiver == Type::Calendar(C::DateTime),
         "min" | "max" | "resolution" | "__reduce__" | "__reduce_ex__" => {
             matches!(
                 receiver,

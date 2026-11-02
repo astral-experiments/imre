@@ -130,6 +130,7 @@ pub(in crate::dynamic) fn members(class: &str) -> Option<Members> {
                 "timetz",
                 "timestamp",
                 "timetuple",
+                "utctimetuple",
             ],
         ),
         "datetime.time" => (
@@ -885,6 +886,7 @@ pub(super) fn call(
         "datetime.date"
         | "datetime.time"
         | "datetime.timetz"
+        | "datetime.utctimetuple"
         | "datetime.replace"
         | "datetime.__replace__"
         | "time.replace"
@@ -1400,6 +1402,31 @@ fn clock_method(
             ));
         }
         return match operation {
+            "utctimetuple" => {
+                let mark = ctx.heap.temporary_mark();
+                let offset = call_tzinfo(ctx, tz, "utcoffset", receiver)?;
+                let utc = if offset == NONE {
+                    value
+                } else {
+                    // Subtract through the native slot, including Python subtype construction.
+                    let shifted = datetime_arithmetic(ctx, "__sub__", &[receiver, offset], &[])?;
+                    ctx.finish_call_operands(mark, shifted);
+                    calendar(ctx, shifted, "datetime").ok_or_else(|| {
+                        Error::new(
+                            "TypeError",
+                            "datetime subtype constructor did not return a datetime",
+                        )
+                    })?
+                };
+                let mut fields = utc.timetuple();
+                fields[8] = 0;
+                ctx.finish_call_operands(mark, NONE);
+                let time = ctx.module("time")?;
+                let factory = ctx.lookup_attr(time, "struct_time")?;
+                let values = fields.map(|n| ctx.int(n));
+                let fields = ctx.alloc(Value::Tuple(values.into()));
+                ctx.call(factory, vec![fields], Vec::new())
+            }
             "date" => {
                 let [y, m, d, ..] = value.fields();
                 Ok(store(
