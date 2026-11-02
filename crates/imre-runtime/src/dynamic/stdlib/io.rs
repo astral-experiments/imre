@@ -7,6 +7,7 @@ mod buffered_io;
 mod descriptor_buffer;
 pub(in crate::dynamic) use descriptor_buffer::BufferedFd;
 mod bytes_io;
+mod docstrings;
 mod file_io;
 pub(in crate::dynamic) use file_io::{open, popen_pipe};
 mod text_wrapper;
@@ -18,9 +19,6 @@ pub(in crate::dynamic) enum MemoryStream {
     Wrapper(std::rc::Rc<text_wrapper::Wrapper>),
     Raw(std::rc::Rc<file_io::RawFile>),
 }
-
-// Tagged sys.stdout and sys.stderr belong to the first native TextIOWrapper class.
-pub(in crate::dynamic) const STANDARD_STREAM_CLASS: &str = "_io.__standard_stream_class__";
 
 const DEFAULT_BUFFER_SIZE: i64 = 128 * 1024;
 
@@ -166,11 +164,30 @@ pub(super) fn open_code(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)])
     ctx.call(open, vec![path, mode], Vec::new())
 }
 
-/// Install canonical class objects so subclasses inherit the same methods across imports.
+/// Install public metadata and the types of native buffered file handles.
 pub(in super::super) fn install(ctx: &mut Context, module: Id) {
     let names = PUBLIC_NAMES.iter().map(|&name| ctx.text(name)).collect();
     let exports = ctx.alloc(Value::List(names));
     ctx.bind(module, "__all__", exports);
+    for (name, origin) in [("SEEK_SET", 0), ("SEEK_CUR", 1), ("SEEK_END", 2)] {
+        let value = ctx.int(origin);
+        ctx.bind(module, name, value);
+    }
+    // Register the actual types of buffered files returned by the native open().
+    let types = [
+        "_io.BufferedReader",
+        "_io.BufferedWriter",
+        "_io.BufferedRandom",
+    ]
+    .iter()
+    .map(|name| ctx.builtin(name))
+    .collect();
+    let types = ctx.alloc(Value::Tuple(types));
+    ctx.bind(module, "_buffered_types", types);
+}
+
+/// Construct a low-level module's native I/O classes before io.py declares its ABCs.
+pub(in super::super) fn install_native(ctx: &mut Context, module: Id) {
     let open = ctx.builtin("open");
     ctx.bind(module, "open", open);
     let text_encoding = ctx.builtin("_io.text_encoding");
@@ -179,15 +196,11 @@ pub(in super::super) fn install(ctx: &mut Context, module: Id) {
     ctx.bind(module, "UnsupportedOperation", unsupported);
     let size = ctx.int(DEFAULT_BUFFER_SIZE);
     ctx.bind(module, "DEFAULT_BUFFER_SIZE", size);
-    for (name, origin) in [("SEEK_SET", 0), ("SEEK_CUR", 1), ("SEEK_END", 2)] {
-        let value = ctx.int(origin);
-        ctx.bind(module, name, value);
-    }
     let object = ctx.builtin("object");
     let io = class(
         ctx,
         module,
-        "IOBase",
+        "_IOBase",
         object,
         &[
             "closed",
@@ -208,37 +221,23 @@ pub(in super::super) fn install(ctx: &mut Context, module: Id) {
     let raw = class(
         ctx,
         module,
-        "RawIOBase",
+        "_RawIOBase",
         io,
         &["read", "readall", "readinto", "write"],
     );
-    ctx.builtins.insert("_io._RawIOBase".into(), raw);
     let file = class(ctx, module, "FileIO", raw, file_io::METHODS);
-    ctx.builtins.insert("_io.FileIO".into(), file);
-    let buffered = class(ctx, module, "BufferedIOBase", io, buffered_io::METHODS);
-    ctx.builtins.insert("_io._BufferedIOBase".into(), buffered);
-    // CPython's io module registers the concrete C file types with the public ABC.
-    for name in ["_io.BufferedReader", "_io.BufferedWriter"] {
-        let concrete = ctx.builtin(name);
-        ctx.heap.abc_registrations.push([buffered, concrete]);
-    }
+    let buffered = class(ctx, module, "_BufferedIOBase", io, buffered_io::METHODS);
     let bytes_io = class(ctx, module, "BytesIO", buffered, bytes_io::METHODS);
-    ctx.builtins.insert("_io.BytesIO".into(), bytes_io);
     let text = class(
         ctx,
         module,
-        "TextIOBase",
+        "_TextIOBase",
         io,
         &[
             "encoding", "errors", "newlines", "detach", "read", "readline", "write",
         ],
     );
-    ctx.builtins.insert("_io._TextIOBase".into(), text);
     let wrapper = class(ctx, module, "TextIOWrapper", text, text_wrapper::METHODS);
-    ctx.builtins.insert("_io.TextIOWrapper".into(), wrapper);
-    ctx.builtins
-        .entry(STANDARD_STREAM_CLASS.into())
-        .or_insert(wrapper);
     let string_io = class(
         ctx,
         module,
@@ -258,7 +257,21 @@ pub(in super::super) fn install(ctx: &mut Context, module: Id) {
             "line_buffering",
         ],
     );
-    ctx.builtins.insert("_io.StringIO".into(), string_io);
+    // Native open and intrinsic file objects retain their initial _io classes.
+    if !ctx.builtins.contains_key("_io._IOBase") {
+        for (name, class) in [
+            ("_io._IOBase", io),
+            ("_io._RawIOBase", raw),
+            ("_io._BufferedIOBase", buffered),
+            ("_io._TextIOBase", text),
+            ("_io.FileIO", file),
+            ("_io.BytesIO", bytes_io),
+            ("_io.TextIOWrapper", wrapper),
+            ("_io.StringIO", string_io),
+        ] {
+            ctx.builtins.insert(name.into(), class);
+        }
+    }
 }
 
 fn class(
@@ -268,7 +281,7 @@ fn class(
     base: Id,
     methods: &[&'static str],
 ) -> Id {
-    let scope = ctx.scope("io", Some(module));
+    let scope = ctx.scope("_io", Some(module));
     let owner = ctx
         .allocate_class(name.into(), scope, vec![base])
         .expect("a single I/O base has a linearization");
@@ -276,19 +289,17 @@ fn class(
         unreachable!()
     };
     *io_kind = Some(name.trim_start_matches('_'));
-    let module_name = ctx.text(
-        if matches!(name, "StringIO" | "BytesIO" | "TextIOWrapper" | "FileIO") {
-            "_io"
-        } else {
-            "io"
-        },
-    );
+    if let Some(doc) = docstrings::base(name) {
+        let doc = ctx.text(doc);
+        ctx.bind(scope, "__doc__", doc);
+    }
+    let module_name = ctx.text("_io");
     ctx.bind(scope, "__module__", module_name);
     let qualname = ctx.text(name);
     ctx.bind(scope, "__qualname__", qualname);
     let wrapper = name == "TextIOWrapper";
     let descriptor_owner = match name {
-        "TextIOBase" => "_io._TextIOBase",
+        "_TextIOBase" => "_io._TextIOBase",
         "StringIO" => "_io.StringIO",
         "FileIO" => "_io.FileIO",
         "TextIOWrapper" => "_io.TextIOWrapper",
@@ -507,7 +518,7 @@ pub(in super::super) fn call(
     };
     let receiver_class = match ctx.heap.get(receiver) {
         Value::Instance { class, .. } => Some(*class),
-        Value::TextFile(_) => ctx.builtins.get(STANDARD_STREAM_CLASS).copied(),
+        Value::TextFile(_) => ctx.builtins.get("_io.TextIOWrapper").copied(),
         _ => None,
     };
     let Some(receiver_class) = receiver_class.filter(|&class| ctx.direct_subclass(class, owner))

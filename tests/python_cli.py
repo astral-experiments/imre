@@ -1697,6 +1697,8 @@ def report(text):
         fixtures = Path(__file__).with_name("fixtures")
         final_fixture = fixtures / "boxed_typing_final.py"
         compare("-IB", final_fixture, native_args=("run", final_fixture, "--runtime-imports", "--quiet"))
+        io_registration = fixtures / "io_abc_registration.py"
+        compare("-IB", io_registration, native_args=("run", io_registration, "--quiet"))
         io_fixture = fixtures / "boxed_io_indirect_import.py"
         compare("-IB", io_fixture, native_args=("run", io_fixture, "--runtime-imports", "--quiet"))
         builtins_fixture = fixtures / "boxed_builtins_module.py"
@@ -1834,6 +1836,7 @@ def report(text):
             "boxed_io_reimport.py",
             "boxed_io_text_encoding.py",
             "boxed_io_protocols.py",
+            "boxed_io_abc_registration.py",
             "boxed_selector_wide_fds.py",
             "boxed_select_selector.py",
             "boxed_pipe_flags.py",

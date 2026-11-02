@@ -1071,6 +1071,7 @@ impl Value {
                 super::stdlib::BinaryFile::Writer { .. } => "_io.BufferedWriter",
             },
             Self::ProcessHandle(_) => "_imre_subprocess.Handle",
+            Self::BufferedRandom(..) => "_io.BufferedRandom",
             Self::TextFile(_) => "_io.TextIOWrapper",
             Self::SequenceIterator { .. } => "iterator",
             Self::ReverseSequence { .. } => "reversed",
