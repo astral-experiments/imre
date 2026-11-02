@@ -283,6 +283,7 @@ impl Context {
         scope: Id,
         bases: &[Id],
         slots: &[String],
+        ordinary_slots: bool,
     ) -> Result<Vec<String>> {
         let mut weak = bases
             .iter()
@@ -293,6 +294,10 @@ impl Context {
                 return Err(Error::new("TypeError", "__slots__ must be identifiers"));
             }
             if original == "__dict__" {
+                if ordinary_slots {
+                    // Ordinary instances already supply dictionary storage through their layout.
+                    continue;
+                }
                 return Err(Error::new(
                     "NotImplementedError",
                     "dynamic __dict__ slot descriptors are unsupported",
@@ -333,7 +338,7 @@ impl Context {
             unreachable!()
         };
         if let Value::Instance { class, .. } = *self.heap.get(receiver)
-            && self.subclass(class, owner)
+            && self.direct_subclass(class, owner)
         {
             return Ok(name);
         }

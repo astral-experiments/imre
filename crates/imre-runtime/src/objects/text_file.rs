@@ -99,15 +99,13 @@ impl TextFile {
         }
     }
 
-    /// Reports whether the live descriptor is attached to a terminal.
+    pub(crate) fn fileno(&self) -> Result<std::os::fd::RawFd> {
+        // SAFETY: reading the owned file's descriptor runs no Python callbacks.
+        unsafe { self.0.0.with(|storage| storage.file().fileno()) }
+    }
+
     pub(crate) fn isatty(&self) -> Result<bool> {
-        // SAFETY: the borrow is nonreentrant and fileno rejects a closed stream.
-        unsafe {
-            self.0.0.with(|storage| {
-                let fd = storage.file().fileno()?;
-                Ok(libc::isatty(fd) != 0)
-            })
-        }
+        Ok(super::os::isatty(self.fileno()?))
     }
 
     pub(crate) fn write(&self, value: &str) -> Result<()> {

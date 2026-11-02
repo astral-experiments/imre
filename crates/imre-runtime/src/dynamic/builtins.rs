@@ -29,6 +29,7 @@ pub(super) fn exception_kind(name: &str) -> Option<crate::objects::exceptions::K
         "UnsupportedOperation" => Some(Kind::UnsupportedOperation),
         "socket.gaierror" => Some(Kind::GaiError),
         "socket.herror" => Some(Kind::HError),
+        "zlib.error" => Some(Kind::ZlibError),
         "binascii.Error" => Some(Kind::BinasciiError),
         "binascii.Incomplete" => Some(Kind::BinasciiIncomplete),
         _ => imre_ast::exceptions::boxed_builtin_kind(name),
@@ -176,7 +177,8 @@ pub(super) fn exception_new_owner(name: &str) -> &str {
         | "ModuleNotFoundError"
         | "StopIteration"
         | "StopAsyncIteration"
-        | "binascii.Incomplete" => "Exception",
+        | "binascii.Incomplete"
+        | "zlib.error" => "Exception",
         "binascii.Error" => "ValueError",
         name if exception_subclass(name, "OSError") == Some(true) => "OSError",
         _ => name,
@@ -350,8 +352,10 @@ pub(super) const BYTEARRAY_METHODS: &[&str] = &[
 pub(super) const BYTES_METHODS: &[&str] = &[
     "__mod__",
     "__repr__",
+    "count",
     "decode",
     "endswith",
+    "find",
     "join",
     "lstrip",
     "rfind",
@@ -523,7 +527,8 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         Value::TextFile(_)
             if matches!(
                 attr,
-                "read"
+                "fileno"
+                    | "read"
                     | "readline"
                     | "write"
                     | "flush"
@@ -1016,7 +1021,7 @@ pub(super) fn call(
     }
     if matches!(
         name,
-        "object.__hash__" | "object.__repr__" | "object.__str__"
+        "object.__hash__" | "object.__repr__" | "object.__str__" | "object.__ne__"
             | "mappingproxy.__repr__" | "mappingproxy.__str__"
     ) {
         let (owner, method) = name.split_once('.').unwrap();
@@ -1035,6 +1040,18 @@ pub(super) fn call(
             return Err(type_error(format!(
                 "wrapper {method}() takes no keyword arguments"
             )));
+        }
+        if method == "__ne__" {
+            let [other] = rest else {
+                return Err(type_error(format!(
+                    "expected 1 argument, got {}",
+                    rest.len()
+                )));
+            };
+            return ctx.with_slot_depth(
+                "maximum recursion depth exceeded while calling a Python object",
+                |ctx| ctx.object_ne(receiver, *other),
+            );
         }
         if !rest.is_empty() {
             return Err(type_error(format!(
@@ -1099,9 +1116,9 @@ pub(super) fn call(
         }
         return Ok(NONE);
     }
-    // A module-qualified OSError subclass uses the exception constructor below.
+    // Module-qualified exceptions use the exception constructor below.
     if let Some((owner, method)) = name.split_once('.')
-        && exception_subclass(name, "OSError") != Some(true)
+        && !is_exception(name)
     {
         return match owner {
             "coroutine" | "coroutine_wrapper" => {
@@ -1149,6 +1166,36 @@ pub(super) fn call(
             "module" => ctx.module_method(method, args, kwargs),
             "float" if method == "__getformat__" => float::getformat(ctx, args, kwargs),
             "float" if method == "as_integer_ratio" => float::as_integer_ratio(ctx, args, kwargs),
+            "getset_descriptor" if matches!(method, "__set__" | "__delete__") => {
+                if !kwargs.is_empty() {
+                    return Err(type_error(format!("wrapper {method}() takes no keyword arguments")));
+                }
+                let (required, message) = if method == "__set__" {
+                    (2, "__set__ expected 2 arguments")
+                } else {
+                    (1, "expected 1 argument")
+                };
+                let Some((&descriptor, values)) = args.split_first() else {
+                    return Err(type_error("expected an integer getset descriptor"));
+                };
+                if values.len() != required {
+                    return Err(type_error(format!("{message}, got {}", values.len())));
+                }
+                let Value::GetSetDescriptor { owner: "int", name: field, .. } = *ctx.heap.get(descriptor) else {
+                    return Err(type_error("expected an integer getset descriptor"));
+                };
+                if !ctx.builtin_slot_accepts(values[0], "int") {
+                    return Err(type_error(format!(
+                        "descriptor '{field}' for 'int' objects doesn't apply to a '{}' object",
+                        ctx.type_name(values[0])
+                    )));
+                }
+                Err(Error::new(
+                    "AttributeError",
+                    format!("attribute '{field}' of 'int' objects is not writable"),
+                ))
+            }
+            "_int_getset" => integer::rational_field(ctx, method, args),
             "int" if method == "bit_length" => integer::bit_length(ctx, args, kwargs),
             "int" if method == "from_bytes" => integer::from_bytes(ctx, args, kwargs),
             "int" if method == "to_bytes" => integer::to_bytes(ctx, args, kwargs),
@@ -1636,7 +1683,13 @@ pub(super) fn call(
                 Value::Str(v) => v.chars().count(),
                 Value::SurrogateStr(points) => points.len(),
                 Value::Bytes(v) | Value::ByteArray(v) => v.len(),
-                Value::MemoryView { .. } => ctx.bytes_like(args[0])?.len(),
+                Value::MemoryView { owner, .. } => {
+                    let owner = Context::memoryview_owner(*owner)?;
+                    match ctx.heap.get(ctx.scalar_value(owner)) {
+                        Value::Array(array) => array.len(),
+                        _ => ctx.bytes_like(owner)?.len(),
+                    }
+                }
                 Value::Range(range) => {
                     return range.len.to_i64().map(|n| ctx.int(n)).ok_or_else(|| {
                         Error::new(
@@ -1684,6 +1737,7 @@ pub(super) fn call(
             let owner = match ctx.heap.get(ctx.scalar_value(object)) {
                 Value::Bytes(_) => object,
                 Value::MemoryView { owner, .. } => Context::memoryview_owner(*owner)?,
+                Value::Array(array) if array.view_layout().0 != "w" => object,
                 Value::Array(_) | Value::ByteArray(_) => {
                     return Err(Error::new(
                         "NotImplementedError",
@@ -1697,6 +1751,10 @@ pub(super) fn call(
                     )));
                 }
             };
+            let storage = ctx.scalar_value(owner);
+            if let Value::Array(array) = ctx.heap.get_mut(storage) {
+                array.viewed = true;
+            }
             Ok(ctx.alloc(Value::MemoryView {
                 owner: Some(owner),
                 hash: None,

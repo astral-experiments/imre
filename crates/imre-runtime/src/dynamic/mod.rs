@@ -341,13 +341,20 @@ impl Context {
         Ok(())
     }
 
-    fn bytes_like(&self, id: Id) -> Result<&[u8]> {
+    fn buffer_storage(&self, id: Id) -> Result<&Value> {
         let owner = match self.heap.get(id) {
             Value::MemoryView { owner, .. } => Self::memoryview_owner(*owner)?,
             _ => id,
         };
-        match self.heap.get(self.scalar_value(owner)) {
+        Ok(self.heap.get(self.scalar_value(owner)))
+    }
+
+    fn bytes_like(&self, id: Id) -> Result<&[u8]> {
+        match self.buffer_storage(id)? {
             Value::Bytes(data) | Value::ByteArray(data) => Ok(data),
+            Value::Array(array) if matches!(self.heap.get(id), Value::MemoryView { .. }) => {
+                Ok(array.as_bytes())
+            }
             _ => Err(Error::new(
                 "TypeError",
                 format!(
@@ -477,6 +484,7 @@ impl Context {
                 | Value::FormatIterator { .. }
                 | Value::Generator { .. }
                 | Value::CoroutineWrapper(_)
+                | Value::BufferedRandom(..)
                 | Value::File(_)
                 | Value::TextFile(_)
                 | Value::Enumerate { .. }
@@ -498,6 +506,7 @@ impl Context {
     fn iterator(&mut self, id: Id) -> Result<Id> {
         if self.is_native_iterator(id) {
             let closed = match self.heap.get(id) {
+                Value::BufferedRandom(file, _) => file.borrow().closed(),
                 Value::File(file) => file.closed(),
                 Value::TextFile(file) => file.closed(),
                 _ => false,
@@ -624,6 +633,7 @@ impl Context {
                 | Value::Zip { .. }
                 | Value::Generator { .. }
                 | Value::CoroutineWrapper(_)
+                | Value::BufferedRandom(..)
                 | Value::File(_)
                 | Value::TextFile(_)
                 | Value::Enumerate { .. }
@@ -990,7 +1000,7 @@ impl Context {
                 });
             }
             Value::LoopIterator { peeked, .. } => return Ok(peeked.take()),
-            Value::File(_) | Value::TextFile(_) => {
+            Value::BufferedRandom(..) | Value::File(_) | Value::TextFile(_) => {
                 let readline = self.lookup_attr(id, "readline")?;
                 let line = self.call(readline, Vec::new(), Vec::new())?;
                 return Ok(self.truth(line)?.then_some(line));
@@ -1195,6 +1205,7 @@ impl Context {
                 | Value::FormatIterator { .. }
                 | Value::Map { .. }
                 | Value::Filter { .. }
+                | Value::BufferedRandom(..)
                 | Value::File(_)
                 | Value::TextFile(_)
                 | Value::Count { .. }
@@ -1802,8 +1813,10 @@ impl Context {
             self.builtin("BaseException.with_traceback");
         }
         let methods = match name {
+            "type" => &["mro"][..],
             "object" => &[
                 "__hash__",
+                "__ne__",
                 "__format__",
                 "__init_subclass__",
                 "__getstate__",
@@ -1833,9 +1846,25 @@ impl Context {
                 builtins::BYTEARRAY_METHODS
             }
             "property" => property::METHODS,
+            "enum.IntEnum" | "enum.IntFlag" => {
+                self.builtin("int.__repr__");
+                &[]
+            }
             "memoryview" => builtins::MEMORYVIEW_METHODS,
             "bool" => &["__repr__"],
-            "int" => &["__add__", "bit_length", "from_bytes", "to_bytes", "__format__", "__repr__"],
+            "int" => {
+                for field in ["numerator", "denominator"] {
+                    let get = self.builtin(&format!("_int_getset.{field}"));
+                    let descriptor = self.alloc(Value::GetSetDescriptor {
+                        owner: "int",
+                        name: field,
+                        get,
+                        set: None,
+                    });
+                    self.builtins.insert(format!("int.{field}"), descriptor);
+                }
+                &["__add__", "bit_length", "from_bytes", "to_bytes", "__format__", "__repr__"]
+            }
             "float" => &["__format__", "__getformat__", "as_integer_ratio", "__repr__"],
             "bytes" => {
                 self.builtin("bytes.fromhex");

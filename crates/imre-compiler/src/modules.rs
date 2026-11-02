@@ -99,6 +99,10 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
                 include_str!("../stdlib/zipimport_source.py"),
             ),
         )),
+        "importlib.metadata._files" => Some((
+            "importlib/metadata/_files.py",
+            include_str!("../stdlib/importlib/metadata_files.py"),
+        )),
         "importlib.metadata._adapters" => Some((
             "importlib/metadata/_adapters.py",
             include_str!("../stdlib/importlib/metadata_adapters.py"),
@@ -135,6 +139,11 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
         )),
         "copy" => Some(("copy.py", include_str!("../stdlib/copy.py"))),
         "copyreg" => Some(("copyreg.py", include_str!("../stdlib/copyreg.py"))),
+        "opcode" => Some(("opcode.py", include_str!("../stdlib/opcode.py"))),
+        "_opcode_metadata" => Some((
+            "_opcode_metadata.py",
+            include_str!("../stdlib/_opcode_metadata.py"),
+        )),
         "warnings" => Some((
             "warnings.py",
             include_str!(
@@ -151,7 +160,7 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
         "decimal" => Some(("decimal.py", include_str!("../stdlib/decimal.py"))),
         // CPython 3.14.5 Lib/py_compile.py. See stdlib/docstrings/LICENSE.
         "py_compile" => Some(("py_compile.py", include_str!("../stdlib/py_compile.py"))),
-        // Based on CPython 3.14.5 Lib/pprint.py. See stdlib/docstrings/LICENSE.
+        // CPython 3.14.5 Lib/pprint.py. See stdlib/docstrings/LICENSE.
         "pprint" => Some(("pprint.py", include_str!("../stdlib/pprint.py"))),
         "difflib" => Some((
             "difflib.py",
@@ -191,21 +200,31 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
         "base64" => Some(("base64.py", include_str!("../stdlib/base64.py"))),
         "codecs" => Some(("codecs.py", include_str!("../stdlib/codecs.py"))),
         "keyword" => Some(("keyword.py", KEYWORD_SOURCE)),
+        "token" => Some(("token.py", include_str!("../stdlib/token.py"))),
         "collections" => {
             static SOURCE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
             Some(("collections/__init__.py", SOURCE.get_or_init(|| {
-                // The three user container classes form the tail of the pinned CPython module.
-                let (_, wrappers) = include_str!(
+                const UPSTREAM: &str = include_str!(
                     "../../../benchmarks/cpython_stdlib/full/collections/upstream/Lib/collections/__init__.py"
-                )
-                .split_once("### UserDict\n")
-                .expect("CPython 3.14.5 UserDict section");
+                );
+                let (_, wrappers) = UPSTREAM
+                    .split_once("### UserDict\n")
+                    .expect("CPython 3.14.5 UserDict section");
+                let (ordered, _) = UPSTREAM
+                    .split_once("### OrderedDict\n")
+                    .and_then(|(_, tail)| tail.split_once("### namedtuple\n"))
+                    .expect("CPython 3.14.5 OrderedDict section");
+                // Define the Python class in the fresh module's globals and let the
+                // upstream module select _collections.OrderedDict when it is available.
                 concat!(
                     include_str!("../stdlib/collections/__init__.py"),
                     "\n",
                     include_str!("../stdlib/collections/namedtuple_repr.py"),
+                    "\n",
+                    include_str!("../stdlib/collections/recursive_repr.py"),
                     "\nimport _collections_abc\nimport sys as _sys\n",
-                ).to_owned() + wrappers
+                    "from _weakref import proxy as _proxy\nfrom operator import eq as _eq\n",
+                ).to_owned() + ordered + wrappers
             })))
         }
         // CPython 3.14.5 Lib/configparser.py.
@@ -1192,8 +1211,17 @@ impl IntrinsicModule {
             (Self::ImportlibResources, "as_file") => {
                 Intrinsic::ObjectRuntimeExport("importlib.resources.as_file")
             }
+            (Self::ImportlibResources, "contents") => {
+                Intrinsic::ObjectRuntimeExport("importlib.resources.contents")
+            }
+            (Self::ImportlibResources, "is_resource") => {
+                Intrinsic::ObjectRuntimeExport("importlib.resources.is_resource")
+            }
             (Self::ImportlibResources, "files") => {
                 Intrinsic::ObjectRuntimeExport("importlib.resources.files")
+            }
+            (Self::ImportlibResources, "path") => {
+                Intrinsic::ObjectRuntimeExport("importlib.resources.path")
             }
             (Self::ImportlibResources, "read_binary") => {
                 Intrinsic::ObjectRuntimeExport("importlib.resources.read_binary")
@@ -1204,11 +1232,23 @@ impl IntrinsicModule {
             (Self::ImportlibMetadata, "Distribution") => {
                 Intrinsic::ObjectRuntimeExport("importlib.metadata.Distribution")
             }
+            (Self::ImportlibMetadata, "PackagePath") => {
+                Intrinsic::ObjectRuntimeExport("importlib.metadata.PackagePath")
+            }
+            (Self::ImportlibMetadata, "FileHash") => {
+                Intrinsic::ObjectRuntimeExport("importlib.metadata.FileHash")
+            }
+            (Self::ImportlibMetadata, "files") => {
+                Intrinsic::ObjectRuntimeExport("importlib.metadata.files")
+            }
             (Self::ImportlibMetadata, "PathDistribution") => {
                 Intrinsic::ObjectRuntimeExport("importlib.metadata.PathDistribution")
             }
             (Self::ImportlibMetadata, "distributions") => {
                 Intrinsic::ObjectRuntimeExport("importlib.metadata.distributions")
+            }
+            (Self::ImportlibMetadata, "requires") => {
+                Intrinsic::ObjectRuntimeExport("importlib.metadata.requires")
             }
             (Self::ImportlibMetadata, "metadata") => {
                 Intrinsic::ObjectRuntimeExport("importlib.metadata.metadata")
@@ -4564,6 +4604,8 @@ impl<'a> Loader<'a> {
         };
         if let Some((filename, source)) = bundled {
             self.reject_stdlib_shadow(name)?;
+            // token initializes its public tables from the live module globals.
+            self.needs_object_imports |= name == "token";
             let pkgutil_source;
             let source = if name == "pkgutil" {
                 let paths = self.filesystem_search_path()?;

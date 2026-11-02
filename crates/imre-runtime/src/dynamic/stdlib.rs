@@ -476,7 +476,8 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             | "cache_name"
             | "source_name"
             | "warn_debug_override"
-            | "warn_loader_deprecation",
+            | "warn_loader_deprecation"
+            | "warn_legacy_load",
         )
         | ("_imre_mock", "is_call_list" | "mark_call_list")
         | (
@@ -538,11 +539,9 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("typing", "TYPE_CHECKING") => FALSE,
         ("typing", "Union") | ("types", "UnionType") => super::union::class(ctx),
         ("typing", "Generic" | "Protocol") => super::typing::named_class(ctx, "typing", name),
-        (
-            "_collections_abc",
-            abc
-            @ ("Sized" | "Iterable" | "Container" | "Collection" | "Mapping" | "MutableMapping"),
-        ) => super::mapping_abc::class(ctx, abc)?,
+        ("_collections_abc", abc) if super::mapping_abc::bootstrapped(abc) => {
+            super::mapping_abc::class(ctx, abc)?
+        }
         ("_collections_abc", "_check_methods") => ctx.builtin("_collections_abc._check_methods"),
         ("_collections_abc", "Callable") => {
             super::typing::named_class(ctx, "collections.abc", "Callable")
@@ -599,6 +598,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("resource", "RLIM_INFINITY") => resource::limit(ctx, resource::INFINITY),
         ("random", "randrange") => ctx.builtin("random.randrange"),
         ("secrets", "choice") => ctx.builtin("secrets.choice"),
+        ("select", "PIPE_BUF") => ctx.int(libc::PIPE_BUF as i64),
         ("select", "select" | "poll") => ctx.builtin(&format!("select.{name}")),
         ("select", name) if let Some(flag) = crate::objects::os::poll_constant(name) => {
             ctx.int(i64::from(flag))
@@ -612,7 +612,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             let items = options.into_iter().map(|option| ctx.text(option)).collect();
             ctx.alloc(Value::List(items))
         }
-        ("zlib", "adler32" | "crc32") => ctx.builtin(&format!("zlib.{name}")),
+        ("zlib", "adler32" | "crc32" | "error") => ctx.builtin(&format!("zlib.{name}")),
         (
             "binascii",
             "Error" | "Incomplete" | "a2b_base64" | "b2a_base64" | "a2b_hex" | "unhexlify",
@@ -1671,6 +1671,10 @@ pub(super) fn call(
                     .transpose()?;
                 let path = crate::objects::cache_paths::source_name(ctx.str_value(*path)?, prefix)?;
                 return Ok(ctx.text(path.to_string()));
+            }
+            ("warn_legacy_load", [], []) => {
+                ctx.warn_legacy_load()?;
+                return Ok(NONE);
             }
             ("warn_loader_deprecation", [globals, mismatch], []) => {
                 let (line, message) = if ctx.truth(*mismatch)? {

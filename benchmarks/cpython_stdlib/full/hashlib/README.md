@@ -46,11 +46,11 @@ python3 benchmarks/cpython_stdlib/full/hashlib/run_shake_vectors.py \
 
 Repeat with `--opt-level 3`. Add `--runtime-imports` to exercise runtime-loaded modules. The runner verifies both file hashes, stages them in the pinned test suite’s URL cache and builds one executable. It runs that executable three times. Both tests must pass with the original files. Changing one digit of the last expected digest in either file must fail just that test and report the actual and expected digest. Each control uses a temporary copy.
 
-The [intact Linux ledger](intact-linux.tsv) compares all 82 registered cases at Imre revision `241b9fe70dc50d7d2887915e0e23ab9f2020cfd3` with CPython `5607950ef232dad16d75c0cf53101d9649d89115`. Both run the module directly with `test.support.use_resources` left at `None` and the big-memory limit unset. The empty-cache and cached columns use the same native executable within each lane.
+The [intact Linux ledger](intact-linux.tsv) compares all 82 registered cases at Imre revision `7c5a5717f5e21cdb0513fda3d3466995cece7078` with CPython `5607950ef232dad16d75c0cf53101d9649d89115`. Both run the module directly with `test.support.use_resources` left at `None` and the big-memory limit unset. The empty-cache and cached columns use the same native executable within each lane.
 
 | Vector cache | CPython 3.14.5 | Imre, ordinary and runtime imports at O0 and O3 |
 | --- | --- | --- |
 | Empty | 72 passed, 10 skipped | 48 passed, 3 errors, 31 skipped |
 | Both pinned files | 74 passed, 8 skipped | 50 passed, 1 error, 31 skipped |
 
-With an empty cache, CPython skipped both SHAKE cases after failing to retrieve the files. Imre reached `urllib.request.build_opener` and raised `AttributeError`. With both files present, only those two verdicts changed. The remaining native error was `test_threaded_hashing`. The ledger includes each skip reason. Six other remote vector tests and two big-memory tests still skipped on CPython with the SHAKE files present.
+With an empty cache, CPython skipped both SHAKE cases after failing to retrieve the files. Imre built the opener, but opening the vector URL raised `NotImplementedError` because the opener has no default HTTP handler. With both files present, only those two verdicts changed. The remaining native error was `test_threaded_hashing`. The ledger includes each skip reason. Six other remote vector tests and two big-memory tests still skipped on CPython with the SHAKE files present.

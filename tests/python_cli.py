@@ -1348,6 +1348,11 @@ def main():
                 "os", "posix",
             )
 
+        compare(
+            "-IB", "-c",
+            "import sys; m = __import__(sys.argv[1]); print(m.tok_name[m.EXACT_TOKEN_TYPES[':=']])",
+            "token",
+        )
         compare("-IB", "-c", "import sys; print(__import__(sys.argv[1]).SelectorKey('f', 7, 1, 'd'))", "selectors")
         compare("-IB", "-c", "load = __import__; print(load('selectors').EVENT_READ)")
         compare(
@@ -1749,6 +1754,10 @@ def report(text):
         (helpers / "uuid.py").write_text("marker = 'explicit search path'\n")
         compare("-IB", "-c", uuid_import + "print(uuid.marker)")
 
+        (helpers / "pprint.py").write_text("def incomplete(:\n")
+        compare("-IB", "-c", f"import sys\nsys.path.insert(0, {str(helpers)!r})\nprint(__import__('sys').__name__)")
+        (helpers / "pprint.py").unlink()
+
         (root / "legacy.py").write_text(args_code)
         legacy = run(imre, "run", "legacy.py", "--quiet", "--", "--opt-level", "2")
         assert (
@@ -1913,6 +1922,7 @@ def report(text):
             "boxed_text_io_wrapper.py",
             "boxed_platform_version.py",
             "boxed_int_to_bytes.py",
+            "boxed_int_rational_fields.py",
             "boxed_int_from_bytes.py",
             "boxed_divmod_slots.py",
             "boxed_complex.py",
@@ -1964,6 +1974,7 @@ def report(text):
             "boxed_typing_type.py",
             "boxed_typing_mapping.py",
             "boxed_typing_regex_aliases.py",
+            "boxed_pprint.py",
             "boxed_formatter.py",
             "boxed_template_literals.py",
             "boxed_re_ascii.py",
@@ -1993,6 +2004,7 @@ def report(text):
             "boxed_time.py",
             "boxed_time_strftime.py",
             "boxed_codecs.py",
+            "boxed_buffered_partial_write.py",
             "boxed_io_exports.py",
             "boxed_io_reimport.py",
             "boxed_io_text_encoding.py",
@@ -2023,6 +2035,9 @@ def report(text):
             "boxed_urllib_file.py",
             "boxed_urllib_cleanup.py",
             "boxed_urllib_retrieve.py",
+            "boxed_urllib_data.py",
+            "boxed_urllib_http_status.py",
+            "boxed_message_parameters.py",
             "boxed_unicodedata.py",
             "boxed_descriptors.py",
             "boxed_exception_repr.py",
@@ -2176,6 +2191,7 @@ def report(text):
             "boxed_hashlib_file_digest.py",
             "boxed_standard_base64.py",
             "boxed_csv.py",
+            "boxed_bytes_count.py",
             "boxed_bytes_separators.py",
             "boxed_bytes_join.py",
             "boxed_bytes_fromhex.py",
@@ -2236,6 +2252,8 @@ def report(text):
             plugin.write_bytes((fixtures / "boxed_os_readlink.py").read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")
             plugin.write_bytes((fixtures / "boxed_os_symlink.py").read_bytes())
+            compare("-IB", "-c", imports + "arithmetic.current()")
+            plugin.write_bytes((fixtures / "boxed_os_rename.py").read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")
             plugin.write_bytes((fixtures / "boxed_os_scandir.py").read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")

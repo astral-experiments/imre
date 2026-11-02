@@ -24,6 +24,71 @@ def current():
         else:
             raise AssertionError("invalid array initialization did not raise")
 
+    for code in ("b", "B", "i", "f", "d"):
+        owner = array(code, [65, 66])
+        view = memoryview(owner)
+        assert view.obj is owner and not view.readonly
+        assert view.format == code and view.itemsize == owner.itemsize
+        assert len(view) == 2 and view.shape == (2,) and view.nbytes == 2 * owner.itemsize
+        assert bytes(view) == owner.tobytes()
+        assert view == b"AB" and view == memoryview(array("i", [65, 66]))
+        try:
+            hash(view)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("writable view was hashable")
+        other = memoryview(view)
+        view.release()
+        try:
+            owner.append(67)
+        except BufferError:
+            pass
+        else:
+            raise AssertionError("resized while the derived view remained live")
+        other.release()
+        owner.append(67)
+        temporary = memoryview(owner)
+        del temporary
+        owner.append(68)
+        assert len(owner) == 4
+
+    for code in ('f', 'd'):
+        view = memoryview(array(code, [float('nan')]))
+        assert view != view and not (view == view)
+        assert [view] == [view]
+        view.release()
+        assert view == view
+
+    import gc
+    gc.disable()
+    try:
+        cycle = []
+        cycle.extend([cycle, memoryview(owner)])
+        del cycle
+        try:
+            owner.append(69)
+        except BufferError:
+            pass
+        else:
+            raise AssertionError("resized before collecting an unreachable view cycle")
+        gc.collect()
+        owner.append(69)
+    finally:
+        gc.enable()
+
+    a = array('i', [0])
+    views = []
+    class ExportDuringAppend:
+        def __index__(self):
+            if not views:
+                a.append(17)
+                views.append(memoryview(a))
+            return 42
+    a.append(ExportDuringAppend())
+    assert a.tolist() == [0, 42] and bytes(views[0]) == a.tobytes()
+    views[0].release()
+
     class Number:
         def __index__(self):
             return 17

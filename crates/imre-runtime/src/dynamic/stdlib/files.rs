@@ -650,7 +650,9 @@ fn standard_buffer_method(
             file.standard_writer()?;
             Ok(crate::dynamic::builtins::boolean(name == "file.writable"))
         }
-        ("file.isatty", []) => Ok(crate::dynamic::builtins::boolean(file.isatty()?)),
+        ("file.isatty", []) => Ok(crate::dynamic::builtins::boolean(
+            crate::objects::os::isatty(file.fileno()?),
+        )),
         ("file.__enter__", []) => {
             file.standard_writer()?;
             Ok(receiver)
@@ -736,7 +738,8 @@ pub(super) fn text_method(
             };
             Ok(ctx.int(count as i64))
         }
-        "isatty" => Ok(if file.isatty()? { TRUE } else { FALSE }),
+        "fileno" => Ok(ctx.int(i64::from(file.fileno()?))),
+        "isatty" => Ok(crate::dynamic::builtins::boolean(file.isatty()?)),
         "flush" => {
             file.flush()?;
             Ok(NONE)

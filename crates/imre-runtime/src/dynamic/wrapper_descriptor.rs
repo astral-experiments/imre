@@ -47,6 +47,7 @@ impl BuiltinDescriptor {
                 Some((class, attr, DictIterator::methods(class)))
             }
             Some(("generator", attr)) => Some(("generator", attr, &["__iter__", "__next__"][..])),
+            Some(("type", attr)) => Some(("type", attr, &["mro"][..])),
             Some(("float", attr)) => Some(("float", attr, &["as_integer_ratio"][..])),
             Some(("bytes", attr)) => Some(("bytes", attr, builtins::BYTES_METHODS)),
             Some(("bytearray", attr)) => Some(("bytearray", attr, builtins::BYTEARRAY_METHODS)),
@@ -105,6 +106,7 @@ impl BuiltinDescriptor {
             "str.istitle" => ("str", "istitle"),
             "float.__format__" => ("float", "__format__"),
             "object.__hash__" => ("object", "__hash__"),
+            "object.__ne__" => ("object", "__ne__"),
             "object.__repr__" => ("object", "__repr__"),
             "object.__str__" => ("object", "__str__"),
             "function.__call__" => ("function", "__call__"),
@@ -197,6 +199,7 @@ impl BuiltinDescriptor {
             }
             "generator" => matches!(ctx.heap.get(receiver), Value::Generator { .. }),
             "object" => true,
+            "type" => ctx.is_type_object(receiver),
             "function" => matches!(ctx.heap.get(receiver), Value::Function { .. }),
             "classmethod" => matches!(ctx.heap.get(receiver), Value::ClassMethod(_)),
             "functools.KeyWrapper" => matches!(ctx.heap.get(receiver), Value::KeyWrapper { .. }),
@@ -258,6 +261,7 @@ impl BuiltinDescriptor {
                     && let Some(receiver) = receiver
                 {
                     match ctx.heap.get(receiver) {
+                        _ if self.owner == "type" => ctx.class_qualname(receiver),
                         Value::NamedTuple { class: Some(stdlib::os::stat::CLASS), .. } => "stat_result",
                         value if let Some(class) = value.instance_class() => ctx
                             .class_attr(class, "__qualname__")
@@ -320,6 +324,13 @@ impl BuiltinDescriptor {
                     ("__reduce_ex__", _) if self.owner == "object" => "($self, protocol, /)",
                     ("__reduce__", "__doc__") if self.owner == stdlib::os::stat::CLASS => return Some(NONE),
                     ("__reduce__", _) if self.owner == stdlib::os::stat::CLASS => "($self, /)",
+                    ("count", "__doc__") if self.owner == "bytes" => {
+                        "Return the number of non-overlapping occurrences of subsection 'sub' in bytes B[start:end].\n\n  start\n    Optional start position. Default: start of the bytes.\n  end\n    Optional stop position. Default: end of the bytes."
+                    }
+                    ("find", "__doc__") if self.owner == "bytes" => {
+                        "Return the lowest index in B where subsection 'sub' is found, such that 'sub' is contained within B[start,end].\n\n  start\n    Optional start position. Default: start of the bytes.\n  end\n    Optional stop position. Default: end of the bytes.\n\nReturn -1 on failure."
+                    }
+                    ("count" | "find", _) if self.owner == "bytes" => "($self, sub[, start[, end]], /)",
                     ("isascii", "__doc__") => {
                         "Return True if all characters in the string are ASCII, False otherwise.\n\nASCII characters have code points in the range U+0000-U+007F.\nEmpty string is ASCII too."
                     }
@@ -350,6 +361,8 @@ impl BuiltinDescriptor {
                         | "swapcase",
                         _,
                     ) => "($self, /)",
+                    ("mro", "__doc__") => "Return a type's method resolution order.",
+                    ("mro", _) => "($self, /)",
                     ("append", "__doc__") => "Append object to the end of the list.",
                     ("pop", "__doc__") => {
                         "Remove and return item at index (default last).\n\nRaises IndexError if list is empty or index is out of range."

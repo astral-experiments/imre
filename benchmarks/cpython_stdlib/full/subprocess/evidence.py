@@ -27,6 +27,8 @@ OPERATIONS = {
         "communicate on seven pipe configurations and check each redirected stream is closed",
     "test.test_subprocess.ProcessTestCase.test_communicate_memoryview_input":
         "send a byte memoryview to the child, compare stdout bytes and check that stderr is None",
+    "test.test_subprocess.ProcessTestCase.test_communicate_memoryview_input_nonbyte":
+        "send an integer array memoryview and compare the child's binary echo with the array bytes",
     "test.test_subprocess.ProcessTestCase.test_post_timeout_communicate_sends_input":
         "retry communication after a zero timeout, check the child's exit status and the returned text",
     "test.test_subprocess.ProcessTestCase.test_communicate_timeout":

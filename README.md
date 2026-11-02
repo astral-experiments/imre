@@ -129,14 +129,14 @@ branches. Skipped tests count toward the suite size only.
 | `re` | 125 | 165 | Earlier native runs verified 125 distinct originals. On the later public build, the full 165-case run passed 72 with fd 0 closed. The ordinary-stdin run finished one successful case before it stopped. The closed-fd result adds no cases to the table. |
 | `shutil` | 46 | 223 | Public native runs matched CPython on a 17-case copy selection with 16 passes and one platform skip. Hard-link self-copy and named-pipe copying added two cases. The full module still stops importing tarfile. |
 | `socket` | 61 | 746 | Earlier and focused cases total 61. Four native modes pass 14/19 resolver originals, including the new service database lookup. The 746-case discovery run executed no test bodies. |
-| `subprocess` | 50 | 353 | The full Linux module registers all 353 cases. A public native parent now passes the original memoryview-input case with a real child, live pipe data, EOF and cleanup. The hosted socket-timeout assertion at ordinal 131 remains outside the count. |
+| `subprocess` | 165 | 353 | The intact public module finished all 353 originals. Both O0 and O3 recorded 151 passes, 15 failures, 141 errors and 46 skips. Fourteen other originals passed at both levels in focused runs on other revisions. |
 | `tempfile` | 84 | 118 | Thirty selected filesystem cases ran in all four public native modes, with 27 passes and three skips. Seven previous errors now pass. Six of those cases had already passed on other builds. |
 | `textwrap` | 68 | 68 | Complete suite on `main`, all 68 passed. |
 | `threading` | 83 | 228 | All 228 original registrations ran in ordinary and boxed builds at both levels. Each passed 83, skipped 32 and reported failures on 113 IDs. The bound worker callback still blocks 58 Bunch fixture cases. |
 | `typing` | 107 | 712 | The public TypedDict class now runs all 32 originals at both levels, with 25 passes, one failure and six erroring IDs. Its overlap with the earlier 107 distinct cases is still being reconciled. |
 | `unittest` | 181 | 1,090 | The intact package registered 244 of 1,090 originals and started 213. Of these, 160 passed at both optimization levels. Another 21 unchanged MockTest cases passed in focused runs on the public #3576 head. The intact mock module still stops while importing unittest.mock.call. |
 | `urllib` | 128 | 178 | All 178 original cases entered on Linux and macOS. The public merge passed 65/77 parser and 60/101 companion cases at O0/O3, including 15 real local-file opener cases. Three earlier successes bring the distinct total to 128. |
-| **Total** | **4,957** | **13,328** | **3 complete suites on `main`** |
+| **Total** | **5,072** | **13,328** | **3 complete suites on `main`** |
 
 See the [standard library coverage report](docs/stdlib.md) for the Linux test
 results and import coverage recorded in this repository.

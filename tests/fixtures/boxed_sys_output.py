@@ -34,6 +34,7 @@ buffer = sys.stdout.buffer
 assert buffer is sys.__stdout__.buffer
 assert buffer is not sys.stderr.buffer
 assert buffer.fileno() == 1 and sys.stderr.buffer.fileno() == 2
+assert buffer.isatty() == os.isatty(buffer.fileno())
 assert buffer.writable() and not buffer.readable()
 assert buffer.name == "<stdout>" and buffer.mode == "wb"
 assert sys.stdout.write("text") == 4
@@ -49,6 +50,12 @@ assert original.write("pending") == 7
 assert err_buffer.write(b"binary stderr\n") == 14
 assert err_buffer.close() is None
 assert err_buffer.closed and original.closed
+try:
+    err_buffer.isatty()
+except ValueError:
+    pass
+else:
+    raise AssertionError("closed standard buffer returned terminal status")
 assert sys.__stderr__.buffer is err_buffer
 assert err_buffer.close() is None
 try:

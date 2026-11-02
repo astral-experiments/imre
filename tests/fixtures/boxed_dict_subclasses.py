@@ -119,6 +119,40 @@ def ordered_dictionary():
     assert moved.popitem(last=False) == ("b", 2)
 
 
+    for method, args in (
+        (OrderedDict.__init__, (object(),)),
+        (OrderedDict.__init__, ({},)),
+        (OrderedDict.__or__, ({}, OrderedDict())),
+        (OrderedDict.__ror__, ({}, OrderedDict())),
+        (OrderedDict.__ior__, ({}, {})),
+    ):
+        try:
+            method(*args)
+        except TypeError as error:
+            assert "requires a 'collections.OrderedDict' object" in str(error)
+        else:
+            raise AssertionError("ordered descriptor accepted a foreign receiver")
+
+    class UnionChild(OrderedDict):
+        def update(self, *args, **kwargs):
+            raise AssertionError("union called update")
+
+        def __setitem__(self, key, value):
+            super().__setitem__(key, (value,))
+
+    class ItemsOnly:
+        def items(self):
+            return [("a", 4), ("c", 3)]
+
+    merged = UnionChild()
+    merged["b"] = 1
+    assert list((merged | {"a": 2}).items()) == [("b", ((1,),)), ("a", (2,))]
+    assert type({"a": 2} | merged) is UnionChild
+    assert type(OrderedDict() | merged) is OrderedDict
+    same = merged
+    merged |= ItemsOnly()
+    assert merged is same and list(merged.items()) == [("b", (1,)), ("a", (4,)), ("c", (3,))]
+
     class ClearOnRepr:
         def __repr__(self):
             snapshot.clear()
@@ -294,6 +328,7 @@ def current():
 
     fromkeys_construction()
     ordered_dictionary()
+    pure_ordered_dictionary()
     base_equality()
     allocate_without_init()
     mapping_patterns()
@@ -889,3 +924,28 @@ def base_equality():
         pass
     else:
         raise AssertionError("cyclic dicts unexpectedly compared equal")
+
+
+def pure_ordered_dictionary():
+    # Blocking the accelerator creates independent linked-list storage in a fresh module.
+    import importlib
+    import sys
+
+    public_collections = sys.modules["collections"]
+    public_accelerator = sys.modules["_collections"]
+    try:
+        del sys.modules["collections"]
+        sys.modules["_collections"] = None
+        fresh_collections = importlib.import_module("collections")
+        pure_type = fresh_collections.OrderedDict
+        assert pure_type is not public_accelerator.OrderedDict
+        assert pure_type.__module__ == "collections"
+        ordered = pure_type([("a", 1), ("b", 2)])
+        ordered.move_to_end("a")
+        print(list(ordered), list(dict.keys(ordered)), list(ordered.copy().items()))
+        print(fresh_collections.Counter("aba")["a"], type(iter(ordered)).__name__)
+    finally:
+        sys.modules["_collections"] = public_accelerator
+        sys.modules["collections"] = public_collections
+    assert pure_type.__iter__.__globals__ is fresh_collections.__dict__
+    assert pure_type.__iter__.__globals__["OrderedDict"] is pure_type
