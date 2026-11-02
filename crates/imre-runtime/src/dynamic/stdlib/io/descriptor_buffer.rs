@@ -556,6 +556,12 @@ impl BufferedFd {
             self.close(Some(ctx), true)?;
             return Ok(NONE);
         }
+        if let ("readinto", [target]) = (name, args)
+            && !self.reading
+        {
+            files::readinto_target(ctx, *target)?;
+            return Err(Error::new("UnsupportedOperation", "read"));
+        }
         let closed = || {
             Error::new(
                 "ValueError",
@@ -717,15 +723,7 @@ impl BufferedFd {
                 Ok(ctx.alloc(Value::Bytes(data)))
             }
             "readinto" if args.len() == 1 => {
-                if !self.reading {
-                    return Err(Error::new("UnsupportedOperation", "readinto"));
-                }
-                let Value::ByteArray(bytes) = ctx.heap.get_mut(args[0]) else {
-                    return Err(Error::new(
-                        "TypeError",
-                        "readinto requires a writable buffer",
-                    ));
-                };
+                let bytes = files::readinto_bytes(ctx, args[0])?;
                 if let Buffer::Pipe(pipe) = buffer {
                     let data = pipe.read(Some(bytes.len()), false)?;
                     bytes[..data.len()].copy_from_slice(&data);
