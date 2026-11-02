@@ -9071,8 +9071,12 @@ impl<'a> Checker<'a> {
         if let Some(copy) = self.dataclass_copy(call)? {
             return Ok(copy);
         }
-        if self.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::Partial)) {
-            return self.partial(call);
+        match self.resolve(&call.func) {
+            Some(Binding::Intrinsic(Intrinsic::Partial)) => return self.partial(call),
+            Some(Binding::Intrinsic(Intrinsic::FileConfig)) if calls::has_unpacking(call) => {
+                return self.logging_file_config(call);
+            }
+            _ => {}
         }
         if calls::starred(call) {
             match self.resolve(&call.func) {

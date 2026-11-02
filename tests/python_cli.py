@@ -2425,6 +2425,30 @@ def report(text):
         )
         final_fixture = fixtures / "boxed_typing_final.py"
         compare("-IB", final_fixture, native_args=("run", final_fixture, "--runtime-imports", "--quiet"))
+        # Check each call in its own module so one object input cannot mask another.
+        ini = "[formatters]\nkeys=\n[handlers]\nkeys=\n[loggers]\nkeys=root\n[logger_root]\nlevel=INFO\nhandlers=\n"
+        config_path = root / "logging.ini"
+        config_path.write_text(ini.replace("INFO", "%(threshold)s"))
+        config_call = root / "file_config_call.py"
+        for setup, call in (
+            ("from io import StringIO", f"configure(fname=StringIO({ini!r}))"),
+            ("", f"configure(defaults={{'threshold': 'ERROR', 'retries': 3}}, fname={str(config_path)!r})"),
+            ("options = {'defaults': {'threshold': 'WARNING'}}",
+             f"configure({str(config_path)!r}, **options)"),
+        ):
+            config_call.write_text(
+                "from logging.config import fileConfig as configure\nfrom logging import getLogger\n"
+                f"{setup}\nresult = {call}\nassert result is None\nprint(getLogger().level)\n"
+            )
+            compare("-IB", config_call, native_args=("run", config_call, "--quiet"), native_timeout=600)
+        config_call.write_text(
+            "from io import StringIO\nfrom logging.config import fileConfig\n"
+            "def configure() -> None:\n"
+            f"    result = fileConfig(StringIO({ini!r}))\n    assert result is None\n"
+            "    level: int = 'wrong'\n    print(level)\nconfigure()\n"
+        )
+        bad_config = run(imre, "check", config_call)
+        assert bad_config.returncode != 0 and b"expected int" in bad_config.stderr, bad_config.stderr
         io_registration = fixtures / "io_abc_registration.py"
         compare("-IB", io_registration, native_args=("run", io_registration, "--quiet"))
         override_fixture = fixtures / "boxed_typing_override.py"
