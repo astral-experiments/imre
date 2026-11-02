@@ -2804,6 +2804,11 @@ impl Context {
                 if name == "__dict__" {
                     return Ok(self.class_dictionary(scope));
                 }
+                if matches!(name, "__annotations__" | "__annotate__")
+                    && self.has_class_annotation_provider(scope)
+                {
+                    return self.class_annotation_attr(obj, scope, name);
+                }
                 if name == "__annotations__"
                     && let Some(thunks) = self
                         .scope_data(scope)
@@ -3209,6 +3214,11 @@ impl Context {
                 }
             }
             Value::Class { scope, .. } => {
+                if matches!(name, "__annotations__" | "__annotate__")
+                    && self.has_class_annotation_provider(scope)
+                {
+                    return self.update_class_annotation_attr(scope, name, None);
+                }
                 let error = match name {
                     "__name__" | "__qualname__" | "__bases__" | "__type_params__"
                     | "__module__" | "__doc__" => Error::new(
@@ -3914,6 +3924,11 @@ impl Context {
                     ));
                 }
                 let scope = *scope;
+                if matches!(name, "__annotations__" | "__annotate__")
+                    && self.has_class_annotation_provider(scope)
+                {
+                    return self.update_class_annotation_attr(scope, name, Some(value));
+                }
                 if name == "__annotations__"
                     && let Value::Scope(data) = self.heap.get_mut(scope)
                     && let Some(namespace) = &mut data.class_namespace
@@ -4960,31 +4975,13 @@ impl Context {
         parameterized: bool,
     ) -> Result<Id> {
         let (original, mut bases) = super::typing::resolve_bases(self, bases)?;
-        let mut typed_dict_meta = None;
-        if let Some(meta) = self.module_value("typing", "_TypedDictMeta")
-            && bases
-                .iter()
-                .any(|&base| self.heap.get(base).instance_class() == Some(meta))
-        {
-            let root = self.module_value("typing", "_TypedDict");
-            if bases.iter().any(|&base| {
-                self.heap.get(base).instance_class() != Some(meta)
-                    && self.classes.get("typing.Generic") != Some(&base)
-            }) {
-                return Err(Error::new(
-                    "TypeError",
-                    "cannot inherit from both a TypedDict type and a non-TypedDict base class",
-                ));
-            }
-            if parameterized || bases.len() != 1 || Some(bases[0]) != root {
-                return Err(Error::new(
-                    "NotImplementedError",
-                    "inherited and generic TypedDict declarations are unsupported",
-                ));
-            }
-            bases = vec![self.builtin("dict")];
-            typed_dict_meta = Some(meta);
-        }
+        let typed_dict_meta = self
+            .module_value("typing", "_TypedDictMeta")
+            .filter(|meta| {
+                bases
+                    .iter()
+                    .any(|&base| self.heap.get(base).instance_class() == Some(*meta))
+            });
         let Value::Function {
             scope: parent,
             code,
@@ -5004,7 +5001,11 @@ impl Context {
             .map_err(|e| Error::new("SystemError", e.to_string()))?;
         let module = self.scope_data(parent).module.clone();
         let scope = self.scope(&module, Some(parent));
-        let enum_namespace = self.enum_namespace(&bases);
+        let enum_namespace = if typed_dict_meta.is_some() {
+            None
+        } else {
+            self.enum_namespace(&bases)
+        };
         let enum_kind = enum_namespace.as_ref().map(|state| state.kind);
         let cell = self.alloc(Value::ClassCell(None));
         let Value::Scope(body_scope) = self.heap.get_mut(scope) else {
@@ -5059,6 +5060,30 @@ impl Context {
                 if declaration { TRUE } else { FALSE },
             );
         }
+        let typed_dict_fields = if let Some(meta) = typed_dict_meta {
+            let generic = self.classes.get("typing.Generic").copied();
+            if bases.iter().any(|&base| {
+                self.heap.get(base).instance_class() != Some(meta) && generic != Some(base)
+            }) {
+                return Err(Error::new(
+                    "TypeError",
+                    "cannot inherit from both a TypedDict type and a non-TypedDict base class",
+                ));
+            }
+            if parameterized || generic.is_some_and(|generic| bases.contains(&generic)) {
+                return Err(Error::new(
+                    "NotImplementedError",
+                    "generic TypedDict declarations are unsupported",
+                ));
+            }
+            let dict = self.builtin("dict");
+            let parents = std::mem::replace(&mut bases, vec![dict]);
+            let parents = self.alloc(Value::Tuple(parents));
+            let (fields, thunks) = self.prepare_typeddict_namespace(scope, annotations)?;
+            Some((parents, fields, thunks))
+        } else {
+            None
+        };
         super::typing::class_parameters(self, scope, original, &bases)?;
         // type.__new__ implicitly wraps only plain functions stored under this name.
         if let Some(function) = self.scope_name(scope, "__init_subclass__")
@@ -5136,24 +5161,13 @@ impl Context {
                 .insert(format!("collections.abc.{name}"), class);
         }
         self.init_abstract_class(class, &name, scope)?;
-        if typed_dict_meta.is_some() {
-            // The class tracks unevaluated fields in its own namespace. Reading
-            // __annotations__ here would cache their values before user code can rebind names.
-            let fields = self
-                .own_class_attr(class, "__annotations__")
-                .ok_or_else(|| Error::new("TypeError", "missing TypedDict annotations"))?;
-            let thunks = self
-                .scope_data(scope)
-                .class_namespace
-                .as_ref()
-                .and_then(|ns| ns.annotation_thunks)
-                .unwrap_or(NONE);
+        if let Some((parents, fields, thunks)) = typed_dict_fields {
             let configure = self
                 .module_value("typing", "_configure_typeddict")
                 .ok_or_else(|| Error::new("RuntimeError", "missing TypedDict initializer"))?;
             self.call(
                 configure,
-                vec![class, fields, total.unwrap_or(TRUE), TRUE, thunks],
+                vec![class, fields, total.unwrap_or(TRUE), thunks, parents],
                 Vec::new(),
             )?;
         }

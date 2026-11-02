@@ -1015,6 +1015,7 @@ pub(super) fn call(
             unreachable!()
         };
         *metaclass = Some(meta);
+        ctx.enable_class_annotation_provider(scope);
         return Ok(class);
     }
     if operation == "TypeVarTuple" {

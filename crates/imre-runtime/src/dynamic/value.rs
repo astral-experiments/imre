@@ -638,6 +638,8 @@ pub(super) struct ClassNamespace {
     /// Backing dictionary shared by live class namespace proxies.
     pub dictionary: Option<Id>,
     pub annotation_thunks: Option<Id>,
+    /// TypedDict installs a class-wide annotation function in place of its field thunks.
+    pub provider_annotations: bool,
     /// Slot names consumed when the class is created, independent of later namespace mutations.
     pub slot_names: Option<std::rc::Rc<[String]>>,
 }
