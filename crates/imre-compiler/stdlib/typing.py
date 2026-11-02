@@ -2268,8 +2268,8 @@ def _resolve_forward_type(value, globals, locals, type_params, owner, format, gu
 
     builtin_aliases = (GenericAlias, _abc_callable_alias_type)
     if not (isinstance(value, builtin_aliases)
-            or isinstance(value, (_typing._GenericAlias, _AnnotatedAlias, _typing.Union))
-            or _is_parameterized_typing_alias(value)):
+            or isinstance(value, (_typing._GenericAlias, _typing._CallableGenericAlias,
+                                  _typing._LiteralGenericAlias, _AnnotatedAlias, _typing.Union))):
         return value
     if isinstance(value, builtin_aliases):
         args = tuple(
@@ -2296,11 +2296,14 @@ def _resolve_forward_type(value, globals, locals, type_params, owner, format, gu
         for arg in resolved[1:]:
             union = union | arg
         return union
+    copy_with = getattr(value, "copy_with", None)
+    if copy_with is not None:
+        return copy_with(resolved)
+    # Native callable, literal and unpack aliases currently lack an instance copy_with.
     if type(value) is _typing._CallableGenericAlias:
-        return _typing._CallableGenericAlias(value.__origin__, resolved, name="Callable")
-    if type(value) in (_typing._UnpackGenericAlias, _typing._LiteralGenericAlias):
-        return type(value)(value.__origin__, resolved)
-    return value.copy_with(resolved)
+        return type(value)(value.__origin__, resolved,
+                           name=getattr(value, "_name", None), inst=getattr(value, "_inst", True))
+    return type(value)(value.__origin__, resolved)
 
 
 # VALUE-format annotation resolution from CPython 3.14.5 Lib/typing.py.

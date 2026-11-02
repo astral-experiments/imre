@@ -11,6 +11,15 @@ def current():
     print(module.Format.VALUE, module.Format.FORWARDREF.value, module.Format.STRING.value)
 
     assert typing.evaluate_forward_ref is evaluate_forward_ref
+    class RawMeta(type):
+        def __eq__(cls, other):
+            raise AssertionError("compared the type of a raw result")
+
+    class Raw(metaclass=RawMeta):
+        pass
+
+    raw = Raw()
+    assert evaluate_forward_ref(module.ForwardRef("raw"), globals={"raw": raw}) is raw
     ns = {"Alias": bytes, "Annotated": typing.Annotated, "Literal": typing.Literal}
     assert evaluate_forward_ref(module.ForwardRef("list['Alias']"), globals=ns) == list[bytes]
     assert evaluate_forward_ref(module.ForwardRef("Literal['Alias']"), globals=ns) == typing.Literal["Alias"]
