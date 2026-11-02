@@ -474,34 +474,59 @@ fn pattern_error_at(
     }
 }
 
-/// Repeat a literal when matching its spelling again is equivalent to comparing the capture.
-fn repeated_literal_capture(pattern: &[u8], flags: i64, bytes: bool) -> Option<(usize, usize)> {
+/// Repeat a mandatory literal capture when its spelling compares like the captured text.
+fn repeated_literal_capture(pattern: &[u8], flags: i64, bytes: bool) -> Option<Vec<u8>> {
     if flags & VERBOSE != 0 || flags & (IGNORECASE | LOCALE) == IGNORECASE | LOCALE {
         return None;
     }
-    let capture = pattern.strip_prefix(b"(")?;
-    let (name, body) = if let Some(named) = capture.strip_prefix(b"?P<") {
-        let end = named.iter().position(|&b| b == b'>')?;
-        let name = std::str::from_utf8(&named[..end]).ok()?;
-        if !group_names::valid(name, bytes) {
+    let plain = |s: &[u8]| !s.iter().any(|b| br"\.^$*+?{}[]|()".contains(b));
+    let mut groups = Vec::new();
+    let mut rest = pattern;
+    while let Some(capture) = rest.strip_prefix(b"(") {
+        if capture.starts_with(b"?P=") {
+            break;
+        }
+        let (name, body) = if let Some(named) = capture.strip_prefix(b"?P<") {
+            let end = named.iter().position(|&b| b == b'>')?;
+            let name = std::str::from_utf8(&named[..end]).ok()?;
+            if !group_names::valid(name, bytes) {
+                return None;
+            }
+            (Some(name.as_bytes()), &named[end + 1..])
+        } else {
+            (None, capture)
+        };
+        let close = body.iter().position(|&b| b == b')')?;
+        let literal = &body[..close];
+        if !plain(literal) {
             return None;
         }
-        (Some(name.as_bytes()), &named[end + 1..])
+        groups.push((name, literal));
+        rest = &body[close + 1..];
+    }
+    let (literal, tail) = if let Some(digits) = rest.strip_prefix(br"\") {
+        let [first @ b'1'..=b'9', tail @ ..] = digits else {
+            return None;
+        };
+        // Three octal digits are a character escape, even when that capture exists.
+        if matches!(digits, [b'0'..=b'7', b'0'..=b'7', b'0'..=b'7', ..]) {
+            return None;
+        }
+        let mut number = usize::from(first - b'0');
+        let tail = if let [second @ b'0'..=b'9', tail @ ..] = tail {
+            number = number * 10 + usize::from(second - b'0');
+            tail
+        } else {
+            tail
+        };
+        (groups.get(number - 1)?.1, tail)
     } else {
-        (None, capture)
+        let name = rest.strip_prefix(b"(?P=")?.strip_suffix(b")")?;
+        (groups.iter().find(|g| g.0 == Some(name))?.1, &[][..])
     };
-    let close = body.iter().position(|&b| b == b')')?;
-    let reference = &body[close + 1..];
-    if reference != br"\1"
-        && !(name.is_some()
-            && reference
-                .strip_prefix(b"(?P=")
-                .and_then(|r| r.strip_suffix(b")"))
-                == name)
-    {
+    if literal.is_empty() || !plain(tail) {
         return None;
     }
-    let literal = &body[..close];
     // Unicode literals match a wider class than a backreference's lowercase comparison.
     // Of the ASCII literals, I/i admit dotless i and S/s admit long s.
     if !bytes
@@ -512,8 +537,7 @@ fn repeated_literal_capture(pattern: &[u8], flags: i64, bytes: bool) -> Option<(
     {
         return None;
     }
-    (!literal.is_empty() && !literal.iter().any(|b| br"\.^$*+?{}[]|()".contains(b)))
-        .then_some((pattern.len() - body.len(), reference.len()))
+    Some([&pattern[..pattern.len() - rest.len()], literal, tail].concat())
 }
 
 fn alphabet(bytes: bool, ascii: bool, flags: i64) -> imre_regex::Alphabet {
@@ -576,18 +600,19 @@ fn compiled(ctx: &mut Context, id: Id, flags: Option<Id>) -> Result<Id> {
             "unsupported native regular expression flags",
         ));
     }
-    let (mut source, spelling): (String, &[u8]) = match ctx.heap.get(id) {
-        Value::Bytes(value) => (byte_pattern(value), value),
-        _ => {
-            let text = ctx.str_value(id)?;
-            (text.to_owned(), text.as_bytes())
-        }
+    let spelling = match ctx.heap.get(id) {
+        Value::Bytes(value) => value.as_slice(),
+        _ => ctx.str_value(id)?.as_bytes(),
     };
-    if let Some((start, suffix)) = repeated_literal_capture(spelling, flags, bytes) {
-        // Keep group 1 and repeat its engine spelling, including any escaped high bytes.
-        source.truncate(source.len() - suffix);
-        source.extend_from_within(start..source.len() - 1);
-    }
+    let repeated = repeated_literal_capture(spelling, flags, bytes);
+    let spelling = repeated.as_deref().unwrap_or(spelling);
+    let source = if bytes {
+        byte_pattern(spelling)
+    } else {
+        std::str::from_utf8(spelling)
+            .expect("text pattern")
+            .to_owned()
+    };
     let ascii = bytes || flags & ASCII != 0;
     // Byte escapes have a separate grammar. Unicode IGNORECASE must fold
     // the literal guard without extending Python's word-category membership.
