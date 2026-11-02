@@ -2587,6 +2587,7 @@ impl IntrinsicModule {
                 Intrinsic::Combinatorial(crate::ir::Combinatorial::CombinationsWithReplacement)
             }
             (Self::Itertools, "batched") => Intrinsic::ObjectRuntimeExport("itertools.batched"),
+            (Self::Itertools, "compress") => Intrinsic::ObjectRuntimeExport("itertools.compress"),
             (Self::Itertools, "count") => Intrinsic::Count,
             (Self::Itertools, "takewhile") => Intrinsic::ObjectRuntimeExport("itertools.takewhile"),
             (Self::Itertools, "dropwhile") => Intrinsic::ObjectRuntimeExport("itertools.dropwhile"),
