@@ -236,6 +236,46 @@ fn byte_pattern(bytes: &[u8]) -> String {
     source
 }
 
+/// Only Python's redundant positive Unicode mode can fall back to the raw engine.
+fn raw_unicode_compatible(source: &str, ascii: bool, boundaries: &[usize]) -> bool {
+    use regex_syntax::ast::{Ast, Flag, parse::Parser};
+
+    let Ok(ast) = Parser::new().parse(source) else {
+        // The ordinary builder reports its syntax error if translation also fails.
+        return true;
+    };
+    let mut nodes = vec![&ast];
+    while let Some(node) = nodes.pop() {
+        let flags = match node {
+            Ast::Group(group) => {
+                nodes.push(&group.ast);
+                group.flags()
+            }
+            Ast::Flags(set) => Some(&set.flags),
+            Ast::Repetition(rep) => {
+                nodes.push(&rep.ast);
+                None
+            }
+            Ast::Concat(concat) => {
+                nodes.extend(&concat.asts);
+                None
+            }
+            Ast::Alternation(alt) => {
+                nodes.extend(&alt.asts);
+                None
+            }
+            _ => None,
+        };
+        if let Some(unicode) = flags.and_then(|f| f.flag_state(Flag::Unicode))
+            && (!unicode || ascii)
+            && boundaries.binary_search(&node.span().start.offset).is_err()
+        {
+            return false;
+        }
+    }
+    true
+}
+
 // Python uses str.isalnum() plus "_" for \w and includes four additional
 // ASCII separators in Unicode whitespace. The nested classes also work
 // when these escapes occur inside a bracketed class in the input.
@@ -243,6 +283,9 @@ fn raw_pattern(pattern: &str, ascii: bool, flags: i64) -> Option<(String, bool)>
     if flags & VERBOSE != 0 {
         return None;
     }
+    let check_unicode =
+        pattern.contains("(?") && pattern.contains('u') && (ascii || pattern.contains('-'));
+    let mut boundaries = Vec::new();
     let mut prefer_translation = false;
     let mut result = String::with_capacity(pattern.len());
     let mut chars = pattern.chars().peekable();
@@ -252,20 +295,11 @@ fn raw_pattern(pattern: &str, ascii: bool, flags: i64) -> Option<(String, bool)>
             if c == '(' && !in_class && chars.peek() == Some(&'?') {
                 let mut group = chars.clone();
                 group.next();
-                let mut disabling = false;
-                let mut needs_python_alphabet = false;
                 let mut prefer_python_flags = false;
                 while let Some(flag) = group.next_if(|c| "aiLmsux-".contains(*c)) {
-                    disabling |= flag == '-';
-                    needs_python_alphabet |= flag == 'u' && (ascii || disabling);
                     prefer_python_flags |= matches!(flag, 'a' | 'u' | 'i' | 'x');
                 }
                 if group.peek() == Some(&':') {
-                    // The raw engine's u flag also controls UTF-8 decoding. Only a
-                    // redundant positive Unicode scope can use its parser as a fallback.
-                    if needs_python_alphabet {
-                        return None;
-                    }
                     prefer_translation |= prefer_python_flags;
                 }
             }
@@ -315,8 +349,16 @@ fn raw_pattern(pattern: &str, ascii: bool, flags: i64) -> Option<(String, bool)>
         }
         match escaped {
             Some('b') if in_class => result.push_str(r"\x08"),
-            Some('b') if ascii => result.push_str(r"(?-u:\b)"),
-            Some('B') if ascii && !in_class => result.push_str(r"(?-u:\B)"),
+            Some(boundary @ ('b' | 'B')) if ascii && !in_class => {
+                if check_unicode {
+                    boundaries.push(result.len());
+                }
+                result.push_str(if boundary == 'b' {
+                    r"(?-u:\b)"
+                } else {
+                    r"(?-u:\B)"
+                });
+            }
             Some('w') => result.push_str(r"[\p{L}\p{N}_]"),
             Some('W') => result.push_str(r"[^\p{L}\p{N}_]"),
             Some('s') => result.push_str(r"[\s\x1c-\x1f]"),
@@ -329,6 +371,9 @@ fn raw_pattern(pattern: &str, ascii: bool, flags: i64) -> Option<(String, bool)>
                 }
             }
         }
+    }
+    if check_unicode && !raw_unicode_compatible(&result, ascii, &boundaries) {
+        return None;
     }
     Some((result, prefer_translation))
 }

@@ -15,6 +15,9 @@ def current():
     assert re.search(r"(?u:\b)", "\u0301") is None
     assert re.fullmatch(r"(?-i:I)\b", "İ", re.I) is None
     assert re.fullmatch("(?x:a # (?a: ignored\n)(?ui:b)", "aB")
+    assert re.fullmatch("(?x:a # (?u: ignored\n)(?i-m:b)", "aB", re.A)
+    assert re.fullmatch("(?x:a # (?-u: ignored\n)(?i-m:b)", "aB")
+    assert re.fullmatch("(?x:\\b a # (?u: ignored\n)(?i-m:b)\\Z", "aB", re.A)
     assert re.fullmatch(r"(?ui:a)", "A")
     assert re.fullmatch(r"(?u-m:a)", "a")
     assert re.fullmatch(r"(?u:(?P<état>é))", "é")["état"] == "é"
