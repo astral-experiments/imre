@@ -18,6 +18,38 @@ use progress::Matcher;
 pub(super) use split::pattern_split;
 use split::split;
 
+pub(in crate::dynamic) const MATCH_METHODS: &[&str] = &["group", "groups", "start", "end", "span"];
+
+/// Class-level access to the same native storage and methods as bound matches.
+pub(in crate::dynamic) fn match_class_attribute(
+    ctx: &mut Context,
+    class: Id,
+    name: &str,
+) -> Option<Id> {
+    use crate::dynamic::value::REGEX_MATCH_TYPE;
+    let value = match name {
+        "__base__" => ctx.builtin("object"),
+        "__bases__" | "__mro__" => {
+            let base = ctx.builtin("object");
+            let types = if name == "__mro__" {
+                vec![class, base]
+            } else {
+                vec![base]
+            };
+            ctx.alloc(Value::Tuple(types))
+        }
+        "__class_getitem__" => {
+            let method = ctx.builtin("Match.__class_getitem__");
+            ctx.bind_native_classmethod(method, class)
+        }
+        "re" => ctx.readonly_member(REGEX_MATCH_TYPE, "re"),
+        "string" => ctx.readonly_member(REGEX_MATCH_TYPE, "string"),
+        method if MATCH_METHODS.contains(&method) => ctx.builtin(&format!("match.{method}")),
+        _ => return None,
+    };
+    Some(value)
+}
+
 const IGNORECASE: i64 = 2;
 const LOCALE: i64 = 4;
 const MULTILINE: i64 = 8;

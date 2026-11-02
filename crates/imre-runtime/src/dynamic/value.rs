@@ -53,6 +53,7 @@ pub(super) const ELLIPSIS: Id = 3;
 pub(super) const NOT_IMPLEMENTED: Id = 4;
 const EMPTY_TUPLE: Id = 5;
 
+pub(super) const REGEX_MATCH_TYPE: &str = "re.Match";
 pub(super) const REGEX_PATTERN_TYPE: &str = "re.Pattern";
 pub(super) const TEMPLATE_TYPE: &str = "string.templatelib.Template";
 pub(super) const TEMPLATE_ITER_TYPE: &str = "string.templatelib.TemplateIter";
@@ -1060,6 +1061,7 @@ impl Value {
             Self::DequeIterator { .. } => super::deque::ITERATOR,
             Self::List(_) => "list",
             Self::CallableIterator(_) => "callable_iterator",
+            Self::RegexMatch(_) => REGEX_MATCH_TYPE,
             Self::RegexPattern(_) => REGEX_PATTERN_TYPE,
             Self::RegexScanner { .. } => "_sre.SRE_Scanner",
             Self::Tuple(_) => "tuple",

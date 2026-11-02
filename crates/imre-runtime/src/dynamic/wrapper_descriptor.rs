@@ -23,6 +23,9 @@ impl BuiltinDescriptor {
             });
         }
         let slots = match symbol.rsplit_once('.') {
+            Some(("match", attr)) => {
+                Some((value::REGEX_MATCH_TYPE, attr, stdlib::regex::MATCH_METHODS))
+            }
             Some((stdlib::os::scandir::ENTRY, attr)) => Some((
                 stdlib::os::scandir::ENTRY,
                 attr,
@@ -156,6 +159,7 @@ impl BuiltinDescriptor {
             ),
             stdlib::os::scandir::ENTRY => matches!(ctx.heap.get(receiver), Value::DirEntry(_)),
             stdlib::os::scandir::ITER => matches!(ctx.heap.get(receiver), Value::Scandir(_)),
+            value::REGEX_MATCH_TYPE => matches!(ctx.heap.get(receiver), Value::RegexMatch(_)),
             "range" => matches!(ctx.heap.get(receiver), Value::Range(_)),
             "slice" => matches!(ctx.heap.get(receiver), Value::Slice(_)),
             "method_descriptor" => ctx.builtin_type_name(receiver) == Some("method_descriptor"),
