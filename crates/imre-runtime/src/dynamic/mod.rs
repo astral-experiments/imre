@@ -2417,6 +2417,34 @@ impl Context {
                 let pi = self.alloc(Value::Float(std::f64::consts::PI));
                 self.bind(scope, "pi", pi);
             }
+            "hashlib" => {
+                let native_new = self.builtin("hashlib.new");
+                self.bind(scope, "_native_new", native_new);
+            }
+            "_blake2" => {
+                for name in ["blake2b", "blake2s"] {
+                    let class = crate::objects::HashState::public_constructor(name).unwrap();
+                    let constructor = self.builtin(class);
+                    self.bind(scope, name, constructor);
+                    for attr in [
+                        "SALT_SIZE",
+                        "PERSON_SIZE",
+                        "MAX_KEY_SIZE",
+                        "MAX_DIGEST_SIZE",
+                    ] {
+                        let constant =
+                            crate::objects::HashState::class_constant(class, attr).unwrap();
+                        let value = self.int(constant as i64);
+                        self.bind(
+                            scope,
+                            &format!("{}_{attr}", name.to_ascii_uppercase()),
+                            value,
+                        );
+                    }
+                }
+                let threshold = self.int(2048);
+                self.bind(scope, "_GIL_MINSIZE", threshold);
+            }
             "_datetime" => {
                 for name in ["date", "datetime", "time", "timedelta", "timezone"] {
                     let class = self.builtin(&format!("datetime.{name}"));
