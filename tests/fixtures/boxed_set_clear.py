@@ -23,8 +23,10 @@ def current():
             return "override"
 
     sub = Subset([1, 2])
-    assert sub.clear() == "override" and len(sub) == 2
-    assert set.clear(sub) is None and not sub
+    assert sub.clear() == "override"
+    assert sub.__contains__(1) and sub.__contains__(2)
+    assert set.clear(sub) is None
+    assert not sub.__contains__(1) and not sub.__contains__(2)
     assert not hasattr(frozenset(), "clear")
 
     values.add(3)
