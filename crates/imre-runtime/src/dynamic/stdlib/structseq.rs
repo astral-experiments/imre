@@ -62,7 +62,7 @@ impl Record {
         let iterator = ctx
             .iterator(sequence.expect("required sequence bound"))
             .map_err(|error| {
-                if error.kind == "TypeError" {
+                if ctx.is_builtin_error(&error, "TypeError") {
                     Error::new("TypeError", "constructor requires a sequence")
                 } else {
                     error

@@ -27,3 +27,27 @@ def current():
             print(error)
         else:
             raise AssertionError(args)
+
+    class BadSequence(TypeError):
+        pass
+
+    class BadIterator:
+        def __init__(self, error):
+            self.error = error
+
+        def __iter__(self):
+            raise self.error
+
+    try:
+        owner(BadIterator(BadSequence("iter failed")))
+    except TypeError as error:
+        assert type(error) is TypeError and str(error) == "constructor requires a sequence"
+    else:
+        raise AssertionError("accepted non-iterable")
+    sentinel = ValueError("iter failed")
+    try:
+        owner(BadIterator(sentinel))
+    except ValueError as error:
+        assert error is sentinel
+    else:
+        raise AssertionError("lost iterator error")
