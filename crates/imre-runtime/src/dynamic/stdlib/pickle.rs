@@ -35,9 +35,38 @@ fn unsupported_reducer(ctx: &Context, obj: Id) -> Error {
     )
 }
 
+/// Produce the protocol 2+ default reduction for an ordinary Python instance with no new arguments.
+fn default_instance_reduce(ctx: &mut Context, receiver: Id, protocol: i32) -> Result<Id> {
+    let Value::Instance { class, .. } = *ctx.heap.get(receiver) else {
+        return Err(unsupported_reducer(ctx, receiver));
+    };
+    // A native base may have state beyond the Python dictionary and slots.
+    let Value::Class { ancestors, .. } = ctx.heap.get(class) else {
+        return Err(unsupported_reducer(ctx, receiver));
+    };
+    if protocol < 2
+        || ancestors
+            .iter()
+            .any(|&base| matches!(ctx.heap.get(base), Value::Native(kind) if kind != "object"))
+        || ctx.class_attr(class, "__getnewargs_ex__").is_some()
+        || ctx.class_attr(class, "__getnewargs__").is_some()
+    {
+        return Err(unsupported_reducer(ctx, receiver));
+    }
+
+    let copyreg = ctx.module("copyreg")?;
+    let newobj = ctx.lookup_attr(copyreg, "__newobj__")?;
+    ctx.heap.keep(newobj);
+    let class = ctx.exact_type(receiver)?;
+    let args = ctx.alloc(Value::Tuple(vec![class]));
+    let getstate = ctx.lookup_attr(receiver, "__getstate__")?;
+    let state = ctx.call(getstate, Vec::new(), Vec::new())?;
+    Ok(ctx.alloc(Value::Tuple(vec![newobj, args, state, NONE, NONE])))
+}
+
 fn default_reduction(ctx: &mut Context, obj: Id, protocol: i32) -> Result<Id> {
     if !matches!(ctx.heap.get(obj), Value::DirEntry(_)) {
-        return Err(unsupported_reducer(ctx, obj));
+        return default_instance_reduce(ctx, obj, protocol);
     }
     if protocol >= 2 {
         return Err(Error::new(
@@ -104,7 +133,7 @@ pub(in crate::dynamic) fn object_reduce(
     let reducer = match ctx.lookup_attr(receiver, "__reduce__") {
         Ok(reducer) => reducer,
         Err(error) if ctx.is_attribute_error(&error) => {
-            return Err(unsupported_reducer(ctx, receiver));
+            return default_reduction(ctx, receiver, protocol);
         }
         Err(error) => return Err(error),
     };
@@ -438,6 +467,52 @@ impl Pickler {
         self.save_reduce(ctx, obj, fields[0], fields[1], state)
     }
 
+    /// NEWOBJ applies the original class's allocator directly when a reduction names __newobj__.
+    fn save_newobj(&mut self, ctx: &mut Context, obj: Id, args: Id) -> Result<()> {
+        let Value::Tuple(items) = ctx.heap.get(args) else {
+            unreachable!("validated reduction args")
+        };
+        let Some((&class, tail)) = items.split_first() else {
+            return Err(pickling_error(
+                ctx,
+                "__newobj__ expected at least 1 argument, got 0",
+            ));
+        };
+        let tail = ctx.alloc(Value::Tuple(tail.to_vec()));
+        let type_class = ctx.builtin("type");
+        if !ctx.instance_of(class, type_class) {
+            return Err(pickling_error(
+                ctx,
+                format!(
+                    "first argument to __newobj__() must be a class, not {}",
+                    ctx.type_name(class)
+                ),
+            ));
+        }
+        let expected = match ctx.lookup_attr(obj, "__class__") {
+            Ok(class) => class,
+            Err(error) if ctx.is_attribute_error(&error) => ctx.exact_type(obj)?,
+            Err(error) => return Err(error),
+        };
+        if class != expected {
+            let repr = ctx.builtin("repr");
+            let expected = ctx.call(repr, vec![expected], Vec::new())?;
+            let class = ctx.call(repr, vec![class], Vec::new())?;
+            return Err(pickling_error(
+                ctx,
+                format!(
+                    "first argument to __newobj__() must be {}, not {}",
+                    ctx.str_value(expected)?,
+                    ctx.str_value(class)?
+                ),
+            ));
+        }
+        self.save(ctx, class)?;
+        self.save(ctx, tail)?;
+        self.out.push(0x81); // NEWOBJ
+        Ok(())
+    }
+
     fn save_reduce(
         &mut self,
         ctx: &mut Context,
@@ -446,9 +521,22 @@ impl Pickler {
         args: Id,
         state: Id,
     ) -> Result<()> {
-        self.save(ctx, func)?;
-        self.save(ctx, args)?;
-        self.out.push(b'R');
+        let newobj = if self.protocol >= 2 {
+            match ctx.lookup_attr(func, "__name__") {
+                Ok(name) => ctx.str_value(name).is_ok_and(|name| name == "__newobj__"),
+                Err(error) if ctx.is_attribute_error(&error) => false,
+                Err(error) => return Err(error),
+            }
+        } else {
+            false
+        };
+        if newobj {
+            self.save_newobj(ctx, obj, args)?;
+        } else {
+            self.save(ctx, func)?;
+            self.save(ctx, args)?;
+            self.out.push(b'R');
+        }
         if let Some(&index) = self.memo.get(&obj) {
             // A reconstructor argument can reach this object through a mutable container.
             self.out.push(b'0'); // POP
