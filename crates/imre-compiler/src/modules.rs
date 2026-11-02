@@ -1437,6 +1437,16 @@ impl IntrinsicModule {
             (Self::Codecs, "BOM_UTF32_LE") => Intrinsic::CodecBom(b"\xff\xfe\0\0"),
             (Self::Codecs, "BOM_UTF32_BE") => Intrinsic::CodecBom(b"\0\0\xfe\xff"),
             (Self::SocketNative, name) => Intrinsic::ObjectRuntimeExport(match name {
+                "gaierror" => "_socket.gaierror",
+                "getnameinfo" => "_socket.getnameinfo",
+                "if_indextoname" => "_socket.if_indextoname",
+                "if_nameindex" => "_socket.if_nameindex",
+                "if_nametoindex" => "_socket.if_nametoindex",
+                "NI_DGRAM" => "_socket.NI_DGRAM",
+                "NI_NAMEREQD" => "_socket.NI_NAMEREQD",
+                "NI_NOFQDN" => "_socket.NI_NOFQDN",
+                "NI_NUMERICHOST" => "_socket.NI_NUMERICHOST",
+                "NI_NUMERICSERV" => "_socket.NI_NUMERICSERV",
                 "has_ipv6" => "_socket.has_ipv6",
                 "SocketType" => "_socket.SocketType",
                 "AF_INET" => "_socket.AF_INET",
@@ -1465,6 +1475,23 @@ impl IntrinsicModule {
                 "error" => "_socket.error",
                 _ => return None,
             }),
+            (Self::Socket, "getnameinfo") => Intrinsic::ObjectRuntimeExport("socket.getnameinfo"),
+            (Self::Socket, "if_indextoname") => {
+                Intrinsic::ObjectRuntimeExport("socket.if_indextoname")
+            }
+            (Self::Socket, "if_nameindex") => Intrinsic::ObjectRuntimeExport("socket.if_nameindex"),
+            (Self::Socket, "if_nametoindex") => {
+                Intrinsic::ObjectRuntimeExport("socket.if_nametoindex")
+            }
+            (Self::Socket, "NI_DGRAM") => Intrinsic::ObjectRuntimeExport("socket.NI_DGRAM"),
+            (Self::Socket, "NI_NAMEREQD") => Intrinsic::ObjectRuntimeExport("socket.NI_NAMEREQD"),
+            (Self::Socket, "NI_NOFQDN") => Intrinsic::ObjectRuntimeExport("socket.NI_NOFQDN"),
+            (Self::Socket, "NI_NUMERICHOST") => {
+                Intrinsic::ObjectRuntimeExport("socket.NI_NUMERICHOST")
+            }
+            (Self::Socket, "NI_NUMERICSERV") => {
+                Intrinsic::ObjectRuntimeExport("socket.NI_NUMERICSERV")
+            }
             (Self::Socket, "SocketType") => Intrinsic::ObjectRuntimeExport("socket.SocketType"),
             (Self::Socket, "has_dualstack_ipv6") => {
                 Intrinsic::ObjectRuntimeExport("socket.has_dualstack_ipv6")

@@ -1,9 +1,10 @@
 import _socket
 import socket
+from socket import NI_NUMERICHOST, NI_NUMERICSERV, getnameinfo
 
 
-flags = socket.NI_NUMERICHOST | socket.NI_NUMERICSERV
-assert socket.getnameinfo is _socket.getnameinfo
+flags = NI_NUMERICHOST | NI_NUMERICSERV
+assert getnameinfo is socket.getnameinfo is _socket.getnameinfo
 assert socket.getnameinfo(("127.0.0.1", 53), flags) == ("127.0.0.1", "53")
 for address, expected in [
     (("localhost", 0), socket.gaierror),
