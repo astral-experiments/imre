@@ -113,7 +113,6 @@ fn integer_overflow(value: i64, kind: &str) -> Error {
 pub(super) struct Array {
     format: Format,
     bytes: Rc<Vec<u8>>,
-    pub(super) viewed: bool,
 }
 
 impl Array {
@@ -220,21 +219,11 @@ fn append_item(ctx: &mut Context, receiver: Id, item: Id) -> Result<()> {
         .checked_add(format.width())
         .ok_or_else(|| Error::new("MemoryError", ""))?;
     // __index__ may already have grown the array to the requested size.
-    if array_mut(ctx, receiver).bytes.len() != end {
-        let has_view = if array_mut(ctx, receiver).viewed {
-            let (heap, roots) = ctx.heap_and_roots();
-            let live = heap.has_live_array_view(receiver, roots)?;
-            array_mut(ctx, receiver).viewed = live;
-            live
-        } else {
-            false
-        };
-        if has_view || ctx.buffer_exports.contains(&receiver) {
-            return Err(Error::new(
-                "BufferError",
-                "cannot resize an array that is exporting buffers",
-            ));
-        }
+    if array_mut(ctx, receiver).bytes.len() != end && ctx.buffer_is_exported(receiver)? {
+        return Err(Error::new(
+            "BufferError",
+            "cannot resize an array that is exporting buffers",
+        ));
     }
     let array = array_mut(ctx, receiver);
     let additional = end.saturating_sub(array.bytes.len());
@@ -294,7 +283,6 @@ pub(super) fn new(ctx: &mut Context, args: &[Id], kw: &[(String, Id)]) -> Result
     let mut array = Array {
         format,
         bytes: Rc::new(Vec::new()),
-        viewed: false,
     };
     if let [initial] = rest {
         match ctx.heap.get(ctx.scalar_value(*initial)) {

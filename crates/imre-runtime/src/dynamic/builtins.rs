@@ -1808,10 +1808,10 @@ pub(super) fn call(
             })?;
             ctx.check_buffer_exporter(object)?;
             let owner = match ctx.heap.get(ctx.scalar_value(object)) {
-                Value::Bytes(_) => object,
+                Value::Bytes(_) | Value::ByteArray(_) => object,
                 Value::MemoryView { owner, .. } => Context::memoryview_owner(*owner)?,
                 Value::Array(array) if array.view_layout().0 != "w" => object,
-                Value::Array(_) | Value::ByteArray(_) => {
+                Value::Array(_) => {
                     return Err(Error::new(
                         "NotImplementedError",
                         "memoryview of a mutable buffer is unsupported",
@@ -1825,8 +1825,8 @@ pub(super) fn call(
                 }
             };
             let storage = ctx.scalar_value(owner);
-            if let Value::Array(array) = ctx.heap.get_mut(storage) {
-                array.viewed = true;
+            if matches!(ctx.heap.get(storage), Value::Array(_) | Value::ByteArray(_)) {
+                ctx.heap.note_buffer_view(storage);
             }
             Ok(ctx.alloc(Value::MemoryView {
                 owner: Some(owner),

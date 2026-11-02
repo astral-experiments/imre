@@ -2073,6 +2073,7 @@ impl Context {
                         let (format, width) = array.view_layout();
                         (format, width, array.len(), false)
                     }
+                    Value::ByteArray(bytes) => ("B", 1, bytes.len(), false),
                     _ => ("B", 1, self.bytes_like(owner)?.len(), true),
                 };
                 return Ok(match name {

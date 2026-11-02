@@ -1864,6 +1864,7 @@ struct Slot {
     // Next in collection order while occupied, or next free slot while vacant.
     gc_next: Cell<usize>,
     untracked_tuple: Cell<bool>,
+    may_have_buffer_views: bool,
     finalization: Finalization,
 }
 
@@ -1874,6 +1875,7 @@ impl Slot {
             trace: Cell::new(UNMARKED),
             gc_next: Cell::new(UNMARKED),
             untracked_tuple: Cell::new(false),
+            may_have_buffer_views: false,
             finalization: Finalization::None,
         }
     }
@@ -2344,6 +2346,7 @@ impl Heap {
             self.free_head = self.slots[index].gc_next.replace(UNMARKED);
             self.free_count -= 1;
             self.slots[index].value = Some(value);
+            self.slots[index].may_have_buffer_views = false;
             index
         } else {
             if self.slots.len() == self.slots.capacity() && self.slots.try_reserve(1).is_err() {
@@ -2802,11 +2805,19 @@ impl Heap {
         reachable
     }
 
+    pub(super) fn note_buffer_view(&mut self, storage: Id) {
+        self.slots[storage as usize].may_have_buffer_views = true;
+    }
+
+    pub(super) fn may_have_buffer_views(&self, storage: Id) -> bool {
+        self.slots[storage as usize].may_have_buffer_views
+    }
+
     /// A view can be unreachable before the next sweep. Check its actual lifetime
-    /// before resizing a previously exported array, without running Python callbacks.
-    pub(super) fn has_live_array_view(
-        &self,
-        array: Id,
+    /// before resizing a previously exported buffer, without running Python callbacks.
+    pub(super) fn has_live_buffer_view(
+        &mut self,
+        storage: Id,
         roots: impl Iterator<Item = Id>,
     ) -> Result<bool> {
         let mut cycles = CycleSet::new(self.slots.len())?;
@@ -2814,12 +2825,13 @@ impl Heap {
         let live = self.slots.iter().any(|slot| {
             slot.marked()
                 && matches!(slot.value, Some(Value::MemoryView { owner: Some(owner), .. })
-                    if owner == array || matches!(self.get(owner),
-                        Value::Instance { scalar: Some(storage), .. } if *storage == array))
+                    if owner == storage || matches!(self.get(owner),
+                        Value::Instance { scalar: Some(payload), .. } if *payload == storage))
         });
         for slot in &self.slots {
             slot.trace.set(UNMARKED);
         }
+        self.slots[storage as usize].may_have_buffer_views = live;
         Ok(live)
     }
 
