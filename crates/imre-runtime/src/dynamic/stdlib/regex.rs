@@ -426,6 +426,9 @@ fn syntax_diagnostic(ctx: &Context, source: Id, flags: i64) -> Option<(String, u
     ) {
         return Some(error);
     }
+    if let Some((msg, at)) = imre_regex::repeat_diagnostic(&text, flags & VERBOSE != 0) {
+        return Some((msg.to_owned(), text[..at].chars().count()));
+    }
     let error = parsed.err()?;
     let message = match error.kind() {
         ErrorKind::ClassUnclosed => "unterminated character set",
@@ -642,6 +645,9 @@ fn compiled(ctx: &mut Context, id: Id, flags: Option<Id>) -> Result<Id> {
     let global_verbose = source.starts_with("(?x)");
     let prepared = if let Some((raw, prefer_translation)) = raw_pattern(&source, ascii, flags) {
         let original = || {
+            if let Some((msg, _)) = imre_regex::repeat_diagnostic(&source, false) {
+                return Err(msg.to_owned());
+            }
             let raw = imre_regex::preserve_zero_repeat_groups(raw)?;
             if flags & IGNORECASE != 0 && !bytes {
                 build(imre_regex::expand_case(&raw, ascii)?)

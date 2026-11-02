@@ -2,6 +2,31 @@ import re
 
 
 def current():
+    for invalid, message, position in (
+        ("(?i)a**", "multiple repeat", 6),
+        (rb"x{1,2}+?", "multiple repeat", 7),
+        ("^*", "nothing to repeat", 1),
+        ("(^*)**", "nothing to repeat", 2),
+        (rb"\b*", "nothing to repeat", 2),
+        ("(?x)a{1,2} #text\n +", "multiple repeat", 18),
+    ):
+        try:
+            re.compile(invalid)
+        except re.PatternError as error:
+            assert (error.msg, error.pos) == (message, position)
+        else:
+            raise AssertionError(invalid)
+    assert re.fullmatch(r"(?:a*)*", "aa")
+    assert re.fullmatch(rb"[\^*+]+", b"^*+")
+    assert re.fullmatch(r"a+?", "aaa")
+    assert re.fullmatch(rb"[\b]*", b"\x08")
+    assert re.fullmatch(rb"(?:\b)*a", b"a")
+    assert re.fullmatch(r"(a*)+a", "aa")
+    assert re.compile(r"a*+a")
+    assert re.compile(r"\<*a++")
+    assert re.compile(rb"\b{start}*a++")
+    assert re.compile("(?mx)# tail\\\n a**\n a")
+
     for flags in (0, re.X):
         assert re.fullmatch(r"([\1])\078", "\x01\x078", flags).group(1) == "\x01"
         assert re.fullmatch(rb"[\200-\377]", b"\xff", flags)
