@@ -568,6 +568,26 @@ fn alphabet(bytes: bool, ascii: bool, flags: i64) -> imre_regex::Alphabet {
     }
 }
 
+/// Consume complete leading global matching flags before choosing the matcher and lowering anchors.
+fn leading_match_flags(mut pattern: &[u8], mut flags: i64) -> (&[u8], i64) {
+    while let Some(rest) = pattern.strip_prefix(b"(?") {
+        let mut added = 0;
+        let mut chars = rest.iter();
+        loop {
+            match chars.next() {
+                Some(b'i') => added |= IGNORECASE,
+                Some(b'm') => added |= MULTILINE,
+                Some(b's') => added |= DOTALL,
+                Some(b')') if added != 0 => break,
+                _ => return (pattern, flags),
+            }
+        }
+        flags |= added;
+        pattern = chars.as_slice();
+    }
+    (pattern, flags)
+}
+
 fn compiled(ctx: &mut Context, id: Id, flags: Option<Id>) -> Result<Id> {
     let flags = flags
         .map(|value| ctx.as_integer(value))
@@ -617,6 +637,7 @@ fn compiled(ctx: &mut Context, id: Id, flags: Option<Id>) -> Result<Id> {
         Value::Bytes(value) => value.as_slice(),
         _ => ctx.str_value(id)?.as_bytes(),
     };
+    let (spelling, flags) = leading_match_flags(spelling, flags);
     let repeated = repeated_literal_capture(spelling, flags, bytes);
     let spelling = repeated.as_deref().unwrap_or(spelling);
     let source = if bytes {

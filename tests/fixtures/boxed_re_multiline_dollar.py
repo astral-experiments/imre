@@ -2,6 +2,20 @@ import re
 
 
 def current():
+    spelling = r"(?m)(?ii)^([a-c]+)$"
+    lines = re.compile(spelling)
+    match = lines.search("x\nAbC\nD")
+    assert (match.span(), match.group(1)) == ((2, 5), "AbC")
+    assert lines.pattern == spelling and lines.flags == re.I | re.M | re.U
+    assert lines.search("ABCD") is None
+    assert re.compile(rb"(?m)ab$").search(b"x\nab\ny").span() == (2, 4)
+    assert re.fullmatch(r"(?i)(abc)\1", "AbCaBc").group(1) == "AbC"
+    assert re.fullmatch(r"(?i)(?-i:a)", "A") is None
+    assert re.fullmatch(r"(?i)i(?m-i:i)i", "İiİ")
+    assert re.fullmatch(r"(?i)i(?m-i:i)i", "İİİ") is None
+    assert re.fullmatch(r"\(\?i\)a", "(?i)A") is None
+    assert re.compile("(?i:a)").flags == re.U
+
     flags = re.MULTILINE | re.VERBOSE
     lines = re.compile(r"(?P<first>é $) \n ^(?P<second>b $)  # end of line", flags)
     match = lines.search("x\né\nb\ny")
