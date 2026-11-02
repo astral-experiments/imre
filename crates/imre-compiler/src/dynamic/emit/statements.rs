@@ -590,16 +590,24 @@ impl Function<'_, '_> {
     fn parameter_scope(&mut self, outer: &str, params: &ast::TypeParams, class: bool) -> String {
         let names = self.op("dict", &[]);
         for param in params {
-            let ast::TypeParam::TypeVar(typevar) = param else {
-                self.unsupported("variadic class type parameters");
-                continue;
-            };
-            if typevar.bound.is_some() || typevar.default.is_some() {
+            if param.default().is_some()
+                || matches!(param, ast::TypeParam::TypeVar(v) if v.bound.is_some())
+            {
                 self.unsupported("class type parameter bounds and defaults");
             }
-            let binding = self.code_name(typevar.name.as_str());
-            let name = self.code_name(self.source.private_names.definition(&typevar.name));
-            self.op("put", &[&names, &binding, &name]);
+            let binding = self.code_name(param.name().as_str());
+            let name =
+                self.code_name(self.source.private_names.definition(param.name()));
+            let declaration = match param {
+                ast::TypeParam::TypeVar(_) => name,
+                ast::TypeParam::TypeVarTuple(_) => {
+                    self.op("class_typevartuple", &[&name])
+                }
+                ast::TypeParam::ParamSpec(_) => {
+                    self.op("class_paramspec", &[&name])
+                }
+            };
+            self.op("put", &[&names, &binding, &declaration]);
         }
         let op = if class {
             "class_parameter_scope"
