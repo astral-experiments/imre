@@ -2909,7 +2909,15 @@ impl SearchRoots {
 pub(crate) fn boxed_mock_export(name: &str) -> bool {
     matches!(
         name,
-        "sentinel" | "DEFAULT" | "ANY" | "MagicMock" | "seal" | "call" | "_Call" | "_CallList"
+        "sentinel"
+            | "DEFAULT"
+            | "ANY"
+            | "MagicMock"
+            | "mock_open"
+            | "seal"
+            | "call"
+            | "_Call"
+            | "_CallList"
     )
 }
 

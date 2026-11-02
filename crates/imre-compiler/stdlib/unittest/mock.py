@@ -165,6 +165,9 @@ class Mock:
 
     def _child(self, name: str) -> Mock:
         _check_child_name(name)
+        return self._get_child(name)
+
+    def _get_child(self, name: str) -> Mock:
         node = self._node
         if name not in node._children:
             index = len(self._nodes)
