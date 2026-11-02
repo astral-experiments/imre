@@ -41,7 +41,7 @@ pub(super) fn module_function(symbol: &str) -> Option<(&str, &str)> {
         "_thread" if matches!(function, "allocate" | "allocate_lock") => Some((module, function)),
         "_contextvars" if function == "copy_context" => Some((module, function)),
         "_io" if function == "text_encoding" => Some((module, function)),
-        "zlib" if function == "adler32" => Some((module, function)),
+        "zlib" if matches!(function, "adler32" | "crc32") => Some((module, function)),
         "hashlib"
             if matches!(function, "new" | "file_digest")
                 || crate::objects::HashState::algorithms().any(|name| name == function) =>

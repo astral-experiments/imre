@@ -521,7 +521,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             let items = options.into_iter().map(|option| ctx.text(option)).collect();
             ctx.alloc(Value::List(items))
         }
-        ("zlib", "adler32") => ctx.builtin("zlib.adler32"),
+        ("zlib", "adler32" | "crc32") => ctx.builtin(&format!("zlib.{name}")),
         (
             "binascii",
             "Error" | "Incomplete" | "a2b_base64" | "b2a_base64" | "a2b_hex" | "unhexlify",
@@ -1262,8 +1262,8 @@ pub(super) fn call(
     if let Some(method) = name.strip_prefix("binascii.") {
         return binascii::call(ctx, method, args, kwargs);
     }
-    if name == "zlib.adler32" {
-        return binascii::adler32(ctx, args, kwargs);
+    if let Some(method @ ("adler32" | "crc32")) = name.strip_prefix("zlib.") {
+        return binascii::checksum(ctx, method, args, kwargs);
     }
     if let Some(method) = name.strip_prefix("struct.Struct.") {
         return structure::method(ctx, method, args, kwargs);

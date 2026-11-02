@@ -12,7 +12,7 @@ mod argparse;
 mod args;
 mod asyncio;
 mod binascii;
-pub(crate) use binascii::{adler32, binascii_decode, binascii_encode, unhexlify};
+pub(crate) use binascii::{adler32, binascii_decode, binascii_encode, crc32, unhexlify};
 pub(crate) use binascii::{base64_decode, urlsafe_encode};
 mod boxed_values;
 mod builtins;
