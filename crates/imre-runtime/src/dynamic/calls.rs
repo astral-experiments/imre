@@ -1009,7 +1009,7 @@ impl Context {
             "bool" => "int",
             "datetime.datetime" => "datetime.date",
             "datetime.timezone" => stdlib::datetime::TZINFO,
-            stdlib::flags::TYPE | stdlib::os::stat::CLASS => "tuple",
+            stdlib::flags::TYPE | stdlib::os::stat::CLASS | stdlib::os::stat::VFS_CLASS => "tuple",
             class if stdlib::fixed_structseq::fixed_type(class).is_some() => "tuple",
             "typing._UnpackGenericAlias" => "typing._GenericAlias",
             HashState::XOF_CLASS => HashState::CLASS,
@@ -1178,6 +1178,7 @@ impl Context {
                             | "_contextvars.ContextVar"
                             | "_contextvars.Token"
                             | stdlib::os::stat::CLASS
+                            | stdlib::os::stat::VFS_CLASS
                             | "array.array"
                             | "selectors.PollSelector"
                             | "selectors.SelectSelector"
@@ -1264,7 +1265,8 @@ impl Context {
                         | stdlib::fixed_structseq::HASH_INFO
                         | stdlib::fixed_structseq::TERMINAL_SIZE
                         | stdlib::flags::TYPE
-                        | stdlib::os::stat::CLASS),
+                        | stdlib::os::stat::CLASS
+                        | stdlib::os::stat::VFS_CLASS),
                     ),
                 ..
             } => Ok(self.builtin(class)),
@@ -1419,13 +1421,6 @@ impl Context {
             {
                 qualified.strip_prefix("urllib.parse.") == Some(*name)
             }
-            (
-                stdlib::os::stat::CLASS,
-                Value::NamedTuple {
-                    class: Some(stdlib::os::stat::CLASS),
-                    ..
-                },
-            ) => true,
             ("typing._GenericAlias", Value::GenericAlias(alias))
                 if alias.kind == super::typing::AliasKind::Unpack =>
             {
@@ -1441,7 +1436,9 @@ impl Context {
                             | stdlib::fixed_structseq::UNRAISABLE_ARGS
                             | stdlib::fixed_structseq::HASH_INFO
                             | stdlib::fixed_structseq::TERMINAL_SIZE
-                            | stdlib::flags::TYPE),
+                            | stdlib::flags::TYPE
+                            | stdlib::os::stat::CLASS
+                            | stdlib::os::stat::VFS_CLASS),
                         ),
                     ..
                 },
@@ -2537,24 +2534,29 @@ impl Context {
                     format!("'datetime.{kind}' object has no attribute '{name}'"),
                 ));
             }
-            Value::Native(ref class) if class == stdlib::os::stat::CLASS => match name {
-                "__reduce__" => return Ok(self.builtin("os.stat_result.__reduce__")),
-                field if let Some(id) = stdlib::os::stat::member(self, field) => return Ok(id),
-                "__module__" => return Ok(self.text("os")),
-                "__name__" | "__qualname__" => return Ok(self.text("stat_result")),
-                "__base__" => return Ok(self.builtin("tuple")),
-                "__match_args__" => {
-                    let names = stdlib::os::stat::FIELDS[..7]
-                        .iter()
-                        .map(|&n| self.text(n))
-                        .collect();
-                    return Ok(self.alloc(Value::Tuple(names)));
+            Value::Native(ref class) if let Some(layout) = stdlib::os::stat::layout(class) => {
+                match name {
+                    "__reduce__" => return Ok(self.builtin(&format!("{class}.__reduce__"))),
+                    field if let Some(id) = stdlib::os::stat::member(self, layout, field) => {
+                        return Ok(id);
+                    }
+                    "__module__" => return Ok(self.text("os")),
+                    "__name__" | "__qualname__" => return Ok(self.text(layout.name())),
+                    "__base__" => return Ok(self.builtin("tuple")),
+                    "__match_args__" => {
+                        let names = layout
+                            .match_fields()
+                            .iter()
+                            .map(|&n| self.text(n))
+                            .collect();
+                        return Ok(self.alloc(Value::Tuple(names)));
+                    }
+                    field if let Some(n) = stdlib::os::stat::count_attribute(layout, field) => {
+                        return Ok(self.int(n));
+                    }
+                    _ => {}
                 }
-                field if let Some(n) = stdlib::os::stat::count_attribute(field) => {
-                    return Ok(self.int(n));
-                }
-                _ => {}
-            },
+            }
             Value::Native(ref class)
                 if class == "datetime.datetime"
                     && matches!(name, "now" | "fromtimestamp" | "combine") =>
@@ -3483,11 +3485,11 @@ impl Context {
                 if let Some(i) = names.iter().position(|n| n == name) {
                     return Ok(values[i]);
                 }
-                if class == Some(stdlib::os::stat::CLASS) {
+                if let Some(layout) = class.and_then(stdlib::os::stat::layout) {
                     if name == "__class__" {
-                        return Ok(self.builtin(stdlib::os::stat::CLASS));
+                        return Ok(self.builtin(layout.class));
                     }
-                    if let Some(n) = stdlib::os::stat::count_attribute(name) {
+                    if let Some(n) = stdlib::os::stat::count_attribute(layout, name) {
                         return Ok(self.int(n));
                     }
                 }
@@ -4044,8 +4046,8 @@ impl Context {
             class: Some(owner), ..
         } = *self.heap.get(obj)
         {
-            let member = if owner == stdlib::os::stat::CLASS {
-                stdlib::os::stat::member(self, name)
+            let member = if let Some(layout) = stdlib::os::stat::layout(owner) {
+                stdlib::os::stat::member(self, layout, name)
             } else if let Some(class) = stdlib::fixed_structseq::fixed_type(owner) {
                 stdlib::fixed_structseq::member(self, class, name)
             } else {
