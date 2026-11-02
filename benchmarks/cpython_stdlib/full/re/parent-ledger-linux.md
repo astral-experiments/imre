@@ -79,6 +79,20 @@ Two further parents passed on CPython. On `a1a48176`, both native levels stopped
 
 On the same public revision, the ordinary dev-runtime builds passed the three existing `findall` parents, `test_findall_atomic_grouping`, `test_findall_possessive_quantifiers` and `test_re_findall`. O0 reported `Ran 3 tests in 16.177s` and O3 reported `Ran 3 tests in 5.944s`, both `OK`. All four public selections reported zero skips and zero subtests. A separate trace on the merged release runtime at O3 observed zero full-subject copies across six 10 MB misses and one snapshot per call across eight hits. The control executable also rejected two deliberately incorrect results. The merged public control packet has SHA-256 `89300a1a5a224c8fe5a09c56eb52db98c0f9d64fb9f4829a8ce24866ba29c3a6`. [Deferred subject copy](https://github.com/astral-experiments/imre/pull/4318) · [Pinned timing assertion](https://github.com/python/cpython/blob/5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/test_re.py#L2475-L2488) · [Raw terminal records](parent-replay-terminals-linux.tsv)
 
+## Reconciliation with the coordinator’s 140 keys
+
+The 140-key coordinator file (SHA-256 `532094fab84f29a89382f844532a902df887df835ebc8c9c973facf5480aaac1`) shares 139 exact (ID, occurrence) pairs with this campaign’s 144-key file. The coordinator alone recorded `test.test_re.ExternalTests.test_re_tests`, occurrence 1. Its 403 table inputs count as one parent. Five `test.test_re.ReTests` methods occur only in the campaign file, all at occurrence 1. The combined ledger has **145 of 165** registrations and SHA-256 `42ec0c15bf295ab19a1e46733c5ec39a509d9f286d9edf405daf589579c098c8`. [Coordinator’s published 140-key count](https://github.com/astral-experiments/imre/blob/fa6e1473700d1a8b3e49b7c28cc381e0295eed44/README.md#L129)
+
+| Ordinal | Original and raw streams | CPython 3.14.5 lines | SHA-256 of those lines |
+| ---: | --- | ---: | --- |
+| 66 | [`test_bug_gh100061`](delta-140/066-test_bug_gh100061.txt) | 2623–2641 | `d2ff910f34ecb0828dfb9fd8d509c3bafaed027e62432bb9b19e61a148959671` |
+| 122 | [`test_pattern_compare_bytes`](delta-140/122-test_pattern_compare_bytes.txt) | 2338–2353 | `888eb4df0696c09da1494ca346ec5d6b972bec3c7ae5755159ea8c863ea8089b` |
+| 123 | [`test_pickling`](delta-140/123-test_pickling.txt) | 1415–1423 | `97500bedb672d9d9fbbdd3bc58c2d17b3b8195c158f3c572583355cbef98c8cf` |
+| 147 | [`test_search_anchor_at_beginning`](delta-140/147-test_search_anchor_at_beginning.txt) | 2476–2488 | `2c9d5ca6ef33dcba7224b0330440cbbc47c5d369151a4bb60809a5c202ee3b27` |
+| 158 | [`test_symbolic_groups`](delta-140/158-test_symbolic_groups.txt) | 282–293 | `c213b9ccac0a0160e61582252547aa079e41a611929cb70b7bc60cd6cba90937` |
+
+The five files contain the complete selected stock, O0 and O3 stdout and stderr streams, with the actual process exits and product hashes. Each named parent recorded a verbose unittest success terminal and the enclosing process exited 0. The selected driver also printed successful subtests. The five-key archive has SHA-256 `1cce072dbd2e0e4e66a91590ca73c7b54ce838519e87e0f177e4de79890a4c9a`. Method hashes cover the complete definition at the pinned revision, from the first decorator or definition line through the final newline. [Pinned source](https://github.com/python/cpython/blob/5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/test_re.py)
+
 ## Reproduce the historical join
 
 The upstream source is CPython commit `5607950ef232dad16d75c0cf53101d9649d89115`. The SHA-256 of `Lib/test/test_re.py` is `879c8b562a5bddb413e73ad6d026a6199785bd08fa1c2c5db1ef831b4e1c47e2`. The following command checks the complement against loader order and reconstructs the historical key digest. Run from the Imre root with the staged CPython test tree and interpreter from the capture replay instructions. [Upstream source](https://github.com/python/cpython/blob/5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/test_re.py)
