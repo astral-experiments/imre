@@ -1505,6 +1505,13 @@ impl IntrinsicModule {
                 "NI_NUMERICSERV" => "_socket.NI_NUMERICSERV",
                 "has_ipv6" => "_socket.has_ipv6",
                 "SocketType" => "_socket.SocketType",
+                "getaddrinfo" => "_socket.getaddrinfo",
+                "AI_NUMERICSERV" => "_socket.AI_NUMERICSERV",
+                "EAI_SERVICE" => "_socket.EAI_SERVICE",
+                "EAI_NODATA" => "_socket.EAI_NODATA",
+                "EAI_NONAME" => "_socket.EAI_NONAME",
+                "AI_PASSIVE" => "_socket.AI_PASSIVE",
+                "SOL_TCP" => "_socket.SOL_TCP",
                 "AF_INET" => "_socket.AF_INET",
                 "AF_INET6" => "_socket.AF_INET6",
                 "AF_UNSPEC" => "_socket.AF_UNSPEC",
@@ -1548,6 +1555,20 @@ impl IntrinsicModule {
             (Self::Socket, "NI_NUMERICSERV") => {
                 Intrinsic::ObjectRuntimeExport("socket.NI_NUMERICSERV")
             }
+            (Self::Socket, "AddressFamily") => {
+                Intrinsic::ObjectRuntimeExport("socket.AddressFamily")
+            }
+            (Self::Socket, "SocketKind") => Intrinsic::ObjectRuntimeExport("socket.SocketKind"),
+            (Self::Socket, "getaddrinfo") => Intrinsic::ObjectRuntimeExport("socket.getaddrinfo"),
+            (Self::Socket, "AI_NUMERICSERV") => {
+                Intrinsic::ObjectRuntimeExport("socket.AI_NUMERICSERV")
+            }
+            (Self::Socket, "AddressInfo") => Intrinsic::ObjectRuntimeExport("socket.AddressInfo"),
+            (Self::Socket, "AI_PASSIVE") => Intrinsic::ObjectRuntimeExport("socket.AI_PASSIVE"),
+            (Self::Socket, "EAI_NODATA") => Intrinsic::ObjectRuntimeExport("socket.EAI_NODATA"),
+            (Self::Socket, "EAI_NONAME") => Intrinsic::ObjectRuntimeExport("socket.EAI_NONAME"),
+            (Self::Socket, "EAI_SERVICE") => Intrinsic::ObjectRuntimeExport("socket.EAI_SERVICE"),
+            (Self::Socket, "SOL_TCP") => Intrinsic::ObjectRuntimeExport("socket.SOL_TCP"),
             (Self::Socket, "SocketType") => Intrinsic::ObjectRuntimeExport("socket.SocketType"),
             (Self::Socket, "has_dualstack_ipv6") => {
                 Intrinsic::ObjectRuntimeExport("socket.has_dualstack_ipv6")

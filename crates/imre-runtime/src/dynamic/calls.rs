@@ -2685,17 +2685,20 @@ impl Context {
                 }
             }
             Value::Native(ref builtin)
-                if matches!(builtin.as_str(), "binascii.Error" | "binascii.Incomplete") =>
+                if matches!(
+                    builtin.as_str(),
+                    "binascii.Error" | "binascii.Incomplete" | "socket.gaierror"
+                ) =>
             {
-                let short = builtin.rsplit('.').next().unwrap();
+                let (module, short) = builtin.split_once('.').unwrap();
                 match name {
                     "__name__" | "__qualname__" => return Ok(self.text(short.to_owned())),
-                    "__module__" => return Ok(self.text("binascii")),
+                    "__module__" => return Ok(self.text(module.to_owned())),
                     "__base__" | "__bases__" => {
-                        let base = self.builtin(if short == "Error" {
-                            "ValueError"
-                        } else {
-                            "Exception"
+                        let base = self.builtin(match short {
+                            "gaierror" => "OSError",
+                            "Error" => "ValueError",
+                            _ => "Exception",
                         });
                         return Ok(if name == "__base__" {
                             base
