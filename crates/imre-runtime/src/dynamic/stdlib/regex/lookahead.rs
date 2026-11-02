@@ -28,6 +28,9 @@ pub(super) fn compile(
     )
     .map_err(|_| original)?;
     if flags & IGNORECASE != 0 {
+        if source.contains(r"\k<") || source.contains("(?(") {
+            return Err("case-insensitive lookahead group references are unsupported".into());
+        }
         // Normalized literal punctuation is escaped. Substituting same-width group
         // openers lets the normal case folder read literals at their original offsets.
         let syntax = source
