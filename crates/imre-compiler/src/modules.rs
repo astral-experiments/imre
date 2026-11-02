@@ -2295,6 +2295,7 @@ pub(crate) struct SourceGraph {
     /// available to the child at the original point in Python's initialization.
     initialization: Vec<(ModuleId, Range<usize>)>,
     pub(crate) errno_names: Vec<String>,
+    pub(crate) doctest_imports: Vec<String>,
 }
 
 impl SourceGraph {
@@ -3440,7 +3441,7 @@ impl<'a> Loader<'a> {
                 }
             }
         }
-        self.doctest_program()?;
+        let doctest_imports = self.doctest_program()?;
         self.inputs.missing.sort_unstable();
         self.inputs.missing.dedup();
         let mut checked_diagnostics = vec![Vec::new(); self.modules.len()];
@@ -3448,6 +3449,7 @@ impl<'a> Loader<'a> {
             checked_diagnostics[id].push(CheckedDiagnostic::BuiltinImport(name));
         }
         let mut graph = SourceGraph {
+            doctest_imports,
             command_startup: None,
             virtual_command: false,
             traceback_objects: false,
