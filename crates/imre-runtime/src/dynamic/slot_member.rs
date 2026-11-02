@@ -461,7 +461,7 @@ impl Context {
         if self.scope_name(scope, "__annotate_func__").is_some() {
             self.enable_class_annotation_provider(scope);
         }
-        if abc.is_some() {
+        if metaclass.is_some() {
             let original = self.scope_name(scope, "__orig_bases__");
             super::typing::class_parameters(self, scope, original, &bases)?;
         }
