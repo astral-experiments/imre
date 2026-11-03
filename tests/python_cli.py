@@ -3518,6 +3518,7 @@ for name in ("md4", "ripemd160"):
             "boxed_unittest_return_warning.py",
             "boxed_unittest_runner_warnings.py",
             "boxed_unittest_runner_durations.py",
+            "boxed_unittest_base_suite.py",
             "boxed_unittest_class_cleanup.py",
             "boxed_pathlib.py",
             "boxed_posixpath.py",

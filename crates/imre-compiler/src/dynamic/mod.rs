@@ -138,6 +138,7 @@ impl Imports {
                     | "traceback"
                     | "unittest.case"
                     | "unittest.result"
+                    | "unittest.suite"
                     | "string.templatelib"
                     | "runpy"
             )
@@ -195,7 +196,13 @@ fn boxed_hashlib_kdf(name: &str) -> bool {
 fn boxed_unittest_export(name: &str) -> bool {
     matches!(
         name,
-        "case" | "result" | "addModuleCleanup" | "doModuleCleanups" | "enterModuleContext"
+        "BaseTestSuite"
+            | "case"
+            | "result"
+            | "suite"
+            | "addModuleCleanup"
+            | "doModuleCleanups"
+            | "enterModuleContext"
     )
 }
 
