@@ -5701,6 +5701,14 @@ impl<'a> Checker<'a> {
                         {
                             return Ok(kind);
                         }
+                        if let Some(Binding::Intrinsic(Intrinsic::ScopedObjectExport(
+                            name @ ("_pickle.PickleError"
+                            | "_pickle.PicklingError"
+                            | "_pickle.UnpicklingError"),
+                        ))) = self.resolve(target)
+                        {
+                            return Err(self.scoped_builtin_error(name, target));
+                        }
                         Err(error(
                             self.source,
                             target,

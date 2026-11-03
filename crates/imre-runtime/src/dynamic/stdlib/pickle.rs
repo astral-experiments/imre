@@ -1,9 +1,9 @@
-use super::super::value::{DictViewKind, ELLIPSIS, NOT_IMPLEMENTED};
+use super::super::value::{DictViewKind, ELLIPSIS, NOT_IMPLEMENTED, NativeModuleState};
 use super::{Context, Error, Id, NONE, Result, Value};
 use std::collections::HashMap;
 mod encoding;
 
-pub(in super::super) fn install(ctx: &mut Context, scope: Id) -> Result<()> {
+pub(in super::super) fn install(ctx: &mut Context, module: Id, scope: Id) -> Result<()> {
     // Keep the dictionary itself so that live registrations are visible, even if
     // the copyreg module attribute is later rebound.
     let copyreg = ctx.module("copyreg")?;
@@ -17,28 +17,41 @@ pub(in super::super) fn install(ctx: &mut Context, scope: Id) -> Result<()> {
             ),
         ));
     }
-    ctx.builtins.insert("_pickle.dispatch_table".into(), table);
-    let version = ctx.int(5);
-    ctx.bind(scope, "HIGHEST_PROTOCOL", version);
-    ctx.bind(scope, "DEFAULT_PROTOCOL", version);
-    let mut base = ctx.builtin("Exception");
-    for name in ["PickleError", "PicklingError"] {
+    let exception = ctx.builtin("Exception");
+    let mut exception_class = |name: &str, base| -> Result<Id> {
         let fields = ctx.scope("_pickle", Some(scope));
         let module_name = ctx.text("_pickle");
         ctx.bind(fields, "__module__", module_name);
         let qualname = ctx.text(name);
         ctx.bind(fields, "__qualname__", qualname);
+        ctx.bind(fields, "__doc__", NONE);
         let class = ctx.allocate_class(name.into(), fields, vec![base])?;
         ctx.bind(scope, name, class);
-        ctx.builtins.insert(format!("_pickle.{name}"), class);
-        base = class;
-    }
+        Ok(class)
+    };
+    let pickle_error = exception_class("PickleError", exception)?;
+    let pickling_error = exception_class("PicklingError", pickle_error)?;
+    exception_class("UnpicklingError", pickle_error)?;
+    let Value::Module { module_state, .. } = ctx.heap.get_mut(module) else {
+        unreachable!()
+    };
+    *module_state = Some(NativeModuleState::PickleWriter {
+        pickling_error,
+        dispatch_table: table,
+    });
+    let callable = ctx.builtin("_pickle.dumps");
+    let dumps = ctx.alloc(Value::Method {
+        callable,
+        receiver: module,
+        explicit: false,
+    });
+    ctx.bind(scope, "dumps", dumps);
     Ok(())
 }
 
-fn pickling_error(ctx: &Context, message: impl Into<String>) -> Error {
+fn pickling_error(class: Id, message: impl Into<String>) -> Error {
     let mut error = Error::new("PicklingError", message);
-    error.class = ctx.builtins["_pickle.PicklingError"];
+    error.class = class;
     error
 }
 
@@ -95,7 +108,7 @@ fn find_global_module(ctx: &mut Context, obj: Id, name: &str) -> Result<Option<I
     Ok(None)
 }
 
-fn global_module(ctx: &mut Context, obj: Id, name: &str) -> Result<Id> {
+fn global_module(ctx: &mut Context, obj: Id, name: &str, error: Id) -> Result<Id> {
     let module = if matches!(obj, ELLIPSIS | NOT_IMPLEMENTED) {
         ctx.text("builtins")
     } else {
@@ -118,14 +131,14 @@ fn global_module(ctx: &mut Context, obj: Id, name: &str) -> Result<Id> {
     } else {
         let current = ctx.module(&module_name).map_err(|e| {
             if ctx.is_builtin_error(&e, "ModuleNotFoundError") {
-                pickling_error(ctx, format!("Can't import module {module_name}"))
+                pickling_error(error, format!("Can't import module {module_name}"))
             } else {
                 e
             }
         })?;
         dotted_attribute(ctx, current, name).map_err(|e| {
             if ctx.is_attribute_error(&e) {
-                pickling_error(ctx, format!("Can't find {name} in {module_name}"))
+                pickling_error(error, format!("Can't find {name} in {module_name}"))
             } else {
                 e
             }
@@ -133,7 +146,7 @@ fn global_module(ctx: &mut Context, obj: Id, name: &str) -> Result<Id> {
     };
     if resolved != obj {
         return Err(pickling_error(
-            ctx,
+            error,
             format!("object differs from {module_name}.{name}"),
         ));
     }
@@ -348,6 +361,8 @@ pub(in crate::dynamic) fn object_reduce(
 const BATCH_SIZE: usize = 1000;
 
 struct Pickler {
+    error: Id,
+    dispatch_table: Id,
     protocol: u8,
     fix_imports: bool,
     memo: HashMap<Id, u32>,
@@ -564,11 +579,11 @@ impl Pickler {
         };
         if name.split('.').any(|part| part == "<locals>") {
             return Err(pickling_error(
-                ctx,
+                self.error,
                 format!("Can't pickle local object '{name}'"),
             ));
         }
-        let module = global_module(ctx, obj, &name)?;
+        let module = global_module(ctx, obj, &name, self.error)?;
         ctx.heap.keep(module);
         if self.protocol >= 4 {
             self.save(ctx, module)?;
@@ -595,7 +610,7 @@ impl Pickler {
         )
         .map_err(|e| {
             if e.kind == "PicklingError" {
-                pickling_error(ctx, e.message)
+                pickling_error(self.error, e.message)
             } else {
                 e
             }
@@ -631,7 +646,7 @@ impl Pickler {
         let reducer = match ctx.heap.get(obj) {
             Value::Set { .. } | Value::ByteArray(_) | Value::SurrogateStr(_) => None,
             _ => {
-                let table = ctx.builtins["_pickle.dispatch_table"];
+                let table = self.dispatch_table;
                 let (_, index) = ctx.find_dictionary_key(table, class, None)?;
                 index.map(|index| ctx.stored_entries(table)[index].1)
             }
@@ -662,20 +677,20 @@ impl Pickler {
             Value::Tuple(fields) if (2..=6).contains(&fields.len()) => fields.clone(),
             _ => {
                 return Err(pickling_error(
-                    ctx,
+                    self.error,
                     "__reduce__ must return a string or a tuple of length 2 through 6",
                 ));
             }
         };
         if !ctx.callable(fields[0]) {
             return Err(pickling_error(
-                ctx,
+                self.error,
                 "first item of the tuple returned by __reduce__ must be callable",
             ));
         }
         if !matches!(ctx.heap.get(fields[1]), Value::Tuple(_)) {
             return Err(pickling_error(
-                ctx,
+                self.error,
                 "second item of the tuple returned by __reduce__ must be a tuple",
             ));
         }
@@ -692,7 +707,7 @@ impl Pickler {
                     "{position} item of the tuple returned by __reduce__ must be an iterator, not {}",
                     ctx.str_value(name)?
                 );
-                return Err(pickling_error(ctx, message));
+                return Err(pickling_error(self.error, message));
             }
         }
         if optional(5) != NONE {
@@ -804,7 +819,7 @@ impl Pickler {
         };
         let Some((&class, tail)) = items.split_first() else {
             return Err(pickling_error(
-                ctx,
+                self.error,
                 "__newobj__ expected at least 1 argument, got 0",
             ));
         };
@@ -812,7 +827,7 @@ impl Pickler {
         let type_class = ctx.builtin("type");
         if !ctx.instance_of(class, type_class) {
             return Err(pickling_error(
-                ctx,
+                self.error,
                 format!(
                     "first argument to __newobj__() must be a class, not {}",
                     ctx.type_name(class)
@@ -829,7 +844,7 @@ impl Pickler {
             let expected = ctx.call(repr, vec![expected], Vec::new())?;
             let class = ctx.call(repr, vec![class], Vec::new())?;
             return Err(pickling_error(
-                ctx,
+                self.error,
                 format!(
                     "first argument to __newobj__() must be {}, not {}",
                     ctx.str_value(expected)?,
@@ -890,6 +905,20 @@ impl Pickler {
 }
 
 pub(super) fn dumps(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    let Some((&module, args)) = args.split_first() else {
+        return Err(Error::new("TypeError", "dumps requires a pickle module"));
+    };
+    let Value::Module {
+        module_state:
+            Some(NativeModuleState::PickleWriter {
+                pickling_error,
+                dispatch_table,
+            }),
+        ..
+    } = *ctx.heap.get(module)
+    else {
+        return Err(Error::new("TypeError", "dumps requires a pickle module"));
+    };
     if args.len() > 2 {
         return Err(Error::new(
             "TypeError",
@@ -956,6 +985,8 @@ pub(super) fn dumps(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> 
     }
     let protocol = if protocol < 0 { 5 } else { protocol as u8 };
     let mut pickler = Pickler {
+        error: pickling_error,
+        dispatch_table,
         protocol,
         fix_imports,
         memo: HashMap::new(),

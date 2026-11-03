@@ -870,12 +870,22 @@ pub(super) enum NativeModuleState {
     LocaleError(Id),
     IsoCalendarDate(Id),
     SslError(Id),
+    PickleWriter {
+        pickling_error: Id,
+        dispatch_table: Id,
+    },
 }
 
 impl NativeModuleState {
-    fn class(self) -> Id {
+    fn references(self, visit: &mut MarkQueue<'_>) {
         match self {
-            Self::LocaleError(class) | Self::IsoCalendarDate(class) | Self::SslError(class) => class,
+            Self::LocaleError(class) | Self::IsoCalendarDate(class) | Self::SslError(class) => {
+                visit.push(class)
+            }
+            Self::PickleWriter {
+                pickling_error,
+                dispatch_table,
+            } => visit.extend([pickling_error, dispatch_table]),
         }
     }
 }
@@ -1694,7 +1704,9 @@ impl Value {
                 ..
             } => {
                 visit.push(*scope);
-                visit.extend(module_state.map(NativeModuleState::class));
+                if let Some(state) = module_state {
+                    state.references(visit);
+                }
                 visit.extend(origin);
                 visit.extend(constructor);
             }

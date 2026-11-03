@@ -2530,6 +2530,8 @@ def report(text):
             extra={"TZ": "EST5"},
         )
         compare("-IB", fixtures / "boxed_pickle_writer.py")
+        for first in ("_pickle", "pickle"):
+            compare("-IB", fixtures / "pickle_accelerator_writer.py", first)
         compare("-IB", "-c", "import io, logging; print(repr(logging.StreamHandler(io.StringIO())))")
         compare("-IB", "-c", "import io; b = io.BytesIO(b'abc'); print(bytes(b.getbuffer()))")
         compare(

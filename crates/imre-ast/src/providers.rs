@@ -43,6 +43,7 @@ fn is_builtin(name: &str) -> bool {
             | "operator"
             | "_operator"
             | "_opcode"
+            | "_pickle"
             | "atexit"
             | "builtins"
             | "errno"

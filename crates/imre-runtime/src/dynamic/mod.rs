@@ -3286,7 +3286,7 @@ impl Context {
             "_warnings" => stdlib::warnings_accel::install(self, module, scope)?,
             "time" => stdlib::time::install_timezone(self, scope)?,
             "struct" => stdlib::structure::install(self, scope)?,
-            "pickle" => stdlib::pickle::install(self, scope)?,
+            "_pickle" => stdlib::pickle::install(self, module, scope)?,
             "urllib.parse" => stdlib::urllib::initialize(self, scope),
             "_io" => stdlib::io::install_native(self, scope, module),
             "ast" => stdlib::ast::install(self, scope),
