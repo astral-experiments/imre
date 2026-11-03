@@ -82,7 +82,7 @@ fn bound_hash_worker_owns_expanded_input_while_running() {
     let held = hash.lock();
     let worker = launch(&ctx, operation, None).unwrap();
     ctx.workers.entries.push(Entry {
-        handle: Rc::clone(&worker.handle),
+        handle: Arc::clone(&worker.handle),
         daemon: false,
         owner: Some(owner),
         ident: worker.ident,
@@ -113,6 +113,72 @@ fn bound_hash_worker_owns_expanded_input_while_running() {
 }
 
 #[test]
+fn zero_timeout_applies_to_worker_exit_and_all_observers_share_native_join() {
+    let timeout = Duration::from_secs(5);
+    // Bound every wait so an incorrect join cannot strand the test process.
+    struct ExitGate {
+        entered: mpsc::Sender<()>,
+        poll: mpsc::Receiver<()>,
+        returned: mpsc::Receiver<()>,
+        completed: mpsc::Sender<()>,
+    }
+    impl Drop for ExitGate {
+        fn drop(&mut self) {
+            let _ = self.entered.send(());
+            let _ = self.poll.recv_timeout(Duration::from_secs(5));
+            let _ = self.returned.recv_timeout(Duration::from_millis(250));
+            let _ = self.completed.send(());
+        }
+    }
+    thread_local! {
+        static GATE: std::cell::OnceCell<ExitGate> = const { std::cell::OnceCell::new() };
+    }
+
+    let (end_body, body) = mpsc::channel();
+    let (entered, at_exit) = mpsc::channel();
+    let (polling, poll) = mpsc::channel();
+    let (finished, returned) = mpsc::channel();
+    let (completed, completion) = mpsc::channel();
+    let handle = Handle::spawn(move || {
+        let gate = ExitGate {
+            entered,
+            poll,
+            returned,
+            completed,
+        };
+        GATE.with(|cell| assert!(cell.set(gate).is_ok()));
+        body.recv_timeout(timeout).unwrap();
+        Err("worker failure".into())
+    })
+    .unwrap();
+
+    handle.join(Some(Duration::ZERO)).unwrap();
+    assert!(handle.alive());
+    end_body.send(()).unwrap();
+    at_exit.recv_timeout(timeout).unwrap();
+    thread::scope(|scope| {
+        let observer = Arc::clone(&handle);
+        scope.spawn(move || assert!(!observer.alive()));
+        let deadline = std::time::Instant::now() + timeout;
+        while handle.native.try_lock().is_ok() {
+            assert!(std::time::Instant::now() < deadline);
+            thread::yield_now();
+        }
+        // is_alive() owns the OS join while TLS is shutting down. Once exit was
+        // signaled, even join(0) must share that join and receive its saved error.
+        polling.send(()).unwrap();
+        let error = handle.join(Some(Duration::ZERO)).unwrap_err();
+        completion
+            .try_recv()
+            .expect("native TLS teardown completed before join returned");
+        let _ = finished.send(());
+        assert_eq!(error.kind, "SystemError");
+        assert_eq!(error.message, "worker failure");
+    });
+    handle.join(None).unwrap();
+}
+
+#[test]
 fn shutdown_joins_non_daemon_workers_and_leaves_daemon_workers_running() {
     let mut ctx = context();
     let (daemon, daemon_alive, non_daemon_joined) = while_lock_held(|lock| {
@@ -128,7 +194,7 @@ fn shutdown_joins_non_daemon_workers_and_leaves_daemon_workers_running() {
         let normal = launch(&ctx, Operation::Empty, None).unwrap();
         for (worker, is_daemon) in [(&daemon, true), (&normal, false)] {
             ctx.workers.entries.push(Entry {
-                handle: Rc::clone(&worker.handle),
+                handle: Arc::clone(&worker.handle),
                 daemon: is_daemon,
                 owner: None,
                 ident: worker.ident,
@@ -137,7 +203,7 @@ fn shutdown_joins_non_daemon_workers_and_leaves_daemon_workers_running() {
             });
         }
         drop(ctx);
-        let non_daemon_joined = normal.handle.thread.borrow().is_none();
+        let non_daemon_joined = normal.handle.native.lock().unwrap().thread.is_none();
         let daemon_alive = daemon.handle.alive();
         normal.handle.join(None).unwrap();
         (daemon, daemon_alive, non_daemon_joined)
