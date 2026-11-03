@@ -1,3 +1,4 @@
+import gc
 import warnings
 
 
@@ -26,7 +27,18 @@ def current():
             raise AssertionError("__int__ must take precedence")
 
     assert int(large) is large
+    for text in ("-5", "0", "1", "256"):
+        assert int(text) is int(text) + 0
+    for text in ("-6", "257"):
+        assert int(text) is not int(text)
+    assert int("0") is not False and int("1") is not True
     assert type(int(Plain(3))) is int
+    assert Plain(3) is not Plain(3) and int(Plain(3)) is int("3")
+
+    saved_id = id(int("173"))
+    gc.collect()
+    restored = int("173")
+    assert id(restored) == saved_id and str(restored) == "173"
     assert int(Override(3)) is large
     assert int(Indexed()) is large
     assert list(map(int, [Converted(large)]))[0] is large

@@ -2430,6 +2430,7 @@ pub(super) struct Heap {
     traces: Vec<Cell<usize>>,
     gc_order: GcOrder,
     linked_string_constants: HashMap<i64, Id>,
+    small_ints: HashMap<i64, Id>,
     short_bytes: HashMap<Option<u8>, Id>,
     full_collection: Option<CycleSet>,
     // Native owners identify spellings. Runtime-created strings keep only a weak boxed handle.
@@ -2647,6 +2648,7 @@ impl Heap {
             gc_order: GcOrder::EMPTY,
             full_collection: None,
             linked_string_constants: HashMap::new(),
+            small_ints: HashMap::new(),
             short_bytes: HashMap::new(),
             interned: HashMap::new(),
             abc_registrations: Vec::new(),
@@ -2866,6 +2868,16 @@ impl Heap {
         {
             return self.intern_literal(owner, true);
         }
+        if let Value::Int(integer) = &value
+            && let Some(n @ -5..=256) = integer.as_small()
+        {
+            if let Some(&id) = self.small_ints.get(&n) {
+                return id;
+            }
+            let id = self.alloc_slot_with_trace(value, false);
+            self.small_ints.insert(n, id);
+            return id;
+        }
         match value {
             Value::Bytes(bytes) if bytes.is_empty() => self.bytes_from_data(bytes),
             Value::Tuple(items) if items.is_empty() => EMPTY_TUPLE,
@@ -2957,9 +2969,7 @@ impl Heap {
     }
 
     fn alloc_slot_with_trace(&mut self, value: Value, trace: bool) -> Id {
-        let trace = trace
-            && self.allocation_traces.is_tracing()
-            && !matches!(&value, Value::Int(n) if matches!(n.as_small(), Some(-5..=256)));
+        let trace = trace && self.allocation_traces.is_tracing();
         let has_gc_header = value.has_gc_header(self);
         let index = if self.free_head != END {
             let index = self.free_head;
@@ -3655,6 +3665,7 @@ impl Heap {
         pending.extend(globals);
         pending.extend(self.full_collection_members());
         pending.extend(self.linked_string_constants.values().copied());
+        pending.extend(self.small_ints.values().copied());
         pending.extend(self.short_bytes.values().copied());
         pending.extend([NONE, FALSE, TRUE, ELLIPSIS, NOT_IMPLEMENTED, EMPTY_TUPLE]);
         pending.extend(
