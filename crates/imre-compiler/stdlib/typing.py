@@ -1960,6 +1960,12 @@ def _typevar_subst(self, arg):
     return arg
 
 
+def _type_repr(obj):
+    if isinstance(obj, tuple):
+        return "[" + ", ".join(_type_repr(item) for item in obj) + "]"
+    return _annotation_type_repr(obj)
+
+
 def _paramspec_subst(self, arg):
     if isinstance(arg, (list, tuple)):
         arg = tuple(_type_check(a, "Expected a type.") for a in arg)

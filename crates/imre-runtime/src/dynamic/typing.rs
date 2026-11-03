@@ -670,6 +670,18 @@ fn typing_alias_helper(ctx: &mut Context, name: &str, args: Vec<Id>) -> Result<I
     ctx.call(method, args, Vec::new())
 }
 
+/// Use the defining typing globals even if the caller replaces the module in sys.modules.
+pub(super) fn tuple_argument_repr(ctx: &mut Context, value: Id) -> Result<Option<Id>> {
+    let Some(factory) = ctx.typing.callable_factory else {
+        return Ok(None);
+    };
+    let Value::Function { scope, .. } = ctx.heap.get(factory) else {
+        return Ok(None);
+    };
+    let helper = ctx.lookup(ctx.root_scope(*scope), "_type_repr")?;
+    ctx.call(helper, vec![value], Vec::new()).map(Some)
+}
+
 pub(super) fn is_param_expr(ctx: &Context, arg: Id) -> bool {
     match ctx.heap.get(arg) {
         Value::Ellipsis | Value::ParamSpec(_) | Value::List(_) | Value::Tuple(_) => true,

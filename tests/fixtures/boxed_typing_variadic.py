@@ -141,6 +141,9 @@ def current():
     class Fixed(Generic[t, u]): pass
     class Signature(Generic[p, t]): pass
     class Parameters(Generic[p]): pass
+    assert repr(Signature[[int, tuple[str]], bool]).endswith("Signature[[int, tuple[str]], bool]")
+    assert repr(Signature[[], bool]).endswith("Signature[[], bool]")
+    assert repr(GenericAlias(Signature, ((int,), bool))).endswith("Signature[(<class 'int'>,), bool]")
 
     spelling = [int, u]
     signature = Signature[spelling, Callable[[u], t]]
