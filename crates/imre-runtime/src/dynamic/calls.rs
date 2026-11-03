@@ -4694,7 +4694,7 @@ impl Context {
         if name == "args" && matches!(self.heap.get(obj), Value::Raised(_)) {
             return Err(Error::new("TypeError", "args may not be deleted"));
         }
-        if name == "__class__" && member.is_none() {
+        if member.is_none() && self.exposes_object_class(obj, name) {
             return Err(Error::new("TypeError", "can't delete __class__ attribute"));
         }
         if member.is_none()
@@ -4980,6 +4980,12 @@ impl Context {
         Some(member)
     }
 
+    /// An inline Python slot can shadow object's class descriptor.
+    fn exposes_object_class(&self, obj: Id, name: &str) -> bool {
+        name == "__class__"
+            && !matches!(*self.heap.get(obj), Value::Instance { class, .. } if self.is_inline_instance_slot(class, name))
+    }
+
     /// A declared instance slot shadows the mapping's inherited factory member.
     fn exposes_defaultdict_factory(&self, obj: Id, name: &str) -> bool {
         name == "default_factory"
@@ -5170,25 +5176,7 @@ impl Context {
                 self.weakref_list(owner, receiver)?;
                 Err(self.readonly_weakref(owner))
             }
-            "__class__" => {
-                let source_class = |class| {
-                    matches!(self.heap.get(class), Value::Class { scope, .. }
-                        if self.scope_data(*scope).class_cell.is_some())
-                };
-                if value.is_some_and(source_class)
-                    && let Value::Instance { class, .. } = *self.heap.get(receiver)
-                    && source_class(class)
-                {
-                    if value == Some(class) {
-                        return Ok(());
-                    }
-                    return Err(Error::new(
-                        "NotImplementedError",
-                        "mutable __class__ reassignment requires compatible instance layouts",
-                    ));
-                }
-                Err(self.immutable_class_assignment(value))
-            }
+            "__class__" => self.assign_instance_class(receiver, value),
             _ => unreachable!(),
         }
     }
@@ -5229,6 +5217,108 @@ impl Context {
         for (_, value) in removed {
             self.heap.weak_edge_removed(value);
         }
+    }
+
+    /// Find the direct base where a slot-free Python hierarchy first acquired this layout.
+    fn dict_layout_base(&self, mut class: Id, object: Id, dict: bool, weak: bool) -> Option<Id> {
+        loop {
+            let Value::Class { scope, .. } = self.heap.get(class) else {
+                return None;
+            };
+            let namespace = self.scope_data(*scope).class_namespace.as_ref()?;
+            let Value::Tuple(bases) = self.heap.get(namespace.bases) else {
+                return None;
+            };
+            // Without named slots or native storage, the first base is the layout base.
+            let base = bases.first().copied().unwrap_or(object);
+            if base == object
+                || self.class_instances_have_dict(base) != dict
+                || self.class_instances_support_weakref(base) != weak
+            {
+                return Some(base);
+            }
+            class = base;
+        }
+    }
+
+    fn assign_instance_class(&mut self, receiver: Id, value: Option<Id>) -> Result<()> {
+        let Some(target) = value.filter(|&id| self.is_type_object(id)) else {
+            return Err(self.immutable_class_assignment(value));
+        };
+        if !self.audit_hooks.is_empty() {
+            let name = self.text("__class__");
+            super::stdlib::audit::event(self, "object.__setattr__", &[receiver, name, target])?;
+        }
+        let Value::Instance { class: source, .. } = *self.heap.get(receiver) else {
+            return Err(self.immutable_class_assignment(value));
+        };
+        let mutable_class = |class| {
+            matches!(self.heap.get(class), Value::Class { scope, .. }
+                if self.scope_data(*scope).class_cell.is_some()
+                    && !self.scope_data(*scope).class_namespace.as_ref().is_some_and(|ns| ns.immutable_type))
+        };
+        if !mutable_class(source) || !mutable_class(target) {
+            return Err(self.immutable_class_assignment(value));
+        }
+        if source == target {
+            return Ok(());
+        }
+        let object = self.builtin("object");
+        let layout = |class| {
+            (
+                self.allocation_base(class),
+                self.class_instances_have_dict(class),
+                self.class_instances_support_weakref(class),
+                self.has_declared_storage_slots(class),
+            )
+        };
+        let old = layout(source);
+        let new = layout(target);
+        let differs = || {
+            Error::new(
+                "TypeError",
+                format!(
+                    "__class__ assignment: '{}' object layout differs from '{}'",
+                    self.class_name(target),
+                    self.class_name(source)
+                ),
+            )
+        };
+        if old != new {
+            return Err(differs());
+        }
+        let (allocator, dict, weak, member_slots) = old;
+        if allocator != Some(object) || member_slots {
+            return Err(Error::new(
+                "NotImplementedError",
+                "__class__ assignment between native-backed or slotted instance layouts",
+            ));
+        }
+        let (Some(source_base), Some(target_base)) = (
+            self.dict_layout_base(source, object, dict, weak),
+            self.dict_layout_base(target, object, dict, weak),
+        ) else {
+            return Err(Error::new(
+                "NotImplementedError",
+                "unavailable __class__ assignment layout",
+            ));
+        };
+        if source_base != target_base {
+            return Err(differs());
+        }
+        // Inline ordinary fields are keyed by name. Both they and an exposed __dict__
+        // keep their storage and identity when the source and target layouts agree.
+        let Value::Instance { class, .. } = self.heap.get_mut(receiver) else {
+            unreachable!()
+        };
+        *class = target;
+        self.heap.weak_edge_removed(source);
+        if self.class_attr(target, "__del__").is_some() {
+            self.heap.register_finalizer(receiver);
+        } else if self.heap.is_pending_finalizer(receiver) {
+            self.heap.take_finalizer(receiver, false);
+        }
+        Ok(())
     }
 
     /// Reject changes through an immutable instance's object.__class__ descriptor.
@@ -5661,11 +5751,11 @@ impl Context {
         {
             return Ok(());
         }
-        if name == "__class__"
-            && let Value::Instance { class, .. } = self.heap.get(obj)
-            && self.builtins.get(stdlib::datetime::TZINFO) == Some(class)
+        if member.is_none()
+            && self.exposes_object_class(obj, name)
+            && matches!(self.heap.get(obj), Value::Instance { .. })
         {
-            return Err(self.immutable_class_assignment(Some(value)));
+            return self.assign_instance_class(obj, Some(value));
         }
         self.check_instance_field(obj, name)?;
         if let Value::Partial { dictionary, .. } = *self.heap.get(obj)

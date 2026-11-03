@@ -16,9 +16,8 @@ pub(super) fn descriptor(owner: &str) -> Option<&'static str> {
     })
 }
 impl Context {
-    /// A native constructor can store slots in the attribute map even when a subclass
-    /// shadows their descriptors, and its capacity can survive deletion.
-    fn has_declared_storage_slots(&self, class: Id) -> bool {
+    /// Named slots remain part of the layout when a subclass shadows their descriptors.
+    pub(super) fn has_declared_storage_slots(&self, class: Id) -> bool {
         self.find_in_mro(class, |base| {
             let Value::Class { scope, .. } = self.heap.get(base) else {
                 return None;
