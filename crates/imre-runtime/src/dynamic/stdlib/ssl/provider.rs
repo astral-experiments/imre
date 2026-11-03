@@ -189,6 +189,8 @@ functions! {
     ASN1_TIME_print(Handle, Handle) -> c_int;
     BIO_gets(Handle, *mut c_char, c_int) -> c_int;
     X509_verify_cert_error_string(c_long) -> *const c_char;
+    SSL_get_shutdown(Handle) -> c_int;
+    SSL_pending(Handle) -> c_int;
     SSL_read_ex(Handle, Handle, usize, *mut usize) -> c_int;
     SSL_write_ex(Handle, *const c_void, usize, *mut usize) -> c_int;
     SSL_get_ciphers(Handle) -> Handle;
