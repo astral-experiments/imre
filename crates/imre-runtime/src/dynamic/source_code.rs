@@ -1588,6 +1588,22 @@ impl Program {
         )
     }
 
+    pub(super) fn expression_range(&self, range: ruff_text_size::TextRange) -> Option<[u32; 4]> {
+        // Prelinked suspended suites are reparsed behind a synthetic function header.
+        // Its columns need not match the original file.
+        if self.linked_body_line.is_some() || self.source_lines.is_empty() {
+            return None;
+        }
+        let point = |offset: ruff_text_size::TextSize| {
+            let byte = offset.to_usize();
+            let line = self.source_lines.partition_point(|&start| start <= byte);
+            (line as u32, (byte - self.source_lines[line - 1]) as u32)
+        };
+        let (start_line, start_col) = point(range.start());
+        let (end_line, end_col) = point(range.end());
+        Some([start_line, end_line, start_col, end_col])
+    }
+
     pub(super) fn expression_line(&self, offset: ruff_text_size::TextSize) -> Option<u32> {
         if self.source_lines.is_empty() {
             return None;
@@ -5047,7 +5063,10 @@ impl Context {
         );
         let previous = self
             .heap
-            .replace_expression(value::ExpressionPosition::Offset(position));
+            .replace_expression(value::ExpressionPosition::Source {
+                offset: position,
+                range: expr.range(),
+            });
         let result = stacker::maybe_grow(128 * 1024, 2 * 1024 * 1024, || {
             self.source_expr_inner(code, scope, expr)
         });

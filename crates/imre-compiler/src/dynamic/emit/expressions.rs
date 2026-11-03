@@ -146,6 +146,16 @@ impl Function<'_, '_> {
                 };
                 let kwargs = self.arguments(&args, &v.arguments, &callable);
                 let span = self.expression_span(expr, &v.func, b'(');
+                // A caller inspecting this live frame needs the full call range, including
+                // simple and multiline calls for which traceback highlighting is suppressed.
+                let (start_line, start_col) = self.source.line_and_column(v.start());
+                let (end_line, end_col) = self.source.line_and_column(v.end());
+                let position = self
+                    .output
+                    .position([start_line, end_line, start_col, end_col]);
+                self.line(&format!(
+                    "call void @imre_dyn_call_position(ptr %ctx, ptr {position})"
+                ));
                 self.call_at(&callable, &args, &kwargs, &mark, span)
             }
             ast::Expr::Lambda(v) => self.define(

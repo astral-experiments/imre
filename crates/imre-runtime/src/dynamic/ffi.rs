@@ -1173,6 +1173,17 @@ pub(super) unsafe extern "C" fn imre_dyn_expression_line(ctx: *mut Context, line
         .replace_expression(value::ExpressionPosition::Line(line));
 }
 
+/// Set the caller's exact range for the immediately following compiled call.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_call_position(
+    ctx: *mut Context,
+    position: *const [u32; 4],
+) {
+    // SAFETY: the compiler supplies a static [start line, end line, start column, end column].
+    let (ctx, position) = unsafe { (&mut *ctx, *position) };
+    ctx.heap.set_call_position(Some(position));
+}
+
 /// Invoke a compiled call using the root mark taken before its operands were evaluated.
 #[unsafe(no_mangle)]
 pub(super) unsafe extern "C" fn imre_dyn_scoped_call_at(
@@ -1187,9 +1198,11 @@ pub(super) unsafe extern "C" fn imre_dyn_scoped_call_at(
     // SAFETY: the generated caller owns the context and supplies a null or static position.
     let (ctx, span) = unsafe { (&mut *ctx, span.as_ref()) };
     if ctx.pending.is_some() {
+        ctx.heap.set_call_position(None);
         return NONE;
     }
     let result = ctx.call_packed(callable, args, kwargs, mark, scope);
+    ctx.heap.set_call_position(None);
     finish_at(ctx, result, span)
 }
 

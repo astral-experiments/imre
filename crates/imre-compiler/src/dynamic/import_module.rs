@@ -146,6 +146,10 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
                         "or hasattr(tp, \"__delete__\")",
                         "or hasattr(tp, \"__delete__\") or _native_data_descriptor(object)",
                     );
+                    // Imre records native source positions without CPython bytecode offsets.
+                    let frame_info = section("def getframeinfo(", "def getinnerframes(")
+                        .replace("_get_code_position_from_tb(frame)", "_frame_position(frame)")
+                        .replace("_get_code_position(frame.f_code, frame.f_lasti)", "_frame_position(frame)");
                     let classes = section("_POSITIONAL_ONLY         = ", "class BufferFlags(")
                         .replace("name.isidentifier()", "_signature_identifier(name)")
                         .replace(
@@ -155,12 +159,16 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
                     [
                         include_str!("../../stdlib/inspect.py"),
                         include_str!("../../stdlib/inspect_signature.py"),
-                        "import functools\nimport importlib.machinery\nimport linecache\nimport os\nimport sys",
+                        "import dis\nimport functools\nimport importlib.machinery\nimport linecache\nimport os\nimport sys\nfrom collections import namedtuple\nfrom inspect import _frame_position",
                         section("def ismodule(object):", "def ispackage(object):"),
                         &descriptors,
                         section("def isfunction(object):", "def _has_code_flag("),
                         section("def istraceback(object):", "def isabstract(object):"),
                         section("def getfile(object):", "class ClassFoundException("),
+                        section("def findsource(object):", "def getcomments(object):"),
+                        section("_Traceback = namedtuple(", "def _get_code_position_from_tb("),
+                        &frame_info,
+                        section("def currentframe():", "def trace(context=1):"),
                         section("def unwrap(func, *, stop=None):", "def indentsize(line):"),
                         section("def _signature_get_partial(", "def _signature_is_builtin("),
                         section("def _signature_is_functionlike(obj):", "def _signature_strip_non_python_syntax("),
