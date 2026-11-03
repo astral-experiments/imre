@@ -73,7 +73,10 @@ impl Drop for Extension {
 fn entries(api: &Api, stack: Handle) -> impl Iterator<Item = Handle> {
     // SAFETY: callers hold the enclosing extension until traversal is complete.
     let count = unsafe { (api.OPENSSL_sk_num)(stack) };
-    (0..count).map(move |i| unsafe { (api.OPENSSL_sk_value)(stack, i) })
+    (0..count).map(move |i| {
+        // SAFETY: i is in bounds and the enclosing extension keeps the stack live.
+        unsafe { (api.OPENSSL_sk_value)(stack, i) }
+    })
 }
 
 fn general_value(api: &Api, general_name: Handle) -> (c_int, Handle) {
@@ -180,6 +183,7 @@ pub(super) fn add(ctx: &mut Context, api: &Api, cert: Handle, dict: Id) -> Resul
         for entry in entries(api, aia.stack.as_ptr()) {
             // SAFETY: each AUTHORITY_INFO_ACCESS entry is an ACCESS_DESCRIPTION.
             let description = unsafe { &*entry.cast::<AccessDescription>() };
+            // SAFETY: the live ACCESS_DESCRIPTION owns its method OID.
             let destinations = match unsafe { (api.OBJ_obj2nid)(description.method) } {
                 NID_AD_OCSP => &mut ocsp,
                 NID_AD_CA_ISSUERS => &mut issuers,

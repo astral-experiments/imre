@@ -25,9 +25,9 @@ fn printed(
     value: Handle,
     print: unsafe extern "C" fn(Handle, Handle) -> c_int,
 ) -> Result<String> {
+    let mut buf = [0u8; 2048];
     // SAFETY: the memory BIO belongs to this call, and each caller supplies a
     // live object of the type required by the paired OpenSSL printer.
-    let mut buf = [0u8; 2048];
     let len = unsafe {
         let bio = (api.BIO_new)((api.BIO_s_mem)());
         if bio.is_null() {
@@ -118,6 +118,7 @@ fn name(ctx: &mut Context, api: &Api, name: Handle) -> Result<Id> {
     for index in 0..count {
         // SAFETY: index is in bounds and the name remains live and unchanged.
         let entry = unsafe { (api.X509_NAME_get_entry)(name, index) };
+        // SAFETY: the live name owns the entry returned for this in-bounds index.
         let set = unsafe { (api.X509_NAME_ENTRY_set)(entry) };
         if !group.is_empty() && previous_set != set {
             names.push(ctx.alloc(Value::Tuple(mem::take(&mut group))));
@@ -148,10 +149,12 @@ pub(super) fn decode(ctx: &mut Context, api: &Api, cert: Handle) -> Result<Id> {
     let serial = printed(ctx, api, serial, api.i2a_ASN1_INTEGER)?;
     let before = printed(ctx, api, before, api.ASN1_TIME_print)?;
     let after = printed(ctx, api, after, api.ASN1_TIME_print)?;
+    #[allow(clippy::useless_conversion, reason = "X509_get_version returns C long")]
+    let version = i64::from(version);
     let entries = vec![
         (ctx.text("subject"), subject),
         (ctx.text("issuer"), issuer),
-        (ctx.text("version"), ctx.int(version as i64 + 1)),
+        (ctx.text("version"), ctx.int(version + 1)),
         (ctx.text("serialNumber"), ctx.text(serial)),
         (ctx.text("notBefore"), ctx.text(before)),
         (ctx.text("notAfter"), ctx.text(after)),

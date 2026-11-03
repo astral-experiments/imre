@@ -134,8 +134,10 @@ impl Api {
         };
         // SAFETY: the provider owns the optional static NUL-terminated reason.
         let raw = unsafe { (self.ERR_reason_error_string)(error) };
-        let text = NonNull::new(raw.cast_mut())
-            .map(|p| unsafe { CStr::from_ptr(p.as_ptr()).to_string_lossy() });
+        let text = NonNull::new(raw.cast_mut()).map(|p| {
+            // SAFETY: a non-null result points to the provider's static, NUL-terminated string.
+            unsafe { CStr::from_ptr(p.as_ptr()).to_string_lossy() }
+        });
         let reason = text
             .as_ref()
             .filter(|_| code & (1 << 19) == 0 && library.is_some())
