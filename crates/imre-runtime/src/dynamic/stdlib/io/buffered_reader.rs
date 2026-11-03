@@ -48,7 +48,7 @@ fn raw_member(ctx: &Context, receiver: Id) -> Option<Id> {
 
 /// Reinitialization invalidates buffered operations; the public raw slot changes only
 /// after readable() succeeds, even if allocation or size validation subsequently fails.
-fn start_init(ctx: &mut Context, receiver: Id, raw: Option<Id>) -> Result<()> {
+pub(super) fn start_init(ctx: &mut Context, receiver: Id, raw: Option<Id>) -> Result<()> {
     let previous = raw_member(ctx, receiver);
     let Value::Instance { memory_stream, .. } = ctx.heap.get_mut(receiver) else {
         return Err(Error::new(
@@ -83,6 +83,76 @@ pub(super) fn initialize(ctx: &mut Context, receiver: Id, raw: Id, size: i64) ->
     install(ctx, receiver, raw, size, false)
 }
 
+/// Discard the outgoing callback buffer without seeking, flushing, or closing its raw.
+pub(super) fn reinitialize_update(
+    ctx: &mut Context,
+    receiver: Id,
+    raw: Id,
+    size: i64,
+    capabilities: &[&str],
+) -> Result<bool> {
+    let (previous, locked) = match ctx.heap.get(receiver) {
+        Value::Instance {
+            memory_stream: Some(MemoryStream::Reader(old)),
+            ..
+        } if old.update.is_some() => (old.raw.get(), old.locked.get()),
+        Value::Instance {
+            memory_stream: Some(MemoryStream::UninitializedReader(Some(raw))),
+            ..
+        } => (Some(*raw), false),
+        _ => return Ok(false),
+    };
+    if previous.is_some_and(|id| super::file_io::state(ctx, id).is_some())
+        || super::file_io::state(ctx, raw).is_some()
+    {
+        return Ok(false);
+    }
+    // A raw I/O callback may currently hold a view into the live buffer. Keep
+    // that operation and its ownership intact instead of replacing its state.
+    if locked {
+        return Err(Error::new(
+            "RuntimeError",
+            "reentrant call inside buffered reader",
+        ));
+    }
+    start_init(ctx, receiver, previous)?;
+    super::descriptor_buffer::check_capabilities(ctx, raw, capabilities)?;
+    if let Ok(nested) = Reader::get(ctx, receiver) {
+        if nested
+            .raw
+            .get()
+            .is_some_and(|id| super::file_io::state(ctx, id).is_some())
+        {
+            return Err(Error::new(
+                "NotImplementedError",
+                "BufferedRandom reinitialization is unsupported",
+            ));
+        }
+        // A capability callback made the receiver usable. It stays usable while the
+        // outer call publishes its raw, validates size, and probes the position.
+        if let Some(previous) = nested.raw.replace(Some(raw))
+            && previous != raw
+        {
+            ctx.heap.weak_edge_removed(previous);
+        }
+    } else if super::descriptor_buffer::backing(ctx, receiver).is_some() {
+        return Err(Error::new(
+            "NotImplementedError",
+            "BufferedRandom reinitialization is unsupported",
+        ));
+    } else {
+        start_init(ctx, receiver, Some(raw))?;
+    }
+    if size <= 0 {
+        return Err(Error::new(
+            "ValueError",
+            "buffer size must be strictly positive",
+        ));
+    }
+    install(ctx, receiver, raw, size, true)?;
+    Ok(true)
+}
+
 pub(super) fn install(
     ctx: &mut Context,
     receiver: Id,
@@ -91,24 +161,51 @@ pub(super) fn install(
     update: bool,
 ) -> Result<Id> {
     let buffer = ctx.alloc(Value::ByteArray(super::zeroed_bytes(size)?));
-    let absolute = invoke(ctx, raw, "tell", vec![])
-        .and_then(|n| index(ctx, n))
-        .ok()
-        .filter(|n| *n >= 0);
-    let state = Reader {
+    let state = Rc::new(Reader {
         raw: Cell::new(Some(raw)),
         size: size as usize,
         buffer,
         end: Cell::new(0),
         pos: Cell::new(0),
-        absolute: Cell::new(absolute),
+        absolute: Cell::new(None),
         locked: Cell::new(false),
         update: update.then(Update::default),
+    });
+    let attach = |ctx: &mut Context| {
+        let Value::Instance { memory_stream, .. } = ctx.heap.get_mut(receiver) else {
+            unreachable!()
+        };
+        *memory_stream = Some(MemoryStream::Reader(Rc::clone(&state)));
     };
-    let Value::Instance { memory_stream, .. } = ctx.heap.get_mut(receiver) else {
-        unreachable!()
-    };
-    *memory_stream = Some(MemoryStream::Reader(Rc::new(state)));
+    if update && Reader::get(ctx, receiver).is_ok() {
+        attach(ctx);
+    }
+    let absolute = invoke(ctx, raw, "tell", vec![])
+        .and_then(|n| index(ctx, n))
+        .ok()
+        .filter(|n| *n >= 0);
+    if update {
+        // A nested initialization can finish inside raw.tell(). Keep its raw,
+        // but discard reads and writes buffered before the outer probe returned.
+        if let Ok(live) = Reader::get(ctx, receiver)
+            && let Some(update) = &live.update
+        {
+            update.dirty.set(None);
+            live.reset();
+            if absolute.is_some() {
+                live.absolute.set(absolute);
+            }
+            return Ok(NONE);
+        }
+        if super::descriptor_buffer::finish_random_probe(ctx, receiver) {
+            return Ok(NONE);
+        }
+    }
+    state.absolute.set(absolute);
+    if update {
+        state.raw.set(raw_member(ctx, receiver));
+    }
+    attach(ctx);
     Ok(NONE)
 }
 
@@ -120,6 +217,11 @@ fn append(out: &mut Vec<u8>, bytes: &[u8]) -> Result<()> {
 }
 
 impl Reader {
+    pub(super) fn pending_update(&self) -> Option<Id> {
+        self.update.as_ref()?.dirty.get()?;
+        self.raw.get()
+    }
+
     fn get(ctx: &Context, receiver: Id) -> Result<Rc<Self>> {
         match ctx.heap.get(receiver) {
             Value::Instance {
@@ -523,12 +625,6 @@ impl Reader {
             Ok(ctx.int(pos))
         })
     }
-}
-
-pub(super) fn pending_update(ctx: &Context, receiver: Id) -> Option<Id> {
-    let reader = Reader::get(ctx, receiver).ok()?;
-    reader.update.as_ref()?.dirty.get()?;
-    reader.raw.get()
 }
 
 pub(super) fn initialized_raw(ctx: &Context, receiver: Id) -> Option<Id> {

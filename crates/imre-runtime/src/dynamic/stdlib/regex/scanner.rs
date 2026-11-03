@@ -10,6 +10,7 @@ pub(in crate::dynamic::stdlib) fn scanner_next(
     let Value::RegexScanner {
         pattern,
         subject,
+        initial_start,
         start,
         end,
         retry,
@@ -84,6 +85,8 @@ pub(in crate::dynamic::stdlib) fn scanner_next(
         pattern,
         subject,
         spans,
+        window: Span::from(initial_start..end),
+        cached_regs: OnceCell::new(),
     }))))
 }
 
@@ -124,8 +127,17 @@ pub(super) fn compile_lexicon(ctx: &mut Context, lexicon: Id, flags: Option<Id>)
         // The Python translator validates the phrase before alternation. Passing
         // raw source to the backend can change token priority (e.g. x$|z) or
         // interpret Python literals inside a set as Rust class operations.
+        let spelling = ctx.str_value(phrase)?;
+        let quoted = if super::may_warn_class(spelling.as_bytes()) {
+            let source = spelling.to_owned();
+            super::quote_class_members(&source, effective, false, |kind, pos| {
+                super::warn_class(ctx, kind, pos)
+            })?
+        } else {
+            None
+        };
         let parsed = imre_regex::translate_pattern_with_line_mode(
-            ctx.str_value(phrase)?,
+            quoted.as_deref().unwrap_or(ctx.str_value(phrase)?),
             flags & VERBOSE != 0,
             super::alphabet(false, ascii, flags),
             flags & DOTALL != 0,

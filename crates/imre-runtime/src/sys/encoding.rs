@@ -1,4 +1,7 @@
 //! Filesystem and standard stream settings captured before user code runs.
+#[cfg(all(target_os = "linux", target_env = "gnu"))]
+pub(crate) mod langinfo;
+
 use crate::objects::Codec;
 use std::borrow::Cow;
 use std::ffi::{CStr, CString, OsStr, OsString};
@@ -221,12 +224,12 @@ fn current_codeset() -> String {
     // SAFETY: the caller holds the process-locale lock while copying libc's storage.
     let name = unsafe { libc::nl_langinfo(libc::CODESET) };
     if name.is_null() {
-        return "UTF-8".to_owned();
+        return "utf-8".to_owned();
     }
     // SAFETY: the non-null NUL-terminated encoding name remains valid under the lock.
     let name = unsafe { CStr::from_ptr(name) };
     if name.to_bytes().is_empty() {
-        "UTF-8".to_owned()
+        "utf-8".to_owned()
     } else {
         name.to_string_lossy().into_owned()
     }

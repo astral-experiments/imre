@@ -2,8 +2,11 @@
 import _imre_subprocess as _process
 from _weakref import ref as _ref
 from time import monotonic as _time
+from types import GenericAlias as _GenericAlias
+from warnings import warn as _warn
 import io
 import selectors
+import sys
 
 __all__ = ["Popen", "PIPE", "STDOUT", "call", "check_call", "getstatusoutput",
            "getoutput", "check_output", "run", "CalledProcessError", "DEVNULL",
@@ -23,6 +26,113 @@ def _cleanup():
         if child.poll() is not None:
             _active.remove(child)
     _process.cleanup()
+
+
+# From CPython 3.14.5, Lib/subprocess.py. See stdlib/docstrings/LICENSE.
+def list2cmdline(seq):
+    """Translate arguments into a command line using the Microsoft C runtime's rules."""
+    from os import fsdecode
+
+    result = []
+    for arg in map(fsdecode, seq):
+        if result:
+            result.append(' ')
+        quoted = " " in arg or "\t" in arg or not arg
+        if quoted:
+            result.append('"')
+
+        # Backslashes are literal unless followed by a quote, including a closing quote.
+        backslashes = []
+        for char in arg:
+            if char == '\\':
+                backslashes.append(char)
+            elif char == '"':
+                result.append('\\' * (2 * len(backslashes)))
+                backslashes = []
+                result.append('\\"')
+            else:
+                if backslashes:
+                    result.extend(backslashes)
+                    backslashes = []
+                result.append(char)
+
+        result.extend(backslashes)
+        if quoted:
+            result.extend(backslashes)
+            result.append('"')
+    return ''.join(result)
+
+
+def _optim_args_from_interpreter_flags():
+    """Return a list of command-line arguments reproducing the current
+    optimization settings in sys.flags."""
+    args = []
+    value = sys.flags.optimize
+    if value > 0:
+        args.append('-' + 'O' * value)
+    return args
+
+
+def _args_from_interpreter_flags():
+    """Return a list of command-line arguments reproducing the current
+    settings in sys.flags, sys.warnoptions and sys._xoptions."""
+    flag_opt_map = {
+        'debug': 'd',
+        # 'inspect': 'i',
+        # 'interactive': 'i',
+        'dont_write_bytecode': 'B',
+        'no_site': 'S',
+        'verbose': 'v',
+        'bytes_warning': 'b',
+        'quiet': 'q',
+        # -O is handled in _optim_args_from_interpreter_flags()
+    }
+    args = _optim_args_from_interpreter_flags()
+    for flag, opt in flag_opt_map.items():
+        v = getattr(sys.flags, flag)
+        if v > 0:
+            args.append('-' + opt * v)
+
+    if sys.flags.isolated:
+        args.append('-I')
+    else:
+        if sys.flags.ignore_environment:
+            args.append('-E')
+        if sys.flags.no_user_site:
+            args.append('-s')
+        if sys.flags.safe_path:
+            args.append('-P')
+
+    # -W options
+    warnopts = sys.warnoptions[:]
+    xoptions = getattr(sys, '_xoptions', {})
+    bytes_warning = sys.flags.bytes_warning
+    dev_mode = sys.flags.dev_mode
+
+    if bytes_warning > 1:
+        warnopts.remove("error::BytesWarning")
+    elif bytes_warning:
+        warnopts.remove("default::BytesWarning")
+    if dev_mode:
+        warnopts.remove('default')
+    for opt in warnopts:
+        args.append('-W' + opt)
+
+    # -X options
+    if dev_mode:
+        args.extend(('-X', 'dev'))
+    for opt in sorted(xoptions):
+        if opt == 'dev':
+            # handled above via sys.flags.dev_mode
+            continue
+        value = xoptions[opt]
+        if value is True:
+            arg = opt
+        else:
+            arg = '%s=%s' % (opt, value)
+        args.extend(('-X', arg))
+
+    return args
 
 
 def _text_encoding():
@@ -74,12 +184,38 @@ def _exec_search_path(env):
     return b":".join(fsencode(part) for part in path.split(":"))
 
 
+def _get_extra_group_ids(extra_groups):
+    if isinstance(extra_groups, str):
+        raise ValueError("Groups must be a list, not a string")
+    gids = []
+    for group in extra_groups:
+        if isinstance(group, str):
+            try:
+                import grp
+            except ImportError:
+                raise ValueError("Items in extra_groups cannot be strings on systems without the grp module")
+            group = grp.getgrnam(group).gr_gid
+        elif not isinstance(group, int):
+            raise TypeError(f"Items in extra_groups must be a string or integer, not {type(group)}")
+        gids.append(group)
+    for gid in gids:
+        if gid < 0:
+            raise ValueError(f"Group ID cannot be negative, got {gid}")
+    return gids
+
+
+def _fork_fds(pass_fds):
+    return sorted(map(int, set(pass_fds)))
+
+
 class Popen:
+    __class_getitem__ = classmethod(_GenericAlias)
     _handle = None
 
     def __init__(self, args, bufsize=-1, executable=None, stdin=None, stdout=None,
-                 stderr=None, *, close_fds=True, shell=False, cwd=None, env=None, restore_signals=True,
-                 universal_newlines=None, encoding=None, errors=None, text=None, start_new_session=False, pipesize=-1):
+                 stderr=None, *, close_fds=True, shell=False, cwd=None, env=None, restore_signals=True, pass_fds=(),
+                 universal_newlines=None, encoding=None, errors=None, text=None, start_new_session=False,
+                 umask=-1, pipesize=-1, process_group=None, startupinfo=None, creationflags=0, extra_groups=None):
         if bufsize is None:
             bufsize = -1
         if not isinstance(bufsize, int):
@@ -91,6 +227,14 @@ class Popen:
             pipesize = -1
         if not isinstance(pipesize, int):
             raise TypeError("pipesize must be an integer")
+        if pass_fds and not close_fds:
+            import warnings
+            warnings.warn("pass_fds overriding close_fds.", RuntimeWarning)
+            close_fds = True
+        if startupinfo is not None:
+            raise ValueError("startupinfo is only supported on Windows platforms")
+        if creationflags != 0:
+            raise ValueError("creationflags is only supported on Windows platforms")
         if (text is not None and universal_newlines is not None
                 and bool(text) != bool(universal_newlines)):
             raise SubprocessError("Cannot disambiguate when both text and universal_newlines "
@@ -106,16 +250,19 @@ class Popen:
         self._communication_started = False
         _cleanup()
         self.args = args
+        self.returncode = None
         self.pipesize = pipesize
         self._sigint_wait_secs = 0.25
-        self._handle = _process.launch(args, executable, stdin, stdout, stderr, close_fds,
-                                       restore_signals, cwd, env, bufsize, pipesize,
-                                       encoding if self.text_mode else None,
-                                       errors if self.text_mode else None, shell, start_new_session)
+        self.stdin = self.stdout = self.stderr = None
+        gids = None if extra_groups is None else _get_extra_group_ids(extra_groups)
+        prepared, fds = _process.prepare(stdin, stdout, stderr, bufsize, pipesize)
+        failed = True
         try:
-            self.stdin = _process.pipe(self._handle, 0)
-            self.stdout = _process.pipe(self._handle, 1)
-            self.stderr = _process.pipe(self._handle, 2)
+            self._prepared = prepared
+            self._pipe_fds = fds
+            self.stdin = _process.pipe(prepared, 0)
+            self.stdout = _process.pipe(prepared, 1)
+            self.stderr = _process.pipe(prepared, 2)
             if self.text_mode:
                 if self.stdin is not None:
                     self.stdin = io.TextIOWrapper(self.stdin, encoding=self.encoding, errors=errors,
@@ -126,13 +273,45 @@ class Popen:
                     self.stderr = io.TextIOWrapper(self.stderr, encoding=self.encoding, errors=errors)
             self._stdin_ref = None if self.stdin is None else _ref(self.stdin)
             self._replacement_output = None
+            self._execute_child(args, executable, None, close_fds, pass_fds, cwd, env,
+                                startupinfo, creationflags, shell, *fds, restore_signals,
+                                None, gids, None, umask, start_new_session,
+                                -1 if process_group is None else process_group)
+            failed = False
         except BaseException:
-            self.kill()
-            _process.close_wait(self._handle)
+            for pipe in (self.stdin, self.stdout, self.stderr):
+                if pipe is not None:
+                    try:
+                        pipe.close()
+                    except OSError:
+                        pass
             raise
+        finally:
+            _process.release(prepared, failed)
 
-    def __del__(self):
-        if self._handle is not None and _process.finalize(self._handle) and _active is not None:
+    def _execute_child(self, args, executable, preexec_fn, close_fds, pass_fds, cwd, env,
+                       startupinfo, creationflags, shell, p2cread, p2cwrite, c2pread, c2pwrite,
+                       errread, errwrite, restore_signals, gid, gids, uid, umask,
+                       start_new_session, process_group):
+        if (p2cread, p2cwrite, c2pread, c2pwrite, errread, errwrite) != self._pipe_fds:
+            raise NotImplementedError("replacing prepared subprocess descriptors is unsupported")
+        if preexec_fn is not None or gid is not None or uid is not None:
+            raise NotImplementedError("unsupported subprocess child settings")
+        self._handle = _process.launch(self._prepared, args, executable, close_fds, restore_signals,
+                                       cwd, env, shell, start_new_session, process_group, umask, pass_fds, gids)
+
+    def __repr__(self):
+        result = f"<{self.__class__.__name__}: returncode: {self.returncode} args: {self.args!r}>"
+        if len(result) > 80:
+            return result[:76] + "...>"
+        return result
+
+    def __del__(self, _warn=_warn):
+        if self._handle is None:
+            return
+        if self.returncode is None:
+            _warn("subprocess %s is still running" % self.pid, ResourceWarning, source=self)
+        if self._internal_poll() is None and _active is not None:
             _active.append(self)
 
     @property
@@ -147,12 +326,15 @@ class Popen:
     def pid(self):
         return _process.pid(self._handle)
 
-    @property
-    def returncode(self):
-        return _process.status(self._handle, False)
+    def _internal_poll(self):
+        if self.returncode is None:
+            status = _process.poll(self._handle)
+            if status is not None:
+                self.returncode = status
+        return self.returncode
 
     def poll(self):
-        return _process.status(self._handle, True)
+        return self._internal_poll()
 
     def wait(self, timeout=None):
         endtime = None if timeout is None else _time() + timeout
@@ -163,10 +345,13 @@ class Popen:
             raise
 
     def _wait(self, timeout):
-        result = _process.wait(self._handle, timeout)
-        if result is None:
-            raise TimeoutExpired(self.args, timeout)
-        return result
+        if self.returncode is None:
+            result = _process.wait(self._handle, timeout, self)
+            if result is not None:
+                self.returncode = result
+            elif self.returncode is None:
+                raise TimeoutExpired(self.args, timeout)
+        return self.returncode
 
     def _wait_after_keyboard_interrupt(self, endtime):
         # The child may also have received SIGINT. Share one brief wait with
@@ -342,7 +527,12 @@ class Popen:
         return stdout, stderr
 
     def send_signal(self, sig):
-        _process.signal(self._handle, sig)
+        self.poll()
+        if self.returncode is None:
+            try:
+                _process.signal(self._handle, sig)
+            except ProcessLookupError:
+                pass
 
     def terminate(self):
         self.send_signal(15)
@@ -474,6 +664,8 @@ def getoutput(cmd, *, encoding=None, errors=None):
 
 
 class CompletedProcess:
+    __class_getitem__ = classmethod(_GenericAlias)
+
     def __init__(self, args, returncode, stdout=None, stderr=None):
         self.args = args
         self.returncode = returncode

@@ -160,7 +160,7 @@ class FileLoader:
 
     @_check_name
     def get_resource_reader(self, module):
-        from importlib.resources._filesystem import FileReader
+        from importlib.readers import FileReader
         return FileReader(self)
 
 

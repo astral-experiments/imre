@@ -14,6 +14,7 @@ pub(super) struct Output {
     strings: Vec<(usize, usize)>,
     next_string: Vec<usize>,
     users: HashMap<String, HashSet<usize>>,
+    local_helpers: HashSet<(usize, &'static str)>,
 }
 
 impl Output {
@@ -36,6 +37,7 @@ impl Output {
             strings: Vec::new(),
             next_string: vec![0; count],
             users: HashMap::new(),
+            local_helpers: HashSet::new(),
         }
     }
 
@@ -45,6 +47,12 @@ impl Output {
 
     pub fn common(&mut self) -> &mut String {
         self.common.as_mut().unwrap_or(&mut self.units[self.entry])
+    }
+
+    pub fn local_helper(&mut self, name: &'static str, definition: &str) {
+        if self.local_helpers.insert((self.current, name)) {
+            self.units[self.current].push_str(definition);
+        }
     }
 
     pub fn entry_buffer(&mut self) -> &mut String {
@@ -241,6 +249,38 @@ pub(crate) fn emit_units(
 #[cfg(test)]
 mod tests {
     use std::fs;
+
+    #[test]
+    fn loop_helpers_are_local_to_the_unit_that_calls_them() {
+        let temp = tempfile::tempdir().unwrap();
+        let entry = temp.path().join("main.py");
+        fs::write(
+            &entry,
+            "from loops import add_rows\nprint(add_rows(0, 10, 0))\n",
+        )
+        .unwrap();
+        fs::write(
+            temp.path().join("loops.py"),
+            include_str!("../../../../tests/fixtures/primitives/affine_range.py"),
+        )
+        .unwrap();
+        let program =
+            crate::compile_file_units(&entry, None, &crate::CompileOptions::default()).unwrap();
+        assert_eq!(program.units.len(), 2);
+        for unit in program.units {
+            let uses = unit
+                .llvm_ir
+                .matches("call {i64,i64} @imre_affine_fixed_prefix")
+                .count();
+            let definitions = unit
+                .llvm_ir
+                .matches("define internal {i64,i64} @imre_affine_fixed_prefix")
+                .count();
+            assert_eq!(uses > 0, unit.name == "loops");
+            assert_eq!(definitions, usize::from(uses > 0));
+            assert!(!unit.llvm_ir.contains("@imre_repeat_fadd"));
+        }
+    }
 
     #[test]
     fn adapters_and_literal_roots_declare_only_their_foreign_uses() {

@@ -9,6 +9,7 @@ use super::{Context, Error, Id, NONE, Result, Value, argument, option};
 
 struct FrameLine<'a> {
     file: &'a str,
+    command_source: Option<&'a str>,
     name: &'a str,
     line: i64,
     span: Option<[u32; 3]>,
@@ -36,7 +37,10 @@ impl FrameLine<'_> {
         let Some(raw) = usize::try_from(self.line)
             .ok()
             .and_then(|line| line.checked_sub(1))
-            .and_then(|i| source?.lines().nth(i))
+            .and_then(|i| match self.command_source {
+                Some(command) => crate::objects::line_field(command, i),
+                None => source?.lines().nth(i),
+            })
         else {
             return out;
         };
@@ -63,6 +67,33 @@ impl FrameLine<'_> {
         }
         out
     }
+}
+
+/// Capture the bindings that FrameSummary will immediately convert to representations.
+pub(super) fn frame_locals(ctx: &mut Context, frame: Id) -> Result<Id> {
+    match *ctx.heap.get(frame) {
+        Value::PythonFrame { scope: NONE, .. } => Ok(ctx.dict(Vec::new())),
+        Value::PythonFrame { scope, code, .. } => ctx.locals_for_code(scope, code),
+        _ => ctx.lookup_attr(frame, "f_locals"),
+    }
+}
+
+/// Return the recorded line and expression byte range of a native traceback node.
+pub(super) fn tb_position(ctx: &mut Context, tb: Id) -> Id {
+    let Value::Traceback { lineno, span, .. } = *ctx.heap.get(tb) else {
+        return NONE;
+    };
+    let line = ctx.int(lineno);
+    let positions = match span {
+        Some([start, _, end]) => vec![
+            line,
+            line,
+            ctx.int(i64::from(start)),
+            ctx.int(i64::from(end)),
+        ],
+        None => vec![line, NONE, NONE, NONE],
+    };
+    ctx.alloc(Value::Tuple(positions))
 }
 
 /// Visit the public traceback protocol, ignoring frames that cannot be cleared yet.
@@ -182,10 +213,15 @@ pub(in crate::dynamic) fn chain_link(error: &Error) -> Option<(Id, &'static str)
 
 /// Render an uncaught chain before shutdown releases its Python exception objects.
 pub(in crate::dynamic) fn report_chain(ctx: &mut Context, error: Error) {
+    let exception = ctx.raised_instance(error);
+    display(ctx, exception);
+}
+
+/// Write the Python exception to the live stderr, retaining the low-level fallback.
+pub(in crate::dynamic) fn display(ctx: &mut Context, exception: Id) {
     use std::io::Write;
 
     let mark = ctx.heap.temporary_mark();
-    let exception = ctx.raised_instance(error);
     ctx.heap.keep(exception);
     if print_uncaught(ctx, exception).is_err() {
         // stderr itself may be gone or unwritable. Keep the exception's arguments
@@ -391,8 +427,18 @@ pub(in crate::dynamic) fn format_frames(
             unreachable!()
         };
         let code = ctx.code_object(code);
+        let file = ctx.str_value(code.filename)?;
+        // Dynamic exec/compile can use the same filename as the boxed -c entry.
+        // Only the native definitions emitted from that entry share its source.
+        let command_source =
+            if file == "<string>" && matches!(code.body, crate::dynamic::value::Body::Native(_)) {
+                ctx.config["command_source"].as_str()
+            } else {
+                None
+            };
         stack.push(FrameLine {
-            file: ctx.str_value(code.filename)?,
+            file,
+            command_source,
             name: ctx.str_value(code.name)?,
             line: lineno,
             span,
@@ -421,10 +467,13 @@ pub(in crate::dynamic) fn format_frames(
                 })
                 .count();
             for frame in &stack[i..i + same.min(3)] {
-                let contents = sources
-                    .entry(frame.file)
-                    .or_insert_with(|| std::fs::read_to_string(frame.file).ok());
-                lines.push(frame.format(contents.as_deref()));
+                let source = frame.command_source.or_else(|| {
+                    sources
+                        .entry(frame.file)
+                        .or_insert_with(|| std::fs::read_to_string(frame.file).ok())
+                        .as_deref()
+                });
+                lines.push(frame.format(source));
             }
             if same > 3 {
                 let count = same - 3;

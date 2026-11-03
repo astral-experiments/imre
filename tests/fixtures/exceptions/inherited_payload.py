@@ -4,6 +4,14 @@ from collections import namedtuple
 Pair = namedtuple("Pair", "first second")
 
 
+class MixedIndentation(TabError):
+    pass
+
+
+class InvalidFloat(FloatingPointError):
+    pass
+
+
 class Display(Exception):
     def __init__(self, msg, *args):
         self.msg = msg
@@ -46,6 +54,14 @@ class Joined(Left, Right):
 
 
 def exercise() -> None:
+    try:
+        raise MixedIndentation("mixed indentation")
+    except SyntaxError:
+        pass
+    try:
+        raise InvalidFloat("invalid float")
+    except ArithmeticError:
+        pass
     problem = Passive("☃", 17, "detail")
     print(str(problem))
     print(repr(problem))

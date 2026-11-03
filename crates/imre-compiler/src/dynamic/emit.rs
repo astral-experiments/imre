@@ -14,13 +14,13 @@ mod statements;
 mod strings;
 
 const ABI: &str = "\
+%code_site = type { ptr, ptr, i32, i32 }
 declare ptr @imre_dyn_new(i32, ptr, ptr)
 declare void @imre_dyn_register(ptr, ptr, ptr, ptr)
 declare i32 @imre_dyn_finish(ptr)
 declare i64 @imre_dyn_lit(ptr, i32, ptr, i64)
-declare i64 @imre_dyn_class_annotation(ptr, i64, i64, i64, i32)
-declare i64 @imre_dyn_def_from_site(ptr, ptr, i64, i64, i64, i64, i64, i64, i64, i1)
-declare void @imre_dyn_generator_body(ptr, i64, ptr, i32)
+declare i64 @imre_dyn_mark_class_annotation(ptr, i64, i64, i32)
+declare i64 @imre_dyn_define(ptr, ptr, i64, i64, i64, i64, i64, i64, i64, i1)
 declare i1 @imre_dyn_failed(ptr)
 declare i64 @imre_dyn_truth_mark(ptr)
 declare void @imre_dyn_comprehension_step(ptr, i64)
@@ -28,7 +28,9 @@ declare void @imre_dyn_discard_truth(ptr, i64)
 declare void @imre_dyn_named_assignment(ptr, i64, i64, i64)
 declare void @imre_dyn_assignment_target(ptr, ptr, i64, i64)
 declare i64 @imre_dyn_op_at(ptr, ptr, i64, i64, i64, ptr)
+declare void @imre_dyn_call_position(ptr, ptr)
 declare i64 @imre_dyn_scoped_call_at(ptr, i64, i64, i64, i64, ptr, i64)
+declare void @imre_dyn_expression_line(ptr, i32)
 declare void @imre_dyn_statement_with_exception(ptr, ptr, i64, ptr, i32, i64)
 ";
 
@@ -45,8 +47,9 @@ pub(crate) fn emit(
         ..Output::default()
     };
     let config = output.data(config.as_bytes());
+    // Entry-only registration must not change fingerprints of unrelated packed providers.
     let mut main = format!(
-        "define i32 @main(i32 %argc, ptr %argv) {{\nentry:\n  %ctx = call ptr @imre_dyn_new(i32 %argc, ptr %argv, ptr {config})\n"
+        "declare void @imre_dyn_register_source(ptr, ptr, ptr, ptr, i64, ptr)\n\ndefine i32 @main(i32 %argc, ptr %argv) {{\nentry:\n  %ctx = call ptr @imre_dyn_new(i32 %argc, ptr %argv, ptr {config})\n"
     );
     let mut declarations = HashSet::new();
     for (unit, (name, path, source)) in modules.iter().enumerate() {
@@ -68,9 +71,15 @@ pub(crate) fn emit(
         } else {
             output.module(unit, name, path, source, &file, bundled)?
         };
+        // Retain the text of virtual providers alongside the installed initializer.
+        let (text, len) = if bundled {
+            (output.data(source.as_bytes()), source.len())
+        } else {
+            ("null".to_owned(), 0)
+        };
         writeln!(
             main,
-            "  call void @imre_dyn_register(ptr %ctx, ptr {module_name}, ptr {file}, ptr {code})"
+            "  call void @imre_dyn_register_source(ptr %ctx, ptr {module_name}, ptr {file}, ptr {text}, i64 {len}, ptr {code})"
         )
         .unwrap();
     }
@@ -123,7 +132,7 @@ impl Output {
     ) -> Result<String, String> {
         let parsed = ruff_python_parser::parse_module(source)
             .map_err(|err| format!("{}: {err}", path.display()))?;
-        crate::analysis::check_star_import_scopes(source, &parsed.syntax().body)
+        crate::analysis::check_scope_syntax(source, parsed.syntax())
             .map_err(|error| format!("{}:{error}", path.display()))?;
         if let Some(keyword) = imre_ast::repeated_keyword(parsed.syntax().into()) {
             let name = keyword.arg.as_ref().expect("repeated named argument");
@@ -152,6 +161,29 @@ impl Output {
             .any(|t| t.kind() == ast::token::TokenKind::TStringStart);
         let template_expressions =
             imre_ast::strings::template_expressions(source, parsed.tokens(), parsed.syntax());
+        // CPython starts the module provider at the first statement, excluding its decorators.
+        let module_start = parsed
+            .syntax()
+            .body
+            .first()
+            .map(|stmt| {
+                let last = match stmt {
+                    ast::Stmt::FunctionDef(stmt) => stmt.decorator_list.last(),
+                    ast::Stmt::ClassDef(stmt) => stmt.decorator_list.last(),
+                    _ => None,
+                };
+                last.and_then(|decorator| {
+                    parsed.tokens().after(decorator.end()).iter().find(|token| {
+                        use ast::token::TokenKind;
+                        matches!(
+                            token.kind(),
+                            TokenKind::Async | TokenKind::Def | TokenKind::Class
+                        )
+                    })
+                })
+                .map_or_else(|| stmt.start(), Ranged::start)
+            })
+            .unwrap_or_default();
         let mut body = parsed.into_syntax().body;
         let method_imports = imre_ast::module_imports(&body);
         let private_names = imre_ast::lower(&mut body);
@@ -168,7 +200,18 @@ impl Output {
             let error = crate::frontend::error(source, param, &reason);
             return Err(format!("{}:{error}", path.display()));
         }
+        // Frozen code exposes its origin independently of the module's registered source path.
+        let code_file = match (bundled, name) {
+            (true, "_frozen_importlib") => self.data(b"<frozen importlib._bootstrap>"),
+            (true, "_frozen_importlib_external") => {
+                self.data(b"<frozen importlib._bootstrap_external>")
+            }
+            _ => file.to_owned(),
+        };
         let location = SourceMap {
+            // CPython's warnings provider validates its public arguments in Python.
+            python_annotations: bundled && name == "_py_warnings",
+            module_start,
             docs,
             unit,
             has_templates,
@@ -186,7 +229,7 @@ impl Output {
             private_names,
             package,
             text: source,
-            file,
+            file: &code_file,
             newlines: source
                 .match_indices('\n')
                 .map(|(offset, _)| offset)
@@ -196,26 +239,32 @@ impl Output {
     }
 }
 
+enum DefinitionName<'a> {
+    Binding(&'a ast::Identifier),
+    Plain(&'a str),
+}
+
 enum Body<'a> {
     Namespace(&'a [ast::Stmt]),
     Statements(&'a [ast::Stmt]),
     /// A suspended suite and whether it was declared with async def.
     GeneratorFunction((&'a [ast::Stmt], bool)),
+    ModuleAnnotations(Vec<(&'a str, &'a ast::Expr)>),
     ClassAnnotations(Vec<statements::class_annotations::Site>, BTreeSet<String>),
     Annotations(
         Vec<(&'a str, &'a ast::Expr)>,
         Option<statements::ClassBindings>,
     ),
-    AnnotationValue(&'a ast::Expr),
-    AnnotationThunk(String, ruff_text_size::TextRange),
     Expression(&'a ast::Expr),
     YieldingLambda(&'a ast::Expr),
     TypeAlias(&'a ast::Expr),
     Generator(&'a [ast::Comprehension], &'a ast::Expr),
-    Unsupported(&'a ast::Stmt, &'static str),
+    UnsupportedAsyncGenerator(&'a ast::StmtFunctionDef),
 }
 
 struct SourceMap<'a> {
+    python_annotations: bool,
+    module_start: ruff_text_size::TextSize,
     docs: Option<crate::modules::doctest::SealedDocs>,
     unit: usize,
     has_templates: bool,
@@ -242,6 +291,16 @@ impl SourceMap<'_> {
         })
     }
 
+    fn line_and_column(&self, offset: ruff_text_size::TextSize) -> (usize, usize) {
+        let line = self.line(offset);
+        let start = if line == 1 {
+            0
+        } else {
+            self.newlines[line - 2] + 1
+        };
+        (line, usize::from(offset) - start)
+    }
+
     fn line(&self, offset: ruff_text_size::TextSize) -> usize {
         self.newlines.partition_point(|&n| n < usize::from(offset)) + 1
     }
@@ -256,6 +315,7 @@ enum StringConstant {
 #[derive(Default)]
 struct Output {
     keep_docstrings: bool,
+    declared_statement_line: bool,
     string_constant_slots: HashMap<(usize, StringConstant), usize>,
     strings: HashMap<Vec<u8>, u32>,
     interned_identifiers: BTreeSet<String>,
@@ -274,12 +334,18 @@ impl Output {
         body: Body<'_>,
         start: ruff_text_size::TextSize,
         in_function: bool,
+        suspended: Option<(String, usize)>,
     ) -> String {
         let site = format!("@code_site{}", self.count);
-        let code = self.code(source, prefix, body, in_function);
+        let (entry, body_line) = if let Some(source) = suspended {
+            self.count += 1;
+            source
+        } else {
+            (self.code(source, prefix, body, in_function), 0)
+        };
         writeln!(
             self.constants,
-            "{site} = private constant {{ ptr, ptr, i32 }} {{ ptr {code}, ptr {}, i32 {} }}",
+            "{site} = private constant %code_site {{ ptr {entry}, ptr {}, i32 {}, i32 {body_line} }}",
             source.file,
             source.line(start)
         )
@@ -333,6 +399,7 @@ impl Output {
             output: self,
             source,
             class_sites: None,
+            module_annotation_sites: None,
             in_function,
             module,
             declared_globals: Default::default(),
@@ -356,14 +423,19 @@ impl Output {
             exits: Vec::new(),
             caught: Vec::new(),
             simple_call: None,
+            expression_line: 0,
         };
         match body {
             Body::Namespace(stmts) => {
-                if module
-                    && source.string_annotations
-                    && imre_ast::annotations::has_variable_annotation(stmts)
-                {
-                    f.op("setup_module_string_annotations", &[&f.scope.clone()]);
+                if module && imre_ast::annotations::has_variable_annotation(stmts) {
+                    if source.string_annotations {
+                        f.op("setup_module_string_annotations", &[&f.scope.clone()]);
+                    } else {
+                        // Lower the provider after collecting the body, but run its setup first.
+                        f.module_annotation_sites = Some(Vec::new());
+                        f.jump("annotations_init");
+                        f.label("module_body");
+                    }
                 }
                 if f.output.keep_docstrings
                     && let Some(doc) = f.source.docstring(f.prefix.trim_end_matches('.'), stmts)
@@ -377,28 +449,28 @@ impl Output {
                 } else {
                     f.statements(stmts);
                 }
+                if let Some(sites) = f.module_annotation_sites.take() {
+                    f.end("ret i64 0");
+                    f.label("annotations_init");
+                    f.setup_deferred_module_annotations(&sites);
+                    f.jump("module_body");
+                }
             }
             Body::Statements(stmts) => {
                 f.declare_globals(stmts);
                 f.statements(stmts);
             }
-            Body::GeneratorFunction(_) | Body::YieldingLambda(_) => {}
+            Body::GeneratorFunction(_) | Body::YieldingLambda(_) => {
+                unreachable!("suspended definitions store their source in the code site")
+            }
             Body::ClassAnnotations(sites, globals) => f.class_annotation_values(&sites, &globals),
-            Body::Annotations(entries, class) => f.annotations(&entries, class),
-            Body::Unsupported(stmt, reason) => {
-                f.checkpoint(stmt);
-                f.unsupported(reason);
+            Body::Annotations(entries, class) => f.annotations(&entries, class, false),
+            Body::ModuleAnnotations(entries) => f.annotations(&entries, None, true),
+            Body::UnsupportedAsyncGenerator(function) => {
+                f.checkpoint(function);
+                f.unsupported("async function");
             }
             Body::Generator(generators, element) => f.generator_step(generators, element),
-            Body::AnnotationThunk(entry, range) => {
-                f.checkpoint(&range);
-                let value = f.checked(&format!("call i64 {entry}(ptr %ctx, i64 {})", f.scope));
-                f.end(&format!("ret i64 {value}"));
-            }
-            Body::AnnotationValue(expr) => {
-                let value = f.expr(expr);
-                f.end(&format!("ret i64 {value}"));
-            }
             Body::Expression(expr) | Body::TypeAlias(expr) => {
                 f.checkpoint(expr);
                 if matches!(body, Body::TypeAlias(_)) {
@@ -444,6 +516,7 @@ struct Function<'a, 'p> {
     declared_globals: std::collections::BTreeSet<String>,
     in_function: bool,
     module: bool,
+    module_annotation_sites: Option<Vec<(String, ast::Expr)>>,
     class_sites: Option<statements::class_annotations::ClassSites>,
     class_locals: Option<statements::ClassBindings>,
     annotation_lookup: bool,
@@ -460,11 +533,13 @@ struct Function<'a, 'p> {
     exits: Vec<(Cleanup, String)>,
     caught: Vec<String>,
     simple_call: Option<ruff_text_size::TextRange>,
+    expression_line: usize,
 }
 
 #[derive(Clone)]
 enum Cleanup {
     With {
+        line: usize,
         exit: String,
         caught: String,
     },
@@ -676,13 +751,8 @@ impl Function<'_, '_> {
                 .get(prefix_end..end)?
                 .iter()
                 .position(|&b| b == opener)?;
-        let line = self.source.line(range.start());
-        let beginning = if line == 1 {
-            0
-        } else {
-            self.source.newlines[line - 2] + 1
-        };
-        Some([line, start - beginning, split - beginning, end - beginning])
+        let (line, col) = self.source.line_and_column(range.start());
+        Some([line, col, col + (split - start), col + (end - start)])
     }
 
     /// Store the handles that must survive the next statement or assignment target.
@@ -699,6 +769,7 @@ impl Function<'_, '_> {
     fn checkpoint(&mut self, node: &impl Ranged) {
         let (ptr, count) = self.live_handles();
         let line = self.source.line(node.start());
+        self.expression_line = line;
         self.line(&format!(
             "call void @imre_dyn_statement_with_exception(ptr %ctx, ptr {ptr}, i64 {count}, ptr {}, i32 {line}, i64 {})",
             self.source.file, self.caught.last().map_or("0", String::as_str)
@@ -736,6 +807,16 @@ mod tests {
     use super::*;
 
     #[test]
+    fn declare_exit_line_only_for_compiled_with() {
+        let path = Path::new("<imre stdlib>/example.py");
+        let declare = "declare void @imre_dyn_set_statement_line";
+        for (source, expected) in [("value = 1", 0), ("with a, b:\n    pass", 1)] {
+            let (_, ir) = provider("example", path, source, true).unwrap().unwrap();
+            assert_eq!(ir.matches(declare).count(), expected);
+        }
+    }
+
+    #[test]
     fn provider_substitution() {
         let root = Path::new("<imre stdlib>");
         let path = root.join("example.py");
@@ -769,7 +850,7 @@ mod tests {
             let declared = format!("declare i64 @{symbol}(ptr, i64)");
             assert_eq!(ir.lines().filter(|line| *line == declared).count(), 1);
             ir.lines()
-                .filter(|line| line.contains("call void @imre_dyn_register("))
+                .filter(|line| line.contains("call void @imre_dyn_register_source("))
                 .map(|line| line.ends_with(&format!("@{symbol})")))
                 .collect::<Vec<_>>()
         };

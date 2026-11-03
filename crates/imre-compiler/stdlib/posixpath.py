@@ -1,6 +1,7 @@
 """POSIX lexical operations shared by os.path and posixpath."""
 # os reads these constants while the two modules import each other.
 curdir = "."
+pardir = ".."
 defpath = "/bin:/usr/bin"
 extsep = "."
 sep = "/"
@@ -8,6 +9,7 @@ altsep = None
 
 import os
 import stat
+import sys
 from _imre_posixpath import (
     extension_start, relative_parts as _relative_parts, realpath_loop as _realpath_loop,
     realpath_parent as _realpath_parent, realpath_parts as _realpath_parts,
@@ -83,6 +85,16 @@ def basename(p):
     return p[p.rfind(sep) + 1:]
 
 
+def dirname(p):
+    """Returns the directory component of a pathname"""
+    p = os.fspath(p)
+    sep = b"/" if isinstance(p, bytes) else "/"
+    head = p[:p.rfind(sep) + 1]
+    if head and head != sep * len(head):
+        head = head.rstrip(sep)
+    return head
+
+
 def splitext(p):
     p = os.fspath(p)
     if type(p) is str or type(p) is bytes:
@@ -136,6 +148,61 @@ def ismount(path):
     # path/.. on a different device as path or the same i-node as path
     return s1.st_dev != s2.st_dev or s1.st_ino == s2.st_ino
 
+# From CPython 3.14.5 Lib/posixpath.py. See stdlib/docstrings/LICENSE.
+def expanduser(path):
+    """Expand ~ and ~user constructions.  If user or $HOME is unknown,
+    do nothing."""
+    path = os.fspath(path)
+    if isinstance(path, bytes):
+        tilde = b'~'
+    else:
+        tilde = '~'
+    if not path.startswith(tilde):
+        return path
+    sep = b'/' if isinstance(path, bytes) else '/'
+    i = path.find(sep, 1)
+    if i < 0:
+        i = len(path)
+    if i == 1:
+        if 'HOME' not in os.environ:
+            try:
+                import pwd
+            except ImportError:
+                # pwd module unavailable, return path unchanged
+                return path
+            try:
+                userhome = pwd.getpwuid(os.getuid()).pw_dir
+            except KeyError:
+                # bpo-10496: if the current user identifier doesn't exist in the
+                # password database, return the path unchanged
+                return path
+        else:
+            userhome = os.environ['HOME']
+    else:
+        try:
+            import pwd
+        except ImportError:
+            # pwd module unavailable, return path unchanged
+            return path
+        name = path[1:i]
+        if isinstance(name, bytes):
+            name = os.fsdecode(name)
+        try:
+            pwent = pwd.getpwnam(name)
+        except KeyError:
+            # bpo-10496: if the user name from the path doesn't exist in the
+            # password database, return the path unchanged
+            return path
+        userhome = pwent.pw_dir
+    # if no user home, return the path unchanged on VxWorks
+    if userhome is None and sys.platform == "vxworks":
+        return path
+    if isinstance(path, bytes):
+        userhome = os.fsencode(userhome)
+    userhome = userhome.rstrip(sep)
+    return (userhome + path[i:]) or sep
+
+
 def abspath(path):
     """Return a normalized absolute path."""
     path = os.fspath(path)
@@ -163,6 +230,46 @@ def relpath(path, start=None):
     if isinstance(start, bytes) != use_bytes:
         raise TypeError("Can't mix strings and bytes in path components")
     return _relative_parts(abspath(path), start)
+
+
+# From CPython 3.14.5 Lib/posixpath.py. See stdlib/docstrings/LICENSE.
+def commonpath(paths):
+    """Given a sequence of path names, returns the longest common sub-path."""
+
+    paths = tuple(map(os.fspath, paths))
+
+    if not paths:
+        raise ValueError('commonpath() arg is an empty sequence')
+
+    if isinstance(paths[0], bytes):
+        sep = b'/'
+        curdir = b'.'
+    else:
+        sep = '/'
+        curdir = '.'
+
+    try:
+        split_paths = [path.split(sep) for path in paths]
+
+        try:
+            isabs, = {p.startswith(sep) for p in paths}
+        except ValueError:
+            raise ValueError("Can't mix absolute and relative paths") from None
+
+        split_paths = [[c for c in s if c and c != curdir] for s in split_paths]
+        s1 = min(split_paths)
+        s2 = max(split_paths)
+        common = s1
+        for i, c in enumerate(s1):
+            if c != s2[i]:
+                common = s1[:i]
+                break
+
+        prefix = sep if isabs else sep[:0]
+        return prefix + sep.join(common)
+    except (TypeError, AttributeError):
+        _check_arg_types('commonpath', *paths)
+        raise
 
 
 # Component traversal and symlink cache follow CPython 3.14.5 Lib/posixpath.py.

@@ -1,7 +1,12 @@
 import _codecs
+import builtins
 import codecs
 import copyreg
 import pickle
+from typing import ParamSpec
+
+
+Params = ParamSpec("Params")
 
 
 def rebuild(protocol):
@@ -34,6 +39,156 @@ def check_registered_reducer(protocol):
     assert pickle.loads(pickle.dumps(WithProtocol(), protocol)) == ("rebuilt", protocol)
     for value in (Ellipsis, NotImplemented, type(None), type(Ellipsis), type(NotImplemented)):
         assert pickle.loads(pickle.dumps(value, protocol)) is value
+
+
+def check_builtin_method_reduction():
+    d = {}
+    method = d.__getitem__
+    descriptor = type(len).__reduce__
+    for reduced in (method.__reduce__(), descriptor(method), method.__reduce_ex__(4)):
+        reconstruct, (receiver, name) = reduced
+        assert reconstruct is getattr and receiver is d and name == "__getitem__"
+    assert descriptor(len) == "len"
+    assert descriptor(_codecs.encode) == "encode"
+    assert descriptor(dict.__new__) == (getattr, (dict, "__new__"))
+    assert descriptor(str.maketrans) == (getattr, (str, "maketrans"))
+    for class_method in (dict.__new__, str.maketrans):
+        assert pickle.loads(pickle.dumps(class_method)) is class_method
+    assert descriptor.__doc__ is None and descriptor.__text_signature__ == "($self, /)"
+    for args, kwargs in (
+        ((), {}), ((WithProtocol().__reduce__,), {}), ((tuple.__repr__,), {}),
+        ((().__repr__,), {}), ((dict.__getitem__,), {}),
+        ((method, 0), {}), ((method,), {"extra": 0}),
+    ):
+        try:
+            descriptor(*args, **kwargs)
+        except TypeError:
+            pass
+        else:
+            raise AssertionError("accepted invalid builtin method reducer arguments")
+
+    class Shadow(dict):
+        pass
+
+    shadow = Shadow()
+    saved = shadow.__getitem__
+    shadow.__getitem__ = None
+    reconstruct, (receiver, name) = saved.__reduce__()
+    assert receiver is shadow and reconstruct(receiver, name) is None
+    assert eval("m.__reduce__()[0]", {"__builtins__": {"getattr": 9}, "m": method}) == 9
+
+    original = builtins.getattr
+    try:
+        builtins.getattr = 42
+        assert method.__reduce__()[0] == 42
+        del builtins.getattr
+        try:
+            method.__reduce__()
+        except AttributeError as error:
+            assert error.args == ("getattr",)
+        else:
+            raise AssertionError("ignored missing builtins.getattr")
+    finally:
+        builtins.getattr = original
+
+    d["method"] = method
+    restored = pickle.loads(pickle.dumps(method))
+    assert restored.__self__["method"] is restored and restored("method") is restored
+    copyreg.pickle(type(method), lambda value: (int, (7,)))
+    try:
+        assert pickle.loads(pickle.dumps(method)) == 7
+    finally:
+        del copyreg.dispatch_table[type(method)]
+
+
+class MethodReceiver:
+    def read(self, value):
+        return value
+
+    @classmethod
+    def factory(cls):
+        return cls()
+
+
+def check_paramspec_markers(protocol):
+    other = ParamSpec("Other")
+    for marker, wrong_kind in ((Params.args, Params.kwargs), (Params.kwargs, Params.args)):
+        cls = type(marker)
+        assert copyreg.dispatch_table[cls](marker) == (cls, (Params,))
+        for dumps, loads in ((pickle.dumps, pickle.loads), (pickle._dumps, pickle._loads)):
+            restored = loads(dumps(marker, protocol))
+            assert type(restored) is cls and restored.__origin__ is Params
+            assert restored == marker and restored != wrong_kind and restored != cls(other)
+            try:
+                dumps(cls(other), protocol)
+            except pickle.PicklingError:
+                pass
+            else:
+                raise AssertionError("pickled an unbound ParamSpec origin")
+
+
+def check_method_descriptors():
+    for kind in (staticmethod, classmethod):
+        wrapper = kind(MethodReceiver.read)
+        assert kind.__reduce__ is object.__reduce__
+        assert kind.__reduce_ex__ is object.__reduce_ex__
+        for dumps in (pickle.dumps, pickle._dumps):
+            for protocol in range(6):
+                try:
+                    dumps(wrapper, protocol)
+                except TypeError as error:
+                    assert str(error) == f"cannot pickle '{kind.__name__}' object"
+                else:
+                    raise AssertionError("pickled a method descriptor")
+
+        wrapper.__reduce_ex__ = lambda protocol: (int, (protocol,))
+        for dumps in (pickle.dumps, pickle._dumps):
+            assert pickle.loads(dumps(wrapper, 4)) == 4
+
+
+def check_python_method_reduction():
+    receiver = MethodReceiver()
+    method = receiver.read
+    kind = type(method)
+    descriptor = kind.__reduce__
+    assert descriptor.__qualname__ == "method.__reduce__"
+    assert descriptor.__objclass__ is kind and descriptor.__text_signature__ == "($self, /)"
+    assert descriptor.__doc__ is None
+    method.__func__.__reduce__ = None
+    try:
+        expected = (getattr, (receiver, "read"))
+        assert method.__reduce__() == descriptor(method) == expected
+        assert kind.__reduce_ex__(method, 4) == expected
+        assert eval("m.__reduce__()[0]", {"__builtins__": {"getattr": 9}, "m": method}) == 9
+        assert receiver.factory.__reduce__() == (getattr, (MethodReceiver, "factory"))
+        for protocol in range(6):
+            cloned, bound = pickle.loads(pickle.dumps((receiver, method), protocol))
+            assert bound.__self__ is cloned and bound(37) == 37
+    finally:
+        del method.__func__.__reduce__
+
+    class Callable:
+        def __call__(self):
+            pass
+
+    target = Callable()
+    explicit = kind(target, receiver)
+    try:
+        descriptor(explicit)
+    except AttributeError:
+        pass
+    else:
+        raise AssertionError("method reduction did not read callable.__name__")
+    target.__name__ = []
+    assert descriptor(explicit)[1][1] is target.__name__
+    assert descriptor(kind(len, receiver)) == (getattr, (receiver, "len"))
+    for args, kwargs in (((), {}), ((len,), {}), ((method, 1), {}), ((method,), {"x": 1})):
+        try:
+            descriptor(*args, **kwargs)
+        except TypeError:
+            pass
+        else:
+            raise AssertionError("accepted invalid Python method reducer arguments")
 
 
 class WithoutProtocol:
@@ -249,6 +404,27 @@ def check_object_reducer():
         else:
             raise AssertionError("legacy reduction accepted slots without a custom state hook")
 
+    from collections import UserString
+    text = UserString("saved")
+    text.items = [text]
+    copy_of_text = copy.deepcopy(text)
+    assert type(copy_of_text) is UserString and copy_of_text == text
+    assert copy_of_text.items is not text.items and copy_of_text.items[0] is copy_of_text
+
+    class Extended:
+        def __getnewargs__(self):
+            raise AssertionError("ordinary hook took precedence")
+
+        def __getnewargs_ex__(self):
+            return ("first",), {"keyword": "second"}
+
+    value = Extended()
+    value.__getnewargs_ex__ = lambda: ((), {})
+    constructor, args, state, listitems, dictitems = value.__reduce_ex__(4)
+    assert constructor is copyreg.__newobj_ex__
+    assert args == (Extended, ("first",), {"keyword": "second"})
+    assert state is value.__dict__ and listitems is None and dictitems is None
+
     plain = Plain({})
     for protocol in (2, 3, 4, 5):
         constructor, args, state, listitems, dictitems = plain.__reduce_ex__(protocol)
@@ -303,6 +479,26 @@ def check_global_names(protocol):
     finally:
         _operator.getitem = getitem
 
+    for value, legacy_name in ((super, "super"), (len, "len"), (min, "min"), (chr, "unichr")):
+        for fix_imports in (True, False):
+            data = pickle.dumps(value, protocol, fix_imports=fix_imports)
+            if protocol <= 3:
+                legacy = protocol < 3 and fix_imports
+                module = "__builtin__" if legacy else "builtins"
+                name = legacy_name if legacy else value.__name__
+                assert ("c" + module + "\n" + name + "\n").encode() in data
+            assert pickle.loads(data, fix_imports=fix_imports) is value
+
+    from itertools import chain, filterfalse
+
+    for cls, legacy_name in ((chain, "chain"), (filterfalse, "ifilterfalse")):
+        for fix_imports in (True, False):
+            data = pickle.dumps(cls, protocol, fix_imports=fix_imports)
+            if protocol < 3:
+                name = legacy_name if fix_imports else cls.__name__
+                assert ("citertools\n" + name + "\n").encode() in data
+            assert pickle.loads(data, fix_imports=fix_imports) is cls
+
     from collections import OrderedDict, UserDict, UserList, UserString
     from datetime import date, datetime, timedelta
 
@@ -347,14 +543,38 @@ def check_namedtuple_reducer():
     assert duplicate.left is duplicate.right and duplicate.left is not shared
 
 
+def check_list_items(protocol):
+    from collections import UserList, deque
+
+    values = []
+    item = BadReturn((deque, ((), 3), None, iter(values)))
+    values.extend((0, item, values, values))
+    restored = pickle.loads(pickle.dumps(item, protocol))
+    assert restored.maxlen == 3
+    assert restored[0] is restored and restored[1] is restored[2]
+    for invalid, name in (([], "list"), (42, "int"), (UserList(), "collections.UserList")):
+        try:
+            pickle.dumps(BadReturn((list, (), None, invalid)), protocol)
+        except pickle.PicklingError as error:
+            assert str(error) == ("fourth item of the tuple returned by __reduce__ "
+                                  "must be an iterator, not " + name)
+        else:
+            raise AssertionError("accepted noniterator list items")
+
+
 def produce():
     check_namedtuple_reducer()
     check_object_reducer()
+    check_builtin_method_reduction()
+    check_python_method_reduction()
+    check_method_descriptors()
     assert _codecs.encode is codecs.encode and codecs.encode.__module__ == "_codecs"
     for protocol in range(pickle.HIGHEST_PROTOCOL + 1):
+        check_paramspec_markers(protocol)
         check_global_names(protocol)
         check_registered_reducer(protocol)
         check_reduction_state(protocol)
+        check_list_items(protocol)
         check_floats(protocol)
         for result in (11, (int,), (11, ()), (int, 11)):
             try:

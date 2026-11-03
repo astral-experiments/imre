@@ -35,8 +35,15 @@ impl References<'_> {
     /// Root an implicit index method only if argument binding can reach conversion.
     fn invokes_index(&self, call: &ast::ExprCall) -> bool {
         let arity = match self.graph.resolve(self.module, &call.func) {
+            Some(Binding::Intrinsic(Intrinsic::Fd(crate::ir::FdOperation::CopyFileRange))) => {
+                // Every descriptor, count and explicit offset may invoke the index protocol.
+                return call.arguments.args.iter().any(|arg| !literal(arg))
+                    || call.arguments.keywords.iter().any(|kw| !literal(&kw.value));
+            }
             Some(Binding::Intrinsic(
-                intrinsic @ (Intrinsic::SysSetRecursionLimit | Intrinsic::SysGetFrameModuleName),
+                intrinsic @ (Intrinsic::SysSetRecursionLimit
+                    | Intrinsic::SysGetFrameModuleName
+                    | Intrinsic::Fd(crate::ir::FdOperation::DeviceEncoding)),
             )) => {
                 return match (
                     call.arguments.args.as_ref(),
@@ -44,8 +51,11 @@ impl References<'_> {
                 ) {
                     ([arg], []) => !matches!(arg, ast::Expr::Starred(_)),
                     ([], [kw]) => {
-                        intrinsic == Intrinsic::SysGetFrameModuleName
-                            && kw.arg.as_deref() == Some("depth")
+                        match intrinsic {
+                            Intrinsic::SysGetFrameModuleName => kw.arg.as_deref() == Some("depth"),
+                            Intrinsic::Fd(_) => kw.arg.as_deref() == Some("fd"),
+                            _ => false,
+                        }
                     }
                     _ => false,
                 };
@@ -58,7 +68,8 @@ impl References<'_> {
                 Some(super::credential_arity(name))
             }
             Some(Binding::Intrinsic(
-                Intrinsic::Fd(crate::ir::FdOperation::Pipe2) | Intrinsic::Mktime,
+                Intrinsic::Fd(crate::ir::FdOperation::Pipe2 | crate::ir::FdOperation::TcGetPgrp)
+                | Intrinsic::Mktime,
             )) => Some(1),
             _ => None,
         };
@@ -289,6 +300,11 @@ impl<'a> Visitor<'a> for References<'_> {
             ) {
                 self.found.attributes.insert(format!("_bound_{name}"));
             }
+            if name == "assertIsInstance" {
+                self.found
+                    .attributes
+                    .insert("_assertTextBytesInstance".into());
+            }
             if matches!(name.as_str(), "assertRaises" | "assertRaisesRegex") {
                 self.found
                     .attributes
@@ -335,7 +351,16 @@ impl<'a> Visitor<'a> for References<'_> {
             }
             if matches!(name.as_str(), "assertEqual" | "assertListEqual") {
                 if name == "assertEqual" {
-                    self.found.attributes.insert("assertDictEqual".into());
+                    self.found.attributes.extend(
+                        [
+                            "assertDictEqual",
+                            "_getAssertEqualityFunc",
+                            "_type_equality_funcs",
+                            "_assertOptionalTextEqual",
+                        ]
+                        .into_iter()
+                        .map(str::to_owned),
+                    );
                 }
                 self.found.attributes.extend(
                     [

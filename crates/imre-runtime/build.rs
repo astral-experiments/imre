@@ -27,21 +27,36 @@ fn write_class_table(out_dir: &Path, file: &str, pattern: &str) {
 }
 
 // Keep target-specific constants in C so their names and values come from the target headers.
-fn add_sysconf_table(c: &mut String) {
-    let names = include_str!("native/sysconf-names.txt");
-    c.push_str("#include <unistd.h>\nstatic const struct entry sysconf_entries[] = {\n");
+fn add_confname_table(c: &mut String, table: &str, names: &str) {
+    writeln!(c, "static const struct entry {table}_entries[] = {{").unwrap();
     for name in names.lines().filter(|line| !line.starts_with('#')) {
         writeln!(c, "#ifdef _{name}\n{{\"{name}\", _{name}}},\n#endif").unwrap();
     }
-    c.push_str(
-        r#"};
-const struct entry *imre_platform_sysconf_entries(size_t *length) {
-    *length = sizeof(sysconf_entries) / sizeof(sysconf_entries[0]);
-    return sysconf_entries;
+    writeln!(
+        c,
+        r#"}};
+const struct entry *imre_platform_{table}_entries(size_t *length) {{
+    *length = sizeof({table}_entries) / sizeof({table}_entries[0]);
+    return {table}_entries;
+}}"#
+    ).unwrap();
 }
-long imre_platform_sysconf(int name, int *error) {
+
+fn add_configuration_queries(c: &mut String) {
+    c.push_str("#include <unistd.h>\n");
+    add_confname_table(c, "confstr", include_str!("native/confstr-names.txt"));
+    add_confname_table(c, "sysconf", include_str!("native/sysconf-names.txt"));
+    add_confname_table(c, "pathconf", include_str!("native/pathconf-names.txt"));
+    c.push_str(
+        r#"long imre_platform_sysconf(int name, int *error) {
     errno = 0;
     long value = sysconf(name);
+    *error = value == -1 ? errno : 0;
+    return value;
+}
+long imre_platform_pathconf(const char *path, int fd, int name, int *error) {
+    errno = 0;
+    long value = path == NULL ? fpathconf(fd, name) : pathconf(path, name);
     *error = value == -1 ? errno : 0;
     return value;
 }
@@ -53,6 +68,12 @@ fn main() {
     let out_dir = PathBuf::from(std::env::var_os("OUT_DIR").unwrap());
     write_class_table(&out_dir, "unicode_alnum.rs", r"[\p{L}\p{N}]");
     write_class_table(&out_dir, "unicode_alpha.rs", r"\p{L}");
+    write_class_table(&out_dir, "unicode_identifier_start.rs", r"[_\p{XID_Start}]");
+    write_class_table(
+        &out_dir,
+        "unicode_identifier_continue.rs",
+        r"\p{XID_Continue}",
+    );
     const SYMBOLS: &str = include_str!("native/errno-symbols.txt");
     println!("cargo:rerun-if-changed=native/errno-symbols.txt");
     let mut c = String::from(
@@ -95,15 +116,23 @@ fn main() {
         c.push_str("#include <netdb.h>\nint imre_socket_host_errno(void) { return h_errno; }\n");
     }
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("linux") {
+        println!("cargo:rerun-if-changed=native/confstr-names.txt");
         println!("cargo:rerun-if-changed=native/sysconf-names.txt");
-        add_sysconf_table(&mut c);
+        println!("cargo:rerun-if-changed=native/pathconf-names.txt");
+        add_configuration_queries(&mut c);
     }
+    c.push_str(
+        "#include <limits.h>\n#ifndef NGROUPS_MAX\n#define NGROUPS_MAX 64\n#endif\n\
+         size_t imre_platform_max_groups(void) { return NGROUPS_MAX; }\n",
+    );
     let path = out_dir.join("platform.c");
     std::fs::write(&path, c).unwrap();
+    println!("cargo:rerun-if-changed=native/ssl_capabilities.c");
     println!("cargo:rerun-if-changed=native/locale_decode.c");
     println!("cargo:rerun-if-changed=native/faulthandler.c");
     cc::Build::new()
         .file("native/faulthandler.c")
+        .file("native/ssl_capabilities.c")
         .file(path)
         .file("native/locale_decode.c")
         .compile("imre_errno_headers");

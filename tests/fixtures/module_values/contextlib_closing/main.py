@@ -1,6 +1,6 @@
 import contextlib
 import types
-from contextlib import closing
+from contextlib import aclosing, closing
 
 
 class Resource:
@@ -58,3 +58,6 @@ alias = Managed[int]
 assert type(alias) is types.GenericAlias
 assert alias.__origin__ is Managed and alias.__args__ == (int,)
 assert closing[str].__origin__ is closing
+
+assert aclosing is contextlib.aclosing
+assert aclosing[int].__origin__ is aclosing

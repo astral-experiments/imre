@@ -86,8 +86,18 @@ impl Context {
     }
 
     pub(super) fn writable_byte_span(&self, object: Id) -> Result<Option<(Id, Range<usize>)>> {
+        self.contiguous_byte_span(object, true)
+    }
+
+    /// Return the backing and byte range of an exported contiguous buffer.
+    pub(super) fn contiguous_byte_span(
+        &self,
+        object: Id,
+        writable: bool,
+    ) -> Result<Option<(Id, Range<usize>)>> {
         self.check_buffer_exporter(object)?;
-        if matches!(self.heap.get(object), Value::MemoryView { .. })
+        if writable
+            && matches!(self.heap.get(object), Value::MemoryView { .. })
             && self.view_is_readonly(object)?
         {
             return Ok(None);
@@ -96,6 +106,10 @@ impl Context {
             self.window_bytes(w)?;
             return Ok(Some((w.backing, w.start..w.start + w.len)));
         }
+        let storage_len = |id| match self.heap.get(id) {
+            Value::Bytes(bytes) if !writable => Some(bytes.len()),
+            _ => self.mutable_storage_len(id),
+        };
         let (owner, start, len) = match *self.heap.get(object) {
             Value::MemoryView { owner, .. } => {
                 let owner = Self::memoryview_owner(owner)?;
@@ -109,14 +123,14 @@ impl Context {
             Value::BytesIoBuffer { .. } => (object, 0, self.view_element_count(object)?),
             _ => {
                 let storage = self.scalar_value(object);
-                return Ok(self.mutable_storage_len(storage).map(|n| (storage, 0..n)));
+                return Ok(storage_len(storage).map(|n| (storage, 0..n)));
             }
         };
-        self.invalidate_stream_snapshot(owner);
+        if writable {
+            self.invalidate_stream_snapshot(owner);
+        }
         let storage = self.view_storage_id(owner);
-        Ok(self
-            .mutable_storage_len(storage)
-            .map(|_| (storage, start..start + len)))
+        Ok(storage_len(storage).map(|_| (storage, start..start + len)))
     }
 
     fn raw_view_index(&mut self, id: Id, key: Id) -> Result<usize> {

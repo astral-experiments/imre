@@ -72,6 +72,8 @@ pub(in super::super) fn install_lowlevel_socket(ctx: &mut Context, scope: Id) ->
     ctx.bind(scope, "getaddrinfo", resolver);
     let socket_type = attribute(ctx, "socket")?;
     ctx.bind(scope, "SocketType", socket_type);
+    let timeout = ctx.builtin("TimeoutError");
+    ctx.bind(scope, "timeout", timeout);
     for name in ["has_ipv6", "socket", "close", "error"] {
         let value = attribute(ctx, name)?;
         ctx.bind(scope, name, value);
@@ -89,6 +91,7 @@ pub(in super::super) fn import_socket_constants(ctx: &mut Context, scope: Id) ->
         .iter()
         .map(|&(name, _)| name)
         .chain(RESOLVER_NAMES.iter().copied())
+        .chain(["timeout"])
     {
         match ctx.lookup_attr(low, name) {
             Ok(value) => ctx.bind(scope, name, value),
@@ -158,7 +161,6 @@ pub(super) fn attribute(ctx: &mut Context, name: &str) -> Result<Id> {
         "close" => Ok(ctx.builtin("_socket.close")),
         "getfqdn" => Ok(ctx.alloc(Value::Native("socket.getfqdn".into()))),
         "error" => Ok(ctx.builtin("OSError")),
-        "timeout" => Ok(ctx.alloc(Value::Native("TimeoutError".into()))),
         _ => Err(Error::new(
             "AttributeError",
             format!("module 'socket' has no attribute '{name}'"),

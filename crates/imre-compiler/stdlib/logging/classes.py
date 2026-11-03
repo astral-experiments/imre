@@ -5,7 +5,7 @@ import os.path
 import sys
 from logging import Formatter, Logger, LogRecord, getLevelNamesMapping, getLogger
 from imre._logging import (
-    _Level, _Lock, _TextOutput, _fallback, _file_encoding_uses_utf8, _lookup_handler,
+    _Level, _Lock, _TextOutput, _fallback, _file_encoding_uses_utf8, _handler_names, _lookup_handler,
     _print_active_exception, _rename_handler,
 )
 from pathlib import Path
@@ -155,6 +155,10 @@ def _shutdown_handler(handler: Handler) -> None:
 
 def getHandlerByName(name: str) -> Handler | None:
     return _lookup_handler(name)
+
+
+def getHandlerNames() -> frozenset[str]:
+    return _handler_names()
 
 
 def _basic_config(level: int | None, fmt: str | None, datefmt: str | None, force: bool,

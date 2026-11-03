@@ -183,6 +183,12 @@ def exercise(path):
         assert reader.seek(0) == 0
         assert reader.read() == "A\xe9\nZ\n"
     assert reader.closed
+    another = open(encoded_path, encoding="latin-1")
+    raw = another.buffer.raw
+    assert not raw.closed
+    del another
+    assert raw.closed
+    del raw
 
     with open(path, "rb") as reader:
         reader.read(1)

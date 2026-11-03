@@ -3,6 +3,9 @@ from types import UnionType
 from typing import TypeVar, Union, get_args, get_origin
 
 
+T = TypeVar("T")
+
+
 class Left:
     pass
 
@@ -33,7 +36,9 @@ class RaisesEquality(EqualSeventeen):
 
 def current():
     import gc
-    from typing import Dict, ForwardRef
+    from typing import Dict, ForwardRef, GenericAlias
+
+    assert GenericAlias is type(list[int])
 
     class Symlink(str):
         pass
@@ -43,6 +48,41 @@ def current():
     assert type(Union['A', 'A']) is ForwardRef
     assert (int | str | 'A').__args__ == (int, str, ForwardRef('A'))
     assert ('A' | (int | str)).__args__ == (ForwardRef('A'), int, str)
+    import copy
+    import pickle
+    from types import GenericAlias
+
+    alias = list[T]
+    assert alias.__reduce__() == (GenericAlias, (list, (T,)))
+    iterator = iter(alias)
+    for owner in (GenericAlias, type(iterator)):
+        assert owner.__reduce__.__doc__ is None
+        assert owner.__reduce__.__text_signature__ == "($self, /)"
+    assert iterator.__reduce__() == (iter, (alias,))
+    starred = next(iterator)
+    assert iterator.__reduce__() == (iter, ((),))
+    factory, (fresh,) = starred.__reduce__()
+    assert factory is next and fresh.__reduce__() == (iter, (alias,))
+    ns = {"x": starred, "__builtins__": {"next": "replacement"}}
+    exec("result = x.__reduce__()", ns)
+    assert ns["result"][0] == "replacement"
+    iterator = iter(alias)
+
+    class Builtins(dict):
+        def __missing__(self, name):
+            assert name == "iter"
+            next(iterator)
+            return "replacement"
+
+    ns = {"x": iterator, "__builtins__": Builtins()}
+    exec("result = x.__reduce__()", ns)
+    assert ns["result"] == ("replacement", ((),))
+    for original in (starred, alias | int):
+        assert copy.copy(original) == copy.deepcopy(original) == original
+        for protocol in range(pickle.HIGHEST_PROTOCOL + 1):
+            result = pickle.loads(pickle.dumps(original, protocol))
+            assert result == original and result.__parameters__ == (T,)
+
     variable = TypeVar('Variable')
     assert (variable | int)[int] is int
     assert (list[variable] | int)[str].__args__ == (list[str], int)

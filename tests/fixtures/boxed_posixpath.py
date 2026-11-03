@@ -5,7 +5,7 @@ import posix
 import posixpath
 from os import altsep, fspath, linesep, pathsep, sep
 from os.path import altsep as path_altsep, pathsep as path_list_sep, sep as path_sep
-from posixpath import abspath, ismount, normpath
+from posixpath import abspath, commonpath, ismount, normpath
 
 
 class Path:
@@ -40,7 +40,26 @@ class Raises:
         raise RuntimeError("method call")
 
 
+def check_commonpath():
+    assert commonpath is posixpath.commonpath is os.path.commonpath
+    assert commonpath(paths=(Path(p) for p in ("//a/./../x", "/a/../y"))) == "/a/.."
+    assert commonpath((Path(b"a/b"), b"a/c")) == b"a"
+    for paths, error, message in (
+        (iter(()), ValueError, "commonpath() arg is an empty sequence"),
+        (("a", "/b"), ValueError, "Can't mix absolute and relative paths"),
+        (("/a", b"b"), TypeError, "Can't mix strings and bytes in path components"),
+        ((Path("a"), Raises()), RuntimeError, "method call"),
+    ):
+        try:
+            commonpath(paths)
+        except error as caught:
+            assert str(caught) == message
+        else:
+            raise AssertionError("commonpath should have raised")
+
+
 def current():
+    check_commonpath()
     assert normpath is os.path.normpath is posix._path_normpath
     assert normpath.__name__ == "_path_normpath" and normpath.__self__ is posix
     for value, expected in (
@@ -195,6 +214,7 @@ def current():
     assert linesep is os.linesep and linesep == "\n"
     assert not hasattr(posixpath, "linesep")
     assert os.extsep == os.path.extsep == posixpath.extsep == "."
+    assert os.pardir == os.path.pardir == posixpath.pardir == ".."
     assert pathsep == ":"
     assert os.defpath is posixpath.defpath and os.defpath == "/bin:/usr/bin"
     assert os.get_exec_path({}) == ["/bin", "/usr/bin"]
@@ -208,6 +228,17 @@ def current():
         raise AssertionError("accepted conflicting PATH keys")
     assert ":λ::some path:".split(pathsep) == ["", "λ", "", "some path", ""]
     assert os.path.splitext is posixpath.splitext and os.path.join is posixpath.join
+    assert os.path.dirname is posixpath.dirname
+    for value, expected in (
+        (Text("a//b"), "a"),
+        (Raw(b"//"), b"//"),
+        (b"\xff//leaf", b"\xff"),
+        ("leaf", ""),
+    ):
+        path = Path(value)
+        path.__fspath__ = lambda: None
+        result = os.path.dirname(p=path)
+        assert result == expected and type(result) is type(expected)
     assert fspath is os.fspath is posix.fspath
     assert fspath.__self__ is posix and fspath.__module__ == "posix"
     for value in ("", ".profile", "a.b/.c", "a/.a.b", "/résumé.☃", "r/", b"a.\xff", Text("a.tar.gz"), Raw(b"a.tar.gz")):

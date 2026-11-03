@@ -39,6 +39,25 @@ def current():
     assert f"[{field}{field}]" == "[formattedformatted]"
     assert specs == ["x", "", "", "", ""]
     assert format(Number(31)) == "count" and format(Number(31), "x") == "1f"
+
+    class NumberWithUnit(float):
+        def __format__(self, spec):
+            return super().__format__(spec) + "m"
+
+    assert "{:+.2E}".format(NumberWithUnit(12.0)) == "+1.20E+01m"
+    assert float.__format__(NumberWithUnit(12.0), ".2") == "1.2e+01"
+    assert format(1.0, "\x00") == "1.0"
+    assert format(12.0, "#.3") == "12.0"
+    assert format(1e20, "+#") == "+1.e+20"
+    assert format(1.2, "010,.2") == "0,000,001.2"
+    assert format(-123456.0, "013,.2f") == "-0,123,456.00"
+    assert format(float("inf"), "09,F") == "000000INF"
+    try:
+        format(NumberWithUnit(1.0), "s")
+    except ValueError as error:
+        assert str(error) == "Unknown format code 's' for object of type 'NumberWithUnit'"
+    else:
+        raise AssertionError("accepted string presentation on a float subclass")
     label = "abc"
     assert f"{label=}" == "label='abc'" and f"{label=:}" == "label=abc"
 
@@ -109,6 +128,23 @@ def current():
             print(len(render()))
         except ValueError as error:
             print(str(error))
+
+    class Index:
+        def __index__(self):
+            return 0xd800
+
+    surrogate = chr(0xd800)
+    assert "%d:%-3.0c%c/%s" % (2, Index(), Text(chr(0xdc00)), "end") == (
+        "2:" + surrogate + "  " + chr(0xdc00) + "/end"
+    )
+    assert "%(ch)3c" % {"ch": 0xd800} == "  " + surrogate
+    assert "%c%c" % (surrogate, chr(0xdc00)) == surrogate + chr(0xdc00)
+
+    low = chr(0xdc00)
+    private = chr(0xf0000)
+    assert "[%3.1s%3.0c%.0s%-2c%-.2s]" % (
+        low + private, surrogate, surrogate, low, private + surrogate
+    ) == "[  " + low + "  " + surrogate + low + " " + private + surrogate + "]"
 
     print("[%5.2s][%-6.3r][%.2a][%4c]" % ("éπx", "abc", "a", "x"))
     print("[%*.*s][%.*s]" % (-6, 2, "abc", -1, "hidden"))

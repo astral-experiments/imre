@@ -32,18 +32,51 @@ pub(super) fn call(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> R
     collections::sorted(ctx, &[names], &[])
 }
 
+/// PEP 585 aliases add their local attributes to the origin's directory.
+fn generic_alias_names(ctx: &mut Context, origin: Id) -> Result<Id> {
+    let dir = ctx.builtin("dir");
+    let names = ctx.call(dir, vec![origin], Vec::new())?;
+    ctx.heap.keep(names);
+    for field in [
+        "__class__",
+        "__origin__",
+        "__args__",
+        "__unpacked__",
+        "__parameters__",
+        "__typing_unpacked_tuple_args__",
+        "__mro_entries__",
+        "__reduce_ex__",
+        "__reduce__",
+    ] {
+        let field = ctx.heap.code_name(field);
+        if !ctx.contains(field, names)? {
+            let Value::List(items) = ctx.heap.get_mut(names) else {
+                unreachable!("dir() returns a list")
+            };
+            items.try_reserve(1).map_err(|_| crate::Error::memory_error())?;
+            items.push(field);
+        }
+    }
+    Ok(names)
+}
+
 /// Merge the instance dictionary with the class dictionaries along the runtime's MRO.
 fn object_names(ctx: &mut Context, object: Id) -> Result<Id> {
     let mut names = BTreeSet::new();
     let mut keys = Vec::new();
     let class = match ctx.heap.get(object) {
+        Value::GenericAlias(alias) if alias.is_builtin_alias() => {
+            return generic_alias_names(ctx, alias.origin);
+        }
         Value::GenericAlias(alias) if matches!(alias.kind, AliasKind::Literal(_)) => {
             return literal_names(ctx, alias.clone());
         }
         Value::GenericAlias(alias) if alias.kind == AliasKind::Concatenate => {
             let origin = alias.origin;
             names.extend(alias.metadata().map(|(name, _)| name.to_owned()));
-            names.extend(["_inst", "_name", "copy_with", "__mro_entries__"].map(str::to_owned));
+            names.extend(
+                ["_inst", "_name", "copy_with", "__iter__", "__mro_entries__"].map(str::to_owned),
+            );
             let origin_names = call(ctx, &[origin], &[])?;
             ctx.heap.keep(origin_names);
             let marker = ctx.text("__");
@@ -67,19 +100,25 @@ fn object_names(ctx: &mut Context, object: Id) -> Result<Id> {
         {
             ctx.builtin("builtin_function_or_method")
         }
+        value if value.is_weak_proxy() => return namespace_directory(ctx, object, true),
         Value::Class { .. } if ctx.has_base(object, "tuple") => {
-            return tuple_directory(ctx, object, false);
+            return namespace_directory(ctx, object, false);
         }
         Value::Instance { class, .. } if ctx.has_base(*class, "tuple") => {
-            return tuple_directory(ctx, object, true);
+            return namespace_directory(ctx, object, true);
         }
         Value::Class { .. } | Value::Native(_) => object,
         Value::Count { .. }
+        | Value::Calendar { .. }
+        | Value::Coroutine { .. }
         | Value::Repeat(_)
+        | Value::DequeIterator { .. }
         | Value::Union(_)
         | Value::Dict(_)
+        | Value::MappingProxy(_)
         | Value::Tuple(_)
         | Value::List(_)
+        | Value::Set { .. }
         | Value::Str(_)
         | Value::SurrogateStr(_) => ctx.exact_type(object)?,
         Value::NamedTuple {
@@ -159,7 +198,7 @@ fn optional_attr(ctx: &mut Context, object: Id, name: &str) -> Result<Option<Id>
 }
 
 /// Copy the instance dictionary before a reported __class__ can mutate it.
-fn tuple_directory(ctx: &mut Context, object: Id, instance: bool) -> Result<Id> {
+pub(super) fn namespace_directory(ctx: &mut Context, object: Id, instance: bool) -> Result<Id> {
     let dictionary = if instance
         && let Some(source) = optional_attr(ctx, object, "__dict__")?
         && let Some(storage) = ctx.dict_storage(source)
@@ -176,7 +215,7 @@ fn tuple_directory(ctx: &mut Context, object: Id, instance: bool) -> Result<Id> 
         Some(object)
     };
     if let Some(class) = class {
-        merge_tuple_names(ctx, class, dictionary)?;
+        merge_class_names(ctx, class, dictionary)?;
     }
     Ok(dictionary)
 }
@@ -203,8 +242,8 @@ fn contributes_dict_descriptor(ctx: &mut Context, class: Id, mapping: Id) -> Res
 }
 
 /// Merge each reported namespace before reading its bases, as in object.__dir__.
-fn merge_tuple_names(ctx: &mut Context, class: Id, dictionary: Id) -> Result<()> {
-    if matches!(ctx.heap.get(class), Value::Native(name) if super::is_builtin_type(name)) {
+fn merge_class_names(ctx: &mut Context, class: Id, dictionary: Id) -> Result<()> {
+    if matches!(ctx.heap.get(class), Value::Native(name) if name != "object" && super::is_builtin_type(name)) {
         let mut names = BTreeSet::new();
         class_names(ctx, class, &mut names)?;
         for name in names {
@@ -254,7 +293,7 @@ fn merge_tuple_names(ctx: &mut Context, class: Id, dictionary: Id) -> Result<()>
             for i in 0..count {
                 let index = ctx.int(i);
                 let base = ctx.get_item(bases, index)?;
-                merge_tuple_names(ctx, base, dictionary)?;
+                merge_class_names(ctx, base, dictionary)?;
             }
         }
         ctx.heap.release_temporaries_since(mark);
@@ -265,9 +304,13 @@ fn merge_tuple_names(ctx: &mut Context, class: Id, dictionary: Id) -> Result<()>
 /// Collect a native typing alias's implemented attributes and its origin's non-dunder names.
 pub(in crate::dynamic) fn typing_alias_dir(ctx: &mut Context, alias: &Alias) -> Result<Id> {
     let fields = alias.instance_fields().map(|(name, _)| name);
-    let fields = fields
-        .into_iter()
-        .chain(["__class__", "__dir__", "__mro_entries__", "copy_with"]);
+    let fields = fields.into_iter().chain([
+        "__class__",
+        "__dir__",
+        "__iter__",
+        "__mro_entries__",
+        "copy_with",
+    ]);
     let origin_names = ctx.with_slot_depth("maximum recursion depth exceeded", |ctx| {
         call(ctx, &[alias.origin], &[])
     })?;
@@ -283,13 +326,11 @@ pub(in crate::dynamic) fn typing_alias_dir(ctx: &mut Context, alias: &Alias) -> 
             .expect("native alias class dictionary")
             .to_vec()
         {
-            // An unnamed generic has no stored instance module; its class's module would be wrong.
-            if alias.kind == AliasKind::Generic
-                && alias.name.is_none()
-                && ctx.str_value(key)? == "__module__"
-            {
-                continue;
-            }
+            ctx.put_item(names, key, NONE)?;
+        }
+    }
+    if let Some(fields) = alias.naming_fields {
+        for (key, _) in ctx.dict_entries(fields).expect("alias naming fields").to_vec() {
             ctx.put_item(names, key, NONE)?;
         }
     }
@@ -325,6 +366,7 @@ fn merge_literal_names(ctx: &mut Context, alias: &Alias, origin_names: Id) -> Re
         "__format__",
         "__getstate__",
         "__init_subclass__",
+        "__iter__",
         "__mro_entries__",
     ]);
     merge_origin_names(ctx, fields, origin_names)
@@ -390,7 +432,13 @@ fn class_names(ctx: &Context, class: Id, names: &mut BTreeSet<String>) -> Result
         Value::Native(name)
             if matches!(
                 name.as_str(),
-                "builtin_function_or_method" | "dict" | "list" | "str"
+                "builtin_function_or_method"
+                    | "dict"
+                    | "list"
+                    | "str"
+                    | "set"
+                    | "frozenset"
+                    | "mappingproxy"
             ) =>
         {
             class_names(ctx, ctx.builtins["object"], names)?;
@@ -406,6 +454,8 @@ fn class_names(ctx: &Context, class: Id, names: &mut BTreeSet<String>) -> Result
                         "__text_signature__",
                     ],
                 ),
+                "set" | "frozenset" => (super::set_methods(name), super::set_operators(name)),
+                "mappingproxy" => (super::MAPPING_PROXY_METHODS, super::MAPPING_PROXY_SLOTS),
                 "dict" => (
                     super::DICT_METHODS,
                     &["__class_getitem__", "__or__", "__reversed__", "__ror__"],
@@ -477,13 +527,6 @@ fn class_names(ctx: &Context, class: Id, names: &mut BTreeSet<String>) -> Result
             {
                 names.insert("__annotations__".to_owned());
             }
-            if scope
-                .class_namespace
-                .as_ref()
-                .is_some_and(|ns| ns.annotation_sites.is_some())
-            {
-                names.insert("__annotate_func__".to_owned());
-            }
             if let Some(slots) = ctx.namespace_binding(ctx.scope_data(scope_id), "__slots__") {
                 match ctx.heap.get(slots) {
                     Value::Str(name) => {
@@ -505,8 +548,13 @@ fn class_names(ctx: &Context, class: Id, names: &mut BTreeSet<String>) -> Result
                 names.extend(["__dict__".to_owned(), "__weakref__".to_owned()]);
             }
         }
-        Value::Native(_) if let Some(&dictionary) = ctx.native_type_dicts.get(&class) => {
-            class_names(ctx, ctx.builtins["object"], names)?;
+        Value::Native(owner) if let Some(&dictionary) = ctx.native_type_dicts.get(&class) => {
+            let base = if crate::dynamic::stdlib::datetime::members(owner).is_some() {
+                Context::native_base(owner).unwrap_or("object")
+            } else {
+                "object"
+            };
+            class_names(ctx, ctx.builtins[base], names)?;
             for &(key, _) in ctx
                 .dict_entries(dictionary)
                 .expect("native class dictionary")

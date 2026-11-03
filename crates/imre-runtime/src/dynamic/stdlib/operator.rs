@@ -186,7 +186,10 @@ macro_rules! operator_functions {
 include!("../../../native/operator-functions.rs");
 
 /// Install the same callable objects in the private extension and its public wrapper.
-pub(in crate::dynamic) fn install(ctx: &mut Context, scope: Id, module: &str) {
+pub(in crate::dynamic) fn install(ctx: &mut Context, owner: Id, scope: Id, module: &str) {
+    if module == "_operator" {
+        super::hmac::bind_compare(ctx, owner, scope, "_operator._compare_digest");
+    }
     for &name in Operation::NAMES {
         let function = ctx.builtin(&format!("operator.{name}"));
         ctx.bind(scope, name, function);
@@ -257,10 +260,7 @@ impl Operation {
                 Ok(NONE)
             }
             Self::Index if matches!(ctx.heap.get(obj), Value::Int(_)) => Ok(obj),
-            Self::Index => {
-                let value = ctx.index_integer(obj)?;
-                Ok(ctx.alloc(Value::Int(value)))
-            }
+            Self::Index => Ok(ctx.exact_index_result(obj)?.0),
             Self::LengthHint => ctx.length_hint(obj, args.get(1).copied()),
         }
     }
@@ -300,7 +300,7 @@ impl Context {
         }
         if let Value::ReverseSequence { source, remaining } = *self.heap.get(value) {
             let hint = match source {
-                Some(seq) if remaining != 0 && remaining <= self.reverse_sequence_len(seq)? => {
+                Some(seq) if remaining != 0 && remaining <= self.sequence_len(seq)? => {
                     remaining
                 }
                 _ => 0,
@@ -311,6 +311,9 @@ impl Context {
             let length = i64::try_from(self.iterator_remaining(value)?.len())
                 .map_err(|_| size_overflow())?;
             return Ok(self.int(length));
+        }
+        if let Value::DequeIterator { remaining, .. } = *self.heap.get(value) {
+            return Ok(self.int(remaining as i64));
         }
         if let Value::RangeIterator(iter) = self.heap.get(value) {
             let n = iter.remaining.to_i64().ok_or_else(size_overflow)?;

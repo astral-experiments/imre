@@ -7,6 +7,7 @@ from _imre_importlib import (
     create_native_module as _create_native_module,
     exec_native_module as _exec_native_module,
     native_spec_info as _native_spec_info,
+    native_source as _native_source,
     warn_import as _warn_import,
 )
 from _imre_importlib import import_module as _native_import, warn_legacy_load as _warn_legacy_load
@@ -49,6 +50,11 @@ class _ModuleLockManager:
         self._drop_user()
 
 
+def _lock_unlock_module(name):
+    with _ModuleLockManager(name):
+        pass
+
+
 def _warning_module():
     import warnings
     return warnings
@@ -86,6 +92,10 @@ class _NativeImporter:
         spec = ModuleSpec(fullname, cls, origin=origin)
         spec.submodule_search_locations = locations
         return spec
+
+    @classmethod
+    def get_source(cls, fullname):
+        return _native_source(fullname, cls is _BundledImporter)
 
     @staticmethod
     def create_module(spec):

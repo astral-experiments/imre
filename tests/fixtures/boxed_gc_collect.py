@@ -6,7 +6,91 @@ class Node:
     pass
 
 
+def check_generations():
+    old = Node()
+    old.link = old
+    gc.collect(2)
+    middle = Node()
+    middle.link = middle
+    gc.collect(0)
+    young = Node()
+    young.link = young
+    child = Node()
+    old.child = child
+    child.parent = old
+    # This initially tracked younger tuple survives through an older object.
+    # Its atomic contents let the minor collection untrack it.
+    old.owned = tuple(iter([137, 178]))
+    refs = [ref(old), ref(middle), ref(young), ref(child)]
+    del old, middle, young, child
+    assert gc.collect(0) == 1
+    assert [w() is None for w in refs] == [False, False, True, False]
+    assert gc.collect(1) == 1
+    assert [w() is None for w in refs] == [False, True, True, False]
+    assert gc.collect(2) == 2
+    assert all(w() is None for w in refs)
+
+    # An acyclic older value drops when a younger cycle releases its last edge.
+    events = []
+    older = Node()
+    gc.collect(2)
+    young = Node()
+    young.link = young
+    young.older = older
+    old_ref = ref(older, lambda w: events.append("older"))
+    young_ref = ref(young, lambda w: events.append("young"))
+    del older, young
+    assert gc.collect(0) == 1
+    assert old_ref() is young_ref() is None and events == ["young", "older"]
+
+    # A resurrected candidate moves up, but a cycle created during its callback
+    # remains young. Recursive collections cannot touch the active isolate.
+    saved = []
+    new_refs = []
+
+    class Resurrect:
+        def __del__(self):
+            events.append("finalize")
+            self.child = None
+            saved.append(self)
+
+    def on_weak(w):
+        assert w() is None
+        events.append("weak")
+        fresh = Node()
+        fresh.link = fresh
+        new_refs.append(ref(fresh))
+        assert gc.collect(1) == 0
+
+    older = Node()
+    released = []
+    old_ref = ref(older, lambda w: released.append(w() is None))
+    gc.collect(2)
+    node = Resurrect()
+    node.link = node
+    node.child = Node()
+    node.child.older = older
+    witness = ref(node, on_weak)
+    del node, older
+    # Observe the older target before the next statement's prompt sweep.
+    assert (gc.collect(0), old_ref() is None, released.copy()) == (0, True, [True])
+    assert witness() is None and events[-2:] == ["weak", "finalize"]
+    again = ref(saved[0])
+    saved.clear()
+    assert new_refs[0]() is not None
+    assert gc.collect(0) == 1
+    assert again() is not None and new_refs[0]() is None
+    assert gc.collect(1) == 1 and again() is None
+
+
 def current():
+    enabled = gc.isenabled()
+    try:
+        gc.disable()
+        check_generations()
+    finally:
+        if enabled:
+            gc.enable()
     callbacks = []
     node = Node()
     node.cycle = node

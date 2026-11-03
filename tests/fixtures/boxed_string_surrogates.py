@@ -63,6 +63,15 @@ def current():
     assert (low * 5).rsplit(low * 2, 1) == [low * 3, ""]
     assert (high + "\x1c" + low).split(None, 1) == [high, low]
     assert str.split(Text(path), low) == ["dir/", ""]
+    for ending in ("\n", "\r", "\r\n", "\v", "\f", "\x1c", "\x1d", "\x1e", "\x85", "\u2028", "\u2029"):
+        lines = Text(low + ending + ending + high + ending)
+        assert str.splitlines(lines) == [low, "", high]
+        assert lines.splitlines(keepends=True) == [low + ending, ending, high + ending]
+    assert (low + "\r\r\n" + high).splitlines(True) == [low + "\r", "\r\n", high]
+    assert path.splitlines()[0] is path
+    for whole in (path, path + "\r\n", "a scalar line", "a scalar line\r\n"):
+        assert whole.splitlines(keepends=True)[0] is whole
+        assert type(Text(whole).splitlines(keepends=True)[0]) is str
     field = Text("field" + low)
     assert field.split("/")[0] is not field.split("/")[0]
     assert field.rsplit("separator longer than field")[0] is field
@@ -144,6 +153,9 @@ def current():
             raise AssertionError("malformed input accepted")
 
     class Mapped(str):
+        def lower(self):
+            return "override"
+
         def title(self):
             return "override"
 
@@ -151,7 +163,13 @@ def current():
             return "override"
 
     word = Mapped("AΣ\ud800ß")
-    assert word.title() == word.swapcase() == "override"
+    assert word.lower() == word.title() == word.swapcase() == "override"
+    lower = str.lower.__get__(word)
+    assert lower() == "aς\ud800ß" and type(lower()) is str
+    assert Text("A\ud800Σİ").lower() == "a\ud800σi\u0307"
+    assert "AΣ\u1acfA".lower() == "aς\u1acfa"
+    # These letters acquired lowercase mappings after Unicode 16.
+    assert "\ua7ce\U00016ea0".lower() == "\ua7ce\U00016ea0"
     title = str.title.__get__(word)
     swapcase = str.swapcase.__get__(word)
     assert title() == "Aς\ud800Ss" and type(title()) is str
@@ -159,11 +177,12 @@ def current():
     assert "A\ud800Σ".title() == "A\ud800Σ"
     assert "A\ud800Σ".swapcase() == "a\ud800σ"
     signed = Mapped("!")
+    assert str.lower(signed) is not str.lower(signed)
     assert str.title(signed) is not str.title(signed)
     assert str.swapcase(signed) is not str.swapcase(signed)
     assert str.title.__objclass__ is str
     assert str.swapcase.__text_signature__ == "($self, /)"
-    for method in (title, swapcase):
+    for method in (lower, title, swapcase):
         for args, kw in (((1,), {}), ((), {"unknown": True})):
             try:
                 method(*args, **kw)

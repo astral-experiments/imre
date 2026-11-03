@@ -78,7 +78,7 @@ fn expand_initializer(
     };
     let call = stmt.value.as_call_expr()?;
     let origin = classes.definitions[context.class].method_origins[context.index];
-    let parent = &classes.definitions[*classes.definitions[classes.ids[&origin]].bases.first()?];
+    let parent = &classes.definitions[classes.definitions[classes.ids[&origin]].storage_base?];
     let direct = crate::classes::direct_base_init(graph, module, parent.definition, method, call);
     if !direct
         && (!crate::classes::super_init(call)

@@ -6,6 +6,8 @@ use std::thread::ThreadId;
 
 const LIMIT: usize = std::mem::size_of::<libc::sigset_t>() * 8 + 1;
 static PENDING: [AtomicBool; LIMIT] = [const { AtomicBool::new(false) }; LIMIT];
+// A worker can request delivery without reading the main interpreter's Python heap.
+static SUPPRESS_INTERRUPTS: [AtomicBool; LIMIT] = [const { AtomicBool::new(false) }; LIMIT];
 #[unsafe(export_name = "imre_signal_tripped")]
 pub(crate) static TRIPPED: AtomicBool = AtomicBool::new(false);
 static MAIN: OnceLock<ThreadId> = OnceLock::new();
@@ -61,7 +63,21 @@ pub(crate) fn install(number: i32, handler: Disposition) -> io::Result<()> {
     if unsafe { libc::sigaction(number, &action, std::ptr::null_mut()) } < 0 {
         return Err(io::Error::last_os_error());
     }
+    record_handler(number as usize, Some(handler));
     Ok(())
+}
+
+/// Share only the disposition bits needed by workers, never a Python handler reference.
+pub(crate) fn record_handler(number: usize, handler: Option<Disposition>) {
+    let suppressed = matches!(handler, Some(Disposition::Default | Disposition::Ignore));
+    SUPPRESS_INTERRUPTS[number].store(suppressed, Ordering::Release);
+}
+
+/// Honor the interpreter disposition even if a native library has changed sigaction.
+pub(crate) fn interrupt_main(number: i32) {
+    if !SUPPRESS_INTERRUPTS[number as usize].load(Ordering::Acquire) {
+        trip(number);
+    }
 }
 
 pub(crate) fn initialize_interrupt() {
@@ -93,6 +109,16 @@ pub(crate) fn nsig() -> i32 {
                 + 1
         })
     }
+}
+
+/// Kernel-pending signals are not inherited. Clear their Python counterparts
+/// while delivery is blocked, before any new signal can be recorded in the child.
+#[cfg(target_os = "linux")]
+pub(crate) fn clear_pending_after_fork() {
+    for bit in &PENDING {
+        bit.store(false, Ordering::Relaxed);
+    }
+    TRIPPED.store(false, Ordering::Release);
 }
 
 pub(crate) fn begin_dispatch() -> bool {

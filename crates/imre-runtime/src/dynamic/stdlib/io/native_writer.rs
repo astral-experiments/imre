@@ -55,18 +55,18 @@ pub(super) const METHODS: &[&str] = &[
 
 /// Path and standard writers own their fd internally and have no Python FileIO to delegate to.
 fn truncate_file(ctx: &mut Context, buffer: Id, size: Option<Id>) -> Result<Id> {
-    files::call(ctx, "file.flush", &[buffer], &[])?;
+    files::binary_method(ctx, buffer, "flush", &[])?;
     let size = match size.filter(|&value| value != NONE) {
         Some(value) => ctx.index_integer(value)?.to_i64().ok_or_else(|| {
             Error::new("OverflowError", "Python int too large to convert to C long")
         })?,
         None => {
-            let position = files::call(ctx, "file.tell", &[buffer], &[])?;
+            let position = files::binary_method(ctx, buffer, "tell", &[])?;
             ctx.as_integer(position)?
         }
     };
     // The position conversion can run Python and close or replace the underlying descriptor.
-    let fd = files::call(ctx, "file.fileno", &[buffer], &[])?;
+    let fd = files::binary_method(ctx, buffer, "fileno", &[])?;
     file_io::truncate_fd(ctx.as_integer(fd)? as i32, size)?;
     Ok(ctx.int(size))
 }
@@ -151,6 +151,14 @@ pub(super) fn call(
                 _ => None,
             };
             Ok(raw.unwrap_or(NONE))
+        } else if matches!(
+            ctx.heap.get(receiver),
+            Value::Instance {
+                memory_stream: Some(MemoryStream::DetachedWriter),
+                ..
+            }
+        ) {
+            Err(Error::new("ValueError", "raw stream has been detached"))
         } else {
             Err(Error::new(
                 "ValueError",
@@ -159,7 +167,7 @@ pub(super) fn call(
         };
     };
     if name == "detach" {
-        return Err(Error::new("UnsupportedOperation", "detach"));
+        return descriptor_buffer::detach_writer(ctx, receiver);
     }
     let Value::File(handle) = ctx.heap.get(buffer) else {
         unreachable!("BufferedWriter backing must be a binary file")
@@ -175,16 +183,14 @@ pub(super) fn call(
         return fd.active.run(|| match name {
             "raw" => Ok(fd.raw),
             "name" | "mode" => ctx.lookup_attr(fd.raw, name),
-            "truncate" if owner == "BufferedRandom" => fd.call(ctx, receiver, name, args, kwargs),
+            "truncate" if owner == "BufferedRandom" => fd.call(ctx, receiver, name, args),
             "truncate" => {
-                fd.call(ctx, receiver, "flush", &[], &[])?;
+                fd.call(ctx, receiver, "flush", &[])?;
                 let truncate = ctx.lookup_attr(fd.raw, "truncate")?;
                 ctx.call(truncate, args.to_vec(), Vec::new())
             }
             "close" if buffer != receiver && !fd.closed() => {
-                if owner == "BufferedWriter" {
-                    fd.warn_on_close(ctx, receiver)?;
-                }
+                fd.warn_on_close(ctx, receiver)?;
                 let flushed = ctx
                     .lookup_attr(receiver, "flush")
                     .and_then(|flush| ctx.call(flush, vec![], Vec::new()));
@@ -202,7 +208,7 @@ pub(super) fn call(
                     (_, closed) => closed.map(|()| NONE),
                 }
             }
-            _ => fd.call(ctx, receiver, name, args, kwargs),
+            _ => fd.call(ctx, receiver, name, args),
         });
     }
     let (path, mode) = handle
@@ -223,8 +229,6 @@ pub(super) fn call(
         "truncate" => return truncate_file(ctx, buffer, args.first().copied()),
         _ => {}
     }
-    let mut operands = vec![buffer];
-    operands.extend_from_slice(args);
-    let value = files::call(ctx, &format!("file.{name}"), &operands, kwargs)?;
+    let value = files::binary_method(ctx, buffer, name, args)?;
     Ok(if name == "__enter__" { receiver } else { value })
 }

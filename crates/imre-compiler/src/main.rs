@@ -29,7 +29,8 @@ const JEMALLOC_RUNTIME: &str = "libimre_runtime_jemalloc.a";
 const PYTHON_HEADER: &str = include_str!("../../imre-runtime/include/Python.h");
 
 const USAGE: &str = "Usage: imre check SOURCE.py [--module-root DIRECTORY] [--extension-path DIRECTORY] [--reachable-only] [--runtime-imports] [--entry-profile FILE] [--watch | -w]
-       imre [-I] [-E] [-B] [-O] [-u] [-W OPTION] [-X faulthandler] [-X utf8[=0|1]] [-X warn_default_encoding] [-X context_aware_warnings=0|1] (-c CODE | SCRIPT) [PROGRAM_ARGUMENTS...]
+       imre [-I] [-E] [-B] [-O] [-u] [-W OPTION] [-X faulthandler] [-X tracemalloc[=NFRAME]] [-X utf8[=0|1]] [-X warn_default_encoding] [-X context_aware_warnings=0|1] (-c CODE | SCRIPT) [PROGRAM_ARGUMENTS...]
+       On Linux, -X cpu_count=N|default sets the number of logical CPUs.
        imre extension-header
        imre build-target [--output-dir DIRECTORY]
        imre wheel PROJECT [--out-dir DIR] [--overlay DIR] [--python PYTHON]
@@ -125,6 +126,41 @@ fn run() -> Result<ExitCode, String> {
             Err(python_command::ParseError::Usage(message)) => {
                 eprintln!("{message}");
                 return Ok(ExitCode::from(2));
+            }
+            Err(python_command::ParseError::FatalStartup(message)) => {
+                eprintln!("{message}");
+                return Ok(ExitCode::FAILURE);
+            }
+            Err(python_command::ParseError::TraceDepthLimit) => {
+                eprintln!(
+                    "Fatal Python error: init_interp_main: can't start tracemalloc\nPython runtime state: core initialized\nValueError: the number of frames must be in range [1; 65535]\n"
+                );
+                #[cfg(unix)]
+                {
+                    // SAFETY: pthread_self returns the calling thread without transferring ownership.
+                    let tid = unsafe { libc::pthread_self() } as usize;
+                    let width = 2 * std::mem::size_of::<usize>();
+                    let mut thread_name = String::new();
+                    #[cfg(any(target_os = "linux", target_os = "macos"))]
+                    {
+                        let mut buf = [0 as libc::c_char; 64];
+                        // SAFETY: buf provides its entire capacity and pthread_getname_np NUL-terminates on success.
+                        if unsafe {
+                            libc::pthread_getname_np(tid as _, buf.as_mut_ptr(), buf.len())
+                        } == 0
+                            && buf[0] != 0
+                        {
+                            // SAFETY: the successful call wrote a NUL-terminated name.
+                            let name = unsafe { std::ffi::CStr::from_ptr(buf.as_ptr()) };
+                            thread_name = format!(" [{}]", name.to_string_lossy());
+                        }
+                    }
+                    eprintln!(
+                        "Current thread 0x{tid:0width$x}{thread_name} (most recent call first):"
+                    );
+                }
+                eprintln!("  <no Python frame>");
+                return Ok(ExitCode::FAILURE);
             }
             Err(python_command::ParseError::ContextWarnings(message)) => {
                 eprintln!(

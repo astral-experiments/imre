@@ -1,12 +1,10 @@
 """Expose a Traversable as a local pathlib.Path for the duration of a context."""
 
 import os
+import sys
 import tempfile
 from _imre_tempfile import cleanup_directory
 from contextlib import contextmanager
-
-from importlib.resources._filesystem import _FilePath
-
 
 def _remove(path, remove=os.remove):
     try:
@@ -52,6 +50,7 @@ def _temp_directory(source, Path):
     try:
         yield _copy_entry(source, Path(directory))
     finally:
+        sys.audit("shutil.rmtree", directory, None)
         cleanup_directory(directory)
 
 
@@ -66,8 +65,6 @@ def as_file(path):
 
     if isinstance(path, Path):
         return _existing(path)
-    if isinstance(path, _FilePath):
-        return _existing(Path(path))
     try:
         directory = path.is_dir()
     except FileNotFoundError:

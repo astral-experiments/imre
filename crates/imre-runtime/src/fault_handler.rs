@@ -75,3 +75,6 @@ pub(crate) fn dump_traceback(fd: i32, all_threads: bool) {
     // SAFETY: The reporter writes to but does not own this descriptor.
     unsafe { imre_fault_dump(fd, all_threads.into()) }
 }
+
+#[cfg(all(test, target_os = "linux"))]
+mod tests;

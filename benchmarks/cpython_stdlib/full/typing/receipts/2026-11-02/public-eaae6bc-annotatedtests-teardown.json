@@ -1,0 +1,3834 @@
+{
+  "group": "test.test_typing.AnnotatedTests",
+  "first_ordinal": 3,
+  "last_ordinal": 30,
+  "originals": 28,
+  "archive": "/workspace/scratch/intact-results/eaae-cohorts/030-test.test_typing.AnnotatedTests.tar.gz",
+  "archive_sha256": "febb5a223e1efb3c31f09809c27c3996ef209124c88a6e739c59c8ad7088d746",
+  "modes": {
+    "ordinary-O0": {
+      "class_boundary": {
+        "basis": "later_original_class_START",
+        "last_original_STOP_event": 172,
+        "next_class_START": {
+          "index": 173,
+          "kind": "START",
+          "case": "test.test_typing.AnyTests.test_any_instance_type_error",
+          "subject": "",
+          "detail": ""
+        }
+      },
+      "module_boundary": {
+        "status": "open",
+        "next_module_group_START": null
+      },
+      "intervening_fixture_or_other_callbacks": [],
+      "runner_count": [],
+      "process_exit": null,
+      "native_xml_closed": false,
+      "raw_stderr_sha256": "f854baafbd9dcda8b23ea69f059d33c2e70d743d18dd661bed6480efec730bdc",
+      "methods": [
+        {
+          "ordinal": 3,
+          "id": "test.test_typing.AnnotatedTests.test_annotated_cached_with_types",
+          "parent_callbacks": [
+            {
+              "index": 7,
+              "kind": "START",
+              "case": "test.test_typing.AnnotatedTests.test_annotated_cached_with_types",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 8,
+              "kind": "PASS",
+              "case": "test.test_typing.AnnotatedTests.test_annotated_cached_with_types",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 9,
+              "kind": "STOP",
+              "case": "test.test_typing.AnnotatedTests.test_annotated_cached_with_types",
+              "subject": "",
+              "detail": ""
+            }
+          ],
+          "child_callbacks": {},
+          "true_skip_events": []
+        },
+        {
+          "ordinal": 4,
+          "id": "test.test_typing.AnnotatedTests.test_annotated_in_other_types",
+          "parent_callbacks": [
+            {
+              "index": 10,
+              "kind": "START",
+              "case": "test.test_typing.AnnotatedTests.test_annotated_in_other_types",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 11,
+              "kind": "PASS",
+              "case": "test.test_typing.AnnotatedTests.test_annotated_in_other_types",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 12,
+              "kind": "STOP",
+              "case": "test.test_typing.AnnotatedTests.test_annotated_in_other_types",
+              "subject": "",
+              "detail": ""
+            }
+          ],
+          "child_callbacks": {},
+          "true_skip_events": []
+        },
+        {
+          "ordinal": 5,
+          "id": "test.test_typing.AnnotatedTests.test_annotated_mro",
+          "parent_callbacks": [
+            {
+              "index": 13,
+              "kind": "START",
+              "case": "test.test_typing.AnnotatedTests.test_annotated_mro",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 14,
+              "kind": "PASS",
+              "case": "test.test_typing.AnnotatedTests.test_annotated_mro",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 15,
+              "kind": "STOP",
+              "case": "test.test_typing.AnnotatedTests.test_annotated_mro",
+              "subject": "",
+              "detail": ""
+            }
+          ],
+          "child_callbacks": {},
+          "true_skip_events": []
+        },
+        {
+          "ordinal": 6,
+          "id": "test.test_typing.AnnotatedTests.test_attr_passthrough",
+          "parent_callbacks": [
+            {
+              "index": 16,
+              "kind": "START",
+              "case": "test.test_typing.AnnotatedTests.test_attr_passthrough",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 17,
+              "kind": "PASS",
+              "case": "test.test_typing.AnnotatedTests.test_attr_passthrough",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 18,
+              "kind": "STOP",
+              "case": "test.test_typing.AnnotatedTests.test_attr_passthrough",
+              "subject": "",
+              "detail": ""
+            }
+          ],
+          "child_callbacks": {},
+          "true_skip_events": []
+        },
+        {
+          "ordinal": 7,
+          "id": "test.test_typing.AnnotatedTests.test_cannot_check_instance",
+          "parent_callbacks": [
+            {
+              "index": 19,
+              "kind": "START",
+              "case": "test.test_typing.AnnotatedTests.test_cannot_check_instance",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 20,
+              "kind": "PASS",
+              "case": "test.test_typing.AnnotatedTests.test_cannot_check_instance",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 21,
+              "kind": "STOP",
+              "case": "test.test_typing.AnnotatedTests.test_cannot_check_instance",
+              "subject": "",
+              "detail": ""
+            }
+          ],
+          "child_callbacks": {},
+          "true_skip_events": []
+        },
+        {
+          "ordinal": 8,
+          "id": "test.test_typing.AnnotatedTests.test_cannot_check_subclass",
+          "parent_callbacks": [
+            {
+              "index": 22,
+              "kind": "START",
+              "case": "test.test_typing.AnnotatedTests.test_cannot_check_subclass",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 23,
+              "kind": "PASS",
+              "case": "test.test_typing.AnnotatedTests.test_cannot_check_subclass",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 24,
+              "kind": "STOP",
+              "case": "test.test_typing.AnnotatedTests.test_cannot_check_subclass",
+              "subject": "",
+              "detail": ""
+            }
+          ],
+          "child_callbacks": {},
+          "true_skip_events": []
+        },
+        {
+          "ordinal": 9,
+          "id": "test.test_typing.AnnotatedTests.test_cannot_getattr_typevar",
+          "parent_callbacks": [
+            {
+              "index": 25,
+              "kind": "START",
+              "case": "test.test_typing.AnnotatedTests.test_cannot_getattr_typevar",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 26,
+              "kind": "PASS",
+              "case": "test.test_typing.AnnotatedTests.test_cannot_getattr_typevar",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 27,
+              "kind": "STOP",
+              "case": "test.test_typing.AnnotatedTests.test_cannot_getattr_typevar",
+              "subject": "",
+              "detail": ""
+            }
+          ],
+          "child_callbacks": {},
+          "true_skip_events": []
+        },
+        {
+          "ordinal": 10,
+          "id": "test.test_typing.AnnotatedTests.test_cannot_instantiate_forward",
+          "parent_callbacks": [
+            {
+              "index": 28,
+              "kind": "START",
+              "case": "test.test_typing.AnnotatedTests.test_cannot_instantiate_forward",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 29,
+              "kind": "PASS",
+              "case": "test.test_typing.AnnotatedTests.test_cannot_instantiate_forward",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 30,
+              "kind": "STOP",
+              "case": "test.test_typing.AnnotatedTests.test_cannot_instantiate_forward",
+              "subject": "",
+              "detail": ""
+            }
+          ],
+          "child_callbacks": {},
+          "true_skip_events": []
+        },
+        {
+          "ordinal": 11,
+          "id": "test.test_typing.AnnotatedTests.test_cannot_instantiate_type_var",
+          "parent_callbacks": [
+            {
+              "index": 31,
+              "kind": "START",
+              "case": "test.test_typing.AnnotatedTests.test_cannot_instantiate_type_var",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 32,
+              "kind": "PASS",
+              "case": "test.test_typing.AnnotatedTests.test_cannot_instantiate_type_var",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 33,
+              "kind": "STOP",
+              "case": "test.test_typing.AnnotatedTests.test_cannot_instantiate_type_var",
+              "subject": "",
+              "detail": ""
+            }
+          ],
+          "child_callbacks": {},
+          "true_skip_events": []
+        },
+        {
+          "ordinal": 12,
+          "id": "test.test_typing.AnnotatedTests.test_cannot_subclass",
+          "parent_callbacks": [
+            {
+              "index": 34,
+              "kind": "START",
+              "case": "test.test_typing.AnnotatedTests.test_cannot_subclass",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 35,
+              "kind": "PASS",
+              "case": "test.test_typing.AnnotatedTests.test_cannot_subclass",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 36,
+              "kind": "STOP",
+              "case": "test.test_typing.AnnotatedTests.test_cannot_subclass",
+              "subject": "",
+              "detail": ""
+            }
+          ],
+          "child_callbacks": {},
+          "true_skip_events": []
+        },
+        {
+          "ordinal": 13,
+          "id": "test.test_typing.AnnotatedTests.test_deduplicate_from_union",
+          "parent_callbacks": [
+            {
+              "index": 37,
+              "kind": "START",
+              "case": "test.test_typing.AnnotatedTests.test_deduplicate_from_union",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 38,
+              "kind": "PASS",
+              "case": "test.test_typing.AnnotatedTests.test_deduplicate_from_union",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 39,
+              "kind": "STOP",
+              "case": "test.test_typing.AnnotatedTests.test_deduplicate_from_union",
+              "subject": "",
+              "detail": ""
+            }
+          ],
+          "child_callbacks": {},
+          "true_skip_events": []
+        },
+        {
+          "ordinal": 14,
+          "id": "test.test_typing.AnnotatedTests.test_dir",
+          "parent_callbacks": [
+            {
+              "index": 40,
+              "kind": "START",
+              "case": "test.test_typing.AnnotatedTests.test_dir",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 45,
+              "kind": "PASS",
+              "case": "test.test_typing.AnnotatedTests.test_dir",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 46,
+              "kind": "STOP",
+              "case": "test.test_typing.AnnotatedTests.test_dir",
+              "subject": "",
+              "detail": ""
+            }
+          ],
+          "child_callbacks": {
+            "SUBTEST_PASS": 4
+          },
+          "true_skip_events": []
+        },
+        {
+          "ordinal": 15,
+          "id": "test.test_typing.AnnotatedTests.test_flatten",
+          "parent_callbacks": [
+            {
+              "index": 47,
+              "kind": "START",
+              "case": "test.test_typing.AnnotatedTests.test_flatten",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 48,
+              "kind": "PASS",
+              "case": "test.test_typing.AnnotatedTests.test_flatten",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 49,
+              "kind": "STOP",
+              "case": "test.test_typing.AnnotatedTests.test_flatten",
+              "subject": "",
+              "detail": ""
+            }
+          ],
+          "child_callbacks": {},
+          "true_skip_events": []
+        },
+        {
+          "ordinal": 16,
+          "id": "test.test_typing.AnnotatedTests.test_forwardref_partial_evaluation",
+          "parent_callbacks": [
+            {
+              "index": 50,
+              "kind": "START",
+              "case": "test.test_typing.AnnotatedTests.test_forwardref_partial_evaluation",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 51,
+              "kind": "ERROR",
+              "case": "test.test_typing.AnnotatedTests.test_forwardref_partial_evaluation",
+              "subject": "",
+              "detail": [
+                "AttributeError",
+                "module 'annotationlib' has no attribute 'get_annotations'"
+              ]
+            },
+            {
+              "index": 52,
+              "kind": "STOP",
+              "case": "test.test_typing.AnnotatedTests.test_forwardref_partial_evaluation",
+              "subject": "",
+              "detail": ""
+            }
+          ],
+          "child_callbacks": {},
+          "true_skip_events": []
+        },
+        {
+          "ordinal": 17,
+          "id": "test.test_typing.AnnotatedTests.test_hash_eq",
+          "parent_callbacks": [
+            {
+              "index": 53,
+              "kind": "START",
+              "case": "test.test_typing.AnnotatedTests.test_hash_eq",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 54,
+              "kind": "PASS",
+              "case": "test.test_typing.AnnotatedTests.test_hash_eq",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 55,
+              "kind": "STOP",
+              "case": "test.test_typing.AnnotatedTests.test_hash_eq",
+              "subject": "",
+              "detail": ""
+            }
+          ],
+          "child_callbacks": {},
+          "true_skip_events": []
+        },
+        {
+          "ordinal": 18,
+          "id": "test.test_typing.AnnotatedTests.test_instantiate",
+          "parent_callbacks": [
+            {
+              "index": 56,
+              "kind": "START",
+              "case": "test.test_typing.AnnotatedTests.test_instantiate",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 57,
+              "kind": "PASS",
+              "case": "test.test_typing.AnnotatedTests.test_instantiate",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 58,
+              "kind": "STOP",
+              "case": "test.test_typing.AnnotatedTests.test_instantiate",
+              "subject": "",
+              "detail": ""
+            }
+          ],
+          "child_callbacks": {},
+          "true_skip_events": []
+        },
+        {
+          "ordinal": 19,
+          "id": "test.test_typing.AnnotatedTests.test_instantiate_generic",
+          "parent_callbacks": [
+            {
+              "index": 59,
+              "kind": "START",
+              "case": "test.test_typing.AnnotatedTests.test_instantiate_generic",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 60,
+              "kind": "PASS",
+              "case": "test.test_typing.AnnotatedTests.test_instantiate_generic",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 61,
+              "kind": "STOP",
+              "case": "test.test_typing.AnnotatedTests.test_instantiate_generic",
+              "subject": "",
+              "detail": ""
+            }
+          ],
+          "child_callbacks": {},
+          "true_skip_events": []
+        },
+        {
+          "ordinal": 20,
+          "id": "test.test_typing.AnnotatedTests.test_instantiate_immutable",
+          "parent_callbacks": [
+            {
+              "index": 62,
+              "kind": "START",
+              "case": "test.test_typing.AnnotatedTests.test_instantiate_immutable",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 63,
+              "kind": "PASS",
+              "case": "test.test_typing.AnnotatedTests.test_instantiate_immutable",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 64,
+              "kind": "STOP",
+              "case": "test.test_typing.AnnotatedTests.test_instantiate_immutable",
+              "subject": "",
+              "detail": ""
+            }
+          ],
+          "child_callbacks": {},
+          "true_skip_events": []
+        },
+        {
+          "ordinal": 21,
+          "id": "test.test_typing.AnnotatedTests.test_new",
+          "parent_callbacks": [
+            {
+              "index": 65,
+              "kind": "START",
+              "case": "test.test_typing.AnnotatedTests.test_new",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 66,
+              "kind": "PASS",
+              "case": "test.test_typing.AnnotatedTests.test_new",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 67,
+              "kind": "STOP",
+              "case": "test.test_typing.AnnotatedTests.test_new",
+              "subject": "",
+              "detail": ""
+            }
+          ],
+          "child_callbacks": {},
+          "true_skip_events": []
+        },
+        {
+          "ordinal": 22,
+          "id": "test.test_typing.AnnotatedTests.test_order_in_union",
+          "parent_callbacks": [
+            {
+              "index": 68,
+              "kind": "START",
+              "case": "test.test_typing.AnnotatedTests.test_order_in_union",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 117,
+              "kind": "PASS",
+              "case": "test.test_typing.AnnotatedTests.test_order_in_union",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 118,
+              "kind": "STOP",
+              "case": "test.test_typing.AnnotatedTests.test_order_in_union",
+              "subject": "",
+              "detail": ""
+            }
+          ],
+          "child_callbacks": {
+            "SUBTEST_PASS": 48
+          },
+          "true_skip_events": []
+        },
+        {
+          "ordinal": 23,
+          "id": "test.test_typing.AnnotatedTests.test_pickle",
+          "parent_callbacks": [
+            {
+              "index": 119,
+              "kind": "START",
+              "case": "test.test_typing.AnnotatedTests.test_pickle",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 150,
+              "kind": "PASS",
+              "case": "test.test_typing.AnnotatedTests.test_pickle",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 151,
+              "kind": "STOP",
+              "case": "test.test_typing.AnnotatedTests.test_pickle",
+              "subject": "",
+              "detail": ""
+            }
+          ],
+          "child_callbacks": {
+            "SUBTEST_PASS": 30
+          },
+          "true_skip_events": []
+        },
+        {
+          "ordinal": 24,
+          "id": "test.test_typing.AnnotatedTests.test_repr",
+          "parent_callbacks": [
+            {
+              "index": 152,
+              "kind": "START",
+              "case": "test.test_typing.AnnotatedTests.test_repr",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 153,
+              "kind": "PASS",
+              "case": "test.test_typing.AnnotatedTests.test_repr",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 154,
+              "kind": "STOP",
+              "case": "test.test_typing.AnnotatedTests.test_repr",
+              "subject": "",
+              "detail": ""
+            }
+          ],
+          "child_callbacks": {},
+          "true_skip_events": []
+        },
+        {
+          "ordinal": 25,
+          "id": "test.test_typing.AnnotatedTests.test_special_form_containment",
+          "parent_callbacks": [
+            {
+              "index": 155,
+              "kind": "START",
+              "case": "test.test_typing.AnnotatedTests.test_special_form_containment",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 156,
+              "kind": "PASS",
+              "case": "test.test_typing.AnnotatedTests.test_special_form_containment",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 157,
+              "kind": "STOP",
+              "case": "test.test_typing.AnnotatedTests.test_special_form_containment",
+              "subject": "",
+              "detail": ""
+            }
+          ],
+          "child_callbacks": {},
+          "true_skip_events": []
+        },
+        {
+          "ordinal": 26,
+          "id": "test.test_typing.AnnotatedTests.test_special_forms_nesting",
+          "parent_callbacks": [
+            {
+              "index": 158,
+              "kind": "START",
+              "case": "test.test_typing.AnnotatedTests.test_special_forms_nesting",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 159,
+              "kind": "PASS",
+              "case": "test.test_typing.AnnotatedTests.test_special_forms_nesting",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 160,
+              "kind": "STOP",
+              "case": "test.test_typing.AnnotatedTests.test_special_forms_nesting",
+              "subject": "",
+              "detail": ""
+            }
+          ],
+          "child_callbacks": {},
+          "true_skip_events": []
+        },
+        {
+          "ordinal": 27,
+          "id": "test.test_typing.AnnotatedTests.test_specialize",
+          "parent_callbacks": [
+            {
+              "index": 161,
+              "kind": "START",
+              "case": "test.test_typing.AnnotatedTests.test_specialize",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 162,
+              "kind": "PASS",
+              "case": "test.test_typing.AnnotatedTests.test_specialize",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 163,
+              "kind": "STOP",
+              "case": "test.test_typing.AnnotatedTests.test_specialize",
+              "subject": "",
+              "detail": ""
+            }
+          ],
+          "child_callbacks": {},
+          "true_skip_events": []
+        },
+        {
+          "ordinal": 28,
+          "id": "test.test_typing.AnnotatedTests.test_subst",
+          "parent_callbacks": [
+            {
+              "index": 164,
+              "kind": "START",
+              "case": "test.test_typing.AnnotatedTests.test_subst",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 165,
+              "kind": "PASS",
+              "case": "test.test_typing.AnnotatedTests.test_subst",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 166,
+              "kind": "STOP",
+              "case": "test.test_typing.AnnotatedTests.test_subst",
+              "subject": "",
+              "detail": ""
+            }
+          ],
+          "child_callbacks": {},
+          "true_skip_events": []
+        },
+        {
+          "ordinal": 29,
+          "id": "test.test_typing.AnnotatedTests.test_too_few_type_args",
+          "parent_callbacks": [
+            {
+              "index": 167,
+              "kind": "START",
+              "case": "test.test_typing.AnnotatedTests.test_too_few_type_args",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 168,
+              "kind": "PASS",
+              "case": "test.test_typing.AnnotatedTests.test_too_few_type_args",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 169,
+              "kind": "STOP",
+              "case": "test.test_typing.AnnotatedTests.test_too_few_type_args",
+              "subject": "",
+              "detail": ""
+            }
+          ],
+          "child_callbacks": {},
+          "true_skip_events": []
+        },
+        {
+          "ordinal": 30,
+          "id": "test.test_typing.AnnotatedTests.test_typevar_subst",
+          "parent_callbacks": [
+            {
+              "index": 170,
+              "kind": "START",
+              "case": "test.test_typing.AnnotatedTests.test_typevar_subst",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 171,
+              "kind": "PASS",
+              "case": "test.test_typing.AnnotatedTests.test_typevar_subst",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 172,
+              "kind": "STOP",
+              "case": "test.test_typing.AnnotatedTests.test_typevar_subst",
+              "subject": "",
+              "detail": ""
+            }
+          ],
+          "child_callbacks": {},
+          "true_skip_events": []
+        }
+      ],
+      "stock_identical_paired_in_mode": [
+        [
+          "test.test_typing.AnnotatedTests.test_annotated_cached_with_types",
+          1
+        ],
+        [
+          "test.test_typing.AnnotatedTests.test_annotated_in_other_types",
+          1
+        ],
+        [
+          "test.test_typing.AnnotatedTests.test_annotated_mro",
+          1
+        ],
+        [
+          "test.test_typing.AnnotatedTests.test_attr_passthrough",
+          1
+        ],
+        [
+          "test.test_typing.AnnotatedTests.test_cannot_check_instance",
+          1
+        ],
+        [
+          "test.test_typing.AnnotatedTests.test_cannot_check_subclass",
+          1
+        ],
+        [
+          "test.test_typing.AnnotatedTests.test_cannot_getattr_typevar",
+          1
+        ],
+        [
+          "test.test_typing.AnnotatedTests.test_cannot_instantiate_forward",
+          1
+        ],
+        [
+          "test.test_typing.AnnotatedTests.test_cannot_instantiate_type_var",
+          1
+        ],
+        [
+          "test.test_typing.AnnotatedTests.test_cannot_subclass",
+          1
+        ],
+        [
+          "test.test_typing.AnnotatedTests.test_deduplicate_from_union",
+          1
+        ],
+        [
+          "test.test_typing.AnnotatedTests.test_dir",
+          1
+        ],
+        [
+          "test.test_typing.AnnotatedTests.test_flatten",
+          1
+        ],
+        [
+          "test.test_typing.AnnotatedTests.test_hash_eq",
+          1
+        ],
+        [
+          "test.test_typing.AnnotatedTests.test_instantiate",
+          1
+        ],
+        [
+          "test.test_typing.AnnotatedTests.test_instantiate_generic",
+          1
+        ],
+        [
+          "test.test_typing.AnnotatedTests.test_instantiate_immutable",
+          1
+        ],
+        [
+          "test.test_typing.AnnotatedTests.test_new",
+          1
+        ],
+        [
+          "test.test_typing.AnnotatedTests.test_order_in_union",
+          1
+        ],
+        [
+          "test.test_typing.AnnotatedTests.test_pickle",
+          1
+        ],
+        [
+          "test.test_typing.AnnotatedTests.test_repr",
+          1
+        ],
+        [
+          "test.test_typing.AnnotatedTests.test_special_form_containment",
+          1
+        ],
+        [
+          "test.test_typing.AnnotatedTests.test_special_forms_nesting",
+          1
+        ],
+        [
+          "test.test_typing.AnnotatedTests.test_specialize",
+          1
+        ],
+        [
+          "test.test_typing.AnnotatedTests.test_subst",
+          1
+        ],
+        [
+          "test.test_typing.AnnotatedTests.test_too_few_type_args",
+          1
+        ],
+        [
+          "test.test_typing.AnnotatedTests.test_typevar_subst",
+          1
+        ]
+      ],
+      "new_to_named_181_paired_in_mode": []
+    },
+    "ordinary-O3": {
+      "class_boundary": {
+        "basis": "later_original_class_START",
+        "last_original_STOP_event": 172,
+        "next_class_START": {
+          "index": 173,
+          "kind": "START",
+          "case": "test.test_typing.AnyTests.test_any_instance_type_error",
+          "subject": "",
+          "detail": ""
+        }
+      },
+      "module_boundary": {
+        "status": "open",
+        "next_module_group_START": null
+      },
+      "intervening_fixture_or_other_callbacks": [],
+      "runner_count": [],
+      "process_exit": null,
+      "native_xml_closed": false,
+      "raw_stderr_sha256": "bc196621d97df84c0635b0dd862fe0de65bf5a17e6f538e6104efe4535e4390d",
+      "methods": [
+        {
+          "ordinal": 3,
+          "id": "test.test_typing.AnnotatedTests.test_annotated_cached_with_types",
+          "parent_callbacks": [
+            {
+              "index": 7,
+              "kind": "START",
+              "case": "test.test_typing.AnnotatedTests.test_annotated_cached_with_types",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 8,
+              "kind": "PASS",
+              "case": "test.test_typing.AnnotatedTests.test_annotated_cached_with_types",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 9,
+              "kind": "STOP",
+              "case": "test.test_typing.AnnotatedTests.test_annotated_cached_with_types",
+              "subject": "",
+              "detail": ""
+            }
+          ],
+          "child_callbacks": {},
+          "true_skip_events": []
+        },
+        {
+          "ordinal": 4,
+          "id": "test.test_typing.AnnotatedTests.test_annotated_in_other_types",
+          "parent_callbacks": [
+            {
+              "index": 10,
+              "kind": "START",
+              "case": "test.test_typing.AnnotatedTests.test_annotated_in_other_types",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 11,
+              "kind": "PASS",
+              "case": "test.test_typing.AnnotatedTests.test_annotated_in_other_types",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 12,
+              "kind": "STOP",
+              "case": "test.test_typing.AnnotatedTests.test_annotated_in_other_types",
+              "subject": "",
+              "detail": ""
+            }
+          ],
+          "child_callbacks": {},
+          "true_skip_events": []
+        },
+        {
+          "ordinal": 5,
+          "id": "test.test_typing.AnnotatedTests.test_annotated_mro",
+          "parent_callbacks": [
+            {
+              "index": 13,
+              "kind": "START",
+              "case": "test.test_typing.AnnotatedTests.test_annotated_mro",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 14,
+              "kind": "PASS",
+              "case": "test.test_typing.AnnotatedTests.test_annotated_mro",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 15,
+              "kind": "STOP",
+              "case": "test.test_typing.AnnotatedTests.test_annotated_mro",
+              "subject": "",
+              "detail": ""
+            }
+          ],
+          "child_callbacks": {},
+          "true_skip_events": []
+        },
+        {
+          "ordinal": 6,
+          "id": "test.test_typing.AnnotatedTests.test_attr_passthrough",
+          "parent_callbacks": [
+            {
+              "index": 16,
+              "kind": "START",
+              "case": "test.test_typing.AnnotatedTests.test_attr_passthrough",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 17,
+              "kind": "PASS",
+              "case": "test.test_typing.AnnotatedTests.test_attr_passthrough",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 18,
+              "kind": "STOP",
+              "case": "test.test_typing.AnnotatedTests.test_attr_passthrough",
+              "subject": "",
+              "detail": ""
+            }
+          ],
+          "child_callbacks": {},
+          "true_skip_events": []
+        },
+        {
+          "ordinal": 7,
+          "id": "test.test_typing.AnnotatedTests.test_cannot_check_instance",
+          "parent_callbacks": [
+            {
+              "index": 19,
+              "kind": "START",
+              "case": "test.test_typing.AnnotatedTests.test_cannot_check_instance",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 20,
+              "kind": "PASS",
+              "case": "test.test_typing.AnnotatedTests.test_cannot_check_instance",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 21,
+              "kind": "STOP",
+              "case": "test.test_typing.AnnotatedTests.test_cannot_check_instance",
+              "subject": "",
+              "detail": ""
+            }
+          ],
+          "child_callbacks": {},
+          "true_skip_events": []
+        },
+        {
+          "ordinal": 8,
+          "id": "test.test_typing.AnnotatedTests.test_cannot_check_subclass",
+          "parent_callbacks": [
+            {
+              "index": 22,
+              "kind": "START",
+              "case": "test.test_typing.AnnotatedTests.test_cannot_check_subclass",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 23,
+              "kind": "PASS",
+              "case": "test.test_typing.AnnotatedTests.test_cannot_check_subclass",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 24,
+              "kind": "STOP",
+              "case": "test.test_typing.AnnotatedTests.test_cannot_check_subclass",
+              "subject": "",
+              "detail": ""
+            }
+          ],
+          "child_callbacks": {},
+          "true_skip_events": []
+        },
+        {
+          "ordinal": 9,
+          "id": "test.test_typing.AnnotatedTests.test_cannot_getattr_typevar",
+          "parent_callbacks": [
+            {
+              "index": 25,
+              "kind": "START",
+              "case": "test.test_typing.AnnotatedTests.test_cannot_getattr_typevar",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 26,
+              "kind": "PASS",
+              "case": "test.test_typing.AnnotatedTests.test_cannot_getattr_typevar",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 27,
+              "kind": "STOP",
+              "case": "test.test_typing.AnnotatedTests.test_cannot_getattr_typevar",
+              "subject": "",
+              "detail": ""
+            }
+          ],
+          "child_callbacks": {},
+          "true_skip_events": []
+        },
+        {
+          "ordinal": 10,
+          "id": "test.test_typing.AnnotatedTests.test_cannot_instantiate_forward",
+          "parent_callbacks": [
+            {
+              "index": 28,
+              "kind": "START",
+              "case": "test.test_typing.AnnotatedTests.test_cannot_instantiate_forward",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 29,
+              "kind": "PASS",
+              "case": "test.test_typing.AnnotatedTests.test_cannot_instantiate_forward",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 30,
+              "kind": "STOP",
+              "case": "test.test_typing.AnnotatedTests.test_cannot_instantiate_forward",
+              "subject": "",
+              "detail": ""
+            }
+          ],
+          "child_callbacks": {},
+          "true_skip_events": []
+        },
+        {
+          "ordinal": 11,
+          "id": "test.test_typing.AnnotatedTests.test_cannot_instantiate_type_var",
+          "parent_callbacks": [
+            {
+              "index": 31,
+              "kind": "START",
+              "case": "test.test_typing.AnnotatedTests.test_cannot_instantiate_type_var",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 32,
+              "kind": "PASS",
+              "case": "test.test_typing.AnnotatedTests.test_cannot_instantiate_type_var",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 33,
+              "kind": "STOP",
+              "case": "test.test_typing.AnnotatedTests.test_cannot_instantiate_type_var",
+              "subject": "",
+              "detail": ""
+            }
+          ],
+          "child_callbacks": {},
+          "true_skip_events": []
+        },
+        {
+          "ordinal": 12,
+          "id": "test.test_typing.AnnotatedTests.test_cannot_subclass",
+          "parent_callbacks": [
+            {
+              "index": 34,
+              "kind": "START",
+              "case": "test.test_typing.AnnotatedTests.test_cannot_subclass",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 35,
+              "kind": "PASS",
+              "case": "test.test_typing.AnnotatedTests.test_cannot_subclass",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 36,
+              "kind": "STOP",
+              "case": "test.test_typing.AnnotatedTests.test_cannot_subclass",
+              "subject": "",
+              "detail": ""
+            }
+          ],
+          "child_callbacks": {},
+          "true_skip_events": []
+        },
+        {
+          "ordinal": 13,
+          "id": "test.test_typing.AnnotatedTests.test_deduplicate_from_union",
+          "parent_callbacks": [
+            {
+              "index": 37,
+              "kind": "START",
+              "case": "test.test_typing.AnnotatedTests.test_deduplicate_from_union",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 38,
+              "kind": "PASS",
+              "case": "test.test_typing.AnnotatedTests.test_deduplicate_from_union",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 39,
+              "kind": "STOP",
+              "case": "test.test_typing.AnnotatedTests.test_deduplicate_from_union",
+              "subject": "",
+              "detail": ""
+            }
+          ],
+          "child_callbacks": {},
+          "true_skip_events": []
+        },
+        {
+          "ordinal": 14,
+          "id": "test.test_typing.AnnotatedTests.test_dir",
+          "parent_callbacks": [
+            {
+              "index": 40,
+              "kind": "START",
+              "case": "test.test_typing.AnnotatedTests.test_dir",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 45,
+              "kind": "PASS",
+              "case": "test.test_typing.AnnotatedTests.test_dir",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 46,
+              "kind": "STOP",
+              "case": "test.test_typing.AnnotatedTests.test_dir",
+              "subject": "",
+              "detail": ""
+            }
+          ],
+          "child_callbacks": {
+            "SUBTEST_PASS": 4
+          },
+          "true_skip_events": []
+        },
+        {
+          "ordinal": 15,
+          "id": "test.test_typing.AnnotatedTests.test_flatten",
+          "parent_callbacks": [
+            {
+              "index": 47,
+              "kind": "START",
+              "case": "test.test_typing.AnnotatedTests.test_flatten",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 48,
+              "kind": "PASS",
+              "case": "test.test_typing.AnnotatedTests.test_flatten",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 49,
+              "kind": "STOP",
+              "case": "test.test_typing.AnnotatedTests.test_flatten",
+              "subject": "",
+              "detail": ""
+            }
+          ],
+          "child_callbacks": {},
+          "true_skip_events": []
+        },
+        {
+          "ordinal": 16,
+          "id": "test.test_typing.AnnotatedTests.test_forwardref_partial_evaluation",
+          "parent_callbacks": [
+            {
+              "index": 50,
+              "kind": "START",
+              "case": "test.test_typing.AnnotatedTests.test_forwardref_partial_evaluation",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 51,
+              "kind": "ERROR",
+              "case": "test.test_typing.AnnotatedTests.test_forwardref_partial_evaluation",
+              "subject": "",
+              "detail": [
+                "AttributeError",
+                "module 'annotationlib' has no attribute 'get_annotations'"
+              ]
+            },
+            {
+              "index": 52,
+              "kind": "STOP",
+              "case": "test.test_typing.AnnotatedTests.test_forwardref_partial_evaluation",
+              "subject": "",
+              "detail": ""
+            }
+          ],
+          "child_callbacks": {},
+          "true_skip_events": []
+        },
+        {
+          "ordinal": 17,
+          "id": "test.test_typing.AnnotatedTests.test_hash_eq",
+          "parent_callbacks": [
+            {
+              "index": 53,
+              "kind": "START",
+              "case": "test.test_typing.AnnotatedTests.test_hash_eq",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 54,
+              "kind": "PASS",
+              "case": "test.test_typing.AnnotatedTests.test_hash_eq",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 55,
+              "kind": "STOP",
+              "case": "test.test_typing.AnnotatedTests.test_hash_eq",
+              "subject": "",
+              "detail": ""
+            }
+          ],
+          "child_callbacks": {},
+          "true_skip_events": []
+        },
+        {
+          "ordinal": 18,
+          "id": "test.test_typing.AnnotatedTests.test_instantiate",
+          "parent_callbacks": [
+            {
+              "index": 56,
+              "kind": "START",
+              "case": "test.test_typing.AnnotatedTests.test_instantiate",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 57,
+              "kind": "PASS",
+              "case": "test.test_typing.AnnotatedTests.test_instantiate",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 58,
+              "kind": "STOP",
+              "case": "test.test_typing.AnnotatedTests.test_instantiate",
+              "subject": "",
+              "detail": ""
+            }
+          ],
+          "child_callbacks": {},
+          "true_skip_events": []
+        },
+        {
+          "ordinal": 19,
+          "id": "test.test_typing.AnnotatedTests.test_instantiate_generic",
+          "parent_callbacks": [
+            {
+              "index": 59,
+              "kind": "START",
+              "case": "test.test_typing.AnnotatedTests.test_instantiate_generic",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 60,
+              "kind": "PASS",
+              "case": "test.test_typing.AnnotatedTests.test_instantiate_generic",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 61,
+              "kind": "STOP",
+              "case": "test.test_typing.AnnotatedTests.test_instantiate_generic",
+              "subject": "",
+              "detail": ""
+            }
+          ],
+          "child_callbacks": {},
+          "true_skip_events": []
+        },
+        {
+          "ordinal": 20,
+          "id": "test.test_typing.AnnotatedTests.test_instantiate_immutable",
+          "parent_callbacks": [
+            {
+              "index": 62,
+              "kind": "START",
+              "case": "test.test_typing.AnnotatedTests.test_instantiate_immutable",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 63,
+              "kind": "PASS",
+              "case": "test.test_typing.AnnotatedTests.test_instantiate_immutable",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 64,
+              "kind": "STOP",
+              "case": "test.test_typing.AnnotatedTests.test_instantiate_immutable",
+              "subject": "",
+              "detail": ""
+            }
+          ],
+          "child_callbacks": {},
+          "true_skip_events": []
+        },
+        {
+          "ordinal": 21,
+          "id": "test.test_typing.AnnotatedTests.test_new",
+          "parent_callbacks": [
+            {
+              "index": 65,
+              "kind": "START",
+              "case": "test.test_typing.AnnotatedTests.test_new",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 66,
+              "kind": "PASS",
+              "case": "test.test_typing.AnnotatedTests.test_new",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 67,
+              "kind": "STOP",
+              "case": "test.test_typing.AnnotatedTests.test_new",
+              "subject": "",
+              "detail": ""
+            }
+          ],
+          "child_callbacks": {},
+          "true_skip_events": []
+        },
+        {
+          "ordinal": 22,
+          "id": "test.test_typing.AnnotatedTests.test_order_in_union",
+          "parent_callbacks": [
+            {
+              "index": 68,
+              "kind": "START",
+              "case": "test.test_typing.AnnotatedTests.test_order_in_union",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 117,
+              "kind": "PASS",
+              "case": "test.test_typing.AnnotatedTests.test_order_in_union",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 118,
+              "kind": "STOP",
+              "case": "test.test_typing.AnnotatedTests.test_order_in_union",
+              "subject": "",
+              "detail": ""
+            }
+          ],
+          "child_callbacks": {
+            "SUBTEST_PASS": 48
+          },
+          "true_skip_events": []
+        },
+        {
+          "ordinal": 23,
+          "id": "test.test_typing.AnnotatedTests.test_pickle",
+          "parent_callbacks": [
+            {
+              "index": 119,
+              "kind": "START",
+              "case": "test.test_typing.AnnotatedTests.test_pickle",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 150,
+              "kind": "PASS",
+              "case": "test.test_typing.AnnotatedTests.test_pickle",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 151,
+              "kind": "STOP",
+              "case": "test.test_typing.AnnotatedTests.test_pickle",
+              "subject": "",
+              "detail": ""
+            }
+          ],
+          "child_callbacks": {
+            "SUBTEST_PASS": 30
+          },
+          "true_skip_events": []
+        },
+        {
+          "ordinal": 24,
+          "id": "test.test_typing.AnnotatedTests.test_repr",
+          "parent_callbacks": [
+            {
+              "index": 152,
+              "kind": "START",
+              "case": "test.test_typing.AnnotatedTests.test_repr",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 153,
+              "kind": "PASS",
+              "case": "test.test_typing.AnnotatedTests.test_repr",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 154,
+              "kind": "STOP",
+              "case": "test.test_typing.AnnotatedTests.test_repr",
+              "subject": "",
+              "detail": ""
+            }
+          ],
+          "child_callbacks": {},
+          "true_skip_events": []
+        },
+        {
+          "ordinal": 25,
+          "id": "test.test_typing.AnnotatedTests.test_special_form_containment",
+          "parent_callbacks": [
+            {
+              "index": 155,
+              "kind": "START",
+              "case": "test.test_typing.AnnotatedTests.test_special_form_containment",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 156,
+              "kind": "PASS",
+              "case": "test.test_typing.AnnotatedTests.test_special_form_containment",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 157,
+              "kind": "STOP",
+              "case": "test.test_typing.AnnotatedTests.test_special_form_containment",
+              "subject": "",
+              "detail": ""
+            }
+          ],
+          "child_callbacks": {},
+          "true_skip_events": []
+        },
+        {
+          "ordinal": 26,
+          "id": "test.test_typing.AnnotatedTests.test_special_forms_nesting",
+          "parent_callbacks": [
+            {
+              "index": 158,
+              "kind": "START",
+              "case": "test.test_typing.AnnotatedTests.test_special_forms_nesting",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 159,
+              "kind": "PASS",
+              "case": "test.test_typing.AnnotatedTests.test_special_forms_nesting",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 160,
+              "kind": "STOP",
+              "case": "test.test_typing.AnnotatedTests.test_special_forms_nesting",
+              "subject": "",
+              "detail": ""
+            }
+          ],
+          "child_callbacks": {},
+          "true_skip_events": []
+        },
+        {
+          "ordinal": 27,
+          "id": "test.test_typing.AnnotatedTests.test_specialize",
+          "parent_callbacks": [
+            {
+              "index": 161,
+              "kind": "START",
+              "case": "test.test_typing.AnnotatedTests.test_specialize",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 162,
+              "kind": "PASS",
+              "case": "test.test_typing.AnnotatedTests.test_specialize",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 163,
+              "kind": "STOP",
+              "case": "test.test_typing.AnnotatedTests.test_specialize",
+              "subject": "",
+              "detail": ""
+            }
+          ],
+          "child_callbacks": {},
+          "true_skip_events": []
+        },
+        {
+          "ordinal": 28,
+          "id": "test.test_typing.AnnotatedTests.test_subst",
+          "parent_callbacks": [
+            {
+              "index": 164,
+              "kind": "START",
+              "case": "test.test_typing.AnnotatedTests.test_subst",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 165,
+              "kind": "PASS",
+              "case": "test.test_typing.AnnotatedTests.test_subst",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 166,
+              "kind": "STOP",
+              "case": "test.test_typing.AnnotatedTests.test_subst",
+              "subject": "",
+              "detail": ""
+            }
+          ],
+          "child_callbacks": {},
+          "true_skip_events": []
+        },
+        {
+          "ordinal": 29,
+          "id": "test.test_typing.AnnotatedTests.test_too_few_type_args",
+          "parent_callbacks": [
+            {
+              "index": 167,
+              "kind": "START",
+              "case": "test.test_typing.AnnotatedTests.test_too_few_type_args",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 168,
+              "kind": "PASS",
+              "case": "test.test_typing.AnnotatedTests.test_too_few_type_args",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 169,
+              "kind": "STOP",
+              "case": "test.test_typing.AnnotatedTests.test_too_few_type_args",
+              "subject": "",
+              "detail": ""
+            }
+          ],
+          "child_callbacks": {},
+          "true_skip_events": []
+        },
+        {
+          "ordinal": 30,
+          "id": "test.test_typing.AnnotatedTests.test_typevar_subst",
+          "parent_callbacks": [
+            {
+              "index": 170,
+              "kind": "START",
+              "case": "test.test_typing.AnnotatedTests.test_typevar_subst",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 171,
+              "kind": "PASS",
+              "case": "test.test_typing.AnnotatedTests.test_typevar_subst",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 172,
+              "kind": "STOP",
+              "case": "test.test_typing.AnnotatedTests.test_typevar_subst",
+              "subject": "",
+              "detail": ""
+            }
+          ],
+          "child_callbacks": {},
+          "true_skip_events": []
+        }
+      ],
+      "stock_identical_paired_in_mode": [
+        [
+          "test.test_typing.AnnotatedTests.test_annotated_cached_with_types",
+          1
+        ],
+        [
+          "test.test_typing.AnnotatedTests.test_annotated_in_other_types",
+          1
+        ],
+        [
+          "test.test_typing.AnnotatedTests.test_annotated_mro",
+          1
+        ],
+        [
+          "test.test_typing.AnnotatedTests.test_attr_passthrough",
+          1
+        ],
+        [
+          "test.test_typing.AnnotatedTests.test_cannot_check_instance",
+          1
+        ],
+        [
+          "test.test_typing.AnnotatedTests.test_cannot_check_subclass",
+          1
+        ],
+        [
+          "test.test_typing.AnnotatedTests.test_cannot_getattr_typevar",
+          1
+        ],
+        [
+          "test.test_typing.AnnotatedTests.test_cannot_instantiate_forward",
+          1
+        ],
+        [
+          "test.test_typing.AnnotatedTests.test_cannot_instantiate_type_var",
+          1
+        ],
+        [
+          "test.test_typing.AnnotatedTests.test_cannot_subclass",
+          1
+        ],
+        [
+          "test.test_typing.AnnotatedTests.test_deduplicate_from_union",
+          1
+        ],
+        [
+          "test.test_typing.AnnotatedTests.test_dir",
+          1
+        ],
+        [
+          "test.test_typing.AnnotatedTests.test_flatten",
+          1
+        ],
+        [
+          "test.test_typing.AnnotatedTests.test_hash_eq",
+          1
+        ],
+        [
+          "test.test_typing.AnnotatedTests.test_instantiate",
+          1
+        ],
+        [
+          "test.test_typing.AnnotatedTests.test_instantiate_generic",
+          1
+        ],
+        [
+          "test.test_typing.AnnotatedTests.test_instantiate_immutable",
+          1
+        ],
+        [
+          "test.test_typing.AnnotatedTests.test_new",
+          1
+        ],
+        [
+          "test.test_typing.AnnotatedTests.test_order_in_union",
+          1
+        ],
+        [
+          "test.test_typing.AnnotatedTests.test_pickle",
+          1
+        ],
+        [
+          "test.test_typing.AnnotatedTests.test_repr",
+          1
+        ],
+        [
+          "test.test_typing.AnnotatedTests.test_special_form_containment",
+          1
+        ],
+        [
+          "test.test_typing.AnnotatedTests.test_special_forms_nesting",
+          1
+        ],
+        [
+          "test.test_typing.AnnotatedTests.test_specialize",
+          1
+        ],
+        [
+          "test.test_typing.AnnotatedTests.test_subst",
+          1
+        ],
+        [
+          "test.test_typing.AnnotatedTests.test_too_few_type_args",
+          1
+        ],
+        [
+          "test.test_typing.AnnotatedTests.test_typevar_subst",
+          1
+        ]
+      ],
+      "new_to_named_181_paired_in_mode": []
+    },
+    "boxed-O0": {
+      "class_boundary": {
+        "basis": "later_original_class_START",
+        "last_original_STOP_event": 172,
+        "next_class_START": {
+          "index": 173,
+          "kind": "START",
+          "case": "test.test_typing.AnyTests.test_any_instance_type_error",
+          "subject": "",
+          "detail": ""
+        }
+      },
+      "module_boundary": {
+        "status": "open",
+        "next_module_group_START": null
+      },
+      "intervening_fixture_or_other_callbacks": [],
+      "runner_count": [],
+      "process_exit": null,
+      "native_xml_closed": false,
+      "raw_stderr_sha256": "81c5182b78ffd19be37df6e8f21ef177c573fc3d0ba33b0f7c7782d40da04393",
+      "methods": [
+        {
+          "ordinal": 3,
+          "id": "test.test_typing.AnnotatedTests.test_annotated_cached_with_types",
+          "parent_callbacks": [
+            {
+              "index": 7,
+              "kind": "START",
+              "case": "test.test_typing.AnnotatedTests.test_annotated_cached_with_types",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 8,
+              "kind": "PASS",
+              "case": "test.test_typing.AnnotatedTests.test_annotated_cached_with_types",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 9,
+              "kind": "STOP",
+              "case": "test.test_typing.AnnotatedTests.test_annotated_cached_with_types",
+              "subject": "",
+              "detail": ""
+            }
+          ],
+          "child_callbacks": {},
+          "true_skip_events": []
+        },
+        {
+          "ordinal": 4,
+          "id": "test.test_typing.AnnotatedTests.test_annotated_in_other_types",
+          "parent_callbacks": [
+            {
+              "index": 10,
+              "kind": "START",
+              "case": "test.test_typing.AnnotatedTests.test_annotated_in_other_types",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 11,
+              "kind": "PASS",
+              "case": "test.test_typing.AnnotatedTests.test_annotated_in_other_types",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 12,
+              "kind": "STOP",
+              "case": "test.test_typing.AnnotatedTests.test_annotated_in_other_types",
+              "subject": "",
+              "detail": ""
+            }
+          ],
+          "child_callbacks": {},
+          "true_skip_events": []
+        },
+        {
+          "ordinal": 5,
+          "id": "test.test_typing.AnnotatedTests.test_annotated_mro",
+          "parent_callbacks": [
+            {
+              "index": 13,
+              "kind": "START",
+              "case": "test.test_typing.AnnotatedTests.test_annotated_mro",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 14,
+              "kind": "PASS",
+              "case": "test.test_typing.AnnotatedTests.test_annotated_mro",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 15,
+              "kind": "STOP",
+              "case": "test.test_typing.AnnotatedTests.test_annotated_mro",
+              "subject": "",
+              "detail": ""
+            }
+          ],
+          "child_callbacks": {},
+          "true_skip_events": []
+        },
+        {
+          "ordinal": 6,
+          "id": "test.test_typing.AnnotatedTests.test_attr_passthrough",
+          "parent_callbacks": [
+            {
+              "index": 16,
+              "kind": "START",
+              "case": "test.test_typing.AnnotatedTests.test_attr_passthrough",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 17,
+              "kind": "PASS",
+              "case": "test.test_typing.AnnotatedTests.test_attr_passthrough",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 18,
+              "kind": "STOP",
+              "case": "test.test_typing.AnnotatedTests.test_attr_passthrough",
+              "subject": "",
+              "detail": ""
+            }
+          ],
+          "child_callbacks": {},
+          "true_skip_events": []
+        },
+        {
+          "ordinal": 7,
+          "id": "test.test_typing.AnnotatedTests.test_cannot_check_instance",
+          "parent_callbacks": [
+            {
+              "index": 19,
+              "kind": "START",
+              "case": "test.test_typing.AnnotatedTests.test_cannot_check_instance",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 20,
+              "kind": "PASS",
+              "case": "test.test_typing.AnnotatedTests.test_cannot_check_instance",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 21,
+              "kind": "STOP",
+              "case": "test.test_typing.AnnotatedTests.test_cannot_check_instance",
+              "subject": "",
+              "detail": ""
+            }
+          ],
+          "child_callbacks": {},
+          "true_skip_events": []
+        },
+        {
+          "ordinal": 8,
+          "id": "test.test_typing.AnnotatedTests.test_cannot_check_subclass",
+          "parent_callbacks": [
+            {
+              "index": 22,
+              "kind": "START",
+              "case": "test.test_typing.AnnotatedTests.test_cannot_check_subclass",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 23,
+              "kind": "PASS",
+              "case": "test.test_typing.AnnotatedTests.test_cannot_check_subclass",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 24,
+              "kind": "STOP",
+              "case": "test.test_typing.AnnotatedTests.test_cannot_check_subclass",
+              "subject": "",
+              "detail": ""
+            }
+          ],
+          "child_callbacks": {},
+          "true_skip_events": []
+        },
+        {
+          "ordinal": 9,
+          "id": "test.test_typing.AnnotatedTests.test_cannot_getattr_typevar",
+          "parent_callbacks": [
+            {
+              "index": 25,
+              "kind": "START",
+              "case": "test.test_typing.AnnotatedTests.test_cannot_getattr_typevar",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 26,
+              "kind": "PASS",
+              "case": "test.test_typing.AnnotatedTests.test_cannot_getattr_typevar",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 27,
+              "kind": "STOP",
+              "case": "test.test_typing.AnnotatedTests.test_cannot_getattr_typevar",
+              "subject": "",
+              "detail": ""
+            }
+          ],
+          "child_callbacks": {},
+          "true_skip_events": []
+        },
+        {
+          "ordinal": 10,
+          "id": "test.test_typing.AnnotatedTests.test_cannot_instantiate_forward",
+          "parent_callbacks": [
+            {
+              "index": 28,
+              "kind": "START",
+              "case": "test.test_typing.AnnotatedTests.test_cannot_instantiate_forward",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 29,
+              "kind": "PASS",
+              "case": "test.test_typing.AnnotatedTests.test_cannot_instantiate_forward",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 30,
+              "kind": "STOP",
+              "case": "test.test_typing.AnnotatedTests.test_cannot_instantiate_forward",
+              "subject": "",
+              "detail": ""
+            }
+          ],
+          "child_callbacks": {},
+          "true_skip_events": []
+        },
+        {
+          "ordinal": 11,
+          "id": "test.test_typing.AnnotatedTests.test_cannot_instantiate_type_var",
+          "parent_callbacks": [
+            {
+              "index": 31,
+              "kind": "START",
+              "case": "test.test_typing.AnnotatedTests.test_cannot_instantiate_type_var",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 32,
+              "kind": "PASS",
+              "case": "test.test_typing.AnnotatedTests.test_cannot_instantiate_type_var",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 33,
+              "kind": "STOP",
+              "case": "test.test_typing.AnnotatedTests.test_cannot_instantiate_type_var",
+              "subject": "",
+              "detail": ""
+            }
+          ],
+          "child_callbacks": {},
+          "true_skip_events": []
+        },
+        {
+          "ordinal": 12,
+          "id": "test.test_typing.AnnotatedTests.test_cannot_subclass",
+          "parent_callbacks": [
+            {
+              "index": 34,
+              "kind": "START",
+              "case": "test.test_typing.AnnotatedTests.test_cannot_subclass",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 35,
+              "kind": "PASS",
+              "case": "test.test_typing.AnnotatedTests.test_cannot_subclass",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 36,
+              "kind": "STOP",
+              "case": "test.test_typing.AnnotatedTests.test_cannot_subclass",
+              "subject": "",
+              "detail": ""
+            }
+          ],
+          "child_callbacks": {},
+          "true_skip_events": []
+        },
+        {
+          "ordinal": 13,
+          "id": "test.test_typing.AnnotatedTests.test_deduplicate_from_union",
+          "parent_callbacks": [
+            {
+              "index": 37,
+              "kind": "START",
+              "case": "test.test_typing.AnnotatedTests.test_deduplicate_from_union",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 38,
+              "kind": "PASS",
+              "case": "test.test_typing.AnnotatedTests.test_deduplicate_from_union",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 39,
+              "kind": "STOP",
+              "case": "test.test_typing.AnnotatedTests.test_deduplicate_from_union",
+              "subject": "",
+              "detail": ""
+            }
+          ],
+          "child_callbacks": {},
+          "true_skip_events": []
+        },
+        {
+          "ordinal": 14,
+          "id": "test.test_typing.AnnotatedTests.test_dir",
+          "parent_callbacks": [
+            {
+              "index": 40,
+              "kind": "START",
+              "case": "test.test_typing.AnnotatedTests.test_dir",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 45,
+              "kind": "PASS",
+              "case": "test.test_typing.AnnotatedTests.test_dir",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 46,
+              "kind": "STOP",
+              "case": "test.test_typing.AnnotatedTests.test_dir",
+              "subject": "",
+              "detail": ""
+            }
+          ],
+          "child_callbacks": {
+            "SUBTEST_PASS": 4
+          },
+          "true_skip_events": []
+        },
+        {
+          "ordinal": 15,
+          "id": "test.test_typing.AnnotatedTests.test_flatten",
+          "parent_callbacks": [
+            {
+              "index": 47,
+              "kind": "START",
+              "case": "test.test_typing.AnnotatedTests.test_flatten",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 48,
+              "kind": "PASS",
+              "case": "test.test_typing.AnnotatedTests.test_flatten",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 49,
+              "kind": "STOP",
+              "case": "test.test_typing.AnnotatedTests.test_flatten",
+              "subject": "",
+              "detail": ""
+            }
+          ],
+          "child_callbacks": {},
+          "true_skip_events": []
+        },
+        {
+          "ordinal": 16,
+          "id": "test.test_typing.AnnotatedTests.test_forwardref_partial_evaluation",
+          "parent_callbacks": [
+            {
+              "index": 50,
+              "kind": "START",
+              "case": "test.test_typing.AnnotatedTests.test_forwardref_partial_evaluation",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 51,
+              "kind": "ERROR",
+              "case": "test.test_typing.AnnotatedTests.test_forwardref_partial_evaluation",
+              "subject": "",
+              "detail": [
+                "AttributeError",
+                "module 'annotationlib' has no attribute 'get_annotations'"
+              ]
+            },
+            {
+              "index": 52,
+              "kind": "STOP",
+              "case": "test.test_typing.AnnotatedTests.test_forwardref_partial_evaluation",
+              "subject": "",
+              "detail": ""
+            }
+          ],
+          "child_callbacks": {},
+          "true_skip_events": []
+        },
+        {
+          "ordinal": 17,
+          "id": "test.test_typing.AnnotatedTests.test_hash_eq",
+          "parent_callbacks": [
+            {
+              "index": 53,
+              "kind": "START",
+              "case": "test.test_typing.AnnotatedTests.test_hash_eq",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 54,
+              "kind": "PASS",
+              "case": "test.test_typing.AnnotatedTests.test_hash_eq",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 55,
+              "kind": "STOP",
+              "case": "test.test_typing.AnnotatedTests.test_hash_eq",
+              "subject": "",
+              "detail": ""
+            }
+          ],
+          "child_callbacks": {},
+          "true_skip_events": []
+        },
+        {
+          "ordinal": 18,
+          "id": "test.test_typing.AnnotatedTests.test_instantiate",
+          "parent_callbacks": [
+            {
+              "index": 56,
+              "kind": "START",
+              "case": "test.test_typing.AnnotatedTests.test_instantiate",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 57,
+              "kind": "PASS",
+              "case": "test.test_typing.AnnotatedTests.test_instantiate",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 58,
+              "kind": "STOP",
+              "case": "test.test_typing.AnnotatedTests.test_instantiate",
+              "subject": "",
+              "detail": ""
+            }
+          ],
+          "child_callbacks": {},
+          "true_skip_events": []
+        },
+        {
+          "ordinal": 19,
+          "id": "test.test_typing.AnnotatedTests.test_instantiate_generic",
+          "parent_callbacks": [
+            {
+              "index": 59,
+              "kind": "START",
+              "case": "test.test_typing.AnnotatedTests.test_instantiate_generic",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 60,
+              "kind": "PASS",
+              "case": "test.test_typing.AnnotatedTests.test_instantiate_generic",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 61,
+              "kind": "STOP",
+              "case": "test.test_typing.AnnotatedTests.test_instantiate_generic",
+              "subject": "",
+              "detail": ""
+            }
+          ],
+          "child_callbacks": {},
+          "true_skip_events": []
+        },
+        {
+          "ordinal": 20,
+          "id": "test.test_typing.AnnotatedTests.test_instantiate_immutable",
+          "parent_callbacks": [
+            {
+              "index": 62,
+              "kind": "START",
+              "case": "test.test_typing.AnnotatedTests.test_instantiate_immutable",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 63,
+              "kind": "PASS",
+              "case": "test.test_typing.AnnotatedTests.test_instantiate_immutable",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 64,
+              "kind": "STOP",
+              "case": "test.test_typing.AnnotatedTests.test_instantiate_immutable",
+              "subject": "",
+              "detail": ""
+            }
+          ],
+          "child_callbacks": {},
+          "true_skip_events": []
+        },
+        {
+          "ordinal": 21,
+          "id": "test.test_typing.AnnotatedTests.test_new",
+          "parent_callbacks": [
+            {
+              "index": 65,
+              "kind": "START",
+              "case": "test.test_typing.AnnotatedTests.test_new",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 66,
+              "kind": "PASS",
+              "case": "test.test_typing.AnnotatedTests.test_new",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 67,
+              "kind": "STOP",
+              "case": "test.test_typing.AnnotatedTests.test_new",
+              "subject": "",
+              "detail": ""
+            }
+          ],
+          "child_callbacks": {},
+          "true_skip_events": []
+        },
+        {
+          "ordinal": 22,
+          "id": "test.test_typing.AnnotatedTests.test_order_in_union",
+          "parent_callbacks": [
+            {
+              "index": 68,
+              "kind": "START",
+              "case": "test.test_typing.AnnotatedTests.test_order_in_union",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 117,
+              "kind": "PASS",
+              "case": "test.test_typing.AnnotatedTests.test_order_in_union",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 118,
+              "kind": "STOP",
+              "case": "test.test_typing.AnnotatedTests.test_order_in_union",
+              "subject": "",
+              "detail": ""
+            }
+          ],
+          "child_callbacks": {
+            "SUBTEST_PASS": 48
+          },
+          "true_skip_events": []
+        },
+        {
+          "ordinal": 23,
+          "id": "test.test_typing.AnnotatedTests.test_pickle",
+          "parent_callbacks": [
+            {
+              "index": 119,
+              "kind": "START",
+              "case": "test.test_typing.AnnotatedTests.test_pickle",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 150,
+              "kind": "PASS",
+              "case": "test.test_typing.AnnotatedTests.test_pickle",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 151,
+              "kind": "STOP",
+              "case": "test.test_typing.AnnotatedTests.test_pickle",
+              "subject": "",
+              "detail": ""
+            }
+          ],
+          "child_callbacks": {
+            "SUBTEST_PASS": 30
+          },
+          "true_skip_events": []
+        },
+        {
+          "ordinal": 24,
+          "id": "test.test_typing.AnnotatedTests.test_repr",
+          "parent_callbacks": [
+            {
+              "index": 152,
+              "kind": "START",
+              "case": "test.test_typing.AnnotatedTests.test_repr",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 153,
+              "kind": "PASS",
+              "case": "test.test_typing.AnnotatedTests.test_repr",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 154,
+              "kind": "STOP",
+              "case": "test.test_typing.AnnotatedTests.test_repr",
+              "subject": "",
+              "detail": ""
+            }
+          ],
+          "child_callbacks": {},
+          "true_skip_events": []
+        },
+        {
+          "ordinal": 25,
+          "id": "test.test_typing.AnnotatedTests.test_special_form_containment",
+          "parent_callbacks": [
+            {
+              "index": 155,
+              "kind": "START",
+              "case": "test.test_typing.AnnotatedTests.test_special_form_containment",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 156,
+              "kind": "PASS",
+              "case": "test.test_typing.AnnotatedTests.test_special_form_containment",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 157,
+              "kind": "STOP",
+              "case": "test.test_typing.AnnotatedTests.test_special_form_containment",
+              "subject": "",
+              "detail": ""
+            }
+          ],
+          "child_callbacks": {},
+          "true_skip_events": []
+        },
+        {
+          "ordinal": 26,
+          "id": "test.test_typing.AnnotatedTests.test_special_forms_nesting",
+          "parent_callbacks": [
+            {
+              "index": 158,
+              "kind": "START",
+              "case": "test.test_typing.AnnotatedTests.test_special_forms_nesting",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 159,
+              "kind": "PASS",
+              "case": "test.test_typing.AnnotatedTests.test_special_forms_nesting",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 160,
+              "kind": "STOP",
+              "case": "test.test_typing.AnnotatedTests.test_special_forms_nesting",
+              "subject": "",
+              "detail": ""
+            }
+          ],
+          "child_callbacks": {},
+          "true_skip_events": []
+        },
+        {
+          "ordinal": 27,
+          "id": "test.test_typing.AnnotatedTests.test_specialize",
+          "parent_callbacks": [
+            {
+              "index": 161,
+              "kind": "START",
+              "case": "test.test_typing.AnnotatedTests.test_specialize",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 162,
+              "kind": "PASS",
+              "case": "test.test_typing.AnnotatedTests.test_specialize",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 163,
+              "kind": "STOP",
+              "case": "test.test_typing.AnnotatedTests.test_specialize",
+              "subject": "",
+              "detail": ""
+            }
+          ],
+          "child_callbacks": {},
+          "true_skip_events": []
+        },
+        {
+          "ordinal": 28,
+          "id": "test.test_typing.AnnotatedTests.test_subst",
+          "parent_callbacks": [
+            {
+              "index": 164,
+              "kind": "START",
+              "case": "test.test_typing.AnnotatedTests.test_subst",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 165,
+              "kind": "PASS",
+              "case": "test.test_typing.AnnotatedTests.test_subst",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 166,
+              "kind": "STOP",
+              "case": "test.test_typing.AnnotatedTests.test_subst",
+              "subject": "",
+              "detail": ""
+            }
+          ],
+          "child_callbacks": {},
+          "true_skip_events": []
+        },
+        {
+          "ordinal": 29,
+          "id": "test.test_typing.AnnotatedTests.test_too_few_type_args",
+          "parent_callbacks": [
+            {
+              "index": 167,
+              "kind": "START",
+              "case": "test.test_typing.AnnotatedTests.test_too_few_type_args",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 168,
+              "kind": "PASS",
+              "case": "test.test_typing.AnnotatedTests.test_too_few_type_args",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 169,
+              "kind": "STOP",
+              "case": "test.test_typing.AnnotatedTests.test_too_few_type_args",
+              "subject": "",
+              "detail": ""
+            }
+          ],
+          "child_callbacks": {},
+          "true_skip_events": []
+        },
+        {
+          "ordinal": 30,
+          "id": "test.test_typing.AnnotatedTests.test_typevar_subst",
+          "parent_callbacks": [
+            {
+              "index": 170,
+              "kind": "START",
+              "case": "test.test_typing.AnnotatedTests.test_typevar_subst",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 171,
+              "kind": "PASS",
+              "case": "test.test_typing.AnnotatedTests.test_typevar_subst",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 172,
+              "kind": "STOP",
+              "case": "test.test_typing.AnnotatedTests.test_typevar_subst",
+              "subject": "",
+              "detail": ""
+            }
+          ],
+          "child_callbacks": {},
+          "true_skip_events": []
+        }
+      ],
+      "stock_identical_paired_in_mode": [
+        [
+          "test.test_typing.AnnotatedTests.test_annotated_cached_with_types",
+          1
+        ],
+        [
+          "test.test_typing.AnnotatedTests.test_annotated_in_other_types",
+          1
+        ],
+        [
+          "test.test_typing.AnnotatedTests.test_annotated_mro",
+          1
+        ],
+        [
+          "test.test_typing.AnnotatedTests.test_attr_passthrough",
+          1
+        ],
+        [
+          "test.test_typing.AnnotatedTests.test_cannot_check_instance",
+          1
+        ],
+        [
+          "test.test_typing.AnnotatedTests.test_cannot_check_subclass",
+          1
+        ],
+        [
+          "test.test_typing.AnnotatedTests.test_cannot_getattr_typevar",
+          1
+        ],
+        [
+          "test.test_typing.AnnotatedTests.test_cannot_instantiate_forward",
+          1
+        ],
+        [
+          "test.test_typing.AnnotatedTests.test_cannot_instantiate_type_var",
+          1
+        ],
+        [
+          "test.test_typing.AnnotatedTests.test_cannot_subclass",
+          1
+        ],
+        [
+          "test.test_typing.AnnotatedTests.test_deduplicate_from_union",
+          1
+        ],
+        [
+          "test.test_typing.AnnotatedTests.test_dir",
+          1
+        ],
+        [
+          "test.test_typing.AnnotatedTests.test_flatten",
+          1
+        ],
+        [
+          "test.test_typing.AnnotatedTests.test_hash_eq",
+          1
+        ],
+        [
+          "test.test_typing.AnnotatedTests.test_instantiate",
+          1
+        ],
+        [
+          "test.test_typing.AnnotatedTests.test_instantiate_generic",
+          1
+        ],
+        [
+          "test.test_typing.AnnotatedTests.test_instantiate_immutable",
+          1
+        ],
+        [
+          "test.test_typing.AnnotatedTests.test_new",
+          1
+        ],
+        [
+          "test.test_typing.AnnotatedTests.test_order_in_union",
+          1
+        ],
+        [
+          "test.test_typing.AnnotatedTests.test_pickle",
+          1
+        ],
+        [
+          "test.test_typing.AnnotatedTests.test_repr",
+          1
+        ],
+        [
+          "test.test_typing.AnnotatedTests.test_special_form_containment",
+          1
+        ],
+        [
+          "test.test_typing.AnnotatedTests.test_special_forms_nesting",
+          1
+        ],
+        [
+          "test.test_typing.AnnotatedTests.test_specialize",
+          1
+        ],
+        [
+          "test.test_typing.AnnotatedTests.test_subst",
+          1
+        ],
+        [
+          "test.test_typing.AnnotatedTests.test_too_few_type_args",
+          1
+        ],
+        [
+          "test.test_typing.AnnotatedTests.test_typevar_subst",
+          1
+        ]
+      ],
+      "new_to_named_181_paired_in_mode": []
+    },
+    "boxed-O3": {
+      "class_boundary": {
+        "basis": "later_original_class_START",
+        "last_original_STOP_event": 172,
+        "next_class_START": {
+          "index": 173,
+          "kind": "START",
+          "case": "test.test_typing.AnyTests.test_any_instance_type_error",
+          "subject": "",
+          "detail": ""
+        }
+      },
+      "module_boundary": {
+        "status": "open",
+        "next_module_group_START": null
+      },
+      "intervening_fixture_or_other_callbacks": [],
+      "runner_count": [],
+      "process_exit": null,
+      "native_xml_closed": false,
+      "raw_stderr_sha256": "9018c21092fcd5f2cad4f83d06e774ed107df51b663be7acd72816a2879f8bb8",
+      "methods": [
+        {
+          "ordinal": 3,
+          "id": "test.test_typing.AnnotatedTests.test_annotated_cached_with_types",
+          "parent_callbacks": [
+            {
+              "index": 7,
+              "kind": "START",
+              "case": "test.test_typing.AnnotatedTests.test_annotated_cached_with_types",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 8,
+              "kind": "PASS",
+              "case": "test.test_typing.AnnotatedTests.test_annotated_cached_with_types",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 9,
+              "kind": "STOP",
+              "case": "test.test_typing.AnnotatedTests.test_annotated_cached_with_types",
+              "subject": "",
+              "detail": ""
+            }
+          ],
+          "child_callbacks": {},
+          "true_skip_events": []
+        },
+        {
+          "ordinal": 4,
+          "id": "test.test_typing.AnnotatedTests.test_annotated_in_other_types",
+          "parent_callbacks": [
+            {
+              "index": 10,
+              "kind": "START",
+              "case": "test.test_typing.AnnotatedTests.test_annotated_in_other_types",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 11,
+              "kind": "PASS",
+              "case": "test.test_typing.AnnotatedTests.test_annotated_in_other_types",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 12,
+              "kind": "STOP",
+              "case": "test.test_typing.AnnotatedTests.test_annotated_in_other_types",
+              "subject": "",
+              "detail": ""
+            }
+          ],
+          "child_callbacks": {},
+          "true_skip_events": []
+        },
+        {
+          "ordinal": 5,
+          "id": "test.test_typing.AnnotatedTests.test_annotated_mro",
+          "parent_callbacks": [
+            {
+              "index": 13,
+              "kind": "START",
+              "case": "test.test_typing.AnnotatedTests.test_annotated_mro",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 14,
+              "kind": "PASS",
+              "case": "test.test_typing.AnnotatedTests.test_annotated_mro",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 15,
+              "kind": "STOP",
+              "case": "test.test_typing.AnnotatedTests.test_annotated_mro",
+              "subject": "",
+              "detail": ""
+            }
+          ],
+          "child_callbacks": {},
+          "true_skip_events": []
+        },
+        {
+          "ordinal": 6,
+          "id": "test.test_typing.AnnotatedTests.test_attr_passthrough",
+          "parent_callbacks": [
+            {
+              "index": 16,
+              "kind": "START",
+              "case": "test.test_typing.AnnotatedTests.test_attr_passthrough",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 17,
+              "kind": "PASS",
+              "case": "test.test_typing.AnnotatedTests.test_attr_passthrough",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 18,
+              "kind": "STOP",
+              "case": "test.test_typing.AnnotatedTests.test_attr_passthrough",
+              "subject": "",
+              "detail": ""
+            }
+          ],
+          "child_callbacks": {},
+          "true_skip_events": []
+        },
+        {
+          "ordinal": 7,
+          "id": "test.test_typing.AnnotatedTests.test_cannot_check_instance",
+          "parent_callbacks": [
+            {
+              "index": 19,
+              "kind": "START",
+              "case": "test.test_typing.AnnotatedTests.test_cannot_check_instance",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 20,
+              "kind": "PASS",
+              "case": "test.test_typing.AnnotatedTests.test_cannot_check_instance",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 21,
+              "kind": "STOP",
+              "case": "test.test_typing.AnnotatedTests.test_cannot_check_instance",
+              "subject": "",
+              "detail": ""
+            }
+          ],
+          "child_callbacks": {},
+          "true_skip_events": []
+        },
+        {
+          "ordinal": 8,
+          "id": "test.test_typing.AnnotatedTests.test_cannot_check_subclass",
+          "parent_callbacks": [
+            {
+              "index": 22,
+              "kind": "START",
+              "case": "test.test_typing.AnnotatedTests.test_cannot_check_subclass",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 23,
+              "kind": "PASS",
+              "case": "test.test_typing.AnnotatedTests.test_cannot_check_subclass",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 24,
+              "kind": "STOP",
+              "case": "test.test_typing.AnnotatedTests.test_cannot_check_subclass",
+              "subject": "",
+              "detail": ""
+            }
+          ],
+          "child_callbacks": {},
+          "true_skip_events": []
+        },
+        {
+          "ordinal": 9,
+          "id": "test.test_typing.AnnotatedTests.test_cannot_getattr_typevar",
+          "parent_callbacks": [
+            {
+              "index": 25,
+              "kind": "START",
+              "case": "test.test_typing.AnnotatedTests.test_cannot_getattr_typevar",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 26,
+              "kind": "PASS",
+              "case": "test.test_typing.AnnotatedTests.test_cannot_getattr_typevar",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 27,
+              "kind": "STOP",
+              "case": "test.test_typing.AnnotatedTests.test_cannot_getattr_typevar",
+              "subject": "",
+              "detail": ""
+            }
+          ],
+          "child_callbacks": {},
+          "true_skip_events": []
+        },
+        {
+          "ordinal": 10,
+          "id": "test.test_typing.AnnotatedTests.test_cannot_instantiate_forward",
+          "parent_callbacks": [
+            {
+              "index": 28,
+              "kind": "START",
+              "case": "test.test_typing.AnnotatedTests.test_cannot_instantiate_forward",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 29,
+              "kind": "PASS",
+              "case": "test.test_typing.AnnotatedTests.test_cannot_instantiate_forward",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 30,
+              "kind": "STOP",
+              "case": "test.test_typing.AnnotatedTests.test_cannot_instantiate_forward",
+              "subject": "",
+              "detail": ""
+            }
+          ],
+          "child_callbacks": {},
+          "true_skip_events": []
+        },
+        {
+          "ordinal": 11,
+          "id": "test.test_typing.AnnotatedTests.test_cannot_instantiate_type_var",
+          "parent_callbacks": [
+            {
+              "index": 31,
+              "kind": "START",
+              "case": "test.test_typing.AnnotatedTests.test_cannot_instantiate_type_var",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 32,
+              "kind": "PASS",
+              "case": "test.test_typing.AnnotatedTests.test_cannot_instantiate_type_var",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 33,
+              "kind": "STOP",
+              "case": "test.test_typing.AnnotatedTests.test_cannot_instantiate_type_var",
+              "subject": "",
+              "detail": ""
+            }
+          ],
+          "child_callbacks": {},
+          "true_skip_events": []
+        },
+        {
+          "ordinal": 12,
+          "id": "test.test_typing.AnnotatedTests.test_cannot_subclass",
+          "parent_callbacks": [
+            {
+              "index": 34,
+              "kind": "START",
+              "case": "test.test_typing.AnnotatedTests.test_cannot_subclass",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 35,
+              "kind": "PASS",
+              "case": "test.test_typing.AnnotatedTests.test_cannot_subclass",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 36,
+              "kind": "STOP",
+              "case": "test.test_typing.AnnotatedTests.test_cannot_subclass",
+              "subject": "",
+              "detail": ""
+            }
+          ],
+          "child_callbacks": {},
+          "true_skip_events": []
+        },
+        {
+          "ordinal": 13,
+          "id": "test.test_typing.AnnotatedTests.test_deduplicate_from_union",
+          "parent_callbacks": [
+            {
+              "index": 37,
+              "kind": "START",
+              "case": "test.test_typing.AnnotatedTests.test_deduplicate_from_union",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 38,
+              "kind": "PASS",
+              "case": "test.test_typing.AnnotatedTests.test_deduplicate_from_union",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 39,
+              "kind": "STOP",
+              "case": "test.test_typing.AnnotatedTests.test_deduplicate_from_union",
+              "subject": "",
+              "detail": ""
+            }
+          ],
+          "child_callbacks": {},
+          "true_skip_events": []
+        },
+        {
+          "ordinal": 14,
+          "id": "test.test_typing.AnnotatedTests.test_dir",
+          "parent_callbacks": [
+            {
+              "index": 40,
+              "kind": "START",
+              "case": "test.test_typing.AnnotatedTests.test_dir",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 45,
+              "kind": "PASS",
+              "case": "test.test_typing.AnnotatedTests.test_dir",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 46,
+              "kind": "STOP",
+              "case": "test.test_typing.AnnotatedTests.test_dir",
+              "subject": "",
+              "detail": ""
+            }
+          ],
+          "child_callbacks": {
+            "SUBTEST_PASS": 4
+          },
+          "true_skip_events": []
+        },
+        {
+          "ordinal": 15,
+          "id": "test.test_typing.AnnotatedTests.test_flatten",
+          "parent_callbacks": [
+            {
+              "index": 47,
+              "kind": "START",
+              "case": "test.test_typing.AnnotatedTests.test_flatten",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 48,
+              "kind": "PASS",
+              "case": "test.test_typing.AnnotatedTests.test_flatten",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 49,
+              "kind": "STOP",
+              "case": "test.test_typing.AnnotatedTests.test_flatten",
+              "subject": "",
+              "detail": ""
+            }
+          ],
+          "child_callbacks": {},
+          "true_skip_events": []
+        },
+        {
+          "ordinal": 16,
+          "id": "test.test_typing.AnnotatedTests.test_forwardref_partial_evaluation",
+          "parent_callbacks": [
+            {
+              "index": 50,
+              "kind": "START",
+              "case": "test.test_typing.AnnotatedTests.test_forwardref_partial_evaluation",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 51,
+              "kind": "ERROR",
+              "case": "test.test_typing.AnnotatedTests.test_forwardref_partial_evaluation",
+              "subject": "",
+              "detail": [
+                "AttributeError",
+                "module 'annotationlib' has no attribute 'get_annotations'"
+              ]
+            },
+            {
+              "index": 52,
+              "kind": "STOP",
+              "case": "test.test_typing.AnnotatedTests.test_forwardref_partial_evaluation",
+              "subject": "",
+              "detail": ""
+            }
+          ],
+          "child_callbacks": {},
+          "true_skip_events": []
+        },
+        {
+          "ordinal": 17,
+          "id": "test.test_typing.AnnotatedTests.test_hash_eq",
+          "parent_callbacks": [
+            {
+              "index": 53,
+              "kind": "START",
+              "case": "test.test_typing.AnnotatedTests.test_hash_eq",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 54,
+              "kind": "PASS",
+              "case": "test.test_typing.AnnotatedTests.test_hash_eq",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 55,
+              "kind": "STOP",
+              "case": "test.test_typing.AnnotatedTests.test_hash_eq",
+              "subject": "",
+              "detail": ""
+            }
+          ],
+          "child_callbacks": {},
+          "true_skip_events": []
+        },
+        {
+          "ordinal": 18,
+          "id": "test.test_typing.AnnotatedTests.test_instantiate",
+          "parent_callbacks": [
+            {
+              "index": 56,
+              "kind": "START",
+              "case": "test.test_typing.AnnotatedTests.test_instantiate",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 57,
+              "kind": "PASS",
+              "case": "test.test_typing.AnnotatedTests.test_instantiate",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 58,
+              "kind": "STOP",
+              "case": "test.test_typing.AnnotatedTests.test_instantiate",
+              "subject": "",
+              "detail": ""
+            }
+          ],
+          "child_callbacks": {},
+          "true_skip_events": []
+        },
+        {
+          "ordinal": 19,
+          "id": "test.test_typing.AnnotatedTests.test_instantiate_generic",
+          "parent_callbacks": [
+            {
+              "index": 59,
+              "kind": "START",
+              "case": "test.test_typing.AnnotatedTests.test_instantiate_generic",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 60,
+              "kind": "PASS",
+              "case": "test.test_typing.AnnotatedTests.test_instantiate_generic",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 61,
+              "kind": "STOP",
+              "case": "test.test_typing.AnnotatedTests.test_instantiate_generic",
+              "subject": "",
+              "detail": ""
+            }
+          ],
+          "child_callbacks": {},
+          "true_skip_events": []
+        },
+        {
+          "ordinal": 20,
+          "id": "test.test_typing.AnnotatedTests.test_instantiate_immutable",
+          "parent_callbacks": [
+            {
+              "index": 62,
+              "kind": "START",
+              "case": "test.test_typing.AnnotatedTests.test_instantiate_immutable",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 63,
+              "kind": "PASS",
+              "case": "test.test_typing.AnnotatedTests.test_instantiate_immutable",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 64,
+              "kind": "STOP",
+              "case": "test.test_typing.AnnotatedTests.test_instantiate_immutable",
+              "subject": "",
+              "detail": ""
+            }
+          ],
+          "child_callbacks": {},
+          "true_skip_events": []
+        },
+        {
+          "ordinal": 21,
+          "id": "test.test_typing.AnnotatedTests.test_new",
+          "parent_callbacks": [
+            {
+              "index": 65,
+              "kind": "START",
+              "case": "test.test_typing.AnnotatedTests.test_new",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 66,
+              "kind": "PASS",
+              "case": "test.test_typing.AnnotatedTests.test_new",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 67,
+              "kind": "STOP",
+              "case": "test.test_typing.AnnotatedTests.test_new",
+              "subject": "",
+              "detail": ""
+            }
+          ],
+          "child_callbacks": {},
+          "true_skip_events": []
+        },
+        {
+          "ordinal": 22,
+          "id": "test.test_typing.AnnotatedTests.test_order_in_union",
+          "parent_callbacks": [
+            {
+              "index": 68,
+              "kind": "START",
+              "case": "test.test_typing.AnnotatedTests.test_order_in_union",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 117,
+              "kind": "PASS",
+              "case": "test.test_typing.AnnotatedTests.test_order_in_union",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 118,
+              "kind": "STOP",
+              "case": "test.test_typing.AnnotatedTests.test_order_in_union",
+              "subject": "",
+              "detail": ""
+            }
+          ],
+          "child_callbacks": {
+            "SUBTEST_PASS": 48
+          },
+          "true_skip_events": []
+        },
+        {
+          "ordinal": 23,
+          "id": "test.test_typing.AnnotatedTests.test_pickle",
+          "parent_callbacks": [
+            {
+              "index": 119,
+              "kind": "START",
+              "case": "test.test_typing.AnnotatedTests.test_pickle",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 150,
+              "kind": "PASS",
+              "case": "test.test_typing.AnnotatedTests.test_pickle",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 151,
+              "kind": "STOP",
+              "case": "test.test_typing.AnnotatedTests.test_pickle",
+              "subject": "",
+              "detail": ""
+            }
+          ],
+          "child_callbacks": {
+            "SUBTEST_PASS": 30
+          },
+          "true_skip_events": []
+        },
+        {
+          "ordinal": 24,
+          "id": "test.test_typing.AnnotatedTests.test_repr",
+          "parent_callbacks": [
+            {
+              "index": 152,
+              "kind": "START",
+              "case": "test.test_typing.AnnotatedTests.test_repr",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 153,
+              "kind": "PASS",
+              "case": "test.test_typing.AnnotatedTests.test_repr",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 154,
+              "kind": "STOP",
+              "case": "test.test_typing.AnnotatedTests.test_repr",
+              "subject": "",
+              "detail": ""
+            }
+          ],
+          "child_callbacks": {},
+          "true_skip_events": []
+        },
+        {
+          "ordinal": 25,
+          "id": "test.test_typing.AnnotatedTests.test_special_form_containment",
+          "parent_callbacks": [
+            {
+              "index": 155,
+              "kind": "START",
+              "case": "test.test_typing.AnnotatedTests.test_special_form_containment",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 156,
+              "kind": "PASS",
+              "case": "test.test_typing.AnnotatedTests.test_special_form_containment",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 157,
+              "kind": "STOP",
+              "case": "test.test_typing.AnnotatedTests.test_special_form_containment",
+              "subject": "",
+              "detail": ""
+            }
+          ],
+          "child_callbacks": {},
+          "true_skip_events": []
+        },
+        {
+          "ordinal": 26,
+          "id": "test.test_typing.AnnotatedTests.test_special_forms_nesting",
+          "parent_callbacks": [
+            {
+              "index": 158,
+              "kind": "START",
+              "case": "test.test_typing.AnnotatedTests.test_special_forms_nesting",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 159,
+              "kind": "PASS",
+              "case": "test.test_typing.AnnotatedTests.test_special_forms_nesting",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 160,
+              "kind": "STOP",
+              "case": "test.test_typing.AnnotatedTests.test_special_forms_nesting",
+              "subject": "",
+              "detail": ""
+            }
+          ],
+          "child_callbacks": {},
+          "true_skip_events": []
+        },
+        {
+          "ordinal": 27,
+          "id": "test.test_typing.AnnotatedTests.test_specialize",
+          "parent_callbacks": [
+            {
+              "index": 161,
+              "kind": "START",
+              "case": "test.test_typing.AnnotatedTests.test_specialize",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 162,
+              "kind": "PASS",
+              "case": "test.test_typing.AnnotatedTests.test_specialize",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 163,
+              "kind": "STOP",
+              "case": "test.test_typing.AnnotatedTests.test_specialize",
+              "subject": "",
+              "detail": ""
+            }
+          ],
+          "child_callbacks": {},
+          "true_skip_events": []
+        },
+        {
+          "ordinal": 28,
+          "id": "test.test_typing.AnnotatedTests.test_subst",
+          "parent_callbacks": [
+            {
+              "index": 164,
+              "kind": "START",
+              "case": "test.test_typing.AnnotatedTests.test_subst",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 165,
+              "kind": "PASS",
+              "case": "test.test_typing.AnnotatedTests.test_subst",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 166,
+              "kind": "STOP",
+              "case": "test.test_typing.AnnotatedTests.test_subst",
+              "subject": "",
+              "detail": ""
+            }
+          ],
+          "child_callbacks": {},
+          "true_skip_events": []
+        },
+        {
+          "ordinal": 29,
+          "id": "test.test_typing.AnnotatedTests.test_too_few_type_args",
+          "parent_callbacks": [
+            {
+              "index": 167,
+              "kind": "START",
+              "case": "test.test_typing.AnnotatedTests.test_too_few_type_args",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 168,
+              "kind": "PASS",
+              "case": "test.test_typing.AnnotatedTests.test_too_few_type_args",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 169,
+              "kind": "STOP",
+              "case": "test.test_typing.AnnotatedTests.test_too_few_type_args",
+              "subject": "",
+              "detail": ""
+            }
+          ],
+          "child_callbacks": {},
+          "true_skip_events": []
+        },
+        {
+          "ordinal": 30,
+          "id": "test.test_typing.AnnotatedTests.test_typevar_subst",
+          "parent_callbacks": [
+            {
+              "index": 170,
+              "kind": "START",
+              "case": "test.test_typing.AnnotatedTests.test_typevar_subst",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 171,
+              "kind": "PASS",
+              "case": "test.test_typing.AnnotatedTests.test_typevar_subst",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 172,
+              "kind": "STOP",
+              "case": "test.test_typing.AnnotatedTests.test_typevar_subst",
+              "subject": "",
+              "detail": ""
+            }
+          ],
+          "child_callbacks": {},
+          "true_skip_events": []
+        }
+      ],
+      "stock_identical_paired_in_mode": [
+        [
+          "test.test_typing.AnnotatedTests.test_annotated_cached_with_types",
+          1
+        ],
+        [
+          "test.test_typing.AnnotatedTests.test_annotated_in_other_types",
+          1
+        ],
+        [
+          "test.test_typing.AnnotatedTests.test_annotated_mro",
+          1
+        ],
+        [
+          "test.test_typing.AnnotatedTests.test_attr_passthrough",
+          1
+        ],
+        [
+          "test.test_typing.AnnotatedTests.test_cannot_check_instance",
+          1
+        ],
+        [
+          "test.test_typing.AnnotatedTests.test_cannot_check_subclass",
+          1
+        ],
+        [
+          "test.test_typing.AnnotatedTests.test_cannot_getattr_typevar",
+          1
+        ],
+        [
+          "test.test_typing.AnnotatedTests.test_cannot_instantiate_forward",
+          1
+        ],
+        [
+          "test.test_typing.AnnotatedTests.test_cannot_instantiate_type_var",
+          1
+        ],
+        [
+          "test.test_typing.AnnotatedTests.test_cannot_subclass",
+          1
+        ],
+        [
+          "test.test_typing.AnnotatedTests.test_deduplicate_from_union",
+          1
+        ],
+        [
+          "test.test_typing.AnnotatedTests.test_dir",
+          1
+        ],
+        [
+          "test.test_typing.AnnotatedTests.test_flatten",
+          1
+        ],
+        [
+          "test.test_typing.AnnotatedTests.test_hash_eq",
+          1
+        ],
+        [
+          "test.test_typing.AnnotatedTests.test_instantiate",
+          1
+        ],
+        [
+          "test.test_typing.AnnotatedTests.test_instantiate_generic",
+          1
+        ],
+        [
+          "test.test_typing.AnnotatedTests.test_instantiate_immutable",
+          1
+        ],
+        [
+          "test.test_typing.AnnotatedTests.test_new",
+          1
+        ],
+        [
+          "test.test_typing.AnnotatedTests.test_order_in_union",
+          1
+        ],
+        [
+          "test.test_typing.AnnotatedTests.test_pickle",
+          1
+        ],
+        [
+          "test.test_typing.AnnotatedTests.test_repr",
+          1
+        ],
+        [
+          "test.test_typing.AnnotatedTests.test_special_form_containment",
+          1
+        ],
+        [
+          "test.test_typing.AnnotatedTests.test_special_forms_nesting",
+          1
+        ],
+        [
+          "test.test_typing.AnnotatedTests.test_specialize",
+          1
+        ],
+        [
+          "test.test_typing.AnnotatedTests.test_subst",
+          1
+        ],
+        [
+          "test.test_typing.AnnotatedTests.test_too_few_type_args",
+          1
+        ],
+        [
+          "test.test_typing.AnnotatedTests.test_typevar_subst",
+          1
+        ]
+      ],
+      "new_to_named_181_paired_in_mode": []
+    }
+  }
+}

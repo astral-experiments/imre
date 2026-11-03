@@ -1,9 +1,9 @@
-use super::super::value::{DictViewKind, ELLIPSIS, NOT_IMPLEMENTED};
+use super::super::value::{DictViewKind, ELLIPSIS, NOT_IMPLEMENTED, NativeModuleState};
 use super::{Context, Error, Id, NONE, Result, Value};
 use std::collections::HashMap;
 mod encoding;
 
-pub(in super::super) fn install(ctx: &mut Context, scope: Id) -> Result<()> {
+pub(in super::super) fn install(ctx: &mut Context, module: Id, scope: Id) -> Result<()> {
     // Keep the dictionary itself so that live registrations are visible, even if
     // the copyreg module attribute is later rebound.
     let copyreg = ctx.module("copyreg")?;
@@ -17,29 +17,140 @@ pub(in super::super) fn install(ctx: &mut Context, scope: Id) -> Result<()> {
             ),
         ));
     }
-    ctx.builtins.insert("_pickle.dispatch_table".into(), table);
-    let version = ctx.int(5);
-    ctx.bind(scope, "HIGHEST_PROTOCOL", version);
-    ctx.bind(scope, "DEFAULT_PROTOCOL", version);
-    let mut base = ctx.builtin("Exception");
-    for name in ["PickleError", "PicklingError"] {
+    let exception = ctx.builtin("Exception");
+    let mut exception_class = |name: &str, base| -> Result<Id> {
         let fields = ctx.scope("_pickle", Some(scope));
         let module_name = ctx.text("_pickle");
         ctx.bind(fields, "__module__", module_name);
         let qualname = ctx.text(name);
         ctx.bind(fields, "__qualname__", qualname);
+        ctx.bind(fields, "__doc__", NONE);
         let class = ctx.allocate_class(name.into(), fields, vec![base])?;
         ctx.bind(scope, name, class);
-        ctx.builtins.insert(format!("_pickle.{name}"), class);
-        base = class;
-    }
+        Ok(class)
+    };
+    let pickle_error = exception_class("PickleError", exception)?;
+    let pickling_error = exception_class("PicklingError", pickle_error)?;
+    exception_class("UnpicklingError", pickle_error)?;
+    let Value::Module { module_state, .. } = ctx.heap.get_mut(module) else {
+        unreachable!()
+    };
+    *module_state = Some(NativeModuleState::PickleWriter {
+        pickling_error,
+        dispatch_table: table,
+    });
+    let callable = ctx.builtin("_pickle.dumps");
+    let dumps = ctx.alloc(Value::Method {
+        callable,
+        receiver: module,
+        explicit: false,
+    });
+    ctx.bind(scope, "dumps", dumps);
     Ok(())
 }
 
-fn pickling_error(ctx: &Context, message: impl Into<String>) -> Error {
+fn pickling_error(class: Id, message: impl Into<String>) -> Error {
     let mut error = Error::new("PicklingError", message);
-    error.class = ctx.builtins["_pickle.PicklingError"];
+    error.class = class;
     error
+}
+
+fn dotted_attribute(ctx: &mut Context, mut value: Id, name: &str) -> Result<Id> {
+    for part in name.split('.') {
+        ctx.heap.keep(value);
+        value = ctx.lookup_attr(value, part)?;
+    }
+    Ok(value)
+}
+
+/// Find an identity match in the public module registry, before falling back to __main__.
+fn find_global_module(ctx: &mut Context, obj: Id, name: &str) -> Result<Option<Id>> {
+    let modules = ctx.public_modules()?;
+    ctx.heap.keep(modules);
+    // The accelerator uses PyDict_Next for an exact dict; a module lookup may add entries.
+    let iterator = if matches!(ctx.heap.get(modules), Value::Dict(_)) {
+        None
+    } else {
+        let iterator = ctx.iterator(modules)?;
+        ctx.heap.keep(iterator);
+        Some(iterator)
+    };
+    let mut index = 0;
+    let roots = ctx.heap.temporary_mark();
+    loop {
+        ctx.heap.release_temporaries_since(roots);
+        let (key, module) = if let Some(iterator) = iterator {
+            let Some(key) = ctx.next_item(iterator)? else {
+                break;
+            };
+            ctx.heap.keep(key);
+            (key, ctx.get_item(modules, key)?)
+        } else {
+            let Value::Dict(entries) = ctx.heap.get(modules) else {
+                unreachable!()
+            };
+            let Some((position, key, module)) = entries.at(index) else {
+                break;
+            };
+            index = position + 1;
+            (key, module)
+        };
+        if module == NONE || ctx.str_value(key).is_ok_and(|name| name == "__main__") {
+            continue;
+        }
+        ctx.heap.keep(key);
+        match dotted_attribute(ctx, module, name) {
+            Ok(candidate) if candidate == obj => return Ok(Some(key)),
+            Err(error) if !ctx.is_attribute_error(&error) => return Err(error),
+            _ => {}
+        }
+    }
+    Ok(None)
+}
+
+fn global_module(ctx: &mut Context, obj: Id, name: &str, error: Id) -> Result<Id> {
+    let module = if matches!(obj, ELLIPSIS | NOT_IMPLEMENTED) {
+        ctx.text("builtins")
+    } else {
+        let module = match ctx.lookup_attr(obj, "__module__") {
+            Err(error) if ctx.is_attribute_error(&error) => NONE,
+            result => result?,
+        };
+        if module != NONE {
+            module
+        } else if let Some(module) = find_global_module(ctx, obj, name)? {
+            return Ok(module);
+        } else {
+            ctx.text("__main__")
+        }
+    };
+    ctx.heap.keep(module);
+    let module_name = ctx.str_value(module)?.to_owned();
+    let resolved = if module_name == "builtins" && super::super::builtins::is_builtin(name) {
+        ctx.builtin(name)
+    } else {
+        let current = ctx.module(&module_name).map_err(|e| {
+            if ctx.is_builtin_error(&e, "ModuleNotFoundError") {
+                pickling_error(error, format!("Can't import module {module_name}"))
+            } else {
+                e
+            }
+        })?;
+        dotted_attribute(ctx, current, name).map_err(|e| {
+            if ctx.is_attribute_error(&e) {
+                pickling_error(error, format!("Can't find {name} in {module_name}"))
+            } else {
+                e
+            }
+        })?
+    };
+    if resolved != obj {
+        return Err(pickling_error(
+            error,
+            format!("object differs from {module_name}.{name}"),
+        ));
+    }
+    Ok(module)
 }
 
 fn unsupported_reducer(ctx: &Context, obj: Id) -> Error {
@@ -49,21 +160,27 @@ fn unsupported_reducer(ctx: &Context, obj: Id) -> Error {
     )
 }
 
-/// Named tuples have a tuple payload in addition to any state supplied by a subclass.
-fn namedtuple_reduce(ctx: &mut Context, receiver: Id, class: Id, protocol: i32) -> Result<Id> {
-    let copyreg = ctx.module("copyreg")?;
+/// Preserve the native base for legacy reductions and consult constructor hooks for newer protocols.
+fn native_layout_reduce(
+    ctx: &mut Context,
+    receiver: Id,
+    class: Id,
+    protocol: i32,
+    cursor: Option<(Id, &'static str)>,
+) -> Result<Id> {
     if protocol < 2 {
+        let copyreg = ctx.module("copyreg")?;
         let reducer = ctx.lookup_attr(copyreg, "_reduce_ex_with_base")?;
         ctx.heap.keep(reducer);
         let reported_class = ctx.lookup_attr(receiver, "__class__")?;
         ctx.heap.keep(reported_class);
         let protocol = ctx.int(i64::from(protocol));
-        // The declared NamedTuple base still represents a native tuple layout.
-        // An unrelated reported class must choose its own legacy reconstructor base.
         let base = if ctx.namedtuple_fields(reported_class).is_some() {
             ctx.builtin("tuple")
         } else {
-            NONE
+            ctx.allocation_base(reported_class)
+                .filter(|&base| ctx.itertools_layout(base).is_some())
+                .unwrap_or(NONE)
         };
         return ctx.call(
             reducer,
@@ -71,16 +188,26 @@ fn namedtuple_reduce(ctx: &mut Context, receiver: Id, class: Id, protocol: i32) 
             Vec::new(),
         );
     }
+    reduce_newobj(ctx, receiver, class, cursor)
+}
+
+/// Consult the class's constructor argument hooks before collecting binary-protocol state.
+fn reduce_newobj(
+    ctx: &mut Context,
+    receiver: Id,
+    class: Id,
+    cursor: Option<(Id, &'static str)>,
+) -> Result<Id> {
     let extended = ctx.class_attr(class, "__getnewargs_ex__");
     let hook = extended.or_else(|| ctx.class_attr(class, "__getnewargs__"));
-    let args = if let Some(hook) = hook {
-        let method = ctx.bind_attribute(hook, receiver, class)?;
-        ctx.call(method, Vec::new(), Vec::new())?
-    } else {
-        ctx.alloc(Value::Tuple(Vec::new()))
+    let Some(hook) = hook else {
+        return reduce_without_newargs(ctx, receiver, class, cursor);
     };
+    let method = ctx.bind_attribute(hook, receiver, class)?;
+    let args = ctx.call(method, Vec::new(), Vec::new())?;
     ctx.heap.keep(args);
-    let reducer = ctx.lookup_attr(copyreg, "_namedtuple_newobj")?;
+    let copyreg = ctx.module("copyreg")?;
+    let reducer = ctx.lookup_attr(copyreg, "_reduce_newobj")?;
     let extended = super::super::builtins::boolean(extended.is_some());
     ctx.call(reducer, vec![receiver, args, extended], Vec::new())
 }
@@ -90,8 +217,11 @@ fn default_instance_reduce(ctx: &mut Context, receiver: Id, protocol: i32) -> Re
     let Value::Instance { class, .. } = *ctx.heap.get(receiver) else {
         return Err(unsupported_reducer(ctx, receiver));
     };
-    if ctx.namedtuple_fields(class).is_some() {
-        return namedtuple_reduce(ctx, receiver, class, protocol);
+    let cursor = ctx
+        .allocation_base(class)
+        .and_then(|base| ctx.itertools_layout(base).map(|name| (base, name)));
+    if cursor.is_some() || ctx.namedtuple_fields(class).is_some() {
+        return native_layout_reduce(ctx, receiver, class, protocol, cursor);
     }
     // A native base may have state beyond the Python dictionary and slots.
     let Value::Class { ancestors, .. } = ctx.heap.get(class) else {
@@ -113,39 +243,58 @@ fn default_instance_reduce(ctx: &mut Context, receiver: Id, protocol: i32) -> Re
         let protocol = ctx.int(i64::from(protocol));
         return ctx.call(reducer, vec![receiver, protocol], Vec::new());
     }
-    if ctx.class_attr(class, "__getnewargs_ex__").is_some()
-        || ctx.class_attr(class, "__getnewargs__").is_some()
-    {
-        return Err(unsupported_reducer(ctx, receiver));
-    }
+    reduce_newobj(ctx, receiver, class, None)
+}
 
+fn reduce_without_newargs(
+    ctx: &mut Context,
+    receiver: Id,
+    class: Id,
+    cursor: Option<(Id, &'static str)>,
+) -> Result<Id> {
     let copyreg = ctx.module("copyreg")?;
     let newobj = ctx.lookup_attr(copyreg, "__newobj__")?;
     ctx.heap.keep(newobj);
-    let class = ctx.exact_type(receiver)?;
     let args = ctx.alloc(Value::Tuple(vec![class]));
     let getstate = ctx.lookup_attr(receiver, "__getstate__")?;
+    if let Some((base, name)) = cursor
+        && matches!(*ctx.heap.get(getstate), Value::Method { callable, receiver: bound, .. }
+            if bound == receiver && ctx.builtins.get("object.__getstate__") == Some(&callable))
+    {
+        // The default Python state cannot reconstruct the saved iterator and callable.
+        let name = if class == base {
+            name
+        } else {
+            ctx.type_name(receiver)
+        };
+        return Err(Error::new(
+            "TypeError",
+            format!("cannot pickle '{name}' object"),
+        ));
+    }
     let state = ctx.call(getstate, Vec::new(), Vec::new())?;
     Ok(ctx.alloc(Value::Tuple(vec![newobj, args, state, NONE, NONE])))
 }
 
 fn default_reduction(ctx: &mut Context, obj: Id, protocol: i32) -> Result<Id> {
-    if !matches!(ctx.heap.get(obj), Value::DirEntry(_)) {
-        return default_instance_reduce(ctx, obj, protocol);
+    match ctx.heap.get(obj) {
+        Value::DirEntry(_) if protocol < 2 => {
+            // copyreg's legacy reducer records the class even when its instances cannot be created.
+            let copyreg = ctx.module("copyreg")?;
+            let reconstructor = ctx.lookup_attr(copyreg, "_reconstructor")?;
+            let class = ctx.exact_type(obj)?;
+            let base = ctx.builtin("object");
+            let args = ctx.alloc(Value::Tuple(vec![class, base, NONE]));
+            Ok(ctx.alloc(Value::Tuple(vec![reconstructor, args])))
+        }
+        Value::DirEntry(_) | Value::ClassMethod { .. } | Value::StaticMethod { .. } => {
+            Err(Error::new(
+                "TypeError",
+                format!("cannot pickle '{}' object", ctx.type_name(obj)),
+            ))
+        }
+        _ => default_instance_reduce(ctx, obj, protocol),
     }
-    if protocol >= 2 {
-        return Err(Error::new(
-            "TypeError",
-            format!("cannot pickle '{}' object", ctx.type_name(obj)),
-        ));
-    }
-    // copyreg's legacy reducer records the class even when its instances cannot be created.
-    let copyreg = ctx.module("copyreg")?;
-    let reconstructor = ctx.lookup_attr(copyreg, "_reconstructor")?;
-    let class = ctx.exact_type(obj)?;
-    let base = ctx.builtin("object");
-    let args = ctx.alloc(Value::Tuple(vec![class, base, NONE]));
-    Ok(ctx.alloc(Value::Tuple(vec![reconstructor, args])))
 }
 
 /// Delegate to the instance hook only when its class overrides object's reducer.
@@ -212,6 +361,8 @@ pub(in crate::dynamic) fn object_reduce(
 const BATCH_SIZE: usize = 1000;
 
 struct Pickler {
+    error: Id,
+    dispatch_table: Id,
     protocol: u8,
     fix_imports: bool,
     memo: HashMap<Id, u32>,
@@ -313,7 +464,7 @@ impl Pickler {
             (ctx.builtin("codecs.encode"), vec![text, latin1])
         };
         let args = ctx.alloc(Value::Tuple(args));
-        self.save_reduce(ctx, obj, func, args, NONE, NONE)
+        self.save_reduce(ctx, obj, func, args, NONE, [NONE; 2])
     }
 
     fn save_list(&mut self, ctx: &mut Context, obj: Id, length: usize) -> Result<()> {
@@ -426,55 +577,25 @@ impl Pickler {
                 ctx.str_value(id)?.to_owned()
             }
         };
-        let module = if matches!(obj, ELLIPSIS | NOT_IMPLEMENTED) {
-            "builtins".to_owned()
-        } else {
-            let module = ctx.lookup_attr(obj, "__module__")?;
-            ctx.str_value(module)?.to_owned()
-        };
-        if name
-            .split('.')
-            .any(|part| part == "<locals>" || part.is_empty())
-        {
+        if name.split('.').any(|part| part == "<locals>") {
             return Err(pickling_error(
-                ctx,
+                self.error,
                 format!("Can't pickle local object '{name}'"),
             ));
         }
-        let resolved = if module == "builtins" && super::super::builtins::is_builtin(&name) {
-            ctx.builtin(&name)
-        } else {
-            let mut current = ctx.module(&module).map_err(|e| {
-                if ctx.is_builtin_error(&e, "ModuleNotFoundError") {
-                    pickling_error(ctx, format!("Can't import module {module}"))
-                } else {
-                    e
-                }
-            })?;
-            for part in name.split('.') {
-                current = ctx.lookup_attr(current, part).map_err(|e| {
-                    if ctx.is_attribute_error(&e) {
-                        pickling_error(ctx, format!("Can't find {name} in {module}"))
-                    } else {
-                        e
-                    }
-                })?;
-            }
-            current
-        };
-        if resolved != obj {
-            return Err(pickling_error(
-                ctx,
-                format!("object differs from {module}.{name}"),
-            ));
+        let module = global_module(ctx, obj, &name, self.error)?;
+        ctx.heap.keep(module);
+        if self.protocol >= 4 {
+            self.save(ctx, module)?;
+            let name = ctx.text(name);
+            self.save(ctx, name)?;
+            self.out.push(0x93); // STACK_GLOBAL
+            return self.remember(ctx, obj);
         }
+
         // Before STACK_GLOBAL, rebuild dotted names as getattr(getattr(outer, ...), ...).
-        let (global_name, suffix) = if self.protocol < 4 {
-            name.split_once('.').unwrap_or((&name, ""))
-        } else {
-            (name.as_str(), "")
-        };
-        let attributes = suffix.split_terminator('.');
+        let mut attributes = name.split('.');
+        let global_name = attributes.next().unwrap();
         for _ in attributes.clone() {
             let getattr = ctx.builtin("getattr");
             self.save(ctx, getattr)?;
@@ -483,13 +604,13 @@ impl Pickler {
         encoding::global(
             &mut self.out,
             self.protocol,
-            &module,
+            ctx.str_value(module)?,
             global_name,
             self.fix_imports,
         )
         .map_err(|e| {
             if e.kind == "PicklingError" {
-                pickling_error(ctx, e.message)
+                pickling_error(self.error, e.message)
             } else {
                 e
             }
@@ -518,14 +639,14 @@ impl Pickler {
                 _ => return self.save_global(ctx, obj, None),
             };
             let args = ctx.alloc(Value::Tuple(vec![singleton]));
-            return self.save_reduce(ctx, obj, class, args, NONE, NONE);
+            return self.save_reduce(ctx, obj, class, args, NONE, [NONE; 2]);
         }
         // The accelerated pickler owns these exact types even when this runtime
         // cannot yet encode their payloads. A registration cannot replace them.
         let reducer = match ctx.heap.get(obj) {
             Value::Set { .. } | Value::ByteArray(_) | Value::SurrogateStr(_) => None,
             _ => {
-                let table = ctx.builtins["_pickle.dispatch_table"];
+                let table = self.dispatch_table;
                 let (_, index) = ctx.find_dictionary_key(table, class, None)?;
                 index.map(|index| ctx.stored_entries(table)[index].1)
             }
@@ -534,6 +655,11 @@ impl Pickler {
             ctx.call(reducer, vec![obj], Vec::new())?
         } else {
             match ctx.heap.get(obj) {
+                Value::Native(symbol)
+                    if super::super::builtins::native_method_owner(symbol).is_some() =>
+                {
+                    Self::call_reduce_hook(ctx, obj, self.protocol)?
+                }
                 Value::Class { .. } | Value::Native(_) => return self.save_global(ctx, obj, None),
                 Value::Ellipsis => return self.save_global(ctx, obj, Some("Ellipsis".into())),
                 Value::NotImplemented => {
@@ -551,44 +677,46 @@ impl Pickler {
             Value::Tuple(fields) if (2..=6).contains(&fields.len()) => fields.clone(),
             _ => {
                 return Err(pickling_error(
-                    ctx,
+                    self.error,
                     "__reduce__ must return a string or a tuple of length 2 through 6",
                 ));
             }
         };
         if !ctx.callable(fields[0]) {
             return Err(pickling_error(
-                ctx,
+                self.error,
                 "first item of the tuple returned by __reduce__ must be callable",
             ));
         }
         if !matches!(ctx.heap.get(fields[1]), Value::Tuple(_)) {
             return Err(pickling_error(
-                ctx,
+                self.error,
                 "second item of the tuple returned by __reduce__ must be a tuple",
             ));
         }
         let optional = |index| fields.get(index).copied().unwrap_or(NONE);
-        let mapping_items = optional(4);
-        if mapping_items != NONE
-            && !ctx.is_native_iterator(mapping_items)
-            && ctx.slot(mapping_items, "__next__").is_none()
-        {
-            return Err(pickling_error(
-                ctx,
-                format!(
-                    "fifth item of the tuple returned by __reduce__ must be an iterator, not {}",
-                    ctx.type_name(mapping_items)
-                ),
-            ));
+        let items = [optional(3), optional(4)];
+        for (iterator, position) in items.into_iter().zip(["fourth", "fifth"]) {
+            if iterator != NONE
+                && !ctx.is_native_iterator(iterator)
+                && ctx.slot(iterator, "__next__").is_none()
+            {
+                let class = ctx.exact_type(iterator)?;
+                let name = super::qualified_type(ctx, class)?;
+                let message = format!(
+                    "{position} item of the tuple returned by __reduce__ must be an iterator, not {}",
+                    ctx.str_value(name)?
+                );
+                return Err(pickling_error(self.error, message));
+            }
         }
-        if optional(3) != NONE || optional(5) != NONE {
+        if optional(5) != NONE {
             return Err(Error::new(
                 "NotImplementedError",
-                "native pickle does not yet support reduction list items or state setters",
+                "native pickle does not yet support reduction state setters",
             ));
         }
-        self.save_reduce(ctx, obj, fields[0], fields[1], optional(2), mapping_items)
+        self.save_reduce(ctx, obj, fields[0], fields[1], optional(2), items)
     }
 
     fn call_reduce_hook(ctx: &mut Context, obj: Id, protocol: u8) -> Result<Id> {
@@ -604,6 +732,37 @@ impl Pickler {
             },
             Err(e) => Err(e),
         }
+    }
+
+    /// Binary protocols fetch the second item before saving the first to select APPENDS.
+    fn save_list_items(&mut self, ctx: &mut Context, iterator: Id) -> Result<()> {
+        while let Some(first) = ctx.next_item(iterator)? {
+            ctx.heap.keep(first);
+            if self.protocol == 0 {
+                self.save(ctx, first)?;
+                self.out.push(b'a'); // APPEND
+                continue;
+            }
+            let Some(second) = ctx.next_item(iterator)? else {
+                self.save(ctx, first)?;
+                self.out.push(b'a');
+                break;
+            };
+            ctx.heap.keep(second);
+            self.out.push(b'('); // MARK
+            self.save(ctx, first)?;
+            self.save(ctx, second)?;
+            for _ in 2..BATCH_SIZE {
+                let Some(item) = ctx.next_item(iterator)? else {
+                    self.out.push(b'e'); // APPENDS
+                    return Ok(());
+                };
+                ctx.heap.keep(item);
+                self.save(ctx, item)?;
+            }
+            self.out.push(b'e');
+        }
+        Ok(())
     }
 
     /// Binary protocols fetch a second pair before serializing the first to select SETITEMS.
@@ -660,7 +819,7 @@ impl Pickler {
         };
         let Some((&class, tail)) = items.split_first() else {
             return Err(pickling_error(
-                ctx,
+                self.error,
                 "__newobj__ expected at least 1 argument, got 0",
             ));
         };
@@ -668,7 +827,7 @@ impl Pickler {
         let type_class = ctx.builtin("type");
         if !ctx.instance_of(class, type_class) {
             return Err(pickling_error(
-                ctx,
+                self.error,
                 format!(
                     "first argument to __newobj__() must be a class, not {}",
                     ctx.type_name(class)
@@ -685,7 +844,7 @@ impl Pickler {
             let expected = ctx.call(repr, vec![expected], Vec::new())?;
             let class = ctx.call(repr, vec![class], Vec::new())?;
             return Err(pickling_error(
-                ctx,
+                self.error,
                 format!(
                     "first argument to __newobj__() must be {}, not {}",
                     ctx.str_value(expected)?,
@@ -706,7 +865,7 @@ impl Pickler {
         func: Id,
         args: Id,
         state: Id,
-        mapping_items: Id,
+        [list_items, mapping_items]: [Id; 2],
     ) -> Result<()> {
         let newobj = if self.protocol >= 2 {
             match ctx.lookup_attr(func, "__name__") {
@@ -731,6 +890,9 @@ impl Pickler {
             return Ok(());
         }
         self.remember(ctx, obj)?;
+        if list_items != NONE {
+            self.save_list_items(ctx, list_items)?;
+        }
         if mapping_items != NONE {
             self.save_mapping_items(ctx, mapping_items)?;
         }
@@ -743,6 +905,20 @@ impl Pickler {
 }
 
 pub(super) fn dumps(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    let Some((&module, args)) = args.split_first() else {
+        return Err(Error::new("TypeError", "dumps requires a pickle module"));
+    };
+    let Value::Module {
+        module_state:
+            Some(NativeModuleState::PickleWriter {
+                pickling_error,
+                dispatch_table,
+            }),
+        ..
+    } = *ctx.heap.get(module)
+    else {
+        return Err(Error::new("TypeError", "dumps requires a pickle module"));
+    };
     if args.len() > 2 {
         return Err(Error::new(
             "TypeError",
@@ -809,6 +985,8 @@ pub(super) fn dumps(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> 
     }
     let protocol = if protocol < 0 { 5 } else { protocol as u8 };
     let mut pickler = Pickler {
+        error: pickling_error,
+        dispatch_table,
         protocol,
         fix_imports,
         memo: HashMap::new(),

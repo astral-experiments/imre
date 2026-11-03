@@ -2,6 +2,7 @@
 
 use super::*;
 use crate::ir::{CalendarType, InstanceType};
+use ty_python_semantic::types::KnownClass;
 
 impl Checker<'_> {
     /// int() on a closed string/integer value preserves the integer or parses the
@@ -133,6 +134,12 @@ impl Checker<'_> {
             return Expr {
                 ty,
                 kind: ExprKind::Builtin(Builtin::RecordView, vec![value]),
+            };
+        }
+        if value.ty == Type::ObjectValue && ty == Type::Str {
+            return Expr {
+                ty,
+                kind: ExprKind::Builtin(Builtin::ObjectTextProject, vec![value]),
             };
         }
         if value.ty == Type::ObjectValue && matches!(ty, Type::BytesIO | Type::StringIO) {
@@ -776,6 +783,52 @@ impl Checker<'_> {
         }
     }
 
+    /// Recognize exact builtin type comparisons on a local with an erased payload.
+    pub(super) fn exact_object_type<'n>(
+        &self,
+        compare: &'n ast::ExprCompare,
+    ) -> Option<(&'n ast::Expr, KnownClass, bool)> {
+        let [op @ (ast::CmpOp::Is | ast::CmpOp::IsNot)] = compare.ops.as_ref() else {
+            return None;
+        };
+        let [left, right] = compare.operands.as_ref() else {
+            return None;
+        };
+        let (call, name) = if let Some(call) = left.as_call_expr() {
+            (call, right)
+        } else {
+            (right.as_call_expr()?, left)
+        };
+        let identifier = name.as_name_expr()?.id.as_str();
+        let class = match identifier {
+            "str" => KnownClass::Str,
+            "tuple" => KnownClass::Tuple,
+            _ => return None,
+        };
+        if !self.unshadowed_builtin(name, identifier) {
+            return None;
+        }
+        let [value] = call.arguments.args.as_ref() else {
+            return None;
+        };
+        if !call.arguments.keywords.is_empty() || !self.unshadowed_builtin(&call.func, "type") {
+            return None;
+        }
+        let slot = *self.names.get(value.as_name_expr()?.id.as_str())?;
+        let ty = self
+            .narrowed
+            .get(&slot)
+            .copied()
+            .unwrap_or(self.locals[slot]);
+        (ty == Type::ObjectValue
+            && self
+                .graph
+                .session
+                .is_known_class(self.module, &call.func, KnownClass::Type)
+            && self.graph.session.is_known_class(self.module, name, class))
+        .then_some((value, class, *op == ast::CmpOp::Is))
+    }
+
     /// A later walrus write invalidates earlier tests even inside the same and/or.
     /// Attribute/subscript tests deliberately contribute no local storage facts.
     fn instance_facts(
@@ -784,6 +837,16 @@ impl Checker<'_> {
         truth: bool,
     ) -> HashMap<String, Vec<(Vec<InstanceType>, bool)>> {
         match test {
+            ast::Expr::Compare(compare)
+                if let Some((expr, KnownClass::Str, positive)) =
+                    self.exact_object_type(compare)
+                    && let Some(name) = expr.as_name_expr() =>
+            {
+                HashMap::from([(
+                    name.id.to_string(),
+                    vec![(vec![InstanceType::ExactText], truth == positive)],
+                )])
+            }
             ast::Expr::Call(call)
                 if matches!(&*call.func, ast::Expr::Name(name) if name.id == "isinstance")
                     && call.arguments.args.len() == 2
@@ -806,8 +869,13 @@ impl Checker<'_> {
                 }
             }
             ast::Expr::Call(call)
-                if matches!(&*call.func, ast::Expr::Name(name) if name.id == "bool")
+                if self.unshadowed_builtin(&call.func, "bool")
                     && call.arguments.args.len() == 1
+                    && self.graph.session.is_known_class(
+                        self.module,
+                        &call.func,
+                        KnownClass::Bool,
+                    )
                     && call.arguments.keywords.is_empty() =>
             {
                 self.instance_facts(&call.arguments.args[0], truth)
@@ -860,6 +928,9 @@ impl Checker<'_> {
                 .unwrap_or(self.locals[slot]);
             if current == Type::ObjectValue {
                 for (classes, truth) in &constraints {
+                    if *truth && matches!(classes.as_slice(), [InstanceType::ExactText]) {
+                        self.narrowed.insert_mut(slot, Type::Str);
+                    }
                     if *truth
                         && let [InstanceType::Exact(ty @ (Type::BytesIO | Type::StringIO))] =
                             classes.as_slice()

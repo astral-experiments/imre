@@ -1,4 +1,4 @@
-use super::{Context, Error, Id, NONE, Result, Value, separator_storage};
+use super::{Context, Error, Id, NONE, Result, Value, required_args, separator_storage};
 use crate::dynamic::{builtins::boolean, copy_ids};
 
 /// Parse the nine arguments of _json.make_encoder in CPython's conversion order.
@@ -44,44 +44,4 @@ pub(in crate::dynamic::stdlib) fn encoder_state(
         ));
     }
     Ok(ctx.alloc(Value::Tuple(copy_ids(&state)?)))
-}
-
-/// PyArg_ParseTupleAndKeywords checks the total count first, then converts each
-/// required argument before looking for the next. Defer missing-argument errors
-/// until each field is read so user conversions retain their exception precedence.
-pub(super) fn required_args<'a>(
-    function: &'a str,
-    args: &'a [Id],
-    kwargs: &'a [(String, Id)],
-    fields: &'a [&str],
-) -> Result<impl Fn(usize) -> Result<Id> + 'a> {
-    let count = args.len() + kwargs.len();
-    let maximum = fields.len();
-    if count > maximum {
-        let kind = if args.is_empty() { "keyword " } else { "" };
-        return Err(Error::new(
-            "TypeError",
-            format!("{function}() takes at most {maximum} {kind}arguments ({count} given)"),
-        ));
-    }
-    Ok(move |i| {
-        let field = fields[i];
-        args.get(i)
-            .copied()
-            .or_else(|| {
-                kwargs
-                    .iter()
-                    .find(|(name, _)| name == field)
-                    .map(|(_, value)| *value)
-            })
-            .ok_or_else(|| {
-                Error::new(
-                    "TypeError",
-                    format!(
-                        "{function}() missing required argument '{field}' (pos {})",
-                        i + 1
-                    ),
-                )
-            })
-    })
 }

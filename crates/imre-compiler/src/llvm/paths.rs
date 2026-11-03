@@ -349,6 +349,7 @@ impl Emitter<'_, '_> {
                     PathOperation::Info => "imre_path_info",
                     PathOperation::InfoRepr => "imre_path_info_repr",
                     PathOperation::Name => "imre_path_name",
+                    PathOperation::Parts => "imre_path_parts",
                     PathOperation::CountPart => "imre_path_count_part",
                     PathOperation::Stem => "imre_path_stem",
                     PathOperation::Suffix => "imre_path_suffix",

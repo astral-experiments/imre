@@ -17,6 +17,38 @@ fn text(value: &str) -> Expr {
     }
 }
 
+/// Recognize a full version-1 configuration whose object definitions the native
+/// logger registry cannot construct. Later duplicate keys replace earlier ones.
+fn defines_logging_objects(config: &ast::ExprDict) -> bool {
+    let Some(fields) = config
+        .items
+        .iter()
+        .map(|item| {
+            let key = item.key.as_ref()?.as_string_literal_expr()?;
+            Some((key.value.to_str(), &item.value))
+        })
+        .collect::<Option<HashMap<_, _>>>()
+    else {
+        return false;
+    };
+    let Some(ast::Expr::NumberLiteral(version)) = fields.get("version") else {
+        return false;
+    };
+    if !matches!(&version.value, ast::Number::Int(n) if n.as_i64() == Some(1))
+        || fields
+            .get("incremental")
+            .is_some_and(|flag| !ast::helpers::is_const_false(flag))
+    {
+        return false;
+    }
+    ["handlers", "formatters", "filters"].iter().any(|name| {
+        fields
+            .get(name)
+            .and_then(|section| section.as_dict_expr())
+            .is_some_and(|dict| dict.items.iter().any(|item| item.key.is_some()))
+    })
+}
+
 impl Checker<'_> {
     fn handler_type(&self) -> Option<Type> {
         let id = self.graph.logging_definition("Handler")?;
@@ -117,6 +149,7 @@ impl Checker<'_> {
                 self.types.optional(handler),
                 vec![parameter("name", Type::Str, None)],
             ),
+            Intrinsic::HandlerNames => (Log::HandlerNames, Type::FrozenStrings, vec![]),
             Intrinsic::FileEncodingUsesUtf8 => (Log::FileEncodingUsesUtf8, Type::Bool, vec![]),
             Intrinsic::PrintActiveException => (Log::PrintActiveException, Type::None, vec![]),
             _ => unreachable!(),
@@ -133,8 +166,10 @@ impl Checker<'_> {
     ) -> Result<Expr, String> {
         let parameters = [parameter("config", documents::MAP, None)];
         let mut scalar = None;
+        let mut needs_objects = false;
         let mut args = self.arguments_with(call, &parameters, None, |checker, _, argument| {
-            if matches!(argument, ast::Expr::Dict(_)) {
+            if let ast::Expr::Dict(config) = argument {
+                needs_objects = defines_logging_objects(config);
                 return checker.expr_expected(argument, documents::MAP);
             }
             let value = checker.expr(argument)?;
@@ -153,6 +188,11 @@ impl Checker<'_> {
             }
             checker.document_coerce(value, documents::MAP, argument)
         })?;
+        if needs_objects {
+            let error = self.scoped_builtin_error("logging.config.dictConfig", call);
+            self.defer_object_error(&error);
+            return Ok(Expr::none());
+        }
         let op = if let Some(kind) = scalar {
             args.order.push(args.values.len());
             args.values.push(Expr::integer(kind));
@@ -161,6 +201,20 @@ impl Checker<'_> {
             Log::DictConfig
         };
         Ok(self.ordered_builtin(Builtin::Logging(op), Type::None, args))
+    }
+
+    /// Use the public weak registry, which keeps live handlers available to later shutdown calls.
+    pub(super) fn logging_shutdown(&self, call: &ast::ExprCall) -> Result<Expr, String> {
+        if !call.arguments.is_empty() {
+            return Err(error(
+                self.source,
+                call,
+                "logging.shutdown arguments require --runtime-imports",
+            ));
+        }
+        let error = self.scoped_builtin_error("logging.shutdown", call);
+        self.defer_object_error(&error);
+        Ok(Expr::none())
     }
 
     /// Read the configuration path only after evaluating all call arguments.
@@ -179,8 +233,34 @@ impl Checker<'_> {
                 Some(Expr::absent(self.types.optional(Type::Str))),
             ),
         ];
-        let args = self.arguments(call, &parameters, None)?;
-        Ok(self.ordered_builtin(Builtin::Logging(Log::FileConfig), Type::None, args))
+        let mut needs_objects = calls::has_unpacking(call);
+        if !needs_objects {
+            let args = self.arguments_with(call, &parameters, None, |checker, index, node| {
+                let expected = parameters[index].ty;
+                // A defaults literal can mix value types. Check its entries as a document.
+                if index == 1 && matches!(node, ast::Expr::Dict(_)) {
+                    needs_objects = true;
+                    return checker.expr_expected(node, documents::MAP);
+                }
+                let value = checker.expr_expected_if(node, expected, |_, _| true)?;
+                Ok(checker.coerce(value, expected, node).unwrap_or_else(|_| {
+                    needs_objects = true;
+                    // This argument list will be discarded after checking the remaining inputs.
+                    Expr::none()
+                }))
+            })?;
+            if !needs_objects {
+                return Ok(self.ordered_builtin(
+                    Builtin::Logging(Log::FileConfig),
+                    Type::None,
+                    args,
+                ));
+            }
+        }
+        // The Python configurator also returns None. Keep checking the caller before fallback.
+        let error = self.scoped_builtin_error("logging.config.fileConfig", call);
+        self.defer_object_error(&error);
+        Ok(Expr::none())
     }
 
     pub(super) fn logging_level_map(&self, names: bool) -> Expr {

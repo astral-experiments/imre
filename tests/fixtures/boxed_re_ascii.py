@@ -4,6 +4,30 @@ import re
 def current():
     from string import Template
 
+    unknown = re.compile("(?i)ab", 0x123001)
+    assert unknown.flags == (0x123001 | re.I | re.U)
+    assert repr(unknown) == "re.compile('(?i)ab', re.IGNORECASE|0x123001)"
+    assert unknown.fullmatch("AB") and unknown.fullmatch("AC") is None
+    assert re.fullmatch("ab", "AB", 0x123001) is None
+    signed = re.compile(b"x+", -512)
+    assert signed.flags == -512 and repr(signed) == "re.compile(b'x+', 0xfffffe00)"
+    assert signed.fullmatch(b"xx") and signed.fullmatch(b"X") is None
+    try:
+        re.compile("x", 1 << 31)
+    except OverflowError as error:
+        assert str(error) == "Python int too large to convert to C int"
+    else:
+        raise AssertionError("out-of-range pattern flags accepted")
+
+    high = chr(0xd800)
+    assert "<%-4.2s>" % ("é" + high + "a") == "<é" + high + "  >"
+    members = "[%s]" % ("é" + high)
+    for char in ("é", high):
+        assert re.fullmatch(members, char).group() == char
+    assert re.fullmatch(members, chr(0xf0000)) is None
+    assert re.fullmatch("[^" + high + "]", chr(0xf0000))
+    assert re.fullmatch("[^" + high + "]", high) is None
+
     for flags in (re.I, re.I | re.X):
         pattern = re.compile(r"(?P<ascii>(?a:[a-z]))(?P<unicode>[a-z])", flags)
         assert pattern.fullmatch("KK").groups() == ("K", "K")
@@ -217,6 +241,11 @@ def current():
             locale_ref = re.compile(rb"([a-c]*)\1", re.L | re.I)
             assert locale_ref.fullmatch(b"AbCaBc").group(1) == b"AbC"
             assert locale_ref.fullmatch(b"AbCac") is None
+            # A negated singleton is one literal, while a range or compound set tests each case.
+            for spelling in (b"[^A]", b"[^AA]"):
+                assert re.fullmatch(spelling, b"a", re.L | re.I) is None
+            for spelling in (b"[^AB]", b"[^A-A]", rb"[^AB] (?#\w)", rb"[^AB]  # \w"):
+                assert re.fullmatch(spelling, b"a", re.L | re.I | re.X).span() == (0, 1)
         finally:
             _locale.setlocale(_locale.LC_CTYPE, saved)
 
@@ -262,3 +291,91 @@ def current():
             assert (error.msg, error.pattern, error.pos) == (message, spelling, position)
         else:
             raise AssertionError("invalid group name accepted")
+
+    for flags in (0, re.X):
+        for spelling, expected in (
+            (r"[--1]", "-./01"),
+            (r"[&&1]", "1&"),
+            (r"[||1]", "1|"),
+            (r"[~~1]", "1~"),
+        ):
+            assert "".join(re.findall(spelling, "-./012&|~", flags)) == expected
+        negated = re.compile(rb"X([^--1])", flags)
+        assert negated.fullmatch(b"X2").group(1) == b"2"
+        assert negated.fullmatch(b"X/") is None
+
+    for pattern, message, position in (
+        (r"[\w-b]", r"bad character range \w-b", 1),
+        (b"[\xff-a]", r"bad character range \xff-a", 1),
+        (r"a**[\w-b]", "multiple repeat", 2),
+        (rb"[a-\D]", r"bad character range a-\D", 1),
+        (r"é[\x62-a]", r"bad character range \x-a", 4),
+        (rb"[\141-\w]", r"bad character range \1-\w", 3),
+    ):
+        try:
+            re.compile(pattern)
+        except re.PatternError as exc:
+            assert (exc.msg, exc.pattern, exc.pos) == (message, pattern, position)
+        else:
+            raise AssertionError("invalid range accepted")
+    assert re.fullmatch(r"[\w-]", "-") and re.fullmatch(rb"[\--0]", b"/")
+
+    import warnings
+
+    for spelling, data in (("[a&&b]", "a&xb"), (b"[a&&b]", b"a&xb")):
+        re.purge()
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", FutureWarning)
+            try:
+                re.compile(spelling)
+            except FutureWarning as exc:
+                assert str(exc) == "Possible set intersection at position 2"
+            else:
+                raise AssertionError("ambiguous class compiled without a warning")
+        with warnings.catch_warnings(record=True) as seen:
+            warnings.simplefilter("always", FutureWarning)
+            compiled = re.compile(spelling)
+            assert compiled is re.compile(spelling)
+            assert compiled.findall(data) == [data[:1], data[1:2], data[3:]]
+            assert len(seen) == 1 and seen[0].filename == __file__
+
+    pattern = re.compile(r"(?P<dots>\N{FULL STOP}+)[\N{LESS-THAN SIGN}-\N{GREATER-THAN SIGN}]")
+    assert pattern.fullmatch("..=").group("dots") == ".."
+    assert pattern.fullmatch("ab=") is None and pattern.fullmatch("..;") is None
+    assert re.fullmatch(r"\\N\{SNAKE\}", r"\N{SNAKE}")
+    assert re.fullmatch(r"(?x)[\N{HYPHEN-MINUS}\N{LINE FEED}]+", "-\n")
+    assert re.fullmatch(r"(\N{LATIN SMALL LETTER A})\1", "aa").group(1) == "a"
+    for name, point in (("lf", 10), ("cjk unified ideograph-4e00", 0x4E00),
+                        ("hangul syllable ga", 0xAC00), ("TANGUT IDEOGRAPH-18D08", 0x18D08),
+                        ("MENDE KIKAKUI SYLLABLE M174 MBOO", 0x1E89A)):
+        assert re.fullmatch(r"\N{" + name + "}", chr(point))
+    for spelling in (
+        r"\N{CJK UNIFIED IDEOGRAPH-04E00}", r"\N{CJK UNIFIED IDEOGRAPH-+4E00}",
+        r"\N{TANGUT IDEOGRAPH-18D09}", r"\N{OIL DRUMXXX}",
+        r"\N{KEYCAP NUMBER SIGN}", br"\N{SNAKE}", br"[\N{LF}]",
+    ):
+        try:
+            re.compile(spelling)
+        except re.PatternError:
+            pass
+        else:
+            raise AssertionError(spelling)
+
+    for spelling, message, pos, line, column in (
+        ("β\n" + r"[\N{UNKNOWN}]", "undefined character name 'UNKNOWN'", 3, 2, 2),
+        (r"\N{LF}\N", "missing {", 8, 1, 9),
+        (r"[\N{}]", "missing character name", 4, 1, 5),
+        (r"\N{a\}", "missing }, unterminated name", 3, 1, 4),
+        (br"[\N{LF}]", r"bad escape \N", 1, 1, 2),
+        (r"\N{SNAKE}(", "missing ), unterminated subpattern", 9, 1, 10),
+        (r"\N{LF}**", "multiple repeat", 7, 1, 8),
+        (r"a**\N{BAD}", "multiple repeat", 2, 1, 3),
+        (r"(?:\N{LF})\9", "invalid group reference 9", 11, 1, 12),
+    ):
+        try:
+            re.compile(spelling)
+        except re.PatternError as exc:
+            assert exc.pattern == spelling and exc.msg == message
+            assert (exc.pos, exc.lineno, exc.colno) == (pos, line, column)
+        else:
+            raise AssertionError(spelling)

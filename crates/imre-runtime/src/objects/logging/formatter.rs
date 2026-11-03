@@ -1,7 +1,6 @@
 //! Percent, brace and template formatting over the actual fields of native log records.
 use crate::StrOwner;
 use std::sync::LazyLock;
-use std::time::Duration;
 
 use regex_automata::meta::Regex;
 use ruff_python_literal::format::{FormatParseError, FormatPart, FormatString, FromTemplate};
@@ -68,15 +67,17 @@ fn braces(fmt: &str) -> Result<Vec<FormatPart>> {
 enum Dollar<'a> {
     Text(&'a str),
     Field(&'a str),
+    /// Prefix through the bare '$', as used by string.Template for its error location.
+    Invalid(&'a str),
 }
 
 /// Template names use ASCII identifiers, even when the surrounding text is Unicode.
-fn dollars(mut fmt: &str) -> Result<Vec<Dollar<'_>>> {
-    let mut tokens = Vec::new();
+fn visit_dollars(template: &str, mut visit: impl FnMut(Dollar<'_>) -> Result<()>) -> Result<()> {
+    let mut fmt = template;
     while let Some((literal, tail)) = fmt.split_once('$') {
-        tokens.push(Dollar::Text(literal));
+        visit(Dollar::Text(literal))?;
         if let Some(rest) = tail.strip_prefix('$') {
-            tokens.push(Dollar::Text("$"));
+            visit(Dollar::Text("$"))?;
             fmt = rest;
             continue;
         }
@@ -90,13 +91,12 @@ fn dollars(mut fmt: &str) -> Result<Vec<Dollar<'_>>> {
             })
             .count();
         if len == 0 || (braced && !name[len..].starts_with('}')) {
-            return Err(invalid("bare '$' not allowed"));
+            return visit(Dollar::Invalid(&template[..template.len() - tail.len()]));
         }
-        tokens.push(Dollar::Field(&name[..len]));
+        visit(Dollar::Field(&name[..len]))?;
         fmt = &name[len + usize::from(braced)..];
     }
-    tokens.push(Dollar::Text(fmt));
-    Ok(tokens)
+    visit(Dollar::Text(fmt))
 }
 
 impl Formatter {
@@ -142,9 +142,18 @@ impl Formatter {
                 }
                 true
             }
-            Style::Dollar => dollars(self.fmt.as_str())?
-                .iter()
-                .any(|t| matches!(t, Dollar::Field(_))),
+            Style::Dollar => {
+                let mut any = false;
+                visit_dollars(self.fmt.as_str(), |part| {
+                    match part {
+                        Dollar::Field(_) => any = true,
+                        Dollar::Invalid(_) => return Err(invalid("bare '$' not allowed")),
+                        Dollar::Text(_) => {}
+                    }
+                    Ok(())
+                })?;
+                any
+            }
             Style::Brace => {
                 let mut any = false;
                 for part in braces(self.fmt.as_str())? {
@@ -220,14 +229,21 @@ impl Formatter {
     fn render(&self, r: &Record) -> Result<String> {
         let mut out = String::new();
         match self.style {
-            Style::Dollar => {
-                for part in dollars(self.fmt.as_str())? {
-                    match part {
-                        Dollar::Text(s) => append(&mut out, s)?,
-                        Dollar::Field(key) => write_display(&mut out, &self.get(r, key)?)?,
-                    }
+            Style::Dollar => visit_dollars(self.fmt.as_str(), |part| match part {
+                Dollar::Text(s) => append(&mut out, s),
+                Dollar::Field(key) => write_display(&mut out, &self.get(r, key)?),
+                Dollar::Invalid(prefix) => {
+                    let mut line = 0usize;
+                    let mut col = 0;
+                    crate::objects::visit_line_fields(prefix, false, |text| {
+                        line += 1;
+                        col = text.chars().count();
+                    });
+                    Err(error(format!(
+                        "Invalid placeholder in string: line {line}, col {col}"
+                    )))
                 }
-            }
+            })?,
             Style::Percent => {
                 let mut tail = self.fmt.as_str();
                 while let Some((literal, rest)) = tail.split_once('%') {
@@ -294,7 +310,8 @@ impl Formatter {
                     } else {
                         format_spec
                     };
-                    append(&mut out, &format_specifier(&v, &spec, "int")?)?;
+                    let type_name = if v.kind.raw() == 7 { "float" } else { "int" };
+                    append(&mut out, &format_specifier(&v, &spec, type_name)?)?;
                 }
             }
         }
@@ -323,7 +340,7 @@ impl Formatter {
         }
         let custom = date.filter(|s| !s.is_empty());
         let pattern = custom.unwrap_or(self.default_time.as_str());
-        let timestamp = super::format_timestamp(Some(pattern), &clock, Duration::ZERO);
+        let timestamp = super::format_timestamp(pattern, &clock);
         let Some(msec) = self
             .default_msec
             .as_ref()
@@ -407,12 +424,68 @@ fn number(v: &OwnedWord) -> Result<f64> {
     }
 }
 
-/// Apply Python's alignment after converting the scalar; the field width counts characters.
-pub(super) fn format_specifier(
+/// An omitted presentation type uses the shortest representation, or general
+/// format with a fractional digit when a precision is given.
+fn default_float(
     value: &OwnedWord,
-    spec: &str,
-    integer_name: &str,
+    flags: &str,
+    precision: &str,
+    alternate: bool,
 ) -> Result<String> {
+    if precision.is_empty() {
+        let number = f64::from_bits(value.word as u64);
+        let mut text = crate::floats::render(number).into_string();
+        text.try_reserve(2).map_err(|_| Error::allocation())?;
+        if alternate
+            && let Some(exp) = text.find('e')
+            && !text[..exp].contains('.')
+        {
+            text.insert(exp, '.');
+        }
+        if !text.starts_with('-')
+            && let Some(sign) = flags.chars().next().filter(|c| "+ ".contains(*c))
+        {
+            text.insert(0, sign);
+        }
+        return Ok(text);
+    }
+    let (mut text, _) = record::percent_value(&format!("{flags}{precision}g"), value)?;
+    // At most one decimal point and an exponent up to e+308 are appended.
+    text.try_reserve(6).map_err(|_| Error::allocation())?;
+    let number = text.trim_start_matches(['-', '+', ' ']);
+    let digits = number.trim_end_matches('.');
+    if !digits.bytes().all(|b| b.is_ascii_digit()) {
+        return Ok(text);
+    }
+    // Reserve one significant digit for the fraction. At the boundary where
+    // general format would use all available digits before the point, use e.
+    let places: usize = precision[1..]
+        .parse()
+        .map_err(|_| error("precision too big"))?;
+    if digits.len() == places.max(1) {
+        let exp = digits.len() - 1;
+        let start = text.len() - number.len();
+        let fraction = if alternate {
+            &digits[1..]
+        } else {
+            digits[1..].trim_end_matches('0')
+        };
+        text.truncate(start + 1 + fraction.len());
+        if alternate || text.len() > start + 1 {
+            text.insert(start + 1, '.');
+        }
+        use std::fmt::Write as _;
+        write!(text, "e+{exp:02}").unwrap();
+    } else if text.ends_with('.') {
+        text.push('0');
+    } else {
+        text.push_str(".0");
+    }
+    Ok(text)
+}
+
+/// Apply Python's alignment after converting the scalar; the field width counts characters.
+pub(super) fn format_specifier(value: &OwnedWord, spec: &str, type_name: &str) -> Result<String> {
     if spec.is_empty() {
         return display(value);
     }
@@ -434,7 +507,8 @@ pub(super) fn format_specifier(
     if sign.is_some() {
         tail = &tail[1..];
     }
-    let negative_zero = value.kind.raw() == 2 && tail.starts_with('z');
+    let float = value.kind.raw() == 7;
+    let negative_zero = (float || value.kind.raw() == 2) && tail.starts_with('z');
     if negative_zero {
         tail = &tail[1..];
     }
@@ -461,8 +535,14 @@ pub(super) fn format_specifier(
     };
     tail = &tail[size..];
     let group = tail.chars().next().filter(|c| ",_".contains(*c));
-    if group.is_some() {
+    if let Some(group) = group {
         tail = &tail[1..];
+        if matches!(
+            (group, tail.as_bytes().first()),
+            (',', Some(b'_')) | ('_', Some(b','))
+        ) {
+            return Err(error("Cannot specify both ',' and '_'."));
+        }
     }
     let precision = if let Some(rest) = tail.strip_prefix('.') {
         let n = rest.bytes().take_while(u8::is_ascii_digit).count();
@@ -477,8 +557,8 @@ pub(super) fn format_specifier(
     let numeric = matches!(value.kind.raw(), 1 | 2 | 7);
     let c = match tail {
         "" => {
-            if value.kind.raw() == 7 {
-                if precision.is_some() { 'g' } else { 's' }
+            if float {
+                'g'
             } else if numeric {
                 'd'
             } else {
@@ -486,15 +566,34 @@ pub(super) fn format_specifier(
             }
         }
         _ if tail.chars().count() == 1 => tail.chars().next().unwrap(),
-        _ if value.kind.raw() == 2 => {
+        _ if float || value.kind.raw() == 2 => {
             return Err(error(format!(
-                "Invalid format specifier '{spec}' for object of type '{integer_name}'"
+                "Invalid format specifier '{spec}' for object of type '{type_name}'"
             )));
         }
         _ => return Err(error(format!("Invalid format specifier '{spec}'"))),
     };
     let integer = value.kind.raw() == 2;
     let integer_code = matches!(c, 'b' | 'o' | 'd' | 'x' | 'X' | 'n' | 'c');
+    if float {
+        let valid_code = "eEfFgGn%".contains(c) || c == '\0';
+        let invalid_group = group.filter(|sep| {
+            !"deEfFgG%".contains(c) && c != '\0' && !(*sep == '_' && "boxX".contains(c))
+        });
+        if !valid_code || invalid_group.is_some() {
+            let code = if ('!'..='\x7f').contains(&c) {
+                c.to_string()
+            } else {
+                format!("\\x{:x}", c as u32)
+            };
+            if let Some(sep) = invalid_group {
+                return Err(error(format!("Cannot specify '{sep}' with '{code}'.")));
+            }
+            return Err(error(format!(
+                "Unknown format code '{code}' for object of type '{type_name}'"
+            )));
+        }
+    }
     if integer && integer_code {
         if negative_zero {
             return Err(error(
@@ -530,7 +629,7 @@ pub(super) fn format_specifier(
         }
     } else if integer && !"eEfFgG%".contains(c) {
         return Err(error(format!(
-            "Unknown format code '{c}' for object of type '{integer_name}'"
+            "Unknown format code '{c}' for object of type '{type_name}'"
         )));
     }
     let flags = format!(
@@ -539,7 +638,9 @@ pub(super) fn format_specifier(
         if alternate { "#" } else { "" }
     );
     let precision = precision.map(|p| format!(".{p}")).unwrap_or_default();
-    let mut s = if c == '%' {
+    let mut s = if float && (tail.is_empty() || c == '\0') {
+        default_float(value, &flags, &precision, alternate)?
+    } else if c == '%' {
         let n = number(value)? * 100.0;
         let spec = format!("{flags}{precision}f");
         let temp = record::float(n);
@@ -579,6 +680,24 @@ pub(super) fn format_specifier(
     } else {
         record::percent_value(&format!("{flags}{precision}{c}"), value)?.0
     };
+    if negative_zero
+        && s.starts_with('-')
+        && s[1..]
+            .split(['e', 'E', '%'])
+            .next()
+            .unwrap()
+            .bytes()
+            .all(|b| matches!(b, b'0' | b'.'))
+    {
+        s.replace_range(
+            ..1,
+            match sign {
+                Some('+') => "+",
+                Some(' ') => " ",
+                _ => "",
+            },
+        );
+    }
     let sign_len = usize::from(c != 'c' && s.starts_with(['-', '+', ' ']));
     let prefix_len = if integer && alternate && matches!(c, 'b' | 'o' | 'x' | 'X') {
         2
@@ -586,52 +705,49 @@ pub(super) fn format_specifier(
         0
     };
     let head = sign_len + prefix_len;
+    let base_digits = integer && matches!(c, 'b' | 'o' | 'x' | 'X');
+    let digits = if base_digits {
+        s.len() - head
+    } else {
+        s[head..].bytes().take_while(u8::is_ascii_digit).count()
+    };
     if let Some(group) = group
-        && integer
-        && matches!(c, 'd' | 'b' | 'o' | 'x' | 'X')
+        && numeric
+        && digits != 0
+        && c != 'c'
     {
-        let step = if c == 'd' { 3 } else { 4 };
-        let digits = s.len() - head;
+        let step = if base_digits { 4 } else { 3 };
+        let suffix = &s[head + digits..];
         let zeros = if fill == '0' && align == Some('=') {
-            let target = width.saturating_sub(head);
+            let target = width.saturating_sub(head + suffix.len());
             target
                 .saturating_sub(target.saturating_sub(1) / (step + 1))
                 .saturating_sub(digits)
         } else {
             0
         };
-        let digits = digits + zeros;
+        let total = digits + zeros;
         let mut grouped = String::new();
-        let bytes = head
-            .checked_add(digits)
-            .and_then(|n| n.checked_add((digits - 1) / step))
+        let bytes = s
+            .len()
+            .checked_add(zeros)
+            .and_then(|n| n.checked_add((total - 1) / step))
             .ok_or_else(|| Error::new(Kind::OverflowError, "formatted string is too long"))?;
         grouped
             .try_reserve_exact(bytes)
             .map_err(|_| Error::new(Kind::MemoryError, "formatted string is too long"))?;
         grouped.push_str(&s[..head]);
         for (i, digit) in std::iter::repeat_n(b'0', zeros)
-            .chain(s.bytes().skip(head))
+            .chain(s[head..head + digits].bytes())
             .enumerate()
         {
-            if i != 0 && (digits - i).is_multiple_of(step) {
+            if i != 0 && (total - i).is_multiple_of(step) {
                 grouped.push(group);
             }
             grouped.push(char::from(digit));
         }
+        grouped.push_str(suffix);
         s = grouped;
-    } else if let Some(group) = group
-        && numeric
-    {
-        let start = s.find(|ch: char| ch.is_ascii_digit()).unwrap_or(s.len());
-        let end = s[start..]
-            .find(|ch: char| !ch.is_ascii_digit())
-            .map_or(s.len(), |i| start + i);
-        for i in (start + 1..end).rev() {
-            if (end - i) % 3 == 0 {
-                s.insert(i, group);
-            }
-        }
     }
     let count = width.saturating_sub(s.chars().count());
     let align = align.unwrap_or(if numeric { '>' } else { '<' });

@@ -7,12 +7,27 @@ pub(super) use scanstring::scanstring;
 
 use std::collections::HashMap;
 
-use super::{Context, Error, FALSE, Id, NONE, Result, TRUE, Value};
+use super::{Context, Error, FALSE, Id, NONE, Result, TRUE, Value, required_args};
 use crate::objects::{
     DecodedJson, JsonNumber, JsonTokenError, decode_json_tokens_at, write_json_codepoints,
     write_json_fragment, write_json_string,
 };
 use crate::{Str, StrOwner};
+
+/// Recognize an exact dict's bound getter without inspecting an arbitrary parse_constant hook.
+pub(super) fn is_constants_lookup(ctx: &Context, constants: Id, hook: Id) -> bool {
+    let Value::Method {
+        receiver,
+        callable,
+        explicit: false,
+    } = ctx.heap.get(hook)
+    else {
+        return false;
+    };
+    *receiver == constants
+        && matches!(ctx.heap.get(constants), Value::Dict(_))
+        && matches!(ctx.heap.get(*callable), Value::Native(name) if name == "dict.__getitem__")
+}
 
 /// Scan one value at a Python character offset and return its value and end offset.
 pub(super) fn scan_once(ctx: &mut Context, constant: Id, input: Id, idx: Id) -> Result<Id> {
@@ -360,7 +375,7 @@ pub(super) fn encoder_call(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id
     else {
         return Err(bad_state());
     };
-    let argument = encoder_state::required_args(
+    let argument = required_args(
         "_iterencode",
         positional,
         kwargs,
@@ -453,6 +468,63 @@ pub(super) fn encoder_call(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id
     Ok(ctx.alloc(Value::Tuple(vec![text])))
 }
 
+/// Exact JSON scalars have no Python callbacks or child references.
+fn json_scalar(ctx: &Context, id: Id) -> bool {
+    matches!(
+        ctx.heap.get(id),
+        Value::None
+            | Value::Bool(_)
+            | Value::Int(_)
+            | Value::Float(_)
+            | Value::Str(_)
+            | Value::SurrogateStr(_)
+    )
+}
+
+fn scalar_entries(ctx: &Context, entries: &[(Id, Id)]) -> bool {
+    entries
+        .iter()
+        .all(|&(key, value)| json_scalar(ctx, key) && json_scalar(ctx, value))
+}
+
+/// Prove a small replacement contains only plain JSON data. Charge repeated
+/// references against the same budget so cycles and shared subgraphs stay bounded.
+fn plain_replacement(ctx: &Context, id: Id, budget: &mut usize) -> bool {
+    let Some(next) = budget.checked_sub(1) else {
+        return false;
+    };
+    *budget = next;
+    match ctx.heap.get(id) {
+        Value::Tuple(items) | Value::List(items) => items
+            .iter()
+            .all(|&item| plain_replacement(ctx, item, budget)),
+        Value::Dict(entries) => {
+            entries.ordered_nodes().is_empty()
+                && entries.iter().all(|&(key, value)| {
+                    plain_replacement(ctx, key, budget) && plain_replacement(ctx, value, budget)
+                })
+        }
+        _ => json_scalar(ctx, id),
+    }
+}
+
+/// Test whether dropping an encoder callback result can run observable cleanup.
+fn observe_release(ctx: &Context, result: Id) -> bool {
+    if !ctx.heap.observes_released_roots() {
+        return false;
+    }
+    if let Value::Dict(entries) = ctx.heap.get(result) {
+        // An ordered node can still own a key removed through a dict descriptor.
+        if !entries.ordered_nodes().is_empty() {
+            return true;
+        }
+        if scalar_entries(ctx, entries) {
+            return false;
+        }
+    }
+    ctx.heap.could_release_callback_result(result) && !plain_replacement(ctx, result, &mut 64)
+}
+
 impl Encoder {
     /// Keep the object in the caller's marker dictionary until its encoding succeeds.
     fn mark(&self, ctx: &mut Context, object: Id) -> Result<Option<(Id, Id)>> {
@@ -477,18 +549,22 @@ impl Encoder {
         };
         let roots = ctx.heap.temporary_mark();
         let encoded = ctx.call(quote, super::super::copy_ids(&[id])?, Vec::new())?;
-        let Some(storage) = ctx.string_storage(encoded) else {
-            let class = ctx.exact_type(encoded)?;
-            let name = ctx.class_name(class);
-            let name = &name[..name.floor_char_boundary(80)];
-            return Err(Error::new(
-                "TypeError",
-                format!("encoder() must return a string, not {name}"),
-            ));
+        ctx.heap.reserve_temporaries(1)?;
+        ctx.heap.keep(encoded);
+        let outcome = if let Some(storage) = ctx.string_storage(encoded) {
+            self.output.raw(ctx.heap.get(storage))
+        } else {
+            ctx.exact_type(encoded).and_then(|class| {
+                let name = ctx.class_name(class);
+                let name = &name[..name.floor_char_boundary(80)];
+                Err(Error::new(
+                    "TypeError",
+                    format!("encoder() must return a string, not {name}"),
+                ))
+            })
         };
-        self.output.raw(ctx.heap.get(storage))?;
-        ctx.heap.release_temporaries_since(roots);
-        Ok(())
+        Self::release_encoded(ctx, roots, encoded, outcome)
+            .map_err(|exc| notes::live_error(ctx, exc))
     }
 
     fn value(&mut self, ctx: &mut Context, id: Id, depth: usize) -> Result<()> {
@@ -524,85 +600,118 @@ impl Encoder {
                 ctx.heap.keep(id);
                 let sequence =
                     ctx.builtin_slot_accepts(id, "list") || ctx.builtin_slot_accepts(id, "tuple");
-                let contents = if sequence && matches!(ctx.heap.get(id), Value::Instance { .. }) {
-                    Self::snapshot(ctx, id)?
-                } else {
-                    id
-                };
-                // Materialize subclass iteration before detecting a repeated container. A
-                // second call may return an empty sequence and end the recursion itself.
-                let empty = match ctx.heap.get(contents) {
-                    Value::List(items)
-                    | Value::Tuple(items)
-                    | Value::NamedTuple { values: items, .. }
-                        if items.is_empty() =>
-                    {
-                        Some("[]")
-                    }
-                    _ if ctx.dict_entries(id).is_some_and(<[_]>::is_empty) => Some("{}"),
-                    _ => None,
-                };
-                if let Some(empty) = empty {
-                    write_json_fragment(&mut self.output.text, empty)?;
-                    ctx.heap.release_temporaries_since(roots);
-                    return Ok(());
+                // A recursive subclass can end iteration by returning an empty snapshot.
+                if sequence && matches!(ctx.heap.get(id), Value::Instance { .. }) {
+                    let snapshot = Self::snapshot(ctx, id, None)?;
+                    let result = self.write_nested(ctx, id, depth, sequence, snapshot);
+                    return Self::release_encoded(ctx, roots, snapshot, result)
+                        .map_err(|exc| notes::live_error(ctx, exc));
                 }
-                let marker = self.mark(ctx, id)?;
-                // The accelerator prepares its separator before visiting any
-                // items, even if every key of the nonempty dict will be skipped.
-                if let Some(indent) = self.indent
-                    && (sequence || ctx.dict_storage(id).is_some())
-                    && ctx.string_storage(indent).is_none()
-                {
-                    let class = ctx.exact_type(indent)?;
-                    let name = ctx.class_name(class);
-                    return Err(Error::new(
-                        "TypeError",
-                        format!(
-                            "can only concatenate str (not \"{}\") to str",
-                            &name[..name.floor_char_boundary(200)]
-                        ),
-                    ));
-                }
-                self.nesting += 1;
-                match ctx.heap.get(contents) {
-                    Value::List(_) | Value::Tuple(_) | Value::NamedTuple { .. } => {
-                        write_json_fragment(&mut self.output.text, "[")?;
-                        let mut i = 0;
-                        while let Value::List(items)
-                        | Value::Tuple(items)
-                        | Value::NamedTuple { values: items, .. } = ctx.heap.get(contents)
-                        {
-                            let Some(&item) = items.get(i) else { break };
-                            self.separator(ctx, i != 0, depth + 1)?;
-                            self.value(ctx, item, depth + 1)
-                                .map_err(|e| noted(ctx, e, id, Location::Index(i)))?;
-                            i += 1;
-                        }
-                        self.close(ctx, "]", i != 0, depth)?;
-                    }
-                    Value::Dict(_) | Value::DefaultDict { .. } => self.object(ctx, id, depth)?,
-                    Value::Instance {
-                        dictionary: Some(_),
-                        ..
-                    } => self.object_items(ctx, id, depth)?,
-                    _ => {
-                        let result =
-                            ctx.call(self.default, super::super::copy_ids(&[id])?, Vec::new())?;
-                        self.value(ctx, result, depth)
-                            .map_err(|e| noted(ctx, e, id, Location::Object))?;
-                    }
-                }
-                self.nesting -= 1;
-                if let Some((dict, key)) = marker
-                    && super::builtins::remove_dict_item(ctx, dict, key)?.is_none()
-                {
-                    return Err(ctx.exception("KeyError", &[key]));
-                }
+                self.write_nested(ctx, id, depth, sequence, id)?;
                 ctx.heap.release_temporaries_since(roots);
             }
         }
         Ok(())
+    }
+
+    fn write_nested(
+        &mut self,
+        ctx: &mut Context,
+        id: Id,
+        depth: usize,
+        sequence: bool,
+        contents: Id,
+    ) -> Result<()> {
+        let empty = match ctx.heap.get(contents) {
+            Value::List(items) | Value::Tuple(items) | Value::NamedTuple { values: items, .. }
+                if items.is_empty() =>
+            {
+                Some("[]")
+            }
+            _ if ctx.dict_entries(id).is_some_and(<[_]>::is_empty) => Some("{}"),
+            _ => None,
+        };
+        if let Some(empty) = empty {
+            write_json_fragment(&mut self.output.text, empty)?;
+            return Ok(());
+        }
+        let marker = self.mark(ctx, id)?;
+        // The accelerator prepares its separator before visiting any
+        // items, even if every key of the nonempty dict will be skipped.
+        if let Some(indent) = self.indent
+            && (sequence || ctx.dict_storage(id).is_some())
+            && ctx.string_storage(indent).is_none()
+        {
+            let class = ctx.exact_type(indent)?;
+            let name = ctx.class_name(class);
+            return Err(Error::new(
+                "TypeError",
+                format!(
+                    "can only concatenate str (not \"{}\") to str",
+                    &name[..name.floor_char_boundary(200)]
+                ),
+            ));
+        }
+        self.nesting += 1;
+        match ctx.heap.get(contents) {
+            Value::List(_) | Value::Tuple(_) | Value::NamedTuple { .. } => {
+                write_json_fragment(&mut self.output.text, "[")?;
+                let mut i = 0;
+                while let Value::List(items)
+                | Value::Tuple(items)
+                | Value::NamedTuple { values: items, .. } = ctx.heap.get(contents)
+                {
+                    let Some(&item) = items.get(i) else { break };
+                    self.separator(ctx, i != 0, depth + 1)?;
+                    self.value(ctx, item, depth + 1)
+                        .map_err(|e| noted(ctx, e, id, Location::Index(i)))?;
+                    i += 1;
+                }
+                self.close(ctx, "]", i != 0, depth)?;
+            }
+            Value::Dict(_) | Value::DefaultDict { .. } => self.object(ctx, id, depth)?,
+            Value::Instance {
+                dictionary: Some(_),
+                ..
+            } => self.object_items(ctx, id, depth)?,
+            _ => {
+                let mark = ctx.heap.temporary_mark();
+                let result = ctx.call(self.default, super::super::copy_ids(&[id])?, Vec::new())?;
+                ctx.heap.reserve_temporaries(1)?;
+                ctx.heap.keep(result);
+                let encoded = self.value(ctx, result, depth);
+                // Release the replacement before formatting the object's error note.
+                Self::release_encoded(ctx, mark, result, encoded)
+                    .map_err(|exc| notes::noted_instance(ctx, exc, id, Location::Object))?;
+            }
+        }
+        self.nesting -= 1;
+        if let Some((dict, key)) = marker
+            && super::builtins::remove_dict_item(ctx, dict, key)?.is_none()
+        {
+            return Err(ctx.exception("KeyError", &[key]));
+        }
+        Ok(())
+    }
+
+    /// Drop a callback's intermediate value before the next member. A finalizer can
+    /// mutate both the enclosing container and the exception being propagated.
+    fn release_encoded(
+        ctx: &mut Context,
+        mark: usize,
+        value: Id,
+        outcome: Result<()>,
+    ) -> std::result::Result<(), Id> {
+        let collect = observe_release(ctx, value);
+        let exception = outcome.err().map(|error| ctx.raised_instance(error));
+        ctx.heap.release_temporaries_since(mark);
+        if let Some(exception) = exception {
+            ctx.heap.keep(exception);
+        }
+        if collect {
+            ctx.collect_unreachable();
+        }
+        exception.map_or(Ok(()), Err)
     }
 
     /// Write a separator and the indentation before a sequence item or object member.
@@ -653,18 +762,7 @@ impl Encoder {
         if matches!(ctx.heap.get(id), Value::DefaultDict { .. }) {
             return self.object_items(ctx, id, depth);
         }
-        let scalar = |id| {
-            matches!(
-                ctx.heap.get(id),
-                Value::None
-                    | Value::Bool(_)
-                    | Value::Int(_)
-                    | Value::Float(_)
-                    | Value::Str(_)
-                    | Value::SurrogateStr(_)
-            )
-        };
-        if self.quote.is_some() || !entries.iter().all(|&(k, v)| scalar(k) && scalar(v)) {
+        if self.quote.is_some() || !scalar_entries(ctx, entries) {
             return if self.sort_keys == FALSE {
                 self.live_object(ctx, id, depth)
             } else {
@@ -708,8 +806,27 @@ impl Encoder {
     }
 
     /// Materialize a subclass iterator while keeping previously yielded values alive.
-    fn snapshot(ctx: &mut Context, source: Id) -> Result<Id> {
-        let iterator = ctx.iterator(source)?;
+    fn snapshot(ctx: &mut Context, source: Id, items_owner: Option<Id>) -> Result<Id> {
+        let iterator = ctx.iterator(source).map_err(|error| {
+            let ty = ctx.builtin("TypeError");
+            if !ctx.raised_error_matches(&error, ty) {
+                return error;
+            }
+            if let Some(owner) = items_owner {
+                let owner = super::diagnostic_type_name(ctx, owner);
+                let result = super::diagnostic_type_name(ctx, source);
+                Error::new(
+                    "TypeError",
+                    format!(
+                        "{}.items() returned a non-iterable (type {})",
+                        &owner[..owner.floor_char_boundary(200)],
+                        &result[..result.floor_char_boundary(200)],
+                    ),
+                )
+            } else {
+                Error::new("TypeError", "_iterencode_list needs a sequence")
+            }
+        })?;
         let list = ctx.alloc(Value::List(Vec::new()));
         super::builtins::call(ctx, "list.extend", &[list, iterator], &[])?;
         Ok(list)
@@ -717,15 +834,22 @@ impl Encoder {
 
     /// Read the mapping through its items method and sort the returned pairs when requested.
     fn object_items(&mut self, ctx: &mut Context, id: Id, depth: usize) -> Result<()> {
+        let mark = ctx.heap.temporary_mark();
         let method = ctx.lookup_attr(id, "items")?;
         let result = ctx.call(method, Vec::new(), Vec::new())?;
         let items = if matches!(ctx.heap.get(result), Value::List(_)) {
             result
         } else {
-            Self::snapshot(ctx, result)?
+            Self::snapshot(ctx, result, Some(id))?
         };
         ctx.heap.reserve_temporaries(1)?;
         ctx.heap.keep(items);
+        let result = self.write_pairs(ctx, id, depth, items);
+        // The C encoder releases the mapping's items while its marker is still set.
+        Self::release_encoded(ctx, mark, items, result).map_err(|exc| notes::live_error(ctx, exc))
+    }
+
+    fn write_pairs(&mut self, ctx: &mut Context, id: Id, depth: usize, items: Id) -> Result<()> {
         if ctx.truth(self.sort_keys)? {
             super::builtins::call(ctx, "list.sort", &[items], &[])?;
         }

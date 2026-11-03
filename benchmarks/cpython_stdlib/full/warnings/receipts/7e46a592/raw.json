@@ -1,0 +1,240 @@
+{
+  "head": "7e46a5929afff9a96d78324b28608570b633f6c8",
+  "source_sha256": "3b00dac0c24bbaf28b3f442402c95d7850f50b567f94d8378d950513150e0943",
+  "toolchain": {
+    "head": "7e46a5929afff9a96d78324b28608570b633f6c8",
+    "tree": "91abab25e3db7c8e9c661fffca74132ebde65942",
+    "repo": "/workspace/scratch/warnings-next/public-merged-fixes",
+    "files": {
+      "imre": "684c03625fbe91dc5cc2674ed0ef20ad93c6c9aace510dc0ea5a24d3fbc57e7a",
+      "libimre_runtime.a": "a5c884ccd9d9631d5b62ceb68fae26f0cb3c36002689b5211e865eb6e5a7a87d"
+    },
+    "clang_sha256": "2b42733d127ff36d279c7bd7abd4247cd4d12234131b6170c22a6185a40b6e74"
+  },
+  "selection": "import sys\nimport unittest\nimport test.test_warnings as suite_module\n\n\ndef event(kind, identity, detail):\n    print(kind, identity, detail, sep=\"\\t\", flush=True)\n\n\ndef register(item):\n    if isinstance(item, unittest.TestSuite):\n        for child in item:\n            register(child)\n    else:\n        event(\"REGISTER\", item.id(), \"\")\n\n\nclass Result(unittest.TestResult):\n    def startTest(self, test):\n        super().startTest(test)\n        event(\"START\", test.id(), \"\")\n\n    def stopTest(self, test):\n        super().stopTest(test)\n        event(\"STOP\", test.id(), \"\")\n\n    def addSuccess(self, test):\n        super().addSuccess(test)\n        event(\"PASS\", test.id(), \"\")\n\n    def addSkip(self, test, reason):\n        super().addSkip(test, reason)\n        event(\"SKIP\", test.id(), repr(reason))\n\n    def addFailure(self, test, err):\n        super().addFailure(test, err)\n        event(\"FAIL\", test.id(), repr(self.failures[-1][1]))\n\n    def addError(self, test, err):\n        super().addError(test, err)\n        event(\"ERROR\", test.id(), repr(self.errors[-1][1]))\n\n    def addExpectedFailure(self, test, err):\n        super().addExpectedFailure(test, err)\n        event(\"XFAIL\", test.id(), repr(self.expectedFailures[-1][1]))\n\n    def addUnexpectedSuccess(self, test):\n        super().addUnexpectedSuccess(test)\n        event(\"XPASS\", test.id(), \"\")\n\n    def addSubTest(self, test, subtest, err):\n        super().addSubTest(test, subtest, err)\n        if err is None:\n            event(\"SUBPASS\", test.id(), repr(subtest.id()))\n        else:\n            event(\"SUBFAIL\", test.id(), repr((subtest.id(), str(err[1]))))\n\n\ndef fingerprint(label, provider):\n    if provider is None:\n        event(\"PROVIDER\", label, \"None\")\n    else:\n        event(\"PROVIDER\", label, repr((provider.__name__, getattr(provider, \"__file__\", None),\n              type(provider.warn).__name__, getattr(provider.warn, \"__module__\", None),\n              getattr(provider, \"_use_context\", None))))\n\n\nfingerprint(\"original\", suite_module.original_warnings)\nfingerprint(\"C\", suite_module.c_warnings)\nfingerprint(\"PurePython\", suite_module.py_warnings)\nevent(\"PROVIDER_IDENTICAL\", \"C/PurePython\", str(suite_module.c_warnings is suite_module.py_warnings))\nsuite = unittest.defaultTestLoader.loadTestsFromNames(['test.test_warnings.DeprecatedTests.test_no_retained_references_to_wrapper_instance', 'test.test_warnings.DeprecatedTests.test_only_strings_allowed', 'test.test_warnings.PyWarnTests.test_stacklevel_import'])\nregister(suite)\nevent(\"COUNT\", \"registered\", str(suite.countTestCases()))\nresult = Result()\nresult.startTestRun()\nsuite.run(result)\nresult.stopTestRun()\nevent(\"END\", \"testsRun\", str(result.testsRun))\nif not result.wasSuccessful():\n    sys.exit(1)\n",
+  "runner": "import sys\n\nif len(sys.argv) != 3 or sys.argv[1] != \"/workspace/scratch/warnings-next/pairing/search\":\n    print(\"The suite launcher received a child interpreter invocation.\", file=sys.stderr)\n    sys.exit(125)\nprint(\"EXECUTABLE\", sys.executable, sep=\"\\t\", flush=True)\nsys.path.insert(0, sys.argv[1])\n__import__(sys.argv[2])\n",
+  "runs": {
+    "stock": {
+      "process": {
+        "argv": [
+          "/workspace/scratch/cpytools/bin/python3.14",
+          "-B",
+          "/workspace/shared/downloads/warnings-native-followup/pairing/launcher/runner.py",
+          "/workspace/scratch/warnings-next/pairing/search",
+          "selected_merged_fixes"
+        ],
+        "env": {
+          "PATH": "/usr/local/bin:/usr/bin:/bin",
+          "TMPDIR": "/workspace/scratch/warnings-next/pairing/stock/stock",
+          "TZ": "UTC",
+          "LC_ALL": "C.UTF-8",
+          "PYTHONDONTWRITEBYTECODE": "1",
+          "PYTHONHASHSEED": "0",
+          "PYTHONPATH": "/workspace/scratch/cpython/Lib"
+        },
+        "cwd": "/workspace/scratch/warnings-next/pairing/stock/stock",
+        "start": 1793668287.4153678,
+        "command_sha256": "c27397da5541f67655be462e128ca3d3eb6e0a8eb0d39036896c9042529f4304",
+        "runner_sha256": "087a5383ffb10dab1843b05f3876ec7c7780a6d2ea132db6a666e63455b61544",
+        "rc": 0,
+        "guard": null,
+        "elapsed_s": 1.66259765625,
+        "descendants": {},
+        "stdout_sha256": "414dd65ba10a341947f26c504a85febff1c912e056ff9c7004bd44af1b972db5",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stdout": [
+        "EXECUTABLE\t/workspace/scratch/cpytools/bin/python3.14\n",
+        "PROVIDER\toriginal\t('warnings', '/workspace/scratch/cpython/Lib/warnings.py', 'builtin_function_or_method', '_warnings', 0)\n",
+        "PROVIDER\tC\t('warnings', '/workspace/scratch/cpython/Lib/warnings.py', 'builtin_function_or_method', '_warnings', 0)\n",
+        "PROVIDER\tPurePython\t('_py_warnings', '/workspace/scratch/cpython/Lib/_py_warnings.py', 'function', '_py_warnings', 0)\n",
+        "PROVIDER_IDENTICAL\tC/PurePython\tFalse\n",
+        "REGISTER\ttest.test_warnings.DeprecatedTests.test_no_retained_references_to_wrapper_instance\t\n",
+        "REGISTER\ttest.test_warnings.DeprecatedTests.test_only_strings_allowed\t\n",
+        "REGISTER\ttest.test_warnings.PyWarnTests.test_stacklevel_import\t\n",
+        "COUNT\tregistered\t3\n",
+        "START\ttest.test_warnings.DeprecatedTests.test_no_retained_references_to_wrapper_instance\t\n",
+        "PASS\ttest.test_warnings.DeprecatedTests.test_no_retained_references_to_wrapper_instance\t\n",
+        "STOP\ttest.test_warnings.DeprecatedTests.test_no_retained_references_to_wrapper_instance\t\n",
+        "START\ttest.test_warnings.DeprecatedTests.test_only_strings_allowed\t\n",
+        "PASS\ttest.test_warnings.DeprecatedTests.test_only_strings_allowed\t\n",
+        "STOP\ttest.test_warnings.DeprecatedTests.test_only_strings_allowed\t\n",
+        "START\ttest.test_warnings.PyWarnTests.test_stacklevel_import\t\n",
+        "PASS\ttest.test_warnings.PyWarnTests.test_stacklevel_import\t\n",
+        "STOP\ttest.test_warnings.PyWarnTests.test_stacklevel_import\t\n",
+        "END\ttestsRun\t3\n"
+      ],
+      "stderr": ""
+    },
+    "O0": {
+      "process": {
+        "argv": [
+          "/workspace/scratch/warnings-next/pairing/public-7e46a592/O0/launcher",
+          "/workspace/scratch/warnings-next/pairing/search",
+          "selected_merged_fixes"
+        ],
+        "env": {
+          "PATH": "/usr/local/bin:/usr/bin:/bin",
+          "TMPDIR": "/workspace/scratch/warnings-next/pairing/public-7e46a592/O0",
+          "TZ": "UTC",
+          "LC_ALL": "C.UTF-8",
+          "PYTHONDONTWRITEBYTECODE": "1",
+          "PYTHONHASHSEED": "0"
+        },
+        "cwd": "/workspace/scratch/warnings-next/pairing/public-7e46a592/O0",
+        "start": 1793668784.9604201,
+        "command_sha256": "eaa666a8444274a14e49e6c5d6e3f810b1683268cdcba6790a0baea29ba7c309",
+        "runner_sha256": "087a5383ffb10dab1843b05f3876ec7c7780a6d2ea132db6a666e63455b61544",
+        "rc": 0,
+        "guard": null,
+        "elapsed_s": 87.72173690795898,
+        "descendants": {},
+        "stdout_sha256": "c149ae3cd33deed1154838e656c40273b5c21f1ecfa54af46bdc6f7ebee4e6ec",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stdout": [
+        "EXECUTABLE\t/usr/bin/python3\n",
+        "PROVIDER\toriginal\t('warnings', '<imre stdlib>/warnings.py', 'builtin_function_or_method', '_warnings', 0)\n",
+        "PROVIDER\tC\t('warnings', '<imre stdlib>/warnings.py', 'builtin_function_or_method', '_warnings', 0)\n",
+        "PROVIDER\tPurePython\t('_py_warnings', '<imre stdlib>/_py_warnings.py', 'function', '_py_warnings', 0)\n",
+        "PROVIDER_IDENTICAL\tC/PurePython\tFalse\n",
+        "REGISTER\ttest.test_warnings.DeprecatedTests.test_no_retained_references_to_wrapper_instance\t\n",
+        "REGISTER\ttest.test_warnings.DeprecatedTests.test_only_strings_allowed\t\n",
+        "REGISTER\ttest.test_warnings.PyWarnTests.test_stacklevel_import\t\n",
+        "COUNT\tregistered\t3\n",
+        "START\ttest.test_warnings.DeprecatedTests.test_no_retained_references_to_wrapper_instance\t\n",
+        "PASS\ttest.test_warnings.DeprecatedTests.test_no_retained_references_to_wrapper_instance\t\n",
+        "STOP\ttest.test_warnings.DeprecatedTests.test_no_retained_references_to_wrapper_instance\t\n",
+        "START\ttest.test_warnings.DeprecatedTests.test_only_strings_allowed\t\n",
+        "PASS\ttest.test_warnings.DeprecatedTests.test_only_strings_allowed\t\n",
+        "STOP\ttest.test_warnings.DeprecatedTests.test_only_strings_allowed\t\n",
+        "START\ttest.test_warnings.PyWarnTests.test_stacklevel_import\t\n",
+        "PASS\ttest.test_warnings.PyWarnTests.test_stacklevel_import\t\n",
+        "STOP\ttest.test_warnings.PyWarnTests.test_stacklevel_import\t\n",
+        "END\ttestsRun\t3\n"
+      ],
+      "stderr": "",
+      "build": {
+        "argv": [
+          "/workspace/scratch/warnings-next/pairing/bin/public-7e46a592/imre",
+          "build",
+          "/workspace/shared/downloads/warnings-native-followup/pairing/launcher/runner.py",
+          "--module-root",
+          "/workspace/shared/downloads/warnings-native-followup/pairing/launcher",
+          "--no-cache",
+          "--opt-level",
+          "0",
+          "--clang",
+          "/workspace/scratch/clang19/bin/clang",
+          "--runtime",
+          "/workspace/scratch/warnings-next/pairing/bin/public-7e46a592/libimre_runtime.a",
+          "-o",
+          "/workspace/scratch/warnings-next/pairing/public-7e46a592/O0/launcher"
+        ],
+        "env": {
+          "PATH": "/usr/local/bin:/usr/bin:/bin",
+          "TMPDIR": "/workspace/scratch/warnings-next/pairing/public-7e46a592/O0",
+          "TZ": "UTC",
+          "LC_ALL": "C.UTF-8",
+          "PYTHONDONTWRITEBYTECODE": "1",
+          "PYTHONHASHSEED": "0"
+        },
+        "cwd": "/workspace/scratch/warnings-next/pairing/public-7e46a592/O0",
+        "start": 1793668737.4172702,
+        "command_sha256": "684c03625fbe91dc5cc2674ed0ef20ad93c6c9aace510dc0ea5a24d3fbc57e7a",
+        "runner_sha256": "087a5383ffb10dab1843b05f3876ec7c7780a6d2ea132db6a666e63455b61544",
+        "rc": 0,
+        "guard": null,
+        "elapsed_s": 47.255345821380615,
+        "descendants": {},
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "204c576172903ca278338bda0caa1ebdc7a8d2f39d077e27aa2b019e003a1144"
+      }
+    },
+    "O3": {
+      "process": {
+        "argv": [
+          "/workspace/scratch/warnings-next/pairing/public-7e46a592/O3/launcher",
+          "/workspace/scratch/warnings-next/pairing/search",
+          "selected_merged_fixes"
+        ],
+        "env": {
+          "PATH": "/usr/local/bin:/usr/bin:/bin",
+          "TMPDIR": "/workspace/scratch/warnings-next/pairing/public-7e46a592/O3",
+          "TZ": "UTC",
+          "LC_ALL": "C.UTF-8",
+          "PYTHONDONTWRITEBYTECODE": "1",
+          "PYTHONHASHSEED": "0"
+        },
+        "cwd": "/workspace/scratch/warnings-next/pairing/public-7e46a592/O3",
+        "start": 1793669015.0058947,
+        "command_sha256": "85c03656c9b81a3a690228d85e6557ec2f86e816c548f6817f8bd5ea1f881b0a",
+        "runner_sha256": "087a5383ffb10dab1843b05f3876ec7c7780a6d2ea132db6a666e63455b61544",
+        "rc": 0,
+        "guard": null,
+        "elapsed_s": 97.75150561332703,
+        "descendants": {},
+        "stdout_sha256": "c149ae3cd33deed1154838e656c40273b5c21f1ecfa54af46bdc6f7ebee4e6ec",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stdout": [
+        "EXECUTABLE\t/usr/bin/python3\n",
+        "PROVIDER\toriginal\t('warnings', '<imre stdlib>/warnings.py', 'builtin_function_or_method', '_warnings', 0)\n",
+        "PROVIDER\tC\t('warnings', '<imre stdlib>/warnings.py', 'builtin_function_or_method', '_warnings', 0)\n",
+        "PROVIDER\tPurePython\t('_py_warnings', '<imre stdlib>/_py_warnings.py', 'function', '_py_warnings', 0)\n",
+        "PROVIDER_IDENTICAL\tC/PurePython\tFalse\n",
+        "REGISTER\ttest.test_warnings.DeprecatedTests.test_no_retained_references_to_wrapper_instance\t\n",
+        "REGISTER\ttest.test_warnings.DeprecatedTests.test_only_strings_allowed\t\n",
+        "REGISTER\ttest.test_warnings.PyWarnTests.test_stacklevel_import\t\n",
+        "COUNT\tregistered\t3\n",
+        "START\ttest.test_warnings.DeprecatedTests.test_no_retained_references_to_wrapper_instance\t\n",
+        "PASS\ttest.test_warnings.DeprecatedTests.test_no_retained_references_to_wrapper_instance\t\n",
+        "STOP\ttest.test_warnings.DeprecatedTests.test_no_retained_references_to_wrapper_instance\t\n",
+        "START\ttest.test_warnings.DeprecatedTests.test_only_strings_allowed\t\n",
+        "PASS\ttest.test_warnings.DeprecatedTests.test_only_strings_allowed\t\n",
+        "STOP\ttest.test_warnings.DeprecatedTests.test_only_strings_allowed\t\n",
+        "START\ttest.test_warnings.PyWarnTests.test_stacklevel_import\t\n",
+        "PASS\ttest.test_warnings.PyWarnTests.test_stacklevel_import\t\n",
+        "STOP\ttest.test_warnings.PyWarnTests.test_stacklevel_import\t\n",
+        "END\ttestsRun\t3\n"
+      ],
+      "stderr": "",
+      "build": {
+        "argv": [
+          "/workspace/scratch/warnings-next/pairing/bin/public-7e46a592/imre",
+          "build",
+          "/workspace/shared/downloads/warnings-native-followup/pairing/launcher/runner.py",
+          "--module-root",
+          "/workspace/shared/downloads/warnings-native-followup/pairing/launcher",
+          "--no-cache",
+          "--opt-level",
+          "3",
+          "--clang",
+          "/workspace/scratch/clang19/bin/clang",
+          "--runtime",
+          "/workspace/scratch/warnings-next/pairing/bin/public-7e46a592/libimre_runtime.a",
+          "-o",
+          "/workspace/scratch/warnings-next/pairing/public-7e46a592/O3/launcher"
+        ],
+        "env": {
+          "PATH": "/usr/local/bin:/usr/bin:/bin",
+          "TMPDIR": "/workspace/scratch/warnings-next/pairing/public-7e46a592/O3",
+          "TZ": "UTC",
+          "LC_ALL": "C.UTF-8",
+          "PYTHONDONTWRITEBYTECODE": "1",
+          "PYTHONHASHSEED": "0"
+        },
+        "cwd": "/workspace/scratch/warnings-next/pairing/public-7e46a592/O3",
+        "start": 1793668737.3187575,
+        "command_sha256": "684c03625fbe91dc5cc2674ed0ef20ad93c6c9aace510dc0ea5a24d3fbc57e7a",
+        "runner_sha256": "087a5383ffb10dab1843b05f3876ec7c7780a6d2ea132db6a666e63455b61544",
+        "rc": 0,
+        "guard": null,
+        "elapsed_s": 277.4671325683594,
+        "descendants": {},
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "d6b67c3920df91e896058fedf450f2147fab3ca1bf83ff991a9bd8affc99a9a3"
+      }
+    }
+  }
+}

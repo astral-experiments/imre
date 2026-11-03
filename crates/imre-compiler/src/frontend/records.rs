@@ -636,15 +636,12 @@ impl Checker<'_> {
             )
         });
         self.class = context.map(|context| context.class);
-        let lexical_base = context.and_then(|context| {
+        let lexical_owner = context.map(|context| {
             let classes = &self.classes.declarations;
             let origin = classes.definitions[context.class].method_origins[context.index];
-            classes.definitions[classes.ids[&origin]]
-                .bases
-                .first()
-                .copied()
+            classes.ids[&origin]
         });
-        self.super_method_base = context
+        self.super_method_owner = context
             .filter(|context| {
                 let classes = &self.classes.declarations;
                 matches!(
@@ -652,7 +649,7 @@ impl Checker<'_> {
                     MethodKind::Instance | MethodKind::Property | MethodKind::PropertySetter
                 ) && classes.definitions[context.class].initializer != Some(context.index)
             })
-            .and(lexical_base);
+            .and(lexical_owner);
         self.exception_formatter = context.and_then(|ctx| {
             let class = &self.classes.declarations.definitions[ctx.class];
             class.forwarder.as_ref()?;
@@ -667,7 +664,9 @@ impl Checker<'_> {
             if record.methods[context.index].name.as_str() != "__init__" {
                 return None;
             }
-            Some(lexical_base.map_or(BaseInitializer::Object, BaseInitializer::Record))
+            let storage = lexical_owner
+                .and_then(|owner| self.classes.declarations.definitions[owner].storage_base);
+            Some(storage.map_or(BaseInitializer::Object, BaseInitializer::Record))
         });
         self.class_receiver = context.and_then(|context| {
             let declaration = &self.classes.declarations.definitions[context.class];
@@ -717,12 +716,20 @@ impl Checker<'_> {
             None
         } else {
             let binding = self.graph.resolve(self.module, expression);
-            if let Some(Binding::Definition(definition)) = binding
-                && (self.classes.declarations.ids.contains_key(&definition)
-                    || self.types.namedtuple(definition).is_some())
-            {
-                // Static dispatch and constant folding can erase the class name from the IR.
-                self.class_reads.borrow_mut().insert(definition);
+            if let Some(Binding::Definition(definition)) = binding {
+                let namedtuple = self.types.namedtuple(definition).is_some();
+                if namedtuple
+                    && root.as_name_expr().is_some_and(|name| {
+                        self.names.contains_key(name.id.as_str())
+                            || self.comprehension_targets.contains(name.id.as_str())
+                    })
+                {
+                    return None;
+                }
+                if namedtuple || self.classes.declarations.ids.contains_key(&definition) {
+                    // Static dispatch and constant folding can erase the class name from the IR.
+                    self.class_reads.borrow_mut().insert(definition);
+                }
             }
             binding
         }
@@ -1252,6 +1259,12 @@ impl Checker<'_> {
             && let Some(names) = self.unittest_loader_names(call, class, object)?
         {
             return Ok(names);
+        }
+        if attribute.attr.as_str() == "assertIsInstance"
+            && let Some(receiver) = &receiver
+            && let Some(checked) = self.unittest_text_instance(call, class, receiver)?
+        {
+            return Ok(checked);
         }
         if matches!(attribute.attr.as_str(), "assertIn" | "assertNotIn")
             && let Some(receiver) = &receiver

@@ -1,3 +1,4 @@
+import sys
 from sys import path
 from types import GenericAlias
 import typing as t
@@ -17,12 +18,61 @@ print(TextIO.__bases__ == (t.IO,), BinaryIO.__orig_bases__ == (t.IO[bytes],))
 print(t.IO.__parameters__ == (t.AnyStr,), TextIO.__parameters__, BinaryIO.__parameters__)
 V = t.TypeVar("V")
 T = t.TypeVar("T", bound=str, covariant=True)
+assert t.TypeVar("Forward", bound="Accessor").__bound__.__forward_arg__ == "Accessor"
+try:
+    t.TypeVar("Invalid", int, bound=(1, 2))
+except TypeError as error:
+    assert str(error) == "Bound must be a type. Got (1, 2)."
+else:
+    raise AssertionError("invalid TypeVar bound was accepted")
 print(K.__name__, K.__module__, K.__bound__ is None, K.__constraints__)
 print(K is t.TypeVar("K"), T.__bound__ is str, T.__covariant__, t.TYPE_CHECKING)
 
 
 class Accessor(t.Generic[T]):
     pass
+
+
+def local_alias_names():
+    class C(t.Generic[K]):
+        pass
+
+    alias = C[int]
+    assert repr(alias) == f"{__name__}.local_alias_names.<locals>.C[int]"
+    assert alias.__module__ == __name__ and "__module__" in dir(alias)
+    assert alias.__name__ == alias.__qualname__ == "C"
+    C.__name__ = "Moved"
+    C.__module__ = "other"
+    assert alias.__module__ == __name__ and C[str].__module__ == "other"
+    assert C[int] is alias and alias.__origin__ is C and alias.__args__ == (int,)
+    assert alias.__name__ == alias.__qualname__ == "Moved"
+    marker = object()
+    for name in ("__module__", "__name__", "__qualname__"):
+        setattr(alias, name, marker)
+        assert getattr(alias, name) is marker and name in dir(alias)
+        delattr(alias, name)
+        assert getattr(alias, name) == ("typing" if name == "__module__" else "Moved")
+        try:
+            delattr(alias, name)
+        except AttributeError:
+            pass
+        else:
+            raise AssertionError("deleted an absent alias field")
+    assert C.__module__ == "other" and C[str].__name__ == "Moved"
+
+
+local_alias_names()
+
+
+class Slotted(t.Generic[T]):
+    __slots__ = ("value",)
+
+
+assert "__slots__" not in vars(t.Generic)
+for obj in (Slotted(), Slotted[int]()):
+    obj.value = 7
+    assert obj.value == 7 and not hasattr(obj, "__dict__")
+assert hasattr(Accessor[int](), "__dict__")
 
 
 # Parameterizations share class attributes through their common origin.
@@ -82,6 +132,19 @@ class Right:
     def select(self, arg):
         return "other"
 
+
+registry = t._overload_registry
+try:
+    t._overload_registry = type(registry)(registry.default_factory)
+    def temporary(x): pass
+    assert t.overload(temporary) is t._overload_dummy
+    assert t._overload_registry[__name__][temporary.__qualname__] == {temporary.__code__.co_firstlineno: temporary}
+    assert t.get_overloads(temporary) == [temporary]
+    assert t.get_overloads(Left.select) == []
+    t.clear_overloads()
+    assert t._overload_registry == {}
+finally:
+    t._overload_registry = registry
 
 old = t.get_overloads(Left.select)
 print(len(old), old[0](None, 1), old[1](None, 2), old[0] is t.get_overloads(Left().select)[0])
@@ -144,7 +207,77 @@ class Based(hook):
 
 print(hook.seen is Based.__orig_bases__, Based.__bases__ == (dict,))
 
+
+class BadBaseHook:
+    def __mro_entries__(self, bases):
+        return (object(),)
+
+
+for bad_base in (object(), BadBaseHook()):
+    ran = []
+    try:
+        class Invalid(t.List[int], bad_base):
+            ran.append(True)
+    except TypeError as error:
+        assert str(error) == "bases must be types"
+    else:
+        raise AssertionError("accepted a non-type base")
+    assert ran == [True]
+
+
+
+class OtherMeta(type):
+    pass
+
+
+ran = []
+try:
+    class InvalidTuple(t.NamedTuple, metaclass=OtherMeta):
+        ran.append(True)
+except TypeError as error:
+    assert "metaclass conflict" in str(error)
+else:
+    raise AssertionError("accepted incompatible NamedTuple metaclasses")
+assert not ran
+
 import collections.abc as cabc
+
+
+class Callback(t.Generic[rendered_spec, K]):
+    pass
+
+
+callback = Callback[[int, list[str]], bool]
+assert callback.__args__ == ((int, list[str]), bool)
+assert repr(callback) == f"{__name__}.Callback[[int, list[str]], bool]"
+assert repr(Callback[[], bool]) == f"{__name__}.Callback[[], bool]"
+assert repr(t.Literal[((int, (str, bool)),)]) == "typing.Literal[[int, [str, bool]]]"
+
+
+class ArgumentTuple(tuple):
+    def __iter__(self):
+        return iter((float,))
+
+
+assert repr(t.Literal[(ArgumentTuple((int,)),)]) == "typing.Literal[[float]]"
+assert repr(list[((int, str),)]) == "list[(<class 'int'>, <class 'str'>)]"
+assert repr(cabc.Callable[..., ()]) == "collections.abc.Callable[..., ()]"
+
+nested = int
+for _ in range(18):
+    nested = t.Literal[((nested,),)]
+saved_limit = sys.getrecursionlimit()
+try:
+    sys.setrecursionlimit(80)
+    try:
+        repr(nested)
+    except RecursionError:
+        pass
+    else:
+        raise AssertionError("tuple arguments lost their enclosing alias frames")
+    assert repr(callback) == f"{__name__}.Callback[[int, list[str]], bool]"
+finally:
+    sys.setrecursionlimit(saved_limit)
 
 
 class PlainCallable(t.Callable):

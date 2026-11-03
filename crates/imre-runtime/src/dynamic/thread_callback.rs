@@ -32,7 +32,9 @@ pub(super) struct Callback {
     values: Vec<Argument>,
     receiver: Option<(String, Argument)>,
     config: serde_json::Value,
-    automatic_gc: Arc<std::sync::atomic::AtomicBool>,
+    gc_settings: Arc<super::gc_schedule::GcSettings>,
+    allocation_traces: super::allocation_traces::AllocationTraces,
+    finalizing: Arc<std::sync::atomic::AtomicBool>,
 }
 
 fn unsupported() -> Error {
@@ -309,6 +311,8 @@ impl Callback {
                     let symbol = [
                         "_thread._count",
                         "sys.exit",
+                        "sys.get_coroutine_origin_tracking_depth",
+                        "sys.set_coroutine_origin_tracking_depth",
                         "gc.enable",
                         "gc.disable",
                         "gc.isenabled",
@@ -345,7 +349,9 @@ impl Callback {
             values,
             receiver: None,
             config: ctx.config.clone(),
-            automatic_gc: ctx.heap.automatic_gc.clone(),
+            gc_settings: ctx.heap.gc_settings.clone(),
+            allocation_traces: ctx.heap.allocation_traces.worker(),
+            finalizing: ctx.finalizing.clone(),
         })
     }
 
@@ -354,8 +360,11 @@ impl Callback {
     }
 
     pub(super) fn load(self) -> Result<(Context, Id, Vec<Id>)> {
-        let mut ctx = ffi::new_context(self.config, std::iter::empty::<String>());
-        ctx.heap.automatic_gc = self.automatic_gc;
+        let mut heap = super::Heap::new();
+        heap.allocation_traces = self.allocation_traces;
+        let mut ctx = ffi::new_context_with_heap(self.config, std::iter::empty::<String>(), heap);
+        ctx.heap.gc_settings = self.gc_settings;
+        ctx.finalizing = self.finalizing;
         let globals = ctx.scope(&self.module, None);
         let scope = if let Some((name, receiver)) = self.receiver {
             let value = match receiver {
@@ -377,9 +386,14 @@ impl Callback {
             span: None,
         };
         let code = match self.entry {
-            Entry::Native(entry) => {
-                ctx.prelinked_code(entry, scope, name, signature, (qualname, NONE), location)
-            }
+            Entry::Native(entry) => ctx.prelinked_code(
+                Body::Native(entry),
+                scope,
+                name,
+                signature,
+                (qualname, NONE),
+                location,
+            ),
             Entry::Source(original) => {
                 original.load(&mut ctx, scope, name, signature, qualname, location)?
             }

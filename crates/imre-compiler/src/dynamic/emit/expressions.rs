@@ -2,7 +2,7 @@ use ruff_python_ast as ast;
 use ruff_text_size::Ranged;
 
 use super::boolean::{Context as BooleanContext, Flow, Target};
-use super::{Body, Function};
+use super::{Body, DefinitionName, Function};
 
 enum Element<'a> {
     Value(&'a ast::Expr),
@@ -11,6 +11,31 @@ enum Element<'a> {
 
 impl Function<'_, '_> {
     pub(super) fn expr(&mut self, expr: &ast::Expr) -> String {
+        let position = imre_ast::expression_position(
+            expr,
+            &self.source.method_imports,
+            Some(&self.source.private_names),
+        );
+        let line = self.source.line(position);
+        let previous = self.expression_line;
+        if previous == line {
+            return self.expr_inner(expr);
+        }
+        self.expression_line = line;
+        self.line(&format!(
+            "call void @imre_dyn_expression_line(ptr %ctx, i32 {line})"
+        ));
+        let value = self.expr_inner(expr);
+        self.expression_line = previous;
+        if !self.terminated {
+            self.line(&format!(
+                "call void @imre_dyn_expression_line(ptr %ctx, i32 {previous})"
+            ));
+        }
+        value
+    }
+
+    fn expr_inner(&mut self, expr: &ast::Expr) -> String {
         match expr {
             ast::Expr::NoneLiteral(_) => "0".into(),
             ast::Expr::EllipsisLiteral(_) => "3".into(),
@@ -121,12 +146,21 @@ impl Function<'_, '_> {
                 };
                 let kwargs = self.arguments(&args, &v.arguments, &callable);
                 let span = self.expression_span(expr, &v.func, b'(');
+                // A caller inspecting this live frame needs the full call range, including
+                // simple and multiline calls for which traceback highlighting is suppressed.
+                let (start_line, start_col) = self.source.line_and_column(v.start());
+                let (end_line, end_col) = self.source.line_and_column(v.end());
+                let position = self
+                    .output
+                    .position([start_line, end_line, start_col, end_col]);
+                self.line(&format!(
+                    "call void @imre_dyn_call_position(ptr %ctx, ptr {position})"
+                ));
                 self.call_at(&callable, &args, &kwargs, &mark, span)
             }
             ast::Expr::Lambda(v) => self.define(
                 v.start(),
-                "<lambda>",
-                false,
+                DefinitionName::Plain("<lambda>"),
                 v.parameters.as_deref(),
                 None,
                 None,
@@ -160,8 +194,7 @@ impl Function<'_, '_> {
                 let iter = self.op("iter", &[&iterable]);
                 let step = self.define(
                     v.start(),
-                    "<genexpr>",
-                    false,
+                    DefinitionName::Plain("<genexpr>"),
                     None,
                     None,
                     None,

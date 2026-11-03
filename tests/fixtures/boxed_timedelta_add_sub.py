@@ -55,7 +55,52 @@ def test_datetime_shift():
     assert start + Reflected() is start
 
 
+def test_date_arithmetic():
+    events = []
+
+    class Child(date):
+        def __new__(cls, *args):
+            events.append(("new", args))
+            return date.__new__(cls, *args)
+
+        def __init__(self, *args):
+            events.append(("init", args))
+
+        def __rsub__(self, other):
+            return "reflected"
+
+    start = Child(2000, 2, 29)
+    events.clear()
+    # A negative microsecond has a normalized day field of -1.
+    step = timedelta(microseconds=-1)
+    for moved in [start + step, step + start, start - step]:
+        assert type(moved) is Child
+    assert events == [
+        (hook, ymd)
+        for ymd in [(2000, 2, 28), (2000, 2, 28), (2000, 3, 1)]
+        for hook in ("new", "init")
+    ]
+    later = date(2000, 3, 1)
+    assert later - start == "reflected"
+    assert date.__rsub__(start, later) == timedelta(1)
+    assert start - later == timedelta(-1)
+    assert date.max - date.min == timedelta(days=3652058)
+    assert date.__rsub__(start, step) is NotImplemented
+    dt = datetime(2000, 2, 29)
+    for method in (date.__add__, date.__radd__, date.__sub__, date.__rsub__):
+        assert method(start, dt) is NotImplemented
+        assert method(dt, step) is NotImplemented
+    for operation in [date.min.__add__, date.max.__sub__]:
+        try:
+            operation(step)
+        except OverflowError:
+            pass
+        else:
+            raise AssertionError("accepted an out-of-range date")
+
+
 def current():
+    test_date_arithmetic()
     test_datetime_shift()
     tick = timedelta.resolution
     two = timedelta(microseconds=2)

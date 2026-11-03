@@ -24,6 +24,7 @@ struct Imports {
     explicit_roots: Vec<PathBuf>,
     runtime_imports: bool,
     uses_import_builtin: bool,
+    imports_logging: bool,
     sys_names: HashSet<String>,
     operator_names: HashSet<String>,
     opcode_names: HashSet<String>,
@@ -109,6 +110,8 @@ impl Imports {
                 name,
                 "_imp"
                     | "_hashlib"
+                    | "ssl"
+                    | "_ssl"
                     | "atexit"
                     | "faulthandler"
                     | "code"
@@ -159,6 +162,8 @@ fn boxed_sys_export(name: &str) -> bool {
             | "implementation"
             | "exit"
             | "exc_info"
+            | "excepthook"
+            | "__excepthook__"
             | "exception"
     )
 }
@@ -211,6 +216,7 @@ impl<'a> Visitor<'a> for Imports {
                 for alias in &imp.names {
                     let name = alias.name.as_str();
                     let bound = alias.asname.as_ref().unwrap_or(&alias.name);
+                    self.imports_logging |= name == "logging";
                     if matches!(name, "__future__" | "_operator") {
                         self.runtime_imports = true;
                     }
@@ -234,6 +240,7 @@ impl<'a> Visitor<'a> for Imports {
             }
             Stmt::ImportFrom(imp) => {
                 let name = imp.module.as_ref().map_or("", |m| m.as_str());
+                self.imports_logging |= imp.level == 0 && name == "logging";
                 self.add(imp.level, name);
                 for a in &imp.names {
                     let suffix = a.name.as_str();
@@ -474,7 +481,9 @@ fn resolve(owner: &str, package: bool, level: u32, name: &str) -> Option<String>
 }
 
 pub(crate) enum ObjectOperation<'a> {
+    TracedEntry,
     Builtin,
+    OrderedCommandImport,
     ClassBody(&'a crate::modules::SourceGraph),
 }
 
@@ -513,14 +522,15 @@ pub(crate) fn compile(
     };
     // An ordinary entry can import a package that uses the object runtime without
     // accessing sys.path or installation metadata in the entry itself.
-    if !runtime_imports
-        && !(startup.is_some()
-            && (src.contains("urllib") || src.contains("ftplib") || src.contains("argparse")))
-        && !(src.contains("class") && src.contains('='))
-        && !(cfg!(unix) && src.contains("signal"))
-        && ![
+    let object_hint = runtime_imports
+        || startup.is_some()
+            && (src.contains("urllib") || src.contains("ftplib") || src.contains("argparse"))
+        || src.contains("class") && src.contains('=')
+        || cfg!(unix) && src.contains("signal")
+        || [
             "__future__",
             "hashlib",
+            "ssl",
             "_imp",
             "atexit",
             "faulthandler",
@@ -548,8 +558,13 @@ pub(crate) fn compile(
             "templatelib",
         ]
         .iter()
-        .any(|name| src.contains(name))
-    {
+        .any(|name| src.contains(name));
+    // Python normalizes non-ASCII identifiers, including imported module names.
+    let provider_hint = startup.is_some()
+        && !options.runtime_imports
+        && (src.contains("logging") || src.contains("tokenize") || !src.is_ascii());
+    let ordered_command = matches!(operation, Some(ObjectOperation::OrderedCommandImport));
+    if !object_hint && !provider_hint && !ordered_command {
         return Ok(None);
     }
     let Ok(mut first) = imports(
@@ -575,15 +590,29 @@ pub(crate) fn compile(
     let ftp_script = imports_provider("ftplib");
     let argparse_script = imports_provider("argparse");
     let provider_script = request_script || ftp_script || argparse_script;
-    if !(module_entry.is_some()
-        || first.runtime_imports
-        || operation.is_some()
-        || (runtime_imports && !first.names.is_empty())
-        || (first.uses_import_builtin && (startup.is_some() || options.runtime_imports))
-        || provider_script)
+    let object_entry = object_hint
+        && (module_entry.is_some()
+            || first.runtime_imports
+            || (operation.is_some() && !ordered_command)
+            || (runtime_imports && !first.names.is_empty())
+            || (first.uses_import_builtin && (startup.is_some() || options.runtime_imports))
+            || provider_script);
+    // Existing object imports keep their normal project-module lookup. Only a new
+    // startup fallback needs to verify that the imported provider is bundled.
+    let logging_script = !object_entry && provider_hint && first.imports_logging;
+    let tokenize_script = !object_entry && imports_provider("tokenize");
+    let ordered_only = !object_entry && !logging_script && !tokenize_script;
+    if ordered_only
+        && (!ordered_command
+            || first.uses_import_builtin
+            || first
+                .names
+                .iter()
+                .any(|(level, name)| *level != 0 || name == "__future__"))
     {
         return Ok(None);
     }
+    let provider_script = provider_script || logging_script || tokenize_script;
     if let Some(name) = module_entry {
         first.add(0, "runpy");
         // Register source candidates without interpreting a module operand as a filesystem path.
@@ -632,8 +661,14 @@ pub(crate) fn compile(
         initial.push(root);
     }
     initial.extend(options.extension_paths.iter().map(|p| cwd.join(p)));
+    let site = options
+        .system_site
+        .as_ref()
+        .filter(|p| !initial.contains(p));
     let mut roots = initial.clone();
     roots.extend(first.explicit_roots.iter().map(|p| cwd.join(p)));
+    let implicit_site = site.filter(|p| !roots.contains(p));
+    roots.extend(implicit_site.cloned());
     // Discover each search directory once even when it appears twice in sys.path.
     let mut seen_roots = HashSet::new();
     roots.retain(|root| seen_roots.insert(root.clone()));
@@ -664,9 +699,10 @@ pub(crate) fn compile(
     // Keep source hints on the winning regular package's path. The runtime finder
     // can still load a different child if a parent changes its __path__.
     let mut entry_sources: HashMap<String, Option<PathBuf>> = HashMap::new();
+    let mut before_site = HashSet::new();
     let mut frozen_imports = Imports::default();
     let mut work = VecDeque::from([("__main__".to_owned(), false, first)]);
-    let mut late_pprint = false;
+    let mut uses_import_builtin = false;
     let mut bundled_only = false;
     loop {
         let (owner, package, imports) = if let Some(next) = work.pop_front() {
@@ -675,8 +711,19 @@ pub(crate) fn compile(
             // Collect late imports and their bundled dependencies after the explicit
             // file graph, without parsing unrelated modules in project directories.
             let mut imports = Imports::default();
-            if late_pprint && !seen.contains("pprint") {
+            if uses_import_builtin && !seen.contains("pprint") {
                 imports.names.push((0, "pprint".to_owned()));
+            }
+            // A runtime-selected HTTP child needs its server and transitive providers.
+            if uses_import_builtin && seen.contains("http") && !seen.contains("http.server") {
+                imports.names.push((0, "http.server".to_owned()));
+            }
+            if uses_import_builtin || seen.contains("importlib") {
+                for name in ["py_compile", "sysconfig"] {
+                    if !seen.contains(name) {
+                        imports.names.push((0, name.to_owned()));
+                    }
+                }
             }
             // The native time.strptime classmethod imports its Python parser on first use.
             if seen.contains("_datetime") && !seen.contains("_strptime") {
@@ -702,6 +749,7 @@ pub(crate) fn compile(
             && !registered_imports.called
             && (!provider_script || owner == "__main__")
             && imports.needs_typed_machinery()
+            && !matches!(operation, Some(ObjectOperation::TracedEntry))
             // Enforce the checked-file machinery contract on the original graph.
             // A module discovered only by boxed imports has no typed layout to preserve.
             && match operation {
@@ -720,7 +768,7 @@ pub(crate) fn compile(
         }
         // A late import of native pickle also needs its bundled reader and dependencies.
         if imports.uses_import_builtin {
-            late_pprint = true;
+            uses_import_builtin = true;
             names.push((0, "pickle".to_owned()));
         }
         // Importing array registers its type with MutableSequence. A runtime
@@ -764,7 +812,17 @@ pub(crate) fn compile(
                 if prefix == "_imp" && !frozen_imports.names.is_empty() {
                     work.push_back((String::new(), false, std::mem::take(&mut frozen_imports)));
                 }
-                if let Some((filename, source)) = bundled_module_source(&prefix) {
+                let bundled = bundled_module_source(&prefix);
+                if implicit_site.is_some()
+                    && (bundled.is_some()
+                        || imre_ast::providers::provider(&prefix).is_some()
+                        || prefix
+                            .rsplit_once('.')
+                            .is_some_and(|(parent, _)| before_site.contains(parent)))
+                {
+                    before_site.insert(prefix.clone());
+                }
+                if let Some((filename, source)) = bundled {
                     let path = Path::new(bundled_root).join(filename);
                     let package = path.ends_with("__init__.py");
                     let imports = imports_for_module(&path, &source)?;
@@ -779,6 +837,9 @@ pub(crate) fn compile(
                     continue;
                 }
                 for root in &roots {
+                    if implicit_site == Some(root) && before_site.contains(&prefix) {
+                        continue;
+                    }
                     if let Some((parent, _)) = prefix.rsplit_once('.')
                         && let Some(selected) = entry_sources.get(parent)
                         && selected.as_ref() != Some(root)
@@ -793,6 +854,9 @@ pub(crate) fn compile(
                                 imports_for_module(&member, source.trim_start_matches('\u{feff}'))
                             {
                                 work.push_back((prefix.clone(), package, imports));
+                            }
+                            if implicit_site.is_some() {
+                                before_site.insert(prefix.clone());
                             }
                             entry_sources.insert(prefix.clone(), package.then(|| root.clone()));
                             break;
@@ -810,6 +874,9 @@ pub(crate) fn compile(
                     } else {
                         inputs.missing.extend([init, file]);
                         if stem.is_dir() {
+                            if ordered_only {
+                                return Ok(None);
+                            }
                             inputs.directories.push((
                                 stem.clone(),
                                 stem.canonicalize().map_err(|e| e.to_string())?,
@@ -820,11 +887,21 @@ pub(crate) fn compile(
                         }
                         continue;
                     };
+                    if implicit_site.is_some() && implicit_site != Some(root) {
+                        before_site.insert(prefix.clone());
+                    }
+                    // A late command import can use the runtime's builtins and bundled
+                    // providers. Leave project-source imports on their original route.
+                    if ordered_only {
+                        return Ok(None);
+                    }
                     // Bundled providers cannot stand in for earlier project modules.
                     if initial.contains(root)
                         && ((request_script && prefix == "urllib")
                             || (ftp_script && prefix == "ftplib")
-                            || (argparse_script && prefix == "argparse"))
+                            || (argparse_script && prefix == "argparse")
+                            || (logging_script && prefix == "logging")
+                            || (tokenize_script && prefix == "tokenize"))
                     {
                         return Ok(None);
                     }
@@ -882,11 +959,19 @@ pub(crate) fn compile(
             ));
         }
     }
+    // The bundle lives in the launcher. This absolute, non-directory path can neither
+    // expose the working directory under -I nor collide with an explicit source root.
+    let bundle_entry = startup.filter(|_| site.is_some())
+        .map(|(_, executable)| Path::new(executable).join(bundled_root));
+    if let (Some(bundle), Some(site)) = (&bundle_entry, site) {
+        initial.extend([bundle.clone(), site.clone()]);
+    }
     let paths = serde_json::to_value(initial)
         .map_err(|e| format!("cannot represent startup search path: {e}"))?;
     let keep_docstrings = startup.is_none_or(|(flags, _)| flags.optimize < 2);
     let config = serde_json::json!({
         "bundled_root":bundled_root,
+        "bundle_entry":bundle_entry,
         "module_docs":{"json": keep_docstrings.then_some(include_str!("../../stdlib/docstrings/json.txt"))},
         "python_version":crate::PYTHON_VERSION.to_string(),
         "implementation_version":env!("CARGO_PKG_VERSION"),
@@ -894,15 +979,18 @@ pub(crate) fn compile(
         "isolated":isolated,"safe_path":safe_path,"no_user_site":startup.is_some_and(|(flags, _)| flags.no_user_site),
         "ignore_environment":startup.is_some_and(|(flags, _)| flags.ignore_environment),
         "context_aware_warnings":startup.map(|(flags, _)| flags.context_aware_warnings),
+        "cpu_count":startup.map(|(flags, _)| flags.cpu_count),
         "utf8_mode":startup.and_then(|(flags, _)| flags.utf8_mode),
         "warnoptions":startup.map(|(flags, _)| &flags.warnoptions),
         "xoptions":startup.map(|(flags, _)| &flags.xoptions),
         "faulthandler":startup.map(|(flags, _)| flags.faulthandler),
+        "tracemalloc":startup.map_or(0, |(flags, _)| flags.tracemalloc),
         "unbuffered":startup.is_some_and(|(flags, _)| flags.unbuffered),
         "warn_default_encoding":startup.map(|(flags, _)| flags.warn_default_encoding),
         "optimize":startup.map_or(0, |(flags, _)| flags.optimize),
         "dont_write_bytecode":startup.is_some_and(|(flags, _)| flags.dont_write_bytecode),
         "executable":startup.map(|(_, executable)| executable),
+        "command_source":command,
         "command":in_memory,"module_entry":module_entry,"path_entry":options.path_entry,"paths":paths,
     });
     check_returns()?;
@@ -937,9 +1025,11 @@ const SEALED_IO: &str = include_str!("../../stdlib/io.py");
 const RUNTIME_PROVIDERS: &[&str] = &[
     "__future__",
     "__hello__",
+    "_collections_abc",
     "_frozen_importlib",
     "_frozen_importlib_external",
     "_opcode_metadata",
+    "_py_warnings",
     "_tokenize",
     "abc",
     "annotationlib",
@@ -958,6 +1048,7 @@ const RUNTIME_PROVIDERS: &[&str] = &[
     "encodings.cp424",
     "encodings.cp437",
     "enum",
+    "functools",
     "genericpath",
     "hashlib",
     "itertools",
@@ -965,16 +1056,21 @@ const RUNTIME_PROVIDERS: &[&str] = &[
     "json.decoder",
     "json.encoder",
     "json.scanner",
+    "linecache",
     "opcode",
     "platform",
     "re",
+    "re._constants",
     "signal",
+    "ssl",
     "stat",
     "string",
     "string.templatelib",
     "subprocess",
     "token",
+    "tracemalloc",
     "types",
+    "warnings",
     "zipimport",
 ];
 

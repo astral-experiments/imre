@@ -302,7 +302,7 @@ impl ClassInfo {
             if class.abstract_methods.is_empty() && !class.bases.is_empty() {
                 types.add_concrete_subclass(id, &class.bases);
             }
-            if let Some(&base) = class.bases.first()
+            if let Some(base) = class.storage_base
                 && !fields[id].starts_with(&fields[base])
             {
                 return Err(graph.modules[class.definition.module].error(
@@ -2396,7 +2396,7 @@ struct Checker<'a> {
     class_receiver: Option<String>,
     /// Earlier assignments in the executing class body shadow module definitions.
     class_lexical: HashSet<String>,
-    super_method_base: Option<usize>,
+    super_method_owner: Option<usize>,
     iterator_source: Option<TextRange>,
     super_initializer: Option<records::BaseInitializer>,
     exception_formatter: Option<bool>,
@@ -2468,7 +2468,7 @@ impl<'a> Checker<'a> {
             class: None,
             class_receiver: None,
             class_lexical: HashSet::new(),
-            super_method_base: None,
+            super_method_owner: None,
             iterator_source: None,
             super_initializer: None,
             exception_formatter: None,
@@ -2628,9 +2628,21 @@ impl<'a> Checker<'a> {
             _ if operation => "set binary operator",
             "__iand__" | "__ior__" | "__isub__" | "__ixor__" => "set in-place operator",
             "union" => "set.union",
+            "symmetric_difference" => "set.symmetric_difference",
             "difference_update" => "set.difference_update",
+            "intersection_update" => "set.intersection_update",
+            "symmetric_difference_update" => "set.symmetric_difference_update",
+            "add" if self.unshadowed_builtin(&attribute.value, "set") => "set.add",
+            "copy" => "set.copy",
+            "issuperset" => "set.issuperset",
+            "__iter__" => "set.__iter__",
+            "__len__" => "set.__len__",
+            "__class_getitem__" => "set.__class_getitem__",
+            "clear" => "set.clear",
+            "pop" => "set.pop",
             "remove" => "set.remove",
             "update" => "set.update",
+            "isdisjoint" => "set.isdisjoint",
             "issubset" => "set.issubset",
             _ => return None,
         };
@@ -2639,14 +2651,21 @@ impl<'a> Checker<'a> {
         {
             return Some(name);
         }
-        if (operation || matches!(attribute.attr.as_str(), "issubset" | "union"))
-            && (receiver == Some(Type::FrozenStrings)
-                || self.unshadowed_builtin(&attribute.value, "frozenset"))
+        if receiver == Some(Type::FrozenStrings)
+            || self.unshadowed_builtin(&attribute.value, "frozenset")
         {
             return Some(match attribute.attr.as_str() {
+                _ if operation => name,
+                "__class_getitem__" => "frozenset.__class_getitem__",
+                "__iter__" => "frozenset.__iter__",
+                "__len__" => "frozenset.__len__",
+                "copy" => "frozenset.copy",
+                "isdisjoint" => "frozenset.isdisjoint",
                 "issubset" => "frozenset.issubset",
+                "issuperset" => "frozenset.issuperset",
+                "symmetric_difference" => "frozenset.symmetric_difference",
                 "union" => "frozenset.union",
-                _ => name,
+                _ => return None,
             });
         }
         None
@@ -2660,8 +2679,16 @@ impl<'a> Checker<'a> {
         if let Some(method) = self.boxed_set_method(attribute, Some(receiver.ty)) {
             return Err(self.object_builtin_error(method, attribute));
         }
-        if receiver.ty == Type::CodecInfo && attribute.attr.as_str() == "_is_text_encoding" {
-            return Err(self.object_builtin_error("CodecInfo._is_text_encoding", attribute));
+        if receiver.ty == Type::CodecInfo
+            && matches!(
+                attribute.attr.as_str(),
+                "_is_text_encoding" | "incrementaldecoder"
+            )
+        {
+            return Err(self.object_builtin_error(attribute.attr.as_str(), attribute));
+        }
+        if matches!(receiver.ty, Type::Coroutine(_)) && attribute.attr.as_str() == "cr_origin" {
+            return Err(self.object_builtin_error("coroutine.cr_origin", attribute));
         }
         if receiver.ty == Type::BinaryIO && matches!(attribute.attr.as_str(), "name" | "mode") {
             return Err(self.object_builtin_error("binary file metadata", attribute));
@@ -4176,7 +4203,6 @@ impl<'a> Checker<'a> {
             && set_element.is_none()
             && self.types.deque_element(iterable.ty).is_none()
             && !string
-            && !bytes
         {
             Some(self.hidden(Type::Int))
         } else {
@@ -4200,7 +4226,9 @@ impl<'a> Checker<'a> {
                 Expr {
                     ty: element,
                     kind: ExprKind::Builtin(
-                        if matches!(self.locals[captured], Type::VarTuple(_)) {
+                        if bytes {
+                            Builtin::BytesGet
+                        } else if matches!(self.locals[captured], Type::VarTuple(_)) {
                             Builtin::TupleIndex
                         } else if matches!(self.locals[captured], Type::List(_)) {
                             Builtin::SequenceGetInBounds
@@ -4236,8 +4264,6 @@ impl<'a> Checker<'a> {
                     kind: ExprKind::Builtin(
                         if string {
                             Builtin::StringIter
-                        } else if bytes {
-                            Builtin::BytesIter
                         } else if self.types.deque_element(self.locals[captured]).is_some() {
                             Builtin::DequeIter { reverse: false }
                         } else if set_element.is_some() {
@@ -4840,6 +4866,7 @@ impl<'a> Checker<'a> {
                     && self.resolve(&call.func)
                         == Some(Binding::Intrinsic(Intrinsic::SubprocessRun))
                     && call.arguments.find_keyword("stdout").is_some()
+                    && !processes::boxed_launch_keywords(call)
                 {
                     Some(Statement::Expr(self.process_run(call, true)?))
                 } else if let ast::Expr::Call(call) = &*expression.value
@@ -4899,12 +4926,18 @@ impl<'a> Checker<'a> {
                     }
                     if let ast::Expr::Attribute(attr) = target {
                         let receiver = self.expr(&attr.value)?;
-                        if receiver.ty == Type::CodecInfo
-                            && attr.attr.as_str() == "_is_text_encoding"
+                        if matches!(receiver.ty, Type::Coroutine(_))
+                            && attr.attr.as_str() == "cr_origin"
                         {
-                            return Err(
-                                self.object_builtin_error("CodecInfo._is_text_encoding", attr)
-                            );
+                            return Err(self.object_builtin_error("coroutine.cr_origin", attr));
+                        }
+                        if receiver.ty == Type::CodecInfo
+                            && matches!(
+                                attr.attr.as_str(),
+                                "_is_text_encoding" | "incrementaldecoder"
+                            )
+                        {
+                            return Err(self.object_builtin_error(attr.attr.as_str(), attr));
                         }
                         if matches!(receiver.ty, Type::Popen(..)) && attr.attr.as_str() == "poll" {
                             statements.push(Statement::Expr(Expr {
@@ -5583,6 +5616,9 @@ impl<'a> Checker<'a> {
             Some(Binding::Intrinsic(Intrinsic::BadGzipFile)) => Some(28),
             Some(Binding::Intrinsic(Intrinsic::BadZipFile)) => Some(36),
             Some(Binding::Intrinsic(Intrinsic::CsvError)) => Some(67),
+            Some(Binding::Intrinsic(Intrinsic::ScopedObjectExport(
+                "socket.timeout" | "_socket.timeout",
+            ))) => exception_kind("TimeoutError"),
             Some(Binding::Intrinsic(Intrinsic::GaiError)) => Some(68),
             Some(Binding::Intrinsic(Intrinsic::HError)) => Some(72),
             Some(Binding::Intrinsic(Intrinsic::BinasciiError)) => Some(69),
@@ -5664,6 +5700,14 @@ impl<'a> Checker<'a> {
                             .or_else(|| self.fixed_testcase_failure_kind(target))
                         {
                             return Ok(kind);
+                        }
+                        if let Some(Binding::Intrinsic(Intrinsic::ScopedObjectExport(
+                            name @ ("_pickle.PickleError"
+                            | "_pickle.PicklingError"
+                            | "_pickle.UnpicklingError"),
+                        ))) = self.resolve(target)
+                        {
+                            return Err(self.scoped_builtin_error(name, target));
                         }
                         Err(error(
                             self.source,
@@ -6010,6 +6054,12 @@ impl<'a> Checker<'a> {
             return Err(self.object_runtime_export("timedelta remainder", binary));
         }
         if let (Type::Calendar(first), Type::Calendar(second)) = (left.ty, right.ty) {
+            if binary.op == ast::Operator::Sub
+                && first == ir::CalendarType::Date
+                && second == ir::CalendarType::Date
+            {
+                return Err(self.object_runtime_export("date difference", binary));
+            }
             return calendar::binary(first, second, left, right, binary, self.source);
         }
         if binary.op == ast::Operator::Mod
@@ -6135,6 +6185,9 @@ impl<'a> Checker<'a> {
             return Ok((op, Type::Int));
         }
         if op == ast::Operator::Mult {
+            if matches!(left, Type::Deque(_)) || matches!(right, Type::Deque(_)) {
+                return Err(self.object_builtin_error("collections.deque repetition", node));
+            }
             if (self.types.element(left).is_some() || matches!(left, Type::Bytes | Type::Str))
                 && right == Type::Int
             {
@@ -6145,6 +6198,9 @@ impl<'a> Checker<'a> {
             {
                 return Ok((Binary::Repeat, right));
             }
+        }
+        if op == ast::Operator::Add && matches!(left, Type::Deque(_)) {
+            return Err(self.object_builtin_error("collections.deque concatenation", node));
         }
         if op == ast::Operator::Add && matches!(left, Type::Str | Type::Bytes) && right == left {
             return Ok((Binary::Concat, left));
@@ -6220,7 +6276,7 @@ impl<'a> Checker<'a> {
     }
 
     fn boxed_builtin_callable(&self, expression: &ast::Expr) -> Option<&'static str> {
-        ["exec", "hex"]
+        ["exec", "hex", "oct"]
             .into_iter()
             .find(|name| self.unshadowed_builtin(expression, name))
     }
@@ -6479,11 +6535,17 @@ impl<'a> Checker<'a> {
                 }
             }
             match symbol {
+                Intrinsic::GetEnv if cfg!(unix) && self.graph.command_startup.is_some() => {
+                    return Err(self.scoped_builtin_error("os.getenv", expression));
+                }
                 Intrinsic::UrlSplit => {
                     return Err(self.scoped_builtin_error("urllib.parse.urlsplit", expression));
                 }
                 Intrinsic::CodecGetWriter => {
                     return Err(self.object_builtin_error("codecs.getwriter", expression));
+                }
+                Intrinsic::Popen | Intrinsic::CompletedProcess if cfg!(unix) => {
+                    return Err(self.scoped_builtin_error("subprocess process class", expression));
                 }
                 Intrinsic::SplitResult { .. } => {
                     return Err(self.scoped_builtin_error("urllib.parse result class", expression));
@@ -6494,11 +6556,22 @@ impl<'a> Checker<'a> {
                 Intrinsic::TracebackFormatter(name) => {
                     return Err(self.object_export_error(name, expression));
                 }
+                // Calls and specialized class attributes have already been handled.
+                // A first-class datetime type needs its actual Python object.
+                Intrinsic::Calendar(_) | Intrinsic::ClockTime
+                    if ast::name::UnqualifiedName::from_expr(expression)
+                        .is_some_and(|name| !self.names.contains_key(name.segments()[0])) =>
+                {
+                    return Err(self.scoped_builtin_error("datetime class value", expression));
+                }
                 Intrinsic::CachedProperty => {
                     return Err(self.object_runtime_export("functools.cached_property", expression));
                 }
                 Intrinsic::ScopedObjectExport(name) => {
                     return Err(self.scoped_builtin_error(name, expression));
+                }
+                Intrinsic::Fd(ir::FdOperation::TcGetPgrp) => {
+                    return Err(self.object_runtime_export("posix.tcgetpgrp", expression));
                 }
                 Intrinsic::ObjectRuntimeExport(name) => {
                     return Err(self.object_runtime_export(name, expression));
@@ -6518,6 +6591,11 @@ impl<'a> Checker<'a> {
                         ty: Type::Bytes,
                         kind: ExprKind::Bytes(bytes.to_vec()),
                     });
+                }
+                // Specialized lookups and mutations are handled at their call sites.
+                // When the mapping itself escapes, preserve its identity and live views.
+                Intrinsic::Environ | Intrinsic::EnvironBytes => {
+                    return Err(self.scoped_builtin_error("environment mapping", expression));
                 }
                 Intrinsic::Stdin => return Err(self.object_runtime_export("sys.stdin", expression)),
                 Intrinsic::Stdout => return Ok(self.stdout_value()),
@@ -6928,6 +7006,27 @@ impl<'a> Checker<'a> {
                 return self.boolean_value(boolean, None);
             }
             ast::Expr::Compare(compare) => {
+                if let Some((value, class, positive)) = self.exact_object_type(compare) {
+                    let predicate = match class {
+                        ty_python_semantic::types::KnownClass::Str => {
+                            Builtin::IsInstance(vec![ir::InstanceType::ExactText])
+                        }
+                        ty_python_semantic::types::KnownClass::Tuple => Builtin::ObjectIsExactTuple,
+                        _ => unreachable!("only exact str and tuple comparisons"),
+                    };
+                    let test = Expr {
+                        ty: Type::Bool,
+                        kind: ExprKind::Builtin(predicate, vec![self.expr(value)?]),
+                    };
+                    return Ok(if positive {
+                        test
+                    } else {
+                        Expr {
+                            ty: Type::Bool,
+                            kind: ExprKind::Not(Box::new(test)),
+                        }
+                    });
+                }
                 if let [op @ (ast::CmpOp::Is | ast::CmpOp::IsNot)] = compare.ops.as_ref()
                     && let [left, right] = compare.operands.as_ref()
                     && let (Some(left), Some(right)) =
@@ -7284,6 +7383,15 @@ impl<'a> Checker<'a> {
                 let mut ops = Vec::new();
                 for (&op, pair) in compare.ops.iter().zip(values.windows(2)) {
                     let (ty, right) = (pair[0].ty, pair[1].ty);
+                    if matches!(
+                        op,
+                        ast::CmpOp::Lt | ast::CmpOp::LtE | ast::CmpOp::Gt | ast::CmpOp::GtE
+                    ) && (matches!(ty, Type::Deque(_)) || matches!(right, Type::Deque(_)))
+                    {
+                        return Err(
+                            self.scoped_builtin_error("collections.deque ordering", expression)
+                        );
+                    }
                     if ty == Type::Context || right == Type::Context {
                         return Err(error(
                             self.source,
@@ -7703,8 +7811,11 @@ impl<'a> Checker<'a> {
                 return self.task_await(value, false, awaited);
             }
             ast::Expr::Attribute(attribute) => {
-                if self.deque_repr_descriptor(attribute) {
-                    return Err(self.scoped_builtin_error("collections.deque.__repr__", attribute));
+                if self.boxed_deque_descriptor(attribute) {
+                    return Err(self.scoped_builtin_error(
+                        &format!("collections.deque.{}", attribute.attr.as_str()),
+                        attribute,
+                    ));
                 }
                 if attribute.attr.as_str() == "MISSING"
                     && self.resolve(&attribute.value)
@@ -7771,7 +7882,17 @@ impl<'a> Checker<'a> {
                         self.scoped_builtin_error("urllib.parse result counterpart", attribute)
                     );
                 }
-                if let Some((_, declaration)) = self.namedtuple_factory(&attribute.value) {
+                if let Some((origin, declaration)) = self.namedtuple_factory(&attribute.value) {
+                    if matches!(origin, crate::types::TupleOrigin::Declaration(_))
+                        && declaration
+                            .fields
+                            .iter()
+                            .any(|field| field == attribute.attr.as_str())
+                    {
+                        return Err(
+                            self.scoped_builtin_error("namedtuple field descriptor", attribute)
+                        );
+                    }
                     return self.namedtuple_class_attribute(attribute, &declaration);
                 }
                 if let Some(method) = ir::StrDescriptor::named(attribute.attr.as_str())
@@ -8000,6 +8121,11 @@ impl<'a> Checker<'a> {
                         Type::None,
                     ));
                 }
+                if matches!(attribute.attr.as_str(), "keys" | "values" | "items")
+                    && self.types.mapping(receiver.ty).is_some()
+                {
+                    return Err(self.scoped_builtin_error("bound dictionary view method", attribute));
+                }
                 if let Some(element) = self.types.deque_element(receiver.ty) {
                     return self.deque_attribute(attribute, receiver, element);
                 }
@@ -8140,7 +8266,9 @@ impl<'a> Checker<'a> {
                         kind: ExprKind::Builtin(Builtin::JsonDecoderMemo, vec![receiver]),
                     });
                 }
-                if calendar::boxed_member(receiver.ty, attribute.attr.as_str()) {
+                if calendar::boxed_member(receiver.ty, attribute.attr.as_str())
+                    || calendar::date_isoformat(receiver.ty, attribute.attr.as_str())
+                {
                     return Err(self.object_runtime_export("datetime instance member", attribute));
                 }
                 if let Type::Calendar(kind) = receiver.ty {
@@ -8663,6 +8791,20 @@ impl<'a> Checker<'a> {
         if let Some(expanded) = self.expand_closed_call(call) {
             return self.call_on(&expanded, receiver);
         }
+        if processes::boxed_launch_keywords(call)
+            && matches!(
+                self.resolve(&call.func),
+                Some(Binding::Intrinsic(
+                    Intrinsic::Popen
+                        | Intrinsic::SubprocessCall
+                        | Intrinsic::SubprocessCheckCall
+                        | Intrinsic::SubprocessRun
+                        | Intrinsic::CheckOutput
+                ))
+            )
+        {
+            return Err(self.scoped_builtin_error("subprocess launch keywords", call));
+        }
         if self.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::OrderedDict)) {
             return self.ordered_dict_constructor(call, None);
         }
@@ -8805,13 +8947,24 @@ impl<'a> Checker<'a> {
         if let Some((origin, declaration)) = self.namedtuple_factory(&call.func) {
             return self.namedtuple_call(origin, &declaration, call);
         }
+        if self.collection_binding(&call.func) == Some(Binding::Intrinsic(Intrinsic::NamedTuple)) {
+            return Err(self.scoped_builtin_error("collections.namedtuple", call));
+        }
         if let Some((method, name)) = crate::classes::super_method(call)
             && self.unshadowed_builtin(name, "super")
         {
             if method.attr.as_str() == "__init__" {
                 return self.call_super_initializer(call);
             }
-            if let Some(base) = self.super_method_base {
+            if let Some(owner) = self.super_method_owner
+                && let Some(storage) = self.classes.declarations.definitions[owner].storage_base
+            {
+                let first = self.classes.declarations.definitions[owner].bases[0];
+                let base = if self.classes.methods[first].contains_key(method.attr.as_str()) {
+                    first
+                } else {
+                    storage
+                };
                 return self.call_super_method(call, method, base);
             }
         }
@@ -8860,9 +9013,18 @@ impl<'a> Checker<'a> {
             return self.counter_elements(call, None);
         }
         if let ast::Expr::Attribute(attribute) = &*call.func
-            && self.deque_repr_descriptor(attribute)
+            && self.boxed_deque_descriptor(attribute)
         {
-            return self.boxed_deque_repr_call(call);
+            return self.boxed_deque_call(attribute.attr.as_str(), call);
+        }
+        if let ast::Expr::Attribute(method) = &*call.func
+            && method.attr.as_str() == "__len__"
+            && self
+                .graph
+                .session
+                .is_builtin_sequence_class(self.module, &method.value)
+        {
+            return Err(self.scoped_builtin_error("sequence length descriptor", call));
         }
         if let ast::Expr::Attribute(method) = &*call.func
             && method.attr.as_str() == "reverse"
@@ -8948,8 +9110,13 @@ impl<'a> Checker<'a> {
         if let Some(copy) = self.dataclass_copy(call)? {
             return Ok(copy);
         }
-        if self.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::Partial)) {
-            return self.partial(call);
+        match self.resolve(&call.func) {
+            Some(Binding::Intrinsic(Intrinsic::Partial)) => return self.partial(call),
+            Some(Binding::Intrinsic(Intrinsic::LoggingShutdown)) => return self.logging_shutdown(call),
+            Some(Binding::Intrinsic(Intrinsic::FileConfig)) if calls::has_unpacking(call) => {
+                return self.logging_file_config(call);
+            }
+            _ => {}
         }
         if calls::starred(call) {
             match self.resolve(&call.func) {
@@ -8957,7 +9124,11 @@ impl<'a> Checker<'a> {
                     return self.credential_call(call, name);
                 }
                 Some(Binding::Intrinsic(Intrinsic::Fd(
-                    op @ (ir::FdOperation::Pipe2 | ir::FdOperation::Read | ir::FdOperation::Write),
+                    op @ (ir::FdOperation::Pipe2
+                    | ir::FdOperation::TcGetPgrp
+                    | ir::FdOperation::Read
+                    | ir::FdOperation::Write
+                    | ir::FdOperation::CopyFileRange),
                 ))) => {
                     return self.fd_call(call, op);
                 }
@@ -9289,6 +9460,18 @@ impl<'a> Checker<'a> {
             Some(Binding::Intrinsic(Intrinsic::ScopedObjectExport(name))) => {
                 return Err(self.scoped_builtin_error(name, call));
             }
+            Some(Binding::Intrinsic(Intrinsic::ObjectRuntimeExport("posix.getpid")))
+                if call.arguments.is_empty()
+                    && self
+                        .graph
+                        .session
+                        .is_stdlib_function(self.module, &call.func, "os", "getpid") =>
+            {
+                return Ok(Expr {
+                    ty: Type::Int,
+                    kind: ExprKind::Builtin(Builtin::Process(ir::ProcessOperation::GetPid), vec![]),
+                });
+            }
             Some(Binding::Intrinsic(Intrinsic::ObjectRuntimeExport(name))) => {
                 return Err(self.object_runtime_export(name, call));
             }
@@ -9320,7 +9503,14 @@ impl<'a> Checker<'a> {
                     "groupby requires direct for iteration with an immediate list(group)",
                 ));
             }
-            Some(Binding::Intrinsic(Intrinsic::GetEnv)) => return self.environ_get(call),
+            Some(Binding::Intrinsic(Intrinsic::GetEnv)) => {
+                // An ordinary POSIX environment can contain surrogate-escaped text
+                // and getenv returns its default by identity, regardless of its type.
+                if cfg!(unix) && self.graph.command_startup.is_some() {
+                    return Err(self.scoped_builtin_error("os.getenv", call));
+                }
+                return self.environ_get(call);
+            }
             Some(Binding::Intrinsic(Intrinsic::Strerror)) => {
                 self.reject_builtin_keywords(call)?;
                 let [code] = call.arguments.args.as_ref() else {
@@ -9358,11 +9548,12 @@ impl<'a> Checker<'a> {
                 self.defer_object_error(&error);
                 return Ok(Expr::none());
             }
-            Some(Binding::Intrinsic(Intrinsic::GetCwd)) => {
+            Some(Binding::Intrinsic(Intrinsic::GetCwd { bytes })) => {
                 self.arguments(call, &[], None)?;
+                let op = ir::ProcessOperation::GetCwd { bytes };
                 return Ok(Expr {
-                    ty: Type::Str,
-                    kind: ExprKind::Builtin(Builtin::Process(ir::ProcessOperation::GetCwd), vec![]),
+                    ty: if bytes { Type::Bytes } else { Type::Str },
+                    kind: ExprKind::Builtin(Builtin::Process(op), vec![]),
                 });
             }
             Some(Binding::Intrinsic(Intrinsic::Popen)) => return self.popen(call, None),
@@ -9429,6 +9620,7 @@ impl<'a> Checker<'a> {
             Some(Binding::Intrinsic(
                 op @ (Intrinsic::HandlerRename
                 | Intrinsic::HandlerLookup
+                | Intrinsic::HandlerNames
                 | Intrinsic::FileEncodingUsesUtf8
                 | Intrinsic::HandlerFallback
                 | Intrinsic::PrintActiveException),
@@ -10116,7 +10308,7 @@ impl<'a> Checker<'a> {
             if attribute.attr.as_str() == "format"
                 && matches!(receiver.ty, Type::Str | Type::StrLiteral(_))
             {
-                return self.named_format_call(Self::string_value(receiver), call);
+                return self.string_format_call(Self::string_value(receiver), call);
             }
             if attribute.attr.as_str() == "translate"
                 && matches!(receiver.ty, Type::Str | Type::StrLiteral(_))
@@ -10362,6 +10554,11 @@ impl<'a> Checker<'a> {
                 {
                     *view = true;
                     return Ok(receiver);
+                }
+                if matches!(attribute.attr.as_str(), "keys" | "values" | "items")
+                    && call.arguments.is_empty()
+                {
+                    return Err(self.scoped_builtin_error("dictionary view", call));
                 }
                 let pop = attribute.attr.as_str() == "pop";
                 if (!pop && attribute.attr.as_str() != "get")
@@ -10976,6 +11173,13 @@ impl<'a> Checker<'a> {
                 ),
             });
         }
+        if cfg!(unix)
+            && let [value] = args.as_slice()
+            && matches!(value.ty, Type::Popen(..) | Type::ActivePopen)
+            && self.unshadowed_builtin(&call.func, "repr")
+        {
+            return Err(self.scoped_builtin_error("subprocess.Popen repr", call));
+        }
         if name.id == "repr"
             && args.len() == 1
             && matches!(
@@ -11038,10 +11242,22 @@ impl<'a> Checker<'a> {
             let key = self.coerce(key.clone(), Type::Str, &call.arguments.args[1])?;
             return Ok(self.implementation_hasattr(receiver.clone(), key));
         }
+        if matches!(
+            (name.id.as_str(), args.len()),
+            ("getattr", 2 | 3) | ("hasattr" | "delattr", 2) | ("setattr", 3)
+        ) && self.unshadowed_builtin(&call.func, name.id.as_str())
+            && matches!(args[0].ty, Type::Coroutine(_))
+            && matches!(&args[1].kind, ExprKind::Str(member) if member == "cr_origin")
+        {
+            self.reject_builtin_keywords(call)?;
+            return Err(self.object_builtin_error("coroutine.cr_origin", call));
+        }
         if self.unshadowed_builtin(&call.func, "getattr")
-            && let [receiver, attribute] = args.as_slice()
+            && let [receiver, attribute] | [receiver, attribute, _] = args.as_slice()
             && let ExprKind::Str(member) = &attribute.kind
-            && calendar::boxed_comparison(receiver.ty, member)
+            && (calendar::boxed_date_arithmetic(receiver.ty, member)
+                || calendar::date_isoformat(receiver.ty, member)
+                || (args.len() == 2 && calendar::boxed_comparison(receiver.ty, member)))
         {
             return Err(self.object_runtime_export("datetime instance member", call));
         }
@@ -11312,6 +11528,17 @@ impl<'a> Checker<'a> {
     /// Text uses UTF-8 and defaults to reading; explicit modes stay literal.
     fn open(&mut self, call: &ast::ExprCall, gzip: bool) -> Result<Expr, String> {
         let args = &call.arguments;
+        // Sealed file handles close on drop without running Python's warning machinery.
+        if !gzip
+            && self
+                .graph
+                .command_startup
+                .as_ref()
+                .is_some_and(|(flags, _)| flags.has_warning_options)
+            && self.unshadowed_builtin(&call.func, "open")
+        {
+            return Err(self.object_builtin_error("open with startup warning filters", call));
+        }
         if !gzip
             && self.unshadowed_builtin(&call.func, "open")
             && args.find_argument_value("opener", 7).is_some()

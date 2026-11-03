@@ -1,6 +1,6 @@
 //! Native I/O classes for runtime-loaded modules.
 
-use super::super::builtins::zeroed_bytes;
+use super::super::{Heap, builtins::zeroed_bytes, value::IoOpenTypes};
 use super::{Context, Error, FALSE, Id, NONE, Result, TRUE, Value};
 
 /// Release one native owner's strong edge before the next observable state change.
@@ -29,7 +29,7 @@ pub(in crate::dynamic) use descriptor_buffer::{
 pub(in crate::dynamic) use rwpair::deallocate_exact_pair;
 mod bytes_io;
 mod bytes_writer;
-pub(in crate::dynamic) use bytes_writer::has_pending_callback_write;
+pub(in crate::dynamic) use bytes_writer::pending_callback_write;
 mod docstrings;
 mod file_io;
 pub(super) use file_io::{
@@ -38,7 +38,6 @@ pub(super) use file_io::{
 };
 pub(in crate::dynamic) use file_io::{open, popen_pipe};
 mod text_wrapper;
-pub(super) use text_wrapper::text_options;
 
 #[derive(Clone, Copy)]
 pub(in crate::dynamic) enum NativeClass {
@@ -53,6 +52,7 @@ pub(in crate::dynamic) enum MemoryStream {
     Reader(std::rc::Rc<buffered_reader::Reader>),
     UninitializedReader(Option<Id>),
     UninitializedWriter(Option<Id>),
+    DetachedWriter,
     BufferedBytes(std::rc::Rc<bytes_writer::Writer>),
     Pair(rwpair::Pair),
     Bytes(std::rc::Rc<bytes_io::BytesIo>),
@@ -118,6 +118,7 @@ pub(in crate::dynamic) fn standard_output(ctx: &mut Context, stderr: bool) -> Re
         ctx.alloc(Value::TextFile(super::super::value::BoxedTextFile {
             file,
             buffer: Some(buffer),
+            finalizing: false,
             line_buffering: stderr || crate::stdio_settings().stdout_line_buffered,
         })),
     )
@@ -141,6 +142,7 @@ pub(in crate::dynamic) fn standard_input(ctx: &mut Context) -> Result<Id> {
         ctx,
         &[fd, mode, buffering, encoding, errors, newline, FALSE],
         &[],
+        None,
     ) {
         Err(error)
             if matches!(error.os_args.as_deref(),
@@ -168,6 +170,7 @@ fn unbuffered_standard(ctx: &mut Context, fd: i32, name: &str) -> Result<Id> {
         ctx,
         &[descriptor, mode, buffering, NONE, NONE, NONE, FALSE],
         &[],
+        None,
     )?;
     let raw = if input {
         ctx.lookup_attr(buffer, "raw")?
@@ -195,22 +198,26 @@ pub(in crate::dynamic) fn rooted_input_chain(ctx: &Context) -> Option<[Id; 3]> {
     let Value::Module { scope, .. } = *ctx.heap.get(ctx.threads.system_module?) else {
         return None;
     };
-    let stdin = ctx.scope_name(scope, "__stdin__")?;
+    text_descriptor_chain(&ctx.heap, ctx.scope_name(scope, "__stdin__")?)
+}
+
+/// A text wrapper and its buffered descriptor retain the next layer through these native edges.
+pub(in crate::dynamic) fn text_descriptor_chain(heap: &Heap, stream: Id) -> Option<[Id; 3]> {
     let Value::Instance {
         memory_stream: Some(MemoryStream::Wrapper(wrapper)),
         ..
-    } = ctx.heap.get(stdin)
+    } = heap.get(stream)
     else {
         return None;
     };
     let buffer = wrapper.buffer.get()?;
-    let Value::File(file) = ctx.heap.get(buffer) else {
+    let Value::File(file) = heap.get(buffer) else {
         return None;
     };
     let super::BinaryFile::Descriptor(fd) = file.as_ref() else {
         return None;
     };
-    Some([stdin, buffer, fd.raw])
+    Some([stream, buffer, fd.raw])
 }
 
 /// Select the default text encoding from the interpreter's startup configuration.
@@ -462,9 +469,7 @@ pub(in super::super) fn install_native(ctx: &mut Context, module: Id, module_obj
         ctx.builtin("open")
     } else {
         let callable = ctx.alloc(Value::IoOpen {
-            reader,
-            writer,
-            random,
+            types: IoOpenTypes { file, reader, writer, random, wrapper },
             unsupported,
         });
         ctx.alloc(Value::Method {
@@ -551,6 +556,11 @@ fn class(
         NEWLINE_DECODER => newline_decoder::CLASS,
         _ => "_io._IOBase",
     };
+    if wrapper {
+        let name = ctx.text("_finalizing");
+        let member = ctx.alloc(Value::SlotMember { owner, name });
+        ctx.bind(scope, "_finalizing", member);
+    }
     let unsupported = ctx.scope_name(module, "UnsupportedOperation").unwrap();
     for &name in methods {
         let method = ctx.alloc(Value::IoMethod {
@@ -810,33 +820,6 @@ pub(super) fn lines(
     }
 }
 
-/// Open a file using the native buffered classes captured by a fresh low-level module.
-pub(in super::super) fn open_from_module(
-    ctx: &mut Context,
-    reader: Id,
-    writer: Id,
-    random: Id,
-    args: &[Id],
-    kwargs: &[(String, Id)],
-) -> Result<Id> {
-    let Some((_, arguments)) = args.split_first() else {
-        return Err(Error::new("TypeError", "_io.open needs its module"));
-    };
-    let file = open(ctx, arguments, kwargs)?;
-    let class = match ctx.heap.get(file).native_io_class_name() {
-        Some("_io.BufferedRandom") => random,
-        Some("_io.BufferedReader") => reader,
-        Some("_io.BufferedWriter") => writer,
-        _ => return Ok(file),
-    };
-    let stream = ctx.instance(class, None);
-    let Value::Instance { memory_stream, .. } = ctx.heap.get_mut(stream) else {
-        unreachable!()
-    };
-    *memory_stream = Some(MemoryStream::BufferedFile(file));
-    Ok(stream)
-}
-
 /// Call an inherited I/O method with its bound receiver or an explicit class-level receiver.
 pub(in super::super) fn call(
     ctx: &mut Context,
@@ -864,7 +847,9 @@ pub(in super::super) fn call(
         Some("BufferedReader" | "BufferedWriter" | "BufferedRWPair" | "BufferedRandom")
     ) {
         owner_kind
-    } else if owner_kind == Some("TextIOWrapper") && name == "__next__" {
+    } else if owner_kind == Some("TextIOWrapper")
+        && matches!(name, "__next__" | "__repr__" | "truncate")
+    {
         Some("TextIOWrapper")
     } else if bytes_io {
         Some("BytesIO")
@@ -882,8 +867,8 @@ pub(in super::super) fn call(
             ) => {
                 format!("descriptor '__init__' of '_io.{class}' object needs an argument")
             }
-            (Some("TextIOWrapper"), "__next__") => {
-                "descriptor '__next__' of '_io.TextIOWrapper' object needs an argument".into()
+            (Some("TextIOWrapper"), name @ ("__next__" | "__repr__")) => {
+                format!("descriptor '{name}' of '_io.TextIOWrapper' object needs an argument")
             }
             (Some(class), _) => format!("unbound method {class}.{name}() needs an argument"),
             _ => format!("unbound I/O method {name} needs a receiver"),
@@ -911,12 +896,12 @@ pub(in super::super) fn call(
                     "descriptor '__init__' requires a '_io.{class}' object but received a '{actual}'"
                 )
             }
-            (Some("TextIOWrapper"), "__next__") => {
+            (Some("TextIOWrapper"), name @ ("__next__" | "__repr__")) => {
                 let actual = receiver_class
                     .and_then(|class| ctx.heap.get(class).io_kind())
                     .map_or_else(|| actual.to_string(), |_| format!("_io.{actual}"));
                 format!(
-                    "descriptor '__next__' requires a '_io.TextIOWrapper' object but received a '{actual}'"
+                    "descriptor '{name}' requires a '_io.TextIOWrapper' object but received a '{actual}'"
                 )
             }
             (Some(class), _) => format!(
@@ -926,6 +911,21 @@ pub(in super::super) fn call(
         };
         return Err(Error::new("TypeError", message));
     };
+    if owner_kind == Some("TextIOWrapper") && name == "__repr__" {
+        if !kwargs.is_empty() {
+            return Err(Error::new(
+                "TypeError",
+                "wrapper __repr__() takes no keyword arguments",
+            ));
+        }
+        if !rest.is_empty() {
+            return Err(Error::new(
+                "TypeError",
+                format!("expected 0 arguments, got {}", rest.len()),
+            ));
+        }
+        return text_wrapper::repr(ctx, receiver);
+    }
     match owner_kind {
         Some("TextIOWrapper")
             if name == "__next__" && matches!(ctx.heap.get(receiver), Value::Instance { .. }) =>
@@ -1029,6 +1029,9 @@ pub(in super::super) fn call(
         return native_writer::call(ctx, "BufferedWriter", receiver, name, rest, kwargs);
     }
     if layout == Some("TextIOWrapper") {
+        if name == "truncate" {
+            return text_wrapper::truncate(ctx, receiver, rest, kwargs);
+        }
         if matches!(ctx.heap.get(receiver), Value::TextFile(_)) {
             return super::files::text_method(ctx, name, args, kwargs);
         }

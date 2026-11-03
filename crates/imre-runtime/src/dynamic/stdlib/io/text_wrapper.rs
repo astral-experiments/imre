@@ -1,15 +1,17 @@
 //! Text encoding and buffering over the original Python binary stream.
 
-use num_traits::ToPrimitive;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use super::super::codecs;
-use super::{Context, Error, Id, MemoryStream, NONE, Result, Value};
+use super::{Context, Error, Id, MemoryStream, NONE, Result, TRUE, Value};
 use crate::dynamic::builtins::boolean;
 use crate::objects::{Codec, DecodeIssue, FixedUnicode};
 
+mod cookie;
 mod reader;
+mod replay;
+use cookie::Cookie;
 mod reconfigure;
 use reader::Reader;
 
@@ -22,6 +24,7 @@ const NATIVE_ORDER: i32 = if cfg!(target_endian = "little") {
 pub(super) const METHODS: &[&str] = &[
     "__init__",
     "__next__",
+    "__repr__",
     "_CHUNK_SIZE",
     "buffer",
     "encoding",
@@ -45,6 +48,7 @@ pub(super) const METHODS: &[&str] = &[
     "readline",
     "seek",
     "tell",
+    "truncate",
 ];
 
 pub(super) fn property(name: &str) -> bool {
@@ -75,10 +79,6 @@ impl StreamCodec {
             Some((format, bom)) => Self::Wide { format, bom },
             None => Self::Registered(Codec::by_key(&key, encoding)?),
         })
-    }
-
-    fn detects_bom(self) -> bool {
-        matches!(self, Self::Wide { bom: true, .. })
     }
 }
 
@@ -151,36 +151,24 @@ fn validate_newline(value: &str) -> Result<&'static str> {
 }
 
 pub(in crate::dynamic::stdlib) fn text_options(
-    ctx: &Context,
+    ctx: &mut Context,
     encoding: Id,
     errors: Id,
     newline: Id,
 ) -> Result<(String, Option<&'static str>, StreamCodec)> {
-    let string = |id, key: &str| -> Result<Option<String>> {
-        if id == NONE {
-            return Ok(None);
+    // Argument Clinic converts encoding and newline before __init__ checks errors.
+    for (id, name) in [
+        (encoding, "encoding"),
+        (newline, "newline"),
+        (errors, "errors"),
+    ] {
+        if id != NONE {
+            super::file_io::check_string_arg(ctx, id, "TextIOWrapper", name, "str or None")?;
         }
-        let v = ctx.str_value(id).map_err(|_| {
-            Error::new(
-                "TypeError",
-                format!(
-                    "TextIOWrapper() argument '{key}' must be str or None, not {}",
-                    ctx.type_name(id)
-                ),
-            )
-        })?;
-        if v.contains('\0') {
-            return Err(Error::new("ValueError", "embedded null character"));
-        }
-        Ok(Some(v.to_owned()))
-    };
-    let encoding = string(encoding, "encoding")?;
-    let encoding = crate::sys::file_encoding(encoding.as_deref()).into_owned();
-    string(errors, "errors")?;
-    let newline = string(newline, "newline")?
-        .as_deref()
-        .map(validate_newline)
-        .transpose()?;
+    }
+    let string = |id| (id != NONE).then(|| ctx.str_value(id)).transpose();
+    let encoding = crate::sys::file_encoding(string(encoding)?).into_owned();
+    let newline = string(newline)?.map(validate_newline).transpose()?;
     let codec = StreamCodec::lookup(&encoding)?;
     Ok((encoding, newline, codec))
 }
@@ -296,6 +284,101 @@ fn initialize(ctx: &mut Context, receiver: Id, args: &[Id], kwargs: &[(String, I
     Ok(NONE)
 }
 
+/// Render public name and mode under the same recursion guard as other I/O objects.
+pub(super) fn repr(ctx: &mut Context, receiver: Id) -> Result<Id> {
+    let class = ctx.exact_type(receiver)?;
+    let standard_output = matches!(ctx.heap.get(receiver), Value::TextFile(_));
+    if !standard_output {
+        Wrapper::from_receiver(ctx, receiver)?;
+    }
+    let name = if ctx.heap.get(class).io_kind() == Some("TextIOWrapper") {
+        "_io.TextIOWrapper"
+    } else {
+        ctx.class_name(class)
+    };
+    let name = &name[..name.floor_char_boundary(100)];
+    if ctx.repr_ancestors.contains(&receiver) {
+        return Err(Error::new(
+            "RuntimeError",
+            format!("reentrant call inside {name}.__repr__"),
+        ));
+    }
+    let mut output = format!("<{name}")
+        .chars()
+        .map(u32::from)
+        .collect::<Vec<_>>();
+    ctx.repr_ancestors
+        .try_reserve(1)
+        .map_err(|_| crate::Error::allocation())?;
+    let roots = ctx.heap.temporary_mark();
+    ctx.heap.keep(receiver);
+    ctx.repr_ancestors.push(receiver);
+    let mut result = Ok(());
+    for (field, label) in [
+        ("name", " name="),
+        ("mode", " mode="),
+        ("encoding", " encoding="),
+    ] {
+        let field_mark = ctx.heap.temporary_mark();
+        let mut rendered_mark = None;
+        result = (|| {
+            let value = if field == "encoding" && !standard_output {
+                // Either public getter can reinitialize the wrapper before its private encoding is used.
+                Wrapper::from_receiver(ctx, receiver)?.encoding.get()
+            } else {
+                match ctx.lookup_attr(receiver, field) {
+                    Ok(value) => value,
+                    Err(err)
+                        if field != "encoding"
+                            && (ctx.is_attribute_error(&err)
+                                || field == "name" && ctx.is_builtin_error(&err, "ValueError")) =>
+                    {
+                        return Ok(());
+                    }
+                    Err(err) => return Err(err),
+                }
+            };
+            ctx.heap.keep(value);
+            rendered_mark = Some(ctx.heap.temporary_mark());
+            let shown = crate::dynamic::builtins::call(ctx, "repr", &[value], &[])?;
+            ctx.heap.keep(shown);
+            let text = ctx.string_codepoints(shown)?;
+            output
+                .try_reserve(label.len() + text.len() + 1)
+                .map_err(|_| crate::Error::allocation())?;
+            output.extend(label.bytes().map(u32::from));
+            output.extend_from_slice(&text);
+            Ok(())
+        })();
+        // %R drops the rendered string before the field value, including on a bad return.
+        // Their finalizers can reenter this guard or reinitialize the next field.
+        for mark in rendered_mark.into_iter().chain([field_mark]) {
+            let collect = ctx.heap.discard_truth_operands(mark, ctx.modules);
+            if let Err(error) = &result {
+                for root in error.roots() {
+                    ctx.heap.keep(root);
+                }
+            }
+            if collect {
+                ctx.collect_unreachable();
+            }
+        }
+        if result.is_err() {
+            break;
+        }
+    }
+    ctx.repr_ancestors.pop();
+    ctx.heap.release_temporaries_since(roots);
+    if let Err(error) = result {
+        for root in error.roots() {
+            ctx.heap.keep(root);
+        }
+        return Err(error);
+    }
+    output.push(u32::from('>'));
+    Ok(ctx.text_codepoints(output))
+}
+
 impl Wrapper {
     /// Get the current stream state after a Python callback may have reinitialized it.
     fn from_receiver(ctx: &Context, receiver: Id) -> Result<Rc<Self>> {
@@ -350,27 +433,6 @@ impl Wrapper {
             Self::invoke_buffer(ctx, receiver, "write", vec![data])?;
         }
         Ok(())
-    }
-
-    fn position(&self, ctx: &mut Context, end: Id) -> Result<Id> {
-        let input = self.input.borrow();
-        let width = match self.decoder.get().codec {
-            StreamCodec::Wide { format, .. } => format.width(),
-            StreamCodec::Registered(_) => 1,
-        };
-        let offset = input.position(ctx, end, width)?;
-        if !self.decoder.get().codec.detects_bom() || !input.wide_snapshot {
-            return Ok(offset);
-        }
-        let flag = match input.order {
-            0 if input.beginning => 2u128,
-            order if order == -NATIVE_ORDER => 1,
-            _ => return Ok(offset),
-        };
-        // TextIOWrapper cookies store the newline decoder's flags above the raw offset.
-        let flag = flag << usize::from(matches!(self.newline.get(), None | Some("")));
-        let cookie = (flag << 64) | u128::from(ctx.as_integer(offset)? as u64);
-        Ok(ctx.alloc(Value::Int(crate::Int::new(cookie.into()))))
     }
 
     fn write(&self, ctx: &mut Context, receiver: Id, value: Id) -> Result<Id> {
@@ -497,7 +559,8 @@ impl Wrapper {
                 if (!line || input.decoded_chunk_nonempty == Some(true))
                     && let Some(part) = input.take(limit, line, w.newline.get(), false)?
                 {
-                    return Ok(ctx.text(part));
+                    drop(input);
+                    return Ok(ctx.alloc(part));
                 }
                 if line && input.decoded_chunk_nonempty == Some(true) {
                     // A consumed line chunk is discarded. An empty decoder result
@@ -508,12 +571,32 @@ impl Wrapper {
             let (method, args) = if all {
                 ("read", vec![])
             } else {
+                let mut size = w.chunk_size.get();
+                if let Some(limit) = limit
+                    && !line
+                {
+                    size = w.input.borrow().read_size(size, limit);
+                }
                 (
                     if w.read1 { "read1" } else { "read" },
-                    vec![ctx.int(w.chunk_size.get() as i64)],
+                    vec![ctx.int(size as i64)],
                 )
             };
+            // A Python read method may seek or reinitialize the wrapper. The snapshot
+            // describes the decoder before the call, as in TextIOWrapper._read_chunk.
+            let mut snapshot = if all {
+                None
+            } else {
+                w.input.borrow().capture(
+                    w.decoder.get().codec,
+                    w.decoder_newline.get(),
+                    w.telling.get(),
+                )?
+            };
             let data = invoke(ctx, buffer, method, args)?;
+            if all && data == NONE {
+                return Err(Error::new("BlockingIOError", "Read returned None."));
+            }
             let w = Self::from_receiver(ctx, receiver)?;
             w.binary()?;
             let bytes = ctx.bytes_like(data).map_err(|_| {
@@ -527,84 +610,90 @@ impl Wrapper {
             })?;
             let end = all || bytes.is_empty();
             let decoder = w.decoder.get();
-            let (codec, raw) = w.input.borrow_mut().chunk(bytes, decoder.codec, end)?;
-            let raw = ctx.alloc(Value::Bytes(raw));
-            // The ordinary native codec entry owns error handling. A registered handler
-            // may run Python, so release the reader borrow before invoking it.
-            let errors = ctx.scalar_value(decoder.errors);
-            let (decoded, consumed, signature, resolved) = match codec {
-                StreamCodec::Registered(c) => (
-                    codecs::decode_bytes(ctx, c, raw, Some(errors))?,
-                    ctx.bytes_like(raw)?.len(),
-                    0,
-                    codec,
-                ),
-                StreamCodec::Wide { format, bom } => {
-                    let errors = ctx.str_value(errors)?.to_owned();
-                    let requested = if bom { 0 } else { format.byte_order() };
-                    let (decoded, consumed, order) =
-                        codecs::decode_wide_chunk(ctx, raw, &errors, format, requested, end)?;
-                    let data = ctx.bytes_like(raw)?;
-                    let width = format.width();
-                    if bom && order == 0 && consumed >= width {
-                        let err = DecodeIssue {
-                            encoding: format.codec_name(true),
-                            start: 0,
-                            end: width,
-                            reason: "Stream does not start with BOM",
-                        }
-                        .error(data);
-                        return Err(ctx.decode_error(err));
-                    }
-                    let consumed = consumed.min(data.len());
-                    let mut reader = w.input.borrow_mut();
-                    reader.save_tail(&data[consumed..])?;
-                    let signature = if bom && order != 0 { width } else { 0 };
-                    reader.order = order;
-                    if order != 0 {
-                        reader.beginning = false;
-                    }
-                    if !all && w.telling.get() {
-                        reader.wide_snapshot = true;
-                    }
-                    let resolved = StreamCodec::Wide {
-                        format: format.with_order(order),
-                        bom: false,
-                    };
-                    (decoded, consumed, signature, resolved)
-                }
-            };
+            let newline = w.decoder_newline.get();
+            let telling = w.telling.get();
+            if let Some(saved) = &mut snapshot {
+                let raw = Rc::make_mut(&mut saved.input);
+                raw.try_reserve(bytes.len())
+                    .map_err(|_| crate::Error::allocation())?;
+                raw.extend_from_slice(bytes);
+            }
+            let byte_count = bytes.len();
+            let chunk = w.input.borrow_mut().chunk(bytes, decoder.codec, end)?;
+            let count = decode_chunk(ctx, &w.input, decoder, newline, chunk, end)?;
             let mut input = w.input.borrow_mut();
-            input.append(
-                ctx.str_value(decoded)?,
-                &ctx.bytes_like(raw)?[signature.min(consumed)..consumed],
-                resolved,
-                w.decoder_newline.get(),
-                end,
-                !all && w.telling.get(),
-            )?;
             if !all {
-                let nonempty = input.final_chunk_has_text();
+                input.record(snapshot, byte_count, count, telling);
+                let nonempty = count != 0;
                 input.decoded_chunk_nonempty = (!line || !end || nonempty).then_some(nonempty);
+                if nonempty && end {
+                    // An empty binary read may release a pending CR or replacement.
+                    // As long as the decoder emitted text, check the line/size limit normally.
+                    continue;
+                }
                 if line && end {
-                    if nonempty {
-                        // The decoder can still emit a pending CR or an error replacement at EOF.
-                        continue;
-                    }
                     input.clear_snapshot();
                 }
             }
             if end {
                 let part = input
                     .take(limit, line, w.newline.get(), true)?
-                    .unwrap_or_default();
+                    .expect("read at EOF returns remaining text");
                 if all {
                     input.after_read_all();
                 }
-                return Ok(ctx.text(part));
+                drop(input);
+                return Ok(ctx.alloc(part));
             }
         }
     }
+}
+
+/// Decode into either the live stream or a temporary decoder replaying a saved position.
+fn decode_chunk(
+    ctx: &mut Context,
+    input: &RefCell<Reader>,
+    decoder: Coder,
+    newline: Option<&str>,
+    (codec, bytes): (StreamCodec, Vec<u8>),
+    end: bool,
+) -> Result<usize> {
+    let raw = ctx.alloc(Value::Bytes(bytes));
+    let errors = ctx.scalar_value(decoder.errors);
+    // Registered error handlers can reenter the stream; no reader borrow spans decoding.
+    let decoded = match codec {
+        StreamCodec::Registered(c) => codecs::decode_bytes(ctx, c, raw, Some(errors))?,
+        StreamCodec::Wide { format, bom } => {
+            let errors = ctx.str_value(errors)?.to_owned();
+            let requested = if bom { 0 } else { format.byte_order() };
+            let (decoded, consumed, order) =
+                codecs::decode_wide_chunk(ctx, raw, &errors, format, requested, end)?;
+            let data = ctx.bytes_like(raw)?;
+            if bom && order == 0 && consumed >= format.width() {
+                let issue = DecodeIssue {
+                    encoding: format.codec_name(true),
+                    start: 0,
+                    end: format.width(),
+                    reason: "Stream does not start with BOM",
+                };
+                let error = issue.error(data);
+                return Err(ctx.decode_error(error));
+            }
+            let mut reader = input.borrow_mut();
+            reader.save_tail(&data[consumed.min(data.len())..])?;
+            reader.order = order;
+            if order != 0 {
+                reader.beginning = false;
+            }
+            decoded
+        }
+    };
+    let storage = ctx
+        .string_storage(decoded)
+        .ok_or_else(|| Error::new("TypeError", "expected str"))?;
+    input
+        .borrow_mut()
+        .append(ctx.heap.get(storage), newline, end)
 }
 
 /// Advance the concrete text iterator. Only an empty line restores telling at EOF.
@@ -652,6 +741,37 @@ pub(super) fn next(
     w.input.borrow_mut().clear_snapshot();
     w.telling.set(w.seekable);
     Err(Error::new("StopIteration", ""))
+}
+
+/// Flush the text stream, then pass the original position to its current binary buffer.
+pub(super) fn truncate(
+    ctx: &mut Context,
+    receiver: Id,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Id> {
+    if !kwargs.is_empty() {
+        return Err(Error::new(
+            "TypeError",
+            "TextIOWrapper.truncate() takes no keyword arguments",
+        ));
+    }
+    super::argument_count("TextIOWrapper", "truncate", args.len())?;
+    let buffer = |ctx: &Context| match ctx.heap.get(receiver) {
+        Value::TextFile(file) => file
+            .buffer
+            .ok_or_else(|| Error::new("ValueError", "underlying buffer has been detached")),
+        _ => Wrapper::from_receiver(ctx, receiver)?.binary(),
+    };
+    buffer(ctx)?;
+    invoke(ctx, receiver, "flush", vec![])?;
+    let stream = buffer(ctx)?;
+    invoke(
+        ctx,
+        stream,
+        "truncate",
+        vec![args.first().copied().unwrap_or(NONE)],
+    )
 }
 
 /// Dispatch to the text layer while keeping the supplied buffer and its overrides observable.
@@ -719,6 +839,24 @@ pub(super) fn call(
             if ctx.truth(closed)? || w.buffer.get().is_none() {
                 return Ok(NONE);
             }
+            if let Value::Instance {
+                class,
+                member_values: Some(members),
+                ..
+            } = ctx.heap.get(receiver)
+                && let Some(base) = ctx.find_in_mro(*class, |base| {
+                    (ctx.heap.get(base).io_kind() == Some("TextIOWrapper")).then_some(base)
+                })
+                && let Some(member) = ctx.own_class_attr(base, "_finalizing")
+                && members.get(&member) == Some(&TRUE)
+            {
+                // A warning hook can raise or replace the buffer before flush and close.
+                let mark = ctx.heap.temporary_mark();
+                let _ = Wrapper::invoke_buffer(ctx, receiver, "_dealloc_warn", vec![receiver]);
+                if ctx.heap.discard_truth_operands(mark, ctx.modules) {
+                    ctx.collect_unreachable();
+                }
+            }
             let flushed = invoke(ctx, receiver, "flush", vec![]);
             if let Err(error) = &flushed {
                 for id in error.roots() {
@@ -785,9 +923,10 @@ pub(super) fn call(
                         "telling position disabled by next() call",
                     ));
                 }
+                w.drain(ctx, receiver)?;
                 invoke(ctx, receiver, "flush", vec![])?;
                 let pos = Wrapper::invoke_buffer(ctx, receiver, "tell", vec![])?;
-                return Wrapper::from_receiver(ctx, receiver)?.position(ctx, pos);
+                return Wrapper::position(ctx, receiver, pos);
             }
             let mut cookie = args[0];
             let seek = ctx.index_integer(cookie)?;
@@ -827,53 +966,68 @@ pub(super) fn call(
             };
             invoke(ctx, receiver, "flush", vec![])?;
             if whence == 2 {
-                Wrapper::from_receiver(ctx, receiver)?
-                    .input
-                    .borrow_mut()
-                    .discard();
-            }
-            let wide_cookie = if w.decoder.get().codec.detects_bom() {
-                offset.big().to_u128().filter(|n| n >> 64 > 0)
-            } else {
-                None
-            };
-            if let Some(bits) = wide_cookie {
-                let shift = usize::from(matches!(w.newline.get(), None | Some("")));
-                let flags = bits >> 64;
-                if flags != 1 << shift && flags != 2 << shift {
-                    return Err(Error::new(
-                        "NotImplementedError",
-                        "native text position needs a decoder snapshot",
-                    ));
+                let w = Wrapper::from_receiver(ctx, receiver)?;
+                let mut input = w.input.borrow_mut();
+                input.discard();
+                input.reset_decoder();
+                drop(input);
+                let zero = ctx.int(0);
+                let end = ctx.int(2);
+                let position = Wrapper::invoke_buffer(ctx, receiver, "seek", vec![zero, end])?;
+                if Wrapper::from_receiver(ctx, receiver)?.writable.get() {
+                    let beginning = ctx.checked_equal(position, zero)?;
+                    let w = Wrapper::from_receiver(ctx, receiver)?;
+                    w.write_start.set(beginning);
+                    w.utf8_signature_pending.set(beginning);
                 }
+                return Ok(position);
             }
-            let byte_offset = match wide_cookie {
-                Some(bits) => i64::try_from(bits as u64).ok(),
-                None => offset.to_i64(),
-            }
-            .ok_or_else(|| Error::new("OverflowError", "seek position out of range"))?;
-            let off = ctx.int(byte_offset);
-            let dir = ctx.int(whence);
-            let position = Wrapper::invoke_buffer(ctx, receiver, "seek", vec![off, dir])?;
-            let beginning = !ctx.truth(position)?;
+
+            let state = Cookie::parse(&offset)?;
+            let off = ctx.int(state.start);
+            Wrapper::invoke_buffer(ctx, receiver, "seek", vec![off])?;
             let w = Wrapper::from_receiver(ctx, receiver)?;
-            let mut input = Reader::after_seek(beginning, whence == 0);
-            if let Some(bits) = wide_cookie {
-                let flag = (bits >> 64) >> usize::from(matches!(w.newline.get(), None | Some("")));
-                input.beginning = flag == 2;
-                if flag == 1 {
-                    input.order = -NATIVE_ORDER;
-                }
-                input.wide_snapshot = true;
+            w.input
+                .borrow_mut()
+                .after_seek(state, w.decoder.get().codec, w.decoder_newline.get());
+
+            if state.skip != 0 {
+                // Even an EOF-only cookie must issue read(0). The underlying file
+                // may have changed since tell(), so decode the actual bytes returned.
+                let size = ctx.int(i64::from(state.feed));
+                let data = Wrapper::invoke_buffer(ctx, receiver, "read", vec![size])?;
+                let Value::Bytes(bytes) = ctx.heap.get(ctx.scalar_value(data)) else {
+                    return Err(Error::new(
+                        "TypeError",
+                        format!(
+                            "underlying read() should have returned a bytes object, not '{}'",
+                            ctx.type_name(data)
+                        ),
+                    ));
+                };
+                let w = Wrapper::from_receiver(ctx, receiver)?;
+                let decoder = w.decoder.get();
+                let mut input = w.input.borrow_mut();
+                input.seek_input(state.flags, bytes)?;
+                let chunk = input.chunk(bytes, decoder.codec, state.eof)?;
+                drop(input);
+                let chars = decode_chunk(
+                    ctx,
+                    &w.input,
+                    decoder,
+                    w.decoder_newline.get(),
+                    chunk,
+                    state.eof,
+                )?;
+                let mut input = w.input.borrow_mut();
+                input.decoded_chunk_nonempty = Some(chars != 0);
+                input.skip_chars(state.skip as usize)?;
             }
-            w.input.replace(input);
+            let w = Wrapper::from_receiver(ctx, receiver)?;
+            let beginning = state.start == 0 && state.flags == 0;
             w.write_start.set(beginning);
             w.utf8_signature_pending.set(beginning);
-            Ok(if wide_cookie.is_some() {
-                cookie
-            } else {
-                position
-            })
+            Ok(cookie)
         }
         _ => Err(Error::new(
             "AttributeError",

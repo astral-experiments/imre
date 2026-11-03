@@ -6,7 +6,7 @@
 //! bound, but no relationship to a container's later length is retained. Indexed
 //! accesses must keep checking current bounds, including after alias mutation.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::marker::PhantomData;
 
 use crate::ir::{Binary, Builtin, Compare, Expr, ExprKind, Function, Module, Statement, Type};
@@ -36,14 +36,28 @@ impl IntRange {
 /// Missing facts, including unreachable or arbitrary-precision expressions, must
 /// use the ordinary checked lowering path.
 pub(crate) struct RangeFacts<'ir> {
-    intervals: HashMap<*const Expr, Interval>,
+    intervals: IntegerFacts,
     cursors: HashMap<*const Statement, Interval>,
     module: PhantomData<&'ir Module>,
 }
 
+pub(crate) struct IntegerFacts(HashMap<*const Expr, Interval>);
+
+impl IntegerFacts {
+    /// Looks up an expression at its original position in the analyzed IR.
+    pub(crate) fn get(&self, expression: &Expr) -> Option<IntRange> {
+        self.0.get(&std::ptr::from_ref(expression))?.small()
+    }
+}
+
 impl RangeFacts<'_> {
     pub(crate) fn integer(&self, expression: &Expr) -> Option<IntRange> {
-        self.intervals.get(&std::ptr::from_ref(expression))?.small()
+        self.intervals.get(expression)
+    }
+
+    /// A rewrite may query these facts only on original expressions before moving them.
+    pub(crate) fn into_original_integers(self) -> IntegerFacts {
+        self.intervals
     }
 
     /// Covers the independent range cursor's initial value and final increment,
@@ -51,6 +65,15 @@ impl RangeFacts<'_> {
     /// start/stop/step arguments are small and the step has a nonzero fixed sign.
     pub(crate) fn range_cursor(&self, statement: &Statement) -> Option<IntRange> {
         self.cursors.get(&std::ptr::from_ref(statement))?.small()
+    }
+
+    /// Keeps the identities of proven loops for an in-place rewrite. Callers may
+    /// query only original statements that have not yet been moved or replaced.
+    pub(crate) fn into_small_cursors(self) -> HashSet<*const Statement> {
+        self.cursors
+            .into_iter()
+            .filter_map(|(statement, interval)| interval.small().map(|_| statement))
+            .collect()
     }
 
     /// Finds slots whose initial value and every possible replacement are small.
@@ -75,13 +98,29 @@ impl RangeFacts<'_> {
             small[parameter] = false;
         }
         let mut moves = Vec::new();
-        inspect_writes(self, &function.body, &mut small, &mut moves);
-        // The statement walk does not enter expression operands. Every scoped
-        // operand can contain its own owners, including nested range cursors.
-        crate::ir::walk_expressions(&function.body, &mut |expression| {
-            if let ExprKind::Scope { body, .. } = &expression.kind {
-                inspect_writes(self, body, &mut small, &mut moves);
+        crate::ir::walk_statements(&function.body, &mut |statement| match statement {
+            Statement::Assign(slot, value) => small[*slot] &= self.integer(value).is_some(),
+            Statement::Move(target, source) => moves.push((*source, *target)),
+            Statement::IterNext {
+                key, value, ready, ..
+            } => {
+                for slot in [Some(*key), *value, Some(*ready)].into_iter().flatten() {
+                    small[slot] = false;
+                }
             }
+            // The cursor proof covers the final increment as well as the yielded target.
+            Statement::For {
+                target,
+                cursor,
+                stop,
+                step,
+                ..
+            } if self.range_cursor(statement).is_none() => {
+                for &slot in [target, cursor, stop, step] {
+                    small[slot] = false;
+                }
+            }
+            _ => {}
         });
         loop {
             let mut changed = false;
@@ -99,86 +138,6 @@ impl RangeFacts<'_> {
     }
 }
 
-/// A function-wide storage invariant needs every writer, independently of the
-/// analysis control-flow path. Hidden range slots include the final increment;
-/// proving only the yielded target would miss a possible BigInt cursor owner.
-fn inspect_writes(
-    facts: &RangeFacts<'_>,
-    body: &[Statement],
-    small: &mut [bool],
-    moves: &mut Vec<(usize, usize)>,
-) {
-    for statement in body {
-        match statement {
-            Statement::Assign(slot, value) => {
-                if facts.integer(value).is_none() {
-                    small[*slot] = false;
-                }
-            }
-            Statement::Move(target, source) => moves.push((*source, *target)),
-            Statement::IterNext {
-                key, value, ready, ..
-            } => {
-                // Mapping storage can supply an arbitrary-precision integer.
-                for slot in [Some(*key), *value, Some(*ready)].into_iter().flatten() {
-                    small[slot] = false;
-                }
-            }
-            Statement::If(_, yes, no) => {
-                inspect_writes(facts, yes, small, moves);
-                inspect_writes(facts, no, small, moves);
-            }
-            Statement::While(_, body, orelse) => {
-                inspect_writes(facts, body, small, moves);
-                inspect_writes(facts, orelse, small, moves);
-            }
-            Statement::Scope { body, .. } => inspect_writes(facts, body, small, moves),
-            Statement::Try {
-                body,
-                handlers,
-                orelse,
-                finalbody,
-            } => {
-                for body in [body, orelse, finalbody] {
-                    inspect_writes(facts, body, small, moves);
-                }
-                for handler in handlers {
-                    inspect_writes(facts, &handler.body, small, moves);
-                }
-            }
-            Statement::For {
-                target,
-                cursor,
-                stop,
-                step,
-                body,
-                orelse,
-                ..
-            } => {
-                if facts.range_cursor(statement).is_none() {
-                    for slot in [target, cursor, stop, step] {
-                        small[*slot] = false;
-                    }
-                }
-                inspect_writes(facts, body, small, moves);
-                inspect_writes(facts, orelse, small, moves);
-            }
-            Statement::Clear(_)
-            | Statement::SetItem(_, _, _)
-            | Statement::AugmentItem(_, _, _, _)
-            | Statement::SetField(_, _, _)
-            | Statement::AugmentField(_, _, _, _)
-            | Statement::Expr(_)
-            | Statement::Return(_)
-            | Statement::Raise(_)
-            | Statement::Break
-            | Statement::Continue
-            | Statement::Exhaust
-            | Statement::Assert(_) => {}
-        }
-    }
-}
-
 /// Computes facts after ownership-preserving IR rewrites have finished. Loop
 /// bodies are recorded only after their entry invariant reaches a fixed point.
 pub(crate) fn analyze(module: &Module) -> RangeFacts<'_> {
@@ -191,7 +150,7 @@ pub(crate) fn analyze(module: &Module) -> RangeFacts<'_> {
         analyzer.function(function);
     }
     RangeFacts {
-        intervals: analyzer.intervals,
+        intervals: IntegerFacts(analyzer.intervals),
         cursors: analyzer.cursors,
         module: PhantomData,
     }

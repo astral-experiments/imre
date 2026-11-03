@@ -4,7 +4,7 @@ import time
 
 def current():
     from select import select
-    from time import ctime, monotonic, perf_counter, time_ns
+    from time import ctime, monotonic, monotonic_ns, perf_counter, time_ns
 
     from types import SimpleNamespace
     for name in ("time", "monotonic", "perf_counter"):
@@ -34,7 +34,12 @@ def current():
         else:
             raise AssertionError("invalid clock type accepted")
 
+    before_ns = monotonic_ns()
     first = monotonic()
+    after_ns = monotonic_ns()
+    assert time.monotonic_ns is monotonic_ns and type(before_ns) is int
+    assert before_ns <= after_ns
+    assert before_ns / 1e9 - 1e-6 <= first <= after_ns / 1e9 + 1e-6
     assert type(first) is float and time.monotonic is monotonic
     sleep = time.sleep
     assert sleep(0) is None
@@ -56,7 +61,7 @@ def current():
     ns = time_ns()
     assert time.time_ns is time_ns and type(ns) is int
     assert abs(ns / 1_000_000_000 - time.time()) < 60
-    for clock in (monotonic, perf_counter, time_ns):
+    for clock in (monotonic, monotonic_ns, perf_counter, time_ns):
         for args, kwargs in (((1,), {}), ((), {"x": 1})):
             try:
                 clock(*args, **kwargs)

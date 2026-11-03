@@ -12,6 +12,25 @@ class Raises:
 
 
 def current():
+    class Meta(type):
+        pass
+
+    class Subject(metaclass=Meta):
+        pass
+
+    for subject, name in (
+        (type, "type"),
+        (int, "type"),
+        (len, "builtin_function_or_method"),
+        (Subject, "Meta"),
+        (Subject(), "Subject"),
+    ):
+        try:
+            re.search("x*", subject)
+        except TypeError as error:
+            assert str(error) == "expected string or bytes-like object, got '%s'" % name
+        else:
+            assert False
     for pattern, subject, want in (
         (r"(?P<outer>(?P<inner>))", "", (1, "outer")),
         (r"(?P<first>)(?P<second>)", "", (2, "second")),
@@ -24,7 +43,16 @@ def current():
     data = bytearray(b"!abz")
     match = re.compile(br"(?P<outer>(a))(b)$").search(data, 1, 3)
     data[:] = b""
+    assert (match.pos, match.endpos) == (1, 3)
+    assert match.regs == ((1, 3), (1, 2), (1, 2), (2, 3))
+    assert match.regs is match.regs
     assert (match.lastindex, match.lastgroup) == (3, None)
+    parts = re.compile(r"(é)|(a)").finditer("xéa!", 1, 3)
+    first, second = tuple(parts)
+    assert first.regs == ((1, 2), (1, 2), (-1, -1))
+    assert (second.pos, second.endpos, second.regs) == (
+        1, 3, ((2, 3), (-1, -1), (2, 3)),
+    )
     for pattern, text in [(r"(?P<word>é)(b)?", "é"), (br"(?P<word>\xff)(b)?", b"\xff")]:
         match = re.compile(pattern).match(text)
         assert match[0] == text

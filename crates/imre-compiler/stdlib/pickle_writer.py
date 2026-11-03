@@ -1,6 +1,6 @@
 # Adapted from CPython 3.14.5, Lib/pickle.py (5607950ef232dad16d75c0cf53101d9649d89115).
 # See stdlib/docstrings/LICENSE. This source shares the boxed pickle module's
-# opcode constants, native exceptions, and reader helpers.
+# opcode constants, exceptions, and reader helpers.
 
 from types import FunctionType
 from copyreg import dispatch_table, _extension_registry
@@ -991,4 +991,33 @@ class _Pickler:
     dispatch[type] = save_type
 
 
-Pickler = _Pickler
+def _dump(obj, file, protocol=None, *, fix_imports=True, buffer_callback=None):
+    _Pickler(file, protocol, fix_imports=fix_imports,
+             buffer_callback=buffer_callback).dump(obj)
+
+def _dumps(obj, protocol=None, *, fix_imports=True, buffer_callback=None):
+    f = io.BytesIO()
+    _Pickler(f, protocol, fix_imports=fix_imports,
+             buffer_callback=buffer_callback).dump(obj)
+    res = f.getvalue()
+    assert isinstance(res, bytes_types)
+    return res
+
+def _load(file, *, fix_imports=True, encoding="ASCII", errors="strict",
+          buffers=None):
+    return _Unpickler(file, fix_imports=fix_imports, buffers=buffers,
+                     encoding=encoding, errors=errors).load()
+
+
+Pickler, Unpickler = _Pickler, _Unpickler
+dump, load = _dump, _load
+try:
+    from _pickle import PickleError, PicklingError, UnpicklingError, dumps
+except ImportError:
+    dumps = _dumps
+
+__all__ = ["PickleError", "PicklingError", "UnpicklingError", "Pickler",
+           "Unpickler", "dump", "dumps", "load", "loads"]
+if _HAVE_PICKLE_BUFFER:
+    __all__.append("PickleBuffer")
+__all__.extend(x for x in dir() if x.isupper() and not x.startswith('_'))

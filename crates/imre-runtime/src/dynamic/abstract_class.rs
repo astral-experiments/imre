@@ -1,6 +1,7 @@
 //! Abstract method declarations on the bundled ABC and its subclasses.
 
 use std::collections::BTreeSet;
+use std::ffi::c_long;
 
 use super::Context;
 use super::value::{Error, FALSE, Id, NONE, NOT_IMPLEMENTED, Result, TRUE, Value};
@@ -134,7 +135,7 @@ impl Context {
                         matches!(name, "__iter__" | "__len__" | "__reversed__")
                     }
                     "memoryview" => matches!(name, "__iter__" | "__len__"),
-                    "coroutine" | "coroutine_wrapper" => {
+                    "coroutine" | "coroutine_wrapper" | "anext_awaitable" => {
                         super::generator_protocol::coroutine_method(kind, name)
                     }
                     _ => {
@@ -292,7 +293,36 @@ impl Context {
                 super::builtins::set_add(self, methods, key)?;
             }
         }
-        self.set_abstract_methods(scope, methods)
+        self.set_abstract_methods(scope, methods)?;
+
+        let Some(marker) = self.own_class_attr(class, "__abc_tpflags__") else {
+            return Ok(());
+        };
+        // Only exact integers contribute flags, but ABC initialization consumes every owned marker.
+        let flags = match self.heap.get(marker) {
+            Value::Int(bits) => bits.to_i64().and_then(|n| c_long::try_from(n).ok()),
+            _ => Some(0),
+        };
+        let key = self.heap.code_name("__abc_tpflags__");
+        self.remove_binding(scope, "__abc_tpflags__", key)?;
+        const COLLECTION_FLAGS: c_long = (1 << 5) | (1 << 6);
+        match flags {
+            Some(n) if n & COLLECTION_FLAGS == COLLECTION_FLAGS => Err(Error::new(
+                "TypeError",
+                "__abc_tpflags__ cannot be both Py_TPFLAGS_SEQUENCE and Py_TPFLAGS_MAPPING",
+            )),
+            Some(bits) => {
+                let Value::Class { pattern_flags, .. } = self.heap.get_mut(class) else {
+                    unreachable!()
+                };
+                pattern_flags.add_marker(bits);
+                Ok(())
+            }
+            None => Err(Error::new(
+                "OverflowError",
+                "Python int too large to convert to C long",
+            )),
+        }
     }
 
     pub(super) fn set_abstract_methods(&mut self, scope: Id, methods: Id) -> Result<()> {

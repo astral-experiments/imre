@@ -3,6 +3,11 @@ use ruff_python_ast as ast;
 
 use super::Function;
 
+fn wildcard(pattern: &ast::Pattern) -> bool {
+    matches!(pattern, ast::Pattern::MatchAs(p) if p.pattern.is_none() && p.name.is_none())
+        || matches!(pattern, ast::Pattern::MatchStar(p) if p.name.is_none())
+}
+
 impl Function<'_, '_> {
     /// Keep the subject across failed cases and publish captures before evaluating a guard.
     pub(super) fn match_statement(&mut self, stmt: &ast::StmtMatch) {
@@ -50,6 +55,57 @@ impl Function<'_, '_> {
         self.op("put", &[captures, &key, value]);
         if !names.iter().any(|seen| seen == name.as_str()) {
             names.push(name.to_string());
+        }
+    }
+
+    fn sequence_pattern(
+        &mut self,
+        patterns: &[ast::Pattern],
+        value: &str,
+        failed: &str,
+        captures: &str,
+        names: &mut Vec<String>,
+    ) {
+        let sequence = self.op("match_sequence", &[value]);
+        let condition = self.truth(&sequence);
+        self.pattern_check(&condition, failed);
+        let star = patterns
+            .iter()
+            .position(|p| matches!(p, ast::Pattern::MatchStar(_)));
+        if star.is_none() || patterns.len() > 1 {
+            let len = self.op("match_sequence_length", &[value]);
+            let required = self.integer(patterns.len() - usize::from(star.is_some()));
+            let valid = self.op(if star.is_some() { ">=" } else { "==" }, &[&len, &required]);
+            let condition = self.truth(&valid);
+            self.pattern_check(&condition, failed);
+        }
+        if patterns.iter().all(wildcard) {
+            return;
+        }
+        if let Some(star) = star
+            && wildcard(&patterns[star])
+        {
+            for (i, child) in patterns.iter().enumerate().filter(|(_, p)| !wildcard(p)) {
+                let index = if i < star {
+                    self.integer(i)
+                } else {
+                    // Earlier subpatterns may have changed the subject's length.
+                    let len = self.op("match_sequence_length", &[value]);
+                    let offset = self.integer(patterns.len() - i);
+                    self.op("-", &[&len, &offset])
+                };
+                let item = self.op("get", &[value, &index]);
+                self.pattern(child, &item, failed, captures, names);
+            }
+        } else {
+            let count = self.integer(patterns.len());
+            let star = star.map_or_else(|| "0".to_owned(), |i| self.integer(i));
+            let items = self.op("unpack", &[value, &count, &star]);
+            for (i, child) in patterns.iter().enumerate() {
+                let index = self.integer(i);
+                let item = self.op("get", &[&items, &index]);
+                self.pattern(child, &item, failed, captures, names);
+            }
         }
     }
 
@@ -119,25 +175,7 @@ impl Function<'_, '_> {
                 }
             }
             ast::Pattern::MatchSequence(p) => {
-                let len = self.op("match_sequence_length", &[value]);
-                let condition = self.value(&format!("icmp ne i64 {len}, 0"));
-                self.pattern_check(&condition, failed);
-                let star = p
-                    .patterns
-                    .iter()
-                    .position(|p| matches!(p, ast::Pattern::MatchStar(_)));
-                let required = self.integer(p.patterns.len() - usize::from(star.is_some()));
-                let valid = self.op(if star.is_some() { ">=" } else { "==" }, &[&len, &required]);
-                let condition = self.truth(&valid);
-                self.pattern_check(&condition, failed);
-                let count = self.integer(p.patterns.len());
-                let star = star.map_or_else(|| "0".to_owned(), |i| self.integer(i));
-                let items = self.op("unpack", &[value, &count, &star]);
-                for (i, child) in p.patterns.iter().enumerate() {
-                    let index = self.integer(i);
-                    let item = self.op("get", &[&items, &index]);
-                    self.pattern(child, &item, failed, captures, names);
-                }
+                self.sequence_pattern(&p.patterns, value, failed, captures, names);
             }
             ast::Pattern::MatchStar(p) => {
                 if let Some(name) = &p.name {

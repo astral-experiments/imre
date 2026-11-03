@@ -1,7 +1,12 @@
 //! POSIX descriptors are integers in the program's descriptor table. A call
 //! can observe a closed number or a number subsequently reused by the kernel.
 
+#[cfg(target_os = "linux")]
+mod copy_range;
 mod credentials;
+pub(crate) use credentials::{credential_id, getegid, geteuid, getgid, getgroups, getuid};
+#[cfg(target_os = "linux")]
+pub(crate) use credentials::{getresgid, getresuid};
 
 use super::exceptions::{Error, Filename, Kind, Result, finish};
 use super::files::{errno_error, errno_with_filenames};
@@ -16,6 +21,11 @@ pub(crate) mod scandir;
 pub(super) mod stat_result;
 pub(crate) use links::{link_at, readlink_at, symlink_at};
 pub(crate) use stat_result::float_seconds;
+
+#[unsafe(no_mangle)]
+pub extern "C" fn imre_os_getpid() -> usize {
+    Int::from_usize(std::process::id() as usize).into_raw()
+}
 
 /// The target's primary or alternate separator, shared by typed and boxed imports.
 pub(crate) fn os_separator(alternate: bool) -> Option<&'static str> {
@@ -123,7 +133,7 @@ descriptor_constants! { descriptor_constant -> i32;
 }
 // The Linux posix initializer installs these flags in the live module dictionary.
 #[cfg(target_os = "linux")]
-descriptor_constants! { imre_os_o_path = O_PATH, imre_os_o_tmpfile = O_TMPFILE }
+descriptor_constants! { imre_os_o_path = O_PATH, imre_os_o_tmpfile = O_TMPFILE, imre_os_o_noctty = O_NOCTTY }
 
 descriptor_constants! { poll_constant -> i16;
     imre_os_pollin = POLLIN, imre_os_pollpri = POLLPRI, imre_os_pollout = POLLOUT,
@@ -339,6 +349,20 @@ pub extern "C" fn imre_os_close(fd: usize) {
     finish(c_int(fd).and_then(close), ());
 }
 
+/// Return the process group selected by the kernel for this PID.
+#[cfg(unix)]
+pub(crate) fn getpgid(pid: libc::pid_t) -> Result<libc::pid_t> {
+    // SAFETY: getpgid takes a process ID and retains no pointers.
+    checked(unsafe { libc::getpgid(pid) })
+}
+
+/// Set a process group, preserving the kernel's membership and permission checks.
+#[cfg(unix)]
+pub(crate) fn setpgid(pid: libc::pid_t, group: libc::pid_t) -> Result<()> {
+    // SAFETY: setpgid accepts two integers and reports failures through errno.
+    checked(unsafe { libc::setpgid(pid, group) }).map(|_| ())
+}
+
 /// Read the kernel session ID without changing the caller's process state.
 pub(crate) fn getsid(pid: libc::pid_t) -> Result<libc::pid_t> {
     // SAFETY: getsid accepts any pid_t and retains no pointers.
@@ -370,6 +394,16 @@ pub(crate) fn waitpid<E: From<Error>>(
         }
         dispatch()?;
     }
+}
+
+/// Apply a POSIX lock relative to the borrowed descriptor's current position.
+#[cfg(target_os = "linux")]
+pub(crate) fn lockf(fd: i32, command: i32, length: libc::off_t) -> io::Result<()> {
+    // SAFETY: lockf takes only integers and retains no pointers or descriptor ownership.
+    if unsafe { libc::lockf(fd, command, length) } < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(())
 }
 
 /// Close the descriptor once, including when the kernel reports an interrupt.
@@ -428,7 +462,7 @@ pub unsafe extern "C" fn imre_os_read(fd: usize, length: usize) -> *const crate:
                     "Python int too large to convert to C ssize_t",
                 )
             })?;
-            read(c_int(fd)?, length, super::stdlib::check_interrupt)
+            read(c_int(fd)?, length, None, super::stdlib::check_interrupt)
                 .map(|bytes| crate::BytesOwner::into_raw(crate::BytesOwner::new(bytes)))
         })(),
         std::ptr::null(),
@@ -445,7 +479,12 @@ pub unsafe extern "C" fn imre_os_write(fd: usize, bytes: *const crate::Bytes) ->
     let bytes = unsafe { &*bytes };
     finish(
         c_int(fd)
-            .and_then(|fd| transfer(|| try_write(fd, bytes), super::stdlib::check_interrupt))
+            .and_then(|fd| {
+                transfer(
+                    || try_write(fd, bytes, None),
+                    super::stdlib::check_interrupt,
+                )
+            })
             .map(|n| Int::from_usize(n).into_raw()),
         0,
     )
@@ -476,6 +515,47 @@ fn transfer<E: From<Error>>(
     }
 }
 
+#[cfg(target_os = "linux")]
+pub(crate) enum RangeTransfer {
+    CopyFileRange,
+    Splice(u32),
+}
+
+#[cfg(target_os = "linux")]
+impl RangeTransfer {
+    /// Transfer between borrowed descriptors, dispatching signals before retrying an interrupted syscall.
+    pub(crate) fn run<E: From<Error>>(
+        self,
+        src: i32,
+        dst: i32,
+        count: usize,
+        mut offset_src: Option<i64>,
+        mut offset_dst: Option<i64>,
+        dispatch: impl FnMut() -> std::result::Result<(), E>,
+    ) -> std::result::Result<usize, E> {
+        let (syscall, flags) = match self {
+            Self::CopyFileRange => (libc::SYS_copy_file_range, 0),
+            Self::Splice(flags) => (libc::SYS_splice, flags),
+        };
+        let offset_src = offset_src
+            .as_mut()
+            .map_or(std::ptr::null_mut(), std::ptr::from_mut);
+        let offset_dst = offset_dst
+            .as_mut()
+            .map_or(std::ptr::null_mut(), std::ptr::from_mut);
+        transfer(
+            || {
+                // SAFETY: each non-null pointer refers to a distinct, live, writable Linux loff_t.
+                let copied = unsafe {
+                    libc::syscall(syscall, src, offset_src, dst, offset_dst, count, flags)
+                };
+                transferred(copied as isize)
+            },
+            dispatch,
+        )
+    }
+}
+
 /// Copy through the kernel, borrowing both descriptors and any explicit input offset.
 #[cfg(target_os = "linux")]
 pub(crate) fn sendfile(
@@ -496,15 +576,21 @@ pub(crate) fn sendfile(
     )
 }
 
+/// Read from the shared file position, or leave it untouched when given an offset.
 pub(crate) fn read<E: From<Error>>(
     fd: i32,
     length: isize,
+    offset: Option<libc::off_t>,
     dispatch: impl FnMut() -> std::result::Result<(), E>,
 ) -> std::result::Result<Vec<u8>, E> {
     let length = usize::try_from(length)
         .map_err(|_| errno_error(io::Error::from_raw_os_error(libc::EINVAL)))?;
     #[cfg(target_os = "macos")]
-    let length = length.min(i32::MAX as usize);
+    let length = if offset.is_none() {
+        length.min(i32::MAX as usize)
+    } else {
+        length
+    };
     if length > crate::MAX_BYTES_LEN {
         return Err(Error::new(Kind::OverflowError, "byte string is too large").into());
     }
@@ -512,25 +598,58 @@ pub(crate) fn read<E: From<Error>>(
     bytes
         .try_reserve_exact(length)
         .map_err(|_| Error::memory_error())?;
-    // SAFETY: bytes has at least length writable bytes; read borrows the integer
-    // descriptor and initializes the returned prefix without retaining either.
     let count = transfer(
-        || transferred(unsafe { libc::read(fd, bytes.as_mut_ptr().cast(), length) }),
+        || {
+            let buffer = bytes.as_mut_ptr().cast();
+            // SAFETY: both syscalls borrow fd and initialize at most length bytes
+            // in the reserved buffer, without retaining the pointer.
+            let count = unsafe {
+                match offset {
+                    Some(offset) => libc::pread(fd, buffer, length, offset),
+                    None => libc::read(fd, buffer, length),
+                }
+            };
+            transferred(count)
+        },
         dispatch,
     )?;
-    // SAFETY: read initialized exactly count bytes, including zero on EOF.
+    // SAFETY: the successful syscall initialized exactly count bytes, including zero at EOF.
     unsafe { bytes.set_len(count) };
     crate::compact_bytes(&mut bytes);
     Ok(bytes)
 }
 
-pub(crate) fn try_write(fd: i32, data: &[u8]) -> Result<Option<usize>> {
+/// Read directly into an exported buffer. An interrupted call needs signal dispatch before retry.
+pub(crate) fn try_readinto(fd: i32, dst: &mut [u8]) -> Result<Option<usize>> {
+    let length = dst.len();
+    #[cfg(target_os = "macos")]
+    let length = length.min(i32::MAX as usize);
+    // SAFETY: read writes at most length bytes into the borrowed slice and retains no pointer.
+    transferred(unsafe { libc::read(fd, dst.as_mut_ptr().cast(), length) })
+}
+
+/// Attempt one write, returning None if a pending signal must be dispatched.
+pub(crate) fn try_write(
+    fd: i32,
+    data: &[u8],
+    offset: Option<libc::off_t>,
+) -> Result<Option<usize>> {
     crate::initialize_io();
     let length = data.len();
     #[cfg(target_os = "macos")]
-    let length = length.min(i32::MAX as usize);
-    // SAFETY: write borrows the descriptor; the byte slice stays live for each call.
-    transferred(unsafe { libc::write(fd, data.as_ptr().cast(), length) })
+    let length = if offset.is_none() {
+        length.min(i32::MAX as usize)
+    } else {
+        length
+    };
+    // SAFETY: both syscalls borrow fd and read at most length bytes from the live slice.
+    let count = unsafe {
+        match offset {
+            Some(offset) => libc::pwrite(fd, data.as_ptr().cast(), length, offset),
+            None => libc::write(fd, data.as_ptr().cast(), length),
+        }
+    };
+    transferred(count)
 }
 
 /// Return a new non-inheritable descriptor for the same open file description.
@@ -590,7 +709,7 @@ fn set_cloexec(fd: i32) -> Result<()> {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_os_pipe(out: *mut usize) {
     // SAFETY: the caller supplies the two uninitialized integer slots.
-    finish(unsafe { make_pipe(out, libc::O_CLOEXEC) }, ());
+    finish(unsafe { write_fd_pair(out, pipe(libc::O_CLOEXEC)) }, ());
 }
 
 /// Atomically create a pipe with the caller's flags, including inheritable ends for zero.
@@ -602,14 +721,24 @@ pub unsafe extern "C" fn imre_os_pipe(out: *mut usize) {
 pub unsafe extern "C" fn imre_os_pipe2(out: *mut usize, flags: usize) {
     // SAFETY: no descriptor is published until both ends were created successfully.
     finish(
-        c_int(flags).and_then(|flags| unsafe { make_pipe(out, flags) }),
+        unsafe { write_fd_pair(out, c_int(flags).and_then(pipe)) },
         (),
     );
 }
 
-/// Initialize the caller's two tuple slots only after establishing the requested flags.
-unsafe fn make_pipe(out: *mut usize, flags: libc::c_int) -> Result<()> {
-    let fds = pipe(flags)?;
+/// Return a pseudoterminal master and slave, both non-inheritable.
+///
+/// # Safety
+/// The caller supplies two writable word slots in a fresh tuple.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_os_openpty(out: *mut usize) {
+    // SAFETY: both slots belong to the caller's unpublished tuple.
+    finish(unsafe { write_fd_pair(out, openpty()) }, ());
+}
+
+/// Initialize the caller's two tuple slots after successfully opening the descriptor pair.
+unsafe fn write_fd_pair(out: *mut usize, fds: Result<[i32; 2]>) -> Result<()> {
+    let fds = fds?;
     for (index, fd) in fds.into_iter().enumerate() {
         // SAFETY: each initialized slot takes one immediate integer.
         unsafe {
@@ -618,6 +747,40 @@ unsafe fn make_pipe(out: *mut usize, flags: libc::c_int) -> Result<()> {
         };
     }
     Ok(())
+}
+
+/// Open a terminal pair and retain ownership until both ends are marked close-on-exec.
+pub(crate) fn openpty() -> Result<[i32; 2]> {
+    use std::os::fd::{AsRawFd, FromRawFd, IntoRawFd, OwnedFd};
+    let (mut master, mut slave) = (-1, -1);
+    // SAFETY: both output slots are writable. Null optional parameters select terminal defaults.
+    checked(unsafe {
+        libc::openpty(
+            &mut master,
+            &mut slave,
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+        )
+    })?;
+    // SAFETY: openpty succeeded and transferred two distinct open descriptors.
+    let pair = unsafe { [OwnedFd::from_raw_fd(master), OwnedFd::from_raw_fd(slave)] };
+    for fd in &pair {
+        INHERITABLE.update(fd.as_raw_fd(), false)?;
+    }
+    Ok(pair.map(OwnedFd::into_raw_fd))
+}
+
+/// Open a non-inheritable PTY master.
+#[cfg(target_os = "linux")]
+pub(crate) fn posix_openpt(flags: i32) -> Result<i32> {
+    use std::os::fd::{AsRawFd, FromRawFd, IntoRawFd, OwnedFd};
+    // SAFETY: posix_openpt takes integer flags and transfers a new descriptor on success.
+    let fd = checked(unsafe { libc::posix_openpt(flags | libc::O_CLOEXEC) })?;
+    // SAFETY: checked success gives us sole ownership of the open master.
+    let fd = unsafe { OwnedFd::from_raw_fd(fd) };
+    INHERITABLE.update(fd.as_raw_fd(), false)?;
+    Ok(fd.into_raw_fd())
 }
 
 /// Return both descriptors after establishing the requested flags on each end.
@@ -652,6 +815,116 @@ pub(crate) fn pipe(flags: libc::c_int) -> Result<[i32; 2]> {
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_os_isatty(fd: usize) -> i32 {
     finish(c_int(fd).map(|fd| i32::from(isatty(fd))), 0)
+}
+
+/// Read the foreground process group associated with a terminal descriptor.
+#[cfg(target_os = "linux")]
+pub(crate) fn tcgetpgrp(fd: i32) -> Result<libc::pid_t> {
+    // SAFETY: tcgetpgrp borrows the descriptor and reports failure through errno.
+    checked(unsafe { libc::tcgetpgrp(fd) })
+}
+
+/// Resolve a terminal descriptor with Linux's reentrant, caller-buffer interface.
+#[cfg(target_os = "linux")]
+pub(crate) fn ttyname(fd: i32) -> Result<Vec<u8>> {
+    // SAFETY: this sysconf selector takes no pointers.
+    let size = unsafe { libc::sysconf(libc::_SC_TTY_NAME_MAX) };
+    if size == -1 {
+        return Err(errno_error(io::Error::last_os_error()));
+    }
+    let mut bytes = Vec::<u8>::new();
+    bytes
+        .try_reserve_exact(size as usize)
+        .map_err(|_| Error::memory_error())?;
+    bytes.resize(size as usize, 0);
+    // SAFETY: libc checks the borrowed fd and writes at most the supplied buffer length.
+    let status = unsafe { libc::ttyname_r(fd, bytes.as_mut_ptr().cast(), bytes.len()) };
+    if status != 0 {
+        return Err(errno_error(io::Error::from_raw_os_error(status)));
+    }
+    // SAFETY: ttyname_r NUL-terminates the returned device name on success.
+    let name = unsafe { CStr::from_ptr(bytes.as_ptr().cast()) };
+    bytes.truncate(name.to_bytes().len());
+    Ok(bytes)
+}
+
+/// Return the raw slave pathname supplied by the Linux PTY interface.
+#[cfg(target_os = "linux")]
+pub(crate) fn ptsname(fd: i32) -> io::Result<Vec<u8>> {
+    let mut name = [0; libc::PATH_MAX as usize + 1];
+    // SAFETY: the writable buffer spans the supplied length. On success libc NUL-terminates it.
+    let status = unsafe { libc::ptsname_r(fd, name.as_mut_ptr(), name.len()) };
+    if status != 0 {
+        return Err(io::Error::from_raw_os_error(status));
+    }
+    // SAFETY: the successful call initialized a NUL-terminated name in this buffer.
+    Ok(unsafe { CStr::from_ptr(name.as_ptr()) }.to_bytes().to_vec())
+}
+
+/// Resolve a file descriptor, reporting a bool warning at the calling source location.
+///
+/// # Safety
+/// When a bool was supplied, both strings are rooted and line is a tagged integer.
+#[cfg(target_os = "linux")]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_os_ptsname(
+    fd: usize,
+    module: *const Str,
+    filename: *const Str,
+    line: usize,
+) -> *const Str {
+    let result = (|| {
+        if !module.is_null() {
+            // SAFETY: the caller keeps both source strings alive through validation.
+            let (module, filename) = unsafe { (&*module, &*filename) };
+            super::runtime_warning(
+                module,
+                filename,
+                (line >> 1) as isize,
+                "bool is used as a file descriptor",
+            )?;
+        }
+        let fd = super::readiness::checked_fd(c_int(fd)?)?;
+        let name = ptsname(fd).map_err(errno_error)?;
+        let encoding = crate::sys::filesystem_encoding()?;
+        let name = super::Codec::lookup(&encoding)?.decode(&name, None)?;
+        super::text::try_owned_string(&name).map(StrOwner::into_raw)
+    })();
+    finish(result, std::ptr::null())
+}
+
+/// Return the foreground process group as a tagged integer.
+#[cfg(target_os = "linux")]
+#[unsafe(no_mangle)]
+pub extern "C" fn imre_os_tcgetpgrp(fd: usize) -> usize {
+    finish(
+        c_int(fd)
+            .and_then(tcgetpgrp)
+            .map(|group| Int::from_usize(group as usize).into_raw()),
+        0,
+    )
+}
+
+/// A terminal follows UTF-8 mode or the current character locale. Other fds have no encoding.
+pub(crate) fn device_encoding(fd: i32) -> Option<std::borrow::Cow<'static, str>> {
+    isatty(fd).then(|| crate::sys::file_encoding(None))
+}
+
+/// Return an owned optional text word (zero for a non-terminal).
+#[unsafe(no_mangle)]
+pub extern "C" fn imre_os_device_encoding(fd: usize) -> usize {
+    finish(
+        c_int(fd).and_then(|fd| match device_encoding(fd) {
+            None => Ok(0),
+            Some(std::borrow::Cow::Borrowed(name)) => {
+                Ok(StrOwner::into_raw(crate::sys::canonical(name)) as usize)
+            }
+            Some(std::borrow::Cow::Owned(name)) => {
+                super::text::try_owned_string(&name).map(|owner| StrOwner::into_raw(owner) as usize)
+            }
+        }),
+        0,
+    )
 }
 
 /// Return false for both non-terminals and invalid descriptors.

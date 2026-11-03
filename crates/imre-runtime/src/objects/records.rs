@@ -53,6 +53,9 @@ pub struct RecordSemantics {
     pub fields: *const RecordField,
 }
 
+/// A plain Python tuple; excludes named tuples, struct sequences, and private frames.
+pub(super) const EXACT_TUPLE: u32 = 1 << 5;
+
 impl RecordDescriptor {
     /// Class and tuple records share storage but have distinct Python protocols.
     pub(super) fn class_semantics(&self) -> Option<&RecordSemantics> {
@@ -571,9 +574,22 @@ pub unsafe extern "C" fn imre_record_try_cached_result(payload: *const usize) ->
 /// The compiler preserves field kinds, acyclic ownership, and descriptor lifetime.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_record_release(payload: *const usize) {
-    if !payload.is_null() {
-        release(Release::Record(payload));
+    if payload.is_null() {
+        return;
     }
+    // SAFETY: the caller transfers a live owner to the record after this header.
+    let header = unsafe { &*payload.cast::<Header>().sub(1) };
+    let count = header.references.get();
+    // A function's last external owner can expose a cycle. An active release
+    // queue must also keep the order of its outstanding owners.
+    if count > 1
+        && (count > 2 || !wrappers::is_function(header.descriptor()))
+        && PENDING_RELEASES.get().is_null()
+    {
+        header.references.set(count - 1);
+        return;
+    }
+    release(Release::Record(payload));
 }
 
 /// A container can start an acyclic release traversal without a record root.

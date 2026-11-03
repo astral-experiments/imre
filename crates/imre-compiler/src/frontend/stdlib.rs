@@ -30,6 +30,39 @@ fn local_key_union(expr: &Expr, dictionaries: &mut Vec<Expr>) -> bool {
     }
 }
 
+/// Rewrite only automatic, unadorned fields; the existing keyword formatter
+/// will unescape literal braces and render the selected scalar values.
+fn positional_template(mut rest: &str, arguments: usize) -> Option<String> {
+    let mut template = String::new();
+    let mut used = 0;
+    let mut literal_chars = 0;
+    while let Some(at) = rest.find(['{', '}']) {
+        let (literal, field) = rest.split_at(at);
+        template.push_str(literal);
+        literal_chars += literal.chars().count();
+        let (pair, tail) = field.split_at_checked(2)?;
+        match pair {
+            "{{" | "}}" => {
+                template.push_str(pair);
+                literal_chars += 1;
+            }
+            "{}" if used < arguments => {
+                template.push_str(&format!("{{arg{used}}}"));
+                used += 1;
+            }
+            _ => return None,
+        }
+        rest = tail;
+    }
+    // CPython can retain the template or a field owner and interns short results.
+    // A field plus two literal characters always produces a fresh result.
+    if used == 0 || literal_chars + rest.chars().count() < 2 {
+        return None;
+    }
+    template.push_str(rest);
+    Some(template)
+}
+
 impl Checker<'_> {
     /// Captures arguments before acquisition, materializes the source before key
     /// calls, and keeps the source argument rooted until the sorted result escapes.
@@ -567,22 +600,45 @@ impl Checker<'_> {
         })
     }
 
-    /// The receiver and keyword values are evaluated once in call order, even
-    /// when the template skips or repeats a name. Only exact scalar text enters
-    /// the formatter, so looking up a field never invokes Python code.
-    pub(super) fn named_format_call(
+    /// Evaluate every argument before rendering any field, including unused
+    /// arguments. Integer conversion stays in the runtime formatter.
+    pub(super) fn string_format_call(
         &mut self,
         receiver: Expr,
         call: &ast::ExprCall,
     ) -> Result<Expr, String> {
-        if !call.arguments.args.is_empty() {
-            return Err(error(
-                self.source,
-                call,
-                "str.format requires named arguments",
-            ));
-        }
         let mut args = vec![receiver];
+        if !call.arguments.args.is_empty() {
+            let ast::Expr::Attribute(method) = &*call.func else {
+                unreachable!()
+            };
+            let template = match &*method.value {
+                ast::Expr::StringLiteral(s) if call.arguments.keywords.is_empty() => {
+                    positional_template(s.value.to_str(), call.arguments.args.len())
+                }
+                _ => None,
+            };
+            let Some(template) = template else {
+                return Err(error(
+                    self.source,
+                    call,
+                    "str.format requires named arguments",
+                ));
+            };
+            args[0] = unpacking::string(&template);
+            for (index, arg) in call.arguments.args.iter().enumerate() {
+                let value = self.expr(arg)?;
+                if !matches!(value.ty, Type::Int | Type::Str | Type::StrLiteral(_)) {
+                    return Err(error(
+                        self.source,
+                        arg,
+                        "positional str.format requires exact str or int",
+                    ));
+                }
+                args.push(unpacking::string(&format!("arg{index}")));
+                args.push(Self::string_value(value));
+            }
+        }
         let mut names = HashSet::new();
         for keyword in &call.arguments.keywords {
             let name = keyword.arg.as_ref().expect("unpacking was rejected");

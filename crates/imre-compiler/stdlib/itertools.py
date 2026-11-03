@@ -153,7 +153,332 @@ def _make_filterfalse(_allocate, _state):
     return filterfalse
 
 
-filterfalse = _make_filterfalse(_itertools._filterfalse_allocate, _itertools._filterfalse_state)
+filterfalse = _make_filterfalse(_itertools._predicate_allocate, _itertools._predicate_state)
+
+
+def _make_accumulate(_allocate, _state):
+    class State:
+        __slots__ = ("source", "func", "total", "started", "pending")
+
+        def __init__(self, iterable, func, initial):
+            self.source = iter(iterable)
+            self.func = func
+            self.total = initial
+            self.pending = initial is not None
+            self.started = self.pending
+
+        def advance(self):
+            if self.pending:
+                self.pending = False
+                return self.total
+            item = next(self.source)
+            if self.started:
+                item = self.total + item if self.func is None else self.func(self.total, item)
+            self.total = item
+            self.started = True
+            return item
+
+
+    class accumulate:
+        """Return series of accumulated sums (or other binary function results)."""
+
+        __slots__ = ()
+
+        def __new__(cls, /, iterable, func=None, *, initial=None):
+            if not issubclass(cls, __class__):
+                raise TypeError("expected an accumulate subclass")
+            return _allocate(__class__, cls, State(iterable, func, initial))
+
+        def __init__(self, *args, **kwargs):
+            if (args or kwargs) and type(self).__init__ is not __class__.__init__:
+                object.__init__(self, *args, **kwargs)
+
+        def __iter__(self):
+            return self
+
+        def __next__(self):
+            return _state(__class__, self).advance()
+
+    accumulate.__qualname__ = "accumulate"
+    return accumulate
+
+
+accumulate = _make_accumulate(_itertools._accumulate_allocate, _itertools._accumulate_state)
+
+
+def _make_starmap(_allocate, _advance):
+    class starmap:
+        """Apply a function to the arguments from each input row."""
+
+        __slots__ = ()
+
+        def __new__(cls, /, *args, **kwargs):
+            if cls is not __class__:
+                if not isinstance(cls, type):
+                    raise TypeError(f"itertools.starmap.__new__(X): X is not a type object ({type(cls).__name__})")
+                if not issubclass(cls, __class__):
+                    raise TypeError(f"itertools.starmap.__new__({cls.__name__}): {cls.__name__} is not a subtype of itertools.starmap")
+            if kwargs and (cls is __class__ or cls.__init__ is __class__.__init__ or cls.__init__ is object.__init__):
+                raise TypeError("starmap() takes no keyword arguments")
+            if len(args) != 2:
+                raise TypeError(f"starmap expected 2 arguments, got {len(args)}")
+            return _allocate(__class__, cls, args[0], iter(args[1]))
+
+        def __init__(self, *args, **kwargs):
+            if (args or kwargs) and type(self).__init__ is not __class__.__init__:
+                raise TypeError("object.__init__() takes exactly one argument (the instance to initialize)")
+
+        def __iter__(self):
+            if not isinstance(self, __class__):
+                raise TypeError("expected a starmap instance")
+            return self
+
+        def __next__(self):
+            return _advance(__class__, self)
+
+    starmap.__qualname__ = "starmap"
+    return starmap
+
+
+starmap = _make_starmap(_itertools._starmap_allocate, _itertools._starmap_next)
+
+
+def _make_takewhile(_allocate, _state):
+    class takewhile:
+        """Return successive input items while the predicate is true."""
+
+        __slots__ = ()
+
+        def __new__(cls, /, *args, **kwargs):
+            if cls is not __class__:
+                if not isinstance(cls, type):
+                    raise TypeError(f"itertools.takewhile.__new__(X): X is not a type object ({type(cls).__name__})")
+                if not issubclass(cls, __class__):
+                    raise TypeError(f"itertools.takewhile.__new__({cls.__name__}): {cls.__name__} is not a subtype of itertools.takewhile")
+            if kwargs and (cls is __class__ or cls.__init__ is __class__.__init__ or cls.__init__ is object.__init__):
+                raise TypeError("takewhile() takes no keyword arguments")
+            if len(args) != 2:
+                raise TypeError(f"takewhile expected 2 arguments, got {len(args)}")
+            return _allocate(__class__, cls, [args[0], False], args[1])
+
+        def __init__(self, *args, **kwargs):
+            if (args or kwargs) and type(self).__init__ is not __class__.__init__:
+                raise TypeError("object.__init__() takes exactly one argument (the instance to initialize)")
+
+        def __iter__(self):
+            if not isinstance(self, __class__):
+                raise TypeError("expected a takewhile instance")
+            return self
+
+        def __next__(self):
+            source, state = _state(__class__, self)
+            if not state[1]:
+                item = next(source)
+                if state[0](item):
+                    return item
+                # Only a false result stops future pulls; exceptions leave the cursor live.
+                state[1] = True
+            raise StopIteration
+
+    takewhile.__qualname__ = "takewhile"
+    return takewhile
+
+
+takewhile = _make_takewhile(_itertools._predicate_allocate, _itertools._predicate_state)
+
+
+def _make_dropwhile(_allocate, _state):
+    class dropwhile:
+        """Drop input items while the predicate is true, then yield all remaining items."""
+
+        __slots__ = ()
+
+        def __new__(cls, /, *args, **kwargs):
+            if cls is not __class__:
+                if not isinstance(cls, type):
+                    raise TypeError(f"itertools.dropwhile.__new__(X): X is not a type object ({type(cls).__name__})")
+                if not issubclass(cls, __class__):
+                    raise TypeError(f"itertools.dropwhile.__new__({cls.__name__}): {cls.__name__} is not a subtype of itertools.dropwhile")
+            if kwargs and (cls is __class__ or cls.__init__ is __class__.__init__ or cls.__init__ is object.__init__):
+                raise TypeError("dropwhile() takes no keyword arguments")
+            if len(args) != 2:
+                raise TypeError(f"dropwhile expected 2 arguments, got {len(args)}")
+            return _allocate(__class__, cls, [args[0], False], args[1])
+
+        def __init__(self, *args, **kwargs):
+            if (args or kwargs) and type(self).__init__ is not __class__.__init__:
+                raise TypeError("object.__init__() takes exactly one argument (the instance to initialize)")
+
+        def __iter__(self):
+            if not isinstance(self, __class__):
+                raise TypeError("expected a dropwhile instance")
+            return self
+
+        def __next__(self):
+            source, state = _state(__class__, self)
+            while True:
+                item = next(source)
+                if state[1]:
+                    return item
+                if not state[0](item):
+                    state[1] = True
+                    return item
+                del item
+
+    dropwhile.__qualname__ = "dropwhile"
+    return dropwhile
+
+
+dropwhile = _make_dropwhile(_itertools._predicate_allocate, _itertools._predicate_state)
+
+
+def _make_pairwise(_allocate, _advance):
+    class pairwise:
+        """Return successive overlapping pairs from the input iterator."""
+
+        __slots__ = ()
+
+        def __new__(cls, /, *args, **kwargs):
+            if cls is not __class__:
+                if not isinstance(cls, type):
+                    raise TypeError(f"itertools.pairwise.__new__(X): X is not a type object ({type(cls).__name__})")
+                if not issubclass(cls, __class__):
+                    raise TypeError(f"itertools.pairwise.__new__({cls.__name__}): {cls.__name__} is not a subtype of itertools.pairwise")
+            if kwargs and (cls is __class__ or cls.__init__ is __class__.__init__ or cls.__init__ is object.__init__):
+                raise TypeError("pairwise() takes no keyword arguments")
+            if len(args) != 1:
+                raise TypeError(f"pairwise expected 1 argument, got {len(args)}")
+            return _allocate(__class__, cls, iter(args[0]))
+
+        def __init__(self, *args, **kwargs):
+            if (args or kwargs) and type(self).__init__ is not __class__.__init__:
+                raise TypeError("object.__init__() takes exactly one argument (the instance to initialize)")
+
+        def __iter__(self):
+            if not isinstance(self, __class__):
+                raise TypeError("expected a pairwise instance")
+            return self
+
+        def __next__(self):
+            return _advance(__class__, self)
+
+    pairwise.__qualname__ = "pairwise"
+    return pairwise
+
+
+pairwise = _make_pairwise(_itertools._pairwise_allocate, _itertools._pairwise_next)
+
+
+def _make_compress(_allocate, _state):
+    class compress:
+        """Yield each data item whose corresponding selector is true."""
+
+        __slots__ = ()
+
+        def __new__(cls, /, data, selectors):
+            if not isinstance(cls, type) or not issubclass(cls, __class__):
+                raise TypeError("expected a compress subclass")
+            # Acquire data first. The allocator then obtains the selectors iterator.
+            return _allocate(__class__, cls, iter(data), selectors)
+
+        def __init__(self, *args, **kwargs):
+            if (args or kwargs) and type(self).__init__ is not __class__.__init__:
+                raise TypeError("object.__init__() takes exactly one argument (the instance to initialize)")
+
+        def __iter__(self):
+            if not isinstance(self, __class__):
+                raise TypeError("expected a compress instance")
+            return self
+
+        def __next__(self):
+            selectors, data = _state(__class__, self)
+            while True:
+                item = next(data)
+                if next(selectors):
+                    return item
+                del item
+
+    compress.__qualname__ = "compress"
+    return compress
+
+
+compress = _make_compress(_itertools._predicate_allocate, _itertools._predicate_state)
+
+
+class _ZipLongestState:
+    __slots__ = ("sources", "active", "fillvalue")
+
+    def __init__(self, iterables, fillvalue):
+        self.sources = [iter(source) for source in iterables]
+        self.active = len(self.sources)
+        self.fillvalue = fillvalue
+
+    def next_row(self):
+        if not self.active:
+            raise StopIteration
+        row = []
+        for i, source in enumerate(self.sources):
+            if source is None:
+                item = self.fillvalue
+            else:
+                try:
+                    item = next(source)
+                except StopIteration:
+                    if self.active <= 1:
+                        self.active = 0
+                        # CPython keeps the final exhausted iterator until the zipper dies.
+                        break
+                    self.active -= 1
+                    self.sources[i] = None
+                    item = self.fillvalue
+                except BaseException:
+                    self.active = 0
+                    raise
+            row.append(item)
+        else:
+            return tuple(row)
+        raise StopIteration
+
+
+def _make_zip_longest(_allocate, _state, _State):
+    class zip_longest:
+        """Return a zip_longest object whose .__next__() method returns a tuple where
+        the i-th element comes from the i-th iterable argument.  The .__next__()
+        method continues until the longest iterable in the argument sequence
+        is exhausted and then it raises StopIteration.  When the shorter iterables
+        are exhausted, the fillvalue is substituted in their place.  The fillvalue
+        defaults to None or can be specified by a keyword argument.
+        """
+
+        __slots__ = ()
+
+        def __new__(cls, /, *iterables, **kwargs):
+            if cls is not __class__:
+                if not isinstance(cls, type):
+                    raise TypeError(f"itertools.zip_longest.__new__(X): X is not a type object ({type(cls).__name__})")
+                if not issubclass(cls, __class__):
+                    raise TypeError(f"itertools.zip_longest.__new__({cls.__name__}): {cls.__name__} is not a subtype of itertools.zip_longest")
+            if kwargs and (len(kwargs) != 1 or "fillvalue" not in kwargs):
+                raise TypeError("zip_longest() got an unexpected keyword argument")
+            return _allocate(__class__, cls, _State(iterables, kwargs.get("fillvalue")))
+
+        def __init__(self, *args, **kwargs):
+            if (args or kwargs) and type(self).__init__ is not __class__.__init__:
+                raise TypeError("object.__init__() takes exactly one argument (the instance to initialize)")
+
+        def __iter__(self):
+            if not isinstance(self, __class__):
+                raise TypeError("expected a zip_longest instance")
+            return self
+
+        def __next__(self):
+            return _state(__class__, self).next_row()
+
+    zip_longest.__qualname__ = "zip_longest"
+    return zip_longest
+
+
+zip_longest = _make_zip_longest(_itertools._zip_longest_allocate, _itertools._zip_longest_state, _ZipLongestState)
 del _itertools
 
 

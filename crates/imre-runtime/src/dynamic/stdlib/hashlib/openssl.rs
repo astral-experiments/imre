@@ -10,6 +10,15 @@ type Fetch = unsafe extern "C" fn(*mut c_void, *const c_char, *const c_char) -> 
 type Free = unsafe extern "C" fn(*mut c_void);
 type Size = unsafe extern "C" fn(*const c_void) -> c_int;
 type Fips = unsafe extern "C" fn(*mut c_void) -> c_int;
+type Hmac = unsafe extern "C" fn(
+    *const c_void,
+    *const c_void,
+    c_int,
+    *const u8,
+    usize,
+    *mut u8,
+    *mut std::ffi::c_uint,
+) -> *mut u8;
 type Pbkdf2 = unsafe extern "C" fn(
     *const c_char,
     c_int,
@@ -56,6 +65,7 @@ pub(crate) struct Provider {
     free: Free,
     size: Size,
     fips: Fips,
+    hmac: Option<Hmac>,
     pbkdf2: Pbkdf2,
     scrypt: Option<Scrypt>,
     peek: PeekError,
@@ -106,6 +116,7 @@ impl Provider {
             free: symbol!(handle, c"EVP_MD_free", Free)?,
             size: symbol!(handle, c"EVP_MD_get_size", Size)?,
             fips: symbol!(handle, c"EVP_default_properties_is_fips_enabled", Fips)?,
+            hmac: symbol!(handle, c"HMAC", Hmac),
             pbkdf2: symbol!(handle, c"PKCS5_PBKDF2_HMAC", Pbkdf2)?,
             scrypt: symbol!(handle, c"EVP_PBE_scrypt", Scrypt),
             peek: symbol!(handle, c"ERR_peek_last_error", PeekError)?,
@@ -159,6 +170,49 @@ impl Provider {
             error
         })?;
         Ok(Digest { provider: self, md })
+    }
+
+    /// A failed digest lookup permits fallback. A rejected MAC is a provider error.
+    pub(crate) fn hmac(
+        &'static self,
+        name: &str,
+        key: &[u8],
+        msg: &[u8],
+    ) -> Result<Option<Vec<u8>>> {
+        let Some(hmac) = self.hmac else {
+            return Ok(None);
+        };
+        let digest = match self.digest(name) {
+            Ok(digest) => digest,
+            Err(error) if error.kind == super::UNSUPPORTED_DIGEST => return Ok(None),
+            Err(error) => return Err(error),
+        };
+        let key_len = c_int::try_from(key.len())
+            .map_err(|_| Error::new("OverflowError", "key is too long."))?;
+        // HMAC(3) requires an EVP_MAX_MD_SIZE output buffer.
+        let mut output = [0_u8; 64];
+        let mut written = 0;
+        // SAFETY: the fetched digest and both slices are live throughout the
+        // synchronous call, and output holds the largest supported digest.
+        let result = unsafe {
+            (self.clear)();
+            hmac(
+                digest.md.as_ptr(),
+                key.as_ptr().cast(),
+                key_len,
+                msg.as_ptr(),
+                msg.len(),
+                output.as_mut_ptr(),
+                &mut written,
+            )
+        };
+        if result.is_null() {
+            return Err(self.error("no reason supplied"));
+        }
+        let output = output
+            .get(..written as usize)
+            .ok_or_else(|| Error::new("ValueError", "invalid HMAC output length"))?;
+        Ok(Some(output.to_vec()))
     }
 
     fn error(&self, fallback: &str) -> Error {

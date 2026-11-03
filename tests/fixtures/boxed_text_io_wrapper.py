@@ -15,8 +15,103 @@ class Wrapper(io.TextIOWrapper):
         super().__init__(raw, **kwargs)
 
 
+def check_repr():
+    for stream in (sys.stdin, sys.stdout, sys.stderr):
+        expected = f"<_io.TextIOWrapper name={stream.name!r} mode={stream.mode!r} encoding={stream.encoding!r}>"
+        assert repr(stream) == stream.__repr__() == expected
+
+    class Named(io.TextIOWrapper):
+        @property
+        def name(self):
+            if self.problem:
+                raise self.problem
+            return self.field() if isinstance(self.field, type) else self.field
+
+        @property
+        def encoding(self):
+            raise AssertionError("repr used the public encoding property")
+
+    class Reinit:
+        def __repr__(self):
+            io.TextIOWrapper.__init__(text, io.BytesIO(), encoding="ascii")
+            return "changed"
+
+    with Named(io.BytesIO(), encoding="utf-8") as text:
+        text.field = text
+        text.problem = KeyError("name lookup")
+        try:
+            repr(text)
+        except KeyError as error:
+            assert error is text.problem
+        else:
+            raise AssertionError("name error was swallowed")
+        text.problem = None
+        try:
+            repr(text)
+        except RuntimeError as error:
+            assert str(error) == "reentrant call inside Named.__repr__"
+        else:
+            raise AssertionError("recursive name did not raise")
+        text.field = Reinit()
+        assert repr(text) == "<Named name=changed encoding='ascii'>"
+
+        order = []
+
+        class Shown(str):
+            def __del__(self):
+                order.append("shown")
+
+        class Name:
+            def __repr__(self):
+                return holder.pop()
+
+            def __del__(self):
+                order.append("name")
+
+        holder = [Shown("rendered")]
+        text.field = Name
+        assert repr(text) == "<Named name=rendered encoding='ascii'>"
+        assert order == ["shown", "name"]
+        text.field = None
+
+
+def check_surrogate_reads():
+    data = b"\xef\xbf\xbd\xff\r\xfe\r\nX\x80"
+    for newline in (None, "", "\n", "\r", "\r\n"):
+        with io.TextIOWrapper(io.BytesIO(data), encoding="utf-8", errors="surrogateescape", newline=newline) as text:
+            expected = "\ufffd\udcff\r\udcfe\r\nX\udc80"
+            if newline is None:
+                expected = "\ufffd\udcff\n\udcfe\nX\udc80"
+            assert text.read() == expected
+            assert text.read() == ""
+
+    with io.TextIOWrapper(io.BytesIO(data), encoding="utf-8", errors="surrogateescape") as text:
+        text._CHUNK_SIZE = 2
+        assert text.read(1) == "\ufffd"
+        cookie = text.tell()
+        assert text.readline() == "\udcff\n"
+        assert next(text) == "\udcfe\n"
+        assert text.read() == "X\udc80"
+        text.seek(cookie)
+        assert text.read(3) == "\udcff\n\udcfe"
+        assert text.read() == "\nX\udc80"
+
+    class Pipe(io.BytesIO):
+        def seekable(self):
+            return False
+
+    with io.TextIOWrapper(Pipe(b"A\xffB"), encoding="utf-8", errors="surrogateescape") as text:
+        assert text.read(1) == "A"
+        text.write("!")
+        assert text.read() == "\udcffB"
+
+
 def current():
+    check_surrogate_reads()
+    check_repr()
     assert original_type is type(sys.stdout) is io.TextIOWrapper is _io.TextIOWrapper
+    assert sys.stdout.truncate.__self__ is sys.stdout
+    assert sys.stderr.truncate.__self__ is sys.stderr
     assert repr(original_type) == "<class '_io.TextIOWrapper'>"
     assert repr(Wrapper) == f"<class '{Wrapper.__module__}.{Wrapper.__qualname__}'>"
     assert isinstance(sys.stderr, io.TextIOBase) and isinstance(sys.stdout, (bytes, io.TextIOWrapper))
@@ -32,6 +127,15 @@ def current():
             print(str(error))
         else:
             raise AssertionError("getencoding accepted arguments")
+    bad = "x" + chr(0xd800) + chr(0xdfff)
+    for options in ({"encoding": bad}, {"errors": bad}, {"errors": 42, "newline": bad}):
+        try:
+            io.TextIOWrapper(io.BytesIO(), **options)
+        except UnicodeEncodeError as error:
+            assert (error.encoding, error.start, error.end) == ("utf-8", 1, 3)
+            assert error.object is bad and error.reason == "surrogates not allowed"
+        else:
+            raise AssertionError("accepted surrogates in text options")
     raw = io.BytesIO()
     wrapper = Wrapper(raw, encoding="utf-8", line_buffering=True)
     assert type(wrapper) is Wrapper and wrapper.buffer is raw and not wrapper.isatty()
@@ -97,6 +201,20 @@ def current():
         assert text.readline() == "x\n" and text.tell() == 3
         assert text.read(1) == "é" and text.tell() == 4
         assert text.seek(3) == 3 and text.read() == "éy"
+    class WouldBlock(io.BytesIO):
+        def read(self, *args):
+            return None
+
+    with io.TextIOWrapper(WouldBlock(b"ab"), encoding="utf-8") as stream:
+        assert stream.read(1) == "a"
+        try:
+            stream.read()
+        except BlockingIOError as error:
+            assert error.args == ("Read returned None.",)
+        else:
+            raise AssertionError("read() accepted None")
+        assert stream.read(1) == "b"
+
     with io.TextIOWrapper(io.BytesIO(b"x\xff"), encoding="utf-8") as text:
         try:
             text.read()
@@ -185,6 +303,53 @@ def current():
         text.flush()
         assert isinstance(text.tell(), int)
 
+    # A newline decoder holding CR can emit text at EOF without reading another byte.
+    with io.TextIOWrapper(io.BytesIO(b"line1\r"), encoding="utf-8") as text:
+        assert text.readline() == "line1\n"
+        cookie = 6 | (1 << 64) | (1 << 128) | (1 << 160)
+        assert text.tell() == cookie
+        assert text.seek(cookie) == cookie and text.buffer.tell() == 6
+        assert text.tell() == cookie and text.read() == ""
+
+    # The next multibyte character releases CR. Restore on another file and
+    # consume only the newline, leaving the character from that file to read.
+    cookie = 2 | (1 << 64) | (2 << 96) | (1 << 128)
+    with io.TextIOWrapper(io.BytesIO("a\ré".encode()), encoding="utf-8") as text:
+        text._CHUNK_SIZE = 1
+        assert text.readline() == "a\n" and text.tell() == cookie
+    with io.TextIOWrapper(io.BytesIO("a\rø!".encode()), encoding="utf-8") as text:
+        assert text.seek(cookie) == cookie and text.buffer.tell() == 4
+        assert text.tell() == cookie and text.read() == "ø!"
+    with io.TextIOWrapper(io.BytesIO(b"a\r"), encoding="utf-8") as text:
+        try:
+            text.seek(cookie)
+        except OSError as error:
+            assert str(error) == "can't restore logical file position"
+        else:
+            raise AssertionError("restored a cookie without enough decoded characters")
+
+    class Chunks(io.BytesIO):
+        def read1(self, size):
+            return self.parts.pop(0)
+
+    raw = Chunks()
+    raw.parts = [b"\xe2", b"", b"Z"]
+    with io.TextIOWrapper(raw, encoding="utf-8", errors="replace") as text:
+        assert text.read(2) == "\ufffdZ" and raw.parts == []
+
+    class InvalidReplay(io.BytesIO):
+        def read(self, size):
+            return bytearray()
+
+    with io.TextIOWrapper(InvalidReplay(b"a\rXY"), encoding="utf-8") as text:
+        try:
+            text.seek(cookie)
+        except TypeError as error:
+            assert str(error) == "underlying read() should have returned a bytes object, not 'bytearray'"
+        else:
+            raise AssertionError("accepted a bytearray during cookie restoration")
+        assert text.tell() == 2
+
     with io.TextIOWrapper(io.BytesIO("é\nXabc\n".encode()), encoding="utf-8") as text:
         text._CHUNK_SIZE = 4
         assert text.readline() == "é\n" and next(text) == "Xabc\n"
@@ -226,6 +391,70 @@ def current():
             assert str(error) == "underlying buffer has been detached"
         else:
             raise AssertionError("read from a detached buffer")
+
+    for args, expected in (
+        ((), "unbound method TextIOWrapper.truncate() needs an argument"),
+        ((1,), "descriptor 'truncate' for '_io.TextIOWrapper' objects doesn't apply to a 'int' object"),
+    ):
+        try:
+            io.TextIOWrapper.truncate(*args)
+        except TypeError as error:
+            assert str(error) == expected
+        else:
+            raise AssertionError("truncate accepted an invalid receiver")
+
+    class TruncatingBuffer(io.BytesIO):
+        def truncate(self, pos):
+            return (self.getvalue(), pos)
+
+    marker = object()
+    with io.TextIOWrapper(TruncatingBuffer(), encoding="utf-8") as stream:
+        stream.write("é")
+        assert stream.truncate() == (b"\xc3\xa9", None)
+        assert stream.truncate(marker)[1] is marker
+
+    class WarningBuffer(io.BytesIO):
+        def _dealloc_warn(self, source):
+            warnings.append(source is stream)
+            raise RuntimeError("ignored warning hook")
+
+        def close(self):
+            flushed.append(self.getvalue())
+            super().close()
+
+    warnings, flushed = [], []
+    for finalize in (False, True):
+        stream = io.TextIOWrapper(WarningBuffer(), encoding="ascii")
+        stream.__dict__["_finalizing"] = True
+        assert stream._finalizing is False
+        stream.write("pending")
+        if finalize:
+            stream.__del__()
+        else:
+            stream.close()
+        assert stream.closed
+    assert warnings == [True]
+    assert flushed == [b"pending", b"pending"]
+
+    del sys.modules["_io"]
+    try:
+        fresh = __import__("_io")
+        foreign = fresh.TextIOWrapper._finalizing
+        original = _io.TextIOWrapper._finalizing
+        with fresh.TextIOWrapper(fresh.BytesIO()) as fresh_stream:
+            foreign.__set__(fresh_stream, True)
+            assert foreign.__get__(fresh_stream) is True
+            for member, other in ((foreign, sys.stdout), (foreign, sys.stderr), (original, fresh_stream)):
+                for operation, args in ((member.__get__, ()), (member.__set__, (False,))):
+                    try:
+                        operation(other, *args)
+                    except TypeError as error:
+                        assert str(error) == "descriptor '_finalizing' for '_io.TextIOWrapper' objects doesn't apply to a '_io.TextIOWrapper' object"
+                    else:
+                        raise AssertionError("foreign finalizing member accepted the wrapper")
+            assert foreign.__get__(fresh_stream) is True
+    finally:
+        sys.modules["_io"] = _io
 
     print("wrapped binary streams")
 

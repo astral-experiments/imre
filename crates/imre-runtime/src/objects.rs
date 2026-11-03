@@ -53,7 +53,7 @@ pub(crate) mod fnmatch;
 mod format_cursors;
 mod functools;
 mod hashlib;
-pub(crate) use hashlib::{State as HashState, hex_text as hash_hex};
+pub(crate) use hashlib::{State as HashState, hex_text as hash_hex, hex_with_separator};
 pub(crate) mod hmac;
 mod inspect;
 pub(crate) mod interpreter_stdlib;
@@ -71,7 +71,9 @@ mod linecache;
 pub(crate) use linecache::{SourceDecodeError, decode_compile_source, decode_source_lines};
 pub(crate) mod locks;
 pub(crate) mod logging;
-pub(crate) use logging::record::{brace_integer_field, percent_float_field, percent_integer_field};
+pub(crate) use logging::record::{
+    brace_float_field, brace_integer_field, percent_float_field, percent_integer_field,
+};
 mod mappings;
 mod module_specs;
 mod namespaces;
@@ -83,8 +85,12 @@ mod paths;
 pub(crate) use paths::{directory_entries, path_utf8};
 pub(crate) mod posixpath;
 mod processes;
-pub(crate) use processes::{BoxedPipe, BoxedPopen, change_environment, initial_environment};
+pub(crate) use processes::{
+    BoxedPipe, BoxedPopen, BoxedPreparation, CStrings, change_environment, initial_environment,
+};
 mod random;
+#[cfg(target_os = "linux")]
+pub(crate) use random::reseed_after_fork;
 pub(crate) use random::{choice_index, imre_random_float, random_below, shuffle_swaps};
 pub(crate) mod readiness;
 pub(crate) mod records;
@@ -104,11 +110,12 @@ mod text;
 pub(crate) use text::{codepoint_search_window, dedent, hexadecimal, search_window};
 pub(crate) use text::{translate, zfill};
 pub(crate) mod time;
-pub(crate) use text::{UrlInput, capitalize, case_map, case_map_points, urlquote, urlsplit};
+pub(crate) use text::{Case, UrlInput, capitalize, case_map, case_map_points, urlquote, urlsplit};
 pub(crate) use text::{
     count_codepoints, count_text, expand_tabs, find_codepoints, find_text, normalize_unicode,
     ord_byte, ord_char, partition_text, python_alnum, python_isalpha, python_isdigit,
-    python_islower, python_isspace, python_istitle, python_isupper, split_parts,
+    python_isidentifier, python_islower, python_isspace, python_istitle, python_isupper,
+    split_parts,
 };
 mod typing;
 pub(crate) use text::{chr_scalar, short_string};
@@ -1365,6 +1372,11 @@ fn plain_ascii_line(bytes: &[u8]) -> bool {
     }) && tail.iter().all(|byte| (32..128).contains(byte))
 }
 
+/// Recognize the line boundaries used by Python's str.splitlines.
+pub(crate) fn is_line_boundary(point: u32) -> bool {
+    matches!(point, 0x0a..=0x0d | 0x1c..=0x1e | 0x85 | 0x2028 | 0x2029)
+}
+
 /// Python line offsets computed once per delimiter, with the common physical
 /// ASCII-line and ordinary CR/LF inputs staying on byte-oriented paths.
 struct LineOffsets {
@@ -1420,21 +1432,9 @@ impl LineOffsets {
             Boundaries::CrLf => {
                 memchr::memchr2(b'\r', b'\n', remaining.as_bytes()).map(|at| (at, 1))
             }
-            Boundaries::Unicode => remaining.char_indices().find_map(|(at, c)| {
-                matches!(
-                    c,
-                    '\n' | '\r'
-                        | '\x0b'
-                        | '\x0c'
-                        | '\x1c'
-                        | '\x1d'
-                        | '\x1e'
-                        | '\u{85}'
-                        | '\u{2028}'
-                        | '\u{2029}'
-                )
-                .then_some((at, c.len_utf8()))
-            }),
+            Boundaries::Unicode => remaining
+                .char_indices()
+                .find_map(|(at, c)| is_line_boundary(u32::from(c)).then_some((at, c.len_utf8()))),
         };
         let Some((offset, length)) = boundary else {
             self.start = value.len();
@@ -1549,6 +1549,14 @@ unsafe fn split_string_lines<const KEEP: bool>(value: *const Str) -> *const Obje
         }),
         std::ptr::null(),
     )
+}
+
+/// Retrieve one field using Python's str.splitlines boundaries.
+pub(crate) fn line_field(value: &str, index: usize) -> Option<&str> {
+    let mut offsets = LineOffsets::new(value);
+    std::iter::from_fn(|| offsets.next(value))
+        .nth(index)
+        .map(|range| &value[range])
 }
 
 /// Visit line fields using the same scanner as native str.splitlines.

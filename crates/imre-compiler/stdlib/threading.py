@@ -3,6 +3,7 @@
 from _thread import TIMEOUT_MAX, LockType as Lock, _local as local, get_ident
 from _thread import allocate_lock as _allocate_lock
 import _thread
+import sys as _sys
 from time import monotonic as _time
 from _weakrefset import WeakSet
 from itertools import count
@@ -13,9 +14,9 @@ except ImportError:
     from collections import deque as _deque
 
 
-__all__ = ["Thread", "Lock", "RLock", "Condition", "Event", "Semaphore", "BoundedSemaphore",
+__all__ = ["Thread", "ThreadError", "Lock", "RLock", "Condition", "Event", "Semaphore", "BoundedSemaphore",
            "Barrier", "BrokenBarrierError", "TIMEOUT_MAX", "local", "get_ident",
-           "main_thread", "current_thread", "enumerate", "active_count"]
+           "ExceptHookArgs", "excepthook", "main_thread", "current_thread", "enumerate", "active_count"]
 try:
     from _thread import get_native_id
 except ImportError:
@@ -23,6 +24,7 @@ except ImportError:
 else:
     _HAVE_THREAD_NATIVE_ID = True
     __all__.append("get_native_id")
+ThreadError = _thread.error
 try:
     _CRLock = _thread.RLock
 except AttributeError:
@@ -62,6 +64,7 @@ class Thread:
         self._native_id = None
         self._handle = None
         self._initialized = True
+        self._stderr = _sys.stderr
         # Retain a weak entry for the lifetime of the object, including after join.
         _dangling.add(self)
 
@@ -77,13 +80,12 @@ class Thread:
             raise RuntimeError("thread.__init__() not called")
         if self._ident is not None:
             raise RuntimeError("threads can only be started once")
-        if self._context is not None:
-            raise NotImplementedError("native workers cannot enter a Python context")
+        has_context = self._context is not None
         # Truth conversion can run Python and replace the target or even start this thread.
         daemon = bool(self.daemon)
         if self._ident is not None:
             raise RuntimeError("threads can only be started once")
-        self._handle, self._ident, self._native_id = _imre_thread.start(self, daemon)
+        self._handle, self._ident, self._native_id = _imre_thread.start(self, daemon, has_context)
 
     def join(self, timeout=None):
         if not self._initialized:
@@ -105,7 +107,8 @@ class Thread:
         status = "initial"
         if self._ident is not None:
             status = "started"
-            if self._handle is not None and not _imre_thread.alive(self._handle):
+            if ((self._handle is not None and not _imre_thread.alive(self._handle))
+                    or (self is _main_thread and self._stopped)):
                 status = "stopped"
         if self._daemonic:
             status += " daemon"
@@ -191,59 +194,6 @@ class Thread:
         warnings.warn('setName() is deprecated, set the name attribute instead',
                       DeprecationWarning, stacklevel=2)
         self.name = name
-
-
-class _MainThread(Thread):
-    def __init__(self):
-        Thread.__init__(self, name="MainThread", daemon=False)
-        self._ident = get_ident()
-        if _HAVE_THREAD_NATIVE_ID:
-            self._native_id = get_native_id()
-
-    def is_alive(self):
-        return True
-
-
-_main_thread = _MainThread()
-
-
-def main_thread():
-    return _main_thread
-
-
-def current_thread():
-    return _imre_thread.current(_main_thread)
-
-
-def enumerate():
-    return [_main_thread] + _imre_thread.threads()
-
-
-def active_count():
-    return len(enumerate())
-
-
-def currentThread():
-    """Return the current Thread object, corresponding to the caller's thread of control.
-
-    This function is deprecated, use current_thread() instead.
-
-    """
-    import warnings
-    warnings.warn('currentThread() is deprecated, use current_thread() instead',
-                  DeprecationWarning, stacklevel=2)
-    return current_thread()
-
-def activeCount():
-    """Return the number of Thread objects currently alive.
-
-    This function is deprecated, use active_count() instead.
-
-    """
-    import warnings
-    warnings.warn('activeCount() is deprecated, use active_count() instead',
-                  DeprecationWarning, stacklevel=2)
-    return active_count()
 
 
 # CPython 3.14.5, Lib/threading.py. See stdlib/docstrings/LICENSE.
@@ -961,3 +911,131 @@ class Barrier:
 
 class BrokenBarrierError(RuntimeError):
     pass
+
+
+# CPython 3.14.5, Lib/threading.py:1258-1305 (PSF License Version 2).
+try:
+    from _thread import (_excepthook as excepthook,
+                         _ExceptHookArgs as ExceptHookArgs)
+except ImportError:
+    # Simple Python implementation if _thread._excepthook() is not available
+    from traceback import print_exception as _print_exception
+    from collections import namedtuple
+
+    _ExceptHookArgs = namedtuple(
+        'ExceptHookArgs',
+        'exc_type exc_value exc_traceback thread')
+
+    def ExceptHookArgs(args):
+        return _ExceptHookArgs(*args)
+
+    def excepthook(args, /):
+        """
+        Handle uncaught Thread.run() exception.
+        """
+        if args.exc_type == SystemExit:
+            # silently ignore SystemExit
+            return
+
+        if _sys is not None and _sys.stderr is not None:
+            stderr = _sys.stderr
+        elif args.thread is not None:
+            stderr = args.thread._stderr
+            if stderr is None:
+                # do nothing if sys.stderr is None and sys.stderr was None
+                # when the thread was created
+                return
+        else:
+            # do nothing if sys.stderr is None and args.thread is None
+            return
+
+        if args.thread is not None:
+            name = args.thread.name
+        else:
+            name = get_ident()
+        print(f"Exception in thread {name}:",
+              file=stderr, flush=True)
+        _print_exception(args.exc_type, args.exc_value, args.exc_traceback,
+                         file=stderr)
+        stderr.flush()
+
+
+# Original value of threading.excepthook
+__excepthook__ = excepthook
+
+
+class _MainThread(Thread):
+    def __init__(self):
+        Thread.__init__(self, name="MainThread", daemon=False)
+        self._stopped = False
+        self._ident = get_ident()
+        if _HAVE_THREAD_NATIVE_ID:
+            self._native_id = get_native_id()
+
+    def is_alive(self):
+        return not self._stopped
+
+
+def current_thread():
+    return _imre_thread.current(_main_thread)
+
+
+def currentThread():
+    """Return the current Thread object, corresponding to the caller's thread of control.
+
+    This function is deprecated, use current_thread() instead.
+
+    """
+    import warnings
+    warnings.warn('currentThread() is deprecated, use current_thread() instead',
+                  DeprecationWarning, stacklevel=2)
+    return current_thread()
+
+
+def active_count():
+    return len(enumerate())
+
+
+def activeCount():
+    """Return the number of Thread objects currently alive.
+
+    This function is deprecated, use active_count() instead.
+
+    """
+    import warnings
+    warnings.warn('activeCount() is deprecated, use active_count() instead',
+                  DeprecationWarning, stacklevel=2)
+    return active_count()
+
+
+def enumerate():
+    return [_main_thread] + _imre_thread.threads()
+
+
+_threading_atexits = []
+_SHUTTING_DOWN = False
+
+
+def _register_atexit(func, *args, **kwargs):
+    """Register a callback to run before non-daemon threads are joined."""
+    if _SHUTTING_DOWN:
+        raise RuntimeError("can't register atexit after shutdown")
+    _threading_atexits.append(lambda: func(*args, **kwargs))
+
+
+_main_thread = _MainThread()
+
+
+def _shutdown():
+    global _SHUTTING_DOWN
+    if _main_thread._stopped:
+        return
+    _SHUTTING_DOWN = True
+    for callback in reversed(_threading_atexits):
+        callback()
+    _main_thread._stopped = True
+    _imre_thread.shutdown()
+
+
+def main_thread():
+    return _main_thread

@@ -61,6 +61,33 @@ def decode_allocation():
     print(config["VALUE"])
 
 
+def async_generator_syntax():
+    # Scope checks also visit dead code and defaults evaluated by the enclosing function.
+    filename = "async-scope.py"
+    for source, message, line, start, end in (
+        ("async def f():\n    é=1; yield from ()", "'yield from' inside async function", 2, 11, 24),
+        ("async def f():\n    return 5\n    if False: yield 1", "'return' with value in async generator", 2, 5, 13),
+        ("async def f():\n    def child(x=(yield)): pass\n    return 5", "'return' with value in async generator", 3, 5, 13),
+    ):
+        try:
+            compile(source, filename, "exec")
+        except SyntaxError as error:
+            assert error.args == (message, (filename, line, start, None, line, end))
+        else:
+            raise AssertionError(source)
+    for body, expected in (
+        ("return 1\n    yield\n    g(x=1, x=2)", "'return' with value in async generator"),
+        ("g(x=1, x=2)\n    yield\n    return 1", "keyword argument repeated: x"),
+    ):
+        try:
+            compile("async def f():\n    " + body, filename, "exec")
+        except SyntaxError as error:
+            assert error.msg == expected
+        else:
+            raise AssertionError(body)
+    compile("async def f():\n    def nested(): yield from ()\n    return nested", filename, "exec")
+
+
 def syntax_members():
     try:
         compile(b"# coding: unknown-encoding\n", "dir/one.py", "exec")
@@ -167,6 +194,48 @@ class Case(Base):
     else:
         raise AssertionError("class decorator exception was lost")
     assert namespace["Broken"] is old and events[-2:] == ["decorated", "Broken"]
+
+
+def source_generic_classes():
+    from typing import Generic, TypedDict, get_args, get_type_hints
+
+    for name, message in [
+        ("__classdict__", "reserved name '__classdict__' cannot be used for type parameter"),
+        ("__debug__", "cannot assign to __debug__"),
+    ]:
+        try:
+            compile(f"class Bad[{name}]: pass", "reserved_parameter.py", "exec")
+        except SyntaxError as exc:
+            assert exc.args[0] == message
+        else:
+            raise AssertionError(f"accepted reserved type parameter {name}")
+
+    seen = []
+    def capture(value):
+        seen.append(value)
+        return value
+
+    ns = {"__name__": __name__, "capture": capture, "TypedDict": TypedDict}
+    code = compile("""class Box[T](list[T]):
+    item: capture(T)
+    def parameter(self):
+        return T
+""", "source_generic.py", "exec")
+    exec(code, ns)
+    box = ns["Box"]
+    (param,) = box.__type_params__
+    assert box.__bases__ == (list, Generic)
+    assert get_args(box.__orig_bases__[0]) == (param,)
+    assert box().parameter() is param and not seen
+    assert box.__annotations__ == {"item": param} and seen == [param]
+    exec(code, ns)
+    assert ns["Box"].__type_params__[0] is not param
+
+    exec("from __future__ import annotations\nclass Row[T](TypedDict):\n    item: T", ns)
+    row = ns["Row"]
+    ref = row.__annotations__["item"]
+    assert ref.__owner__ is row and ref.__forward_module__ == row.__module__
+    assert get_type_hints(row)["item"] is row.__type_params__[0]
 
 
 def module_annotations():
@@ -701,6 +770,48 @@ def exec_caller_namespaces():
     assert separate == {"result": 8}
 
 
+def source_set_displays():
+    events = []
+
+    def mark(value):
+        events.append(value)
+        return value
+
+    scope = {"mark": mark}
+    assert eval("{mark(1), *mark((1, 2)), *(), mark(3)}", scope) == {1, 2, 3}
+    assert events == [1, (1, 2), 3]
+
+    # A 30-element display evaluates the entire prefix. A 31-element display hashes as it goes.
+    for count, expected in ((28, [[]] + [1] * 28), (29, [[]])):
+        events.clear()
+        try:
+            eval("{mark([])," + "mark(1)," * count + "*mark(())}", scope)
+        except TypeError as error:
+            assert "unhashable type: 'list'" in str(error)
+        else:
+            raise AssertionError("accepted an unhashable set element")
+        assert events == expected, events
+
+    class Key:
+        def __init__(self, value):
+            self.value = value
+
+        def __hash__(self):
+            events.append(self.value)
+            return 1
+
+        def __eq__(self, other):
+            return True
+
+        def __del__(self):
+            events.append(-self.value)
+
+    scope["Key"] = Key
+    events.clear()
+    result = eval("{Key(1), Key(2), Key(3), *mark(())}", scope)
+    assert len(result) == 1 and events == [1, 2, -2, 3, -3, ()], events
+
+
 def starred_calls():
     events = []
 
@@ -724,6 +835,17 @@ def starred_calls():
     events.clear()
     exec("answer = (mark(1), *spread(), *(), mark(3))", scope)
     assert scope["answer"] == (1, 2, 3) and events == [1, "iter", 3]
+    events.clear()
+    exec("answer = [mark(1), *spread(), *(), mark(3)]", scope)
+    assert scope["answer"] == [1, 2, 3] and events == [1, "iter", 3]
+    events.clear()
+    try:
+        eval("[mark(1), *2, mark(3)]", scope)
+    except TypeError as error:
+        assert str(error) == "Value after * must be an iterable, not int"
+    else:
+        raise AssertionError("accepted a noniterable in a starred list")
+    assert events == [1]
 
     import gc
     import weakref
@@ -745,6 +867,8 @@ def starred_calls():
         return cursor_refs[0]() is None
 
     assert eval("(*source, released())", {"source": Source(), "released": released}) == (True,)
+    cursor_refs.clear()
+    assert eval("[*source, released()]", {"source": Source(), "released": released}) == [True]
 
     for source in ("collect(**{}, label=1, label=2)", "collect(label=1, **{}, label=2)"):
         events.clear()
@@ -885,6 +1009,7 @@ def caller_namespaces(argument):
 
 def current():
     starred_calls()
+    source_set_displays()
     caller_namespaces(3)
     source_eval()
     exec_caller_namespaces()
@@ -900,10 +1025,12 @@ def current():
     relative_import_hooks()
     source_name_deletion()
     source_classes()
+    source_generic_classes()
     source_test_cases()
     source_nested_functions()
     check_source_lambdas()
     syntax_members()
+    async_generator_syntax()
     for data in (b"\xef\xbb\xbfVALUE = 61", bytearray(b"#!python\r# coding: latin-1\rVALUE = '\xe9'")):
         config = {}
         exec(compile(data, "settings.py", "exec"), config)

@@ -295,6 +295,16 @@ impl Context {
         Ok(child)
     }
 
+    /// Acquire a contiguous source before checking the exporter’s element size.
+    pub(super) fn byte_sized_buffer(&self, input: Id) -> Result<&[u8]> {
+        let span = self.buffer_span(input)?;
+        let data = span.contiguous()?;
+        if span.width != 1 {
+            return Err(Error::new("TypeError", "a bytes-like object is required"));
+        }
+        Ok(data)
+    }
+
     pub(super) fn view_bytes(&self, view: Id) -> Result<&[u8]> {
         self.buffer_span(view)?.contiguous()
     }
@@ -435,24 +445,28 @@ impl Context {
         }
     }
 
-    pub(super) fn memoryview_item_method(
+    pub(super) fn buffer_item_method(
         &mut self,
+        owner: &str,
         method: &str,
         args: &[Id],
         kwargs: &[(String, Id)],
     ) -> Result<Id> {
-        let Some((&view, rest)) = args.split_first() else {
+        let Some((&receiver, rest)) = args.split_first() else {
             return Err(Error::new(
                 "TypeError",
-                format!("descriptor '{method}' of 'memoryview' object needs an argument"),
+                format!("descriptor '{method}' of '{owner}' object needs an argument"),
             ));
         };
-        if !matches!(self.heap.get(view), Value::MemoryView { .. }) {
+        if !matches!(
+            (owner, self.heap.get(receiver)),
+            ("memoryview", Value::MemoryView { .. }) | ("array.array", Value::Array(_))
+        ) {
             return Err(Error::new(
                 "TypeError",
                 format!(
-                    "descriptor '{method}' requires a 'memoryview' object but received a '{}'",
-                    self.type_name(view)
+                    "descriptor '{method}' requires a '{owner}' object but received a '{}'",
+                    self.type_name(receiver)
                 ),
             ));
         }
@@ -463,10 +477,12 @@ impl Context {
             ));
         }
         match (method, rest) {
-            ("__getitem__", [key]) => self.get_item(view, *key),
-            ("__delitem__", [key]) => self.delete_item(view, *key).map(|()| super::value::NONE),
+            ("__getitem__", [key]) => self.get_item(receiver, *key),
+            ("__delitem__", [key]) => self
+                .delete_item(receiver, *key)
+                .map(|()| super::value::NONE),
             ("__setitem__", [key, value]) => self
-                .put_item(view, *key, *value)
+                .put_item(receiver, *key, *value)
                 .map(|()| super::value::NONE),
             ("__setitem__", _) => Err(Error::new(
                 "TypeError",

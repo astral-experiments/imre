@@ -1,7 +1,35 @@
-//! Construction and comparison for types.SimpleNamespace.
+//! Construction, replacement and comparison for types.SimpleNamespace.
 
 use super::value::{Error, Id, NONE, NOT_IMPLEMENTED, Result, Value};
 use super::{Context, builtins};
+
+/// Allocate bare namespace storage. The class call runs the initializer separately.
+pub(super) fn allocate(ctx: &mut Context, args: &[Id]) -> Result<Id> {
+    let owner = super::namespace::CLASS;
+    let base = ctx.classes[owner];
+    let Some(&class) = args.first() else {
+        return Err(Error::new(
+            "TypeError",
+            format!("{owner}.__new__(): not enough arguments"),
+        ));
+    };
+    if !ctx.direct_subclass(class, base) {
+        return Err(ctx.invalid_new_subtype(owner, class));
+    }
+    if let Some(layout) = ctx.allocation_base(class)
+        && layout != base
+    {
+        return Err(Error::new(
+            "TypeError",
+            format!(
+                "{owner}.__new__({}) is not safe, use {}.__new__()",
+                ctx.class_name(class),
+                ctx.class_name(layout)
+            ),
+        ));
+    }
+    Ok(ctx.instance(class, None))
+}
 
 pub(super) fn initialize(
     ctx: &mut Context,
@@ -46,6 +74,33 @@ pub(super) fn initialize(
     };
     builtins::update_dict(ctx, dictionary, input, kwargs)?;
     Ok(NONE)
+}
+
+/// Invoke the actual class with no arguments, then update its namespace storage in place.
+pub(super) fn replace(
+    ctx: &mut Context,
+    object: Id,
+    class: Id,
+    changes: &[(String, Id)],
+) -> Result<Id> {
+    let replacement = ctx.call(class, vec![], vec![])?;
+    let Some(target_class) = super::namespace::instance_class(ctx, replacement) else {
+        let returned = ctx.exact_type(replacement)?;
+        let constructor = super::stdlib::qualified_type(ctx, class)?;
+        let returned = super::stdlib::qualified_type(ctx, returned)?;
+        return Err(Error::new(
+            "TypeError",
+            format!(
+                "expect types.SimpleNamespace type, but {}() returned '{}' object",
+                ctx.str_value(constructor)?,
+                ctx.str_value(returned)?,
+            ),
+        ));
+    };
+    let source = ctx.instance_dictionary(object, class);
+    let target = ctx.instance_dictionary(replacement, target_class);
+    builtins::update_dict(ctx, target, Some(source), changes)?;
+    Ok(replacement)
 }
 
 pub(super) fn equal(ctx: &mut Context, object: Id, other: Id, invert: bool) -> Result<Id> {

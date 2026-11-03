@@ -43,29 +43,34 @@ pub(super) fn call(
     };
     let mut obj = super::single_argument(name, param, args, kwargs)?;
     match name {
-        "_signature_identifier" => {
-            // A str subclass can replace either the method or attribute lookup.
-            if let Value::Instance { class, .. } = *ctx.heap.get(obj) {
-                let overridden = ["isidentifier", "__getattribute__", "__getattr__"]
-                    .iter()
-                    .any(|name| ctx.class_attr(class, name).is_some());
-                match ctx.lookup_attr(obj, "isidentifier") {
-                    Ok(method) => return ctx.call(method, Vec::new(), Vec::new()),
-                    Err(err) if !overridden && ctx.is_attribute_error(&err) => {}
-                    Err(err) => return Err(err),
-                }
+        "_native_data_descriptor" => {
+            return Ok(if ctx.native_data_descriptor(obj) {
+                TRUE
+            } else {
+                FALSE
+            });
+        }
+        "_frame_position" => match *ctx.heap.get(obj) {
+            Value::Traceback { .. } => return Ok(super::traceback::tb_position(ctx, obj)),
+            Value::PythonFrame { lineno, .. } => {
+                let fields = match ctx.frame_position(obj) {
+                    Some(range) => range.map(|v| ctx.int(i64::from(v))),
+                    None => [
+                        ctx.int(i64::from(lineno)),
+                        super::NONE,
+                        super::NONE,
+                        super::NONE,
+                    ],
+                };
+                return Ok(ctx.alloc(Value::Tuple(fields.to_vec())));
             }
-            let name = ctx.str_value(obj)?;
-            let valid = ruff_python_stdlib::identifiers::is_identifier(name)
-                || ruff_python_stdlib::keyword::is_keyword(name);
-            return Ok(if valid { TRUE } else { FALSE });
-        }
-        "_signature_mapping" => {
-            let storage = ctx
-                .dict_storage(obj)
-                .ok_or_else(|| super::Error::new("TypeError", "expected a parameter dictionary"))?;
-            return Ok(ctx.alloc(Value::MappingProxy(storage)));
-        }
+            _ => {
+                return Err(super::Error::new(
+                    "TypeError",
+                    "expected a frame or traceback",
+                ));
+            }
+        },
         "_signature_layout" => return layout(ctx, obj),
         _ => {}
     }
@@ -94,10 +99,27 @@ pub(super) fn call(
 
 /// Read the same argument layout used to bind the boxed function's calls.
 fn layout(ctx: &mut Context, obj: Id) -> Result<Id> {
-    let Value::Function { code, .. } = ctx.heap.get(obj) else {
-        return Err(super::Error::new("TypeError", "expected a Python function"));
+    let code = match ctx.heap.get(obj) {
+        Value::Function { code, .. } => ctx.code_object(*code),
+        Value::Code(code) => code,
+        _ => {
+            return Err(super::Error::new(
+                "TypeError",
+                "expected a Python function or code object",
+            ));
+        }
     };
-    let parameters = ctx.code_object(*code).parameters;
+    if code.parameters == super::NONE {
+        // Module suites and eval expressions are compiled without function parameters.
+        if ctx.str_value(code.name)? == "<module>" {
+            return Ok(ctx.alloc(Value::Tuple(Vec::new())));
+        }
+        return Err(super::Error::new(
+            "NotImplementedError",
+            "code lacks a parameter layout",
+        ));
+    }
+    let parameters = code.parameters;
     let spec: serde_json::Value = serde_json::from_str(ctx.str_value(parameters)?)
         .map_err(|error| super::Error::new("SystemError", error.to_string()))?;
     let mut result = Vec::new();
@@ -126,7 +148,8 @@ fn layout(ctx: &mut Context, obj: Id) -> Result<Id> {
 fn shadowed_dict(ctx: &Context, class: Id) -> Option<Id> {
     ctx.find_in_mro(class, |entry| {
         let value = ctx.own_class_attr(entry, "__dict__")?;
-        if matches!(ctx.heap.get(value), Value::GetSetDescriptor { owner, name: "__dict__", .. }
+        if matches!(ctx.heap.get(value), Value::LayoutDescriptor(owner, "__dict__") if *owner == entry)
+            || matches!(ctx.heap.get(value), Value::GetSetDescriptor { owner, name: "__dict__", .. }
             if ctx.builtins.get(*owner) == Some(&entry))
         {
             return None;
@@ -155,6 +178,12 @@ fn class_member(ctx: &mut Context, class: Id, name: &str) -> Option<Id> {
             return Some(value);
         }
         // Some native wrapper and method descriptors are interned on first access.
+        if matches!(ctx.heap.get(entry), Value::Native(owner) if owner == "object") {
+            if let Some(member) = ctx.raw_object_member(name) {
+                return Some(member);
+            }
+            continue;
+        }
         if let Value::Native(owner) = ctx.heap.get(entry) {
             let symbol = format!("{owner}.{name}");
             if crate::dynamic::wrapper_descriptor::BuiltinDescriptor::lookup(&symbol).is_some() {

@@ -27,6 +27,118 @@ def expect_errno(operation, args, number):
         raise AssertionError("descriptor operation unexpectedly succeeded")
 
 
+def check_ttyname():
+    from os import ttyname
+
+    assert ttyname is posix.ttyname and ttyname is os.ttyname
+    master, slave = os.openpty()
+    try:
+        path = ttyname(Index(slave))
+        assert path == os.ptsname(master)
+        assert os.path.samestat(os.stat(path), os.fstat(slave))
+        with tempfile.TemporaryFile() as file:
+            expect_errno(ttyname, (file.fileno(),), errno.ENOTTY)
+    finally:
+        os.close(slave)
+        os.close(master)
+    expect_errno(ttyname, (slave,), errno.EBADF)
+
+
+def check_posix_pty():
+    from os import grantpt, posix_openpt, unlockpt
+
+    assert posix_openpt is posix.posix_openpt
+    assert grantpt is posix.grantpt and unlockpt is posix.unlockpt
+    del posix.grantpt
+    try:
+        assert not hasattr(posix, "grantpt") and os.grantpt is grantpt
+    finally:
+        posix.grantpt = grantpt
+    flags = os.O_RDWR | os.O_NOCTTY
+    master = posix_openpt(Index(flags | os.O_NONBLOCK))
+    try:
+        assert not os.get_inheritable(master)
+        assert not os.get_blocking(master)
+        os.set_blocking(master, True)
+        path = os.ptsname(master)
+        with open(master, "rb", closefd=False) as stream:
+            assert grantpt(stream) is None
+            expect_errno(os.open, (path, flags), errno.EIO)
+            assert unlockpt(stream) is None
+        slave = os.open(path, flags)
+        try:
+            assert os.ttyname(slave) == path
+            # glibc validates that grantpt received a master. musl permits a no-op.
+            if "CS_GNU_LIBC_VERSION" in os.confstr_names:
+                expect_errno(grantpt, (slave,), errno.EINVAL)
+            assert os.write(slave, b"pty") == 3
+            assert os.read(master, 3) == b"pty"
+        finally:
+            os.close(slave)
+    finally:
+        os.close(master)
+
+
+def check_tcgetpgrp():
+    import subprocess
+    from os import tcgetpgrp
+
+    assert tcgetpgrp is os.tcgetpgrp and tcgetpgrp is posix.tcgetpgrp
+    master, slave = os.openpty()
+    try:
+        # A new session leader acquires the slave as its controlling terminal on open.
+        command = ["/bin/sh", "-c", 'exec 3<"$1"; echo ready; read line', "sh", os.ttyname(slave)]
+        with subprocess.Popen(command, start_new_session=True, stdin=subprocess.PIPE,
+                              stdout=subprocess.PIPE) as child:
+            try:
+                assert child.stdout.readline() == b"ready\n"
+                assert tcgetpgrp(Index(master)) == child.pid
+                expect_errno(tcgetpgrp, (child.stdin.fileno(),), errno.ENOTTY)
+            finally:
+                child.communicate(b"done\n")
+            assert child.returncode == 0
+    finally:
+        os.close(slave)
+        os.close(master)
+    expect_errno(tcgetpgrp, (slave,), errno.EBADF)
+
+
+def check_sync(sync):
+    with tempfile.TemporaryFile() as file:
+        fd = file.fileno()
+        os.write(fd, b"abc")
+        os.lseek(fd, 1, os.SEEK_SET)
+        assert sync(fd=file) is None
+        assert os.read(fd, 2) == b"bc"
+    expect_errno(sync, (fd,), errno.EBADF)
+
+
+def check_fchdir():
+    from os import fchdir
+
+    assert fchdir is posix.fchdir and fchdir is os.fchdir
+    previous = os.getcwd()
+    with tempfile.TemporaryDirectory() as directory:
+        parent = os.open(".", os.O_RDONLY)
+        try:
+            child = os.open(directory, os.O_RDONLY)
+            try:
+                assert fchdir(fd=child) is None
+                assert os.path.samestat(os.stat("."), os.fstat(child))
+                with tempfile.TemporaryFile() as file:
+                    expect_errno(fchdir, (file,), errno.ENOTDIR)
+                assert os.path.samestat(os.stat("."), os.fstat(child))
+            finally:
+                try:
+                    fchdir(parent)
+                finally:
+                    os.close(child)
+            expect_errno(fchdir, (child,), errno.EBADF)
+        finally:
+            os.close(parent)
+    assert os.getcwd() == previous
+
+
 def check_sendfile():
     from os import sendfile
 
@@ -47,10 +159,204 @@ def check_sendfile():
         expect_errno(sendfile, (-1, src, None, 0), errno.EBADF)
 
 
+def check_copy_file_range():
+    from os import copy_file_range
+
+    assert copy_file_range is os.copy_file_range and copy_file_range is posix.copy_file_range
+    with tempfile.TemporaryFile() as source, tempfile.TemporaryFile() as destination:
+        src = source.fileno()
+        dst = destination.fileno()
+        os.write(src, b"abcdef")
+        os.write(dst, b"......")
+        os.lseek(src, 4, os.SEEK_SET)
+        os.lseek(dst, 0, os.SEEK_SET)
+        assert copy_file_range(
+            src=Index(src), dst=Index(dst), count=Index(2), offset_src=Index(1), offset_dst=Index(2)
+        ) == 2
+        assert os.lseek(src, 0, os.SEEK_CUR) == 4
+        assert os.lseek(dst, 0, os.SEEK_CUR) == 0
+        assert copy_file_range(src, dst, 0) == 0
+        assert copy_file_range(src, dst, 10, None, None) == 2
+        assert copy_file_range(src, dst, 1) == 0
+        assert os.lseek(src, 0, os.SEEK_CUR) == 6
+        assert os.lseek(dst, 0, os.SEEK_CUR) == 2
+        os.lseek(dst, 0, os.SEEK_SET)
+        assert os.read(dst, 10) == b"efbc.."
+        expect_errno(copy_file_range, (-1, dst, 0), errno.EBADF)
+        try:
+            copy_file_range(src, dst, -1, object())
+        except ValueError as error:
+            assert str(error) == "negative value for 'count' not allowed"
+        else:
+            raise AssertionError("negative count was accepted")
+
+
+def check_readv():
+    from os import readv
+
+    assert readv is os.readv is posix.readv
+    with tempfile.TemporaryFile() as source:
+        fd = source.fileno()
+        os.write(fd, b"abcdef")
+        os.lseek(fd, 1, os.SEEK_SET)
+        first, last = bytearray(b".."), bytearray(b"....")
+        assert readv(fd, [first, last]) == 5
+        assert (first, last) == (b"bc", b"def.")
+        assert os.lseek(fd, 0, os.SEEK_CUR) == 6
+        assert readv(fd, [last]) == 0
+        assert readv(fd, []) == 0
+        os.lseek(fd, 0, os.SEEK_SET)
+        storage = bytearray(b"......")
+        view = memoryview(storage)
+        assert readv(fd, (view[:3], view[1:4])) == 6
+        assert storage == b"adef.."
+        os.lseek(fd, 0, os.SEEK_SET)
+        try:
+            readv(fd, [first, b"readonly"])
+        except BufferError:
+            pass
+        else:
+            raise AssertionError("readv accepted a read-only buffer")
+        assert os.lseek(fd, 0, os.SEEK_CUR) == 0
+        first.append(0)
+    expect_errno(readv, (fd, [first]), errno.EBADF)
+
+
+def check_preadv():
+    from os import preadv
+
+    assert preadv is os.preadv is posix.preadv
+    assert os.RWF_HIPRI == posix.RWF_HIPRI
+    assert os.RWF_NOWAIT == posix.RWF_NOWAIT
+    with tempfile.TemporaryFile() as source:
+        fd = source.fileno()
+        os.write(fd, b"abcdef")
+        os.lseek(fd, 1, os.SEEK_SET)
+        head, tail = bytearray(b".."), bytearray(b"...")
+        assert preadv(fd, [head, tail], 2) == 4
+        assert (head, tail) == (b"cd", b"ef.")
+        assert preadv(fd, [head], 6, 0) == 0
+        expect_errno(preadv, (fd, [head], -2), errno.EINVAL)
+        assert os.lseek(fd, 0, os.SEEK_CUR) == 1
+        try:
+            preadv(fd, [head], 0, 1 << 30)
+        except NotImplementedError:
+            pass  # libc supplies only the flags-free preadv.
+        except OSError as error:
+            assert error.errno in (errno.EINVAL, errno.EOPNOTSUPP)
+        else:
+            raise AssertionError("unsupported preadv flag succeeded")
+        assert os.lseek(fd, 0, os.SEEK_CUR) == 1
+    expect_errno(preadv, (fd, [head], 0), errno.EBADF)
+
+
+def check_writev():
+    from os import writev
+
+    assert writev is os.writev is posix.writev
+    data = bytearray(b"abc")
+    with tempfile.TemporaryFile() as target:
+        fd = target.fileno()
+        parts = (b"<", data, memoryview(data)[1:], memoryview(b"|>"))
+        assert writev(fd, parts) == 8
+        assert os.lseek(fd, 0, os.SEEK_CUR) == 8
+        assert os.pread(fd, 8, 0) == b"<abcbc|>"
+        assert writev(fd, []) == 0
+        probe = bytearray(b"unchanged")
+        try:
+            writev(fd, [probe, object()])
+        except TypeError:
+            pass
+        else:
+            raise AssertionError("writev accepted a non-buffer")
+        probe.append(0)
+        assert os.lseek(fd, 0, os.SEEK_CUR) == 8
+    expect_errno(writev, (fd, [b"x"]), errno.EBADF)
+
+    reader, writer = os.pipe()
+    os.close(reader)
+    try:
+        expect_errno(writev, (writer, [b"x", b"y"]), errno.EPIPE)
+    finally:
+        os.close(writer)
+
+
+def check_pwritev():
+    from os import pwritev
+
+    assert pwritev is os.pwritev is posix.pwritev
+    with tempfile.TemporaryFile() as target:
+        fd = target.fileno()
+        os.write(fd, b"abcdef")
+        os.lseek(fd, 1, os.SEEK_SET)
+        assert pwritev(fd, [b"X", bytearray(b"Y"), memoryview(b"Z")], 2) == 3
+        assert os.pread(fd, 6, 0) == b"abXYZf"
+        expect_errno(pwritev, (fd, [b"!"], -2), errno.EINVAL)
+        assert os.lseek(fd, 0, os.SEEK_CUR) == 1
+        if hasattr(os, "RWF_APPEND"):
+            try:
+                n = pwritev(fd, [b"!", b"?"], 0, os.RWF_APPEND)
+            except NotImplementedError:
+                pass  # The linked libc implements only pwritev.
+            except OSError as error:
+                assert error.errno in (errno.EINVAL, errno.EOPNOTSUPP)
+            else:
+                assert n == 2 and os.pread(fd, 8, 0) == b"abXYZf!?"
+                assert os.lseek(fd, 0, os.SEEK_CUR) == 1
+                assert pwritev(fd, [b"+"], -1, os.RWF_APPEND) == 1
+                assert os.lseek(fd, 0, os.SEEK_CUR) == 9
+                assert os.pread(fd, 9, 0) == b"abXYZf!?+"
+
+
+def check_splice():
+    from os import splice
+
+    assert splice is os.splice is posix.splice
+    for name in ("SPLICE_F_MOVE", "SPLICE_F_MORE", "SPLICE_F_NONBLOCK"):
+        assert vars(os)[name] == vars(posix)[name]
+    with tempfile.TemporaryFile() as source, tempfile.TemporaryFile() as destination:
+        src, dst = source.fileno(), destination.fileno()
+        os.write(src, b"abcdef")
+        reader, writer = os.pipe()
+        try:
+            flags = os.SPLICE_F_MOVE | os.SPLICE_F_MORE
+            assert splice(src=Index(src), dst=Index(writer), count=Index(4),
+                          flags=Index(flags), offset_src=Index(1)) == 4
+            assert os.lseek(src, 0, os.SEEK_CUR) == 6
+            assert splice(reader, dst, 2, offset_dst=3) == 2
+            assert os.read(reader, 2) == b"de"
+            assert os.lseek(dst, 0, os.SEEK_CUR) == 0
+            assert os.read(dst, 5) == b"\x00\x00\x00bc"
+            expect_errno(splice, (reader, dst, 1, None, None, os.SPLICE_F_NONBLOCK), errno.EAGAIN)
+            expect_errno(splice, (reader, dst, 1, 0), errno.ESPIPE)
+            assert splice(-1, -1, 0) == 0
+        finally:
+            os.close(reader)
+            os.close(writer)
+
+
 def current():
+    from os import fsync
+
+    assert fsync is os.fsync and fsync is posix.fsync
+    check_sync(fsync)
+    check_fchdir()
     if sys.platform == "linux":
+        from os import fdatasync
+
+        assert fdatasync is os.fdatasync and fdatasync is posix.fdatasync
+        check_sync(fdatasync)
+        check_ttyname()
+        check_posix_pty()
+        check_tcgetpgrp()
         check_tmpfile()
+        check_copy_file_range()
         check_sendfile()
+        check_splice()
+        check_readv()
+        check_preadv()
+        check_writev()
+        check_pwritev()
     assert os.strerror is posix.strerror
     try:
         os.fstat(-1)

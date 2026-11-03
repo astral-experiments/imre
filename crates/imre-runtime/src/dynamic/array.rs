@@ -231,7 +231,9 @@ impl Array {
                 element.try_into().unwrap(),
             )))),
             Format::Long => Value::Int(Int::from(
-                c_long::from_ne_bytes(element.try_into().unwrap()) as i64,
+                c_long::from_ne_bytes(element.try_into().unwrap())
+                    .to_i64()
+                    .expect("C long fits in i64"),
             )),
             Format::LongLong => {
                 Value::Int(Int::from(i64::from_ne_bytes(element.try_into().unwrap())))
@@ -476,6 +478,46 @@ pub(super) fn new(ctx: &mut Context, args: &[Id], kw: &[(String, Id)]) -> Result
     Ok(ctx.alloc(Value::Array(array)))
 }
 
+/// Extend native-order element storage from a byte-sized buffer.
+fn from_bytes(ctx: &mut Context, receiver: Id, input: Id) -> Result<Id> {
+    ctx.check_buffer_exporter(input)?;
+    let width = array_mut(ctx, receiver).format.width();
+    ctx.with_buffer_export(input, |ctx| {
+        let len = ctx.byte_sized_buffer(input)?.len();
+        if len % width != 0 {
+            return Err(Error::new(
+                "ValueError",
+                "bytes length not a multiple of item size",
+            ));
+        }
+        if len == 0 {
+            return Ok(NONE);
+        }
+        if ctx.buffer_is_exported(receiver)? {
+            return Err(Error::new(
+                "BufferError",
+                "cannot resize an array that is exporting buffers",
+            ));
+        }
+        if let Some((source, range)) = ctx.contiguous_byte_span(input, false)?
+            && let Some((source, Value::Array(target))) =
+                ctx.heap.source_and_target(source, receiver)
+        {
+            let data = match source {
+                Value::Bytes(data) | Value::ByteArray(data) => data.as_slice(),
+                Value::Array(array) => array.as_bytes(),
+                Value::BytesIoStorage(Some(file)) => file.storage(),
+                _ => unreachable!("contiguous buffer backing"),
+            };
+            target.append_bytes(&data[range])?;
+        } else {
+            let bytes = ctx.memoryview_bytes(input)?;
+            array_mut(ctx, receiver).append_bytes(&bytes)?;
+        }
+        Ok(NONE)
+    })
+}
+
 /// Append the bytes from one read before reporting an aligned size mismatch.
 fn from_file(ctx: &mut Context, receiver: Id, file: Id, count: Id) -> Result<Id> {
     let count = ctx.index_integer(count)?.to_i64().ok_or_else(|| {
@@ -528,7 +570,14 @@ fn from_file(ctx: &mut Context, receiver: Id, file: Id, count: Id) -> Result<Id>
 pub(super) fn has_method(name: &str) -> bool {
     matches!(
         name,
-        "tobytes" | "tolist" | "append" | "fromfile" | "byteswap"
+        "__getitem__"
+            | "__setitem__"
+            | "tobytes"
+            | "tolist"
+            | "append"
+            | "frombytes"
+            | "fromfile"
+            | "byteswap"
     )
 }
 
@@ -557,6 +606,24 @@ pub(super) fn method(
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
+    if name == "frombytes" {
+        let (receiver, args) =
+            builtins::method_receiver_args(ctx, "array.array", name, args, kwargs)?;
+        let [input] = args else {
+            return Err(Error::new(
+                "TypeError",
+                format!(
+                    "array.frombytes() takes exactly one argument ({} given)",
+                    args.len()
+                ),
+            ));
+        };
+        let receiver = ctx.scalar_value(receiver);
+        return from_bytes(ctx, receiver, *input);
+    }
+    if matches!(name, "__getitem__" | "__setitem__") {
+        return ctx.buffer_item_method("array.array", name, args, kwargs);
+    }
     let Some((&receiver, args)) = args.split_first() else {
         return Err(Error::new("TypeError", "expected array receiver"));
     };

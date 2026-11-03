@@ -2,6 +2,7 @@
 
 import _typing as _typing_runtime
 import builtins as _builtins
+import copyreg
 import functools
 import sys as _sys
 import typing as _typing
@@ -16,10 +17,133 @@ from collections.abc import Callable as _ABCCallable
 from _collections_abc import AsyncIterator as _AsyncIterator, Awaitable as _Awaitable
 from abc import abstractmethod
 from annotationlib import ForwardRef, _make_forward_ref
+from annotationlib import annotations_to_string as _annotation_strings, type_repr as _annotation_type_repr
 from functools import lru_cache
 from _typing import _idfunc
+from types import GenericAlias
 from typing import Any, Callable, Generic, Protocol, TypeVar, Union
 from typing import ParamSpec, ParamSpecArgs, ParamSpecKwargs, TypeVarTuple
+
+
+# Please keep __all__ alphabetized within each category.
+__all__ = [
+    # Super-special typing primitives.
+    'Annotated',
+    'Any',
+    'Callable',
+    'ClassVar',
+    'Concatenate',
+    'Final',
+    'ForwardRef',
+    'Generic',
+    'Literal',
+    'Optional',
+    'ParamSpec',
+    'Protocol',
+    'Tuple',
+    'Type',
+    'TypeVar',
+    'TypeVarTuple',
+    'Union',
+
+    # ABCs (from collections.abc).
+    'AbstractSet',  # collections.abc.Set.
+    'ByteString',
+    'Container',
+    'ContextManager',
+    'Hashable',
+    'ItemsView',
+    'Iterable',
+    'Iterator',
+    'KeysView',
+    'Mapping',
+    'MappingView',
+    'MutableMapping',
+    'MutableSequence',
+    'MutableSet',
+    'Sequence',
+    'Sized',
+    'ValuesView',
+    'Awaitable',
+    'AsyncIterator',
+    'AsyncIterable',
+    'Coroutine',
+    'Collection',
+    'AsyncGenerator',
+    'AsyncContextManager',
+
+    # Structural checks, a.k.a. protocols.
+    'Reversible',
+    'SupportsAbs',
+    'SupportsBytes',
+    'SupportsComplex',
+    'SupportsFloat',
+    'SupportsIndex',
+    'SupportsInt',
+    'SupportsRound',
+
+    # Concrete collection types.
+    'ChainMap',
+    'Counter',
+    'Deque',
+    'Dict',
+    'DefaultDict',
+    'List',
+    'OrderedDict',
+    'Set',
+    'FrozenSet',
+    'NamedTuple',  # Not really a type.
+    'TypedDict',  # Not really a type.
+    'Generator',
+
+    # Other concrete types.
+    'BinaryIO',
+    'IO',
+    'Match',
+    'Pattern',
+    'TextIO',
+
+    # One-off things.
+    'AnyStr',
+    'assert_type',
+    'assert_never',
+    'cast',
+    'clear_overloads',
+    'dataclass_transform',
+    'evaluate_forward_ref',
+    'final',
+    'get_args',
+    'get_origin',
+    'get_overloads',
+    'get_protocol_members',
+    'get_type_hints',
+    'is_protocol',
+    'is_typeddict',
+    'LiteralString',
+    'Never',
+    'NewType',
+    'no_type_check',
+    'no_type_check_decorator',
+    'NoDefault',
+    'NoReturn',
+    'NotRequired',
+    'overload',
+    'override',
+    'ParamSpecArgs',
+    'ParamSpecKwargs',
+    'ReadOnly',
+    'Required',
+    'reveal_type',
+    'runtime_checkable',
+    'Self',
+    'Text',
+    'TYPE_CHECKING',
+    'TypeAlias',
+    'TypeGuard',
+    'TypeIs',
+    'TypeAliasType',
+    'Unpack',
+]
 
 
 # From CPython 3.14.5 Lib/typing.py. See stdlib/docstrings/LICENSE.
@@ -486,30 +610,6 @@ def _typeddict_qualifiers(tp):
     return qualifiers
 
 
-def _annotation_type_repr(value):
-    # Equivalent to annotationlib.type_repr for the supported runtime values.
-    from types import BuiltinFunctionType, FunctionType
-
-    if value is None:
-        return "None"
-    if value is type(None):
-        return "NoneType"
-    if isinstance(value, (type, FunctionType, BuiltinFunctionType)):
-        return (value.__qualname__ if value.__module__ == "builtins" else
-                f"{value.__module__}.{value.__qualname__}")
-    if value is ...:
-        return "..."
-    from string.templatelib import Template
-    if isinstance(value, Template):
-        raise NotImplementedError("template annotation strings require AST unparsing")
-    return repr(value)
-
-
-def _annotation_strings(annotations):
-    return {name: value if isinstance(value, str) else _annotation_type_repr(value)
-            for name, value in annotations.items()}
-
-
 class _TypedDictSymbol:
     """An operand in a synthetic annotation namespace (see annotationlib._Stringifier)."""
 
@@ -521,7 +621,8 @@ class _TypedDictSymbol:
 
     def __repr__(self):
         tokens, _ = self.__expression__()
-        return "".join(t if type(t) is str else t[0] for t in tokens)
+        from annotationlib import _render_tokens
+        return _render_tokens(tokens)
 
     def __hash__(self):
         return id(self)
@@ -530,6 +631,13 @@ class _TypedDictSymbol:
         if type(value) is _TypedDictSymbol:
             tokens, priority = value.__expression__()
             return ("(", *tokens, ")") if priority < precedence else tokens
+        from annotationlib import _template_constant, _template_repr
+        from string.templatelib import Template
+        if type(value) is Template:
+            return ((_template_repr, value),)
+        if self.__stringifier_dict__.stringify or value is None or type(value) in (str, int, float, bool, complex):
+            # Rendering a constant may run a user's repr. Keep the value until unparse.
+            return ((_template_constant, value),)
         if type(value) in (list, tuple, set, dict):
             if type(value) is set and not value:
                 return ("{*()}",)
@@ -547,10 +655,6 @@ class _TypedDictSymbol:
                 tokens.append(",")
             tokens.append(closing)
             return tuple(tokens)
-        if self.__stringifier_dict__.symbolic and value is ...:
-            return ("...",)
-        if self.__stringifier_dict__.symbolic or value is None or type(value) in (str, int, float, bool, complex):
-            return (repr(value),)
         # Real operands may have no name in the eventual evaluation namespace.
         names = self.__stringifier_dict__
         key = f"__annotationlib_name_{names.next_id}__"
@@ -558,12 +662,19 @@ class _TypedDictSymbol:
         return ((key, value),)
 
     def __derived__(self, tokens, precedence=20):
-        return self.__stringifier_dict__.symbol(tokens, None, precedence)
+        return self.__stringifier_dict__.symbol(tokens, None, self.__globals__, self.__owner__,
+                                               self.__forward_is_class__, precedence)
 
     def __getattr__(self, name):
         return self.__derived__((*self.__operand__(self, 20), ".", name))
 
+    def __iter__(self):
+        # ast.unparse uses bitwise-or precedence for the operand of a star.
+        yield self.__derived__(("*", *self.__operand__(self, 6)))
+
     def __getitem__(self, index):
+        if self.__ast_node__ == "__classdict__":
+            raise KeyError
         tokens = [*self.__operand__(self, 20), "["]
         items = index if isinstance(index, tuple) and index else (index,)
         for i, item in enumerate(items):
@@ -608,15 +719,41 @@ class _TypedDictSymbol:
         raise TypeError("Cannot stringify annotation containing string formatting")
 
     def _binary(op, precedence, *, reverse=False, comparison=False):
+        # Powers bind to the right. Nested comparisons need parentheses on either side.
+        left_precedence = precedence + (comparison or op == "**")
+        right_precedence = precedence + (op != "**")
+
         def binary(self, other):
             left, right = (other, self) if reverse else (self, other)
             return self.__derived__(
-                (*self.__operand__(left, precedence + comparison), f" {op} ",
-                 *self.__operand__(right, precedence + 1)), precedence)
+                (*self.__operand__(left, left_precedence), f" {op} ",
+                 *self.__operand__(right, right_precedence)), precedence)
         return binary
 
+    __pow__ = _binary("**", 13)
+    __rpow__ = _binary("**", 13, reverse=True)
+    __mul__ = _binary("*", 11)
+    __rmul__ = _binary("*", 11, reverse=True)
+    __matmul__ = _binary("@", 11)
+    __rmatmul__ = _binary("@", 11, reverse=True)
+    __truediv__ = _binary("/", 11)
+    __rtruediv__ = _binary("/", 11, reverse=True)
+    __floordiv__ = _binary("//", 11)
+    __rfloordiv__ = _binary("//", 11, reverse=True)
+    __mod__ = _binary("%", 11)
+    __rmod__ = _binary("%", 11, reverse=True)
     __add__ = _binary("+", 10)
     __radd__ = _binary("+", 10, reverse=True)
+    __sub__ = _binary("-", 10)
+    __rsub__ = _binary("-", 10, reverse=True)
+    __lshift__ = _binary("<<", 9)
+    __rlshift__ = _binary("<<", 9, reverse=True)
+    __rshift__ = _binary(">>", 9)
+    __rrshift__ = _binary(">>", 9, reverse=True)
+    __and__ = _binary("&", 8)
+    __rand__ = _binary("&", 8, reverse=True)
+    __xor__ = _binary("^", 7)
+    __rxor__ = _binary("^", 7, reverse=True)
     __or__ = _binary("|", 6)
     __ror__ = _binary("|", 6, reverse=True)
     __eq__ = _binary("==", 5, comparison=True)
@@ -627,37 +764,49 @@ class _TypedDictSymbol:
     __ge__ = _binary(">=", 5, comparison=True)
     del _binary
 
+    def _unary(op):
+        def unary(self):
+            return self.__derived__((op, *self.__operand__(self, 12)), 12)
+        return unary
+
+    __pos__ = _unary("+")
+    __neg__ = _unary("-")
+    __invert__ = _unary("~")
+    del _unary
+
 
 class _TypedDictNames(dict):
     """Resolve missing names without modifying the provider's globals or cells."""
 
-    def symbol(self, tokens, cells, precedence=20):
+    def symbol(self, tokens, cell, globals, owner, is_class, precedence=20):
         value = _TypedDictSymbol()
         value.__arg__ = None
         value.__ast_node__ = tokens[0] if len(tokens) == 1 else (tokens, precedence)
         value.__code__ = None
         value.__stringifier_dict__ = self
-        value.__globals__ = self.source_globals
-        value.__cell__ = cells
+        value.__globals__ = globals
+        value.__cell__ = cell
         value.__forward_module__ = None
-        value.__forward_is_class__ = self.is_class
+        value.__forward_is_class__ = is_class
         value.__forward_is_argument__ = False
-        value.__owner__ = self.owner
-        value.__extra_names__ = dict(t for t in tokens if type(t) is tuple) or None
+        value.__owner__ = owner
+        value.__extra_names__ = dict(t for t in tokens if type(t) is tuple and type(t[0]) is str) or None
         value.__resolved_str_cache__ = None
         self.symbols.append(value)
         return value
 
     def __missing__(self, name):
-        return self.symbol((name,), None)
+        return self.symbol((name,), None, self.source_globals, self.owner, self.is_class)
 
     def finish(self):
         # Convert the actual operands as in CPython. They can be held inside a
         # typing alias, an arbitrary container, or a callback's saved state.
         for value in self.symbols:
-            tokens, _ = value.__expression__()
-            value.__arg__ = repr(value)
-            value.__ast_node__ = tokens if value.__extra_names__ else None
+            if type(value.__ast_node__) is str:
+                value.__arg__ = value.__ast_node__
+                value.__ast_node__ = None
+            else:
+                value.__ast_node__, _ = value.__expression__()
             value.__stringifier_dict__ = None
             if value.__cell__ is None:
                 value.__cell__ = self.cells
@@ -665,13 +814,13 @@ class _TypedDictNames(dict):
         self.symbols.clear()
 
 
-def _typeddict_names(source_globals, cells, owner, known, is_class=None):
+def _typeddict_names(source_globals, cells, owner, known, is_class=None, *, stringify=False):
     names = _TypedDictNames()
     names.source_globals = source_globals
     names.cells = cells
     names.owner = owner
     names.is_class = isinstance(owner, type) if is_class is None else is_class
-    names.symbolic = known is None
+    names.stringify = stringify
     names.symbols = []
     names.next_id = 1
     if known is not None:
@@ -683,29 +832,30 @@ def _typeddict_cell(value):
     return (lambda: value).__closure__[0]
 
 
-def _typeddict_replay(annotate, owner, allow_evaluation):
+def _typeddict_replay(annotate, owner, format, allow_evaluation):
+    from annotationlib import Format
     from types import FunctionType
-    cells = (dict(zip(annotate.__code__.co_freevars, annotate.__closure__))
-             if annotate.__closure__ else None)
     known = {**annotate.__builtins__, **annotate.__globals__} if allow_evaluation else None
-    names = _typeddict_names(annotate.__globals__, cells, owner, known)
+    stringify = format == Format.STRING
+    source_globals = None if stringify else annotate.__globals__
+    names = _typeddict_names(source_globals, None, None if stringify else owner, known,
+                             stringify=stringify)
+    is_class = isinstance(owner, type)
     closure = None
-    if cells:
+    if annotate.__closure__:
+        names.cells = {}
         new_cells = []
-        for name, cell in cells.items():
+        for name, cell in zip(annotate.__code__.co_freevars, annotate.__closure__, strict=True):
+            names.cells[name] = cell
             if allow_evaluation:
                 try:
                     cell.cell_contents
                 except ValueError:
-                    value = names.symbol((name,), cell)
+                    pass
                 else:
                     new_cells.append(cell)
                     continue
-            elif name == "__classdict__":
-                # A miss here must fall through to the free variable or global.
-                value = {}
-            else:
-                value = names.symbol((name,), cell)
+            value = names.symbol((name,), cell, annotate.__globals__, owner, is_class)
             new_cells.append(_typeddict_cell(value))
         closure = tuple(new_cells)
     func = FunctionType(annotate.__code__, names, argdefs=annotate.__defaults__,
@@ -714,45 +864,8 @@ def _typeddict_replay(annotate, owner, allow_evaluation):
 
 
 def _call_annotate(annotate, format, owner=None):
-    from annotationlib import Format
-    if format == Format.VALUE_WITH_FAKE_GLOBALS:
-        raise ValueError("The VALUE_WITH_FAKE_GLOBALS format is for internal use only")
-    try:
-        return annotate(format)
-    except NotImplementedError:
-        pass
-
-    if format == Format.VALUE:
-        raise RuntimeError("annotate function does not support VALUE format")
-    if format not in (Format.FORWARDREF, Format.STRING):
-        raise ValueError(f"Invalid format: {format!r}")
-
-    if format == Format.FORWARDREF:
-        probe, names = _typeddict_replay(annotate, owner, True)
-    else:
-        probe = annotate
-    try:
-        result = probe(Format.VALUE_WITH_FAKE_GLOBALS)
-    except NotImplementedError:
-        values = annotate(Format.VALUE)
-        return _annotation_strings(values) if format == Format.STRING else values
-    except Exception:
-        pass
-    else:
-        if format == Format.FORWARDREF:
-            names.finish()
-            return result
-
-    # Known names can themselves raise on evaluation. Re-run the provider with
-    # symbolic names, keeping its constants, control flow and exception behavior.
-    symbolic, names = _typeddict_replay(annotate, owner, False)
-    result = symbolic(Format.VALUE_WITH_FAKE_GLOBALS)
-    if format == Format.STRING:
-        return {key: value if isinstance(value, str) else
-                "..." if value is ... else repr(value) for key, value in result.items()}
-    names.finish()
-    return {key: value.evaluate(format=Format.FORWARDREF)
-            if isinstance(value, ForwardRef) else value for key, value in result.items()}
+    from annotationlib import call_annotate_function
+    return call_annotate_function(annotate, format, owner=owner)
 
 
 _sentinel = object()
@@ -1149,6 +1262,78 @@ def assert_never(arg, /):
     raise AssertionError(f"Expected code to be unreachable, but got: {value}")
 
 
+# Runtime overload registration from CPython 3.14.5 Lib/typing.py.
+def _overload_dummy(*args, **kwds):
+    """Helper for @overload to raise when called."""
+    raise NotImplementedError(
+        "You should not call an overloaded function. "
+        "A series of @overload-decorated functions "
+        "outside a stub module should always be followed "
+        "by an implementation that is not @overload-ed.")
+
+
+# {module: {qualname: {firstlineno: func}}}
+_overload_registry = _defaultdict(functools.partial(_defaultdict, dict))
+
+
+def overload(func):
+    """Decorator for overloaded functions/methods.
+
+    In a stub file, place two or more stub definitions for the same
+    function in a row, each decorated with @overload.
+
+    For example::
+
+        @overload
+        def utf8(value: None) -> None: ...
+        @overload
+        def utf8(value: bytes) -> bytes: ...
+        @overload
+        def utf8(value: str) -> bytes: ...
+
+    In a non-stub file (i.e. a regular .py file), do the same but
+    follow it with an implementation.  The implementation should *not*
+    be decorated with @overload::
+
+        @overload
+        def utf8(value: None) -> None: ...
+        @overload
+        def utf8(value: bytes) -> bytes: ...
+        @overload
+        def utf8(value: str) -> bytes: ...
+        def utf8(value):
+            ...  # implementation goes here
+
+    The overloads for a function can be retrieved at runtime using the
+    get_overloads() function.
+    """
+    # classmethod and staticmethod
+    f = getattr(func, "__func__", func)
+    try:
+        _overload_registry[f.__module__][f.__qualname__][f.__code__.co_firstlineno] = func
+    except AttributeError:
+        # Not a normal function; ignore.
+        pass
+    return _overload_dummy
+
+
+def get_overloads(func):
+    """Return all defined overloads for *func* as a sequence."""
+    # classmethod and staticmethod
+    f = getattr(func, "__func__", func)
+    if f.__module__ not in _overload_registry:
+        return []
+    mod_dict = _overload_registry[f.__module__]
+    if f.__qualname__ not in mod_dict:
+        return []
+    return list(mod_dict[f.__qualname__].values())
+
+
+def clear_overloads():
+    """Clear all overloads in the registry."""
+    _overload_registry.clear()
+
+
 # Runtime decorator from CPython 3.14.5 Lib/typing.py. See stdlib/docstrings/LICENSE.
 def final(f):
     """Decorator to indicate final methods and final classes.
@@ -1466,6 +1651,12 @@ def TypeAlias(self, parameters):
     raise TypeError(f"{self} is not subscriptable")
 
 
+def _type_repr(arg):
+    if isinstance(arg, tuple):
+        return '[' + ', '.join(_type_repr(item) for item in arg) + ']'
+    return _annotation_type_repr(arg)
+
+
 def _type_convert(arg, module=None, *, allow_special_forms=False, owner=None):
     if arg is None:
         return type(None)
@@ -1493,6 +1684,15 @@ def _type_check(arg, message, is_argument=True, module=None, *, allow_special_fo
     if type(arg) is tuple:
         raise TypeError(f"{message} Got {repr(arg)[:100]}.")
     return arg
+
+
+def _make_callable_alias(constructor, origin, params):
+    args, result = params
+    result = _type_check(result, "Callable[args, result]: result must be a type.")
+    if not isinstance(args, tuple):
+        args = (args,)
+    flat = tuple(_type_convert(arg) for arg in args) + (result,)
+    return constructor(origin, flat, name="Callable")
 
 
 def _typeddict_qualifier_alias(form, parameters):
@@ -1759,6 +1959,15 @@ def _should_unflatten_callable_args(typ, args):
     )
 
 
+def _typevar_subst(self, arg):
+    from types import GenericAlias
+    arg = _type_check(arg, "Parameters to generic types must be types.")
+    if ((isinstance(arg, _typing._GenericAlias) and arg.__origin__ is Unpack)
+            or (isinstance(arg, GenericAlias) and getattr(arg, "__unpacked__", False))):
+        raise TypeError(f"{arg} is not valid as type argument")
+    return arg
+
+
 def _paramspec_subst(self, arg):
     if isinstance(arg, (list, tuple)):
         arg = tuple(_type_check(a, "Expected a type.") for a in arg)
@@ -1783,6 +1992,15 @@ def _paramspec_prepare_subst(self, alias, args):
     elif isinstance(args[i], list):
         args = (*args[:i], tuple(args[i]), *args[i+1:])
     return args
+
+
+@_typing_runtime._install_generic_alias_iter
+class _GenericAlias:
+    def __iter__(self):
+        yield Unpack[self]
+
+    def __getitem__(self, args):
+        return _specialize_generic_alias(self, args)
 
 
 def _concatenate_copy_with(self, params):
@@ -1817,7 +2035,7 @@ def _alias_type_arg(arg, message="Parameters to generic types must be types."):
 
 
 def _is_parameterized_typing_alias(value):
-    return type(value) in (_typing._GenericAlias, _typing._CallableGenericAlias, _typing._LiteralGenericAlias)
+    return _typing_runtime._get_alias_kind(value) == "typing"
 
 
 def _named_alias_bases(alias, bases):
@@ -1917,12 +2135,13 @@ class _SpecialGenericAlias(_NotIterable):
             return self._getitem(params)
 
     def copy_with(self, params):
-        cls = type(self)
-        if cls is _typing._UnpackGenericAlias:
-            return cls(self.__origin__, params)
-        if cls is _typing._CallableGenericAlias:
-            return cls(self.__origin__, params, name=self._name, inst=self._inst)
-        return _typing._GenericAlias(self.__origin__, params, name=self._name, inst=self._inst)
+        if isinstance(self, _SpecialGenericAlias):
+            cls = _typing._GenericAlias
+        else:
+            cls = type(self)
+            if _typing_runtime._get_alias_kind(self) == "unpack":
+                return cls(self.__origin__, params)
+        return cls(self.__origin__, params, name=self._name, inst=self._inst)
 
     def __instancecheck__(self, value):
         return self.__subclasscheck__(type(value))
@@ -2044,6 +2263,19 @@ Sized = _SpecialGenericAlias(_Sized, 0)
 ByteString = _DeprecatedGenericAlias(_ByteString, 0, removal_version=(3, 17))
 
 
+def _pickle_psargs(psargs):
+    return ParamSpecArgs, (psargs.__origin__,)
+
+
+def _pickle_pskwargs(pskwargs):
+    return ParamSpecKwargs, (pskwargs.__origin__,)
+
+
+copyreg.pickle(ParamSpecArgs, _pickle_psargs)
+copyreg.pickle(ParamSpecKwargs, _pickle_pskwargs)
+del _pickle_psargs, _pickle_pskwargs
+
+
 # Reconstruction callables and arguments used by CPython's typing alias reducers.
 def _reduce_generic_alias(alias):
     from operator import getitem
@@ -2068,11 +2300,13 @@ def _rebuild_builtin_alias(alias, args):
     return next(iter(result)) if alias.__unpacked__ else result
 
 
-def _substitute_alias_arguments(args, replacements):
+def _substitute_alias_arguments(args, replacements, *, parameter_tuples=False):
     result = []
     for arg in args:
         if _is_unpacked_typevartuple(arg):
             result.extend(replacements[arg.__args__[0]])
+        elif parameter_tuples and isinstance(arg, tuple):
+            result.append(_substitute_alias_arguments(arg, replacements, parameter_tuples=True))
         else:
             result.append(_substitute_alias_argument(arg, replacements))
     return tuple(result)
@@ -2083,6 +2317,8 @@ def _substitute_alias_argument(arg, replacements):
         return arg
     for parameter, value in replacements.items():
         if arg is parameter:
+            if isinstance(parameter, _typing.TypeVar):
+                return parameter.__typing_subst__(value)
             if isinstance(parameter, _typing.TypeVarTuple):
                 raise TypeError("Substitution of bare TypeVarTuple is not supported")
             return value
@@ -2143,6 +2379,56 @@ def _prepare_typevartuple(pack, alias, args):
             + (fill,) * (len(params) - right - left - index - 1) + args[end:])
 
 
+def _variadic_class_getitem_uncached(cls, args, constructor):
+    if not isinstance(args, tuple):
+        args = (args,)
+    args = tuple(_type_convert(arg) for arg in args)
+    parameters = cls.__parameters__
+    for param in parameters:
+        prepare = getattr(param, "__typing_prepare_subst__", None)
+        if prepare is not None:
+            args = prepare(cls, args)
+        elif isinstance(param, _typing.TypeVarTuple):
+            args = _prepare_typevartuple(param, cls, args)
+        elif isinstance(param, _typing.TypeVar):
+            # An earlier preparation hook may have changed the class parameters.
+            for index, current in enumerate(cls.__parameters__):
+                if current is param or current == param:
+                    break
+            else:
+                raise ValueError("sequence.index(x): x not in sequence")
+            actual = len(args)
+            if index >= actual:
+                default = param.__default__ if index == actual else _typing.NoDefault
+                if default is _typing.NoDefault:
+                    raise TypeError(f"Too few arguments for {cls}; actual {actual}, expected at least {index + 1}")
+                args = args + (default,)
+
+    expected = len(cls.__parameters__)
+    if not expected:
+        raise TypeError(f"{cls} is not a generic class")
+    actual = len(args)
+    if actual > expected:
+        raise TypeError(f"Too many arguments for {cls}; actual {actual}, expected {expected}")
+    if actual < expected and not cls.__parameters__[actual].has_default():
+        required = expected - sum(p.has_default() for p in cls.__parameters__)
+        raise TypeError(f"Too few arguments for {cls}; actual {actual}, expected at least {required}")
+    flattened = tuple(item for param, arg in zip(parameters, args)
+                      for item in (arg if isinstance(param, _typing.TypeVarTuple) else (arg,)))
+    return constructor(cls, flattened)
+
+
+_cached_variadic_class_getitem = lru_cache(_variadic_class_getitem_uncached)
+
+
+def _variadic_class_getitem(cls, args, constructor):
+    try:
+        return _cached_variadic_class_getitem(cls, args, constructor)
+    except TypeError:
+        pass
+    return _variadic_class_getitem_uncached(cls, args, constructor)
+
+
 def _specialize_generic_alias_uncached(alias, args):
     from types import GenericAlias
     if type(alias) is not GenericAlias and (alias.__origin__ is Generic or alias.__origin__ is Protocol):
@@ -2166,7 +2452,7 @@ def _specialize_generic_alias_uncached(alias, args):
         raise TypeError(f"Too {which} arguments for {alias}; actual {len(expanded)}, expected {expected}")
     replacements = {}
     for parameter, arg in zip(parameters, expanded):
-        if isinstance(parameter, _typing.TypeVarTuple):
+        if isinstance(parameter, (_typing.TypeVar, _typing.TypeVarTuple)):
             replacements[parameter] = arg
             continue
         if isinstance(parameter, _typing.ParamSpec):
@@ -2176,23 +2462,32 @@ def _specialize_generic_alias_uncached(alias, args):
         if _typing.get_origin(arg) is Unpack:
             raise TypeError(f"{arg} is not valid as type argument")
         replacements[parameter] = arg
-    args = _substitute_alias_arguments(alias.__args__, replacements)
+
+    def substituted_args(*, parameter_tuples=False):
+        return _substitute_alias_arguments(alias.__args__, replacements, parameter_tuples=parameter_tuples)
+
     if type(alias) is GenericAlias:
-        return _rebuild_builtin_alias(alias, args)
+        return _rebuild_builtin_alias(alias, substituted_args())
     if isinstance(alias, _typing.Union):
-        return _typing.Union[args]
+        return _typing.Union[substituted_args()]
+    if _typing_runtime._get_alias_kind(alias) == "unpack":
+        return _SpecialGenericAlias.copy_with(alias, substituted_args())
     if isinstance(alias, (_AnnotatedAlias, _typing._ConcatenateGenericAlias)):
-        return alias.copy_with(args)
+        return alias.copy_with(substituted_args())
     if type(alias) is _typing._CallableGenericAlias:
         # typing flattens each substituted tuple, even one in the result position.
-        flat = tuple(item for arg in args for item in (arg if isinstance(arg, tuple) else (arg,)))
+        flat = tuple(item for arg in substituted_args() for item in (arg if isinstance(arg, tuple) else (arg,)))
         return _typing._CallableGenericAlias(alias.__origin__, flat, name="Callable")
     if alias.__origin__ is _typing.get_origin(Callable):
         # collections.abc.Callable rebuilds its argument list separately from its result.
+        args = substituted_args()
         if not isinstance(args[0], (tuple, list)):
             args = (args[:-1], args[-1])
         return alias.__origin__[args]
-    return _typing._GenericAlias(alias.__origin__, args, name=alias._name, inst=alias._inst)
+    constructor = _typing._GenericAlias
+    # Only a generic class alias stores a ParamSpec expression as a nested tuple.
+    args = substituted_args(parameter_tuples=type(alias) is constructor)
+    return constructor(alias.__origin__, args, name=alias._name, inst=alias._inst)
 
 
 _cached_generic_specialization = lru_cache(_specialize_generic_alias_uncached)
@@ -2202,7 +2497,8 @@ def _specialize_generic_alias(alias, args):
     try:
         return _cached_generic_specialization(alias, args)
     except TypeError:
-        return _specialize_generic_alias_uncached(alias, args)
+        pass
+    return _specialize_generic_alias_uncached(alias, args)
 
 
 class _TypedCacheSpecialForm(_SpecialForm, _root=True):
@@ -2299,6 +2595,151 @@ def Literal(self, *parameters):
     return _typing._LiteralGenericAlias(self, parameters)
 
 
+def evaluate_forward_ref(
+    forward_ref,
+    *,
+    owner=None,
+    globals=None,
+    locals=None,
+    type_params=None,
+    format=None,
+    _recursive_guard=frozenset(),
+):
+    """Evaluate a forward reference as a type hint.
+
+    This is similar to calling the ForwardRef.evaluate() method,
+    but unlike that method, evaluate_forward_ref() also
+    recursively evaluates forward references nested within the type hint.
+
+    *forward_ref* must be an instance of ForwardRef. *owner*, if given,
+    should be the object that holds the annotations that the forward reference
+    derived from, such as a module, class object, or function. It is used to
+    infer the namespaces to use for looking up names. *globals* and *locals*
+    can also be explicitly given to provide the global and local namespaces.
+    *type_params* is a tuple of type parameters that are in scope when
+    evaluating the forward reference. This parameter should be provided (though
+    it may be an empty tuple) if *owner* is not given and the forward reference
+    does not already have an owner set. *format* specifies the format of the
+    annotation and is a member of the annotationlib.Format enum, defaulting to
+    VALUE.
+
+    """
+    from annotationlib import Format
+
+    if format == Format.STRING:
+        return forward_ref.__forward_arg__
+    if forward_ref.__forward_arg__ in _recursive_guard:
+        return forward_ref
+
+    if format is None:
+        format = Format.VALUE
+    value = forward_ref.evaluate(globals=globals, locals=locals,
+                                 type_params=type_params, owner=owner, format=format)
+
+    if (isinstance(value, ForwardRef)
+            and format == Format.FORWARDREF):
+        return value
+
+    if isinstance(value, str):
+        value = _make_forward_ref(value, module=forward_ref.__forward_module__,
+                                  owner=owner or forward_ref.__owner__,
+                                  is_argument=forward_ref.__forward_is_argument__,
+                                  is_class=forward_ref.__forward_is_class__)
+    if owner is None:
+        owner = forward_ref.__owner__
+    return _eval_type(
+        value, globals, locals, type_params,
+        recursive_guard=_recursive_guard | {forward_ref.__forward_arg__},
+        format=format, owner=owner, parent_fwdref=forward_ref,
+    )
+
+
+def _deprecation_warning_for_no_type_params_passed(funcname: str) -> None:
+    import warnings
+
+    depr_message = (
+        f"Failing to pass a value to the 'type_params' parameter "
+        f"of {funcname!r} is deprecated, as it leads to incorrect behaviour "
+        f"when calling {funcname} on a stringified annotation "
+        f"that references a PEP 695 type parameter. "
+        f"It will be disallowed in Python 3.15."
+    )
+    warnings.warn(depr_message, category=DeprecationWarning, stacklevel=3)
+
+
+def _forward_ref_module_globals(ref, owner):
+    # Let annotationlib infer the defining module unless we must restore owner parameters.
+    params = getattr(owner, "__type_params__", None)
+    if not params:
+        return None
+    namespace = getattr(_sys.modules.get(ref.__forward_module__), "__dict__", None)
+    if namespace is None:
+        return None
+    globalns = dict(namespace)
+    for param in params:
+        globalns[param.__name__] = param
+    return globalns
+
+
+def _eval_type(t, globalns, localns, type_params=_sentinel, *, recursive_guard=frozenset(),
+               format=None, owner=None, parent_fwdref=None, prefer_fwd_module=False):
+    """Evaluate all forward references in the given type t.
+
+    For use of globalns and localns see the docstring for get_type_hints().
+    recursive_guard is used to prevent infinite recursion with a recursive
+    ForwardRef.
+    """
+    from types import GenericAlias
+
+    if type_params is _sentinel:
+        _deprecation_warning_for_no_type_params_passed("typing._eval_type")
+        type_params = ()
+    if isinstance(t, ForwardRef):
+        if prefer_fwd_module and t.__forward_module__ is not None:
+            globalns = _forward_ref_module_globals(t, owner)
+        return evaluate_forward_ref(t, globals=globalns, locals=localns,
+                                    type_params=type_params, owner=owner,
+                                    _recursive_guard=recursive_guard, format=format)
+    # Query the native alias representation without publishing private classes in typing.
+    kind = _typing_runtime._get_alias_kind(t)
+    if kind is None and not isinstance(t, (_AnnotatedAlias, Union)):
+        return t
+    if kind == "builtin":
+        args = tuple(
+            _make_forward_ref(arg, module=getattr(parent_fwdref, "__forward_module__", None),
+                              owner=getattr(parent_fwdref, "__owner__", None))
+            if isinstance(arg, str) else arg for arg in t.__args__
+        )
+        unpacked = t.__unpacked__
+        if _should_unflatten_callable_args(t, args):
+            t = t.__origin__[(args[:-1], args[-1])]
+        else:
+            t = t.__origin__[args]
+        if unpacked:
+            t = Unpack[t]
+        kind = _typing_runtime._get_alias_kind(t)
+
+    resolved = tuple(
+        _eval_type(arg, globalns, localns, type_params, recursive_guard=recursive_guard,
+                   format=format, owner=owner, prefer_fwd_module=prefer_fwd_module)
+        for arg in t.__args__
+    )
+    if resolved == t.__args__:
+        return t
+    if kind == "builtin":
+        return GenericAlias(t.__origin__, resolved)
+    if isinstance(t, _typing.Union):
+        union = resolved[0]
+        for arg in resolved[1:]:
+            union = union | arg
+        return union
+    copy_with = getattr(t, "copy_with", None)
+    if copy_with is not None:
+        return copy_with(resolved)
+    # The native literal alias lacks an instance copy_with.
+    return type(t)(t.__origin__, resolved)
+
+
 # VALUE-format annotation resolution from CPython 3.14.5 Lib/typing.py.
 def _hint_scope(params, globalns, localns, is_class):
     if params:
@@ -2311,7 +2752,8 @@ def _hint_scope(params, globalns, localns, is_class):
     return globalns, localns
 
 
-def _resolve_hint(value, globalns, localns, owner, seen, include_extras, format, parent_ref=None):
+def _resolve_hint(value, globalns, localns, owner, seen, include_extras, format, parent_ref=None,
+                  *, prefer_fwd_module=True):
     from annotationlib import Format, ForwardRef
     from types import GenericAlias, ModuleType
     if isinstance(value, str):
@@ -2320,18 +2762,16 @@ def _resolve_hint(value, globalns, localns, owner, seen, include_extras, format,
         expr = value.__forward_arg__
         if expr in seen:
             return value
-        if value.__forward_module__ is not None:
-            import sys
-            module = sys.modules.get(value.__forward_module__)
-            if module is not None:
-                globalns = module.__dict__
+        if prefer_fwd_module and value.__forward_module__ is not None:
+            globalns = _forward_ref_module_globals(value, owner)
         result = value.evaluate(globals=globalns, locals=localns, type_params=(), owner=owner, format=format)
         if format == Format.FORWARDREF and isinstance(result, ForwardRef):
             return result
         if isinstance(result, str):
             result = ForwardRef(result, module=value.__forward_module__, owner=owner or value.__owner__,
                                 is_argument=value.__forward_is_argument__, is_class=value.__forward_is_class__)
-        return _resolve_hint(result, globalns, localns, owner, seen + (expr,), include_extras, format, value)
+        return _resolve_hint(result, globalns, localns, owner, seen + (expr,), include_extras, format,
+                             value, prefer_fwd_module=False)
 
     origin = _typing.get_origin(value)
     if origin is None or origin is Literal:
@@ -2343,7 +2783,8 @@ def _resolve_hint(value, globalns, localns, owner, seen, include_extras, format,
         module = getattr(parent_ref, '__forward_module__', None)
         ref_owner = getattr(parent_ref, '__owner__', None)
         values = tuple(ForwardRef(arg, module=module, owner=ref_owner) if isinstance(arg, str) else arg for arg in args)
-    resolved = tuple(_resolve_hint(a, globalns, localns, owner, seen, include_extras, format) for a in values)
+    resolved = tuple(_resolve_hint(a, globalns, localns, owner, seen, include_extras, format,
+                                   prefer_fwd_module=prefer_fwd_module) for a in values)
     if isinstance(value, _AnnotatedAlias):
         if not include_extras:
             return resolved[0]
@@ -2519,6 +2960,17 @@ def __getattr__(attr):
     elif attr in {"ContextManager", "AsyncContextManager"}:
         import contextlib
         alias = _SpecialGenericAlias(getattr(contextlib, f"Abstract{attr}"), 2, name=attr, defaults=(bool | None,))
+    elif attr == "_collect_parameters":
+        import warnings
+
+        warnings.warn(
+            "The private _collect_parameters function is deprecated and will be"
+            " removed in a future version of Python. Any use of private functions"
+            " is discouraged and may break in the future.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        alias = _collect_type_parameters
     else:
         raise AttributeError(f"module {__name__!r} has no attribute {attr!r}")
     globals()[attr] = alias

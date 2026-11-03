@@ -1,0 +1,5 @@
+import contextlib
+from contextlib import AsyncContextDecorator, asynccontextmanager
+
+assert asynccontextmanager is contextlib.asynccontextmanager
+assert AsyncContextDecorator is contextlib.AsyncContextDecorator

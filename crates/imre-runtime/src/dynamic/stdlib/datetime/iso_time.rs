@@ -1,6 +1,6 @@
 //! Parse the clock and optional UTC offset accepted by CPython's `time.fromisoformat`.
 
-fn digits(bytes: &[u8]) -> Option<i32> {
+pub(super) fn digits(bytes: &[u8]) -> Option<i32> {
     let mut value = 0;
     for &byte in bytes {
         if !byte.is_ascii_digit() {
@@ -47,8 +47,12 @@ fn components(mut bytes: &[u8], before_zone: bool) -> Option<[i32; 4]> {
 }
 
 pub(super) fn parse(text: &str) -> Option<([i32; 4], Option<i64>)> {
-    let text = text.as_bytes();
-    let text = text.strip_prefix(b"T").unwrap_or(text);
+    let bytes = text.as_bytes();
+    parse_clock(bytes.strip_prefix(b"T").unwrap_or(bytes))
+}
+
+/// Parse the clock payload after any caller-specific prefix or separator.
+pub(super) fn parse_clock(text: &[u8]) -> Option<([i32; 4], Option<i64>)> {
     let boundary = text
         .iter()
         .position(|b| matches!(b, b'Z' | b'+' | b'-'))

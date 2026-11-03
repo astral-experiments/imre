@@ -13,7 +13,7 @@ struct Parser<'a> {
     source: &'a str,
     literal: bool,
     lines: Vec<usize>,
-    function_starts: Vec<TextSize>,
+    definition_starts: Vec<TextSize>,
     template_expressions: HashMap<TextSize, String>,
     replacements: BTreeMap<TextSize, Vec<u32>>,
     load: Id,
@@ -26,6 +26,70 @@ enum Trailer {
     Attribute(ast::Identifier, ast::ExprContext),
     Subscript(Box<ast::Expr>, ast::ExprContext),
     Call(ast::Arguments, Vec<Id>),
+}
+
+/// Adjacent constant pieces share one AST node spanning the first through the last piece.
+#[derive(Default)]
+struct JoinedParts {
+    values: Vec<Id>,
+    text: Vec<u32>,
+    literal: Option<(TextRange, Id)>,
+}
+
+impl JoinedParts {
+    fn include_literal(&mut self, range: TextRange, kind: Id) {
+        let (span, _) = self.literal.get_or_insert((range, kind));
+        *span = span.cover(range);
+    }
+
+    /// CPython's set_ftstring_expr preserves the source spelling, removing comment text
+    /// but retaining its newline. The location continues to span the original source.
+    fn debug_literal(&mut self, text: &str, start: TextSize) {
+        self.include_literal(TextRange::at(start, TextSize::of(text)), NONE);
+        let starts_comment = |ch, quote: &mut Option<char>| {
+            match (*quote, ch) {
+                (None, '#') => return true,
+                (None, '\'' | '"') => *quote = Some(ch),
+                (Some(q), _) if ch == q => *quote = None,
+                _ => {}
+            }
+            false
+        };
+        let mut quote = None;
+        let mut chars = text.chars();
+        while let Some(ch) = chars.next() {
+            if ch == '\\' {
+                chars.next();
+            } else if starts_comment(ch, &mut quote) {
+                // The pinned lexer skips escapes while detecting a comment, then
+                // copies the spelling with a fresh quote state and no escape step.
+                quote = None;
+                let mut in_comment = false;
+                for ch in text.chars() {
+                    if ch == '\n' {
+                        in_comment = false;
+                    } else if !in_comment {
+                        in_comment = starts_comment(ch, &mut quote);
+                    }
+                    if !in_comment {
+                        self.text.push(u32::from(ch));
+                    }
+                }
+                return;
+            }
+        }
+        self.text.extend(text.chars().map(u32::from));
+    }
+
+    fn flush(&mut self, parser: &mut Parser<'_>) {
+        if let Some((range, kind)) = self.literal.take()
+            && !self.text.is_empty()
+        {
+            let value = parser.ctx.text_codepoints(std::mem::take(&mut self.text));
+            self.values
+                .push(parser.node("Constant", &[value, kind], range));
+        }
+    }
 }
 
 impl Parser<'_> {
@@ -68,10 +132,56 @@ impl Parser<'_> {
         Ok(self.list(values))
     }
 
+    fn comprehension_element(&mut self, element: ast::Expr) -> Result<Id> {
+        // Ruff also recognizes iterable unpacking in comprehensions, added in Python 3.15.
+        if element.is_starred_expr() {
+            return Err(Error::new(
+                "SyntaxError",
+                "iterable unpacking cannot be used in comprehension",
+            ));
+        }
+        self.expr(element)
+    }
+
+    fn comprehensions(
+        &mut self,
+        clauses: impl IntoIterator<Item = ast::Comprehension>,
+    ) -> Result<Id> {
+        let mut nodes = Vec::new();
+        for clause in clauses {
+            let target = self.expr(clause.target)?;
+            let iter = self.expr(clause.iter)?;
+            let filters = self.exprs(clause.ifs)?;
+            let is_async = self.ctx.int(i64::from(clause.is_async));
+            nodes.push(parsed_instance(
+                self.ctx,
+                "comprehension",
+                &[target, iter, filters, is_async],
+                None,
+            ));
+        }
+        Ok(self.list(nodes))
+    }
+
     fn optional(&mut self, expr: Option<Box<ast::Expr>>) -> Result<Id> {
         expr.map(|e| self.expr(*e))
             .transpose()
             .map(|e| e.unwrap_or(NONE))
+    }
+
+    fn aliases(&mut self, aliases: &[ast::Alias]) -> Id {
+        let nodes = aliases
+            .iter()
+            .map(|alias| {
+                let name = self.ctx.text(alias.name.as_str());
+                let asname = alias
+                    .asname
+                    .as_ref()
+                    .map_or(NONE, |n| self.ctx.text(n.as_str()));
+                self.node("alias", &[name, asname], alias.range())
+            })
+            .collect();
+        self.list(nodes)
     }
 
     fn arg(&mut self, parameter: &mut ast::Parameter) -> Result<Id> {
@@ -133,17 +243,143 @@ impl Parser<'_> {
         ))
     }
 
+    fn keyword(&mut self, keyword: ast::Keyword) -> Result<Id> {
+        let range = keyword.range();
+        let name = keyword.arg.map_or(NONE, |n| self.ctx.text(n.as_str()));
+        let value = self.expr(keyword.value)?;
+        Ok(self.node("keyword", &[name, value], range))
+    }
+
+    fn handler(&mut self, handler: ast::ExceptHandler) -> Result<Id> {
+        let ast::ExceptHandler::ExceptHandler(handler) = handler;
+        let range = handler.range();
+        let exception = self.optional(handler.type_)?;
+        let name = handler.name.map_or(NONE, |n| self.ctx.text(n.as_str()));
+        let body = self.suite(handler.body)?;
+        Ok(self.node("ExceptHandler", &[exception, name, body], range))
+    }
+
+    fn with_item(&mut self, item: ast::WithItem) -> Result<Id> {
+        let context = self.expr(item.context_expr)?;
+        let target = self.optional(item.optional_vars)?;
+        Ok(parsed_instance(
+            self.ctx,
+            "withitem",
+            &[context, target],
+            None,
+        ))
+    }
+
     fn statement(&mut self, s: ast::Stmt) -> Result<Id> {
         use ast::Stmt;
         let range = self.statement_range(&s);
         let (kind, fields) = match s {
             Stmt::Expr(v) => ("Expr", vec![self.expr(*v.value)?]),
             Stmt::Pass(_) => ("Pass", vec![]),
+            Stmt::Import(v) if !v.is_lazy => ("Import", vec![self.aliases(&v.names)]),
+            // Absolute future directives need feature validation before conversion.
+            Stmt::ImportFrom(v)
+                if !v.is_lazy && (v.level != 0 || v.module.as_deref() != Some("__future__")) =>
+            {
+                let module = v
+                    .module
+                    .as_ref()
+                    .map_or(NONE, |m| self.ctx.text(m.as_str()));
+                let names = self.aliases(&v.names);
+                let level = self.ctx.int(i64::from(v.level));
+                ("ImportFrom", vec![module, names, level])
+            }
             Stmt::Assign(v) => (
                 "Assign",
                 vec![self.exprs(v.targets)?, self.expr(*v.value)?, NONE],
             ),
             Stmt::Return(v) => ("Return", vec![self.optional(v.value)?]),
+            Stmt::Assert(v) => ("Assert", vec![self.expr(*v.test)?, self.optional(v.msg)?]),
+            Stmt::Raise(v) => (
+                "Raise",
+                vec![self.optional(v.exc)?, self.optional(v.cause)?],
+            ),
+            Stmt::Break(_) => ("Break", vec![]),
+            Stmt::Continue(_) => ("Continue", vec![]),
+            Stmt::Delete(v) => ("Delete", vec![self.exprs(v.targets)?]),
+            Stmt::AugAssign(v) => (
+                "AugAssign",
+                vec![
+                    self.expr(*v.target)?,
+                    self.ctx.builtins[&format!("ast._{:?}", v.op)],
+                    self.expr(*v.value)?,
+                ],
+            ),
+            Stmt::While(v) => (
+                "While",
+                vec![
+                    self.expr(*v.test)?,
+                    self.suite(v.body)?,
+                    self.suite(v.orelse)?,
+                ],
+            ),
+            Stmt::For(v) => (
+                if v.is_async { "AsyncFor" } else { "For" },
+                vec![
+                    self.expr(*v.target)?,
+                    self.expr(*v.iter)?,
+                    self.suite(v.body)?,
+                    self.suite(v.orelse)?,
+                    NONE,
+                ],
+            ),
+            Stmt::With(v) => {
+                let items = v
+                    .items
+                    .into_iter()
+                    .map(|i| self.with_item(i))
+                    .collect::<Result<_>>()?;
+                (
+                    if v.is_async { "AsyncWith" } else { "With" },
+                    vec![self.list(items), self.suite(v.body)?, NONE],
+                )
+            }
+            Stmt::Try(v) => {
+                let body = self.suite(v.body)?;
+                let handlers = v
+                    .handlers
+                    .into_iter()
+                    .map(|h| self.handler(h))
+                    .collect::<Result<_>>()?;
+                (
+                    if v.is_star { "TryStar" } else { "Try" },
+                    vec![
+                        body,
+                        self.list(handlers),
+                        self.suite(v.orelse)?,
+                        self.suite(v.finalbody)?,
+                    ],
+                )
+            }
+            Stmt::ClassDef(v) if v.type_params.is_none() => {
+                let (bases, keywords) = if let Some(args) = v.arguments {
+                    let bases = self.exprs(args.args)?;
+                    let keywords = args
+                        .keywords
+                        .into_iter()
+                        .map(|k| self.keyword(k))
+                        .collect::<Result<_>>()?;
+                    (bases, self.list(keywords))
+                } else {
+                    (self.list(vec![]), self.list(vec![]))
+                };
+                (
+                    "ClassDef",
+                    vec![
+                        self.ctx.text(v.name.as_str()),
+                        bases,
+                        keywords,
+                        self.suite(v.body)?,
+                        self.exprs(v.decorator_list.into_iter().map(|d| d.expression))?,
+                        self.list(vec![]),
+                    ],
+                )
+            }
             Stmt::If(v) => {
                 let mut otherwise = self.list(vec![]);
                 for clause in v.elif_else_clauses.into_iter().rev() {
@@ -166,14 +402,18 @@ impl Parser<'_> {
                     vec![self.expr(*v.test)?, self.suite(v.body)?, otherwise],
                 )
             }
-            Stmt::FunctionDef(mut v) if !v.is_async && v.type_params.is_none() => {
+            Stmt::FunctionDef(mut v) if v.type_params.is_none() => {
                 let decorators = v
                     .decorator_list
                     .into_iter()
                     .map(|d| self.expr(d.expression))
                     .collect::<Result<_>>()?;
                 (
-                    "FunctionDef",
+                    if v.is_async {
+                        "AsyncFunctionDef"
+                    } else {
+                        "FunctionDef"
+                    },
                     vec![
                         self.ctx.text(v.name.as_str()),
                         self.parameters(&mut v.parameters)?,
@@ -199,14 +439,17 @@ impl Parser<'_> {
     }
 
     fn statement_range(&self, statement: &ast::Stmt) -> TextRange {
-        if let ast::Stmt::FunctionDef(function) = statement
-            && let Some(last) = function.decorator_list.last()
-        {
-            // Ruff includes decorators in the range. Python starts at the def keyword.
+        let decorators = match statement {
+            ast::Stmt::FunctionDef(v) => &v.decorator_list,
+            ast::Stmt::ClassDef(v) => &v.decorator_list,
+            _ => return statement.range(),
+        };
+        if let Some(last) = decorators.last() {
+            // Ruff includes decorators; CPython starts at the class, def or async keyword.
             let next = self
-                .function_starts
+                .definition_starts
                 .partition_point(|start| *start < last.end());
-            return TextRange::new(self.function_starts[next], function.end());
+            return TextRange::new(self.definition_starts[next], statement.end());
         }
         statement.range()
     }
@@ -215,6 +458,7 @@ impl Parser<'_> {
         match context {
             ast::ExprContext::Load => Ok(self.load),
             ast::ExprContext::Store => Ok(self.store),
+            ast::ExprContext::Del => Ok(self.ctx.builtins["ast._Del"]),
             _ => Err(Error::new(
                 "NotImplementedError",
                 "unsupported AST expression context",
@@ -227,29 +471,58 @@ impl Parser<'_> {
         source: &str,
         tokens: &ast::token::Tokens,
         syntax: impl Into<ast::ModRef<'a>>,
-    ) {
+    ) -> Result<()> {
+        use ast::token::TokenKind::{
+            Async, Class, Def, FStringEnd, FStringStart, TStringEnd, TStringStart,
+        };
+
         self.replacements = crate::dynamic::source_code::string_replacements(source, tokens);
-        if !self.literal {
+        if self.literal {
+            return Ok(());
+        }
+        let mut string_depth = 0;
+        let mut has_templates = false;
+        for token in tokens.iter() {
+            match token.kind() {
+                FStringStart | TStringStart => {
+                    string_depth += 1;
+                    // One of CPython's 150 tokenizer modes is the outer Python source.
+                    if string_depth == 150 {
+                        return Err(Error::new(
+                            "SyntaxError",
+                            "too many nested f-strings or t-strings",
+                        ));
+                    }
+                    has_templates |= token.kind() == TStringStart;
+                }
+                FStringEnd | TStringEnd => string_depth -= 1,
+                Async | Class | Def => self.definition_starts.push(token.start()),
+                _ => {}
+            }
+        }
+        if has_templates {
             self.template_expressions =
                 imre_ast::strings::template_expressions(source, tokens, syntax);
         }
+        Ok(())
     }
 
     /// Ruff decodes both isolated surrogates and U+FFFD to its replacement character.
-    fn append_template_text(
+    fn append_literal_text(
         &self,
         points: &mut Vec<u32>,
-        literal: &ast::InterpolatedStringLiteralElement,
+        text: &str,
+        range: TextRange,
     ) -> Result<()> {
         let mut original = self
             .replacements
-            .range(literal.start()..literal.end())
+            .range(range.start()..range.end())
             .flat_map(|(_, points)| points.iter().copied());
-        let mismatch = || Error::new("NotImplementedError", "ast.parse: t-string escape spelling");
+        let mismatch = || Error::new("NotImplementedError", "ast.parse: string escape spelling");
         points
-            .try_reserve(literal.value.chars().count())
+            .try_reserve(text.chars().count())
             .map_err(|_| crate::Error::allocation())?;
-        for ch in literal.value.chars() {
+        for ch in text.chars() {
             points.push(if ch == char::REPLACEMENT_CHARACTER {
                 original.next().ok_or_else(mismatch)?
             } else {
@@ -262,47 +535,50 @@ impl Parser<'_> {
         Ok(())
     }
 
+    fn middle_literal(
+        &self,
+        parts: &mut JoinedParts,
+        lit: &ast::InterpolatedStringLiteralElement,
+        raw: bool,
+        continued_brace_error: &'static str,
+    ) -> Result<()> {
+        if !lit.value.is_empty() {
+            let source = &self.source[lit.range()];
+            // CPython drops an empty middle token after a brace boundary;
+            // Ruff can include it in the range of the preceding literal.
+            let prefix = source.trim_end_matches("\\\n");
+            if !raw && prefix.len() != source.len() && prefix.ends_with(['{', '}']) {
+                return Err(Error::new("NotImplementedError", continued_brace_error));
+            }
+            self.append_literal_text(&mut parts.text, &lit.value, lit.range())?;
+            parts.include_literal(lit.range(), NONE);
+        }
+        Ok(())
+    }
+
     fn template_values(&mut self, template: &mut ast::ExprTString) -> Result<Id> {
-        let mut values = Vec::new();
-        let mut text = Vec::new();
-        let mut text_range: Option<TextRange> = None;
+        let mut parts = JoinedParts::default();
         for part in template.value.iter_mut() {
             let raw = part.flags.prefix().is_raw();
             for element in &mut part.elements {
                 match element {
                     ast::InterpolatedStringElement::Literal(lit) => {
-                        if !lit.value.is_empty() {
-                            let source = &self.source[lit.range()];
-                            // CPython may discard an empty middle token after a brace boundary.
-                            // Ruff merges that token into the range of its preceding literal.
-                            let prefix = source.trim_end_matches("\\\n");
-                            if !raw && prefix.len() != source.len() && prefix.ends_with(['{', '}'])
-                            {
-                                return Err(Error::new(
-                                    "NotImplementedError",
-                                    "ast.parse: continued t-string brace literal",
-                                ));
-                            }
-                            self.append_template_text(&mut text, lit)?;
-                            text_range =
-                                Some(text_range.map_or(lit.range(), |r| r.cover(lit.range())));
-                        }
+                        self.middle_literal(
+                            &mut parts,
+                            lit,
+                            raw,
+                            "ast.parse: continued t-string brace literal",
+                        )?;
                     }
                     ast::InterpolatedStringElement::Interpolation(field) => {
-                        if let Some(range) = text_range.take() {
-                            let value = self.ctx.text_codepoints(std::mem::take(&mut text));
-                            values.push(self.node("Constant", &[value, NONE], range));
-                        }
-                        values.push(self.template_field(field, raw)?);
+                        parts.flush(self);
+                        parts.values.push(self.template_field(field, raw)?);
                     }
                 }
             }
         }
-        if let Some(range) = text_range {
-            let value = self.ctx.text_codepoints(text);
-            values.push(self.node("Constant", &[value, NONE], range));
-        }
-        Ok(self.list(values))
+        parts.flush(self);
+        Ok(self.list(parts.values))
     }
 
     fn template_field(&mut self, field: &mut ast::InterpolatedElement, raw: bool) -> Result<Id> {
@@ -319,7 +595,7 @@ impl Parser<'_> {
             let mut parts = Vec::new();
             if let Some(lit) = lit.filter(|lit| !lit.value.is_empty()) {
                 let mut points = Vec::new();
-                self.append_template_text(&mut points, lit)?;
+                self.append_literal_text(&mut points, &lit.value, lit.range())?;
                 let value = self.ctx.text_codepoints(points);
                 parts.push(self.node("Constant", &[value, NONE], lit.range()));
             }
@@ -344,17 +620,132 @@ impl Parser<'_> {
             })?;
         let spelling = self.ctx.text(spelling);
         let conversion = self.ctx.int(i64::from(field.conversion as i8));
-        // Take the expression so long operator chains follow the existing iterative path.
-        let placeholder = ast::Expr::NoneLiteral(ast::ExprNoneLiteral {
-            range: field.expression.range(),
-            node_index: ast::AtomicNodeIndex::NONE,
-        });
-        let expression = self.expr(std::mem::replace(&mut *field.expression, placeholder))?;
+        let expression = self.field_expression(field)?;
         Ok(self.node(
             "Interpolation",
             &[expression, spelling, conversion, format_spec],
             field.range(),
         ))
+    }
+
+    fn field_expression(&mut self, field: &mut ast::InterpolatedElement) -> Result<Id> {
+        // Take the expression so long operator chains follow the existing iterative path.
+        let placeholder = ast::Expr::NoneLiteral(ast::ExprNoneLiteral {
+            range: field.expression.range(),
+            node_index: ast::AtomicNodeIndex::NONE,
+        });
+        self.expr(std::mem::replace(&mut *field.expression, placeholder))
+    }
+
+    fn formatted_values(&mut self, string: &mut ast::ExprFString) -> Result<Id> {
+        let mut parts = JoinedParts::default();
+        for part in string.value.iter_mut() {
+            match part {
+                ast::FStringPartMut::Literal(lit) => {
+                    // Even an empty ordinary string contributes its range and leading 'u' kind.
+                    let kind = if self.source[lit.range()].starts_with('u') {
+                        self.ctx.text("u")
+                    } else {
+                        NONE
+                    };
+                    parts.include_literal(lit.range(), kind);
+                    self.append_literal_text(&mut parts.text, &lit.value, lit.range())?;
+                }
+                ast::FStringPartMut::FString(part) => {
+                    self.formatted_elements(
+                        &mut parts,
+                        &mut part.elements,
+                        part.flags.prefix().is_raw(),
+                        0,
+                    )?;
+                }
+            }
+        }
+        parts.flush(self);
+        Ok(self.list(parts.values))
+    }
+
+    fn has_named_escape(source: &str) -> bool {
+        let mut chars = source.chars();
+        while let Some(ch) = chars.next() {
+            if ch == '\\' && chars.next() == Some('N') && chars.as_str().starts_with('{') {
+                return true;
+            }
+        }
+        false
+    }
+
+    fn formatted_elements(
+        &mut self,
+        parts: &mut JoinedParts,
+        elements: &mut ast::InterpolatedStringElements,
+        raw: bool,
+        spec_depth: u8,
+    ) -> Result<()> {
+        for element in elements {
+            match element {
+                ast::InterpolatedStringElement::Literal(lit) => {
+                    // CPython can fold several cooked format tokens into a plain Constant.
+                    if spec_depth != 0 && !raw && Self::has_named_escape(&self.source[lit.range()])
+                    {
+                        return Err(Error::new(
+                            "NotImplementedError",
+                            "ast.parse: named Unicode escape in f-string format spec",
+                        ));
+                    }
+                    self.middle_literal(
+                        parts,
+                        lit,
+                        raw,
+                        "ast.parse: continued f-string brace literal",
+                    )?;
+                }
+                ast::InterpolatedStringElement::Interpolation(field) => {
+                    // A new f-string starts its own replacement-field nesting count.
+                    if spec_depth == 3 {
+                        return Err(Error::new(
+                            "SyntaxError",
+                            "f-string: expressions nested too deeply",
+                        ));
+                    }
+                    let mut conversion = field.conversion;
+                    if let Some(debug) = &field.debug_text {
+                        parts.debug_literal(debug.as_str(), field.start() + TextSize::new(1));
+                        if conversion == ast::ConversionFlag::None && field.format_spec.is_none() {
+                            conversion = ast::ConversionFlag::Repr;
+                        }
+                    }
+                    parts.flush(self);
+                    let expr = self.field_expression(field)?;
+                    let end = field.end() - TextSize::new(1);
+                    let spec = if let Some(spec) = &mut field.format_spec {
+                        let mut nested = JoinedParts::default();
+                        self.formatted_elements(
+                            &mut nested,
+                            &mut spec.elements,
+                            raw,
+                            spec_depth + 1,
+                        )?;
+                        nested.flush(self);
+                        let values = self.list(nested.values);
+                        self.node(
+                            "JoinedStr",
+                            &[values],
+                            TextRange::new(spec.start() - TextSize::new(1), end),
+                        )
+                    } else {
+                        NONE
+                    };
+                    let conversion = self.ctx.int(i64::from(conversion as i8));
+                    parts.values.push(self.node(
+                        "FormattedValue",
+                        &[expr, conversion, spec],
+                        field.range(),
+                    ));
+                }
+            }
+        }
+        Ok(())
     }
 
     fn expr(&mut self, e: ast::Expr) -> Result<Id> {
@@ -374,17 +765,16 @@ impl Parser<'_> {
                 Expr::Attribute(v) => (v.value, Trailer::Attribute(v.attr, v.ctx)),
                 Expr::Subscript(v) => (v.value, Trailer::Subscript(v.slice, v.ctx)),
                 Expr::Call(mut v) => {
-                    let mut keywords = Vec::new();
-                    for keyword in std::mem::take(&mut v.arguments.keywords) {
-                        let range = keyword.range();
-                        let name = keyword
-                            .arg
-                            .as_ref()
-                            .map(|n| self.ctx.text(n.as_str()))
-                            .unwrap_or(NONE);
-                        let value = self.expr(keyword.value)?;
-                        keywords.push(self.node("keyword", &[name, value], range));
+                    // A bare generator argument includes the call parentheses in CPython's range.
+                    if let [Expr::Generator(generator)] = v.arguments.args.as_mut_slice()
+                        && !generator.parenthesized
+                    {
+                        generator.range = v.arguments.range;
                     }
+                    let keywords = std::mem::take(&mut v.arguments.keywords)
+                        .into_iter()
+                        .map(|kw| self.keyword(kw))
+                        .collect::<Result<_>>()?;
                     (v.func, Trailer::Call(v.arguments, keywords))
                 }
                 _ => break,
@@ -398,6 +788,9 @@ impl Parser<'_> {
                 "Name",
                 vec![self.ctx.text(v.id.as_str()), self.context(v.ctx)?],
             ),
+            Expr::FString(mut v) if !self.literal => {
+                ("JoinedStr", vec![self.formatted_values(&mut v)?])
+            }
             Expr::TString(mut v) if !self.literal => {
                 ("TemplateStr", vec![self.template_values(&mut v)?])
             }
@@ -437,6 +830,69 @@ impl Parser<'_> {
                 };
                 ("Constant", vec![self.ctx.alloc(number), NONE])
             }
+            Expr::BoolOp(v) if !self.literal => {
+                let op = self.ctx.builtins[match v.op {
+                    ast::BoolOp::And => "ast._And",
+                    ast::BoolOp::Or => "ast._Or",
+                }];
+                ("BoolOp", vec![op, self.exprs(v.values)?])
+            }
+            Expr::Lambda(v) if !self.literal => {
+                let mut parameters = v.parameters.unwrap_or_default();
+                (
+                    "Lambda",
+                    vec![self.parameters(&mut parameters)?, self.expr(*v.body)?],
+                )
+            }
+            Expr::ListComp(v) if !self.literal => (
+                "ListComp",
+                vec![
+                    self.comprehension_element(*v.elt)?,
+                    self.comprehensions(v.generators)?,
+                ],
+            ),
+            Expr::SetComp(v) if !self.literal => (
+                "SetComp",
+                vec![
+                    self.comprehension_element(*v.elt)?,
+                    self.comprehensions(v.generators)?,
+                ],
+            ),
+            Expr::DictComp(v) if !self.literal => {
+                let key = v.key.ok_or_else(|| {
+                    Error::new(
+                        "SyntaxError",
+                        "dict unpacking cannot be used in dict comprehension",
+                    )
+                })?;
+                (
+                    "DictComp",
+                    vec![
+                        self.expr(*key)?,
+                        self.expr(*v.value)?,
+                        self.comprehensions(v.generators)?,
+                    ],
+                )
+            }
+            Expr::Generator(v) if !self.literal => (
+                "GeneratorExp",
+                vec![
+                    self.comprehension_element(*v.elt)?,
+                    self.comprehensions(v.generators)?,
+                ],
+            ),
+            Expr::Slice(v) if !self.literal => (
+                "Slice",
+                vec![
+                    self.optional(v.lower)?,
+                    self.optional(v.upper)?,
+                    self.optional(v.step)?,
+                ],
+            ),
+            Expr::Starred(v) if !self.literal => {
+                ("Starred", vec![self.expr(*v.value)?, self.context(v.ctx)?])
+            }
+            Expr::YieldFrom(v) if !self.literal => ("YieldFrom", vec![self.expr(*v.value)?]),
             Expr::Tuple(v) => ("Tuple", vec![self.exprs(v.elts)?, self.context(v.ctx)?]),
             Expr::List(v) => ("List", vec![self.exprs(v.elts)?, self.context(v.ctx)?]),
             Expr::Set(v) => ("Set", vec![self.exprs(v.elts)?]),
@@ -530,12 +986,13 @@ pub(super) fn parse(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> 
     let [src, filename, mode] =
         builtins::bind("parse", args, kwargs, ["source", "filename", "mode"])?;
     let copy = |text: &str| crate::Str::try_new(text).map_err(|_| crate::Error::allocation());
-    let source = copy(ctx.str_value(src.ok_or_else(|| {
+    let source = src.ok_or_else(|| {
         Error::new(
             "TypeError",
             "parse() missing 1 required positional argument: 'source'",
         )
-    })?)?)?;
+    })?;
+    let filename_id = filename;
     let filename = copy(
         filename
             .map(|f| ctx.str_value(f))
@@ -547,7 +1004,32 @@ pub(super) fn parse(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> 
             .transpose()?
             .unwrap_or("exec"),
     )?;
-    parse_source(ctx, &source, &filename, &mode, false)
+    // compile validates mode before asking the tokenizer to decode source bytes.
+    if !matches!(mode.as_str(), "exec" | "eval" | "single" | "func_type") {
+        return Err(Error::new(
+            "ValueError",
+            "compile() mode must be 'exec', 'eval', 'single' or 'func_type'",
+        ));
+    }
+    let text;
+    let decoded;
+    let source = if ctx.string_storage(source).is_some() {
+        text = copy(ctx.str_value(source)?)?;
+        text.as_str()
+    } else {
+        let bytes = ctx.native_buffer_bytes(source).map_err(|_| {
+            Error::new(
+                "TypeError",
+                "compile() arg 1 must be a string, bytes or AST object",
+            )
+        })?;
+        decoded = crate::objects::decode_compile_source(bytes).map_err(|error| {
+            let filename_id = filename_id.unwrap_or_else(|| ctx.text("<unknown>"));
+            ctx.source_decode_error(error, filename_id)
+        })?;
+        decoded.as_str()
+    };
+    parse_source(ctx, source, &filename, &mode, false)
 }
 
 pub(super) fn parse_source(
@@ -575,7 +1057,7 @@ pub(super) fn parse_source(
         source,
         literal,
         lines,
-        function_starts: Vec::new(),
+        definition_starts: Vec::new(),
         template_expressions: HashMap::new(),
         replacements: BTreeMap::new(),
         load,
@@ -590,13 +1072,7 @@ pub(super) fn parse_source(
     match mode {
         "exec" => {
             let body = ruff_python_parser::parse_module(source).map_err(syntax)?;
-            parser.prepare_strings(source, body.tokens(), body.syntax());
-            parser.function_starts = body
-                .tokens()
-                .iter()
-                .filter(|token| token.kind() == ast::token::TokenKind::Def)
-                .map(Ranged::start)
-                .collect();
+            parser.prepare_strings(source, body.tokens(), body.syntax())?;
             let body = parser.suite(body.into_syntax().body)?;
             let ignores = parser.list(vec![]);
             Ok(parsed_instance(
@@ -615,7 +1091,7 @@ pub(super) fn parse_source(
                     syntax(err)
                 }
             })?;
-            parser.prepare_strings(source, expr.tokens(), expr.syntax());
+            parser.prepare_strings(source, expr.tokens(), expr.syntax())?;
             let body = parser.expr(*expr.into_syntax().body)?;
             Ok(parsed_instance(parser.ctx, "Expression", &[body], None))
         }

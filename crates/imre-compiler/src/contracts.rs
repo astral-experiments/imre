@@ -129,10 +129,11 @@ impl Builtin {
             | Self::ExceptionFieldLen
             | Self::ExceptionFieldIndex
             | Self::ExceptionFormatterResult(_) => Contract::new(true, PreservesLists),
-            Self::MappingObjectGet => Contract::new(true, PreservesOwners),
+            Self::MappingObjectGet | Self::ObjectTextProject => Contract::new(true, PreservesOwners),
             Self::BoxValue
             | Self::ExceptionTupleView
             | Self::ObjectRecordProject(_)
+            | Self::ObjectIsExactTuple
             | Self::ObjectStreamProject
             | Self::ObjectRecordIdentity { .. }
             | Self::ExceptionTupleIdentity
@@ -224,6 +225,7 @@ impl Builtin {
                     | PathOperation::Drive
                     | PathOperation::Root
                     | PathOperation::Anchor
+                    | PathOperation::Parts
                     | PathOperation::Name
                     | PathOperation::Stem
                     | PathOperation::Suffix
@@ -341,6 +343,7 @@ impl Builtin {
                 | ProcessOperation::PopenCleanup
                 | ProcessOperation::Call { .. }
                 | ProcessOperation::AsyncSpawn { .. } => Contract::new(true, Unknown),
+                ProcessOperation::GetPid => Contract::new(false, PreservesLists),
                 ProcessOperation::Executable
                 | ProcessOperation::PopenPid
                 | ProcessOperation::PopenActive
@@ -382,7 +385,7 @@ impl Builtin {
                 | ProcessOperation::EnvironClear
                 | ProcessOperation::EnvironUpdate { .. }
                 | ProcessOperation::EnvironGet
-                | ProcessOperation::GetCwd
+                | ProcessOperation::GetCwd { .. }
                 | ProcessOperation::Fd(_)
                 | ProcessOperation::Credential(_)
                 | ProcessOperation::CredentialId { .. }
@@ -676,6 +679,7 @@ impl Builtin {
             | Self::DequePop { .. }
             | Self::DequeIndex
             | Self::DequeGet { .. }
+            | Self::DequeRotate
             | Self::DequeSet
             | Self::DequeDelete { .. }
             | Self::Pop
@@ -744,8 +748,7 @@ impl Builtin {
             | Self::Combinatorial(_)
             | Self::Islice
             | Self::Cycle => Contract::new(true, PreservesLists),
-            Self::BytesIter
-            | Self::DefaultListDict
+            Self::DefaultListDict
             | Self::DefaultFactorySet { .. }
             | Self::DequeMaxlen
             | Self::DequeIter { .. }
@@ -1160,6 +1163,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_environb_index"
                 | "imre_environ_index"
                 | "imre_getcwd"
+                | "imre_getcwdb"
                 | "imre_os_linesep"
                 | "imre_os_pathsep"
                 | "imre_shutil_which"
@@ -1255,6 +1259,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_str_splitlines_options"
                 | "imre_str_translate"
                 | "imre_mapping_object_get"
+                | "imre_object_exact_text"
                 | "imre_exception_field_repr"
                 | "imre_system_exit_code_equal"
                 | "imre_system_exit_code_text"
@@ -1343,6 +1348,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_path_name"
                 | "imre_path_stem"
                 | "imre_path_suffix"
+                | "imre_path_parts"
                 | "imre_path_suffixes"
                 | "imre_path_resolve"
                 | "imre_tempdir_new"

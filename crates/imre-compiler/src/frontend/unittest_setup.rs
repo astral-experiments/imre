@@ -128,12 +128,14 @@ pub(super) fn slots(
         return Ok(slots);
     };
     let mut groups: BTreeMap<usize, Vec<usize>> = BTreeMap::new();
-    for (id, c) in classes.definitions.iter().enumerate() {
-        if let Some(pos) = c.bases.iter().position(|&base| base == case) {
-            groups
-                .entry(if pos == 0 { id } else { c.bases[pos - 1] })
-                .or_default()
-                .push(id);
+    for id in 0..classes.definitions.len() {
+        let mut child = id;
+        while let Some(base) = classes.definitions[child].storage_base {
+            if base == case {
+                groups.entry(child).or_default().push(id);
+                break;
+            }
+            child = base;
         }
     }
     let owners: Vec<_> = classes.definitions.iter().map(|c| c.name.clone()).collect();
@@ -177,9 +179,8 @@ pub(super) fn slots(
                     // keeps its ordinary storage. An inherited spelling may denote
                     // a different lexical name and cannot stand in for a new field.
                     let inherited = c
-                        .bases
-                        .first()
-                        .map_or(0, |&base| classes.definitions[base].fields.len());
+                        .storage_base
+                        .map_or(0, |base| classes.definitions[base].fields.len());
                     let initialized = c.fields[inherited..].iter().any(|f| f.name == name);
                     if group.iter().any(|&id| {
                         let def = &classes.definitions[id];

@@ -16,6 +16,75 @@ IMPORT = "from helper import f\nprint(f(2))\n"
 
 
 REJECTED = {
+    "generator_local_keeps_typed_call": ({
+        "helper.py": (
+            "def values():\n"
+            "    def pair(left, right): return left + right\n"
+            "    yield pair(2, 3)\n"
+            "def typed(n: int) -> int: return n\n"
+        ),
+        "main.py": "from helper import values, typed\nprint(next(values()))\ntyped('wrong')\n",
+    }, "invalid-argument-type"),
+    "unittest_method_skip_preserves_typed_call": ({
+        "main.py": (
+            "import unittest\n"
+            "class Case(unittest.TestCase):\n"
+            "    @unittest.skipUnless(False, 'feature required')\n"
+            "    def test_body(self): pass\n"
+            "    @staticmethod\n"
+            "    @staticmethod\n"
+            "    def extra(): pass\n"
+            "def typed(n: int) -> int: return n\n"
+            "typed('wrong')\n"
+        ),
+    }, "invalid-argument-type"),
+    "runtime_method_skip_leaves_other_class_checked": ({
+        "main.py": (
+            "import unittest\n"
+            "class Case(unittest.TestCase):\n"
+            "    @unittest.skipUnless(False, 'feature required')\n"
+            "    def test_body(self): pass\n"
+            "class Other:\n"
+            "    @staticmethod\n"
+            "    @staticmethod\n"
+            "    def extra(): pass\n"
+            "print(Other.extra())\n"
+        ),
+    }, "method decorators cannot be stacked"),
+    "leading_mixin_preserves_assignment_check": ({
+        "helper.py": "def invalid() -> int:\n    value: int = 'wrong'\n    return value\n",
+        "main.py": (
+            "from helper import invalid\n"
+            "class Methods:\n    def extra(self) -> int: return 1\n"
+            "class Storage:\n    def __init__(self, n: int): self.x = n\n"
+            "class Child(Methods, Storage): pass\n"
+            "print(Child(3).extra())\n"
+        ),
+    }, "expected int, got str"),
+    "second_base_has_storage": ({
+        "main.py": (
+            "class Left:\n    def __init__(self, x: int): self.left = x\n"
+            "class Right:\n    def __init__(self, y: int): self.right = y\n"
+            "class Both(Left, Right): pass\n"
+        ),
+    }, "multiple independent base classes"),
+    "custom_dir_preserves_typed_call": ({
+        "main.py": (
+            "class Subject:\n"
+            "    def __dir__(self): return ['value']\n"
+            "def typed(n: int) -> int: return n\n"
+            "dir(Subject())\n"
+            "typed('wrong')\n"
+        ),
+    }, "invalid-argument-type"),
+    "inspect_isdatadescriptor_preserves_typed_call": ({
+        "main.py": (
+            "from inspect import isdatadescriptor\n"
+            "def typed(n: int) -> int: return n\n"
+            "print(isdatadescriptor(property()))\n"
+            "typed('wrong')\n"
+        ),
+    }, "expected int, got str"),
     "optional_import_keeps_typed_call_check": ({
         "main.py": (
             "import http.client\n"
@@ -93,6 +162,36 @@ REJECTED = {
             "deque.__repr__(queue('wrong'))\n"
         ),
     }, "expected int, got str"),
+    "source_method_factory_checks_calls": ({
+        "helper.py": HELPER,
+        "main.py": (
+            "import helper\n"
+            "class Case:\n"
+            "    @helper.f('wrong')\n"
+            "    def method(self): pass\n"
+        ),
+    }, "invalid-argument-type"),
+    "method_decorator_must_be_callable": ({
+        "helper.py": HELPER,
+        "main.py": (
+            "import helper\n"
+            "class Case:\n"
+            "    @helper.f(7)\n"
+            "    def method(self): pass\n"
+        ),
+    }, "call-non-callable"),
+    "shutdown_keeps_checked_initializer": ({
+        "main.py": (
+            "from logging import shutdown as finish\nresult = finish()\n"
+            "invalid: int = 'wrong'\nprint(invalid)\n"
+        ),
+    }, "expected int"),
+    "shutdown_with_supplied_weak_refs_requires_object_imports": ({
+        "main.py": (
+            "import logging, weakref\nhandler = logging.NullHandler()\n"
+            "logging.shutdown(handlerList=[weakref.ref(handler)])\n"
+        ),
+    }, "logging.shutdown arguments require --runtime-imports"),
     "saved_deque_repr_keeps_checked_calls": ({
         "main.py": (
             "from collections import deque\ndef identity(n: int) -> int:\n    return n\n"
@@ -106,6 +205,26 @@ REJECTED = {
             "with patch.object(Owner, 'value', replacement('wrong')):\n    pass\n"
         ),
     }, "expected int, got str"),
+    "handler_names_preserves_assignment": ({
+        "main.py": (
+            "from logging import getHandlerNames\ndef run() -> None:\n"
+            "    names = getHandlerNames()\n    print('handler' in names)\n"
+            "    value: int = 'wrong'\n    print(value)\nrun()\n"
+        ),
+    }, "expected int, got str"),
+    "unused_queue_listener_preserves_assignment": ({
+        "main.py": (
+            "from logging.handlers import QueueListener\ndef run() -> None:\n"
+            "    value: int = 'wrong'\n    print(value)\nrun()\n"
+        ),
+    }, "expected int, got str"),
+    "saved_queue_handler_preserves_checked_calls": ({
+        "main.py": (
+            "from logging.handlers import QueueHandler as Handler\ndef take(n: int) -> None:\n    print(n)\n"
+            "def run() -> None:\n    constructor = Handler\n    print(constructor.__name__)\n"
+            "    take('wrong')\nrun()\n"
+        ),
+    }, "invalid-argument-type"),
     "unused_chdir_preserves_checked_calls": ({
         "main.py": "from os import chdir\ndef path(n: int) -> int:\n    return n\npath('wrong')\n",
     }, "expected int, got str"),
@@ -204,6 +323,38 @@ REJECTED = {
         "main.py": "from helper import selected\n",
         "helper.py": "if True:\n    selected: int\nelse:\n    selected = 1\n",
     }, 'no static binding "selected"'),
+    "namedtuple_descriptor_preserves_typed_call": ({
+        "main.py": (
+            "from collections import namedtuple\n"
+            "Point = namedtuple('Point', 'x y')\n"
+            "field = Point.x\n"
+            "def typed(n: int) -> int: return n + 1\n"
+            "typed('wrong')\n"
+        ),
+    }, "expected int, got str"),
+    "namedtuple_descriptor_shadowed_by_parameter": ({
+        "main.py": (
+            "from collections import namedtuple\n"
+            "Point = namedtuple('Point', 'x y')\n"
+            "def read(Point: int) -> int: return Point.x\n"
+            "print(read(5))\n"
+        ),
+    }, "rebinding a builtin, definition, or imported module"),
+    "namedtuple_descriptor_shadowed_by_comprehension_target": ({
+        "main.py": (
+            "from collections import namedtuple\n"
+            "Point = namedtuple('Point', 'x')\n"
+            "print([1 for _ in [0] if Point.x for Point in [3]])\n"
+        ),
+    }, "comprehension local may be uninitialized on this path"),
+    "namedtuple_module_shadowed_by_parameter": ({
+        "points.py": "from collections import namedtuple\nPoint = namedtuple('Point', 'x y')\n",
+        "main.py": (
+            "import points\n"
+            "def read(points: int) -> int: return points.Point.x\n"
+            "print(read(5))\n"
+        ),
+    }, "rebinding a builtin, definition, or imported module"),
     "unbound_alias": ({"main.py": "import helper\n", "helper.py": "Pair = tuple[Missing, int]\n"}, "name is not a local value"),
     "unused_bad_type": ({"main.py": IMPORT, "helper.py": HELPER + 'def unused() -> int:\n    return "wrong"\n'}, "helper.py"),
     "unused_resource_function": ({
@@ -296,7 +447,17 @@ REJECTED = {
     "reserved_alias": ({"main.py": "from helper import f as int\n", "helper.py": HELPER}, "reserved"),
     "normalized_reserved_alias": ({"main.py": "from helper import f as ℕone\n", "helper.py": HELPER}, "reserved"),
     "stdlib_shadow": ({"main.py": "import sys\n", "sys.py": HELPER}, "standard-library"),
+    "operator_provider_shadow": ({
+        "main.py": "import consumer\n",
+        "consumer.py": "from _operator import _compare_digest\n",
+        "_operator.py": HELPER,
+    }, 'shadowing is unsupported: "_operator"'),
     "py_compile_shadow": ({"main.py": "import py_compile\n", "py_compile.py": HELPER}, 'shadowing is unsupported: "py_compile"'),
+    "ntpath_shadow": ({
+        "main.py": "from helper import parts\nprint(parts())\n",
+        "helper.py": "import ntpath\ndef parts(): return ntpath.splitdrive('C:/a')\n",
+        "ntpath.py": HELPER,
+    }, 'shadowing is unsupported: "ntpath"'),
     "token_shadow": ({"main.py": "import token\n", "token.py": HELPER}, 'shadowing is unsupported: "token"'),
     "email_address_parser_unknown_name": ({
         "main.py": "from email._header_value_parser import missing_parser\n",
@@ -316,6 +477,66 @@ REJECTED = {
 }
 
 ACCEPTED = {
+    "generator_local_argument_binding": {
+        "helper.py": (
+            "def values():\n"
+            "    def pair(left, right): return left + right\n"
+            "    yield pair(2, 3)\n"
+            "    yield pair(2, 3, 4)\n"
+        ),
+        "main.py": (
+            "from helper import values\n"
+            "gen = values()\n"
+            "print(next(gen))\n"
+            "try: next(gen)\n"
+            "except TypeError as error: print(error)\n"
+        ),
+    },
+    "imported_leading_method_mixin": {
+        "helper.py": (
+            "OFFSET = 7\n"
+            "class Methods:\n"
+            "    def extra(self) -> int: return OFFSET\n"
+        ),
+        "main.py": (
+            "from helper import Methods\n"
+            "class Storage:\n"
+            "    def __init__(self, n: int): self.number = n\n"
+            "    def value(self) -> int: return self.number\n"
+            "class Child(Methods, Storage):\n"
+            "    def total(self) -> int: return super().extra() + super().value()\n"
+            "item = Child(5)\n"
+            "print(item.total())\n"
+            "print(isinstance(item, Methods))\n"
+            "print(isinstance(item, Storage))\n"
+        ),
+    },
+    "imported_method_mixin": {
+        "helper.py": (
+            "OFFSET = 7\n"
+            "class Methods(object):\n"
+            "    def common(self) -> int: return 99\n"
+            "    def extra(self) -> int: return OFFSET\n"
+        ),
+        "main.py": (
+            "from helper import Methods\n"
+            "OFFSET = 200\n"
+            "class Storage:\n"
+            "    def __init__(self, value: int): self.value = value\n"
+            "    def common(self) -> int: return self.value\n"
+            "class Child(Storage, Methods): pass\n"
+            "class Override(Child):\n"
+            "    def extra(self) -> int: return 12\n"
+            "def via(m: Methods) -> int: return m.common() + m.extra()\n"
+            "print(via(Child(4)))\n"
+            "print(via(Override(4)))\n"
+            "print(issubclass(Override, Methods))\n"
+        ),
+    },
+    "nested_operator_compare_digest": {
+        "main.py": "from consumer import equal\nprint(equal(b'ab', b'ab'), equal(b'ab', b'ac'))\n",
+        "consumer.py": "from _operator import _compare_digest as equal\n",
+    },
     "urllib_request_and_error": {
         "main.py": (
             "import urllib.request\n"
@@ -416,6 +637,29 @@ ACCEPTED = {
             "print(available is after.sys, missing is None)\n"
         ),
         "after.py": "import sys\nprint('after')\n",
+    },
+    "ntpath_indirect": {
+        "main.py": "from helper import paths\nprint(paths())\n",
+        "helper.py": (
+            "import ntpath\n"
+            "from ntpath import splitdrive\n"
+            "def paths():\n"
+            "    return ntpath.__name__, splitdrive('C:/base'), ntpath.join('C:', 'a', 'b')\n"
+        ),
+    },
+    "optional_import_in_dependency": {
+        "helper.py": (
+            "try:\n    import sys as provider\nexcept ImportError:\n    provider = None\n"
+            "import child\n"
+            "assert provider is not None\n"
+            "def value() -> int: return 7\n"
+        ),
+        "child.py": (
+            "from importlib import import_module\n"
+            "parent = import_module('helper')\n"
+            "print(parent.provider is not None)\n"
+        ),
+        "main.py": "from helper import value\nprint(value())\n",
     },
     "optional_import_error_alternatives": {
         "main.py": "from pkg.adapter import chosen, available, recovered\nprint(chosen, available, recovered)\n",
@@ -676,7 +920,8 @@ ACCEPTED = {
     "zip_source_spec": {
         "main.py": (
             "import sys\nimport zipimport\nfrom importlib import import_module, invalidate_caches\n"
-            "from importlib.util import find_spec\nfrom witness import seen\n"
+            "from importlib.util import find_spec\nfrom importlib.resources import files\nfrom witness import seen\n"
+            "sys.path.insert(0, __file__.rsplit('/', 1)[0] + '/zip-provider')\n"
             "def refresh():\n    assert sys.exception() is None\n    refresh_finder()\n"
             "for name in ('stored', 'deflated'):\n"
             "    sys.path.insert(0, __file__.rsplit('/', 1)[0] + '/' + name + '.zip')\n"
@@ -685,6 +930,19 @@ ACCEPTED = {
             "    assert package is import_module(name) and package.__spec__ is spec\n"
             "    assert spec.loader is package.__loader__ and type(spec.loader) is zipimport.zipimporter\n"
             "    assert spec.submodule_search_locations is package.__path__\n"
+            "    from importlib.readers import ZipReader\n"
+            "    reader = spec.loader.get_resource_reader(name)\n"
+            "    assert isinstance(reader, ZipReader) and reader.prefix == name + '/'\n"
+            "    leaf = import_module(name + '.leaf')\n"
+            "    adjacent = leaf.__loader__.get_resource_reader(leaf.__name__)\n"
+            "    assert adjacent.archive == reader.archive and adjacent.prefix == reader.prefix\n"
+            "    root = files(leaf)\n"
+            "    assert 'message.txt' in [member.name for member in root.iterdir()]\n"
+            "    if name == 'stored':\n"
+            "        assert root.joinpath('message.txt').read_bytes() == b'hello'\n"
+            "        try:\n            root.joinpath('missing.txt').read_bytes()\n"
+            "        except FileNotFoundError:\n            pass\n"
+            "        else:\n            raise AssertionError('missing ZIP resource opened')\n"
             "    print(seen, spec.loader.get_data(package.__path__[0] + '/message.txt'))\n"
             "finder = spec.loader\n"
             "with open(finder.archive, \"rb\") as archive:\n"
@@ -909,6 +1167,24 @@ ACCEPTED = {
         "orchard/__init__.py": "print('parent init')\n",
         "orchard/leaf.py": "print('leaf init')\nmarker = __name__\n",
     },
+    "source_method_factories": {
+        "factory.py": (
+            "def label(n: int):\n"
+            "    print('factory', n)\n"
+            "    def apply(value):\n"
+            "        print('apply', n)\n"
+            "        return n\n"
+            "    return apply\n"
+        ),
+        "main.py": (
+            "import factory as labels\n"
+            "class Result:\n"
+            "    @labels.label(2)\n"
+            "    @labels.label(3)\n"
+            "    def value(self): pass\n"
+            "print(Result().value)\n"
+        ),
+    },
     "conditional_function_export": {
         "main.py": (
             "from helper import selected as chosen\nimport helper\n"
@@ -1074,9 +1350,20 @@ def main() -> None:
             if name == "zip_source_spec":
                 if os.name != "posix":
                     continue
+                # The boxed ZIP reader uses the reference interpreter's zipfile.Path.
+                location = run([args.python, "-I", "-c", "import zipfile; print(zipfile.__file__)"], case)
+                require_success(location)
+                source = Path(location.stdout.strip())
+                provider = case / "zip-provider"
+                provider.mkdir()
+                if source.name == "__init__.py":
+                    shutil.copytree(source.parent, provider / "zipfile", ignore=shutil.ignore_patterns("__pycache__"))
+                else:
+                    shutil.copyfile(source, provider / "zipfile.py")
                 for pkg, method in [("stored", ZIP_STORED), ("deflated", ZIP_DEFLATED)]:
                     with ZipFile(case / f"{pkg}.zip", "w", compression=method) as archive:
                         archive.writestr(f"{pkg}/__init__.py", "# coding: (ordinary comment)\nfrom witness import seen\nseen.append(__name__)\n")
+                        archive.writestr(f"{pkg}/leaf.py", "")
                         archive.writestr(f"{pkg}/message.txt", b"hello")
             baseline = run([args.python, "-E", "-m", "main"], case)
             require_success(baseline)
@@ -1092,8 +1379,10 @@ def main() -> None:
                            *build_flags]
                 if args.sanitize:
                     command.append("--sanitize")
-                # Optimizing the bundled address parser and warnings modules can take several minutes.
-                slow_optimized = name in {"email_address_parsers", "record_warnings", "warn_named_helper"}
+                # Optimizing these bundled-module integration cases can take several minutes.
+                slow_optimized = name in {
+                    "email_address_parsers", "filesystem_resources", "record_warnings", "warn_named_helper", "zip_source_spec",
+                }
                 timeout = 300 if slow_optimized and level > 0 else build_timeout
                 require_success(run(command, temporary, timeout=timeout))
                 result = run([str(executable)], temporary)

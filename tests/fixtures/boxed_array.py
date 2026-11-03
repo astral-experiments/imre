@@ -237,6 +237,11 @@ def current():
     assert item.lengths == [1, 2] and list(a) == [3, 8, 92]
     assert list(item.snapshot) == [3, 90]
 
+    indexed = array('l', [10, 20])
+    assert indexed.__getitem__(-1) == array.__getitem__(indexed, 1) == 20
+    assert array.__setitem__(indexed, -1, -7) is None
+    assert indexed.__setitem__(0, 8) is None and list(indexed) == [8, -7]
+
     assert list(array('i',[Number()])) == [17]
     assert list(array('f',[Distance()])) == [5.5]
     assert list(array('d',(float(i) for i in range(3)))) == [0.0,1.0,2.0]
@@ -248,6 +253,41 @@ def current():
 
     from io import BytesIO
     sample = array('i', [0x12345678])
+    loaded = array('i', [-9])
+    assert array.frombytes(loaded, memoryview(sample).cast('B')) is None
+    with memoryview(loaded) as view:
+        assert view.format == 'i' and view.itemsize == sample.itemsize
+        assert loaded.frombytes(b'') is None
+        for buf, kind in ((sample, TypeError), (b'x', ValueError),
+                          (sample.tobytes(), BufferError), (memoryview(b'abc')[::2], BufferError)):
+            try:
+                loaded.frombytes(buf)
+            except kind:
+                pass
+            else:
+                raise AssertionError("invalid array buffer was accepted")
+        assert view.tobytes() == array('i', [-9, 0x12345678]).tobytes()
+    loaded.frombytes(bytearray(sample.tobytes()))
+
+    backing = bytearray(b"prefix-data-suffix")
+    sliced = memoryview(backing)[7:11]
+    copied = array('B')
+    copied.frombytes(sliced)
+    backing[7] = 0
+    assert copied.tobytes() == b"data"
+    cast_slice = memoryview(sample).cast('B')[1:-1]
+    copied.frombytes(cast_slice)
+    assert copied.tobytes() == b"data" + sample.tobytes()[1:-1]
+    assert loaded.tolist() == [-9, 0x12345678, 0x12345678]
+    one_byte = array('B', [1])
+    try:
+        one_byte.frombytes(one_byte)
+    except BufferError:
+        pass
+    else:
+        raise AssertionError("array grew during a self-export")
+    assert one_byte.tolist() == [1]
+
     source = BytesIO(sample.tobytes())
     appended = array('i')
     try:

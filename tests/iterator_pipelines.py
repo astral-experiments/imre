@@ -21,6 +21,8 @@ REJECTED = {
     "sentinel_deleted_capture": "def f() -> None:\n    error = ValueError('first')\n    for i, word in enumerate(iter(lambda: str(error), 'stop')):\n        print(i, word)\n        try:\n            raise ValueError('second')\n        except ValueError as error:\n            pass\nf()\n",
     "chain_heterogeneous": "from itertools import chain\nitems = list(chain([1], ['s']))\n",
     "chain_escaped": "from itertools import chain\nitems = chain([1], [2])\n",
+    "chain_from_iterable_escaped": "from itertools import chain\nitems = chain.from_iterable([[1]])\n",
+    "chain_from_iterable_keyword": "from itertools import chain\nitems = list(chain.from_iterable(iterable=[[1]]))\n",
     "chain_keyword": "from itertools import chain\nitems = list(chain(source=[1]))\n",
     "min_float_generator": "print(min(float(i) for i in range(2)))\n",
     "max_generator_default": "print(max((i for i in range(2)), default=0))\n",

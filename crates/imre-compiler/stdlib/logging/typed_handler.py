@@ -16,6 +16,16 @@ class Handler:
         self._closed = False
         self.createLock()
 
+    def acquire(self) -> None:
+        lock = self.lock
+        if lock is not None:
+            lock.acquire()
+
+    def release(self) -> None:
+        lock = self.lock
+        if lock is not None:
+            lock.release()
+
     def handle(self, record: LogRecord | None) -> LogRecord | bool | None:
         if record is None:
             return None

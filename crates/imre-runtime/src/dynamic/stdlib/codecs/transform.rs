@@ -137,9 +137,11 @@ pub(in crate::dynamic::stdlib) fn transform(
     error_name(ctx, errors)?;
     let key = crate::objects::normalize_codec(&encoding)?;
     let wide = FixedUnicode::encoding(&key);
-    let native = name == "decode" && (wide.is_some() || key == "raw_unicode_escape");
+    let native = key == "raw_unicode_escape" || (name == "decode" && wide.is_some());
     match lookup_transform(ctx, &encoding, native)? {
         Some(entry) => apply(ctx, entry, name, input, &encoding, errors, false),
+        None if name == "encode" => raw_unicode_escape::encode(ctx, input)
+            .map_err(|error| codec_error(ctx, error, name, &encoding)),
         None => native_decode(ctx, wide, input, errors),
     }
 }
@@ -154,14 +156,22 @@ pub(in crate::dynamic) fn encode_text_object(
     let name = spelling(ctx, encoding, "utf-8")?;
     error_name(ctx, errors)?;
     let key = crate::objects::normalize_codec(&name)?;
+    let raw_escape = key == "raw_unicode_escape";
     let entry = if shortcut(&key) {
         None
     } else {
-        lookup_transform(ctx, &name, FixedUnicode::encoding(&key).is_some())?
+        lookup_transform(
+            ctx,
+            &name,
+            raw_escape || FixedUnicode::encoding(&key).is_some(),
+        )?
     };
     let Some(entry) = entry else {
+        if raw_escape {
+            return raw_unicode_escape::encode(ctx, input);
+        }
         let data = encode_text(ctx, input, encoding, errors)?;
-        return Ok(ctx.alloc(Value::Bytes(data)));
+        return Ok(ctx.heap.bytes_from_data(data));
     };
     let result = apply(ctx, entry, "encode", input, &name, errors, true)?;
     match ctx.heap.get(ctx.scalar_value(result)) {

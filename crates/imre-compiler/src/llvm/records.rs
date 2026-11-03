@@ -161,7 +161,12 @@ pub(super) fn semantics(module: &Module, ty: Type, name: &str, output: &mut Stri
                 ),
             )
         }
-        Type::Tuple(_) => (1, 3, "", "", "null".to_owned()),
+        Type::Tuple(_) => {
+            // Private frames can also have tuple-shaped storage. Only a Python tuple
+            // display gets the same exact-type flag as a runtime-built tuple.
+            let exact = module.types.is_plain_or_declared_tuple(ty);
+            (1, 3 | (u32::from(exact) << 5), "", "", "null".to_owned())
+        }
         _ => unreachable!("only public record layouts have value behavior"),
     };
     let names = |output: &mut String, prefix: &str, value: &str| {

@@ -259,6 +259,8 @@ impl Emitter<'_, '_> {
                     unreachable!()
                 };
                 let width = self.module.class_fields[class].len();
+                self.output
+                    .local_helper("imre_struct_cursor_row", STRUCT_CURSOR_ROW);
                 let sparse = self.instruction(format!(
                     "call ptr @imre_struct_cursor_row(ptr {}, i64 {native}, ptr {cursor}, i64 {width})",
                     list.value.operand
@@ -298,6 +300,35 @@ impl Emitter<'_, '_> {
         })
     }
 }
+
+const STRUCT_CURSOR_ROW: &str = r"
+declare void @imre_struct_seek_span(ptr, i64, ptr) nounwind
+; Fields match the runtime's repr(C) ReadSpan. Unsigned subtraction rejects
+; a seek backwards before the cached start as well as advances past its end.
+define internal ptr @imre_struct_cursor_row(ptr %list, i64 %at, ptr %span, i64 %width) alwaysinline nounwind {
+entry:
+  %lenptr = getelementptr inbounds {i64,i64,i64,ptr}, ptr %span, i32 0, i32 1
+  %maskptr = getelementptr inbounds {i64,i64,i64,ptr}, ptr %span, i32 0, i32 2
+  %dataptr = getelementptr inbounds {i64,i64,i64,ptr}, ptr %span, i32 0, i32 3
+  %lo = load i64, ptr %span
+  %len = load i64, ptr %lenptr
+  %delta = sub i64 %at, %lo
+  %hit = icmp ult i64 %delta, %len
+  br i1 %hit, label %read, label %seek
+seek:
+  call void @imre_struct_seek_span(ptr %list, i64 %at, ptr %span)
+  br label %read
+read:
+  %start = load i64, ptr %span
+  %mask = load i64, ptr %maskptr
+  %data = load ptr, ptr %dataptr
+  %relative = sub i64 %at, %start
+  %index = and i64 %relative, %mask
+  %offset = mul i64 %index, %width
+  %row = getelementptr inbounds i64, ptr %data, i64 %offset
+  ret ptr %row
+}
+";
 
 #[cfg(test)]
 mod tests {

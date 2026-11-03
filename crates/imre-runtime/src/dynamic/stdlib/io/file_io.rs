@@ -8,6 +8,7 @@ use std::rc::Rc;
 
 use super::super::{builtins, files, os::stat::warn_bool_fd, os_error};
 use super::{Context, Error, Id, MemoryStream, NONE, Result, Value};
+use crate::dynamic::value::IoOpenTypes;
 use crate::objects::{BoxedPipe, os};
 
 pub(super) const METHODS: &[&str] = &[
@@ -235,7 +236,7 @@ pub(in crate::dynamic::stdlib) fn check_open_string(
     check_string_arg(ctx, value, "open", name, expected)
 }
 
-fn check_string_arg(
+pub(super) fn check_string_arg(
     ctx: &mut Context,
     value: Id,
     function: &str,
@@ -297,6 +298,17 @@ fn descriptor_from_argument(ctx: &mut Context, file: Id) -> Option<RawFd> {
         .and_then(|n| RawFd::try_from(n).ok())
 }
 
+/// FileIO encodes path spellings that the UTF-8 buffered-file shortcut cannot use.
+fn needs_encoded_path(ctx: &Context, path: Id) -> Result<bool> {
+    Ok(match ctx.heap.get(ctx.scalar_value(path)) {
+        Value::Bytes(_) | Value::SurrogateStr(_) => true,
+        Value::Str(text) if !text.is_ascii() => {
+            crate::sys::filesystem_encoding()?.as_str() != "utf-8"
+        }
+        _ => false,
+    })
+}
+
 /// Pass FileIO only its operation and optional update marker, in that order.
 fn raw_open_mode(mode: &str) -> String {
     let mut raw: String = mode.chars().filter(|c| "rwax".contains(*c)).collect();
@@ -306,11 +318,33 @@ fn raw_open_mode(mode: &str) -> String {
     raw
 }
 
+/// Builtins.open keeps using the initial _io types after either module is reimported.
+fn open_types(ctx: &mut Context, fresh: Option<IoOpenTypes>) -> Result<IoOpenTypes> {
+    if let Some(types) = fresh {
+        return Ok(types);
+    }
+    if !ctx.builtins.contains_key("_io.FileIO") {
+        ctx.module("_io")?;
+    }
+    let class = |name: &str| {
+        ctx.builtins.get(name).copied()
+            .ok_or_else(|| Error::new("ImportError", format!("missing private type {name}")))
+    };
+    Ok(IoOpenTypes {
+        file: class("_io.FileIO")?,
+        reader: class("_io.BufferedReader")?,
+        writer: class("_io.BufferedWriter")?,
+        random: class("_io.BufferedRandom")?,
+        wrapper: class("_io.TextIOWrapper")?,
+    })
+}
+
 /// Resolve the public open() arguments before opening the underlying file.
 pub(in crate::dynamic) fn open(
     ctx: &mut Context,
     args: &[Id],
     kwargs: &[(String, Id)],
+    fresh: Option<IoOpenTypes>,
 ) -> Result<Id> {
     let [
         file,
@@ -372,16 +406,12 @@ pub(in crate::dynamic) fn open(
     let opener = opener.filter(|&v| v != NONE);
     if buffering == 0 {
         let raw_mode = raw_open_mode(mode_text);
-        return open_raw(ctx, raw_arg, raw_mode, binary, owns, opener);
+        let class = open_types(ctx, fresh)?.file;
+        return open_raw(ctx, class, raw_arg, raw_mode, binary, owns, opener);
     }
     let update = mode_text.contains('+');
     let text_output = !binary && !update && mode_text.contains(['w', 'a', 'x']);
     let text_input = buffering < 0 && matches!(mode_text, "r" | "rt" | "tr");
-    let binary_bytes_path = binary
-        && buffering < 0
-        && !update
-        && !numeric
-        && matches!(ctx.heap.get(ctx.scalar_value(raw_arg)), Value::Bytes(_));
     if binary && buffering == 1 {
         ctx.emit_builtin_warning(
             crate::objects::exceptions::Kind::RuntimeWarning,
@@ -389,14 +419,19 @@ pub(in crate::dynamic) fn open(
             1,
         )?;
     }
+    // Sealed binary handles do not dispatch ResourceWarning from a Python finalizer.
+    let warning_options = ctx.config["warnoptions"]
+        .as_array()
+        .is_some_and(|options| !options.is_empty());
     let fd = descriptor_from_argument(ctx, raw_arg);
-    if opener.is_some()
+    if fresh.is_some()
+        || opener.is_some()
         || fd.is_some()
         || text_output
         || text_input
-        || binary_bytes_path
         || update
-        || (binary && buffering == 1)
+        || (binary && (buffering == 1 || warning_options))
+        || (binary && !numeric && needs_encoded_path(ctx, raw_arg)?)
     {
         if fd.is_some_and(|fd| fd < 0) {
             return Err(Error::new("ValueError", "negative file descriptor"));
@@ -404,8 +439,8 @@ pub(in crate::dynamic) fn open(
         let mode_text = mode.map(|v| ctx.str_value(v)).transpose()?.unwrap_or("r");
         let reading = mode_text.contains('r');
         let raw_mode = raw_open_mode(mode_text);
-        ctx.module("io")?;
-        let raw = ctx.instance(ctx.builtins["_io.FileIO"], None);
+        let types = open_types(ctx, fresh)?;
+        let raw = ctx.instance(types.file, None);
         initialize_file(
             ctx,
             raw,
@@ -424,20 +459,31 @@ pub(in crate::dynamic) fn open(
         };
         let line_buffering =
             buffering == 1 || (!binary && buffering < 0 && handle.fd.get().is_some_and(os::isatty));
-        let buffer = if update {
-            super::BufferedFd::update(raw, handle, capacity)
+        let buffer = if fresh.is_some() || (binary && warning_options) {
+            let class = if update {
+                types.random
+            } else if reading {
+                types.reader
+            } else {
+                types.writer
+            };
+            let size = ctx.int(capacity as i64);
+            ctx.call(class, vec![raw, size], Vec::new())
         } else {
-            super::BufferedFd::new(raw, handle, reading, capacity)
+            let buffer = if update {
+                super::BufferedFd::update(raw, handle, capacity)
+            } else {
+                super::BufferedFd::new(raw, handle, reading, capacity)
+            };
+            buffer.and_then(|buffer| allocate_buffer(ctx, buffer))
         }
-        .and_then(|buffer| allocate_buffer(ctx, buffer))
         .map_err(|error| close_on_error(ctx, raw, error))?;
         if binary {
             return Ok(buffer);
         }
-        let wrapper = ctx.builtins["_io.TextIOWrapper"];
         let stream = ctx
             .call(
-                wrapper,
+                types.wrapper,
                 vec![
                     buffer,
                     encoding.unwrap_or(NONE),
@@ -513,6 +559,7 @@ pub(in crate::dynamic) fn open(
 
 fn open_raw(
     ctx: &mut Context,
+    class: Id,
     filename: Id,
     raw_mode: String,
     binary: bool,
@@ -520,8 +567,6 @@ fn open_raw(
     opener: Option<Id>,
 ) -> Result<Id> {
     // CPython creates/truncates the raw file before rejecting unbuffered text.
-    ctx.module("io")?;
-    let class = ctx.builtins["_io.FileIO"];
     // The reported mode of w+ is rb+, but the constructor must still create/truncate.
     let mode = ctx.text(raw_mode);
     let file = ctx.call(

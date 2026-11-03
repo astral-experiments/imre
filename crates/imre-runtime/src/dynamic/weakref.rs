@@ -2,10 +2,14 @@
 use super::Context;
 use super::value::{Error, Id, NONE, NOT_IMPLEMENTED, Result, Value};
 
+pub(super) const PROXY_TYPE: &str = "weakref.ProxyType";
+pub(super) const PROXY_METHODS: &[&str] = &["__bytes__", "__repr__", "__reversed__"];
+pub(super) const CALLABLE_PROXY_TYPE: &str = "weakref.CallableProxyType";
+pub(super) const CALLABLE_PROXY_METHODS: &[&str] = &["__repr__"];
 pub(super) const REFERENCE_HASH: &str = "weakref.ReferenceType.__hash__";
 pub(super) const REFERENCE_TYPE: &str = "weakref.ReferenceType";
 pub(super) const REFERENCE_METHODS: &[&str] = &[
-    "__new__", "__init__", "__call__", "__eq__", "__ne__", "__hash__",
+    "__new__", "__init__", "__call__", "__eq__", "__ne__", "__hash__", "__repr__",
 ];
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -19,8 +23,8 @@ impl Kind {
     pub fn class(self) -> &'static str {
         match self {
             Self::Reference => REFERENCE_TYPE,
-            Self::Proxy => "weakref.ProxyType",
-            Self::CallableProxy => "weakref.CallableProxyType",
+            Self::Proxy => PROXY_TYPE,
+            Self::CallableProxy => CALLABLE_PROXY_TYPE,
         }
     }
 }
@@ -34,6 +38,15 @@ pub(super) struct Reference {
 }
 
 impl Value {
+    pub(super) fn is_weak_proxy(&self) -> bool {
+        matches!(self, Self::Weak(wr) if wr.kind != Kind::Reference)
+    }
+
+    fn is_weakrefable_native_base(&self) -> bool {
+        matches!(self, Self::Native(name)
+            if matches!(name.as_str(), "set" | "frozenset" | super::deque::CLASS))
+    }
+
     /// Return the reference payload for an exact ref, proxy, or Python reference subclass.
     pub(super) fn weak_reference(&self) -> Option<&Reference> {
         match self {
@@ -67,6 +80,57 @@ impl Reference {
             ));
         }
         Ok(self.target.unwrap_or(NONE))
+    }
+
+    fn repr(self, ctx: &mut Context, owner: Id) -> Result<Id> {
+        let kind = if self.kind == Kind::Reference {
+            "weakref"
+        } else {
+            "weakproxy"
+        };
+        let Some(target) = self.target else {
+            return Ok(ctx.text(format!("<{kind} at {owner:#x}; dead>")));
+        };
+        ctx.with_weak_target(target, |ctx| {
+            let class = ctx.exact_type(target)?;
+            // Resolve the optional name on the type, bypassing instance-level attribute hooks.
+            let name = if self.kind != Kind::Reference {
+                None
+            } else if let Some(slot) = ctx.class_attr(class, "__name__") {
+                Some(ctx.bind_attribute(slot, target, class)?)
+            } else {
+                match ctx.heap.get(target) {
+                    Value::Class { name, .. } => Some(ctx.text(name.to_owned())),
+                    Value::Function { .. }
+                    | Value::TypeVar(_)
+                    | Value::ParamSpec(_)
+                    | Value::TypeVarTuple { .. } => Some(ctx.lookup_attr(target, "__name__")?),
+                    _ if matches!(
+                        ctx.builtin_type_name(target),
+                        Some("type" | "builtin_function_or_method")
+                    ) =>
+                    {
+                        Some(ctx.lookup_attr(target, "__name__")?)
+                    }
+                    _ => None,
+                }
+            };
+            let class_name = super::stdlib::qualified_type(ctx, class)?;
+            let prefix = ctx.text(format!("<{kind} at {owner:#x}; to '"));
+            let mut text = ctx.concat_strings(prefix, class_name)?;
+            let address = ctx.text(format!("' at {target:#x}"));
+            text = ctx.concat_strings(text, address)?;
+            let end = if let Some(name) = name.and_then(|name| ctx.string_storage(name)) {
+                let opening = ctx.text(" (");
+                text = ctx.concat_strings(text, opening)?;
+                text = ctx.concat_strings(text, name)?;
+                ")>"
+            } else {
+                ">"
+            };
+            let end = ctx.text(end);
+            ctx.concat_strings(text, end)
+        })
     }
 
     pub fn upgrade(self) -> Result<Id> {
@@ -110,6 +174,8 @@ impl Context {
                 ),
             ));
         }
+        // A proxy can be constructed without first importing its type from _weakref.
+        self.builtin(kind.class());
         let wrapper = subclass.map(|class| self.instance(class, None));
         self.heap
             .new_weak_reference(target, callback, kind, wrapper)
@@ -126,6 +192,20 @@ impl Context {
         Ok(obj)
     }
 
+    /// Hold the referent through a proxy operation that can run Python.
+    pub(super) fn with_weak_target<T>(
+        &mut self,
+        target: Id,
+        operation: impl FnOnce(&mut Self) -> Result<T>,
+    ) -> Result<T> {
+        self.heap.reserve_temporaries(1)?;
+        let mark = self.heap.temporary_mark();
+        self.heap.keep(target);
+        let result = operation(self);
+        self.heap.release_weak_target(mark, target);
+        result
+    }
+
     pub(super) fn class_instances_support_weakref(&self, class: Id) -> bool {
         let Value::Class { ancestors, .. } = self.heap.get(class) else {
             return false;
@@ -138,14 +218,13 @@ impl Context {
         std::iter::once(&class)
             .chain(ancestors)
             .any(|&base| match self.heap.get(base) {
-                Value::Native(name) => matches!(name.as_str(), "set" | "frozenset"),
                 Value::Class { scope, .. } => self
                     .scope_data(*scope)
                     .class_namespace
                     .as_deref()
                     .and_then(|namespace| namespace.slot_names.as_deref())
                     .is_none_or(|names| names.iter().any(|name| name == "__weakref__")),
-                _ => false,
+                base => base.is_weakrefable_native_base(),
             })
     }
 
@@ -159,11 +238,12 @@ impl Context {
         let Value::Class { ancestors, .. } = self.heap.get(class) else {
             return;
         };
-        if ancestors.iter().any(|&base| self.class_instances_support_weakref(base) ||
-            matches!(self.heap.get(base), Value::Native(name) if matches!(name.as_str(), "set" | "frozenset"))) {
+        if ancestors.iter().any(|&base| {
+            self.class_instances_support_weakref(base) || self.heap.get(base).is_weakrefable_native_base()
+        }) {
             return;
         }
-        let descriptor = self.alloc(Value::WeakrefDescriptor(class));
+        let descriptor = self.alloc(Value::LayoutDescriptor(class, "__weakref__"));
         self.bind(scope, "__weakref__", descriptor);
     }
 
@@ -209,14 +289,19 @@ impl Context {
             Value::Raised(error) => error
                 .class()
                 .is_some_and(|class| self.class_instances_support_weakref(class)),
-            Value::ParamSpec(_)
+            Value::GenericAlias(_)
+            | Value::ParamSpec(_)
             | Value::TypeVar(_)
+            | Value::TypeVarTuple { .. }
             | Value::Class { .. }
             | Value::Function { .. }
+            | Value::Generator { .. }
+            | Value::AsyncGenerator { .. }
             | Value::Module { .. }
             | Value::Method { .. }
             | Value::Code(_)
             | Value::Set { .. }
+            | Value::Deque(_)
             | Value::MemoryView { .. }
             | Value::File(_)
             | Value::Partial { .. }
@@ -310,7 +395,7 @@ pub(super) fn call(
             let Some((&descriptor, rest)) = args.split_first() else {
                 unreachable!()
             };
-            let Value::WeakrefDescriptor(owner) = *ctx.heap.get(descriptor) else {
+            let Value::LayoutDescriptor(owner, field) = *ctx.heap.get(descriptor) else {
                 unreachable!()
             };
             let name = function.rsplit('.').next().unwrap();
@@ -323,10 +408,14 @@ pub(super) fn call(
             match (name, rest) {
                 ("__get__", [NONE] | [NONE, NONE]) => Err(error("__get__(None, None) is invalid")),
                 ("__get__", [NONE, _]) => Ok(descriptor),
-                ("__get__", [receiver] | [receiver, _]) => ctx.weakref_list(owner, *receiver),
-                ("__set__", [receiver, _]) | ("__delete__", [receiver]) => {
-                    ctx.weakref_list(owner, *receiver)?;
-                    Err(ctx.readonly_weakref(owner))
+                ("__get__", [receiver] | [receiver, _]) => ctx.read_layout_descriptor(owner, field, *receiver),
+                ("__set__", [receiver, value]) => {
+                    ctx.write_layout_descriptor(owner, field, *receiver, Some(*value))?;
+                    Ok(NONE)
+                }
+                ("__delete__", [receiver]) => {
+                    ctx.write_layout_descriptor(owner, field, *receiver, None)?;
+                    Ok(NONE)
                 }
                 _ => {
                     let expected = match name {
@@ -350,6 +439,16 @@ pub(super) fn call(
                     ))
                 }
             }
+        }
+        "weakref.ProxyType.__bytes__" | "weakref.ProxyType.__reversed__" => {
+            let method = function.rsplit('.').next().unwrap();
+            let proxy =
+                super::builtins::noargs_method_receiver(ctx, PROXY_TYPE, method, args, kwargs)?;
+            let target = ctx.weak_proxy_target(proxy)?;
+            ctx.with_weak_target(target, |ctx| {
+                let hook = ctx.lookup_attr(target, method)?;
+                ctx.call(hook, Vec::new(), Vec::new())
+            })
         }
         "weakref.ReferenceType.__new__" => {
             let Some((&class, rest)) = args.split_first() else {
@@ -384,15 +483,18 @@ pub(super) fn call(
             )
         }
         "weakref.ReferenceType.__call__"
+        | "weakref.ReferenceType.__repr__"
+        | "weakref.ProxyType.__repr__"
+        | "weakref.CallableProxyType.__repr__"
         | "weakref.ReferenceType.__init__"
         | "weakref.ReferenceType.__eq__"
         | "weakref.ReferenceType.__ne__" => {
-            let name = function.rsplit('.').next().unwrap();
+            let (class, name) = function.rsplit_once('.').unwrap();
             let Some((&owner, rest)) = args.split_first() else {
                 return Err(Error::new(
                     "TypeError",
                     format!(
-                        "descriptor '{name}' of 'weakref.ReferenceType' object needs an argument"
+                        "descriptor '{name}' of '{class}' object needs an argument"
                     ),
                 ));
             };
@@ -401,12 +503,12 @@ pub(super) fn call(
                 .get(owner)
                 .weak_reference()
                 .copied()
-                .filter(|r| r.kind == Kind::Reference)
+                .filter(|r| r.kind.class() == class)
             else {
                 return Err(Error::new(
                     "TypeError",
                     format!(
-                        "descriptor '{name}' requires a 'weakref.ReferenceType' object but received a '{}'",
+                        "descriptor '{name}' requires a '{class}' object but received a '{}'",
                         ctx.type_name(owner)
                     ),
                 ));
@@ -424,6 +526,15 @@ pub(super) fn call(
                 ));
             }
             match name {
+                "__repr__" => {
+                    if !rest.is_empty() {
+                        return Err(Error::new(
+                            "TypeError",
+                            format!("expected 0 arguments, got {}", rest.len()),
+                        ));
+                    }
+                    reference.repr(ctx, owner)
+                }
                 "__init__" => {
                     reference_args(name, rest)?;
                     Ok(NONE)
@@ -531,13 +642,15 @@ pub(super) fn call(
                     ),
                 ));
             };
-            let entries = ctx.dict_entries(dict).expect("dict storage");
-            if let Some(&(_, value)) = entries.iter().find(|(stored, _)| ctx.equal(*stored, *key)) {
+            if let Some(index) = ctx.find_dictionary_key(dict, *key, None)?.1 {
+                let value = ctx.dict_entries(dict).expect("dict storage")[index].1;
                 let Some(reference) = ctx.heap.get(value).weak_reference() else {
                     return Err(error("not a weakref"));
                 };
                 if reference.target.is_none() {
-                    ctx.delete_item(dict, *key)?;
+                    // A second key lookup could call Python and replace the dead reference.
+                    super::builtins::remove_table_entry(ctx, dict, index)?;
+                    ctx.finalize_removed_dict_value(value);
                 }
             }
             Ok(NONE)

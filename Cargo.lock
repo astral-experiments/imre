@@ -691,6 +691,7 @@ dependencies = [
 name = "imre-ast"
 version = "0.1.5"
 dependencies = [
+ "libc",
  "ruff_python_ast",
  "ruff_python_codegen",
  "ruff_python_stdlib",
@@ -738,6 +739,7 @@ version = "0.1.5"
 dependencies = [
  "regex",
  "regex-syntax",
+ "unicode_names2",
 ]
 
 [[package]]

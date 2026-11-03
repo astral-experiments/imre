@@ -6,7 +6,9 @@ use ruff_python_ast as ast;
 use ruff_python_ast::visitor::{Visitor, walk_expr};
 
 use crate::ir::Type;
-use crate::modules::{Binding, DefinitionId, Intrinsic, SourceGraph, SourceModule};
+use crate::modules::{
+    Binding, DefinitionId, Intrinsic, IntrinsicModule, SourceGraph, SourceModule,
+};
 
 mod constants;
 mod dataclasses;
@@ -70,7 +72,9 @@ pub(crate) struct Class {
     pub(crate) method_kinds: Vec<MethodKind>,
     /// Declaring class for the corresponding method's imports and lexical super.
     pub(crate) method_origins: Vec<DefinitionId>,
-    /// Single storage-bearing lineage, nearest base first.
+    /// The parent whose field layout and initializer the receiver inherits.
+    pub(crate) storage_base: Option<usize>,
+    /// Ancestors in Python method lookup order.
     pub(crate) bases: Vec<usize>,
     pub(crate) abstract_methods: HashSet<String>,
     pub(crate) abc: bool,
@@ -319,10 +323,41 @@ pub(crate) fn mapping_base(graph: &SourceGraph, module: usize, expression: &ast:
     )
 }
 
+/// Recognize a factory on an imported source module while the class namespace is still being built.
+fn source_method_factory(
+    graph: &SourceGraph,
+    module: usize,
+    decorator: &ast::Decorator,
+    class_names: &HashSet<String>,
+) -> bool {
+    let ast::Expr::Call(call) = &decorator.expression else {
+        return false;
+    };
+    let mut root = call.func.as_ref();
+    while let ast::Expr::Attribute(attr) = root {
+        root = &attr.value;
+    }
+    let Some(owner) = root.as_name_expr() else {
+        return false;
+    };
+    let Some(Binding::Definition(id)) = graph.resolve(module, &call.func) else {
+        return false;
+    };
+    let source = &graph.modules[id.module];
+    id.module != module
+        && !class_names.contains(owner.id.as_str())
+        && !source.bundled
+        && matches!(
+            source.parsed.syntax().body[id.statement],
+            ast::Stmt::FunctionDef(_)
+        )
+}
+
 fn unittest_skip_decorator(
     graph: &SourceGraph,
     module: usize,
     decorator: &ast::Decorator,
+    class_names: Option<&HashSet<String>>,
 ) -> Result<Option<SkipDecorator>, String> {
     let ast::Expr::Call(call) = &decorator.expression else {
         return Ok(None);
@@ -330,6 +365,13 @@ fn unittest_skip_decorator(
     let ast::Expr::Attribute(attr) = call.func.as_ref() else {
         return Ok(None);
     };
+    if class_names.is_some_and(|names| {
+        attr.value
+            .as_name_expr()
+            .is_none_or(|owner| names.contains(owner.id.as_str()))
+    }) {
+        return Ok(None);
+    }
     let Some(Binding::Module(owner)) = graph.resolve(module, &attr.value) else {
         return Ok(None);
     };
@@ -364,7 +406,7 @@ fn identity_skip_decorator(graph: &SourceGraph, module: usize, decorator: &ast::
     let ast::Expr::Attribute(attr) = &*call.func else {
         return false;
     };
-    let Ok(Some(skip)) = unittest_skip_decorator(graph, module, decorator) else {
+    let Ok(Some(skip)) = unittest_skip_decorator(graph, module, decorator, None) else {
         return false;
     };
     if !matches!(skip.reason, ast::Expr::StringLiteral(_))
@@ -383,6 +425,25 @@ fn identity_skip_decorator(graph: &SourceGraph, module: usize, decorator: &ast::
                 return false;
             };
             value
+        }
+        ast::Expr::Call(probe)
+            if probe.func.as_name_expr().is_some_and(|name| name.id == "hasattr")
+                && graph.resolve(module, &probe.func).is_none()
+                && probe.arguments.keywords.is_empty()
+                && let [object @ ast::Expr::Name(_), ast::Expr::StringLiteral(name)] =
+                    probe.arguments.args.as_ref()
+                && graph
+                    .session
+                    .is_stdlib_function(module, &probe.func, "builtins", "hasattr")
+                && graph.session.is_stdlib_module(module, object, "os")
+                && graph.resolve(module, object)
+                    == Some(Binding::IntrinsicModule(IntrinsicModule::Os))
+                && matches!(
+                    IntrinsicModule::Os.symbol(name.value.to_str()),
+                    Some(Binding::Intrinsic(Intrinsic::Credential(_)))
+                ) =>
+        {
+            true
         }
         _ => return false,
     };
@@ -404,15 +465,24 @@ pub(crate) fn defines_pickle_reducer(node: &ast::StmtClassDef) -> bool {
     })
 }
 
+// Keep a decorator error local to its class until we know how that class is built.
+#[derive(Default)]
+struct DeferredMethodDecorators {
+    has_runtime_method: bool,
+    unsupported: Option<String>,
+}
+
 fn collect_class(
     graph: &SourceGraph,
     module: &SourceModule,
     definition: DefinitionId,
     node: &ast::StmtClassDef,
-    base: Option<(usize, &Class)>,
+    parents: [Option<(usize, &Class)>; 2],
     exception_layout: bool,
     exceptions: &HashMap<DefinitionId, u32>,
+    decorators: &mut DeferredMethodDecorators,
 ) -> Result<Class, String> {
+    let base = parents[0];
     if defines_pickle_reducer(node) {
         graph.needs_object_runtime.set(true);
         return Err(module.error(node, "pickle reducers require the object runtime"));
@@ -478,7 +548,7 @@ fn collect_class(
     }
     let mut skip_decorators = Vec::new();
     for decorator in &node.decorator_list {
-        let Some(skip) = unittest_skip_decorator(graph, definition.module, decorator)? else {
+        let Some(skip) = unittest_skip_decorator(graph, definition.module, decorator, None)? else {
             skip_decorators.clear();
             break;
         };
@@ -552,8 +622,26 @@ fn collect_class(
     }
     let mut methods: Vec<ast::StmtFunctionDef> = Vec::new();
     let mut method_kinds = Vec::new();
+    let mut has_custom_dir = false;
     let mut initializer = None;
     for (ordinal, statement) in node.body.iter().enumerate() {
+        // A type-only method declaration may have a separate runtime signature.
+        let statement = match statement {
+            ast::Stmt::If(guard)
+                if guard
+                    .test
+                    .as_name_expr()
+                    .is_some_and(|test| !class_bindings.contains(test.id.as_str()))
+                    && graph.resolve(definition.module, &guard.test)
+                        == Some(Binding::Intrinsic(Intrinsic::TypeChecking))
+                    && let [otherwise] = guard.elif_else_clauses.as_slice()
+                    && otherwise.test.is_none()
+                    && let [method @ ast::Stmt::FunctionDef(_)] = otherwise.body.as_slice() =>
+            {
+                method
+            }
+            _ => statement,
+        };
         // A call through an upcast uses its declared layout. Do not erase an
         // override which could select a different callable at runtime.
         let member = match statement {
@@ -742,6 +830,25 @@ fn collect_class(
                         "StrEnum methods cannot override member metadata or special behavior",
                     ));
                 }
+                if name == "__dir__" {
+                    // The object runtime binds the class's directory hook. Continue validating
+                    // the other class members before switching to that provider.
+                    let error =
+                        module.error(method, "custom __dir__ requires native class construction");
+                    graph
+                        .object_builtin_errors
+                        .borrow_mut()
+                        .insert(error.clone());
+                    graph.class_body_error.borrow_mut().get_or_insert(error);
+                    has_custom_dir = true;
+                    class_bindings.insert(name.to_owned());
+                    continue;
+                }
+                if name == "__del__" && graph.command_startup.is_some() {
+                    let error = module.error(method, "class finalizers require the object runtime");
+                    graph.class_body_error.replace(Some(error.clone()));
+                    return Err(error);
+                }
                 let unary_protocol = matches!(
                     name,
                     "__str__" | "__repr__" | "__bool__" | "__index__" | "__iter__" | "__copy__"
@@ -763,8 +870,58 @@ fn collect_class(
                 }
                 let kind = if abstract_method {
                     MethodKind::Instance
+                } else if let [decorator] = method.decorator_list.as_slice()
+                    && unittest_skip_decorator(
+                        graph,
+                        definition.module,
+                        decorator,
+                        Some(&class_bindings),
+                    )?
+                    .is_some()
+                {
+                    // The public decorator can wrap even a direct method call and evaluates
+                    // its arguments while the class namespace is being constructed.
+                    let error = module.error(
+                        decorator,
+                        "unittest method skips require native class construction",
+                    );
+                    graph.class_body_error.borrow_mut().get_or_insert(error);
+                    graph.check_decorated_method_calls.set(true);
+                    decorators.has_runtime_method = true;
+                    MethodKind::Instance
                 } else {
-                    method_kind(graph, definition.module, method, &class_bindings)?
+                    match method_kind(graph, definition.module, method, &class_bindings) {
+                        Err(error)
+                            if graph.command_startup.is_none() && !name.starts_with("__") =>
+                        {
+                            // An arbitrary decorator may bind a descriptor or a non-callable.
+                            // Preserve the class name without inventing a fixed method slot.
+                            if method.decorator_list.iter().any(|decorator| {
+                                source_method_factory(
+                                    graph,
+                                    definition.module,
+                                    decorator,
+                                    &class_bindings,
+                                )
+                            }) {
+                                // The class builder evaluates the factory and binds its result.
+                                graph
+                                    .class_body_error
+                                    .borrow_mut()
+                                    .get_or_insert(error.clone());
+                                graph.check_method_factories.set(true);
+                                decorators.has_runtime_method = true;
+                            }
+                            decorators.unsupported.get_or_insert(error);
+                            if !names.insert(name.to_owned()) {
+                                return Err(module
+                                    .error(method, &format!("duplicate class member {name:?}")));
+                            }
+                            class_bindings.insert(name.to_owned());
+                            continue;
+                        }
+                        kind => kind?,
+                    }
                 };
                 if name == "__call__" && kind != MethodKind::Instance {
                     return Err(module.error(
@@ -1130,7 +1287,8 @@ fn collect_class(
         }
     };
     let mut bases = Vec::new();
-    if let Some((id, base)) = base {
+    for (position, (id, base)) in parents.into_iter().flatten().enumerate() {
+        // A trailing independent root follows the entire primary lineage in the MRO.
         bases.push(id);
         bases.extend_from_slice(&base.bases);
         for (index, method) in base.methods.iter().enumerate() {
@@ -1139,6 +1297,19 @@ fn collect_class(
                     && !graph.inherits_class_method(definition, method.name.as_str())
                 {
                     continue;
+                }
+                if position > 0 {
+                    let name = method.name.as_str();
+                    if methods.iter().any(|earlier| earlier.name.as_str() == name) {
+                        continue;
+                    }
+                    if fields.iter().any(|field| field.name == name)
+                        || static_bindings.contains_key(name)
+                        || exception_aliases.contains_key(name)
+                    {
+                        return Err(module
+                            .error(node, "a mixin method conflicts with a fixed class member"));
+                    }
                 }
                 methods.push(method.clone());
                 method_kinds.push(base.method_kinds[index]);
@@ -1192,6 +1363,8 @@ fn collect_class(
     let mut init_exposes_self = base_exposes_self;
     if let Some(initializer) = initializer
         && method_origins[initializer] == definition
+        // An object-backed class can create new instance fields in its initializer.
+        && !has_custom_dir
         // A proven forwarding exception constructor writes each field through its plan.
         && forwarder.is_none()
     {
@@ -1237,6 +1410,7 @@ fn collect_class(
         methods,
         method_kinds,
         method_origins,
+        storage_base: base.map(|(id, _)| id),
         bases,
         abstract_methods,
         abc,

@@ -100,6 +100,33 @@ def current():
     assert tuple(Shift(2, 3)) == (3, 5)
     assert tuple(Shift._make((2, 3))) == (2, 3)
     assert Foreign(9) == 9
+
+    lengths = []
+
+    class Measured(Fields):
+        def __len__(self):
+            lengths.append(1)
+            return len(lengths)
+
+    class Inherited(Measured):
+        pass
+
+    measured = Inherited(2, 3)
+    measured.__len__ = lambda: 99
+    assert len(measured) == 1 and tuple.__len__(measured) == 2
+    lengths.clear()
+    try:
+        Inherited._make((2, 3))
+    except TypeError as error:
+        assert str(error) == "Expected 2 arguments, got 2"
+    else:
+        raise AssertionError("subclass length ignored")
+    assert lengths == [1, 1]
+
+    Single = namedtuple("Single", "only")
+    rebound = Fields._make.__func__(Single, (7, 8))
+    assert type(rebound) is Single and tuple(rebound) == (7, 8)
+
     class Tagged(tuple):
         def __init__(self, values, *, tag):
             self.tag = tag
@@ -137,7 +164,12 @@ def current():
     shadow.left = 8
     assert shadow.left == 8 and Fields.left.__get__(shadow) == 3
 
+    slot = type(getter).__repr__
+    bound = getter.__repr__
+    assert slot.__objclass__ is type(getter)
+    assert slot.__get__(getter)() == bound() == "_tuplegetter(1, 'Alias for field number 1')"
     getter.__doc__ = "right coordinate"
+    assert slot(getter) == bound() == repr(getter)
     assert repr(getter) == "_tuplegetter(1, 'right coordinate')"
     assert type(getter).__doc__.__get__(getter) == "right coordinate"
 

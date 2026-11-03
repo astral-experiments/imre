@@ -28,6 +28,8 @@ pub(super) fn resolve(
         }
         path.push(id);
         let mut base: Option<usize> = None;
+        let mut mixin = None;
+        let mut leading_mixin = false;
         if let Some(args) = &node.arguments {
             for argument in &args.args {
                 if graph.is_protocol_base(definition.module, argument) {
@@ -57,6 +59,15 @@ pub(super) fn resolve(
                         return Err(
                             module.error(argument, "pickle.Pickler requires object lowering")
                         );
+                    }
+                    Some(Binding::Intrinsic(Intrinsic::ObjectRuntimeExport(
+                        "contextlib.ContextDecorator",
+                    ))) => {
+                        graph.needs_object_runtime.set(true);
+                        return Err(module.error(
+                            argument,
+                            "ContextDecorator subclasses require object lowering",
+                        ));
                     }
                     Some(Binding::Intrinsic(Intrinsic::ObjectRuntimeExport(
                         "codecs.IncrementalDecoder" | "codecs.CodecInfo",
@@ -112,17 +123,57 @@ pub(super) fn resolve(
                         build(next, graph, nodes, ids, exceptions, classes, path)?;
                         if let Some(first) = base {
                             let parent: &Class = classes[first].as_ref().unwrap();
-                            if !parent.bases.contains(&next) {
-                                return Err(module.error(
-                                    argument,
-                                    "multiple independent base classes are unsupported",
-                                ));
+                            if parent.bases.contains(&next) {
+                                continue;
                             }
+                            if args.args.len() == 2 && first != next {
+                                let second = classes[next].as_ref().unwrap();
+                                if method_only_mixin(graph, second) {
+                                    mixin = Some(next);
+                                    continue;
+                                }
+                                if !second.bases.contains(&first)
+                                    && independent_leading_mixin(graph, parent, second)
+                                {
+                                    base = Some(next);
+                                    mixin = Some(first);
+                                    leading_mixin = true;
+                                    continue;
+                                }
+                            }
+                            return Err(module.error(
+                                argument,
+                                "multiple independent base classes are unsupported",
+                            ));
                         } else {
                             base = Some(next);
                         }
                     }
                     _ => {
+                        let origin = match argument {
+                            ast::Expr::Subscript(subscript) => &*subscript.value,
+                            other => other,
+                        };
+                        if graph
+                            .session
+                            .is_builtin_sequence_class(definition.module, origin)
+                            || graph
+                                .session
+                                .is_collections_storage_base(definition.module, argument)
+                            || graph.session.is_known_class(
+                                definition.module,
+                                argument,
+                                ty_python_semantic::types::KnownClass::Super,
+                            )
+                        {
+                            let error = module
+                                .error(argument, "native base class requires object lowering");
+                            graph
+                                .object_builtin_errors
+                                .borrow_mut()
+                                .insert(error.clone());
+                            return Err(error);
+                        }
                         return Err(
                             module.error(argument, "the base must be a known fixed-layout class")
                         );
@@ -130,15 +181,27 @@ pub(super) fn resolve(
                 }
             }
         }
-        let mut class = collect_class(
+        let mut decorators = DeferredMethodDecorators::default();
+        let class = collect_class(
             graph,
             module,
             definition,
             node,
-            base.map(|i| (i, classes[i].as_ref().unwrap())),
+            [base, mixin].map(|parent| parent.map(|id| (id, classes[id].as_ref().unwrap()))),
             exceptions.layouts.contains(&definition),
             &exceptions.ids,
-        )?;
+            &mut decorators,
+        );
+        if !decorators.has_runtime_method
+            && let Some(error) = decorators.unsupported
+        {
+            return Err(error);
+        }
+        let mut class = class?;
+        if leading_mixin {
+            // The independent root has no ancestors. It precedes the entire storage lineage.
+            class.bases.rotate_right(1);
+        }
         if exceptions.layouts.contains(&definition) {
             let index = (exceptions.ids[&definition] - exceptions::FIRST_USER_EXCEPTION) as usize;
             let mro = &exceptions.named[index].ancestors;
@@ -169,6 +232,49 @@ pub(super) fn resolve(
         build(id, graph, nodes, ids, exceptions, &mut classes, &mut path)?;
     }
     Ok(classes.into_iter().map(Option::unwrap).collect())
+}
+
+/// A root mixin supplies ordinary methods without declaring receiver storage.
+fn method_only_mixin(graph: &SourceGraph, class: &Class) -> bool {
+    let node = &class.node;
+    node.decorator_list.is_empty()
+        && node.type_params.is_none()
+        && node.arguments.as_ref().is_none_or(|args| {
+            args.keywords.is_empty()
+                && (args.args.is_empty()
+                    || matches!(&*args.args, [base]
+                if graph.session.builtin_object_base(class.definition.module, base)))
+        })
+        && node.body.iter().all(|stmt| match stmt {
+            ast::Stmt::FunctionDef(f) => !f.name.starts_with("__") && f.decorator_list.is_empty(),
+            ast::Stmt::Expr(expr) => matches!(&*expr.value, ast::Expr::StringLiteral(_)),
+            ast::Stmt::Pass(_) => true,
+            _ => false,
+        })
+}
+
+/// The fixed layout can reuse disjoint methods, but cannot run a cooperative
+/// mixin method against different next bases depending on the receiver.
+fn independent_leading_mixin(graph: &SourceGraph, mixin: &Class, storage: &Class) -> bool {
+    method_only_mixin(graph, mixin)
+        && !ast::helpers::any_over_body(
+            &mixin.node.body,
+            |expr| matches!(expr, ast::Expr::Name(name) if name.id == "super"),
+        )
+        && mixin
+            .methods
+            .iter()
+            .filter(|method| method.name.as_str() != "__init__")
+            .all(|method| {
+                let name = method.name.as_str();
+                !storage
+                    .methods
+                    .iter()
+                    .any(|other| other.name.as_str() == name)
+                    && !storage.fields.iter().any(|field| field.name == name)
+                    && !storage.static_bindings.contains_key(name)
+                    && !storage.exception_aliases.contains_key(name)
+            })
 }
 
 /// Return the member and the name whose binding must be the builtin `super`.
