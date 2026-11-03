@@ -135,6 +135,10 @@ impl Imports {
                     | "tomllib._parser"
                     | "tomllib._re"
                     | "tomllib._types"
+                    | "xml"
+                    | "xml.etree"
+                    | "xml.etree.ElementPath"
+                    | "xml.etree.ElementTree"
                     | "zoneinfo"
                     | "zoneinfo._common"
                     | "zoneinfo._tzpath"
@@ -345,7 +349,10 @@ impl<'a> Visitor<'a> for Imports {
         {
             self.uses_import_builtin = true;
             self.add(0, "importlib");
-            if name.value.to_str().split('.').next() == Some("zoneinfo") {
+            if matches!(
+                name.value.to_str().split('.').next(),
+                Some("xml" | "zoneinfo")
+            ) {
                 self.add(0, name.value.to_str());
             }
             self.visit_arguments(&call.arguments);
@@ -635,6 +642,7 @@ pub(crate) fn compile(
             "json",
             "tomllib",
             "zoneinfo",
+            "xml",
             "opcode",
             "operator",
             "struct",
@@ -826,8 +834,12 @@ pub(crate) fn compile(
             if uses_import_builtin && !seen.contains("pprint") {
                 imports.names.push((0, "pprint".to_owned()));
             }
-            if computed_import && !seen.contains("zoneinfo") {
-                imports.names.push((0, "zoneinfo".to_owned()));
+            if computed_import {
+                for name in ["zoneinfo", "xml.etree.ElementTree"] {
+                    if !seen.contains(name) {
+                        imports.names.push((0, name.to_owned()));
+                    }
+                }
             }
             // A runtime-selected HTTP child needs its server and transitive providers.
             if uses_import_builtin && seen.contains("http") && !seen.contains("http.server") {

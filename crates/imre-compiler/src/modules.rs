@@ -47,6 +47,22 @@ fn stat_mode_source() -> Option<&'static str> {
     }
 }
 
+/// Pinned CPython 3.14.5 XML packages and the modules used by ElementTree.
+pub(crate) fn etree_source(name: &str) -> Option<(&'static str, &'static str)> {
+    macro_rules! source {
+        ($path:literal) => {
+            Some(($path, include_str!(concat!("../stdlib/", $path))))
+        };
+    }
+    match name {
+        "xml" => source!("xml/__init__.py"),
+        "xml.etree" => source!("xml/etree/__init__.py"),
+        "xml.etree.ElementPath" => source!("xml/etree/ElementPath.py"),
+        "xml.etree.ElementTree" => source!("xml/etree/ElementTree.py"),
+        _ => None,
+    }
+}
+
 /// Python source modules bundled for runtime imports.
 pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'static str)> {
     match name {
@@ -540,7 +556,7 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
         "getopt" => Some(("getopt.py", include_str!("../stdlib/getopt.py"))),
         "gettext" => Some(("gettext.py", include_str!("../stdlib/gettext.py"))),
         "uuid" => Some(("uuid.py", include_str!("../stdlib/uuid.py"))),
-        _ => None,
+        _ => etree_source(name),
     }
 }
 
@@ -4714,9 +4730,10 @@ impl<'a> Loader<'a> {
                         }
                     } else if self.modules[target].is_bundled("http.client")
                         || self.modules[target].is_bundled("dis")
+                        || self.modules[target].is_bundled("xml.etree.ElementTree")
+                        || self.modules[target].is_bundled("xml.etree.ElementPath")
                     {
-                        // http.client supplies names beyond its checked header types.
-                        // dis imports opcode's public names with a wildcard.
+                        // These source providers resolve additional exports at runtime.
                         Binding::ConditionalValue
                     } else {
                         return Err(format!(
@@ -5051,6 +5068,11 @@ impl<'a> Loader<'a> {
                 "string/__init__.py",
                 include_str!("../stdlib/string/__init__.py"),
             )),
+            // The Python evaluator resolves ElementTree's optional C accelerator and the
+            // globals that ElementPath initializes from its tokenizer.
+            "xml.etree.ElementTree" | "xml.etree.ElementPath" => {
+                etree_source(name).map(|(filename, _)| (filename, ""))
+            }
             // ZoneInfo exports belong to the boxed provider. Loading the package's children
             // while scanning this typed namespace would recursively enter its initializer.
             "zoneinfo" => Some(("zoneinfo/__init__.py", "")),
@@ -5070,8 +5092,10 @@ impl<'a> Loader<'a> {
         if let Some((filename, source)) = bundled {
             self.reject_stdlib_shadow(name)?;
             // token initializes its public tables from the live module globals.
-            self.needs_object_imports |=
-                matches!(name, "token" | "http.client" | "fractions" | "zoneinfo");
+            self.needs_object_imports |= matches!(
+                name,
+                "token" | "http.client" | "fractions" | "xml" | "zoneinfo"
+            );
             let pkgutil_source;
             let source = if name == "pkgutil" {
                 let paths = self.filesystem_search_path()?;

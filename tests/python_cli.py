@@ -1239,6 +1239,8 @@ def check_unittest_module_main(imre, root, run):
         "        self.assertEqual(sys.argv[0], os.path.basename(sys.executable) + ' -m unittest')\n"
         "        self.assertEqual((Fraction('6/8') + Fraction(1, 6)).as_integer_ratio(), (11, 12))\n"
         "        self.assertRaises(ZeroDivisionError, Fraction, '1/0')\n"
+        "        from xml.etree.ElementTree import Element\n"
+        "        self.assertEqual(Element('sample').tag, 'sample')\n"
         "        print(self.id())\n"
         "class Failing(unittest.TestCase):\n"
         "    def test_one(self):\n"
@@ -2856,6 +2858,10 @@ def report(text):
             "print(d.astimezone(), d.astimezone(tz=None))",
             extra={"TZ": "EST5"},
         )
+        element_user = root / "element_user.py"
+        shutil.copyfile(fixtures / "boxed_xml_etree.py", root / "element_helper.py")
+        element_user.write_text("import element_helper\n")
+        compare("-B", element_user, native_args=("run", element_user, "--quiet"), native_timeout=300)
         if Path("/usr/share/zoneinfo/America/New_York").is_file():
             compare("-IB", fixtures / "boxed_zoneinfo.py", native_timeout=300)
         compare("-IB", fixtures / "boxed_pickle_writer.py")
