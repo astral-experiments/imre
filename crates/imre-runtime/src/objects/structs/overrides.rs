@@ -431,6 +431,9 @@ impl Binary {
             }
             self.bits.resize(words, 0);
         }
+        if step == 1 || (step != 0 && step == n - 1) {
+            return self.set_contiguous(at, step == 1, n, count, set);
+        }
         let mut done = 0;
         while done < count && !crate::signals::TRIPPED.load(std::sync::atomic::Ordering::Relaxed) {
             let chunk = (count - done).min(1024);
@@ -451,6 +454,55 @@ impl Binary {
             done += chunk;
         }
         (done, at)
+    }
+
+    /// Fill each contiguous run up to its wrap or the next signal check.
+    #[inline(never)]
+    fn set_contiguous(
+        &mut self,
+        mut at: usize,
+        forward: bool,
+        n: usize,
+        count: usize,
+        set: bool,
+    ) -> (usize, usize) {
+        let mut done = 0;
+        while done < count && !crate::signals::TRIPPED.load(std::sync::atomic::Ordering::Relaxed) {
+            let chunk = (count - done).min(1024);
+            let range = if forward {
+                let first = if at + 1 == n { 0 } else { at + 1 };
+                first..first + chunk.min(n - first)
+            } else {
+                let end = if at == 0 { n } else { at };
+                end - chunk.min(end)..end
+            };
+            done += range.len();
+            at = if forward { range.end - 1 } else { range.start };
+            self.fill_range(range, set);
+        }
+        (done, at)
+    }
+
+    /// Set or clear a contiguous range and count only the bits that change.
+    fn fill_range(&mut self, range: std::ops::Range<usize>, set: bool) {
+        let end = range.end.min(self.bits.len().saturating_mul(BLOCK));
+        let mut at = range.start;
+        let mut changed = 0;
+        while at < end {
+            let offset = at % BLOCK;
+            let width = (end - at).min(BLOCK - offset);
+            let mask = (u64::MAX >> (BLOCK - width)) << offset;
+            let word = &mut self.bits[at / BLOCK];
+            let flips = mask & if set { !*word } else { *word };
+            changed += flips.count_ones() as usize;
+            *word ^= flips;
+            at += width;
+        }
+        if set {
+            self.changed += changed;
+        } else {
+            self.changed -= changed;
+        }
     }
 
     fn remove(&mut self, at: usize) {
@@ -707,6 +759,35 @@ mod page_tests {
         for (&at, value) in expected {
             assert_eq!(rows.get(at, 2), Some(value.as_slice()));
         }
+    }
+
+    #[test]
+    fn contiguous_writes_match_scalar_stores_across_wraps() {
+        let n: usize = 193;
+        for step in [1, n - 1] {
+            let mut rows = Binary::empty(&[7], n.div_ceil(BLOCK)).unwrap();
+            let mut expected = vec![false; n];
+            for at in (0..n).step_by(3) {
+                rows.insert(at);
+                expected[at] = true;
+            }
+            let mut at = 64;
+            for (count, set) in [(128, true), (165, false), (2051, true), (192, false)] {
+                let start = at;
+                for _ in 0..count {
+                    at = (at + step) % n;
+                    expected[at] = set;
+                }
+                assert_eq!(rows.set_modular(start, step, n, count, set), (count, at));
+                assert_eq!(rows.changed, expected.iter().filter(|&&bit| bit).count());
+                assert!((0..n).all(|i| rows.contains(i) == expected[i]));
+            }
+        }
+        let mut short = Binary::empty(&[7], 1).unwrap();
+        short.insert(63);
+        assert_eq!(short.set_modular(128, n - 1, n, 65, false), (65, 63));
+        assert_eq!(short.changed, 0);
+        assert_eq!(short.bits.len(), 1);
     }
 
     #[test]
