@@ -246,6 +246,7 @@ impl BuiltinDescriptor {
             "int.__repr__" => ("int", "__repr__"),
             "float.__repr__" => ("float", "__repr__"),
             "int.__format__" => ("int", "__format__"),
+            "str.__eq__" => ("str", "__eq__"),
             "str.__format__" => ("str", "__format__"),
             "str.__mod__" => ("str", "__mod__"),
             "str.__rmod__" => ("str", "__rmod__"),
@@ -566,7 +567,7 @@ impl BuiltinDescriptor {
                     "($self, /)"
                 })
             }
-            "__doc__" | "__text_signature__" if self.owner == "mappingproxy"
+            "__doc__" | "__text_signature__" if matches!(self.owner, "mappingproxy" | "str")
                 && let Some(op) = super::operators::comparison_op(self.name) =>
             {
                 if name == "__doc__" {

@@ -2019,7 +2019,7 @@ pub(super) fn method(
     }
     if matches!(
         (owner, name),
-        ("str", "__mod__" | "__rmod__") | ("bytes", "__mod__")
+        ("str", "__eq__" | "__mod__" | "__rmod__") | ("bytes", "__mod__")
     ) {
         let (&receiver, args) = args.split_first().ok_or_else(|| {
             type_error(format!(
@@ -2043,6 +2043,12 @@ pub(super) fn method(
                 args.len()
             )));
         };
+        if name == "__eq__" {
+            return Ok(match ctx.string_storage(other) {
+                Some(other) => boolean(ctx.equal(ctx.scalar_value(receiver), other)),
+                None => NOT_IMPLEMENTED,
+            });
+        }
         if let Value::Bytes(format) = ctx.heap.get(ctx.scalar_value(receiver)) {
             return bytes_percent(ctx, &format.clone(), other);
         }
