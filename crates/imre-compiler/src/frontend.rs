@@ -7214,6 +7214,20 @@ impl<'a> Checker<'a> {
                     }
                 }
                 self.restore_state(exit.expect("comparisons have at least two operands"));
+                if matches!(compare.ops.as_ref(), [ast::CmpOp::Eq | ast::CmpOp::NotEq])
+                    && values
+                        .iter()
+                        .all(|value| self.types.element(value.ty).is_some())
+                    && values.iter().any(
+                        |value| matches!(&value.kind, ExprKind::List(items) if items.is_empty()),
+                    )
+                {
+                    // With one empty list, equality only compares emptiness. No elements are read.
+                    values = values
+                        .into_iter()
+                        .map(|list| self.truth_value(list))
+                        .collect();
+                }
                 if values.iter().any(|v| matches!(v.ty, Type::WeakProxy(_))) {
                     return self.weak_proxy_comparison(values, &compare.ops, expression);
                 }
