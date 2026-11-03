@@ -182,7 +182,9 @@ pub(super) fn call(
             let kind = &kind[..kind.floor_char_boundary(100)];
             Err(Error::new(
                 "TypeError",
-                format!("descriptor '{method}' for '_ssl._SSLContext' objects doesn't apply to a '{kind}' object"),
+                format!(
+                    "descriptor '{method}' for '_ssl._SSLContext' objects doesn't apply to a '{kind}' object"
+                ),
             ))
         }
         ("cert_store_stats", &[handle]) => {
