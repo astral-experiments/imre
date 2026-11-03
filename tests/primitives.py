@@ -17,7 +17,6 @@ REJECTED = {
     "invert_float": "print(~1.0)\n",
     "invert_bool": "print(~True)\n",
     "optional_integer": "def bad(value: int | None) -> int:\n    return value & 3\n",
-    "divmod_float": "pair = divmod(1.0, 2)\n",
     "divmod_bool": "pair = divmod(True, 2)\n",
     "divmod_missing": "pair = divmod(1)\n",
     "divmod_extra": "pair = divmod(1, 2, 3)\n",
@@ -55,6 +54,7 @@ ERRORS = {
     "negative_left_shift": ('print("before")\nprint(1 << -1)\n', "ValueError"),
     "negative_right_shift": ('print("before")\nprint(1 >> -1)\n', "ValueError"),
     "divmod_zero": ('print("before")\npair = divmod(3, 0)\n', "ZeroDivisionError"),
+    "float_divmod_zero": ('print("before")\npair = divmod(1.0, 0)\n', "ZeroDivisionError"),
     "extend_zero_step": (
         'values = [1]\nprint("before")\nvalues.extend(range(0, 3, 0))\n',
         "ValueError",

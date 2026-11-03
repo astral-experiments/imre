@@ -111,3 +111,10 @@ try:
     print(divided(1 << 180, 0))
 except ZeroDivisionError:
     print("scalarized zero division")
+
+float_quotient, float_remainder = divmod(1.0, 2)
+print(float_quotient)
+print(float_remainder)
+float_quotient, float_remainder = divmod(-7, 2.5)
+print(float_quotient)
+print(float_remainder)

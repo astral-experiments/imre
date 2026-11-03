@@ -432,7 +432,7 @@ impl Builtin {
             | Self::NegativeIntegerPower
             | Self::Decode
             | Self::DecodeAscii
-            | Self::BytesHex
+            | Self::FloatDivmod | Self::BytesHex
             | Self::UrlsafeB64encode
             | Self::Base64Translate
             | Self::BinasciiAsciiInput
