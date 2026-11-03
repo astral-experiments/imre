@@ -2,7 +2,7 @@
 
 Imre checks every name in the [CPython 3.14.5](https://github.com/python/cpython/tree/5607950ef232dad16d75c0cf53101d9649d89115/Lib) top-level module registry (`sys.stdlib_module_names`) on Linux. The first tables cover 194 names without a leading underscore; [the appendix](#names-beginning-with-an-underscore) covers the other 103. Dotted APIs such as `os.path` appear under their parent.
 
-**At a glance:** 135 of 297 modules accept an ordinary import; 1 more accept it only with `--reachable-only`. Across 44 modules with recorded suites, 295 complete test executions pass natively at both optimization levels; 15,152 of 15,426 upstream executions have a classification.
+**At a glance:** 138 of 297 modules accept an ordinary import; 1 more accept it only with `--reachable-only`. Across 44 modules with recorded suites, 295 complete test executions pass natively at both optimization levels; 15,152 of 15,426 upstream executions have a classification.
 
 **Import** checks an otherwise empty file containing `import module`, in ordinary and reachable-only compilation. A successful import does not establish that any function works. Follow the evidence links for the supported operations and their limits.
 
@@ -52,6 +52,7 @@ The last two columns show where CPython still helps at O3. **CPython fixture**: 
 | `functools` | Yes | Selected `partial`, caching decorators and dispatch operations. [Evidence](../benchmarks/cpython_stdlib/full/functools/EVIDENCE.md) | [0 / 329](../benchmarks/cpython_stdlib/full/functools/) | 18 | 17 |
 | `gc` | Yes | `collect()` and `collect(2)` reclaim unreachable native cycles and dispatch weak-reference callbacks. [Evidence](../tests/fixtures/boxed_gc_collect.py) | — | — | — |
 | `genericpath` | Yes | The genericpath companion suite is counted under `os`. [Evidence](../benchmarks/cpython_stdlib/full/os/README.md) | — | — | — |
+| `getopt` | Yes | No API example recorded. | — | — | — |
 | `gettext` | Yes | Translate singular, plural and contextual messages from GNU MO catalogs selected by domain and language, with source-text fallback. [Evidence](../tests/fixtures/text/gettext_catalog.py) | [18 / 73](../benchmarks/cpython_stdlib/full/gettext/) | 6 | 0 |
 | `grp` | Yes | No API example recorded. | — | — | — |
 | `gzip` | Yes | Read text lines and binary chunks from gzip files. [Evidence](../tests/fixtures/files/stream_reads.py) | — | — | — |
@@ -125,6 +126,7 @@ The last two columns show where CPython still helps at O3. **CPython fixture**: 
 | `zipfile` | Yes | Read stored and deflated members and report CRC failures. [Evidence](../benchmarks/cpython_stdlib/native_zip_members.py) | — | — | — |
 | `zipimport` | Yes | Read stored and deflated resources with `zipimporter.get_data()`. Importing Python modules from ZIP paths is unsupported. [Evidence](../tests/fixtures/files/zipimport_resources.py) | — | — | — |
 | `zlib` | Yes | `adler32` computes an unsigned checksum of bytes with an optional integer seed. Compressed-input failures preserve the `error` exception. [Evidence](../tests/fixtures/bytes/zlib_adler32.py) | — | — | — |
+| `zoneinfo` | Yes | No API example recorded. | — | — | — |
 
 ## Modules without an accepted import or a suite measurement
 
@@ -149,7 +151,6 @@ Both import probes reject these names. No native API example or full-suite ledge
 | `filecmp` |
 | `fileinput` |
 | `ftplib` |
-| `getopt` |
 | `getpass` |
 | `glob` |
 | `graphlib` |
@@ -207,7 +208,6 @@ Both import probes reject these names. No native API example or full-suite ledge
 | `xml` |
 | `xmlrpc` |
 | `zipapp` |
-| `zoneinfo` |
 
 ## Proposed scope exclusions
 
@@ -250,6 +250,7 @@ These include documented interfaces such as `__future__` and `_thread`, as well 
 | `_opcode_metadata` | Yes | No API example recorded. | — | — | — |
 | `_operator` | Yes | No API example recorded. | — | — | — |
 | `_pickle` | Yes | No API example recorded. | — | — | — |
+| `_pyio` | Yes | No API example recorded. | — | — | — |
 | `_sha3` | Yes | No API example recorded. | — | — | — |
 | `_signal` | Yes | No API example recorded. | — | — | — |
 | `_socket` | Yes | No API example recorded. | — | — | — |
@@ -309,7 +310,6 @@ Both import modes reject the following names. They have no recorded API example 
 | `_py_warnings` |
 | `_pydatetime` |
 | `_pydecimal` |
-| `_pyio` |
 | `_pylong` |
 | `_pyrepl` |
 | `_queue` |
