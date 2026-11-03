@@ -531,6 +531,7 @@ impl Context {
             let dict = self.class_namespace_dict(scope, false);
             self.heap.replace_cell(dict_cell, Some(dict));
         }
+        self.install_instance_dictionary_descriptor(class, scope);
         self.install_weakref_descriptor(class, scope);
         self.initialize_class_members(class, scope, None)?;
         let hook = self.super_attribute(class, class, class, "__init_subclass__")?;

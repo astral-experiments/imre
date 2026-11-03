@@ -64,4 +64,59 @@ assert getattr_static(SimpleNamespace(item=42), "item") == 42
 assert getattr_static("example", "lower") is str.lower
 assert getattr_static(Base, "__repr__") is object.__repr__
 assert getattr_static(object, "__str__") is object.__str__
+class_field = getattr_static(item, "__class__")
+assert class_field is getattr_static(Child, "__class__")
+assert class_field.__objclass__ is object
+assert class_field.__get__(item) is Child
+assert class_field.__get__(None, Child) is class_field
+
+dictionary = vars(Base)["__dict__"]
+assert getattr_static(item, "__dict__") is dictionary
+assert getattr_static(Child, "__dict__") is dictionary
+assert dictionary.__objclass__ is Base
+assert dictionary.__get__(item) is object.__getattribute__(item, "__dict__")
+dictionary.__set__(item, {"replaced": 2})
+assert getattr_static(item, "replaced") == 2
+dictionary.__delete__(item)
+assert getattr_static(item, "replaced", item) is item
+try:
+    dictionary.__get__(Hidden())
+except TypeError:
+    pass
+else:
+    raise AssertionError("dictionary descriptor accepted an unrelated receiver")
+class Mixin:
+    pass
+
+
+class ErrorWithMixin(Mixin, Exception):
+    pass
+
+
+exc = ErrorWithMixin()
+exc.extra = 47
+inherited_dict = vars(Mixin)["__dict__"]
+assert inherited_dict.__get__(exc) is vars(exc)
+assert vars(exc)["extra"] == 47
+replacement = {"extra": 5}
+inherited_dict.__set__(exc, replacement)
+assert vars(exc) is replacement
+try:
+    inherited_dict.__delete__(exc)
+except TypeError as error:
+    assert error.args == ("cannot delete __dict__",)
+else:
+    raise AssertionError("exception dictionary was deleted")
+class NamespaceWithMixin(Mixin, SimpleNamespace):
+    pass
+
+
+ns = NamespaceWithMixin(answer=42)
+assert inherited_dict.__get__(ns) is vars(ns)
+try:
+    inherited_dict.__set__(ns, {})
+except AttributeError as error:
+    assert error.args == ("readonly attribute",)
+else:
+    raise AssertionError("namespace dictionary was replaced")
 print("static attributes")

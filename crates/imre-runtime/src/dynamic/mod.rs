@@ -2139,6 +2139,10 @@ impl Context {
         }
         let value = self.alloc(Value::Native(name.to_owned()));
         self.builtins.insert(name.to_owned(), value);
+        if name == "object" {
+            let descriptor = self.alloc(Value::LayoutDescriptor(value, "__class__"));
+            self.builtins.insert("object.__class__".into(), descriptor);
+        }
         if name == "super" {
             let mut entries = Vec::new();
             for name in ["__new__", "__repr__", "__getattribute__", "__init__", "__get__"] {
