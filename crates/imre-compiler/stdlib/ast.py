@@ -1,26 +1,15 @@
 # From CPython 3.14.5 Lib/ast.py. See stdlib/docstrings/LICENSE.
 
-# The boxed generator supports with blocks across suspension. Use the same
-# exception boundary as CPython, including an AttributeError thrown at yield.
-class _IgnoreMissingField:
-    def __enter__(self):
-        pass
-
-    def __exit__(self, exc_type, exc, tb):
-        return exc_type is not None and issubclass(exc_type, AttributeError)
-
-
-_ignore_missing_field = _IgnoreMissingField()
-
-
 def iter_fields(node):
     """
     Yield a tuple of ``(fieldname, value)`` for each field in ``node._fields``
     that is present on *node*.
     """
     for field in node._fields:
-        with _ignore_missing_field:
+        try:
             yield field, getattr(node, field)
+        except AttributeError:
+            pass
 
 
 class NodeVisitor(object):
