@@ -3,6 +3,20 @@ import functools
 
 def current():
     placeholder = functools.Placeholder
+    factory = type(placeholder)
+    assert factory is functools._PlaceholderType
+    try:
+        functools.Placeholder = object()
+        assert factory() is placeholder
+    finally:
+        functools.Placeholder = placeholder
+    for args, kwargs in (((1,), {}), ((), {"value": 1})):
+        try:
+            factory(*args, **kwargs)
+        except TypeError:
+            pass
+        else:
+            raise AssertionError("Placeholder constructor accepted arguments")
 
     def record(*args, **keywords):
         return args, keywords
@@ -10,7 +24,7 @@ def current():
     class Binding(functools.partial):
         pass
 
-    bound = Binding(record, placeholder, 4, value=5)
+    bound = Binding(record, factory(), 4, value=5)
     assert type(bound) is Binding and isinstance(bound, functools.partial)
     assert bound.func is record and bound.args == (placeholder, 4)
     assert bound.keywords == {"value": 5}
