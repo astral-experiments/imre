@@ -24,19 +24,23 @@ def rows(path):
         return list(csv.DictReader(stream, delimiter="\t"))
 
 
-def native_children():
-    from_archive = ROOT / "dfe0f18e-children"
-    validate = runpy.run_path(str(from_archive / "audit.py"))["validate_group"]
+def native_children(receipt, label, head):
+    tools = ROOT / "dfe0f18e-children/audit.py"
+    validate = runpy.run_path(str(tools))["validate_group"]
+    tag = "public-" + head[:8]
     with tempfile.TemporaryDirectory() as scratch:
-        for archive in (BASE / "raw.tar.gz", from_archive / "raw.tar.gz"):
+        for archive in (BASE / "raw.tar.gz", ROOT / receipt / "raw.tar.gz"):
             with tarfile.open(archive) as raw:
                 raw.extractall(scratch, filter="data")
-        return validate(scratch, "public-dfe0f18e", "selected_children",
-                        "dfe0f18ebecfc5b302a5747f79079d48b9eb86eb")
+        result = validate(scratch, tag, label, head)
+        if receipt == "061b0196":
+            audit = runpy.run_path(str(ROOT / receipt / "workloads.py"))["verify"]
+            audit(Path(scratch), tag, label, result)
+        return result
 
 
-def child_row(previous, result):
-    row = dict(previous, receipt="dfe0f18e-children")
+def child_row(previous, result, receipt):
+    row = dict(previous, receipt=receipt)
     row["disposition"] = "paired" if result["paired"] else "native-child-nonpass"
     for mode in ("stock", "O0", "O3"):
         record = result[mode]
@@ -71,17 +75,23 @@ def main():
     current = rows(ROOT / "parents.tsv")
     assert len(current) == len(baseline) == 187
     selected = []
-    children = native_children()
+    children = native_children("dfe0f18e-children", "selected_children",
+                               "dfe0f18ebecfc5b302a5747f79079d48b9eb86eb")
+    shutdown = native_children("061b0196", "selected_shutdown_children",
+                               "061b01963d06311f964de28ecf655176265f66c0")
+    assert len(shutdown) == 2 and all(r["paired"] for r in shutdown.values())
     assert set(children) == {r["id"] for r in baseline if r["disposition"] == "requires-native-child"}
     replayed = environment_children()
     assert len(replayed) == 4 and all(k in children and n == 1 for k, n in replayed)
     for prior, row in zip(baseline, current):
         assert all(row[k] == prior[k] for k in ("ordinal", "id", "occurrence"))
         if prior["id"] in children:
-            first = child_row(prior, children[prior["id"]])
+            first = child_row(prior, children[prior["id"]], "dfe0f18e-children")
             key = (prior["id"], int(prior["occurrence"]))
             if first["disposition"] != "paired" and key in replayed:
                 assert row == replayed_child_row(first, replayed[key])
+            elif first["disposition"] != "paired" and prior["id"] in shutdown:
+                assert row == child_row(first, shutdown[prior["id"]], "061b0196")
             else:
                 assert row == first
         elif row["receipt"] == "dfe0f18e":
