@@ -291,6 +291,17 @@ assert spec == FullArgSpec(["a", "b"], "args", "kwargs", (3,), ["flag"], {"flag"
                            {"b": int, "return": str})
 assert getfullargspec(wrapper).varargs == "values"
 assert getfullargspec(C().method).args == ["self", "value"]
+receiver = C()
+assert inspect.getcallargs(receiver.method) == {"self": receiver, "value": b"x"}
+assert inspect.getcallargs(original, 1, 2, 3, extra=4) == {
+    "a": 1, "b": 2, "args": (3,), "flag": False, "kwargs": {"extra": 4},
+}
+try:
+    inspect.getcallargs(receiver.method, b"x", value=b"y")
+except TypeError as exc:
+    assert str(exc) == "method() got multiple values for argument 'value'"
+else:
+    raise AssertionError("getcallargs accepted two values for the same parameter")
 assert getfullargspec(partial(C().method, b"x")).args == ["value"]
 sig = Signature.from_callable(wrapper)
 assert type(sig.parameters.copy()) is OrderedDict

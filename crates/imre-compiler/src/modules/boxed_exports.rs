@@ -336,6 +336,7 @@ pub(super) fn symbol(module: M, name: &str) -> Option<Binding> {
             "getargvalues",
             "getasyncgenlocals",
             "getasyncgenstate",
+            "getcallargs",
             "getcoroutinelocals",
             "getcoroutinestate",
             "getfullargspec",
