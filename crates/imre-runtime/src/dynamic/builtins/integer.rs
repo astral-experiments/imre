@@ -183,50 +183,6 @@ pub(super) fn to_bytes(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) 
         None => 1,
     };
     let (little, signed) = byte_options(ctx, "to_bytes", order, signed)?;
-    if size < 0 {
-        return Err(Error::new(
-            "ValueError",
-            "length argument must be non-negative",
-        ));
-    }
-    let size = size as usize;
-    if size > crate::MAX_BYTES_LEN {
-        return Err(Error::new("OverflowError", "byte string is too large"));
-    }
-    // CPython allocates the result before checking whether the integer fits.
-    let mut output = Vec::new();
-    output
-        .try_reserve_exact(size)
-        .map_err(|_| Error::new("MemoryError", ""))?;
-    let value = value.big();
-    let negative = value.sign() == Sign::Minus;
-    if negative && !signed {
-        return Err(Error::new(
-            "OverflowError",
-            "can't convert negative int to unsigned",
-        ));
-    }
-    let bits = value.bits();
-    // At a signed boundary the negative power of two already includes its sign bit.
-    let sign_bit = signed && bits != 0 && !(negative && value.trailing_zeros() == Some(bits - 1));
-    if (bits + u64::from(sign_bit)).div_ceil(8) > size as u64 {
-        return Err(Error::new("OverflowError", "int too big to convert"));
-    }
-    output.resize(size, 0u8);
-    for (byte, source) in output
-        .iter_mut()
-        .zip(value.iter_u32_digits().flat_map(u32::to_le_bytes))
-    {
-        *byte = source;
-    }
-    if negative {
-        let mut carry = true;
-        for byte in &mut output {
-            (*byte, carry) = (!*byte).overflowing_add(u8::from(carry));
-        }
-    }
-    if !little {
-        output.reverse();
-    }
+    let output = crate::objects::integer_bytes(&value, size, little, signed)?;
     Ok(ctx.alloc(Value::Bytes(output)))
 }

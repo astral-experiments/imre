@@ -1295,6 +1295,7 @@ pub(crate) enum Builtin {
     Encode,
     Decode,
     DecodeAscii,
+    BytesHex,
     UrlsafeB64encode,
     Base64Translate,
     BinasciiAsciiInput,
@@ -1355,6 +1356,8 @@ pub(crate) enum Builtin {
     ZipOpen,
     ZipNamelist,
     ZipClose,
+    /// Encodes an integer with an explicit width, byte order, and sign policy.
+    IntToBytes,
     /// Validates complete UTF-8 at the decode evaluation point and returns a
     /// retained bytes identity for an internal allocation-free character gather.
     BytesValidateUtf8,
