@@ -200,6 +200,8 @@ impl Output {
             return Err(format!("{}:{error}", path.display()));
         }
         let location = SourceMap {
+            // CPython's warnings provider validates its public arguments in Python.
+            python_annotations: bundled && name == "_py_warnings",
             module_start,
             docs,
             unit,
@@ -252,6 +254,7 @@ enum Body<'a> {
 }
 
 struct SourceMap<'a> {
+    python_annotations: bool,
     module_start: ruff_text_size::TextSize,
     docs: Option<crate::modules::doctest::SealedDocs>,
     unit: usize,

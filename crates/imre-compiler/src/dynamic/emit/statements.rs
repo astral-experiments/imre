@@ -865,6 +865,9 @@ impl Function<'_, '_> {
         signature["types"] = json!({});
         // A generator call returns a suspended frame, before it yields or returns a value.
         let scalar = |expr: &ast::Expr| {
+            if self.source.python_annotations {
+                return None;
+            }
             scalar_annotation(expr).filter(|name| {
                 !type_params.is_some_and(|params| params.iter().any(|p| p.name().as_str() == *name))
             })
