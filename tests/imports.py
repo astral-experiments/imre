@@ -161,6 +161,18 @@ REJECTED = {
             "    def method(self): pass\n"
         ),
     }, "call-non-callable"),
+    "shutdown_keeps_checked_initializer": ({
+        "main.py": (
+            "from logging import shutdown as finish\nresult = finish()\n"
+            "invalid: int = 'wrong'\nprint(invalid)\n"
+        ),
+    }, "expected int"),
+    "shutdown_with_supplied_weak_refs_requires_object_imports": ({
+        "main.py": (
+            "import logging, weakref\nhandler = logging.NullHandler()\n"
+            "logging.shutdown(handlerList=[weakref.ref(handler)])\n"
+        ),
+    }, "logging.shutdown arguments require --runtime-imports"),
     "saved_deque_repr_keeps_checked_calls": ({
         "main.py": (
             "from collections import deque\ndef identity(n: int) -> int:\n    return n\n"

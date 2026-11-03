@@ -202,6 +202,20 @@ impl Checker<'_> {
         Ok(self.ordered_builtin(Builtin::Logging(op), Type::None, args))
     }
 
+    /// Use the public weak registry, which keeps live handlers available to later shutdown calls.
+    pub(super) fn logging_shutdown(&self, call: &ast::ExprCall) -> Result<Expr, String> {
+        if !call.arguments.is_empty() {
+            return Err(error(
+                self.source,
+                call,
+                "logging.shutdown arguments require --runtime-imports",
+            ));
+        }
+        let error = self.scoped_builtin_error("logging.shutdown", call);
+        self.defer_object_error(&error);
+        Ok(Expr::none())
+    }
+
     /// Read the configuration path only after evaluating all call arguments.
     pub(super) fn logging_file_config(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
         let parameters = [

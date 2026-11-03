@@ -891,6 +891,8 @@ An unshadowed builtin class such as `object` or `int` can be a `store_const` val
 
 `logging.basicConfig` accepts `level`, `format`, `datefmt`, and `force`. A configured handler keeps its settings unless forced. Both configuration and `setLevel` resolve string levels in the native registry. `addLevelName` updates the integer label and the reverse name lookup; `getLevelNamesMapping()` returns a fresh dictionary. `getLevelName(number)` returns a string. For a string argument, use `isinstance(result, int)` to distinguish a registered name from the fallback text. The percent-style format accepts `name`, `levelname`, `levelno`, `message`, and local-time `asctime`. Custom handlers and filters are outside this surface.
 
+A direct `logging.shutdown()` call uses the object runtime’s weak handler registry. It visits live handlers in reverse registration order and respects each handler’s `flushOnClose` setting. Supplying a handler list requires a program that already uses runtime imports, such as one built with `--runtime-imports`.
+
 ## Synchronous subprocesses
 
 `subprocess.getstatusoutput(cmd, *, encoding=None, errors=None)` runs the command

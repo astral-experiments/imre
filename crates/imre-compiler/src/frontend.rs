@@ -9083,6 +9083,7 @@ impl<'a> Checker<'a> {
         }
         match self.resolve(&call.func) {
             Some(Binding::Intrinsic(Intrinsic::Partial)) => return self.partial(call),
+            Some(Binding::Intrinsic(Intrinsic::LoggingShutdown)) => return self.logging_shutdown(call),
             Some(Binding::Intrinsic(Intrinsic::FileConfig)) if calls::has_unpacking(call) => {
                 return self.logging_file_config(call);
             }
