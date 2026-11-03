@@ -139,7 +139,7 @@ def _signature_from_callable(obj, *, sigcls, follow_wrapper_chains=True,
             obj, sigcls, globals, locals, eval_str, annotation_format, skip_bound_arg=skip_bound_arg)
     kind = type(obj)
     if (kind is types.BuiltinFunctionType or kind is types.WrapperDescriptorType
-            or kind is types.MethodWrapperType):
+            or kind is types.MethodWrapperType or kind is types.MethodDescriptorType):
         text_signature = getattr(obj, "__text_signature__", None)
         if not text_signature:
             raise ValueError(f"no signature found for builtin {obj!r}")
