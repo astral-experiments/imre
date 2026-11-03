@@ -383,6 +383,12 @@ class ForwardRef:
             tuple(sorted(self.__extra_names__.items())) if self.__extra_names__ else None,
         ))
 
+    def __or__(self, other):
+        return types.UnionType[self, other]
+
+    def __ror__(self, other):
+        return types.UnionType[other, self]
+
     def __repr__(self):
         extra = []
         if self.__forward_module__ is not None:
