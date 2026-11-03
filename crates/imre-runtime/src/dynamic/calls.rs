@@ -3071,6 +3071,19 @@ impl Context {
             Value::Native(ref class) if class == "coroutine" && name == "cr_origin" => {
                 return Ok(self.readonly_member("coroutine", "cr_origin"));
             }
+            Value::Coroutine { frame, .. } if name == "cr_running" => {
+                return self.default_get_attr(frame, "gi_running");
+            }
+            Value::Coroutine { frame, .. } if name == "cr_suspended" => {
+                return self.default_get_attr(frame, "gi_suspended");
+            }
+            Value::Coroutine { frame, .. } if name == "cr_frame" => {
+                if !self.audit_hooks.is_empty() {
+                    let attribute = self.text(name);
+                    stdlib::audit::event(self, "object.__getattr__", &[obj, attribute])?;
+                }
+                return self.generator_frame(frame);
+            }
             Value::Coroutine { frame, .. } if name == "cr_code" => {
                 let Value::Generator { code, .. } = *self.heap.get(frame) else {
                     unreachable!("coroutine frame")
