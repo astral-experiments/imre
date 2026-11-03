@@ -96,8 +96,8 @@ class StreamHandler(Handler):
     def setStream(self, stream: _TextOutput | None) -> _TextOutput | None:
         if stream is self.stream:
             return None
+        old = self.stream
         with self.lock:
             self.flush()
-            old = self.stream
             self.stream = stream
         return old
