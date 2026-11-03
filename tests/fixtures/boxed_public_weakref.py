@@ -30,6 +30,7 @@ def current():
     equal_weak_value_keys(equal, Key("first"))
     weak_key_constructor()
     generic_alias_weakref()
+    coroutine_weak_value()
     reference_repr()
 
 
@@ -80,6 +81,36 @@ def generic_alias_weakref():
     collect()
     assert handle() is None and callbacks == [handle]
     assert "union" not in values
+
+
+def coroutine_weak_value():
+    from gc import collect
+
+    async def job():
+        return 42
+
+    values = WeakValueDictionary()
+    callbacks = []
+    coro = job()
+    iterator = coro.__await__()
+    values["job"] = coro
+    handle = ref(coro, callbacks.append)
+    del coro
+    collect()
+    assert values["job"] is handle() and not callbacks
+
+    try:
+        next(iterator)
+    except StopIteration as exc:
+        assert exc.value == 42
+    else:
+        raise AssertionError("coroutine did not finish")
+    assert values["job"] is handle() and not callbacks
+
+    del iterator
+    collect()
+    assert handle() is None and "job" not in values
+    assert len(callbacks) == 1 and callbacks[0] is handle
 
 
 def weak_key_constructor():
