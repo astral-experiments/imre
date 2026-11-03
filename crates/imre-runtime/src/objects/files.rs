@@ -178,7 +178,8 @@ impl FileState {
         self.input()?.peek()
     }
 
-    pub(super) fn read_pipe_line(&mut self, size: Option<usize>) -> Result<Bytes> {
+    /// Read through the first newline or size limit, whichever comes first.
+    pub(crate) fn read_line_limited(&mut self, size: Option<usize>) -> Result<Bytes> {
         self.input()?.binary_line_limited(size)
     }
 

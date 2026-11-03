@@ -1583,6 +1583,17 @@ def main() -> None:
                 "        with module.open('members.gz', 'rb') as stream:\n"
                 "            print(stream.read1(65536), stream.read())\n"
                 "        print(stream.closed)\n"
+                "        class Reader(module.GzipFile):\n"
+                "            def read(self, *args):\n"
+                "                raise AssertionError('readline called read')\n"
+                "        with Reader('members.gz', 'rb') as stream:\n"
+                "            print(stream.readline(0), stream.readline(3), stream.readline(8), stream.readline(1))\n"
+                "            try:\n"
+                "                stream.readline(-(1 << 100))\n"
+                "            except OverflowError:\n"
+                "                pass\n"
+                "            else:\n"
+                "                raise AssertionError('unrepresentable line size accepted')\n"
             )
             for module, operation, path, expected in [
                 ("opcode", "lookup", temporary, "31\n"), ("_opcode_metadata", "lookup", temporary, "31\n"),
@@ -1590,7 +1601,7 @@ def main() -> None:
                 ("main", "import", temporary / "codeop_module", ""),
                 ("main", "import", temporary / "codeop_named_helper", "16896\n"),
                 ("boxed_interactive_interpreter", "current", FIXTURES.parent, ""),
-                ("gzip", "read", temporary, "b'first' b'second'\nTrue\n"),
+                ("gzip", "read", temporary, "b'first' b'second'\nTrue\nb'' b'fir' b'stsecond' b''\n"),
             ]:
                 result = run([str(executable), probe.stem, module, operation, str(path)], temporary)
                 require_success(result)

@@ -11,7 +11,7 @@ pub(super) fn call(
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
-    let arity = if matches!(name, "read" | "read1") {
+    let arity = if matches!(name, "read" | "read1") || (name == "readline" && args.len() == 2) {
         2
     } else {
         1
@@ -53,7 +53,16 @@ pub(super) fn call(
             Ok(ctx.alloc(Value::Bytes(bytes)))
         }
         "readline" => {
-            let bytes = handle.borrow_mut().read_line_bytes()?;
+            let size = super::files::read_length(ctx, args.get(1).copied())?;
+            let mut file = handle.borrow_mut();
+            if file.closed() {
+                return Err(Error::new("ValueError", "readline of closed file"));
+            }
+            let bytes = if size == 0 {
+                Vec::new()
+            } else {
+                file.read_line_limited(usize::try_from(size).ok())?
+            };
             Ok(ctx.alloc(Value::Bytes(bytes)))
         }
         "fileno" => Ok(ctx.int(i64::from(handle.borrow().fileno()?))),

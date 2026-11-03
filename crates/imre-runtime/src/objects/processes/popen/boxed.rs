@@ -388,7 +388,7 @@ impl BoxedPipe {
     pub(crate) fn read(&self, size: Option<usize>, line: bool) -> Result<Vec<u8>> {
         self.with_file(|file| {
             if line {
-                file.read_pipe_line(size)
+                file.read_line_limited(size)
             } else {
                 file.read_bytes(size)
             }
