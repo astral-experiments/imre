@@ -1,5 +1,24 @@
 //! Names supplied by the boxed runtime without a filesystem module.
-pub fn is_module(name: &str) -> bool {
+pub enum Provider {
+    Builtin,
+    #[cfg(unix)]
+    Ssl,
+    Hashlib,
+}
+
+/// Optional native libraries are resolved by the runtime on the execution host.
+pub fn provider(name: &str) -> Option<Provider> {
+    #[cfg(unix)]
+    if matches!(name, "_ssl" | "_imre_ssl") {
+        return Some(Provider::Ssl);
+    }
+    if name == "_hashlib" {
+        return Some(Provider::Hashlib);
+    }
+    is_builtin(name).then_some(Provider::Builtin)
+}
+
+fn is_builtin(name: &str) -> bool {
     matches!(
         name,
         "_blake2"

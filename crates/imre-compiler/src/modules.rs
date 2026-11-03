@@ -5640,7 +5640,8 @@ impl<'a> Loader<'a> {
     fn load_new_module(&mut self, name: &str) -> Result<ModuleId, String> {
         let first = name.split('.').next().unwrap_or("");
         if stdlib_top_level(first)
-            && (imre_ast::providers::is_module(first)
+            && (IntrinsicModule::named(first).is_some()
+                || imre_ast::providers::provider(first).is_some()
                 || !self.search_roots.get(self.archive_roots).is_some_and(|site| {
                     // A typeshed declaration alone does not supply an importable module.
                     let path = site.join(first);

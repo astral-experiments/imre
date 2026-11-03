@@ -116,14 +116,14 @@ pub(super) fn jit_module(ctx: &mut Context) -> Result<Id> {
 }
 
 pub(super) fn is_module(name: &str) -> bool {
-    #[cfg(unix)]
-    if matches!(name, "_ssl" | "_imre_ssl") {
-        return ssl::provider::available();
+    use imre_ast::providers::{Provider, provider};
+    match provider(name) {
+        Some(Provider::Builtin) => true,
+        #[cfg(unix)]
+        Some(Provider::Ssl) => ssl::provider::available(),
+        Some(Provider::Hashlib) => hashlib::openssl::provider().is_some(),
+        None => false,
     }
-    if name == "_hashlib" {
-        return hashlib::openssl::provider().is_some();
-    }
-    imre_ast::providers::is_module(name)
 }
 
 pub(super) use imre_ast::providers::has_lazy_attributes;

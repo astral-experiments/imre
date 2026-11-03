@@ -5,9 +5,9 @@ use std::path::Path;
 use super::{Context, Id, NONE, Result, TRUE, Value};
 
 impl Context {
-    /// The installed launcher's stdlib path represents sources bundled in the executable.
+    /// Map the launcher's absolute bundle entry to its compiled source registry.
     pub(super) fn registry_root<'a>(&'a self, path: &'a Path) -> &'a Path {
-        if self.config["stdlib_dir"].as_str().map(Path::new) == Some(path)
+        if self.config["bundle_entry"].as_str().map(Path::new) == Some(path)
             && let Some(bundle) = self.config["bundled_root"].as_str()
         {
             Path::new(bundle)
