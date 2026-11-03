@@ -671,6 +671,7 @@ impl Builtin {
             | Self::ZipMinReadSize
             | Self::ZipField(_)
             | Self::ZipOpen
+            | Self::ZipImportIndex
             | Self::ZipNamelist
             | Self::ZipClose
             | Self::Input
@@ -1391,6 +1392,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_zip_test"
                 | "imre_zip_min_read_size"
                 | "imre_zip_open"
+                | "imre_zip_import_index"
                 | "imre_zip_namelist"
                 | "imre_zip_close"
                 | "imre_int_str"

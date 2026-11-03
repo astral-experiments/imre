@@ -6629,6 +6629,9 @@ impl Emitter<'_, '_> {
                 }
             }
             Builtin::ZipOpen => self.call("imre_zip_open", returns, &[&args[0].value]),
+            Builtin::ZipImportIndex => {
+                self.call("imre_zip_import_index", returns, &[&args[0].value])
+            }
             Builtin::ZipNamelist => self.call("imre_zip_namelist", returns, &[&args[0].value]),
             Builtin::ZipClose => {
                 self.void_call("imre_zip_close", &[&args[0].value]);
@@ -9638,6 +9641,7 @@ declare i64 @imre_zip_info_method(ptr)
 declare i64 @imre_zip_info_external_attr(ptr)
 declare i32 @imre_zip_info_is_dir(ptr)
 declare ptr @imre_zip_open(ptr)
+declare ptr @imre_zip_import_index(ptr)
 declare ptr @imre_zip_namelist(ptr)
 declare void @imre_zip_close(ptr)
 declare ptr @imre_int_to_bytes(i64, i64, ptr, i1)
