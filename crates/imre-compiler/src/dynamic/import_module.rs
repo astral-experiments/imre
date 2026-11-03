@@ -162,11 +162,11 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
                     [
                         include_str!("../../stdlib/inspect.py"),
                         include_str!("../../stdlib/inspect_signature.py"),
-                        "import dis\nimport functools\nimport importlib.machinery\nimport linecache\nimport os\nimport sys\nfrom collections import namedtuple\nfrom inspect import _frame_position",
+                        "import collections.abc\nimport dis\nimport functools\nimport importlib.machinery\nimport linecache\nimport os\nimport sys\nfrom collections import namedtuple\nfrom inspect import _frame_position",
                         section("def ismodule(object):", "def ispackage(object):"),
                         &descriptors,
                         section("def isfunction(object):", "def _has_code_flag("),
-                        section("def istraceback(object):", "def isabstract(object):"),
+                        section("def isawaitable(object):", "def isabstract(object):"),
                         section("def _getmembers(", "Attribute = namedtuple("),
                         section("def getfile(object):", "class ClassFoundException("),
                         section("def findsource(object):", "def getcomments(object):"),

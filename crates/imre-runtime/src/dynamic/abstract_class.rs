@@ -139,8 +139,9 @@ impl Context {
                         super::generator_protocol::coroutine_method(kind, name)
                     }
                     _ => {
-                        super::builtins::is_iterator_type(kind)
-                            && matches!(name, "__iter__" | "__next__")
+                        super::async_generator::method(kind, name)
+                            || super::builtins::is_iterator_type(kind)
+                                && matches!(name, "__iter__" | "__next__")
                     }
                 };
                 present.then_some(true)

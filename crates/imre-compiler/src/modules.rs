@@ -1447,6 +1447,7 @@ impl IntrinsicModule {
             (Self::Inspect, "isdatadescriptor") => {
                 Intrinsic::ScopedObjectExport("inspect.isdatadescriptor")
             }
+            (Self::Inspect, "isawaitable") => Intrinsic::ScopedObjectExport("inspect.isawaitable"),
             (Self::Inspect, "getattr_static") => Intrinsic::InspectGetattrStatic,
             (Self::Inspect, "ismethoddescriptor") => Intrinsic::InspectIsMethodDescriptor,
             (Self::Inspect, "iscoroutinefunction") => Intrinsic::InspectCoroutine { mark: false },
