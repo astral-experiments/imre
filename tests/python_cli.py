@@ -2756,6 +2756,8 @@ for name in ("md4", "ripemd160"):
             fixture = fixtures / name
             compare("-IB", fixture, native_args=("run", fixture, "--quiet"))
             compare("-IB", fixture, native_args=("run", fixture, "--runtime-imports", "--quiet"))
+        plugin.write_bytes((fixtures / "boxed_sys_excepthook.py").read_bytes())
+        compare("-IB", "-c", imports + "arithmetic.current()", native_timeout=300)
         for fixture in (
             "boxed_ast.py",
             "boxed_ast_encoded_source.py",
@@ -2781,7 +2783,6 @@ for name in ("md4", "ripemd160"):
             "boxed_sys_getsizeof.py",
             "boxed_sys_audit.py",
             "boxed_sys_asyncgen_hooks.py",
-            "boxed_sys_excepthook.py",
             "boxed_sys_audit_recursion.py",
             "boxed_sys_recursion_limit.py",
             "boxed_sys_intern.py",
