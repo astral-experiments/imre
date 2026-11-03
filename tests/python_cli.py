@@ -3268,6 +3268,7 @@ for name in ("md4", "ripemd160"):
             "boxed_urllib_http.py",
             "boxed_http_transport.py",
             "boxed_message_parameters.py",
+            "boxed_email_parser.py",
             "boxed_unicodedata.py",
             "boxed_descriptors.py",
             "boxed_exception_repr.py",
