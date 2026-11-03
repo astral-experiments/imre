@@ -1371,6 +1371,12 @@ def main():
             assert expected.stderr.startswith(b"<sys>:0: ResourceWarning: unclosed file ")
             assert actual.stderr == expected.stderr, (expected.stderr, actual.stderr)
 
+        provider = Path(__file__).with_name("fixtures") / "boxed_io_open_warning.py"
+        for exe in (sys.executable, imre):
+            proc = run(exe, "-Wd", provider, timeout=300)
+            assert proc.returncode == 0, proc.stderr
+            assert proc.stderr == b"", proc.stderr
+
         # The binary buffer must work from an ordinary -c command on its own.
         for stream in ("stdout", "stderr"):
             command = (

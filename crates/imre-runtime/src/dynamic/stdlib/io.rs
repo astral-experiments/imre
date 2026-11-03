@@ -1,6 +1,6 @@
 //! Native I/O classes for runtime-loaded modules.
 
-use super::super::{Heap, builtins::zeroed_bytes};
+use super::super::{Heap, builtins::zeroed_bytes, value::IoOpenTypes};
 use super::{Context, Error, FALSE, Id, NONE, Result, TRUE, Value};
 
 /// Release one native owner's strong edge before the next observable state change.
@@ -142,6 +142,7 @@ pub(in crate::dynamic) fn standard_input(ctx: &mut Context) -> Result<Id> {
         ctx,
         &[fd, mode, buffering, encoding, errors, newline, FALSE],
         &[],
+        None,
     ) {
         Err(error)
             if matches!(error.os_args.as_deref(),
@@ -169,6 +170,7 @@ fn unbuffered_standard(ctx: &mut Context, fd: i32, name: &str) -> Result<Id> {
         ctx,
         &[descriptor, mode, buffering, NONE, NONE, NONE, FALSE],
         &[],
+        None,
     )?;
     let raw = if input {
         ctx.lookup_attr(buffer, "raw")?
@@ -467,9 +469,7 @@ pub(in super::super) fn install_native(ctx: &mut Context, module: Id, module_obj
         ctx.builtin("open")
     } else {
         let callable = ctx.alloc(Value::IoOpen {
-            reader,
-            writer,
-            random,
+            types: IoOpenTypes { file, reader, writer, random, wrapper },
             unsupported,
         });
         ctx.alloc(Value::Method {
@@ -818,33 +818,6 @@ pub(super) fn lines(
             Ok(ctx.alloc(Value::List(result)))
         }
     }
-}
-
-/// Open a file using the native buffered classes captured by a fresh low-level module.
-pub(in super::super) fn open_from_module(
-    ctx: &mut Context,
-    reader: Id,
-    writer: Id,
-    random: Id,
-    args: &[Id],
-    kwargs: &[(String, Id)],
-) -> Result<Id> {
-    let Some((_, arguments)) = args.split_first() else {
-        return Err(Error::new("TypeError", "_io.open needs its module"));
-    };
-    let file = open(ctx, arguments, kwargs)?;
-    let class = match ctx.heap.get(file).native_io_class_name() {
-        Some("_io.BufferedRandom") => random,
-        Some("_io.BufferedReader") => reader,
-        Some("_io.BufferedWriter") => writer,
-        _ => return Ok(file),
-    };
-    let stream = ctx.instance(class, None);
-    let Value::Instance { memory_stream, .. } = ctx.heap.get_mut(stream) else {
-        unreachable!()
-    };
-    *memory_stream = Some(MemoryStream::BufferedFile(file));
-    Ok(stream)
 }
 
 /// Call an inherited I/O method with its bound receiver or an explicit class-level receiver.
