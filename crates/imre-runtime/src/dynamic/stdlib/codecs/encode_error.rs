@@ -161,6 +161,13 @@ pub(super) fn encode(
             ) {
                 return Err(invalid());
             }
+            // Multibyte codecs strictly encode a text replacement before resuming the input.
+            let encoded =
+                if matches!(codec, Codec::ShiftJis) && ctx.string_storage(*replacement).is_some() {
+                    Some(ctx.encode_legacy_codepoints(*replacement, codec, false)?)
+                } else {
+                    None
+                };
             // Encoding resumes in the original string even when the handler rebinds exc.object.
             let resume = if resume < 0 {
                 source.len() as i64 + resume
@@ -173,7 +180,9 @@ pub(super) fn encode(
                     format!("position {resume} from error handler out of bounds"),
                 ));
             }
-            if let Value::Bytes(bytes) = ctx.heap.get(value) {
+            if let Some(bytes) = encoded {
+                append(&mut output, &bytes)?;
+            } else if let Value::Bytes(bytes) = ctx.heap.get(value) {
                 append(&mut output, bytes)?;
             } else {
                 for &code in ctx.string_codepoints(value)?.iter() {

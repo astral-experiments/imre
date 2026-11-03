@@ -52,6 +52,28 @@ def check_shift_jis():
     else:
         raise AssertionError("accepted a CP932 extension")
 
+    source = "A☃xB"
+    errors = []
+
+    def replace_snowman(error):
+        errors.append(error)
+        return replacement, error.end
+
+    codecs.register_error("test.sjis_replace", replace_snowman)
+    replacement = "Q日"
+    assert source.encode("shift_jis", "test.sjis_replace") == b"AQ\x93\xfaxB"
+    replacement = "Q😀"
+    try:
+        source.encode("shift_jis", "test.sjis_replace")
+    except UnicodeEncodeError as error:
+        assert error.object is replacement
+        assert (error.encoding, error.start, error.end, error.reason) == (
+            "shift_jis", 1, 2, "illegal multibyte sequence")
+    else:
+        raise AssertionError("accepted an unencodable replacement")
+    assert len(errors) == 2
+    assert all(error.object is source and (error.start, error.end) == (1, 2) for error in errors)
+
 
 def check_raw_unicode_escape():
     source = "\0\n\\u1234\x1aÿĀ€\ud800\udfff😀"
