@@ -162,6 +162,8 @@ fn boxed_sys_export(name: &str) -> bool {
             | "implementation"
             | "exit"
             | "exc_info"
+            | "excepthook"
+            | "__excepthook__"
             | "exception"
     )
 }
