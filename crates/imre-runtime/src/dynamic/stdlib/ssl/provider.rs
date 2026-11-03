@@ -877,12 +877,17 @@ impl Session {
         Ok(der)
     }
 
+    pub(crate) fn send(&mut self, bytes: &[u8]) -> Result<usize, Failure> {
+        let n = self.blocking_io(Operation::Write(bytes))?;
+        if (n == 0 && !bytes.is_empty()) || n > bytes.len() {
+            return Err(Failure::Other("invalid SSL_write byte count".into()));
+        }
+        Ok(n)
+    }
+
     pub(crate) fn sendall(&mut self, mut bytes: &[u8]) -> Result<(), Failure> {
         while !bytes.is_empty() {
-            let n = self.blocking_io(Operation::Write(bytes))?;
-            if n == 0 || n > bytes.len() {
-                return Err(Failure::Other("invalid SSL_write byte count".into()));
-            }
+            let n = self.send(bytes)?;
             bytes = &bytes[n..];
         }
         Ok(())
