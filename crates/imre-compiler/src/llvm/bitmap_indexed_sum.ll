@@ -72,25 +72,38 @@ define internal i1 @imre_bitmap_tag(ptr %bits, i64 %words, i64 %pos) alwaysinlin
 ; A coprime modular step permutes the whole list in each complete period.
 ; A long partial period can subtract the omitted tags from one complete period.
 ; Both folds require an exact sum for every possible prefix.
-; Keep one-time orbit planning separate from the ordered traversal.
-define internal { double, i64 } @imre_bitmap_permutation_prefix(ptr %view, i64 %start, i64 %stop, i64 %n, i64 %first, i64 %step, i64 %prefix_ones, double %initial, double %zero, double %one) noinline nounwind {
+; Keep one-time orbit planning compact and separate from the ordered traversal.
+define internal { double, i64 } @imre_bitmap_permutation_prefix(ptr %view, i64 %start, i64 %stop, i64 %n, i64 %first, i64 %step, i64 %prefix_ones, double %initial, double %zero, double %one) noinline optsize nounwind {
 entry:
   %distance = sub i64 %stop, %start
   %remaining = lshr i64 %distance, 1
   %bits_ptr = getelementptr ptr, ptr %view, i64 2
   %bits = load ptr, ptr %bits_ptr
   %precounted = icmp eq ptr %bits, null
-  br i1 %precounted, label %sparse_counts, label %plan
-sparse_counts:
-  ; Sparse traversal supplied visit counts directly. The same exactness bound
-  ; and signal checkpoint apply before committing either representation.
+  br i1 %precounted, label %known_counts, label %plan
+known_counts:
+  %period = phi i64 [ 0, %entry ], [ %orbit_length, %repeated ]
+  ; Both paths know the number of visits and require an exact sum.
   %safe_zero = call i1 @imre_exact_fadd_bound(double %initial, double %zero, i64 %remaining)
   %safe_one = call i1 @imre_exact_fadd_bound(double %initial, double %one, i64 %remaining)
   %safe_terms = and i1 %safe_zero, %safe_one
   %tripped = load atomic volatile i8, ptr @imre_signal_tripped monotonic, align 1
   %sparse_clear = icmp eq i8 %tripped, 0
   %safe = and i1 %safe_terms, %sparse_clear
-  br i1 %safe, label %counts, label %miss
+  br i1 %safe, label %count_source, label %miss
+count_source:
+  br i1 %precounted, label %counts, label %orbit_count
+orbit_count:
+  %cycle_words_ptr = getelementptr i64, ptr %view, i64 3
+  %cycle_words = load i64, ptr %cycle_words_ptr
+  %repetitions = udiv i64 %remaining, %period
+  %tail = urem i64 %remaining, %period
+  %cycle_ones = call i64 @imre_bitmap_reverse_ones(ptr %bits, i64 %cycle_words, i64 %n, i64 %first, i64 %step, i64 %period, i64 %repetitions, i64 %tail)
+  %abandoned = icmp slt i64 %cycle_ones, 0
+  %after_count = load atomic volatile i8, ptr @imre_signal_tripped monotonic, align 1
+  %pending_after = icmp ne i8 %after_count, 0
+  %abort = or i1 %abandoned, %pending_after
+  br i1 %abort, label %miss, label %counts
 plan:
   ; Counting a tag also checks for interrupts. Require at most one omitted
   ; row per two visited rows before choosing the complement.
@@ -109,12 +122,22 @@ plan:
   %room = icmp uge i64 %remaining, %budget
   %sparse = and i1 %narrow, %room
   %worthwhile = or i1 %enough, %sparse
-  %candidate = and i1 %full_view, %worthwhile
+  %long_scan = icmp uge i64 %remaining, 256
+  %try_orbit = or i1 %worthwhile, %long_scan
+  %candidate = and i1 %full_view, %try_orbit
   br i1 %candidate, label %orbit, label %miss
 orbit:
   %proof = call { i64, i64 } @imre_modular_bezout(i64 %step, i64 %n)
   %gcd = extractvalue { i64, i64 } %proof, 0
   %permutation = icmp eq i64 %gcd, 1
+  br i1 %permutation, label %whole_list, label %repeated
+repeated:
+  ; The modular index returns to its first row after n/gcd visits.
+  %orbit_length = udiv exact i64 %n, %gcd
+  %quarter = lshr i64 %remaining, 2
+  %cheap = icmp ule i64 %orbit_length, %quarter
+  br i1 %cheap, label %known_counts, label %miss
+whole_list:
   %periods = udiv i64 %remaining, %n
   %whole = mul i64 %periods, %n
   %partial = sub i64 %remaining, %whole
@@ -129,7 +152,7 @@ orbit:
   %exact_zero = call i1 @imre_exact_fadd_bound(double %initial, double %zero, i64 %bitmap_visits)
   %exact_one = call i1 @imre_exact_fadd_bound(double %initial, double %one, i64 %bitmap_visits)
   %exact = and i1 %exact_zero, %exact_one
-  %eligible = and i1 %exact, %permutation
+  %eligible = and i1 %exact, %worthwhile
   br i1 %eligible, label %interrupt, label %miss
 interrupt:
   %signal = load atomic volatile i8, ptr @imre_signal_tripped monotonic, align 1
@@ -155,7 +178,7 @@ direct:
   br i1 %shorter, label %complement, label %counts
 complement:
   ; Walk backwards from the start of the next period to count the omitted rows.
-  %absent = call i64 @imre_bitmap_omitted_ones(ptr %bits, i64 %words, i64 %n, i64 %first, i64 %step, i64 %omitted)
+  %absent = call i64 @imre_bitmap_reverse_ones(ptr %bits, i64 %words, i64 %n, i64 %first, i64 %step, i64 %omitted, i64 1, i64 0)
   br label %partial_count
 partial_count:
   %speculative = phi i64 [ %absent, %complement ], [ %hits, %selected ]
@@ -165,8 +188,8 @@ partial_count:
   %included = add i64 %full_ones, %partial_ones
   br i1 %interrupted, label %miss, label %counts
 counts:
-  %visits = phi i64 [ %bitmap_visits, %direct ], [ %bitmap_visits, %partial_count ], [ %remaining, %sparse_counts ]
-  %ones = phi i64 [ %full_ones, %direct ], [ %included, %partial_count ], [ %prefix_ones, %sparse_counts ]
+  %visits = phi i64 [ %bitmap_visits, %direct ], [ %bitmap_visits, %partial_count ], [ %remaining, %count_source ], [ %remaining, %orbit_count ]
+  %ones = phi i64 [ %full_ones, %direct ], [ %included, %partial_count ], [ %prefix_ones, %count_source ], [ %cycle_ones, %orbit_count ]
   %zeros = sub i64 %visits, %ones
   %nf_zero = uitofp i64 %zeros to double
   %nf_one = uitofp i64 %ones to double
@@ -192,14 +215,15 @@ done:
   ret { double, i64 } %result
 }
 
-; Count tags in the shorter, unvisited suffix. A pending interrupt discards the
-; speculative count before the caller publishes any loop state.
-define internal i64 @imre_bitmap_omitted_ones(ptr %bits, i64 %words, i64 %n, i64 %first, i64 %step, i64 %omitted) nounwind {
+; Walk backwards from the first row. Over one orbit, left-1 is the forward
+; visit number, so the first tail rows contribute one extra visit. An omitted
+; suffix uses unit weights and no tail.
+define internal i64 @imre_bitmap_reverse_ones(ptr %bits, i64 %words, i64 %n, i64 %first, i64 %step, i64 %length, i64 %periods, i64 %tail) nounwind {
 entry:
   br label %loop
 loop:
   %at = phi i64 [ %first, %entry ], [ %prev, %visit ]
-  %left = phi i64 [ %omitted, %entry ], [ %rest, %visit ]
+  %left = phi i64 [ %length, %entry ], [ %rest, %visit ]
   %count = phi i64 [ 0, %entry ], [ %added, %visit ]
   %signal = load atomic volatile i8, ptr @imre_signal_tripped monotonic, align 1
   %pending = icmp ne i8 %signal, 0
@@ -210,8 +234,11 @@ visit:
   %wrapped = add i64 %raw, %n
   %prev = select i1 %wrap, i64 %wrapped, i64 %raw
   %bit = call i1 @imre_bitmap_tag(ptr %bits, i64 %words, i64 %prev)
-  %one = zext i1 %bit to i64
-  %added = add i64 %count, %one
+  %in_tail = icmp ule i64 %left, %tail
+  %extra = zext i1 %in_tail to i64
+  %weight = add i64 %periods, %extra
+  %hits = select i1 %bit, i64 %weight, i64 0
+  %added = add i64 %count, %hits
   %rest = sub i64 %left, 1
   %done = icmp eq i64 %rest, 0
   br i1 %done, label %exit, label %loop

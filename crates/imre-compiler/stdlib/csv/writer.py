@@ -39,11 +39,10 @@ class _Writer:
 
             forbid_quote = (mode == QUOTE_NONE or
                             (field is None and mode in (QUOTE_STRINGS, QUOTE_NOTNULL)))
-            if isinstance(field, str):
-                # Take the underlying Unicode value, without a subclass __str__ override.
-                text = "".join((field,))
-            else:
-                text = "" if field is None else str(field)
+            if not isinstance(field, str):
+                field = "" if field is None else str(field)
+            # Use the underlying Unicode value even when __str__ returns a subclass.
+            text = "".join((field,))
             if not text and d.delimiter == " " and d.skipinitialspace:
                 if forbid_quote:
                     raise Error("empty field must be quoted if delimiter is a space "

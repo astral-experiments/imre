@@ -1,28 +1,45 @@
 //! CPython 3.14.5 Shift JIS (JIS X 0201 and JIS X 0208).
-use super::{DecodeIssue, Error, HashMap, LazyLock, Result};
+use super::{DecodeIssue, Error, Result};
 
 const COLUMNS: usize = 188;
 const UNMAPPED: u16 = 0xfffe;
 // Generated with scripts/generate-shift-jis.py. The rows and columns omit byte-range gaps.
 const TABLE: &[u8; 42 * COLUMNS * 2] = include_bytes!("shift_jis.bin");
 
-static ENCODE: LazyLock<HashMap<char, [u8; 2]>> = LazyLock::new(|| {
-    TABLE
-        .chunks_exact(2)
-        .enumerate()
-        .filter_map(|(i, pair)| {
-            let scalar = u16::from_le_bytes([pair[0], pair[1]]);
-            if scalar == UNMAPPED {
-                return None;
-            }
+// Dense pages cover only the Unicode high bytes present in the decode table.
+const PAGE_INDEX: ([u8; 256], usize) = {
+    let mut pages = [u8::MAX; 256];
+    let mut count = 0;
+    let mut i = 0;
+    while i < TABLE.len() {
+        let scalar = u16::from_le_bytes([TABLE[i], TABLE[i + 1]]);
+        let page = TABLE[i + 1] as usize;
+        if scalar != UNMAPPED && pages[page] == u8::MAX {
+            pages[page] = count as u8;
+            count += 1;
+        }
+        i += 2;
+    }
+    (pages, count)
+};
+
+static ENCODE: [[[u8; 2]; 256]; PAGE_INDEX.1] = {
+    let mut pages = [[[0; 2]; 256]; PAGE_INDEX.1];
+    let mut i = 0;
+    while i < TABLE.len() / 2 {
+        let low = TABLE[2 * i];
+        let high = TABLE[2 * i + 1];
+        if u16::from_le_bytes([low, high]) != UNMAPPED {
             let row = (i / COLUMNS) as u8;
             let col = (i % COLUMNS) as u8;
             let lead = if row < 31 { 0x81 + row } else { 0xc1 + row };
             let trail = if col < 63 { 0x40 + col } else { 0x41 + col };
-            Some((char::from_u32(u32::from(scalar)).unwrap(), [lead, trail]))
-        })
-        .collect()
-});
+            pages[PAGE_INDEX.0[high as usize] as usize][low as usize] = [lead, trail];
+        }
+        i += 1;
+    }
+    pages
+};
 
 /// Return a complete one- or two-byte character, including CPython's two encode-only aliases.
 pub(crate) fn encode_char(ch: char) -> Option<([u8; 2], usize)> {
@@ -31,7 +48,12 @@ pub(crate) fn encode_char(ch: char) -> Option<([u8; 2], usize)> {
         '\u{a5}' => 0x5c,
         '\u{203e}' => 0x7e,
         '\u{ff61}'..='\u{ff9f}' => 0xa1 + (u32::from(ch) - 0xff61) as u8,
-        _ => return ENCODE.get(&ch).map(|pair| (*pair, 2)),
+        _ => {
+            let [low, high] = u16::try_from(u32::from(ch)).ok()?.to_le_bytes();
+            let page = ENCODE.get(usize::from(PAGE_INDEX.0[usize::from(high)]))?;
+            let pair = page[usize::from(low)];
+            return (pair[0] != 0).then_some((pair, 2));
+        }
     };
     Some(([byte, 0], 1))
 }

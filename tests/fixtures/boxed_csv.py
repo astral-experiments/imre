@@ -51,3 +51,11 @@ def current():
     writer = csv.writer(stream, delimiter=Syntax(";"), lineterminator=ending)
     print(type(writer.dialect.delimiter) is str, writer.dialect.lineterminator is ending)
     print(writer.writerow(["a;", "b|"]), stream.getvalue())
+
+    class Product:
+        def __str__(self):
+            return Syntax('12" box')
+
+    stream = StringIO()
+    assert csv.writer(stream).writerow([Product()]) == 12
+    assert stream.getvalue() == '"12"" box"\r\n'

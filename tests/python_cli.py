@@ -1261,6 +1261,13 @@ def check_unittest_module_main(imre, root, run):
     assert with_locals.returncode == 1 and b"FAILED (failures=1, errors=1)" in with_locals.stderr, with_locals
     assert local_line in with_locals.stderr.splitlines(), with_locals
 
+    (package / "other.py").write_text("raise AssertionError('outside discovery pattern')\n")
+    discovered = run(imre, "-m", "unittest", "discover", "-v", "-s", package.name, "-t", ".",
+                     "-p", "sample.py", "-k", "Passing.test_one")
+    assert discovered.returncode == 0 and discovered.stdout == (passing + ".test_one\n").encode(), discovered
+    assert f"test_one ({passing}.test_one) ... ok".encode() in discovered.stderr.splitlines(), discovered
+    assert b"Ran 1 test in " in discovered.stderr, discovered
+
 
 def check_unittest_file_discovery(imre, root, run):
     entry = root / "discover_after_build.py"
@@ -3002,6 +3009,11 @@ def report(text):
                     "-IB", object_io, certdata,
                     native_args=("run", object_io, "--quiet", "--", certdata), native_timeout=600,
                 )
+                cert_chain = fixtures / "ssl_cert_chain.py"
+                compare(
+                    "-IB", cert_chain, certdata,
+                    native_args=("run", cert_chain, "--quiet", "--", certdata), native_timeout=600,
+                )
                 unwrap = fixtures / "ssl_object_unwrap.py"
                 compare(
                     "-IB", unwrap, certdata,
@@ -3359,6 +3371,7 @@ for name in ("md4", "ripemd160"):
             "boxed_functools_reduce.py",
             "boxed_functools_singledispatch.py",
             "boxed_functools_partialmethod.py",
+            "boxed_functools_partial_state.py",
             "boxed_asynccontextmanager_protocol.py",
             "boxed_contextmanager.py",
             "boxed_contextlib_aclosing.py",

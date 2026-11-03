@@ -20,6 +20,22 @@ from inspect import (
 _sentinel = object()
 
 
+def getargs(co):
+    """Return the named, variadic positional and variadic keyword arguments of a code object."""
+    if not iscode(co):
+        raise TypeError(f"{co!r} is not a code object")
+    args = []
+    varargs = varkw = None
+    for kind, name in _signature_layout(co):
+        if kind == _VAR_POSITIONAL:
+            varargs = name
+        elif kind == _VAR_KEYWORD:
+            varkw = name
+        else:
+            args.append(name)
+    return Arguments(args, varargs, varkw)
+
+
 def getattr_static(obj, attr, default=_sentinel):
     """Retrieve an attribute without invoking descriptors or attribute hooks."""
     value = _static_member(obj, attr, _sentinel)
