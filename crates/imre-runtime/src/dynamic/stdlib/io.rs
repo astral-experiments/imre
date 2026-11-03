@@ -890,15 +890,17 @@ pub(in super::super) fn call(
         };
         return Err(Error::new("TypeError", message));
     };
-    if owner_kind == Some("StringIO") && name == "__new__" {
+    if let Some(kind @ ("BytesIO" | "StringIO")) = owner_kind
+        && name == "__new__"
+    {
         let Some(&class) = rest.first() else {
             return Err(Error::new(
                 "TypeError",
-                "_io.StringIO.__new__(): not enough arguments",
+                format!("_io.{kind}.__new__(): not enough arguments"),
             ));
         };
         if !ctx.direct_subclass(class, owner) {
-            return Err(ctx.invalid_new_subtype("_io.StringIO", class));
+            return Err(ctx.invalid_new_subtype(&format!("_io.{kind}"), class));
         }
         return Ok(ctx.instance(class, None));
     }
@@ -1297,17 +1299,21 @@ fn string_io_getstate(ctx: &mut Context, receiver: Id) -> Result<Id> {
     let value = ctx.alloc(value.into());
     let newline = newline.map_or(NONE, |s| ctx.text(s));
     let position = ctx.int(position as i64);
-    let dict = if let Value::Instance {
+    let dict = copy_stream_dict(ctx, receiver)?;
+    Ok(ctx.alloc(Value::Tuple(vec![value, newline, position, dict])))
+}
+
+fn copy_stream_dict(ctx: &mut Context, receiver: Id) -> Result<Id> {
+    if let Value::Instance {
         namespace: Some(dict),
         ..
     } = *ctx.heap.get(receiver)
     {
         let storage = ctx.dict_storage(dict).expect("instance dictionary");
-        super::builtins::copy_dict(ctx, dict, storage)?
+        super::builtins::copy_dict(ctx, dict, storage)
     } else {
-        NONE
-    };
-    Ok(ctx.alloc(Value::Tuple(vec![value, newline, position, dict])))
+        Ok(NONE)
+    }
 }
 
 fn string_io_setstate(ctx: &mut Context, receiver: Id, state: Id) -> Result<Id> {
@@ -1358,18 +1364,22 @@ fn string_io_setstate(ctx: &mut Context, receiver: Id, state: Id) -> Result<Id> 
         ));
     }
     file.seek_memory(position, 0)?;
+    restore_stream_dict(ctx, receiver, dict, "fourth")
+}
+
+fn restore_stream_dict(ctx: &mut Context, receiver: Id, dict: Id, item: &str) -> Result<Id> {
     if dict != NONE {
         if ctx.dict_storage(dict).is_none() {
             return Err(Error::new(
                 "TypeError",
                 format!(
-                    "fourth item of state should be a dict, got a {}",
+                    "{item} item of state should be a dict, got a {}",
                     ctx.type_name(dict),
                 ),
             ));
         }
         let Value::Instance { namespace, .. } = ctx.heap.get_mut(receiver) else {
-            unreachable!("StringIO methods have an instance receiver");
+            unreachable!("memory stream methods have an instance receiver");
         };
         if let Some(existing) = *namespace {
             let storage = ctx.dict_storage(existing).expect("instance dictionary");

@@ -8,7 +8,10 @@ use super::{Context, Error, FALSE, Id, MemoryStream, NONE, Result, TRUE, Value};
 use crate::objects::Memory;
 
 pub(super) const METHODS: &[&str] = &[
+    "__new__",
     "__init__",
+    "__getstate__",
+    "__setstate__",
     "__iter__",
     "__next__",
     "read",
@@ -37,6 +40,8 @@ pub(in crate::dynamic) struct BytesIo {
     // A fresh stream can read its exact immutable input directly until a write or getbuffer().
     // While deferred, storage holds only the cursor and snapshot roots the input in the heap.
     deferred: Cell<bool>,
+    // Copying the pickle dictionary can close the stream before __getstate__ reads its cursor.
+    closed_position: Cell<u64>,
     // The heap traces the boxed immutable snapshot until a write replaces its contents.
     pub(in crate::dynamic) snapshot: Cell<Option<Id>>,
 }
@@ -56,6 +61,7 @@ impl BytesIo {
         Self {
             storage: ctx.alloc(Value::BytesIoStorage(Some(Rc::new(Memory::new(data))))),
             deferred: Cell::new(false),
+            closed_position: Cell::new(0),
             snapshot: Cell::new(None),
         }
     }
@@ -225,6 +231,55 @@ impl BytesIo {
         Ok(ctx.alloc(Value::List(lines)))
     }
 
+    fn setstate(&self, ctx: &mut Context, receiver: Id, state: Id) -> Result<Id> {
+        let items = ctx.tuple_items(state)?;
+        let Some(&[value, position, dict, ..]) = items.as_deref() else {
+            return Err(Error::new(
+                "TypeError",
+                format!(
+                    "{}.__setstate__ argument should be 3-tuple, got {}",
+                    ctx.type_name(receiver),
+                    ctx.type_name(state),
+                ),
+            ));
+        };
+        ctx.check_bytearray_resize(self.storage)?;
+        self.reset(ctx);
+        self.write_input(ctx, value)?;
+        let position = ctx
+            .as_int(position)
+            .map_err(|_| {
+                Error::new(
+                    "TypeError",
+                    format!(
+                        "second item of state must be an integer, not {}",
+                        ctx.type_name(position)
+                    ),
+                )
+            })?
+            .to_i64()
+            .ok_or_else(|| {
+                Error::new(
+                    "OverflowError",
+                    "Python int too large to convert to C ssize_t",
+                )
+            })?;
+        let position = u64::try_from(position)
+            .map_err(|_| Error::new("ValueError", "position value cannot be negative"))?;
+        self.file_mut(ctx)?.seek(SeekFrom::Start(position))?;
+        super::restore_stream_dict(ctx, receiver, dict, "third")
+    }
+
+    fn reset(&self, ctx: &mut Context) {
+        if let Ok(file) = self.file_mut(ctx) {
+            file.reset_position_and_size();
+        } else {
+            self.closed_position.set(0);
+        }
+        self.deferred.set(false);
+        self.snapshot.set(None);
+    }
+
     fn init(
         &self,
         ctx: &mut Context,
@@ -250,11 +305,7 @@ impl BytesIo {
         } else {
             args.first().copied().unwrap_or(NONE)
         };
-        if let Ok(file) = self.file_mut(ctx) {
-            file.reset_position_and_size();
-        }
-        self.deferred.set(false);
-        self.snapshot.set(None);
+        self.reset(ctx);
         ctx.check_bytearray_resize(self.storage)?;
         if initial != NONE {
             if matches!(ctx.heap.get(initial), Value::Bytes(_)) {
@@ -454,10 +505,18 @@ pub(super) fn call(
             };
             Ok(ctx.int(pos as i64))
         }
-        "tell" => {
-            let pos = stream.file_mut(ctx)?.seek(SeekFrom::Current(0))?;
-            Ok(ctx.int(pos as i64))
+        "tell" => Ok(ctx.int(stream.file(ctx)?.position() as i64)),
+        "__getstate__" => {
+            let value = stream.getvalue(ctx)?;
+            ctx.heap.keep(value);
+            let dict = super::copy_stream_dict(ctx, receiver)?;
+            let pos = stream
+                .file(ctx)
+                .map_or_else(|_| stream.closed_position.get(), Memory::position);
+            let pos = ctx.int(pos as i64);
+            Ok(ctx.alloc(Value::Tuple(vec![value, pos, dict])))
         }
+        "__setstate__" => stream.setstate(ctx, receiver, args[0]),
         "getvalue" => stream.getvalue(ctx),
         "getbuffer" => {
             stream.file(ctx)?;
@@ -475,6 +534,9 @@ pub(super) fn call(
         }),
         "close" => {
             ctx.check_bytearray_resize(stream.storage)?;
+            if let Ok(file) = stream.file(ctx) {
+                stream.closed_position.set(file.position());
+            }
             *ctx.heap.get_mut(stream.storage) = Value::BytesIoStorage(None);
             stream.deferred.set(false);
             stream.snapshot.set(None);
