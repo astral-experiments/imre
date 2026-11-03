@@ -29,6 +29,7 @@ def current():
     print(observed() is None, equal in caches[0], caches[0][collision])
     equal_weak_value_keys(equal, Key("first"))
     weak_key_constructor()
+    weak_struct_key()
     generic_alias_weakref()
     coroutine_weak_value()
     reference_repr()
@@ -124,6 +125,26 @@ def weak_key_constructor():
     del key
     collect()
     assert observed() is None and len(mapping) == 0
+
+
+def weak_struct_key():
+    from gc import collect
+    from struct import Struct
+
+    layout = Struct(">H")
+    mapping = WeakKeyDictionary({layout: "header"})
+    copy = mapping.copy()
+    callbacks = []
+    handle = ref(layout, callbacks.append)
+    key = next(iter(copy))
+    del layout
+    collect()
+    assert handle() is key and mapping[key] == "header"
+    assert key.unpack(b"\x00\x2a") == (42,)
+    del key
+    collect()
+    assert not mapping and not copy
+    assert handle() is None and callbacks == [handle]
 
 
 def reference_repr():
