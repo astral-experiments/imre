@@ -1161,6 +1161,7 @@ const RUNTIME_PROVIDERS: &[&str] = &[
     "fractions",
     "functools",
     "genericpath",
+    "gzip",
     "hashlib",
     "itertools",
     "json",

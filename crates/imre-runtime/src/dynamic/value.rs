@@ -1327,6 +1327,7 @@ pub(super) enum Value {
     },
     File(crate::shared::Shared<super::stdlib::BinaryFile>),
     TextFile(BoxedTextFile),
+    GzipReader(crate::Shared<std::cell::RefCell<crate::objects::FileState>>),
     RegexScanner {
         pattern: Id,
         subject: Id,
@@ -1439,6 +1440,7 @@ impl Value {
             Self::ProcessHandle { .. } => "_imre_subprocess.Handle",
             Self::ProcessPreparation(_) => "_imre_subprocess.Prepared",
             Self::BufferedRandom(..) => "_io.BufferedRandom",
+            Self::GzipReader(_) => "object",
             Self::GenericAliasIterator(_) => "generic_alias_iterator",
             Self::SequenceIterator { .. } => "iterator",
             Self::ReverseSequence { .. } => "reversed",
@@ -2093,6 +2095,7 @@ impl Value {
             | Self::PartialPlaceholder
             | Self::TokenMissing
             | Self::ProcessPreparation(_)
+            | Self::GzipReader(_)
             | Self::ProcessHandle { .. } => {}
             #[cfg(unix)]
             Self::MemoryBio(_)
