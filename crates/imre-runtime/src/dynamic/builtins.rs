@@ -775,6 +775,7 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
                     | "recvfrom"
                     | "recv_into"
                     | "makefile"
+                    | "dup"
                     | "send"
                     | "sendall"
                     | "sendto"

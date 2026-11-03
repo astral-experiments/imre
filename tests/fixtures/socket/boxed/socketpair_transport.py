@@ -1,4 +1,5 @@
 import errno
+import os
 import socket
 from socket import socketpair
 
@@ -35,6 +36,20 @@ with left, right:
     assert right.recv(2) == b"fi"
     assert right.recv(10) == b""
     assert right.recv(10) == b"last"
+
+left, right = socketpair()
+with right, left.dup() as copy:
+    old_fd = left.fileno()
+    left.close()
+    # Reuse the exact number for the peer before closing and dropping the old wrapper.
+    os.dup2(right.fileno(), old_fd, inheritable=False)
+    try:
+        left.close()
+        del left
+        os.write(old_fd, b"x")
+        assert copy.recv(1) == b"x"
+    finally:
+        os.close(old_fd)
 
 previous = socket.getdefaulttimeout()
 try:

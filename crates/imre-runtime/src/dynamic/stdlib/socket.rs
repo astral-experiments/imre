@@ -1204,6 +1204,7 @@ pub(super) fn call(
         "fileno" | "listen" | "accept" | "getsockname" | "getpeername" => {
             return endpoint_method(ctx, method, &s, args);
         }
+        "dup" => return Ok(ctx.alloc(Value::Socket(native::dup(&s)?))),
         "get_inheritable" => {
             let enabled = crate::objects::os::INHERITABLE.enabled(native::fd(&s))?;
             return Ok(if enabled { super::TRUE } else { super::FALSE });
