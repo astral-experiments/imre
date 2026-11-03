@@ -272,12 +272,14 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
                     const UPSTREAM: &str = include_str!(
                         "../../../benchmarks/cpython_stdlib/full/base64/upstream/Lib/base64.py"
                     );
+                    let from = |start: &str| {
+                        &UPSTREAM[UPSTREAM.find(start).expect("pinned base64 section")..]
+                    };
                     let section = |start: &str, end: &str| {
-                        let start = UPSTREAM.find(start).expect("pinned base64 section");
-                        let (section, _) = UPSTREAM[start..]
+                        from(start)
                             .split_once(end)
-                            .expect("pinned base64 section end");
-                        section
+                            .expect("pinned base64 section end")
+                            .0
                     };
                     [
                         "import binascii\nimport struct\n",
@@ -287,7 +289,7 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
                         section("def b16decode(", "# Ascii85 encoding/decoding"),
                         include_str!("../stdlib/base85_encode.py"),
                         section("def a85decode(", "# The following code is originally taken"),
-                        section("def b85decode(", "def main():"),
+                        from("def b85decode("),
                     ]
                     .join("\n")
                 }),

@@ -1615,6 +1615,12 @@ def main():
         for module in ("json", "json.tool"):
             compare("-B", "-m", module, "--compact", json_input)
 
+        binary_input = root / "input.bin"
+        binary_input.write_bytes(b"a\xffb\n" * 15)
+        compare("-B", "-m", "base64", "-e", binary_input, native_timeout=600)
+        binary_input.write_bytes(b"Yf9iCg==\n")
+        compare("-B", "-m", "base64", "-d", binary_input, native_timeout=600)
+
         entry = root / "entry"
         entry.mkdir()
         (entry / "__main__.py").write_text(
