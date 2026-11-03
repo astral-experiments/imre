@@ -1471,6 +1471,9 @@ def no_type_check(arg):
             # Native descriptor names advertised by dir() need not be materialized.
             names = set()
             for base in getattr(arg, '__mro__', (arg,)):
+                # object defines no Python functions or nested classes to mark.
+                if base is object:
+                    continue
                 for key, value in getattr(base, '__dict__', {}).items():
                     if key == '__annotations__' and type(value) is dict:
                         # An annotations dict cannot be a declared function or class.
