@@ -2360,6 +2360,8 @@ impl IntrinsicModule {
             (Self::Codecs, "BOM_UTF32_LE") => Intrinsic::CodecBom(b"\xff\xfe\0\0"),
             (Self::Codecs, "BOM_UTF32_BE") => Intrinsic::CodecBom(b"\0\0\xfe\xff"),
             (Self::Socket | Self::SocketNative, "herror") => Intrinsic::HError,
+            (Self::Socket, "timeout") => Intrinsic::ScopedObjectExport("socket.timeout"),
+            (Self::SocketNative, "timeout") => Intrinsic::ScopedObjectExport("_socket.timeout"),
             (Self::SocketNative, name) => Intrinsic::ObjectRuntimeExport(match name {
                 "gaierror" => "_socket.gaierror",
                 "getnameinfo" => "_socket.getnameinfo",
@@ -5271,13 +5273,14 @@ impl<'a> Loader<'a> {
                     | IntrinsicModule::Sha3
                     | IntrinsicModule::Md5
                     | IntrinsicModule::Atexit
-                    | IntrinsicModule::SocketNative
                     | IntrinsicModule::Imp
                     | IntrinsicModule::ImportlibAbc
                     | IntrinsicModule::ImportlibLoaderAbc
                     | IntrinsicModule::ImportlibBootstrapExternal
                     | IntrinsicModule::ImportlibResourcesAbc
-            );
+            ) || module == IntrinsicModule::SocketNative
+                && imports
+                    .is_none_or(|names| names.iter().any(|alias| alias.name.as_str() != "timeout"));
         }
         if module == Some(IntrinsicModule::Dataclasses)
             && imports.is_none_or(|names| {

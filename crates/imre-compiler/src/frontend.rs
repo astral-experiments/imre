@@ -5616,6 +5616,9 @@ impl<'a> Checker<'a> {
             Some(Binding::Intrinsic(Intrinsic::BadGzipFile)) => Some(28),
             Some(Binding::Intrinsic(Intrinsic::BadZipFile)) => Some(36),
             Some(Binding::Intrinsic(Intrinsic::CsvError)) => Some(67),
+            Some(Binding::Intrinsic(Intrinsic::ScopedObjectExport(
+                "socket.timeout" | "_socket.timeout",
+            ))) => exception_kind("TimeoutError"),
             Some(Binding::Intrinsic(Intrinsic::GaiError)) => Some(68),
             Some(Binding::Intrinsic(Intrinsic::HError)) => Some(72),
             Some(Binding::Intrinsic(Intrinsic::BinasciiError)) => Some(69),
