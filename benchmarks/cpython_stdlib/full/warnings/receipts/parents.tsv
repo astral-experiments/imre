@@ -10,8 +10,8 @@ ordinal	id	occurrence	disposition	stock	O0	O3	stock_lines	O0_lines	O3_lines	rece
 9	test.test_warnings.CCatchWarningTests.test_record_override_showwarning_before	1	paired	PASS	PASS	PASS	14/218/219/220	14/218/219/220	14/218/219/220	dfe0f18e
 10	test.test_warnings.CCatchWarningTests.test_record_override_showwarning_inside	1	paired	PASS	PASS	PASS	15/221/222/223	15/221/222/223	15/221/222/223	dfe0f18e
 11	test.test_warnings.CEnvironmentVariableTests.test_comma_separated_warnings	1	paired	PASS	PASS	PASS	7/29/30/31	7/29/30/31	7/29/30/31	dfe0f18e-children
-12	test.test_warnings.CEnvironmentVariableTests.test_conflicting_envvar_and_command_line	1	native-child-nonpass	PASS	FAIL	FAIL	8/32/33/34	8/32/33/34	8/32/33/34	dfe0f18e-children
-13	test.test_warnings.CEnvironmentVariableTests.test_default_filter_configuration	1	native-child-nonpass	PASS	FAIL	FAIL	9/35/36/37	9/35/36/37	9/35/36/37	dfe0f18e-children
+12	test.test_warnings.CEnvironmentVariableTests.test_conflicting_envvar_and_command_line	1	paired	PASS	PASS	PASS	6/11/12/13	6/11/12/13	6/11/12/13	58f847de
+13	test.test_warnings.CEnvironmentVariableTests.test_default_filter_configuration	1	paired	PASS	PASS	PASS	7/14/15/16	7/14/15/16	7/14/15/16	58f847de
 14	test.test_warnings.CEnvironmentVariableTests.test_envvar_and_command_line	1	paired	PASS	PASS	PASS	10/38/39/40	10/38/39/40	10/38/39/40	dfe0f18e-children
 15	test.test_warnings.CEnvironmentVariableTests.test_nonascii	1	paired	PASS	PASS	PASS	11/41/42/43	11/41/42/43	11/41/42/43	dfe0f18e-children
 16	test.test_warnings.CEnvironmentVariableTests.test_single_warning	1	paired	PASS	PASS	PASS	12/44/45/46	12/44/45/46	12/44/45/46	dfe0f18e-children
@@ -107,7 +107,7 @@ ordinal	id	occurrence	disposition	stock	O0	O3	stock_lines	O0_lines	O3_lines	rece
 106	test.test_warnings.PyCatchWarningTests.test_record_override_showwarning_before	1	paired	PASS	PASS	PASS	111/517/518/519	111/517/518/519	111/517/518/519	dfe0f18e
 107	test.test_warnings.PyCatchWarningTests.test_record_override_showwarning_inside	1	paired	PASS	PASS	PASS	112/520/521/522	112/520/521/522	112/520/521/522	dfe0f18e
 108	test.test_warnings.PyEnvironmentVariableTests.test_comma_separated_warnings	1	paired	PASS	PASS	PASS	15/53/54/55	15/53/54/55	15/53/54/55	dfe0f18e-children
-109	test.test_warnings.PyEnvironmentVariableTests.test_conflicting_envvar_and_command_line	1	native-child-nonpass	PASS	FAIL	FAIL	16/56/57/58	16/56/57/58	16/56/57/58	dfe0f18e-children
+109	test.test_warnings.PyEnvironmentVariableTests.test_conflicting_envvar_and_command_line	1	paired	PASS	PASS	PASS	8/17/18/19	8/17/18/19	8/17/18/19	58f847de
 110	test.test_warnings.PyEnvironmentVariableTests.test_default_filter_configuration	1	paired	PASS	PASS	PASS	17/59/60/61	17/59/60/61	17/59/60/61	dfe0f18e-children
 111	test.test_warnings.PyEnvironmentVariableTests.test_envvar_and_command_line	1	paired	PASS	PASS	PASS	18/62/63/64	18/62/63/64	18/62/63/64	dfe0f18e-children
 112	test.test_warnings.PyEnvironmentVariableTests.test_nonascii	1	paired	PASS	PASS	PASS	19/65/66/67	19/65/66/67	19/65/66/67	dfe0f18e-children
