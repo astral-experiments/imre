@@ -268,7 +268,7 @@ impl Emitter<'_, '_> {
                 include_str!("bitmap_indexed_sum.ll"),
             );
             let initial = self.borrow_slot(*sum);
-            let result = self.instruction(format!("call {{ double, i64 }} @imre_bitmap_indexed_sum(ptr {view}, i64 {start}, i64 {stop}, i64 {modulus}, i64 {scale}, i64 {offset}, double {}, double {}, double {})", initial.operand, terms[0], terms[1]));
+            let result = self.instruction(format!("call {{ double, i64 }} @imre_bitmap_indexed_sum(ptr {view}, i64 {start}, i64 {stop}, i64 {modulus}, i64 {}, i64 {alternate}, i64 {scale}, i64 {offset}, double {}, double {}, double {})", length.operand, initial.operand, terms[0], terms[1]));
             let end = self.instruction(format!("extractvalue {{ double, i64 }} {result}, 1"));
             let advanced = self.instruction(format!("icmp ne i64 {end}, {start}"));
             self.branch(&advanced, &publish, &resume);
