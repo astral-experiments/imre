@@ -211,6 +211,27 @@ assert not ran
 import collections.abc as cabc
 
 
+class Callback(t.Generic[rendered_spec, K]):
+    pass
+
+
+callback = Callback[[int, list[str]], bool]
+assert callback.__args__ == ((int, list[str]), bool)
+assert repr(callback) == f"{__name__}.Callback[[int, list[str]], bool]"
+assert repr(Callback[[], bool]) == f"{__name__}.Callback[[], bool]"
+assert repr(t.Literal[((int, (str, bool)),)]) == "typing.Literal[[int, [str, bool]]]"
+
+
+class ArgumentTuple(tuple):
+    def __iter__(self):
+        return iter((float,))
+
+
+assert repr(t.Literal[(ArgumentTuple((int,)),)]) == "typing.Literal[[float]]"
+assert repr(list[((int, str),)]) == "list[(<class 'int'>, <class 'str'>)]"
+assert repr(cabc.Callable[..., ()]) == "collections.abc.Callable[..., ()]"
+
+
 class PlainCallable(t.Callable):
     pass
 
