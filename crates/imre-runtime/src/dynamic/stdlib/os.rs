@@ -563,9 +563,6 @@ pub(super) fn is_descriptor_function(name: &str) -> bool {
                 name,
                 "copy_file_range"
                     | "get_terminal_size"
-                    | "posix_openpt"
-                    | "grantpt"
-                    | "unlockpt"
                     | "tcgetpgrp"
                     | "ttyname"
                     | "preadv"

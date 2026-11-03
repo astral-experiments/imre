@@ -49,6 +49,11 @@ def check_posix_pty():
 
     assert posix_openpt is posix.posix_openpt
     assert grantpt is posix.grantpt and unlockpt is posix.unlockpt
+    del posix.grantpt
+    try:
+        assert not hasattr(posix, "grantpt") and os.grantpt is grantpt
+    finally:
+        posix.grantpt = grantpt
     flags = os.O_RDWR | os.O_NOCTTY
     master = posix_openpt(Index(flags | os.O_NONBLOCK))
     try:
