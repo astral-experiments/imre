@@ -127,7 +127,7 @@ in the denominator. The [omission decisions](docs/stdlib-omissions.md) explain e
 | `logging` | 225 | 272 | 0 | Both invalid queue configurations failed as expected without starting a multiprocessing manager. This adds one original to the earlier queue and logging results. |
 | `os` | 341 | 579 | 0 | Thirty-seven POSIX process-spawn originals and one pipe-inheritance test passed on Linux. Two spawn cases that stock skipped remain unpaired. |
 | `pathlib` | 970 | 1,369 | 1 | Eight inherited group and home-directory tests passed on the reviewed head merged in #4448. Earlier package discovery and focused runs contribute to the total. |
-| `re` | 147 | 165 | 0 | One more original passed in a public two-test replay. The cumulative total includes earlier complete and focused runs. |
+| `re` | 147 | 165 | 7 | Seven CPython compiler and bytecode checks have explicit omissions. The 147 paired originals include focused and complete runs. |
 | `shutil` | 105 | 223 | 0 | Nineteen focused copy originals passed on stock and native O0/O3 with the Linux kernel transfer. Sixteen were new. The file-mode skip and the full 223-case run are tracked separately. |
 | `socket` | 61 | 746 | 0 | Earlier and focused cases total 61. Four native modes pass 14/19 resolver originals, including the new service database lookup. The 746-case discovery run executed no test bodies. |
 | `subprocess` | 266 | 353 | 0 | The intact POSIX class and focused runs exercise real children. Three additional selected originals verified the child umask, resulting file mode and reaping under file descriptor pressure. |
@@ -137,7 +137,7 @@ in the denominator. The [omission decisions](docs/stdlib-omissions.md) explain e
 | `typing` | 450 | 712 | 0 | One more original resolved all four `ClassVar[int]` annotations through `get_type_hints` on stock and ordinary O0/O3. The total includes earlier selected and class runs. [Callbacks and replay](benchmarks/cpython_stdlib/full/typing/receipts/annotation-resolution/README.md) |
 | `unittest` | 275 | 1,090 | 0 | The intact package passed 160 cases. On public #3601, the unchanged test_assertions and test_case files ran all 150 originals with runtime imports. Their 109 paired passes added 81 distinct cases. Another 34 original mock methods passed in focused runs. |
 | `urllib` | 173 | 178 | 0 | Both unchanged scripts compiled and exited 0 in ordinary and runtime-import modes at both native levels. Four HTTP tests now pass with SSL enabled. Three originals matched only in child callbacks, and two Windows cases skipped on stock Linux. |
-| **Total** | **8,336** | **13,328** | **20** | **3 complete suites match stock on `main`** |
+| **Total** | **8,336** | **13,328** | **27** | **3 complete suites match stock on `main`** |
 
 See the [standard library coverage report](docs/stdlib.md) for the Linux test
 results and import coverage recorded in this repository.
