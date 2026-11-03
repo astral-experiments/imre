@@ -58,6 +58,10 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
             "unittest/runner.py",
             include_str!("../stdlib/unittest/runner.py"),
         )),
+        "unittest.suite" => Some((
+            "unittest/suite.py",
+            include_str!("../stdlib/unittest/suite.py"),
+        )),
         "unittest.signals" => Some((
             "unittest/signals.py",
             include_str!("../stdlib/unittest/signals.py"),
