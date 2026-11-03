@@ -1,105 +1,13 @@
 //! Python AST nodes and traversal for runtime-loaded modules.
 use std::collections::VecDeque;
 
+use imre_ast::python_nodes::DefaultField::{List, Load, Optional, Required};
+use imre_ast::python_nodes::{self, NODES};
+
 use super::super::{Context, Error, Id, NONE, Result, Value, builtins};
 
 mod literal;
 mod parse;
-
-#[derive(Clone, Copy)]
-enum DefaultField {
-    Required,
-    Optional,
-    List,
-    Load,
-}
-
-use DefaultField::{List, Load, Optional, Required};
-
-struct Node {
-    name: &'static str,
-    base: &'static str,
-    fields: &'static [(&'static str, DefaultField)],
-    positions: bool,
-}
-
-macro_rules! node {
-    ($name:ident : $base:ident, $positions:expr; $($field:ident : $default:ident),*) => {
-        Node { name: stringify!($name), base: stringify!($base), positions: $positions,
-               fields: &[$((stringify!($field), $default)),*] }
-    };
-}
-
-const NODES: &[Node] = &[
-    node!(AST: object, false;),
-    node!(mod: AST, false;),
-    node!(stmt: AST, true;),
-    node!(expr: AST, true;),
-    node!(expr_context: AST, false;),
-    node!(operator: AST, false;),
-    node!(cmpop: AST, false;),
-    node!(unaryop: AST, false;),
-    node!(Module: mod, false; body: List, type_ignores: List),
-    node!(Expression: mod, false; body: Required),
-    node!(FunctionDef: stmt, true; name: Required, args: Required, body: List, decorator_list: List, returns: Optional, type_comment: Optional, type_params: List),
-    node!(arguments: AST, false; posonlyargs: List, args: List, vararg: Optional, kwonlyargs: List, kw_defaults: List, kwarg: Optional, defaults: List),
-    node!(arg: AST, true; arg: Required, annotation: Optional, type_comment: Optional),
-    node!(Pass: stmt, true;),
-    node!(Expr: stmt, true; value: Required),
-    node!(If: stmt, true; test: Required, body: List, orelse: List),
-    node!(Assign: stmt, true; targets: List, value: Required, type_comment: Optional),
-    node!(Return: stmt, true; value: Optional),
-    node!(Import: stmt, true; names: List),
-    node!(ImportFrom: stmt, true; module: Optional, names: List, level: Optional),
-    node!(alias: AST, true; name: Required, asname: Optional),
-    node!(Name: expr, true; id: Required, ctx: Load),
-    node!(Constant: expr, true; value: Required, kind: Optional),
-    node!(Attribute: expr, true; value: Required, attr: Required, ctx: Load),
-    node!(Subscript: expr, true; value: Required, slice: Required, ctx: Load),
-    node!(Call: expr, true; func: Required, args: List, keywords: List),
-    node!(keyword: AST, true; arg: Optional, value: Required),
-    node!(IfExp: expr, true; test: Required, body: Required, orelse: Required),
-    node!(Tuple: expr, true; elts: List, ctx: Load),
-    node!(List: expr, true; elts: List, ctx: Load),
-    node!(Set: expr, true; elts: List),
-    node!(Dict: expr, true; keys: List, values: List),
-    node!(UnaryOp: expr, true; op: Required, operand: Required),
-    node!(BinOp: expr, true; left: Required, op: Required, right: Required),
-    node!(Compare: expr, true; left: Required, ops: List, comparators: List),
-    node!(Eq: cmpop, false;),
-    node!(NotEq: cmpop, false;),
-    node!(Lt: cmpop, false;),
-    node!(LtE: cmpop, false;),
-    node!(Gt: cmpop, false;),
-    node!(GtE: cmpop, false;),
-    node!(Is: cmpop, false;),
-    node!(IsNot: cmpop, false;),
-    node!(In: cmpop, false;),
-    node!(NotIn: cmpop, false;),
-    node!(Add: operator, false;),
-    node!(Sub: operator, false;),
-    node!(Mult: operator, false;),
-    node!(MatMult: operator, false;),
-    node!(Div: operator, false;),
-    node!(FloorDiv: operator, false;),
-    node!(Mod: operator, false;),
-    node!(Pow: operator, false;),
-    node!(LShift: operator, false;),
-    node!(RShift: operator, false;),
-    node!(BitOr: operator, false;),
-    node!(BitXor: operator, false;),
-    node!(BitAnd: operator, false;),
-    node!(UAdd: unaryop, false;),
-    node!(USub: unaryop, false;),
-    node!(Not: unaryop, false;),
-    node!(Invert: unaryop, false;),
-    node!(TemplateStr: expr, true; values: List),
-    node!(Interpolation: expr, true; value: Required, str: Required, conversion: Required, format_spec: Optional),
-    node!(JoinedStr: expr, true; values: List),
-    node!(FormattedValue: expr, true; value: Required, conversion: Required, format_spec: Optional),
-    node!(Load: expr_context, false;),
-    node!(Store: expr_context, false;),
-];
 
 const POSITIONS: [&str; 4] = ["lineno", "col_offset", "end_lineno", "end_col_offset"];
 
@@ -146,11 +54,14 @@ pub(in super::super) fn install(ctx: &mut Context, module: Id) {
             scope,
             ancestors,
         });
-        ctx.builtins.insert(format!("ast.{}", spec.name), class);
+        ctx.builtins.insert(spec.qualified_name.into(), class);
         ctx.bind(module, spec.name, class);
     }
     for spec in NODES {
-        if matches!(spec.base, "expr_context" | "operator" | "unaryop" | "cmpop") {
+        if matches!(
+            spec.base,
+            "expr_context" | "operator" | "unaryop" | "cmpop" | "boolop"
+        ) {
             let singleton = parsed_instance(ctx, spec.name, &[], None);
             ctx.builtins
                 .insert(format!("ast._{}", spec.name), singleton);
@@ -172,7 +83,7 @@ fn init(ctx: &mut Context, instance: Id, args: &[Id], kwargs: &[(String, Id)]) -
     let spec = NODES
         .iter()
         .rev()
-        .find(|s| ctx.instance_of(instance, ctx.builtins[&format!("ast.{}", s.name)]))
+        .find(|s| ctx.instance_of(instance, ctx.builtins[s.qualified_name]))
         .ok_or_else(|| Error::new("TypeError", "expected AST instance"))?;
     if args.len() > spec.fields.len() {
         let count = spec.fields.len();
@@ -238,10 +149,7 @@ fn parsed_instance(
     values: &[Id],
     positions: Option<[i64; 4]>,
 ) -> Id {
-    let spec = NODES
-        .iter()
-        .find(|s| s.name == kind)
-        .expect("known AST node");
+    let spec = python_nodes::find(kind).expect("known AST node");
     debug_assert_eq!(values.len(), spec.fields.len());
     let mut fields: indexmap::IndexMap<_, _> = spec
         .fields
@@ -259,7 +167,7 @@ fn parsed_instance(
     }
     ctx.alloc(Value::Instance {
         namespace: None,
-        class: ctx.builtins[&format!("ast.{kind}")],
+        class: ctx.builtins[spec.qualified_name],
         fields,
         dictionary: None,
         scalar: None,

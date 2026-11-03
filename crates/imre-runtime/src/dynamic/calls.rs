@@ -381,8 +381,6 @@ impl Context {
                         | weakref::PROXY_TYPE
                         | weakref::REFERENCE_TYPE
                 ) || (kind == super::deque::CLASS && super::deque::owns(name))
-                    || stdlib::datetime::members(kind)
-                    .is_some_and(|members| members.owns(name))
                     || (kind == stdlib::fixed_structseq::SCHED_PARAM
                         && matches!(name, "__reduce__" | "__replace__"))
                     || (kind == "function" && name == "__call__")
@@ -1417,6 +1415,9 @@ impl Context {
                             | "datetime.timedelta"
                             | "datetime.timezone"
                             | stdlib::datetime::TZINFO
+                            | "socket.socket"
+                            | "struct.Struct"
+                            | "hmac.HMAC"
                             | "collections.defaultdict"
                             | "_contextvars.Context"
                             | "_contextvars.ContextVar"
@@ -7062,9 +7063,13 @@ impl Context {
         typed_dict_meta: Option<Id>,
         enum_base: bool,
     ) -> Result<Option<Id>> {
+        // NamedTuple's marker is replaced with tuple before allocating the class.
+        let namedtuple = self.namedtuple_base(bases);
+        let metaclass_bases = bases.iter().copied().filter(|base| Some(*base) != namedtuple);
         if explicit.is_none()
-            && !bases.iter().any(|&base| {
-                self.is_bundled_abc(base)
+            && !metaclass_bases.clone().any(|base| {
+                !self.is_type_object(base)
+                    || self.is_bundled_abc(base)
                     || matches!(self.heap.get(base), Value::Class { metaclass: Some(meta), .. }
                         if Some(*meta) != typed_dict_meta)
             })
@@ -7085,7 +7090,7 @@ impl Context {
                 "metaclass conflict: the metaclass of a derived class must be a (non-strict) subclass of the metaclasses of all its bases",
             )
         };
-        for &base in bases {
+        for base in metaclass_bases {
             let meta =
                 if self.heap.get(base).instance_class().is_none() && self.is_bundled_abc(base) {
                     self.abc_meta()
@@ -7102,7 +7107,7 @@ impl Context {
         if winner == type_class {
             return Ok(None);
         }
-        if enum_base {
+        if enum_base || namedtuple.is_some() {
             return Err(conflict());
         }
         let is_abc = self.builtins.get("abc.ABCMeta") == Some(&winner);

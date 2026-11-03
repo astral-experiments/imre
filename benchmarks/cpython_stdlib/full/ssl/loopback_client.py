@@ -6,7 +6,8 @@ import sys
 
 def main():
     host, port, cafile, hostname, expected = sys.argv[1:6]
-    mode = sys.argv[6:]
+    leaf_file, wire_count = sys.argv[6:8]
+    mode = sys.argv[8:]
     if mode == ["https"]:
         import http.client
         import urllib.request
@@ -43,6 +44,12 @@ def main():
         with peer:
             assert raw.fileno() == -1
             assert int(expected) == 0
+            with open(leaf_file, encoding="ascii") as cert, open(cafile, encoding="ascii") as ca:
+                leaf = ssl.PEM_cert_to_DER_cert(cert.read())
+                root = ssl.PEM_cert_to_DER_cert(ca.read())
+            assert ssl.PEM_cert_to_DER_cert(ssl.DER_cert_to_PEM_cert(leaf)) == leaf
+            assert peer.get_verified_chain() == [leaf, root]
+            assert peer.get_unverified_chain() == [leaf, root][:int(wire_count)]
             peer.sendall(b"LOCAL TLS\n")
             data = b""
             while len(data) < 10:
@@ -65,6 +72,13 @@ def main():
             print("VERIFIED_ECHO", hostname)
         peer.close()
         assert peer.get_channel_binding() is None
+        for name in ("get_verified_chain", "get_unverified_chain"):
+            try:
+                getattr(peer, name)()
+            except AttributeError as exc:
+                assert str(exc) == "'NoneType' object has no attribute '%s'" % name
+            else:
+                raise AssertionError("closed TLS socket returned a certificate chain")
 
 
 main()

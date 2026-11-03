@@ -35,6 +35,8 @@ pub(in crate::dynamic) fn install(ctx: &mut Context, scope: Id) -> Result<()> {
         "maximum_version",
         "options",
         "verify_flags",
+        "cert_store_stats",
+        "raise_context_receiver_error",
         "default_verify_paths",
         "default_verify_flags",
         "set_alpn_protocols",
@@ -46,6 +48,8 @@ pub(in crate::dynamic) fn install(ctx: &mut Context, scope: Id) -> Result<()> {
         "channel_binding",
         "hostname_checks_common_name",
         "set_hostname_checks_common_name",
+        "get_verified_chain",
+        "get_unverified_chain",
         "sendall",
         "recv",
         "close",
@@ -171,6 +175,29 @@ pub(super) fn call(
         ("verify_flags", &[handle]) => {
             let flags = context(ctx, handle)?.borrow().verify_flags();
             Ok(ctx.alloc(Value::Int(crate::Int::new(flags.into()))))
+        }
+        ("raise_context_receiver_error", &[method, receiver]) => {
+            let method = ctx.str_value(method)?;
+            let kind = super::diagnostic_type_name(ctx, receiver);
+            let kind = &kind[..kind.floor_char_boundary(100)];
+            Err(Error::new(
+                "TypeError",
+                format!(
+                    "descriptor '{method}' for '_ssl._SSLContext' objects doesn't apply to a '{kind}' object"
+                ),
+            ))
+        }
+        ("cert_store_stats", &[handle]) => {
+            let counts = context(ctx, handle)?
+                .borrow()
+                .cert_store_stats()
+                .ok_or_else(|| Error::new("MemoryError", "failed to query cert store"))?;
+            let entries = ["x509", "crl", "x509_ca"]
+                .into_iter()
+                .zip(counts)
+                .map(|(key, count)| (ctx.text(key), ctx.int(i64::from(count))))
+                .collect();
+            Ok(ctx.dict(entries))
         }
         ("default_verify_paths", &[handle]) => {
             context(ctx, handle)?
@@ -335,6 +362,28 @@ pub(super) fn call(
                 .as_ref()
                 .and_then(|ssl| ssl.channel_binding());
             Ok(data.map_or(NONE, |bytes| ctx.alloc(Value::Bytes(bytes))))
+        }
+        ("get_verified_chain" | "get_unverified_chain", &[handle]) => {
+            let closed_chain = || {
+                Error::new(
+                    "AttributeError",
+                    format!("'NoneType' object has no attribute '{name}'"),
+                )
+            };
+            if handle == NONE {
+                return Err(closed_chain());
+            }
+            let certificates = session(ctx, handle)?
+                .borrow()
+                .as_ref()
+                .ok_or_else(closed_chain)?
+                .certificate_chain(name == "get_verified_chain")
+                .map_err(|e| provider_error(ctx, e))?;
+            let chain = certificates
+                .into_iter()
+                .map(|der| ctx.alloc(Value::Bytes(der)))
+                .collect();
+            Ok(ctx.alloc(Value::List(chain)))
         }
         ("sendall", &[handle, data]) => {
             let data = ctx.native_buffer_bytes(data)?;

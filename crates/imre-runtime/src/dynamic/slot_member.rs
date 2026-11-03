@@ -308,10 +308,7 @@ impl Context {
                 Err(error) if error.kind != "AttributeError" => return Err(error),
                 Err(_) => {}
             }
-            return Err(Error::new(
-                "TypeError",
-                "metaclass conflict: the metaclass of a derived class must be a (non-strict) subclass of the metaclasses of all its bases",
-            ));
+            specialized = true;
         }
         let metaclass = if specialized || explicit_meta.is_some() {
             let winner = self.select_class_metaclass(

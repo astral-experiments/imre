@@ -1496,6 +1496,22 @@ impl Value {
         }
     }
 
+    fn scalar_leaf(&self) -> bool {
+        matches!(
+            self,
+            Value::None
+                | Value::Bool(_)
+                | Value::Int(_)
+                | Value::Float(_)
+                | Value::Complex(_)
+                | Value::Str(_)
+                | Value::SurrogateStr(_)
+                | Value::Bytes(_)
+                | Value::ByteArray(_)
+                | Value::Native(_)
+        )
+    }
+
     fn children(&self, visit: &mut MarkQueue<'_>) {
         match self {
             Self::Deque(ring) => visit.extend(&ring.items),
@@ -2265,21 +2281,39 @@ pub(super) struct MarkQueue<'a> {
     slots: &'a [Slot],
     traces: &'a [Cell<usize>],
     next: usize,
-    ordered: Option<&'a mut GcOrder>,
+    mode: MarkMode<'a>,
+}
+
+enum MarkMode<'a> {
+    All,
+    SkipScalarLeaves,
+    Ordered(&'a mut GcOrder),
 }
 
 impl MarkQueue<'_> {
     pub(super) fn push(&mut self, id: Id) {
         let trace = &self.traces[id as usize];
         if trace.get() == UNMARKED {
-            if let Some(order) = &mut self.ordered {
-                trace.set(END);
-                if self.slots[id as usize].gc_next.get() == UNMARKED {
-                    order.push(id as usize, self.slots);
+            match &mut self.mode {
+                MarkMode::Ordered(order) => {
+                    trace.set(END);
+                    if self.slots[id as usize].gc_next.get() == UNMARKED {
+                        order.push(id as usize, self.slots);
+                    }
                 }
-            } else {
-                trace.set(self.next);
-                self.next = id as usize;
+                // A complete reachability trace needs no pending visit for an exact scalar.
+                MarkMode::SkipScalarLeaves
+                    if self.slots[id as usize]
+                        .value
+                        .as_ref()
+                        .is_some_and(Value::scalar_leaf) =>
+                {
+                    trace.set(END);
+                }
+                _ => {
+                    trace.set(self.next);
+                    self.next = id as usize;
+                }
             }
         }
     }
@@ -2998,19 +3032,7 @@ impl Heap {
     }
 
     fn finalizer_free_scalar(&self, id: Id) -> bool {
-        matches!(
-            self.get(id),
-            Value::None
-                | Value::Bool(_)
-                | Value::Int(_)
-                | Value::Float(_)
-                | Value::Complex(_)
-                | Value::Str(_)
-                | Value::SurrogateStr(_)
-                | Value::Bytes(_)
-                | Value::ByteArray(_)
-                | Value::Native(_)
-        )
+        self.get(id).scalar_leaf()
     }
 
     /// Regex matches and patterns on exact text or bytes hold only their subject and pattern source.
@@ -3417,7 +3439,7 @@ impl Heap {
             slots: &self.slots,
             traces: &self.traces,
             next: END,
-            ordered: None,
+            mode: MarkMode::SkipScalarLeaves,
         };
         self.mark_roots(globals, &mut pending);
         while let Some(id) = pending.pop() {
@@ -3643,7 +3665,7 @@ impl Heap {
             slots: &self.slots,
             traces: &self.traces,
             next: END,
-            ordered: None,
+            mode: MarkMode::All,
         };
         self.mark_roots(roots, &mut pending);
         while remaining != 0
@@ -3929,7 +3951,7 @@ impl Heap {
             slots: &self.slots,
             traces: &self.traces,
             next: END,
-            ordered: None,
+            mode: MarkMode::All,
         };
         value.children(&mut children);
         while let Some(id) = children.pop() {
@@ -3953,7 +3975,7 @@ impl Heap {
             slots: &self.slots,
             traces: &self.traces,
             next: END,
-            ordered: None,
+            mode: MarkMode::All,
         };
         self.mark_roots(globals, &mut pending);
         while pending.pop().is_some() {}
@@ -3970,7 +3992,7 @@ impl Heap {
                 slots: &self.slots,
                 traces: &self.traces,
                 next: END,
-                ordered: Some(&mut scan),
+                mode: MarkMode::Ordered(&mut scan),
             });
             if slot.generation <= generation
                 && newly_reachable.is_none_or(|cohort| cohort[id] != 0)
@@ -4568,7 +4590,8 @@ mod tests {
     fn prompt_sweep_preserves_cycle_descendants_and_pending_owners() {
         let mut heap = Heap::new();
         let mark = heap.temporary_mark();
-        let leaf = heap.alloc(Value::List(Vec::new()));
+        let scalar = heap.alloc(Value::Str("leaf".into()));
+        let leaf = heap.alloc(Value::List(vec![scalar]));
         let cycle = heap.alloc(Value::List(vec![leaf, leaf]));
         let Value::List(items) = heap.get_mut(cycle) else {
             unreachable!()
@@ -4581,7 +4604,7 @@ mod tests {
         heap.release_temporaries_since(mark);
 
         heap.collect(std::iter::empty());
-        for id in [leaf, cycle, child, owner] {
+        for id in [scalar, leaf, cycle, child, owner] {
             assert!(heap.slots[id as usize].value.is_some());
         }
         assert!(heap.slots[discarded as usize].value.is_none());

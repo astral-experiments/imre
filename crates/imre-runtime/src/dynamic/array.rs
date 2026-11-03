@@ -499,13 +499,18 @@ fn from_bytes(ctx: &mut Context, receiver: Id, input: Id) -> Result<Id> {
                 "cannot resize an array that is exporting buffers",
             ));
         }
-        if let Some((Value::Bytes(data) | Value::ByteArray(data), Value::Array(target))) = ctx
-            .heap
-            .source_and_target(ctx.scalar_value(input), receiver)
+        if let Some((source, range)) = ctx.contiguous_byte_span(input, false)?
+            && let Some((source, Value::Array(target))) =
+                ctx.heap.source_and_target(source, receiver)
         {
-            target.append_bytes(data)?;
+            let data = match source {
+                Value::Bytes(data) | Value::ByteArray(data) => data.as_slice(),
+                Value::Array(array) => array.as_bytes(),
+                Value::BytesIoStorage(Some(file)) => file.storage(),
+                _ => unreachable!("contiguous buffer backing"),
+            };
+            target.append_bytes(&data[range])?;
         } else {
-            // A view can select only part of its backing storage.
             let bytes = ctx.memoryview_bytes(input)?;
             array_mut(ctx, receiver).append_bytes(&bytes)?;
         }

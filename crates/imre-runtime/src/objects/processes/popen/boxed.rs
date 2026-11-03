@@ -181,6 +181,7 @@ impl BoxedPopen {
         process_group: i32,
         umask: i32,
         keep: Vec<RawFd>,
+        extra_groups: Option<Vec<libc::gid_t>>,
     ) -> std::result::Result<Self, BoxedLaunchError> {
         let mut words = Words::new(8);
         words
@@ -231,6 +232,7 @@ impl BoxedPopen {
             boxed_child: Some(ChildAttributes {
                 new_session: start_new_session,
                 group: process_group,
+                extra_groups,
                 mask: (umask >= 0).then_some(umask as libc::mode_t),
                 keep,
             }),

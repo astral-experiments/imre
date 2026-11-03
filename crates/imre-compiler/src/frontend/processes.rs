@@ -20,13 +20,13 @@ enum LaunchApi {
     Run { discarded: bool },
 }
 
-/// POSIX platform options compare Python objects before any pipe is opened. A forwarded
-/// mapping can supply either option; closed keyword displays have already been expanded.
+/// Platform options and supplementary groups need boxed argument handling. Forwarded
+/// mappings can supply these options; closed keyword displays have already been expanded.
 pub(super) fn boxed_launch_keywords(call: &ast::ExprCall) -> bool {
     call.arguments.keywords.iter().any(|kw| {
         matches!(
             kw.arg.as_deref(),
-            None | Some("startupinfo" | "creationflags")
+            None | Some("startupinfo" | "creationflags" | "extra_groups")
         )
     })
 }

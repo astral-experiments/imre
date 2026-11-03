@@ -501,6 +501,7 @@ pub(super) const BYTEARRAY_METHODS: &[&str] = &[
     "hex",
     "ljust",
     "lstrip",
+    "replace",
     "resize",
     "reverse",
     "rstrip",
@@ -523,6 +524,7 @@ pub(super) const BYTES_METHODS: &[&str] = &[
     "join",
     "ljust",
     "lstrip",
+    "replace",
     "rfind",
     "rsplit",
     "rstrip",
@@ -1782,6 +1784,7 @@ pub(super) fn call(
                         | "endswith"
                         | "ljust"
                         | "lstrip"
+                        | "replace"
                         | "rstrip"
                         | "split"
                         | "splitlines"
