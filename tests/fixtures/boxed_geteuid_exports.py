@@ -6,7 +6,7 @@ names = ("chown", "fchown", "lchown", "getuid", "geteuid", "getgid", "getgroups"
 getters = ("getegid",)
 if sys.platform == "linux":
     getters += ("getresgid", "getresuid")
-names += getters + ("setregid",)
+names += getters + ("setreuid", "setregid")
 for name in names:
     assert name in vars(posix)
 os = __import__(sys.argv[1])
@@ -27,39 +27,41 @@ for name in getters:
 
 print(os.geteuid())
 
-setregid = os.setregid
-assert setregid.__self__ is posix
-assert setregid.__text_signature__ == "($module, rgid, egid, /)"
-print(setregid.__doc__)
 
-calls = []
-
-
-class Group:
+class Identifier:
     def __init__(self, value):
         self.value = value
 
     def __index__(self):
-        calls.append(self.value)
+        converted.append(self.value)
         return self.value
 
 
-# Both spellings of the no-change sentinel are accepted on our LP64 POSIX targets.
-assert setregid(Group(-1), Group(2**32 - 1)) is None
-assert calls == [-1, 2**32 - 1]
-assert setregid(-1, os.getegid()) is None
-for args, kwargs in (
-    ((-2, Group(-1)), {}),
-    ((-1, 2**32), {}),
-    ((-1, 2**64), {}),
-    ((None, -1), {}),
-    ((-1,), {}),
-    ((), {"rgid": -1, "egid": -1}),
+for name, current, real, effective in (
+    ("setreuid", os.geteuid(), "ruid", "euid"),
+    ("setregid", os.getegid(), "rgid", "egid"),
 ):
-    try:
-        setregid(*args, **kwargs)
-    except (OverflowError, TypeError) as exc:
-        print(type(exc).__name__, str(exc))
-    else:
-        raise AssertionError("setregid accepted invalid arguments")
-assert calls == [-1, 2**32 - 1]
+    setter = getattr(os, name)
+    assert setter.__self__ is posix and setter.__name__ == name
+    assert setter.__text_signature__ == f"($module, {real}, {effective}, /)"
+    print(setter.__doc__)
+
+    # Both sentinel spellings leave process credentials alone on LP64 POSIX targets.
+    converted = []
+    assert setter(Identifier(-1), Identifier(2**32 - 1)) is None
+    assert setter(-1, current) is None
+    for args, kwargs in (
+        ((-2, Identifier(-1)), {}),
+        ((-1, 2**32), {}),
+        ((-1, 2**64), {}),
+        ((None, -1), {}),
+        ((-1,), {}),
+        ((), {real: -1, effective: -1}),
+    ):
+        try:
+            setter(*args, **kwargs)
+        except (OverflowError, TypeError) as exc:
+            print(type(exc).__name__, str(exc))
+        else:
+            raise AssertionError(f"{name} accepted invalid arguments")
+    assert converted == [-1, 2**32 - 1]

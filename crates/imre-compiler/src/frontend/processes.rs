@@ -27,7 +27,12 @@ pub(super) fn boxed_launch_keywords(call: &ast::ExprCall) -> bool {
             matches!(
                 kw.arg.as_deref(),
                 None | Some(
-                    "preexec_fn" | "startupinfo" | "creationflags" | "group" | "extra_groups"
+                    "preexec_fn"
+                        | "startupinfo"
+                        | "creationflags"
+                        | "group"
+                        | "extra_groups"
+                        | "user"
                 )
             )
         })
