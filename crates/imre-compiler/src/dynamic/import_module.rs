@@ -158,7 +158,10 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
                     .replace("iter(lines).__next__", "functools.partial(next, iter(lines))")
                     .replace("    Parameter = cls._parameter_cls", "    import ast\n    Parameter = cls._parameter_cls");
                     // Imre records native source positions without CPython bytecode offsets.
-                    let frame_info = section("def getframeinfo(", "def getinnerframes(")
+                    let frame_info = section(
+                        "def getframeinfo(",
+                        "# ------------------------------------------------ static version of getattr",
+                    )
                         .replace("_get_code_position_from_tb(frame)", "_frame_position(frame)")
                         .replace("_get_code_position(frame.f_code, frame.f_lasti)", "_frame_position(frame)");
                     [
@@ -174,7 +177,6 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
                         section("def findsource(object):", "def getcomments(object):"),
                         section("_Traceback = namedtuple(", "def _get_code_position_from_tb("),
                         &frame_info,
-                        section("def currentframe():", "def trace(context=1):"),
                         section("def getmro(cls):", "def indentsize(line):"),
                         section("def formatannotation(", "def formatannotationrelativeto("),
                         section("FullArgSpec = namedtuple(", "ArgInfo = namedtuple("),
