@@ -10,6 +10,7 @@ from annotationlib import Format, ForwardRef, get_annotations
 from collections import OrderedDict
 from keyword import iskeyword
 from inspect import (
+    _descriptor_get,
     _native_data_descriptor,
     _signature_layout,
     _static_member,
@@ -70,10 +71,11 @@ def _signature_from_class(obj, sigcls, follow_wrapper_chains, signature_of_metho
                 seen.add(name)
                 method = obj.__new__ if name == "__new__" else namespace[name]
                 # A decorator can wrap the object default without defining a constructor.
-                if _unwrap_constructor_method(method, follow_wrapper_chains) is default:
+                original = _unwrap_constructor_method(method, follow_wrapper_chains)
+                if original is default:
                     continue
                 uses_object_defaults = False
-                if method is None:
+                if method is None or isinstance(original, _NonUserDefinedCallables):
                     continue
                 if name == "__new__":
                     return signature_of_method(method, True)
@@ -158,13 +160,7 @@ def _signature_from_callable(obj, *, sigcls, follow_wrapper_chains=True,
     text_signature = getattr(obj, "__text_signature__", None)
     if text_signature:
         return _signature_fromstr(sigcls, obj, text_signature)
-    method, drop_first = _bind_signature_method(call, obj)
-    # Recurse into a Python function or a bound builtin with its own signature.
-    function = method.__func__ if isinstance(method, types.MethodType) else method
-    if (callable(method) and not isinstance(function, types.FunctionType)
-            and type(method) is not types.BuiltinFunctionType):
-        raise ValueError(f"callable {obj!r} is not supported by signature")
-    return signature_of_method(method, drop_first)
+    return signature_of_method(_descriptor_get(call, obj), False)
 
 
 def _signature_from_function(obj, sigcls, globals, locals, eval_str, annotation_format,

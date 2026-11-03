@@ -3375,14 +3375,14 @@ impl Context {
         } else {
             mro.extend_from_slice(&ancestors);
         }
-        // Other dunder names can replace special methods or class metadata. Keep
-        // their existing layout until their type slots can be updated as well.
+        // Calls already resolve __call__ through descriptor binding. Other dunder
+        // names can replace special methods or class metadata with their own layout.
         let ordinary_slots = layout != ClassLayout::Specialized
             && slot_names.as_deref().is_some_and(|names| {
                 names.iter().all(|name| {
                     !name.starts_with("__")
                         || !name.ends_with("__")
-                        || matches!(name.as_str(), "__dict__" | "__weakref__")
+                        || matches!(name.as_str(), "__call__" | "__dict__" | "__weakref__")
                 })
             });
         if layout == ClassLayout::TypeNamespace && slot_names.is_some() && !ordinary_slots {

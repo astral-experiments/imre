@@ -25,6 +25,22 @@ pub(super) fn call(
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
+    if name == "_descriptor_get" {
+        if let [descriptor, obj] = *args
+            && kwargs.is_empty()
+        {
+            // As in inspect._descriptor_get, class objects supply their own signature.
+            if ctx.is_type_object(descriptor) {
+                return Ok(descriptor);
+            }
+            let owner = ctx.exact_type(obj)?;
+            return ctx.bind_attribute(descriptor, obj, owner);
+        }
+        return Err(super::Error::new(
+            "TypeError",
+            "_descriptor_get expects two positional arguments",
+        ));
+    }
     if name == "_static_member" {
         if let [obj, attr, missing] = *args
             && kwargs.is_empty()

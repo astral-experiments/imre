@@ -228,6 +228,7 @@ impl BuiltinDescriptor {
             "object.__format__" => ("object", "__format__"),
             "object.__sizeof__" => ("object", "__sizeof__"),
             "dict.__sizeof__" => ("dict", "__sizeof__"),
+            "dict.fromkeys" => ("dict", "fromkeys"),
             "int.__sizeof__" => ("int", "__sizeof__"),
             "str.__sizeof__" => ("str", "__sizeof__"),
             "bytearray.__sizeof__" => ("bytearray", "__sizeof__"),
@@ -295,6 +296,7 @@ impl BuiltinDescriptor {
             "dict.__ror__" => ("dict", "__ror__"),
             "dict.__ior__" => ("dict", "__ior__"),
             "dict.__eq__" => ("dict", "__eq__"),
+            "dict.__init__" => ("dict", "__init__"),
             "dict.__repr__" => ("dict", "__repr__"),
             "dict.__reversed__" => ("dict", "__reversed__"),
             "tuple.__repr__" => ("tuple", "__repr__"),
@@ -331,6 +333,7 @@ impl BuiltinDescriptor {
                     | "index"
                     | "join"
                     | "from_bytes"
+                    | "fromkeys"
                     | "isascii"
                     | "isalpha"
                     | "isdigit"
@@ -354,6 +357,7 @@ impl BuiltinDescriptor {
             (self.owner, self.name),
             ("object", "__subclasshook__" | "__init_subclass__")
                 | ("int", "from_bytes")
+                | ("dict", "fromkeys")
                 | ("typing.Generic", "__init_subclass__")
         ) {
             "classmethod_descriptor"
@@ -583,10 +587,10 @@ impl BuiltinDescriptor {
             }
             "__doc__" if self.name == "__lt__" => ctx.text("Return self<value."),
             "__text_signature__" if self.name == "__lt__" => ctx.text("($self, value, /)"),
-            "__doc__" if self.owner == "object" && self.name == "__init__" => {
+            "__doc__" if matches!(self.owner, "object" | "dict") && self.name == "__init__" => {
                 ctx.text("Initialize self.  See help(type(self)) for accurate signature.")
             }
-            "__text_signature__" if self.owner == "object" && self.name == "__init__" => {
+            "__text_signature__" if matches!(self.owner, "object" | "dict") && self.name == "__init__" => {
                 ctx.text("($self, /, *args, **kwargs)")
             }
             "__doc__" if self.name == "__getattribute__" => ctx.text("Return getattr(self, name)."),
@@ -647,6 +651,8 @@ impl BuiltinDescriptor {
                 "Return self converted to an integer, if self is suitable for use as an index into a list.",
             ),
             "__text_signature__" if self.name == "__index__" => ctx.text("($self, /)"),
+            "__doc__" if self.name == "__pow__" => ctx.text("Return pow(self, value, mod)."),
+            "__text_signature__" if self.name == "__pow__" => ctx.text("($self, value, mod=None, /)"),
             "__doc__" if self.name == "__add__" => ctx.text("Return self+value."),
             "__doc__" if self.name == "__radd__" => ctx.text("Return value+self."),
             "__doc__" if self.name == "__sub__" => ctx.text("Return self-value."),
@@ -781,6 +787,8 @@ impl BuiltinDescriptor {
                     ("join", _) => "($self, iterable, /)",
                     ("from_bytes", "__doc__") => "Return the integer represented by the given array of bytes.\n\n  bytes\n    Holds the array of bytes to convert.  The argument must either\n    support the buffer protocol or be an iterable object producing bytes.\n    Bytes and bytearray are examples of built-in objects that support the\n    buffer protocol.\n  byteorder\n    The byte order used to represent the integer.  If byteorder is 'big',\n    the most significant byte is at the beginning of the byte array.  If\n    byteorder is 'little', the most significant byte is at the end of the\n    byte array.  To request the native byte order of the host system, use\n    sys.byteorder as the byte order value.  Default is to use 'big'.\n  signed\n    Indicates whether two's complement is used to represent the integer.",
                     ("from_bytes", _) => "($type, /, bytes, byteorder='big', *, signed=False)",
+                    ("fromkeys", "__doc__") => "Create a new dictionary with keys from iterable and values set to value.",
+                    ("fromkeys", _) => "($type, iterable, value=None, /)",
                     ("append", "__doc__") => "Append object to the end of the list.",
                     ("pop", "__doc__") => {
                         "Remove and return item at index (default last).\n\nRaises IndexError if list is empty or index is out of range."

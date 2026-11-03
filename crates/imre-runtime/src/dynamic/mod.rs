@@ -2484,6 +2484,16 @@ impl Context {
             self.builtin(&format!("{name}.{method}"));
         }
         match name {
+            "dict" => {
+                let mut entries = Vec::new();
+                for member in methods.iter().copied().chain(["__sizeof__"]) {
+                    let key = self.heap.code_name(member);
+                    entries.push((key, self.builtin(&format!("dict.{member}"))));
+                }
+                entries.push((self.heap.code_name("__hash__"), NONE));
+                let dictionary = self.dict(entries);
+                self.native_type_dicts.insert(value, dictionary);
+            }
             "int" => {
                 self.install_numeric_dictionary(value, "int", methods, ["numerator", "denominator"])
             }

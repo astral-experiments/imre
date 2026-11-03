@@ -87,6 +87,34 @@ class BoundJoinCall:
     __call__ = ":".join
 
 
+class DictFactory(dict):
+    __call__ = dict.__dict__["fromkeys"]
+
+
+class CustomDict(dict):
+    def __init__(self, fields):
+        super().__init__(fields)
+
+
+class ReadOnce:
+    def __get__(self, obj, owner):
+        obj.reads += 1
+        if obj.reads > 1:
+            raise RuntimeError("descriptor read twice")
+        return partial(with_options, "label")
+
+
+class Handler:
+    __call__ = ReadOnce()
+
+    def __init__(self):
+        self.reads = 0
+
+
+class SlottedHandler:
+    __slots__ = "__call__"
+
+
 class InheritedName(str):
     pass
 
@@ -221,6 +249,40 @@ for join in (JoinCall(":"), BoundJoinCall()):
     sig = inspect.signature(join)
     assert str(sig) == "(iterable, /)"
     assert join(*sig.bind(["a", "bc"]).args) == "a:bc"
+
+factory = DictFactory()
+assert inspect.signature(factory) == inspect.signature(dict.fromkeys)
+assert type(factory(["key"])) is DictFactory
+assert str(inspect.signature(CustomDict)) == "(fields)"
+for cls in (dict, DictFactory):
+    try:
+        inspect.signature(cls)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("native dict constructor acquired a signature")
+
+power = (2).__pow__
+assert str(inspect.signature(power)) == "(value, mod=None, /)"
+assert power(3, 5) == 3
+assert int.__pow__(2, 1.5) is NotImplemented
+
+handler = Handler()
+handler.__call__ = lambda wrong: None
+assert inspect.signature(handler) == inspect.signature(partial(with_options, "label"))
+assert handler.reads == 1
+try:
+    inspect.signature(handler)
+except RuntimeError as error:
+    assert str(error) == "descriptor read twice"
+else:
+    raise AssertionError("descriptor exception was lost")
+assert handler.reads == 2
+
+slotted = SlottedHandler()
+slotted.__call__ = lambda value: value
+assert str(inspect.signature(slotted)) == "(value)"
+assert slotted(7) == 7
 
 update_wrapper(wrapper, original)
 spec = inspect.getfullargspec(original)

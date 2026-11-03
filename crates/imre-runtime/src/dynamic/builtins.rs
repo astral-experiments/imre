@@ -449,6 +449,7 @@ pub(super) fn real_methods(owner: &str) -> &'static [&'static str] {
             "__float__",
             "__int__",
             "__lt__",
+            "__pow__",
             "__round__",
             "__trunc__",
         ],
@@ -1931,7 +1932,7 @@ pub(super) fn call(
             "bytes" | "bytearray" if method == "translate" => {
                 translation::translate(ctx, owner, args, kwargs)
             }
-            "int" if matches!(method, "__add__" | "__bool__" | "__index__") => {
+            "int" if matches!(method, "__add__" | "__bool__" | "__index__" | "__pow__") => {
                 collections::builtin_slot(ctx, name, args, kwargs)
             }
             "str" if method == "__str__" => collections::builtin_slot(ctx, name, args, kwargs),
