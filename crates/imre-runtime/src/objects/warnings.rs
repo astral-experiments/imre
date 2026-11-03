@@ -208,7 +208,7 @@ fn insert_rule(rule: Rule, append: bool) {
     filters.displayed.clear();
 }
 
-pub(crate) fn category_number(name: &str) -> Option<u32> {
+fn category_number(name: &str) -> Option<u32> {
     imre_ast::exceptions::WARNING_CATEGORIES
         .iter()
         .position(|kind| kind.name() == name)
@@ -264,22 +264,6 @@ pub(crate) fn startup_filter(option: &str) -> Result<(), String> {
         false,
     );
     Ok(())
-}
-
-/// Decide before constructing a Python warning instance or invoking its display hook.
-pub(crate) fn should_emit(
-    category: u32,
-    kind: Kind,
-    message: &str,
-    module: &str,
-    line: isize,
-) -> crate::Result<bool> {
-    match filtered(category, module, line, || message.to_owned()) {
-        Ok(None) => Ok(false),
-        Ok(Some((Action::Error, message))) => Err(Error::new(kind, message)),
-        Ok(Some(_)) => Ok(true),
-        Err(()) => Err(Error::new(Kind::OverflowError, LINE_OVERFLOW)),
-    }
 }
 
 thread_local! {
