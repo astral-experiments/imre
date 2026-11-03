@@ -489,6 +489,14 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
                 ].join("\n")
             })))
         }
+        "uuid" => Some((
+            "uuid.py",
+            concat!(
+                include_str!("../../stdlib/uuid.py"),
+                "\n",
+                include_str!("../../stdlib/uuid_boxed.py"),
+            ),
+        )),
         _ => crate::modules::bundled_runtime_source(name),
     }
 }
