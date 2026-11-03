@@ -127,21 +127,27 @@ enum State {
     TrailingNewline,
 }
 
+/// A field keeps its UTF-8 storage until a Python surrogate requires code points.
+pub(crate) enum Field {
+    Text(String),
+    Surrogates(Vec<u32>),
+}
+
 /// One logical record. Both native object representations consume the same parser.
 pub(crate) struct Row<F> {
     save_field: F,
-    field: String,
+    field: Field,
     chars: usize,
     limit: i64,
     quoted: bool,
     state: State,
 }
 
-impl<F: FnMut(String, bool) -> Result<()>> Row<F> {
+impl<F: FnMut(Field, bool) -> Result<()>> Row<F> {
     pub(crate) fn new(save_field: F) -> Self {
         Self {
             save_field,
-            field: String::new(),
+            field: Field::Text(String::new()),
             chars: 0,
             limit: 131_072,
             quoted: false,
@@ -149,9 +155,14 @@ impl<F: FnMut(String, bool) -> Result<()>> Row<F> {
         }
     }
 
-    pub(crate) fn line(&mut self, dialect: &Dialect, line: &str, limit: i64) -> Result<bool> {
+    pub(crate) fn line(
+        &mut self,
+        dialect: &Dialect,
+        line: impl Iterator<Item = u32>,
+        limit: i64,
+    ) -> Result<bool> {
         self.limit = limit;
-        for ch in line.chars() {
+        for ch in line {
             self.token(dialect, Some(ch))?;
         }
         self.token(dialect, None)?;
@@ -169,32 +180,52 @@ impl<F: FnMut(String, bool) -> Result<()>> Row<F> {
         Ok(true)
     }
 
-    fn add(&mut self, ch: char) -> Result<()> {
+    fn add(&mut self, point: u32) -> Result<()> {
         if self.chars as i64 >= self.limit {
             return Err(Error::new(
                 Kind::CsvError,
                 format!("field larger than field limit ({})", self.limit),
             ));
         }
-        self.field
-            .try_reserve(ch.len_utf8())
-            .map_err(|_| Error::allocation())?;
-        self.field.push(ch);
+        match &mut self.field {
+            Field::Text(text) => {
+                if let Some(ch) = char::from_u32(point) {
+                    text.try_reserve(ch.len_utf8())
+                        .map_err(|_| Error::allocation())?;
+                    text.push(ch);
+                } else {
+                    let mut points = Vec::new();
+                    points
+                        .try_reserve(self.chars + 1)
+                        .map_err(|_| Error::allocation())?;
+                    points.extend(text.chars().map(u32::from));
+                    points.push(point);
+                    self.field = Field::Surrogates(points);
+                }
+            }
+            Field::Surrogates(points) => {
+                points.try_reserve(1).map_err(|_| Error::allocation())?;
+                points.push(point);
+            }
+        }
         self.chars += 1;
         Ok(())
     }
 
     fn save(&mut self) -> Result<()> {
-        (self.save_field)(std::mem::take(&mut self.field), self.quoted)?;
+        (self.save_field)(
+            std::mem::replace(&mut self.field, Field::Text(String::new())),
+            self.quoted,
+        )?;
         self.quoted = false;
         self.chars = 0;
         Ok(())
     }
 
     /// None is the iterator's end-of-line marker, which need not be a newline.
-    fn token(&mut self, dialect: &Dialect, token: Option<char>) -> Result<()> {
+    fn token(&mut self, dialect: &Dialect, token: Option<u32>) -> Result<()> {
         use State::*;
-        let newline = matches!(token, Some('\n' | '\r'));
+        let newline = token == Some(u32::from('\n')) || token == Some(u32::from('\r'));
         if self.state == Record {
             if token.is_none() {
                 return Ok(());
@@ -217,17 +248,20 @@ impl<F: FnMut(String, bool) -> Result<()>> Row<F> {
                 if newline {
                     self.save()?;
                     self.state = TrailingNewline;
-                } else if self.state == FieldStart && token == dialect.quote {
+                } else if self.state == FieldStart && token == dialect.quote.map(u32::from) {
                     self.quoted = true;
                     self.state = Quoted;
-                } else if self.state == AfterQuote && token == dialect.quote {
+                } else if self.state == AfterQuote && token == dialect.quote.map(u32::from) {
                     self.add(ch)?;
                     self.state = Quoted;
-                } else if self.state != AfterQuote && token == dialect.escape {
+                } else if self.state != AfterQuote && token == dialect.escape.map(u32::from) {
                     self.state = EscapeField;
-                } else if self.state == FieldStart && dialect.skip_space && token == Some(' ') {
+                } else if self.state == FieldStart
+                    && dialect.skip_space
+                    && token == Some(u32::from(' '))
+                {
                     // Leading delimiter spaces are skipped too.
-                } else if token == Some(dialect.delimiter) {
+                } else if token == Some(u32::from(dialect.delimiter)) {
                     self.save()?;
                     self.state = FieldStart;
                 } else if self.state == AfterQuote && dialect.strict {
@@ -248,9 +282,9 @@ impl<F: FnMut(String, bool) -> Result<()>> Row<F> {
             }
             Quoted => {
                 if let Some(ch) = token {
-                    if Some(ch) == dialect.escape {
+                    if Some(ch) == dialect.escape.map(u32::from) {
                         self.state = EscapeQuoted;
-                    } else if Some(ch) == dialect.quote {
+                    } else if Some(ch) == dialect.quote.map(u32::from) {
                         self.state = if dialect.doublequote {
                             AfterQuote
                         } else {
@@ -262,7 +296,7 @@ impl<F: FnMut(String, bool) -> Result<()>> Row<F> {
                 }
             }
             EscapeField | EscapeQuoted => {
-                self.add(token.unwrap_or('\n'))?;
+                self.add(token.unwrap_or(u32::from('\n')))?;
                 self.state = if self.state == EscapeQuoted {
                     Quoted
                 } else if newline {
@@ -290,7 +324,13 @@ impl<F: FnMut(String, bool) -> Result<()>> Row<F> {
 impl Reader {
     fn next(&mut self) -> Result<Option<crate::ObjectOwner>> {
         let mut fields = Words::new(3);
-        let mut row = Row::new(|text, _| {
+        let mut row = Row::new(|field, _| {
+            let Field::Text(text) = field else {
+                return Err(Error::new(
+                    Kind::ValueError,
+                    "typed CSV input must be UTF-8",
+                ));
+            };
             fields
                 .values
                 .try_reserve(1)
@@ -308,7 +348,7 @@ impl Reader {
                 break;
             };
             self.line_num += 1;
-            if row.line(&self.dialect, &line, 131_072)? {
+            if row.line(&self.dialect, line.chars().map(u32::from), 131_072)? {
                 break;
             }
         }
