@@ -563,6 +563,9 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             "_frame_locals" | "_tb_position" | "clear_frames" | "format_exc" | "format_exception"
             | "print_exc" | "print_exception",
         ) => ctx.builtin(&format!("traceback.{name}")),
+        ("struct", "Struct") | ("hmac", "HMAC") | ("functools", "partial") => {
+            ctx.builtin(&format!("{module}.{name}"))
+        }
         ("types", "MappingProxyType") => ctx.builtin("mappingproxy"),
         ("types", "ModuleType") => ctx.builtin("module"),
         ("types", "SimpleNamespace") => super::namespace::class(ctx)?,
@@ -840,7 +843,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         )
         | ("_imre_zipimport", "exists" | "isfile" | "index" | "read" | "contains" | "invalidate")
         | ("platform", "system" | "node" | "release" | "version" | "machine" | "mac_ver")
-        | ("struct", "Struct" | "calcsize" | "pack" | "unpack")
+        | ("struct", "calcsize" | "pack" | "unpack")
         | ("base64", "urlsafe_b64encode" | "urlsafe_b64decode")
         | ("random", "random" | "choice" | "choices" | "shuffle")
         | ("codecs", "register_error" | "lookup_error")
@@ -848,7 +851,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         | ("marshal", "loads")
         | ("pickle", "dumps")
         | ("hashlib", "file_digest")
-        | ("hmac", "new" | "HMAC")
+        | ("hmac", "new")
         | (
             "re",
             "match" | "fullmatch" | "search" | "compile" | "_compile_scanner" | "split" | "findall"
@@ -858,7 +861,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         | ("enum", "_simple_enum")
         | (
             "functools",
-            "cache" | "cmp_to_key" | "lru_cache" | "_cache_wrapper" | "partial" | "reduce"
+            "cache" | "cmp_to_key" | "lru_cache" | "_cache_wrapper" | "reduce"
             | "update_wrapper",
         )
         | ("_string", "formatter_parser" | "formatter_field_name_split")

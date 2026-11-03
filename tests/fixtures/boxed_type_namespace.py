@@ -160,3 +160,21 @@ def current():
             assert "not an acceptable base type" in str(exc)
         else:
             raise AssertionError(base)
+
+
+    try:
+        type("Invalid", (object(),), {})
+    except TypeError as exc:
+        assert str(exc) == "bases must be types"
+    else:
+        raise AssertionError("accepted a non-type base")
+
+    import functools
+    import hmac
+    import socket
+    import struct
+
+    for base in (functools.partial, hmac.HMAC, socket.socket, socket.timeout, struct.Struct):
+        class Child(base):
+            pass
+        assert Child.__bases__ == (base,)
