@@ -567,6 +567,10 @@ class SSLObject:
         error.reason = result if library else None
         raise error
 
+    def getpeercert(self, binary_form=False):
+        """Return the peer certificate as a dictionary or DER bytes, or None if absent."""
+        return _call(_imre_ssl.bio_getpeercert, self._sslobj, binary_form)
+
     def do_handshake(self):
         """Advance the handshake, raising SSLWantReadError when more peer data is needed."""
         self._bio_call(_imre_ssl.bio_handshake)

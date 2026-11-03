@@ -27,6 +27,16 @@ def handshake(client_ctx, server_ctx, hostname):
 
 
 client, server = handshake(client_ctx, server_ctx, "localhost")
+with open(sys.argv[1] + "/ssl_cert.pem") as cert:
+    expected_der = ssl.PEM_cert_to_DER_cert(cert.read())
+assert client.getpeercert(binary_form=True) == expected_der
+peer = client.getpeercert()
+assert peer["subjectAltName"] == (("DNS", "localhost"),)
+# Compare every decoded field with the same stock-Python run.
+for key in sorted(peer):
+    print(key, peer[key])
+assert server.getpeercert() is None
+assert server.getpeercert(True) is None
 
 try:
     client.unwrap()
@@ -39,6 +49,12 @@ assert client.unwrap() is None
 
 incoming = ssl.MemoryBIO()
 truncated = client_ctx.wrap_bio(incoming, ssl.MemoryBIO(), server_hostname="localhost")
+try:
+    truncated.getpeercert(True)
+except ValueError as exc:
+    assert str(exc) == "handshake not done yet"
+else:
+    raise AssertionError("peer certificate available before the handshake")
 incoming.write_eof()
 try:
     truncated.do_handshake()
@@ -55,6 +71,9 @@ with warnings.catch_warnings():
     generic = ssl.SSLContext(ssl.PROTOCOL_TLS)
 generic.load_cert_chain(certfile)
 handshake(client_ctx, generic, "localhost")
+unchecked, server = handshake(generic, server_ctx, "other.example")
+assert unchecked.getpeercert() == {}
+assert unchecked.getpeercert(True) == expected_der
 generic.verify_mode = ssl.CERT_REQUIRED
 try:
     handshake(generic, server_ctx, "other.example")

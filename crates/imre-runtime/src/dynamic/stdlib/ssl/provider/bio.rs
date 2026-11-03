@@ -170,6 +170,37 @@ impl BioSession {
         result
     }
 
+    pub(in crate::dynamic) fn peer_certificate(
+        &self,
+        ctx: &mut Context,
+        binary: bool,
+    ) -> Result<Id> {
+        let ssl = self.handle.as_ptr();
+        let api = self.api;
+        // SAFETY: this BioSession owns the SSL throughout the query.
+        if unsafe { (api.SSL_is_init_finished)(ssl) } == 0 {
+            return Err(Error::new("ValueError", "handshake not done yet"));
+        }
+        // SAFETY: the peer certificate is borrowed from the live SSL.
+        let cert = unsafe { (api.SSL_get0_peer_certificate)(ssl) };
+        if cert.is_null() {
+            return Ok(NONE);
+        }
+        if binary {
+            let der = api
+                .encode_certificate(cert)
+                .map_err(|e| super::super::provider_error(ctx, e))?;
+            return Ok(ctx.alloc(Value::Bytes(der)));
+        }
+        // SAFETY: SSL owns a reference to its context. CPython uses the context's
+        // current verify mode when choosing whether to return the decoded fields.
+        let mode = unsafe { (api.SSL_CTX_get_verify_mode)((api.SSL_get_SSL_CTX)(ssl)) };
+        if mode & super::SSL_VERIFY_PEER == 0 {
+            return Ok(ctx.alloc(Value::Dict(Default::default())));
+        }
+        super::certificate::decode(ctx, api, cert)
+    }
+
     pub(in crate::dynamic) fn shutdown(&mut self) -> std::result::Result<(), BioFailure> {
         let ssl = self.handle.as_ptr();
         self.api.clear();

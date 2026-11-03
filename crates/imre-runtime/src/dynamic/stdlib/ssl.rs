@@ -57,6 +57,7 @@ pub(in crate::dynamic) fn install(ctx: &mut Context, scope: Id) -> Result<()> {
         "accept",
         "wrap_bio",
         "bio_handshake",
+        "bio_getpeercert",
         "bio_shutdown",
         "channel_binding",
         "hostname_checks_common_name",
@@ -499,6 +500,14 @@ pub(super) fn call(
                     .map_err(|e| provider_error(ctx, e))?;
             drop((handle, incoming, outgoing));
             Ok(ctx.alloc(Value::TlsBioSession(Rc::new(RefCell::new(result)))))
+        }
+        ("bio_getpeercert", &[handle, binary]) => {
+            let binary = ctx.truth(binary)?;
+            let Value::TlsBioSession(session) = ctx.heap.get(handle) else {
+                return Err(Error::new("TypeError", "expected a TLS memory BIO session"));
+            };
+            let session = Rc::clone(session);
+            session.borrow().peer_certificate(ctx, binary)
         }
         ("bio_handshake" | "bio_shutdown", &[handle]) => {
             use provider::bio::BioFailure;
