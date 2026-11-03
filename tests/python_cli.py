@@ -3828,6 +3828,66 @@ else:
             compare("-IB", "-c", imports + "arithmetic.current()")
             plugin.write_bytes((fixtures / "boxed_subprocess_text.py").read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")
+            script = root / "subprocess_text.py"
+            command = r"printf '\200'; printf '\223err\224' >&2; exit 7"
+            script.write_text(
+                "import subprocess\n"
+                f"cmd = ['/bin/sh', '-c', {command!r}]\n"
+                "try: subprocess.run(cmd, capture_output=True, check=True, encoding='cp1252')\n"
+                "except subprocess.CalledProcessError as exc:\n"
+                "    print(exc.output == '€', exc.stderr == '“err”', exc.args == (7, cmd))\n"
+            )
+            compare("-B", script)
+
+            script.write_text(
+                "import subprocess\n"
+                "print(subprocess.check_output(['/bin/cat'], input='€', encoding='cp1252'))\n"
+            )
+            compare("-B", script)
+
+            capture = (
+                "def capture() -> str:\n"
+                "    return subprocess.check_output(['/bin/printf', r'\\200'], encoding='cp1252')\n"
+            )
+            for invalid, diagnostic in (
+                ("def invalid() -> int:\n    return 'bad'\n", b"invalid-return-type"),
+                ("def needs_int(value: int): pass\ndef invalid():\n    needs_int('invalid')\n", b"invalid-argument-type"),
+            ):
+                for definitions, calls in (
+                    (invalid + capture, "invalid()\nprint(capture())"),
+                    (invalid + capture, "print(capture())"),
+                    (capture + invalid, "print(capture())\ninvalid()"),
+                    (capture + invalid, "print(capture())"),
+                ):
+                    script.write_text("import subprocess\n" + definitions + calls + "\n")
+                    result = run(imre, "-B", script)
+                    assert result.returncode > 0 and not result.stdout, result
+                    assert diagnostic in result.stderr or b"expected int, got str" in result.stderr, result
+
+            script.write_text(
+                "import subprocess\n"
+                "def ordinary(value): pass\n"
+                "def caught():\n"
+                "    try: subprocess.run(['/bin/cat'], input=b'bad', capture_output=True, encoding='cp1252')\n"
+                "    except AttributeError: print('input rejected')\n"
+                "    try: ordinary()\n"
+                "    except TypeError: print('argument rejected')\n"
+                "caught()\n"
+            )
+            compare("-B", script)
+
+            script.write_text(
+                "import io\n"
+                "def acquire(): return io.BytesIO(b'x').getbuffer()\n"
+                "def wrong() -> int: return 'wrong'\n"
+                "print(acquire().tobytes())\n"
+                "try: wrong()\n"
+                "except TypeError: print('return rejected')\n"
+            )
+            result = run(imre, "-B", script)
+            assert result.returncode == 0 and result.stderr == b"", result
+            assert result.stdout == b"b'x'\nreturn rejected\n", result
+
             plugin.write_bytes((fixtures / "boxed_os_chdir.py").read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")
             plugin.write_bytes((fixtures / "boxed_os_capabilities.py").read_bytes())

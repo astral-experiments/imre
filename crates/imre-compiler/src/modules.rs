@@ -8,7 +8,7 @@ use ruff_db::parsed::ParsedModuleRef;
 use ruff_python_ast as ast;
 use ruff_text_size::{Ranged, TextRange, TextSize};
 
-use crate::analysis::{CheckedDiagnostic, Session};
+use crate::analysis::{CheckedDiagnostic, FallbackCalls, Session};
 use crate::ir::{
     CopyOperation, FnmatchOperation, PosixPathOperation, SysEncoding, WrapperAttributes,
 };
@@ -324,6 +324,10 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
         )),
         "encodings.cp1251" => Some((
             "encodings/cp1251.py",
+            include_str!("../stdlib/encodings/writer_charmap.py"),
+        )),
+        "encodings.cp1252" => Some((
+            "encodings/cp1252.py",
             include_str!("../stdlib/encodings/writer_charmap.py"),
         )),
         "encodings.cp424" => Some((
@@ -2761,7 +2765,7 @@ pub(crate) struct SourceGraph {
     pub(crate) empty_keywords: empty_keywords::EmptyKeywords,
     checked_diagnostics: std::cell::RefCell<Vec<Vec<CheckedDiagnostic>>>,
     pub(crate) needs_object_runtime: std::cell::Cell<bool>,
-    pub(crate) check_fallback_calls: std::cell::Cell<bool>,
+    pub(crate) check_fallback_calls: std::cell::Cell<FallbackCalls>,
     pub(crate) check_method_factories: std::cell::Cell<bool>,
     pub(crate) class_layout_error: std::cell::RefCell<Option<String>>,
     pub(crate) object_builtin_errors: std::cell::RefCell<HashSet<String>>,
@@ -2787,6 +2791,13 @@ pub(crate) struct SourceGraph {
 }
 
 impl SourceGraph {
+    /// Request checked-file diagnostics without replacing checks requested by a Python entry.
+    pub(crate) fn require_fallback_calls(&self) {
+        if matches!(self.check_fallback_calls.get(), FallbackCalls::None) {
+            self.check_fallback_calls.set(FallbackCalls::All);
+        }
+    }
+
     /// Select object class construction while preserving checked calls and typed module layouts.
     pub(crate) fn require_object_class_layout(&self, error: String) -> String {
         self.class_layout_error.replace(Some(error.clone()));

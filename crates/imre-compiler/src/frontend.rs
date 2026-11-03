@@ -4656,7 +4656,7 @@ impl<'a> Checker<'a> {
                 && !self.graph.modules[self.module].bundled
                 && self.failure_kind(error) == Some(FailureKind::ObjectOperation)
             {
-                self.graph.check_fallback_calls.set(true);
+                self.graph.require_fallback_calls();
             }
             let discarded = match statement {
                 ast::Stmt::Expr(expr) => narrowing::expression_assignments(&expr.value).is_empty(),
