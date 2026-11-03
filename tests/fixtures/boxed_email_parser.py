@@ -1,4 +1,4 @@
-from email import message_from_string
+from email import message_from_bytes, message_from_string
 from email.feedparser import FeedParser
 from email.message import Message
 
@@ -9,6 +9,9 @@ def current():
     assert type(msg) is Message
     assert msg.get_all("X-Trace") == ["one", "two\r\n\tcontinued"]
     print(msg.items(), msg.get_payload())
+    msg = message_from_bytes(b"X-Trace: wire\r\n\r\nbody\xff")
+    assert msg.items() == [("X-Trace", "wire")]
+    assert msg.get_payload(decode=True) == b"body\xff"
     parser = FeedParser()
     parser.feed("broken head")
     parser.feed("er\r\nbody")
