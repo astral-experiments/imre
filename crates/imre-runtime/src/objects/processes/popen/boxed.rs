@@ -293,13 +293,10 @@ impl BoxedPopen {
 
     pub(crate) fn wait<E: From<Error>>(
         &self,
-        seconds: Option<f64>,
         check: impl FnMut() -> std::result::Result<(), E>,
     ) -> std::result::Result<Option<i32>, E> {
         let control = self.0.borrow().control.clone();
-        Ok(control
-            .wait_with(seconds.map(Deadline::Float).as_ref(), check)?
-            .map(ReturnCode::kernel))
+        Ok(control.wait_with(None, check)?.map(ReturnCode::kernel))
     }
 
     /// Only an observed child status updates returncode when the constructor raises.
