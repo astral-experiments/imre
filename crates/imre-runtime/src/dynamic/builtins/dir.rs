@@ -109,6 +109,7 @@ fn object_names(ctx: &mut Context, object: Id) -> Result<Id> {
         }
         Value::Class { .. } | Value::Native(_) => object,
         Value::Count { .. }
+        | Value::Calendar { .. }
         | Value::Coroutine { .. }
         | Value::Repeat(_)
         | Value::DequeIterator { .. }
@@ -541,8 +542,13 @@ fn class_names(ctx: &Context, class: Id, names: &mut BTreeSet<String>) -> Result
                 names.extend(["__dict__".to_owned(), "__weakref__".to_owned()]);
             }
         }
-        Value::Native(_) if let Some(&dictionary) = ctx.native_type_dicts.get(&class) => {
-            class_names(ctx, ctx.builtins["object"], names)?;
+        Value::Native(owner) if let Some(&dictionary) = ctx.native_type_dicts.get(&class) => {
+            let base = if crate::dynamic::stdlib::datetime::members(owner).is_some() {
+                Context::native_base(owner).unwrap_or("object")
+            } else {
+                "object"
+            };
+            class_names(ctx, ctx.builtins[base], names)?;
             for &(key, _) in ctx
                 .dict_entries(dictionary)
                 .expect("native class dictionary")
