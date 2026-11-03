@@ -198,7 +198,7 @@ fn optional_attr(ctx: &mut Context, object: Id, name: &str) -> Result<Option<Id>
 }
 
 /// Copy the instance dictionary before a reported __class__ can mutate it.
-fn namespace_directory(ctx: &mut Context, object: Id, instance: bool) -> Result<Id> {
+pub(super) fn namespace_directory(ctx: &mut Context, object: Id, instance: bool) -> Result<Id> {
     let dictionary = if instance
         && let Some(source) = optional_attr(ctx, object, "__dict__")?
         && let Some(storage) = ctx.dict_storage(source)
@@ -243,7 +243,7 @@ fn contributes_dict_descriptor(ctx: &mut Context, class: Id, mapping: Id) -> Res
 
 /// Merge each reported namespace before reading its bases, as in object.__dir__.
 fn merge_class_names(ctx: &mut Context, class: Id, dictionary: Id) -> Result<()> {
-    if matches!(ctx.heap.get(class), Value::Native(name) if super::is_builtin_type(name)) {
+    if matches!(ctx.heap.get(class), Value::Native(name) if name != "object" && super::is_builtin_type(name)) {
         let mut names = BTreeSet::new();
         class_names(ctx, class, &mut names)?;
         for name in names {

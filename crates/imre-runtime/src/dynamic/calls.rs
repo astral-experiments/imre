@@ -873,7 +873,7 @@ impl Context {
         {
             return Ok(self.bind_native_classmethod(value, owner));
         }
-        if matches!(self.heap.get(value), Value::Native(name) if name == "object.__init_subclass__")
+        if matches!(self.heap.get(value), Value::Native(name) if matches!(name.as_str(), "object.__init_subclass__" | "object.__subclasshook__"))
         {
             return Ok(self.alloc(Value::Method {
                 callable: value,
@@ -1052,11 +1052,10 @@ impl Context {
             (_, Some(field)) => Ok(field),
             (Some(member), None) => self.bind_attribute(member, object, class),
             (None, None)
-                if matches!(name, "__getattribute__" | "__delattr__")
-                    || (matches!(name, "__str__" | "__init__" | "__lt__")
-                        && self.allocation_base(class) == Some(self.builtin("object"))) =>
+                if (matches!(name, "__getattribute__" | "__delattr__")
+                    || self.allocation_base(class) == Some(self.builtin("object")))
+                    && let Some(method) = self.raw_object_member(name) =>
             {
-                let method = self.builtin(&format!("object.{name}"));
                 self.bind_attribute(method, object, class)
             }
             (None, None) => self.builtin_attribute(object, name),
@@ -1390,6 +1389,7 @@ impl Context {
                             | "builtin_function_or_method"
                             | "method-wrapper"
                             | "wrapper_descriptor"
+                            | "classmethod_descriptor"
                             | "method_descriptor"
                             | "getset_descriptor"
                             | "member_descriptor"
@@ -2945,11 +2945,7 @@ impl Context {
                     return Ok(value);
                 }
                 if name == "__get__" {
-                    let callable = self.builtin(if slot.method {
-                        "method_descriptor.__get__"
-                    } else {
-                        "wrapper_descriptor.__get__"
-                    });
+                    let callable = self.builtin(&format!("{}.__get__", slot.class()));
                     return Ok(self.alloc(Value::Method {
                         callable,
                         receiver: obj,
@@ -4050,7 +4046,7 @@ impl Context {
                 return Ok(self.builtin(&format!("int.{name}")));
             }
             Value::Native(ref class)
-                if matches!(class.as_str(), "method_descriptor" | "wrapper_descriptor")
+                if matches!(class.as_str(), "method_descriptor" | "wrapper_descriptor" | "classmethod_descriptor")
                     && name == "__get__" =>
             {
                 return Ok(self.builtin(&format!("{class}.__get__")));
@@ -4124,23 +4120,15 @@ impl Context {
                     return Ok(method);
                 }
             }
-            Value::Native(ref class)
-                if class == "object"
-                    && matches!(
-                        name,
-                        "__hash__"
-                            | "__repr__"
-                            | "__str__"
-                            | "__getattribute__"
-                            | "__setattr__"
-                            | "__delattr__"
-                            | "__ne__"
-                            | "__lt__"
-                            | "__init__"
-                            | "__new__"
-                    ) =>
-            {
-                return Ok(self.builtin(&format!("object.{name}")));
+            Value::Native(ref class) if class == "object" => {
+                match name {
+                    "__dict__" => return Ok(self.object_dictionary()),
+                    "__doc__" => return Ok(self.text(Self::OBJECT_DOC)),
+                    _ => {}
+                }
+                if let Some(member) = self.raw_object_member(name) {
+                    return self.bind_attribute(member, NONE, obj);
+                }
             }
             Value::Native(ref class)
                 if DictIterator::methods(class).contains(&name)
@@ -4236,10 +4224,10 @@ impl Context {
                 if let Some(value) = self.class_attr(obj, name) {
                     return self.bind_attribute(value, NONE, obj);
                 }
-                if matches!(name, "__init__" | "__lt__")
-                    && self.allocation_base(obj) == Some(self.builtin("object"))
+                if self.allocation_base(obj) == Some(self.builtin("object"))
+                    && let Some(member) = self.raw_object_member(name)
                 {
-                    return Ok(self.builtin(&format!("object.{name}")));
+                    return self.bind_attribute(member, NONE, obj);
                 }
                 if name == "__init__" && self.has_base(obj, "type") {
                     return Ok(self.builtin("type.__init__"));
@@ -6277,6 +6265,9 @@ impl Context {
             }
             Value::Native(name) if name == "wrapper_descriptor.__get__" => {
                 wrapper_descriptor::descriptor_get(self, "wrapper_descriptor", &args, &kwargs)
+            }
+            Value::Native(name) if name == "classmethod_descriptor.__get__" => {
+                wrapper_descriptor::descriptor_get(self, "classmethod_descriptor", &args, &kwargs)
             }
             Value::Native(name) if name == "method_descriptor.__get__" => {
                 wrapper_descriptor::descriptor_get(self, "method_descriptor", &args, &kwargs)

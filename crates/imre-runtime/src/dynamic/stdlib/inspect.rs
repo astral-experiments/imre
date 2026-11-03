@@ -178,10 +178,13 @@ fn class_member(ctx: &mut Context, class: Id, name: &str) -> Option<Id> {
             return Some(value);
         }
         // Some native wrapper and method descriptors are interned on first access.
-        if let Value::Native(owner) = ctx.heap.get(entry) {
-            if owner == "object" && name == "__class__" {
-                return ctx.builtins.get("object.__class__").copied();
+        if matches!(ctx.heap.get(entry), Value::Native(owner) if owner == "object") {
+            if let Some(member) = ctx.raw_object_member(name) {
+                return Some(member);
             }
+            continue;
+        }
+        if let Value::Native(owner) = ctx.heap.get(entry) {
             let symbol = format!("{owner}.{name}");
             if crate::dynamic::wrapper_descriptor::BuiltinDescriptor::lookup(&symbol).is_some() {
                 return Some(ctx.builtin(&symbol));

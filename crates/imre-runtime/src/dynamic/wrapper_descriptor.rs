@@ -260,6 +260,17 @@ impl BuiltinDescriptor {
             "collections._tuplegetter.__repr__" => (super::namedtuple::GETTER, "__repr__"),
             "object.__init__" => ("object", "__init__"),
             "object.__lt__" => ("object", "__lt__"),
+            "object.__le__" => ("object", "__le__"),
+            "object.__eq__" => ("object", "__eq__"),
+            "object.__gt__" => ("object", "__gt__"),
+            "object.__ge__" => ("object", "__ge__"),
+            "object.__getattribute__" => ("object", "__getattribute__"),
+            "object.__setattr__" => ("object", "__setattr__"),
+            "object.__delattr__" => ("object", "__delattr__"),
+            "object.__dir__" => ("object", "__dir__"),
+            "object.__subclasshook__" => ("object", "__subclasshook__"),
+            "object.__init_subclass__" => ("object", "__init_subclass__"),
+            "classmethod_descriptor.__get__" => ("classmethod_descriptor", "__get__"),
             "object.__hash__" => ("object", "__hash__"),
             "object.__ne__" => ("object", "__ne__"),
             "object.__repr__" => ("object", "__repr__"),
@@ -299,6 +310,9 @@ impl BuiltinDescriptor {
             method: matches!(
                 name,
                 "__format__"
+                    | "__dir__"
+                    | "__subclasshook__"
+                    | "__init_subclass__"
                     | "__sizeof__"
                     | "__getstate__"
                     | "__reduce__"
@@ -325,7 +339,9 @@ impl BuiltinDescriptor {
 
     /// Report the descriptor type exposed by type() and explicit __get__.
     pub(super) fn class(self) -> &'static str {
-        if self.method {
+        if self.owner == "object" && matches!(self.name, "__subclasshook__" | "__init_subclass__") {
+            "classmethod_descriptor"
+        } else if self.method {
             "method_descriptor"
         } else {
             "wrapper_descriptor"
@@ -403,7 +419,7 @@ impl BuiltinDescriptor {
             "array.array" => matches!(ctx.heap.get(receiver), Value::Array(_)),
             "slice" => matches!(ctx.heap.get(receiver), Value::Slice(_)),
             "member_descriptor" => ctx.exact_type(receiver)? == ctx.builtin("member_descriptor"),
-            "method_descriptor" | "wrapper_descriptor" => {
+            "method_descriptor" | "wrapper_descriptor" | "classmethod_descriptor" => {
                 ctx.builtin_type_name(receiver) == Some(self.owner)
             }
             "dict" => ctx.dict_storage(receiver).is_some(),
@@ -811,6 +827,7 @@ pub(super) fn descriptor_get(
                 return ctx.bind_super(descriptor, receiver, start, bound);
             }
             if let Some(slot) = slot
+                && slot.class() != "classmethod_descriptor"
                 && !matches!(ctx.heap.get(descriptor), Value::Native(symbol) if stdlib::datetime::clock_classmethod(symbol))
             {
                 return slot.bind(ctx, descriptor, receiver);
