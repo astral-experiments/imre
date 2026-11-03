@@ -175,9 +175,7 @@ impl Emitter<'_, '_> {
         };
         let (start, stop, modulus) = (&args[0].operand, &args[1].operand, &modulus.operand);
         let ordinary = self.label();
-        let condition = self.label();
         let inspect = self.label();
-        let batch = self.label();
         let runs = self.entry_alloca("{ i64, [8 x i64] }");
         self.output
             .local_helper("imre_uniform_index_range", INDEX_RANGE_HELPER);
@@ -198,49 +196,66 @@ impl Emitter<'_, '_> {
         self.start(&prepare);
         self.output
             .local_helper("imre_struct_modular_runs", include_str!("modular_rows.ll"));
+        let distance = self.instruction(format!("sub i64 {stop}, {start}"));
         let count = self.instruction(format!(
-            "call i64 @imre_struct_modular_runs(ptr {}, i64 {modulus}, i64 {scale}, i64 {offset}, ptr {runs})",
+            "call i64 @imre_struct_modular_runs(ptr {}, i64 {modulus}, i64 {scale}, i64 {offset}, i64 {distance}, ptr {runs})",
             receiver.operand
         ));
-        self.jump(&condition);
-        self.start(&condition);
-        // Relinquish the read-only proof before running any signal handler.
-        // The ordinary range header polls with the fully published prefix.
-        let tripped = self
-            .instruction("load atomic volatile i8, ptr @imre_signal_tripped monotonic, align 1");
-        let pending = self.instruction(format!("icmp ne i8 {tripped}, 0"));
-        let test = self.label();
-        self.branch(&pending, &ordinary, &test);
-        self.start(&test);
-        let at = self.borrow_slot(cursor);
-        let more = self.instruction(format!("icmp slt i64 {}, {stop}", at.operand));
-        self.branch(&more, &batch, exhausted);
-        self.start(&batch);
-        let left = self.instruction(format!("sub i64 {stop}, {}", at.operand));
-        let span = self.instruction(format!(
-            "call i64 @imre_modular_batch_width(i64 {}, i64 {left}, i64 {count}, ptr {runs})",
-            at.operand
-        ));
-        let count = self.instruction(format!("lshr i64 {span}, 1"));
-        let end = self.instruction(format!("add i64 {}, {span}", at.operand));
-        let last = self.instruction(format!("sub i64 {end}, 2"));
-        let ordinal = |operand| Value {
-            ty: Type::Int,
-            operand,
-            small_integer: true,
-        };
-        let subscript = self.instruction(format!(
-            "call i64 @imre_bounded_modular_index(i64 {last}, i64 {scale}, i64 {offset}, i64 {modulus})"
-        ));
-        self.store(target, &ordinal(last));
-        self.store(*index, &ordinal(subscript));
-        let mut projection = term.as_ref().clone();
-        mark_indexed_reads_in_bounds(self.module, &mut projection, list, *index);
-        let value = self.expr(&projection);
-        let old = self.borrow_slot(*sum);
-        self.add_repeated_term(*sum, &old, &value, &count);
-        self.store(cursor, &ordinal(end));
-        self.jump(&condition);
+        let scalar = self.label();
+        let planned = self.label();
+        let unplanned = self.instruction(format!("icmp slt i64 {count}, 0"));
+        self.branch(&unplanned, &scalar, &planned);
+        for (entry, single_rows) in [(scalar, true), (planned, false)] {
+            self.start(&entry);
+            let condition = self.label();
+            let batch = self.label();
+            self.jump(&condition);
+            self.start(&condition);
+            // Relinquish the read-only proof before running any signal handler.
+            // The ordinary range header polls with the fully published prefix.
+            let tripped = self.instruction(
+                "load atomic volatile i8, ptr @imre_signal_tripped monotonic, align 1",
+            );
+            let pending = self.instruction(format!("icmp ne i8 {tripped}, 0"));
+            let test = self.label();
+            self.branch(&pending, &ordinary, &test);
+            self.start(&test);
+            let at = self.borrow_slot(cursor);
+            let more = self.instruction(format!("icmp slt i64 {}, {stop}", at.operand));
+            self.branch(&more, &batch, exhausted);
+            self.start(&batch);
+            let (end, last, repetitions) = if single_rows {
+                let end = self.instruction(format!("add i64 {}, 2", at.operand));
+                (end, at.operand, "1".to_owned())
+            } else {
+                let left = self.instruction(format!("sub i64 {stop}, {}", at.operand));
+                let span = self.instruction(format!(
+                    "call i64 @imre_modular_batch_width(i64 {}, i64 {left}, i64 {count}, ptr {runs})",
+                    at.operand
+                ));
+                let repetitions = self.instruction(format!("lshr i64 {span}, 1"));
+                let end = self.instruction(format!("add i64 {}, {span}", at.operand));
+                let last = self.instruction(format!("sub i64 {end}, 2"));
+                (end, last, repetitions)
+            };
+            let subscript = self.instruction(format!(
+                "call i64 @imre_bounded_modular_index(i64 {last}, i64 {scale}, i64 {offset}, i64 {modulus})"
+            ));
+            let ordinal = |operand| Value {
+                ty: Type::Int,
+                operand,
+                small_integer: true,
+            };
+            self.store(target, &ordinal(last));
+            self.store(*index, &ordinal(subscript));
+            let mut projection = term.as_ref().clone();
+            mark_indexed_reads_in_bounds(self.module, &mut projection, list, *index);
+            let value = self.expr(&projection);
+            let old = self.borrow_slot(*sum);
+            self.add_repeated_term(*sum, &old, &value, &repetitions);
+            self.store(cursor, &ordinal(end));
+            self.jump(&condition);
+        }
         self.start(&ordinary);
     }
 
