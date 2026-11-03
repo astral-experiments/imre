@@ -2292,6 +2292,10 @@ pub(super) fn call(
         };
         return typing_alias_helper(ctx, helper, args.to_vec());
     }
+    if let ("_no_type_check_member", [class, attr], []) = (operation, args, kwargs) {
+        let name = ctx.str_value(*attr)?.to_owned();
+        return ctx.no_type_check_member(*class, &name);
+    }
     if let ("_protocol_mro", [class], []) = (operation, args, kwargs) {
         if matches!(ctx.heap.get(*class), Value::Native(_)) {
             let bases = ctx.base_lineage(*class, true);

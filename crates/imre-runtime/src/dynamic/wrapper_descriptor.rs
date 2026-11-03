@@ -51,6 +51,13 @@ impl BuiltinDescriptor {
                 method: !matches!(name, "__eq__" | "__ne__" | "__iter__"),
             });
         }
+        if symbol == "functools.partial.__setstate__" {
+            return Some(Self {
+                owner: stdlib::functools::PARTIAL_CLASS,
+                name: "__setstate__",
+                method: true,
+            });
+        }
         if symbol == "typing.Union.__mro_entries__" {
             return Some(Self {
                 owner: "typing.Union",
@@ -429,12 +436,7 @@ impl BuiltinDescriptor {
             "type" => ctx.is_type_object(receiver),
             "function" => matches!(ctx.heap.get(receiver), Value::Function { .. }),
             "classmethod" => matches!(ctx.heap.get(receiver), Value::ClassMethod { .. }),
-            stdlib::functools::PARTIAL_CLASS => {
-                matches!(
-                    ctx.heap.get(ctx.scalar_value(receiver)),
-                    Value::Partial { .. }
-                )
-            }
+            stdlib::functools::PARTIAL_CLASS => ctx.builtin_slot_accepts(receiver, self.owner),
             "functools.KeyWrapper" => matches!(ctx.heap.get(receiver), Value::KeyWrapper { .. }),
             super::namespace::CLASS => namespace::instance_class(ctx, receiver).is_some(),
             "frame" => matches!(ctx.heap.get(receiver), Value::PythonFrame { .. }),

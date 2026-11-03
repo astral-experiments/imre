@@ -419,6 +419,26 @@ fn visible_origin_name(ctx: &mut Context, name: Id, marker: Id) -> Result<bool> 
     Ok(false)
 }
 
+/// Check the current native class directories without invoking Python hooks.
+pub(in crate::dynamic) fn listed_by_native_base(
+    ctx: &mut Context,
+    class: Id,
+    name: &str,
+) -> Result<bool> {
+    for base in ctx.base_lineage(class, true) {
+        if matches!(ctx.heap.get(base), Value::Native(kind) if super::is_static_gc_type(kind)) {
+            let mut names = BTreeSet::new();
+            match class_names(ctx, base, &mut names) {
+                Ok(()) if names.contains(name) => return Ok(true),
+                Ok(()) => {}
+                Err(error) if error.kind == "NotImplementedError" => {}
+                Err(error) => return Err(error),
+            }
+        }
+    }
+    Ok(false)
+}
+
 /// Collect each Python class's own names without evaluating class values or descriptors.
 fn class_names(ctx: &Context, class: Id, names: &mut BTreeSet<String>) -> Result<()> {
     match ctx.heap.get(class) {

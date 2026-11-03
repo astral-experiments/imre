@@ -686,7 +686,6 @@ REJECTED = {
     "read_size": 'with open("input.txt", "r", encoding="utf-8") as stream:\n    stream.read(1)',
     "readline_size": 'with open("input.txt", "r", encoding="utf-8") as stream:\n    stream.readline(2)',
     "zipimport_code": 'import zipimport\nzipimport.zipimporter("archive.zip").get_code("module")',
-    "gzip_write": 'import gzip\ngzip.open("output.gz", "wb")',
     "gzip_text_codec": 'import gzip\ngzip.open("input.gz", "rt", encoding="latin1")',
     "gzip_binary_encoding": 'import gzip\ngzip.open("input.gz", "rb", encoding="utf-8")',
     "gzip_text_no_encoding": 'import gzip\ngzip.open("input.gz", "rt")',
@@ -939,6 +938,16 @@ def main() -> None:
     passed = 0
     with tempfile.TemporaryDirectory(prefix="imre-files-") as directory:
         temporary = Path(directory)
+        for call in (
+            'gzip.open("out.gz", "wb")',
+            'gzip.open("out.gz", mode="ab")',
+            'gzip.GzipFile("out.gz", "xb")',
+        ):
+            path = temporary / "gzip_writer.py"
+            path.write_text(f"import gzip\nwith {call} as f:\n    f.write(b'x')\n")
+            result = run([compiler, "check", str(path)], temporary)
+            assert result.returncode == 0, (call, result.stderr)
+            passed += 1
         for name, source in REJECTED.items():
             path = temporary / f"{name}.py"
             path.write_text(dedent(source), encoding="utf-8")

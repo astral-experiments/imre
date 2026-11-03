@@ -1,4 +1,4 @@
-//! One-shot DEFLATE streams for the boxed zlib module.
+//! DEFLATE streams for the boxed zlib and gzip modules.
 use super::{Context, Error, Id, Result, Value, builtins, os};
 use std::{ffi::CStr, mem::MaybeUninit};
 use zlib_rs::{DeflateConfig, DeflateFlush, InflateConfig, InflateFlush, ReturnCode};
@@ -67,6 +67,58 @@ pub(super) fn call(
     Ok(ctx.alloc(Value::Bytes(output)))
 }
 
+/// The gzip facade writes the framing and owns its file object. These primitives
+/// advance one raw DEFLATE stream and return just its newly produced bytes.
+pub(super) fn gzip_writer(ctx: &mut Context, name: &str, args: &[Id]) -> Result<Id> {
+    if name == "writer" {
+        let level = os::c_int(ctx, args[0])?;
+        if !(-1..=9).contains(&level) {
+            return Err(Error::new("ValueError", "Invalid initialization option"));
+        }
+        let stream = Stream::new(Codec::Compress { level, wbits: -15 })?;
+        let writer = crate::Shared::try_new(std::cell::RefCell::new(Some(stream)))
+            .map_err(|_| crate::Error::allocation())?;
+        return Ok(ctx.alloc(Value::GzipWriter(writer)));
+    }
+    let Value::GzipWriter(writer) = ctx.heap.get(args[0]) else {
+        return Err(Error::new("TypeError", "expected a gzip writer"));
+    };
+    let writer = writer.clone();
+    let (data, flush) = if name == "compress" {
+        ctx.check_buffer_exporter(args[1])?;
+        (buffer(ctx, args[1])?, DeflateFlush::NoFlush)
+    } else {
+        let mode = os::c_int(ctx, args[1])?;
+        let flush = DeflateFlush::try_from(mode).map_err(|_| {
+            Error::new(
+                "zlib.error",
+                "Error -2 while flushing: inconsistent stream state",
+            )
+        })?;
+        if flush == DeflateFlush::NoFlush {
+            return Ok(ctx.alloc(Value::Bytes(Vec::new())));
+        }
+        (&[][..], flush)
+    };
+    let mut writer = writer.borrow_mut();
+    let stream = writer.as_mut().ok_or_else(|| {
+        let action = if name == "compress" {
+            "compressing data"
+        } else {
+            "flushing"
+        };
+        Error::new(
+            "zlib.error",
+            format!("Error -2 while {action}: inconsistent stream state"),
+        )
+    })?;
+    let bytes = stream.process(data, Vec::new(), flush)?;
+    if flush == DeflateFlush::Finish {
+        *writer = None;
+    }
+    Ok(ctx.alloc(Value::Bytes(bytes)))
+}
+
 #[derive(Clone, Copy)]
 enum Codec {
     Compress { level: i32, wbits: i32 },
@@ -80,7 +132,22 @@ impl Codec {
         output
             .try_reserve_exact(initial_size)
             .map_err(|_| Error::new("MemoryError", "Unable to allocate output buffer."))?;
-        let mut stream = Stream::new(self)?;
+        Stream::new(self)?.process(input, output, DeflateFlush::Finish)
+    }
+}
+
+pub(in crate::dynamic) struct Stream {
+    codec: Codec,
+    raw: z_stream,
+}
+
+impl Stream {
+    fn process(
+        &mut self,
+        input: &[u8],
+        mut output: Vec<u8>,
+        flush: DeflateFlush,
+    ) -> Result<Vec<u8>> {
         let mut input_pos = 0;
         loop {
             if output.len() == output.capacity() {
@@ -89,7 +156,7 @@ impl Codec {
                     .map_err(|_| Error::new("MemoryError", "Unable to allocate output buffer."))?;
             }
             let (status, consumed, produced, output_full) =
-                stream.step(&input[input_pos..], output.spare_capacity_mut());
+                self.step(&input[input_pos..], output.spare_capacity_mut(), flush);
             input_pos += consumed;
             // SAFETY: the stream initialized produced bytes of the supplied spare capacity.
             unsafe { output.set_len(output.len() + produced) };
@@ -101,21 +168,20 @@ impl Codec {
                 {
                     continue;
                 }
-                ReturnCode::Ok | ReturnCode::BufError => {
-                    return Err(stream.error(ReturnCode::BufError));
+                ReturnCode::Ok | ReturnCode::BufError
+                    if flush != DeflateFlush::Finish && input_pos == input.len() =>
+                {
+                    crate::compact_bytes(&mut output);
+                    return Ok(output);
                 }
-                other => return Err(stream.error(other)),
+                ReturnCode::Ok | ReturnCode::BufError => {
+                    return Err(self.error(ReturnCode::BufError));
+                }
+                other => return Err(self.error(other)),
             }
         }
     }
-}
 
-struct Stream {
-    codec: Codec,
-    raw: z_stream,
-}
-
-impl Stream {
     fn new(codec: Codec) -> Result<Self> {
         let mut raw = z_stream::default();
         let status = match codec {
@@ -150,6 +216,7 @@ impl Stream {
         &mut self,
         input: &[u8],
         output: &mut [MaybeUninit<u8>],
+        flush: DeflateFlush,
     ) -> (ReturnCode, usize, usize, bool) {
         let count = input.len().min(u32::MAX as usize) as u32;
         let space = output.len().min(u32::MAX as usize) as u32;
@@ -164,11 +231,7 @@ impl Stream {
             match self.codec {
                 Codec::Compress { .. } => deflate::deflate(
                     deflate::DeflateStream::from_stream_mut(&mut self.raw).unwrap(),
-                    if finish {
-                        DeflateFlush::Finish
-                    } else {
-                        DeflateFlush::NoFlush
-                    },
+                    if finish { flush } else { DeflateFlush::NoFlush },
                 ),
                 Codec::Decompress { .. } => inflate::inflate(
                     inflate::InflateStream::from_stream_mut(&mut self.raw).unwrap(),

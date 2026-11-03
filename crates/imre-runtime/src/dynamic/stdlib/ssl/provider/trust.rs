@@ -118,7 +118,7 @@ impl Api {
         }
     }
 
-    fn trust_error(&self, error: c_ulong, detail: Option<&str>) -> Failure {
+    pub(super) fn trust_error(&self, error: c_ulong, detail: Option<&str>) -> Failure {
         // OpenSSL 3 ERR_GET_LIB and ERR_GET_REASON. Common errors, such as
         // ERR_R_PEM_LIB, carry a numeric errno but no library-specific mnemonic.
         let code = (error & 0x7f_ffff) as i64;

@@ -1,4 +1,4 @@
-//! Boxed access to the same lazy, path-backed gzip decoder as typed reads.
+//! Boxed gzip access to the lazy path reader and incremental DEFLATE encoder.
 
 use std::cell::RefCell;
 
@@ -11,7 +11,9 @@ pub(super) fn call(
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
-    let arity = if matches!(name, "read" | "read1") || (name == "readline" && args.len() == 2) {
+    let arity = if matches!(name, "read" | "read1" | "compress" | "flush_writer")
+        || (name == "readline" && args.len() == 2)
+    {
         2
     } else {
         1
@@ -21,6 +23,9 @@ pub(super) fn call(
             "TypeError",
             format!("_imre_gzip.{name}() requires {arity} positional arguments"),
         ));
+    }
+    if matches!(name, "writer" | "compress" | "flush_writer") {
+        return super::zlib::gzip_writer(ctx, name, args);
     }
     let receiver = args[0];
     if name == "open" {

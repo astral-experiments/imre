@@ -327,6 +327,7 @@ impl Context {
             | ("bytes", Value::Bytes(_))
             | ("bytearray", Value::ByteArray(_))
             | ("array.array", Value::Array(_))
+            | (stdlib::functools::PARTIAL_CLASS, Value::Partial { .. })
             | (stdlib::functools::LRU_CACHE_CLASS, Value::Cached { .. })
             | ("set", Value::Set { frozen: false, .. })
             | ("frozenset", Value::Set { frozen: true, .. })
@@ -2387,7 +2388,7 @@ impl Context {
         }
         if name == stdlib::functools::PARTIAL_CLASS {
             let mut entries = Vec::new();
-            for method in ["__new__", "__call__", "__get__"] {
+            for method in ["__new__", "__call__", "__get__", "__setstate__"] {
                 let slot = self.builtin(&format!("{name}.{method}"));
                 entries.push((self.heap.code_name(method), slot));
             }

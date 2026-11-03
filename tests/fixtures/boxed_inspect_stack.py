@@ -45,6 +45,21 @@ def current():
     assert trace.positions.lineno == trace.lineno
 
     resumed_call_position()
+    frame_arguments(1, 2, 3, flag=True, tag="frame")
+    gen = (n for n in (1,))
+    assert inspect.getargs(gen.gi_code) == ([".0"], None, None)
+    gen.close()
+
+
+def frame_arguments(first, /, second, *rest, flag, **kwargs):
+    info = inspect.getargvalues(inspect.currentframe())
+    assert isinstance(info, inspect.ArgInfo)
+    assert info[:3] == (["first", "second", "flag"], "rest", "kwargs")
+    assert inspect.formatargvalues(*info) == (
+        "(first=1, second=2, flag=True, *rest=(3,), **kwargs={'tag': 'frame'})"
+    )
+    info.locals["flag"] = False
+    assert flag is False
 
 
 def resumed_call_position():

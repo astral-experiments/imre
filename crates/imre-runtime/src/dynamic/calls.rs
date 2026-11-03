@@ -30,6 +30,13 @@ pub(super) enum MappingOperation {
     Keywords(Option<Id>),
 }
 
+#[derive(PartialEq, Eq)]
+enum AttributeLookup {
+    Value,
+    Method,
+    ListedClassMember,
+}
+
 #[derive(Default)]
 struct InstanceLayout {
     dictionary: bool,
@@ -1146,7 +1153,7 @@ impl Context {
             {
                 self.bind_attribute(method, object, class)
             }
-            (None, None) => self.builtin_attribute(object, name),
+            (None, None) => self.builtin_attribute(object, name, AttributeLookup::Value),
         }
     }
 
@@ -1995,7 +2002,7 @@ impl Context {
         }
         let base = self.scalar_value(obj);
         if builtins::method_name(self.heap.get(base), name).is_some() {
-            return self.builtin_attribute(obj, name);
+            return self.builtin_attribute(obj, name, AttributeLookup::Value);
         }
         let mut kind = self
             .builtin_type_name(obj)
@@ -2088,7 +2095,7 @@ impl Context {
             && self.class_attr(class, "__getattr__").is_none()
             && self.class_attr(class, "__getattribute__").is_none_or(|hook| matches!(self.heap.get(hook), Value::Native(symbol) if symbol == "object.__getattribute__"))
         {
-            self.default_attr_for_call(obj, name, true)
+            self.default_attr(obj, name, AttributeLookup::Method)
         } else {
             self.lookup_attr(obj, name)
         }
@@ -2096,11 +2103,16 @@ impl Context {
 
     /// Base lookup bypasses Python's __getattribute__ and __getattr__ hooks.
     pub(super) fn default_get_attr(&mut self, obj: Id, name: &str) -> Result<Id> {
-        self.default_attr_for_call(obj, name, false)
+        self.default_attr(obj, name, AttributeLookup::Value)
+    }
+
+    /// Resolve a dir-listed member of a class with the default metaclass for no_type_check.
+    pub(super) fn no_type_check_member(&mut self, class: Id, name: &str) -> Result<Id> {
+        self.default_attr(class, name, AttributeLookup::ListedClassMember)
     }
 
     /// Keep non-data wrapper receiver checks at call time for direct method calls.
-    fn default_attr_for_call(&mut self, obj: Id, name: &str, for_call: bool) -> Result<Id> {
+    fn default_attr(&mut self, obj: Id, name: &str, lookup: AttributeLookup) -> Result<Id> {
         if name == "__dict__"
             && let Some(&dictionary) = self.native_type_dicts.get(&obj)
         {
@@ -2160,6 +2172,17 @@ impl Context {
             && self.readable_data_descriptor(member)
         {
             return self.bind_attribute(member, obj, meta);
+        }
+        if name == "__delattr__"
+            && self.is_type_object(obj)
+            && self.allocation_base(obj).is_some_and(
+                |base| matches!(self.heap.get(base), Value::Native(owner) if owner == "dict"),
+            )
+        {
+            let member = self
+                .class_attr(obj, name)
+                .unwrap_or_else(|| self.builtin("object.__delattr__"));
+            return self.bind_attribute(member, NONE, obj);
         }
         if let Value::Native(kind) = self.heap.get(obj)
             && stdlib::datetime::members(kind).is_some()
@@ -2239,7 +2262,7 @@ impl Context {
             } else {
                 self.dictionary_field(namespace, name)?
             };
-            if for_call
+            if lookup == AttributeLookup::Method
                 && field.is_none()
                 && let Some(member) = member
                 && match self.heap.get(member) {
@@ -2318,7 +2341,7 @@ impl Context {
             if name == "maxlen" {
                 return Ok(ring.maxlen.map_or(NONE, |n| self.int(n as i64)));
             }
-            return self.builtin_attribute(obj, name);
+            return self.builtin_attribute(obj, name, lookup);
         }
         if name == "msg"
             && let Some(message) = self.import_error_message(obj, None)
@@ -4648,10 +4671,10 @@ impl Context {
                 return self.instance_attribute(obj, class, None, name);
             }
         }
-        self.builtin_attribute(obj, name)
+        self.builtin_attribute(obj, name, lookup)
     }
 
-    fn builtin_attribute(&mut self, obj: Id, name: &str) -> Result<Id> {
+    fn builtin_attribute(&mut self, obj: Id, name: &str, lookup: AttributeLookup) -> Result<Id> {
         if name == "__prepare__" && self.is_type_object(obj) {
             let type_class = self.builtin("type");
             let owner = if self.direct_subclass(obj, type_class) {
@@ -4758,6 +4781,18 @@ impl Context {
                 receiver: obj,
                 explicit: false,
             }));
+        }
+        // Native directories can list unmaterialized slots. A bound descriptor already
+        // returned its value or error above; only an intrinsic miss reaches this point.
+        if lookup == AttributeLookup::ListedClassMember {
+            if matches!(self.heap.get(obj), Value::Native(_))
+                && let Some(member) = self.own_class_attr(obj, name)
+            {
+                return self.bind_attribute(member, NONE, obj);
+            }
+            if builtins::dir::listed_by_native_base(self, obj, name)? {
+                return Ok(NONE);
+            }
         }
         Err(self.missing_attribute(obj, name))
     }
@@ -5601,7 +5636,7 @@ impl Context {
         dictionary
     }
 
-    fn replace_instance_dictionary(&mut self, obj: Id, class: Id, new: Option<Id>) {
+    pub(super) fn replace_instance_dictionary(&mut self, obj: Id, class: Id, new: Option<Id>) {
         let removed = self.take_instance_fields(obj, class);
         let Value::Instance { namespace, .. } = self.heap.get_mut(obj) else {
             unreachable!()
@@ -8383,7 +8418,8 @@ impl Context {
         }
         self.init_abstract_class(class, scope)?;
         if self.is_protocol_declaration(class) {
-            self.call_typing_helper("_freeze_protocol_members", vec![class, annotations])?;
+            let members = self.call_typing_helper("_get_protocol_attrs", vec![class])?;
+            self.set_attr(class, "__protocol_attrs__", members)?;
         }
         if let Some((parents, fields, annotate, total)) = typed_dict_fields {
             let configure = self

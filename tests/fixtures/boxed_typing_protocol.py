@@ -1,3 +1,4 @@
+import annotationlib
 import typing
 from abc import ABC, ABCMeta, abstractmethod
 from collections.abc import Mapping, Sized
@@ -44,6 +45,15 @@ def current():
     print(HasHTML._is_protocol, Concrete._is_protocol, Concrete().__html__())
     print(WithInit("explicit initializer").value)
     print(Protocol.__abstractmethods__ == frozenset(), Abstract.__abstractmethods__ == {"operation"})
+    namespace = {"__name__": __name__, "Protocol": Protocol}
+    exec("class Deferred(Protocol):\n    item: NotInScope", namespace)
+    deferred = namespace["Deferred"]
+    assert get_protocol_members(deferred) == {"item"}
+    assert annotationlib.get_annotations(deferred, format=annotationlib.Format.STRING) == {"item": "NotInScope"}
+    ref = annotationlib.get_annotations(deferred, format=annotationlib.Format.FORWARDREF)["item"]
+    assert isinstance(ref, annotationlib.ForwardRef) and ref.__owner__ is deferred
+    assert ref.__forward_arg__ == "NotInScope"
+
     class Forward(Protocol):
         item: NotInScope
         def method(self): ...
