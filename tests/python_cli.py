@@ -1683,6 +1683,13 @@ def main():
         ftp_script.write_text("import ftplib\nprint(ftplib.FTP().encoding, ftplib.parse257('257 \"home\"'))\n")
         compare("-B", ftp_script)
 
+        director_script = root / "opener_director.py"
+        director_script.write_text(
+            "from urllib.request import OpenerDirector, build_opener\n"
+            "assert type(build_opener()) is OpenerDirector\n"
+        )
+        compare("-IB", director_script, native_args=("run", director_script, "--quiet"))
+
         # A project FTP provider is loaded only if the opener actually uses FTP.
         alternate = root / "ftp_provider"
         alternate.mkdir()

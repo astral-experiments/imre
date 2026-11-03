@@ -2224,6 +2224,9 @@ impl IntrinsicModule {
             (Self::PosixPath, "splitext") => Intrinsic::PosixPath(PosixPathOperation::Splitext),
             (Self::PosixPath, "normpath") => Intrinsic::PosixPath(PosixPathOperation::Normpath),
             (Self::PosixPath, "abspath") => Intrinsic::PosixPath(PosixPathOperation::Abspath),
+            (Self::UrllibRequest, "OpenerDirector") => {
+                Intrinsic::ScopedObjectExport("urllib.request.OpenerDirector")
+            }
             (Self::UrllibRequest, "Request") => {
                 Intrinsic::ScopedObjectExport("urllib.request.Request")
             }
