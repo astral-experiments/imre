@@ -199,6 +199,14 @@ impl Output {
             let error = crate::frontend::error(source, param, &reason);
             return Err(format!("{}:{error}", path.display()));
         }
+        // Frozen code exposes its origin independently of the module's registered source path.
+        let code_file = match (bundled, name) {
+            (true, "_frozen_importlib") => self.data(b"<frozen importlib._bootstrap>"),
+            (true, "_frozen_importlib_external") => {
+                self.data(b"<frozen importlib._bootstrap_external>")
+            }
+            _ => file.to_owned(),
+        };
         let location = SourceMap {
             module_start,
             docs,
@@ -218,7 +226,7 @@ impl Output {
             private_names,
             package,
             text: source,
-            file,
+            file: &code_file,
             newlines: source
                 .match_indices('\n')
                 .map(|(offset, _)| offset)
