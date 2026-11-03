@@ -107,6 +107,7 @@ def bars(
     engines=ENGINES,
     label_width=83,
     value_format="{:.2f} ms",
+    unavailable=(),
 ):
     row_step, bar_height = 29, 10
     plot_x = x + label_width
@@ -130,9 +131,12 @@ def bars(
         )
     for i, (engine, name) in enumerate(engines.items()):
         row_y = y + row_step * i
+        label(ax, x, row_y, name, 14, color=MUTED)
+        if engine in unavailable:
+            label(ax, x + width, row_y, "unsupported", 13, color=MUTED, align="right")
+            continue
         value = medians[engine]
         color = ACCENT if engine == "imre" else BAR
-        label(ax, x, row_y, name, 14, color=MUTED)
         ax.add_patch(
             Rectangle(
                 (plot_x, row_y - bar_height / 2),
@@ -161,12 +165,10 @@ def workload_panels(rows, path, *, applications=False):
     row_height = 180 + 29 * (max(len(medians) for _, medians in rows) - 3)
     height = panel_top + row_height * row_count + 27
     counts = sorted({len(case["samples_ns"]) for case, _ in rows})
-    runs = "–".join(map(str, counts))
+    runs = str(counts[0]) if len(counts) == 1 else f"{counts[0]}–{counts[-1]}"
     fig, ax = benchmark_card(
         height,
-        "Comparing Imre, Bun, Rust, and CPython"
-        if applications
-        else "Comparing Imre, Rust, and CPython",
+        "Comparing Imre, Rust, and CPython",
         f"{runs} runs per engine",
     )
     for i, (case, medians) in enumerate(rows):
@@ -182,17 +184,21 @@ def workload_panels(rows, path, *, applications=False):
         )
         label(ax, x + 4, y + 47, case["input"], 13, color=MUTED)
         if applications:
-            engines = {
-                "rust": "Rust",
-                "imre": "Imre",
-                "bun": "Bun",
-                "cpython": "CPython",
-            }
+            engines = ENGINES.copy()
             if "original_cpython" in medians:
                 engines.update(
                     cpython="CPython · typed", original_cpython="CPython · uv"
                 )
-            bars(ax, medians, x + 4, y + 74, 393, engines=engines, label_width=116)
+            bars(
+                ax,
+                medians,
+                x + 4,
+                y + 74,
+                393,
+                engines=engines,
+                label_width=116,
+                unavailable=case.get("unavailable", ()),
+            )
         else:
             bars(ax, medians, x + 4, y + 74, 393)
     save(fig, path, "Median runtime by workload")
@@ -201,8 +207,6 @@ def workload_panels(rows, path, *, applications=False):
 def frozen_flask_panel(report, path):
     engines = {
         "imre": "Frozen Flask on Imre",
-        "node": "Node.js",
-        "bun": "Bun",
         "rust": "Rust / Hyper",
     }
     if any(
@@ -268,7 +272,7 @@ def main():
     if not report.get("complete", True):
         parser.error("the measurement is incomplete")
     cases = report["cases"]
-    applications = "bun" in cases[0]["samples_ns"][0]
+    applications = report.get("suite") == "applications" or "runner_sha256" in report
     args.output_dir.mkdir(parents=True, exist_ok=True)
     mpl.rcParams.update(
         {
@@ -283,7 +287,6 @@ def main():
         engines = {
             "rust": "Rust",
             "imre": "Imre",
-            "bun": "Bun",
             "cpython": "CPython",
             "original_cpython": "CPython (original uv)",
         }
@@ -308,8 +311,10 @@ def main():
             values.append(f"{mid:.2f}")
             intervals.append(f"{low:.2f}–{high:.2f}")
         cells = " | ".join(values)
-        speedup = medians["cpython"] / medians["imre"]
-        times.append(f"| {case['name']} | {case['input']} | {cells} | {speedup:.2f}× |")
+        speedup = (
+            f"{medians['cpython'] / medians['imre']:.2f}×" if "imre" in medians else "—"
+        )
+        times.append(f"| {case['name']} | {case['input']} | {cells} | {speedup} |")
         spreads.append(
             f"| {case['name']} | {' | '.join(intervals)} | {case['report_bytes']:,} |"
         )

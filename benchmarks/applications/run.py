@@ -6,7 +6,6 @@ import json
 import os
 import platform
 import runpy
-import shutil
 import subprocess
 import sys
 import tarfile
@@ -49,6 +48,7 @@ class Case:
     cwd: Path
     expected: bytes
     output: Path | None = None
+    unavailable: dict | None = None
 
 
 def cpu_ticks():
@@ -81,9 +81,7 @@ def idle_window(cpu):
 
 
 def idle_enough(window):
-    return (
-        window["selected"]["busy_pct"] <= 5 and window["other_cpus"]["busy_pct"] <= 10
-    )
+    return window["selected"]["busy_pct"] <= 5 and window["other_cpus"]["busy_pct"] <= 2
 
 
 def wait_for_idle(cpu):
@@ -135,18 +133,17 @@ def search_fixture(archive, work):
 
 
 def prepare(a, work, env):
-    build, bun, py = a.build_dir, a.bun, sys.executable
+    build, py = a.build_dir, sys.executable
     rust = build / "target/release"
     examples = ROOT / "examples"
     cases = []
 
-    def commands(native, rs, js, python, args):
+    def commands(native, rs, python, args):
         return {
             k: [*cmd, *args]
             for k, cmd in {
                 "imre": [build / native],
                 "rust": [rust / rs],
-                "bun": [bun, HERE / js],
                 "cpython": [py, *python],
             }.items()
         }
@@ -170,7 +167,6 @@ def prepare(a, work, env):
     cmds = commands(
         "catalog",
         "python-catalog-reference",
-        "catalog.mjs",
         ["-m", "python_catalog"],
         [source, out],
     )
@@ -180,9 +176,7 @@ def prepare(a, work, env):
     )
 
     tree, manifest, matches = search_fixture(a.ruff_archive, work)
-    cmds = commands(
-        "search", "source-search", "search.mjs", [HERE / "search.py"], [manifest]
-    )
+    cmds = commands("search", "source-search", [HERE / "search.py"], [manifest])
     cases.append(Case("Source search", "1,956 Ruff source files", cmds, tree, matches))
 
     require(digest(a.wheel.read_bytes()) == PIP, "expected pip 26.1.1 wheel")
@@ -191,7 +185,6 @@ def prepare(a, work, env):
     cmds = commands(
         "wheel",
         "verify-wheel",
-        "wheel.mjs",
         [examples / "wheel_record/validate.py"],
         [a.wheel],
     )
@@ -199,7 +192,22 @@ def prepare(a, work, env):
     member = runpy.run_path(str(ROOT / "tests/wheel_record.py"))["tamper_real"](
         a.wheel, bad
     )
-    for k, cmd in cmds.items():
+    unavailable = {}
+    for k, cmd in list(cmds.items()):
+        valid = subprocess.run(cmd, env=env, capture_output=True, timeout=120)
+        error = valid.stderr.decode(errors="replace").splitlines()
+        if (
+            k == "imre"
+            and valid.returncode
+            and error[-1:] == ["ModuleNotFoundError: No module named 'zipfile'"]
+        ):
+            unavailable[k] = {"exit_code": valid.returncode, "error": error[-1]}
+            del cmds[k]
+            continue
+        require(
+            valid.returncode == 0 and not valid.stdout and not valid.stderr,
+            f"{k} failed the valid wheel: {error}",
+        )
         proc = subprocess.run(
             [*cmd[:-1], bad], env=env, capture_output=True, timeout=120, check=False
         )
@@ -208,15 +216,20 @@ def prepare(a, work, env):
             f"{k} missed corrupt member {member}",
         )
     cases.append(
-        Case("Wheel verification", f"pip 26.1.1 · {members} members", cmds, work, b"")
+        Case(
+            "Wheel verification",
+            f"pip 26.1.1 · {members} members",
+            cmds,
+            work,
+            b"",
+            unavailable=unavailable,
+        )
     )
 
     require(digest(a.graph.read_bytes()) == GRAPH, "DIMACS graph differs")
     tiny = work / "tiny.gr"
     tiny.write_text("p sp 5 5\na 1 2 20\na 1 2 1\na 2 3 2\na 1 3 8\na 3 4 1\n")
-    roads = commands(
-        "roads", "road-routing", "roads.mjs", [examples / "road_routing.py"], []
-    )
+    roads = commands("roads", "road-routing", [examples / "road_routing.py"], [])
     for k, cmd in roads.items():
         p = subprocess.run(
             [*cmd, tiny, "1,4", "4,1", "1,1"], env=env, check=True, capture_output=True
@@ -249,7 +262,6 @@ def prepare(a, work, env):
     cmds = commands(
         "conformance",
         "conformance-report-reference",
-        "conformance.mjs",
         ["-m", "conformance_report"],
         [*report.arguments(), "--output", out],
     )
@@ -262,7 +274,6 @@ def prepare(a, work, env):
     for engine, cmd in commands(
         "conformance",
         "conformance-report-reference",
-        "conformance.mjs",
         ["-m", "conformance_report"],
         [*control.arguments(), "--output", out],
     ).items():
@@ -287,20 +298,15 @@ def prepare(a, work, env):
 
 def measure(case, env, cpu):
     engines = list(case.commands)
-    if len(engines) == 4:
-        orders = ((0, 1, 3, 2), (1, 2, 0, 3), (2, 3, 1, 0), (3, 0, 2, 1)) * 3
-    else:
-        n = len(engines)
-        orders = []
-        for sequence in (list(range(n)), list(reversed(range(n)))):
-            orders.extend(sequence[i:] + sequence[:i] for i in range(n))
+    orders = []
+    for sequence in (engines, engines[::-1]):
+        orders.extend(sequence[i:] + sequence[:i] for i in range(len(sequence)))
     before = wait_for_idle(cpu)
     start_ticks = cpu_ticks()
     rows = []
-    for order in [range(len(engines)), reversed(range(len(engines))), *orders]:
+    for order in [engines, engines[::-1], *orders, *orders]:
         row = {}
-        for index in order:
-            engine = engines[index]
+        for engine in order:
             if case.output:
                 case.output.unlink(missing_ok=True)
             start = time.perf_counter_ns()
@@ -333,6 +339,7 @@ def measure(case, env, cpu):
         "input": case.size,
         "warmups_ns": rows[:2],
         "samples_ns": rows[2:],
+        **({"unavailable": case.unavailable} if case.unavailable else {}),
         "report_bytes": len(case.expected),
         "report_sha256": digest(case.expected),
         "activity_before": before,
@@ -345,15 +352,11 @@ def main():
     p = argparse.ArgumentParser(description=__doc__)
     for name in ["build-dir", "ruff-archive", "wheel", "graph", "output"]:
         p.add_argument("--" + name, required=True, type=lambda s: Path(s).resolve())
-    p.add_argument("--bun", default="bun")
     p.add_argument("--cpu", required=True, type=int)
     p.add_argument(
         "--only", action="append", help="select a workload by its exact display name"
     )
     a = p.parse_args()
-    if not (bun := shutil.which(a.bun)):
-        p.error(f"Bun executable not found: {a.bun}")
-    a.bun = Path(bun).resolve()
     require(not sys.flags.optimize, "suite needs enabled assertions")
     os.sched_setaffinity(0, {a.cpu})
     examples = ROOT / "examples"
@@ -377,6 +380,7 @@ def main():
             require(len(cases) == len(set(a.only)), "unknown workload")
         result = {
             "schema": 1,
+            "suite": "applications",
             "date_utc": datetime.now(UTC).isoformat(),
             "host": platform.node(),
             "os": platform.platform(),
@@ -403,8 +407,8 @@ def main():
                 during = trial["activity_during"]
                 acceptable = (
                     idle_enough(trial["activity_after"])
-                    and during["other_cpus"]["busy_pct"] <= 10
-                    and during["selected"]["steal_pct"] <= 1
+                    and during["other_cpus"]["busy_pct"] <= 2
+                    and during["selected"]["steal_pct"] <= 0.1
                 )
                 if acceptable:
                     result["cases"].append(trial)

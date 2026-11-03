@@ -1,12 +1,13 @@
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
-use std::io::{Read, copy};
-use std::{env, fs::File};
+use std::io::{Cursor, Read, copy};
+use std::{env, fs};
 use zip::ZipArchive;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let mut wheel = ZipArchive::new(File::open(env::args_os().nth(1).ok_or("missing wheel")?)?)?;
+    let path = env::args_os().nth(1).ok_or("missing wheel")?;
+    let mut wheel = ZipArchive::new(Cursor::new(fs::read(path)?))?;
     let records: Vec<_> = wheel
         .file_names()
         .filter(|path| {
@@ -18,7 +19,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let [record] = records.as_slice() else {
         return Err("expected one RECORD".into());
     };
-    let mut rows = HashMap::new();
+    let mut rows = HashMap::with_capacity(wheel.len());
     for row in csv::ReaderBuilder::new()
         .has_headers(false)
         .from_reader(wheel.by_name(record)?)
@@ -33,16 +34,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         if member.is_dir() {
             continue;
         }
-        let name = member.name().to_owned();
-        let row = rows.remove(&name);
-        if signatures.contains(&name) {
+        let name = member.name();
+        let row = rows.remove(name);
+        if signatures.iter().any(|signature| signature == name) {
             if row.is_some() {
                 return Err("signature in RECORD".into());
             }
             continue;
         }
         let (expected, size) = row.ok_or_else(|| format!("missing RECORD entry: {name}"))?;
-        if &name == record {
+        if name == record {
             if !expected.is_empty() || size.is_some() {
                 return Err("RECORD must have empty hash and size".into());
             }
@@ -53,7 +54,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 || expected.strip_prefix("sha256=")
                     != Some(URL_SAFE_NO_PAD.encode(hash.finalize()).as_str())
             {
-                return Err(format!("hash or size mismatch: {name}").into());
+                return Err(format!("hash or size mismatch: {}", member.name()).into());
             }
         }
     }

@@ -72,11 +72,17 @@ async fn route(req: Request<Incoming>) -> Result<Response<Full<Bytes>>, Infallib
                 .and_then(|doc| doc.get("values"))
                 .and_then(Value::as_array);
             match values.and_then(|items| {
-                let mut total = BigInt::default();
+                let mut small = 0_i128;
+                let mut large = BigInt::default();
                 for item in items {
-                    total += item.as_number()?.to_string().parse::<BigInt>().ok()?;
+                    let number = item.as_number()?;
+                    if let Some(value) = number.as_i64() {
+                        small += i128::from(value);
+                    } else {
+                        large += number.as_str().parse::<BigInt>().ok()?;
+                    }
                 }
-                Some((items.len(), total))
+                Some((items.len(), large + small))
             }) {
                 Some((count, total)) => reply(
                     201,

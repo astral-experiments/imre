@@ -119,6 +119,7 @@ version = "0.1.0"
 dependencies = [
  "base64",
  "csv",
+ "memchr",
  "sha2",
  "zip",
 ]
