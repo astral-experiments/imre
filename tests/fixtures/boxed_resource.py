@@ -1,5 +1,5 @@
 import resource
-from resource import RLIMIT_CORE, RLIMIT_STACK, RLIM_INFINITY, getrlimit, setrlimit
+from resource import RLIMIT_CORE, RLIMIT_NPROC, RLIMIT_STACK, RLIM_INFINITY, getrlimit, setrlimit
 
 
 class Index:
@@ -23,6 +23,7 @@ def current():
     assert limits == getrlimit(RLIMIT_STACK)
     assert getrlimit(True) == getrlimit(1)
     print(RLIMIT_STACK, RLIM_INFINITY, limits)
+    print(resource.RLIMIT_NPROC, getrlimit(RLIMIT_NPROC))
     for call in (
         lambda: getrlimit(),
         lambda: getrlimit(1, 2),

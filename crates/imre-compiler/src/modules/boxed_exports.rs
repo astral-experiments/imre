@@ -363,6 +363,7 @@ pub(super) fn symbol(module: M, name: &str) -> Option<Binding> {
             "resource",
             "RLIMIT_CORE",
             "RLIMIT_NOFILE",
+            "RLIMIT_NPROC",
             "RLIMIT_STACK",
             "RLIM_INFINITY",
             "getrlimit",
