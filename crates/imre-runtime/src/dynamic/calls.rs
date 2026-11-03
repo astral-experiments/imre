@@ -6494,12 +6494,16 @@ impl Context {
                     ));
                 }
                 let result = self.call(alias.origin, args, kwargs)?;
-                if matches!(self.heap.get(result), Value::Instance { .. })
-                    && let Err(error) = self.set_attr(result, "__orig_class__", callable)
-                    && !alias.kind.is_typing_alias()
-                    && !matches!(error.kind.as_ref(), "AttributeError" | "TypeError")
-                {
-                    return Err(error);
+                if let Err(error) = self.set_attr(result, "__orig_class__", callable) {
+                    let ignored = if alias.is_builtin_alias() {
+                        self.is_attribute_error(&error)
+                            || self.is_builtin_error(&error, "TypeError")
+                    } else {
+                        self.is_builtin_error(&error, "Exception")
+                    };
+                    if !ignored {
+                        return Err(error);
+                    }
                 }
                 Ok(result)
             }
