@@ -35,6 +35,27 @@ def current():
     assert divmod(Pair(), Child()) == "pair"
     assert divmod(object(), Pair()) == "rpair"
 
+    # The float slot returns two floats even when one operand is integral.
+    assert divmod(5, 2.0) == (2.0, 1.0)
+    assert repr(divmod(0, -2.0)) == "(-0.0, -0.0)"
+    assert divmod(1.0, 0.1) == (1.0 // 0.1, 1.0 % 0.1)
+
+    class ReflectedFloat(float):
+        def __rdivmod__(self, other):
+            return ("reflected", other)
+
+    class DecliningFloat(float):
+        def __divmod__(self, other):
+            return NotImplemented
+
+    assert divmod(5, ReflectedFloat(2)) == ("reflected", 5)
+    try:
+        divmod(DecliningFloat(5), 2)
+    except TypeError:
+        pass
+    else:
+        raise AssertionError("ignored NotImplemented from __divmod__")
+
     class Forward(int):
         def __divmod__(self, other):
             print("declined")

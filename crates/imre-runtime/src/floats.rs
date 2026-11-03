@@ -279,18 +279,36 @@ pub extern "C" fn imre_float_divide(left: f64, right: f64, operation: u32) -> f6
         return left / right;
     }
     let remainder = left % right;
-    let opposite = (remainder < 0.0) != (right < 0.0);
     if operation == 2 {
-        return if remainder == 0.0 {
-            0.0_f64.copysign(right)
-        } else if opposite {
-            remainder + right
-        } else {
-            remainder
-        };
+        signed_remainder(remainder, right)
+    } else {
+        floor_quotient(left, right, remainder)
     }
+}
+
+/// Compute both results from one remainder operation, as in CPython's float_divmod.
+pub(super) fn divmod_nonzero(left: f64, right: f64) -> (f64, f64) {
+    debug_assert!(right != 0.0);
+    let remainder = left % right;
+    (
+        floor_quotient(left, right, remainder),
+        signed_remainder(remainder, right),
+    )
+}
+
+fn signed_remainder(remainder: f64, divisor: f64) -> f64 {
+    if remainder == 0.0 {
+        0.0_f64.copysign(divisor)
+    } else if (remainder < 0.0) != (divisor < 0.0) {
+        remainder + divisor
+    } else {
+        remainder
+    }
+}
+
+fn floor_quotient(left: f64, right: f64, remainder: f64) -> f64 {
     let mut quotient = (left - remainder) / right;
-    if remainder != 0.0 && opposite {
+    if remainder != 0.0 && (remainder < 0.0) != (right < 0.0) {
         quotient -= 1.0;
     }
     if quotient == 0.0 {
