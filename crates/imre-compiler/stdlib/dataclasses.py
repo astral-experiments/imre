@@ -1,13 +1,13 @@
 from _imre_dataclasses import (
     is_defaultdict as _is_defaultdict,
     loaded_module as _loaded_module,
-    make_type as _make_type, members as _members,
+    members as _members,
     native_iterator as _native_iterator, retarget_class_cell as _retarget_class_cell,
     slot_bases as _slot_bases,
     slotted_type as _slotted_type,
 )
 import types
-from types import FunctionType, GenericAlias, MemberDescriptorType
+from types import GenericAlias, MemberDescriptorType
 
 __all__ = ["dataclass", "field", "Field", "fields", "is_dataclass", "make_dataclass", "asdict", "astuple", "replace",
            "MISSING", "KW_ONLY", "InitVar", "FrozenInstanceError"]
@@ -618,29 +618,13 @@ def make_dataclass(cls_name, fields, *, bases=(), namespace=None, init=True,
 
     if implicit:
         raise NotImplementedError('implicit Any fields require deferred typing.Any resolution')
-    if not isinstance(bases, tuple):
-        raise TypeError('type.__new__() argument 2 must be tuple, not ' + type(bases).__name__)
 
-    members = {}
-    if namespace is not None:
-        members.update(namespace)
-    members.update(defaults)
-    if '__slots__' in members or '__classcell__' in members:
-        raise NotImplementedError('boxed make_dataclass requires an ordinary class namespace')
-    if any(not isinstance(key, str) for key in members):
-        raise NotImplementedError('boxed class namespaces require string keys')
-    members.setdefault('__module__', 'types')
-    members.setdefault('__doc__', None)
-    members.setdefault('__qualname__', cls_name)
-    if not isinstance(members['__qualname__'], str):
-        raise TypeError('type __qualname__ must be a str')
-    for key in ('__init_subclass__', '__class_getitem__'):
-        value = members.get(key)
-        if isinstance(value, FunctionType):
-            members[key] = classmethod(value)
-    if isinstance(members.get('__new__'), FunctionType):
-        members['__new__'] = staticmethod(members['__new__'])
-    cls = _make_type(cls_name, bases, members)
+    def fill_namespace(ns):
+        if namespace is not None:
+            ns.update(namespace)
+        ns.update(defaults)
+
+    cls = types.new_class(cls_name, bases, {}, fill_namespace)
 
     def annotate(format):
         # The field types are already values. Rendering strings requires annotationlib.

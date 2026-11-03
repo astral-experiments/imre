@@ -430,8 +430,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         )
         | (
             "_imre_dataclasses",
-            "make_type"
-            | "is_defaultdict"
+            "is_defaultdict"
             | "loaded_module"
             | "members"
             | "native_iterator"
@@ -2151,19 +2150,6 @@ pub(super) fn call(
     }
     if let Some(method) = name.strip_prefix("_imre_dataclasses.") {
         match (method, args, kwargs) {
-            ("make_type", [name, bases, members], []) => {
-                let name = ctx.str_value(*name)?.to_owned();
-                if name.contains('\0') {
-                    return Err(Error::new(
-                        "ValueError",
-                        "type name must not contain null characters",
-                    ));
-                }
-                let bases = ctx
-                    .tuple_items(*bases)?
-                    .ok_or_else(|| Error::new("TypeError", "expected a tuple of bases"))?;
-                return ctx.make_dataclass_type(name, bases, *members);
-            }
             ("is_defaultdict", [obj], []) => {
                 // Boxed defaultdict exposes its factory on instances, including derived instances.
                 return Ok(if ctx.defaultdict_factory(*obj).is_some() {
