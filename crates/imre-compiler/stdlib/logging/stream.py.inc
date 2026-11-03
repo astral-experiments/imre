@@ -2,16 +2,6 @@
     def createLock(self) -> None:
         self.lock = _Lock()
 
-    def acquire(self) -> None:
-        lock = self.lock
-        if lock is not None:
-            lock.acquire()
-
-    def release(self) -> None:
-        lock = self.lock
-        if lock is not None:
-            lock.release()
-
     def _at_fork_reinit(self) -> None:
         lock = self.lock
         if lock is None:
