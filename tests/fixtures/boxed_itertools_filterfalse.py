@@ -48,6 +48,19 @@ def current():
     cursor = Cursor(None, [0], label="subclass")
     assert type(cursor) is Cursor and cursor.label == "subclass" and list(cursor) == [0]
 
+    class WithArgs(filterfalse):
+        def __getnewargs__(self):
+            return None, ()
+
+    item = WithArgs(None, [])
+    assert item.__reduce_ex__(5)[1] == (WithArgs, None, ())
+    try:
+        item.__reduce_ex__(0)
+    except TypeError as error:
+        assert str(error) == "filterfalse expected 2 arguments, got 1"
+    else:
+        raise AssertionError("reconstructed filterfalse from one argument")
+
     import pickle
     for protocol in range(pickle.HIGHEST_PROTOCOL + 1):
         try:
