@@ -201,14 +201,24 @@ pub(in crate::dynamic) fn rooted_input_chain(ctx: &Context) -> Option<[Id; 3]> {
     text_descriptor_chain(&ctx.heap, ctx.scope_name(scope, "__stdin__")?)
 }
 
-/// A text wrapper and its buffered descriptor retain the next layer through these native edges.
+/// Follow the stored strong references from a text wrapper to its buffer and raw file.
 pub(in crate::dynamic) fn text_descriptor_chain(heap: &Heap, stream: Id) -> Option<[Id; 3]> {
     let Value::Instance {
-        memory_stream: Some(MemoryStream::Wrapper(wrapper)),
+        memory_stream,
+        fields,
         ..
     } = heap.get(stream)
     else {
         return None;
+    };
+    let Some(MemoryStream::Wrapper(wrapper)) = memory_stream else {
+        // _pyio keeps both links in instance fields. Once they move to a
+        // materialized __dict__, leave them to the ordinary reachability check.
+        let buffer = *fields.get("_buffer")?;
+        let Value::Instance { fields, .. } = heap.get(buffer) else {
+            return None;
+        };
+        return Some([stream, buffer, *fields.get("_raw")?]);
     };
     let buffer = wrapper.buffer.get()?;
     let Value::File(file) = heap.get(buffer) else {
