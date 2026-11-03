@@ -165,10 +165,10 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
                         &frame_info,
                         section("def currentframe():", "def trace(context=1):"),
                         section("def getmro(cls):", "def indentsize(line):"),
+                        section("def formatannotation(", "def formatannotationrelativeto("),
                         section("def _signature_get_partial(", "def _signature_is_builtin("),
                         section("def _signature_is_functionlike(obj):", "def _signature_strip_non_python_syntax("),
-                        section("class _void:", "class _ParameterKind("),
-                        section("_POSITIONAL_ONLY         = ", "class BufferFlags("),
+                        section("class _void:", "class BufferFlags("),
                     ]
                     .join("\n")
                 }),

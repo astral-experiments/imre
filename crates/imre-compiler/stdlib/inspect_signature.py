@@ -29,40 +29,6 @@ def getattr_static(obj, attr, default=_sentinel):
     raise AttributeError(attr)
 
 
-class _ParameterKind(enum.IntEnum):
-    POSITIONAL_ONLY = 0
-    POSITIONAL_OR_KEYWORD = 1
-    VAR_POSITIONAL = 2
-    KEYWORD_ONLY = 3
-    VAR_KEYWORD = 4
-
-    @property
-    def description(self):
-        return ("positional-only", "positional or keyword", "variadic positional",
-                "keyword-only", "variadic keyword")[self.value]
-
-    def __str__(self):
-        return self.name
-
-
-def formatannotation(annotation, base_module=None, *, quote_annotation_strings=True):
-    if not quote_annotation_strings and isinstance(annotation, str):
-        return annotation
-    if getattr(annotation, '__module__', None) == 'typing':
-        # Preserve punctuation and strip typing. only at the start of a dotted name.
-        return ''.join(part.removeprefix('typing.') for part in
-                       re.split(r'([^\w.]+)', repr(annotation)))
-    if isinstance(annotation, types.GenericAlias):
-        return str(annotation)
-    if isinstance(annotation, type):
-        if annotation.__module__ in ('builtins', base_module):
-            return annotation.__qualname__
-        return annotation.__module__+'.'+annotation.__qualname__
-    if isinstance(annotation, ForwardRef):
-        return annotation.__forward_arg__
-    return repr(annotation)
-
-
 def _constructor(obj, follow_wrapper_chains):
     # Inspect binds a metaclass's __call__ descriptor to the metaclass itself.
     meta = type(obj)
