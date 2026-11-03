@@ -10,6 +10,8 @@ license = "MIT OR Apache-2.0"
 [dependencies]
 base64 = "0.22.1"
 csv = "1.4.0"
+# Enable SIMD detection in the ZIP reader's DEFLATE backend.
+flate2 = { version = "1", default-features = false, features = ["runtime_detection"] }
 memchr = "2"
 sha2 = "0.10.9"
 smallvec = { version = "1", features = ["union"] }

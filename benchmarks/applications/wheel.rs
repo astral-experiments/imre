@@ -1,7 +1,7 @@
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
-use std::io::{Cursor, Read, copy};
+use std::io::{Cursor, Read};
 use std::{env, fs};
 use zip::ZipArchive;
 
@@ -29,6 +29,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         rows.insert(path, (hash, size));
     }
     let signatures = [format!("{record}.jws"), format!("{record}.p7s")];
+    let mut buffer = [0u8; 64 * 1024];
     for i in 0..wheel.len() {
         let mut member = wheel.by_index(i)?;
         if member.is_dir() {
@@ -49,7 +50,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         } else {
             let mut hash = Sha256::new();
-            let count = copy(&mut member.by_ref(), &mut hash)?;
+            let mut count = 0u64;
+            loop {
+                let n = member.read(&mut buffer)?;
+                if n == 0 {
+                    break;
+                }
+                hash.update(&buffer[..n]);
+                count += n as u64;
+            }
             if Some(count) != size
                 || expected.strip_prefix("sha256=")
                     != Some(URL_SAFE_NO_PAD.encode(hash.finalize()).as_str())
