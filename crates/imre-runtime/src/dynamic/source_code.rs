@@ -160,7 +160,8 @@ enum Instruction {
     Iter(ast::Expr),
     UnsupportedAsyncIter(Option<ast::Expr>),
     Await(Option<ast::Expr>),
-    SaveCallOperand(Option<ast::Expr>),
+    SaveOperand(Option<ast::Expr>),
+    Binary(ast::Operator, ruff_text_size::TextRange),
     SaveCallMethod(ast::ExprAttribute),
     CallSaved {
         positional: usize,
@@ -1124,7 +1125,7 @@ impl Program {
                 | Instruction::Iter(e)
                 | Instruction::ExceptMatch(e, _)
                 | Instruction::Await(Some(e))
-                | Instruction::SaveCallOperand(Some(e)) => strings.visit_expr(e),
+                | Instruction::SaveOperand(Some(e)) => strings.visit_expr(e),
                 Instruction::SaveCallMethod(field) => {
                     strings.heap.code_name(field.attr.as_str());
                     strings.visit_expr(&field.value);
@@ -1292,7 +1293,8 @@ impl Program {
                 }
                 Instruction::ReturnSent
                 | Instruction::Await(None)
-                | Instruction::SaveCallOperand(None)
+                | Instruction::SaveOperand(None)
+                | Instruction::Binary(_, _)
                 | Instruction::Jump(_)
                 | Instruction::Break(_)
                 | Instruction::EnterFinally { .. }
@@ -1693,7 +1695,7 @@ impl Program {
             };
             Instruction::SaveCallMethod(field)
         } else {
-            Instruction::SaveCallOperand(Some(*call.func))
+            Instruction::SaveOperand(Some(*call.func))
         };
         self.instructions.push((line, callable));
         let positional = call.arguments.args.len();
@@ -1718,7 +1720,7 @@ impl Program {
                 Some(expr)
             };
             self.instructions
-                .push((line, Instruction::SaveCallOperand(value)));
+                .push((line, Instruction::SaveOperand(value)));
         }
         self.instructions.push((
             line,
@@ -1728,6 +1730,18 @@ impl Program {
                 position,
             },
         ));
+    }
+
+    /// Binary operations can preserve an operand while a nested await delegates.
+    fn awaits_in_operand(expr: &ast::Expr) -> bool {
+        match expr {
+            ast::Expr::Await(_) => true,
+            ast::Expr::BinOp(binary) => {
+                Self::awaits_in_operand(&binary.left) || Self::awaits_in_operand(&binary.right)
+            }
+            ast::Expr::Call(call) => Self::has_awaited_call_arguments(call),
+            _ => false,
+        }
     }
 
     // A suspended expression supplies its result when execution resumes.
@@ -1757,6 +1771,20 @@ impl Program {
                 if self.kind.is_async() && Self::has_awaited_call_arguments(&call) =>
             {
                 self.lower_awaited_call(call, line);
+                return Ok(None);
+            }
+            ast::Expr::BinOp(binary)
+                if self.kind.is_async()
+                    && (Self::awaits_in_operand(&binary.left)
+                        || Self::awaits_in_operand(&binary.right)) =>
+            {
+                for operand in [*binary.left, *binary.right] {
+                    let value = self.lower_suspension(operand, line, function)?;
+                    self.instructions
+                        .push((line, Instruction::SaveOperand(value)));
+                }
+                self.instructions
+                    .push((line, Instruction::Binary(binary.op, binary.range)));
                 return Ok(None);
             }
             ast::Expr::Yield(y) => Instruction::Yield(y.value.map(|value| *value)),
@@ -4043,7 +4071,7 @@ impl Context {
                             | Instruction::ReturnSent
                             | Instruction::Delegate
                             | Instruction::Await(None)
-                            | Instruction::SaveCallOperand(None)
+                            | Instruction::SaveOperand(None)
                             | Instruction::AsyncWithMethods(None)
                             | Instruction::UnsupportedAsyncIter(None)
                             | Instruction::CallAsyncEnter
@@ -4703,12 +4731,28 @@ impl Context {
                 };
                 iterators.push(self.await_iterator(value, None)?);
             }
-            Instruction::SaveCallOperand(expr) => {
+            Instruction::SaveOperand(expr) => {
                 let value = match expr {
                     Some(expr) => eval(self, expr)?,
                     None => *sent,
                 };
                 iterators.push(value);
+            }
+            Instruction::Binary(op, range) => {
+                let right = iterators.pop().expect("saved right operand");
+                let left = iterators.pop().expect("saved left operand");
+                let previous = self
+                    .heap
+                    .replace_expression(value::ExpressionPosition::Source {
+                        offset: range.start(),
+                        range: *range,
+                    });
+                let result = self.op(op.as_str(), left, right, NONE);
+                self.heap.replace_expression(previous);
+                self.heap.weak_edge_removed(right);
+                self.heap.weak_edge_removed(left);
+                self.heap.release_unbound_finalizers();
+                *sent = result?;
             }
             Instruction::SaveCallMethod(field) => {
                 let method = self.source_call_method(code, scope, field)?;
