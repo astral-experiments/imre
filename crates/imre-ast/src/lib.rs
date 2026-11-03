@@ -210,10 +210,15 @@ impl Names {
 
 /// Whether source opts in to stringized annotations via a future import.
 pub fn future_annotations(body: &[ast::Stmt]) -> bool {
+    future_import(body, "annotations")
+}
+
+/// Whether the module imports a given compiler feature from __future__.
+pub fn future_import(body: &[ast::Stmt], feature: &str) -> bool {
     body.iter().any(|s| {
         matches!(s, ast::Stmt::ImportFrom(i) if i.level == 0
-            && i.module.as_ref().is_some_and(|m| m.as_str() == "__future__")
-            && i.names.iter().any(|n| n.name.as_str() == "annotations"))
+            && i.module.as_deref() == Some("__future__")
+            && i.names.iter().any(|n| n.name.as_str() == feature))
     })
 }
 

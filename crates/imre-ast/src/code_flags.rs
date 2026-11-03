@@ -33,6 +33,24 @@ pub const INSPECT_FLAGS: &[(&str, u32)] = &[
     ("CO_METHOD", METHOD),
 ];
 
+/// Flags determined by a function's signature and lexical scope.
+pub fn function_flags(params: Option<&ast::Parameters>, nested: bool, method: bool) -> u32 {
+    let mut flags = OPTIMIZED | NEWLOCALS;
+    if params.is_some_and(|p| p.vararg.is_some()) {
+        flags |= VARARGS;
+    }
+    if params.is_some_and(|p| p.kwarg.is_some()) {
+        flags |= VARKEYWORDS;
+    }
+    if nested {
+        flags |= NESTED;
+    }
+    if method {
+        flags |= METHOD;
+    }
+    flags
+}
+
 #[derive(Default)]
 struct Yields(bool);
 impl<'a> Visitor<'a> for Yields {

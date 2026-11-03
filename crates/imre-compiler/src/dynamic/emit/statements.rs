@@ -672,22 +672,13 @@ impl Function<'_, '_> {
             Body::Namespace(..) => None,
             _ => {
                 use imre_ast::code_flags::*;
-                let mut flags = OPTIMIZED | NEWLOCALS;
-                if params.is_some_and(|p| p.vararg.is_some()) {
-                    flags |= VARARGS;
-                }
-                if params.is_some_and(|p| p.kwarg.is_some()) {
-                    flags |= VARKEYWORDS;
-                }
-                if type_params.is_some() || self.in_function {
-                    flags |= NESTED;
-                }
-                if type_params.is_none()
-                    && !self.prefix.is_empty()
-                    && !self.prefix.ends_with(".<locals>.")
-                {
-                    flags |= METHOD;
-                }
+                let mut flags = function_flags(
+                    params,
+                    type_params.is_some() || self.in_function,
+                    type_params.is_none()
+                        && !self.prefix.is_empty()
+                        && !self.prefix.ends_with(".<locals>."),
+                );
                 if self.source.string_annotations {
                     flags |= FUTURE_ANNOTATIONS;
                 }

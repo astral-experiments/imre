@@ -34,6 +34,7 @@ def factory():
 
 
 def current():
+    from inspect import isasyncgenfunction, isgeneratorfunction
     from types import FunctionType, GeneratorType, coroutine
 
     def values():
@@ -49,6 +50,61 @@ def current():
     assert after.gi_code.co_flags == original.co_flags | 0x100
     assert coroutine(values).__code__ is after.gi_code
     assert next(before) == next(after) == 1
+
+    namespace = {}
+    exec("""from __future__ import annotations, barry_as_FLUFL
+def outer(*args, **kwargs):
+    global Example
+    class Example:
+        async def method(self):
+            yield 1
+    def documented():
+        'a docstring'
+        yield 1
+    async def coroutine_func(): pass
+    return documented, coroutine_func
+""", namespace)
+    outer = namespace["outer"]
+    generator, native_coro = outer()
+    assert isgeneratorfunction(generator)
+    assert isasyncgenfunction(namespace["Example"].method)
+    assert not isgeneratorfunction(native_coro)
+    future = 0x01000000 | 0x00400000
+    assert outer.__code__.co_flags == future | 0x0F
+    assert generator.__code__.co_flags == future | 0x04000033
+    assert namespace["Example"].method.__code__.co_flags == future | 0x08000213
+    saved_code = native_coro.__code__
+    assert coroutine(native_coro) is native_coro and native_coro.__code__ is saved_code
+    assert saved_code.co_flags == future | 0x93
+    before_marking = generator()
+    original_code = generator.__code__
+    assert coroutine(generator) is generator
+    assert before_marking.gi_code is original_code
+    assert generator().gi_code.co_flags == original_code.co_flags | 0x100
+
+    exec("""def operand(): return (yield 1) + 2
+lambda_operand = lambda: (yield 1) + 2
+def default_operand():
+    def inner(value=(yield 1)): pass
+def plain():
+    def inner(): yield
+def guard():
+    if False: yield
+def cleanup():
+    try: pass
+    finally: yield
+""", namespace)
+    for name in ("operand", "lambda_operand", "default_operand"):
+        try:
+            flags = namespace[name].__code__.co_flags
+        except NotImplementedError as error:
+            assert sys.implementation.name == "imre"
+            assert str(error) == "co_flags unavailable for this code object"
+        else:
+            assert flags == 0x23
+    assert namespace["plain"].__code__.co_flags == 3
+    assert namespace["guard"].__code__.co_flags == 0x23
+    assert namespace["cleanup"].__code__.co_flags == 0x23
 
     def mixed(first, /, second, optional=3, *args, required, **kwargs):
         pass

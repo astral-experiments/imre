@@ -218,13 +218,7 @@ impl Output {
             template_expressions,
             replacements,
             method_imports,
-            barry_as_flufl: body.iter().any(|stmt| {
-                matches!(stmt,
-                    ast::Stmt::ImportFrom(import) if import.level == 0
-                        && import.module.as_deref() == Some("__future__")
-                        && import.names.iter().any(|name| name.name.as_str() == "barry_as_FLUFL")
-                )
-            }),
+            barry_as_flufl: imre_ast::future_import(&body, "barry_as_FLUFL"),
             string_annotations: private_names.string_annotations,
             private_names,
             package,
