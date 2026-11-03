@@ -286,6 +286,21 @@ pub extern "C" fn imre_float_divide(left: f64, right: f64, operation: u32) -> f6
     }
 }
 
+/// Write the quotient and remainder of a typed float divmod.
+///
+/// # Safety
+/// `fields` must point to two writable, aligned doubles.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_float_divmod(left: f64, right: f64, fields: *mut [f64; 2]) -> i32 {
+    if right == 0.0 {
+        return Error::new(Kind::ZeroDivisionError, "division by zero").returning(0);
+    }
+    let (quotient, remainder) = divmod_nonzero(left, right);
+    // SAFETY: the caller supplies the storage for both results.
+    unsafe { fields.write([quotient, remainder]) };
+    1
+}
+
 /// Compute both results from one remainder operation, as in CPython's float_divmod.
 pub(super) fn divmod_nonzero(left: f64, right: f64) -> (f64, f64) {
     debug_assert!(right != 0.0);

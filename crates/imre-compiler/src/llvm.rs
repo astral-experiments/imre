@@ -6130,6 +6130,27 @@ impl Emitter<'_, '_> {
                 _ => unreachable!("bytes conversion was checked"),
             },
             Builtin::Encode => self.call("imre_str_encode", Type::Bytes, &[&args[0].value]),
+            Builtin::FloatDivmod => {
+                let [left, right] = [0, 1].map(|index| {
+                    let arg = &args[index].value;
+                    if arg.ty == Type::Int {
+                        self.call("imre_int_float", Type::Float, &[arg])
+                    } else {
+                        arg.clone()
+                    }
+                });
+                let fields = self.entry_alloca("[2 x double]");
+                let status = self.instruction(format!(
+                    "call i32 @imre_float_divmod(double {}, double {}, ptr {fields})",
+                    left.operand, right.operand
+                ));
+                let failed = self.instruction(format!("icmp eq i32 {status}, 0"));
+                self.check_failed(&failed);
+                let pair = self.record(returns);
+                let values = self.instruction(format!("load [2 x double], ptr {fields}"));
+                self.line(format!("store [2 x double] {values}, ptr {}", pair.operand));
+                pair
+            }
             Builtin::BytesHex => self.call("imre_bytes_hex", Type::Str, &[&args[0].value]),
             Builtin::Decode => self.call("imre_bytes_decode", Type::Str, &[&args[0].value]),
             Builtin::CsvReader {
@@ -9443,6 +9464,7 @@ declare i64 @imre_float_int(double)
 declare double @imre_float_parse(ptr)
 declare double @imre_bytes_float(ptr)
 declare double @imre_float_divide(double, double, i32)
+declare i32 @imre_float_divmod(double, double, ptr)
 declare i32 @imre_int_float_compare(i64, double)
 declare double @imre_int_true_divide(i64, i64)
 declare ptr @imre_bytes_literal(ptr, i64)
@@ -11511,6 +11533,14 @@ def transform(values: list[int], count: int) -> int:
         assert!(fast.contains("icmp ult i64"));
         assert!(fast.contains("getelementptr inbounds i64"));
         assert!(fast.contains("call i64 @imre_list_borrow_index("));
+    }
+
+    #[test]
+    fn float_divmod_uses_one_native_remainder_operation() {
+        let source =
+            "def pair(x: int, y: float) -> tuple[float, float]:\n    return divmod(x, y)\n";
+        let llvm = compile(source, &CompileOptions::default()).unwrap();
+        assert_eq!(llvm.matches("call i32 @imre_float_divmod(").count(), 1);
     }
 
     #[test]

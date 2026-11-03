@@ -11194,6 +11194,15 @@ impl<'a> Checker<'a> {
         }
         if name.id == "divmod" && args.len() == 2 {
             if args.iter().any(|arg| arg.ty == Type::Float) {
+                if args
+                    .iter()
+                    .all(|arg| matches!(arg.ty, Type::Float | Type::Int))
+                {
+                    return Ok(Expr {
+                        ty: self.types.tuple(vec![Type::Float, Type::Float]),
+                        kind: ExprKind::Builtin(Builtin::FloatDivmod, args),
+                    });
+                }
                 return Err(self.scoped_builtin_error("float divmod", call));
             }
             if args
