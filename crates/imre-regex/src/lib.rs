@@ -304,6 +304,8 @@ pub fn visit_class_warnings(
 pub enum EscapeError {
     Syntax(String, usize),
     Undefined(String),
+    UnknownGroup(String),
+    InvalidGroupName(String),
 }
 
 /// Named scalar replacements and the first escape diagnostic, in original character offsets.
@@ -514,6 +516,7 @@ impl BranchWidth {
 }
 
 struct GroupState {
+    open: usize,
     alphabet: Alphabet,
     backtrack: bool,
     dotall: bool,
@@ -558,12 +561,35 @@ fn check_backreference(
     result
 }
 
-fn reference_name(input: &mut Input<'_>) -> Result<String, String> {
-    let name: String = std::iter::from_fn(|| input.next_if(|c| *c != ')')).collect();
-    if input.next() != Some(')') {
-        return Err("unterminated group reference".into());
+fn reference_name(
+    input: &mut Input<'_>,
+    visitor: Option<&mut WarningVisitor<'_>>,
+) -> Result<String, String> {
+    let start = input.position;
+    let mut name = String::new();
+    loop {
+        let (message, at) = match input.next() {
+            Some(')') if input.clone().eq(['\\']) => {
+                ("bad escape (end of pattern)", input.position)
+            }
+            Some(')') if !name.is_empty() => return Ok(name),
+            Some(')') | None if name.is_empty() => ("missing group name", start),
+            None => ("missing ), unterminated name", start),
+            Some('\\') => {
+                name.push('\\');
+                if let Some(ch) = input.next() {
+                    name.push(ch);
+                    continue;
+                }
+                ("bad escape (end of pattern)", input.position - 1)
+            }
+            Some(ch) => {
+                name.push(ch);
+                continue;
+            }
+        };
+        return Err(syntax_error(input, visitor, at, message.into()));
     }
-    Ok(name)
 }
 
 fn reference_id(name: &str, groups: &[Option<String>], conditional: bool) -> Result<usize, String> {
@@ -675,7 +701,7 @@ fn tokenize(
                     input.next();
                     input.next();
                     let at = input.position;
-                    let name = reference_name(&mut input)?;
+                    let name = reference_name(&mut input, warnings.as_deref_mut())?;
                     let id = reference_id(&name, &groups, false)?;
                     check_backreference(id, &outer_prefixes, warnings.as_deref_mut(), at)?;
                     has_reference = true;
@@ -698,6 +724,7 @@ fn tokenize(
                 }
                 let atomic_assertion = assertion == Some('=');
                 let mut group = GroupState {
+                    open,
                     alphabet: escapes.alphabet,
                     backtrack: may_backtrack,
                     dotall,
@@ -728,7 +755,7 @@ fn tokenize(
                         }
                     } else if lookahead && input.next_if_eq(&'(').is_some() {
                         let start = input.position;
-                        let name = reference_name(&mut input)?;
+                        let name = reference_name(&mut input, warnings.as_deref_mut())?;
                         if let Some(probe) =
                             warnings.as_mut().and_then(|v| v.reference.as_deref_mut())
                             && !name.is_empty()
@@ -750,7 +777,21 @@ fn tokenize(
                             }
                             pending_conditions.push((group as usize, start));
                         }
-                        let id = reference_id(&name, &groups, true)?;
+                        let id = reference_id(&name, &groups, true).map_err(|reason| {
+                            if let Some(visitor) = warnings.as_mut()
+                                && let Some(escapes) = visitor.escapes.as_mut()
+                                && !name.bytes().all(|c| c.is_ascii_digit())
+                            {
+                                let error =
+                                    if (visitor.valid_name)(&name, alphabet == Alphabet::Bytes) {
+                                        EscapeError::UnknownGroup(name)
+                                    } else {
+                                        EscapeError::InvalidGroupName(name)
+                                    };
+                                escapes.error = Some((error, start));
+                            }
+                            reason
+                        })?;
                         if visiting {
                             if id == 0
                                 || id >= MAX_GROUPS as usize
@@ -894,7 +935,12 @@ fn tokenize(
                     group.backtrack = true;
                     if let Scope::Conditional { has_else } = &mut group.scope {
                         if *has_else {
-                            return Err("conditional backref with more than two branches".into());
+                            // The parser sees this separator before fetching the next token.
+                            return Err(record_syntax(
+                                warnings.as_deref_mut(),
+                                input.position - 1,
+                                "conditional backref with more than two branches".into(),
+                            ));
                         }
                         *has_else = true;
                         may_backtrack = false; // A conditional cannot take an extra unreachable branch.
@@ -1139,6 +1185,17 @@ fn tokenize(
             }
         };
         width.push(atom_width);
+    }
+    if let Some(unclosed) = outer_prefixes.last()
+        && outer_prefixes
+            .iter()
+            .any(|g| matches!(g.scope, Scope::Conditional { .. }))
+    {
+        return Err(record_syntax(
+            warnings.as_deref_mut(),
+            unclosed.open,
+            "missing ), unterminated subpattern".into(),
+        ));
     }
     if (literal_brace || lookahead || scoped_mode) && escapes.bracketed_word {
         return Err(
@@ -1556,6 +1613,10 @@ fn syntax_error(
     } else {
         (message, start)
     };
+    record_syntax(visitor, at, message)
+}
+
+fn record_syntax(visitor: Option<&mut WarningVisitor<'_>>, at: usize, message: String) -> String {
     if let Some(escapes) = visitor.and_then(|visitor| visitor.escapes.as_mut()) {
         escapes.error = Some((EscapeError::Syntax(message.clone(), 0), at));
     }
