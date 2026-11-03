@@ -1448,6 +1448,8 @@ def main():
         bytecode.write_bytes(b"")
         compare(bytecode, status=1, stderr=b"EOFError: EOF read where not expected\n")
         if sys.version_info[:2] == (3, 14):
+            compare("-I", "-c", "import warnings; [print(f) for f in warnings._get_filters()]",
+                    native_timeout=600)
             renamed = root / "bad_bytecode"
             renamed.write_bytes(importlib.util.MAGIC_NUMBER[:2] + b"xx")
             compare(renamed, status=1, stderr=b"RuntimeError: Bad magic number in .pyc file\n")
