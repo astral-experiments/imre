@@ -2263,6 +2263,9 @@ impl IntrinsicModule {
             (Self::UrllibRequest, "_parse_proxy") => {
                 Intrinsic::ScopedObjectExport("urllib.request._parse_proxy")
             }
+            (Self::UrllibRequest, "_proxy_bypass_winreg_override") => {
+                Intrinsic::ScopedObjectExport("urllib.request._proxy_bypass_winreg_override")
+            }
             (Self::UrllibRequest, "install_opener") => {
                 Intrinsic::ScopedObjectExport("urllib.request.install_opener")
             }
