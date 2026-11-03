@@ -456,6 +456,12 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
                 }),
             ))
         }
+        "http.cookiejar" => Some((
+            "http/cookiejar.py",
+            include_str!(
+                "../../../benchmarks/cpython_stdlib/full/http/upstream/Lib/http/cookiejar.py"
+            ),
+        )),
         "http.server" => Some(("http/server.py", include_str!("../stdlib/http/server.py"))),
         "locale" => Some(("locale.py", include_str!("../stdlib/locale.py"))),
         "_imre_gettext_locale" => Some((
@@ -2269,6 +2275,9 @@ impl IntrinsicModule {
             }
             (Self::UrllibRequest, "AbstractDigestAuthHandler") => {
                 Intrinsic::ScopedObjectExport("urllib.request.AbstractDigestAuthHandler")
+            }
+            (Self::UrllibRequest, "HTTPCookieProcessor") => {
+                Intrinsic::ScopedObjectExport("urllib.request.HTTPCookieProcessor")
             }
             (Self::UrllibRequest, "HTTPDigestAuthHandler") => {
                 Intrinsic::ScopedObjectExport("urllib.request.HTTPDigestAuthHandler")
