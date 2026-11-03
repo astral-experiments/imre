@@ -71,6 +71,7 @@ pub(super) mod structure;
 mod subprocess;
 mod system_size;
 pub(super) mod traceback;
+pub(super) mod tracemalloc;
 pub(super) mod urllib;
 mod warnings;
 pub(super) mod warnings_accel;
@@ -948,6 +949,9 @@ pub(super) fn call(
     #[cfg(all(target_os = "linux", target_env = "gnu"))]
     if name == "_locale.nl_langinfo" {
         return locale::nl_langinfo(ctx, args, kwargs);
+    }
+    if let Some(method) = name.strip_prefix("_tracemalloc.") {
+        return tracemalloc::call(ctx, method, args, kwargs);
     }
     if let Some(method) = name.strip_prefix("_warnings.") {
         return warnings_accel::call(ctx, method, args, kwargs);

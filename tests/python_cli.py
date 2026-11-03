@@ -957,6 +957,48 @@ def check_os_abort(imre, run):
     assert result.returncode == -signal.SIGABRT, result
 
 
+def check_tracemalloc_startup(imre, run):
+    probe = (
+        "import sys, tracemalloc; "
+        "print(sys._xoptions, tracemalloc.is_tracing(), tracemalloc.get_traceback_limit())"
+    )
+    for flags, setting in (
+        (("-X", "tracemalloc=2", "-X", "tracemalloc=5"), "3"),
+        (("-E",), "invalid"),
+        (("-I", "-X", "tracemalloc"), "invalid"),
+        (("-X", "tracemalloc=1"), "invalid"),
+        (("-X", "tracemalloc=-1"), ""),
+    ):
+        env = {"PYTHONTRACEMALLOC": setting}
+        expected = run(sys.executable, *flags, "-c", probe, extra=env)
+        actual = run(imre, *flags, "-c", probe, extra=env, timeout=600)
+        assert (actual.returncode, actual.stdout, actual.stderr) == (
+            expected.returncode, expected.stdout, expected.stderr
+        )
+
+    # Reject an out-of-range runtime limit before reading or compiling the entry.
+    if sys.platform.startswith("linux"):
+        for args in (("-c", "if:"), ("missing-tracemalloc-script.py",)):
+            expected = run(sys.executable, "-Xtracemalloc=65536", *args)
+            actual = run(imre, "-Xtracemalloc=65536", *args)
+            assert actual.returncode == expected.returncode == 1 and actual.stdout == expected.stdout == b""
+            # The fatal diagnostic includes the reporting process's thread ID and name.
+            assert actual.stderr.partition(b"Current thread 0x")[0] == expected.stderr.partition(b"Current thread 0x")[0]
+            assert actual.stderr.endswith(b"  <no Python frame>\n"), actual.stderr
+
+    # The ordinary compiler enforces annotated return types before selecting the traced runtime.
+    wrong_return = "def f() -> int:\n    return 'bad'\nprint(f())"
+    ordinary = run(imre, "-c", wrong_return)
+    traced = run(imre, "-Xtracemalloc=1", "-c", wrong_return)
+    assert traced.returncode == ordinary.returncode == 1
+    assert b"annotations are enforced contracts" in ordinary.stderr and traced.stderr == ordinary.stderr
+
+    # This import normally specializes to the typed representation.
+    spec = "from importlib.machinery import ModuleSpec; print(ModuleSpec('sample', None).name)"
+    traced = run(imre, "-Xtracemalloc=1", "-c", spec, timeout=600)
+    assert (traced.returncode, traced.stdout, traced.stderr) == (0, b"sample\n", b"")
+
+
 def check_faulthandler(imre, root, env):
     import resource
     import select
@@ -1249,6 +1291,7 @@ def main():
                 timeout=timeout,
             )
 
+        check_tracemalloc_startup(imre, run)
         if sys.platform == "darwin" or sys.platform.startswith("linux"):
             check_installed_site(imre, root, run)
             check_faulthandler(imre, root, env)
@@ -3116,6 +3159,7 @@ for name in ("md4", "ripemd160"):
             "boxed_warning_categories.py",
             "boxed_warnings.py",
             "boxed_warnings_accelerator.py",
+            "boxed_tracemalloc.py",
             "boxed_oserror.py",
             "boxed_type_identity.py",
             "boxed_type_namespace.py",

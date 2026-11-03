@@ -162,6 +162,7 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
             "_opcode_metadata.py",
             include_str!("../stdlib/_opcode_metadata.py"),
         )),
+        "tracemalloc" => Some(("tracemalloc.py", include_str!("../stdlib/tracemalloc.py"))),
         "warnings" => Some((
             "warnings.py",
             include_str!(
@@ -565,6 +566,8 @@ pub(crate) enum IntrinsicModule {
     Time,
     Warnings,
     WarningsNative,
+    Tracemalloc,
+    TracemallocNative,
     Tomli,
     TomliW,
     Shutil,
@@ -1093,6 +1096,8 @@ impl IntrinsicModule {
             "time" => Some(Self::Time),
             "warnings" => Some(Self::Warnings),
             "_warnings" => Some(Self::WarningsNative),
+            "tracemalloc" => Some(Self::Tracemalloc),
+            "_tracemalloc" => Some(Self::TracemallocNative),
             "tomli" => Some(Self::Tomli),
             "tomli_w" => Some(Self::TomliW),
             "shutil" => Some(Self::Shutil),

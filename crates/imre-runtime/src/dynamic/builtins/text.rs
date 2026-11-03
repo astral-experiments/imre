@@ -222,7 +222,26 @@ pub(super) fn construct(
                 Some(Value::Int(_) | Value::Bool(_)) => {
                     zeroed_bytes(ctx.as_integer(value.unwrap())?)?
                 }
-                _ => bytes_from_iterable(ctx, value.unwrap())?,
+                _ => {
+                    let source = value.unwrap();
+                    let bytes = bytes_from_iterable(ctx, source)?;
+                    // An exact tuple or buffer fills newly allocated bytes. The iterable
+                    // writer instead finishes from known byte data and can return a singleton.
+                    if name == "bytes"
+                        && !matches!(ctx.heap.get(source), Value::Tuple(_))
+                        && !matches!(
+                            ctx.heap.get(ctx.scalar_value(source)),
+                            Value::Bytes(_)
+                                | Value::ByteArray(_)
+                                | Value::MemoryView { .. }
+                                | Value::BytesIoBuffer { .. }
+                                | Value::Array(_)
+                        )
+                    {
+                        return Ok(ctx.heap.bytes_from_data(bytes));
+                    }
+                    bytes
+                }
             };
             Ok(ctx.alloc(if name == "bytes" {
                 Value::Bytes(bytes)

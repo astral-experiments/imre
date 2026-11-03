@@ -23,8 +23,8 @@ pub(super) enum Invocation {
 pub(super) enum ParseError {
     Usage(String),
     ContextWarnings(&'static str),
-    #[cfg(target_os = "linux")]
     FatalStartup(&'static str),
+    TraceDepthLimit,
 }
 
 impl From<String> for ParseError {
@@ -93,6 +93,7 @@ pub(super) fn parse(
                     let option = operand(flags.as_str(), args, "-X")?;
                     match option.split_once('=').unwrap_or((&option, "")) {
                         ("faulthandler", _) => faulthandler = true,
+                        ("tracemalloc", _) => {}
                         ("cpu_count", _) if cfg!(target_os = "linux") => {}
                         ("context_aware_warnings", _) => {
                             context_option.get_or_insert_with(|| option.clone());
@@ -148,6 +149,13 @@ pub(super) fn parse(
                     .unwrap_or(1)
             })
     };
+    let tracemalloc = trace_depth(&xoptions, ignore_environment).map_err(|error| {
+        #[cfg(unix)]
+        if !ignore_environment && let Err(message) = imre_ast::startup::environment_hash_seed() {
+            return ParseError::FatalStartup(message);
+        }
+        error
+    })?;
     // A launcher error must preserve the priority of settings validated earlier by CPython.
     let startup_error = |error| {
         #[cfg(target_os = "linux")]
@@ -212,6 +220,8 @@ pub(super) fn parse(
     }
     let env_present =
         |key| !ignore_environment && env::var_os(key).is_some_and(|value| !value.is_empty());
+    let tracemalloc =
+        u16::try_from(tracemalloc).map_err(|_| startup_error(ParseError::TraceDepthLimit))?;
     let flags = CommandFlags {
         isolated,
         ignore_environment,
@@ -228,6 +238,7 @@ pub(super) fn parse(
         warnoptions,
         xoptions,
         faulthandler: faulthandler || env_present("PYTHONFAULTHANDLER"),
+        tracemalloc,
     };
     let executable = env::current_exe()
         .map_err(|e| e.to_string())?
@@ -308,6 +319,48 @@ fn linux_numeric_option(value: &str, ignore_environment: bool) -> Option<&str> {
     // SAFETY: this call owns the non-null locale, and the trim above has finished using it.
     unsafe { libc::freelocale(locale) };
     (!rest.is_empty()).then_some(rest)
+}
+
+/// CPython validates the environment first, then uses the first matching -X option.
+fn trace_depth(xoptions: &[String], ignore_environment: bool) -> Result<u32, ParseError> {
+    let number = |value: &str| {
+        value
+            .trim_start_matches([' ', '\t', '\n', '\x0b', '\x0c', '\r'])
+            .parse::<i32>()
+            .ok()
+            .and_then(|n| u32::try_from(n).ok())
+    };
+    let mut depth = 0;
+    if !ignore_environment
+        && let Some(value) = env::var_os("PYTHONTRACEMALLOC").filter(|s| !s.is_empty())
+    {
+        depth = value.to_str().and_then(number).ok_or(ParseError::FatalStartup(
+            "Fatal Python error: config_init_tracemalloc: PYTHONTRACEMALLOC: invalid number of frames\nPython runtime state: preinitialized\n",
+        ))?;
+    }
+    if let Some(option) = xoptions
+        .iter()
+        .find(|s| s.split('=').next() == Some("tracemalloc"))
+    {
+        depth = match option.split_once('=') {
+            None => 1,
+            Some((_, "")) => 0,
+            Some((_, value)) => {
+                #[cfg(target_os = "linux")]
+                let parsed = if !value.is_ascii() {
+                    linux_numeric_option(value, ignore_environment).and_then(number)
+                } else {
+                    number(value)
+                };
+                #[cfg(not(target_os = "linux"))]
+                let parsed = number(value);
+                parsed.ok_or(ParseError::FatalStartup(
+                    "Fatal Python error: config_init_tracemalloc: -X tracemalloc=NFRAME: invalid number of frames\nPython runtime state: preinitialized\n",
+                ))?
+            }
+        };
+    }
+    Ok(depth)
 }
 
 fn operand(

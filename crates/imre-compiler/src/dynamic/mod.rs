@@ -481,6 +481,7 @@ fn resolve(owner: &str, package: bool, level: u32, name: &str) -> Option<String>
 }
 
 pub(crate) enum ObjectOperation<'a> {
+    TracedEntry,
     Builtin,
     OrderedCommandImport,
     ClassBody(&'a crate::modules::SourceGraph),
@@ -748,6 +749,7 @@ pub(crate) fn compile(
             && !registered_imports.called
             && (!provider_script || owner == "__main__")
             && imports.needs_typed_machinery()
+            && !matches!(operation, Some(ObjectOperation::TracedEntry))
             // Enforce the checked-file machinery contract on the original graph.
             // A module discovered only by boxed imports has no typed layout to preserve.
             && match operation {
@@ -982,6 +984,7 @@ pub(crate) fn compile(
         "warnoptions":startup.map(|(flags, _)| &flags.warnoptions),
         "xoptions":startup.map(|(flags, _)| &flags.xoptions),
         "faulthandler":startup.map(|(flags, _)| flags.faulthandler),
+        "tracemalloc":startup.map_or(0, |(flags, _)| flags.tracemalloc),
         "unbuffered":startup.is_some_and(|(flags, _)| flags.unbuffered),
         "warn_default_encoding":startup.map(|(flags, _)| flags.warn_default_encoding),
         "optimize":startup.map_or(0, |(flags, _)| flags.optimize),
@@ -1022,6 +1025,7 @@ const SEALED_IO: &str = include_str!("../../stdlib/io.py");
 const RUNTIME_PROVIDERS: &[&str] = &[
     "__future__",
     "__hello__",
+    "_collections_abc",
     "_frozen_importlib",
     "_frozen_importlib_external",
     "_opcode_metadata",
@@ -1044,6 +1048,7 @@ const RUNTIME_PROVIDERS: &[&str] = &[
     "encodings.cp424",
     "encodings.cp437",
     "enum",
+    "functools",
     "genericpath",
     "hashlib",
     "itertools",
@@ -1051,6 +1056,7 @@ const RUNTIME_PROVIDERS: &[&str] = &[
     "json.decoder",
     "json.encoder",
     "json.scanner",
+    "linecache",
     "opcode",
     "platform",
     "re",
@@ -1062,6 +1068,7 @@ const RUNTIME_PROVIDERS: &[&str] = &[
     "string.templatelib",
     "subprocess",
     "token",
+    "tracemalloc",
     "types",
     "warnings",
     "zipimport",
