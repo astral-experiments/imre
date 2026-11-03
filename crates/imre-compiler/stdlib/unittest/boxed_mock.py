@@ -621,6 +621,10 @@ def _make_autospec(spec, strict, as_instance, name=None, target=None):
             target = partial(spec.__init__, None)
         elif any("__call__" in base.__dict__ for base in spec.__mro__):
             target = _autospec_target(spec, "__call__", spec.__call__)
+    elif isinstance(spec, classmethod):
+        target = partial(spec.__func__, None)
+    elif isinstance(spec, staticmethod):
+        target = spec.__func__
     elif target is None and callable(spec):
         target = spec
     if target is not None and iscoroutinefunction(target):
@@ -664,7 +668,7 @@ def create_autospec(spec, spec_set=False, instance=False, *, unsafe=False, **kwa
     from inspect import isroutine
     if _is_instance_mock(spec):
         raise InvalidSpecError("Cannot autospec a Mock object")
-    if isroutine(spec):
+    if isroutine(spec) and not isinstance(spec, (classmethod, staticmethod)):
         raise NotImplementedError("create_autospec does not yet support standalone routines")
     if not unsafe:
         for typo in ("autospect", "auto_spec", "set_spec"):

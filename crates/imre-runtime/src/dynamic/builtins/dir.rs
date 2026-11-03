@@ -102,7 +102,9 @@ fn object_names(ctx: &mut Context, object: Id) -> Result<Id> {
         {
             ctx.builtin("builtin_function_or_method")
         }
-        Value::Function { .. } => return namespace_directory(ctx, object, true),
+        Value::Function { .. } | Value::ClassMethod { .. } | Value::StaticMethod { .. } => {
+            return namespace_directory(ctx, object, true);
+        }
         Value::Method { .. } if ctx.builtin_type_name(object) == Some("method") => {
             return namespace_directory(ctx, object, true);
         }
@@ -437,6 +439,8 @@ fn class_names(ctx: &Context, class: Id, names: &mut BTreeSet<String>) -> Result
                 name.as_str(),
                 "builtin_function_or_method"
                     | "function"
+                    | "classmethod"
+                    | "staticmethod"
                     | "method"
                     | "dict"
                     | "list"
@@ -466,6 +470,23 @@ fn class_names(ctx: &Context, class: Id, names: &mut BTreeSet<String>) -> Result
                         "__name__",
                         "__qualname__",
                         "__type_params__",
+                    ],
+                ),
+                "classmethod" | "staticmethod" => (
+                    if name == "staticmethod" {
+                        &["__call__"]
+                    } else {
+                        &[]
+                    },
+                    &[
+                        "__annotate__",
+                        "__annotations__",
+                        "__class_getitem__",
+                        "__dict__",
+                        "__func__",
+                        "__get__",
+                        "__isabstractmethod__",
+                        "__wrapped__",
                     ],
                 ),
                 "method" => (&[], &["__call__", "__func__", "__get__", "__self__"]),
