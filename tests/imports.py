@@ -1666,6 +1666,25 @@ def main() -> None:
         assert result.returncode == 1 and "import nesting exceeds 96" in result.stderr, result
         checks += 2
 
+        if sys.platform in ("linux", "darwin"):
+            constants = ["SO_ERROR"]
+            if sys.platform == "linux":
+                constants.extend(["SOCK_NONBLOCK", "SOCK_CLOEXEC"])
+            for module in ("socket", "_socket"):
+                case = temporary / f"{module}_constants_keep_typed_calls"
+                write_files(case, {"main.py": (
+                    f"from {module} import {', '.join(constants)}\n"
+                    "def typed(n: int) -> int: return n\n"
+                    f"def mask() -> int: return {' | '.join(constants)}\n"
+                    "def dormant() -> int:\n"
+                    "    return typed('wrong')\n"
+                    "print(mask())\n"
+                )})
+                result = run([compiler, "check", str(case / "main.py")], temporary)
+                assert result.returncode != 0 and "main.py:5:" in result.stderr, result
+                assert "expected int, got str" in result.stderr or "invalid-argument-type" in result.stderr, result
+                checks += 1
+
         for name, (files, expected) in REJECTED.items():
             case = temporary / name
             write_files(case, files)
