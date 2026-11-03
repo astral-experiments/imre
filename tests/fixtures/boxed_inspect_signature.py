@@ -291,6 +291,17 @@ assert sig.parameters["instance"].kind is Parameter.POSITIONAL_ONLY
 assert str(inspect.signature(object.__init__)) == "(self, /, *args, **kwargs)"
 assert str(inspect.signature(object().__init__)) == "(*args, **kwargs)"
 
+assert str(inspect.signature(object.__new__, follow_wrapped=False)) == "(*args, **kwargs)"
+assert getfullargspec(object.__new__).args == ["type"]
+assert str(inspect.signature("|".join)) == "(iterable, /)"
+assert str(inspect.signature(partial("|".join, ("a", "b")))) == "()"
+try:
+    inspect.signature(min)
+except ValueError as exc:
+    assert str(exc) == f"no signature found for builtin {min!r}"
+else:
+    raise AssertionError("min has no text signature")
+
 documented.__self__ = object()
 documented.__text_signature__ = "($self, /, value, *, retries=1)"
 assert str(inspect.signature(documented, annotation_format=Format.STRING)) == "(value, *, retries=1)"
