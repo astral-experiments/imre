@@ -96,6 +96,10 @@ functions! {
     SSL_CTX_set_cipher_list(Handle, *const c_char) -> c_int;
     SSL_CTX_get_security_level(Handle) -> c_int;
     SSL_CTX_set_default_verify_paths(Handle) -> c_int;
+    X509_get_default_cert_file_env() -> *const c_char;
+    X509_get_default_cert_file() -> *const c_char;
+    X509_get_default_cert_dir_env() -> *const c_char;
+    X509_get_default_cert_dir() -> *const c_char;
     SSL_CTX_get_cert_store(Handle) -> Handle;
     X509_STORE_lock(Handle) -> c_int;
     X509_STORE_unlock(Handle) -> c_int;
