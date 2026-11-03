@@ -796,6 +796,36 @@ pub(super) fn socketpair(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]
     Ok(ctx.alloc(Value::Tuple(vec![left, right])))
 }
 
+/// Socket operations shared by raw endpoints and the exclusively owned TLS transport.
+pub(super) fn endpoint_method(
+    ctx: &mut Context,
+    method: &str,
+    socket: &crate::objects::Object,
+    args: &[Id],
+) -> Result<Id> {
+    match method {
+        "fileno" => Ok(ctx.int(i64::from(native::fd(socket)))),
+        "listen" => {
+            let backlog = match args {
+                [value] => ctx.index_c_int(*value)?,
+                _ => libc::SOMAXCONN.min(128),
+            };
+            native::listen(socket, backlog)?;
+            Ok(NONE)
+        }
+        "accept" => {
+            let (child, peer) = native::accept(socket)?;
+            let peer = pack_socket_name(ctx, peer)?;
+            let child = ctx.alloc(Value::Socket(child));
+            Ok(ctx.alloc(Value::Tuple(vec![child, peer])))
+        }
+        "getsockname" | "getpeername" => {
+            pack_socket_name(ctx, native::socket_name(socket, method == "getpeername")?)
+        }
+        _ => unreachable!(),
+    }
+}
+
 pub(super) fn call(
     ctx: &mut Context,
     name: &str,
@@ -957,7 +987,9 @@ pub(super) fn call(
     match method {
         "__enter__" => return Ok(*receiver),
         "__exit__" | "close" => native::close(&s)?,
-        "fileno" => return Ok(ctx.int(i64::from(native::fd(&s)))),
+        "fileno" | "listen" | "accept" | "getsockname" | "getpeername" => {
+            return endpoint_method(ctx, method, &s, args);
+        }
         "get_inheritable" => {
             let enabled = crate::objects::os::INHERITABLE.enabled(native::fd(&s))?;
             return Ok(if enabled { super::TRUE } else { super::FALSE });
@@ -970,19 +1002,6 @@ pub(super) fn call(
             &s,
             &address(ctx, native::family(&s), argument(args, 0)?, method)?,
         )?,
-        "listen" => native::listen(
-            &s,
-            int_option(ctx, args, kwargs, 0, "backlog", libc::SOMAXCONN.min(128))?,
-        )?,
-        "accept" => {
-            let (child, peer) = native::accept(&s)?;
-            let peer = pack_socket_name(ctx, peer)?;
-            let child = ctx.alloc(Value::Socket(child));
-            return Ok(ctx.alloc(Value::Tuple(vec![child, peer])));
-        }
-        "getsockname" | "getpeername" => {
-            return pack_socket_name(ctx, native::socket_name(&s, method == "getpeername")?);
-        }
         "setblocking" => native::set_blocking_mode(&s, ctx.as_integer(argument(args, 0)?)? != 0)?,
         "gettimeout" => {
             return Ok(native::get_timeout(&s).map_or(NONE, |duration| {

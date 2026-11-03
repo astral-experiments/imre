@@ -1,5 +1,6 @@
-"""TLS contexts and blocking, connected sockets using system OpenSSL."""
+"""TLS contexts and blocking sockets using system OpenSSL."""
 
+import errno as _errno
 import io as _io
 import _imre_ssl
 import _ssl
@@ -435,6 +436,12 @@ class SSLContext:
             if not server_hostname.isascii():
                 raise NotImplementedError("encode internationalized hostnames to IDNA before wrapping the socket")
         result = _call(_imre_ssl.wrap, self._ctx, sock, server_hostname)
+        if result is None:
+            reason = "Closed before TLS handshake with data in recv buffer."
+            error = SSLError(_errno.ENOTCONN, reason)
+            error.reason = reason
+            error.library = None
+            raise error
         if isinstance(result, tuple):
             code, message = result
             # Match CPython's hostname diagnostics for these X509 verification codes.
@@ -457,13 +464,16 @@ class SSLContext:
         peer._context = self
         peer._server_hostname = server_hostname
         peer.server_side = bool(server_side)
+        peer.do_handshake_on_connect = do_handshake_on_connect
+        peer.suppress_ragged_eofs = suppress_ragged_eofs
         return peer
 
 
 class SSLSocket:
     """Encrypted I/O on a socket returned by SSLContext.wrap_socket()."""
 
-    __slots__ = ("_session", "_context", "_server_hostname", "server_side", "_io_refs", "_closed")
+    __slots__ = ("_session", "_context", "_server_hostname", "server_side", "_io_refs", "_closed",
+                 "do_handshake_on_connect", "suppress_ragged_eofs")
 
     def __init__(self, *args, **kwargs):
         raise TypeError("SSLSocket does not have a public constructor. Instances are returned by SSLContext.wrap_socket().")
@@ -476,6 +486,31 @@ class SSLSocket:
     def server_hostname(self):
         return self._server_hostname
 
+    def fileno(self):
+        return _imre_ssl.fileno(self._session)
+
+    def getsockname(self):
+        return _imre_ssl.getsockname(self._session)
+
+    def getpeername(self):
+        return _imre_ssl.getpeername(self._session)
+
+    def listen(self, backlog=128, /):
+        return _imre_ssl.listen(self._session, backlog)
+
+    def accept(self):
+        child, address = _imre_ssl.accept(self._session)
+        try:
+            peer = self.context.wrap_socket(
+                child, server_side=True,
+                do_handshake_on_connect=self.do_handshake_on_connect,
+                suppress_ragged_eofs=self.suppress_ragged_eofs,
+            )
+        except BaseException:
+            child.close()
+            raise
+        return peer, address
+
     def get_verified_chain(self):
         """Return the verified certificate chain as a list of DER-encoded certificates."""
         return _call(_imre_ssl.get_verified_chain, self._session)
@@ -485,22 +520,22 @@ class SSLSocket:
         return _call(_imre_ssl.get_unverified_chain, self._session)
 
     def send(self, data, flags=0):
-        if self._session is not None and flags != 0:
+        if _imre_ssl.is_session(self._session) and flags != 0:
             raise ValueError("non-zero flags not allowed in calls to send() on %s" % self.__class__)
         return _call(_imre_ssl.send, self._session, data, flags)
 
     def sendall(self, data, flags=0):
-        if flags:
+        if _imre_ssl.is_session(self._session) and flags:
             raise ValueError("non-zero flags not allowed in calls to sendall() on SSLSocket")
-        return _call(_imre_ssl.sendall, self._session, data)
+        return _call(_imre_ssl.sendall, self._session, data, flags)
 
     def recv(self, buflen=1024, flags=0):
-        if flags:
+        if _imre_ssl.is_session(self._session) and flags:
             raise ValueError("non-zero flags not allowed in calls to recv() on SSLSocket")
-        return _call(_imre_ssl.recv, self._session, buflen)
+        return _call(_imre_ssl.recv, self._session, buflen, flags)
 
     def get_channel_binding(self, cb_type="tls-unique"):
-        if self._session is None:
+        if not _imre_ssl.is_session(self._session):
             if cb_type not in CHANNEL_BINDING_TYPES:
                 raise ValueError("{0} channel binding type not implemented".format(cb_type))
             return None

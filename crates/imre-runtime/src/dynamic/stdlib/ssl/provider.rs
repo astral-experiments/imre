@@ -1,8 +1,9 @@
 //! Blocking TLS connections using the optional system OpenSSL 3 library.
 use std::ffi::{CStr, CString, c_char, c_int, c_long, c_uint, c_ulong, c_void};
-use std::os::fd::{AsRawFd, OwnedFd};
 use std::ptr::{self, NonNull};
 use std::sync::OnceLock;
+
+use crate::objects::socket;
 
 pub(in crate::dynamic) mod bio;
 pub(super) mod ciphers;
@@ -610,7 +611,7 @@ impl Drop for Context {
 pub(crate) struct Session {
     api: &'static Api,
     handle: NonNull<c_void>,
-    socket: OwnedFd,
+    pub(super) socket: crate::ObjectOwner,
     server: bool,
 }
 
@@ -622,7 +623,11 @@ enum Operation<'a> {
 }
 
 impl Session {
-    pub(crate) fn wrap(ctx: &Context, fd: OwnedFd, host: Option<&str>) -> Result<Self, Failure> {
+    pub(crate) fn wrap(
+        ctx: &Context,
+        socket: crate::ObjectOwner,
+        host: Option<&str>,
+    ) -> Result<Self, Failure> {
         if ctx.server == host.is_some() {
             return Err(Failure::Other(
                 "TLS role and server hostname disagree".into(),
@@ -636,7 +641,7 @@ impl Session {
         let session = Self {
             api,
             handle,
-            socket: fd,
+            socket,
             server: ctx.server,
         };
         if let Some(host) = host {
@@ -644,7 +649,7 @@ impl Session {
         }
         // SAFETY: SSL_set_fd creates a non-closing socket BIO. The owned descriptor
         // remains valid for the full lifetime of this SSL object.
-        if unsafe { (api.SSL_set_fd)(handle.as_ptr(), session.socket.as_raw_fd()) } != 1 {
+        if unsafe { (api.SSL_set_fd)(handle.as_ptr(), socket::fd(&session.socket)) } != 1 {
             return Err(api.error("SSL_set_fd"));
         }
         if ctx.server {
@@ -778,8 +783,7 @@ impl Session {
                     } else {
                         libc::POLLOUT
                     };
-                    crate::objects::socket::wait_blocking(self.socket.as_raw_fd(), events)
-                        .map_err(Failure::Io)?;
+                    socket::wait_blocking(socket::fd(&self.socket), events).map_err(Failure::Io)?;
                 }
                 SSL_ERROR_SYSCALL if os_error.kind() == std::io::ErrorKind::Interrupted => continue,
                 SSL_ERROR_SYSCALL if os_error.raw_os_error() != Some(0) => {
@@ -906,7 +910,9 @@ impl Session {
 
 impl Drop for Session {
     fn drop(&mut self) {
-        // SAFETY: SSL_free releases the sole SSL reference before socket is dropped.
+        // SAFETY: free the SSL and its non-closing BIO while the socket is still valid.
         unsafe { (self.api.SSL_free)(self.handle.as_ptr()) };
+        // An endpoint operation may still hold a reference across a Python callback.
+        let _ = socket::close(&self.socket);
     }
 }

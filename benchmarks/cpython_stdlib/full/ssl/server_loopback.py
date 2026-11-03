@@ -17,11 +17,11 @@ support.verbose = False
 from test import test_ssl as fixture
 
 
-def exchange(server, version, cafile, hostname, expected):
+def exchange(server, version, cafile, hostname, expected, mode="serve"):
     ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
     ctx.minimum_version = ctx.maximum_version = version
     ctx.load_verify_locations(cafile)
-    argv = [*server, "reject" if expected else "serve", fixture.SIGNED_CERTFILE, "-"]
+    argv = [*server, "reject" if expected else mode, fixture.SIGNED_CERTFILE, "-"]
     with subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                           stderr=subprocess.PIPE, text=True) as child:
         line = ""
@@ -79,6 +79,7 @@ def main():
     host = fixture.SIGNED_CERTFILE_HOSTNAME
     for version in (ssl.TLSVersion.TLSv1_2, ssl.TLSVersion.TLSv1_3):
         exchange(server, version, fixture.SIGNING_CA, host, 0)
+    exchange(server, ssl.TLSVersion.TLSv1_3, fixture.SIGNING_CA, host, 0, mode="listen")
     exchange(server, ssl.TLSVersion.TLSv1_3, fixture.SIGNING_CA, "wrong.example", 62)
     exchange(server, ssl.TLSVersion.TLSv1_2, fixture.CAFILE_NEURONIO, host, 20)
 
