@@ -1798,6 +1798,8 @@ impl Context {
         let mark = self.heap.temporary_mark();
         let (heap, roots) = self.heap_and_roots();
         let callbacks = heap.begin_collection(roots, generation)?;
+        let check_older_owners = generation < 2
+            && (!callbacks.is_empty() || self.heap.full_collection_members().next().is_some());
         let mut released = 0;
         if !callbacks.is_empty() {
             self.run_weak_callbacks(callbacks.iter().copied());
@@ -1817,8 +1819,8 @@ impl Context {
         if let Some(callbacks) = callbacks {
             self.run_weak_callbacks(callbacks);
         }
-        if generation < 2 && count != 0 {
-            // Clearing young cycles can release the last owner of an older acyclic value.
+        if check_older_owners {
+            // Even a resurrected cycle can release its last edge to an older acyclic value.
             self.collect_unreachable();
         }
         self.heap.end_full_collection();
