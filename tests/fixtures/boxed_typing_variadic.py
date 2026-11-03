@@ -98,6 +98,13 @@ def current():
     assert again is not starred and again == starred and starred != alias
     assert hash(starred) == hash(alias) and len({starred, alias, again}) == 2
     t = TypeVar("T")
+    template = Unpack[Tuple[t, ...]]
+    specialized = template[int]
+    assert specialized == Unpack[Tuple[int, ...]]
+    assert specialized is template[int] and specialized is not Unpack[Tuple[int, ...]]
+    assert type(specialized) is type(template)
+    assert specialized.__typing_unpacked_tuple_args__ == (int, ...)
+    assert Tuple[t, *Tuple[tuple[*ts], ...]][str, int, bool] == Tuple[str, *Tuple[tuple[int, bool], ...]]
     spelled, = list[t]
     assert spelled.__typing_unpacked_tuple_args__ is None
     assert spelled[int] == next(iter(list[int]))

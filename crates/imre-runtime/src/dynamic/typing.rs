@@ -744,7 +744,10 @@ pub(super) fn subscribe(ctx: &mut Context, target: Id, index: Id) -> Option<Resu
         && (alias.name.is_some()
             || matches!(
                 alias.kind,
-                AliasKind::Concatenate | AliasKind::Callable | AliasKind::AbcCallable
+                AliasKind::Concatenate
+                    | AliasKind::Callable
+                    | AliasKind::AbcCallable
+                    | AliasKind::Unpack
             )
             || (alias.kind == AliasKind::Generic
                 && matches!(ctx.heap.get(alias.origin), Value::Class { .. })))
@@ -756,7 +759,7 @@ pub(super) fn subscribe(ctx: &mut Context, target: Id, index: Id) -> Option<Resu
         ));
     }
     if let Value::GenericAlias(alias) = ctx.heap.get(target)
-        && matches!(alias.kind, AliasKind::Literal(_) | AliasKind::Unpack)
+        && matches!(alias.kind, AliasKind::Literal(_))
         && matches!(ctx.heap.get(alias.parameters), Value::Tuple(params) if params.is_empty())
     {
         return Some(ctx.checked_format(target, true).and_then(|name| {

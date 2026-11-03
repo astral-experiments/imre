@@ -2300,6 +2300,8 @@ def _substitute_alias_argument(arg, replacements):
         return arg
     for parameter, value in replacements.items():
         if arg is parameter:
+            if isinstance(parameter, _typing.TypeVar):
+                return parameter.__typing_subst__(value)
             if isinstance(parameter, _typing.TypeVarTuple):
                 raise TypeError("Substitution of bare TypeVarTuple is not supported")
             return value
@@ -2433,7 +2435,7 @@ def _specialize_generic_alias_uncached(alias, args):
         raise TypeError(f"Too {which} arguments for {alias}; actual {len(expanded)}, expected {expected}")
     replacements = {}
     for parameter, arg in zip(parameters, expanded):
-        if isinstance(parameter, _typing.TypeVarTuple):
+        if isinstance(parameter, (_typing.TypeVar, _typing.TypeVarTuple)):
             replacements[parameter] = arg
             continue
         if isinstance(parameter, _typing.ParamSpec):
@@ -2451,7 +2453,7 @@ def _specialize_generic_alias_uncached(alias, args):
         return _rebuild_builtin_alias(alias, substituted_args())
     if isinstance(alias, _typing.Union):
         return _typing.Union[substituted_args()]
-    if isinstance(alias, (_AnnotatedAlias, _typing._ConcatenateGenericAlias)):
+    if isinstance(alias, (_AnnotatedAlias, _typing._ConcatenateGenericAlias, _typing._UnpackGenericAlias)):
         return alias.copy_with(substituted_args())
     if type(alias) is _typing._CallableGenericAlias:
         # typing flattens each substituted tuple, even one in the result position.
