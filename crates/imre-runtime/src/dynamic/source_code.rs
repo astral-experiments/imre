@@ -151,7 +151,14 @@ enum Instruction {
         end: usize,
     },
     Iter(ast::Expr),
-    Await(ast::Expr),
+    Await(Option<ast::Expr>),
+    SaveCallOperand(Option<ast::Expr>),
+    SaveCallMethod(ast::ExprAttribute),
+    CallSaved {
+        positional: usize,
+        keywords: Vec<ast::Identifier>,
+        position: ruff_text_size::TextSize,
+    },
     Next(Option<ast::Expr>, usize),
     Jump(usize),
     Break(usize),
@@ -1108,7 +1115,17 @@ impl Program {
                 | Instruction::Unless(e, _)
                 | Instruction::Iter(e)
                 | Instruction::ExceptMatch(e, _)
-                | Instruction::Await(e) => strings.visit_expr(e),
+                | Instruction::Await(Some(e))
+                | Instruction::SaveCallOperand(Some(e)) => strings.visit_expr(e),
+                Instruction::SaveCallMethod(field) => {
+                    strings.heap.code_name(field.attr.as_str());
+                    strings.visit_expr(&field.value);
+                }
+                Instruction::CallSaved { keywords, .. } => {
+                    for name in keywords {
+                        strings.heap.code_name(name.as_str());
+                    }
+                }
                 Instruction::Match { subject, cases, .. } => {
                     strings.visit_expr(subject);
                     for case in cases {
@@ -1265,6 +1282,8 @@ impl Program {
                     }
                 }
                 Instruction::ReturnSent
+                | Instruction::Await(None)
+                | Instruction::SaveCallOperand(None)
                 | Instruction::Jump(_)
                 | Instruction::Break(_)
                 | Instruction::EnterFinally { .. }
@@ -1625,6 +1644,63 @@ impl Program {
         }
     }
 
+    /// A fixed call can save its callable and earlier arguments in the source frame
+    /// while a directly awaited argument delegates. Unpacking retains its own calling protocol.
+    fn has_awaited_call_arguments(call: &ast::ExprCall) -> bool {
+        let args = &call.arguments;
+        !args.args.iter().any(ast::Expr::is_starred_expr)
+            && args.keywords.iter().all(|kw| kw.arg.is_some())
+            && (args.args.iter().any(ast::Expr::is_await_expr)
+                || args.keywords.iter().any(|kw| kw.value.is_await_expr()))
+    }
+
+    fn lower_awaited_call(&mut self, call: ast::ExprCall, line: u32) {
+        let method =
+            imre_ast::direct_method(&call, &self.method_imports, self.private_names.as_deref());
+        let position = method.map_or_else(|| call.start(), |field| field.attr.start());
+        let callable = if method.is_some() {
+            let ast::Expr::Attribute(field) = *call.func else {
+                unreachable!()
+            };
+            Instruction::SaveCallMethod(field)
+        } else {
+            Instruction::SaveCallOperand(Some(*call.func))
+        };
+        self.instructions.push((line, callable));
+        let positional = call.arguments.args.len();
+        let keywords = call
+            .arguments
+            .keywords
+            .iter()
+            .map(|kw| kw.arg.clone().expect("fixed keyword"))
+            .collect();
+        let operands = call
+            .arguments
+            .args
+            .into_iter()
+            .chain(call.arguments.keywords.into_iter().map(|kw| kw.value));
+        for expr in operands {
+            let value = if let ast::Expr::Await(awaited) = expr {
+                self.instructions
+                    .push((line, Instruction::Await(Some(*awaited.value))));
+                self.instructions.push((line, Instruction::Delegate));
+                None
+            } else {
+                Some(expr)
+            };
+            self.instructions
+                .push((line, Instruction::SaveCallOperand(value)));
+        }
+        self.instructions.push((
+            line,
+            Instruction::CallSaved {
+                positional,
+                keywords,
+                position,
+            },
+        ));
+    }
+
     // A suspended expression supplies its result when execution resumes.
     fn lower_suspension(
         &mut self,
@@ -1637,8 +1713,22 @@ impl Program {
                 return Err(Error::new("SyntaxError", "'yield' outside function"));
             }
             ast::Expr::Await(a) if self.kind == FunctionKind::Coroutine => {
-                self.instructions.push((line, Instruction::Await(*a.value)));
+                let value = match *a.value {
+                    ast::Expr::Call(call) if Self::has_awaited_call_arguments(&call) => {
+                        self.lower_awaited_call(call, line);
+                        None
+                    }
+                    expr => Some(expr),
+                };
+                self.instructions.push((line, Instruction::Await(value)));
                 self.instructions.push((line, Instruction::Delegate));
+                return Ok(None);
+            }
+            ast::Expr::Call(call)
+                if self.kind == FunctionKind::Coroutine
+                    && Self::has_awaited_call_arguments(&call) =>
+            {
+                self.lower_awaited_call(call, line);
                 return Ok(None);
             }
             ast::Expr::Yield(y) => Instruction::Yield(y.value.map(|value| *value)),
@@ -3896,6 +3986,8 @@ impl Context {
                         Instruction::BindSent(_)
                             | Instruction::ReturnSent
                             | Instruction::Delegate
+                            | Instruction::Await(None)
+                            | Instruction::SaveCallOperand(None)
                             | Instruction::AsyncWithMethods(None)
                             | Instruction::CallAsyncEnter
                             | Instruction::AwaitWithResult(_)
@@ -4540,9 +4632,46 @@ impl Context {
                 let value = eval(self, e)?;
                 iterators.push(self.iterator(value)?);
             }
-            Instruction::Await(e) => {
-                let value = eval(self, e)?;
+            Instruction::Await(expr) => {
+                let value = match expr {
+                    Some(expr) => eval(self, expr)?,
+                    None => std::mem::replace(sent, NONE),
+                };
                 iterators.push(self.await_iterator(value, None)?);
+            }
+            Instruction::SaveCallOperand(expr) => {
+                let value = match expr {
+                    Some(expr) => eval(self, expr)?,
+                    None => *sent,
+                };
+                iterators.push(value);
+            }
+            Instruction::SaveCallMethod(field) => {
+                let method = self.source_call_method(code, scope, field)?;
+                iterators.push(method);
+            }
+            Instruction::CallSaved {
+                positional,
+                keywords,
+                position,
+            } => {
+                let start = iterators.len() - (1 + positional + keywords.len());
+                let (pos, named) = iterators[start + 1..].split_at(*positional);
+                let kwargs = keywords
+                    .iter()
+                    .map(ToString::to_string)
+                    .zip(named.iter().copied())
+                    .collect();
+                let previous = self
+                    .heap
+                    .replace_expression(value::ExpressionPosition::Offset(*position));
+                let result = self.call_in_scope(scope, iterators[start], pos.to_vec(), kwargs);
+                self.heap.replace_expression(previous);
+                for operand in iterators.drain(start..).rev() {
+                    self.heap.weak_edge_removed(operand);
+                }
+                self.heap.release_unbound_finalizers();
+                *sent = self.check_call_return(result?)?;
             }
             Instruction::Next(_, _) | Instruction::Delegate => {
                 let delegated = matches!(op, Instruction::Delegate);
@@ -4900,6 +5029,20 @@ impl Context {
             _ => unreachable!("validated unpacking target"),
         }
         Ok(())
+    }
+
+    fn source_call_method(
+        &mut self,
+        code: &Program,
+        scope: Id,
+        field: &ast::ExprAttribute,
+    ) -> Result<Id> {
+        let receiver = self.source_expr(code, scope, &field.value)?;
+        let method = self.lookup_method(receiver, field.attr.as_str())?;
+        // Evaluating an argument can delete the receiver's reference to the callable.
+        self.heap.reserve_temporaries(1)?;
+        self.heap.keep(method);
+        Ok(method)
     }
 
     fn source_expr(&mut self, code: &Program, scope: Id, expr: &ast::Expr) -> Result<Id> {
@@ -5573,12 +5716,7 @@ impl Context {
                 let f = if let Some(field) =
                     imre_ast::direct_method(v, &code.method_imports, code.private_names.as_deref())
                 {
-                    let receiver = eval(self, &field.value)?;
-                    let method = self.lookup_method(receiver, field.attr.as_str())?;
-                    // Evaluating an argument can delete the receiver's reference to the callable.
-                    self.heap.reserve_temporaries(1)?;
-                    self.heap.keep(method);
-                    method
+                    self.source_call_method(code, scope, field)?
                 } else {
                     eval(self, &v.func)?
                 };
