@@ -1,24 +1,35 @@
+use smallvec::SmallVec;
 use std::cmp::Reverse;
 use std::collections::BinaryHeap;
 use std::{env, fs};
 
-const END: usize = usize::MAX;
+const WIDE: u64 = 1 << 63;
+const WEIGHT_BITS: u32 = 31;
+const WEIGHT_MASK: u64 = (1 << WEIGHT_BITS) - 1;
 
 #[derive(Default)]
 struct Graph {
-    heads: Vec<usize>,
-    edges: Vec<Edge>,
-}
-
-struct Edge {
-    next: usize,
-    to: usize,
-    weight: u64,
+    rows: Vec<SmallVec<[u64; 4]>>,
+    wide: Vec<(usize, u64)>,
 }
 
 impl Graph {
+    fn add(&mut self, from: usize, to: usize, weight: u64) {
+        // The high bit marks an index into the table of edges that don't fit.
+        let edge = if let Ok(to) = u32::try_from(to)
+            && weight <= WEIGHT_MASK
+        {
+            (u64::from(to) << WEIGHT_BITS) | weight
+        } else {
+            let index = self.wide.len();
+            self.wide.push((to, weight));
+            WIDE | index as u64
+        };
+        self.rows[from].push(edge);
+    }
+
     fn distance(&self, start: usize, end: usize) -> Option<u64> {
-        let mut best = vec![u64::MAX; self.heads.len()];
+        let mut best = vec![u64::MAX; self.rows.len()];
         let mut queue = BinaryHeap::from([Reverse((0, start))]);
         best[start] = 0;
         while let Some(Reverse((cost, node))) = queue.pop() {
@@ -26,16 +37,17 @@ impl Graph {
                 return Some(cost);
             }
             if cost == best[node] {
-                let mut edge = self.heads[node];
-                while edge != END {
-                    let arc = &self.edges[edge];
-                    let neighbor = arc.to;
-                    let next = cost + arc.weight;
+                for &edge in &self.rows[node] {
+                    let (neighbor, weight) = if edge & WIDE == 0 {
+                        ((edge >> WEIGHT_BITS) as usize, edge & WEIGHT_MASK)
+                    } else {
+                        self.wide[(edge & !WIDE) as usize]
+                    };
+                    let next = cost + weight;
                     if next < best[neighbor] {
                         best[neighbor] = next;
                         queue.push(Reverse((next, neighbor)));
                     }
-                    edge = arc.next;
                 }
             }
         }
@@ -51,26 +63,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         match fields.next() {
             Some("p") => {
                 let nodes: usize = fields.nth(1).ok_or("missing nodes")?.parse()?;
-                graph.heads = vec![END; nodes + 1];
-                let arcs: usize = fields.next().ok_or("missing arc count")?.parse()?;
-                graph.edges.reserve(arcs);
+                let _: usize = fields.next().ok_or("missing arc count")?.parse()?;
+                graph.rows.resize_with(nodes + 1, SmallVec::new);
             }
             Some("a") => {
-                let from: usize = fields.next().ok_or("missing start")?.parse()?;
+                let from = fields.next().ok_or("missing start")?.parse()?;
                 let to = fields.next().ok_or("missing end")?.parse()?;
                 let weight = fields.next().ok_or("missing weight")?.parse()?;
-                graph.edges.push(Edge {
-                    next: graph.heads[from],
-                    to,
-                    weight,
-                });
-                graph.heads[from] = graph.edges.len() - 1;
+                graph.add(from, to, weight);
             }
             _ => {}
         }
     }
     if args.len() == 0 {
-        println!("{} {}", graph.heads.len() - 1, graph.edges.len());
+        let edges: usize = graph.rows.iter().map(SmallVec::len).sum();
+        println!("{} {}", graph.rows.len() - 1, edges);
     }
     for pair in args {
         let (start, end) = pair.split_once(',').ok_or("invalid query")?;

@@ -12,6 +12,7 @@ base64 = "0.22.1"
 csv = "1.4.0"
 memchr = "2"
 sha2 = "0.10.9"
+smallvec = { version = "1", features = ["union"] }
 zip = { version = "8.6.0", default-features = false, features = ["deflate-flate2-zlib-rs"] }
 
 [[bin]]
