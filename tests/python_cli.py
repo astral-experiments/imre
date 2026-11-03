@@ -2030,6 +2030,8 @@ def main():
         ):
             compare("-c", f"try:\n    {statement}\nexcept {error} as exc:\n    print(exc)")
 
+        compare("-c", "print(divmod(1.0, 0.1), divmod(0, -2.0), divmod(-2.0, 1))")
+
         subset_method = root / "set_issubset.py"
         for statement in (
             "print({1, 2}.issubset([2, 1]))",

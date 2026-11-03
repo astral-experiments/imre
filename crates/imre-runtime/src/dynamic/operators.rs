@@ -5075,7 +5075,7 @@ impl Context {
         Ok((result != value::NOT_IMPLEMENTED).then_some(result))
     }
 
-    /// Try divmod's numeric slots in order, including the inherited slot of integer subclasses.
+    /// Try divmod's numeric slots in order, including the inherited integer and float slots.
     pub(super) fn divmod(&mut self, a: Id, b: Id) -> Result<Id> {
         let class = |value| {
             self.heap
@@ -5116,6 +5116,17 @@ impl Context {
                 if let Some(result) = self.operator_slot(receiver, hook, other)? {
                     return Ok(result);
                 }
+            } else if let Value::Float(x) = *self.heap.get(self.scalar_value(receiver))
+                && let Some(y) = self.real_component(self.scalar_value(other))?
+            {
+                let (left, right) = if reflected { (y, x) } else { (x, y) };
+                if right == 0.0 {
+                    return Err(Error::new("ZeroDivisionError", "division by zero"));
+                }
+                let (quotient, remainder) = crate::floats::divmod_nonzero(left, right);
+                let quotient = self.alloc(Value::Float(quotient));
+                let remainder = self.alloc(Value::Float(remainder));
+                return Ok(self.alloc(Value::Tuple(vec![quotient, remainder])));
             } else if let (Ok(x), Ok(y)) = (self.as_int(a), self.as_int(b)) {
                 let quotient = self.alloc(Value::Int(crate::integer_binary(&x, &y, 3)?));
                 let remainder = self.alloc(Value::Int(crate::integer_binary(&x, &y, 4)?));
