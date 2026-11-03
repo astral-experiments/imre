@@ -3763,6 +3763,8 @@ impl Context {
                 self.freeze_itertools_types(scope);
                 for (name, owner) in [
                     ("accumulate", "itertools.accumulate"),
+                    ("cycle", "itertools.cycle"),
+                    ("filterfalse", "itertools.filterfalse"),
                     ("pairwise", "itertools.pairwise"),
                     ("starmap", "itertools.starmap"),
                     ("takewhile", "itertools.takewhile"),
