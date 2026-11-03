@@ -1302,6 +1302,7 @@ pub(crate) enum Builtin {
     BinasciiDecode,
     BinasciiEncode,
     BinasciiUnhexlify,
+    Base85Decode,
     CodecLookup,
     CodecName,
     StrEncodeOptions,

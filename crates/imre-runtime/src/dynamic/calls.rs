@@ -1574,6 +1574,7 @@ impl Context {
                             | "binascii.b2a_base64"
                             | "binascii.a2b_hex"
                             | "binascii.unhexlify"
+                            | "binascii._imre_b85decode"
                     )
                     || name.starts_with("_weakref.")
                 {
