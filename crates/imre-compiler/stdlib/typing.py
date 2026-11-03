@@ -2,6 +2,7 @@
 
 import _typing as _typing_runtime
 import builtins as _builtins
+import copyreg
 import functools
 import sys as _sys
 import typing as _typing
@@ -2260,6 +2261,19 @@ Iterator = _SpecialGenericAlias(_abc.Iterator, 1)
 Reversible = _SpecialGenericAlias(_Reversible, 1)
 Sized = _SpecialGenericAlias(_Sized, 0)
 ByteString = _DeprecatedGenericAlias(_ByteString, 0, removal_version=(3, 17))
+
+
+def _pickle_psargs(psargs):
+    return ParamSpecArgs, (psargs.__origin__,)
+
+
+def _pickle_pskwargs(pskwargs):
+    return ParamSpecKwargs, (pskwargs.__origin__,)
+
+
+copyreg.pickle(ParamSpecArgs, _pickle_psargs)
+copyreg.pickle(ParamSpecKwargs, _pickle_pskwargs)
+del _pickle_psargs, _pickle_pskwargs
 
 
 # Reconstruction callables and arguments used by CPython's typing alias reducers.
