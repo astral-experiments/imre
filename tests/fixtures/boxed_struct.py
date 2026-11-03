@@ -154,6 +154,28 @@ def current():
     assert struct.pack(">l", -2) == b"\xff\xff\xff\xfe"
     assert struct.unpack("<l", b"\xfe\xff\xff\xff") == (-2,)
     assert struct.unpack("!0l", b"") == ()
+    transitions = (-(1 << 63), -2208988800, (1 << 63) - 1)
+    for prefix in ("", "@", "=", "<", ">", "!"):
+        layout = struct.Struct(prefix + "3q")
+        assert layout.size == 24
+        assert layout.unpack(layout.pack(*transitions)) == transitions
+        for n in (-(1 << 63) - 1, 1 << 63):
+            try:
+                struct.pack(prefix + "q", n)
+            except struct.error as error:
+                assert str(error) == "'q' format requires -9223372036854775808 <= number <= 9223372036854775807"
+            else:
+                raise AssertionError("signed long long overflow accepted")
+    assert struct.pack(">q", Field(-2)) == b"\xff" * 7 + b"\xfe"
+    assert struct.unpack("<q", b"\xfe" + b"\xff" * 7) == (-2,)
+    opposite_endian = ">" if struct.pack("@q", 1) == struct.pack("<q", 1) else "<"
+    try:
+        struct.pack(opposite_endian + "q", OverflowingIndex())
+    except HookOverflow:
+        pass
+    else:
+        raise AssertionError("lost index error")
+
     assert struct.calcsize("@B0l") == struct.calcsize("@B0L")
     bcm = struct.Struct("@3I4l2I")
     fields = (1, 2, 3, -1, 17, -19, 23, 29, 31)

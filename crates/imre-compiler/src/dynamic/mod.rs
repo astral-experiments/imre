@@ -4,7 +4,6 @@ mod emit;
 mod import_module;
 mod provider_archive;
 pub(crate) mod provider_pack;
-pub(super) use import_module::{RegisteredImports, registered_imports};
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
@@ -26,6 +25,7 @@ struct Imports {
     private_names: imre_ast::Names,
     uses_import_builtin: bool,
     uses_exec: bool,
+    computed_import: bool,
     imports_logging: bool,
     sys_names: HashSet<String>,
     operator_names: HashSet<String>,
@@ -135,6 +135,10 @@ impl Imports {
                     | "tomllib._parser"
                     | "tomllib._re"
                     | "tomllib._types"
+                    | "zoneinfo"
+                    | "zoneinfo._common"
+                    | "zoneinfo._tzpath"
+                    | "zoneinfo._zoneinfo"
                     | "traceback"
                     | "unittest.case"
                     | "unittest.result"
@@ -327,11 +331,25 @@ impl<'a> Visitor<'a> for Imports {
         visitor::walk_stmt(self, s);
     }
     fn visit_expr(&mut self, e: &'a Expr) {
+        // A literal __import__ call cannot select a different provider at execution.
+        if let Expr::Call(call) = e
+            && matches!(&*call.func, Expr::Name(name) if name.id == "__import__")
+            && let Some(Expr::StringLiteral(name)) = call.arguments.find_argument_value("name", 0)
+        {
+            self.uses_import_builtin = true;
+            self.add(0, "importlib");
+            if name.value.to_str().split('.').next() == Some("zoneinfo") {
+                self.add(0, name.value.to_str());
+            }
+            self.visit_arguments(&call.arguments);
+            return;
+        }
         if let Expr::Name(name) = e
             && name.ctx == ast::ExprContext::Load
         {
             if name.id == "__import__" {
                 self.uses_import_builtin = true;
+                self.computed_import = true;
                 self.add(0, "importlib");
             }
             if name.id == "exec" {
@@ -543,11 +561,11 @@ fn resolve(owner: &str, package: bool, level: u32, name: &str) -> Option<String>
     Some(parts.join("."))
 }
 
-pub(crate) enum ObjectOperation<'a> {
+pub(crate) enum ObjectOperation {
     TracedEntry,
     Builtin,
     OrderedCommandImport,
-    ClassLayout(&'a crate::modules::SourceGraph),
+    ClassLayout,
 }
 
 pub(crate) fn compile(
@@ -555,8 +573,8 @@ pub(crate) fn compile(
     module_root: Option<&Path>,
     options: &CompileOptions,
     runtime_imports: bool,
-    operation: Option<ObjectOperation<'_>>,
-    registered_imports: RegisteredImports,
+    operation: Option<ObjectOperation>,
+    typed_graph: Option<&crate::modules::SourceGraph>,
     check_returns: impl FnOnce() -> Result<(), String>,
 ) -> Result<Option<Compilation>, String> {
     let invocation = options.command.as_ref();
@@ -609,6 +627,7 @@ pub(crate) fn compile(
             "runpy",
             "json",
             "tomllib",
+            "zoneinfo",
             "opcode",
             "operator",
             "struct",
@@ -694,6 +713,10 @@ pub(crate) fn compile(
             first.add(0, &format!("{name}.__main__"));
         }
     }
+    let registered_imports = typed_graph
+        .filter(|_| runtime_imports)
+        .map(import_module::registered_imports)
+        .unwrap_or_default();
     first
         .names
         .extend(registered_imports.targets.into_iter().map(|name| (0, name)));
@@ -774,6 +797,7 @@ pub(crate) fn compile(
     let mut work = VecDeque::from([("__main__".to_owned(), false, first)]);
     let mut uses_import_builtin = false;
     let mut uses_exec = false;
+    let mut computed_import = registered_imports.computed;
     let mut bundled_only = false;
     let mut getters = VecDeque::new();
     let mut through_getter = false;
@@ -792,6 +816,9 @@ pub(crate) fn compile(
             let mut imports = Imports::default();
             if uses_import_builtin && !seen.contains("pprint") {
                 imports.names.push((0, "pprint".to_owned()));
+            }
+            if computed_import && !seen.contains("zoneinfo") {
+                imports.names.push((0, "zoneinfo".to_owned()));
             }
             // A runtime-selected HTTP child needs its server and transitive providers.
             if uses_import_builtin && seen.contains("http") && !seen.contains("http.server") {
@@ -834,6 +861,13 @@ pub(crate) fn compile(
             bundled_only = true;
             (String::new(), false, imports)
         };
+        // A boxed provider can discover further site modules while collecting dependencies.
+        // Keep checked machinery diagnostics on the modules in the original program.
+        let machinery_graph = typed_graph.filter(|_| {
+            matches!(operation, Some(ObjectOperation::ClassLayout))
+                || seen.contains("zoneinfo")
+                || computed_import
+        });
         if module_entry.is_none()
             && !options.runtime_imports
             && !registered_imports.called
@@ -841,17 +875,14 @@ pub(crate) fn compile(
             && !through_getter
             && imports.needs_typed_machinery()
             && !matches!(operation, Some(ObjectOperation::TracedEntry))
-            // Enforce the checked-file machinery contract on the original graph.
-            // A module discovered only by boxed imports has no typed layout to preserve.
-            && match operation {
-                Some(ObjectOperation::ClassLayout(graph)) => owner == "__main__"
-                    || graph.modules.iter().any(|m| m.name == owner),
-                _ => true,
-            }
+            && (owner == "__main__"
+                || machinery_graph
+                    .is_none_or(|graph| graph.modules.iter().any(|m| m.name == owner)))
         {
             return Ok(None);
         }
         uses_exec |= imports.uses_exec;
+        computed_import |= imports.computed_import;
         let mut names = imports.names;
         if owner == "importlib" {
             // Filesystem modules can import the loader protocols through either public module.
@@ -918,8 +949,14 @@ pub(crate) fn compile(
                     let path = Path::new(bundled_root).join(filename);
                     let package = path.ends_with("__init__.py");
                     let mut getter = Imports::default();
-                    let imports = scan_imports(&source, SourceKind::File, Some(&mut getter))
+                    let mut imports = scan_imports(&source, SourceKind::File, Some(&mut getter))
                         .map_err(|e| format!("{}: {e}", path.display()))?;
+                    // unittest's loader imports application modules by name, including during discovery.
+                    // Other bundled imports are implementation details of a known provider.
+                    if prefix != "unittest.loader" {
+                        imports.computed_import = false;
+                        getter.computed_import = false;
+                    }
                     if !getter.names.is_empty() || getter.uses_exec {
                         getters.push_back((prefix.clone(), package, getter));
                     }

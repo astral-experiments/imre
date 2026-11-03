@@ -357,6 +357,10 @@ REJECTED = {
     "unsupported_stdlib": ({"main.py": "import turtle\n"}, 'standard-library imports and shadowing are unsupported: "turtle"'),
     "missing": ({"main.py": "import missing_dependency\n"}, "cannot resolve first-party"),
     "dynamic": ({"main.py": '__import__("helper")\n', "helper.py": HELPER}, "unsupported"),
+    "unused_import_builtin_keeps_checked_import": ({
+        "main.py": '__import__("helper")\nif False:\n    unused = __import__\n',
+        "helper.py": HELPER,
+    }, "unsupported"),
     "nested": ({"main.py": "def f() -> None:\n    import math\nf()\n"}, "unsupported"),
     "conditional": ({"main.py": "if False:\n    import math\n"}, "unsupported"),
     "conditional_missing_export": ({

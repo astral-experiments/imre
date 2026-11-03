@@ -2080,6 +2080,22 @@ def main():
             )
             compare("-B", array_import, native_args=("run", array_import, "--runtime-imports", "--quiet"))
 
+        zoneinfo_entry = root / "zoneinfo_entry.py"
+        (root / "zoneinfo_helper.py").write_text("import zoneinfo as provider\n")
+        for statement in (
+            "from zoneinfo_helper import provider",
+            "import sys\nprovider = __import__(sys.argv[1])",
+        ):
+            zoneinfo_entry.write_text(
+                statement + "\nprint(provider.ZoneInfo.__name__, provider.TZPATH)\n"
+                "provider.reset_tzpath([])\nprint(provider.TZPATH)\n"
+            )
+            compare(
+                "-B", zoneinfo_entry, "zoneinfo", extra={"PYTHONTZPATH": str(root)},
+                native_args=("run", zoneinfo_entry, "--quiet", "--", "zoneinfo"),
+                native_timeout=300,
+            )
+
         hash_args = ["", b"", "latin1é", b"latin1\xe9", "Āfoo", "😀abc", bytes(range(32))]
         hash_calls = "\n".join(f"print(hash({value!r}))" for value in hash_args)
         for seed in ("0", "1", "4294967295"):
@@ -2724,6 +2740,8 @@ def report(text):
             "print(d.astimezone(), d.astimezone(tz=None))",
             extra={"TZ": "EST5"},
         )
+        if Path("/usr/share/zoneinfo/America/New_York").is_file():
+            compare("-IB", fixtures / "boxed_zoneinfo.py", native_timeout=300)
         compare("-IB", fixtures / "boxed_pickle_writer.py")
         for first in ("_pickle", "pickle"):
             compare("-IB", fixtures / "pickle_accelerator_writer.py", first, native_timeout=600)
