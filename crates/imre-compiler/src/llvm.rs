@@ -9106,6 +9106,7 @@ declare ptr @imre_functools_placeholder(i32)
 @imre_socket_af_inet = external constant i64
 @imre_socket_sock_stream = external constant i64
 @imre_socket_sol_socket = external constant i64
+@imre_socket_so_type = external constant i64
 @imre_socket_so_reuseaddr = external constant i64
 @imre_socket_ipproto_tcp = external constant i64
 @imre_socket_tcp_nodelay = external constant i64
