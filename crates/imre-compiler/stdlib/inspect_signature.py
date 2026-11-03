@@ -35,7 +35,7 @@ def _unwrap_constructor_method(method, follow_wrapper_chains):
     return method
 
 
-def _constructor(obj, follow_wrapper_chains):
+def _signature_from_class(obj, sigcls, follow_wrapper_chains, signature_of_method):
     # Only a user-defined metaclass __call__ takes precedence over the class constructor.
     meta = type(obj)
     for base in getattr(meta, "__mro__", ()):
@@ -46,7 +46,7 @@ def _constructor(obj, follow_wrapper_chains):
             if method is not None:
                 original = _unwrap_constructor_method(method, follow_wrapper_chains)
                 if not isinstance(original, _NonUserDefinedCallables):
-                    return _bind_signature_method(method, meta)
+                    return signature_of_method(*_bind_signature_method(method, meta))
             break
 
     # A shadowed __init__ and an inherited __new__ can coexist. Find the first
@@ -56,11 +56,15 @@ def _constructor(obj, follow_wrapper_chains):
     for base in getattr(obj, "__mro__", (obj,)):
         if base is object:
             if uses_object_defaults:
-                return None, False
+                return sigcls()
             break
         namespace = getattr(base, "__dict__", None)
         if namespace is None:
-            break  # The native builtin exposes no inspectable constructor.
+            # A native base can publish a signature without a Python constructor.
+            text_signature = getattr(base, "__text_signature__", None)
+            if text_signature:
+                return _signature_fromstr(sigcls, base, text_signature)
+            break
         for name, default in (("__new__", object.__new__), ("__init__", object.__init__)):
             if name not in seen and name in namespace:
                 seen.add(name)
@@ -72,8 +76,8 @@ def _constructor(obj, follow_wrapper_chains):
                 if method is None:
                     continue
                 if name == "__new__":
-                    return method, True
-                return _bind_signature_method(method, obj)
+                    return signature_of_method(method, True)
+                return signature_of_method(*_bind_signature_method(method, obj))
     raise ValueError(f"no signature found for builtin type {obj!r}")
 
 
@@ -138,27 +142,28 @@ def _signature_from_callable(obj, *, sigcls, follow_wrapper_chains=True,
         if not text_signature:
             raise ValueError(f"no signature found for builtin {obj!r}")
         return _signature_fromstr(sigcls, obj, text_signature, skip_bound_arg=skip_bound_arg)
+
+    def signature_of_method(method, drop_first):
+        inner = _signature_from_callable(
+            method, sigcls=sigcls, follow_wrapper_chains=follow_wrapper_chains,
+            skip_bound_arg=skip_bound_arg, globals=globals, locals=locals,
+            eval_str=eval_str, annotation_format=annotation_format)
+        return _signature_bound_method(inner) if drop_first and skip_bound_arg else inner
+
     if isinstance(obj, type):
-        method, drop_first = _constructor(obj, follow_wrapper_chains)
-        if method is None:
-            return sigcls()
-    else:
-        call = getattr_static(type(obj), "__call__", None)
-        if call is None:
-            raise ValueError(f"callable {obj!r} is not supported by signature")
-        text_signature = getattr(obj, "__text_signature__", None)
-        if text_signature:
-            return _signature_fromstr(sigcls, obj, text_signature)
-        method, drop_first = _bind_signature_method(call, obj)
-        # Native call wrappers have no Python parameter layout to recurse into.
-        function = method.__func__ if isinstance(method, types.MethodType) else method
-        if not isinstance(function, types.FunctionType) and callable(method):
-            raise ValueError(f"callable {obj!r} is not supported by signature")
-    inner = _signature_from_callable(
-        method, sigcls=sigcls, follow_wrapper_chains=follow_wrapper_chains,
-        skip_bound_arg=skip_bound_arg, globals=globals, locals=locals,
-        eval_str=eval_str, annotation_format=annotation_format)
-    return _signature_bound_method(inner) if drop_first and skip_bound_arg else inner
+        return _signature_from_class(obj, sigcls, follow_wrapper_chains, signature_of_method)
+    call = getattr_static(type(obj), "__call__", None)
+    if call is None:
+        raise ValueError(f"callable {obj!r} is not supported by signature")
+    text_signature = getattr(obj, "__text_signature__", None)
+    if text_signature:
+        return _signature_fromstr(sigcls, obj, text_signature)
+    method, drop_first = _bind_signature_method(call, obj)
+    # Native call wrappers have no Python parameter layout to recurse into.
+    function = method.__func__ if isinstance(method, types.MethodType) else method
+    if not isinstance(function, types.FunctionType) and callable(method):
+        raise ValueError(f"callable {obj!r} is not supported by signature")
+    return signature_of_method(method, drop_first)
 
 
 def _signature_from_function(obj, sigcls, globals, locals, eval_str, annotation_format,
