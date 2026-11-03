@@ -99,7 +99,7 @@ REJECTED = {
             "try:\n    from os.path import basename as leaf\nexcept ImportError:\n    leaf = None\n"
             "import sys\ndef typed(n: int) -> int: return n\nprint(typed('wrong'))\n"
         ),
-    }, "invalid-argument-type"),
+    }, "expected int, got str; annotations are enforced contracts"),
     "optional_from_rejects_stdlib_shadow": ({
         "main.py": (
             "try:\n    from concurrent.futures import Future\nexcept ImportError:\n    Future = None\n"
