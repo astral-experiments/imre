@@ -1,7 +1,6 @@
 """Read gzip-compressed files using Imre's streaming decoder."""
 
 import io
-import operator
 import os
 import _imre_gzip
 from _imre_gzip import BadGzipFile
@@ -47,11 +46,7 @@ class GzipFile(io.BufferedIOBase):
         return _imre_gzip.read1(reader, io.DEFAULT_BUFFER_SIZE if size < 0 else size)
 
     def readline(self, size=-1):
-        reader = self._open_reader()
-        size = -1 if size is None else operator.index(size)
-        if size < 0:
-            return _imre_gzip.readline(reader)
-        return super().readline(size)
+        return _imre_gzip.readline(self._open_reader(), size)
 
     def fileno(self):
         return _imre_gzip.fileno(self._open_reader())
