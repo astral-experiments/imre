@@ -3,7 +3,7 @@ import inspect
 import warnings
 from annotationlib import Format
 from functools import Placeholder, partial, partialmethod, update_wrapper
-from inspect import Parameter, Signature
+from inspect import FullArgSpec, Parameter, Signature, getfullargspec
 
 
 def omitted(value=inspect._sentinel):
@@ -168,6 +168,13 @@ assert str(inspect.signature(StaticCall())) == "(first, second)"
 assert str(inspect.signature(ClassCall())) == "(item)"
 
 update_wrapper(wrapper, original)
+spec = inspect.getfullargspec(original)
+assert type(spec) is FullArgSpec
+assert spec == FullArgSpec(["a", "b"], "args", "kwargs", (3,), ["flag"], {"flag": False},
+                           {"b": int, "return": str})
+assert getfullargspec(wrapper).varargs == "values"
+assert getfullargspec(C().method).args == ["self", "value"]
+assert getfullargspec(partial(C().method, b"x")).args == ["value"]
 sig = Signature.from_callable(wrapper)
 assert type(sig.parameters.copy()) is OrderedDict
 print(str(sig), sig.return_annotation is str)
@@ -256,6 +263,9 @@ assert bound.__text_signature__ == raw.__text_signature__ == "($self, instance, 
 assert str(Signature.from_callable(raw)) == "(self, instance, owner=None, /)"
 sig = inspect.signature(bound)
 assert str(sig) == "(instance, owner=None, /)"
+assert getfullargspec(bound) == getfullargspec(raw) == FullArgSpec(
+    ["self", "instance", "owner"], None, None, (None,), [], None, {}
+)
 assert sig.parameters["owner"].default is None
 assert sig.parameters["instance"].kind is Parameter.POSITIONAL_ONLY
 

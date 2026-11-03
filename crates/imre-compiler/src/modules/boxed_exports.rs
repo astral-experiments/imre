@@ -312,8 +312,10 @@ pub(super) fn symbol(module: M, name: &str) -> Option<Binding> {
         M::Inspect => exports!(
             "inspect",
             "BoundArguments",
+            "FullArgSpec",
             "Parameter",
             "Signature",
+            "getfullargspec",
             "getmodule",
             "getmodulename",
             "isbuiltin",
