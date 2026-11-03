@@ -34,3 +34,8 @@ print(fold((1 << 31) - 3000, (1 << 31) + 5, 7))
 
 print(fold(1 << 33, (1 << 33) + 4097, -11))
 print(discarded_product(1 << 32, (1 << 32) + 2048))
+
+# Keep the original owner live while the reduction replaces its boxed accumulator.
+for initial in [1 << 100, -(1 << 100), -(1 << 62) - 2000]:
+    print(fold(0, 4097, initial))
+    print(initial)
