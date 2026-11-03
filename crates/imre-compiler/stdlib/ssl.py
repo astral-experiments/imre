@@ -562,15 +562,21 @@ class SSLObject:
     def _bio_call(self, operation, *args):
         result = _call(operation, self._sslobj, *args)
         if isinstance(result, tuple):
-            _raise_verify_error(self.server_hostname, *result)
-        if not isinstance(result, str):
+            # Certificate errors carry a numeric verification code, record errors a reason name.
+            reason, message = result
+            if isinstance(reason, int):
+                _raise_verify_error(self.server_hostname, reason, message)
+            kind, code, library = SSLError, SSL_ERROR_SSL, "SSL"
+        elif isinstance(result, str):
+            reason = result
+            kind, code, message, library = _BIO_ERRORS[reason]
+        else:
             return result
-        kind, code, message, library = _BIO_ERRORS[result]
         if library:
-            message = f"[{library}: {result}] {message}"
+            message = f"[{library}: {reason}] {message}"
         error = kind(code, message)
         error.library = library
-        error.reason = result if library else None
+        error.reason = reason if library else None
         raise error
 
     def read(self, len=1024, buffer=None):

@@ -155,6 +155,11 @@ fn bio_failure(ctx: &mut Context, error: provider::bio::BioFailure) -> Result<Id
         BioFailure::UnexpectedEof => "UNEXPECTED_EOF_WHILE_READING",
         BioFailure::ProtocolIsShutdown => "PROTOCOL_IS_SHUTDOWN",
         BioFailure::ShutdownInInit => "SHUTDOWN_WHILE_IN_INIT",
+        BioFailure::RecordError { reason, message } => {
+            let reason = ctx.text(reason);
+            let message = ctx.text(message);
+            return Ok(ctx.alloc(Value::Tuple(vec![reason, message])));
+        }
         BioFailure::Tls(provider::Failure::Verify { code, message }) => {
             return Ok(verify_failure(ctx, code, message));
         }

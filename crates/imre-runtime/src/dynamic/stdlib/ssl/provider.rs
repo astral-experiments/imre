@@ -387,16 +387,23 @@ impl Api {
         self.error(operation)
     }
 
+    fn reason_text(&self, code: c_ulong) -> Option<std::borrow::Cow<'_, str>> {
+        // SAFETY: the loaded library owns the optional static reason string.
+        let reason = unsafe { (self.ERR_reason_error_string)(code) };
+        NonNull::new(reason.cast_mut()).map(|p| {
+            // SAFETY: a non-null result points to the provider's static, NUL-terminated string.
+            unsafe { CStr::from_ptr(p.as_ptr()) }.to_string_lossy()
+        })
+    }
+
     fn error(&self, operation: &str) -> Failure {
-        // SAFETY: OpenSSL returns a static NUL-terminated reason, or null.
-        let reason = unsafe { (self.ERR_reason_error_string)((self.ERR_peek_last_error)()) };
-        if reason.is_null() {
-            Failure::Other(operation.to_owned())
-        } else {
-            // SAFETY: reason is the non-null library string checked above.
-            let detail = unsafe { CStr::from_ptr(reason) }.to_string_lossy();
-            Failure::Other(format!("{operation}: {detail}"))
-        }
+        // SAFETY: inspect the calling thread's error queue.
+        let code = unsafe { (self.ERR_peek_last_error)() };
+        let message = self.reason_text(code).map_or_else(
+            || operation.to_owned(),
+            |detail| format!("{operation}: {detail}"),
+        );
+        Failure::Other(message)
     }
 }
 

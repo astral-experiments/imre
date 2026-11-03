@@ -99,3 +99,30 @@ except ssl.SSLCertVerificationError as error:
     assert error.verify_code == 62
 else:
     raise AssertionError("accepted wrong hostname")
+
+# A record authenticated under one session cannot be read by a different peer.
+client, server, cin, cout, sin, sout = connect("localhost")
+other, peer, other_in, other_out, peer_in, peer_out = connect("localhost")
+assert server.write(b"one session") == 11
+record = sout.read()
+other_in.write(record)
+try:
+    other.read()
+except ssl.SSLError as error:
+    assert error.library == "SSL" and error.errno == ssl.SSL_ERROR_SSL
+    assert error.reason in ("RECORD_LAYER_FAILURE", "DECRYPTION_FAILED_OR_BAD_RECORD_MAC")
+else:
+    raise AssertionError("foreign record was accepted")
+assert other.pending() == 0
+alert = other_out.read()
+assert alert
+peer_in.write(alert)
+try:
+    peer.read()
+except ssl.SSLError as error:
+    assert error.library == "SSL" and error.errno == ssl.SSL_ERROR_SSL
+    assert error.reason == "SSLV3_ALERT_BAD_RECORD_MAC"
+else:
+    raise AssertionError("missing bad-record alert")
+cin.write(record)
+assert client.read() == b"one session"

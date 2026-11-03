@@ -80,6 +80,10 @@ pub(in crate::dynamic) enum BioFailure {
     UnexpectedEof,
     ProtocolIsShutdown,
     ShutdownInInit,
+    RecordError {
+        reason: &'static str,
+        message: String,
+    },
     Tls(Failure),
 }
 
@@ -153,15 +157,28 @@ impl BioSession {
             // SAFETY: inspect the current operation's error queue without removing entries.
             super::SSL_ERROR_SYSCALL if unsafe { (api.ERR_peek_error)() } == 0 => BioFailure::Eof,
             super::SSL_ERROR_SSL => {
-                // SSL_R_SHUTDOWN_WHILE_IN_INIT from OpenSSL 3's sslerr.h.
+                // OpenSSL 3 ERR_PACK(ERR_LIB_SSL, 0, SSL_R_*).
                 const SHUTDOWN_IN_INIT: std::ffi::c_ulong = (20 << 23) | 407;
                 const PROTOCOL_IS_SHUTDOWN: std::ffi::c_ulong = (20 << 23) | 207;
+                const RECORD_LAYER_FAILURE: std::ffi::c_ulong = (20 << 23) | 313;
+                const DECRYPTION_FAILED_OR_BAD_RECORD_MAC: std::ffi::c_ulong = (20 << 23) | 281;
+                const SSLV3_ALERT_BAD_RECORD_MAC: std::ffi::c_ulong = (20 << 23) | 1020;
                 // SAFETY: this thread's last error belongs to the failed SSL operation.
-                match unsafe { (api.ERR_peek_last_error)() } {
-                    super::UNEXPECTED_EOF => BioFailure::UnexpectedEof,
-                    PROTOCOL_IS_SHUTDOWN => BioFailure::ProtocolIsShutdown,
-                    SHUTDOWN_IN_INIT => BioFailure::ShutdownInInit,
-                    _ => BioFailure::Tls(api.error(operation)),
+                let code = unsafe { (api.ERR_peek_last_error)() };
+                let reason = match code {
+                    super::UNEXPECTED_EOF => return BioFailure::UnexpectedEof,
+                    PROTOCOL_IS_SHUTDOWN => return BioFailure::ProtocolIsShutdown,
+                    SHUTDOWN_IN_INIT => return BioFailure::ShutdownInInit,
+                    RECORD_LAYER_FAILURE => "RECORD_LAYER_FAILURE",
+                    DECRYPTION_FAILED_OR_BAD_RECORD_MAC => "DECRYPTION_FAILED_OR_BAD_RECORD_MAC",
+                    SSLV3_ALERT_BAD_RECORD_MAC => "SSLV3_ALERT_BAD_RECORD_MAC",
+                    _ => return BioFailure::Tls(api.error(operation)),
+                };
+                BioFailure::RecordError {
+                    reason,
+                    message: api
+                        .reason_text(code)
+                        .map_or_else(|| operation.to_owned(), |s| s.into_owned()),
                 }
             }
             _ => BioFailure::Tls(api.error(operation)),
