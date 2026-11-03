@@ -1,6 +1,7 @@
 //! Python integer exponentiation, including modular inverses for negative powers.
 
 use super::*;
+use num_integer::Integer;
 use num_traits::Pow;
 
 /// # Safety
@@ -91,6 +92,12 @@ pub(super) fn modular_power(base: &Int, exponent: &Int, modulus: &Int) -> Result
             ));
         };
         inverse.modpow(&-exponent.as_ref(), &modulus)
+    } else if let Some(power) = exponent.to_u32()
+        && base.bits().saturating_mul(u64::from(power)) <= 512
+    {
+        // At most eight 64-bit limbs are needed for the full power. Reduce it
+        // once instead of setting up modular multiplication for a short exponent.
+        base.as_ref().pow(power).mod_floor(&modulus)
     } else {
         base.modpow(&exponent, &modulus)
     };
