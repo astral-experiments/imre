@@ -627,6 +627,83 @@ pub unsafe extern "C" fn imre_struct_binary_ordered(
     sum
 }
 
+/// Continue a modular progression of writes using the two rows already in its dictionary.
+/// Return the tagged ordinal of the last completed store, or zero to resume the scalar loop.
+///
+/// # Safety
+/// The typed loop roots the list and an independent record of the given layout.
+/// `last_index` has room for one tagged integer. The first scalar store has succeeded.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_struct_set_modular(
+    list: *const Object,
+    layout: *const RecordDescriptor,
+    row: *const usize,
+    current: i64,
+    stop: i64,
+    at: i64,
+    stride: i64,
+    upper: i64,
+    modulus: i64,
+    last_index: *mut i64,
+) -> i64 {
+    if crate::signals::TRIPPED.load(std::sync::atomic::Ordering::Relaxed) {
+        return 0;
+    }
+    let tagged = [current, stop, at, stride, upper, modulus];
+    if tagged.iter().any(|&v| v <= 0 || v & 1 == 0) {
+        return 0;
+    }
+    let [current, stop, at, stride, upper, n] = tagged.map(|v| (v >> 1) as usize);
+    // Keep every source multiply and add in the tagged range. Positive n also
+    // makes the remainder total and bounds every subsequent list subscript.
+    if n == 0
+        || at >= n
+        || stop.saturating_sub(current) < 64
+        || (stop - 1) as u128 * stride as u128 + upper as u128 > (i64::MAX / 2) as u128
+    {
+        return 0;
+    }
+    // SAFETY: both borrowed inputs survive every store. The kernel only updates
+    // integer tags, so it cannot run Python while the list is mutably borrowed.
+    unsafe {
+        object(list).0.with_mut(|storage| {
+            let Storage::Sequence(words) = storage else {
+                return 0;
+            };
+            let Some(rows) = words.rows_mut() else {
+                return 0;
+            };
+            if n > rows.len || !std::ptr::eq(rows.layout, layout) {
+                return 0;
+            }
+            let value = rows.payload(row);
+            let RowStorage::Repeated(base, edits) = &mut rows.storage else {
+                return 0;
+            };
+            let base = base_row(base, rows.layout.length);
+            let count = stop - current - 1;
+            let step = stride % n;
+            let Some(binary) = edits.for_modular_writes(at, value, base, n, step, count) else {
+                return 0;
+            };
+            let set = if value == binary.row {
+                true
+            } else if value == base {
+                false
+            } else {
+                return 0;
+            };
+            let (done, at) = binary.set_modular(at, step, n, count, set);
+            if done == 0 {
+                return 0;
+            }
+            rows.boxed.take();
+            last_index.write(2 * at as i64 + 1);
+            2 * (current + done) as i64 + 1
+        })
+    }
+}
+
 /// Append a loop-invariant value to an empty scalar struct list in one step.
 /// Returning false leaves the list untouched for the original append loop.
 ///

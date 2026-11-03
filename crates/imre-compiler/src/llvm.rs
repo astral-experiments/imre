@@ -2740,6 +2740,9 @@ impl Emitter<'_, '_> {
                 self.block(body);
                 self.loops.pop();
                 if !self.terminated {
+                    if unit_step {
+                        self.batch_modular_writes(body, *target, *cursor, *stop);
+                    }
                     self.jump(&increment);
                 }
                 self.start(&increment);
@@ -9804,6 +9807,7 @@ declare void @imre_object_retain(ptr)
 declare void @imre_object_release(ptr)
 declare ptr @imre_struct_list_new(ptr)
 declare i1 @imre_struct_try_fill_empty(ptr, ptr, ptr, i64)
+declare i64 @imre_struct_set_modular(ptr, ptr, ptr, i64, i64, i64, i64, i64, i64, ptr) nounwind
 declare i64 @imre_struct_cycle_prefix(ptr, i64, i64)
 declare ptr @imre_struct_read_view(ptr, ptr) nounwind
 declare void @imre_struct_seek_span(ptr, i64, ptr) nounwind
