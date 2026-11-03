@@ -1519,6 +1519,14 @@ unsafe fn split_string_lines<const KEEP: bool>(value: *const Str) -> *const Obje
     )
 }
 
+/// Retrieve one field using Python's str.splitlines boundaries.
+pub(crate) fn line_field(value: &str, index: usize) -> Option<&str> {
+    let mut offsets = LineOffsets::new(value);
+    std::iter::from_fn(|| offsets.next(value))
+        .nth(index)
+        .map(|range| &value[range])
+}
+
 /// Visit line fields using the same scanner as native str.splitlines.
 pub(crate) fn visit_line_fields<'a>(
     value: &'a str,

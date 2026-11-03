@@ -953,6 +953,7 @@ pub(crate) fn compile(
         "optimize":startup.map_or(0, |(flags, _)| flags.optimize),
         "dont_write_bytecode":startup.is_some_and(|(flags, _)| flags.dont_write_bytecode),
         "executable":startup.map(|(_, executable)| executable),
+        "command_source":command,
         "command":in_memory,"module_entry":module_entry,"path_entry":options.path_entry,"paths":paths,
     });
     check_returns()?;
