@@ -175,6 +175,23 @@ class Based(hook):
 
 print(hook.seen is Based.__orig_bases__, Based.__bases__ == (dict,))
 
+
+class BadBaseHook:
+    def __mro_entries__(self, bases):
+        return (object(),)
+
+
+for bad_base in (object(), BadBaseHook()):
+    ran = []
+    try:
+        class Invalid(t.List[int], bad_base):
+            ran.append(True)
+    except TypeError as error:
+        assert str(error) == "bases must be types"
+    else:
+        raise AssertionError("accepted a non-type base")
+    assert ran == [True]
+
 import collections.abc as cabc
 
 
