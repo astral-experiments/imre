@@ -26,6 +26,11 @@ REJECTED = {
     ),
     "nullcontext_integer": "from contextlib import nullcontext\nwith nullcontext(1):\n    pass",
     "nullcontext_two_args": "from contextlib import nullcontext\nwith nullcontext('a', 'b'):\n    pass",
+    "async_temporary_directory": "async def f() -> None:\n    async with TemporaryDirectory():\n        pass",
+    "async_shadowed_nullcontext": (
+        "from contextlib import nullcontext\n"
+        "async def f(nullcontext: int) -> None:\n    async with nullcontext():\n        pass"
+    ),
     "constructor_value": "factory = TemporaryDirectory",
     "manager_annotation": "def use(value: TemporaryDirectory) -> None:\n    pass",
     "manual_enter": "print(TemporaryDirectory().__enter__())",

@@ -390,6 +390,7 @@ impl Context {
             .into_iter()
             .chain(bundle.iter().filter(|_| top_level).cloned())
         {
+            let spelling = self.registry_root(&spelling).to_owned();
             let root = if spelling.as_os_str().is_empty() {
                 std::env::current_dir()
             } else if bundle.as_ref().is_some_and(|dir| spelling.starts_with(dir)) {
@@ -424,6 +425,7 @@ impl Context {
             // A path below an archive is virtual. Preserve its spelling because the
             // loader exposes it in __file__, __path__, and resource names.
             if cfg!(unix)
+                && disk
                 && !spelling.as_os_str().is_empty()
                 && spelling
                     .ancestors()

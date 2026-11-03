@@ -104,7 +104,7 @@ with Rust-competitive performance.
 
 ## Standard library test results
 
-As of November 3, 2026, Imre has a paired pass for **8,335 of 13,328 tests (62.5%)** in the original 25 standard library module families.
+As of November 3, 2026, Imre has a paired pass for **8,336 of 13,328 tests (62.5%)** in the original 25 standard library module families.
 A **paired pass** means that CPython 3.14.5 passed the original test and Imre passed it at both
 `-O0` and `-O3`. The total combines focused and intact suite runs across revisions, including
 development branches. Each original test occurrence counts once. Skipped and omitted tests remain
@@ -134,10 +134,10 @@ in the denominator. The [omission decisions](docs/stdlib-omissions.md) explain e
 | `tempfile` | 108 | 118 | 2 | All 118 originals finished in ordinary and boxed O0/O3. Each native run passed 108 and skipped 10. Stock passed 112 and skipped six. Two extra native skips are documented omissions. The other two require working os.fork and os.spawnl. |
 | `textwrap` | 68 | 68 | 0 | Complete suite on `main`, all 68 passed. |
 | `threading` | 83 | 228 | 1 | All 228 original registrations ran in ordinary and boxed builds at both levels. Each passed 83, skipped 32 and reported failures on 113 IDs. The bound worker callback still blocks 58 Bunch fixture cases. |
-| `typing` | 449 | 712 | 0 | Sixty-one more originals passed from the pinned `test_typing.py`. Stock and ordinary native O0/O3 recorded identical parent callbacks and all 50 successful subtests. The total includes earlier selected and class runs. |
+| `typing` | 450 | 712 | 0 | One more original resolved all four `ClassVar[int]` annotations through `get_type_hints` on stock and ordinary O0/O3. The total includes earlier selected and class runs. [Callbacks and replay](benchmarks/cpython_stdlib/full/typing/receipts/annotation-resolution/README.md) |
 | `unittest` | 275 | 1,090 | 0 | The intact package passed 160 cases. On public #3601, the unchanged test_assertions and test_case files ran all 150 originals with runtime imports. Their 109 paired passes added 81 distinct cases. Another 34 original mock methods passed in focused runs. |
 | `urllib` | 173 | 178 | 0 | Both unchanged scripts compiled and exited 0 in ordinary and runtime-import modes at both native levels. Four HTTP tests now pass with SSL enabled. Three originals matched only in child callbacks, and two Windows cases skipped on stock Linux. |
-| **Total** | **8,335** | **13,328** | **20** | **3 complete suites match stock on `main`** |
+| **Total** | **8,336** | **13,328** | **20** | **3 complete suites match stock on `main`** |
 
 See the [standard library coverage report](docs/stdlib.md) for the Linux test
 results and import coverage recorded in this repository.
@@ -152,9 +152,9 @@ CPython 3.14.5 discovers **1,217 test occurrences** in these six families on Lin
 | `inspect` | — | 362 | Callable signatures, argument binding, and decorator unwrapping |
 | `ssl` | — | 195 | SSL contexts, certificates, and loopback TLS connections |
 | `types` | 111 | 141 | On public `ce052eab`, the intact `test_types` runs recorded 100 paired passes and exited 1. `test_dynamicclassattribute` recorded 11 paired passes and exited 0 at both native levels. Two stock skips remain in the denominator. |
-| `warnings` | 158 | 187 | The [parent ledger](benchmarks/cpython_stdlib/full/warnings/receipts/) combines 155 intact-suite passes on `dfe0f18e` with three selected passes on `7e46a592`. Stock skipped six. The 19 child-interpreter parents await separate verification. |
+| `warnings` | 171 | 187 | The [parent ledger](benchmarks/cpython_stdlib/full/warnings/receipts/) combines 158 in-process passes with 13 verified using native interpreter children at O0 and O3. Six child-dependent originals failed, six skipped on stock and four skipped only on Imre. |
 | `weakref` | 163 | 183 | Selected stock and native O0/O3 runs each passed 118 weakref and 45 WeakSet originals, and all six processes exited 0. The separate intact native module runs still exit 1. |
-| **Measured total (4 of 6 families)** | **506** | **660** |  |
+| **Measured total (4 of 6 families)** | **519** | **660** | |
 
 ## Design
 

@@ -157,7 +157,7 @@ enum Instruction {
     CallSaved {
         positional: usize,
         keywords: Vec<ast::Identifier>,
-        position: ruff_text_size::TextSize,
+        position: value::ExpressionPosition,
     },
     Next(Option<ast::Expr>, usize),
     Jump(usize),
@@ -1673,7 +1673,10 @@ impl Program {
     fn lower_awaited_call(&mut self, call: ast::ExprCall, line: u32) {
         let method =
             imre_ast::direct_method(&call, &self.method_imports, self.private_names.as_deref());
-        let position = method.map_or_else(|| call.start(), |field| field.attr.start());
+        let position = value::ExpressionPosition::Source {
+            offset: method.map_or_else(|| call.start(), |field| field.attr.start()),
+            range: call.range(),
+        };
         let callable = if method.is_some() {
             let ast::Expr::Attribute(field) = *call.func else {
                 unreachable!()
@@ -4672,9 +4675,7 @@ impl Context {
                     .map(ToString::to_string)
                     .zip(named.iter().copied())
                     .collect();
-                let previous = self
-                    .heap
-                    .replace_expression(value::ExpressionPosition::Offset(*position));
+                let previous = self.heap.replace_expression(*position);
                 let result = self.call_in_scope(scope, iterators[start], pos.to_vec(), kwargs);
                 self.heap.replace_expression(previous);
                 for operand in iterators.drain(start..).rev() {

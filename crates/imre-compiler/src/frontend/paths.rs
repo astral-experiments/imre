@@ -229,6 +229,7 @@ impl Checker<'_> {
             "stem" => (PathOperation::Stem, Type::Str),
             "suffix" => (PathOperation::Suffix, Type::Str),
             "suffixes" => (PathOperation::Suffixes, self.types.list(Type::Str)),
+            "parts" => (PathOperation::Parts, self.types.var_tuple(Type::Str)),
             "parent" => (PathOperation::Parent, receiver.ty),
             "drive" => (PathOperation::Drive, Type::Str),
             "root" => (PathOperation::Root, Type::Str),

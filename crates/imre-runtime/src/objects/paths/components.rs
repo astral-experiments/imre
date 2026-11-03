@@ -144,6 +144,22 @@ pub unsafe extern "C" fn imre_path_change_extension(
 }
 
 /// # Safety
+/// The caller roots the immutable path until the result owns its component strings.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_path_parts(path: *const Object) -> *const usize {
+    // SAFETY: only independently owned fields escape the immutable path borrow.
+    let result = unsafe {
+        object(path)
+            .0
+            .with(|storage| storage.parsed(PurePath::parts))
+    };
+    finish(
+        result.map(|tuple| tuple.into_word() as *const usize),
+        std::ptr::null(),
+    )
+}
+
+/// # Safety
 /// The input path stays rooted until each suffix is installed in its own result list.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_path_suffixes(path: *const Object) -> *const Object {
