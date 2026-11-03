@@ -105,6 +105,22 @@ class DefaultInit(ConstructorBase):
     __init__ = object.__init__
 
 
+@warnings.deprecated("old constructor")
+class DeprecatedChild(ConstructorBase):
+    pass
+
+
+class InitDescriptor:
+    __wrapped__ = object.__init__
+
+    def __get__(self, instance, owner):
+        return lambda selected: None
+
+
+class DescriptorInit:
+    __init__ = InitDescriptor()
+
+
 proxy = FunctionProxy(original)
 assert inspect.signature(proxy) == inspect.signature(original)
 proxy.__defaults__ = (5,)
@@ -188,28 +204,12 @@ assert not inspect.ismodule(inspect.Parameter)
 print(inspect.signature(ConstructorChild), inspect.signature(NewFirst), inspect.signature(DefaultInit))
 
 
-@warnings.deprecated("old constructor")
-class DeprecatedChild(ConstructorBase):
-    pass
-
-
 assert inspect.signature(DeprecatedChild) == inspect.signature(ConstructorBase)
 assert str(inspect.signature(DeprecatedChild, follow_wrapped=False)) == "(*args, **kwargs)"
 DeprecatedChild.__new__.__signature__ = Signature([
     Parameter("cls", Parameter.POSITIONAL_ONLY), Parameter("published", Parameter.KEYWORD_ONLY),
 ])
 assert str(inspect.signature(DeprecatedChild)) == "(*, published)"
-
-
-class InitDescriptor:
-    __wrapped__ = object.__init__
-
-    def __get__(self, instance, owner):
-        return lambda selected: None
-
-
-class DescriptorInit:
-    __init__ = InitDescriptor()
 
 
 assert str(inspect.signature(DescriptorInit)) == "(selected)"
