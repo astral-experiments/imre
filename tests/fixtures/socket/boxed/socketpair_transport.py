@@ -35,3 +35,15 @@ with left, right:
     assert right.recv(2) == b"fi"
     assert right.recv(10) == b""
     assert right.recv(10) == b"last"
+
+previous = socket.getdefaulttimeout()
+try:
+    socket.setdefaulttimeout(0.75)
+    left, right = socketpair()
+    with left, right:
+        assert left.gettimeout() == right.gettimeout() == 0.75
+        socket.setdefaulttimeout(None)
+        with socket.socket() as other:
+            assert other.gettimeout() is None and left.gettimeout() == 0.75
+finally:
+    socket.setdefaulttimeout(previous)

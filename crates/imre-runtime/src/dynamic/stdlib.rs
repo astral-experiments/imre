@@ -1401,6 +1401,7 @@ pub(super) fn call(
             | "sys._get_cpu_count_config"
             | "sys.get_coroutine_origin_tracking_depth"
             | "sys.getdefaultencoding"
+            | "_socket.getdefaulttimeout"
             | "_locale.getencoding"
             | "sys.getfilesystemencoding"
             | "sys.getfilesystemencodeerrors"
@@ -1448,6 +1449,10 @@ pub(super) fn call(
             }
             "sys.get_coroutine_origin_tracking_depth" => {
                 ctx.int(i64::from(ctx.threads.coroutine_origin_depth))
+            }
+            "_socket.getdefaulttimeout" => {
+                let timeout = *ctx.socket_default_timeout.lock().unwrap();
+                timeout.map_or(NONE, |d| ctx.alloc(Value::Float(d.as_secs_f64())))
             }
             "posix._create_environ" => os::environment(ctx),
             "posix.getcwd" | "posix.getcwdb" => os::getcwd(ctx, name == "posix.getcwdb")?,
@@ -2332,6 +2337,9 @@ pub(super) fn call(
     }
     if name == "_socket.socketpair" {
         return socket::socketpair(ctx, args, kwargs);
+    }
+    if name == "_socket.setdefaulttimeout" {
+        return socket::setdefaulttimeout(ctx, args, kwargs);
     }
     if name == "_socket.close" {
         return socket::close(ctx, args, kwargs);

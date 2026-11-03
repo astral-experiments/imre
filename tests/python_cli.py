@@ -1683,6 +1683,13 @@ def main():
         ftp_script.write_text("import ftplib\nprint(ftplib.FTP().encoding, ftplib.parse257('257 \"home\"'))\n")
         compare("-B", ftp_script)
 
+        director_script = root / "opener_director.py"
+        director_script.write_text(
+            "from urllib.request import OpenerDirector, build_opener\n"
+            "assert type(build_opener()) is OpenerDirector\n"
+        )
+        compare("-IB", director_script, native_args=("run", director_script, "--quiet"))
+
         # A project FTP provider is loaded only if the opener actually uses FTP.
         alternate = root / "ftp_provider"
         alternate.mkdir()
@@ -2786,6 +2793,15 @@ def report(text):
             queue_lookup.write_text(f"{statement}\nprint({name}.QueueListener.__name__)\n")
             checked = run(imre, "check", queue_lookup)
             assert checked.returncode == 0, checked.stderr
+        timeout_script = root / "default_timeout.py"
+        timeout_script.write_text(
+            "from ftplib import FTP\n"
+            "from http.client import HTTPConnection\n"
+            "from socket import _GLOBAL_DEFAULT_TIMEOUT as default\n"
+            "assert FTP().timeout is HTTPConnection('localhost').timeout is default\n"
+            "assert FTP(timeout=None).timeout is HTTPConnection('localhost', timeout=None).timeout is None\n"
+        )
+        compare("-IB", timeout_script, native_args=("run", timeout_script, "--quiet"))
         socket_alias = root / "socket_timeout_alias.py"
         socket_alias.write_text(
             "from _socket import timeout as low_timeout\nfrom socket import timeout\n"

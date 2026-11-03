@@ -1,6 +1,7 @@
 //! Runtime-loaded Python sockets share descriptor ownership and syscalls with typed sockets.
 use super::{Context, Error, Id, NONE, Result, Value, argument, option};
 use crate::objects::socket as native;
+use std::time::Duration;
 
 const CONSTANTS: &[(&str, i32)] = &[
     ("AF_INET", libc::AF_INET),
@@ -66,6 +67,10 @@ pub(in super::super) fn install_lowlevel_socket(ctx: &mut Context, scope: Id) ->
         let value = ctx.builtin(&format!("socket.{name}"));
         ctx.bind(scope, name, value);
     }
+    for name in ["getdefaulttimeout", "setdefaulttimeout"] {
+        let function = ctx.builtin(&format!("_socket.{name}"));
+        ctx.bind(scope, name, function);
+    }
     let pair = ctx.builtin("_socket.socketpair");
     ctx.bind(scope, "socketpair", pair);
     let resolver = ctx.builtin("_socket.getaddrinfo");
@@ -91,7 +96,7 @@ pub(in super::super) fn import_socket_constants(ctx: &mut Context, scope: Id) ->
         .iter()
         .map(|&(name, _)| name)
         .chain(RESOLVER_NAMES.iter().copied())
-        .chain(["timeout"])
+        .chain(["timeout", "getdefaulttimeout", "setdefaulttimeout"])
     {
         match ctx.lookup_attr(low, name) {
             Ok(value) => ctx.bind(scope, name, value),
@@ -775,6 +780,47 @@ fn getsockopt(
     Ok(ctx.alloc(Value::Bytes(bytes)))
 }
 
+fn parse_socket_timeout(ctx: &mut Context, value: Id) -> Result<Option<Duration>> {
+    super::select::timeout(ctx, Some(&value), false).map_err(|error| {
+        if error.kind == "ValueError" && error.message == "timeout must be non-negative" {
+            Error::new("ValueError", "Timeout value out of range")
+        } else if error.kind == "TypeError" {
+            Error::new(
+                "TypeError",
+                format!(
+                    "'{}' object cannot be interpreted as an integer or float",
+                    ctx.type_name(value)
+                ),
+            )
+        } else {
+            error
+        }
+    })
+}
+
+/// Update the default only after the same conversion used by socket.settimeout succeeds.
+pub(super) fn setdefaulttimeout(
+    ctx: &mut Context,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Id> {
+    let value =
+        super::super::builtins::one_positional_arg("_socket.setdefaulttimeout", args, kwargs)?;
+    let timeout = parse_socket_timeout(ctx, value)?;
+    *ctx.socket_default_timeout.lock().unwrap() = timeout;
+    Ok(NONE)
+}
+
+/// Apply the current default to a new endpoint unless its type requested nonblocking I/O.
+fn new_socket(ctx: &mut Context, socket: crate::ObjectOwner) -> Result<Id> {
+    if native::get_timeout(&socket).is_none()
+        && let Some(timeout) = *ctx.socket_default_timeout.lock().unwrap()
+    {
+        native::set_timeout(&socket, Some(timeout))?;
+    }
+    Ok(ctx.alloc(Value::Socket(socket)))
+}
+
 pub(super) fn close(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
     let arg = super::super::builtins::one_positional_arg("_socket.close", args, kwargs)?;
     // CPython converts through C long before casting to its POSIX socket descriptor.
@@ -791,8 +837,8 @@ pub(super) fn socketpair(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]
     }
     let [family, kind, proto] = values;
     let (left, right) = native::socketpair(family, kind, proto)?;
-    let left = ctx.alloc(Value::Socket(left));
-    let right = ctx.alloc(Value::Socket(right));
+    let left = new_socket(ctx, left)?;
+    let right = new_socket(ctx, right)?;
     Ok(ctx.alloc(Value::Tuple(vec![left, right])))
 }
 
@@ -816,7 +862,7 @@ pub(super) fn endpoint_method(
         "accept" => {
             let (child, peer) = native::accept(socket)?;
             let peer = pack_socket_name(ctx, peer)?;
-            let child = ctx.alloc(Value::Socket(child));
+            let child = new_socket(ctx, child)?;
             Ok(ctx.alloc(Value::Tuple(vec![child, peer])))
         }
         "getsockname" | "getpeername" => {
@@ -841,7 +887,7 @@ pub(super) fn call(
                 int_option(ctx, args, kwargs, 1, "type", -1)?,
                 int_option(ctx, args, kwargs, 2, "proto", -1)?,
             )?;
-            return Ok(ctx.alloc(Value::Socket(handle)));
+            return new_socket(ctx, handle);
         }
         "if_nameindex" => {
             check_args(name, args, kwargs, 0, &[])?;
@@ -1010,21 +1056,7 @@ pub(super) fn call(
         }
         "settimeout" => {
             let value = argument(args, 0)?;
-            let timeout = super::select::timeout(ctx, Some(&value), false).map_err(|error| {
-                if error.kind == "ValueError" && error.message == "timeout must be non-negative" {
-                    Error::new("ValueError", "Timeout value out of range")
-                } else if error.kind == "TypeError" {
-                    Error::new(
-                        "TypeError",
-                        format!(
-                            "'{}' object cannot be interpreted as an integer or float",
-                            ctx.type_name(value)
-                        ),
-                    )
-                } else {
-                    error
-                }
-            })?;
+            let timeout = parse_socket_timeout(ctx, value)?;
             native::set_timeout(&s, timeout)?;
         }
         "getblocking" => {
