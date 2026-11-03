@@ -30,6 +30,17 @@ pub(super) fn call(
         }
         return Ok(ctx.alloc(Value::Int(crate::Int::new(gcd))));
     }
+    if operation == "copysign" {
+        let &[x, y] = args else {
+            return Err(Error::new(
+                "TypeError",
+                format!("copysign expected 2 arguments, got {}", args.len()),
+            ));
+        };
+        let x = as_double(ctx, x)?;
+        let y = as_double(ctx, y)?;
+        return Ok(ctx.alloc(Value::Float(x.copysign(y))));
+    }
     let &[value] = args else {
         return Err(Error::new(
             "TypeError",

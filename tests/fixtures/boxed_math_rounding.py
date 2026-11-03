@@ -1,7 +1,7 @@
 """Rounding function objects and the original operands they dispatch on."""
 
 import math
-from math import ceil, floor, isnan, modf, trunc
+from math import ceil, copysign, floor, isnan, modf, trunc
 
 
 class Hooks:
@@ -76,6 +76,28 @@ def current():
     assert isnan(FloatOverride("nan")) is True
     for value in (float("inf"), -0.0, FloatOnly(), IndexOnly()):
         assert isnan(value) is False
+
+    assert copysign is math.copysign
+    assert copysign(FloatOnly(), IndexOnly()) == 1.25
+    assert copysign(IndexOnly(), FloatOverride(-0.0)) == -5.0
+    assert type(copysign(True, False)) is float
+    assert str(copysign(0, -1)) == "-0.0"
+    assert copysign(float("inf"), -0.0) == -float("inf")
+    negative_nan = copysign(float("nan"), -0.0)
+    assert isnan(negative_nan) and copysign(1, negative_nan) == -1.0
+    for call, error_type, message in (
+        (lambda: copysign(1), TypeError, "copysign expected 2 arguments, got 1"),
+        (lambda: copysign(1, 2, 3), TypeError, "copysign expected 2 arguments, got 3"),
+        (lambda: copysign(1, y=-1), TypeError, "math.copysign() takes no keyword arguments"),
+        (lambda: copysign(1, "2"), TypeError, "must be real number, not str"),
+        (lambda: copysign(10**1000, "2"), OverflowError, "int too large to convert to float"),
+    ):
+        try:
+            call()
+        except error_type as error:
+            assert str(error) == message
+        else:
+            raise AssertionError(message)
 
     assert math.modf(FloatOnly()) == (-0.25, -1.0)
     assert modf(IndexOnly()) == (0.0, 5.0)
