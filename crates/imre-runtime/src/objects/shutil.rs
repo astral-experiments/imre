@@ -22,39 +22,13 @@ use super::{Bytes, Int, Str};
 /// Python attribute or configuration name is unavailable.
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_shutil_confstr_cs_path() -> *const Bytes {
-    let mut small = [0; 255];
-    let mut large = Vec::new();
-    let mut buffer: &mut [u8] = &mut small;
-    loop {
-        // SAFETY: this is the calling thread's errno; confstr borrows the
-        // writable buffer only until return. Zero distinguishes None from error.
-        let len = unsafe {
-            #[cfg(target_os = "linux")]
-            {
-                *libc::__errno_location() = 0;
-            }
-            #[cfg(target_os = "macos")]
-            {
-                *libc::__error() = 0;
-            }
-            libc::confstr(libc::_CS_PATH, buffer.as_mut_ptr().cast(), buffer.len())
-        };
-        if len == 0 {
-            let error = std::io::Error::last_os_error();
-            if error.raw_os_error() != Some(0) {
-                super::files::errno_error(error).raise();
-            }
-            return std::ptr::null();
+    match super::interpreter_stdlib::confstr_bytes(libc::_CS_PATH) {
+        Ok(Some(bytes)) => crate::BytesOwner::into_raw(crate::BytesOwner::new(bytes)),
+        Ok(None) => std::ptr::null(),
+        Err(error) => {
+            super::files::errno_error(error).raise();
+            std::ptr::null()
         }
-        if len <= buffer.len() {
-            return crate::BytesOwner::into_raw(crate::BytesOwner::new(buffer[..len - 1].to_vec()));
-        }
-        if large.try_reserve(len - large.len()).is_err() {
-            sequence_allocation_failed();
-            return std::ptr::null();
-        }
-        large.resize(len, 0);
-        buffer = &mut large;
     }
 }
 

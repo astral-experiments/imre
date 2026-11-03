@@ -1,4 +1,4 @@
-//! Linux sysconf uses target libc constants and the names mapping on the defining module.
+//! Linux configuration queries use target libc constants and names from the defining module.
 
 use std::ffi::{CStr, c_char, c_int, c_long};
 
@@ -11,6 +11,7 @@ struct Entry {
 }
 
 unsafe extern "C" {
+    fn imre_platform_confstr_entries(length: *mut usize) -> *const Entry;
     fn imre_platform_sysconf_entries(length: *mut usize) -> *const Entry;
     fn imre_platform_pathconf_entries(length: *mut usize) -> *const Entry;
     fn imre_platform_pathconf(
@@ -28,6 +29,7 @@ pub(in crate::dynamic) fn initialize(ctx: &mut Context, module: Id, scope: Id) {
             "sysconf_names",
             imre_platform_sysconf_entries as unsafe extern "C" fn(*mut usize) -> *const Entry,
         ),
+        ("confstr_names", imre_platform_confstr_entries),
         ("pathconf_names", imre_platform_pathconf_entries),
     ] {
         let mut length = 0;
@@ -42,14 +44,14 @@ pub(in crate::dynamic) fn initialize(ctx: &mut Context, module: Id, scope: Id) {
                 // SAFETY: the generated table points at NUL-terminated ASCII string literals.
                 let name = unsafe { CStr::from_ptr(entry.name) }
                     .to_str()
-                    .expect("ASCII sysconf name");
+                    .expect("ASCII configuration name");
                 (ctx.text(name), ctx.int(i64::from(entry.code)))
             })
             .collect();
         let names = ctx.dict(names);
         ctx.bind(scope, name, names);
     }
-    for name in ["sysconf", "pathconf", "fpathconf"] {
+    for name in ["confstr", "sysconf", "pathconf", "fpathconf"] {
         let callable = ctx.builtin(&format!("posix.{name}"));
         let function = ctx.alloc(Value::Method {
             callable,
@@ -62,24 +64,35 @@ pub(in crate::dynamic) fn initialize(ctx: &mut Context, module: Id, scope: Id) {
 
 pub(in crate::dynamic::stdlib) fn call(
     ctx: &mut Context,
+    func: &str,
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
     if !kwargs.is_empty() {
         return Err(Error::new(
             "TypeError",
-            "posix.sysconf() takes no keyword arguments",
+            format!("{func}() takes no keyword arguments"),
         ));
     }
     let [module, name] = args else {
         return Err(Error::new(
             "TypeError",
             format!(
-                "posix.sysconf() takes exactly one argument ({} given)",
+                "{func}() takes exactly one argument ({} given)",
                 args.len().saturating_sub(1)
             ),
         ));
     };
+    if func == "posix.confstr" {
+        let code = confname(ctx, *module, *name, "confstr_names")?;
+        let Some(bytes) = crate::objects::interpreter_stdlib::confstr_bytes(code)
+            .map_err(super::super::os_error)?
+        else {
+            return Ok(crate::dynamic::NONE);
+        };
+        let codec = crate::objects::Codec::lookup(crate::sys::filesystem_encoding()?.as_str())?;
+        return Ok(ctx.text_codepoints(codec.decode_filesystem(&bytes)?));
+    }
     let code = confname(ctx, *module, *name, "sysconf_names")?;
     let mut errno = 0;
     // SAFETY: the shim writes errno through a live c_int. -1 with errno zero is a valid result.

@@ -1483,6 +1483,8 @@ def main():
         bytecode.write_bytes(b"")
         compare(bytecode, status=1, stderr=b"EOFError: EOF read where not expected\n")
         if sys.version_info[:2] == (3, 14):
+            compare("-I", "-c", "import warnings; [print(f) for f in warnings._get_filters()]",
+                    native_timeout=600)
             renamed = root / "bad_bytecode"
             renamed.write_bytes(importlib.util.MAGIC_NUMBER[:2] + b"xx")
             compare(renamed, status=1, stderr=b"RuntimeError: Bad magic number in .pyc file\n")
@@ -2798,12 +2800,18 @@ for name in ("md4", "ripemd160"):
                 native_args=("run", open_fixture, *import_flags, "--quiet"),
                 native_timeout=300,
             )
+        compare(
+            "-B", "-c",
+            "from ast import BinOp, ClassDef\nimport ast\n"
+            "assert BinOp is ast.BinOp and ClassDef is ast.ClassDef\n",
+        )
         for name in ("boxed_unittest_mock_any.py", "boxed_unittest_mock_side_effect.py", "boxed_unittest_mock_call.py"):
             fixture = fixtures / name
             compare("-IB", fixture, native_args=("run", fixture, "--quiet"))
             compare("-IB", fixture, native_args=("run", fixture, "--runtime-imports", "--quiet"))
         for fixture in (
             "boxed_ast.py",
+            "boxed_ast_compound.py",
             "boxed_ast_encoded_source.py",
             "boxed_ast_visitors.py",
             "boxed_ast_literal_eval.py",
@@ -3367,6 +3375,8 @@ else:
             plugin.write_bytes((fixtures / "boxed_fcntl.py").read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")
             plugin.write_bytes((fixtures / "boxed_posix_rtld_flags.py").read_bytes())
+            compare("-IB", "-c", imports + "arithmetic.current()")
+            plugin.write_bytes((fixtures / "boxed_posix_confstr.py").read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")
             plugin.write_bytes((fixtures / "boxed_posix_sysconf.py").read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")
