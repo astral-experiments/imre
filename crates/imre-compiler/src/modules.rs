@@ -2199,6 +2199,9 @@ impl IntrinsicModule {
             (Self::Os, "removedirs") if cfg!(unix) => {
                 Intrinsic::ObjectRuntimeExport("os.removedirs")
             }
+            (Self::Os, "execvp") if cfg!(target_os = "linux") => {
+                Intrinsic::ObjectRuntimeExport("os.execvp")
+            }
             (Self::Os, "execvpe") if cfg!(target_os = "linux") => {
                 Intrinsic::ObjectRuntimeExport("os.execvpe")
             }
@@ -2208,8 +2211,26 @@ impl IntrinsicModule {
             (Self::Os, "spawnv") if cfg!(target_os = "linux") => {
                 Intrinsic::ObjectRuntimeExport("os.spawnv")
             }
+            (Self::Os, "spawnve") if cfg!(target_os = "linux") => {
+                Intrinsic::ObjectRuntimeExport("os.spawnve")
+            }
+            (Self::Os, "spawnvp") if cfg!(target_os = "linux") => {
+                Intrinsic::ObjectRuntimeExport("os.spawnvp")
+            }
+            (Self::Os, "spawnvpe") if cfg!(target_os = "linux") => {
+                Intrinsic::ObjectRuntimeExport("os.spawnvpe")
+            }
             (Self::Os, "spawnl") if cfg!(target_os = "linux") => {
                 Intrinsic::ObjectRuntimeExport("os.spawnl")
+            }
+            (Self::Os, "spawnle") if cfg!(target_os = "linux") => {
+                Intrinsic::ObjectRuntimeExport("os.spawnle")
+            }
+            (Self::Os, "spawnlp") if cfg!(target_os = "linux") => {
+                Intrinsic::ObjectRuntimeExport("os.spawnlp")
+            }
+            (Self::Os, "spawnlpe") if cfg!(target_os = "linux") => {
+                Intrinsic::ObjectRuntimeExport("os.spawnlpe")
             }
             (Self::Os, "P_WAIT") if cfg!(target_os = "linux") => Intrinsic::IntConstant(0),
             (Self::Os, "P_NOWAIT" | "P_NOWAITO") if cfg!(target_os = "linux") => {
