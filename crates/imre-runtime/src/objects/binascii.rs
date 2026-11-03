@@ -188,6 +188,68 @@ pub unsafe extern "C" fn imre_binascii_unhexlify(value: *const Bytes) -> *const 
     finish(unhexlify(unsafe { &*value }).map(owned), std::ptr::null())
 }
 
+/// Map each input byte to its digit, with an out-of-range value for invalid characters.
+const fn base85_digits(alphabet: &[u8; 85]) -> [u8; 256] {
+    let mut digits = [u8::MAX; 256];
+    let mut i = 0;
+    while i < alphabet.len() {
+        digits[alphabet[i] as usize] = i as u8;
+        i += 1;
+    }
+    digits
+}
+
+/// Decode into the final buffer. A short last group is padded with the highest digit.
+pub(crate) fn decode_base85(data: &[u8], z85: bool) -> Result<Bytes> {
+    const B85: [u8; 256] = base85_digits(
+        b"0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz!#$%&()*+-;<=>?@^_`{|}~",
+    );
+    const Z85: [u8; 256] = base85_digits(
+        b"0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ.-:+=^!/*?&<>()[]{}@%$#",
+    );
+    let (digits, name) = if z85 { (&Z85, "z85") } else { (&B85, "base85") };
+    let mut output = allocate(data.len() / 5 * 4 + (data.len() % 5).saturating_sub(1))?;
+    for (group, chunk) in data.chunks(5).enumerate() {
+        let mut word = 0u64;
+        for (offset, &byte) in chunk.iter().enumerate() {
+            let digit = digits[usize::from(byte)];
+            if digit == u8::MAX {
+                return Err(Error::new(
+                    Kind::ValueError,
+                    format!("bad {name} character at position {}", group * 5 + offset),
+                ));
+            }
+            word = word * 85 + u64::from(digit);
+        }
+        for _ in chunk.len()..5 {
+            word = word * 85 + 84;
+        }
+        let word = u32::try_from(word).map_err(|_| {
+            Error::new(
+                Kind::ValueError,
+                format!("{name} overflow in hunk starting at byte {}", group * 5),
+            )
+        })?;
+        output.extend_from_slice(&word.to_be_bytes()[..chunk.len() - 1]);
+    }
+    Ok(output)
+}
+
+/// Decode RFC 1924 Base85 or Z85 bytes without allocating an object for every group.
+///
+/// # Safety
+/// The caller roots the exact immutable bytes for the duration of the call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_base85_decode(value: *const Bytes, z85: bool) -> *const Bytes {
+    // SAFETY: the input remains rooted while the decoder reads its bytes.
+    let result = decode_base85(unsafe { &*value }, z85).and_then(|bytes| {
+        BytesOwner::try_new(bytes)
+            .map(BytesOwner::into_raw)
+            .map_err(|_| Error::allocation())
+    });
+    finish(result, std::ptr::null())
+}
+
 pub(crate) fn binascii_encode(data: &[u8], newline: bool) -> Result<Bytes> {
     encode(data, &STANDARD, newline)
 }

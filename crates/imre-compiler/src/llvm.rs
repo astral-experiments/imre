@@ -6068,6 +6068,11 @@ impl Emitter<'_, '_> {
                 Type::Bytes,
                 &[&args[0].value, &args[1].value, &args[2].value],
             ),
+            Builtin::Base85Decode => self.call(
+                "imre_base85_decode",
+                Type::Bytes,
+                &[&args[0].value, &args[1].value],
+            ),
             Builtin::BinasciiUnhexlify => {
                 self.call("imre_binascii_unhexlify", Type::Bytes, &[&args[0].value])
             }
@@ -9435,6 +9440,7 @@ declare ptr @imre_binascii_decode(ptr, i1)
 declare i64 @imre_zlib_adler32(ptr, i64)
 declare ptr @imre_binascii_encode(ptr, i1)
 declare ptr @imre_binascii_unhexlify(ptr)
+declare ptr @imre_base85_decode(ptr, i1)
 declare ptr @imre_sha1_hex(ptr)
 declare i1 @imre_hmac_compare_digest_bytes(ptr, ptr)
 declare i1 @imre_hmac_compare_digest_str(ptr, ptr)
@@ -11526,6 +11532,13 @@ def transform(values: list[int], count: int) -> int:
         assert!(fast.contains("icmp ult i64"));
         assert!(fast.contains("getelementptr inbounds i64"));
         assert!(fast.contains("call i64 @imre_list_borrow_index("));
+    }
+
+    #[test]
+    fn decodes_base85_bytes_and_ascii_strings_in_typed_code() {
+        let source = "from base64 import b85decode, z85decode\ndef unpack(x: bytes, y: str) -> bytes:\n    return b85decode(b=x) + z85decode(y)\n";
+        let llvm = compile(source, &CompileOptions::default()).unwrap();
+        assert_eq!(llvm.matches("call ptr @imre_base85_decode(").count(), 2);
     }
 
     #[test]

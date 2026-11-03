@@ -31,7 +31,7 @@ pub(super) fn call(
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
-    if matches!(name, "a2b_hex" | "unhexlify") {
+    if matches!(name, "a2b_hex" | "unhexlify" | "_imre_b85decode") {
         if !kwargs.is_empty() {
             return Err(Error::new(
                 "TypeError",
@@ -47,7 +47,12 @@ pub(super) fn call(
                 ),
             ));
         };
-        let result = crate::objects::unhexlify(input(ctx, *data, true)?)?;
+        let data = input(ctx, *data, true)?;
+        let result = if name == "_imre_b85decode" {
+            crate::objects::decode_base85(data, false)?
+        } else {
+            crate::objects::unhexlify(data)?
+        };
         return Ok(ctx.alloc(Value::Bytes(result)));
     }
     let count = args.len() + kwargs.len();

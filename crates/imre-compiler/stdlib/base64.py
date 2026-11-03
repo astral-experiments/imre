@@ -389,6 +389,11 @@ def b85decode(b):
 
     The result is returned as a bytes object.
     """
+    b = _bytes_from_decode_data(b)
+    if type(b) is bytes or type(b) is bytearray:
+        return binascii._imre_b85decode(b)
+
+    # Subclasses can override length, addition, slicing, and iteration.
     global _b85dec
     # Delay the initialization of tables to not waste memory
     # if the function is never called
@@ -400,7 +405,6 @@ def b85decode(b):
             b85dec_tmp[c] = i
         _b85dec = b85dec_tmp
 
-    b = _bytes_from_decode_data(b)
     padding = (-len(b)) % 5
     b = b + b'~' * padding
     out = []

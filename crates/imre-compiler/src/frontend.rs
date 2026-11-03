@@ -9505,6 +9505,21 @@ impl<'a> Checker<'a> {
             Some(Binding::Intrinsic(Intrinsic::CachedProperty)) => {
                 return Err(self.object_runtime_export("functools.cached_property", call));
             }
+            Some(Binding::Intrinsic(Intrinsic::ScopedObjectExport(
+                name @ ("base64.b85decode" | "base64.z85decode"),
+            ))) if self.graph.session.is_stdlib_function(
+                self.module,
+                &call.func,
+                "base64",
+                if name == "base64.z85decode" {
+                    "z85decode"
+                } else {
+                    "b85decode"
+                },
+            ) =>
+            {
+                return self.base85_decode(name, call);
+            }
             Some(Binding::Intrinsic(Intrinsic::ScopedObjectExport(name))) => {
                 return Err(self.scoped_builtin_error(name, call));
             }

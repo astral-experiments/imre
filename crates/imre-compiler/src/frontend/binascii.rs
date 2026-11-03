@@ -95,6 +95,29 @@ impl Checker<'_> {
         Ok(calls::type_error(Type::Bytes, vec![input], message))
     }
 
+    /// Decode concrete byte buffers and ASCII strings without entering the object runtime.
+    pub(super) fn base85_decode(
+        &mut self,
+        name: &'static str,
+        call: &ast::ExprCall,
+    ) -> Result<Expr, String> {
+        let z85 = name == "base64.z85decode";
+        let param = parameter(if z85 { "s" } else { "b" }, Type::Bytes, None);
+        let mut args = self
+            .arguments_with(call, &[param], None, |checker, _, value| {
+                checker.evaluated_argument(value)
+            })
+            .map_err(|_| self.scoped_builtin_error(name, call))?;
+        let input = args.values.pop().expect("required decode input");
+        let data = self
+            .codec_buffer(input, true, true, call)
+            .map_err(|_| self.scoped_builtin_error(name, call))?;
+        Ok(bytes_op(
+            Builtin::Base85Decode,
+            vec![data, Expr::boolean(z85)],
+        ))
+    }
+
     pub(super) fn binascii_unhexlify(
         &mut self,
         call: &ast::ExprCall,
