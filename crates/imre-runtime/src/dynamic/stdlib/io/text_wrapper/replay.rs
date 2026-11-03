@@ -59,13 +59,10 @@ impl Wrapper {
             return Ok(cookie.value(ctx));
         }
 
-        let decoder = w.decoder.get();
-        ctx.heap.keep(decoder.errors);
-        let newline = w.decoder_newline.get();
         let replay = RefCell::new(Reader::default());
         replay.borrow_mut().seen = seen;
 
-        let result = reconstruct(ctx, &replay, decoder, newline, cookie, bytes, needed, ratio);
+        let result = reconstruct(ctx, &w, &replay, cookie, bytes, needed, ratio);
         // Restoring IncrementalNewlineDecoder's saved flags leaves its newline
         // history as observed during the replay, even if decoding failed.
         w.input.borrow_mut().seen = replay.borrow().seen;
@@ -75,14 +72,16 @@ impl Wrapper {
 
 fn reconstruct(
     ctx: &mut Context,
+    wrapper: &Wrapper,
     replay: &RefCell<Reader>,
-    decoder: Coder,
-    newline: Option<&str>,
     mut cookie: Cookie,
     bytes: &[u8],
     mut needed: usize,
     ratio: f64,
 ) -> Result<Cookie> {
+    let decoder = wrapper.decoder.get();
+    ctx.heap.keep(decoder.errors);
+    let newline = wrapper.decoder_newline.get();
     // Find a safe prefix, close to the logical position, with no partial code unit.
     let mut prefix = ((ratio * needed as f64) as usize).min(bytes.len());
     let mut back = 1usize;

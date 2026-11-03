@@ -478,9 +478,9 @@ fn pairwise_state(ctx: &Context, base: Id, receiver: Id) -> Result<(Id, Option<I
         && let Some(&state) = values.get(&base)
         && let Value::Tuple(items) = ctx.heap.get(state)
     {
-        match items.as_slice() {
-            &[source] => return Ok((source, None)),
-            &[source, previous] => return Ok((source, Some(previous))),
+        match *items.as_slice() {
+            [source] => return Ok((source, None)),
+            [source, previous] => return Ok((source, Some(previous))),
             _ => {}
         }
     }

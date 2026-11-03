@@ -1,3 +1,4 @@
+use super::WarningLocation;
 use crate::dynamic::{
     Context, builtins,
     value::{Error, Id, Location, NONE, Result, Value},
@@ -107,12 +108,14 @@ pub(in crate::dynamic) fn warn(
         ctx,
         message,
         category,
-        filename,
-        lineno,
+        WarningLocation {
+            filename,
+            lineno,
+            line: None,
+        },
         Some(module),
         registry,
         source.unwrap_or(NONE),
-        None,
     )
 }
 

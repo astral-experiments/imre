@@ -93,7 +93,7 @@ fn inline_flags(
             _ => None,
         };
         if let Some(msg) = message {
-            invalid.get_or_insert_with(|| (msg, j));
+            invalid.get_or_insert((msg, j));
         }
         added |= flag;
     }
@@ -103,12 +103,10 @@ fn inline_flags(
         while let Some(flag) = source.get(j).and_then(|c| bit(*c)) {
             j += 1;
             if flag & (ASCII | LOCALE | UNICODE) != 0 {
-                invalid.get_or_insert_with(|| {
-                    (
-                        "bad inline flags: cannot turn off flags 'a', 'u' and 'L'",
-                        j,
-                    )
-                });
+                invalid.get_or_insert((
+                    "bad inline flags: cannot turn off flags 'a', 'u' and 'L'",
+                    j,
+                ));
             }
             removed |= flag;
         }

@@ -1788,18 +1788,19 @@ impl Context {
             }
             return;
         }
-        if self.heap.has_ordinary_finalizers() {
-            if !self.heap.caller_keeps_only_finalizer() && self.heap.has_unbound_finalizer(NONE) {
-                match self.drain_acyclic_finalizers() {
-                    Ok(true) => {
-                        // Dropping a finalized instance releases its remaining strong edges,
-                        // including native resources whose close is visible to the next operand.
-                        self.collect_unreachable();
-                        return;
-                    }
-                    Err(_) => return,
-                    Ok(false) => {}
+        if self.heap.has_ordinary_finalizers()
+            && !self.heap.caller_keeps_only_finalizer()
+            && self.heap.has_unbound_finalizer(NONE)
+        {
+            match self.drain_acyclic_finalizers() {
+                Ok(true) => {
+                    // Dropping a finalized instance releases its remaining strong edges,
+                    // including native resources whose close is visible to the next operand.
+                    self.collect_unreachable();
+                    return;
                 }
+                Err(_) => return,
+                Ok(false) => {}
             }
         }
         let (heap, roots) = self.heap_and_roots();

@@ -1,3 +1,4 @@
+use super::warnings_accel::WarningLocation;
 use super::{Context, Id, NONE, Result};
 
 enum Origin {
@@ -184,12 +185,14 @@ impl Context {
             self,
             message,
             category,
-            filename,
-            line as i32,
+            WarningLocation {
+                filename,
+                lineno: line as i32,
+                line: None,
+            },
             Some(module),
             registry,
             NONE,
-            None,
         )
         .map(|_| ())
     }

@@ -81,11 +81,13 @@ fn positioned_v2(write: bool) -> Option<PositionedV2> {
         } else {
             return None;
         };
-        // SAFETY: each of the selected libc symbols has the declared C ABI.
+        // SAFETY: RTLD_DEFAULT is a valid lookup handle and name is a static C string.
         let symbol = unsafe { libc::dlsym(libc::RTLD_DEFAULT, name.as_ptr()) };
         if symbol.is_null() {
             None
         } else {
+            // SAFETY: the non-null preadv2/pwritev2 symbol has the PositionedV2 C ABI.
+            // The large-file symbols take a 64-bit offset, as do the regular ones selected above.
             Some(unsafe { std::mem::transmute::<*mut libc::c_void, PositionedV2>(symbol) })
         }
     })

@@ -1395,10 +1395,11 @@ pub(super) fn descriptor(
                 values.into(),
             ));
         }
-        // SAFETY: both calls read identifiers for the current process and take no pointers.
         let id = if name == "getpgrp" {
+            // SAFETY: getpgrp takes no arguments and returns the calling process's group ID.
             unsafe { libc::getpgrp() }
         } else {
+            // SAFETY: getppid takes no arguments and returns the calling process's parent ID.
             unsafe { libc::getppid() }
         };
         return Ok(ctx.int(i64::from(id)));

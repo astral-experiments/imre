@@ -3,6 +3,7 @@
 use std::io::Write;
 use std::path::Path;
 
+use super::WarningLocation;
 use crate::dynamic::stdlib::diagnostic_type_name;
 use crate::dynamic::{Context, Error, Id, NONE, Result, Value};
 
@@ -66,11 +67,14 @@ pub(super) fn show(
     text: Id,
     message: Id,
     category: Id,
-    filename: Id,
-    lineno: i32,
+    location: WarningLocation,
     source: Id,
-    line: Option<Id>,
 ) -> Result<()> {
+    let WarningLocation {
+        filename,
+        lineno,
+        line,
+    } = location;
     let Some(show) = super::warnings_attr(ctx, "_showwarnmsg", true)? else {
         // The C fallback clears display errors (including failures in sys.stderr.write).
         let _ = fallback(ctx, text, category, filename, lineno, line);
