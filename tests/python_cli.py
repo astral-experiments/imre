@@ -2771,6 +2771,11 @@ def report(text):
                 flags = fixtures / "ssl_verify_flags.py"
                 compare("-IB", flags, native_args=("run", flags, "--quiet"), native_timeout=600)
                 certdata = fixtures.parents[1] / "benchmarks/cpython_stdlib/full/shared/upstream/Lib/test/certdata"
+                unwrap = fixtures / "ssl_object_unwrap.py"
+                compare(
+                    "-IB", unwrap, certdata,
+                    native_args=("run", unwrap, "--quiet", "--", certdata), native_timeout=600,
+                )
                 locations = fixtures / "ssl_verify_locations.py"
                 compare(
                     "-IB", locations, certdata,

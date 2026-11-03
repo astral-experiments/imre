@@ -4,7 +4,7 @@ use std::ffi::c_void;
 use std::ptr::{self, NonNull};
 use std::rc::Rc;
 
-use super::Api;
+use super::{Api, Failure};
 use crate::dynamic::{
     Context, builtins, stdlib,
     value::{Error, Id, NONE, Result, Value},
@@ -25,7 +25,7 @@ pub(in crate::dynamic) struct Bio {
 
 impl Drop for Bio {
     fn drop(&mut self) {
-        // SAFETY: BIO_new transferred this BIO's only native owner to us.
+        // SAFETY: release the Python MemoryBIO's reference; attached SSL objects own theirs.
         unsafe { (self.api.BIO_free)(self.handle.as_ptr()) };
     }
 }
@@ -61,6 +61,143 @@ impl Bio {
             (self.api.BIO_ctrl)(self.handle.as_ptr(), SET_MEM_EOF_RETURN, 0, ptr::null_mut());
         }
         self.eof_written = true;
+    }
+}
+
+pub(in crate::dynamic) struct BioSession {
+    api: &'static Api,
+    handle: NonNull<c_void>,
+    server: bool,
+}
+
+/// A BIO operation never waits for an fd. Its caller moves ciphertext before retrying.
+pub(in crate::dynamic) enum BioFailure {
+    WantRead,
+    WantWrite,
+    ZeroReturn,
+    Eof,
+    UnexpectedEof,
+    ShutdownInInit,
+    Tls(Failure),
+}
+
+impl BioSession {
+    pub(in crate::dynamic) fn wrap(
+        ctx: &super::Context,
+        incoming: &Bio,
+        outgoing: &Bio,
+        host: Option<&str>,
+        server: bool,
+    ) -> std::result::Result<Self, Failure> {
+        let api = ctx.api;
+        api.clear();
+        // SAFETY: SSL_new acquires a reference to the live context.
+        let handle = NonNull::new(unsafe { (api.SSL_new)(ctx.handle.as_ptr()) })
+            .ok_or_else(|| api.error("SSL_new"))?;
+        let session = Self {
+            api,
+            handle,
+            server,
+        };
+        let ssl = handle.as_ptr();
+        if let Some(host) = host {
+            api.set_peer_name(ssl, host, ctx.check_hostname)?;
+        }
+        // SAFETY: each set0 operation consumes exactly one newly acquired reference,
+        // including when incoming and outgoing are the same BIO. SSL_free releases
+        // already-installed references on failures and on normal destruction.
+        unsafe {
+            if (api.BIO_up_ref)(incoming.handle.as_ptr()) != 1 {
+                return Err(api.error("BIO_up_ref"));
+            }
+            (api.SSL_set0_rbio)(ssl, incoming.handle.as_ptr());
+            if (api.BIO_up_ref)(outgoing.handle.as_ptr()) != 1 {
+                return Err(api.error("BIO_up_ref"));
+            }
+            (api.SSL_set0_wbio)(ssl, outgoing.handle.as_ptr());
+            if server {
+                (api.SSL_set_accept_state)(ssl);
+            } else {
+                (api.SSL_set_connect_state)(ssl);
+            }
+        }
+        Ok(session)
+    }
+
+    /// Classify the immediately preceding operation, before any other OpenSSL call.
+    fn failure(&self, rc: i32, operation: &str) -> BioFailure {
+        let api = self.api;
+        let os_error = std::io::Error::last_os_error();
+        // SAFETY: SSL_get_error examines the same thread and live SSL as the failed call.
+        match unsafe { (api.SSL_get_error)(self.handle.as_ptr(), rc) } {
+            super::SSL_ERROR_WANT_READ => BioFailure::WantRead,
+            super::SSL_ERROR_WANT_WRITE => BioFailure::WantWrite,
+            super::SSL_ERROR_ZERO_RETURN => BioFailure::ZeroReturn,
+            super::SSL_ERROR_SYSCALL if os_error.raw_os_error() != Some(0) => {
+                BioFailure::Tls(Failure::Io(os_error))
+            }
+            // SAFETY: inspect the current operation's error queue without removing entries.
+            super::SSL_ERROR_SYSCALL if unsafe { (api.ERR_peek_error)() } == 0 => BioFailure::Eof,
+            super::SSL_ERROR_SSL => {
+                // SSL_R_SHUTDOWN_WHILE_IN_INIT from OpenSSL 3's sslerr.h.
+                const SHUTDOWN_IN_INIT: std::ffi::c_ulong = (20 << 23) | 407;
+                // SAFETY: this thread's last error belongs to the failed SSL operation.
+                match unsafe { (api.ERR_peek_last_error)() } {
+                    super::UNEXPECTED_EOF => BioFailure::UnexpectedEof,
+                    SHUTDOWN_IN_INIT => BioFailure::ShutdownInInit,
+                    _ => BioFailure::Tls(api.error(operation)),
+                }
+            }
+            _ => BioFailure::Tls(api.error(operation)),
+        }
+    }
+
+    pub(in crate::dynamic) fn handshake(&mut self) -> std::result::Result<(), BioFailure> {
+        self.api.clear();
+        super::clear_errno();
+        // SAFETY: the SSL and both of its memory BIOs remain live across every retry.
+        let rc = unsafe { (self.api.SSL_do_handshake)(self.handle.as_ptr()) };
+        let result = if rc == 1 {
+            Ok(())
+        } else {
+            Err(self.failure(rc, "SSL_do_handshake"))
+        };
+        if !matches!(result, Err(BioFailure::WantRead | BioFailure::WantWrite)) {
+            self.api
+                .verify_peer(self.handle.as_ptr(), !self.server && result.is_ok())
+                .map_err(BioFailure::Tls)?;
+        }
+        result
+    }
+
+    pub(in crate::dynamic) fn shutdown(&mut self) -> std::result::Result<(), BioFailure> {
+        let ssl = self.handle.as_ptr();
+        self.api.clear();
+        super::clear_errno();
+        // SAFETY: SSL_shutdown operates on this live SSL with nonblocking memory BIOs.
+        let mut rc = unsafe { (self.api.SSL_shutdown)(ssl) };
+        if rc == 0 {
+            // We sent close_notify. Try receiving the peer's alert without reading
+            // past it; the peer's ciphertext might already be queued in our input.
+            self.api.clear();
+            // SAFETY: read-ahead is a setting on this owned SSL.
+            unsafe { (self.api.SSL_set_read_ahead)(ssl, 0) };
+            super::clear_errno();
+            // SAFETY: retry the same shutdown on the same live SSL.
+            rc = unsafe { (self.api.SSL_shutdown)(ssl) };
+        }
+        match rc {
+            1 => Ok(()),
+            0 => Err(BioFailure::WantRead),
+            _ => Err(self.failure(rc, "SSL_shutdown")),
+        }
+    }
+}
+
+impl Drop for BioSession {
+    fn drop(&mut self) {
+        // SAFETY: releasing the SSL drops the references taken to its context and BIOs.
+        unsafe { (self.api.SSL_free)(self.handle.as_ptr()) };
     }
 }
 

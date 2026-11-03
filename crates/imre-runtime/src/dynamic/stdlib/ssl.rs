@@ -55,6 +55,9 @@ pub(in crate::dynamic) fn install(ctx: &mut Context, scope: Id) -> Result<()> {
         "getpeername",
         "listen",
         "accept",
+        "wrap_bio",
+        "bio_handshake",
+        "bio_shutdown",
         "channel_binding",
         "hostname_checks_common_name",
         "set_hostname_checks_common_name",
@@ -78,6 +81,20 @@ fn context(ctx: &Context, id: Id) -> Result<&RefCell<provider::Context>> {
     }
 }
 
+fn context_for_role(ctx: &Context, id: Id, server: bool) -> Result<&RefCell<provider::Context>> {
+    let context = context(ctx, id)?;
+    if matches!(
+        (context.borrow().protocol, server),
+        (provider::Protocol::Client, true) | (provider::Protocol::Server, false)
+    ) {
+        return Err(Error::new(
+            "ValueError",
+            "TLS role is incompatible with the context protocol",
+        ));
+    }
+    Ok(context)
+}
+
 fn session(ctx: &Context, id: Id) -> Result<&RefCell<Option<provider::Session>>> {
     match ctx.heap.get(id) {
         Value::TlsSession(handle) => Ok(handle),
@@ -98,6 +115,28 @@ fn pending_io_error(ctx: &Context, handle: Id, errno: i32) -> Error {
         }
         _ => closed(),
     }
+}
+
+fn memory_bio<'a>(ctx: &'a Context, id: Id, arg: &str) -> Result<&'a RefCell<provider::bio::Bio>> {
+    if let Value::MemoryBio(bio) = ctx.heap.get(ctx.scalar_value(id)) {
+        Ok(bio)
+    } else {
+        let ty = if id == NONE {
+            "None"
+        } else {
+            ctx.type_name(id)
+        };
+        Err(Error::new(
+            "TypeError",
+            format!("_wrap_bio() argument '{arg}' must be _ssl.MemoryBIO, not {ty}"),
+        ))
+    }
+}
+
+fn verify_failure(ctx: &mut Context, code: i64, message: String) -> Id {
+    let code = ctx.int(code);
+    let message = ctx.text(message);
+    ctx.alloc(Value::Tuple(vec![code, message]))
 }
 
 fn cert_path(ctx: &mut Context, path: Id, arg: &str) -> Result<CString> {
@@ -426,18 +465,69 @@ pub(super) fn call(
                 .map_err(|e| provider_error(ctx, e))?;
             Ok(NONE)
         }
+        ("wrap_bio", &[handle, incoming, outgoing, hostname, side]) => {
+            let server = ctx.truth(side)?;
+            let handle = context_for_role(ctx, handle, server)?.borrow();
+            let incoming = memory_bio(ctx, incoming, "incoming")?.borrow();
+            let outgoing = memory_bio(ctx, outgoing, "outgoing")?.borrow();
+            let host = if hostname == NONE {
+                None
+            } else {
+                let host = ctx.str_value(hostname)?;
+                if host.is_empty() || host.starts_with('.') {
+                    return Err(Error::new(
+                        "ValueError",
+                        "server_hostname cannot be an empty string or start with a leading dot.",
+                    ));
+                }
+                if host.contains('\0') {
+                    return Err(Error::new(
+                        "TypeError",
+                        "argument must be encoded string without null bytes, not str",
+                    ));
+                }
+                if !host.is_ascii() {
+                    return Err(Error::new(
+                        "NotImplementedError",
+                        "TLS requires an ASCII server_hostname",
+                    ));
+                }
+                Some(host)
+            };
+            let result =
+                provider::bio::BioSession::wrap(&handle, &incoming, &outgoing, host, server)
+                    .map_err(|e| provider_error(ctx, e))?;
+            drop((handle, incoming, outgoing));
+            Ok(ctx.alloc(Value::TlsBioSession(Rc::new(RefCell::new(result)))))
+        }
+        ("bio_handshake" | "bio_shutdown", &[handle]) => {
+            use provider::bio::BioFailure;
+            let Value::TlsBioSession(session) = ctx.heap.get(handle) else {
+                return Err(Error::new("TypeError", "expected a TLS memory BIO session"));
+            };
+            let result = if name == "bio_handshake" {
+                session.borrow_mut().handshake()
+            } else {
+                session.borrow_mut().shutdown()
+            };
+            let status = match result {
+                Ok(()) => return Ok(NONE),
+                Err(BioFailure::WantRead) => "WANT_READ",
+                Err(BioFailure::WantWrite) => "WANT_WRITE",
+                Err(BioFailure::ZeroReturn) => "ZERO_RETURN",
+                Err(BioFailure::Eof) => "EOF",
+                Err(BioFailure::UnexpectedEof) => "UNEXPECTED_EOF_WHILE_READING",
+                Err(BioFailure::ShutdownInInit) => "SHUTDOWN_WHILE_IN_INIT",
+                Err(BioFailure::Tls(provider::Failure::Verify { code, message })) => {
+                    return Ok(verify_failure(ctx, code, message));
+                }
+                Err(BioFailure::Tls(e)) => return Err(provider_error(ctx, e)),
+            };
+            Ok(ctx.text(status))
+        }
         ("wrap", &[handle, socket, hostname, side]) => {
             let server = ctx.truth(side)?;
-            let handle = context(ctx, handle)?;
-            let protocol = handle.borrow().protocol;
-            if (server && protocol == provider::Protocol::Client)
-                || (!server && protocol == provider::Protocol::Server)
-            {
-                return Err(Error::new(
-                    "ValueError",
-                    "TLS role is incompatible with the context protocol",
-                ));
-            }
+            let handle = context_for_role(ctx, handle, server)?;
             let host = if hostname == NONE {
                 if handle.borrow().check_hostname {
                     return Err(Error::new(
@@ -484,9 +574,7 @@ pub(super) fn call(
                     Ok(ctx.alloc(Value::TlsSession(Rc::new(RefCell::new(Some(session))))))
                 }
                 Err(provider::Failure::Verify { code, message }) => {
-                    let code = ctx.int(code);
-                    let message = ctx.text(message);
-                    Ok(ctx.alloc(Value::Tuple(vec![code, message])))
+                    Ok(verify_failure(ctx, code, message))
                 }
                 Err(e) => Err(provider_error(ctx, e)),
             }

@@ -974,6 +974,8 @@ pub(super) enum Value {
     TlsSession(std::rc::Rc<std::cell::RefCell<Option<super::stdlib::ssl::provider::Session>>>),
     #[cfg(unix)]
     TlsListener(crate::ObjectOwner),
+    #[cfg(unix)]
+    TlsBioSession(std::rc::Rc<std::cell::RefCell<super::stdlib::ssl::provider::bio::BioSession>>),
     Socket(crate::ObjectOwner),
     Deque(Box<crate::objects::DequeRing<Id>>),
     GenericAliasIterator(Option<Id>),
@@ -1348,6 +1350,8 @@ impl Value {
             Self::TlsSession(_) => "_imre_ssl.Session",
             #[cfg(unix)]
             Self::TlsListener(_) => "_imre_ssl.Listener",
+            #[cfg(unix)]
+            Self::TlsBioSession(_) => "_imre_ssl.BioSession",
             Self::Context(_) => "_contextvars.Context",
             Self::ContextVar { .. } => "_contextvars.ContextVar",
             Self::ContextToken { .. } => "_contextvars.Token",
@@ -2031,7 +2035,8 @@ impl Value {
             Self::MemoryBio(_)
             | Self::TlsContext(_)
             | Self::TlsSession(_)
-            | Self::TlsListener(_) => {}
+            | Self::TlsListener(_)
+            | Self::TlsBioSession(_) => {}
             Self::TextFile(file) => visit.extend(file.buffer),
             Self::BufferedRandom(_, name) => visit.push(*name),
         }

@@ -32,6 +32,8 @@ const SSL_ERROR_WANT_READ: c_int = 2;
 const SSL_ERROR_WANT_WRITE: c_int = 3;
 const SSL_ERROR_SYSCALL: c_int = 5;
 const SSL_ERROR_ZERO_RETURN: c_int = 6;
+// OpenSSL 3 ERR_PACK(ERR_LIB_SSL, 0, SSL_R_UNEXPECTED_EOF_WHILE_READING).
+const UNEXPECTED_EOF: c_ulong = (20 << 23) | 294;
 
 macro_rules! functions {
     ($($name:ident($($arg:ty),*) -> $ret:ty;)+) => {
@@ -76,6 +78,7 @@ functions! {
     BIO_new(Handle) -> Handle;
     BIO_new_mem_buf(*const c_void, c_int) -> Handle;
     BIO_free(Handle) -> c_int;
+    BIO_up_ref(Handle) -> c_int;
     BIO_ctrl_pending(Handle) -> usize;
     BIO_ctrl(Handle, c_int, c_long, Handle) -> c_long;
     BIO_set_flags(Handle, c_int) -> ();
@@ -129,6 +132,13 @@ functions! {
     SSL_new(Handle) -> Handle;
     SSL_free(Handle) -> ();
     SSL_set_fd(Handle, c_int) -> c_int;
+    SSL_set0_rbio(Handle, Handle) -> ();
+    SSL_set0_wbio(Handle, Handle) -> ();
+    SSL_set_accept_state(Handle) -> ();
+    SSL_set_connect_state(Handle) -> ();
+    SSL_do_handshake(Handle) -> c_int;
+    SSL_shutdown(Handle) -> c_int;
+    SSL_set_read_ahead(Handle, c_int) -> ();
     X509_VERIFY_PARAM_get_hostflags(Handle) -> c_uint;
     X509_VERIFY_PARAM_set_hostflags(Handle, c_uint) -> ();
     SSL_session_reused(Handle) -> c_int;
@@ -144,6 +154,7 @@ functions! {
     SSL_ctrl(Handle, c_int, c_long, Handle) -> c_long;
     SSL_accept(Handle) -> c_int;
     SSL_connect(Handle) -> c_int;
+    SSL_get_verify_mode(Handle) -> c_int;
     SSL_get_verify_result(Handle) -> c_long;
     SSL_get0_peer_certificate(Handle) -> Handle;
     SSL_get0_verified_chain(Handle) -> Handle;
@@ -230,6 +241,90 @@ impl Api {
     fn clear(&self) {
         // SAFETY: clears the calling thread's OpenSSL error queue.
         unsafe { (self.ERR_clear_error)() };
+    }
+
+    fn set_peer_name(&self, ssl: Handle, host: &str, verify_hostname: bool) -> Result<(), Failure> {
+        if host.is_empty() || host.starts_with('.') || !host.is_ascii() {
+            return Err(Failure::Other(
+                "invalid or unsupported server hostname".into(),
+            ));
+        }
+        let name =
+            CString::new(host).map_err(|_| Failure::Other("embedded null character".into()))?;
+        // SAFETY: CPython uses OpenSSL's own parser to select IP SAN matching
+        // and suppress SNI for address literals. A successful parse is owned.
+        let ip = unsafe { (self.a2i_IPADDRESS)(name.as_ptr()) };
+        if !ip.is_null() {
+            // SAFETY: the parsed ASN1_OCTET_STRING contains the address in network
+            // byte order. OpenSSL copies its bytes before we release it.
+            let accepted = unsafe {
+                let accepted = !verify_hostname
+                    || (self.X509_VERIFY_PARAM_set1_ip)(
+                        (self.SSL_get0_param)(ssl),
+                        (self.ASN1_STRING_get0_data)(ip),
+                        (self.ASN1_STRING_length)(ip) as usize,
+                    ) == 1;
+                (self.ASN1_OCTET_STRING_free)(ip);
+                accepted
+            };
+            if !accepted {
+                return Err(self.error("X509_VERIFY_PARAM_set1_ip"));
+            }
+        } else {
+            self.clear();
+            // Reject ambiguous numeric inputs instead of authenticating them as DNS.
+            if host.bytes().all(|c| c.is_ascii_digit() || c == b'.')
+                || !host
+                    .bytes()
+                    .all(|c| c.is_ascii_alphanumeric() || matches!(c, b'-' | b'.' | b'_'))
+            {
+                return Err(Failure::Other(
+                    "invalid or unsupported server hostname".into(),
+                ));
+            }
+            // SAFETY: OpenSSL copies the terminated name in both calls. Host flags
+            // are inherited from the context. IP literals took the separate verification path above.
+            unsafe {
+                if verify_hostname && (self.SSL_set1_host)(ssl, name.as_ptr()) != 1 {
+                    return Err(self.error("SSL_set1_host"));
+                }
+                if (self.SSL_ctrl)(
+                    ssl,
+                    SSL_CTRL_SET_TLSEXT_HOSTNAME,
+                    0,
+                    name.as_ptr().cast_mut().cast(),
+                ) != 1
+                {
+                    return Err(self.error("SSL_set_tlsext_host_name"));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn verify_peer(&self, ssl: Handle, client_handshake_complete: bool) -> Result<(), Failure> {
+        // SAFETY: read the mode copied into this SSL by SSL_new, even if the context
+        // was reconfigured between retries on a memory BIO.
+        if unsafe { (self.SSL_get_verify_mode)(ssl) } & SSL_VERIFY_PEER == 0 {
+            return Ok(());
+        }
+        // SAFETY: this live SSL contains the verification result of that handshake.
+        let code = unsafe { (self.SSL_get_verify_result)(ssl) };
+        if code != 0 {
+            // SAFETY: OpenSSL documents this as a static string for every result code.
+            let msg = unsafe { CStr::from_ptr((self.X509_verify_cert_error_string)(code)) };
+            return Err(Failure::Verify {
+                code: code as i64,
+                message: msg.to_string_lossy().into_owned(),
+            });
+        }
+        // A user-selected anonymous TLS 1.2 cipher can omit the certificate and
+        // still yield X509_V_OK. This client requires an authenticated peer.
+        // SAFETY: only test the borrowed pointer for presence while SSL is live.
+        if client_handshake_complete && unsafe { (self.SSL_get0_peer_certificate)(ssl) }.is_null() {
+            return Err(Failure::Other("peer did not return a certificate".into()));
+        }
+        Ok(())
     }
 
     fn file_error(&self, operation: &str) -> Failure {
@@ -711,7 +806,7 @@ impl Session {
             server,
         };
         if let Some(host) = host {
-            session.set_peer_name(host, ctx.check_hostname)?;
+            api.set_peer_name(handle.as_ptr(), host, ctx.check_hostname)?;
         }
         // SAFETY: SSL_set_fd creates a non-closing socket BIO. The owned descriptor
         // remains valid for the full lifetime of this SSL object.
@@ -723,92 +818,9 @@ impl Session {
         } else {
             Operation::Connect
         });
-        let verify_peer = ctx.verify_bits() & SSL_VERIFY_PEER != 0;
-        // SAFETY: this live SSL contains the verification result of that handshake.
-        let code = unsafe { (api.SSL_get_verify_result)(handle.as_ptr()) };
-        if verify_peer && code != 0 {
-            // SAFETY: OpenSSL documents this as a static string for every result code.
-            let msg = unsafe { CStr::from_ptr((api.X509_verify_cert_error_string)(code)) };
-            return Err(Failure::Verify {
-                code: code as i64,
-                message: msg.to_string_lossy().into_owned(),
-            });
-        }
+        api.verify_peer(handle.as_ptr(), !server && handshake.is_ok())?;
         handshake?;
-        // A user-selected anonymous TLS 1.2 cipher can omit the certificate and
-        // still yield X509_V_OK. This client requires an authenticated peer.
-        // SAFETY: only test the borrowed pointer for presence while SSL is live.
-        if !server
-            && verify_peer
-            && unsafe { (api.SSL_get0_peer_certificate)(handle.as_ptr()) }.is_null()
-        {
-            return Err(Failure::Other("peer did not return a certificate".into()));
-        }
         Ok(session)
-    }
-
-    fn set_peer_name(&self, host: &str, check_hostname: bool) -> Result<(), Failure> {
-        let api = self.api;
-        let ssl = self.handle.as_ptr();
-        if host.is_empty() || host.starts_with('.') || !host.is_ascii() {
-            return Err(Failure::Other(
-                "invalid or unsupported server hostname".into(),
-            ));
-        }
-        let name =
-            CString::new(host).map_err(|_| Failure::Other("embedded null character".into()))?;
-        // SAFETY: CPython uses OpenSSL's own parser to select IP SAN matching
-        // and suppress SNI for address literals. A successful parse is owned.
-        let ip = unsafe { (api.a2i_IPADDRESS)(name.as_ptr()) };
-        if !ip.is_null() {
-            // SAFETY: the parsed ASN1_OCTET_STRING contains the address in network
-            // byte order. OpenSSL copies its bytes before we release it.
-            let rc = unsafe {
-                let rc = if check_hostname {
-                    (api.X509_VERIFY_PARAM_set1_ip)(
-                        (api.SSL_get0_param)(ssl),
-                        (api.ASN1_STRING_get0_data)(ip),
-                        (api.ASN1_STRING_length)(ip) as usize,
-                    )
-                } else {
-                    1
-                };
-                (api.ASN1_OCTET_STRING_free)(ip);
-                rc
-            };
-            if rc != 1 {
-                return Err(api.error("X509_VERIFY_PARAM_set1_ip"));
-            }
-        } else {
-            api.clear();
-            // Reject ambiguous numeric inputs instead of authenticating them as DNS.
-            if host.bytes().all(|c| c.is_ascii_digit() || c == b'.')
-                || !host
-                    .bytes()
-                    .all(|c| c.is_ascii_alphanumeric() || matches!(c, b'-' | b'.' | b'_'))
-            {
-                return Err(Failure::Other(
-                    "invalid or unsupported server hostname".into(),
-                ));
-            }
-            // SAFETY: OpenSSL copies the terminated name in both calls. Host flags
-            // are inherited from the context. IP literals took the separate verification path above.
-            unsafe {
-                if check_hostname && (api.SSL_set1_host)(ssl, name.as_ptr()) != 1 {
-                    return Err(api.error("SSL_set1_host"));
-                }
-                if (api.SSL_ctrl)(
-                    ssl,
-                    SSL_CTRL_SET_TLSEXT_HOSTNAME,
-                    0,
-                    name.as_ptr().cast_mut().cast(),
-                ) != 1
-                {
-                    return Err(api.error("SSL_set_tlsext_host_name"));
-                }
-            }
-        }
-        Ok(())
     }
 
     /// Retry a blocking socket BIO operation with the same buffer and length.
@@ -857,8 +869,6 @@ impl Session {
                 }
                 _ => {
                     if matches!(operation, Operation::Read(_)) {
-                        // OpenSSL 3 ERR_PACK(ERR_LIB_SSL, 0, SSL_R_UNEXPECTED_EOF_WHILE_READING).
-                        const UNEXPECTED_EOF: c_ulong = (20 << 23) | 294;
                         // SAFETY: peek at the error from this operation before clearing the queue.
                         let detail = unsafe { (api.ERR_peek_last_error)() };
                         // Our public wrapper accepts only suppress_ragged_eofs=True.
