@@ -55,6 +55,24 @@ def current():
             assert str(error) == f"{unpacked} is not valid as type argument"
         else:
             raise AssertionError("substituted an unpacked tuple for a type variable")
+
+    for alias in (list[variable], List[variable]):
+        assert alias[*tuple[int]] == alias[int]
+        try:
+            alias[*tuple[int, ...]]
+        except TypeError as error:
+            assert str(error) == "*tuple[int, ...] is not valid as type argument"
+        else:
+            raise AssertionError("accepted an unbounded unpack for a scalar type variable")
+
+    class Nested:
+        __parameters__ = (variable,)
+
+        def __getitem__(self, args):
+            assert args == (*tuple[int, ...],)
+            return str
+
+    assert List[Nested()][*tuple[int, ...]] == List[str]
     try:
         namespace["extra"] = 1
     except TypeError:

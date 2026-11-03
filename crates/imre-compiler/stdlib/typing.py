@@ -1998,6 +1998,9 @@ class _GenericAlias:
     def __iter__(self):
         yield Unpack[self]
 
+    def __getitem__(self, args):
+        return _specialize_generic_alias(self, args)
+
 
 def _concatenate_copy_with(self, params):
     if isinstance(params[-1], (list, tuple)):
@@ -2300,6 +2303,8 @@ def _substitute_alias_argument(arg, replacements):
         return arg
     for parameter, value in replacements.items():
         if arg is parameter:
+            if isinstance(parameter, _typing.TypeVar):
+                return parameter.__typing_subst__(value)
             if isinstance(parameter, _typing.TypeVarTuple):
                 raise TypeError("Substitution of bare TypeVarTuple is not supported")
             return value
@@ -2433,7 +2438,7 @@ def _specialize_generic_alias_uncached(alias, args):
         raise TypeError(f"Too {which} arguments for {alias}; actual {len(expanded)}, expected {expected}")
     replacements = {}
     for parameter, arg in zip(parameters, expanded):
-        if isinstance(parameter, _typing.TypeVarTuple):
+        if isinstance(parameter, (_typing.TypeVar, _typing.TypeVarTuple)):
             replacements[parameter] = arg
             continue
         if isinstance(parameter, _typing.ParamSpec):
@@ -2451,6 +2456,8 @@ def _specialize_generic_alias_uncached(alias, args):
         return _rebuild_builtin_alias(alias, substituted_args())
     if isinstance(alias, _typing.Union):
         return _typing.Union[substituted_args()]
+    if _typing_runtime._get_alias_kind(alias) == "unpack":
+        return _SpecialGenericAlias.copy_with(alias, substituted_args())
     if isinstance(alias, (_AnnotatedAlias, _typing._ConcatenateGenericAlias)):
         return alias.copy_with(substituted_args())
     if type(alias) is _typing._CallableGenericAlias:
@@ -2476,7 +2483,8 @@ def _specialize_generic_alias(alias, args):
     try:
         return _cached_generic_specialization(alias, args)
     except TypeError:
-        return _specialize_generic_alias_uncached(alias, args)
+        pass
+    return _specialize_generic_alias_uncached(alias, args)
 
 
 class _TypedCacheSpecialForm(_SpecialForm, _root=True):
