@@ -1501,6 +1501,10 @@ impl IntrinsicModule {
             (Self::Inspect, "getinnerframes") => {
                 Intrinsic::ScopedObjectExport("inspect.getinnerframes")
             }
+            (Self::Inspect, "Attribute") => Intrinsic::ScopedObjectExport("inspect.Attribute"),
+            (Self::Inspect, "classify_class_attrs") => {
+                Intrinsic::ScopedObjectExport("inspect.classify_class_attrs")
+            }
             (Self::Inspect, "getmembers") => Intrinsic::ScopedObjectExport("inspect.getmembers"),
             (Self::Inspect, "getmembers_static") => {
                 Intrinsic::ScopedObjectExport("inspect.getmembers_static")

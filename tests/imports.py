@@ -85,6 +85,15 @@ REJECTED = {
             "typed('wrong')\n"
         ),
     }, "expected int, got str"),
+    "inspect_classify_class_attrs_preserves_typed_call": ({
+        "main.py": (
+            "from inspect import classify_class_attrs\n"
+            "class Subject: pass\n"
+            "def typed(n: int) -> int: return n\n"
+            "classify_class_attrs(Subject)\n"
+            "typed('wrong')\n"
+        ),
+    }, "expected int, got str"),
     "optional_import_keeps_typed_call_check": ({
         "main.py": (
             "import http.client\n"

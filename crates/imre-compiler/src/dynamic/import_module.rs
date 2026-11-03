@@ -184,7 +184,7 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
                         section("def isfunction(object):", "# A marker for markcoroutinefunction"),
                         section("def isasyncgenfunction(obj):", "def isabstract(object):"),
                         &abstract_predicate,
-                        section("def _getmembers(", "Attribute = namedtuple("),
+                        section("def _getmembers(", "def getmro(cls):"),
                         section("def getfile(object):", "class ClassFoundException("),
                         section("def findsource(object):", "def getcomments(object):"),
                         &source_blocks,
