@@ -64,6 +64,8 @@ mod weakref;
 mod wrapper_descriptor;
 mod zip;
 
+pub(crate) use stdlib::hashlib::digest::State as HashStream;
+
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::path::PathBuf;

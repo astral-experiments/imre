@@ -6111,7 +6111,7 @@ impl Emitter<'_, '_> {
             Builtin::HashNew => self.call(
                 "imre_hash_new",
                 Type::Hash,
-                &[&args[0].value, &args[1].value],
+                &[&args[0].value, &args[1].value, &args[2].value],
             ),
             Builtin::Placeholder(kind) => Value {
                 ty: returns,
@@ -9397,7 +9397,7 @@ declare void @imre_codec_writer_set_encoding(ptr, ptr)
 declare ptr @imre_codec_writer_stream(ptr)
 declare ptr @imre_codec_writer_errors(ptr)
 declare void @imre_codec_writer_set_errors(ptr, ptr)
-declare ptr @imre_hash_new(ptr, ptr)
+declare ptr @imre_hash_new(ptr, ptr, i1)
 declare ptr @imre_hash_algorithms_available()
 declare ptr @imre_hash_algorithms_guaranteed()
 declare void @imre_hash_update(ptr, ptr)

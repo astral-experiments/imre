@@ -40,13 +40,14 @@ def make_wheel(path, compression, case):
     buf = io.StringIO(newline="")
     writer = csv.writer(buf)
     for name, data in members.items():
-        digest = base64.urlsafe_b64encode(hashlib.sha256(data).digest()).rstrip(b"=").decode()
+        algorithm = "sha512" if name == QUOTED else "sha256"
+        digest = base64.urlsafe_b64encode(hashlib.new(algorithm, data).digest()).rstrip(b"=").decode()
         if name == QUOTED and case == "missing-row":
             continue
         size = -1 if name == QUOTED and case == "invalid-size" else len(data)
         if name == QUOTED and case == "wrong-size":
             size += 1
-        writer.writerow((name, "sha256=" + digest, size))
+        writer.writerow((name, algorithm + "=" + digest, size))
     writer.writerow((record, "", ""))
     members[record] = buf.getvalue().encode()
     if case == "missing-record":

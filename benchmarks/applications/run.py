@@ -48,7 +48,6 @@ class Case:
     cwd: Path
     expected: bytes
     output: Path | None = None
-    unavailable: dict | None = None
 
 
 def cpu_ticks():
@@ -192,18 +191,9 @@ def prepare(a, work, env):
     member = runpy.run_path(str(ROOT / "tests/wheel_record.py"))["tamper_real"](
         a.wheel, bad
     )
-    unavailable = {}
-    for k, cmd in list(cmds.items()):
+    for k, cmd in cmds.items():
         valid = subprocess.run(cmd, env=env, capture_output=True, timeout=120)
         error = valid.stderr.decode(errors="replace").splitlines()
-        if (
-            k == "imre"
-            and valid.returncode
-            and error[-1:] == ["ModuleNotFoundError: No module named 'zipfile'"]
-        ):
-            unavailable[k] = {"exit_code": valid.returncode, "error": error[-1]}
-            del cmds[k]
-            continue
         require(
             valid.returncode == 0 and not valid.stdout and not valid.stderr,
             f"{k} failed the valid wheel: {error}",
@@ -222,7 +212,6 @@ def prepare(a, work, env):
             cmds,
             work,
             b"",
-            unavailable=unavailable,
         )
     )
 
@@ -339,7 +328,6 @@ def measure(case, env, cpu):
         "input": case.size,
         "warmups_ns": rows[:2],
         "samples_ns": rows[2:],
-        **({"unavailable": case.unavailable} if case.unavailable else {}),
         "report_bytes": len(case.expected),
         "report_sha256": digest(case.expected),
         "activity_before": before,

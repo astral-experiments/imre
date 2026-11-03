@@ -446,6 +446,7 @@ impl Builtin {
             | Self::CodecWriter(_)
             | Self::HashNew
             | Self::HashAlgorithms { .. }
+            | Self::HashUpdate
             | Self::HashUpdateFile
             | Self::Sha1Hex
             | Self::Sha1New
@@ -538,7 +539,6 @@ impl Builtin {
             | Self::JsonDecoderNew
             | Self::JsonEncoderNew
             | Self::JsonDecoderMemo
-            | Self::HashUpdate
             | Self::HashDigestSize
             | Self::HashIdentity
             | Self::HashBlockSize
@@ -1290,6 +1290,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_codec_writer_control"
                 | "imre_hash_type"
                 | "imre_hash_new"
+                | "imre_hash_update"
                 | "imre_hash_update_file"
                 | "imre_sha1_new"
                 | "imre_sha256_new"

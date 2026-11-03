@@ -215,7 +215,7 @@ pub(super) fn method(ctx: &mut Context, name: &str, args: &[Id]) -> Result<Id> {
             hash.lock().update(data)?;
             return Ok(NONE);
         }
-        "hash.copy" => Value::Hash(hash.lock().copy()?),
+        "hash.copy" => Value::Hash(SharedHash::from_state(hash.lock().try_copy()?)),
         _ => unreachable!("registered hash method"),
     };
     Ok(ctx.alloc(value))

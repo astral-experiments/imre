@@ -228,7 +228,7 @@ enum Storage {
         name: crate::StrOwner,
         filename: crate::StrOwner,
     },
-    Hash(allocator_api2::boxed::Box<hashlib::State>),
+    Hash(allocator_api2::boxed::Box<crate::dynamic::HashStream>),
     Poll(Box<readiness::Poll>),
     NativeModule(errno::Module),
     ModuleNamespace(Rc<errno::Registry>),
