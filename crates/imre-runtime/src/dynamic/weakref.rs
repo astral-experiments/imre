@@ -293,6 +293,7 @@ impl Context {
             Value::GenericAlias(_)
             | Value::Union(_)
             | Value::RegexPattern(_)
+            | Value::Struct { .. }
             | Value::ParamSpec(_)
             | Value::TypeVar(_)
             | Value::TypeVarTuple { .. }
