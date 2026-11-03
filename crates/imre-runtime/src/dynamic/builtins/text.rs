@@ -15,7 +15,8 @@ use super::super::stdlib::codecs::{decode_named, encode_text_object};
 use super::*;
 
 use crate::objects::{
-    Case, python_whitespace, split_parts, translate, visit_line_fields as split_lines,
+    Case, is_line_boundary, python_whitespace, split_parts, translate,
+    visit_line_fields as split_lines,
 };
 
 mod bytes_fields;
@@ -1493,6 +1494,52 @@ fn strip_string(ctx: &mut Context, receiver: Id, name: &str, chars: Option<Id>) 
     }
 }
 
+/// Keep unpaired surrogates as line content without converting them to UTF-8.
+fn split_string_lines(ctx: &mut Context, receiver: Id, keep: bool) -> Result<Id> {
+    let storage = ctx
+        .string_storage(receiver)
+        .expect("validated str receiver");
+    let mut values = Vec::new();
+    if matches!(ctx.heap.get(storage), Value::SurrogateStr(_)) {
+        let mut start = 0;
+        loop {
+            let points = ctx.string_codepoints(storage)?;
+            let rest = &points[start..];
+            if rest.is_empty() {
+                break;
+            }
+            let boundary = rest
+                .iter()
+                .position(|&point| is_line_boundary(point))
+                .unwrap_or(rest.len());
+            let ending = match &rest[boundary..] {
+                [0x0d, 0x0a, ..] => 2,
+                [] => 0,
+                _ => 1,
+            };
+            let end = if keep { boundary + ending } else { boundary };
+            let line = if receiver == storage && end == points.len() {
+                storage
+            } else {
+                let field = super::super::copy_ids(&rest[..end])?;
+                ctx.text_codepoints(field)
+            };
+            values.push(line);
+            start += boundary + ending;
+        }
+    } else {
+        let source = ctx.str_value(storage)?.to_owned();
+        split_lines(&source, keep, |field| {
+            values.push(if receiver == storage && field.len() == source.len() {
+                storage
+            } else {
+                ctx.text(field)
+            });
+        });
+    }
+    Ok(ctx.alloc(Value::List(values)))
+}
+
 fn split_string(
     ctx: &mut Context,
     receiver: Id,
@@ -2551,6 +2598,11 @@ pub(super) fn method(
     if owner == "str" && matches!(name, "split" | "rsplit") {
         return split_string(ctx, receiver, name, args, kwargs);
     }
+    if owner == "str" && name == "splitlines" {
+        let [keep] = bind_method_arguments(name, args, kwargs, ["keepends"], 1)?;
+        let keep = ctx.optional_truth(keep, false)?;
+        return split_string_lines(ctx, receiver, keep);
+    }
     let source = ctx.str_value(receiver)?.to_owned();
     match name {
         "format" => format_string(ctx, &source, FormatSource::Arguments(args, kwargs)),
@@ -2595,13 +2647,6 @@ pub(super) fn method(
                 }
             };
             Ok(ctx.alloc(Value::Tuple(fields)))
-        }
-        "splitlines" => {
-            let [keep] = bind_method_arguments(name, args, kwargs, ["keepends"], 1)?;
-            let keep = ctx.optional_truth(keep, false)?;
-            let mut values = Vec::new();
-            split_lines(&source, keep, |field| values.push(ctx.text(field)));
-            Ok(ctx.alloc(Value::List(values)))
         }
         "capitalize" | "upper" => {
             positional(name, kwargs)?;

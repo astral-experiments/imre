@@ -61,10 +61,9 @@ impl<'a> Visitor<'a> for ClosureNames {
                         !child.locals.contains(name) && !child.globals.contains(name)
                     }));
                 }
-                // A bare decorator name cannot introduce a binding in the defining frame.
+                // Decorator expressions run here and can bind names in this frame.
                 for decorator in &f.decorator_list {
                     self.visit_decorator(decorator);
-                    self.locals_incomplete |= !decorator.expression.is_name_expr();
                 }
                 for param in f.parameters.iter_non_variadic_params() {
                     if let Some(default) = &param.default {
@@ -870,6 +869,9 @@ impl Function<'_, '_> {
         signature["types"] = json!({});
         // A generator call returns a suspended frame, before it yields or returns a value.
         let scalar = |expr: &ast::Expr| {
+            if self.source.python_annotations {
+                return None;
+            }
             scalar_annotation(expr).filter(|name| {
                 !type_params.is_some_and(|params| params.iter().any(|p| p.name().as_str() == *name))
             })

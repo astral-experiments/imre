@@ -104,7 +104,7 @@ with Rust-competitive performance.
 
 ## Standard library test results
 
-As of November 3, 2026, Imre has a paired pass for **8,106 of 13,328 tests (60.8%)** in the original 25 standard library module families.
+As of November 3, 2026, Imre has a paired pass for **8,203 of 13,328 tests (61.5%)** in the original 25 standard library module families.
 A **paired pass** means that CPython 3.14.5 passed the original test and Imre passed it at both
 `-O0` and `-O3`. The total combines focused and intact suite runs across revisions, including
 development branches. Each original test occurrence counts once. Skipped and omitted tests remain
@@ -112,8 +112,8 @@ in the denominator. The [omission decisions](docs/stdlib-omissions.md) explain e
 
 | Module | Paired passes | Upstream tests | Omitted | How the tests ran |
 | --- | ---: | ---: | ---: | --- |
-| `argparse` | 1,850 | 1,893 | 0 | Selected stock and native runs added 59 originals. Twelve generated methods exercise parser setup with empty upstream failure lists. All 1,893 original occurrences are inventoried. |
-| `collections` | 640 | 659 | 8 | [ChainMap lookup and Counter copying](benchmarks/cpython_stdlib/full/collections/receipts/2026-11-02/chainmap-counter/) passed on stock and native O0/O3, including all six Counter pickle subtests. Earlier focused and intact runs contribute to the total. |
+| `argparse` | 1,886 | 1,893 | 6 | Thirty-six more originals completed on stock and native O0/O3. Six bytecode-only launch cases are omitted. The remaining source-backed case exercises `pygettext`. |
+| `collections` | 640 | 659 | 8 | [ChainMap lookup and Counter copying](benchmarks/cpython_stdlib/full/collections/receipts/2026-11-02/chainmap-counter/) passed on stock and boxed native O0/O3, including all six Counter pickle subtests. Earlier focused and intact runs contribute to the total. |
 | `csv` | 122 | 128 | 0 | Complete suite on `main`, 122 passed and six matched upstream skips. |
 | `dataclasses` | 247 | 276 | 0 | The latest intact public run passed 206, and the retained intact run passed 207. Thirteen more TestDocString originals pass on a sealed development tree after all 276 register. Their public replay needs annotationlib.get_annotations for #3578. |
 | `datetime` | 868 | 1,098 | 0 | Twenty more date and datetime originals matched stock, including all 99 subtests at each native level. Six previously credited leap-year tests passed on the feature branch in #4492. |
@@ -134,10 +134,10 @@ in the denominator. The [omission decisions](docs/stdlib-omissions.md) explain e
 | `tempfile` | 108 | 118 | 2 | All 118 originals finished in ordinary and boxed O0/O3. Each native run passed 108 and skipped 10. Stock passed 112 and skipped six. Two extra native skips are documented omissions. The other two require working os.fork and os.spawnl. |
 | `textwrap` | 68 | 68 | 0 | Complete suite on `main`, all 68 passed. |
 | `threading` | 83 | 228 | 1 | All 228 original registrations ran in ordinary and boxed builds at both levels. Each passed 83, skipped 32 and reported failures on 113 IDs. The bound worker callback still blocks 58 Bunch fixture cases. |
-| `typing` | 388 | 712 | 0 | Complete class replays added 109 original parents. Stock and public O0/O3 matched every child subtest, and all class processes finished. The cumulative count includes earlier selected runs. |
+| `typing` | 449 | 712 | 0 | Sixty-one more originals passed from the pinned `test_typing.py`. Stock and ordinary native O0/O3 recorded identical parent callbacks and all 50 successful subtests. The total includes earlier selected and class runs. |
 | `unittest` | 275 | 1,090 | 0 | The intact package passed 160 cases. On public #3601, the unchanged test_assertions and test_case files ran all 150 originals with runtime imports. Their 109 paired passes added 81 distinct cases. Another 34 original mock methods passed in focused runs. |
 | `urllib` | 173 | 178 | 0 | Both unchanged scripts compiled and exited 0 in ordinary and runtime-import modes at both native levels. Four HTTP tests now pass with SSL enabled. Three originals matched only in child callbacks, and two Windows cases skipped on stock Linux. |
-| **Total** | **8,106** | **13,328** | **14** | **3 complete suites match stock on `main`** |
+| **Total** | **8,203** | **13,328** | **20** | **3 complete suites match stock on `main`** |
 
 See the [standard library coverage report](docs/stdlib.md) for the Linux test
 results and import coverage recorded in this repository.
@@ -151,10 +151,10 @@ CPython 3.14.5 discovers **1,217 test occurrences** in these six families on Lin
 | `contextlib` | — | 149 | Context managers, exception propagation, and cleanup order |
 | `inspect` | — | 362 | Callable signatures, argument binding, and decorator unwrapping |
 | `ssl` | — | 195 | SSL contexts, certificates, and loopback TLS connections |
-| `types` | 97 | 141 | The unchanged `test_types` and `test_dynamicclassattribute` suites contributed 86 and 11 paired passes on public revision `5296088f`. |
+| `types` | 111 | 141 | On public `ce052eab`, the intact `test_types` runs recorded 100 paired passes and exited 1. `test_dynamicclassattribute` recorded 11 paired passes and exited 0 at both native levels. Two stock skips remain in the denominator. |
 | `warnings` | 0 | 187 | Stock passed 181 and skipped six. Both ordinary native builds stopped at the import of `warnings.deprecated` before test registration. |
 | `weakref` | 160 | 183 | On one public revision, 116 weakref and 44 WeakSet originals passed on stock and at both native optimization levels. All six selected runs completed with exit 0. |
-| **Measured total (3 of 6 families)** | **257** | **511** | |
+| **Measured total (3 of 6 families)** | **271** | **511** | |
 
 ## Design
 

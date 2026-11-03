@@ -140,11 +140,7 @@ fn caller(ctx: &Context, level: isize, prefixes: &[Id]) -> Option<(Location, Id)
     let frame = if steps <= 0 {
         first
     } else {
-        let internal = |file: &str| {
-            // The frozen bootstrap and independently imported source bootstrap have distinct files.
-            file == "<imre stdlib>/_frozen_importlib.py"
-                || (file.contains("importlib") && file.contains("_bootstrap"))
-        };
+        let internal = |file: &str| file.contains("importlib") && file.contains("_bootstrap");
         let skip = !internal(&first.0.file);
         frames
             .filter(|(location, _)| {

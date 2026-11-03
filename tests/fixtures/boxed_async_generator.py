@@ -80,6 +80,7 @@ def current():
         assert str(exc) == "async generator raised " + kind.__name__
 
     check_await_delegate()
+    check_awaited_argument()
     check_hooks()
     check_unawaited()
     print("async-generator protocol passed")
@@ -168,3 +169,18 @@ def check_unawaited():
             assert record.category is RuntimeWarning and record.source is gen
             assert str(record.message) == "coroutine method '" + name + "' of 'probe' was never awaited"
     assert raised(StopIteration, next, gen.aclose()).value is None
+
+
+def check_awaited_argument():
+    async def double(value):
+        return value * 2
+
+    async def stream():
+        result = await double(await Pause())
+        yield result
+
+    gen = stream()
+    op = gen.__anext__()
+    assert next(op) == "paused"
+    assert raised(StopIteration, op.send, 21).value == 42
+    assert raised(StopAsyncIteration, next, gen.__anext__())

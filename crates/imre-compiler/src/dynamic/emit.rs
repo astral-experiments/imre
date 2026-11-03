@@ -199,7 +199,17 @@ impl Output {
             let error = crate::frontend::error(source, param, &reason);
             return Err(format!("{}:{error}", path.display()));
         }
+        // Frozen code exposes its origin independently of the module's registered source path.
+        let code_file = match (bundled, name) {
+            (true, "_frozen_importlib") => self.data(b"<frozen importlib._bootstrap>"),
+            (true, "_frozen_importlib_external") => {
+                self.data(b"<frozen importlib._bootstrap_external>")
+            }
+            _ => file.to_owned(),
+        };
         let location = SourceMap {
+            // CPython's warnings provider validates its public arguments in Python.
+            python_annotations: bundled && name == "_py_warnings",
             module_start,
             docs,
             unit,
@@ -218,7 +228,7 @@ impl Output {
             private_names,
             package,
             text: source,
-            file,
+            file: &code_file,
             newlines: source
                 .match_indices('\n')
                 .map(|(offset, _)| offset)
@@ -251,6 +261,7 @@ enum Body<'a> {
 }
 
 struct SourceMap<'a> {
+    python_annotations: bool,
     module_start: ruff_text_size::TextSize,
     docs: Option<crate::modules::doctest::SealedDocs>,
     unit: usize,

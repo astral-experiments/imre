@@ -29,6 +29,10 @@ def fresh_imports(*blocked):
 
 with fresh_imports():
     frozen = importlib.import_module("importlib")
+    assert frozen._bootstrap._gcd_import.__code__.co_filename == "<frozen importlib._bootstrap>"
+    assert frozen._bootstrap_external.cache_from_source.__code__.co_filename == "<frozen importlib._bootstrap_external>"
+    assert frozen._bootstrap.__file__.endswith(".py")
+    assert frozen._bootstrap_external.__file__.endswith(".py")
     frozen_machinery = frozen.import_module("importlib.machinery")
     frozen_util = frozen.import_module("importlib.util")
     with warnings.catch_warnings(record=True) as caught:
@@ -48,6 +52,8 @@ with fresh_imports("_frozen_importlib", "_frozen_importlib_external"):
     machinery = source.import_module("importlib.machinery")
     core = source._bootstrap
     external = source._bootstrap_external
+    assert core._gcd_import.__code__.co_filename == core.__file__
+    assert external.cache_from_source.__code__.co_filename == external.__file__
     assert core is sys.modules["importlib._bootstrap"] and core is not frozen._bootstrap
     assert external is sys.modules["importlib._bootstrap_external"] and external is not frozen._bootstrap_external
     assert external._bootstrap is core and core._bootstrap_external is external

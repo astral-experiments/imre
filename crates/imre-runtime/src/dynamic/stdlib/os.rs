@@ -563,6 +563,7 @@ pub(super) fn is_descriptor_function(name: &str) -> bool {
                 name,
                 "copy_file_range"
                     | "get_terminal_size"
+                    | "tcgetpgrp"
                     | "ttyname"
                     | "preadv"
                     | "pwritev"
@@ -1065,6 +1066,12 @@ pub(super) fn descriptor(
         // SAFETY: umask takes a numeric mode and returns the process's previous mask.
         let previous = unsafe { libc::umask(mask as libc::mode_t) };
         return Ok(ctx.int(i64::from(previous)));
+    }
+    #[cfg(target_os = "linux")]
+    if name == "tcgetpgrp" {
+        let fd = builtins::one_positional_arg("posix.tcgetpgrp", args, kwargs)?;
+        let group = native::tcgetpgrp(c_int(ctx, fd)?)?;
+        return Ok(ctx.int(i64::from(group)));
     }
     #[cfg(unix)]
     if name == "getpgid" {
