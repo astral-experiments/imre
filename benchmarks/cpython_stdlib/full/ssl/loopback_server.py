@@ -1,7 +1,23 @@
 """Blocking SSLContext server for the CPython test_ssl loopback fixture."""
+import errno
 import socket
 import ssl
 import sys
+
+
+class ClosingBacklog:
+    def __init__(self, sock):
+        self.sock = sock
+
+    def __index__(self):
+        self.sock.close()
+        return 1
+
+
+def accept_one(listener):
+    listener.listen(1)
+    print("PORT", listener.getsockname()[1], flush=True)
+    return listener.accept()
 
 
 def main():
@@ -18,34 +34,46 @@ def main():
     if mode == "load":
         print("LOADED", flush=True)
         return
-    assert mode in ("serve", "reject")
+    assert mode in ("serve", "reject", "listen")
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:
         listener.bind(("127.0.0.1", 0))
-        listener.listen(1)
-        print("PORT", listener.getsockname()[1], flush=True)
-        raw, _ = listener.accept()
-        with raw:
-            try:
-                wrapped = ctx.wrap_socket(raw, server_side=True)
-            except ssl.SSLError as exc:
-                assert mode == "reject" and raw.fileno() == -1
-                print("PEER_REJECTED", str(exc), flush=True)
-                return
-            with wrapped as peer:
+        if mode == "listen":
+            with ctx.wrap_socket(listener, server_side=True) as tls_listener:
+                assert listener.fileno() == -1
+                wrapped, address = accept_one(tls_listener)
+                assert wrapped.getpeername() == address
+                assert wrapped.getsockname() == tls_listener.getsockname()
+        else:
+            raw, _ = accept_one(listener)
+            with raw:
+                try:
+                    wrapped = ctx.wrap_socket(raw, server_side=True)
+                except ssl.SSLError as exc:
+                    assert mode == "reject" and raw.fileno() == -1
+                    print("PEER_REJECTED", str(exc), flush=True)
+                    return
                 assert mode == "serve" and raw.fileno() == -1
-                assert peer.server_side and peer.server_hostname is None and peer.context is ctx
-                assert peer.get_verified_chain() == []
-                assert peer.get_unverified_chain() == []
-                binding = peer.get_channel_binding()
-                assert isinstance(binding, bytes) and binding
-                print("BINDING", binding.hex(), flush=True)
-                data = b""
-                while len(data) < 10:
-                    chunk = peer.recv(10 - len(data))
-                    assert chunk
-                    data += chunk
-                assert data == b"LOCAL TLS\n"
-                peer.sendall(data.decode("ascii").lower().encode("ascii"))
+        with wrapped as peer:
+            assert peer.server_side and peer.server_hostname is None and peer.context is ctx
+            assert peer.get_verified_chain() == []
+            assert peer.get_unverified_chain() == []
+            binding = peer.get_channel_binding()
+            assert isinstance(binding, bytes) and binding
+            print("BINDING", binding.hex(), flush=True)
+            data = b""
+            while len(data) < 10:
+                chunk = peer.recv(10 - len(data))
+                assert chunk
+                data += chunk
+            assert data == b"LOCAL TLS\n"
+            peer.sendall(data.decode("ascii").lower().encode("ascii"))
+            if mode == "listen":
+                try:
+                    peer.listen(ClosingBacklog(peer))
+                except OSError as exc:
+                    assert exc.errno == errno.EBADF
+                else:
+                    raise AssertionError("listen succeeded after close")
 
 
 main()

@@ -46,6 +46,12 @@ pub(in crate::dynamic) fn install(ctx: &mut Context, scope: Id) -> Result<()> {
         "load_verify_locations",
         "load_cert_chain",
         "wrap",
+        "is_session",
+        "fileno",
+        "getsockname",
+        "getpeername",
+        "listen",
+        "accept",
         "channel_binding",
         "hostname_checks_common_name",
         "set_hostname_checks_common_name",
@@ -74,6 +80,20 @@ fn session(ctx: &Context, id: Id) -> Result<&RefCell<Option<provider::Session>>>
         Value::TlsSession(handle) => Ok(handle),
         Value::None => Err(closed()),
         _ => Err(Error::new("TypeError", "expected a TLS session")),
+    }
+}
+
+fn without_session(ctx: &Context, handle: Id) -> bool {
+    matches!(ctx.heap.get(handle), Value::TlsListener(_) | Value::None)
+}
+
+/// Pending sockets must never consume or emit application bytes before TLS authenticates them.
+fn pending_io_error(ctx: &Context, handle: Id, errno: i32) -> Error {
+    match ctx.heap.get(handle) {
+        Value::TlsListener(s) if socket::fd(s) >= 0 => {
+            errno_error(io::Error::from_raw_os_error(errno)).into()
+        }
+        _ => closed(),
     }
 }
 
@@ -401,9 +421,17 @@ pub(super) fn call(
             let Value::Socket(socket) = ctx.heap.get(socket) else {
                 return Err(Error::new("TypeError", "expected a socket"));
             };
-            let fd = socket::take_tls_stream(socket)?;
+            let (transport, connected) = socket::take_tls_stream(socket, host.is_none())?;
+            if !connected {
+                // Leave the transferred fd owned on every error. The public wrapper turns
+                // queued pre-handshake data into the corresponding structured SSLError.
+                if socket::pending_tls_data(&transport)? {
+                    return Ok(NONE);
+                }
+                return Ok(ctx.alloc(Value::TlsListener(transport)));
+            }
             // Provider calls cannot invoke Python. Release the handle borrow before VM allocation.
-            let result = provider::Session::wrap(&handle.borrow(), fd, host);
+            let result = provider::Session::wrap(&handle.borrow(), transport, host);
             match result {
                 Ok(session) => {
                     Ok(ctx.alloc(Value::TlsSession(Rc::new(RefCell::new(Some(session))))))
@@ -415,6 +443,33 @@ pub(super) fn call(
                 }
                 Err(e) => Err(provider_error(ctx, e)),
             }
+        }
+        ("is_session", &[handle]) => Ok(super::builtins::boolean(matches!(
+            ctx.heap.get(handle),
+            Value::TlsSession(s) if s.borrow().is_some()
+        ))),
+        ("fileno" | "getsockname" | "getpeername" | "listen" | "accept", [handle, rest @ ..])
+            if rest.is_empty() || (name == "listen" && rest.len() == 1) =>
+        {
+            let socket = match ctx.heap.get(*handle) {
+                Value::TlsListener(s) => Some(s.clone()),
+                Value::TlsSession(session) => {
+                    session.borrow().as_ref().map(|tls| tls.socket.clone())
+                }
+                Value::None => None,
+                _ => return Err(Error::new("TypeError", "expected a TLS socket")),
+            };
+            let Some(socket) = socket else {
+                if let Some(&backlog) = rest.first() {
+                    ctx.index_c_int(backlog)?;
+                }
+                return if name == "fileno" {
+                    Ok(ctx.int(-1))
+                } else {
+                    Err(closed())
+                };
+            };
+            super::socket::endpoint_method(ctx, name, &socket, rest)
         }
         ("hostname_checks_common_name", &[handle]) => Ok(super::builtins::boolean(
             context(ctx, handle)?.borrow().hostname_checks_common_name(),
@@ -455,6 +510,9 @@ pub(super) fn call(
                     ),
                 ));
             }
+            if without_session(ctx, handle) {
+                return Ok(NONE);
+            }
             let data = session(ctx, handle)?
                 .borrow()
                 .as_ref()
@@ -468,7 +526,7 @@ pub(super) fn call(
                     format!("'NoneType' object has no attribute '{name}'"),
                 )
             };
-            if handle == NONE {
+            if without_session(ctx, handle) {
                 return Err(closed_chain());
             }
             let certificates = session(ctx, handle)?
@@ -483,37 +541,41 @@ pub(super) fn call(
                 .collect();
             Ok(ctx.alloc(Value::List(chain)))
         }
-        ("send", &[handle, data, flags]) => {
-            ctx.check_buffer_exporter(data)?;
-            let data = ctx.native_buffer_bytes(data)?;
-            if handle == NONE {
-                // A closed SSLSocket falls back to socket.send, which parses flags before EBADF.
-                ctx.index_c_int(flags)?;
-                return Err(closed());
+        ("send" | "sendall", [handle, data, flags @ ..])
+            if flags.len() == 1 || (flags.is_empty() && name == "sendall") =>
+        {
+            ctx.check_buffer_exporter(*data)?;
+            let data = ctx.native_buffer_bytes(*data)?;
+            if without_session(ctx, *handle) {
+                if let Some(&flags) = flags.first() {
+                    ctx.index_c_int(flags)?;
+                }
+                return Err(pending_io_error(ctx, *handle, libc::EPIPE));
             }
-            let n = session(ctx, handle)?
-                .borrow_mut()
-                .as_mut()
-                .ok_or_else(closed)?
-                .send(data)
-                .map_err(|e| provider_error(ctx, e))?;
-            Ok(ctx.int(n as i64))
+            let sent = {
+                let mut handle = session(ctx, *handle)?.borrow_mut();
+                let session = handle.as_mut().ok_or_else(closed)?;
+                if name == "sendall" {
+                    session.sendall(data).map_err(|e| provider_error(ctx, e))?;
+                    return Ok(NONE);
+                }
+                session.send(data).map_err(|e| provider_error(ctx, e))?
+            };
+            Ok(ctx.int(sent as i64))
         }
-        ("sendall", &[handle, data]) => {
-            ctx.check_buffer_exporter(data)?;
-            let data = ctx.native_buffer_bytes(data)?;
-            session(ctx, handle)?
-                .borrow_mut()
-                .as_mut()
-                .ok_or_else(closed)?
-                .sendall(data)
-                .map_err(|e| provider_error(ctx, e))?;
-            Ok(NONE)
-        }
-        ("recv", &[handle, size]) => {
-            let size = usize::try_from(ctx.as_integer(size)?)
+        ("recv", [handle, size, flags @ ..]) if flags.len() <= 1 => {
+            let size = usize::try_from(ctx.as_integer(*size)?)
                 .map_err(|_| Error::new("ValueError", "negative buffersize in recv"))?;
-            let data = session(ctx, handle)?
+            if without_session(ctx, *handle) {
+                if let Some(&flags) = flags.first() {
+                    ctx.index_c_int(flags)?;
+                }
+                if size == 0 {
+                    return Ok(ctx.alloc(Value::Bytes(Vec::new())));
+                }
+                return Err(pending_io_error(ctx, *handle, libc::ENOTCONN));
+            }
+            let data = session(ctx, *handle)?
                 .borrow_mut()
                 .as_mut()
                 .ok_or_else(closed)?
@@ -522,7 +584,11 @@ pub(super) fn call(
             Ok(ctx.alloc(Value::Bytes(data)))
         }
         ("close", &[handle]) => {
-            session(ctx, handle)?.borrow_mut().take();
+            if let Value::TlsListener(s) = ctx.heap.get(handle) {
+                socket::close(s)?;
+            } else {
+                session(ctx, handle)?.borrow_mut().take();
+            }
             Ok(NONE)
         }
         _ => Err(Error::new(
