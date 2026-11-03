@@ -4,7 +4,7 @@
 //! invalidates them. Call parameters gain facts only when every syntactic call
 //! site supplies a known interval without intervening argument effects.
 
-use crate::ir::{self, Builtin, CallArgs, Expr, ExprKind, Module, Statement, Type};
+use crate::ir::{self, Builtin, Expr, ExprKind, Module, Statement, Type};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct Bounds {
@@ -43,82 +43,73 @@ struct Calls {
 /// Repeated passes propagate through private helpers without assuming recursive
 /// contracts. An unexpected nonconverging graph simply keeps checked reads.
 pub(crate) fn specialize(module: &mut Module) {
-    let parameters = module
+    if module
         .functions
         .iter()
-        .map(|function| function.params.clone())
-        .collect::<Vec<_>>();
-    let mut inputs = parameters
+        .all(|function| function.params.is_empty())
+    {
+        Analysis::Rewrite.module(module, &[]);
+        return;
+    }
+    let mut inputs = module
+        .functions
         .iter()
-        .map(|params| vec![None; params.len()])
+        .map(|function| vec![None; function.params.len()])
         .collect::<Vec<_>>();
     for _ in 0..=module.functions.len() {
-        let next = analyze(module, &parameters, &inputs, false);
+        let mut calls = inputs
+            .iter()
+            .map(|params| Calls {
+                seen: false,
+                inputs: vec![None; params.len()],
+            })
+            .collect::<Vec<_>>();
+        Analysis::Infer(&mut calls).module(module, &inputs);
+        let next = calls
+            .into_iter()
+            .map(|call| call.inputs)
+            .collect::<Vec<_>>();
         if next == inputs {
-            analyze(module, &parameters, &inputs, true);
+            Analysis::Rewrite.module(module, &inputs);
             return;
         }
         inputs = next;
     }
 }
 
-fn analyze(
-    module: &mut Module,
-    parameters: &[Vec<usize>],
-    inputs: &[Vec<Fact>],
-    rewrite: bool,
-) -> Vec<Vec<Fact>> {
-    let mut calls = parameters
-        .iter()
-        .map(|params| Calls {
-            seen: false,
-            inputs: vec![None; params.len()],
-        })
-        .collect::<Vec<_>>();
-    for (id, function) in module
-        .functions
-        .iter_mut()
-        .chain([&mut module.entry])
-        .enumerate()
-    {
-        let mut state = vec![None; function.locals.len()];
-        if let Some(inputs) = inputs.get(id) {
-            for (&slot, &fact) in function.params.iter().zip(inputs) {
-                state[slot] = fact;
-            }
-        }
-        Analysis {
-            calls: &mut calls,
-            rewrite,
-        }
-        .block(&mut function.body, &mut state);
-    }
-    calls.into_iter().map(|call| call.inputs).collect()
-}
-
-struct Analysis<'a> {
-    calls: &'a mut [Calls],
-    rewrite: bool,
+enum Analysis<'a> {
+    Infer(&'a mut [Calls]),
+    Rewrite,
 }
 
 impl Analysis<'_> {
-    fn record_call(&mut self, id: usize, args: &CallArgs, values: &[Fact]) {
-        let call = &mut self.calls[id];
-        let inputs = (0..call.inputs.len())
-            .map(|parameter| {
-                args.order
-                    .get(parameter)
-                    .and_then(|&source| values.get(source))
-                    .copied()
-                    .flatten()
-            })
-            .collect::<Vec<_>>();
-        if call.seen {
-            join_states(&mut call.inputs, &inputs);
-        } else {
-            call.inputs = inputs;
-            call.seen = true;
+    /// Visits the function bodies using the input bounds from the preceding iteration.
+    fn module(&mut self, module: &mut Module, inputs: &[Vec<Fact>]) {
+        for (id, function) in module
+            .functions
+            .iter_mut()
+            .chain([&mut module.entry])
+            .enumerate()
+        {
+            let mut state = vec![None; function.locals.len()];
+            if let Some(inputs) = inputs.get(id) {
+                for (&slot, &fact) in function.params.iter().zip(inputs) {
+                    state[slot] = fact;
+                }
+            }
+            self.block(&mut function.body, &mut state);
         }
+    }
+
+    /// Joins one call site's arguments into the callee's incoming bounds.
+    fn record_call(&mut self, id: usize, argument: impl Fn(usize) -> Fact) {
+        let Self::Infer(calls) = self else { return };
+        let call = &mut calls[id];
+        for (parameter, input) in call.inputs.iter_mut().enumerate() {
+            let fact = argument(parameter);
+            *input = if call.seen { join(*input, fact) } else { fact };
+        }
+        call.seen = true;
     }
 
     fn block(&mut self, body: &mut [Statement], state: &mut State) {
@@ -266,7 +257,7 @@ impl Analysis<'_> {
                         facts.first().copied().flatten()
                     }
                     Builtin::ListGet if arguments_readonly && args[0].ty == Type::ListInt => {
-                        if self.rewrite
+                        if matches!(self, Self::Rewrite)
                             && let Some(bounds) = facts.first().copied().flatten()
                         {
                             *operation = Builtin::ListGetBounded {
@@ -280,16 +271,18 @@ impl Analysis<'_> {
                 }
             }
             ExprKind::Call(id, args) => {
-                let pure = args.values.iter().all(readonly);
-                let mut values = args
-                    .values
-                    .iter_mut()
-                    .map(|arg| self.expression(arg, state))
-                    .collect::<Vec<_>>();
-                if !pure {
-                    values.fill(None);
+                let infer = matches!(self, Self::Infer(_)) && args.values.iter().all(readonly);
+                let mut values = Vec::new();
+                for argument in &mut args.values {
+                    let fact = self.expression(argument, state);
+                    if infer {
+                        values.push(fact);
+                    }
                 }
-                self.record_call(*id, args, &values);
+                self.record_call(*id, |parameter| {
+                    let &source = args.order.get(parameter)?;
+                    values.get(source).copied().flatten()
+                });
                 state.fill(None);
                 None
             }
@@ -298,9 +291,7 @@ impl Analysis<'_> {
                     self.expression(receiver, state);
                 }
                 // A callback may receive inputs absent from direct call sites.
-                let call = &mut self.calls[*function];
-                call.seen = true;
-                call.inputs.fill(None);
+                self.record_call(*function, |_| None);
                 None
             }
             ExprKind::Invoke { callable, args } => {
@@ -317,9 +308,7 @@ impl Analysis<'_> {
                 }
                 // Initializers have an implicit receiver; avoid guessing their
                 // positional mapping and keep every parameter unknown.
-                let call = &mut self.calls[*initializer];
-                call.seen = true;
-                call.inputs.fill(None);
+                self.record_call(*initializer, |_| None);
                 state.fill(None);
                 None
             }
@@ -496,7 +485,7 @@ pub(crate) fn block_readonly(body: &[Statement]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ir::walk_expressions;
+    use crate::ir::{CallArgs, walk_expressions};
 
     fn lower(source: &str) -> Module {
         let graph = crate::modules::SourceGraph::single(source).unwrap();
