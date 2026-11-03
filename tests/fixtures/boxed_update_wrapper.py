@@ -40,6 +40,14 @@ print(update_wrapper(wrapped=Source, wrapper=target, assigned=("missing",), upda
 print(target.info, target.__wrapped__ is Source)
 
 
+def assigned():
+    yield "info"
+    assert target.info is Source.info
+
+
+update_wrapper(target, Source, assigned(), ())
+
+
 def alternate(fmt):
     return {"format": fmt}
 

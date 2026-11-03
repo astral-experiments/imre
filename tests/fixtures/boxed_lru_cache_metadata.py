@@ -29,6 +29,8 @@ def current():
     assert cached.cache_parameters() is not cached.cache_parameters()
     assert outer.cache_parameters is cached.cache_parameters
     other_parameters = lru_cache(original).cache_parameters
+    assert type(lru_cache) is type(original)
+    assert type(other_parameters) is type(original)
     assert other_parameters is not cached.cache_parameters
     assert other_parameters != cached.cache_parameters
     assert len({other_parameters, cached.cache_parameters, outer.cache_parameters}) == 2

@@ -1,9 +1,42 @@
 """Decorator implementations from CPython 3.14.5 Lib/functools.py (PSF-2.0)."""
 
 from _thread import RLock
-from functools import Placeholder, WRAPPER_ASSIGNMENTS, WRAPPER_UPDATES, _CacheInfo, partial, reduce, update_wrapper
+from functools import Placeholder, _CacheInfo, _cache_wrapper, partial, reduce
 from types import GenericAlias
 
+
+WRAPPER_ASSIGNMENTS = ('__module__', '__name__', '__qualname__', '__doc__',
+                       '__annotate__', '__type_params__')
+WRAPPER_UPDATES = ('__dict__',)
+def update_wrapper(wrapper,
+                   wrapped,
+                   assigned = WRAPPER_ASSIGNMENTS,
+                   updated = WRAPPER_UPDATES):
+    """Update a wrapper function to look like the wrapped function
+
+       wrapper is the function to be updated
+       wrapped is the original function
+       assigned is a tuple naming the attributes assigned directly
+       from the wrapped function to the wrapper function (defaults to
+       functools.WRAPPER_ASSIGNMENTS)
+       updated is a tuple naming the attributes of the wrapper that
+       are updated with the corresponding attribute from the wrapped
+       function (defaults to functools.WRAPPER_UPDATES)
+    """
+    for attr in assigned:
+        try:
+            value = getattr(wrapped, attr)
+        except AttributeError:
+            pass
+        else:
+            setattr(wrapper, attr, value)
+    for attr in updated:
+        getattr(wrapper, attr).update(getattr(wrapped, attr, {}))
+    # Issue #17482: set __wrapped__ last so we don't inadvertently copy it
+    # from the wrapped function when updating __dict__
+    wrapper.__wrapped__ = wrapped
+    # Return the wrapper so this can be used as a decorator via partial()
+    return wrapper
 
 def wraps(wrapped,
           assigned = WRAPPER_ASSIGNMENTS,
@@ -186,18 +219,44 @@ def total_ordering(cls):
     return cls
 
 
-def _lru_cache_decorator(maxsize, typed):
-    from functools import _cache_wrapper, update_wrapper
+def lru_cache(maxsize=128, typed=False):
+    """Least-recently-used cache decorator.
+
+    If *maxsize* is set to None, the LRU features are disabled and the cache
+    can grow without bound.
+
+    If *typed* is True, arguments of different types will be cached separately.
+    For example, f(decimal.Decimal("3.0")) and f(3.0) will be treated as
+    distinct calls with distinct results. Some types such as str and int may
+    be cached separately even when typed is false.
+
+    Arguments to the cached function must be hashable.
+
+    View the cache statistics named tuple (hits, misses, maxsize, currsize)
+    with f.cache_info().  Clear the cache and statistics with f.cache_clear().
+    Access the underlying function with f.__wrapped__.
+
+    See:  https://en.wikipedia.org/wiki/Cache_replacement_policies#Least_recently_used_(LRU)
+
+    """
     def decorating_function(user_function):
         wrapper = _cache_wrapper(user_function, maxsize, typed)
         wrapper.cache_parameters = lambda: {'maxsize': maxsize, 'typed': typed}
         return update_wrapper(wrapper, user_function)
+
+    if isinstance(maxsize, int):
+        if maxsize < 0:
+            maxsize = 0
+    elif callable(maxsize) and isinstance(typed, bool):
+        user_function, maxsize = maxsize, 128
+        return decorating_function(user_function)
+    elif maxsize is not None:
+        raise TypeError('Expected first argument to be an integer, a callable, or None')
     return decorating_function
 
 
 def cache(user_function, /):
     'Simple lightweight unbounded cache.  Sometimes called "memoize".'
-    from functools import lru_cache
     return lru_cache(maxsize=None)(user_function)
 
 

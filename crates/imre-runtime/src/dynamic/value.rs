@@ -1265,14 +1265,6 @@ pub(super) enum Value {
         comparator: Id,
         object: Option<Id>,
     },
-    CacheDecorator {
-        maxsize: Id,
-        typed: Id,
-    },
-    CacheParameters {
-        maxsize: Id,
-        typed: Id,
-    },
     Cached {
         function: Id,
         capacity: Option<usize>,
@@ -2044,9 +2036,6 @@ impl Value {
             } => {
                 visit.extend([*function, *args, *keywords]);
                 visit.extend(dictionary);
-            }
-            Self::CacheDecorator { maxsize, typed } | Self::CacheParameters { maxsize, typed } => {
-                visit.extend([*maxsize, *typed]);
             }
             Self::Cached {
                 function,
