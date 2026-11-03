@@ -1,6 +1,7 @@
 """Compare sealed UTF-8 files, context cleanup, and process arguments with CPython."""
 
 import argparse
+import binascii
 import errno
 import gzip
 import os
@@ -44,6 +45,23 @@ ACCEPTED = {
             os.close(master)
             os.close(slave)
         assert os.device_encoding(slave) is None
+    """,
+    "zip_empty_unicode_path": """
+        import warnings
+        from zipfile import ZipFile
+        from zipimport import zipimporter
+
+        warnings.simplefilter("error", UserWarning)
+        assert zipimporter("empty-path.zip").get_data("original") == b"payload"
+        try:
+            ZipFile("empty-path.zip").close()
+        except UserWarning as exc:
+            print(str(exc))
+        else:
+            raise AssertionError("missing empty Unicode path warning")
+        warnings.simplefilter("ignore", UserWarning)
+        with ZipFile("empty-path.zip") as archive:
+            print(archive.namelist())
     """,
     "binary_update_path_builtin": """
         with open("checked-update.bin", "wb+") as stream:
@@ -802,6 +820,12 @@ def seed(directory: Path, case: str) -> None:
     (directory / "truncated.txt").write_bytes(b"truncated \xf0\x9f")
     (directory / "output.txt").write_bytes(b"old data that must be truncated")
     (directory / "directory").mkdir()
+    if case == "zip_empty_unicode_path":
+        member = zipfile.ZipInfo("original")
+        # Info-ZIP Unicode Path, version 1, matching CRC and no replacement name.
+        member.extra = b"\x75\x70\x05\x00\x01" + binascii.crc32(b"original").to_bytes(4, "little")
+        with zipfile.ZipFile(directory / "empty-path.zip", "w") as archive:
+            archive.writestr(member, b"payload")
     if case in {"zipimport_resources", "boxed_zipimport_resources"}:
         for name, method in [("stored.zip", zipfile.ZIP_STORED), ("deflated.zip", zipfile.ZIP_DEFLATED)]:
             with zipfile.ZipFile(directory / name, "w") as archive:

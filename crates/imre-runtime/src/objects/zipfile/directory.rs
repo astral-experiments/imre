@@ -148,7 +148,12 @@ pub(super) fn name(raw: &[u8], utf8: bool) -> Result<Str> {
 }
 
 /// ZIP64 may replace sentinel sizes/offsets, and Info-ZIP may override the display name.
-fn parse_extra(raw: &[u8], mut extra: &[u8], info: &mut Info) -> Result<()> {
+fn parse_extra(
+    raw: &[u8],
+    mut extra: &[u8],
+    info: &mut Info,
+    empty_unicode_path: fn() -> Result<()>,
+) -> Result<()> {
     while extra.len() >= 4 {
         let tag = u16_at(extra, 0);
         let len = usize::from(u16_at(extra, 2));
@@ -175,15 +180,19 @@ fn parse_extra(raw: &[u8], mut extra: &[u8], info: &mut Info) -> Result<()> {
             }
             let mut checksum = flate2::Crc::new();
             checksum.update(raw);
-            if data[0] == 1 && u32_at(data, 1) == checksum.sum() && data.len() > 5 {
+            if data[0] == 1 && u32_at(data, 1) == checksum.sum() {
                 let text = std::str::from_utf8(&data[5..]).map_err(|_| {
                     bad("Corrupt unicode path extra field (0x7075): invalid utf-8 bytes")
                 })?;
-                info.filename = StrOwner::try_new(
-                    Str::try_new(text.split('\0').next().unwrap())
-                        .map_err(|_| Error::allocation())?,
-                )
-                .map_err(|_| Error::allocation())?;
+                if text.is_empty() {
+                    empty_unicode_path()?;
+                } else {
+                    info.filename = StrOwner::try_new(
+                        Str::try_new(text.split('\0').next().unwrap())
+                            .map_err(|_| Error::allocation())?,
+                    )
+                    .map_err(|_| Error::allocation())?;
+                }
             }
         }
         extra = &extra[4 + len..];
@@ -191,7 +200,10 @@ fn parse_extra(raw: &[u8], mut extra: &[u8], info: &mut Info) -> Result<()> {
     Ok(())
 }
 
-pub(super) fn entries(reader: &mut (impl Read + Seek)) -> Result<Vec<Info>> {
+pub(super) fn entries(
+    reader: &mut (impl Read + Seek),
+    empty_unicode_path: fn() -> Result<()>,
+) -> Result<Vec<Info>> {
     let (start, mut remaining, prefix) = find_directory(reader)?;
     reader
         .seek(SeekFrom::Start(start))
@@ -251,6 +263,7 @@ pub(super) fn entries(reader: &mut (impl Read + Seek)) -> Result<Vec<Info>> {
             raw,
             &buf[raw.len()..(name_len + extra_len).min(n)],
             &mut info,
+            empty_unicode_path,
         )?;
         info.offset = i128::from(info.local_offset) + prefix;
         entries.try_reserve(1).map_err(|_| Error::allocation())?;
@@ -313,7 +326,7 @@ mod tests {
             ],
             b"archive comment",
         );
-        let found = entries(&mut Cursor::new(fixture)).ok().unwrap();
+        let found = entries(&mut Cursor::new(fixture), || Ok(())).ok().unwrap();
         assert_eq!(
             found
                 .iter()
@@ -331,7 +344,7 @@ mod tests {
         extra.extend(checksum.sum().to_le_bytes());
         extra.extend("é".as_bytes());
         let fixture = index(&[(b"a", 0, &extra), (b"b", 0, &extra)], b"");
-        let found = entries(&mut Cursor::new(fixture)).ok().unwrap();
+        let found = entries(&mut Cursor::new(fixture), || Ok(())).ok().unwrap();
         assert_eq!(
             found
                 .iter()
@@ -342,6 +355,12 @@ mod tests {
         assert!(!StrOwner::ptr_eq(&found[0].filename, &found[0].original));
         assert!(StrOwner::ptr_eq(&found[1].filename, &found[1].original));
         extra[9] = 0xff;
-        assert!(entries(&mut Cursor::new(index(&[(b"a", 0, &extra)], b""))).is_err());
+        assert!(
+            entries(
+                &mut Cursor::new(index(&[(b"a", 0, &extra)], b"")),
+                || Ok(())
+            )
+            .is_err()
+        );
     }
 }

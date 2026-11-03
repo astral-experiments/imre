@@ -370,19 +370,7 @@ pub(crate) fn runtime_warning(
     line: isize,
     message: &str,
 ) -> crate::Result<()> {
-    match filtered(2, module, line, || message.into())
-        .map_err(|()| Error::new(Kind::OverflowError, LINE_OVERFLOW))?
-    {
-        Some((Action::Error, message)) => return Err(Error::new(Kind::RuntimeWarning, message)),
-        Some((_, message)) => {
-            let _ = crate::sys::write_stderr(
-                &format!("{filename}:{line}: RuntimeWarning: {message}"),
-                true,
-            );
-        }
-        None => {}
-    }
-    Ok(())
+    internal_warning(Kind::RuntimeWarning, module, filename, line, message, None)
 }
 
 /// A checked non-finalizer warning issued from an internal standard-library frame.
@@ -392,15 +380,37 @@ pub(super) fn deprecation(
     line: isize,
     message: &str,
 ) -> crate::Result<()> {
-    match filtered(4, module, line, || message.into())
+    internal_warning(
+        Kind::DeprecationWarning,
+        module,
+        filename,
+        line,
+        message,
+        None,
+    )
+}
+
+/// Apply warning filters at a standard-library call site before displaying its source.
+pub(super) fn internal_warning(
+    kind: Kind,
+    module: &str,
+    filename: &str,
+    line: isize,
+    message: &str,
+    source_line: Option<&str>,
+) -> crate::Result<()> {
+    let category = category_number(kind.name()).expect("expected a warning category");
+    match filtered(category, module, line, || message.into())
         .map_err(|()| Error::new(Kind::OverflowError, LINE_OVERFLOW))?
     {
-        Some((Action::Error, message)) => Err(Error::new(Kind::DeprecationWarning, message)),
+        Some((Action::Error, message)) => Err(Error::new(kind, message)),
         Some((_, message)) => {
-            let _ = crate::sys::write_stderr(
-                &format!("{filename}:{line}: DeprecationWarning: {message}"),
-                true,
-            );
+            let mut text = format!("{filename}:{line}: {}: {message}", kind.name());
+            if let Some(source) = source_line {
+                text.push_str("\n  ");
+                text.push_str(source);
+            }
+            let _ = crate::sys::write_stderr(&text, true);
             Ok(())
         }
         None => Ok(()),

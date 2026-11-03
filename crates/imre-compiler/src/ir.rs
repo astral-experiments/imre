@@ -1355,6 +1355,7 @@ pub(crate) enum Builtin {
     ZipMinReadSize,
     ZipField(ZipField),
     ZipOpen,
+    ZipImportIndex,
     ZipNamelist,
     ZipClose,
     /// Encodes an integer with an explicit width, byte order, and sign policy.

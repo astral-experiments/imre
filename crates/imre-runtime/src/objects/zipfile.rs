@@ -131,7 +131,11 @@ fn store(storage: Storage) -> Result<ObjectOwner> {
 impl Archive {
     /// Open a filesystem archive for CRC-checked metadata member reads.
     pub(crate) fn open_path(path: &str) -> Result<Self> {
-        Self::open(Source::open(path)?, Some(StrOwner::new(path.into())))
+        Self::open_with(
+            Source::open(path)?,
+            Some(StrOwner::new(path.into())),
+            || Ok(()),
+        )
     }
 
     /// Retain the central directory after closing the descriptor used to index it.
@@ -174,7 +178,15 @@ impl Archive {
     }
 
     fn open(source: Source, filename: Option<StrOwner>) -> Result<Self> {
-        let entries = source.directory()?;
+        Self::open_with(source, filename, warn_empty_unicode_path)
+    }
+
+    fn open_with(
+        source: Source,
+        filename: Option<StrOwner>,
+        empty_unicode_path: fn() -> Result<()>,
+    ) -> Result<Self> {
+        let entries = source.directory(empty_unicode_path)?;
         let mut list = Words::new(5);
         let mut by_name = HashMap::new();
         list.values
@@ -322,6 +334,28 @@ pub unsafe extern "C" fn imre_zip_open(path: *const Str) -> *const Object {
     // SAFETY: the path is a live string owner for the entire open operation.
     let path: StrOwner = unsafe { StrOwner::acquire_word(path as usize) };
     opened(Source::open(&path).and_then(|source| Archive::open(source, Some(path))))
+}
+
+/// Open the directory used internally by the bundled zipimporter.
+///
+/// # Safety
+/// The caller roots the path string for the duration of the call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_zip_import_index(path: *const Str) -> *const Object {
+    // SAFETY: the native caller retains the string while we index it.
+    opened(Archive::index_import(unsafe { &*path }.as_str()))
+}
+
+// ZipInfo._decodeExtra uses stacklevel=2, its caller in _RealGetContents.
+fn warn_empty_unicode_path() -> Result<()> {
+    super::warnings::internal_warning(
+        Kind::UserWarning,
+        "zipfile",
+        "zipfile/__init__.py",
+        1592,
+        "Empty unicode path extra field (0x7075)",
+        Some("x._decodeExtra(orig_filename_crc)"),
+    )
 }
 
 /// Open a caller-supplied binary stream; closing the archive never closes it.
