@@ -194,7 +194,7 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
                         section("def getmro(cls):", "def indentsize(line):"),
                         section("def _findclass(func):", "def cleandoc(doc):"),
                         section("GEN_CREATED = ", "def getgeneratorlocals("),
-                        section("CORO_CREATED = ", "def getcoroutinelocals("),
+                        section("CORO_CREATED = ", "AGEN_CREATED ="),
                         section("def formatannotation(", "def formatannotationrelativeto("),
                         section("FullArgSpec = namedtuple(", "ArgInfo = namedtuple("),
                         section("_NonUserDefinedCallables =", "def _signature_get_user_defined_method("),
