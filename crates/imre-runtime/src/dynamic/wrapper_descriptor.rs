@@ -112,8 +112,13 @@ impl BuiltinDescriptor {
             Some(("anext_awaitable", attr)) => {
                 Some(("anext_awaitable", attr, generator_protocol::ANEXT_METHODS))
             }
-            Some(("mappingproxy", attr)) => {
-                Some(("mappingproxy", attr, builtins::MAPPING_PROXY_METHODS))
+            Some(("mappingproxy", attr)) if attr != "__class_getitem__" => {
+                let members = if builtins::MAPPING_PROXY_METHODS.contains(&attr) {
+                    builtins::MAPPING_PROXY_METHODS
+                } else {
+                    builtins::MAPPING_PROXY_SLOTS
+                };
+                Some(("mappingproxy", attr, members))
             }
             Some(("type", attr)) => Some(("type", attr, &["mro"][..])),
             Some(("int", attr)) => Some(("int", attr, builtins::real_methods("int"))),
@@ -257,11 +262,6 @@ impl BuiltinDescriptor {
             "dict.__eq__" => ("dict", "__eq__"),
             "dict.__repr__" => ("dict", "__repr__"),
             "dict.__reversed__" => ("dict", "__reversed__"),
-            "mappingproxy.__getitem__" => ("mappingproxy", "__getitem__"),
-            "mappingproxy.__hash__" => ("mappingproxy", "__hash__"),
-            "mappingproxy.__repr__" => ("mappingproxy", "__repr__"),
-            "mappingproxy.__str__" => ("mappingproxy", "__str__"),
-            "mappingproxy.__contains__" => ("mappingproxy", "__contains__"),
             "tuple.__repr__" => ("tuple", "__repr__"),
             "types.SimpleNamespace.__init__" => (super::namespace::CLASS, "__init__"),
             "types.SimpleNamespace.__repr__" => (super::namespace::CLASS, "__repr__"),
@@ -496,13 +496,22 @@ impl BuiltinDescriptor {
                 ctx.text(if self.name == "__copy__" { "($self, /)" } else { "($self, memo, /)" })
             }
             "__doc__" | "__text_signature__"
-                if self.name == "__len__" && matches!(self.owner, "list" | "tuple") =>
+                if self.name == "__len__" && matches!(self.owner, "list" | "tuple" | "mappingproxy") =>
             {
                 ctx.text(if name == "__doc__" {
                     "Return len(self)."
                 } else {
                     "($self, /)"
                 })
+            }
+            "__doc__" | "__text_signature__" if self.owner == "mappingproxy"
+                && let Some(op) = super::operators::comparison_op(self.name) =>
+            {
+                if name == "__doc__" {
+                    ctx.text(format!("Return self{op}value."))
+                } else {
+                    ctx.text("($self, value, /)")
+                }
             }
             "__doc__" if self.name == "__lt__" => ctx.text("Return self<value."),
             "__text_signature__" if self.name == "__lt__" => ctx.text("($self, value, /)"),
@@ -582,9 +591,9 @@ impl BuiltinDescriptor {
             "__doc__" if self.name == "__floordiv__" => ctx.text("Return self//value."),
             "__doc__" if self.name == "__rfloordiv__" => ctx.text("Return value//self."),
             "__doc__" if self.name == "__ior__" => ctx.text("Return self|=value."),
-            "__doc__" if self.owner == "dict" && self.name == "__or__" => ctx.text("Return self|value."),
-            "__doc__" if self.owner == "dict" && self.name == "__ror__" => ctx.text("Return value|self."),
-            "__text_signature__" if self.name == "__ior__" || (self.owner == "dict" && matches!(self.name, "__or__" | "__ror__")) => ctx.text("($self, value, /)"),
+            "__doc__" if matches!(self.owner, "dict" | "mappingproxy") && self.name == "__or__" => ctx.text("Return self|value."),
+            "__doc__" if matches!(self.owner, "dict" | "mappingproxy") && self.name == "__ror__" => ctx.text("Return value|self."),
+            "__text_signature__" if self.name == "__ior__" || (matches!(self.owner, "dict" | "mappingproxy") && matches!(self.name, "__or__" | "__ror__")) => ctx.text("($self, value, /)"),
             "__doc__" if self.name == "__iadd__" => ctx.text("Implement self+=value."),
             "__text_signature__" if matches!(self.name, "__add__" | "__radd__" | "__sub__" | "__rsub__" | "__iadd__" | "__mul__" | "__rmul__" | "__truediv__" | "__rtruediv__" | "__mod__" | "__rmod__" | "__floordiv__" | "__rfloordiv__") => {
                 ctx.text("($self, value, /)")

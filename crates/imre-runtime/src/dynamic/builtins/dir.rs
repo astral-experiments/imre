@@ -115,6 +115,7 @@ fn object_names(ctx: &mut Context, object: Id) -> Result<Id> {
         | Value::DequeIterator { .. }
         | Value::Union(_)
         | Value::Dict(_)
+        | Value::MappingProxy(_)
         | Value::Tuple(_)
         | Value::List(_)
         | Value::Set { .. }
@@ -433,7 +434,13 @@ fn class_names(ctx: &Context, class: Id, names: &mut BTreeSet<String>) -> Result
         Value::Native(name)
             if matches!(
                 name.as_str(),
-                "builtin_function_or_method" | "dict" | "list" | "str" | "set" | "frozenset"
+                "builtin_function_or_method"
+                    | "dict"
+                    | "list"
+                    | "str"
+                    | "set"
+                    | "frozenset"
+                    | "mappingproxy"
             ) =>
         {
             class_names(ctx, ctx.builtins["object"], names)?;
@@ -450,6 +457,7 @@ fn class_names(ctx: &Context, class: Id, names: &mut BTreeSet<String>) -> Result
                     ],
                 ),
                 "set" | "frozenset" => (super::set_methods(name), super::set_operators(name)),
+                "mappingproxy" => (super::MAPPING_PROXY_METHODS, super::MAPPING_PROXY_SLOTS),
                 "dict" => (
                     super::DICT_METHODS,
                     &["__class_getitem__", "__or__", "__reversed__", "__ror__"],
