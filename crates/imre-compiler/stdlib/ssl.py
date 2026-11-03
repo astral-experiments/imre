@@ -1,4 +1,4 @@
-"""TLS contexts and blocking sockets using system OpenSSL."""
+"""TLS contexts, blocking sockets and in-memory handshakes using system OpenSSL."""
 
 import errno as _errno
 import io as _io
@@ -18,6 +18,10 @@ from _ssl import HAS_SNI, HAS_ECDH, HAS_NPN, HAS_ALPN, HAS_PSK, HAS_PHA
 CHANNEL_BINDING_TYPES = ["tls-unique"]
 HAS_NEVER_CHECK_COMMON_NAME = hasattr(_ssl, "HOSTFLAG_NEVER_CHECK_SUBJECT")
 SSL_ERROR_SSL = 1
+SSL_ERROR_WANT_READ = 2
+SSL_ERROR_WANT_WRITE = 3
+SSL_ERROR_ZERO_RETURN = 6
+SSL_ERROR_EOF = 8
 
 
 class TLSVersion(_IntEnum):
@@ -218,6 +222,28 @@ def _call(function, *args):
         return function(*args)
     except _imre_ssl.Error as exc:
         raise SSLError(SSL_ERROR_SSL, str(exc)) from None
+
+
+def _check_role(protocol, server_side):
+    if server_side and protocol == PROTOCOL_TLS_CLIENT:
+        raise SSLError(0, "Cannot create a server socket with a PROTOCOL_TLS_CLIENT context")
+    if not server_side and protocol == PROTOCOL_TLS_SERVER:
+        raise SSLError(0, "Cannot create a client socket with a PROTOCOL_TLS_SERVER context")
+
+
+def _raise_verify_error(hostname, code, message):
+    if code == 62:
+        message = "Hostname mismatch, certificate is not valid for '%s'." % hostname
+    elif code == 64:
+        message = "IP address mismatch, certificate is not valid for '%s'." % hostname
+    error = SSLCertVerificationError(
+        SSL_ERROR_SSL, "[SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: " + message
+    )
+    error.verify_code = code
+    error.verify_message = message
+    error.library = "SSL"
+    error.reason = "CERTIFICATE_VERIFY_FAILED"
+    raise error
 
 
 DefaultVerifyPaths = namedtuple("DefaultVerifyPaths",
@@ -438,6 +464,16 @@ class SSLContext:
             error.reason = reason
             raise error
 
+    def wrap_bio(self, incoming, outgoing, server_side=False, server_hostname=None, session=None):
+        if server_hostname is not None:
+            if isinstance(server_hostname, str):
+                if not server_hostname.isascii():
+                    raise NotImplementedError("encode internationalized hostnames to IDNA before wrapping the BIO")
+            else:
+                server_hostname = server_hostname.decode("ascii")
+        return self.sslobject_class._create(incoming, outgoing, server_side=server_side,
+                                            server_hostname=server_hostname, session=session, context=self)
+
     def wrap_socket(self, sock, server_side=False, do_handshake_on_connect=True,
                     suppress_ragged_eofs=True, server_hostname=None, session=None):
         if server_side and server_hostname is not None:
@@ -446,10 +482,7 @@ class SSLContext:
             raise ValueError("session can only be specified in client mode")
         if self.check_hostname and not server_hostname:
             raise ValueError("check_hostname requires server_hostname")
-        if server_side and self.protocol == PROTOCOL_TLS_CLIENT:
-            raise SSLError(0, "Cannot create a server socket with a PROTOCOL_TLS_CLIENT context")
-        if not server_side and self.protocol == PROTOCOL_TLS_SERVER:
-            raise SSLError(0, "Cannot create a client socket with a PROTOCOL_TLS_SERVER context")
+        _check_role(self.protocol, server_side)
         if not do_handshake_on_connect or not suppress_ragged_eofs or session is not None:
             raise NotImplementedError("only a blocking handshake with default session and EOF handling is supported")
         if not server_side and server_hostname is not None:
@@ -467,20 +500,7 @@ class SSLContext:
             error.library = None
             raise error
         if isinstance(result, tuple):
-            code, message = result
-            # Match CPython's hostname diagnostics for these X509 verification codes.
-            if code == 62:
-                message = "Hostname mismatch, certificate is not valid for '%s'." % server_hostname
-            elif code == 64:
-                message = "IP address mismatch, certificate is not valid for '%s'." % server_hostname
-            error = SSLCertVerificationError(
-                SSL_ERROR_SSL, "[SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: " + message
-            )
-            error.verify_code = code
-            error.verify_message = message
-            error.library = "SSL"
-            error.reason = "CERTIFICATE_VERIFY_FAILED"
-            raise error
+            _raise_verify_error(server_hostname, *result)
         peer = object.__new__(SSLSocket)
         peer._io_refs = 0
         peer._closed = False
@@ -491,6 +511,81 @@ class SSLContext:
         peer.do_handshake_on_connect = do_handshake_on_connect
         peer.suppress_ragged_eofs = suppress_ragged_eofs
         return peer
+
+
+_BIO_ERRORS = {
+    "WANT_READ": (SSLWantReadError, SSL_ERROR_WANT_READ, "The operation did not complete (read)", None),
+    "WANT_WRITE": (SSLWantWriteError, SSL_ERROR_WANT_WRITE, "The operation did not complete (write)", None),
+    "ZERO_RETURN": (SSLZeroReturnError, SSL_ERROR_ZERO_RETURN, "TLS/SSL connection has been closed (EOF)", None),
+    "EOF": (SSLEOFError, SSL_ERROR_EOF, "EOF occurred in violation of protocol", None),
+    "UNEXPECTED_EOF_WHILE_READING": (SSLEOFError, SSL_ERROR_EOF, "EOF occurred in violation of protocol", "SSL"),
+    "SHUTDOWN_WHILE_IN_INIT": (SSLError, SSL_ERROR_SSL, "shutdown while in init", "SSL"),
+}
+
+
+class SSLObject:
+    """A TLS connection driven by caller-owned incoming and outgoing memory BIOs."""
+
+    def __init__(self, *args, **kwargs):
+        raise TypeError(f"{self.__class__.__name__} does not have a public constructor. "
+                        "Instances are returned by SSLContext.wrap_bio().")
+
+    @classmethod
+    def _create(cls, incoming, outgoing, server_side=False, server_hostname=None,
+                session=None, context=None):
+        server_side = bool(server_side)
+        native_context = SSLContext._ctx.__get__(context)
+        _check_role(_imre_ssl.protocol(native_context), server_side)
+        if session is not None:
+            raise NotImplementedError("setting a session on a memory BIO is unsupported")
+        self = cls.__new__(cls)
+        self._sslobj = _call(_imre_ssl.wrap_bio, native_context, incoming, outgoing,
+                             server_hostname, server_side)
+        self._context = context
+        self._server_side = server_side
+        self._server_hostname = server_hostname
+        return self
+
+    @property
+    def context(self):
+        return self._context
+
+    @property
+    def server_side(self):
+        return self._server_side
+
+    @property
+    def server_hostname(self):
+        return self._server_hostname
+
+    def _bio_call(self, operation):
+        result = _call(operation, self._sslobj)
+        if result is None:
+            return
+        if isinstance(result, tuple):
+            _raise_verify_error(self.server_hostname, *result)
+        kind, code, message, library = _BIO_ERRORS[result]
+        if library:
+            message = f"[{library}: {result}] {message}"
+        error = kind(code, message)
+        error.library = library
+        error.reason = result if library else None
+        raise error
+
+    def getpeercert(self, binary_form=False):
+        """Return the peer certificate as a dictionary or DER bytes, or None if absent."""
+        return _call(_imre_ssl.bio_getpeercert, self._sslobj, binary_form)
+
+    def do_handshake(self):
+        """Advance the handshake, raising SSLWantReadError when more peer data is needed."""
+        self._bio_call(_imre_ssl.bio_handshake)
+
+    def unwrap(self):
+        """Send and receive TLS close notifications through the memory BIOs."""
+        self._bio_call(_imre_ssl.bio_shutdown)
+
+
+SSLContext.sslobject_class = SSLObject
 
 
 class SSLSocket:
