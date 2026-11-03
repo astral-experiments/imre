@@ -397,8 +397,8 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ) => ctx.builtin(&format!("{module}.{name}")),
         (
             "_imre_gzip",
-            "open" | "read" | "read1" | "readline" | "fileno" | "close" | "writer" | "compress"
-            | "flush_writer",
+            "open" | "read" | "read1" | "readline" | "tell" | "fileno" | "close" | "writer"
+            | "compress" | "flush_writer",
         ) => ctx.builtin(&format!("{module}.{name}")),
         ("_imre_gzip", "BadGzipFile") => ctx.builtin("gzip.BadGzipFile"),
         ("_locale", "getencoding") => ctx.builtin("_locale.getencoding"),

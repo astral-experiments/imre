@@ -70,6 +70,9 @@ pub(super) fn call(
             };
             Ok(ctx.alloc(Value::Bytes(bytes)))
         }
+        "tell" => Ok(ctx.alloc(Value::Int(crate::Int::new(
+            handle.borrow_mut().tell()?.into(),
+        )))),
         "fileno" => Ok(ctx.int(i64::from(handle.borrow().fileno()?))),
         "close" => {
             handle.borrow_mut().close().map_err(super::os_error)?;

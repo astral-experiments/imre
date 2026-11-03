@@ -79,6 +79,8 @@ impl Read for GzipInput {
 pub(super) struct GzipReader {
     input: GzipInput,
     decoder: Decompress,
+    // Bytes returned by successful raw reads, across all members.
+    pub(super) position: u64,
     crc: Crc,
     phase: Phase,
 }
@@ -94,6 +96,7 @@ impl GzipReader {
                 unread: 0..0,
             },
             decoder: Decompress::new(false),
+            position: 0,
             crc: Crc::new(),
             phase: Phase::Header,
         }
@@ -225,6 +228,7 @@ impl GzipReader {
                     if written > 0 {
                         // SAFETY: total_out advanced by the initialized prefix length.
                         self.crc.update(unsafe { out[..written].assume_init_ref() });
+                        self.position += written as u64;
                         return Ok(written);
                     }
                 }

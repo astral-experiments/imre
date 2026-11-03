@@ -154,9 +154,9 @@ class GzipFile(io.BufferedIOBase):
         return super().seekable()
 
     def tell(self):
-        if self.mode != WRITE:
-            return super().tell()
         self._check_open()
+        if self.mode == READ:
+            return _imre_gzip.tell(self._reader)
         self._writer.flush()
         return self._writer.raw.size
 
