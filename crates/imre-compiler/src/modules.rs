@@ -2129,6 +2129,11 @@ impl IntrinsicModule {
             (Self::Hashlib, "algorithms_guaranteed") => {
                 Intrinsic::HashAlgorithms { guaranteed: true }
             }
+            (Self::Zipfile, "ZIP_STORED") => Intrinsic::IntConstant(0),
+            (Self::Zipfile, "ZIP_DEFLATED") => Intrinsic::IntConstant(8),
+            (Self::Zipfile, "ZIP_BZIP2") => Intrinsic::IntConstant(12),
+            (Self::Zipfile, "ZIP_LZMA") => Intrinsic::IntConstant(14),
+            (Self::Zipfile, "ZIP_ZSTANDARD") => Intrinsic::IntConstant(93),
             (Self::Zipfile, "ZipFile") => Intrinsic::ZipFile,
             (Self::Zipfile, "ZipInfo") => Intrinsic::ZipInfo,
             (Self::Io | Self::IoNative, "BlockingIOError") => {
@@ -2244,6 +2249,7 @@ impl IntrinsicModule {
                 Intrinsic::PurePath(crate::ir::PathFlavor::Windows)
             }
             (Self::Random, "shuffle") => Intrinsic::Random(crate::ir::RandomOperation::Shuffle),
+            (Self::Random, "randbytes") => Intrinsic::ScopedObjectExport("random.randbytes"),
             (Self::Random, "choices") => Intrinsic::ObjectRuntimeExport("random.choices"),
             (Self::Random, "choice") => Intrinsic::RandomChoice { secure: false },
             (Self::Secrets, "choice") => Intrinsic::RandomChoice { secure: true },

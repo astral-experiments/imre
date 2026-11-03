@@ -214,8 +214,13 @@ fn integer_result(result: Result<BigInt>) -> usize {
 pub unsafe extern "C" fn imre_random_bits(count: usize) -> usize {
     // SAFETY: the compiler roots this Python integer for the call.
     let count = unsafe { Int::borrow(count) };
+    integer_result(random_bits(&count))
+}
+
+/// Draw the requested number of bits from the same module generator as random().
+pub(crate) fn random_bits(count: &Int) -> Result<BigInt> {
     let count = count.big();
-    integer_result(if count.sign() == Sign::Minus {
+    if count.sign() == Sign::Minus {
         Err(Error::new(Kind::ValueError, "Cannot convert negative int"))
     } else if let Some(n) = count.to_u64() {
         shared().bits(n).map(BigInt::from)
@@ -224,7 +229,7 @@ pub unsafe extern "C" fn imre_random_bits(count: usize) -> usize {
             Kind::OverflowError,
             "Python int too large for C uint64_t",
         ))
-    })
+    }
 }
 
 fn sequence_index(length: &BigUint, secure: bool) -> Result<BigUint> {
@@ -328,6 +333,17 @@ pub unsafe extern "C" fn imre_random_shuffle_list(list: *const super::Object) {
     };
 }
 
+/// Draw from an inclusive interval of Python integers.
+pub(crate) fn randint(start: &BigInt, stop: &BigInt) -> Result<BigInt> {
+    if start > stop {
+        return Err(Error::new(
+            Kind::ValueError,
+            format!("empty range in randint({start}, {stop})"),
+        ));
+    }
+    Ok(start + BigInt::from(random_below((stop - start + 1u32).magnitude())?))
+}
+
 /// Select from an arithmetic progression without materializing it. A range used
 /// as a sequence must fit len(); randrange and randint admit arbitrary widths.
 fn progression(start: &BigInt, stop: &BigInt, step: &BigInt, mode: u32) -> Result<BigInt> {
@@ -338,13 +354,7 @@ fn progression(start: &BigInt, stop: &BigInt, step: &BigInt, mode: u32) -> Resul
         ));
     }
     if mode == 1 {
-        if start > stop {
-            return Err(Error::new(
-                Kind::ValueError,
-                format!("empty range in randint({start}, {stop})"),
-            ));
-        }
-        return Ok(start + BigInt::from(random_below((stop - start + 1u32).magnitude())?));
+        return randint(start, stop);
     }
     let sequence = matches!(mode, 2 | 4);
     if step.is_zero() {

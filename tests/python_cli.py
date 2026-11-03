@@ -1629,6 +1629,52 @@ def main():
             message = f"can't find '__main__' module in '{root / 'empty_entry'}'"
             assert missing.returncode == 1 and missing.stderr.decode().rstrip().endswith(message)
 
+        compare("-IB", "-c", r"""import zipfile
+with zipfile.ZipFile('stored.zip', 'w') as archive:
+    archive.writestr('wheel/data', b'\x00\xff')
+with zipfile.ZipFile('stored.zip') as archive:
+    print(archive.namelist(), archive.read('wheel/data'))""")
+
+        compare("-IB", "-c", """import os, zipfile, zlib
+path = 'zip-writer-capability.zip'
+try:
+    with zipfile.ZipFile(path, 'w', zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr('compressed', b'data')
+except NotImplementedError as exc:
+    from unittest import TestCase
+    assert not hasattr(zlib, 'compressobj')
+    assert str(exc) == 'Writing ZIP_DEFLATED requires zlib.compressobj'
+    assert not os.path.exists(path)
+    with open(path, 'wb') as stream:
+        stream.write(b'original')
+    with TestCase().assertRaises(NotImplementedError):
+        zipfile.ZipFile(path, 'w', zipfile.ZIP_DEFLATED)
+    with open(path, 'rb') as stream:
+        assert stream.read() == b'original'
+
+    def fields(member):
+        return (member.compress_type, member.compress_level, member.file_size,
+                member.compress_size, member.CRC, member.flag_bits, member.header_offset)
+
+    with zipfile.ZipFile(path, 'w') as archive:
+        archive.writestr('first', b'original')
+        member = archive.getinfo('first')
+        before = fields(member)
+        with TestCase().assertRaises(NotImplementedError):
+            archive.writestr(member, b'replacement', compress_type=zipfile.ZIP_DEFLATED, compresslevel=3)
+        assert fields(member) == before
+        assert archive.read('first') == b'original'
+        archive.writestr('later', b'added')
+    with zipfile.ZipFile(path) as archive:
+        assert archive.namelist() == ['first', 'later']
+        assert archive.read('first') == b'original' and archive.read('later') == b'added'
+else:
+    assert hasattr(zlib, 'compressobj')
+    with zipfile.ZipFile(path) as archive:
+        assert archive.getinfo('compressed').compress_type == zipfile.ZIP_DEFLATED
+        assert archive.read('compressed') == b'data'
+os.unlink(path)""")
+
         archive = root / "application"
         with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as app:
             for prefix in ("", "sub/"):

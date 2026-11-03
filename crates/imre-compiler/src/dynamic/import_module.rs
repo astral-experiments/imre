@@ -582,6 +582,10 @@ fn stdlib_package_source(name: &str) -> Option<(&'static str, &'static str)> {
         "tomllib._parser" => source!("tomllib/_parser.py"),
         "tomllib._re" => source!("tomllib/_re.py"),
         "tomllib._types" => source!("tomllib/_types.py"),
+        "zipfile" => source!("zipfile/__init__.py"),
+        "zipfile.__main__" => source!("zipfile/__main__.py"),
+        "zipfile._path" => source!("zipfile/_path/__init__.py"),
+        "zipfile._path.glob" => source!("zipfile/_path/glob.py"),
         _ => None,
     }
 }

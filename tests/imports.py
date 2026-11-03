@@ -157,6 +157,21 @@ REJECTED = {
             "print(typed('wrong'))\n"
         ),
     }, "expected int, got str"),
+    "unused_randbytes_preserves_typed_call": ({
+        "main.py": (
+            "from random import randbytes\n"
+            "def typed(n: int) -> int: return n\n"
+            "typed('wrong')\n"
+        ),
+    }, "expected int, got str"),
+    "randbytes_call_preserves_typed_call": ({
+        "main.py": (
+            "from random import randbytes\n"
+            "def typed(n: int) -> int: return n\n"
+            "randbytes(5)\n"
+            "typed('wrong')\n"
+        ),
+    }, "expected int, got str"),
     "unused_warn_preserves_typed_arguments": ({
         "main.py": (
             "from warnings import warn\n"

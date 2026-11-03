@@ -1,5 +1,5 @@
 import random
-from random import choice, choices, random as draw, shuffle
+from random import choice, choices, randbytes, randint, random as draw, shuffle
 
 
 def current():
@@ -74,6 +74,31 @@ def current():
             events.append(("format", self.value))
             return "bound" + str(self.value)
 
+    events = []
+    assert randint is random.randint
+    assert randint(b=Index(bound), a=Index(bound)) == bound
+    assert events == [("index", bound), ("index", bound)]
+    try:
+        randint(Index(2), Index(1))
+    except ValueError as error:
+        assert str(error) == "empty range in randint(2, 1)"
+    else:
+        raise AssertionError("empty integer interval accepted")
+
+    assert randbytes is random.randbytes
+    for size in (0, 1, 4, 5, 35):
+        value = randbytes(n=size)
+        assert type(value) is bytes and len(value) == size
+
+    class Length:
+        def __mul__(self, other):
+            assert other == 8
+            return 0
+
+        def __index__(self):
+            return 3
+
+    assert randbytes(Length()) == bytes(3)
     events = []
     try:
         randrange(Index(3), Index(6), Index(-2))

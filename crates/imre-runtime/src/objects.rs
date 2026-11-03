@@ -93,7 +93,9 @@ pub(crate) use processes::{
 mod random;
 #[cfg(target_os = "linux")]
 pub(crate) use random::reseed_after_fork;
-pub(crate) use random::{choice_index, imre_random_float, random_below, shuffle_swaps};
+pub(crate) use random::{
+    choice_index, imre_random_float, randint, random_below, random_bits, shuffle_swaps,
+};
 pub(crate) mod readiness;
 pub(crate) mod records;
 mod regexes;
