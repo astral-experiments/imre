@@ -83,6 +83,14 @@ assert not hasattr(plain, "__len__")
 plain.__custom__(1)
 plain.__custom__.assert_called_once_with(1)
 
+items = MagicMock()
+items["key"].value = 42
+seal(items)
+assert items[1:3].value == 42
+items.__getitem__.assert_called_with(slice(1, 3))
+assert not hasattr(items["key"], "missing")
+assert not hasattr(other, "__getitem__")
+
 locked = MagicMock(spec=["__iter__"])
 seal(locked)
 with check.assertRaises(AttributeError):
