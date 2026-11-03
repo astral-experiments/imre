@@ -2208,6 +2208,9 @@ impl IntrinsicModule {
             (Self::UrllibRequest, "Request") => {
                 Intrinsic::ScopedObjectExport("urllib.request.Request")
             }
+            (Self::UrllibRequest, "pathname2url") => {
+                Intrinsic::ScopedObjectExport("urllib.request.pathname2url")
+            }
             (Self::UrllibRequest, "urlopen") => {
                 Intrinsic::ScopedObjectExport("urllib.request.urlopen")
             }
