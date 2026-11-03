@@ -8,6 +8,11 @@ def current():
     assert re.compile(rb".*?").findall(b"xyz", 1, 2) == [b"", b"y", b""]
     assert re.compile("").findall("ab", 2, 1) == []
 
+    text = "é\udcff\ue000\ud800"
+    assert re.compile(r"|.").findall(text, 1, 3) == ["", "\udcff", "", "\ue000", ""]
+    assert re.findall(r"(a)?(.)", text) == [("", char) for char in text]
+    assert re.findall("[\udcff\ud800]", text + "\U000f0000") == ["\udcff", "\ud800"]
+
     source = b":x::"
     view = memoryview(source)
     other = memoryview(view)
