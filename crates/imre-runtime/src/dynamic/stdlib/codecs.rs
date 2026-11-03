@@ -531,7 +531,8 @@ fn box_native_entry(ctx: &mut Context, entry: CodecInfo) -> Result<Id> {
         Codec::Latin1 => "latin_1",
         Codec::Utf8 { signature: false } => "utf_8",
         Codec::Utf8 { signature: true } => "utf_8_sig",
-        Codec::CodePage(_) | Codec::ShiftJis => codec.name(),
+        Codec::CodePage(page) => page.module_name,
+        Codec::ShiftJis => codec.name(),
     };
     let module = ctx.module(&format!("encodings.{suffix}"))?;
     // Keep the pending constructor arguments across Python-visible module lookups.

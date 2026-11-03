@@ -14,19 +14,21 @@ use std::sync::LazyLock;
 
 pub(crate) struct CodePage {
     index: usize,
+    pub(crate) module_name: &'static str,
     decode: Charmap,
     encode: HashMap<char, u8>,
 }
 
 impl CodePage {
     /// Reuse the pinned source decoding table in both directions.
-    fn new(index: usize, name: &str) -> Self {
-        let decode = Charmap::named(name).unwrap();
+    fn new(index: usize, module_name: &'static str) -> Self {
+        let decode = Charmap::named(module_name).unwrap();
         let encode = (0..=u8::MAX)
             .filter_map(|byte| decode.decode(byte).map(|ch| (ch, byte)))
             .collect();
         Self {
             index,
+            module_name,
             decode,
             encode,
         }
@@ -36,8 +38,9 @@ impl CodePage {
 static CP1251: LazyLock<CodePage> = LazyLock::new(|| CodePage::new(4, "cp1251"));
 static CP424: LazyLock<CodePage> = LazyLock::new(|| CodePage::new(5, "cp424"));
 static CP437: LazyLock<CodePage> = LazyLock::new(|| CodePage::new(6, "cp437"));
+static KOI8_U: LazyLock<CodePage> = LazyLock::new(|| CodePage::new(8, "koi8_u"));
 
-const CODEC_NAMES: [&str; 8] = [
+const CODEC_NAMES: [&str; 9] = [
     "ascii",
     "iso8859-1",
     "utf-8",
@@ -46,6 +49,7 @@ const CODEC_NAMES: [&str; 8] = [
     "cp424",
     "cp437",
     "shift_jis",
+    "koi8-u",
 ];
 
 thread_local! {
@@ -538,6 +542,7 @@ impl Codec {
             "cp1251" | "1251" | "windows_1251" => Ok(Self::CodePage(&CP1251)),
             "cp424" | "424" | "csibm424" | "ebcdic_cp_he" | "ibm424" => Ok(Self::CodePage(&CP424)),
             "cp437" | "437" | "cspc8codepage437" | "ibm437" => Ok(Self::CodePage(&CP437)),
+            "koi8_u" => Ok(Self::CodePage(&KOI8_U)),
             "latin1" | "latin" | "iso8859" | "latin_1" | "l1" | "iso8859_1" | "iso_8859_1"
             | "iso_8859_1_1987" | "8859" | "cp819" | "ibm819" | "iso_ir_100" | "csisolatin1" => {
                 Ok(Self::Latin1)
