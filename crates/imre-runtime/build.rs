@@ -39,7 +39,8 @@ const struct entry *imre_platform_{table}_entries(size_t *length) {{
     *length = sizeof({table}_entries) / sizeof({table}_entries[0]);
     return {table}_entries;
 }}"#
-    ).unwrap();
+    )
+    .unwrap();
 }
 
 fn add_configuration_queries(c: &mut String) {

@@ -112,7 +112,10 @@ pub(super) fn getgrouplist(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id
     if !matches!(ctx.heap.get(text), Value::Str(_) | Value::SurrogateStr(_)) {
         return Err(Error::new(
             "TypeError",
-            format!("getgrouplist() argument 1 must be str, not {}", ctx.type_name(user)),
+            format!(
+                "getgrouplist() argument 1 must be str, not {}",
+                ctx.type_name(user)
+            ),
         ));
     }
     let user = CString::new(ctx.encode_utf8_codepoints(text, false, "strict")?)
@@ -131,7 +134,10 @@ pub(super) fn getgrouplist(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id
             unsafe { libc::getgrouplist(user.as_ptr(), base, groups.as_mut_ptr(), &mut count) };
         if result >= 0 {
             groups.truncate(count as usize);
-            let values = groups.into_iter().map(|gid| ctx.int(python_gid(gid))).collect();
+            let values = groups
+                .into_iter()
+                .map(|gid| ctx.int(python_gid(gid)))
+                .collect();
             return Ok(ctx.alloc(Value::List(values)));
         }
         // The group database can grow between calls. Some NSS backends leave

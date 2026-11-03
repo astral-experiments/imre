@@ -1,9 +1,13 @@
-"""TLS contexts and blocking, connected sockets using system OpenSSL."""
+"""TLS contexts, blocking sockets and in-memory handshakes using system OpenSSL."""
 
+import errno as _errno
 import io as _io
 import _imre_ssl
 import _ssl
 import os
+import socket as _socket
+import warnings as _warnings
+from operator import index as _index
 from _ssl import MemoryBIO
 from _ssl import OPENSSL_VERSION, OPENSSL_VERSION_INFO, OPENSSL_VERSION_NUMBER
 from _ssl import SSLError, nid2obj as _nid2obj, txt2obj as _txt2obj
@@ -15,6 +19,10 @@ from _ssl import HAS_SNI, HAS_ECDH, HAS_NPN, HAS_ALPN, HAS_PSK, HAS_PHA
 CHANNEL_BINDING_TYPES = ["tls-unique"]
 HAS_NEVER_CHECK_COMMON_NAME = hasattr(_ssl, "HOSTFLAG_NEVER_CHECK_SUBJECT")
 SSL_ERROR_SSL = 1
+SSL_ERROR_WANT_READ = 2
+SSL_ERROR_WANT_WRITE = 3
+SSL_ERROR_ZERO_RETURN = 6
+SSL_ERROR_EOF = 8
 
 
 class TLSVersion(_IntEnum):
@@ -217,6 +225,28 @@ def _call(function, *args):
         raise SSLError(SSL_ERROR_SSL, str(exc)) from None
 
 
+def _check_role(protocol, server_side):
+    if server_side and protocol == PROTOCOL_TLS_CLIENT:
+        raise SSLError(0, "Cannot create a server socket with a PROTOCOL_TLS_CLIENT context")
+    if not server_side and protocol == PROTOCOL_TLS_SERVER:
+        raise SSLError(0, "Cannot create a client socket with a PROTOCOL_TLS_SERVER context")
+
+
+def _raise_verify_error(hostname, code, message):
+    if code == 62:
+        message = "Hostname mismatch, certificate is not valid for '%s'." % hostname
+    elif code == 64:
+        message = "IP address mismatch, certificate is not valid for '%s'." % hostname
+    error = SSLCertVerificationError(
+        SSL_ERROR_SSL, "[SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: " + message
+    )
+    error.verify_code = code
+    error.verify_message = message
+    error.library = "SSL"
+    error.reason = "CERTIFICATE_VERIFY_FAILED"
+    raise error
+
+
 DefaultVerifyPaths = namedtuple("DefaultVerifyPaths",
     "cafile capath openssl_cafile_env openssl_cafile openssl_capath_env "
     "openssl_capath")
@@ -272,40 +302,52 @@ class Purpose(_ASN1Object, _Enum):
 class SSLContext:
     """TLS settings, trusted certificates and local certificate chains."""
 
-    __slots__ = ("_ctx", "_post_handshake_auth")
+    __slots__ = ("_ctx", "_post_handshake_auth", "__dict__")
 
-    def __init__(self, protocol):
+    def __init__(self, protocol=None):
+        if protocol is None:
+            _warnings.warn("ssl.SSLContext() without protocol argument is deprecated.",
+                           DeprecationWarning, stacklevel=2)
+            protocol = PROTOCOL_TLS
+        protocol = _index(protocol)
         if protocol == PROTOCOL_TLS_CLIENT:
             self._ctx = _call(_imre_ssl.context)
         elif protocol == PROTOCOL_TLS_SERVER:
             self._ctx = _call(_imre_ssl.server_context)
+        elif protocol == PROTOCOL_TLS:
+            _warnings.warn("ssl.PROTOCOL_TLS is deprecated", DeprecationWarning, stacklevel=2)
+            self._ctx = _call(_imre_ssl.generic_context)
+        elif protocol in _PROTOCOL_NAMES:
+            raise NotImplementedError("fixed-version SSL contexts are not supported")
+        elif not -(1 << 31) <= protocol < (1 << 31):
+            raise OverflowError("Python int too large to convert to C int")
         else:
-            raise NotImplementedError("only PROTOCOL_TLS_CLIENT and PROTOCOL_TLS_SERVER are supported")
+            raise ValueError("invalid or unsupported protocol version %i" % protocol)
         self._post_handshake_auth = False
 
     @property
     def protocol(self):
-        return PROTOCOL_TLS_SERVER if _imre_ssl.is_server(self._ctx) else PROTOCOL_TLS_CLIENT
+        return _SSLMethod(_imre_ssl.protocol(__class__._ctx.__get__(self)))
 
     @property
     def check_hostname(self):
-        return self.protocol == PROTOCOL_TLS_CLIENT
+        return _imre_ssl.check_hostname(__class__._ctx.__get__(self))
 
     @check_hostname.setter
     def check_hostname(self, enabled):
-        if bool(enabled) != self.check_hostname:
-            raise NotImplementedError("hostname checks are required in client mode and disabled in server mode")
+        if not issubclass(type(self), __class__):
+            _imre_ssl.raise_context_receiver_error("check_hostname", self)
+        _imre_ssl.check_hostname(__class__._ctx.__get__(self), enabled)
 
     @property
     def verify_mode(self):
-        return CERT_REQUIRED if self.check_hostname else CERT_NONE
+        return VerifyMode(_imre_ssl.verify_mode(__class__._ctx.__get__(self)))
 
     @verify_mode.setter
     def verify_mode(self, mode):
-        if mode == CERT_NONE and self.check_hostname:
-            raise ValueError("Cannot set verify_mode to CERT_NONE when check_hostname is enabled.")
-        if mode != self.verify_mode:
-            raise NotImplementedError("only CERT_REQUIRED for clients and CERT_NONE for servers are supported")
+        if not issubclass(type(self), __class__):
+            _imre_ssl.raise_context_receiver_error("verify_mode", self)
+        _imre_ssl.verify_mode(__class__._ctx.__get__(self), mode)
 
     @property
     def options(self):
@@ -351,7 +393,13 @@ class SSLContext:
 
     @property
     def verify_flags(self):
-        return VerifyFlags(_call(_imre_ssl.verify_flags, self._ctx))
+        return VerifyFlags(_call(_imre_ssl.verify_flags, __class__._ctx.__get__(self)))
+
+    @verify_flags.setter
+    def verify_flags(self, value):
+        if not issubclass(type(self), __class__):
+            _imre_ssl.raise_context_receiver_error("verify_flags", self)
+        _call(_imre_ssl.verify_flags, __class__._ctx.__get__(self), value)
 
     @property
     def post_handshake_auth(self):
@@ -362,6 +410,11 @@ class SSLContext:
         enabled = bool(enabled)
         _call(_imre_ssl.set_post_handshake_auth, self._ctx, enabled)
         self._post_handshake_auth = enabled
+
+    def session_stats(self, /):
+        if not issubclass(type(self), __class__):
+            _imre_ssl.raise_context_receiver_error("session_stats", self)
+        return _imre_ssl.session_stats(__class__._ctx.__get__(self))
 
     def cert_store_stats(self, /):
         if not issubclass(type(self), SSLContext):
@@ -387,6 +440,11 @@ class SSLContext:
             wire.extend(encoded)
         _call(_imre_ssl.set_alpn_protocols, self._ctx, bytes(wire))
 
+    def get_ciphers(self, /):
+        if not issubclass(type(self), __class__):
+            _imre_ssl.raise_context_receiver_error("get_ciphers", self)
+        return _call(_imre_ssl.get_ciphers, __class__._ctx.__get__(self))
+
     def set_ciphers(self, cipherlist, /):
         _call(_imre_ssl.set_ciphers, self._ctx, cipherlist)
 
@@ -395,67 +453,193 @@ class SSLContext:
             raise NotImplementedError("load_cert_chain supports unencrypted private keys")
         _call(_imre_ssl.load_cert_chain, self._ctx, certfile, keyfile)
 
-    def load_verify_locations(self, cafile=None, capath=None, cadata=None):
-        if capath is not None or cadata is not None:
-            raise NotImplementedError("only cafile is supported")
-        if cafile is None:
-            raise TypeError("cafile, capath and cadata cannot be all omitted")
-        _call(_imre_ssl.load_verify_locations, self._ctx, cafile)
+    def load_verify_locations(self, /, cafile=None, capath=None, cadata=None):
+        if not issubclass(type(self), __class__):
+            _imre_ssl.raise_context_receiver_error("load_verify_locations", self)
+        result = _call(_imre_ssl.load_verify_locations, __class__._ctx.__get__(self),
+                       cafile, capath, cadata)
+        if result is not None:
+            code, message, library, reason = result
+            error = SSLError(code, message)
+            error.library = library
+            error.reason = reason
+            raise error
+
+    def wrap_bio(self, incoming, outgoing, server_side=False, server_hostname=None, session=None):
+        if server_hostname is not None:
+            if isinstance(server_hostname, str):
+                if not server_hostname.isascii():
+                    raise NotImplementedError("encode internationalized hostnames to IDNA before wrapping the BIO")
+            else:
+                server_hostname = server_hostname.decode("ascii")
+        return self.sslobject_class._create(incoming, outgoing, server_side=server_side,
+                                            server_hostname=server_hostname, session=session, context=self)
 
     def wrap_socket(self, sock, server_side=False, do_handshake_on_connect=True,
                     suppress_ragged_eofs=True, server_hostname=None, session=None):
+        return self.sslsocket_class._create(
+            sock=sock, server_side=server_side, do_handshake_on_connect=do_handshake_on_connect,
+            suppress_ragged_eofs=suppress_ragged_eofs, server_hostname=server_hostname,
+            context=self, session=session,
+        )
+
+
+_TLS_ERRORS = {
+    "WANT_READ": (SSLWantReadError, SSL_ERROR_WANT_READ, "The operation did not complete (read)", None),
+    "WANT_WRITE": (SSLWantWriteError, SSL_ERROR_WANT_WRITE, "The operation did not complete (write)", None),
+    "ZERO_RETURN": (SSLZeroReturnError, SSL_ERROR_ZERO_RETURN, "TLS/SSL connection has been closed (EOF)", None),
+    "EOF": (SSLEOFError, SSL_ERROR_EOF, "EOF occurred in violation of protocol", None),
+    "UNEXPECTED_EOF_WHILE_READING": (SSLEOFError, SSL_ERROR_EOF, "EOF occurred in violation of protocol", "SSL"),
+    "PROTOCOL_IS_SHUTDOWN": (SSLError, SSL_ERROR_SSL, "protocol is shutdown", "SSL"),
+    "SHUTDOWN_WHILE_IN_INIT": (SSLError, SSL_ERROR_SSL, "shutdown while in init", "SSL"),
+}
+
+
+def _tls_result(result, hostname):
+    if isinstance(result, tuple):
+        # Certificate errors carry a numeric verification code, record errors a reason name.
+        reason, message = result
+        if isinstance(reason, int):
+            _raise_verify_error(hostname, reason, message)
+        kind, code, library = SSLError, SSL_ERROR_SSL, "SSL"
+    elif isinstance(result, str):
+        reason = result
+        kind, code, message, library = _TLS_ERRORS[reason]
+    else:
+        return result
+    if library:
+        message = f"[{library}: {reason}] {message}"
+    error = kind(code, message)
+    error.library = library
+    error.reason = reason if library else None
+    raise error
+
+
+class SSLObject:
+    """A TLS connection driven by caller-owned incoming and outgoing memory BIOs."""
+
+    def __init__(self, *args, **kwargs):
+        raise TypeError(f"{self.__class__.__name__} does not have a public constructor. "
+                        "Instances are returned by SSLContext.wrap_bio().")
+
+    @classmethod
+    def _create(cls, incoming, outgoing, server_side=False, server_hostname=None,
+                session=None, context=None):
+        server_side = bool(server_side)
+        native_context = SSLContext._ctx.__get__(context)
+        _check_role(_imre_ssl.protocol(native_context), server_side)
+        if session is not None:
+            raise NotImplementedError("setting a session on a memory BIO is unsupported")
+        self = cls.__new__(cls)
+        self._sslobj = _call(_imre_ssl.wrap_bio, native_context, incoming, outgoing,
+                             server_hostname, server_side)
+        self._context = context
+        self._server_side = server_side
+        self._server_hostname = server_hostname
+        return self
+
+    @property
+    def context(self):
+        return self._context
+
+    @property
+    def server_side(self):
+        return self._server_side
+
+    @property
+    def server_hostname(self):
+        return self._server_hostname
+
+    def _bio_call(self, operation, *args):
+        return _tls_result(_call(operation, self._sslobj, *args), self.server_hostname)
+
+    def read(self, len=1024, buffer=None):
+        """Read up to len decrypted bytes, or return the number read into buffer."""
+        return self._bio_call(_imre_ssl.bio_read, len, buffer)
+
+    def write(self, data):
+        """Write bytes-like data and return the number of plaintext bytes accepted."""
+        return self._bio_call(_imre_ssl.bio_write, data)
+
+    def pending(self):
+        """Return the number of already decrypted bytes available to read."""
+        return self._bio_call(_imre_ssl.bio_pending)
+
+    def getpeercert(self, binary_form=False):
+        """Return the peer certificate as a dictionary or DER bytes, or None if absent."""
+        return _call(_imre_ssl.bio_getpeercert, self._sslobj, binary_form)
+
+    def do_handshake(self):
+        """Advance the handshake, raising SSLWantReadError when more peer data is needed."""
+        self._bio_call(_imre_ssl.bio_handshake)
+
+    def unwrap(self):
+        """Send and receive TLS close notifications through the memory BIOs."""
+        self._bio_call(_imre_ssl.bio_shutdown)
+
+
+SSLContext.sslobject_class = SSLObject
+
+
+class SSLSocket:
+    """Encrypted I/O on a socket returned by SSLContext.wrap_socket()."""
+
+    __slots__ = ("_session", "_context", "_server_hostname", "server_side", "_io_refs", "_closed",
+                 "do_handshake_on_connect", "suppress_ragged_eofs")
+
+    def __new__(cls, *args, **kwargs):
+        # The native wrap call takes ownership of the descriptor after allocation.
+        return object.__new__(cls)
+
+    def __init__(self, *args, **kwargs):
+        raise TypeError("SSLSocket does not have a public constructor. Instances are returned by SSLContext.wrap_socket().")
+
+    @classmethod
+    def _create(cls, sock, server_side=False, do_handshake_on_connect=True,
+                suppress_ragged_eofs=True, server_hostname=None, context=None, session=None):
+        if sock.getsockopt(_socket.SOL_SOCKET, _socket.SO_TYPE) != _socket.SOCK_STREAM:
+            raise NotImplementedError("only stream sockets are supported")
         if server_side and server_hostname is not None:
             raise ValueError("server_hostname can only be specified in client mode")
         if server_side and session is not None:
             raise ValueError("session can only be specified in client mode")
-        if self.check_hostname and not server_hostname:
+        if context.check_hostname and not server_hostname:
             raise ValueError("check_hostname requires server_hostname")
-        if bool(server_side) != (self.protocol == PROTOCOL_TLS_SERVER):
-            if server_side:
-                raise SSLError(0, "Cannot create a server socket with a PROTOCOL_TLS_CLIENT context")
-            raise SSLError(0, "Cannot create a client socket with a PROTOCOL_TLS_SERVER context")
-        if not do_handshake_on_connect or not suppress_ragged_eofs or session is not None:
-            raise NotImplementedError("only a blocking handshake with default session and EOF handling is supported")
-        if not server_side:
+        _check_role(context.protocol, server_side)
+        if not do_handshake_on_connect or session is not None:
+            raise NotImplementedError("only a blocking handshake with the default session is supported")
+        if not server_side and server_hostname is not None:
             if isinstance(server_hostname, bytes):
                 server_hostname = server_hostname.decode("ascii")
             if not isinstance(server_hostname, str):
                 raise TypeError("server_hostname must be a string")
             if not server_hostname.isascii():
                 raise NotImplementedError("encode internationalized hostnames to IDNA before wrapping the socket")
-        result = _call(_imre_ssl.wrap, self._ctx, sock, server_hostname)
-        if isinstance(result, tuple):
-            code, message = result
-            # Match CPython's hostname diagnostics for these X509 verification codes.
-            if code == 62:
-                message = "Hostname mismatch, certificate is not valid for '%s'." % server_hostname
-            elif code == 64:
-                message = "IP address mismatch, certificate is not valid for '%s'." % server_hostname
-            error = SSLCertVerificationError(
-                SSL_ERROR_SSL, "[SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: " + message
-            )
-            error.verify_code = code
-            error.verify_message = message
-            error.library = "SSL"
-            error.reason = "CERTIFICATE_VERIFY_FAILED"
+        peer = cls.__new__(cls, family=sock.family, type=sock.type, proto=sock.proto, fileno=sock.fileno())
+        if not issubclass(type(peer), SSLSocket):
+            raise TypeError("SSLSocket.__new__ must return an SSLSocket instance")
+        result = _call(_imre_ssl.wrap, context._ctx, sock, server_hostname, bool(server_side))
+        if result is None:
+            reason = "Closed before TLS handshake with data in recv buffer."
+            error = SSLError(_errno.ENOTCONN, reason)
+            error.reason = reason
+            error.library = None
             raise error
-        peer = object.__new__(SSLSocket)
-        peer._io_refs = 0
-        peer._closed = False
-        peer._session = result
-        peer._context = self
-        peer._server_hostname = server_hostname
-        peer.server_side = bool(server_side)
+        if isinstance(result, tuple):
+            _raise_verify_error(server_hostname, *result)
+        try:
+            peer._io_refs = 0
+            peer._closed = False
+            peer._session = result
+            peer._context = context
+            peer._server_hostname = server_hostname
+            peer.server_side = bool(server_side)
+            peer.do_handshake_on_connect = do_handshake_on_connect
+            peer.suppress_ragged_eofs = suppress_ragged_eofs
+        except BaseException:
+            _call(_imre_ssl.close, result)
+            raise
         return peer
-
-
-class SSLSocket:
-    """Encrypted I/O on a socket returned by SSLContext.wrap_socket()."""
-
-    __slots__ = ("_session", "_context", "_server_hostname", "server_side", "_io_refs", "_closed")
-
-    def __init__(self, *args, **kwargs):
-        raise TypeError("SSLSocket does not have a public constructor. Instances are returned by SSLContext.wrap_socket().")
 
     @property
     def context(self):
@@ -465,6 +649,31 @@ class SSLSocket:
     def server_hostname(self):
         return self._server_hostname
 
+    def fileno(self):
+        return _imre_ssl.fileno(self._session)
+
+    def getsockname(self):
+        return _imre_ssl.getsockname(self._session)
+
+    def getpeername(self):
+        return _imre_ssl.getpeername(self._session)
+
+    def listen(self, backlog=128, /):
+        return _imre_ssl.listen(self._session, backlog)
+
+    def accept(self):
+        child, address = _imre_ssl.accept(self._session)
+        try:
+            peer = self.context.wrap_socket(
+                child, server_side=True,
+                do_handshake_on_connect=self.do_handshake_on_connect,
+                suppress_ragged_eofs=self.suppress_ragged_eofs,
+            )
+        except BaseException:
+            child.close()
+            raise
+        return peer, address
+
     def get_verified_chain(self):
         """Return the verified certificate chain as a list of DER-encoded certificates."""
         return _call(_imre_ssl.get_verified_chain, self._session)
@@ -473,18 +682,47 @@ class SSLSocket:
         """Return the certificate chain sent by the peer as a list of DER-encoded certificates."""
         return _call(_imre_ssl.get_unverified_chain, self._session)
 
+    def send(self, data, flags=0):
+        if _imre_ssl.is_session(self._session) and flags != 0:
+            raise ValueError("non-zero flags not allowed in calls to send() on %s" % self.__class__)
+        return _call(_imre_ssl.send, self._session, data, flags)
+
     def sendall(self, data, flags=0):
-        if flags:
+        if _imre_ssl.is_session(self._session) and flags:
             raise ValueError("non-zero flags not allowed in calls to sendall() on SSLSocket")
-        return _call(_imre_ssl.sendall, self._session, data)
+        return _call(_imre_ssl.sendall, self._session, data, flags)
+
+    def read(self, len=1024, buffer=None):
+        if not _imre_ssl.is_session(self._session):
+            raise ValueError("Read on closed or unwrapped SSL socket.")
+        try:
+            return _tls_result(_call(_imre_ssl.read, self._session, len, buffer), self.server_hostname)
+        except SSLError as exc:
+            if exc.args[0] == SSL_ERROR_EOF and self.suppress_ragged_eofs:
+                return b"" if buffer is None else 0
+            raise
 
     def recv(self, buflen=1024, flags=0):
-        if flags:
-            raise ValueError("non-zero flags not allowed in calls to recv() on SSLSocket")
-        return _call(_imre_ssl.recv, self._session, buflen)
+        if _imre_ssl.is_session(self._session):
+            if flags:
+                raise ValueError("non-zero flags not allowed in calls to recv() on SSLSocket")
+            return self.read(buflen)
+        return _call(_imre_ssl.recv, self._session, buflen, flags)
+
+    def pending(self):
+        if not _imre_ssl.is_session(self._session):
+            return 0
+        return _tls_result(_call(_imre_ssl.pending, self._session), self.server_hostname)
+
+    def unwrap(self):
+        if not _imre_ssl.is_session(self._session):
+            raise ValueError("No SSL wrapper around " + str(self))
+        _tls_result(_call(_imre_ssl.tls_shutdown, self._session), self.server_hostname)
+        self._session = _imre_ssl.release_session(self._session)
+        return self
 
     def get_channel_binding(self, cb_type="tls-unique"):
-        if self._session is None:
+        if not _imre_ssl.is_session(self._session):
             if cb_type not in CHANNEL_BINDING_TYPES:
                 raise ValueError("{0} channel binding type not implemented".format(cb_type))
             return None
@@ -507,6 +745,10 @@ class SSLSocket:
             raw.close()
             raise
 
+    def shutdown(self, how):
+        self._session = _imre_ssl.release_session(self._session)
+        _imre_ssl.shutdown(self._session, how)
+
     def close(self):
         self._closed = True
         if not self._io_refs and self._session is not None:
@@ -518,6 +760,9 @@ class SSLSocket:
 
     def __exit__(self, exc_type, exc, traceback):
         self.close()
+
+
+SSLContext.sslsocket_class = SSLSocket
 
 
 class _SSLReader(_io.RawIOBase):

@@ -1,9 +1,7 @@
 //! Spawn a waitable Linux child with the caller's ordered POSIX file actions.
-use super::{Context, Error, Id, NONE, Result, audit, builtins, os, posixpath};
-use crate::objects::CStrings;
+use super::{Context, Error, Id, NONE, Result, audit, builtins, os, posixpath, process_arguments};
 
 mod actions;
-mod arguments;
 mod attributes;
 
 /// The os facade copies the current posix namespace, including any reassigned exports.
@@ -88,9 +86,23 @@ pub(super) fn call(
     )?;
     let resetids = resetids.map(|v| ctx.truth(v)).transpose()?.unwrap_or(false);
     let setsid = setsid.map(|v| ctx.truth(v)).transpose()?.unwrap_or(false);
-    let (argv_strings, env_strings) = arguments::arguments(ctx, name, argv, env, scheduler)?;
-    let argv_strings = CStrings::new(argv_strings)?;
-    let env_strings = env_strings.map(CStrings::new).transpose()?;
+    let argc = process_arguments::argv_len(ctx, name, argv)?;
+    if env != NONE && !ctx.has_mapping_subscription(env) {
+        return Err(Error::new(
+            "TypeError",
+            format!("{name}: environment must be a mapping object or None"),
+        ));
+    }
+    if scheduler.is_some_and(|value| value != NONE && !ctx.builtin_slot_accepts(value, "tuple")) {
+        return Err(Error::new(
+            "TypeError",
+            format!("{name}: scheduler must be a tuple or None"),
+        ));
+    }
+    let argv_strings = process_arguments::argv(ctx, name, argv, argc)?;
+    let env_strings = (env != NONE)
+        .then(|| process_arguments::environment(ctx, env))
+        .transpose()?;
     let actions = actions::FileActions::parse(ctx, file_actions.unwrap_or(NONE))?;
     let attributes = attributes::Attributes::new(
         ctx,

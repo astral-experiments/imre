@@ -7,4 +7,6 @@ def current():
     assert saferepr([1, 2, 3]) == '[1, 2, 3]'
     printer = PrettyPrinter(width=12)
     assert printer.pformat(MappingProxyType({'a': 'a' * 10})) == "mappingproxy({'a': 'aaaaaaaaaa'})"
+    path = b"dir \xff file".decode("utf-8", "surrogateescape")
+    assert pformat(path, width=9) == "('dir '\n '\\udcff '\n 'file')"
     return 0

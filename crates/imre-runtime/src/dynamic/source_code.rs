@@ -94,6 +94,16 @@ enum FunctionKind {
 }
 
 impl FunctionKind {
+    fn prelinked(code: &value::CodeObject) -> Self {
+        if code.flags & imre_ast::code_flags::ASYNC_GENERATOR != 0 {
+            Self::AsyncGenerator
+        } else if code.coroutine {
+            Self::Coroutine
+        } else {
+            Self::Generator
+        }
+    }
+
     fn is_async(self) -> bool {
         matches!(self, Self::Coroutine | Self::AsyncGenerator)
     }
@@ -229,19 +239,49 @@ struct Definition {
 }
 
 enum DefinitionKind {
-    TypeAlias(Vec<String>),
+    TypeAlias(Option<Box<ast::TypeParams>>),
     Function(Box<ast::Parameters>),
     Class {
         arguments: Option<Box<ast::Arguments>>,
         parameterized: bool,
     },
-    ClassParameters(Vec<ast::Identifier>),
+    ClassParameters(Box<ast::TypeParams>),
+}
+
+struct EagerComprehension<'a> {
+    kind: &'static str,
+    clauses: &'a [ast::Comprehension],
+    key: Option<&'a ast::Expr>,
+    value: &'a ast::Expr,
+}
+
+impl<'a> EagerComprehension<'a> {
+    fn from_expr(expr: &'a ast::Expr) -> Option<Self> {
+        let (kind, clauses, key, value) = match expr {
+            ast::Expr::ListComp(c) => ("list", &c.generators[..], None, &c.elt),
+            ast::Expr::SetComp(c) => ("set", &c.generators[..], None, &c.elt),
+            ast::Expr::DictComp(c) => {
+                ("dict", &c.generators[..], Some(c.key.as_deref()?), &c.value)
+            }
+            _ => return None,
+        };
+        Some(Self {
+            kind,
+            clauses,
+            key,
+            value,
+        })
+    }
+
+    fn elements(&self) -> impl Iterator<Item = &'a ast::Expr> {
+        self.key.into_iter().chain(std::iter::once(self.value))
+    }
 }
 
 /// Check the expressions executed inline or in a synchronous generator's deferred frame.
-fn synchronous_comprehension(
-    element: &ast::Expr,
-    clauses: &[ast::Comprehension],
+fn synchronous_comprehension<'a>(
+    elements: impl Iterator<Item = &'a ast::Expr>,
+    clauses: &'a [ast::Comprehension],
     deferred: bool,
 ) -> bool {
     use ast::visitor::{self, Visitor};
@@ -251,7 +291,7 @@ fn synchronous_comprehension(
             self.0.push(expr);
         }
     }
-    let mut body = Body(vec![element]);
+    let mut body = Body(elements.collect());
     for (index, clause) in clauses.iter().enumerate() {
         if clause.is_async {
             return false;
@@ -346,16 +386,10 @@ impl<'a> ast::visitor::Visitor<'a> for NamedBindings {
             }
             return;
         }
-        if let ast::Expr::SetComp(ast::ExprSetComp {
-            elt, generators, ..
-        })
-        | ast::Expr::ListComp(ast::ExprListComp {
-            elt, generators, ..
-        }) = expr
-        {
+        if let Some(comp) = EagerComprehension::from_expr(expr) {
             self.comprehensions.push(ComprehensionBindings::default());
             stacker::maybe_grow(128 * 1024, 2 * 1024 * 1024, || {
-                for clause in generators {
+                for clause in comp.clauses {
                     let frame = self
                         .comprehensions
                         .last_mut()
@@ -383,7 +417,9 @@ impl<'a> ast::visitor::Visitor<'a> for NamedBindings {
                     self.visit_expr(&clause.target);
                     self.visit_comprehension(clause);
                 }
-                self.visit_expr(elt);
+                for element in comp.elements() {
+                    self.visit_expr(element);
+                }
             });
             self.comprehensions.pop();
             return;
@@ -893,7 +929,11 @@ impl<'a> CompiledStrings<'a, '_> {
                     continue;
                 }
                 ast::Expr::Generator(genexpr)
-                    if synchronous_comprehension(&genexpr.elt, &genexpr.generators, true) =>
+                    if synchronous_comprehension(
+                        std::iter::once(genexpr.elt.as_ref()),
+                        &genexpr.generators,
+                        true,
+                    ) =>
                 {
                     functions
                         .try_reserve(1)
@@ -902,18 +942,14 @@ impl<'a> CompiledStrings<'a, '_> {
                     self.visit_expr(&genexpr.generators[0].iter);
                     continue;
                 }
-                ast::Expr::SetComp(ast::ExprSetComp {
-                    elt, generators, ..
-                })
-                | ast::Expr::ListComp(ast::ExprListComp {
-                    elt, generators, ..
-                }) => {
+                expr if let Some(comp) = EagerComprehension::from_expr(expr) => {
+                    let generators = comp.clauses;
                     self.visit_expr(&generators[0].iter);
                     let mut names = HashSet::new();
                     for clause in generators {
                         Program::collect_target_names(&clause.target, &mut names)?;
                     }
-                    if synchronous_comprehension(elt, generators, false) {
+                    if synchronous_comprehension(comp.elements(), generators, false) {
                         self.eager_comprehension_targets
                             .insert(expr.range(), names.clone());
                     }
@@ -930,7 +966,9 @@ impl<'a> CompiledStrings<'a, '_> {
                             self.visit_expr(predicate);
                         }
                     }
-                    self.visit_expr(elt);
+                    for element in comp.elements() {
+                        self.visit_expr(element);
+                    }
                     continue;
                 }
                 ast::Expr::FString(formatted) => {
@@ -1259,7 +1297,9 @@ impl Program {
                         Rc::get_mut(&mut definition.body).expect("newly lowered child code");
                     strings.heap.code_name(&definition.binding);
                     if let DefinitionKind::ClassParameters(params) = &definition.kind {
-                        child.locals.extend(params.iter().map(ToString::to_string));
+                        child
+                            .locals
+                            .extend(params.iter().map(|p| p.name().to_string()));
                     }
                     let (roots, reads) =
                         child.prepare_strings(strings.heap, strings.shared, spellings, line_at)?;
@@ -1268,7 +1308,9 @@ impl Program {
                             reads
                                 .iter()
                                 .filter(|name| {
-                                    !params.iter().any(|param| param.as_str() == name.as_str())
+                                    !params
+                                        .iter()
+                                        .any(|param| param.name().as_str() == name.as_str())
                                 })
                                 .cloned(),
                         );
@@ -1597,7 +1639,7 @@ impl Program {
                 if let DefinitionKind::ClassParameters(params) = &definition.kind {
                     child.resolve_directives(
                         &|name| {
-                            if params.iter().any(|p| p.as_str() == name) {
+                            if params.iter().any(|p| p.name().as_str() == name) {
                                 Some(EnclosingBinding::TypeParameter)
                             } else {
                                 bound(name)
@@ -2128,19 +2170,13 @@ impl Program {
                     Instruction::From(module.to_owned(), s.level, names)
                 }
                 Stmt::TypeAlias(s) if !function && self.class_attributes.is_none() => {
-                    let mut parameters = Vec::new();
-                    if let Some(params) = s.type_params {
-                        for param in &*params {
-                            let ast::TypeParam::TypeVar(var) = param else {
-                                return Err(unsupported("variadic type alias parameters"));
-                            };
-                            if var.bound.is_some() || var.default.is_some() {
-                                return Err(unsupported(
-                                    "type alias parameter bounds and defaults",
-                                ));
-                            }
-                            parameters.push(var.name.to_string());
-                        }
+                    if s.type_params.as_deref().is_some_and(|params| {
+                        params.iter().any(|param| {
+                            param.default().is_some()
+                                || matches!(param, ast::TypeParam::TypeVar(var) if var.bound.is_some())
+                        })
+                    }) {
+                        return Err(unsupported("type alias parameter bounds and defaults"));
                     }
                     let ast::Expr::Name(name) = *s.name else {
                         return Err(unsupported("type alias target"));
@@ -2161,7 +2197,7 @@ impl Program {
                         binding: name.to_string(),
                         decorators: Vec::new(),
                         body: Rc::new(child),
-                        kind: DefinitionKind::TypeAlias(parameters),
+                        kind: DefinitionKind::TypeAlias(s.type_params),
                         annotate: None,
                     })
                 }
@@ -2196,12 +2232,6 @@ impl Program {
                     })
                 }
                 Stmt::ClassDef(mut s) => {
-                    if let Some(args) = &s.arguments
-                        && (args.keywords.iter().any(|kw| kw.arg.is_none())
-                            || args.args.iter().any(|a| matches!(a, ast::Expr::Starred(_))))
-                    {
-                        return Err(unsupported("expanded class arguments"));
-                    }
                     let mut child = self.definition_body(&s.name, &s.decorator_list, line, lines);
                     if let Some(names) = &class_names {
                         child.private_names = Some(Rc::clone(names));
@@ -2235,12 +2265,10 @@ impl Program {
                         annotate: None,
                     };
                     if let Some(params) = s.type_params {
-                        let mut parameters = Vec::new();
+                        let mut names = HashSet::new();
                         for param in &*params {
-                            let ast::TypeParam::TypeVar(var) = param else {
-                                return Err(unsupported("variadic class type parameters"));
-                            };
-                            match var.name.as_str() {
+                            let name = param.name();
+                            match name.as_str() {
                                 "__classdict__" => {
                                     return Err(Error::new(
                                         "SyntaxError",
@@ -2255,24 +2283,22 @@ impl Program {
                                 }
                                 _ => {}
                             }
-                            if var.bound.is_some() || var.default.is_some() {
+                            if param.default().is_some()
+                                || matches!(param, ast::TypeParam::TypeVar(var) if var.bound.is_some())
+                            {
                                 return Err(unsupported(
                                     "class type parameter bounds and defaults",
                                 ));
                             }
-                            if parameters
-                                .iter()
-                                .any(|p: &ast::Identifier| p.id == var.name.id)
-                            {
+                            if !names.insert(name.as_str()) {
                                 return Err(Error::new(
                                     "SyntaxError",
                                     format!(
                                         "duplicate type parameter '{}'",
-                                        definition.body.definition_spelling(&var.name)
+                                        definition.body.definition_spelling(name)
                                     ),
                                 ));
                             }
-                            parameters.push(var.name.clone());
                         }
                         // Bases and keywords run in the implicit type-parameter function.
                         // Decorators are evaluated and applied in the enclosing scope.
@@ -2294,7 +2320,7 @@ impl Program {
                             binding: s.name.to_string(),
                             decorators,
                             body: Rc::new(header),
-                            kind: DefinitionKind::ClassParameters(parameters),
+                            kind: DefinitionKind::ClassParameters(params),
                             annotate: None,
                         };
                     }
@@ -2939,15 +2965,15 @@ impl Context {
             return Err(error);
         }
         if let ast::Mod::Module(module) = parsed.syntax()
-            && let Some((expr, message)) = imre_ast::type_alias_error(&module.body)
+            && let Some((range, message)) = imre_ast::type_alias_error(&module.body)
         {
             let position = |offset: ruff_text_size::TextSize| {
                 let offset = offset.to_usize();
                 let line = lines.partition_point(|start| *start <= offset);
                 (line as i64, (offset - lines[line - 1] + 1) as i64)
             };
-            let (line, column) = position(expr.start());
-            let (end_line, end_column) = position(expr.end());
+            let (line, column) = position(range.start());
+            let (end_line, end_column) = position(range.end());
             let msg = self.text(message);
             let line = self.int(line);
             let mut fields = self.syntax_fields(&[msg]);
@@ -3649,8 +3675,7 @@ impl Context {
         let definition = self.code_object(code);
         let kind = match &definition.body {
             Body::Source(program) => program.kind,
-            Body::PendingGenerator { .. } if definition.coroutine => FunctionKind::Coroutine,
-            Body::PendingGenerator { .. } => FunctionKind::Generator,
+            Body::PendingGenerator { .. } => FunctionKind::prelinked(definition),
             Body::Native(_) => unreachable!("source function"),
         };
         if kind != FunctionKind::Plain {
@@ -3730,11 +3755,7 @@ impl Context {
         program.private_names = private_names;
         program.qualname = self.str_value(code.qualname)?.to_owned();
         program.first_line = code.first_line;
-        program.kind = if def.is_async {
-            FunctionKind::Coroutine
-        } else {
-            FunctionKind::Generator
-        };
+        program.kind = FunctionKind::prelinked(code);
         program.lower_namespace(std::mem::take(&mut def.body), &lines, true)?;
         if signature.generator_lambda {
             program.kind = FunctionKind::GeneratorLambda;
@@ -4561,19 +4582,7 @@ impl Context {
                         }
                         SourcePattern::Class(expr) => {
                             let class = eval(self, expr)?;
-                            if !matches!(self.heap.get(class), Value::Class { .. })
-                                && !matches!(
-                                    self.builtin_type_name(class),
-                                    Some("type" | "typing._AnyMeta")
-                                )
-                            {
-                                return Err(Error::new(
-                                    "TypeError",
-                                    "called match pattern must be a class",
-                                ));
-                            }
-                            self.heap.get(subject).instance_class() == Some(class)
-                                || self.python_instance_check(subject, class)?
+                            self.class_pattern_matches(subject, class)?
                         }
                         SourcePattern::Wildcard => true,
                     };
@@ -4971,14 +4980,16 @@ impl Context {
             Instruction::ClassStart => {
                 self.enable_class_annotation_provider(scope);
                 // Only postponed annotations need a visible mapping from the start of the suite.
-                if !code.postponed_annotations {
+                if !code.postponed_annotations
+                    && self.scope_data(scope).class_body_mapping().is_none()
+                {
                     let key = self.heap.code_name("__annotations__");
                     self.remove_binding(scope, "__annotations__", key)?;
                 }
                 let first = self.int(i64::from(code.first_line));
-                self.bind(scope, "__firstlineno__", first);
+                self.store_class_metadata(scope, "__firstlineno__", first)?;
                 if let Some(doc) = code.doc {
-                    self.bind(scope, "__doc__", code.literals[&doc]);
+                    self.store_class_metadata(scope, "__doc__", code.literals[&doc])?;
                 }
             }
             Instruction::ClassEnd => {
@@ -5030,13 +5041,23 @@ impl Context {
         let mut alias_parameters = NONE;
         let mut bases = None;
         let sig = match &definition.kind {
-            DefinitionKind::TypeAlias(names) => {
-                if !names.is_empty() {
-                    let entries = names
+            DefinitionKind::TypeAlias(params) => {
+                if let Some(params) = params {
+                    let entries = params
                         .iter()
-                        .map(|name| {
-                            let id = self.heap.code_name(name);
-                            (id, id)
+                        .map(|param| {
+                            let binding = self.heap.code_name(param.name().as_str());
+                            let name = self.heap.code_name(child.definition_spelling(param.name()));
+                            let declaration = match param {
+                                ast::TypeParam::TypeVar(_) => name,
+                                ast::TypeParam::TypeVarTuple(_) => {
+                                    super::typing::declared_pack(self, name)
+                                }
+                                ast::TypeParam::ParamSpec(_) => {
+                                    super::paramspec::declared(self, name)
+                                }
+                            };
+                            (binding, declaration)
                         })
                         .collect();
                     let names = self.dict(entries);
@@ -5061,23 +5082,27 @@ impl Context {
                 let mut values = Vec::new();
                 let mut keywords = Vec::new();
                 if let Some(args) = args {
-                    for expression in &args.args {
-                        let base = eval(self, expression)?;
-                        self.heap.keep(base);
-                        values.push(base);
-                    }
-                    for keyword in &args.keywords {
-                        let name = keyword.arg.as_ref().expect("validated class keyword");
-                        let value = eval(self, &keyword.value)?;
-                        self.heap.keep(value);
-                        keywords.push((name.to_string(), value));
+                    values = self.source_sequence_items(code, scope, &args.args)?;
+                    if !args.keywords.is_empty() {
+                        let mapping =
+                            self.source_keyword_mapping(code, scope, None, &args.keywords)?;
+                        keywords = self.keyword_args(mapping)?;
                     }
                 }
                 if *parameterized {
                     values.push(self.lookup(defining_scope, ".generic_base")?);
                 }
                 bases = Some((self.alloc(Value::List(values)), keywords, *parameterized));
+                let declared = |kind| {
+                    child
+                        .directives
+                        .iter()
+                        .filter_map(|(name, (directive, _))| (*directive == kind).then_some(name))
+                        .collect::<BTreeSet<_>>()
+                };
                 serde_json::json!({
+                    "class_globals": declared(ScopeDirective::Global),
+                    "scope_nonlocals": declared(ScopeDirective::Nonlocal),
                     "needs_class_cell": child.needs_class_cell,
                     "needs_dict_cell": child.needs_dict_cell,
                     "postponed_annotations": child.postponed_annotations,
@@ -5154,11 +5179,14 @@ impl Context {
             let entries = params
                 .iter()
                 .map(|param| {
-                    let name = child.definition_spelling(param);
-                    (
-                        self.heap.code_name(param.as_str()),
-                        self.heap.code_name(name),
-                    )
+                    let binding = self.heap.code_name(param.name().as_str());
+                    let name = self.heap.code_name(child.definition_spelling(param.name()));
+                    let declaration = match param {
+                        ast::TypeParam::TypeVar(_) => name,
+                        ast::TypeParam::TypeVarTuple(_) => super::typing::declared_pack(self, name),
+                        ast::TypeParam::ParamSpec(_) => super::paramspec::declared(self, name),
+                    };
+                    (binding, declaration)
                 })
                 .collect();
             let names = self.dict(entries);
@@ -5436,7 +5464,7 @@ impl Context {
         &mut self,
         code: &Program,
         scope: Id,
-        callable: Id,
+        callable: Option<Id>,
         keywords: &[ast::Keyword],
     ) -> Result<Id> {
         let merged = self.dict(Vec::new());
@@ -5457,7 +5485,11 @@ impl Context {
                 }
                 named
             };
-            self.op("keywords", merged, mapping, callable)?;
+            self.merge_mapping(
+                merged,
+                mapping,
+                super::calls::MappingOperation::Keywords(callable),
+            )?;
         }
         Ok(merged)
     }
@@ -5566,7 +5598,10 @@ impl Context {
                     && self.slot(iterable, "__getitem__").is_none() =>
             {
                 let prefix = if let Some(callable) = sole_star_callable {
-                    format!("{} argument after *", self.keyword_callable(callable)?)
+                    format!(
+                        "{} argument after *",
+                        self.keyword_callable(Some(callable))?
+                    )
                 } else {
                     "Value after *".into()
                 };
@@ -5619,16 +5654,15 @@ impl Context {
         &mut self,
         code: &Program,
         parent: Id,
-        element: &ast::Expr,
-        clauses: &[ast::Comprehension],
-        kind: &str,
+        comp: EagerComprehension<'_>,
         targets: &HashSet<String>,
     ) -> Result<Id> {
         let mark = self.heap.temporary_mark();
         let result = (|| -> Result<Id> {
+            let clauses = comp.clauses;
             let first = self.source_comprehension_iterator(code, parent, &clauses[0].iter)?;
             let scope = self.comprehension_scope_with_targets(parent, targets.clone());
-            let collection = self.op(kind, NONE, NONE, NONE)?;
+            let collection = self.op(comp.kind, NONE, NONE, NONE)?;
             // Each mark preserves the iterator and persistent roots of all outer clauses.
             let mut levels = Vec::new();
             levels
@@ -5652,9 +5686,13 @@ impl Context {
                 if let Some(next) = clauses.get(levels.len()) {
                     let inner = self.source_comprehension_iterator(code, scope, &next.iter)?;
                     levels.push((inner, self.heap.temporary_mark()));
+                } else if let Some(key) = comp.key {
+                    let key = self.source_expr(code, scope, key)?;
+                    let value = self.source_expr(code, scope, comp.value)?;
+                    self.put_item(collection, key, value)?;
                 } else {
-                    let element = self.source_expr(code, scope, element)?;
-                    self.op("append", collection, element, NONE)?;
+                    let value = self.source_expr(code, scope, comp.value)?;
+                    self.op("append", collection, value, NONE)?;
                 }
             }
             Ok(collection)
@@ -5814,18 +5852,10 @@ impl Context {
                     .heap
                     .packed_tuple(items, v.elts.iter().all(imre_ast::literal_tuple_element)))
             }
-            ast::Expr::SetComp(ast::ExprSetComp {
-                elt, generators, ..
-            })
-            | ast::Expr::ListComp(ast::ExprListComp {
-                elt, generators, ..
-            }) if let Some(targets) = code.eager_comprehension_targets.get(&expr.range()) => {
-                let kind = if matches!(expr, Expr::ListComp(_)) {
-                    "list"
-                } else {
-                    "set"
-                };
-                self.source_eager_comprehension(code, scope, elt, generators, kind, targets)
+            expr if let Some(targets) = code.eager_comprehension_targets.get(&expr.range())
+                && let Some(comp) = EagerComprehension::from_expr(expr) =>
+            {
+                self.source_eager_comprehension(code, scope, comp, targets)
             }
             Expr::Set(display) => self.source_set_display(code, scope, &display.elts),
             Expr::Dict(v) => {
@@ -5909,7 +5939,7 @@ impl Context {
                 let keywords = &v.arguments.keywords;
                 let mut kwargs = Vec::new();
                 let mapping = if keywords.iter().any(|item| item.arg.is_none()) {
-                    Some(self.source_keyword_mapping(code, scope, f, keywords)?)
+                    Some(self.source_keyword_mapping(code, scope, Some(f), keywords)?)
                 } else {
                     for item in keywords {
                         let key = item.arg.as_ref().expect("named keyword");

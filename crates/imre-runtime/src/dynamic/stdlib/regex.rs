@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::cell::OnceCell;
 use std::fmt::Write;
 use std::rc::Rc;
@@ -498,7 +499,8 @@ fn raw_pattern(pattern: &str, ascii: bool, flags: i64) -> Option<(String, bool, 
             }
             // The regular backend reads a possessive modifier as another repetition.
             // Ask the Python tokenizer to bind it to its operand.
-            prefer_backtracking |= !in_class && matches!(c, '*' | '+' | '?') && chars.peek() == Some(&'+');
+            prefer_backtracking |=
+                !in_class && matches!(c, '*' | '+' | '?') && chars.peek() == Some(&'+');
             if c == '{' && !in_class {
                 if !imre_regex::starts_counted_repeat(chars.clone()) {
                     prefer_translation = true;
@@ -591,7 +593,6 @@ fn raw_pattern(pattern: &str, ascii: bool, flags: i64) -> Option<(String, bool, 
 /// Report offsets in the user's spelling before byte escaping, case folding or verbose translation.
 fn syntax_diagnostic(ctx: &Context, source: Id, flags: i64) -> Option<(String, usize)> {
     use regex_syntax::ast::{ErrorKind, parse::ParserBuilder};
-    use std::borrow::Cow;
 
     let text: Cow<'_, str> = match ctx.heap.get(ctx.scalar_value(source)) {
         // Preserve one parser position per original Python code point.
@@ -605,7 +606,11 @@ fn syntax_diagnostic(ctx: &Context, source: Id, flags: i64) -> Option<(String, u
         _ => Cow::Borrowed(ctx.str_value(source).ok()?),
     };
     let bytes = matches!(ctx.heap.get(ctx.scalar_value(source)), Value::Bytes(_));
-    let normalized = match escapes::normalize(&text, bytes, flags, true) {
+    let points = match ctx.heap.get(ctx.scalar_value(source)) {
+        Value::SurrogateStr(points) => Some(points.as_slice()),
+        _ => None,
+    };
+    let normalized = match escapes::normalize(&text, bytes, flags, true, points) {
         Ok(normalized) => normalized,
         Err(error) => return Some(error),
     };
@@ -617,15 +622,7 @@ fn syntax_diagnostic(ctx: &Context, source: Id, flags: i64) -> Option<(String, u
         .ignore_whitespace(flags & VERBOSE != 0)
         .build()
         .parse(text);
-    if let Some((message, at)) = group_names::diagnostic(
-        text,
-        bytes,
-        match ctx.heap.get(ctx.scalar_value(source)) {
-            Value::SurrogateStr(points) => Some(points),
-            _ => None,
-        },
-        &parsed,
-    ) {
+    if let Some((message, at)) = group_names::diagnostic(text, bytes, points, position, &parsed) {
         return Some((message, position(at)));
     }
     if let Some((msg, at)) = imre_regex::repeat_diagnostic(text, flags & VERBOSE != 0) {
@@ -953,7 +950,9 @@ fn compile_uncached(ctx: &mut Context, id: Id, flags: Option<Id>) -> Result<Id> 
         Err(message) => {
             let may_reference = spelling.windows(3).any(|w| w == b"(?(")
                 || spelling.windows(4).any(|w| w == b"(?P=")
-                || spelling.windows(2).any(|w| w[0] == b'\\' && matches!(w[1], b'1'..=b'9'));
+                || spelling
+                    .windows(2)
+                    .any(|w| w[0] == b'\\' && matches!(w[1], b'1'..=b'9'));
             if may_reference
                 && let Some((msg, offset)) = imre_regex::group_reference_diagnostic(
                     &flags::original_spelling(spelling, bytes),
@@ -967,7 +966,9 @@ fn compile_uncached(ctx: &mut Context, id: Id, flags: Option<Id>) -> Result<Id> 
                 )
             {
                 let original = pattern_spelling(ctx, id, &projections)?;
-                let start = flags::original_spelling(&original[..parsed.skip], bytes).chars().count();
+                let start = flags::original_spelling(&original[..parsed.skip], bytes)
+                    .chars()
+                    .count();
                 return Err(pattern_error_at(ctx, id, msg, Some(start + offset)));
             }
             return Err(pattern_error(ctx, id, flags, message));
@@ -987,12 +988,7 @@ fn compile_uncached(ctx: &mut Context, id: Id, flags: Option<Id>) -> Result<Id> 
         }
     }
     if let Some(bad) = parsed.deferred {
-        return Err(pattern_error_at(
-            ctx,
-            id,
-            bad.error.0,
-            Some(bad.error.1),
-        ));
+        return Err(pattern_error_at(ctx, id, bad.error.0, Some(bad.error.1)));
     }
     let mut pattern = if let Some((plain, _)) = projections {
         // A surrogate inside a leading comment has a different byte width in the
@@ -1115,7 +1111,7 @@ fn prepare(
             .expect("text pattern")
             .to_owned()
     };
-    let source = match escapes::normalize(&source, bytes, flags, false) {
+    let source = match escapes::normalize(&source, bytes, flags, false, None) {
         Ok(Some(names)) => names.text,
         Ok(None) => source,
         Err((message, _)) => return Err(message),
@@ -1147,48 +1143,49 @@ fn prepare(
         Some(pattern) => raw_pattern(pattern, ascii, flags & !VERBOSE),
         None => raw_pattern(&source, ascii, flags),
     };
-    let prepared =
-        if let Some((raw, prefer_translation, prefer_backtracking)) = raw {
-            let original = || {
-                if let Some((msg, _)) = imre_regex::repeat_diagnostic(&source, flags & VERBOSE != 0) {
-                    return Err(msg.to_owned());
-                }
-                let raw = imre_regex::preserve_zero_repeat_groups(raw)?;
-                if flags & IGNORECASE != 0 && !bytes {
-                    build(imre_regex::expand_case(&raw, ascii)?)
-                } else {
-                    build(raw)
-                }
-            };
-            let committed = prefer_backtracking.then(|| backtrack(String::new()).ok()).flatten();
-            match committed {
-                Some((source, Matcher::Lookahead(matcher))) if matcher.total_close_order() => {
-                    Ok((source, Matcher::Lookahead(matcher)))
-                }
-                fallback => {
-                    // Preserve the regular matcher's winning close trace when a repeated
-                    // capture has no fixed syntax order. The committed VM can still
-                    // handle such a pattern when the regular engine cannot compile it.
-                    let regular = if prefer_translation || inline_verbose {
-                        translate(&source)
-                            .and_then(build)
-                            .or_else(|err| {
-                                if fallback.is_some() {
-                                    Err(err)
-                                } else {
-                                    backtrack(err)
-                                }
-                            })
-                            .or_else(|_| original())
-                    } else {
-                        original()
-                    };
-                    regular.or_else(|err| fallback.ok_or(err))
-                }
+    let prepared = if let Some((raw, prefer_translation, prefer_backtracking)) = raw {
+        let original = || {
+            if let Some((msg, _)) = imre_regex::repeat_diagnostic(&source, flags & VERBOSE != 0) {
+                return Err(msg.to_owned());
             }
-        } else {
-            translate(&source).and_then(build)
+            let raw = imre_regex::preserve_zero_repeat_groups(raw)?;
+            if flags & IGNORECASE != 0 && !bytes {
+                build(imre_regex::expand_case(&raw, ascii)?)
+            } else {
+                build(raw)
+            }
         };
+        let committed = prefer_backtracking
+            .then(|| backtrack(String::new()).ok())
+            .flatten();
+        match committed {
+            Some((source, Matcher::Lookahead(matcher))) if matcher.total_close_order() => {
+                Ok((source, Matcher::Lookahead(matcher)))
+            }
+            fallback => {
+                // Preserve the regular matcher's winning close trace when a repeated
+                // capture has no fixed syntax order. The committed VM can still
+                // handle such a pattern when the regular engine cannot compile it.
+                let regular = if prefer_translation || inline_verbose {
+                    translate(&source)
+                        .and_then(build)
+                        .or_else(|err| {
+                            if fallback.is_some() {
+                                Err(err)
+                            } else {
+                                backtrack(err)
+                            }
+                        })
+                        .or_else(|_| original())
+                } else {
+                    original()
+                };
+                regular.or_else(|err| fallback.ok_or(err))
+            }
+        }
+    } else {
+        translate(&source).and_then(build)
+    };
     let prepared = match prepared {
         Err(original)
             if !bytes
@@ -1583,13 +1580,28 @@ fn subject_bytes(ctx: &Context, id: Id, bytes: bool) -> Result<&[u8]> {
     if !matches!(value, Value::Str(_) | Value::SurrogateStr(_)) {
         ctx.check_buffer_exporter(id)?;
     }
+    let bad_subject = |_| {
+        let name = match ctx.heap.get(id) {
+            Value::Native(_) => ctx
+                .builtin_type_name(id)
+                .and_then(|name| name.rsplit('.').next())
+                .unwrap_or_else(|| ctx.type_name(id)),
+            _ => ctx.type_name(id),
+        };
+        Error::new(
+            "TypeError",
+            format!(
+                "expected string or bytes-like object, got '{}'",
+                &name[..name.floor_char_boundary(200)]
+            ),
+        )
+    };
     match value {
-        Value::Bytes(_)
-        | Value::ByteArray(_)
-        | Value::Array(_)
-        | Value::MemoryView { owner: Some(_), .. } => {
+        Value::Bytes(_) | Value::ByteArray(_) | Value::Array(_) | Value::MemoryView { .. } => {
+            // SRE acquires a simple buffer before checking the pattern's type.
+            let data = ctx.native_buffer_bytes(id).map_err(bad_subject)?;
             if bytes {
-                return ctx.native_buffer_bytes(id);
+                return Ok(data);
             }
             Err(Error::new(
                 "TypeError",
@@ -1600,22 +1612,7 @@ fn subject_bytes(ctx: &Context, id: Id, bytes: bool) -> Result<&[u8]> {
             "TypeError",
             "cannot use a bytes pattern on a string-like object",
         )),
-        _ => ctx.str_value(id).map(str::as_bytes).map_err(|_| {
-            let name = match ctx.heap.get(id) {
-                Value::Native(_) => ctx
-                    .builtin_type_name(id)
-                    .and_then(|name| name.rsplit('.').next())
-                    .unwrap_or_else(|| ctx.type_name(id)),
-                _ => ctx.type_name(id),
-            };
-            Error::new(
-                "TypeError",
-                format!(
-                    "expected string or bytes-like object, got '{}'",
-                    &name[..name.floor_char_boundary(200)]
-                ),
-            )
-        }),
+        _ => ctx.str_value(id).map(str::as_bytes).map_err(bad_subject),
     }
 }
 
@@ -1749,8 +1746,11 @@ pub(super) fn search(
         let mut captures = pattern.regex.create_captures();
         return match split::next_span(pattern, text, start, None, &mut captures) {
             Ok(Some(first)) => {
-                let text = text.to_vec();
-                findall(ctx, pattern, &text, first, &mut captures)
+                let snapshot = match &subject.projection {
+                    Some(p) => Cow::Borrowed(&p.text.as_bytes()[..end]),
+                    None => Cow::Owned(text.to_vec()),
+                };
+                findall(ctx, pattern, &subject, &snapshot, first, &mut captures)
             }
             Ok(None) => Ok(ctx.alloc(Value::List(Vec::new()))),
             Err(message) => Err(pattern.match_error(ctx, message)),
@@ -1856,28 +1856,34 @@ pub(super) fn match_method(ctx: &mut Context, name: &str, args: &[Id]) -> Result
 fn findall(
     ctx: &mut Context,
     pattern: &Pattern,
+    subject: &SearchSubject,
     text: &[u8],
     mut span: Span,
     captures: &mut Captures,
 ) -> Result<Id> {
+    let capture = |ctx: &mut Context, field: Option<Span>| {
+        let span = field.unwrap_or_else(|| Span::from(0..0));
+        if subject.projection.is_some() {
+            subject.slice(ctx, span)
+        } else {
+            Ok(ctx.alloc(group_value(&text[span.range()], pattern.bytes)))
+        }
+    };
     let mut found = Vec::new();
     loop {
-        let fields: Vec<_> = group_spans(captures)
-            .map(|span| span.map(|s| &text[s.range()]))
-            .collect();
+        let fields: Vec<_> = group_spans(captures).collect();
         let value = match fields.as_slice() {
-            [complete] => group_value(complete.unwrap_or_default(), pattern.bytes),
-            [_, one] => group_value(one.unwrap_or_default(), pattern.bytes),
+            [one] | [_, one] => capture(ctx, *one)?,
             [_, groups @ ..] => {
                 let values = groups
                     .iter()
-                    .map(|s| ctx.alloc(group_value(s.unwrap_or_default(), pattern.bytes)))
-                    .collect();
-                Value::Tuple(values)
+                    .map(|&s| capture(ctx, s))
+                    .collect::<Result<_>>()?;
+                ctx.alloc(Value::Tuple(values))
             }
             [] => unreachable!("every regex has an overall match"),
         };
-        found.push(ctx.alloc(value));
+        found.push(value);
         let Some(next) = split::next_span(pattern, text, span.end, Some(span), captures)
             .map_err(|message| pattern.match_error(ctx, message))?
         else {

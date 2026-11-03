@@ -1,6 +1,6 @@
 //! Linux scatter reads and gather writes over exported buffers.
 
-use super::{Context, Error, Id, Result, Value};
+use super::{Context, Error, Id, Result, Value, is_sequence};
 use std::{
     collections::{HashMap, TryReserveError, hash_map::Entry},
     ops::Range,
@@ -8,25 +8,6 @@ use std::{
 
 fn no_memory(_: TryReserveError) -> Error {
     Error::new("MemoryError", "")
-}
-
-fn is_sequence(ctx: &Context, id: Id) -> bool {
-    // PySequence_Check excludes dict subclasses even if they override __getitem__.
-    ctx.dict_storage(id).is_none()
-        && (matches!(
-            ctx.heap.get(ctx.scalar_value(id)),
-            Value::List(_)
-                | Value::Tuple(_)
-                | Value::NamedTuple { .. }
-                | Value::Range(_)
-                | Value::Deque(_)
-                | Value::Str(_)
-                | Value::SurrogateStr(_)
-                | Value::Bytes(_)
-                | Value::ByteArray(_)
-                | Value::Array(_)
-                | Value::MemoryView { .. }
-        ) || ctx.slot(id, "__getitem__").is_some())
 }
 
 fn buffer_span(ctx: &Context, id: Id, writable: bool) -> Result<(Id, Range<usize>)> {
@@ -81,11 +62,13 @@ fn positioned_v2(write: bool) -> Option<PositionedV2> {
         } else {
             return None;
         };
-        // SAFETY: each of the selected libc symbols has the declared C ABI.
+        // SAFETY: RTLD_DEFAULT is a valid lookup handle and name is a static C string.
         let symbol = unsafe { libc::dlsym(libc::RTLD_DEFAULT, name.as_ptr()) };
         if symbol.is_null() {
             None
         } else {
+            // SAFETY: the non-null preadv2/pwritev2 symbol has the PositionedV2 C ABI.
+            // The large-file symbols take a 64-bit offset, as do the regular ones selected above.
             Some(unsafe { std::mem::transmute::<*mut libc::c_void, PositionedV2>(symbol) })
         }
     })

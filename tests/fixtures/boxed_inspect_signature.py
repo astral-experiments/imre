@@ -3,7 +3,7 @@ import inspect
 import warnings
 from annotationlib import Format
 from functools import Placeholder, partial, partialmethod, update_wrapper
-from inspect import Parameter, Signature
+from inspect import FullArgSpec, Parameter, Signature, getfullargspec
 
 
 def omitted(value=inspect._sentinel):
@@ -16,6 +16,10 @@ def original(a, /, b: int = 3, *args, flag=False, **kwargs) -> str:
 
 def annotated(value: "Element") -> "Element":
     return value
+
+
+def deferred(value: MissingAnnotation) -> int:
+    pass
 
 
 def with_options(a, b, *args, flag=False):
@@ -127,6 +131,10 @@ class DescriptorInit:
     __init__ = InitDescriptor()
 
 
+def documented(*args, **kwargs):
+    pass
+
+
 proxy = FunctionProxy(original)
 assert inspect.signature(proxy) == inspect.signature(original)
 proxy.__defaults__ = (5,)
@@ -141,6 +149,13 @@ proxy.__annotations__ = {}
 assert str(inspect.signature(proxy)) == "()"
 del proxy.__defaults__
 assert str(inspect.signature(proxy)) == "(*args, **kwargs)"
+
+string_sig = inspect.signature(deferred, annotation_format=Format.STRING)
+assert string_sig.parameters["value"].annotation == "MissingAnnotation"
+assert string_sig.return_annotation == "int"
+forward_sig = Signature.from_callable(deferred, annotation_format=Format.FORWARDREF)
+assert forward_sig.parameters["value"].annotation.__forward_arg__ == "MissingAnnotation"
+assert forward_sig.return_annotation is int
 
 assert inspect.signature(annotated).parameters["value"].annotation == "Element"
 resolved = Signature.from_callable(
@@ -164,10 +179,21 @@ else:
 target = CallableInstance()
 target.__call__ = lambda shadow: None
 assert str(inspect.signature(target)) == "(item, /, *, count=1)"
+target.__text_signature__ = "(value, /, *, width=80)"
+assert str(inspect.signature(target)) == "(value, /, *, width=80)"
+target.__text_signature__ = ""
+assert str(inspect.signature(target)) == "(item, /, *, count=1)"
 assert str(inspect.signature(StaticCall())) == "(first, second)"
 assert str(inspect.signature(ClassCall())) == "(item)"
 
 update_wrapper(wrapper, original)
+spec = inspect.getfullargspec(original)
+assert type(spec) is FullArgSpec
+assert spec == FullArgSpec(["a", "b"], "args", "kwargs", (3,), ["flag"], {"flag": False},
+                           {"b": int, "return": str})
+assert getfullargspec(wrapper).varargs == "values"
+assert getfullargspec(C().method).args == ["self", "value"]
+assert getfullargspec(partial(C().method, b"x")).args == ["value"]
 sig = Signature.from_callable(wrapper)
 assert type(sig.parameters.copy()) is OrderedDict
 print(str(sig), sig.return_annotation is str)
@@ -248,3 +274,32 @@ assert str(inspect.signature(partial(with_options, Placeholder, 2))) == "(a, /, 
 assert str(inspect.signature(PartialMethods.with_hole)) == "(receiver, value, /)"
 assert str(inspect.signature(PartialMethods().with_hole)) == "(value, /)"
 assert str(inspect.signature(PartialMethods.variadic)) == "(*args)"
+
+
+bound = object.__init__.__get__
+raw = type(object.__init__).__get__
+assert bound.__text_signature__ == raw.__text_signature__ == "($self, instance, owner=None, /)"
+assert str(Signature.from_callable(raw)) == "(self, instance, owner=None, /)"
+sig = inspect.signature(bound)
+assert str(sig) == "(instance, owner=None, /)"
+assert getfullargspec(bound) == getfullargspec(raw) == FullArgSpec(
+    ["self", "instance", "owner"], None, None, (None,), [], None, {}
+)
+assert sig.parameters["owner"].default is None
+assert sig.parameters["instance"].kind is Parameter.POSITIONAL_ONLY
+
+assert str(inspect.signature(object.__init__)) == "(self, /, *args, **kwargs)"
+assert str(inspect.signature(object().__init__)) == "(*args, **kwargs)"
+
+documented.__self__ = object()
+documented.__text_signature__ = "($self, /, value, *, retries=1)"
+assert str(inspect.signature(documented, annotation_format=Format.STRING)) == "(value, *, retries=1)"
+assert inspect.getfullargspec(documented).args == ["self", "value"]
+
+documented.__text_signature__ = "(self, 123)"
+try:
+    inspect.signature(documented)
+except ValueError:
+    pass
+else:
+    raise AssertionError("invalid function text signature was accepted")

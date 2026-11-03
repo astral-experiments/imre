@@ -34,8 +34,9 @@ pub(in crate::dynamic::stdlib) fn call(
     if name == "sched_getparam" {
         let pid = builtins::one_positional_arg("posix.sched_getparam", args, kwargs)?;
         let pid = os::c_int(ctx, pid)?;
-        // SAFETY: sched_getparam writes to an exclusively owned C struct only for this call.
+        // SAFETY: zero is valid for the integer fields of Linux sched_param.
         let mut param = unsafe { std::mem::zeroed::<libc::sched_param>() };
+        // SAFETY: param is an aligned, writable sched_param borrowed exclusively for this call.
         if unsafe { libc::sched_getparam(pid, &mut param) } < 0 {
             return Err(crate::objects::errno_error(std::io::Error::last_os_error()).into());
         }

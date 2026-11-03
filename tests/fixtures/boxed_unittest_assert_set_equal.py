@@ -39,3 +39,18 @@ def current():
     routed.assertEqual({0}, frozenset({0}), "mixed")
     routed.assertEqual(Other([0]), Other([0]), "subclass")
     assert calls == ["set", "frozen"]
+
+    def compare(first, second, *, msg):
+        calls.append((first, second, msg))
+        return False
+
+    first, second = Other([0]), Other([1])
+    routed.addTypeEqualityFunc(Other, compare)
+    assert routed.assertEqual(first, second, "custom") is None
+    assert calls[-1] == (first, second, "custom")
+    with case.assertRaises(AssertionError):
+        case.assertEqual(first, second)
+
+    routed.addTypeEqualityFunc(Other, "assertSetEqual")
+    routed.assertEqual(first, second)
+    assert calls[-1] is None

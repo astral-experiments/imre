@@ -7,12 +7,13 @@ pub(in crate::dynamic) enum EnumKind {
     Integer,
     String,
     IntFlag,
+    Flag,
 }
 
 impl EnumKind {
     pub(in crate::dynamic) fn scalar_base(self) -> Option<&'static str> {
         match self {
-            Self::Plain => None,
+            Self::Plain | Self::Flag => None,
             Self::Integer => Some("enum.IntEnum"),
             Self::String => Some("enum.StrEnum"),
             Self::IntFlag => Some("enum.IntFlag"),
@@ -34,6 +35,7 @@ impl Context {
         let (base, kind) = bases.iter().rev().find_map(|&base| {
             [
                 ("enum.IntFlag", EnumKind::IntFlag),
+                ("enum.Flag", EnumKind::Flag),
                 ("enum.IntEnum", EnumKind::Integer),
                 ("enum.StrEnum", EnumKind::String),
                 ("enum.Enum", EnumKind::Plain),
@@ -178,9 +180,9 @@ impl Context {
                 self.call(generator, vec![name, start, count, history], Vec::new())?
             } else if kind == EnumKind::String {
                 self.text(name.to_lowercase())
-            } else if empty || (kind == EnumKind::IntFlag && count == 0) {
+            } else if empty || (matches!(kind, EnumKind::Flag | EnumKind::IntFlag) && count == 0) {
                 start
-            } else if kind == EnumKind::IntFlag {
+            } else if matches!(kind, EnumKind::Flag | EnumKind::IntFlag) {
                 let mut values = self.items(history)?.into_iter();
                 let mut highest = values.next().unwrap();
                 for value in values {

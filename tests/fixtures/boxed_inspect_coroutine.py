@@ -1,7 +1,9 @@
+import collections
 import inspect
-from functools import partial, update_wrapper
+import types
+from functools import partial, partialmethod, update_wrapper
 from inspect import CO_ASYNC_GENERATOR, CO_COROUTINE, CO_GENERATOR
-from inspect import cleandoc, iscoroutinefunction, markcoroutinefunction
+from inspect import cleandoc, isawaitable, iscoroutinefunction, markcoroutinefunction
 
 
 assert inspect.cleandoc is cleandoc
@@ -37,6 +39,9 @@ class Views:
     async def deferred(self):
         pass
 
+    deferred_partial = partialmethod(deferred)
+    sync_partial = partialmethod(sync)
+
     async def __call__(self):
         pass
 
@@ -48,11 +53,17 @@ def make():
 
 
 views = Views()
+assert iscoroutinefunction(Views.deferred_partial)
+assert iscoroutinefunction(views.deferred_partial)
+assert not iscoroutinefunction(Views.sync_partial)
+assert not iscoroutinefunction(views.sync_partial)
 before = views.sync
 wrapped = partial(before)
 for callback in (view, async_generator, factory, views, views.deferred, partial(views.deferred), wrapped, None):
     print(iscoroutinefunction(obj=callback))
 print(markcoroutinefunction(func=before) is Views.sync)
+assert not iscoroutinefunction(Views.sync_partial)
+assert iscoroutinefunction(views.sync_partial)
 print(iscoroutinefunction(before), iscoroutinefunction(views.sync), iscoroutinefunction(wrapped))
 factory._is_coroutine_marker = True
 print(iscoroutinefunction(factory))
@@ -86,3 +97,36 @@ plain.__code__ = view.__code__
 print(iscoroutinefunction(plain), iscoroutinefunction(alias))
 plain.__code__ = saved
 print(iscoroutinefunction(plain), iscoroutinefunction(alias))
+
+
+# Runner.close() awaits the operation returned by aclose().
+namespace = {}
+exec("async def values(): yield 1", namespace)
+agen = namespace["values"]()
+step = agen.__anext__()
+closer = agen.aclose()
+coro = view()
+assert isawaitable is inspect.isawaitable
+assert isawaitable(coro) and isawaitable(closer)
+assert not isawaitable(agen)
+assert isawaitable(step)
+step.close()
+closer.close()
+coro.close()
+
+
+class Streams:
+    def items(self):
+        yield 1
+
+    deferred = partialmethod(items)
+
+
+assert inspect.isgeneratorfunction(Streams.deferred)
+assert inspect.isgeneratorfunction(Streams().deferred)
+assert inspect.isasyncgenfunction(partial(async_generator))
+assert not inspect.isgeneratorfunction(async_generator)
+assert inspect.isgenerator(Streams().items())
+assert inspect.isasyncgen(agen) and type(agen) is types.AsyncGeneratorType
+assert inspect.iscoroutine(coro) and not inspect.isgenerator(coro)
+assert inspect.ispackage(collections) and not inspect.ispackage(types)

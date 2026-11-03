@@ -6,6 +6,7 @@ mod named;
 
 pub use casefold::expand_case;
 
+use std::collections::HashMap;
 use std::fmt::Write;
 
 use regex_syntax::hir::HirKind;
@@ -304,6 +305,8 @@ pub fn visit_class_warnings(
 pub enum EscapeError {
     Syntax(String, usize),
     Undefined(String),
+    UnknownGroup(String),
+    InvalidGroupName(String),
 }
 
 /// Named scalar replacements and the first escape diagnostic, in original character offsets.
@@ -367,6 +370,10 @@ pub fn numeric_condition_diagnostic(
 }
 
 /// Diagnose the first invalid reference in source order, optionally including open backreferences.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "Preserve the public diagnostic signature for callers that configure the syntax visitor."
+)]
 pub fn group_reference_diagnostic(
     pattern: &str,
     verbose: bool,
@@ -514,6 +521,7 @@ impl BranchWidth {
 }
 
 struct GroupState {
+    open: usize,
     alphabet: Alphabet,
     backtrack: bool,
     dotall: bool,
@@ -558,24 +566,56 @@ fn check_backreference(
     result
 }
 
-fn reference_name(input: &mut Input<'_>) -> Result<String, String> {
-    let name: String = std::iter::from_fn(|| input.next_if(|c| *c != ')')).collect();
-    if input.next() != Some(')') {
-        return Err("unterminated group reference".into());
+fn reference_name<'a>(
+    input: &mut Input<'a>,
+    visitor: Option<&mut WarningVisitor<'_>>,
+) -> Result<&'a str, String> {
+    let spelling = input.chars.as_str();
+    let start = input.position;
+    loop {
+        let (message, at) = match input.next() {
+            Some(')') if input.clone().eq(['\\']) => {
+                ("bad escape (end of pattern)", input.position)
+            }
+            Some(')') => {
+                let end = spelling.len() - input.chars.as_str().len() - 1;
+                if end != 0 {
+                    return Ok(&spelling[..end]);
+                }
+                ("missing group name", start)
+            }
+            None if input.position == start => ("missing group name", start),
+            None => ("missing ), unterminated name", start),
+            Some('\\') => {
+                if input.next().is_some() {
+                    continue;
+                }
+                ("bad escape (end of pattern)", input.position - 1)
+            }
+            Some(_) => continue,
+        };
+        return Err(syntax_error(input, visitor, at, message.into()));
     }
-    Ok(name)
 }
 
-fn reference_id(name: &str, groups: &[Option<String>], conditional: bool) -> Result<usize, String> {
+fn reference_id(
+    name: &str,
+    groups: &[Option<String>],
+    name_index: Option<&HashMap<&str, usize>>,
+    conditional: bool,
+) -> Result<usize, String> {
     if conditional && !name.is_empty() && name.bytes().all(|b| b.is_ascii_digit()) {
         return name
             .parse()
             .map_err(|_| "invalid regex group reference".into());
     }
-    groups
-        .iter()
-        .position(|g| g.as_deref() == Some(name))
-        .ok_or_else(|| "unknown regex group name".into())
+    match name_index {
+        Some(index) => index.get(name).copied(),
+        None => groups
+            .iter()
+            .position(|group| group.as_deref() == Some(name)),
+    }
+    .ok_or_else(|| "unknown regex group name".into())
 }
 
 fn skip_comment(input: &mut impl Iterator<Item = char>) -> Result<(), String> {
@@ -626,6 +666,9 @@ fn tokenize(
     let mut input = Input::new(pattern);
     let mut output = String::new();
     let mut groups = vec![None]; // Group zero is the whole match.
+    // Small patterns have few captures. Scan their existing slots and save the
+    // name index for patterns large enough for repeated scans to dominate.
+    let mut name_index = (lookahead && pattern.len() > 256).then(HashMap::new);
     let mut can_repeat = false;
     let mut last_was_repeat = false;
     let mut may_backtrack = false;
@@ -675,8 +718,8 @@ fn tokenize(
                     input.next();
                     input.next();
                     let at = input.position;
-                    let name = reference_name(&mut input)?;
-                    let id = reference_id(&name, &groups, false)?;
+                    let name = reference_name(&mut input, warnings.as_deref_mut())?;
+                    let id = reference_id(name, &groups, name_index.as_ref(), false)?;
                     check_backreference(id, &outer_prefixes, warnings.as_deref_mut(), at)?;
                     has_reference = true;
                     write!(output, r"\k<{id}>").unwrap();
@@ -698,6 +741,7 @@ fn tokenize(
                 }
                 let atomic_assertion = assertion == Some('=');
                 let mut group = GroupState {
+                    open,
                     alphabet: escapes.alphabet,
                     backtrack: may_backtrack,
                     dotall,
@@ -728,7 +772,7 @@ fn tokenize(
                         }
                     } else if lookahead && input.next_if_eq(&'(').is_some() {
                         let start = input.position;
-                        let name = reference_name(&mut input)?;
+                        let name = reference_name(&mut input, warnings.as_deref_mut())?;
                         if let Some(probe) =
                             warnings.as_mut().and_then(|v| v.reference.as_deref_mut())
                             && !name.is_empty()
@@ -750,7 +794,23 @@ fn tokenize(
                             }
                             pending_conditions.push((group as usize, start));
                         }
-                        let id = reference_id(&name, &groups, true)?;
+                        let id = reference_id(name, &groups, name_index.as_ref(), true)
+                            .inspect_err(|_| {
+                                if let Some(visitor) = warnings.as_mut()
+                                    && let Some(escapes) = visitor.escapes.as_mut()
+                                    && !name.bytes().all(|c| c.is_ascii_digit())
+                                {
+                                    let error = if (visitor.valid_name)(
+                                        name,
+                                        alphabet == Alphabet::Bytes,
+                                    ) {
+                                        EscapeError::UnknownGroup(name.to_owned())
+                                    } else {
+                                        EscapeError::InvalidGroupName(name.to_owned())
+                                    };
+                                    escapes.error = Some((error, start));
+                                }
+                            })?;
                         if visiting {
                             if id == 0
                                 || id >= MAX_GROUPS as usize
@@ -769,7 +829,7 @@ fn tokenize(
                         group.scope = Scope::Conditional { has_else: false };
                     } else if input.next_if_eq(&':').is_some() {
                         output.push_str("?:");
-                    } else if visiting && input.peek().is_some_and(|c| "aiLmsux-".contains(*c)) {
+                    } else if visiting && input.peek().is_some_and(|c| "aiLmsux-".contains(c)) {
                         let spec: String =
                             std::iter::from_fn(|| input.next_if(|c| "aiLmsux-".contains(*c)))
                                 .collect();
@@ -841,24 +901,32 @@ fn tokenize(
                             continue;
                         }
                     } else if input.next_if_eq(&'P').is_some() && input.next_if_eq(&'<').is_some() {
-                        let mut name = String::new();
-                        loop {
+                        let spelling = input.chars.as_str();
+                        let start = input.position;
+                        let name = loop {
+                            let first = input.position == start;
                             match input.next() {
-                                Some('>') if !name.is_empty() => break,
+                                Some('>') if !first => {
+                                    let end = spelling.len() - input.chars.as_str().len() - 1;
+                                    break &spelling[..end];
+                                }
                                 Some(c)
                                     if lookahead && c != '>'
                                         || c == '_'
                                         || c.is_ascii_alphabetic()
-                                        || !name.is_empty() && c.is_ascii_digit() =>
-                                {
-                                    name.push(c)
-                                }
+                                        || !first && c.is_ascii_digit() => {}
                                 _ => return Err("expected an ASCII Python capture name".into()),
                             }
-                        }
+                        };
+                        let id = groups.len();
+                        let duplicate = if let Some(index) = name_index.as_mut() {
+                            *index.entry(name).or_insert(id) != id
+                        } else {
+                            warnings.is_some() && groups.iter().flatten().any(|old| old == name)
+                        };
                         if let Some(visitor) = warnings.as_ref()
-                            && (!(visitor.valid_name)(&name, alphabet == Alphabet::Bytes)
-                                || groups.iter().flatten().any(|old| old == &name))
+                            && (!(visitor.valid_name)(name, alphabet == Alphabet::Bytes)
+                                || duplicate)
                         {
                             return Err("invalid Python group name".into());
                         }
@@ -867,8 +935,8 @@ fn tokenize(
                         if !lookahead {
                             write!(output, "?P<{name}>").unwrap();
                         }
-                        group.scope = Scope::Capture(groups.len());
-                        groups.push(Some(name));
+                        group.scope = Scope::Capture(id);
+                        groups.push(Some(name.to_owned()));
                         group_widths.push(Width::UNKNOWN);
                     } else {
                         return Err(reject_header(
@@ -894,7 +962,12 @@ fn tokenize(
                     group.backtrack = true;
                     if let Scope::Conditional { has_else } = &mut group.scope {
                         if *has_else {
-                            return Err("conditional backref with more than two branches".into());
+                            // The parser sees this separator before fetching the next token.
+                            return Err(record_syntax(
+                                warnings.as_deref_mut(),
+                                input.position - 1,
+                                "conditional backref with more than two branches".into(),
+                            ));
                         }
                         *has_else = true;
                         may_backtrack = false; // A conditional cannot take an extra unreachable branch.
@@ -1070,7 +1143,7 @@ fn tokenize(
                 let at = input.position - 1;
                 output.push(c);
                 let (lo, hi) = if c == '{' {
-                    let lo = if input.peek() == Some(&',') {
+                    let lo = if input.peek() == Some(',') {
                         output.push('0');
                         0
                     } else {
@@ -1139,6 +1212,17 @@ fn tokenize(
             }
         };
         width.push(atom_width);
+    }
+    if let Some(unclosed) = outer_prefixes.last()
+        && outer_prefixes
+            .iter()
+            .any(|g| matches!(g.scope, Scope::Conditional { .. }))
+    {
+        return Err(record_syntax(
+            warnings.as_deref_mut(),
+            unclosed.open,
+            "missing ), unterminated subpattern".into(),
+        ));
     }
     if (literal_brace || lookahead || scoped_mode) && escapes.bracketed_word {
         return Err(
@@ -1259,25 +1343,28 @@ pub use replacement::{ReplacementError, ReplacementPart, parse_replacement, repl
 /// Position in the original Python spelling, before escape expansion.
 #[derive(Clone)]
 struct Input<'a> {
-    chars: std::iter::Peekable<std::str::Chars<'a>>,
+    chars: std::str::Chars<'a>,
     position: usize,
 }
 
 impl<'a> Input<'a> {
     fn new(source: &'a str) -> Self {
         Self {
-            chars: source.chars().peekable(),
+            chars: source.chars(),
             position: 0,
         }
     }
 
-    fn peek(&mut self) -> Option<&char> {
-        self.chars.peek()
+    fn peek(&self) -> Option<char> {
+        self.chars.clone().next()
     }
 
     fn next_if(&mut self, accept: impl FnOnce(&char) -> bool) -> Option<char> {
-        if self.peek().is_some_and(accept) {
-            self.next()
+        let mut next = self.clone();
+        let ch = next.next()?;
+        if accept(&ch) {
+            *self = next;
+            Some(ch)
         } else {
             None
         }
@@ -1556,6 +1643,10 @@ fn syntax_error(
     } else {
         (message, start)
     };
+    record_syntax(visitor, at, message)
+}
+
+fn record_syntax(visitor: Option<&mut WarningVisitor<'_>>, at: usize, message: String) -> String {
     if let Some(escapes) = visitor.and_then(|visitor| visitor.escapes.as_mut()) {
         escapes.error = Some((EscapeError::Syntax(message.clone(), 0), at));
     }
@@ -1570,7 +1661,7 @@ fn push_octal_escape(
     in_class: bool,
     visitor: Option<&mut WarningVisitor<'_>>,
 ) -> Result<Option<char>, String> {
-    let Some(&first @ '0'..='7') = input.peek() else {
+    let Some(first @ '0'..='7') = input.peek() else {
         return Ok(None);
     };
     let mut digits = input.clone();
@@ -1792,7 +1883,7 @@ fn parse_class(
     mut warnings: Option<&mut WarningVisitor<'_>>,
 ) -> Result<(), String> {
     output.push('[');
-    if input.peek() == Some(&'[')
+    if input.peek() == Some('[')
         && from_end.is_none()
         && !warnings
             .as_mut()
@@ -1817,7 +1908,7 @@ fn parse_class(
             output.push(']');
             return Ok(());
         }
-        if !first && range_start.is_none() && input.peek() == Some(&c) && from_end.is_none() {
+        if !first && range_start.is_none() && input.peek() == Some(c) && from_end.is_none() {
             let operation = match c {
                 '-' => Some("set difference"),
                 '&' => Some("set intersection"),
@@ -1839,14 +1930,14 @@ fn parse_class(
                 }
             }
         }
-        if c == '-' && left_atom.is_some() && input.peek() != Some(&']') {
+        if c == '-' && left_atom.is_some() && input.peek() != Some(']') {
             output.push('-');
             range_start = left_atom.take();
             continue;
         }
         let mut second = None;
         let value = if c == '\\' {
-            second = input.peek().copied();
+            second = input.peek();
             escaped(input, output, true, escapes, warnings.as_deref_mut())?.scalar()
         } else {
             if matches!(c, '[' | '-' | '&' | '~' | '|')
@@ -1860,7 +1951,7 @@ fn parse_class(
         if let Some((low, left, extra)) = range_start.take() {
             if !matches!((low, value), (Some(low), Some(high)) if low <= high) {
                 // Python's tokenizer reads one token past the right endpoint.
-                if input.peek() == Some(&'\\') && input.clone().nth(1).is_none() {
+                if input.peek() == Some('\\') && input.clone().nth(1).is_none() {
                     return Err("incomplete regex escape".into());
                 }
                 let range: String = std::iter::once(left)
@@ -1934,6 +2025,18 @@ mod tests {
                 ),
                 Some((message.into(), position))
             );
+        }
+    }
+
+    #[test]
+    fn named_references_use_the_number_of_the_original_capture() {
+        for prefix in ["", &"x".repeat(256)] {
+            let pattern = format!("{prefix}(x)(?P<été>a)(?P=été)");
+            let (source, groups) =
+                super::backtracking_source(&pattern, false, super::Alphabet::Unicode, false)
+                    .unwrap();
+            assert!(source.ends_with(r"\k<2>"));
+            assert_eq!(groups, [None, None, Some("été".to_owned())]);
         }
     }
 

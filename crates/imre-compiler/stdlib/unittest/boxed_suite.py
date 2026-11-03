@@ -9,6 +9,11 @@ def _validateCaseMethod(case, methodName):
     else:
         case._testMethodDoc = getattr(method, "__doc__", None)
     case._cleanups = []
+    case._type_equality_funcs = {
+        str: "assertMultiLineEqual",
+        set: "assertSetEqual",
+        frozenset: "assertSetEqual",
+    }
 
 
 def _boxedCheckFixtures(cls):
@@ -16,62 +21,60 @@ def _boxedCheckFixtures(cls):
         for name in ("addClassCleanup", "enterClassContext", "doClassCleanups"):
             if getattr(cls, name, None) is not None:
                 raise NotImplementedError("native unittest does not yet support class cleanup hooks: " + name)
-        return
-    for name in ("run", "__call__"):
-        for owner in cls.__mro__:
-            if owner is object:
-                break
-            if name in owner.__dict__:
-                if owner is not TestCase:
-                    raise NotImplementedError("native unittest does not yet support custom result hooks: "
-                                              + owner.__qualname__ + "." + name)
-                break
 
 
-def _runRegistered(result, test, name, stopTestRun=None):
-    result.startTest(test)
+def _caseRun(self, result=None):
+    stopTestRun = None
+    if result is None:
+        result = self.defaultTestResult()
+        startTestRun = getattr(result, "startTestRun", None)
+        stopTestRun = getattr(result, "stopTestRun", None)
+        if startTestRun is not None:
+            startTestRun()
+    result.startTest(self)
     try:
-        _runBoxedCase(result, test)
+        cls = type(self)
+        method = getattr(self, self._testMethodName)
+        if getattr(cls, "__unittest_skip__", False) or getattr(method, "__unittest_skip__", False):
+            reason = getattr(cls, "__unittest_skip_why__", "") or getattr(method, "__unittest_skip_why__", "")
+            case._addSkip(result, self, reason)
+            return result
+        expecting_failure = (getattr(self, "__unittest_expecting_failure__", False)
+                             or getattr(method, "__unittest_expecting_failure__", False))
+        outcome = case._Outcome(result)
+        start_time = case.time.perf_counter()
+        try:
+            self._outcome = outcome
+            with outcome.testPartExecutor(self):
+                self._callSetUp()
+            if outcome.success:
+                outcome.expecting_failure = expecting_failure
+                with outcome.testPartExecutor(self):
+                    self._callTestMethod(method)
+                outcome.expecting_failure = False
+                with outcome.testPartExecutor(self):
+                    self._callTearDown()
+            self.doCleanups()
+            self._addDuration(result, case.time.perf_counter() - start_time)
+            if outcome.success:
+                if not expecting_failure:
+                    result.addSuccess(self)
+                elif outcome.expectedFailure is None:
+                    self._addUnexpectedSuccess(result)
+                else:
+                    self._addExpectedFailure(result, outcome.expectedFailure)
+        finally:
+            outcome.expectedFailure = None
+            self._outcome = None
+        return result
     finally:
-        result.stopTest(test)
+        result.stopTest(self)
         if stopTestRun is not None:
             stopTestRun()
 
 
-def _runBoxedCase(result, test):
-    cls = type(test)
-    method = getattr(test, test._testMethodName)
-    if getattr(cls, "__unittest_skip__", False) or getattr(method, "__unittest_skip__", False):
-        reason = getattr(cls, "__unittest_skip_why__", "") or getattr(method, "__unittest_skip_why__", "")
-        case._addSkip(result, test, reason)
-        return
-    expecting_failure = (getattr(test, "__unittest_expecting_failure__", False)
-                         or getattr(method, "__unittest_expecting_failure__", False))
-    outcome = case._Outcome(result)
-    start_time = case.time.perf_counter()
-    try:
-        test._outcome = outcome
-        with outcome.testPartExecutor(test):
-            test._callSetUp()
-        if outcome.success:
-            outcome.expecting_failure = expecting_failure
-            with outcome.testPartExecutor(test):
-                test._callTestMethod(method)
-            outcome.expecting_failure = False
-            with outcome.testPartExecutor(test):
-                test._callTearDown()
-        test.doCleanups()
-        test._addDuration(result, case.time.perf_counter() - start_time)
-        if outcome.success:
-            if not expecting_failure:
-                result.addSuccess(test)
-            elif outcome.expectedFailure is None:
-                test._addUnexpectedSuccess(result)
-            else:
-                test._addExpectedFailure(result, outcome.expectedFailure)
-    finally:
-        outcome.expectedFailure = None
-        test._outcome = None
+def _runRegistered(result, test, name):
+    _caseRun(test, result)
 
 
 def _boxedSubTestEnter(self):
@@ -169,18 +172,6 @@ def _caseDebug(self):
     while cleanups:
         function, args, kwargs = cleanups.pop()
         self._callCleanup(function, *args, **kwargs)
-
-
-def _caseRun(self, result=None):
-    stopTestRun = None
-    if result is None:
-        result = self.defaultTestResult()
-        startTestRun = getattr(result, "startTestRun", None)
-        stopTestRun = getattr(result, "stopTestRun", None)
-        if startTestRun is not None:
-            startTestRun()
-    _runRegistered(result, self, "", stopTestRun)
-    return result
 
 
 def _callTest(self, *args, **kwargs):
@@ -297,38 +288,59 @@ class _ErrorHolder:
 
 def _boxedFixturePhase(hook, method, parent, result):
     if hook is None:
-        return True
+        return
     try:
         hook()
     except Exception as exc:
         if isinstance(result, _DebugResult):
             raise
         _boxedFixtureProblem(parent, method, result, exc, exc.__traceback__)
-        return False
-    return True
 
 
 def _boxedFixtureProblem(parent, method, result, exc, tb):
     label = method + " (" + parent + ")"
     holder = _ErrorHolder(label)
-    if isinstance(exc, SkipTest):
-        result.addSkip(holder, str(exc))
+    addSkip = getattr(result, "addSkip", None)
+    if addSkip is not None and isinstance(exc, SkipTest):
+        addSkip(holder, str(exc))
     else:
         result.addError(holder, (type(exc), exc, tb))
 
 
+def _call_if_exists(result, name):
+    getattr(result, name, lambda: None)()
+
+
 def _boxedClassPhase(cls, method, result):
-    return _boxedFixturePhase(getattr(cls, method, None), method, cls.__module__ + "." + cls.__qualname__, result)
-
-
-def _boxedClassCleanups(cls, method, result):
-    hook = getattr(cls, "doClassCleanups", None)
-    if hook is not None:
-        hook()
-        for _, exc, tb in cls.tearDown_exceptions:
-            if isinstance(result, _DebugResult):
-                raise exc
-            _boxedFixtureProblem(cls.__module__ + "." + cls.__qualname__, method, result, exc, tb)
+    hook = getattr(cls, method, None)
+    cleanups = getattr(cls, "doClassCleanups", None)
+    setup = method == "setUpClass"
+    if hook is None and (setup or cleanups is None):
+        return
+    _call_if_exists(result, "_setupStdout")
+    try:
+        failed = False
+        if hook is not None:
+            try:
+                hook()
+            except Exception as exc:
+                if isinstance(result, _DebugResult):
+                    raise
+                failed = True
+                if setup:
+                    try:
+                        cls._classSetupFailed = True
+                    except TypeError:
+                        pass
+                _boxedFixtureProblem(cls.__module__ + "." + cls.__qualname__, method, result, exc, exc.__traceback__)
+        if cleanups is not None and (not setup or failed):
+            cleanups()
+            for _, exc, tb in cls.tearDown_exceptions:
+                if isinstance(result, _DebugResult):
+                    raise exc
+                _boxedFixtureProblem(cls.__module__ + "." + cls.__qualname__, method, result, exc, tb)
+    finally:
+        _call_if_exists(result, "_restoreStdout")
 
 
 def _boxedTearDownClass(cls, result):
@@ -336,7 +348,6 @@ def _boxedTearDownClass(cls, result):
             and not getattr(cls, "_classSetupFailed", False)
             and not getattr(cls, "__unittest_skip__", False)):
         _boxedClassPhase(cls, "tearDownClass", result)
-        _boxedClassCleanups(cls, "tearDownClass", result)
 
 
 def _boxedTearDownModule(previous, result):
@@ -347,8 +358,12 @@ def _boxedTearDownModule(previous, result):
         module = sys.modules[name]
     except KeyError:
         return
-    _boxedFixturePhase(getattr(module, "tearDownModule", None), "tearDownModule", name, result)
-    _boxedFixturePhase(case.doModuleCleanups, "tearDownModule", name, result)
+    _call_if_exists(result, "_setupStdout")
+    try:
+        _boxedFixturePhase(getattr(module, "tearDownModule", None), "tearDownModule", name, result)
+        _boxedFixturePhase(case.doModuleCleanups, "tearDownModule", name, result)
+    finally:
+        _call_if_exists(result, "_restoreStdout")
 
 
 def _boxedSetUpModule(previous, cls, result):
@@ -361,9 +376,22 @@ def _boxedSetUpModule(previous, cls, result):
         module = sys.modules[name]
     except KeyError:
         return
-    if not _boxedFixturePhase(getattr(module, "setUpModule", None), "setUpModule", name, result):
-        result._moduleSetUpFailed = True
-        _boxedFixturePhase(case.doModuleCleanups, "setUpModule", name, result)
+    hook = getattr(module, "setUpModule", None)
+    if hook is None:
+        return
+    _call_if_exists(result, "_setupStdout")
+    try:
+        try:
+            hook()
+        except Exception as exc:
+            if isinstance(result, _DebugResult):
+                raise
+            result._moduleSetUpFailed = True
+            _boxedFixtureProblem(name, "setUpModule", result, exc, exc.__traceback__)
+        if result._moduleSetUpFailed:
+            _boxedFixturePhase(case.doModuleCleanups, "setUpModule", name, result)
+    finally:
+        _call_if_exists(result, "_restoreStdout")
 
 
 def _boxedIsLeaf(test):
@@ -405,9 +433,7 @@ def _suiteRun(self, result, debug=False):
                             cls._classSetupFailed = False
                         except TypeError:
                             pass  # Builtin callables can be suite members.
-                        if not _boxedClassPhase(cls, "setUpClass", result):
-                            cls._classSetupFailed = True
-                            _boxedClassCleanups(cls, "setUpClass", result)
+                        _boxedClassPhase(cls, "setUpClass", result)
                     result._previousTestClass = cls
                 if getattr(cls, "_classSetupFailed", False) or getattr(result, "_moduleSetUpFailed", False):
                     continue

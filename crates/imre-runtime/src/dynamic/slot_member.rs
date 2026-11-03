@@ -285,6 +285,7 @@ impl Context {
         let bases = self
             .tuple_items(base_tuple)?
             .ok_or_else(|| argument(self, 2, "tuple", base_tuple))?;
+        let supplied_bases = (!bases.is_empty()).then_some(base_tuple);
         let storage = self
             .dict_storage(namespace)
             .ok_or_else(|| argument(self, 3, "dict", namespace))?;
@@ -314,7 +315,7 @@ impl Context {
             let winner = self.select_class_metaclass(
                 &bases,
                 Some(explicit_meta.unwrap_or(type_class)),
-                None,
+                self.module_value("typing", "_TypedDictMeta"),
                 false,
             )?;
             if bases
@@ -412,6 +413,7 @@ impl Context {
         };
         let dict_cell = self.dict_named_item(namespace, "__classdictcell__");
         let class_namespace = super::value::ClassNamespace {
+            supplied_bases,
             name_override: Some(name),
             dictionary: Some(namespace),
             ..Default::default()
@@ -449,10 +451,6 @@ impl Context {
             self.bind_local(scope, "__qualname__", name);
         }
         self.enable_class_annotation_provider(scope);
-        if metaclass.is_some() {
-            let original = self.scope_name(scope, "__orig_bases__");
-            super::typing::class_parameters(self, scope, original, &bases)?;
-        }
         let ancestors = self.linearized_bases(&bases, false)?;
         let class =
             self.allocate_prepared_class(name_text, scope, bases, ancestors, layout, slots)?;

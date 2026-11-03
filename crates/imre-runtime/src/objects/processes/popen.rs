@@ -23,6 +23,39 @@ use std::sync::Arc;
 
 type Pipes = [Option<crate::ObjectOwner>; 3];
 
+/// Fork only when the caller can safely continue its interpreter in the child.
+pub(crate) trait PreExec {
+    fn fork(&mut self) -> Result<libc::pid_t>;
+    /// Run the callback in the child. False reports a Python exception to the parent.
+    fn invoke(&mut self) -> bool;
+}
+
+/// Return the child's setup-error pipe to its owner before waiting for exec.
+pub(crate) struct ForkExec<'a> {
+    pub(crate) callback: Option<&'a mut dyn PreExec>,
+    pub(crate) reader: &'a mut Option<io::PipeReader>,
+}
+
+pub(super) struct ForkLaunch<'a> {
+    pub(super) fork_exec: ForkExec<'a>,
+    pub(super) child_fds: [RawFd; 3],
+    pub(super) parent_fds: [RawFd; 3],
+}
+
+pub(super) enum LaunchedChild {
+    Process(Child),
+    Forked(libc::pid_t),
+}
+
+impl LaunchedChild {
+    fn pid(&self) -> libc::pid_t {
+        match self {
+            Self::Process(child) => child.id() as libc::pid_t,
+            Self::Forked(pid) => *pid,
+        }
+    }
+}
+
 #[derive(Default)]
 pub(super) struct ChildPipes {
     pub(super) ends: [Option<Stdio>; 3],
@@ -34,6 +67,7 @@ pub(super) struct ChildPipes {
 pub(crate) struct PreparedHandles {
     child: ChildPipes,
     parents: [Option<OwnedFd>; 3],
+    parent_fds: [RawFd; 3],
     pipes: Pipes,
     child_fds: [RawFd; 3],
 }
@@ -89,6 +123,9 @@ impl ChildPipes {
         }
         Ok(PreparedHandles {
             child,
+            parent_fds: parents
+                .each_ref()
+                .map(|fd| fd.as_ref().map_or(-1, AsRawFd::as_raw_fd)),
             parents,
             pipes: Default::default(),
             child_fds,
@@ -251,7 +288,8 @@ struct SizedPipeConfig {
 }
 
 #[derive(Default)]
-struct LaunchExtras<'a> {
+struct LaunchExtras<'a, 'hook> {
+    fork_exec: Option<ForkExec<'hook>>,
     prepared: Option<PreparedHandles>,
     redirects: [usize; 3],
     child: Option<(usize, usize, bool)>,
@@ -274,7 +312,7 @@ impl LaunchConfig {
     /// # Safety
     /// Bit 18 selects ChildConfig; stream modes 6/7 select RedirectConfig.
     /// Older callers using fixed streams supply only the original prefix.
-    unsafe fn extras(config: *const Self) -> LaunchExtras<'static> {
+    unsafe fn extras(config: *const Self) -> LaunchExtras<'static, 'static> {
         // SAFETY: the launch prefix is present for all three ABI layouts.
         let streams = unsafe { (*config).streams };
         if streams & (1 << 18) != 0 {
@@ -397,7 +435,7 @@ fn redirect_number(fd: &Int) -> (i32, bool) {
 ///
 /// # Safety
 /// The caller roots the argv, optional directory/environment and buffer size.
-unsafe fn spawn(config: &LaunchConfig, mut extras: LaunchExtras<'_>) -> Result<Popen> {
+unsafe fn spawn(config: &LaunchConfig, mut extras: LaunchExtras<'_, '_>) -> Result<Popen> {
     // CPython runs _cleanup before validating the new Popen's arguments.
     cleanup();
     // SAFETY: settings describe the rooted command, path and integer representations.
@@ -518,12 +556,25 @@ unsafe fn spawn(config: &LaunchConfig, mut extras: LaunchExtras<'_>) -> Result<P
             new_session,
             group,
             mask: (mask >= 0).then_some(mask as libc::mode_t),
+            gid: libc::gid_t::MAX,
             extra_groups: None,
+            uid: libc::uid_t::MAX,
             keep,
         })
     };
     let text = streams & (1 << 16) != 0;
     handles.wrap_parents(text, bufsize)?;
+    let fork_launch = extras.fork_exec.map(|fork_exec| {
+        let mut child_fds = handles.child_fds;
+        if modes[2] == 5 {
+            child_fds[2] = if child_fds[1] == -1 { 1 } else { child_fds[1] };
+        }
+        ForkLaunch {
+            fork_exec,
+            child_fds,
+            parent_fds: handles.parent_fds,
+        }
+    });
     let PreparedHandles {
         child: prepared,
         pipes,
@@ -539,8 +590,17 @@ unsafe fn spawn(config: &LaunchConfig, mut extras: LaunchExtras<'_>) -> Result<P
         search_path: extras.search_path,
     };
     // SAFETY: the compiler supplies the same exact owners as subprocess.run.
-    let child =
-        unsafe { launch_error::spawn(&args, config, streams, redirects, allow_spawn, child) }?;
+    let child = unsafe {
+        launch_error::spawn(
+            &args,
+            config,
+            streams,
+            redirects,
+            allow_spawn,
+            fork_launch,
+            child,
+        )
+    }?;
     Ok(Popen {
         pipes,
         args,

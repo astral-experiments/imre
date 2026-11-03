@@ -58,10 +58,14 @@ impl Calendar {
     /// Build each type's own min, max and resolution, in CPython's class-dictionary order.
     pub(crate) fn class_constants(class: &str) -> Option<[Self; 3]> {
         let (min, max, resolution) = match class {
-            "datetime.date" => (Value::DateOnly(1), Value::DateOnly(MAX_ORD), DAY),
+            "datetime.date" => (
+                Value::DateOnly(Civil::from_ordinal(1)),
+                Value::DateOnly(Civil::from_ordinal(MAX_ORD)),
+                DAY,
+            ),
             "datetime.datetime" => {
                 let datetime = |local| Value::Date {
-                    local,
+                    local: Civil::from_micros(local),
                     zone: None,
                     fold: 0,
                 };
@@ -142,7 +146,9 @@ impl Calendar {
     pub(crate) fn datetime_difference(&self, other: &Self) -> Result<Self, Error> {
         let parts = |dt: &Self| {
             with(&dt.0, |v| match v {
-                Value::Date { local, zone, .. } => (*local, zone.as_ref().map(|z| offset(z))),
+                Value::Date { local, zone, .. } => {
+                    (local.micros(), zone.as_ref().map(|z| offset(z)))
+                }
                 _ => unreachable!(),
             })
         };
@@ -195,7 +201,56 @@ impl Calendar {
     }
 
     pub(crate) fn date(year: i32, month: i32, day: i32) -> Result<Self, Error> {
-        try_owner(Value::DateOnly(checked_ordinal(year, month, day)?)).map(Self)
+        try_owner(Value::DateOnly(Civil::from_ordinal(checked_ordinal(
+            year, month, day,
+        )?)))
+        .map(Self)
+    }
+
+    /// Restore a discriminator-checked CPython pickle without normalizing its remaining bytes.
+    pub(crate) fn from_pickle(bytes: &[u8], zone: Option<&Self>) -> Result<Self, Error> {
+        let mut packed = [0; 10];
+        let zone = zone.map(|z| z.0.clone());
+        let value = match bytes.len() {
+            4 => {
+                packed[..4].copy_from_slice(bytes);
+                Value::DateOnly(Civil::Packed(packed))
+            }
+            10 => {
+                packed.copy_from_slice(bytes);
+                let fold = i32::from(packed[2] >> 7);
+                packed[2] &= 0x7f;
+                Value::Date {
+                    local: Civil::Packed(packed),
+                    zone,
+                    fold,
+                }
+            }
+            _ => unreachable!("caller checked pickle length"),
+        };
+        try_owner(value).map(Self)
+    }
+
+    pub(crate) fn is_packed_datetime(&self) -> bool {
+        with(&self.0, |v| {
+            matches!(
+                v,
+                Value::Date {
+                    local: Civil::Packed(_),
+                    ..
+                }
+            )
+        })
+    }
+
+    pub(crate) fn compare_datetime_fields(&self, other: &Self) -> std::cmp::Ordering {
+        let civil = |value: &Self| {
+            with(&value.0, |v| match v {
+                Value::Date { local, .. } => *local,
+                _ => unreachable!(),
+            })
+        };
+        civil(self).compare(civil(other))
     }
 
     pub(crate) fn time_micros(fields: [i32; 5]) -> Result<i128, Error> {
@@ -214,14 +269,18 @@ impl Calendar {
     /// Return the datetime's local clock and fold without carrying over its timezone.
     pub(crate) fn time_of_day(&self) -> Result<Self, Error> {
         with(&self.0, |value| match value {
-            Value::Date { local, fold, .. } => Self::time(local.rem_euclid(DAY), *fold, None),
+            Value::Date { local, fold, .. } => {
+                let clock = local.clock(*fold).map(|n| n as i32);
+                Self::time(Self::time_micros(clock)?, *fold, None)
+            }
             _ => unreachable!(),
         })
     }
 
     pub(crate) fn wall_microseconds(&self) -> i128 {
         with(&self.0, |value| match value {
-            Value::Date { local, .. } | Value::Time { local, .. } => *local,
+            Value::Date { local, .. } => local.micros(),
+            Value::Time { local, .. } => *local,
             _ => unreachable!(),
         })
     }
@@ -262,7 +321,7 @@ impl Calendar {
             let Value::Date { local, fold, .. } = value else {
                 unreachable!()
             };
-            let micros = conversion::naive_offset(*local, *fold != 0)?;
+            let micros = conversion::naive_offset(local.micros(), *fold != 0)?;
             Ok(Self(owner(Value::Delta(micros))))
         })
     }
@@ -286,7 +345,7 @@ impl Calendar {
             let Value::Date { local, zone, fold } = value else {
                 unreachable!()
             };
-            let micros = *local - (EPOCH_ORD - 1) * DAY;
+            let micros = local.micros() - (EPOCH_ORD - 1) * DAY;
             if let Some(zone) = zone {
                 return Ok(total_seconds(micros - offset(zone)));
             }
@@ -337,7 +396,7 @@ impl Calendar {
             if adjustment != 0 {
                 return with(&value.0, |v| match v {
                     Value::Date { local, .. } => {
-                        date(*local + adjustment, Some(zone.0.clone())).map(Self)
+                        date(local.micros() + adjustment, Some(zone.0.clone())).map(Self)
                     }
                     _ => unreachable!(),
                 });
@@ -348,8 +407,8 @@ impl Calendar {
 
     pub(crate) fn fields(&self) -> [i128; 8] {
         with(&self.0, |v| match v {
-            Value::Date { local, fold, .. } => date_fields(*local, *fold),
-            Value::DateOnly(ord) => date_fields((*ord - 1) * DAY, 0),
+            Value::Date { local, fold, .. } => local.fields(*fold),
+            Value::DateOnly(local) => local.fields(0),
             _ => unreachable!(),
         })
     }
@@ -364,7 +423,7 @@ impl Calendar {
             h,
             minute,
             s,
-            (ord - 1) % 7,
+            (ord - 1).rem_euclid(7),
             ord - i64::from(days_before_year(y as i32)),
             -1,
         ]
@@ -407,10 +466,20 @@ impl Calendar {
 
     /// The ISO year is the Gregorian year of the Thursday in the same week.
     pub(crate) fn iso_week_fields(&self) -> [i32; 3] {
-        let ordinal = self.ordinal() as i32;
-        let weekday = (ordinal - 1) % 7;
-        let (year, _, _) = ymd(i128::from(ordinal + 3 - weekday));
-        [year, (ordinal - iso_week_one(year)) / 7 + 1, weekday + 1]
+        let ord = self.ordinal() as i32;
+        let mut year = self.fields()[0] as i32;
+        let mut days = ord - iso_week_one(year);
+        let week = if days < 0 {
+            year -= 1;
+            days = ord - iso_week_one(year);
+            days.div_euclid(7)
+        } else if days >= 52 * 7 && ord >= iso_week_one(year + 1) {
+            year += 1;
+            0
+        } else {
+            days / 7
+        };
+        [year, week + 1, days.rem_euclid(7) + 1]
     }
 
     /// Normalize ISO 24:00 before the receiving class validates the civil fields.
@@ -447,8 +516,7 @@ impl Calendar {
 
     pub(crate) fn ordinal(&self) -> i64 {
         with(&self.0, |v| match v {
-            Value::DateOnly(ord) => *ord as i64,
-            Value::Date { local, .. } => (local.div_euclid(DAY) + 1) as i64,
+            Value::DateOnly(local) | Value::Date { local, .. } => local.ordinal() as i64,
             _ => unreachable!(),
         })
     }
@@ -485,7 +553,7 @@ impl Calendar {
                 local,
                 zone: Some(zone),
                 ..
-            } => Some(parts(local + DAY - offset(zone))),
+            } => Some(parts(local.micros() + DAY - offset(zone))),
             _ => None,
         })
     }
@@ -508,11 +576,9 @@ impl Calendar {
         let mut text = String::new();
         let mut out = super::super::values::ReprWriter(&mut text);
         if as_date {
-            write_named_repr(
-                &Value::DateOnly(i128::from(self.ordinal())),
-                Some(class),
-                &mut out,
-            )
+            let [y, m, d, ..] = self.fields();
+            use std::fmt::Write as _;
+            write!(out, "{class}({y}, {m}, {d})")
         } else {
             with(&self.0, |v| write_named_repr(v, Some(class), &mut out))
         }

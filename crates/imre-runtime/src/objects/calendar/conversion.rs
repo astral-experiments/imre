@@ -30,7 +30,7 @@ pub unsafe extern "C" fn imre_calendar_replace(
         else {
             unreachable!()
         };
-        let mut fields = date_fields(*local, *old_fold).map(|field| field as i32);
+        let mut fields = local.fields(*old_fold).map(|field| field as i32);
         for (field, word) in fields.iter_mut().zip([y, m, d, h, mi, s, u, fold]) {
             if word != 0 {
                 // replace uses CPython's C-int converter, whose overflow message
@@ -148,9 +148,9 @@ pub unsafe extern "C" fn imre_calendar_astimezone(
         }
         let source_offset = match zone {
             Some(zone) => offset(zone),
-            None => naive_offset(*local, *fold != 0)?,
+            None => naive_offset(local.micros(), *fold != 0)?,
         };
-        let utc = local - source_offset;
+        let utc = local.micros() - source_offset;
         check_datetime_range(utc)?;
         // SAFETY: the target stays alive until the new datetime acquires its reference.
         date(utc + offset(target_ref), Some(unsafe { retain(target) }))

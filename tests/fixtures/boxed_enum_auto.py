@@ -1,4 +1,4 @@
-from enum import Enum, IntEnum, IntFlag, StrEnum, auto
+from enum import Enum, Flag, IntEnum, IntFlag, StrEnum, auto
 
 
 def current():
@@ -24,6 +24,22 @@ def current():
         ONE = auto()
         TWO = auto()
         FOUR = auto()
+
+    class Access(Flag):
+        READ = auto()
+        PAIR = 6
+
+    assert not isinstance(Access.READ, int)
+    assert (Access.READ | Access.PAIR) is Access(7)
+    try:
+        Access(3)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("partially named strict combination accepted")
+
+    Modes = Flag("Modes", "READ WRITE")
+    assert (Modes.READ | Modes.WRITE) is Modes(3)
 
     from copy import copy, deepcopy
 

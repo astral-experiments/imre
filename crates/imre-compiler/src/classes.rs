@@ -93,7 +93,9 @@ pub(crate) struct Class {
 
 impl Class {
     pub(crate) fn has_literal_hook(&self, name: &str) -> bool {
-        self.init_hooks.get(name).is_some_and(|hook| hook.writes.is_empty())
+        self.init_hooks
+            .get(name)
+            .is_some_and(|hook| hook.writes.is_empty())
     }
 
     /// The ABI slot stays in the root layout when a subclass adds Python fields.
@@ -212,22 +214,21 @@ impl Classes {
                     {
                         continue;
                     }
-                    // A runtime server subclass also uses its mixins as Python classes.
-                    // Select its provider before inferring fixed layouts for those mixins.
-                    if let Some(base) = node.arguments.iter().flat_map(|args| &args.args).find(
-                        |base| {
-                            graph.resolve(module_id, base)
-                                == Some(Binding::Intrinsic(Intrinsic::SOCKETSERVER_CLASS))
-                        },
-                    ) {
-                        let error =
-                            module.error(base, "socketserver base class requires object lowering");
-                        graph.class_body_error.replace(Some(error.clone()));
-                        graph
-                            .object_builtin_errors
-                            .borrow_mut()
-                            .insert(error.clone());
-                        return Err(error);
+                    // Select the boxed base before inferring fixed layouts for any mixins.
+                    if let Some((base, name)) = node
+                        .arguments
+                        .iter()
+                        .flat_map(|args| &args.args)
+                        .find_map(|base| {
+                            let Binding::Intrinsic(intrinsic) = graph.resolve(module_id, base)?
+                            else {
+                                return None;
+                            };
+                            Some((base, intrinsic.scoped_class_base()?))
+                        })
+                    {
+                        let error = module.error(base, &format!("{name} requires object lowering"));
+                        return Err(graph.require_object_class_layout(error));
                     }
                     ids.insert(definition, source_nodes.len());
                     let mut record = std::borrow::Cow::Borrowed(node);
@@ -274,7 +275,7 @@ impl Classes {
             .collect::<Vec<_>>();
         let definitions = inheritance::resolve(graph, &nodes, &ids, &resolved)?;
         // An inner class uses the object runtime, but every fixed class must validate first.
-        if let Some(error) = graph.class_body_error.borrow().as_ref() {
+        if let Some(error) = graph.class_layout_error.borrow().as_ref() {
             return Err(error.clone());
         }
         let data_names: HashSet<_> = definitions
@@ -427,7 +428,10 @@ fn identity_skip_decorator(graph: &SourceGraph, module: usize, decorator: &ast::
             value
         }
         ast::Expr::Call(probe)
-            if probe.func.as_name_expr().is_some_and(|name| name.id == "hasattr")
+            if probe
+                .func
+                .as_name_expr()
+                .is_some_and(|name| name.id == "hasattr")
                 && graph.resolve(module, &probe.func).is_none()
                 && probe.arguments.keywords.is_empty()
                 && let [object @ ast::Expr::Name(_), ast::Expr::StringLiteral(name)] =
@@ -478,10 +482,11 @@ fn collect_class(
     definition: DefinitionId,
     node: &ast::StmtClassDef,
     parents: [Option<(usize, &Class)>; 2],
-    exception_layout: bool,
-    exceptions: &HashMap<DefinitionId, u32>,
+    declarations: &exceptions::Declarations,
     decorators: &mut DeferredMethodDecorators,
 ) -> Result<Class, String> {
+    let exception_layout = declarations.layouts.contains(&definition);
+    let exceptions = &declarations.ids;
     let base = parents[0];
     if defines_pickle_reducer(node) {
         graph.needs_object_runtime.set(true);
@@ -780,7 +785,8 @@ fn collect_class(
                 }
                 if method.type_params.is_some() {
                     let postponed = imre_ast::future_annotations(&module.parsed.syntax().body);
-                    if crate::dynamic::function_type_params(method, postponed, true, None).is_some() {
+                    if crate::dynamic::function_type_params(method, postponed, true, None).is_some()
+                    {
                         graph.needs_object_runtime.set(true);
                     }
                     return Err(module.error(method, "method type parameters are unsupported"));
@@ -843,14 +849,14 @@ fn collect_class(
                         .object_builtin_errors
                         .borrow_mut()
                         .insert(error.clone());
-                    graph.class_body_error.borrow_mut().get_or_insert(error);
+                    graph.class_layout_error.borrow_mut().get_or_insert(error);
                     has_custom_dir = true;
                     class_bindings.insert(name.to_owned());
                     continue;
                 }
                 if name == "__del__" && graph.command_startup.is_some() {
                     let error = module.error(method, "class finalizers require the object runtime");
-                    graph.class_body_error.replace(Some(error.clone()));
+                    graph.class_layout_error.replace(Some(error.clone()));
                     return Err(error);
                 }
                 let unary_protocol = matches!(
@@ -889,7 +895,7 @@ fn collect_class(
                         decorator,
                         "unittest method skips require native class construction",
                     );
-                    graph.class_body_error.borrow_mut().get_or_insert(error);
+                    graph.class_layout_error.borrow_mut().get_or_insert(error);
                     graph.check_decorated_method_calls.set(true);
                     decorators.has_runtime_method = true;
                     MethodKind::Instance
@@ -910,7 +916,7 @@ fn collect_class(
                             }) {
                                 // The class builder evaluates the factory and binds its result.
                                 graph
-                                    .class_body_error
+                                    .class_layout_error
                                     .borrow_mut()
                                     .get_or_insert(error.clone());
                                 graph.check_method_factories.set(true);
@@ -1133,9 +1139,12 @@ fn collect_class(
                     return Err(module.error(nested, "duplicate class binding"));
                 }
                 class_bindings.insert(name.to_owned());
-                graph.class_body_error.borrow_mut().get_or_insert_with(|| {
-                    module.error(nested, "nested classes require native class construction")
-                });
+                graph
+                    .class_layout_error
+                    .borrow_mut()
+                    .get_or_insert_with(|| {
+                        module.error(nested, "nested classes require native class construction")
+                    });
             }
             ast::Stmt::Pass(_) => {}
             ast::Stmt::If(branch)
@@ -1154,7 +1163,7 @@ fn collect_class(
                     branch,
                     "conditional method definitions require native class construction",
                 );
-                graph.class_body_error.replace(Some(error.clone()));
+                graph.class_layout_error.replace(Some(error.clone()));
                 return Err(error);
             }
             _ => {
@@ -1532,7 +1541,7 @@ pub(crate) fn method_kind(
     let module = &graph.modules[module_id];
     let unsupported = |error: String| {
         if graph.command_startup.is_some() {
-            graph.class_body_error.replace(Some(error.clone()));
+            graph.class_layout_error.replace(Some(error.clone()));
         }
         Err(error)
     };

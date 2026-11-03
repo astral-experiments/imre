@@ -84,20 +84,9 @@ def _bind_signature_method(method, owner):
     return method, False
 
 
-def _instance_call(obj):
-    method = getattr_static(type(obj), "__call__", None)
-    if method is not None and not getattr(obj, "__text_signature__", None):
-        bound, drop_first = _bind_signature_method(method, obj)
-        # Native call wrappers have no Python parameter layout to recurse into.
-        function = bound.__func__ if isinstance(bound, types.MethodType) else bound
-        if isinstance(function, types.FunctionType) or not callable(bound):
-            return bound, drop_first
-    raise ValueError(f"callable {obj!r} is not supported by signature")
-
-
 def _signature_from_callable(obj, *, sigcls, follow_wrapper_chains=True,
-                             globals=None, locals=None, eval_str=False,
-                             annotation_format=Format.VALUE):
+                             skip_bound_arg=True, globals=None, locals=None,
+                             eval_str=False, annotation_format=Format.VALUE):
     if not callable(obj):
         raise TypeError(f"{obj!r} is not a callable object")
     if follow_wrapper_chains and not isinstance(obj, types.MethodType):
@@ -106,9 +95,9 @@ def _signature_from_callable(obj, *, sigcls, follow_wrapper_chains=True,
     if isinstance(obj, types.MethodType):
         inner = _signature_from_callable(
             obj.__func__, sigcls=sigcls, follow_wrapper_chains=follow_wrapper_chains,
-            globals=globals, locals=locals, eval_str=eval_str,
-            annotation_format=annotation_format)
-        return _signature_bound_method(inner)
+            skip_bound_arg=skip_bound_arg, globals=globals, locals=locals,
+            eval_str=eval_str, annotation_format=annotation_format)
+        return _signature_bound_method(inner) if skip_bound_arg else inner
     explicit = getattr(obj, "__signature__", None)
     if explicit is not None:
         if not isinstance(explicit, Signature):
@@ -118,8 +107,8 @@ def _signature_from_callable(obj, *, sigcls, follow_wrapper_chains=True,
     if isinstance(partialmethod, functools.partialmethod):
         wrapped = _signature_from_callable(
             partialmethod.func, sigcls=sigcls, follow_wrapper_chains=follow_wrapper_chains,
-            globals=globals, locals=locals, eval_str=eval_str,
-            annotation_format=annotation_format)
+            skip_bound_arg=skip_bound_arg, globals=globals, locals=locals,
+            eval_str=eval_str, annotation_format=annotation_format)
         # Reserve the receiver while binding the partial arguments, then restore it
         # in the signature of the unbound method.
         sig = _signature_get_partial(wrapped, partialmethod, (None,))
@@ -132,32 +121,48 @@ def _signature_from_callable(obj, *, sigcls, follow_wrapper_chains=True,
     if isinstance(obj, functools.partial):
         wrapped = _signature_from_callable(
             obj.func, sigcls=sigcls, follow_wrapper_chains=follow_wrapper_chains,
-            globals=globals, locals=locals, eval_str=eval_str,
-            annotation_format=annotation_format)
+            skip_bound_arg=skip_bound_arg, globals=globals, locals=locals,
+            eval_str=eval_str, annotation_format=annotation_format)
         return _signature_get_partial(wrapped, obj)
     if isinstance(obj, types.FunctionType) or _signature_is_functionlike(obj):
-        return _signature_from_function(obj, sigcls, globals, locals, eval_str, annotation_format)
+        return _signature_from_function(
+            obj, sigcls, globals, locals, eval_str, annotation_format, skip_bound_arg=skip_bound_arg)
+    kind = type(obj)
+    if kind is types.WrapperDescriptorType or kind is types.MethodWrapperType:
+        text_signature = getattr(obj, "__text_signature__", None)
+        if text_signature:
+            return _signature_fromstr(sigcls, obj, text_signature, skip_bound_arg=skip_bound_arg)
     if isinstance(obj, type):
         method, drop_first = _constructor(obj, follow_wrapper_chains)
         if method is None:
             return sigcls()
     else:
-        method, drop_first = _instance_call(obj)
+        call = getattr_static(type(obj), "__call__", None)
+        if call is None:
+            raise ValueError(f"callable {obj!r} is not supported by signature")
+        text_signature = getattr(obj, "__text_signature__", None)
+        if text_signature:
+            return _signature_fromstr(sigcls, obj, text_signature)
+        method, drop_first = _bind_signature_method(call, obj)
+        # Native call wrappers have no Python parameter layout to recurse into.
+        function = method.__func__ if isinstance(method, types.MethodType) else method
+        if not isinstance(function, types.FunctionType) and callable(method):
+            raise ValueError(f"callable {obj!r} is not supported by signature")
     inner = _signature_from_callable(
         method, sigcls=sigcls, follow_wrapper_chains=follow_wrapper_chains,
-        globals=globals, locals=locals, eval_str=eval_str,
-        annotation_format=annotation_format)
-    return _signature_bound_method(inner) if drop_first else inner
+        skip_bound_arg=skip_bound_arg, globals=globals, locals=locals,
+        eval_str=eval_str, annotation_format=annotation_format)
+    return _signature_bound_method(inner) if drop_first and skip_bound_arg else inner
 
 
-def _signature_from_function(obj, sigcls, globals, locals, eval_str, annotation_format):
+def _signature_from_function(obj, sigcls, globals, locals, eval_str, annotation_format,
+                             *, skip_bound_arg=True):
     is_duck = not isinstance(obj, types.FunctionType)
     if is_duck and not _signature_is_functionlike(obj):
         raise TypeError(f"{obj!r} is not a Python function")
-    if getattr(obj, "__text_signature__", None):
-        raise NotImplementedError("text signatures are not yet supported")
-    if not eval_str and annotation_format in (Format.FORWARDREF, Format.STRING):
-        raise NotImplementedError("native signatures currently support only value annotations")
+    text_signature = getattr(obj, "__text_signature__", None)
+    if text_signature:
+        return _signature_fromstr(sigcls, obj, text_signature, skip_bound_arg=skip_bound_arg)
     layout = _signature_layout(obj.__code__ if is_duck else obj)
     annotations = get_annotations(
         obj, globals=globals, locals=locals, eval_str=eval_str, format=annotation_format)

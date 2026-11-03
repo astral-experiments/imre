@@ -1,5 +1,19 @@
+import sys
 from inspect import getattr_static
 from types import SimpleNamespace
+
+
+version = vars(sys)["version"]
+assert getattr_static(sys, "version") is version is sys.version
+replacement = object()
+try:
+    sys.version = replacement
+    assert getattr_static(sys, "version") is replacement
+    del sys.version
+    assert not hasattr(sys, "version")
+    assert getattr_static(sys, "version", None) is None
+finally:
+    sys.version = version
 
 
 class ReadOnly:
@@ -158,3 +172,41 @@ except TypeError:
 else:
     raise AssertionError("object namespace was writable")
 print("static attributes")
+
+
+class Old(dict):
+    value = 4
+
+
+class New(dict):
+    value = 3
+
+    @property
+    def __dict__(self):
+        raise AssertionError("shadowed dictionary was read")
+
+
+class Rebased(Old):
+    pass
+
+
+class Descendant(Rebased):
+    pass
+
+
+before = Descendant.__mro__
+instance = Descendant(key=1)
+assert getattr_static(instance, "value") == 4
+bases = (New,)
+Rebased.__bases__ = bases
+assert Rebased.__bases__ is bases
+assert before == (Descendant, Rebased, Old, dict, object)
+assert Descendant.__mro__ == (Descendant, Rebased, New, dict, object)
+assert instance["key"] == 1 and instance.value == getattr_static(instance, "value") == 3
+try:
+    Rebased.__bases__ = (Descendant,)
+except TypeError:
+    pass
+else:
+    raise AssertionError("cyclic bases accepted")
+assert Rebased.__bases__ is bases and instance.value == 3

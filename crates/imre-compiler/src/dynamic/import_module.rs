@@ -53,7 +53,9 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
         "reprlib" => Some(("reprlib.py", include_str!("../../stdlib/reprlib.py"))),
         "datetime" => Some((
             "datetime.py",
-            include_str!("../../../../benchmarks/cpython_stdlib/full/datetime/upstream/Lib/datetime.py"),
+            include_str!(
+                "../../../../benchmarks/cpython_stdlib/full/datetime/upstream/Lib/datetime.py"
+            ),
         )),
         "enum" => Some(("enum.py", include_str!("../../stdlib/enum.py"))),
         "json" => Some((
@@ -146,28 +148,57 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
                         "or hasattr(tp, \"__delete__\")",
                         "or hasattr(tp, \"__delete__\") or _native_data_descriptor(object)",
                     );
+                    // Keep CPython's class-creation checks and read Imre's abstract flag.
+                    let abstract_predicate = section("def isabstract(object):", "def _getmembers(")
+                        .replace("object.__flags__", "_abstract_flags(object)");
+                    // Load the parser dependencies on first signature inspection. The boxed
+                    // list iterator exposes next() but has no Python-visible __next__ method.
+                    let text_signatures = section(
+                        "def _signature_strip_non_python_syntax(",
+                        "def _signature_from_builtin(",
+                    )
+                    .replace("    if not signature:", "    import token\n    import tokenize\n    if not signature:")
+                    .replace("iter(lines).__next__", "functools.partial(next, iter(lines))")
+                    .replace("    Parameter = cls._parameter_cls", "    import ast\n    Parameter = cls._parameter_cls");
+                    // BlockFinder and getblock share tokenize. Delay its import until the
+                    // first scan so importing inspect alone does not initialize the tokenizer.
+                    let source_blocks = section("class EndOfBlock(", "def getsource(object):")
+                        .replace(
+                            "        self.indent = 0",
+                            "        global tokenize\n        if 'tokenize' not in globals():\n            import tokenize\n        self.indent = 0",
+                        )
+                        .replace("iter(lines).__next__", "functools.partial(next, iter(lines))");
                     // Imre records native source positions without CPython bytecode offsets.
-                    let frame_info = section("def getframeinfo(", "def getinnerframes(")
+                    let frame_info = section(
+                        "def getframeinfo(",
+                        "# ------------------------------------------------ static version of getattr",
+                    )
                         .replace("_get_code_position_from_tb(frame)", "_frame_position(frame)")
                         .replace("_get_code_position(frame.f_code, frame.f_lasti)", "_frame_position(frame)");
                     [
                         include_str!("../../stdlib/inspect.py"),
                         include_str!("../../stdlib/inspect_signature.py"),
-                        "import dis\nimport functools\nimport importlib.machinery\nimport linecache\nimport os\nimport sys\nfrom collections import namedtuple\nfrom inspect import _frame_position",
-                        section("def ismodule(object):", "def ispackage(object):"),
+                        "import abc\nimport collections.abc\nimport dis\nimport functools\nimport importlib.machinery\nimport linecache\nimport os\nimport sys\nfrom collections import namedtuple\nfrom inspect import _abstract_flags, _frame_position",
+                        section("TPFLAGS_IS_ABSTRACT =", "def ismethoddescriptor(object):"),
                         &descriptors,
-                        section("def isfunction(object):", "def _has_code_flag("),
-                        section("def istraceback(object):", "def isabstract(object):"),
+                        section("def isfunction(object):", "# A marker for markcoroutinefunction"),
+                        section("def isasyncgenfunction(obj):", "def isabstract(object):"),
+                        &abstract_predicate,
                         section("def _getmembers(", "Attribute = namedtuple("),
                         section("def getfile(object):", "class ClassFoundException("),
                         section("def findsource(object):", "def getcomments(object):"),
+                        &source_blocks,
+                        section("AGEN_CREATED =", "def getasyncgenlocals("),
                         section("_Traceback = namedtuple(", "def _get_code_position_from_tb("),
                         &frame_info,
-                        section("def currentframe():", "def trace(context=1):"),
                         section("def getmro(cls):", "def indentsize(line):"),
+                        section("GEN_CREATED = ", "def getgeneratorlocals("),
+                        section("CORO_CREATED = ", "def getcoroutinelocals("),
                         section("def formatannotation(", "def formatannotationrelativeto("),
+                        section("FullArgSpec = namedtuple(", "ArgInfo = namedtuple("),
                         section("def _signature_get_partial(", "def _signature_is_builtin("),
                         section("def _signature_is_functionlike(obj):", "def _signature_strip_non_python_syntax("),
+                        &text_signatures,
                         section("class _void:", "class BufferFlags("),
                     ]
                     .join("\n")
@@ -200,6 +231,11 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
         "urllib.request" => Some((
             "urllib/request.py",
             include_str!("../../stdlib/urllib/request.py"),
+        )),
+        // CPython 3.14.5 Lib/urllib/robotparser.py. See licenses/CPython.txt.
+        "urllib.robotparser" => Some((
+            "urllib/robotparser.py",
+            include_str!("../../stdlib/urllib/robotparser.py"),
         )),
         "urllib.response" => Some((
             "urllib/response.py",
@@ -292,6 +328,10 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
                 "\n",
                 include_str!("../../stdlib/unittest/boxed_runner.py"),
             ),
+        )),
+        "unittest.__main__" => Some((
+            "unittest/__main__.py",
+            include_str!("../../stdlib/unittest/__main__.py"),
         )),
         "unittest.mock" => Some((
             "unittest/mock.py",
@@ -452,6 +492,14 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
                 ].join("\n")
             })))
         }
+        "uuid" => Some((
+            "uuid.py",
+            concat!(
+                include_str!("../../stdlib/uuid.py"),
+                "\n",
+                include_str!("../../stdlib/uuid_boxed.py"),
+            ),
+        )),
         _ => crate::modules::bundled_runtime_source(name),
     }
 }
@@ -528,6 +576,10 @@ fn stdlib_package_source(name: &str) -> Option<(&'static str, &'static str)> {
         "multiprocessing.spawn" => source!("multiprocessing/spawn.py"),
         "multiprocessing.synchronize" => source!("multiprocessing/synchronize.py"),
         "multiprocessing.util" => source!("multiprocessing/util.py"),
+        "tomllib" => source!("tomllib/__init__.py"),
+        "tomllib._parser" => source!("tomllib/_parser.py"),
+        "tomllib._re" => source!("tomllib/_re.py"),
+        "tomllib._types" => source!("tomllib/_types.py"),
         _ => None,
     }
 }

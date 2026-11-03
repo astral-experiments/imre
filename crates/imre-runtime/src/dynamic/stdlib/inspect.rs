@@ -43,6 +43,27 @@ pub(super) fn call(
     };
     let mut obj = super::single_argument(name, param, args, kwargs)?;
     match name {
+        "_abstract_flags" => {
+            let target = ctx.weak_proxy_target(obj)?;
+            let abstract_class = match *ctx.heap.get(target) {
+                Value::Class {
+                    scope, metaclass, ..
+                } => {
+                    // The default type descriptor takes precedence over a class-body __flags__.
+                    if metaclass.is_some_and(|meta| {
+                        ctx.class_attr(meta, "__flags__").is_some()
+                            || ctx.class_attr(meta, "__getattribute__").is_some()
+                    }) {
+                        return ctx.lookup_attr(obj, "__flags__");
+                    }
+                    ctx.scope_data(scope).is_abstract
+                }
+                _ if ctx.is_type_object(target) => false,
+                // isinstance(obj, type) can also succeed through a reported __class__.
+                _ => return ctx.lookup_attr(obj, "__flags__"),
+            };
+            return Ok(ctx.int(if abstract_class { 1 << 20 } else { 0 }));
+        }
         "_native_data_descriptor" => {
             return Ok(if ctx.native_data_descriptor(obj) {
                 TRUE
@@ -80,6 +101,31 @@ pub(super) fn call(
         ctx.set_attr(obj, "_is_coroutine_marker", mark)?;
         return Ok(obj);
     }
+    // The bundled functools helper also recognizes the function produced by class access
+    // to a partialmethod. A cold import can lack the Python module or its initializer.
+    let functools = ctx.text("functools");
+    let target = if let Some(module) = ctx.registered_module(functools)?
+        && let Value::Module { scope, .. } = *ctx.heap.get(module)
+        && let Some(unwrap) = ctx.scope_name(scope, "_unwrap_partialmethod")
+    {
+        ctx.call(unwrap, vec![obj], Vec::new())?
+    } else {
+        obj
+    };
+    let target = unwrap_method_and_partial(ctx, target);
+    if let Value::Function { code, .. } = ctx.heap.get(target)
+        && ctx.code_object(*code).coroutine
+    {
+        return Ok(TRUE);
+    }
+    // A marker on the sync function wrapped by an unbound partialmethod does not propagate.
+    let obj = unwrap_method_and_partial(ctx, obj);
+    let marked =
+        attribute(ctx, obj, "_is_coroutine_marker")?.is_some_and(|value| value == marker(ctx));
+    Ok(if marked { TRUE } else { FALSE })
+}
+
+fn unwrap_method_and_partial(ctx: &Context, mut obj: Id) -> Id {
     loop {
         match ctx.heap.get(obj) {
             Value::Method { callable, .. }
@@ -88,13 +134,9 @@ pub(super) fn call(
                 obj = *callable
             }
             Value::Partial { function, .. } => obj = *function,
-            Value::Function { code, .. } if ctx.code_object(*code).coroutine => return Ok(TRUE),
-            _ => break,
+            _ => return obj,
         }
     }
-    let marked =
-        attribute(ctx, obj, "_is_coroutine_marker")?.is_some_and(|value| value == marker(ctx));
-    Ok(if marked { TRUE } else { FALSE })
 }
 
 /// Read the same argument layout used to bind the boxed function's calls.

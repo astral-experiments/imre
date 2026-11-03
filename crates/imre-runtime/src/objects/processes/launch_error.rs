@@ -128,8 +128,9 @@ pub(super) unsafe fn spawn(
     streams: u32,
     mut redirects: popen::Redirects<'_>,
     allow_spawn: bool,
+    fork_launch: Option<popen::ForkLaunch<'_>>,
     child_attributes: impl FnOnce(bool) -> Result<ChildAttributes>,
-) -> Result<Child> {
+) -> Result<popen::LaunchedChild> {
     let modes = [12, 0, 4].map(|shift| (streams >> shift) & 15);
     // Popen already holds its pipes and shared devnull; legacy callers open
     // their handles at launch and must still probe them on validation errors.
@@ -141,17 +142,18 @@ pub(super) unsafe fn spawn(
     // SAFETY: the original command and configuration are still rooted.
     unsafe { validate_command_shape(cmd, config) }
         .map_err(|e| popen::error_after_handles(pending, false, e))?;
-    let direct = redirects.direct.unwrap_or_else(|| {
-        allow_spawn
-            && uses_posix_spawn(
-                // SAFETY: the caller roots the command and any explicit executable.
-                unsafe { has_directory(cmd, config) },
-                !config.cwd.is_null(),
-                modes,
-                redirects.fds,
-                streams & (1 << 17) == 0,
-            )
-    });
+    let direct = fork_launch.is_none()
+        && redirects.direct.unwrap_or_else(|| {
+            allow_spawn
+                && uses_posix_spawn(
+                    // SAFETY: the caller roots the command and any explicit executable.
+                    unsafe { has_directory(cmd, config) },
+                    !config.cwd.is_null(),
+                    modes,
+                    redirects.fds,
+                    streams & (1 << 17) == 0,
+                )
+        });
     // CPython's posix_spawn mapping converter allows an initial '=' but requires
     // a nonempty key. The fork/exec environment list rejects '=' anywhere.
     if let Some(env) = &redirects.environment
@@ -202,39 +204,64 @@ pub(super) unsafe fn spawn(
         return Err(popen::error_after_handles(pending, false, c_int_overflow()));
     }
     let failure_site = redirects.failure_site.take();
-    launch
-        .spawn_tagged(cwd.as_ref(), streams, redirects, attributes)
-        .map_err(|err| {
-            let (site, err) = decode(err);
-            if let Some(slot) = failure_site {
-                *slot = site.map(|site| (site, direct));
+    let result = if let Some(fork_launch) = fork_launch {
+        if modes[0] == 5
+            || redirects
+                .prepared
+                .as_ref()
+                .is_some_and(|pipes| pipes.closed_descriptor)
+        {
+            Err(io::Error::from_raw_os_error(libc::EBADF))
+        } else {
+            match preexec::spawn(
+                launch,
+                cwd.as_deref(),
+                streams,
+                fork_launch,
+                redirects.prepared.take(),
+                &attributes,
+            ) {
+                Ok(pid) => Ok(popen::LaunchedChild::Forked(pid)),
+                Err(preexec::PreExecError::Fork(error)) => return Err(error),
+                Err(preexec::PreExecError::Io(error)) => Err(error),
             }
-            // SAFETY: failure does not release the original command or its arguments.
-            let name = site.map(|site| unsafe {
-                match site {
-                    Site::Directory => {
-                        filename(config.cwd as usize, WordKind::new(config.cwd_kind), true)
-                    }
-                    Site::Executable if !config.executable.is_null() => filename(
-                        config.executable as usize,
-                        WordKind::new(config.executable_kind),
-                        !direct,
-                    ),
-                    Site::Executable if config.shell => {
-                        Filename::Str(StrOwner::new(Str::from(if cfg!(target_os = "android") {
-                            "/system/bin/sh"
-                        } else {
-                            "/bin/sh"
-                        })))
-                    }
-                    Site::Executable => {
-                        let (word, kind) = argv::first(cmd).expect("validated nonempty argv");
-                        filename(word, kind, !direct)
-                    }
+        }
+    } else {
+        launch
+            .spawn_tagged(cwd.as_ref(), streams, redirects, attributes)
+            .map(popen::LaunchedChild::Process)
+    };
+    result.map_err(|err| {
+        let (site, err) = decode(err);
+        if let Some(slot) = failure_site {
+            *slot = site.map(|site| (site, direct));
+        }
+        // SAFETY: failure does not release the original command or its arguments.
+        let name = site.map(|site| unsafe {
+            match site {
+                Site::Directory => {
+                    filename(config.cwd as usize, WordKind::new(config.cwd_kind), true)
                 }
-            });
-            errno_with_filenames(err, name, None)
-        })
+                Site::Executable if !config.executable.is_null() => filename(
+                    config.executable as usize,
+                    WordKind::new(config.executable_kind),
+                    !direct,
+                ),
+                Site::Executable if config.shell => {
+                    Filename::Str(StrOwner::new(Str::from(if cfg!(target_os = "android") {
+                        "/system/bin/sh"
+                    } else {
+                        "/bin/sh"
+                    })))
+                }
+                Site::Executable => {
+                    let (word, kind) = argv::first(cmd).expect("validated nonempty argv");
+                    filename(word, kind, !direct)
+                }
+            }
+        });
+        errno_with_filenames(err, name, None)
+    })
 }
 
 /// Only the direct spawn interface converts an executable with os.fspath.

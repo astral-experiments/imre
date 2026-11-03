@@ -51,6 +51,47 @@ class CodecInfo(tuple):
         return tuple(self)
 
 
+class IncrementalEncoder(object):
+    """
+    An IncrementalEncoder encodes an input in multiple steps. The input can
+    be passed piece by piece to the encode() method. The IncrementalEncoder
+    remembers the state of the encoding process between calls to encode().
+    """
+    def __init__(self, errors='strict'):
+        """
+        Creates an IncrementalEncoder instance.
+
+        The IncrementalEncoder may use different error handling schemes by
+        providing the errors keyword argument. See the module docstring
+        for a list of possible values.
+        """
+        self.errors = errors
+        self.buffer = ""
+
+    def encode(self, input, final=False):
+        """
+        Encodes input and returns the resulting object.
+        """
+        raise NotImplementedError
+
+    def reset(self):
+        """
+        Resets the encoder to the initial state.
+        """
+
+    def getstate(self):
+        """
+        Return the current state of the encoder.
+        """
+        return 0
+
+    def setstate(self, state):
+        """
+        Set the current state of the encoder. state must have been
+        returned by getstate().
+        """
+
+
 class IncrementalDecoder(object):
     """
     An IncrementalDecoder decodes an input in multiple steps. The input can
@@ -289,6 +330,21 @@ class BufferedIncrementalDecoder(IncrementalDecoder):
     def setstate(self, state):
         # ignore additional state info
         self.buffer = state[0]
+
+
+def getincrementalencoder(encoding):
+
+    """ Lookup up the codec for the given encoding and return
+        its IncrementalEncoder class or factory function.
+
+        Raises a LookupError in case the encoding cannot be found
+        or the codecs doesn't provide an incremental encoder.
+
+    """
+    encoder = lookup(encoding).incrementalencoder
+    if encoder is None:
+        raise LookupError(encoding)
+    return encoder
 
 
 def getincrementaldecoder(encoding):

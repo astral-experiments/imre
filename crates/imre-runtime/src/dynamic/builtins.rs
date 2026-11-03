@@ -379,7 +379,7 @@ pub(super) fn is_final_iterator_type(name: &str) -> bool {
 pub(super) fn is_enum_base(name: &str) -> bool {
     matches!(
         name,
-        "enum.Enum" | "enum.IntEnum" | "enum.IntFlag" | "enum.StrEnum"
+        "enum.Enum" | "enum.Flag" | "enum.IntEnum" | "enum.IntFlag" | "enum.StrEnum"
     )
 }
 
@@ -412,8 +412,24 @@ pub(super) const DICT_METHODS: &[&str] = &[
 ];
 
 pub(super) const LIST_METHODS: &[&str] = &[
-    "__add__", "__getitem__", "__iadd__", "__init__", "__iter__", "__len__", "__repr__", "append", "clear",
-    "copy", "count", "extend", "index", "insert", "pop", "remove", "reverse", "sort",
+    "__add__",
+    "__getitem__",
+    "__iadd__",
+    "__init__",
+    "__iter__",
+    "__len__",
+    "__repr__",
+    "append",
+    "clear",
+    "copy",
+    "count",
+    "extend",
+    "index",
+    "insert",
+    "pop",
+    "remove",
+    "reverse",
+    "sort",
 ];
 
 const FROZENSET_OPERATORS: &[&str] = &[
@@ -429,6 +445,7 @@ pub(super) fn real_methods(owner: &str) -> &'static [&'static str] {
     match owner {
         "int" => &[
             "__abs__",
+            "__bool__",
             "__float__",
             "__int__",
             "__lt__",
@@ -669,10 +686,12 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         }
         Value::ItemGetter(_) if attr == "__reduce__" => "operator.itemgetter",
         Value::NamedTuple {
-            class:
-                Some(owner @ (super::stdlib::os::stat::CLASS | super::stdlib::os::stat::VFS_CLASS)),
-            ..
-        } if attr == "__reduce__" => owner,
+            class: Some(owner), ..
+        } if let Some(layout) = super::stdlib::os::stat::layout(owner)
+            && layout.methods().contains(&attr) =>
+        {
+            owner
+        }
         Value::Property(_) if super::property::METHODS.contains(&attr) => "property",
         Value::ClassMethod { .. } | Value::StaticMethod { .. }
             if matches!(attr, "__reduce__" | "__reduce_ex__") =>
@@ -775,11 +794,11 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         }
         Value::List(_) if LIST_METHODS.contains(&attr) => "list",
         Value::Tuple(_) | Value::NamedTuple { .. }
-            if matches!(attr, "__len__" | "count" | "index") =>
+            if matches!(attr, "__getitem__" | "__len__" | "count" | "index") =>
         {
             "tuple"
         }
-        Value::Tuple(_) if matches!(attr, "__getitem__" | "__repr__") => "tuple",
+        Value::Tuple(_) if attr == "__repr__" => "tuple",
         Value::Set { frozen, .. } => {
             let owner = if *frozen { "frozenset" } else { "set" };
             if !(set_methods(owner).contains(&attr) || set_operators(owner).contains(&attr)) {
@@ -849,11 +868,8 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         Value::Repeat(_) if matches!(attr, "__iter__" | "__next__" | "__length_hint__") => {
             "itertools.repeat"
         }
-        Value::Function { .. } | Value::Cached { .. } | Value::Partial { .. }
-            if attr == "__get__" =>
-        {
-            "function"
-        }
+        Value::Function { .. } | Value::Cached { .. } if attr == "__get__" => "function",
+        Value::Partial { .. } if attr == "__get__" => "functools.partial",
         Value::ContextVar { .. } if matches!(attr, "get" | "set" | "reset") => {
             "_contextvars.ContextVar"
         }
@@ -1312,7 +1328,10 @@ pub(super) fn call(
 ) -> Result<Id> {
     if name == "method.__reduce__" {
         let method = noargs_method_receiver(ctx, "method", "__reduce__", args, kwargs)?;
-        let Value::Method { callable, receiver, .. } = *ctx.heap.get(method) else {
+        let Value::Method {
+            callable, receiver, ..
+        } = *ctx.heap.get(method)
+        else {
             unreachable!("validated Python method")
         };
         let name = ctx.lookup_attr(callable, "__name__")?;
@@ -1320,7 +1339,11 @@ pub(super) fn call(
     }
     if name == "builtin_function_or_method.__reduce__" {
         let method = noargs_method_receiver(
-            ctx, "builtin_function_or_method", "__reduce__", args, kwargs,
+            ctx,
+            "builtin_function_or_method",
+            "__reduce__",
+            args,
+            kwargs,
         )?;
         return reduce_builtin_method(ctx, method);
     }
@@ -1494,7 +1517,11 @@ pub(super) fn call(
             };
             if owner == "object" {
                 if method != "__ne__" {
-                    return Ok(if method == "__eq__" && receiver == *other { TRUE } else { NOT_IMPLEMENTED });
+                    return Ok(if method == "__eq__" && receiver == *other {
+                        TRUE
+                    } else {
+                        NOT_IMPLEMENTED
+                    });
                 }
                 return ctx.with_slot_depth(
                     "maximum recursion depth exceeded while calling a Python object",
@@ -1562,22 +1589,34 @@ pub(super) fn call(
     }
     if name == "object.__dir__" {
         let [receiver, rest @ ..] = args else {
-            return Err(type_error("unbound method object.__dir__() needs an argument"));
+            return Err(type_error(
+                "unbound method object.__dir__() needs an argument",
+            ));
         };
         if !kwargs.is_empty() {
             return Err(type_error("object.__dir__() takes no keyword arguments"));
         }
         if !rest.is_empty() {
-            return Err(type_error(format!("object.__dir__() takes no arguments ({} given)", rest.len())));
+            return Err(type_error(format!(
+                "object.__dir__() takes no arguments ({} given)",
+                rest.len()
+            )));
         }
         let directory = dir::namespace_directory(ctx, *receiver, true)?;
-        let keys = ctx.dict_entries(directory).unwrap().iter().map(|&(key, _)| key).collect();
+        let keys = ctx
+            .dict_entries(directory)
+            .unwrap()
+            .iter()
+            .map(|&(key, _)| key)
+            .collect();
         return Ok(ctx.alloc(Value::List(keys)));
     }
     if matches!(name, "object.__init_subclass__" | "object.__subclasshook__") {
         let method = name.strip_prefix("object.").unwrap();
         let [class, rest @ ..] = args else {
-            return Err(type_error(format!("descriptor '{method}' of 'object' object needs an argument")));
+            return Err(type_error(format!(
+                "descriptor '{method}' of 'object' object needs an argument"
+            )));
         };
         super::stdlib::datetime::validate_classmethod_receiver(ctx, "object", method, *class)?;
         if !kwargs.is_empty() {
@@ -1591,14 +1630,19 @@ pub(super) fn call(
         }
         if method == "__subclasshook__" {
             if rest.len() != 1 {
-                return Err(type_error(format!("{}.{method}() takes exactly one argument ({} given)", ctx.class_name(*class), rest.len())));
+                return Err(type_error(format!(
+                    "{}.{method}() takes exactly one argument ({} given)",
+                    ctx.class_name(*class),
+                    rest.len()
+                )));
             }
             return Ok(NOT_IMPLEMENTED);
         }
         if !rest.is_empty() {
             return Err(type_error(format!(
                 "{}.__init_subclass__() takes no arguments ({} given)",
-                ctx.class_name(*class), rest.len()
+                ctx.class_name(*class),
+                rest.len()
             )));
         }
         return Ok(NONE);
@@ -1882,7 +1926,7 @@ pub(super) fn call(
             "bytes" | "bytearray" if method == "translate" => {
                 translation::translate(ctx, owner, args, kwargs)
             }
-            "int" if matches!(method, "__add__" | "__index__") => {
+            "int" if matches!(method, "__add__" | "__bool__" | "__index__") => {
                 collections::builtin_slot(ctx, name, args, kwargs)
             }
             "str" if method == "__str__" => collections::builtin_slot(ctx, name, args, kwargs),
@@ -2004,18 +2048,22 @@ pub(super) fn call(
                     }
                     return Ok(child);
                 }
-                let Value::MemoryView { owner, .. } = ctx.heap.get_mut(args[0]) else {
+                let Value::MemoryView { owner, .. } = *ctx.heap.get(args[0]) else {
                     return Err(type_error("expected memoryview"));
                 };
                 if method == "__enter__" {
-                    Context::memoryview_owner(*owner)?;
+                    Context::memoryview_owner(owner)?;
                     return Ok(args[0]);
                 }
-                let exports = ctx
+                let mut exports = ctx
                     .buffer_exports
                     .iter()
                     .filter(|&&view| view == args[0])
                     .count();
+                if ctx.heap.may_have_buffer_views(args[0]) {
+                    let (heap, roots) = ctx.heap_and_roots();
+                    exports += heap.live_buffer_export_count(args[0], roots)?;
+                }
                 if exports != 0 {
                     let unit = if exports == 1 { "buffer" } else { "buffers" };
                     return Err(Error::new(
@@ -2023,7 +2071,20 @@ pub(super) fn call(
                         format!("memoryview has {exports} exported {unit}"),
                     ));
                 }
-                *owner = None;
+                let Value::MemoryView { owner, lease, .. } = ctx.heap.get_mut(args[0]) else {
+                    unreachable!()
+                };
+                let owner = owner.take();
+                let lease = lease.take();
+                if let Some(owner) = owner {
+                    ctx.heap.weak_edge_removed(owner);
+                }
+                if let Some(lease) = lease
+                    && let Value::PythonBufferLease { exporter, view, .. } = *ctx.heap.get(lease)
+                {
+                    ctx.heap.weak_edge_removed(exporter);
+                    ctx.heap.weak_edge_removed(view);
+                }
                 Ok(NONE)
             }
             "slice" => super::slice::method(ctx, method, args, kwargs),

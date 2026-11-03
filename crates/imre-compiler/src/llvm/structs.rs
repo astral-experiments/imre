@@ -302,7 +302,6 @@ impl Emitter<'_, '_> {
 }
 
 const STRUCT_CURSOR_ROW: &str = r"
-declare void @imre_struct_seek_span(ptr, i64, ptr) nounwind
 ; Fields match the runtime's repr(C) ReadSpan. Unsigned subtraction rejects
 ; a seek backwards before the cached start as well as advances past its end.
 define internal ptr @imre_struct_cursor_row(ptr %list, i64 %at, ptr %span, i64 %width) alwaysinline nounwind {

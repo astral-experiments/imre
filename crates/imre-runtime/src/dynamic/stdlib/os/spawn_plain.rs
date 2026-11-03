@@ -2,10 +2,10 @@
 
 use std::sync::atomic::Ordering;
 
-use super::{Context, Id, NONE, Result, Value, c_path, spawn_child};
+use super::{Context, Id, NONE, Value, c_path, spawn_child};
 use crate::dynamic::copy_ids;
 use crate::objects::CStrings;
-use crate::objects::exceptions::Kind;
+use crate::objects::exceptions::{Kind, Result};
 
 /// The wrapper resolves _exit in its own globals only if the child's exec raises.
 fn has_builtin_exit(ctx: &Context) -> bool {
@@ -24,22 +24,21 @@ fn has_builtin_exit(ctx: &Context) -> bool {
     exit == Some(builtin)
 }
 
-/// CPython issues this advisory warning in the parent, even if the fork failed.
-fn warn_about_threads(ctx: &mut Context) {
-    if spawn_child::glibc_proves_single_threaded() {
-        return;
-    }
-    // Linux knows about native workers outside this interpreter's thread registry.
-    let multiple = std::fs::read_dir("/proc/self/task")
-        .map(|tasks| tasks.filter_map(std::result::Result::ok).nth(1).is_some())
-        .unwrap_or_else(|_| ctx.threads.count.load(Ordering::Relaxed) > 0);
-    if multiple {
-        let message = format!(
-            "This process (pid={}) is multi-threaded, use of fork() may lead to deadlocks in the child.",
-            std::process::id()
-        );
-        let _ = ctx.emit_builtin_warning(Kind::DeprecationWarning, &message, 1);
-    }
+/// Observe the parent thread count before its after-fork handlers can change it.
+pub(super) fn multiple_threads(ctx: &Context) -> bool {
+    !spawn_child::glibc_proves_single_threaded()
+        && std::fs::read_dir("/proc/self/task")
+            .map(|tasks| tasks.filter_map(std::result::Result::ok).nth(1).is_some())
+            .unwrap_or_else(|_| ctx.threads.count.load(Ordering::Relaxed) > 0)
+}
+
+/// A warning hook can run Python, so emit only after the parent handlers release their locks.
+pub(super) fn warn_about_threads(ctx: &mut Context) {
+    let message = format!(
+        "This process (pid={}) is multi-threaded, use of fork() may lead to deadlocks in the child.",
+        std::process::id()
+    );
+    let _ = ctx.emit_builtin_warning(Kind::DeprecationWarning, &message, 1);
 }
 
 /// Return a real child PID, or decline before forking if the child needs the interpreter.
@@ -48,7 +47,7 @@ pub(super) fn try_spawn(
     path: Id,
     argv: Id,
     exec: Id,
-) -> Result<Option<libc::pid_t>> {
+) -> Option<Result<libc::pid_t>> {
     let plain_path = |id| {
         matches!(
             ctx.heap.get(id),
@@ -60,13 +59,13 @@ pub(super) fn try_spawn(
         || !has_builtin_exit(ctx)
         || !plain_path(path)
     {
-        return Ok(None);
+        return None;
     }
     let (Value::List(items) | Value::Tuple(items)) = ctx.heap.get(argv) else {
-        return Ok(None);
+        return None;
     };
     if !items.iter().copied().all(plain_path) {
-        return Ok(None);
+        return None;
     }
 
     // _spawnvef catches execv's conversion errors in the child. An invalid image
@@ -84,7 +83,5 @@ pub(super) fn try_spawn(
         Some((path, CStrings::new(args).ok()?))
     });
     let command = image.as_ref().map(|(path, args)| (path.as_c_str(), args));
-    let pid = CStrings::fork_execv(command);
-    warn_about_threads(ctx);
-    Ok(Some(pid?))
+    Some(CStrings::fork_execv(command))
 }

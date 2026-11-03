@@ -1162,11 +1162,12 @@ pub(super) fn method(
                 return Ok(boolean(ctx.stored_entries(receiver).is_empty()));
             }
             if matches!(ctx.heap.get(other), Value::Set { .. }) {
-                let (source, probe) = if ctx.stored_entries(other).len() > ctx.stored_entries(receiver).len() {
-                    (receiver, other)
-                } else {
-                    (other, receiver)
-                };
+                let (source, probe) =
+                    if ctx.stored_entries(other).len() > ctx.stored_entries(receiver).len() {
+                        (receiver, other)
+                    } else {
+                        (other, receiver)
+                    };
                 return ctx.set_members_match(source, probe, false);
             }
             let iterator = ctx.iterator(other)?;
@@ -1495,6 +1496,7 @@ pub(super) fn builtin_slot(
         "__repr__"
             | "__str__"
             | "__index__"
+            | "__bool__"
             | "__abs__"
             | "__int__"
             | "__float__"
@@ -1531,6 +1533,9 @@ pub(super) fn builtin_slot(
                 _ => unreachable!("validated collection receiver"),
             };
             return Ok(ctx.int(length as i64));
+        }
+        if method == "__bool__" {
+            return Ok(boolean(ctx.truth(storage)?));
         }
         if method == "__abs__" {
             return super::absolute_value(ctx, object);

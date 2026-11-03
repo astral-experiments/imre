@@ -39,6 +39,12 @@ def local_alias_names():
     class C(t.Generic[K]):
         pass
 
+    class N(int):
+        pass
+
+    assert N.from_bytes.__qualname__ == N.__qualname__ + ".from_bytes"
+    assert C.__init_subclass__.__qualname__ == C.__qualname__ + ".__init_subclass__"
+
     alias = C[int]
     assert repr(alias) == f"{__name__}.local_alias_names.<locals>.C[int]"
     assert alias.__module__ == __name__ and "__module__" in dir(alias)
@@ -64,6 +70,33 @@ def local_alias_names():
 
 
 local_alias_names()
+
+
+class GenericHook:
+    def __init_subclass__(cls, *, initialize):
+        assert "__parameters__" not in vars(cls)
+        if initialize:
+            super().__init_subclass__()
+
+
+class Initialized(GenericHook, t.Generic[K], initialize=True):
+    pass
+
+
+class Uninitialized[U](GenericHook, initialize=False):
+    pass
+
+
+assert Initialized.__parameters__ == (K,) and t.get_origin(Initialized[int]) is Initialized
+try:
+    Uninitialized[int]
+except AttributeError as error:
+    assert error.__notes__ == [
+        "Note: this exception may have been caused by 'GenericHook.__init_subclass__' "
+        "(or the '__init_subclass__' method on a superclass) not calling 'super().__init_subclass__()'"
+    ]
+else:
+    raise AssertionError("subscribed a class whose hook skipped Generic initialization")
 
 
 class Slotted(t.Generic[T]):
@@ -351,6 +384,25 @@ print(repr(t.Generic[K]), repr(dict[K,V]))
 print(repr(bound.__bound__), repr(t.Callable[[int, str], bytes]))
 print(t.get_args(t.Callable[[int, str], bytes]) == ([int, str], bytes))
 print(dict[K,V]() == {}, Accessor[int]().__orig_class__ is Accessor[int])
+
+
+class Factory(t.Generic[K]):
+    def __new__(cls, result):
+        return result
+
+
+class Product:
+    pass
+
+
+def decode(value):
+    return int(value)
+
+
+for alias in (Factory[int], GenericAlias(Factory, int)):
+    for product in (decode, Product):
+        assert alias(product) is product
+        assert product.__orig_class__ is alias
 
 inferred = t.TypeVar("Inferred", infer_variance=True)
 print(K.__infer_variance__, inferred.__infer_variance__, repr(inferred))

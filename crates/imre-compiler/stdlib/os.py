@@ -5,7 +5,7 @@ from posix import device_encoding, openpty
 import posixpath as path
 import stat as st
 from posix import chown, fchown, geteuid, getgid, getgroups, getuid, lchown
-from posix import _exit
+from posix import _exit, times, times_result
 from posix import pread, pwrite, readinto
 from _collections_abc import _check_methods
 from _collections_abc import Mapping as _Mapping, MutableMapping as _MutableMapping
@@ -19,6 +19,11 @@ except ImportError:
     pass
 
 try:
+    from posix import fork, register_at_fork
+except ImportError:
+    pass
+
+try:
     from posix import waitstatus_to_exitcode
 except ImportError:
     pass
@@ -28,10 +33,11 @@ if sys.platform == "linux":
     from posix import F_LOCK, F_TEST, F_TLOCK, F_ULOCK, lockf
     from posix import MFD_CLOEXEC, memfd_create
     from posix import RWF_APPEND, RWF_DSYNC, RWF_HIPRI, RWF_NOWAIT, RWF_SYNC, preadv, pwritev
+    from posix import GRND_NONBLOCK, GRND_RANDOM, getrandom
     from posix import SPLICE_F_MORE, SPLICE_F_MOVE, SPLICE_F_NONBLOCK, splice
     import posix as _posix
     from posix import O_NOCTTY, grantpt, posix_openpt, ptsname, unlockpt
-    from posix import get_terminal_size, pipe2, readv, tcgetpgrp, ttyname, writev
+    from posix import get_terminal_size, pipe2, readv, tcgetpgrp, tcsetpgrp, ttyname, writev
     for _name in vars(_posix):
         if _name.startswith(("RTLD_", "POSIX_SPAWN_", "SCHED_")) or _name in (
             "sched_getscheduler", "sched_param",
@@ -60,10 +66,24 @@ if sys.platform == "linux":
 
 
 import posix as _posix
-for _name in ("getegid", "getresgid", "getresuid"):
+for _name in ("getegid", "getresgid", "getresuid", "setgroups", "setregid", "setreuid"):
     if _name in vars(_posix):
         globals()[_name] = getattr(_posix, _name)
 del _name, _posix
+
+# From CPython 3.14.5, Lib/os.py. See stdlib/docstrings/LICENSE.
+if "sched_getaffinity" in globals() and sys._get_cpu_count_config() < 0:
+    def process_cpu_count():
+        """
+        Get the number of CPUs of the current process.
+
+        Return the number of logical CPUs usable by the calling thread of the
+        current process. Return None if indeterminable.
+        """
+        return len(sched_getaffinity(0))
+elif "cpu_count" in globals():
+    process_cpu_count = cpu_count
+
 
 curdir = path.curdir
 pardir = path.pardir
@@ -313,22 +333,20 @@ if sys.platform == "linux":
     P_WAIT = 0
     P_NOWAIT = P_NOWAITO = 1
 
-    def spawnv(mode, file, args):
-        """Execute file with args in a child. Return its exit code or its PID for P_NOWAIT.
-
-        On Linux, child-side Python callbacks require a single-threaded process
-        that glibc can verify. Otherwise they raise NotImplementedError before fork.
-        """
-        func = execv
+    def _spawnvef(mode, file, args, env, func):
         if not isinstance(args, (tuple, list)):
             raise TypeError("argv must be a tuple or a list")
         if not args or not args[0]:
             raise ValueError("argv first element cannot be empty")
-        pid = _spawn_exec(file, args, func)
+        # The native execv fast path supports only the two-argument call.
+        # Other calls require a verified single-threaded process before fork.
+        pid = _spawn_exec(file, args, func if env is None else None)
         if pid == 0:
-            # A child that needs Python conversions or audit hooks runs the captured execv.
             try:
-                func(file, args)
+                if env is None:
+                    func(file, args)
+                else:
+                    func(file, args, env)
             except:
                 _exit(127)
         elif mode == P_NOWAIT:
@@ -339,9 +357,86 @@ if sys.platform == "linux":
                 if not WIFSTOPPED(status):
                     return waitstatus_to_exitcode(status)
 
+    def spawnv(mode, file, args):
+        """Execute file with args in a child. Return its exit code or its PID for P_NOWAIT.
+
+        On Linux, child-side Python callbacks require a single-threaded process
+        that glibc can verify. Otherwise they raise NotImplementedError before fork.
+        """
+        return _spawnvef(mode, file, args, None, execv)
+
+    def spawnve(mode, file, args, env):
+        """Execute file with args and env in a child."""
+        return _spawnvef(mode, file, args, env, execve)
+
+    def spawnvp(mode, file, args):
+        """Search PATH for file and execute it with args in a child."""
+        return _spawnvef(mode, file, args, None, execvp)
+
+    def spawnvpe(mode, file, args, env):
+        """Search PATH from env for file and execute it with args and env in a child."""
+        return _spawnvef(mode, file, args, env, execvpe)
+
     def spawnl(mode, file, *args):
         """Execute file with the given arguments. Return its exit code or its PID for P_NOWAIT."""
         return spawnv(mode, file, args)
+
+    def spawnle(mode, file, *args):
+        """Execute file in a child using the last argument as its environment."""
+        return spawnve(mode, file, args[:-1], args[-1])
+
+    def spawnlp(mode, file, *args):
+        """Search PATH for file and execute it with the given arguments in a child."""
+        return spawnvp(mode, file, args)
+
+    def spawnlpe(mode, file, *args):
+        """Execute file in a child using PATH from the supplied environment."""
+        return spawnvpe(mode, file, args[:-1], args[-1])
+
+    # From CPython 3.14.5, Lib/os.py. See stdlib/docstrings/LICENSE.
+    def execvp(file, args):
+        """Replace the current process with file, searching PATH from the environment."""
+        _execvpe(file, args)
+
+    def execvpe(file, args, env):
+        """execvpe(file, args, env)
+
+    Execute the executable file (which is searched for along $PATH)
+    with argument list args and environment env, replacing the
+    current process.
+    args may be a list or tuple of strings. """
+        _execvpe(file, args, env)
+
+    def _execvpe(file, args, env=None):
+        if env is not None:
+            exec_func = execve
+            argrest = (args, env)
+        else:
+            exec_func = execv
+            argrest = (args,)
+            env = environ
+
+        if path.dirname(file):
+            exec_func(file, *argrest)
+            return
+        saved_exc = None
+        path_list = get_exec_path(env)
+        if name != 'nt':
+            file = fsencode(file)
+            path_list = map(fsencode, path_list)
+        for dir in path_list:
+            fullname = path.join(dir, file)
+            try:
+                exec_func(fullname, *argrest)
+            except (FileNotFoundError, NotADirectoryError) as e:
+                last_exc = e
+            except OSError as e:
+                last_exc = e
+                if saved_exc is None:
+                    saved_exc = e
+        if saved_exc is not None:
+            raise saved_exc
+        raise last_exc
 
 
 # From CPython 3.14.5, Lib/os.py. See stdlib/docstrings/LICENSE.

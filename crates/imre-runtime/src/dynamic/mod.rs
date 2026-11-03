@@ -1,22 +1,27 @@
 //! Object operations for native Python functions with dynamically loaded modules.
 //! The compiler lowers statements, branches, loops and function bodies to LLVM.
 
+pub(crate) use stdlib::hashlib::digest::State as DigestState;
+
 mod abstract_class;
 mod allocation_traces;
 mod array;
 mod async_generator;
+#[cfg(target_os = "linux")]
+mod at_fork;
 mod atexit;
 mod builtins;
 mod calls;
 mod class_annotations;
+mod class_bases;
 mod collection_pattern;
 mod complex;
 mod defaultdict;
 mod deque;
 mod dictionary;
 mod displayhook;
-mod excepthook;
 mod enums;
+mod excepthook;
 mod ffi;
 mod finalizers;
 mod function_fields;
@@ -63,8 +68,6 @@ mod value;
 mod weakref;
 mod wrapper_descriptor;
 mod zip;
-
-pub(crate) use stdlib::hashlib::digest::State as HashStream;
 
 use std::borrow::Cow;
 use std::collections::HashMap;
@@ -119,7 +122,10 @@ struct ExposedClassBody {
     annotation_cell: Option<Id>,
 }
 
+type SocketDefaultTimeout = std::sync::Arc<std::sync::Mutex<Option<std::time::Duration>>>;
+
 pub(crate) struct Context {
+    socket_default_timeout: SocketDefaultTimeout,
     threads: lowlevel_threads::Workers,
     workers: thread_worker::Registry,
     heap: Heap,
@@ -130,6 +136,7 @@ pub(crate) struct Context {
     sys_path: Id,
     default_encoding: Id,
     audit_hooks: Vec<Id>,
+    fork_hooks: [Vec<Id>; 3],
     // The fatal handler borrows its descriptor while Python retains the destination.
     fault_file: Option<Id>,
     exit_callbacks: Vec<Id>,
@@ -247,6 +254,27 @@ impl Context {
         self.heap.dict_storage(value)
     }
 
+    /// PyMapping_Check tests the subscript slot even for sequences with no keys method.
+    fn has_mapping_subscription(&self, value: Id) -> bool {
+        self.slot(value, "__getitem__").is_some()
+            || self.dict_storage(value).is_some()
+            || self.builtin_slot_accepts(value, "tuple")
+            || matches!(
+                self.heap.get(self.scalar_value(value)),
+                Value::List(_)
+                    | Value::Str(_)
+                    | Value::SurrogateStr(_)
+                    | Value::Bytes(_)
+                    | Value::ByteArray(_)
+                    | Value::MemoryView { .. }
+                    | Value::Range(_)
+                    | Value::Array(_)
+                    | Value::MappingProxy(_)
+                    | Value::Context(_)
+                    | Value::RegexMatch(_)
+            )
+    }
+
     /// The native elements inherited by a Python-defined list or tuple subclass.
     fn sequence_payload(&self, object: Id) -> Option<(Id, &[Id])> {
         let Value::Instance {
@@ -298,6 +326,7 @@ impl Context {
             | ("bytes", Value::Bytes(_))
             | ("bytearray", Value::ByteArray(_))
             | ("array.array", Value::Array(_))
+            | (stdlib::functools::LRU_CACHE_CLASS, Value::Cached { .. })
             | ("set", Value::Set { frozen: false, .. })
             | ("frozenset", Value::Set { frozen: true, .. })
             | (value::REGEX_PATTERN_TYPE, Value::RegexPattern(_))
@@ -357,32 +386,43 @@ impl Context {
         })
     }
 
-    /// Acquiring a Python-defined buffer can replace the native storage or install a release callback.
-    fn check_buffer_exporter(&self, object: Id) -> Result<()> {
+    /// Find the Python acquisition slot, keeping native base descriptors in MRO order.
+    fn python_buffer_method(&self, object: Id) -> Result<Option<Id>> {
         let Value::Instance { class, .. } = self.heap.get(object) else {
-            return Ok(());
+            return Ok(None);
         };
-        let python_slot = |slot| {
+        let slot = |name| {
             self.find_in_mro(*class, |base| match self.heap.get(base) {
-                Value::Class { .. } => self.own_class_attr(base, slot).map(|_| true),
-                Value::Native(name)
-                    if matches!(name.as_str(), "array.array" | "bytearray")
-                        || (name == "bytes" && slot == "__buffer__") =>
+                Value::Class { .. } => self.own_class_attr(base, name).map(Some),
+                Value::Native(base)
+                    if matches!(base.as_str(), "array.array" | "bytearray")
+                        || (base == "bytes" && name == "__buffer__") =>
                 {
-                    Some(false)
+                    Some(None)
                 }
                 _ => None,
             })
         };
-        if match python_slot("__buffer__") {
-            Some(true) => true,
-            Some(false) => python_slot("__release_buffer__") == Some(true),
-            None => false,
-        } {
-            return Err(Error::new(
-                "NotImplementedError",
-                "Python-defined buffer hooks are unsupported",
-            ));
+        let Some(method) = slot("__buffer__") else {
+            return Ok(None);
+        };
+        // A Python release hook must run even when the last derived view dies in GC.
+        if slot("__release_buffer__").flatten().is_some() {
+            return Err(Self::unsupported_buffer_hooks());
+        }
+        Ok(method)
+    }
+
+    fn unsupported_buffer_hooks() -> Error {
+        Error::new(
+            "NotImplementedError",
+            "Python-defined buffer hooks are unsupported",
+        )
+    }
+
+    fn check_buffer_exporter(&self, object: Id) -> Result<()> {
+        if self.python_buffer_method(object)?.is_some() {
+            return Err(Self::unsupported_buffer_hooks());
         }
         Ok(())
     }
@@ -492,21 +532,47 @@ impl Context {
     }
 
     fn new_memoryview(&mut self, object: Id) -> Result<Id> {
-        self.check_buffer_exporter(object)?;
-        let (owner, anonymous, layout) = match *self.heap.get(self.scalar_value(object)) {
-            Value::Bytes(_) | Value::ByteArray(_) => (object, false, None),
+        if let Some(method) = self.python_buffer_method(object)? {
+            let class = self.exact_type(object)?;
+            let method = self.bind_attribute(method, object, class)?;
+            // PyMemoryView_FromObject requests PyBUF_FULL_RO, including shape and strides.
+            let flags = self.int(0x11c);
+            let view = self.call(method, vec![flags], vec![])?;
+            if !matches!(self.heap.get(view), Value::MemoryView { .. }) {
+                return Err(Error::new(
+                    "TypeError",
+                    "__buffer__ returned non-memoryview object",
+                ));
+            }
+            let outer = self.new_memoryview(view)?;
+            let wrapper = self.alloc(Value::BufferWrapper);
+            let export = self.alloc(Value::PythonBufferLease {
+                exporter: object,
+                view,
+                wrapper,
+            });
+            self.heap.note_buffer_view(view);
+            let Value::MemoryView { lease, .. } = self.heap.get_mut(outer) else {
+                unreachable!()
+            };
+            *lease = Some(export);
+            return Ok(outer);
+        }
+        let (owner, anonymous, layout, lease) = match *self.heap.get(self.scalar_value(object)) {
+            Value::Bytes(_) | Value::ByteArray(_) => (object, false, None, None),
             Value::MemoryView {
                 owner,
                 anonymous,
                 layout,
+                lease,
                 ..
-            } => (Self::memoryview_owner(owner)?, anonymous, layout),
+            } => (Self::memoryview_owner(owner)?, anonymous, layout, lease),
             Value::BytesIoBuffer { .. } => {
                 let len = self.view_element_count(object)?;
                 self.invalidate_stream_snapshot(object);
-                (object, false, Some(memoryview::ViewLayout::full(len)))
+                (object, false, Some(memoryview::ViewLayout::full(len)), None)
             }
-            Value::Array(ref a) if a.view_layout().0 != "w" => (object, false, None),
+            Value::Array(ref a) if a.view_layout().0 != "w" => (object, false, None, None),
             Value::Array(_) => {
                 return Err(Error::new(
                     "NotImplementedError",
@@ -536,6 +602,7 @@ impl Context {
         );
         Ok(self.alloc(Value::MemoryView {
             owner: Some(owner),
+            lease,
             anonymous,
             layout,
             readonly,
@@ -586,7 +653,7 @@ impl Context {
             return Ok(false);
         }
         let (heap, roots) = self.heap_and_roots();
-        heap.has_live_buffer_view(storage, roots)
+        Ok(heap.live_buffer_export_count(storage, roots)? != 0)
     }
 
     fn check_bytearray_resize(&mut self, id: Id) -> Result<()> {
@@ -1767,11 +1834,15 @@ impl Context {
             return Some(self.builtin(&format!("object.{name}")));
         }
         if name == "__doc__" {
-            let doc = self.builtins.get("object.__doc__").copied().unwrap_or_else(|| {
-                let doc = self.text(Self::OBJECT_DOC);
-                self.builtins.insert("object.__doc__".to_owned(), doc);
-                doc
-            });
+            let doc = self
+                .builtins
+                .get("object.__doc__")
+                .copied()
+                .unwrap_or_else(|| {
+                    let doc = self.text(Self::OBJECT_DOC);
+                    self.builtins.insert("object.__doc__".to_owned(), doc);
+                    doc
+                });
             return Some(doc);
         }
         None
@@ -1782,7 +1853,11 @@ impl Context {
             dict
         } else {
             let mut entries = Vec::new();
-            for name in crate::objects::OBJECT_METHODS.iter().copied().chain(["__class__", "__doc__"]) {
+            for name in crate::objects::OBJECT_METHODS
+                .iter()
+                .copied()
+                .chain(["__class__", "__doc__"])
+            {
                 let value = self.raw_object_member(name).unwrap();
                 entries.push((self.heap.code_name(name), value));
             }
@@ -1949,7 +2024,9 @@ impl Context {
         if let Some(&cell) = self.scope_data(scope).closure.cells.get(name) {
             return Ok(self.heap.replace_cell(cell, None).is_some());
         }
-        if let Some(locals) = self.scope_data(scope).exec_locals {
+        let frame = self.scope_data(scope);
+        if let Some(locals) = frame.exec_locals.or(frame.class_body_mapping()) {
+            // DELETE_NAME reports a missing name on deletion failure, even for a colliding key.
             return Ok(self.delete_item(locals, key).is_ok());
         }
         if let Some(namespace) = self.scope_data(scope).binding_namespace(name) {
@@ -2096,7 +2173,17 @@ impl Context {
     fn lookup(&mut self, mut scope: Id, name: &str) -> Result<Id> {
         let origin = scope;
         loop {
-            scope = self.binding_scope(scope, name);
+            let target = self.binding_scope(scope, name);
+            let frame = self.scope_data(scope);
+            if target != scope
+                && frame.class_body_mapping().is_some()
+                && frame.closure.nonlocals.contains(name)
+                && let Some(value) = self.lookup_scope_name(scope, name)?
+            {
+                // LOAD_FROM_DICT_OR_DEREF checks class locals before its enclosing cell.
+                return Ok(value);
+            }
+            scope = target;
             if let Some(locals) = self.scope_data(scope).exec_locals {
                 match self.load_exec_name(locals, name) {
                     Err(error) if self.is_builtin_error(&error, "KeyError") => {}
@@ -2182,7 +2269,13 @@ impl Context {
         }
         if name == "super" {
             let mut entries = Vec::new();
-            for name in ["__new__", "__repr__", "__getattribute__", "__init__", "__get__"] {
+            for name in [
+                "__new__",
+                "__repr__",
+                "__getattribute__",
+                "__init__",
+                "__get__",
+            ] {
                 let method = self.builtin(&format!("super.{name}"));
                 entries.push((self.heap.code_name(name), method));
             }
@@ -2190,6 +2283,19 @@ impl Context {
                 let field = self.readonly_member("super", name);
                 entries.push((self.heap.code_name(name), field));
             }
+            let dictionary = self.dict(entries);
+            self.native_type_dicts.insert(value, dictionary);
+        }
+        if name == stdlib::functools::LRU_CACHE_CLASS {
+            let mut entries = Vec::new();
+            for &member in stdlib::functools::COPY_METHODS {
+                let method = self.builtin(&format!("{name}.{member}"));
+                entries.push((self.heap.code_name(member), method));
+            }
+            entries.push((
+                self.heap.code_name("__module__"),
+                self.heap.code_name("functools"),
+            ));
             let dictionary = self.dict(entries);
             self.native_type_dicts.insert(value, dictionary);
         }
@@ -2240,7 +2346,7 @@ impl Context {
             self.builtin(symbol);
         }
         let methods = match name {
-            "type" => &["mro"][..],
+            "type" => &["mro", "__prepare__"][..],
             "object" => &[
                 "__hash__",
                 "__ne__",
@@ -2321,6 +2427,22 @@ impl Context {
             .chain(builtins::real_methods(name))
         {
             self.builtin(&format!("{name}.{method}"));
+        }
+        if name == "int" {
+            // A type dictionary exposes the declaring descriptors before binding.
+            let members = methods
+                .iter()
+                .chain(builtins::real_methods(name))
+                .copied()
+                .chain(["__new__", "__sizeof__", "numerator", "denominator"]);
+            let entries = members
+                .map(|member| {
+                    let key = self.heap.code_name(member);
+                    (key, self.builtin(&format!("int.{member}")))
+                })
+                .collect();
+            let dictionary = self.dict(entries);
+            self.native_type_dicts.insert(value, dictionary);
         }
         value
     }
@@ -2832,6 +2954,12 @@ impl Context {
                 self.bind(scope, name, function);
             }
             stdlib::os::eventfd::initialize(self, scope);
+            if stdlib::os::fork_available() {
+                for attr in ["fork", "register_at_fork"] {
+                    let function = self.builtin(&format!("posix.{attr}"));
+                    self.bind(scope, attr, function);
+                }
+            }
         }
         if name == "_thread" && source.is_none() {
             let rlock = self.builtin(thread_rlock::CLASS);
@@ -2850,12 +2978,25 @@ impl Context {
         }
         #[cfg(unix)]
         if source.is_none() && matches!(name, "os" | "posix") {
-            let posix = if name == "os" { Some(self.module("posix")?) } else { None };
+            let posix = if name == "os" {
+                Some(self.module("posix")?)
+            } else {
+                None
+            };
             #[cfg(target_os = "linux")]
             stdlib::posix_spawn::initialize(self, scope, posix)?;
             for attr in [
-                "fchdir", "chown", "fchown", "lchown", "getuid", "geteuid", "getgid", "getgroups",
+                "fchdir",
+                "chown",
+                "fchown",
+                "lchown",
+                "getuid",
+                "geteuid",
+                "getgid",
+                "getgroups",
                 "getpgrp",
+                "times",
+                "times_result",
             ] {
                 let value = match posix {
                     Some(posix) => match self.lookup_attr(posix, attr) {
@@ -2874,8 +3015,13 @@ impl Context {
                 #[cfg(target_os = "linux")]
                 "tcgetpgrp",
                 #[cfg(target_os = "linux")]
+                "tcsetpgrp",
+                #[cfg(target_os = "linux")]
                 "ttyname",
                 "getegid",
+                "setgroups",
+                "setregid",
+                "setreuid",
                 #[cfg(target_os = "linux")]
                 "getresgid",
                 #[cfg(target_os = "linux")]
@@ -2978,6 +3124,8 @@ impl Context {
                 stdlib::os::scheduler::initialize(self, scope);
                 stdlib::os::sysconf::initialize(self, module, scope);
                 for name in [
+                    "getrandom",
+                    "execve",
                     "get_terminal_size",
                     "lockf",
                     "posix_fadvise",
@@ -2997,6 +3145,8 @@ impl Context {
                 let getgrouplist = self.builtin("posix.getgrouplist");
                 self.bind(scope, "getgrouplist", getgrouplist);
                 for (attr, flag) in [
+                    ("GRND_NONBLOCK", libc::GRND_NONBLOCK),
+                    ("GRND_RANDOM", libc::GRND_RANDOM),
                     ("SPLICE_F_MOVE", libc::SPLICE_F_MOVE),
                     ("SPLICE_F_NONBLOCK", libc::SPLICE_F_NONBLOCK),
                     ("SPLICE_F_MORE", libc::SPLICE_F_MORE),
@@ -3096,6 +3246,9 @@ impl Context {
                         }
                     }
                     for attr in [
+                        "getrandom",
+                        "GRND_NONBLOCK",
+                        "GRND_RANDOM",
                         "get_terminal_size",
                         "posix_openpt",
                         "grantpt",
@@ -3162,6 +3315,8 @@ impl Context {
                     let value = self.lookup_attr(path, name)?;
                     self.bind(scope, name, value);
                 }
+                let os_name = self.heap.code_name(crate::sys::OS_NAME);
+                self.bind(scope, "name", os_name);
                 let linesep = self.text(crate::objects::os::LINE_SEPARATOR);
                 self.bind(scope, "linesep", linesep);
                 self.bind(scope, "path", path);
@@ -3178,7 +3333,9 @@ impl Context {
                 self.bind(scope, "pi", pi);
             }
             #[cfg(unix)]
-            "_ssl" if source.is_none() => stdlib::ssl::provider::objects::install(self, module, scope)?,
+            "_ssl" if source.is_none() => {
+                stdlib::ssl::provider::objects::install(self, module, scope)?
+            }
             #[cfg(unix)]
             "_imre_ssl" if source.is_none() => stdlib::ssl::install(self, scope)?,
             "_hashlib" if source.is_none() => {
@@ -3187,9 +3344,9 @@ impl Context {
             "hmac"
                 if source.is_none()
                     || source.as_ref().is_some_and(|(path, _, _)| {
-                        self.config["bundled_root"].as_str().is_some_and(|root| {
-                            path == &std::path::Path::new(root).join("hmac.py")
-                        })
+                        self.config["bundled_root"]
+                            .as_str()
+                            .is_some_and(|root| path == &std::path::Path::new(root).join("hmac.py"))
                     }) =>
             {
                 let provider = match self.find_module("_hashlib") {
@@ -3356,6 +3513,8 @@ impl Context {
                 self.bind(scope, "_xoptions", xoptions);
                 if self.threads.system_module.is_none() {
                     self.bind(scope, "modules", self.modules);
+                    let version = stdlib::sys_version(self)?;
+                    self.bind(scope, "version", version);
                 }
                 let byteorder = self.text(if cfg!(target_endian = "little") {
                     "little"
@@ -3365,7 +3524,12 @@ impl Context {
                 self.bind(scope, "byteorder", byteorder);
                 let thread_info = stdlib::fixed_structseq::thread_info(self);
                 self.bind(scope, "thread_info", thread_info);
-                for name in ["get_coroutine_origin_tracking_depth", "set_coroutine_origin_tracking_depth"] {
+                for name in [
+                    #[cfg(target_os = "linux")]
+                    "_get_cpu_count_config",
+                    "get_coroutine_origin_tracking_depth",
+                    "set_coroutine_origin_tracking_depth",
+                ] {
                     let callable = self.builtin(&format!("sys.{name}"));
                     self.bind(scope, name, callable);
                 }

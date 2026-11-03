@@ -1773,13 +1773,17 @@ impl Emitter<'_, '_> {
         self.entry_allocas.clear();
         self.mapping_words = 0;
         self.locals = function.locals.clone();
-        byte_outputs::select(function, &mut self.locals);
         self.borrowed_locals = borrows.locals.clone();
+        self.rooted_locals = borrows.rooted.clone();
+        // The sole owner stays live while extend() evaluates and uses its receiver.
+        for (capture, owner) in byte_outputs::select(function, &mut self.locals) {
+            self.borrowed_locals[capture] = true;
+            self.rooted_locals[owner] = true;
+        }
         self.struct_locals = structs::snapshot_locals(self.module, function);
         for (slot, &snapshot) in self.struct_locals.iter().enumerate() {
             self.borrowed_locals[slot] |= snapshot;
         }
-        self.rooted_locals = borrows.rooted.clone();
         self.length_roots = borrows.length_roots.clone();
         self.length_snapshots = vec![None; self.locals.len()];
         self.int_buffers.clear();
@@ -3897,8 +3901,55 @@ impl Emitter<'_, '_> {
         }
     }
 
+    /// Compare the first UTF-8 byte with an ASCII literal without owning the indexed character.
+    fn indexed_ascii_comparison(
+        &mut self,
+        left: &Expr,
+        right: &Expr,
+        op: Compare,
+    ) -> Option<Value> {
+        let predicate = match op {
+            Compare::Equal => "eq",
+            Compare::NotEqual => "ne",
+            _ => return None,
+        };
+        let (args, literal) = match (&left.kind, &right.kind) {
+            (ExprKind::Builtin(Builtin::StringGet, args), ExprKind::Str(literal))
+            | (ExprKind::Str(literal), ExprKind::Builtin(Builtin::StringGet, args)) => {
+                (args, literal)
+            }
+            _ => return None,
+        };
+        let [byte] = literal.as_bytes() else {
+            return None;
+        };
+        let source = self.operand(&args[0]);
+        let index = self.operand(&args[1]);
+        let buffer = self.entry_alloca("[4 x i8]");
+        let part = self.entry_alloca("{ ptr, i64 }");
+        let status = self.instruction(format!(
+            "call i32 @imre_str_get_part(ptr {}, i64 {}, ptr {buffer}, ptr {part})",
+            source.value.operand, index.value.operand
+        ));
+        let failed = self.instruction(format!("icmp eq i32 {status}, 0"));
+        self.check_failed(&failed);
+        self.release_operand(&source);
+        self.release_operand(&index);
+        let first = self.instruction(format!("load i8, ptr {buffer}"));
+        Some(Value {
+            ty: Type::Bool,
+            operand: self.instruction(format!("icmp {predicate} i8 {first}, {byte}")),
+            small_integer: false,
+        })
+    }
+
     /// Keeps a chain's middle operand rooted until its final comparison completes.
     fn comparisons(&mut self, values: &[Expr], ops: &[Compare]) -> Value {
+        if let ([left, right], [op]) = (values, ops)
+            && let Some(result) = self.indexed_ascii_comparison(left, right, *op)
+        {
+            return result;
+        }
         if let ([left, right], [op]) = (values, ops)
             && let Some(result) = self.integer_region_comparison(left, right, *op)
         {
@@ -5284,6 +5335,7 @@ impl Emitter<'_, '_> {
             | Builtin::StringReplace
             | Builtin::FloatFormat { .. }
             | Builtin::HexFormat { .. }
+            | Builtin::FloatCopySign
             | Builtin::Abs => self.stdlib_builtin(builtin, &args),
             Builtin::TupleCacheNew => return self.record(returns),
             Builtin::TupleCacheResult => Value {
@@ -9157,6 +9209,7 @@ declare void @imre_os_pipe2(ptr, i64)
 declare i32 @imre_os_isatty(i64)
 declare ptr @imre_os_ptsname(i64, ptr, ptr, i64)
 declare i64 @imre_os_tcgetpgrp(i64)
+declare void @imre_os_tcsetpgrp(i64, i64)
 declare i64 @imre_os_device_encoding(i64)
 declare i32 @imre_os_get_blocking(i64)
 declare void @imre_os_set_blocking(i64, i64)
@@ -9344,6 +9397,7 @@ declare ptr @imre_functools_placeholder(i32)
 @imre_socket_af_inet = external constant i64
 @imre_socket_sock_stream = external constant i64
 @imre_socket_sol_socket = external constant i64
+@imre_socket_so_type = external constant i64
 @imre_socket_so_reuseaddr = external constant i64
 @imre_socket_ipproto_tcp = external constant i64
 @imre_socket_tcp_nodelay = external constant i64
@@ -9586,6 +9640,7 @@ declare ptr @imre_struct_list_new(ptr)
 declare i1 @imre_struct_try_fill_empty(ptr, ptr, ptr, i64)
 declare i64 @imre_struct_cycle_prefix(ptr, i64, i64)
 declare ptr @imre_struct_read_view(ptr, ptr) nounwind
+declare void @imre_struct_seek_span(ptr, i64, ptr) nounwind
 declare i64 @imre_struct_binary_prefix(ptr, ptr) nounwind
 declare double @imre_struct_binary_ordered(ptr, i64, i64, double, double, double) nounwind
 declare ptr @imre_struct_row(ptr, i64) nounwind
@@ -9831,6 +9886,7 @@ declare void @imre_popen_set_selector(ptr)
 declare ptr @imre_float_format(double, i32, i32)
 declare ptr @imre_int_hex_format(i64, i32, i32)
 declare double @llvm.fabs.f64(double)
+declare double @llvm.copysign.f64(double, double)
 declare double @llvm.trunc.f64(double)
 declare ptr @imre_int_str(i64)
 declare ptr @imre_decimal_int_text(i64)
@@ -11462,6 +11518,7 @@ def total(text: str) -> int:
             .expect("private byte append");
         assert!(instructions.next().unwrap().contains("icmp eq i32"));
         assert!(eligible.contains("call ptr @imre_byte_output_finish("));
+        assert!(!eligible.contains("call void @imre_object_retain("));
         assert!(!eligible.contains("call ptr @imre_bytes_list("));
 
         for observer in [

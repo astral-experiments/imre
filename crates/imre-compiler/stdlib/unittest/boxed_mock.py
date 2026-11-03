@@ -165,7 +165,7 @@ class InvalidSpecError(Exception):
 
 def _is_instance_mock(value):
     # A spec or proxy can report a different __class__.
-    return issubclass(type(value), Mock)
+    return issubclass(type(value), NonCallableMock)
 
 
 def _is_exception(value):
@@ -182,7 +182,13 @@ def _callable(value):
     return getattr(value, "__call__", callable(value) or None) is not None
 
 
-class Mock(_FixedMock):
+def _instance_callable(spec):
+    if isinstance(spec, type):
+        return any(base.__dict__.get("__call__") is not None for base in spec.__mro__)
+    return getattr(spec, "__call__", None) is not None
+
+
+class NonCallableMock(_FixedMock):
     _mock_sealed = False
     _mock_methods = None
     _mock_strict = False
@@ -193,7 +199,8 @@ class Mock(_FixedMock):
         # Give each mock its own class for special-method lookup.
         return object.__new__(type(cls.__name__, (cls,), {}))
 
-    def __init__(self, spec=None, *, spec_set=None, name=None, side_effect=None, return_value=_unset_return, **attrs):
+    def __init__(self, spec=None, *, spec_set=None, name=None, side_effect=None, return_value=_unset_return,
+                 _new_parent=None, _new_name="", **attrs):
         methods = spec_set if spec_set is not None else spec
         if _is_instance_mock(methods):
             raise InvalidSpecError(f"Cannot spec a Mock object. [object={methods!r}]")
@@ -202,7 +209,8 @@ class Mock(_FixedMock):
             spec_class = methods
             methods = dir(methods)
         elif methods is not None and type(methods) not in (list, tuple):
-            raise NotImplementedError("mock specifications from objects are not supported")
+            spec_class = type(methods)
+            methods = dir(methods)
         object.__setattr__(self, "_spec_class", spec_class)
         owner = type(self)
         for magic in owner._mock_auto_magics:
@@ -214,6 +222,9 @@ class Mock(_FixedMock):
         object.__setattr__(self, "_mock_methods", methods)
         object.__setattr__(self, "_mock_strict", spec_set is not None)
         super().__init__(name=name)
+        if _new_parent is not None:
+            suffix = _new_name if _new_name == "()" else "." + _new_name
+            _new_parent._attach(self._node, suffix)
         self.mock_calls = _CallList()
         self.method_calls = _CallList()
         self.side_effect = side_effect
@@ -312,12 +323,17 @@ class Mock(_FixedMock):
             return
         object.__delattr__(self, name)
 
+    def _get_child_mock(self, /, **kwargs):
+        # Each instance has a private subclass for its own protocol slots.
+        factory = type(self).__mro__[1]
+        if not issubclass(factory, CallableMixin):
+            factory = MagicMock if issubclass(factory, NonCallableMagicMock) else Mock
+        return factory(**kwargs)
+
     def _at(self, index):
         node = self._nodes[index]
         if not hasattr(node, "_proxy"):
-            # Each instance has a private subclass for its own protocol slots.
-            factory = type(self).__mro__[1]
-            proxy = factory()
+            proxy = self._get_child_mock()
             proxy._node = node
             proxy._nodes = self._nodes
             node._proxy = proxy
@@ -331,6 +347,15 @@ class Mock(_FixedMock):
             raise AttributeError(f"Mock object has no attribute {name!r}")
         if name.startswith("_") and (methods is None or name in _mock_magics):
             raise AttributeError(name)
+        members = getattr(self._node, "_autospec_members", {})
+        if name in members:
+            value, target = members[name]
+            child = _make_autospec(value, self._mock_strict, False, target=target)
+            self._adopt(child, "." + name)
+            object.__setattr__(self, name, child)
+            if self._mock_sealed:
+                seal(child)
+            return child
         if self._mock_sealed and name not in self._node._children:
             if methods is None:
                 _check_child_name(name)
@@ -357,8 +382,11 @@ class Mock(_FixedMock):
     def return_value(self):
         if self._mock_sealed and self._node._result == -1:
             raise AttributeError(self._mock_path() + ".return_value")
-        child = super().return_value
-        return getattr(child._node, "_configured_return", child)
+        index = self._return_index()
+        node = self._nodes[index]
+        if hasattr(node, "_configured_return"):
+            return node._configured_return
+        return self._at(index)
 
     @return_value.setter
     def return_value(self, value):
@@ -366,11 +394,164 @@ class Mock(_FixedMock):
             self._node._result = -1
             return
         self._adopt(value, "()")
-        child = super().return_value
-        child._node._configured_return = value
+        self._nodes[self._return_index()]._configured_return = value
 
+    def reset_mock(self, visited=None, *, return_value=False, side_effect=False):
+        if visited is None:
+            visited = []
+        pending = [(self, return_value, side_effect)]
+        while pending:
+            current, clear_return, clear_effect = pending.pop()
+            if id(current) in visited:
+                continue
+            visited.append(id(current))
+            node = current._node
+            # A generated magic method retains its protocol return value on reset.
+            if clear_return and issubclass(type(current), MagicMock) and node._mock_name:
+                name = node._mock_name
+                if "__%s__" % name[2:-2] == name:
+                    clear_return = False
+            node._reset_state(clear_return, clear_effect)
+            current.mock_calls = _CallList()
+            current.method_calls = _CallList()
+            if node._result != -1:
+                result = current.return_value
+                if _is_instance_mock(result):
+                    pending.append((result, False, False))
+            children = {name: current._at(index) for name, index in node._children.items()}
+            children.update(getattr(node, "_assigned_children", {}))
+            for child in children.values():
+                pending.append((child, clear_return, clear_effect))
+
+    def _calls_repr(self):
+        if not self.mock_calls:
+            return ""
+        return f"\nCalls: {safe_repr(self.mock_calls)}."
+
+    def _call_matcher(self, recorded):
+        # Normalize arguments for comparisons only. Keep the original spelling
+        # for call_args, call_args_list and assertion failure messages.
+        if not isinstance(recorded, tuple) or len(recorded) not in (2, 3):
+            return recorded
+        name, args, kwargs = _call_parts(recorded, len(recorded))
+        mock = self
+        sig = getattr(mock._node, "_spec_signature", None)
+        if name:
+            sig = None
+            for part in name.replace("()", "").split("."):
+                node = mock._node
+                child = getattr(node, "_assigned_children", {}).get(part)
+                if child is None:
+                    if part not in node._children:
+                        break
+                    child = mock._at(node._children[part])
+                mock = child
+                sig = getattr(mock._node, "_spec_signature", None)
+        if sig is None:
+            return recorded
+        try:
+            bound = sig.bind(*args, **kwargs)
+        except TypeError as error:
+            return error.with_traceback(None)
+        return call(name, bound.args, bound.kwargs)
+
+    def _assert_called_with(self, args, kwargs):
+        expected = _new_call(args, kwargs)
+        observed = self._node.call_args
+        cause = None
+        if observed is not None:
+            match = self._call_matcher(expected)
+            if self._call_matcher(observed) == match:
+                return
+            if isinstance(match, Exception):
+                cause = match
+        name = self._name()
+        actual = "not called." if observed is None else _format_recorded_call(observed, name)
+        raise AssertionError("expected call not found.\nExpected: " +
+                             _format_recorded_call(expected, name) + "\n  Actual: " + actual) from cause
+
+    def assert_called_with(self, /, *args, **kwargs):
+        self._assert_called_with(args, kwargs)
+
+    def assert_called_once_with(self, /, *args, **kwargs):
+        self._assert_called_once_with(args, kwargs)
+
+    def assert_has_calls(self, calls, any_order=False):
+        # Iterate without consulting user length hints; they may record calls.
+        expected = [self._call_matcher(item) for item in calls]
+        cause = next((item for item in expected if isinstance(item, Exception)), None)
+        actual = _CallList(self._call_matcher(item) for item in self.mock_calls)
+        if not any_order:
+            if expected not in actual:
+                problem = "Calls not found."
+                if cause is not None:
+                    errors = [item if isinstance(item, Exception) else None for item in expected]
+                    problem = f"Error processing expected calls.\nErrors: {errors}"
+                raise AssertionError(f"{problem}\nExpected: {_CallList(calls)}\n  Actual: {safe_repr(self.mock_calls)}") from cause
+            return
+
+        remaining = list(actual)
+        missing = []
+        for call in expected:
+            try:
+                remaining.remove(call)
+            except ValueError:
+                missing.append(call)
+        if missing:
+            raise AssertionError(f"{self._name()!r} does not contain all of {tuple(missing)!r} in its call list, found {remaining!r} instead") from cause
+
+    def assert_any_call(self, /, *args, **kwargs):
+        expected = _new_call(args, kwargs)
+        match = self._call_matcher(expected)
+        cause = match if isinstance(match, Exception) else None
+        # Equality hooks may record more calls. Check only the history at entry.
+        if cause is None:
+            for actual in [self._call_matcher(item) for item in self._node.call_args_list]:
+                if all([left == right for left, right in zip(match, actual)]):
+                    return
+        raise AssertionError(_format_recorded_call(expected, self._name()) + " call not found") from cause
+
+
+# CPython's protocol names must not fall through to ordinary attribute children.
+_mock_magics = set("__%s__" % name for name in (
+    "abs add aenter aexit aiter and anext bool ceil complex contains delete delitem dir divmod "
+    "enter eq exit float floor floordiv format fspath ge get getformat getinitargs getitem "
+    "getnewargs getnewargs_ex getstate gt hash iadd iand ifloordiv ilshift imatmul imod imul "
+    "index int invert ior ipow irshift isub iter itruediv ixor le len lshift lt matmul missing "
+    "mod mul ne neg next or pos pow radd rand rdivmod reduce reduce_ex repr reversed rfloordiv "
+    "rlshift rmatmul rmod rmul ror round rpow rrshift rshift rsub rtruediv rxor set setitem "
+    "setstate sizeof str sub subclasses truediv trunc xor"
+).split())
+
+
+class _MagicSlot:
+    def __init__(self, name, parent):
+        self.name = name
+        self.parent = parent
+
+    def __get__(self, instance, owner):
+        if self.parent._mock_sealed and self.name not in self.parent._node._children:
+            raise AttributeError(self.parent._mock_path() + "." + self.name)
+        child = self.parent._get_child(self.name)
+        child._node._magic = True
+        setattr(self.parent, self.name, child)
+        if self.name == "__exit__":
+            child.return_value = False
+        elif self.name == "__iter__":
+            def iterate():
+                if child._node._result == -1:
+                    return iter(())
+                return iter(child.return_value)
+            child.side_effect = iterate
+        return child
+
+
+class CallableMixin:
     def __call__(self, /, *args, **kwargs):
         node = self._node
+        signature = getattr(node, "_spec_signature", None)
+        if signature is not None:
+            signature.bind(*args, **kwargs)
         node.called = True
         node.call_args = _new_call(args, kwargs)
         node.call_args_list.append(node.call_args)
@@ -413,115 +594,105 @@ class Mock(_FixedMock):
                 return result
         return self.return_value
 
-    def reset_mock(self, visited=None, *, return_value=False, side_effect=False):
-        if visited is None:
-            visited = []
-        pending = [(self, return_value, side_effect)]
-        while pending:
-            current, clear_return, clear_effect = pending.pop()
-            if id(current) in visited:
-                continue
-            visited.append(id(current))
-            node = current._node
-            # A generated magic method retains its protocol return value on reset.
-            if clear_return and issubclass(type(current), MagicMock) and node._mock_name:
-                name = node._mock_name
-                if "__%s__" % name[2:-2] == name:
-                    clear_return = False
-            node._reset_state(clear_return, clear_effect)
-            current.mock_calls = _CallList()
-            current.method_calls = _CallList()
-            if node._result != -1:
-                result = current.return_value
-                if _is_instance_mock(result):
-                    pending.append((result, False, False))
-            children = {name: current._at(index) for name, index in node._children.items()}
-            children.update(getattr(node, "_assigned_children", {}))
-            for child in children.values():
-                pending.append((child, clear_return, clear_effect))
 
-    def _calls_repr(self):
-        if not self.mock_calls:
-            return ""
-        return f"\nCalls: {safe_repr(self.mock_calls)}."
-
-    def assert_called_with(self, /, *args, **kwargs):
-        self._assert_called_with(args, kwargs)
-
-    def assert_called_once_with(self, /, *args, **kwargs):
-        self._assert_called_once_with(args, kwargs)
-
-    def assert_has_calls(self, calls, any_order=False):
-        # Iterate without consulting user length hints; they may record calls.
-        expected = [item for item in calls]
-        cause = next((item for item in expected if isinstance(item, Exception)), None)
-        actual = _CallList(item for item in self.mock_calls)
-        if not any_order:
-            if expected not in actual:
-                problem = "Calls not found."
-                if cause is not None:
-                    errors = [item if isinstance(item, Exception) else None for item in expected]
-                    problem = f"Error processing expected calls.\nErrors: {errors}"
-                raise AssertionError(f"{problem}\nExpected: {_CallList(calls)}\n  Actual: {safe_repr(self.mock_calls)}") from cause
-            return
-
-        remaining = list(actual)
-        missing = []
-        for call in expected:
-            try:
-                remaining.remove(call)
-            except ValueError:
-                missing.append(call)
-        if missing:
-            raise AssertionError(f"{self._name()!r} does not contain all of {tuple(missing)!r} in its call list, found {remaining!r} instead") from cause
-
-    def assert_any_call(self, /, *args, **kwargs):
-        expected = _new_call(args, kwargs)
-        # Equality hooks may record more calls. Check only the history at entry.
-        for actual in [item for item in self._node.call_args_list]:
-            assert len(expected) == len(actual)
-            if all([left == right for left, right in zip(expected, actual)]):
-                return
-        raise AssertionError(_format_recorded_call(expected, self._name()) + " call not found")
-
-
-# CPython's protocol names must not fall through to ordinary attribute children.
-_mock_magics = set("__%s__" % name for name in (
-    "abs add aenter aexit aiter and anext bool ceil complex contains delete delitem dir divmod "
-    "enter eq exit float floor floordiv format fspath ge get getformat getinitargs getitem "
-    "getnewargs getnewargs_ex getstate gt hash iadd iand ifloordiv ilshift imatmul imod imul "
-    "index int invert ior ipow irshift isub iter itruediv ixor le len lshift lt matmul missing "
-    "mod mul ne neg next or pos pow radd rand rdivmod reduce reduce_ex repr reversed rfloordiv "
-    "rlshift rmatmul rmod rmul ror round rpow rrshift rshift rsub rtruediv rxor set setitem "
-    "setstate sizeof str sub subclasses truediv trunc xor"
-).split())
-_file_magics = ("__enter__", "__exit__", "__iter__", "__next__")
-
-
-class _MagicSlot:
-    def __init__(self, name, parent):
-        self.name = name
-        self.parent = parent
-
-    def __get__(self, instance, owner):
-        if self.parent._mock_sealed and self.name not in self.parent._node._children:
-            raise AttributeError(self.parent._mock_path() + "." + self.name)
-        child = self.parent._get_child(self.name)
-        child._node._magic = True
-        setattr(self.parent, self.name, child)
-        if self.name == "__exit__":
-            child.return_value = False
-        elif self.name == "__iter__":
-            def iterate():
-                if child._node._result == -1:
-                    return iter(())
-                return iter(child.return_value)
-            child.side_effect = iterate
-        return child
+class Mock(CallableMixin, NonCallableMock):
+    pass
 
 
 class MagicMock(Mock):
-    _mock_auto_magics = _file_magics
+    _mock_auto_magics = ("__enter__", "__exit__", "__getitem__", "__setitem__", "__iter__", "__next__")
+
+
+class NonCallableMagicMock(NonCallableMock):
+    _mock_auto_magics = MagicMock._mock_auto_magics
+
+
+def _autospec_target(spec, name, value):
+    from functools import partial
+    from inspect import getattr_static
+    from types import FunctionType
+
+    # Only ordinary functions read from a class still need a receiver.
+    if isinstance(value, FunctionType) and isinstance(spec, type):
+        if isinstance(getattr_static(spec, name, value), FunctionType):
+            return partial(value, None)
+    return value
+
+
+def _make_autospec(spec, strict, as_instance, name=None, target=None):
+    from functools import partial
+    from inspect import iscoroutinefunction, isdatadescriptor, signature
+    from types import FunctionType
+
+    if _is_instance_mock(spec):
+        raise InvalidSpecError("Cannot autospec a Mock object")
+    if type(spec) in (list, tuple):
+        spec = type(spec)
+    if isdatadescriptor(spec):
+        # A property viewed through its class has no known result type.
+        return MagicMock(name=name)
+    is_class = isinstance(spec, type)
+    if is_class:
+        if not as_instance:
+            target = partial(spec.__init__, None)
+        elif _instance_callable(spec):
+            target = _autospec_target(spec, "__call__", spec.__call__)
+    elif target is None and callable(spec):
+        target = spec
+    if target is not None and iscoroutinefunction(target):
+        raise NotImplementedError("autospeccing async callables is not supported")
+    cls = MagicMock if target is not None else NonCallableMagicMock
+    mock = cls(spec_set=spec, name=name) if strict else cls(spec=spec, name=name)
+    if spec is not None:
+        # Capture the original attributes now; build their mocks on first access.
+        members = {}
+        for entry in mock._mock_methods:
+            if entry.startswith("__") and entry.endswith("__"):
+                continue
+            try:
+                value = getattr(spec, entry)
+            except AttributeError:
+                continue
+            target_method = None
+            if isinstance(value, FunctionType):
+                target_method = _autospec_target(spec, entry, value)
+            members[entry] = (value, target_method)
+        mock._node._autospec_members = members
+    if target is not None:
+        try:
+            sig = signature(target)
+        except ValueError:
+            # Some builtin callables do not expose a signature.
+            pass
+        else:
+            mock._node._spec_signature = sig
+            type(mock).__signature__ = sig
+    if is_class and not as_instance:
+        mock.return_value = _make_autospec(spec, strict, True)
+    elif isinstance(spec, (FunctionType, MethodType)):
+        # A spec method has a return value even if first read after seal().
+        mock.return_value = MagicMock()
+    return mock
+
+
+def create_autospec(spec, spec_set=False, instance=False, *, unsafe=False, **kwargs):
+    """Create a mock of a class or instance, checking calls against the source signatures."""
+    from inspect import isroutine
+    if _is_instance_mock(spec):
+        raise InvalidSpecError("Cannot autospec a Mock object")
+    if isroutine(spec):
+        raise NotImplementedError("create_autospec does not yet support standalone routines")
+    if not unsafe:
+        for typo in ("autospect", "auto_spec", "set_spec"):
+            if typo in kwargs:
+                raise RuntimeError(f"{typo!r} might be a typo; use unsafe=True if this is intended")
+    for option in ("wraps", "parent"):
+        if option in kwargs:
+            raise NotImplementedError(f"create_autospec does not support {option!r}")
+    mock = _make_autospec(spec, spec_set, instance, kwargs.pop("name", None))
+    if kwargs:
+        mock.configure_mock(**kwargs)
+    return mock
 
 
 def seal(mock):
@@ -641,3 +812,16 @@ def mock_open(mock=None, read_data=''):
     mock.side_effect = reset_data
     mock.return_value = handle
     return mock
+
+
+class PropertyMock(Mock):
+    """Record property reads as calls without arguments and writes as calls with the value."""
+
+    def _get_child_mock(self, /, **kwargs):
+        return MagicMock(**kwargs)
+
+    def __get__(self, obj, obj_type=None):
+        return self()
+
+    def __set__(self, obj, val):
+        self(val)

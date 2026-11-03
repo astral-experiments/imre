@@ -178,3 +178,21 @@ def current():
     gc.collect()
     assert ref() is None
     print('dictionary view mapping')
+
+# Repr snapshots the contents before formatting and guards the view itself.
+dictionary = {}
+view = dictionary.values()
+dictionary["self"] = view
+assert repr(view) == "dict_values([...])"
+pairs = dictionary.items()
+dictionary["self"] = pairs
+assert repr(pairs) == "dict_items([('self', ...)])"
+
+class Clearing:
+    def __repr__(self):
+        dictionary.clear()
+        return "cleared"
+
+dictionary.clear()
+dictionary.update(first=Clearing(), second=2)
+assert repr(dictionary.values()) == "dict_values([cleared, 2])"

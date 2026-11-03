@@ -1037,7 +1037,11 @@ pub(super) fn call(
             if let Some(name) = name
                 && ctx.string_storage(name).is_none()
             {
-                let kind = if name == NONE { "None" } else { ctx.type_name(name) };
+                let kind = if name == NONE {
+                    "None"
+                } else {
+                    ctx.type_name(name)
+                };
                 return Err(Error::new(
                     "TypeError",
                     format!("timezone() argument 2 must be str, not {kind}"),
@@ -1209,7 +1213,11 @@ pub(super) fn call(
                     let Value::Calendar { tzname, .. } = *ctx.heap.get(args[0]) else {
                         unreachable!()
                     };
-                    if tzname == NONE { ctx.text(value.text()) } else { tzname }
+                    if tzname == NONE {
+                        ctx.text(value.text())
+                    } else {
+                        tzname
+                    }
                 }
                 "__str__" => {
                     if class != "timedelta" {
@@ -1362,14 +1370,18 @@ fn calendar_class_args<'a>(
     Ok((class, args))
 }
 
-/// Validate the class before a calendar classmethod is bound or called directly.
+/// Validate the class before a native classmethod is bound or called directly.
 pub(in crate::dynamic) fn validate_classmethod_receiver(
     ctx: &mut Context,
     owner: &'static str,
     method: &str,
     class: Id,
 ) -> Result<()> {
-    let base = ctx.builtin(owner);
+    let base = ctx
+        .classes
+        .get(owner)
+        .copied()
+        .unwrap_or_else(|| ctx.builtin(owner));
     let is_type = ctx.is_type_object(class);
     if is_type && ctx.direct_subclass(class, base) {
         return Ok(());

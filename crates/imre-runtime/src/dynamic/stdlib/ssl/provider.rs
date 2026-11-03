@@ -1,11 +1,16 @@
 //! Blocking TLS connections using the optional system OpenSSL 3 library.
 use std::ffi::{CStr, CString, c_char, c_int, c_long, c_uint, c_ulong, c_void};
-use std::os::fd::{AsRawFd, OwnedFd};
 use std::ptr::{self, NonNull};
 use std::sync::OnceLock;
 
+use crate::objects::socket;
+
 pub(in crate::dynamic) mod bio;
+mod certificate;
+pub(super) mod ciphers;
 pub(in crate::dynamic) mod objects;
+mod trust;
+pub(super) use trust::CaData;
 pub(in crate::dynamic) mod versions;
 
 type Handle = *mut c_void;
@@ -28,6 +33,8 @@ const SSL_ERROR_WANT_READ: c_int = 2;
 const SSL_ERROR_WANT_WRITE: c_int = 3;
 const SSL_ERROR_SYSCALL: c_int = 5;
 const SSL_ERROR_ZERO_RETURN: c_int = 6;
+// OpenSSL 3 ERR_PACK(ERR_LIB_SSL, 0, SSL_R_UNEXPECTED_EOF_WHILE_READING).
+const UNEXPECTED_EOF: c_ulong = (20 << 23) | 294;
 
 macro_rules! functions {
     ($($name:ident($($arg:ty),*) -> $ret:ty;)+) => {
@@ -70,13 +77,16 @@ functions! {
     ASN1_OBJECT_free(Handle) -> ();
     BIO_s_mem() -> Handle;
     BIO_new(Handle) -> Handle;
+    BIO_new_mem_buf(*const c_void, c_int) -> Handle;
     BIO_free(Handle) -> c_int;
+    BIO_up_ref(Handle) -> c_int;
     BIO_ctrl_pending(Handle) -> usize;
     BIO_ctrl(Handle, c_int, c_long, Handle) -> c_long;
     BIO_set_flags(Handle, c_int) -> ();
     BIO_clear_flags(Handle, c_int) -> ();
     BIO_read(Handle, *mut c_void, c_int) -> c_int;
     BIO_write(Handle, *const c_void, c_int) -> c_int;
+    TLS_method() -> Handle;
     TLS_client_method() -> Handle;
     TLS_server_method() -> Handle;
     SSL_CTX_set_default_passwd_cb(Handle, PasswordCallback) -> ();
@@ -92,6 +102,7 @@ functions! {
     SSL_CTX_get_options(Handle) -> u64;
     SSL_CTX_set_options(Handle, u64) -> u64;
     SSL_CTX_clear_options(Handle, u64) -> u64;
+    SSL_CTX_get_verify_mode(Handle) -> c_int;
     SSL_CTX_set_verify(Handle, c_int, VerifyCallback) -> ();
     SSL_CTX_set_cipher_list(Handle, *const c_char) -> c_int;
     SSL_CTX_get_security_level(Handle) -> c_int;
@@ -101,6 +112,9 @@ functions! {
     X509_get_default_cert_dir_env() -> *const c_char;
     X509_get_default_cert_dir() -> *const c_char;
     SSL_CTX_get_cert_store(Handle) -> Handle;
+    d2i_X509_bio(Handle, *mut Handle) -> Handle;
+    PEM_read_bio_X509(Handle, *mut Handle, PasswordCallback, Handle) -> Handle;
+    X509_STORE_add_cert(Handle, Handle) -> c_int;
     X509_STORE_lock(Handle) -> c_int;
     X509_STORE_unlock(Handle) -> c_int;
     X509_STORE_get0_objects(Handle) -> Handle;
@@ -111,6 +125,7 @@ functions! {
     X509_check_ca(Handle) -> c_int;
     SSL_CTX_get0_param(Handle) -> Handle;
     X509_VERIFY_PARAM_set_flags(Handle, c_ulong) -> c_int;
+    X509_VERIFY_PARAM_clear_flags(Handle, c_ulong) -> c_int;
     X509_VERIFY_PARAM_get_flags(Handle) -> c_ulong;
     SSL_CTX_set_alpn_protos(Handle, *const u8, c_uint) -> c_int;
     SSL_CTX_set_post_handshake_auth(Handle, c_int) -> ();
@@ -118,6 +133,15 @@ functions! {
     SSL_new(Handle) -> Handle;
     SSL_free(Handle) -> ();
     SSL_set_fd(Handle, c_int) -> c_int;
+    SSL_set0_rbio(Handle, Handle) -> ();
+    SSL_set0_wbio(Handle, Handle) -> ();
+    SSL_set_accept_state(Handle) -> ();
+    SSL_set_connect_state(Handle) -> ();
+    SSL_do_handshake(Handle) -> c_int;
+    SSL_is_init_finished(Handle) -> c_int;
+    SSL_get_SSL_CTX(Handle) -> Handle;
+    SSL_shutdown(Handle) -> c_int;
+    SSL_set_read_ahead(Handle, c_int) -> ();
     X509_VERIFY_PARAM_get_hostflags(Handle) -> c_uint;
     X509_VERIFY_PARAM_set_hostflags(Handle, c_uint) -> ();
     SSL_session_reused(Handle) -> c_int;
@@ -133,16 +157,53 @@ functions! {
     SSL_ctrl(Handle, c_int, c_long, Handle) -> c_long;
     SSL_accept(Handle) -> c_int;
     SSL_connect(Handle) -> c_int;
+    SSL_get_verify_mode(Handle) -> c_int;
     SSL_get_verify_result(Handle) -> c_long;
     SSL_get0_peer_certificate(Handle) -> Handle;
+    X509_get_ext_d2i(Handle, c_int, *mut c_int, *mut c_int) -> Handle;
+    GENERAL_NAMES_free(Handle) -> ();
+    GENERAL_NAME_get0_value(Handle, *mut c_int) -> Handle;
+    GENERAL_NAME_print(Handle, Handle) -> c_int;
+    AUTHORITY_INFO_ACCESS_free(Handle) -> ();
+    CRL_DIST_POINTS_free(Handle) -> ();
     SSL_get0_verified_chain(Handle) -> Handle;
     SSL_get_peer_cert_chain(Handle) -> Handle;
     OPENSSL_sk_num(Handle) -> c_int;
     OPENSSL_sk_value(Handle, c_int) -> Handle;
     i2d_X509(Handle, *mut *mut u8) -> c_int;
+    X509_get_subject_name(Handle) -> Handle;
+    X509_get_issuer_name(Handle) -> Handle;
+    X509_get_version(Handle) -> c_long;
+    X509_get_serialNumber(Handle) -> Handle;
+    X509_get0_notBefore(Handle) -> Handle;
+    X509_get0_notAfter(Handle) -> Handle;
+    X509_NAME_entry_count(Handle) -> c_int;
+    X509_NAME_get_entry(Handle, c_int) -> Handle;
+    X509_NAME_ENTRY_set(Handle) -> c_int;
+    X509_NAME_ENTRY_get_object(Handle) -> Handle;
+    X509_NAME_ENTRY_get_data(Handle) -> Handle;
+    ASN1_STRING_type(Handle) -> c_int;
+    ASN1_STRING_to_UTF8(*mut *mut u8, Handle) -> c_int;
+    CRYPTO_free(Handle, *const c_char, c_int) -> ();
+    i2a_ASN1_INTEGER(Handle, Handle) -> c_int;
+    ASN1_TIME_print(Handle, Handle) -> c_int;
+    BIO_gets(Handle, *mut c_char, c_int) -> c_int;
     X509_verify_cert_error_string(c_long) -> *const c_char;
+    SSL_get_shutdown(Handle) -> c_int;
+    SSL_pending(Handle) -> c_int;
     SSL_read_ex(Handle, Handle, usize, *mut usize) -> c_int;
     SSL_write_ex(Handle, *const c_void, usize, *mut usize) -> c_int;
+    SSL_get_ciphers(Handle) -> Handle;
+    SSL_CIPHER_get_id(Handle) -> u32;
+    SSL_CIPHER_get_name(Handle) -> *const c_char;
+    SSL_CIPHER_get_version(Handle) -> *const c_char;
+    SSL_CIPHER_description(Handle, *mut c_char, c_int) -> *mut c_char;
+    SSL_CIPHER_get_bits(Handle, *mut c_int) -> c_int;
+    SSL_CIPHER_is_aead(Handle) -> c_int;
+    SSL_CIPHER_get_cipher_nid(Handle) -> c_int;
+    SSL_CIPHER_get_digest_nid(Handle) -> c_int;
+    SSL_CIPHER_get_kx_nid(Handle) -> c_int;
+    SSL_CIPHER_get_auth_nid(Handle) -> c_int;
     SSL_get_error(Handle, c_int) -> c_int;
     ERR_clear_error() -> ();
     ERR_peek_error() -> c_ulong;
@@ -190,7 +251,16 @@ pub(crate) fn version() -> Option<String> {
 
 #[derive(Debug)]
 pub(crate) enum Failure {
-    Verify { code: i64, message: String },
+    Verify {
+        code: i64,
+        message: String,
+    },
+    Trust {
+        code: i64,
+        library: Option<&'static str>,
+        reason: Option<String>,
+        message: String,
+    },
     Io(std::io::Error),
     Other(String),
 }
@@ -199,6 +269,111 @@ impl Api {
     fn clear(&self) {
         // SAFETY: clears the calling thread's OpenSSL error queue.
         unsafe { (self.ERR_clear_error)() };
+    }
+
+    fn set_peer_name(&self, ssl: Handle, host: &str, verify_hostname: bool) -> Result<(), Failure> {
+        if host.is_empty() || host.starts_with('.') || !host.is_ascii() {
+            return Err(Failure::Other(
+                "invalid or unsupported server hostname".into(),
+            ));
+        }
+        let name =
+            CString::new(host).map_err(|_| Failure::Other("embedded null character".into()))?;
+        // SAFETY: CPython uses OpenSSL's own parser to select IP SAN matching
+        // and suppress SNI for address literals. A successful parse is owned.
+        let ip = unsafe { (self.a2i_IPADDRESS)(name.as_ptr()) };
+        if !ip.is_null() {
+            // SAFETY: the parsed ASN1_OCTET_STRING contains the address in network
+            // byte order. OpenSSL copies its bytes before we release it.
+            let accepted = unsafe {
+                let accepted = !verify_hostname
+                    || (self.X509_VERIFY_PARAM_set1_ip)(
+                        (self.SSL_get0_param)(ssl),
+                        (self.ASN1_STRING_get0_data)(ip),
+                        (self.ASN1_STRING_length)(ip) as usize,
+                    ) == 1;
+                (self.ASN1_OCTET_STRING_free)(ip);
+                accepted
+            };
+            if !accepted {
+                return Err(self.error("X509_VERIFY_PARAM_set1_ip"));
+            }
+        } else {
+            self.clear();
+            // Reject ambiguous numeric inputs instead of authenticating them as DNS.
+            if host.bytes().all(|c| c.is_ascii_digit() || c == b'.')
+                || !host
+                    .bytes()
+                    .all(|c| c.is_ascii_alphanumeric() || matches!(c, b'-' | b'.' | b'_'))
+            {
+                return Err(Failure::Other(
+                    "invalid or unsupported server hostname".into(),
+                ));
+            }
+            // SAFETY: OpenSSL copies the terminated name in both calls. Host flags
+            // are inherited from the context. IP literals took the separate verification path above.
+            unsafe {
+                if verify_hostname && (self.SSL_set1_host)(ssl, name.as_ptr()) != 1 {
+                    return Err(self.error("SSL_set1_host"));
+                }
+                if (self.SSL_ctrl)(
+                    ssl,
+                    SSL_CTRL_SET_TLSEXT_HOSTNAME,
+                    0,
+                    name.as_ptr().cast_mut().cast(),
+                ) != 1
+                {
+                    return Err(self.error("SSL_set_tlsext_host_name"));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn encode_certificate(&self, certificate: Handle) -> Result<Vec<u8>, Failure> {
+        if certificate.is_null() {
+            return Err(Failure::Other("missing certificate in TLS chain".into()));
+        }
+        // SAFETY: the X509 remains live through both calls. A null output queries its DER size.
+        let size = unsafe { (self.i2d_X509)(certificate, ptr::null_mut()) };
+        if size <= 0 {
+            return Err(self.error("i2d_X509"));
+        }
+        let mut der = vec![0u8; size as usize];
+        let mut cursor = der.as_mut_ptr();
+        // SAFETY: the unchanged certificate has exactly size encoded bytes. i2d_X509
+        // advances cursor, while der retains ownership of the original allocation.
+        if unsafe { (self.i2d_X509)(certificate, &mut cursor) } != size {
+            return Err(self.error("i2d_X509"));
+        }
+        Ok(der)
+    }
+
+    fn verify_peer(&self, ssl: Handle, client_handshake_complete: bool) -> Result<(), Failure> {
+        // SAFETY: read the mode copied into this SSL by SSL_new, even if the context
+        // was reconfigured between retries on a memory BIO.
+        if unsafe { (self.SSL_get_verify_mode)(ssl) } & SSL_VERIFY_PEER == 0 {
+            return Ok(());
+        }
+        // SAFETY: this live SSL contains the verification result of that handshake.
+        let code = unsafe { (self.SSL_get_verify_result)(ssl) };
+        if code != 0 {
+            // SAFETY: OpenSSL documents this as a static string for every result code.
+            let msg = unsafe { CStr::from_ptr((self.X509_verify_cert_error_string)(code)) };
+            #[allow(clippy::useless_conversion, reason = "OpenSSL returns a C long")]
+            let code = i64::from(code);
+            return Err(Failure::Verify {
+                code,
+                message: msg.to_string_lossy().into_owned(),
+            });
+        }
+        // A user-selected anonymous TLS 1.2 cipher can omit the certificate and
+        // still yield X509_V_OK. This client requires an authenticated peer.
+        // SAFETY: only test the borrowed pointer for presence while SSL is live.
+        if client_handshake_complete && unsafe { (self.SSL_get0_peer_certificate)(ssl) }.is_null() {
+            return Err(Failure::Other("peer did not return a certificate".into()));
+        }
+        Ok(())
     }
 
     fn file_error(&self, operation: &str) -> Failure {
@@ -214,15 +389,36 @@ impl Api {
         self.error(operation)
     }
 
+    fn reason_text(&self, code: c_ulong) -> Option<std::borrow::Cow<'_, str>> {
+        // SAFETY: the loaded library owns the optional static reason string.
+        let reason = unsafe { (self.ERR_reason_error_string)(code) };
+        NonNull::new(reason.cast_mut()).map(|p| {
+            // SAFETY: a non-null result points to the provider's static, NUL-terminated string.
+            unsafe { CStr::from_ptr(p.as_ptr()) }.to_string_lossy()
+        })
+    }
+
     fn error(&self, operation: &str) -> Failure {
-        // SAFETY: OpenSSL returns a static NUL-terminated reason, or null.
-        let reason = unsafe { (self.ERR_reason_error_string)((self.ERR_peek_last_error)()) };
-        if reason.is_null() {
-            Failure::Other(operation.to_owned())
-        } else {
-            // SAFETY: reason is the non-null library string checked above.
-            let detail = unsafe { CStr::from_ptr(reason) }.to_string_lossy();
-            Failure::Other(format!("{operation}: {detail}"))
+        // SAFETY: inspect the calling thread's error queue.
+        let code = unsafe { (self.ERR_peek_last_error)() };
+        let message = self.reason_text(code).map_or_else(
+            || operation.to_owned(),
+            |detail| format!("{operation}: {detail}"),
+        );
+        Failure::Other(message)
+    }
+}
+
+fn clear_errno() {
+    // SAFETY: only clear this thread's errno for the following OpenSSL operation.
+    unsafe {
+        #[cfg(target_os = "linux")]
+        {
+            *libc::__errno_location() = 0;
+        }
+        #[cfg(target_os = "macos")]
+        {
+            *libc::__error() = 0;
         }
     }
 }
@@ -232,37 +428,50 @@ unsafe extern "C" fn reject_password(_: *mut c_char, _: c_int, _: c_int, _: Hand
     -1
 }
 
+// Method selectors exposed by CPython, distinct from TLS wire versions.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum Protocol {
+    Tls = 2,
+    Client = 16,
+    Server = 17,
+}
+
+const SSL_VERIFY_PEER: c_int = 1;
+const SSL_VERIFY_FAIL_IF_NO_PEER_CERT: c_int = 2;
+const VERIFY_REQUIRED: c_int = SSL_VERIFY_PEER | SSL_VERIFY_FAIL_IF_NO_PEER_CERT;
+
 pub(crate) struct Context {
     api: &'static Api,
     handle: NonNull<c_void>,
-    server: bool,
+    pub(super) protocol: Protocol,
+    pub(super) check_hostname: bool,
 }
 
 impl Context {
-    pub(crate) fn is_server(&self) -> bool {
-        self.server
-    }
-
-    pub(crate) fn new(server: bool) -> Result<Self, Failure> {
+    pub(super) fn new(protocol: Protocol) -> Result<Self, Failure> {
         let api = api().ok_or_else(|| Failure::Other("OpenSSL 3 TLS is unavailable".into()))?;
         api.clear();
-        // SAFETY: both methods are process-lifetime constants in this provider.
-        let method = if server {
-            api.TLS_server_method
-        } else {
-            api.TLS_client_method
+        let method = match protocol {
+            Protocol::Tls => api.TLS_method,
+            Protocol::Client => api.TLS_client_method,
+            Protocol::Server => api.TLS_server_method,
         };
+        // SAFETY: each selector returns a process-lifetime SSL_METHOD from this same provider.
         let handle = NonNull::new(unsafe { (api.SSL_CTX_new)(method()) })
             .ok_or_else(|| api.error("SSL_CTX_new"))?;
         let mut ctx = Self {
             api,
             handle,
-            server,
+            protocol,
+            check_hostname: protocol == Protocol::Client,
         };
-        // SAFETY: the context is live and owns both settings. Clients verify the peer.
-        // Servers have CPython's default policy of no client authentication.
+        ctx.set_verify_bits(if ctx.check_hostname {
+            VERIFY_REQUIRED
+        } else {
+            0
+        });
+        // SAFETY: the context owns the callback, which has static lifetime.
         unsafe {
-            (api.SSL_CTX_set_verify)(handle.as_ptr(), if server { 0 } else { 0x01 | 0x02 }, None);
             (api.SSL_CTX_set_default_passwd_cb)(handle.as_ptr(), reject_password);
         }
         // SAFETY: arguments implement the SSL_CTX_set_min_proto_version macro.
@@ -297,6 +506,48 @@ impl Context {
         ctx.add_verify_flags(X509_V_FLAG_TRUSTED_FIRST)?;
         ctx.set_ciphers(CIPHERS)?;
         Ok(ctx)
+    }
+
+    fn verify_bits(&self) -> c_int {
+        // SAFETY: SSL_CTX_get_verify_mode reads this live context.
+        unsafe { (self.api.SSL_CTX_get_verify_mode)(self.handle.as_ptr()) }
+    }
+
+    fn set_verify_bits(&mut self, bits: c_int) {
+        // SAFETY: OpenSSL copies the mode. A null callback retains default verification.
+        unsafe { (self.api.SSL_CTX_set_verify)(self.handle.as_ptr(), bits, None) };
+    }
+
+    pub(super) fn verify_mode(&self) -> Result<i64, Failure> {
+        match self.verify_bits() & VERIFY_REQUIRED {
+            0 => Ok(0),
+            SSL_VERIFY_PEER => Ok(1),
+            VERIFY_REQUIRED => Ok(2),
+            _ => Err(Failure::Other(
+                "invalid return value from SSL_CTX_get_verify_mode".into(),
+            )),
+        }
+    }
+
+    pub(super) fn set_verify_mode(&mut self, mode: c_int) -> Result<(), &'static str> {
+        let bits = match mode {
+            0 if self.check_hostname => {
+                return Err("Cannot set verify_mode to CERT_NONE when check_hostname is enabled.");
+            }
+            0 => 0,
+            1 => SSL_VERIFY_PEER,
+            2 => VERIFY_REQUIRED,
+            _ => return Err("invalid value for verify_mode"),
+        };
+        self.set_verify_bits(bits);
+        Ok(())
+    }
+
+    pub(super) fn set_check_hostname(&mut self, enabled: bool) {
+        if enabled && self.verify_bits() == 0 {
+            self.set_verify_bits(VERIFY_REQUIRED);
+        }
+        self.check_hostname = enabled;
     }
 
     fn add_verify_flags(&mut self, flags: c_ulong) -> Result<(), Failure> {
@@ -336,13 +587,61 @@ impl Context {
         }
     }
 
-    pub(crate) fn verify_flags(&self) -> u64 {
+    pub(crate) fn verify_flags(&self) -> c_ulong {
         // SAFETY: the borrowed parameters remain valid throughout the query.
         unsafe {
             (self.api.X509_VERIFY_PARAM_get_flags)((self.api.SSL_CTX_get0_param)(
                 self.handle.as_ptr(),
-            )) as u64
+            ))
         }
+    }
+
+    pub(super) fn set_verify_flags(&mut self, flags: c_ulong) -> Result<(), Failure> {
+        let old = self.verify_flags();
+        let clear = old & !flags;
+        if clear != 0 {
+            self.api.clear();
+            // SAFETY: the verification parameters are borrowed from this live SSL_CTX.
+            if unsafe {
+                (self.api.X509_VERIFY_PARAM_clear_flags)(
+                    (self.api.SSL_CTX_get0_param)(self.handle.as_ptr()),
+                    clear,
+                )
+            } != 1
+            {
+                return Err(self.api.error("X509_VERIFY_PARAM_clear_flags"));
+            }
+        }
+        let set = flags & !old;
+        if set != 0 {
+            self.add_verify_flags(set)?;
+        }
+        Ok(())
+    }
+
+    pub(super) fn session_stats(&self) -> [(&'static str, i64); 11] {
+        // SSL_CTX_sess_* are macros over SSL_CTX_ctrl. CPython exposes these
+        // SSL_CTRL_SESS_* counters in this order, omitting CB_HIT (28).
+        [
+            ("number", 20),
+            ("connect", 21),
+            ("connect_good", 22),
+            ("connect_renegotiate", 23),
+            ("accept", 24),
+            ("accept_good", 25),
+            ("accept_renegotiate", 26),
+            ("hits", 27),
+            ("misses", 29),
+            ("timeouts", 30),
+            ("cache_full", 31),
+        ]
+        .map(|(name, command)| {
+            // SAFETY: these read-only commands take no pointer or integer argument.
+            let count = unsafe {
+                (self.api.SSL_CTX_ctrl)(self.handle.as_ptr(), command, 0, ptr::null_mut())
+            };
+            (name, count as i64)
+        })
     }
 
     pub(super) fn cert_store_stats(&self) -> Option<[c_int; 3]> {
@@ -428,22 +727,6 @@ impl Context {
         unsafe {
             (self.api.SSL_CTX_set_post_handshake_auth)(self.handle.as_ptr(), i32::from(enabled))
         };
-    }
-
-    pub(crate) fn load_verify_locations(&mut self, cafile: &CStr) -> Result<(), Failure> {
-        self.api.clear();
-        // SAFETY: the context is live and the terminated path outlives the call.
-        if unsafe {
-            (self.api.SSL_CTX_load_verify_locations)(
-                self.handle.as_ptr(),
-                cafile.as_ptr(),
-                ptr::null(),
-            )
-        } != 1
-        {
-            return Err(self.api.file_error("SSL_CTX_load_verify_locations"));
-        }
-        Ok(())
     }
 
     pub(crate) fn load_cert_chain(
@@ -574,7 +857,7 @@ impl Drop for Context {
 pub(crate) struct Session {
     api: &'static Api,
     handle: NonNull<c_void>,
-    socket: OwnedFd,
+    socket: Option<crate::ObjectOwner>,
     server: bool,
 }
 
@@ -583,15 +866,25 @@ enum Operation<'a> {
     Connect,
     Read(&'a mut [u8]),
     Write(&'a [u8]),
+    Shutdown,
 }
 
 impl Session {
-    pub(crate) fn wrap(ctx: &Context, fd: OwnedFd, host: Option<&str>) -> Result<Self, Failure> {
-        if ctx.server == host.is_some() {
-            return Err(Failure::Other(
-                "TLS role and server hostname disagree".into(),
-            ));
-        }
+    pub(super) fn socket(&self) -> &crate::ObjectOwner {
+        self.socket.as_ref().expect("live TLS transport")
+    }
+
+    /// Free the non-closing TLS BIO and transfer its original socket back to the caller.
+    pub(super) fn into_socket(mut self) -> crate::ObjectOwner {
+        self.socket.take().expect("live TLS transport")
+    }
+
+    pub(crate) fn wrap(
+        ctx: &Context,
+        socket: crate::ObjectOwner,
+        host: Option<&str>,
+        server: bool,
+    ) -> Result<Self, Failure> {
         let api = ctx.api;
         api.clear();
         // SAFETY: SSL_new takes its own reference to this live context.
@@ -600,122 +893,48 @@ impl Session {
         let session = Self {
             api,
             handle,
-            socket: fd,
-            server: ctx.server,
+            socket: Some(socket),
+            server,
         };
         if let Some(host) = host {
-            session.set_peer_name(host)?;
+            api.set_peer_name(handle.as_ptr(), host, ctx.check_hostname)?;
         }
         // SAFETY: SSL_set_fd creates a non-closing socket BIO. The owned descriptor
         // remains valid for the full lifetime of this SSL object.
-        if unsafe { (api.SSL_set_fd)(handle.as_ptr(), session.socket.as_raw_fd()) } != 1 {
+        if unsafe { (api.SSL_set_fd)(handle.as_ptr(), socket::fd(session.socket())) } != 1 {
             return Err(api.error("SSL_set_fd"));
         }
-        if ctx.server {
-            session.blocking_io(Operation::Accept)?;
-            return Ok(session);
-        }
-        let connected = session.blocking_io(Operation::Connect);
-        // SAFETY: this live SSL contains the verification result of that handshake.
-        let code = unsafe { (api.SSL_get_verify_result)(handle.as_ptr()) };
-        if code != 0 {
-            // SAFETY: OpenSSL documents this as a static string for every result code.
-            let msg = unsafe { CStr::from_ptr((api.X509_verify_cert_error_string)(code)) };
-            return Err(Failure::Verify {
-                code: code as i64,
-                message: msg.to_string_lossy().into_owned(),
-            });
-        }
-        connected?;
-        // A user-selected anonymous TLS 1.2 cipher can omit the certificate and
-        // still yield X509_V_OK. This client requires an authenticated peer.
-        // SAFETY: only test the borrowed pointer for presence while SSL is live.
-        if unsafe { (api.SSL_get0_peer_certificate)(handle.as_ptr()) }.is_null() {
-            return Err(Failure::Other("peer did not return a certificate".into()));
-        }
+        let handshake = session.blocking_io(
+            if server {
+                Operation::Accept
+            } else {
+                Operation::Connect
+            },
+            |api, _, label| api.error(label),
+        );
+        api.verify_peer(handle.as_ptr(), !server && handshake.is_ok())?;
+        handshake?;
         Ok(session)
     }
 
-    fn set_peer_name(&self, host: &str) -> Result<(), Failure> {
-        let api = self.api;
-        let ssl = self.handle.as_ptr();
-        if host.is_empty() || host.starts_with('.') || !host.is_ascii() {
-            return Err(Failure::Other(
-                "invalid or unsupported server hostname".into(),
-            ));
-        }
-        let name =
-            CString::new(host).map_err(|_| Failure::Other("embedded null character".into()))?;
-        // SAFETY: CPython uses OpenSSL's own parser to select IP SAN matching
-        // and suppress SNI for address literals. A successful parse is owned.
-        let ip = unsafe { (api.a2i_IPADDRESS)(name.as_ptr()) };
-        if !ip.is_null() {
-            // SAFETY: the parsed ASN1_OCTET_STRING contains the address in network
-            // byte order. OpenSSL copies its bytes before we release it.
-            let rc = unsafe {
-                let param = (api.SSL_get0_param)(ssl);
-                let rc = (api.X509_VERIFY_PARAM_set1_ip)(
-                    param,
-                    (api.ASN1_STRING_get0_data)(ip),
-                    (api.ASN1_STRING_length)(ip) as usize,
-                );
-                (api.ASN1_OCTET_STRING_free)(ip);
-                rc
-            };
-            if rc != 1 {
-                return Err(api.error("X509_VERIFY_PARAM_set1_ip"));
-            }
-        } else {
-            api.clear();
-            // Reject ambiguous numeric inputs instead of authenticating them as DNS.
-            if host.bytes().all(|c| c.is_ascii_digit() || c == b'.')
-                || !host
-                    .bytes()
-                    .all(|c| c.is_ascii_alphanumeric() || matches!(c, b'-' | b'.' | b'_'))
-            {
-                return Err(Failure::Other(
-                    "invalid or unsupported server hostname".into(),
-                ));
-            }
-            // SAFETY: OpenSSL copies the terminated name in both calls. Host flags
-            // are inherited from the context. IP literals took the separate verification path above.
-            unsafe {
-                if (api.SSL_set1_host)(ssl, name.as_ptr()) != 1 {
-                    return Err(api.error("SSL_set1_host"));
-                }
-                if (api.SSL_ctrl)(
-                    ssl,
-                    SSL_CTRL_SET_TLSEXT_HOSTNAME,
-                    0,
-                    name.as_ptr().cast_mut().cast(),
-                ) != 1
-                {
-                    return Err(api.error("SSL_set_tlsext_host_name"));
-                }
-            }
-        }
-        Ok(())
-    }
-
     /// Retry a blocking socket BIO operation with the same buffer and length.
-    fn blocking_io(&self, mut operation: Operation<'_>) -> Result<usize, Failure> {
+    fn blocking_io<E: From<Failure>>(
+        &self,
+        mut operation: Operation<'_>,
+        failure: impl FnOnce(&Api, i32, &str) -> E,
+    ) -> Result<usize, E> {
         let api = self.api;
         let ssl = self.handle.as_ptr();
+        let mut sent_shutdown = false;
         loop {
             api.clear();
             let mut n = 0;
-            // SAFETY: only clear this thread's errno. All operations borrow our
-            // live SSL, and their buffers and output counter outlive each attempt.
+            clear_errno();
+            // SAFETY: all operations borrow our live SSL, and their buffers and
+            // output counter outlive each attempt.
             let (rc, label) = unsafe {
-                #[cfg(target_os = "linux")]
-                {
-                    *libc::__errno_location() = 0;
-                }
-                #[cfg(target_os = "macos")]
-                {
-                    *libc::__error() = 0;
-                }
                 match &mut operation {
+                    Operation::Shutdown => ((api.SSL_shutdown)(ssl), "SSL_shutdown"),
                     Operation::Accept => ((api.SSL_accept)(ssl), "SSL_accept"),
                     Operation::Connect => ((api.SSL_connect)(ssl), "SSL_connect"),
                     Operation::Read(buf) => (
@@ -731,6 +950,17 @@ impl Session {
             if rc == 1 {
                 return Ok(n);
             }
+            if rc == 0 && matches!(operation, Operation::Shutdown) {
+                // Retry for the peer's close_notify without consuming subsequent
+                // cleartext. CPython accepts a second zero from SSL_shutdown.
+                if sent_shutdown {
+                    return Ok(0);
+                }
+                sent_shutdown = true;
+                // SAFETY: read-ahead is a setting on this live SSL.
+                unsafe { (api.SSL_set_read_ahead)(ssl, 0) };
+                continue;
+            }
             // Snapshot errno before any other OpenSSL call can change it.
             let os_error = std::io::Error::last_os_error();
             // SAFETY: classify this exact return value immediately on the same thread.
@@ -742,28 +972,14 @@ impl Session {
                     } else {
                         libc::POLLOUT
                     };
-                    crate::objects::socket::wait_blocking(self.socket.as_raw_fd(), events)
+                    socket::wait_blocking(socket::fd(self.socket()), events)
                         .map_err(Failure::Io)?;
                 }
                 SSL_ERROR_SYSCALL if os_error.kind() == std::io::ErrorKind::Interrupted => continue,
                 SSL_ERROR_SYSCALL if os_error.raw_os_error() != Some(0) => {
-                    return Err(Failure::Io(os_error));
+                    return Err(Failure::Io(os_error).into());
                 }
-                _ => {
-                    if matches!(operation, Operation::Read(_)) {
-                        // OpenSSL 3 ERR_PACK(ERR_LIB_SSL, 0, SSL_R_UNEXPECTED_EOF_WHILE_READING).
-                        const UNEXPECTED_EOF: c_ulong = (20 << 23) | 294;
-                        // SAFETY: peek at the error from this operation before clearing the queue.
-                        let detail = unsafe { (api.ERR_peek_last_error)() };
-                        // Our public wrapper accepts only suppress_ragged_eofs=True.
-                        if kind == SSL_ERROR_ZERO_RETURN
-                            || (kind == SSL_ERROR_SSL && detail == UNEXPECTED_EOF)
-                        {
-                            return Ok(0);
-                        }
-                    }
-                    return Err(api.error(label));
-                }
+                _ => return Err(failure(api, kind, label)),
             }
         }
     }
@@ -811,61 +1027,58 @@ impl Session {
         if self.server && !verified {
             // SAFETY: a non-null peer chain belongs to the current handshake.
             let leaf = unsafe { (api.SSL_get0_peer_certificate)(self.handle.as_ptr()) };
-            certificates.push(self.encode_certificate(leaf)?);
+            certificates.push(api.encode_certificate(leaf)?);
         }
         for index in 0..count {
             // SAFETY: this index is within the live stack returned above.
             let certificate = unsafe { (api.OPENSSL_sk_value)(chain, index) };
-            certificates.push(self.encode_certificate(certificate)?);
+            certificates.push(api.encode_certificate(certificate)?);
         }
         Ok(certificates)
     }
 
-    fn encode_certificate(&self, certificate: Handle) -> Result<Vec<u8>, Failure> {
-        let api = self.api;
-        if certificate.is_null() {
-            return Err(Failure::Other("missing certificate in TLS chain".into()));
+    pub(crate) fn send(&mut self, bytes: &[u8]) -> Result<usize, Failure> {
+        let n = self.blocking_io(Operation::Write(bytes), |api, _, label| api.error(label))?;
+        if (n == 0 && !bytes.is_empty()) || n > bytes.len() {
+            return Err(Failure::Other("invalid SSL_write byte count".into()));
         }
-        // SAFETY: the X509 remains live through both calls. A null output queries its DER size.
-        let size = unsafe { (api.i2d_X509)(certificate, ptr::null_mut()) };
-        if size <= 0 {
-            return Err(api.error("i2d_X509"));
-        }
-        let mut der = vec![0u8; size as usize];
-        let mut cursor = der.as_mut_ptr();
-        // SAFETY: the unchanged certificate has exactly size encoded bytes. i2d_X509
-        // advances cursor, while der retains ownership of the original allocation.
-        if unsafe { (api.i2d_X509)(certificate, &mut cursor) } != size {
-            return Err(api.error("i2d_X509"));
-        }
-        Ok(der)
+        Ok(n)
     }
 
     pub(crate) fn sendall(&mut self, mut bytes: &[u8]) -> Result<(), Failure> {
         while !bytes.is_empty() {
-            let n = self.blocking_io(Operation::Write(bytes))?;
-            if n == 0 || n > bytes.len() {
-                return Err(Failure::Other("invalid SSL_write byte count".into()));
-            }
+            let n = self.send(bytes)?;
             bytes = &bytes[n..];
         }
         Ok(())
     }
 
-    pub(crate) fn recv(&mut self, size: usize) -> Result<Vec<u8>, Failure> {
-        // A TLS application-data read returns at most one plaintext record.
-        let mut bytes = vec![0; size.min(16 * 1024)];
-        if !bytes.is_empty() {
-            let n = self.blocking_io(Operation::Read(&mut bytes))?;
-            bytes.truncate(n);
+    pub(in crate::dynamic) fn read(&mut self, out: &mut [u8]) -> Result<usize, bio::BioFailure> {
+        if out.is_empty() {
+            return Ok(0);
         }
-        Ok(bytes)
+        let result = self.blocking_io(Operation::Read(out), Api::ssl_failure_kind);
+        self.api.finish_read(self.handle, result)
+    }
+
+    pub(in crate::dynamic) fn pending(&self) -> Result<usize, bio::BioFailure> {
+        self.api.ssl_pending(self.handle)
+    }
+
+    /// Exchange close notifications while the session still owns the socket.
+    pub(in crate::dynamic) fn shutdown(&mut self) -> Result<(), bio::BioFailure> {
+        self.blocking_io(Operation::Shutdown, Api::ssl_failure_kind)?;
+        Ok(())
     }
 }
 
 impl Drop for Session {
     fn drop(&mut self) {
-        // SAFETY: SSL_free releases the sole SSL reference before socket is dropped.
+        // SAFETY: free the SSL and its non-closing BIO while the socket is still valid.
         unsafe { (self.api.SSL_free)(self.handle.as_ptr()) };
+        // An endpoint operation may still hold a reference across a Python callback.
+        if let Some(socket) = &self.socket {
+            let _ = socket::close(socket);
+        }
     }
 }

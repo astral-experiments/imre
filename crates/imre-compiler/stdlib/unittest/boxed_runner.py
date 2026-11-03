@@ -1,30 +1,71 @@
 # Fixed-layout TestResult specializes its error representation. Boxed results
 # receive the real exception tuple through the public overridable callbacks.
-def _boxedResultDetail(error):
-    import traceback
-    kind, value, tb = error
-    # Only trim leading frames in the bundled unittest implementation. A user
-    # calling addError directly can supply a traceback with no framework frame.
-    internal = (_boxedResultDetail.__code__.co_filename, case.__file__)
-    while tb is not None and tb.tb_frame.f_code.co_filename in internal:
+# Traceback filtering from CPython 3.14.5 Lib/unittest/result.py. See ../docstrings/LICENSE.
+def _clean_tracebacks(self, exctype, value, tb, test):
+    ret = None
+    first = True
+    excs = [(exctype, value, tb)]
+    seen = {id(value)}  # Detect loops in chained exceptions.
+    while excs:
+        (exctype, value, tb) = excs.pop()
+        # Skip test runner traceback levels
+        while tb and self._is_relevant_tb_level(tb):
+            tb = tb.tb_next
+
+        # Skip assert*() traceback levels
+        if exctype is test.failureException:
+            self._remove_unittest_tb_frames(tb)
+
+        if first:
+            ret = tb
+            first = False
+        else:
+            value.__traceback__ = tb
+
+        if value is not None:
+            for c in (value.__cause__, value.__context__):
+                if c is not None and id(c) not in seen:
+                    excs.append((type(c), c, c.__traceback__))
+                    seen.add(id(c))
+    return ret
+
+
+def _is_relevant_tb_level(self, tb):
+    return '__unittest' in tb.tb_frame.f_globals
+
+
+def _remove_unittest_tb_frames(self, tb):
+    '''Truncates usercode tb at the first unittest frame.
+
+    If the first frame of the traceback is in user code,
+    the prefix up to the first unittest frame is returned.
+    If the first frame is already in the unittest module,
+    the traceback is not modified.
+    '''
+    prev = None
+    while tb and not self._is_relevant_tb_level(tb):
+        prev = tb
         tb = tb.tb_next
-    return "".join(traceback.format_exception(kind, value, tb))
+    if prev is not None:
+        prev.tb_next = None
 
 
 def _addError(self, test, error):
     if getattr(self, "failfast", False):
         self.stop()
-    self.errors.append((test, _boxedResultDetail(error)))
+    self.errors.append((test, self._exc_info_to_string(error, test)))
+    self._mirrorOutput = True
 
 
 def _addFailure(self, test, error):
     if getattr(self, "failfast", False):
         self.stop()
-    self.failures.append((test, _boxedResultDetail(error)))
+    self.failures.append((test, self._exc_info_to_string(error, test)))
+    self._mirrorOutput = True
 
 
 def _resultExpectedFailure(self, test, error):
-    self.expectedFailures.append((test, _boxedResultDetail(error)))
+    self.expectedFailures.append((test, self._exc_info_to_string(error, test)))
 
 
 def _resultSubTest(self, test, subtest, error):
@@ -32,7 +73,8 @@ def _resultSubTest(self, test, subtest, error):
         if getattr(self, "failfast", False):
             self.stop()
         problems = self.failures if issubclass(error[0], test.failureException) else self.errors
-        problems.append((subtest, _boxedResultDetail(error)))
+        problems.append((subtest, self._exc_info_to_string(error, test)))
+        self._mirrorOutput = True
 
 
 # Adapted from CPython 3.14.5 Lib/unittest/runner.py. See ../docstrings/LICENSE.
@@ -140,6 +182,50 @@ def _boxedResultInit(self, stream=None, descriptions=None, verbosity=None):
     self.collectedDurations = []
     self.buffer = False
     self.tb_locals = False
+    self._stdout_buffer = None
+    self._stderr_buffer = None
+    self._original_stdout = sys.stdout
+    self._original_stderr = sys.stderr
+    self._mirrorOutput = False
+
+
+# Adapted from CPython 3.14.5 Lib/unittest/result.py. See ../docstrings/LICENSE.
+def _setupStdout(self):
+    if self.buffer:
+        if self._stderr_buffer is None:
+            import io
+            self._stderr_buffer = io.StringIO()
+            self._stdout_buffer = io.StringIO()
+        sys.stdout = self._stdout_buffer
+        sys.stderr = self._stderr_buffer
+
+
+def _restoreStdout(self):
+    if self.buffer:
+        if self._mirrorOutput:
+            output = sys.stdout.getvalue()
+            error = sys.stderr.getvalue()
+            if output:
+                self._original_stdout.write(result._bufferedOutput(output, "Stdout"))
+            if error:
+                self._original_stderr.write(result._bufferedOutput(error, "Stderr"))
+        sys.stdout = self._original_stdout
+        sys.stderr = self._original_stderr
+        self._stdout_buffer.seek(0)
+        self._stdout_buffer.truncate()
+        self._stderr_buffer.seek(0)
+        self._stderr_buffer.truncate()
+
+
+def startTest(self, test):
+    self.testsRun += 1
+    self._mirrorOutput = False
+    self._setupStdout()
+
+
+def stopTest(self, test):
+    self._restoreStdout()
+    self._mirrorOutput = False
 
 
 def _wasSuccessful(self):
@@ -188,7 +274,7 @@ class _StreamWrite:
 
 
 def _streamAttribute(self, name):
-    if name in ("stream", "__getstate__"):
+    if name in ("stream", "_memory", "__getstate__"):
         raise AttributeError(name)
     return getattr(self.stream, name)
 
@@ -196,9 +282,6 @@ def _streamAttribute(self, name):
 def _boxedRunnerInit(self, stream=None, descriptions=True, verbosity=1, failfast=False,
                      buffer=False, resultclass=None, warnings=None, *, tb_locals=False,
                      durations=None):
-    if buffer or tb_locals:
-        raise NotImplementedError("native TextTestRunner does not yet support output buffering "
-                                  "or local variables in tracebacks")
     self.stream = _WritelnDecorator(sys.stderr if stream is None else stream)
     self.descriptions = descriptions
     self.verbosity = verbosity
@@ -218,20 +301,23 @@ def _makeResult(self):
         return self.resultclass(self.stream, self.descriptions, self.verbosity)
 
 
-_textResultInit = TextTestResult.__init__
-
-
 def _boxedTextResultInit(self, stream=None, descriptions=True, verbosity=1, *, durations=None):
-    _textResultInit(self, stream, descriptions, verbosity)
+    super(TextTestResult, self).__init__(stream, descriptions, verbosity)
+    self.stream = stream if isinstance(stream, _WritelnDecorator) else _WritelnDecorator(stream)
+    self.descriptions = descriptions
+    self.verbose = verbosity
+    self._failureNames = []
+    self._errorNames = []
+    self.current_name = ""
+    self.name_pending = False
+    self.started = time.time()
     self.showAll = verbosity > 1
     self.dots = verbosity == 1
     self._newline = True
-    if isinstance(stream, _WritelnDecorator):
-        self.stream = stream
     self.durations = durations
 
 
-from unittest import runner as _runnerModule
+from unittest import result, runner as _runnerModule
 
 
 # From CPython 3.14.5 Lib/unittest/{result,runner}.py. See ../docstrings/LICENSE.
@@ -330,6 +416,14 @@ _WritelnDecorator.__getattr__ = _streamAttribute
 _WritelnDecorator.write = _StreamWrite()
 TestResult.addDuration = addDuration
 TestResult.__init__ = _boxedResultInit
+TestResult._setupStdout = _setupStdout
+TestResult._restoreStdout = _restoreStdout
+TestResult.startTest = startTest
+TestResult.stopTest = stopTest
+TestResult._clean_tracebacks = _clean_tracebacks
+TestResult._is_relevant_tb_level = _is_relevant_tb_level
+TestResult._remove_unittest_tb_frames = _remove_unittest_tb_frames
+TestResult._exc_info_to_string = result._exc_info_to_string
 TestResult.addExpectedFailure = _resultExpectedFailure
 TestResult.addSubTest = _resultSubTest
 TestResult.addError = _addError

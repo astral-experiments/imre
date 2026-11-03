@@ -13,7 +13,7 @@ use sha3::{Sha3_224, Sha3_256, Sha3_384, Sha3_512, Shake128, Shake256};
 
 use super::exceptions::{Error, Kind, Result, finish};
 use super::{Bytes, Object, Storage, StorageCell, Str, object};
-use crate::dynamic::HashStream;
+use crate::dynamic::DigestState;
 use crate::{BytesOwner, Int, ObjectOwner};
 
 #[derive(Clone)]
@@ -243,7 +243,7 @@ impl State {
 
     pub(crate) fn repr(&self, identity: usize) -> impl std::fmt::Display {
         std::fmt::from_fn(move |f| {
-            if Self::is_provider_class(self.class_name()) {
+            if Self::is_provider_class(self.class_name()) || self.class_name() == "_md5.md5" {
                 return write!(f, "<{} object at {identity:#x}>", self.class_name());
             }
             write!(
@@ -386,9 +386,17 @@ impl State {
         }
         Ok(bytes)
     }
+
+    pub(crate) fn xof_hexdigest(&self, length: &Int) -> Result<Str> {
+        hex_text(&self.xof_digest(length)?)
+    }
+
+    pub(crate) fn hexdigest(&self) -> Result<Str> {
+        self.fixed_digest("hexdigest", hex_text)
+    }
 }
 
-fn handle(state: HashStream) -> Result<*const Object> {
+fn handle(state: DigestState) -> Result<*const Object> {
     let state = allocator_api2::boxed::Box::try_new(state).map_err(|_| Error::allocation())?;
     ObjectOwner::try_new(Object(StorageCell::new(Storage::Hash(state))))
         .map(ObjectOwner::into_raw)
@@ -405,7 +413,7 @@ pub unsafe extern "C" fn imre_hash_new(
 ) -> *const Object {
     // SAFETY: both operands remain owned for this operation.
     let (name, data) = unsafe { (&*name, &*data) };
-    let result = HashStream::named(name, data, used_for_security).and_then(handle);
+    let result = DigestState::public(name, data, used_for_security).and_then(handle);
     finish(result, ptr::null())
 }
 
@@ -474,7 +482,6 @@ pub(crate) fn hex_with_separator(bytes: &[u8], separator: Option<u8>, group: i32
     Ok(result)
 }
 
-
 fn hex(digest: &[u8]) -> Result<*const Str> {
     crate::checked_owned_str(hex_text(digest)?)
 }
@@ -501,7 +508,7 @@ pub unsafe extern "C" fn imre_sha256_hex(value: *const Bytes) -> *const Str {
 pub unsafe extern "C" fn imre_sha1_new(value: *const Bytes) -> *const Object {
     // SAFETY: the provider consumes the borrowed bytes before returning.
     finish(
-        handle(HashStream::Portable(State::sha1(unsafe { &*value }))),
+        handle(DigestState::Portable(State::sha1(unsafe { &*value }))),
         ptr::null(),
     )
 }
@@ -512,7 +519,7 @@ pub unsafe extern "C" fn imre_sha1_new(value: *const Bytes) -> *const Object {
 pub unsafe extern "C" fn imre_sha256_new(value: *const Bytes) -> *const Object {
     // SAFETY: the provider consumes the borrowed bytes before returning.
     finish(
-        handle(HashStream::Portable(State::new(
+        handle(DigestState::Portable(State::new(
             Algorithm::Sha256(Sha256::new_with_prefix(unsafe { &*value })),
             None,
         ))),
@@ -538,7 +545,7 @@ pub unsafe extern "C" fn imre_hash_update(hash: *const Object, value: *const Byt
 
 /// Read through the buffered stream so its pending bytes and cursor are respected.
 fn update_buffered_file(
-    state: &mut HashStream,
+    state: &mut DigestState,
     file: &mut super::FileState,
     size: &Int,
 ) -> Result<()> {
@@ -636,7 +643,7 @@ pub unsafe extern "C" fn imre_hash_update_file(
 
 /// # Safety
 /// The caller roots an exact hash object and the operation cannot invoke Python code.
-unsafe fn with_state<T>(hash: *const Object, f: impl FnOnce(&HashStream) -> T) -> T {
+unsafe fn with_state<T>(hash: *const Object, f: impl FnOnce(&DigestState) -> T) -> T {
     // SAFETY: the rooted hash remains immutably borrowed for the callback.
     unsafe {
         object(hash).0.with(|storage| {
@@ -653,7 +660,7 @@ unsafe fn with_state<T>(hash: *const Object, f: impl FnOnce(&HashStream) -> T) -
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_hash_type(hash: *const Object) -> *const Str {
     // SAFETY: the name is static and does not borrow storage from the rooted handle.
-    let name = unsafe { with_state(hash, HashStream::class_name) };
+    let name = unsafe { with_state(hash, DigestState::class_name) };
     let class = crate::StrOwner::try_new(Str::const_new(name))
         .ok()
         .and_then(|name| crate::sys::try_intern_owner(&name))
@@ -673,7 +680,7 @@ pub extern "C" fn imre_hash_identity(hash: *const Object) -> usize {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_hash_name(hash: *const Object) -> *const Str {
     // SAFETY: provider names are static strings independent of the hash.
-    let name = unsafe { with_state(hash, HashStream::name) };
+    let name = unsafe { with_state(hash, DigestState::name) };
     finish(crate::checked_owned_str(Str::from(name)), ptr::null())
 }
 
@@ -682,7 +689,7 @@ pub unsafe extern "C" fn imre_hash_name(hash: *const Object) -> *const Str {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_hash_digest_size(hash: *const Object) -> usize {
     // SAFETY: the lookup only reads the hash's algorithm tag.
-    let size = unsafe { with_state(hash, HashStream::digest_size) };
+    let size = unsafe { with_state(hash, DigestState::digest_size) };
     Int::from_usize(size).into_raw()
 }
 
@@ -691,7 +698,7 @@ pub unsafe extern "C" fn imre_hash_digest_size(hash: *const Object) -> usize {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_hash_block_size(hash: *const Object) -> usize {
     // SAFETY: the lookup only reads the hash's algorithm tag.
-    let size = unsafe { with_state(hash, HashStream::block_size) };
+    let size = unsafe { with_state(hash, DigestState::block_size) };
     Int::from_usize(size).into_raw()
 }
 
@@ -699,9 +706,9 @@ pub unsafe extern "C" fn imre_hash_block_size(hash: *const Object) -> usize {
 /// The caller roots the hash. Its independent copy can be updated separately.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_hash_copy(hash: *const Object) -> *const Object {
-    // SAFETY: the rooted hash stays borrowed until its provider has copied the state.
+    // SAFETY: the provider copies the rooted streaming state before returning.
     finish(
-        unsafe { with_state(hash, HashStream::try_copy) }.and_then(handle),
+        unsafe { with_state(hash, DigestState::try_copy) }.and_then(handle),
         ptr::null(),
     )
 }
@@ -733,7 +740,7 @@ pub unsafe extern "C" fn imre_hash_hexdigest(hash: *const Object) -> *const Str 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_hash_xof_digest(hash: *const Object, length: usize) -> *const Bytes {
     // SAFETY: the checked handle and tagged integer remain owned by the caller.
-    let bytes = unsafe { with_state(hash, |s| s.xof_digest(&Int::borrow(length))) };
+    let bytes = unsafe { with_state(hash, |s| s.xof("digest", &Int::borrow(length))) };
     finish(
         bytes
             .and_then(|bytes| BytesOwner::try_new(bytes).map_err(|_| Error::memory_error()))
@@ -749,7 +756,7 @@ pub unsafe extern "C" fn imre_hash_xof_hexdigest(hash: *const Object, length: us
     // SAFETY: the checked handle and tagged integer remain owned by the caller.
     let text = unsafe {
         with_state(hash, |s| {
-            s.xof_digest(&Int::borrow(length))
+            s.xof("hexdigest", &Int::borrow(length))
                 .and_then(|bytes| hex_text(&bytes))
         })
     };

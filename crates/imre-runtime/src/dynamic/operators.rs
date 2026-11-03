@@ -129,6 +129,7 @@ enum FormatLookup {
     Repr,
     Str,
     MethodName,
+    DictViewList,
     TypingTuple(usize),
 }
 
@@ -330,10 +331,7 @@ impl Context {
         let number = self.as_int(result).map_err(|_| {
             Error::new(
                 "TypeError",
-                format!(
-                    "{slot} returned non-int (type {})",
-                    self.type_name(result)
-                ),
+                format!("{slot} returned non-int (type {})", self.type_name(result)),
             )
         })?;
         if !matches!(self.heap.get(result), Value::Int(_)) {
@@ -685,7 +683,10 @@ impl Context {
                     break 'current left.checked_equal(right, self)?;
                 }
                 if matches!(
-                    (self.heap.get(a), self.heap.get(b)),
+                    (
+                        self.heap.get(self.scalar_value(a)),
+                        self.heap.get(self.scalar_value(b))
+                    ),
                     (Value::GenericAlias(_), Value::GenericAlias(_))
                 ) {
                     let Some(parts) = super::typing::checked_alias_parts(self, a, b)? else {
@@ -1484,7 +1485,7 @@ impl Context {
         work: &mut [FormatPart],
         ancestors: &[Id],
         sequence_words: Option<usize>,
-    ) -> Result<Option<String>> {
+    ) -> Result<Option<Id>> {
         let calendar_repr = matches!(lookup, FormatLookup::Repr)
             && super::stdlib::datetime::render::python_repr(self, id);
         if matches!(lookup, FormatLookup::Repr | FormatLookup::Str)
@@ -1513,6 +1514,7 @@ impl Context {
             FormatLookup::Repr => self.repr_override(id),
             FormatLookup::Str => builtins::call(self, "str", &[id], &[]).map(Some),
             FormatLookup::MethodName => self.bound_method_name(id),
+            FormatLookup::DictViewList => builtins::call(self, "list", &[id], &[]).map(Some),
             FormatLookup::TypingTuple(frames) => {
                 self.suspended_typing_frames += frames;
                 let result = typing::typing_alias_helper(self, "_type_repr", vec![id]);
@@ -1521,18 +1523,9 @@ impl Context {
             }
         };
         self.repr_sequence_words = previous;
-        let result = converted.and_then(|value| {
-            value
-                .map(|s| {
-                    let mut text = String::new();
-                    append_rendered_text(&mut text, self.str_value(s)?)?;
-                    Ok(text)
-                })
-                .transpose()
-        });
         self.repr_ancestors.truncate(depth);
         self.heap.release_temporaries_since(mark);
-        result
+        converted
     }
 
     /// Write exception headers and queue their arguments on the same container worklist.
@@ -1679,7 +1672,7 @@ impl Context {
             &mut [FormatPart],
             &[Id],
             Option<usize>,
-        ) -> Result<Option<String>>,
+        ) -> Result<Option<Id>>,
     ) -> Result<String> {
         use FormatPart as Part;
         let mut output = String::new();
@@ -1858,7 +1851,7 @@ impl Context {
                         &active,
                         remaining_sequence_words,
                     )? {
-                        append_rendered_text(&mut output, &text)?;
+                        append_rendered_text(&mut output, ctx.str_value(text)?)?;
                     } else if let Some(items) = ctx.tuple_items(id)? {
                         // Internal diagnostics render stored tuple elements without calling Python.
                         append_rendered_text(&mut output, "[")?;
@@ -2032,7 +2025,7 @@ impl Context {
                         &active,
                         remaining_sequence_words,
                     )? {
-                        append_rendered_text(&mut output, &text)?;
+                        append_rendered_text(&mut output, ctx.str_value(text)?)?;
                     } else if let Some(storage) = ctx.string_storage(id) {
                         append_rendered_text(&mut output, ctx.str_value(storage)?)?;
                     } else {
@@ -2061,7 +2054,7 @@ impl Context {
                             remaining_sequence_words,
                         )?
                     {
-                        append_rendered_text(&mut output, &text)?;
+                        append_rendered_text(&mut output, ctx.str_value(text)?)?;
                         continue;
                     }
                     let (storage, with_factory) = native_storage.unwrap_or((id, true));
@@ -2105,7 +2098,10 @@ impl Context {
                                     &active,
                                     remaining_sequence_words,
                                 )?;
-                                append_rendered_text(&mut output, name.as_deref().unwrap_or("?"))?;
+                                append_rendered_text(
+                                    &mut output,
+                                    name.map(|id| ctx.str_value(id)).transpose()?.unwrap_or("?"),
+                                )?;
                             }
                             append_rendered_text(&mut output, " of ")?;
                             continue;
@@ -2183,7 +2179,8 @@ impl Context {
                                 }
                             }
                             work.push(Part::Text(if callable { "[[" } else { "[" }));
-                            if let Some(name) = alias.name.filter(|_| alias.naming_fields.is_none()) {
+                            if let Some(name) = alias.name.filter(|_| alias.naming_fields.is_none())
+                            {
                                 work.push(Part::Value(name, false));
                                 work.push(Part::Text("typing."));
                             } else {
@@ -2302,6 +2299,28 @@ impl Context {
                                 push_frame(&mut work, Part::Text(", "))?;
                             }
                             push_frame(&mut work, Part::Value(*value, true))?;
+                            continue;
+                        }
+                        Value::DictView { .. } if checked => {
+                            if !enter_ancestor(&mut ancestors, id)? {
+                                append_rendered_text(&mut output, "...")?;
+                                continue;
+                            }
+                            push_frame(&mut active, id)?;
+                            append_rendered_text(&mut output, ctx.type_name(id))?;
+                            append_rendered_text(&mut output, "(")?;
+                            push_frame(&mut work, Part::Leave(id, ")"))?;
+                            // Snapshot the view before an element's repr can mutate its dictionary.
+                            let list = element_repr(
+                                &mut ctx,
+                                id,
+                                FormatLookup::DictViewList,
+                                &mut work,
+                                &active,
+                                remaining_sequence_words,
+                            )?
+                            .expect("checked dictionary view snapshot");
+                            push_frame(&mut work, Part::Value(list, true))?;
                             continue;
                         }
                         Value::MappingProxy(mapping) => {
@@ -2584,7 +2603,7 @@ impl Context {
         format!("<{name} object at {receiver:#x}>")
     }
 
-    fn qualified_class_name(&self, class: Id, scope: Id) -> String {
+    pub(super) fn qualified_class_name(&self, class: Id, scope: Id) -> String {
         let module = match self.namespace_binding(self.scope_data(scope), "__module__") {
             Some(value) => self.str_value(value).ok(),
             None => Some(self.scope_data(scope).module.as_str()),
@@ -3014,7 +3033,8 @@ impl Context {
                 .ok_or_else(|| Error::new("TypeError", "enum member names must be a dictionary"))?;
             return self.get_item(names, key);
         }
-        if let Some(value) = super::typing::subscribe(self, obj, key) {
+        let alias = super::typing::alias_payload(self, obj).unwrap_or(obj);
+        if let Some(value) = super::typing::subscribe(self, alias, key) {
             return value;
         }
         if matches!(self.heap.get(obj), Value::MappingProxy(_)) {
@@ -4383,6 +4403,22 @@ impl Context {
         Ok(result)
     }
 
+    /// Acquire contiguous native bytes using the sequence concatenation error convention.
+    fn concat_buffer(&self, left: Id, right: Id) -> Result<&[u8]> {
+        self.check_buffer_exporter(right)
+            .and_then(|()| self.native_buffer_bytes(right))
+            .map_err(|_| {
+                let name = |id| {
+                    let name = self.type_name(id);
+                    &name[..name.floor_char_boundary(100)]
+                };
+                Error::new(
+                    "TypeError",
+                    format!("can't concat {} to {}", name(right), name(left)),
+                )
+            })
+    }
+
     fn binary_operation(&mut self, op: &str, a: Id, b: Id, inplace: bool) -> Result<Id> {
         if !inplace && op == "|" {
             let weak_proxy = |id| matches!(self.heap.get(id), Value::Weak(wr) if wr.kind != weakref::Kind::Reference);
@@ -4412,6 +4448,38 @@ impl Context {
         }
         if let Some(result) = self.binary_special(op, a, b)? {
             return Ok(result);
+        }
+        if inplace
+            && op == "+"
+            && let storage = self.scalar_value(a)
+            && matches!(self.heap.get(storage), Value::ByteArray(_))
+        {
+            let additional = self.concat_buffer(a, b)?.len();
+            if additional == 0 {
+                return Ok(a);
+            }
+            // Reading the right-hand buffer exports it during the resize.
+            if storage == self.scalar_value(b) {
+                return Err(Self::exported_bytearray_error());
+            }
+            self.check_bytearray_resize(storage)?;
+            let Value::ByteArray(left) = self.heap.get_mut(storage) else {
+                unreachable!()
+            };
+            left.try_reserve(additional)
+                .map_err(|_| Error::new("MemoryError", "bytes allocation failed"))?;
+            // The resize check ruled out every view of the destination. Keep its
+            // allocation while borrowing the source buffer from the same heap.
+            let mut bytes = std::mem::take(left);
+            let appended = self
+                .native_buffer_bytes(b)
+                .map(|right| bytes.extend_from_slice(right));
+            let Value::ByteArray(left) = self.heap.get_mut(storage) else {
+                unreachable!()
+            };
+            *left = bytes;
+            appended?;
+            return Ok(a);
         }
         if inplace && op == "+" && matches!(self.heap.get(a), Value::Deque(_)) {
             deque::extend(self, a, b, false)?;
@@ -4572,7 +4640,8 @@ impl Context {
                 return self.concat_list(storage, b);
             }
             "+" => match (self.heap.get(a), self.heap.get(b)) {
-                (Value::Bytes(x), Value::Bytes(y) | Value::ByteArray(y)) => {
+                (Value::Bytes(x), _) => {
+                    let y = self.concat_buffer(a, b)?;
                     if y.is_empty() {
                         return Ok(a);
                     }
@@ -4581,12 +4650,6 @@ impl Context {
                     }
                     let bytes = crate::objects::concat_bytes(x, y)?;
                     return Ok(self.alloc(Value::Bytes(bytes)));
-                }
-                (Value::Bytes(_), _) => {
-                    return Err(Error::new(
-                        "TypeError",
-                        format!("can't concat {} to bytes", self.type_name(b)),
-                    ));
                 }
                 (Value::ByteArray(x), Value::Bytes(y) | Value::ByteArray(y)) => {
                     let bytes = crate::objects::concat_bytes(x, y)?;
@@ -4958,6 +5021,16 @@ impl Context {
             self.bound_slot(obj, name)?
         };
         let Some(method) = method else {
+            let union = match name {
+                "__or__" => Some([obj, other]),
+                "__ror__" => Some([other, obj]),
+                _ => None,
+            };
+            if let Some([left, right]) = union
+                && super::union::subclass_slot_pair(self, left, right)
+            {
+                return super::union::make(self, &[left, right]).map(Some);
+            }
             // Overriding one multiplication method installs a numeric slot for both directions.
             if let Some(peer) = match name {
                 "__mul__" => Some("__rmul__"),
@@ -5347,6 +5420,10 @@ impl Context {
         if matches!(op, "==" | "!=" | "<" | "<=" | ">" | ">=")
             && let Some(&decimal) = self.classes.get("decimal.Decimal")
             && (ac == Some(decimal) || bc == Some(decimal))
+            && !(matches!(op, "==" | "!=")
+                && [ac, bc]
+                    .into_iter()
+                    .all(|class| class.is_some_and(|class| self.direct_subclass(class, decimal))))
         {
             return Err(Error::new(
                 "NotImplementedError",
@@ -5407,25 +5484,6 @@ impl Context {
             && matches!(self.heap.get(right), Value::Set { .. })
         {
             return self.set_binary(op, a, right, true);
-        }
-        if op == "+"
-            && matches!(self.heap.get(a), Value::ByteArray(_))
-            && let Value::Bytes(right) | Value::ByteArray(right) = self.heap.get(b)
-        {
-            if right.is_empty() {
-                return Ok(a);
-            }
-            // Reading the right-hand buffer exports it during the resize.
-            if a == b {
-                return Err(Self::exported_bytearray_error());
-            }
-            self.check_bytearray_resize(a)?;
-            let bytes = crate::objects::concat_bytes(self.bytes_like(a)?, self.bytes_like(b)?)?;
-            let Value::ByteArray(left) = self.heap.get_mut(a) else {
-                unreachable!()
-            };
-            *left = bytes;
-            return Ok(a);
         }
         if op == "|" && matches!(self.heap.get(a), Value::Dict(_) | Value::DefaultDict { .. }) {
             builtins::update_dict(self, a, Some(b), &[])?;

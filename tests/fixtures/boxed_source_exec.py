@@ -164,6 +164,53 @@ class Case(Base):
     assert case().label() == ("base", "global")
     assert case.describe() == "Case"
     assert case.__firstlineno__ == 5
+
+    exec("""class Entry:
+    def __mro_entries__(self, original):
+        events.append(('resolve', original))
+        return (list,)
+entry = Entry()
+def pack():
+    events.append('unpack')
+    yield entry
+    yield Base
+def record(label, value):
+    events.append(label)
+    return value
+class Meta(type):
+    @classmethod
+    def __prepare__(mcls, name, bases, **kw):
+        events.append(('prepare', bases, kw))
+        return {}
+    def __new__(mcls, name, bases, ns, **kw):
+        events.append(('new', kw))
+        return type.__new__(mcls, name, bases, ns)
+class Expanded(tag=record('named', 1), *pack(), **record('mapping', {'metaclass': Meta, 'extra': 2})):
+    events.append('body')
+""", namespace)
+    expanded = namespace["Expanded"]
+    orig = (namespace["entry"], namespace["Base"])
+    resolved = (list, namespace["Base"])
+    kw = {"tag": 1, "extra": 2}
+    assert events[-7:] == ["unpack", "named", "mapping", ("resolve", orig),
+                           ("prepare", resolved, kw), "body", ("new", kw)]
+    assert expanded.__bases__ == resolved and expanded.__orig_bases__ == orig
+    assert type(expanded) is namespace["Meta"]
+
+    for header, message in [
+        ("*42", "Value after * must be an iterable, not int"),
+        ("**42", "__build_class__() argument after ** must be a mapping, not int"),
+        ("metaclass=type, **{'metaclass': type}, later=record('late', 1)",
+         "__build_class__() got multiple values for keyword argument 'metaclass'"),
+        ("**{1: 2}", "keywords must be strings"),
+    ]:
+        try:
+            exec(f"class Invalid({header}): events.append('invalid body')", namespace)
+        except TypeError as error:
+            assert str(error) == message
+        else:
+            raise AssertionError(f"accepted invalid class header {header}")
+        assert "Invalid" not in namespace and events[-1] == ("new", kw)
     try:
         deep_code = compile("class Deep:\n    total = 1" + "+1" * 8192, "deep_class.py", "exec")
     except RecursionError:
@@ -197,7 +244,7 @@ class Case(Base):
 
 
 def source_generic_classes():
-    from typing import Generic, TypedDict, get_args, get_type_hints
+    from typing import Generic, ParamSpec, TypedDict, TypeVarTuple, Unpack, get_args, get_origin, get_type_hints
 
     for name, message in [
         ("__classdict__", "reserved name '__classdict__' cannot be used for type parameter"),
@@ -230,6 +277,22 @@ def source_generic_classes():
     assert box.__annotations__ == {"item": param} and seen == [param]
     exec(code, ns)
     assert ns["Box"].__type_params__[0] is not param
+
+    code = compile("""class Variadic[T, *Ts, **P]:
+    def parameters(self):
+        return T, Ts, P
+""", "source_variadic.py", "exec")
+    exec(code, ns)
+    variadic = ns["Variadic"]
+    item, pack, signature = variadic.__type_params__
+    assert type(pack) is TypeVarTuple and type(signature) is ParamSpec
+    assert variadic().parameters() == variadic.__parameters__ == (item, pack, signature)
+    base, = variadic.__orig_bases__
+    first, unpacked, last = get_args(base)
+    assert get_origin(base) is Generic and first is item and last is signature
+    assert get_origin(unpacked) is Unpack and get_args(unpacked) == (pack,)
+    exec(code, ns)
+    assert all(a is not b for a, b in zip(variadic.__type_params__, ns["Variadic"].__type_params__))
 
     exec("from __future__ import annotations\nclass Row[T](TypedDict):\n    item: T", ns)
     row = ns["Row"]
@@ -642,6 +705,23 @@ def capture(items):
         raise AssertionError("an unhashable element must stop the comprehension")
 
 
+def source_dictcomp():
+    namespace = {}
+    exec("""
+def collect(rows):
+    events = []
+    def mark(value):
+        events.append(value)
+        return value
+    key = "outer"
+    result = {mark(key): mark(value) for key, value in rows if key}
+    return result, events, key
+""", namespace)
+    result, events, original = namespace["collect"]([("a", 1), ("", 2), ("b", 3), ("a", 4)])
+    assert list(result.items()) == [("a", 4), ("b", 3)]
+    assert events == ["a", 1, "b", 3, "a", 4] and original == "outer"
+
+
 def named_bindings():
     namespace = {}
     exec("""def recipe(values):
@@ -1020,6 +1100,7 @@ def current():
     source_genexpr()
     source_listcomp()
     source_setcomp()
+    source_dictcomp()
     source_match()
     check_scope_directives()
     relative_import_hooks()

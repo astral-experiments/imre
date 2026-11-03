@@ -4,7 +4,10 @@
 #[cfg(target_os = "linux")]
 mod copy_range;
 mod credentials;
-pub(crate) use credentials::{credential_id, getegid, geteuid, getgid, getgroups, getuid};
+pub(crate) use credentials::{
+    credential_id, getegid, geteuid, getgid, getgroups, getuid, max_groups, setgroups, setregid,
+    setreuid,
+};
 #[cfg(target_os = "linux")]
 pub(crate) use credentials::{getresgid, getresuid};
 
@@ -21,6 +24,50 @@ pub(crate) mod scandir;
 pub(super) mod stat_result;
 pub(crate) use links::{link_at, readlink_at, symlink_at};
 pub(crate) use stat_result::float_seconds;
+
+/// Sample the POSIX process and waited-for child CPU clocks, in seconds.
+#[cfg(unix)]
+pub(crate) fn times() -> Result<[f64; 5]> {
+    // SAFETY: _SC_CLK_TCK is a parameterless sysconf query.
+    let ticks = unsafe { libc::sysconf(libc::_SC_CLK_TCK) };
+    if ticks < 1 {
+        return Err(Error::new(
+            Kind::RuntimeError,
+            "cannot read ticks_per_second",
+        ));
+    }
+    let mut process = std::mem::MaybeUninit::<libc::tms>::uninit();
+    // SAFETY: times writes a tms on success. Clear this thread's errno before
+    // sampling because an elapsed clock_t can wrap to the error sentinel.
+    let elapsed = unsafe {
+        #[cfg(target_os = "linux")]
+        {
+            *libc::__errno_location() = 0;
+        }
+        #[cfg(target_vendor = "apple")]
+        {
+            *libc::__error() = 0;
+        }
+        #[cfg(target_os = "android")]
+        {
+            *libc::__errno() = 0;
+        }
+        libc::times(process.as_mut_ptr())
+    };
+    if elapsed == !0 {
+        return Err(errno_error(io::Error::last_os_error()));
+    }
+    // SAFETY: times initialized the four counters.
+    let process = unsafe { process.assume_init() };
+    Ok([
+        process.tms_utime,
+        process.tms_stime,
+        process.tms_cutime,
+        process.tms_cstime,
+        elapsed,
+    ]
+    .map(|count| count as f64 / ticks as f64))
+}
 
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_os_getpid() -> usize {
@@ -558,12 +605,13 @@ impl RangeTransfer {
 
 /// Copy through the kernel, borrowing both descriptors and any explicit input offset.
 #[cfg(target_os = "linux")]
-pub(crate) fn sendfile(
+pub(crate) fn sendfile<E: From<Error>>(
     out_fd: i32,
     in_fd: i32,
     mut offset: Option<libc::off_t>,
     count: isize,
-) -> Result<usize> {
+    dispatch: impl FnMut() -> std::result::Result<(), E>,
+) -> std::result::Result<usize, E> {
     crate::initialize_io();
     let offset = offset
         .as_mut()
@@ -572,8 +620,39 @@ pub(crate) fn sendfile(
     // The kernel validates the raw descriptors and receives the count as size_t.
     transfer(
         || transferred(unsafe { libc::sendfile(out_fd, in_fd, offset, count as usize) }),
-        || Ok(()),
+        dispatch,
     )
+}
+
+/// Issue getrandom even for an empty request, returning any successful short read.
+#[cfg(target_os = "linux")]
+pub(crate) fn getrandom<E: From<Error>>(
+    size: isize,
+    flags: i32,
+    dispatch: impl FnMut() -> std::result::Result<(), E>,
+) -> std::result::Result<Vec<u8>, E> {
+    let length = usize::try_from(size)
+        .map_err(|_| errno_error(io::Error::from_raw_os_error(libc::EINVAL)))?;
+    if length > crate::MAX_BYTES_LEN {
+        return Err(Error::memory_error().into());
+    }
+    let mut bytes = Vec::<u8>::new();
+    bytes
+        .try_reserve_exact(length)
+        .map_err(|_| Error::memory_error())?;
+    let count = transfer(
+        || {
+            // SAFETY: the kernel writes at most length bytes into the reserved buffer.
+            let count =
+                unsafe { libc::syscall(libc::SYS_getrandom, bytes.as_mut_ptr(), length, flags) };
+            transferred(count as isize)
+        },
+        dispatch,
+    )?;
+    // SAFETY: a successful return reports exactly the number of bytes the kernel initialized.
+    unsafe { bytes.set_len(count) };
+    crate::compact_bytes(&mut bytes);
+    Ok(bytes)
 }
 
 /// Read from the shared file position, or leave it untouched when given an offset.
@@ -824,6 +903,13 @@ pub(crate) fn tcgetpgrp(fd: i32) -> Result<libc::pid_t> {
     checked(unsafe { libc::tcgetpgrp(fd) })
 }
 
+/// Set the foreground process group on the borrowed terminal descriptor.
+#[cfg(target_os = "linux")]
+pub(crate) fn tcsetpgrp(fd: i32, pgid: libc::pid_t) -> Result<()> {
+    // SAFETY: tcsetpgrp takes two integers and reports failures through errno.
+    checked(unsafe { libc::tcsetpgrp(fd, pgid) }).map(|_| ())
+}
+
 /// Resolve a terminal descriptor with Linux's reentrant, caller-buffer interface.
 #[cfg(target_os = "linux")]
 pub(crate) fn ttyname(fd: i32) -> Result<Vec<u8>> {
@@ -903,6 +989,13 @@ pub extern "C" fn imre_os_tcgetpgrp(fd: usize) -> usize {
             .map(|group| Int::from_usize(group as usize).into_raw()),
         0,
     )
+}
+
+/// Convert both Python integers before changing the foreground group.
+#[cfg(target_os = "linux")]
+#[unsafe(no_mangle)]
+pub extern "C" fn imre_os_tcsetpgrp(fd: usize, pgid: usize) {
+    finish(c_int(fd).and_then(|fd| tcsetpgrp(fd, c_int(pgid)?)), ());
 }
 
 /// A terminal follows UTF-8 mode or the current character locale. Other fds have no encoding.

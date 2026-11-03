@@ -542,10 +542,16 @@ impl Context {
         if let Value::Union(union) = *self.heap.get(key) {
             return union.hash(self).map(ControlFlow::Break);
         }
-        if matches!(self.heap.get(key), Value::BytesIoBuffer { .. }) {
+        if matches!(
+            self.heap.get(key),
+            Value::BytesIoBuffer { .. } | Value::BufferWrapper
+        ) {
             return Ok(ControlFlow::Break(Self::identity_hash(key)));
         }
-        if let Value::MemoryView { owner, hash, .. } = *self.heap.get(key) {
+        if let Value::MemoryView {
+            owner, lease, hash, ..
+        } = *self.heap.get(key)
+        {
             if let Some(hash) = hash {
                 return Ok(ControlFlow::Break(hash));
             }
@@ -564,7 +570,10 @@ impl Context {
                 ));
             }
             let hash = self.with_buffer_export(key, |ctx| {
-                ctx.dictionary_hash(owner)?;
+                // A Python acquisition exposes a hashable buffer wrapper as its owner.
+                if lease.is_none() {
+                    ctx.dictionary_hash(owner)?;
+                }
                 Ok(crate::python_hash::bytes(&ctx.memoryview_bytes(key)?))
             })?;
             if let Value::MemoryView { hash: cached, .. } = self.heap.get_mut(key) {
@@ -704,6 +713,7 @@ impl Context {
                     let mut duration = value.hash_delta_parts();
                     if matches!(kind, "time" | "datetime")
                         && (receiver != key
+                            || value.is_packed_datetime() && value.fields()[7] != 0
                             || crate::dynamic::stdlib::datetime::comparison::custom(self, *tzinfo))
                         && let Some(offset) =
                             crate::dynamic::stdlib::datetime::comparison::hash_offset(
@@ -876,7 +886,10 @@ impl Context {
                     } else if let Some(answer) = self.binary_special("==", left, right)? {
                         Work::Done(self.truth(answer)?)
                     } else if matches!(
-                        (self.heap.get(left), self.heap.get(right)),
+                        (
+                            self.heap.get(self.scalar_value(left)),
+                            self.heap.get(self.scalar_value(right))
+                        ),
                         (Value::GenericAlias(_), Value::GenericAlias(_))
                     ) {
                         if let Some((a, b)) =

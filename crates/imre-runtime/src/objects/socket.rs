@@ -23,6 +23,11 @@ pub(super) struct Socket {
 }
 
 impl Socket {
+    fn into_owner(self) -> Result<crate::ObjectOwner> {
+        crate::ObjectOwner::try_new(Object(StorageCell::new(Storage::Socket(self))))
+            .map_err(|_| Error::memory_error())
+    }
+
     fn close(&mut self) -> io::Result<()> {
         self.close_requested = true;
         if self.readers != 0 {
@@ -202,16 +207,23 @@ pub(crate) fn fd(s: &Object) -> RawFd {
     state(s, |s| s.fd)
 }
 
-/// Transfer a connected blocking stream to its TLS owner, leaving all socket aliases closed.
+/// Move a blocking stream to its TLS owner and report whether a handshake can begin.
 #[cfg(unix)]
-pub(crate) fn take_tls_stream(socket: &Object) -> Result<OwnedFd> {
+pub(crate) fn take_tls_stream(socket: &Object, server: bool) -> Result<(crate::ObjectOwner, bool)> {
     if kind(socket) != libc::SOCK_STREAM {
         return Err(Error::new(
             Kind::NotImplementedError,
             "only stream sockets are supported",
         ));
     }
-    socket_name(socket, true)?;
+    let connected = match peer_call(|addr, len| {
+        // SAFETY: peer_call provides writable storage and its capacity for getpeername.
+        unsafe { libc::getpeername(fd(socket), addr, len) }
+    }) {
+        Ok(_) => true,
+        Err(e) if server && e.raw_os_error() == Some(libc::ENOTCONN) => false,
+        Err(e) => return Err(errno_error(e)),
+    };
     state(socket, |s| {
         if s.close_requested || s.readers != 0 {
             return Err(Error::new(
@@ -227,11 +239,25 @@ pub(crate) fn take_tls_stream(socket: &Object) -> Result<OwnedFd> {
                 "TLS requires a blocking socket without a timeout",
             ));
         }
-        let raw = std::mem::replace(&mut s.fd, -1);
+        let transport = Socket {
+            fd: std::mem::replace(&mut s.fd, -1),
+            ..*s
+        };
         s.close_requested = true;
-        // SAFETY: the open fd was exclusively owned by s, which can no longer access or close it.
-        Ok(unsafe { OwnedFd::from_raw_fd(raw) })
+        Ok((transport.into_owner()?, connected))
     })
+}
+
+/// Detect cleartext queued on a peer that closed before TLS started.
+#[cfg(unix)]
+pub(crate) fn pending_tls_data(socket: &Object) -> Result<bool> {
+    let mut byte = 0;
+    // SAFETY: byte is writable for this call. The transferred blocking socket has no timeout.
+    match unsafe { receive(socket, &raw mut byte, 1, libc::MSG_DONTWAIT) } {
+        Ok(n) => Ok(n != 0),
+        Err(e) if matches!(e.raw_os_error(), Some(libc::ENOTCONN | libc::EINVAL)) => Ok(false),
+        Err(e) => Err(errno_error(e)),
+    }
 }
 
 fn checked(ret: i32) -> io::Result<i32> {
@@ -348,6 +374,7 @@ socket_constants! {
     imre_socket_af_inet = libc::AF_INET,
     imre_socket_sock_stream = libc::SOCK_STREAM,
     imre_socket_sol_socket = libc::SOL_SOCKET,
+    imre_socket_so_type = libc::SO_TYPE,
     imre_socket_so_reuseaddr = libc::SO_REUSEADDR,
     imre_socket_ipproto_tcp = libc::IPPROTO_TCP,
     imre_socket_tcp_nodelay = libc::TCP_NODELAY,
@@ -394,7 +421,7 @@ fn handle(
     }
     #[cfg(target_vendor = "apple")]
     setopt(raw, libc::SOL_SOCKET, libc::SO_NOSIGPIPE, 1).map_err(errno_error)?;
-    crate::ObjectOwner::try_new(Object(StorageCell::new(Storage::Socket(Socket {
+    Socket {
         fd: fd.into_raw_fd(),
         family,
         kind,
@@ -402,8 +429,8 @@ fn handle(
         timeout_ns: if blocking { -1 } else { 0 },
         readers: 0,
         close_requested: false,
-    }))))
-    .map_err(|_| Error::memory_error())
+    }
+    .into_owner()
 }
 
 pub(crate) fn open(family: i32, ty: i32, proto: i32) -> Result<crate::ObjectOwner> {

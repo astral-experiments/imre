@@ -642,6 +642,12 @@ if sys.platform == "linux":
             assert error.errno == errno.EBADF
         else:
             raise AssertionError("closed tcgetpgrp descriptor")
+        try:
+            os.tcsetpgrp(master, 0)
+        except OSError as error:
+            assert error.errno == errno.EBADF
+        else:
+            raise AssertionError("closed tcsetpgrp descriptor")
     """
 
 ERRORS = {

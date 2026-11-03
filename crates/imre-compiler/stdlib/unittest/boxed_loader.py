@@ -183,7 +183,7 @@ def _main_option(arg):
             and not re.match(r"-\.?\d", arg))
 
 
-def main():
+def main(module="__main__"):
     runner = _MainRunner()
     names = []
     patterns = []
@@ -226,9 +226,12 @@ def main():
         sys.exit(2)
     if patterns:
         defaultTestLoader.testNamePatterns = patterns
-    module = __import__("__main__")
+    if isinstance(module, str):
+        module = __import__(module, fromlist=["__name__"])
     if names:
         suite = defaultTestLoader.loadTestsFromNames([_convert_name(name) for name in names], module)
+    elif module is None:
+        suite = defaultTestLoader.discover(".")
     else:
         suite = defaultTestLoader.loadTestsFromModule(module)
     result = TextTestRunner(verbosity=runner.verbose, failfast=runner.failfast).run(suite)
@@ -247,3 +250,18 @@ TestCase._addUnexpectedSuccess = case._addUnexpectedSuccess
 
 from unittest import loader, signals, util
 from unittest.signals import registerResult, removeResult
+
+
+# Lazy import of IsolatedAsyncioTestCase from .async_case
+# It imports asyncio, which is relatively heavy, but most tests
+# do not need it.
+
+def __dir__():
+    return globals().keys() | {'IsolatedAsyncioTestCase'}
+
+def __getattr__(name):
+    if name == 'IsolatedAsyncioTestCase':
+        global IsolatedAsyncioTestCase
+        from .async_case import IsolatedAsyncioTestCase
+        return IsolatedAsyncioTestCase
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

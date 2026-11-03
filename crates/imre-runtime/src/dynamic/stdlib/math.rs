@@ -60,6 +60,9 @@ pub(super) fn call(
         }
         return Ok(ctx.alloc(Value::Int(crate::Int::new(n.big().sqrt()))));
     }
+    if operation == "isinf" {
+        return Ok(builtins::boolean(as_double(ctx, value)?.is_infinite()));
+    }
     if operation == "isnan" {
         return Ok(builtins::boolean(as_double(ctx, value)?.is_nan()));
     }

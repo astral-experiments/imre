@@ -575,6 +575,17 @@ class TextIO(IO[str]):
 
 # TypedDict creation and nominal recognition from CPython 3.14.5 Lib/typing.py.
 class _TypedDictMeta(type):
+    def __new__(cls, name, bases, ns, total=True):
+        for base in bases:
+            if type(base) is not _TypedDictMeta and base is not Generic:
+                raise TypeError("cannot inherit from both a TypedDict type and a non-TypedDict base class")
+
+        actual_bases = (Generic, dict) if any(issubclass(base, Generic) for base in bases) else (dict,)
+        fields = ns.pop("__annotations__", None)
+        td = type.__new__(_TypedDictMeta, name, actual_bases, ns)
+        _configure_typeddict(td, fields, total, bases=bases, namespace=ns)
+        return td
+
     __call__ = dict
 
     def __subclasscheck__(cls, other):
@@ -1008,12 +1019,17 @@ def _namedtuple_annotate(original):
     return annotate
 
 
-def _configure_typeddict(cls, fields, total, own_annotate=None, bases=()):
+def _configure_typeddict(cls, fields, total, own_annotate=None, bases=(), *, namespace=None):
     if not hasattr(cls, "__orig_bases__"):
         cls.__orig_bases__ = bases
 
+    if fields is None and namespace is not None:
+        from annotationlib import get_annotate_from_class_namespace
+        own_annotate = get_annotate_from_class_namespace(namespace)
+        fields = {}
     if own_annotate is not None:
-        fields = _call_annotate(own_annotate, 3, cls)
+        from annotationlib import Format
+        fields = _call_annotate(own_annotate, Format.FORWARDREF, cls)
     annotations = {key: _typeddict_field(tp, cls.__module__, cls)
                    for key, tp in fields.items()}
 
@@ -1498,6 +1514,15 @@ class _Final:
             raise TypeError("Cannot subclass special typing classes")
 
 
+_cleanups = [_typing_runtime._clear_alias_caches]
+
+
+def _typing_cache(func):
+    cached = lru_cache(func)
+    _cleanups.append(cached.cache_clear)
+    return cached
+
+
 class _NotIterable:
     __module__ = __name__
     __slots__ = ()
@@ -1542,7 +1567,7 @@ class _SpecialForm(_Final, _NotIterable, _root=True):
     def __subclasscheck__(self, cls):
         raise TypeError(f"{repr(self)} cannot be used with issubclass()")
 
-    @lru_cache
+    @_typing_cache
     def _cached_getitem(self, parameters):
         return self._getitem(self, parameters)
 
@@ -2014,6 +2039,43 @@ class _GenericAlias:
         return _specialize_generic_alias(self, args)
 
 
+class _UnionGenericAliasMeta(type):
+    def __instancecheck__(self, inst: object) -> bool:
+        import warnings
+        warnings._deprecated("_UnionGenericAlias", remove=(3, 17))
+        return isinstance(inst, Union)
+
+    def __subclasscheck__(self, inst: type) -> bool:
+        import warnings
+        warnings._deprecated("_UnionGenericAlias", remove=(3, 17))
+        return issubclass(inst, Union)
+
+    def __eq__(self, other):
+        import warnings
+        warnings._deprecated("_UnionGenericAlias", remove=(3, 17))
+        if other is _UnionGenericAlias or other is Union:
+            return True
+        return NotImplemented
+
+    def __hash__(self):
+        return hash(Union)
+
+
+class _UnionGenericAlias(metaclass=_UnionGenericAliasMeta):
+    """Compatibility hack.
+
+    A class named _UnionGenericAlias used to be used to implement
+    typing.Union. This class exists to serve as a shim to preserve
+    the meaning of some code that used to use _UnionGenericAlias
+    directly.
+
+    """
+    def __new__(cls, self_cls, parameters, /, *, name=None):
+        import warnings
+        warnings._deprecated("_UnionGenericAlias", remove=(3, 17))
+        return Union[parameters]
+
+
 def _concatenate_copy_with(self, params):
     if isinstance(params[-1], (list, tuple)):
         return (*params[:-1], *params[-1])
@@ -2135,7 +2197,7 @@ class _SpecialGenericAlias(_NotIterable):
             raise TypeError(f"Too {count} arguments for {self}; actual {len(args)}, expected {expected}")
         return self.copy_with(args)
 
-    @lru_cache
+    @_typing_cache
     def _cached_getitem(self, params):
         return self._getitem(params)
 
@@ -2394,7 +2456,18 @@ def _variadic_class_getitem_uncached(cls, args, constructor):
     if not isinstance(args, tuple):
         args = (args,)
     args = tuple(_type_convert(arg) for arg in args)
-    parameters = cls.__parameters__
+    try:
+        parameters = cls.__parameters__
+    except AttributeError as exc:
+        init_subclass = getattr(cls, '__init_subclass__', None)
+        if init_subclass not in {None, Generic.__init_subclass__}:
+            exc.add_note(
+                f"Note: this exception may have been caused by "
+                f"{init_subclass.__qualname__!r} (or the "
+                f"'__init_subclass__' method on a superclass) not "
+                f"calling 'super().__init_subclass__()'"
+            )
+        raise
     for param in parameters:
         prepare = getattr(param, "__typing_prepare_subst__", None)
         if prepare is not None:
@@ -2429,7 +2502,7 @@ def _variadic_class_getitem_uncached(cls, args, constructor):
     return constructor(cls, flattened)
 
 
-_cached_variadic_class_getitem = lru_cache(_variadic_class_getitem_uncached)
+_cached_variadic_class_getitem = _typing_cache(_variadic_class_getitem_uncached)
 
 
 def _variadic_class_getitem(cls, args, constructor):
@@ -2501,7 +2574,7 @@ def _specialize_generic_alias_uncached(alias, args):
     return constructor(alias.__origin__, args, name=alias._name, inst=alias._inst)
 
 
-_cached_generic_specialization = lru_cache(_specialize_generic_alias_uncached)
+_cached_generic_specialization = _typing_cache(_specialize_generic_alias_uncached)
 
 
 def _specialize_generic_alias(alias, args):
@@ -2515,7 +2588,7 @@ def _specialize_generic_alias(alias, args):
 class _TypedCacheSpecialForm(_SpecialForm, _root=True):
     __module__ = __name__
 
-    @lru_cache
+    @_typing_cache
     def _typed_getitem(self, parameters, types):
         # As in _tp_cache(typed=True), only the immediate argument types are keys.
         return self._getitem(self, *parameters)

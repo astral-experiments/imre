@@ -1,0 +1,21 @@
+from urllib.request import _proxy_bypass_macosx_sysconf as bypass
+
+rules: dict[str, object] = {"exclude_simple": False, "exceptions": ["", "local.example", "*.internal", "127.0.0.1", "10.10", "172.19.10.0/24"]}
+assert bypass("local.example", rules)
+assert bypass("abc.internal", rules)
+assert not bypass("abc.internal:443", rules)
+assert not bypass("internal", rules)
+assert bypass("127.0.0.1:3128", rules)
+assert not bypass("127.0.0.2", rules)
+assert bypass("10.10.255.255", rules)
+assert not bypass("10.11.0.0", rules)
+assert bypass("172.19.10.255", rules)
+assert not bypass("172.19.11.0", rules)
+assert not bypass("127.00.0.1", rules)
+assert not bypass("127.0.0.256", rules)
+assert bypass("10.10", rules)
+assert bypass("printer:443", {"exclude_simple": True})
+assert not bypass("printer", {"exclude_simple": False})
+assert bypass("255.255.255.255", {"exceptions": ["0.0.0.0/0"]})
+assert not bypass("10.0.0.1", {"exceptions": ["10.0.0.1/40"]})
+assert bypass("10.0.0.1", {"exceptions": ["10.0.0.1/40", "10.0.0.1/32"]})

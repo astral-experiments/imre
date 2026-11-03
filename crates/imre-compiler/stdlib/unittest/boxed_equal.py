@@ -22,15 +22,40 @@ def assertMultiLineEqual(self, first, second, msg=None):
     return _text_equal(self, first, second, msg)
 
 
+def addTypeEqualityFunc(self, typeobj, function):
+    """Register a comparison for assertEqual when both operands have this exact type."""
+    self._type_equality_funcs[typeobj] = function
+
+
+def _getAssertEqualityFunc(self, first, second):
+    if type(first) is type(second):
+        asserter = self._type_equality_funcs.get(type(first))
+        if asserter is not None:
+            if isinstance(asserter, str):
+                return getattr(self, asserter)
+            return asserter
+    return self._baseAssertEqual
+
+
 def assertEqual(self, first, second, msg=None):
-    first_type = type(first)
-    if first_type is type(second):
-        if first_type is str:
-            return self.assertMultiLineEqual(first, second, msg)
-        if first_type is set or first_type is frozenset:
-            self.assertSetEqual(first, second, msg=msg)
-            return
-    return self._baseAssertEqual(first, second, msg)
+    assertion_func = self._getAssertEqualityFunc(first, second)
+    assertion_func(first, second, msg=msg)
+
+
+def assertDictEqual(self, d1, d2, msg=None):
+    self.assertIsInstance(d1, dict, 'First argument is not a dictionary')
+    self.assertIsInstance(d2, dict, 'Second argument is not a dictionary')
+
+    if d1 != d2:
+        import pprint
+        from unittest.util import _common_shorten_repr
+
+        standardMsg = '%s != %s' % _common_shorten_repr(d1, d2)
+        diff = ('\n' + '\n'.join(difflib.ndiff(
+                       pprint.pformat(d1).splitlines(),
+                       pprint.pformat(d2).splitlines())))
+        standardMsg = self._truncateMessage(standardMsg, diff)
+        self.fail(self._formatMessage(msg, standardMsg))
 
 
 def assertSetEqual(self, set1, set2, msg=None):
@@ -198,9 +223,14 @@ def assertIsNot(self, expr1, expr2, msg=None):
         _raise_identity_failure(self, _safe_repr(expr1), None, msg)
 
 
+addTypeEqualityFunc.__qualname__ = "TestCase.addTypeEqualityFunc"
+TestCase.addTypeEqualityFunc = addTypeEqualityFunc
+TestCase._getAssertEqualityFunc = _getAssertEqualityFunc
 TestCase._baseAssertEqual = _baseAssertEqual
 TestCase.assertMultiLineEqual = assertMultiLineEqual
 TestCase.assertEqual = assertEqual
+assertDictEqual.__qualname__ = "TestCase.assertDictEqual"
+TestCase.assertDictEqual = assertDictEqual
 assertSetEqual.__qualname__ = "TestCase.assertSetEqual"
 TestCase.assertSetEqual = assertSetEqual
 TestCase.assertNotEqual = assertNotEqual
@@ -336,8 +366,21 @@ def assertListEqual(self, list1, list2, msg=None):
     self.assertSequenceEqual(list1, list2, msg, seq_type=list)
 
 
+def assertTupleEqual(self, tuple1, tuple2, msg=None):
+    """A tuple-specific equality assertion.
+
+    Args:
+        tuple1: The first tuple to compare.
+        tuple2: The second tuple to compare.
+        msg: Optional message to use on failure instead of a list of
+                differences.
+    """
+    self.assertSequenceEqual(tuple1, tuple2, msg, seq_type=tuple)
+
+
 TestCase.assertSequenceEqual = assertSequenceEqual
 TestCase.assertListEqual = assertListEqual
+TestCase.assertTupleEqual = assertTupleEqual
 
 
 # Multiset comparison and diagnostics follow CPython 3.14.5 unittest.util and unittest.case.

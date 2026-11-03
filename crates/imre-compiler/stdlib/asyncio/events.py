@@ -873,6 +873,7 @@ if hasattr(os, 'fork'):
         if _event_loop_policy is not None:
             _event_loop_policy._local = _BaseDefaultEventLoopPolicy._Local()
         _set_running_loop(None)
-        signal.set_wakeup_fd(-1)
+        if hasattr(signal, "set_wakeup_fd"):
+            signal.set_wakeup_fd(-1)
 
     os.register_at_fork(after_in_child=on_fork)

@@ -171,14 +171,11 @@ impl Checker<'_> {
                     ) {
                         return Err(self.object_runtime_export("pickle.Pickler", base));
                     }
-                    if matches!(
-                        self.resolve(base),
-                        Some(crate::modules::Binding::Intrinsic(
-                            Intrinsic::SOCKETSERVER_CLASS
-                        ))
-                    ) {
-                        let error = self.scoped_builtin_error("socketserver base class", base);
-                        self.graph.class_body_error.replace(Some(error.clone()));
+                    if let Some(crate::modules::Binding::Intrinsic(intrinsic)) = self.resolve(base)
+                        && let Some(name) = intrinsic.scoped_class_base()
+                    {
+                        let error = self.scoped_builtin_error(name, base);
+                        self.graph.class_layout_error.replace(Some(error.clone()));
                         return Err(error);
                     }
                     if self.graph.session.is_known_class(

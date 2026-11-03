@@ -47,14 +47,8 @@ impl BoxedPreparation {
                 child[1].clone()
             };
         }
-        let mut parent = [-1; 3];
-        for (index, file) in handles.pipes.iter().enumerate() {
-            if let Some(file) = file {
-                parent[index] = BoxedPipe(file.clone()).fileno()?;
-            }
-        }
         let [stdin, stdout, stderr] = child;
-        let [write, read, err] = parent.map(|fd| Int::from(i64::from(fd)));
+        let [write, read, err] = handles.parent_fds.map(|fd| Int::from(i64::from(fd)));
         let fds = [stdin, write, read, stdout, err, stderr];
         let pipes = handles.pipes.clone();
         let launch = Some(BoxedLaunch {
@@ -181,7 +175,10 @@ impl BoxedPopen {
         process_group: i32,
         umask: i32,
         keep: Vec<RawFd>,
+        gid: libc::gid_t,
         extra_groups: Option<Vec<libc::gid_t>>,
+        uid: libc::uid_t,
+        fork_exec: Option<ForkExec<'_>>,
     ) -> std::result::Result<Self, BoxedLaunchError> {
         let mut words = Words::new(8);
         words
@@ -224,6 +221,7 @@ impl BoxedPopen {
         }
         let mut site = None;
         let mut extras = LaunchExtras {
+            fork_exec,
             prepared: Some(handles),
             failure_site: Some(&mut site),
             direct,
@@ -232,7 +230,9 @@ impl BoxedPopen {
             boxed_child: Some(ChildAttributes {
                 new_session: start_new_session,
                 group: process_group,
+                gid,
                 extra_groups,
+                uid,
                 mask: (umask >= 0).then_some(umask as libc::mode_t),
                 keep,
             }),
@@ -270,6 +270,19 @@ impl BoxedPopen {
         ))
     }
 
+    /// Decode the fixed-size error record written by the guarded child before _exit(255).
+    pub(crate) fn preexec_error(code: i32) -> BoxedLaunchError {
+        if code == 0 {
+            return Error::new(Kind::SubprocessError, "Exception occurred in preexec_fn.").into();
+        }
+        let (site, error) = launch_error::decode(io::Error::from_raw_os_error(code));
+        BoxedLaunchError {
+            error: errno_error(error),
+            directory: site.map(|site| matches!(site, launch_error::Site::Directory)),
+            direct: false,
+        }
+    }
+
     pub(crate) fn pid(&self) -> i32 {
         self.0.borrow().control.pid
     }
@@ -280,13 +293,25 @@ impl BoxedPopen {
 
     pub(crate) fn wait<E: From<Error>>(
         &self,
-        seconds: Option<f64>,
+        check: impl FnMut() -> std::result::Result<(), E>,
+    ) -> std::result::Result<Option<i32>, E> {
+        let control = self.0.borrow().control.clone();
+        Ok(control.wait_with(None, check)?.map(ReturnCode::kernel))
+    }
+
+    /// Only an observed child status updates returncode when the constructor raises.
+    /// A signal handler may already have consumed the status through os.waitpid.
+    pub(crate) fn wait_failed_exec<E: From<Error>>(
+        &self,
         check: impl FnMut() -> std::result::Result<(), E>,
     ) -> std::result::Result<Option<i32>, E> {
         let control = self.0.borrow().control.clone();
         Ok(control
-            .wait_with(seconds.map(Deadline::Float).as_ref(), check)?
-            .map(ReturnCode::kernel))
+            .wait_with(None, check)?
+            .and_then(|status| match status {
+                ReturnCode::NoChild => None,
+                observed => Some(observed.kernel()),
+            }))
     }
 
     pub(crate) fn signal(&self, number: i32) -> Result<()> {

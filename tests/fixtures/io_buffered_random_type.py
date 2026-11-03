@@ -1,3 +1,4 @@
+import errno
 import io
 import os
 import sys
@@ -110,6 +111,50 @@ try:
             else: raise AssertionError("old descriptor accepted fresh receiver")
     finally:
         sys.modules["_io"] = oldio
+
+    # Appending moves the raw file to EOF when a relative seek flushes the pending bytes.
+    for offset, final_pos, contents in (
+        (-1, 12, b"0123456789AB"),
+        (-7, 6, b"012345"),
+        (1, 14, b"0123456789ABC\0"),
+        (-20, None, b"0123456789ABC"),
+    ):
+        with io.FileIO(path, "w") as seed:
+            seed.write(b"0123456789")
+        with io.open(path, "a+b", buffering=4) as stream:
+            stream.seek(0)
+            assert stream.read(1) == b"0" and stream.raw.tell() == 4
+            assert stream.write(b"ABC") == 3
+            if final_pos is None:
+                try:
+                    stream.seek(offset, os.SEEK_CUR)
+                except OSError as exc:
+                    assert exc.errno == errno.EINVAL
+                else:
+                    raise AssertionError("seek before the beginning succeeded")
+            else:
+                assert stream.seek(offset, os.SEEK_CUR) == final_pos
+            stream.flush()
+            assert stream.truncate() == len(contents)
+        with io.FileIO(path) as result:
+            assert result.read() == contents
+
+    with io.open(path, "r+b", buffering=4) as stream:
+        assert stream.read(1) == b"0"
+        try:
+            stream.seek(-sys.maxsize - 1, os.SEEK_CUR)
+        except OSError as exc:
+            assert exc.errno == errno.EINVAL
+        else:
+            raise AssertionError("seek before the beginning succeeded")
+        assert stream.tell() == 1 and stream.raw.tell() == 4
+        os.lseek(stream.fileno(), 0, os.SEEK_SET)
+        try:
+            assert stream.tell() == 0
+            assert stream.seek(-1, os.SEEK_CUR) == stream.seek(1, os.SEEK_CUR) == 0
+            assert stream.read(1) == b"1"
+        finally:
+            os.lseek(stream.fileno(), 4, os.SEEK_SET)
 finally:
     os.unlink(path)
 print("BufferedRandom checked")

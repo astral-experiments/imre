@@ -552,9 +552,7 @@ pub extern "C" fn imre_getcwdb() -> *const Bytes {
     let cwd = std::env::current_dir()
         .map_err(files::errno_error)
         .map(|cwd| {
-            crate::BytesOwner::into_raw(crate::BytesOwner::new(
-                cwd.into_os_string().into_vec(),
-            ))
+            crate::BytesOwner::into_raw(crate::BytesOwner::new(cwd.into_os_string().into_vec()))
         });
     finish(cwd, std::ptr::null())
 }

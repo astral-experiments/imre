@@ -70,6 +70,17 @@ def generic_alias_weakref():
     collect()
     print(handle() is None, len(callbacks) == 1 and callbacks[0] is handle)
 
+    union = int | str
+    callbacks = []
+    handle = ref(union, callbacks.append)
+    values = WeakValueDictionary()
+    values["union"] = union
+    assert handle() is union and values["union"] is union
+    del union
+    collect()
+    assert handle() is None and callbacks == [handle]
+    assert "union" not in values
+
 
 def weak_key_constructor():
     from gc import collect

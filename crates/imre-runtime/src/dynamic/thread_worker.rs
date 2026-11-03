@@ -2,11 +2,9 @@
 
 use super::lowlevel_threads::Running;
 use super::thread_callback::Callback;
-use std::cell::RefCell;
 use std::io::Write;
-use std::rc::Rc;
 use std::sync::{
-    Arc,
+    Arc, Condvar, Mutex, MutexGuard, Weak,
     atomic::{AtomicBool, Ordering},
     mpsc,
 };
@@ -19,46 +17,97 @@ use super::{Context, Error, Id, NONE, Result, Value};
 use crate::objects::locks::{PrimitiveLock, thread_ident, timeout_float, timeout_int};
 
 type WorkerStatus = std::result::Result<(), String>;
-type Startup = std::result::Result<(usize, Option<u64>), String>;
+
+#[derive(Default)]
+struct NativeJoin {
+    thread: Option<JoinHandle<WorkerStatus>>,
+    failure: Option<(&'static str, String)>,
+}
 
 #[derive(Default)]
 pub(super) struct Handle {
-    thread: RefCell<Option<JoinHandle<WorkerStatus>>>,
-    // The worker sends its identity at startup, then closes this channel at exit.
-    finished: Option<mpsc::Receiver<Startup>>,
+    running: Mutex<bool>,
+    exiting: Condvar,
+    native: Mutex<NativeJoin>,
+}
+
+// A detached worker must not keep its own join handle alive.
+struct WorkerExit(Weak<Handle>);
+
+impl Drop for WorkerExit {
+    fn drop(&mut self) {
+        if let Some(handle) = self.0.upgrade() {
+            *handle.running.lock().unwrap() = false;
+            handle.exiting.notify_all();
+        }
+    }
 }
 
 impl Handle {
+    fn spawn(worker: impl FnOnce() -> WorkerStatus + Send + 'static) -> std::io::Result<Arc<Self>> {
+        let handle = Arc::new(Self {
+            running: Mutex::new(true),
+            ..Self::default()
+        });
+        let exit = WorkerExit(Arc::downgrade(&handle));
+        let thread = thread::Builder::new().spawn(move || {
+            // Publish exit after the worker drops its Context, also when unwinding.
+            let _exit = exit;
+            worker()
+        })?;
+        handle.native.lock().unwrap().thread = Some(thread);
+        Ok(handle)
+    }
+
+    fn running(&self) -> bool {
+        *self.running.lock().unwrap()
+    }
+
+    // After the exit signal, all observers synchronize with the same native join.
+    fn joined(&self) -> MutexGuard<'_, NativeJoin> {
+        let mut native = self.native.lock().unwrap();
+        if let Some(thread) = native.thread.take() {
+            native.failure = match thread.join() {
+                Ok(status) => status.err().map(|message| ("SystemError", message)),
+                Err(_) => Some(("RuntimeError", "native worker panicked".to_owned())),
+            };
+        }
+        native
+    }
+
     fn alive(&self) -> bool {
-        self.thread
-            .borrow()
-            .as_ref()
-            .is_some_and(|t| !t.is_finished())
+        if self.running() {
+            return true;
+        }
+        // An is_alive() caller may join first. Keep any failure for the next explicit join.
+        drop(self.joined());
+        false
     }
 
     fn join(&self, timeout: Option<Duration>) -> Result<()> {
-        if let Some(timeout) = timeout
-            && self.alive()
-            && let Some(finished) = &self.finished
-            && matches!(
-                finished.recv_timeout(timeout),
-                Err(mpsc::RecvTimeoutError::Timeout)
-            )
-        {
+        let running = self.running.lock().unwrap();
+        let running = match timeout {
+            Some(limit) => {
+                self.exiting
+                    .wait_timeout_while(running, limit, |r| *r)
+                    .unwrap()
+                    .0
+            }
+            None => self.exiting.wait_while(running, |r| *r).unwrap(),
+        };
+        if *running {
             return Ok(());
         }
-        if let Some(thread) = self.thread.borrow_mut().take() {
-            thread
-                .join()
-                .map_err(|_| Error::new("RuntimeError", "native worker panicked"))?
-                .map_err(|failure| Error::new("SystemError", failure))?;
+        drop(running);
+        if let Some((kind, message)) = self.joined().failure.take() {
+            return Err(Error::new(kind, message));
         }
         Ok(())
     }
 }
 
 struct Entry {
-    handle: Rc<Handle>,
+    handle: Arc<Handle>,
     daemon: bool,
     owner: Option<Id>,
     ident: usize,
@@ -235,7 +284,7 @@ impl Context {
         }
         self.workers
             .entries
-            .retain(|entry| entry.owner.is_some() || entry.handle.alive());
+            .retain(|entry| entry.owner.is_some() || entry.handle.running());
     }
 }
 
@@ -294,7 +343,7 @@ pub(super) enum Operation {
 }
 
 struct Started {
-    handle: Rc<Handle>,
+    handle: Arc<Handle>,
     active: Arc<AtomicBool>,
     ident: usize,
     native_id: Option<u64>,
@@ -350,7 +399,7 @@ pub(super) fn check_start(ctx: &Context) -> Result<()> {
 
 /// Both public launch paths use the same bootstrap, count guard and native startup handshake.
 fn launch(ctx: &Context, operation: Operation, detached_label: Option<String>) -> Result<Started> {
-    let (ready, finished) = mpsc::sync_channel(0);
+    let (ready, started) = mpsc::sync_channel(0);
     let (operand_bound, wait_for_operand) = match &operation {
         Operation::Python(callback) if callback.awaits_receiver() => {
             let (tx, rx) = mpsc::channel();
@@ -363,79 +412,79 @@ fn launch(ctx: &Context, operation: Operation, detached_label: Option<String>) -
     let worker_active = Arc::clone(&active);
     let fault_workers =
         matches!(operation, Operation::Python(_)).then(|| ctx.heap.begin_fault_worker());
-    let thread = thread::Builder::new()
-        .spawn(move || {
-            // A failed bootstrap publishes no identity and contributes nothing to the live count.
-            let mut prefix = None;
-            let mut update = None;
-            let (python, acquire) = match operation {
-                Operation::Python(callback) => match callback.load() {
-                    Ok((mut worker, function, arguments)) => {
-                        worker
-                            .heap
-                            .observe_fault_workers(fault_workers.as_ref().expect("Python worker"));
-                        worker.threads.count = Arc::clone(&count);
-                        worker.threads.private_context = true;
-                        worker.threads.acquire_bound = operand_bound;
-                        (Some((worker, function, arguments)), None)
-                    }
-                    Err(error) => {
-                        let _ = ready.send(Err(error.to_string()));
-                        return Ok(());
-                    }
-                },
-                Operation::Empty => (None, None),
-                Operation::UpdateHash { hash, data } => {
-                    update = Some((hash, data));
-                    (None, None)
+    let handle = Handle::spawn(move || {
+        // A failed bootstrap publishes no identity and contributes nothing to the live count.
+        let mut prefix = None;
+        let mut update = None;
+        let (python, acquire) = match operation {
+            Operation::Python(callback) => match callback.load() {
+                Ok((mut worker, function, arguments)) => {
+                    worker
+                        .heap
+                        .observe_fault_workers(fault_workers.as_ref().expect("Python worker"));
+                    worker.threads.count = Arc::clone(&count);
+                    worker.threads.private_context = true;
+                    worker.threads.acquire_bound = operand_bound;
+                    (Some((worker, function, arguments)), None)
                 }
-                Operation::Acquire { lock, release } => {
-                    prefix = release;
-                    (None, Some(lock))
+                Err(error) => {
+                    let _ = ready.send(Err(error.to_string()));
+                    return Ok(());
                 }
-            };
-            let _running = Running::enter(count, worker_active);
-            // Consume the nonblocking prefix and bind the final receiver before the
-            // parent resumes and can rebind either closure cell.
-            if let Some(lock) = prefix
-                && let Err(error) = lock.release()
-            {
-                let _ = ready.send(Err(Error::from(error).to_string()));
-                return Ok(());
+            },
+            Operation::Empty => (None, None),
+            Operation::UpdateHash { hash, data } => {
+                update = Some((hash, data));
+                (None, None)
             }
-            #[cfg(any(target_os = "linux", target_os = "macos"))]
-            let native_id = Some(crate::objects::locks::native_thread_id());
-            #[cfg(not(any(target_os = "linux", target_os = "macos")))]
-            let native_id = None;
-            if ready.send(Ok((thread_ident(), native_id))).is_ok() {
-                if let Some((mut worker, function, arguments)) = python {
-                    if let Err(error) = worker.call(function, arguments, Vec::new()) {
-                        if let Some(label) = detached_label {
-                            if error.kind != "SystemExit" {
-                                let _ = writeln!(
-                                    crate::sys::stderr_writer(),
-                                    "Exception ignored in thread started by {label}:\n{error}"
-                                );
-                            }
-                        } else {
-                            return Err(error.to_string());
+            Operation::Acquire { lock, release } => {
+                prefix = release;
+                (None, Some(lock))
+            }
+        };
+        let _running = Running::enter(count, worker_active);
+        // Consume the nonblocking prefix and bind the final receiver before the
+        // parent resumes and can rebind either closure cell.
+        if let Some(lock) = prefix
+            && let Err(error) = lock.release()
+        {
+            let _ = ready.send(Err(Error::from(error).to_string()));
+            return Ok(());
+        }
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
+        let native_id = Some(crate::objects::locks::native_thread_id());
+        #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+        let native_id = None;
+        if ready.send(Ok((thread_ident(), native_id))).is_ok() {
+            if let Some((mut worker, function, arguments)) = python {
+                if let Err(error) = worker.call(function, arguments, Vec::new()) {
+                    if let Some(label) = detached_label {
+                        if error.kind != "SystemExit" {
+                            let _ = writeln!(
+                                crate::sys::stderr_writer(),
+                                "Exception ignored in thread started by {label}:\n{}",
+                                error.report(&worker.heap)
+                            );
                         }
+                    } else {
+                        return Err(error.report(&worker.heap).to_string());
                     }
-                } else if let Some(lock) = acquire {
-                    lock.acquire(true, None);
-                } else if let Some((hash, data)) = update {
-                    hash.lock()
-                        .update(&data)
-                        .map_err(|error| error.to_string())?;
                 }
+            } else if let Some(lock) = acquire {
+                lock.acquire(true, None);
+            } else if let Some((hash, data)) = update {
+                hash.lock()
+                    .update(&data)
+                    .map_err(|error| error.to_string())?;
             }
-            Ok(())
-        })
-        .map_err(|_| Error::new("RuntimeError", "can't start new thread"))?;
-    let (ident, native_id) = match finished.recv() {
+        }
+        Ok(())
+    })
+    .map_err(|_| Error::new("RuntimeError", "can't start new thread"))?;
+    let (ident, native_id) = match started.recv() {
         Ok(Ok(identity)) => identity,
         failure => {
-            let _ = thread.join();
+            let _ = handle.join(None);
             let reason = match failure {
                 Ok(Err(message)) => message,
                 _ => "thread initialization failed".into(),
@@ -449,10 +498,7 @@ fn launch(ctx: &Context, operation: Operation, detached_label: Option<String>) -
         let _ = received.recv();
     }
     Ok(Started {
-        handle: Rc::new(Handle {
-            thread: RefCell::new(Some(thread)),
-            finished: Some(finished),
-        }),
+        handle,
         active,
         ident,
         native_id,
@@ -469,11 +515,24 @@ pub(super) fn start_detached(
     Ok((worker.ident, worker.active))
 }
 
+/// Thread.run expands *args and **kwargs before calling the target. A bound method
+/// can keep an exact input tuple during the call. An ordinary function binds its
+/// arguments into a frame and releases the call containers before its body runs.
+pub(super) fn expanded_call_roots(ctx: &Context, target: Id, args: Id) -> Vec<Id> {
+    if matches!(ctx.heap.get(target), Value::Method { .. })
+        && matches!(ctx.heap.get(args), Value::Tuple(_))
+    {
+        vec![target, args]
+    } else {
+        vec![target]
+    }
+}
+
 // Validate the actual bound method and its operands before starting an OS
 // thread. No Python handle, callback, or pointer into Context may cross here.
 fn worker_target(ctx: &Context, target: Id, args: Id, kwargs: Id) -> Result<(Operation, Vec<Id>)> {
     if target == NONE {
-        return Ok((Operation::Empty, vec![target, args, kwargs]));
+        return Ok((Operation::Empty, Vec::new()));
     }
     if let Some((callback, roots)) = Callback::capture_for_thread(ctx, target, args, kwargs)? {
         return Ok((callback, roots));
@@ -516,7 +575,10 @@ fn worker_target(ctx: &Context, target: Id, args: Id, kwargs: Id) -> Result<(Ope
             _ => None,
         };
         if let Some(operation) = operation {
-            return Ok((operation, vec![target, args, kwargs]));
+            // The bound call owns its expanded arguments even if the caller clears the list.
+            let mut roots = expanded_call_roots(ctx, target, args);
+            roots.extend_from_slice(pos);
+            return Ok((operation, roots));
         }
     }
     Err(Error::new(
@@ -568,7 +630,10 @@ pub(super) fn call(
                 ));
             }
             check_start(ctx)?;
-            if args.get(2).is_some_and(|&has_context| has_context != super::FALSE) {
+            if args
+                .get(2)
+                .is_some_and(|&has_context| has_context != super::FALSE)
+            {
                 return Err(Error::new(
                     "NotImplementedError",
                     "native workers cannot enter a Python context",
@@ -603,13 +668,13 @@ pub(super) fn call(
                 Err(error) => {
                     // Once native startup is attempted CPython consumes the handle,
                     // even if the OS refuses to create a thread. No identity is published.
-                    let consumed = ctx.alloc(Value::ThreadHandle(Rc::new(Handle::default())));
+                    let consumed = ctx.alloc(Value::ThreadHandle(Arc::new(Handle::default())));
                     ctx.set_attr(owner, "_handle", consumed)?;
                     return Err(error);
                 }
             };
             ctx.workers.entries.push(Entry {
-                handle: Rc::clone(&handle),
+                handle: Arc::clone(&handle),
                 daemon,
                 owner: Some(owner),
                 operands: roots,
@@ -637,13 +702,14 @@ pub(super) fn call(
                 && ctx
                     .workers
                     .live()
-                    .any(|entry| Rc::ptr_eq(&entry.handle, worker))
+                    .any(|entry| Arc::ptr_eq(&entry.handle, worker))
             {
                 return Err(Error::new(
                     "PythonFinalizationError",
                     "cannot join thread at interpreter shutdown",
                 ));
             }
+            let worker = Arc::clone(worker);
             worker.join(limit)?;
             ctx.reap_thread_operands();
             Ok(NONE)
@@ -652,6 +718,7 @@ pub(super) fn call(
             let Value::ThreadHandle(worker) = ctx.heap.get(handle) else {
                 return Err(Error::new("TypeError", "expected a thread handle"));
             };
+            let worker = Arc::clone(worker);
             Ok(boolean(worker.alive()))
         }
         ("current", &[main]) => {

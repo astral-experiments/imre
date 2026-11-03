@@ -1,5 +1,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 54 54" width="54" height="54" role="img" aria-labelledby="title">
   <title id="title">Imre</title>
   <rect width="54" height="54" rx="11" fill="#12171b"/>
-  <path d="M19 10h27l-6 7h-7l-6 20h12l-6 7H7l6-7h7l6-20H13Z" fill="#de5fe9"/>
+  <path d="M7 22q20-14 40 0v5q-20-14-40 0Z" fill="#cdcbfb"/>
+  <path d="M7 31q20-14 40 0v9h-9v-2a11 11 0 0 0-22 0v2H7Z" fill="#de5fe9"/>
+  <path d="m18 25 4 7m14-7-4 7" fill="none" stroke="#12171b" stroke-width="2.7"/>
 </svg>

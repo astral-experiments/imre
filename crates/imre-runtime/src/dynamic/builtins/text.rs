@@ -468,6 +468,18 @@ pub(super) fn bytearray_method(
     let extra = if method == "append" {
         byte = [ctx.byte_value(argument)?];
         Cow::Borrowed(byte.as_slice())
+    } else if matches!(
+        ctx.heap.get(ctx.scalar_value(argument)),
+        Value::Array(_) | Value::MemoryView { .. }
+    ) {
+        ctx.check_buffer_exporter(argument)?;
+        let bytes = ctx.native_buffer_bytes(argument).map_err(|_| {
+            type_error(format!(
+                "can't set bytearray slice from {}",
+                ctx.type_name(argument)
+            ))
+        })?;
+        Cow::Owned(super::super::copy_ids(bytes)?)
     } else {
         Cow::Owned(bytes_from_iterable(ctx, argument)?)
     };
@@ -682,8 +694,16 @@ pub(super) fn builtin_format(
             ctx.type_name(value)
         )));
     }
-    if ctx.string_storage(value).is_some() && spec == "s" {
-        return Ok(value);
+    if let Some(storage) = ctx.string_storage(value)
+        && let Some(width) = crate::objects::format_index(spec.strip_suffix('s').unwrap_or(spec))?
+    {
+        if width == 0 {
+            // An unpadded empty str subclass formats to its base string.
+            return Ok(if ctx.truth(storage)? { value } else { storage });
+        }
+        let fill = if spec.starts_with('0') { '0' } else { ' ' };
+        let padded = justify_string(ctx, storage, width, u32::from(fill), "ljust")?;
+        return Ok(if padded == storage { value } else { padded });
     }
     if let Some(field) = FixedFloatSpec::parse(spec)? {
         let number = float_operand(ctx, value)?
@@ -1084,7 +1104,7 @@ pub(in super::super) fn bytes_percent(ctx: &mut Context, format: &[u8], rhs: Id)
                 });
             }
         };
-        if matches!(spec.format_char, 's' | 'b') {
+        if matches!(spec.format_char, 's' | 'b' | 'c') {
             let end = input.peek().map_or(format.len(), |&(i, _)| i);
             bytes_fields::append(ctx, &spec, &mut args, &mut output, format.len() - end)?;
             continue;
@@ -1164,6 +1184,16 @@ fn percent_layout(
     Ok((width, precision))
 }
 
+/// Render the operand type name used by CPython's character conversion diagnostics.
+fn percent_type_name(ctx: &mut Context, arg: Id) -> Result<&str> {
+    if let Some(class) = ctx.heap.get(arg).instance_class() {
+        let name = super::super::stdlib::qualified_type(ctx, class)?;
+        ctx.str_value(name)
+    } else {
+        Ok(ctx.type_name(arg))
+    }
+}
+
 /// Convert a Unicode `%c` argument without invoking string-subclass overrides.
 fn percent_char(ctx: &mut Context, arg: Id) -> Result<Id> {
     if let Some(storage) = ctx.string_storage(arg) {
@@ -1190,12 +1220,7 @@ fn percent_char(ctx: &mut Context, arg: Id) -> Result<Id> {
             Ok(ctx.text_codepoints(vec![point]))
         }
         Err(error) if ctx.is_builtin_error(&error, "TypeError") => {
-            let name = if let Some(class) = ctx.heap.get(arg).instance_class() {
-                let name = super::super::stdlib::qualified_type(ctx, class)?;
-                ctx.str_value(name)?
-            } else {
-                ctx.type_name(arg)
-            };
+            let name = percent_type_name(ctx, arg)?;
             Err(type_error(format!(
                 "%c requires an int or a unicode character, not {name}"
             )))
@@ -1924,6 +1949,16 @@ fn justify(
     } else {
         u32::from(' ')
     };
+    justify_string(ctx, receiver, width, fill, name)
+}
+
+fn justify_string(
+    ctx: &mut Context,
+    receiver: Id,
+    width: usize,
+    fill: u32,
+    name: &str,
+) -> Result<Id> {
     let storage = ctx.string_storage(receiver).unwrap();
     let source = ctx.heap.get(storage);
     let len = match source {

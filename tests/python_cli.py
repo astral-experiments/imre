@@ -944,6 +944,18 @@ def check_python_process_identity(imre, root, env):
                     pass
 
 
+def check_os_execvpe(imre, root, run):
+    fixture = Path(__file__).resolve().with_name("fixtures") / "boxed_os_execvpe.py"
+    executable = root / "execvpe"
+    built = run(imre, "build", fixture, "--opt-level", "0", "-o", executable, timeout=300)
+    assert built.returncode == 0, built
+    for mode in ("errors", "bindings", "inherited", "supplied", "slash"):
+        expected = (0, b"", b"") if mode in ("errors", "bindings") else (77, b"replaced\n", b"")
+        for command in ((sys.executable, "-IB", fixture), (executable,)):
+            result = run(*command, mode)
+            assert (result.returncode, result.stdout, result.stderr) == expected, (mode, result)
+
+
 def check_os_abort(imre, run):
     import signal
 
@@ -1112,7 +1124,7 @@ def check_pickle_reductions(imre, root, run):
 
         obj = LabeledTuple((3, 4))
         obj.label = {"back": obj}
-        streams = [pickle.dumps((obj, obj.label), protocol) for protocol in range(6)]
+        streams = [pickle.dumps((obj, obj.label, bytearray(b"\0\xff")), protocol) for protocol in range(6)]
         entry.write_text(
             "from boxed_pickle_reduction import consume, produce\n"
             f"consume({streams!r})\nproduce()\n"
@@ -1137,6 +1149,10 @@ def check_pickle_reductions(imre, root, run):
                 payload = bytes(range(256))
                 assert value[7] == (b"", payload[:-1], payload, payload, ("rebuilt", protocol))
                 assert value[7][2] is value[7][3]
+                empty, mutable, alias, reduced = value[10]
+                assert type(empty) is bytearray and not empty
+                assert type(mutable) is bytearray and mutable == payload and mutable is alias
+                assert reduced == ("rebuilt", protocol)
                 mapping = value[9]
                 assert list(mapping) == ["z", "a", "m"] and mapping["m"] == 42
                 assert mapping["z"] is mapping and mapping.state is mapping["a"]
@@ -1208,6 +1224,35 @@ def check_unittest_main_names(imre, root, run):
     missing = run(executable, "-v", "Cases.test_missing")
     assert missing.returncode == 1 and b"ERROR: test_missing (unittest.loader._FailedTest.test_missing)" in missing.stderr, missing
     assert b"Ran 1 test" in missing.stderr and b"FAILED (errors=1)" in missing.stderr, missing
+
+
+def check_unittest_module_main(imre, root, run):
+    package = root / "cli_test_package"
+    package.mkdir()
+    (package / "__init__.py").touch()
+    (package / "sample.py").write_text(
+        "import unittest\n"
+        "import os, sys\n"
+        "from fractions import Fraction\n"
+        "class Passing(unittest.TestCase):\n"
+        "    def test_one(self):\n"
+        "        self.assertEqual(sys.argv[0], os.path.basename(sys.executable) + ' -m unittest')\n"
+        "        self.assertEqual((Fraction('6/8') + Fraction(1, 6)).as_integer_ratio(), (11, 12))\n"
+        "        self.assertRaises(ZeroDivisionError, Fraction, '1/0')\n"
+        "        print(self.id())\n"
+        "class Failing(unittest.TestCase):\n"
+        "    def test_one(self): self.fail('deliberate failure')\n"
+    )
+    passing = "cli_test_package.sample.Passing"
+    ok = run(imre, "-m", "unittest", "-v", passing, passing + ".test_one")
+    assert ok.returncode == 0 and ok.stdout == (passing + ".test_one\n").encode() * 2, ok
+    assert ok.stderr.count(f"test_one ({passing}.test_one) ... ok".encode()) == 2, ok
+    failing = "cli_test_package.sample.Failing.test_one"
+    errors = run(imre, "-m", "unittest", "-v", failing, passing + ".test_missing")
+    assert errors.returncode == 1 and b"Ran 2 tests" in errors.stderr, errors
+    assert f"FAIL: test_one ({failing})".encode() in errors.stderr, errors
+    assert b"ERROR: test_missing (unittest.loader._FailedTest.test_missing)" in errors.stderr, errors
+    assert b"FAILED (failures=1, errors=1)" in errors.stderr, errors
 
 
 def check_unittest_file_discovery(imre, root, run):
@@ -1298,6 +1343,7 @@ def main():
             check_python_process_identity(imre, root, env)
         if sys.platform.startswith("linux"):
             check_os_abort(imre, run)
+            check_os_execvpe(imre, root, run)
             check_pending_signals(imre, root, env)
             marked_call_flags = marked_call_refusal_flags(root)
             check_bound_method_allocation(imre, run, marked_call_flags)
@@ -1581,6 +1627,21 @@ def main():
             for prefix in ("", "sub/"):
                 app.writestr(prefix + "__main__.py", (entry / "__main__.py").read_text())
                 app.writestr(prefix + "sibling.py", f"marker = {prefix!r}\n")
+        malformed = root / "malformed.py"
+        for source, line, diagnostic in (
+            (b"# header\r\n\r\ns='\xff'\n", 3, b"Non-UTF-8 code starting with '\\xff'"),
+            (b"# comment\r# coding: utf-8\rs='\xe9x'\r", 3,
+             b"(unicode error) 'utf-8' codec can't decode byte 0xe9 in position 3"),
+            (b"# ok\r\n# coding: utf-8 \xff\n", 2,
+             b"(unicode error) 'utf-8' codec can't decode byte 0xff in position 21"),
+        ):
+            malformed.write_bytes(source)
+            for exe in (sys.executable, imre):
+                failed = run(exe, "-B", malformed)
+                assert (failed.returncode, failed.stdout) == (1, b""), failed
+                assert f'File "{malformed}", line {line}'.encode() in failed.stderr, failed
+                assert b"SyntaxError: " + diagnostic in failed.stderr, failed
+
         # A .pyc operand is never Python source, even when its bytes form a valid script.
         bytecode = root / "not_source.pyc"
         bytecode.write_text("print('executed as source')\n")
@@ -1653,9 +1714,51 @@ def main():
         )
         compare("-B", tokenize_script)
 
+        pyio_script = root / "pyio_entry.py"
+        pyio_script.write_text(
+            "import io, _pyio\n"
+            "assert io.BytesIO is not _pyio.BytesIO\n"
+            "for stream in (io.BytesIO, _pyio.BytesIO):\n"
+            "    with stream(b'abc') as buf:\n"
+            "        print(stream.__module__, buf.read())\n"
+        )
+        compare("-I", pyio_script, native_timeout=600)
+        compare(
+            "-I", "-c", "import sys; print(__import__(sys.argv[1]).BytesIO(b'abc').read())",
+            "_pyio", native_timeout=600,
+        )
+
+        pyio_project = root / "pyio_project"
+        pyio_project.mkdir()
+        (pyio_project / "_pyio.py").write_text("marker = 'local provider'\n")
+        local_script = pyio_project / "entry.py"
+        local_script.write_text("import _pyio\nprint(_pyio.marker)\n")
+        compare("-B", local_script)
+
+        config_script = root / "config_entry.py"
+        config_script.write_text(
+            "from configparser import ConfigParser\n"
+            "config = ConfigParser()\n"
+            "config.read_string('[DEFAULT]\\nroot=/opt\\n[app]\\npath=%(root)s/bin')\n"
+            "print(config['app']['path'])\n"
+        )
+        config_env = {"IMREFLAGS": "--opt-level 0"}
+        compare("-B", config_script, extra=config_env, native_timeout=600)
+        compare(
+            "-B", "-c", "import sys; print(__import__(sys.argv[1]).ConfigParser.__name__)",
+            "configparser", extra=config_env, native_timeout=600,
+        )
+
         ftp_script = root / "ftp_entry.py"
         ftp_script.write_text("import ftplib\nprint(ftplib.FTP().encoding, ftplib.parse257('257 \"home\"'))\n")
         compare("-B", ftp_script)
+
+        director_script = root / "opener_director.py"
+        director_script.write_text(
+            "from urllib.request import OpenerDirector, build_opener\n"
+            "assert type(build_opener()) is OpenerDirector\n"
+        )
+        compare("-IB", director_script, native_args=("run", director_script, "--quiet"))
 
         # A project FTP provider is loaded only if the opener actually uses FTP.
         alternate = root / "ftp_provider"
@@ -1706,6 +1809,21 @@ def main():
             "print(field.__get__(Point(11, 22)), field.__get__((31, 32)))\n"
         )
         compare("-B", descriptor, native_args=("run", descriptor, "--quiet"))
+
+        (root / "namedtuple_spec.py").write_text(
+            "from importlib.machinery import ModuleSpec\n"
+            "def make_spec(): return ModuleSpec('example', None)\n"
+        )
+        options = root / "namedtuple_options.py"
+        options.write_text(
+            "from collections import namedtuple\n"
+            "T = namedtuple('T', ['line', 'class'], defaults=[None], rename=True, module='other')\n"
+            "def spec_name():\n"
+            "    from namedtuple_spec import make_spec\n"
+            "    return make_spec().name\n"
+            "print(T(7), T._field_defaults, T.__module__, spec_name())\n"
+        )
+        compare("-B", options, native_args=("run", options, "--quiet"))
 
         unrelated = root / "unrelated_asdict.py"
         unrelated.write_text(
@@ -1952,6 +2070,9 @@ def main():
             "try: check('abc', ('ab', 'c'))\nexcept AssertionError as exc: print(str(exc))",
             "case.assertSequenceEqual([1, 2], (1, 2))\n"
             "try: case.assertSequenceEqual([1, 2], [1])\nexcept AssertionError as exc: print(str(exc))",
+            "case.addTypeEqualityFunc(int, 'assertLess')\ncase.assertEqual(1, 2)",
+            "case.assertTupleEqual((1,), (1,))\n"
+            "try: case.assertTupleEqual((1,), [1])\nexcept AssertionError as exc: print(str(exc))",
             "Case.assertNotIsInstance(case, 1, str)",
             "check = case.assertIsInstance\ncheck(1, int)",
             "check = Case.assertNotIsInstance\ncheck(case, 1, str)",
@@ -2031,6 +2152,11 @@ def main():
             "except FileExistsError as error:\n    print(str(error))",
             "py_compile", native_timeout=300,
         )
+        compare(
+            "-IB", "-c",
+            'from tomllib import loads; print(loads("[tool]\\nport = 8000")["tool"]["port"])',
+            native_timeout=300,
+        )
         compare("-IB", "-c", "load = __import__; print(load('selectors').EVENT_READ)")
         compare(
             "-IB", "-c",
@@ -2055,6 +2181,21 @@ def main():
             "print(textwrap.wrap('one two three', width=5), textwrap.shorten('one two three', 9))",
         )
 
+        compare(
+            "-IB", "-c",
+            "from copy import copy, deepcopy\n"
+            "from functools import lru_cache\n"
+            "class C:\n"
+            "    @lru_cache()\n"
+            "    def f(self): pass\n"
+            "wrapped = C.f\n"
+            "assert copy(wrapped) is deepcopy(wrapped) is wrapped\n"
+            "assert wrapped.__reduce__() == 'C.f'\n"
+            "for owner in (type(wrapped), wrapped):\n"
+            "    assert owner.__reduce__.__text_signature__ == '($self, /)'\n"
+            "    assert owner.__copy__.__text_signature__ is owner.__deepcopy__.__text_signature__ is None\n",
+            native_timeout=300,
+        )
         getters = Path(__file__).with_name("fixtures") / "typed_attrgetter"
         compare("-IB", getters / "fields.py")
         compare("-B", getters / "main.py")
@@ -2072,6 +2213,8 @@ def main():
         compare("-IB", "-c", "from operator import __getitem__; print(__getitem__((11,), 0))")
         compare("-IB", Path(__file__).with_name("fixtures") / "boxed_update_wrapper.py")
         compare("-IB", Path(__file__).with_name("fixtures") / "boxed_tracebacks.py")
+        compare("-IB", Path(__file__).with_name("fixtures") / "inspect_trace.py")
+        compare("-IB", Path(__file__).with_name("fixtures") / "boxed_traceback_links.py")
         compare("-IB", Path(__file__).with_name("fixtures") / "boxed_print_traceback.py")
         compare("-IB", "-c", "import operator as op\nprint(op.attrgetter('upper')('method')())")
 
@@ -2144,6 +2287,14 @@ def main():
             "atexit.register(lambda: print('before shutdown', handler.stream is None))\n",
             extra={"IMREFLAGS": "--opt-level 0"},
             native_timeout=300,
+        )
+        compare(
+            "-I", "-c",
+            "for enabled in (False, True):\n"
+            "    if enabled:\n"
+            "        def pop(items): return items.pop()\n"
+            "    try: print(pop([42]))\n"
+            "    except NameError: print('unbound')\n",
         )
         compare("-B", "-c", "print(list.__len__([1, 2]), tuple.__len__((3,)))")
         if os.name == "posix":
@@ -2490,11 +2641,15 @@ def report(text):
             "    print(type(result).__name__, result, result is x)\n"
         )
         compare("-IB", "-c", decimal_import + "import decimal_subclass")
-        (helpers / "decimal_comparison.py").write_text(
-            "from decimal import Decimal\nprint(Decimal('1.00') == Decimal(1))\n"
-        )
-        unsupported = run(imre, "-IB", "-c", decimal_import + "import decimal_comparison")
-        assert unsupported.returncode and b"native Decimal numeric comparisons are unsupported" in unsupported.stderr
+        comparisons = Path(__file__).with_name("fixtures") / "text" / "decimal_comparison.py"
+        (helpers / "decimal_comparison.py").write_bytes(comparisons.read_bytes())
+        compare("-IB", "-c", decimal_import + "import decimal_comparison")
+        for expression in ("Decimal('1.00') < Decimal(1)", "Decimal('1.00') == 1"):
+            (helpers / "decimal_boundary.py").write_text(
+                f"from decimal import Decimal\nprint({expression})\n"
+            )
+            unsupported = run(imre, "-IB", "-c", decimal_import + "import decimal_boundary")
+            assert unsupported.returncode and b"native Decimal numeric comparisons are unsupported" in unsupported.stderr
 
         (helpers / "decimal.py").write_text("class Decimal:\n    def __init__(self, value): self.value = value\n")
         compare("-IB", "-c", decimal_import + "from decimal import Decimal\nprint(Decimal(False).value is False)")
@@ -2510,6 +2665,30 @@ def report(text):
         compare("-IB", "-c", uuid_import + "print(hasattr(uuid, '__path__'), str(uuid.UUID(int=0)))")
         (helpers / "uuid.py").write_text("marker = 'explicit search path'\n")
         compare("-IB", "-c", uuid_import + "print(uuid.marker)")
+        compare(
+            "-B", "-c",
+            "import importlib, os, sys\n"
+            "name = sys.argv[1]\n"
+            "module = importlib.import_module(name)\n"
+            "value = module.uuid4()\n"
+            "assert value.version == 4 and value.variant == module.RFC_4122\n"
+            "assert value.bytes == value.int.to_bytes(16, 'big')\n"
+            "def entropy(n):\n"
+            "    assert n == 16\n"
+            "    return bytes.fromhex('0123456789abbdef4123456789abcdef')\n"
+            "original = os.urandom\n"
+            "os.urandom = entropy\n"
+            "try:\n"
+            "    assert str(module.uuid4()) == '01234567-89ab-4def-8123-456789abcdef'\n"
+            "finally:\n"
+            "    os.urandom = original\n"
+            "del sys.modules[name]\n"
+            f"sys.path.insert(0, {str(helpers)!r})\n"
+            "print(importlib.import_module(name).marker)\n",
+            "uuid",
+            extra={"IMREFLAGS": "--opt-level 0"},
+            native_timeout=300,
+        )
 
         (helpers / "pprint.py").write_text("def incomplete(:\n")
         compare("-IB", "-c", f"import sys\nsys.path.insert(0, {str(helpers)!r})\nprint(__import__('sys').__name__)")
@@ -2577,6 +2756,15 @@ def report(text):
         (root / "http_files.py").write_bytes((fixtures / "boxed_http_files.py").read_bytes())
         compare("-B", "-m", "http_files", "http.server", str(root),
                 extra={"IMRE_ENCODED_FLAGS": "--opt-level\x1f0"}, native_timeout=180)
+
+        compare(
+            "-B", "-c",
+            "import sys, unittest\n"
+            "assert 'unittest.mock' not in sys.modules\n"
+            "mock = __import__(sys.argv[1], fromlist=['Mock'])\n"
+            "print(mock is unittest.mock, mock.Mock(return_value=42)())",
+            "unittest.mock", extra={"IMRE_ENCODED_FLAGS": "--opt-level\x1f0"},
+        )
 
         compare("-B", "-c", "from typing import Protocol as P; print(P.__name__)")
         compare("-B", fixtures / "typing_protocol_import.py")
@@ -2703,8 +2891,34 @@ def report(text):
             except OSError:
                 pass
             else:
+                stats = fixtures / "ssl_session_stats.py"
+                compare("-IB", stats, native_args=("run", stats, "--quiet"), native_timeout=600)
+                wrappers = fixtures / "ssl_context_wrappers.py"
+                compare("-IB", wrappers, native_args=("run", wrappers, "--quiet"), native_timeout=600)
+                ciphers = fixtures / "ssl_context_ciphers.py"
+                compare("-IB", ciphers, native_args=("run", ciphers, "--quiet"), native_timeout=600)
                 bio = fixtures / "ssl_memory_bio.py"
                 compare("-IB", bio, native_args=("run", bio, "--quiet"), native_timeout=600)
+                hostname = fixtures / "ssl_check_hostname.py"
+                compare("-IB", hostname, native_args=("run", hostname, "--quiet"), native_timeout=600)
+                flags = fixtures / "ssl_verify_flags.py"
+                compare("-IB", flags, native_args=("run", flags, "--quiet"), native_timeout=600)
+                certdata = fixtures.parents[1] / "benchmarks/cpython_stdlib/full/shared/upstream/Lib/test/certdata"
+                object_io = fixtures / "ssl_object_io.py"
+                compare(
+                    "-IB", object_io, certdata,
+                    native_args=("run", object_io, "--quiet", "--", certdata), native_timeout=600,
+                )
+                unwrap = fixtures / "ssl_object_unwrap.py"
+                compare(
+                    "-IB", unwrap, certdata,
+                    native_args=("run", unwrap, "--quiet", "--", certdata), native_timeout=600,
+                )
+                locations = fixtures / "ssl_verify_locations.py"
+                compare(
+                    "-IB", locations, certdata,
+                    native_args=("run", locations, "--quiet", "--", certdata), native_timeout=600,
+                )
         queue_exports = fixtures / "logging_queue_exports.py"
         compare("-IB", queue_exports, native_args=("run", queue_exports, "--quiet"), native_timeout=600)
         thread_hook_exports = root / "thread_hook_exports.py"
@@ -2722,6 +2936,15 @@ def report(text):
             queue_lookup.write_text(f"{statement}\nprint({name}.QueueListener.__name__)\n")
             checked = run(imre, "check", queue_lookup)
             assert checked.returncode == 0, checked.stderr
+        timeout_script = root / "default_timeout.py"
+        timeout_script.write_text(
+            "from ftplib import FTP\n"
+            "from http.client import HTTPConnection\n"
+            "from socket import _GLOBAL_DEFAULT_TIMEOUT as default\n"
+            "assert FTP().timeout is HTTPConnection('localhost').timeout is default\n"
+            "assert FTP(timeout=None).timeout is HTTPConnection('localhost', timeout=None).timeout is None\n"
+        )
+        compare("-IB", timeout_script, native_args=("run", timeout_script, "--quiet"))
         socket_alias = root / "socket_timeout_alias.py"
         socket_alias.write_text(
             "from _socket import timeout as low_timeout\nfrom socket import timeout\n"
@@ -2758,8 +2981,9 @@ def report(text):
             "boxed_threading_deprecated_accessors.py",
             "boxed_lowlevel_thread.py", "boxed_lowlevel_thread_roots.py",
             "boxed_thread_dangling.py", "boxed_threading_rlock.py", "boxed_indirect_threading_rlock.py",
-            "boxed_threading_condition_event.py", "boxed_thread_captured_lock.py",
-            "boxed_thread_bound_lock.py",
+            "boxed_threading_condition_event.py", "boxed_threading_timer.py",
+            "boxed_thread_captured_lock.py",
+            "boxed_thread_bound_lock.py", "boxed_thread_argument_lifetime.py",
             "boxed_thread_captured_acquire.py",
             "boxed_thread_finalization.py",
             "boxed_thread_hash_update.py",
@@ -2924,6 +3148,8 @@ for name in ("md4", "ripemd160"):
                 )
 
         compare("-IB", fixtures / "boxed_unittest_named_loader.py")
+        async_case = fixtures / "unittest_isolated_asyncio.py"
+        compare("-IB", async_case, native_args=("run", async_case, "--quiet"), native_timeout=600)
         compare("-IB", fixtures / "boxed_unittest_patch.py")
         call_args = fixtures / "unittest_mock_call_args.py"
         compare("-IB", call_args, native_args=("run", call_args, "--quiet"))
@@ -2934,13 +3160,14 @@ for name in ("md4", "ripemd160"):
             "-B", "-c", "from unittest.mock import Mock\nm = Mock(['close'])\nm.close()\nassert not hasattr(m, 'read')\n",
             extra=mock_compile_flags, native_timeout=300,
         )
-        open_fixture = fixtures / "boxed_unittest_mock_open.py"
-        for import_flags in ((), ("--runtime-imports",)):
-            compare(
-                "-IB", open_fixture, extra=mock_compile_flags,
-                native_args=("run", open_fixture, *import_flags, "--quiet"),
-                native_timeout=300,
-            )
+        for name in ("boxed_unittest_mock_open.py", "boxed_unittest_autospec.py"):
+            fixture = fixtures / name
+            for import_flags in ((), ("--runtime-imports",)):
+                compare(
+                    "-IB", fixture, extra=mock_compile_flags,
+                    native_args=("run", fixture, *import_flags, "--quiet"),
+                    native_timeout=300,
+                )
         compare(
             "-B", "-c",
             "from ast import BinOp, ClassDef\nimport ast\n"
@@ -2959,10 +3186,13 @@ for name in ("md4", "ripemd160"):
             "boxed_code_objects.py",
             "boxed_inspect_getmembers.py",
             "boxed_inspect_getmodule.py",
+            "boxed_inspect_sourcelines.py",
             "boxed_inspect_stack.py",
             "boxed_inspect_unwrap.py",
             "boxed_inspect_isroutine.py",
+            "boxed_inspect_isabstract.py",
             "boxed_numeric_repr.py",
+            "boxed_decimal_hash.py",
             "boxed_recursive_repr.py",
             "boxed_bound_method_repr.py",
             "boxed_simple_namespace.py",
@@ -3060,6 +3290,7 @@ for name in ("md4", "ripemd160"):
             "boxed_typing_typevar_members.py",
             "boxed_typing_parameter_collector.py",
             "boxed_typing_alias_namespaces.py",
+            "boxed_typing_cache_cleanup.py",
             "boxed_abc_callable_alias.py",
             "boxed_typing_variadic.py",
             "boxed_typing_tuple.py",
@@ -3169,8 +3400,10 @@ for name in ("md4", "ripemd160"):
             "boxed_urllib_http_status.py",
             "boxed_urllib_ftp.py",
             "boxed_urllib_http.py",
+            "boxed_urllib_cookies.py",
             "boxed_http_transport.py",
             "boxed_message_parameters.py",
+            "boxed_email_parser.py",
             "boxed_unicodedata.py",
             "boxed_descriptors.py",
             "boxed_exception_repr.py",
@@ -3214,6 +3447,7 @@ for name in ("md4", "ripemd160"):
             "boxed_module_dir.py",
             "boxed_unittest_assert_almost_equal.py",
             "boxed_unittest_assert_count_equal.py",
+            "boxed_unittest_assert_dict_equal.py",
             "boxed_unittest_assert_set_equal.py",
             "boxed_unittest_membership.py",
             "boxed_unittest_endswith.py",
@@ -3269,9 +3503,12 @@ for name in ("md4", "ripemd160"):
             "boxed_bytecache.py",
             "boxed_fnmatch.py",
             "boxed_unittest_cleanup.py",
+            "boxed_unittest_result_format.py",
+            "boxed_unittest_result_buffer.py",
             "boxed_unittest_result_registry.py",
             "boxed_unittest_get_description.py",
             "boxed_unittest_default_result.py",
+            "boxed_unittest_return_warning.py",
             "boxed_unittest_runner_warnings.py",
             "boxed_unittest_runner_durations.py",
             "boxed_unittest_class_cleanup.py",
@@ -3360,6 +3597,7 @@ for name in ("md4", "ripemd160"):
             "boxed_source_coroutine.py",
             "boxed_coroutine_origin.py",
             "boxed_anext.py",
+            "boxed_async_generator.py",
             "boxed_source_async_generator.py",
             "boxed_source_async_with.py",
             "boxed_with_control.py",
@@ -3447,6 +3685,7 @@ else:
 """)
             check_boxed_unittest_main_reporting(imre, root, run)
             check_unittest_main_names(imre, root, run)
+            check_unittest_module_main(imre, root, run)
             check_unittest_file_discovery(imre, root, run)
             plugin.write_bytes((fixtures / "boxed_subprocess_fileio.py").read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")
@@ -3493,6 +3732,8 @@ else:
             compare("-IB", "-c", imports + "arithmetic.current()")
         if sys.platform in ("darwin", "linux"):
             compare("-IB", str(fixtures / "boxed_geteuid_exports.py"), "os", "posix")
+            plugin.write_bytes((fixtures / "boxed_os_times.py").read_bytes())
+            compare("-IB", "-c", imports + "arithmetic.current()")
             plugin.write_bytes((fixtures / "boxed_grp.py").read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")
             plugin.write_bytes((fixtures / "boxed_pwd.py").read_bytes())
@@ -3502,10 +3743,22 @@ else:
             compare("-B", "-c", imports + "arithmetic.current()",
                     extra={"LC_ALL": "C", "PYTHONUTF8": "0", "PYTHONCOERCECLOCALE": "0"})
         if sys.platform == "linux":
+            plugin.write_bytes((fixtures / "boxed_os_getrandom.py").read_bytes())
+            compare("-IB", "-c", imports + "arithmetic.current()")
+            execve = str(fixtures / "boxed_os_execve.py")
+            compare("-IB", execve, "exports", "os")
+            for mode in ("path", "fd"):
+                compare("-IB", execve, mode, "os", status=17)
             plugin.write_bytes((fixtures / "boxed_os_spawn.py").read_bytes())
             libc, version = platform.libc_ver()
             child_callbacks = libc == "glibc" and tuple(map(int, version.split(".")[:2])) >= (2, 32)
             compare("-IB", "-c", imports + f"arithmetic.current({child_callbacks})")
+            if child_callbacks:
+                plugin.write_bytes((fixtures / "boxed_os_fork.py").read_bytes())
+                compare("-IB", "-c", imports + "arithmetic.current()")
+                compare("-IB", "-c", imports + "arithmetic.threaded_spawn()")
+                plugin.write_bytes((fixtures / "boxed_subprocess_preexec.py").read_bytes())
+                compare("-IB", "-c", imports + "arithmetic.current()")
             plugin.write_bytes((fixtures / "boxed_posix_fadvise.py").read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")
             plugin.write_bytes((fixtures / "boxed_posix_fallocate.py").read_bytes())

@@ -2,6 +2,8 @@
 //! fixed zones keep their original offset and owner, including the canonical UTC singleton.
 use super::*;
 pub(super) mod boxed;
+mod civil;
+use civil::Civil;
 mod clock;
 pub(super) use clock::clock_parts;
 mod conversion;
@@ -114,7 +116,7 @@ fn compare_rooted(
                     })?
                 }
                 (Value::Delta(a), Value::Delta(b)) => a.cmp(b),
-                (Value::DateOnly(a), Value::DateOnly(b)) => a.cmp(b),
+                (Value::DateOnly(a), Value::DateOnly(b)) => a.compare(*b),
                 (Value::DateOnly(_), Value::Date { .. })
                 | (Value::Date { .. }, Value::DateOnly(_)) => {
                     if equality {
@@ -143,8 +145,11 @@ fn compare_rooted(
                         local: b, zone: bz, ..
                     },
                 ) => match (az, bz) {
-                    (None, None) => a.cmp(b),
-                    (Some(az), Some(bz)) => (a - offset(az)).cmp(&(b - offset(bz))),
+                    (None, None) => a.compare(*b),
+                    (Some(x), Some(y)) if offset(x) == offset(y) => a.compare(*b),
+                    (Some(az), Some(bz)) => {
+                        (a.micros() - offset(az)).cmp(&(b.micros() - offset(bz)))
+                    }
                     _ if equality => return Ok(std::cmp::Ordering::Greater),
                     _ => {
                         return Err(Error::new(
@@ -179,7 +184,7 @@ const FACTORS: [i64; 7] = [
 
 pub(super) enum Value {
     Delta(i128),
-    DateOnly(i128),
+    DateOnly(Civil),
     Time {
         local: i128,
         zone: Option<crate::ObjectOwner>,
@@ -188,7 +193,7 @@ pub(super) enum Value {
     // The value is local civil microseconds since ordinal 1. Both naive and aware datetimes
     // use the same calendar; the fixed offset matters for instant comparison, not day addition.
     Date {
-        local: i128,
+        local: Civil,
         zone: Option<crate::ObjectOwner>,
         fold: i32,
     },
@@ -328,7 +333,7 @@ fn write_named_repr(
     match v {
         Value::Delta(n) => write_delta_repr(*n, name.unwrap_or("datetime.timedelta"), out)?,
         Value::DateOnly(ord) => {
-            let (y, m, d) = ymd(*ord);
+            let [y, m, d] = ord.ymd();
             write!(out, "{}({y}, {m}, {d})", name.unwrap_or("datetime.date"))?;
         }
         Value::Zone { offset, name } => {
@@ -344,9 +349,14 @@ fn write_named_repr(
             }
             out.write_char(')')?;
         }
-        Value::Date { local, zone, fold } | Value::Time { local, zone, fold } => {
+        Value::Date { zone, fold, .. } | Value::Time { zone, fold, .. } => {
+            let local = match v {
+                Value::Date { local, .. } => *local,
+                Value::Time { local, .. } => Civil::from_micros(*local),
+                _ => unreachable!(),
+            };
             if matches!(v, Value::Date { .. }) {
-                let (y, m, d) = ymd(local.div_euclid(DAY) + 1);
+                let [y, m, d] = local.ymd();
                 write!(
                     out,
                     "{}({y}, {m}, {d}, ",
@@ -355,7 +365,7 @@ fn write_named_repr(
             } else {
                 write!(out, "{}(", name.unwrap_or("datetime.time"))?;
             }
-            let [h, mi, s, u, _] = time_fields(*local, *fold);
+            let [h, mi, s, u, _] = local.clock(*fold);
             write!(out, "{h}, {mi}")?;
             if s != 0 || u != 0 {
                 write!(out, ", {s}")?;
@@ -399,7 +409,7 @@ pub(super) fn equal(a: &Value, b: &Value) -> bool {
     match (a, b) {
         (Value::Delta(a), Value::Delta(b)) => a == b,
         (Value::Time { .. }, Value::Time { .. }) => clock::order(a, b).is_some_and(|o| o.is_eq()),
-        (Value::DateOnly(a), Value::DateOnly(b)) => a == b,
+        (Value::DateOnly(a), Value::DateOnly(b)) => a.compare(*b).is_eq(),
         (Value::Zone { offset: a, .. }, Value::Zone { offset: b, .. }) => delta(a) == delta(b),
         (
             Value::Date {
@@ -409,8 +419,9 @@ pub(super) fn equal(a: &Value, b: &Value) -> bool {
                 local: b, zone: bz, ..
             },
         ) => match (az, bz) {
-            (None, None) => a == b,
-            (Some(x), Some(y)) => a - offset(x) == b - offset(y),
+            (None, None) => a.compare(*b).is_eq(),
+            (Some(x), Some(y)) if offset(x) == offset(y) => a.compare(*b).is_eq(),
+            (Some(x), Some(y)) => a.micros() - offset(x) == b.micros() - offset(y),
             _ => false,
         },
         _ => false,
@@ -582,7 +593,11 @@ fn datetime_from_fields(
 ) -> Result<crate::ObjectOwner, Error> {
     let ord = checked_ordinal(y, m, d)?;
     let local = (ord - 1) * DAY + time_micros([h, mn, s, u, fold])?;
-    try_owner(Value::Date { local, zone, fold })
+    try_owner(Value::Date {
+        local: Civil::from_micros(local),
+        zone,
+        fold,
+    })
 }
 
 fn time_micros([h, mn, s, u, fold]: [i32; 5]) -> Result<i128, Error> {
@@ -609,7 +624,7 @@ pub unsafe extern "C" fn imre_calendar_date(
 ) -> *const Object {
     rc_result((|| {
         let ord = checked_ordinal(c_component(year)?, c_component(month)?, c_component(day)?)?;
-        try_owner(Value::DateOnly(ord))
+        try_owner(Value::DateOnly(Civil::from_ordinal(ord)))
     })())
 }
 
@@ -648,17 +663,23 @@ fn combine(
     time: &Object,
     zone: Option<crate::ObjectOwner>,
 ) -> Result<crate::ObjectOwner, Error> {
-    let start = with(day, |v| match v {
-        Value::DateOnly(ord) => (ord - 1) * DAY,
-        Value::Date { local, .. } => local.div_euclid(DAY) * DAY,
+    let date = with(day, |v| match v {
+        Value::DateOnly(civil) | Value::Date { local: civil, .. } => *civil,
         _ => unreachable!(),
     });
     with(time, |v| match v {
-        Value::Time { local, fold, .. } => try_owner(Value::Date {
-            local: start + local,
-            zone,
-            fold: *fold,
-        }),
+        Value::Time { local, fold, .. } => {
+            if let Civil::Scalar(day) = date {
+                return try_owner(Value::Date {
+                    local: Civil::from_micros(i128::from(day).div_euclid(DAY) * DAY + local),
+                    zone,
+                    fold: *fold,
+                });
+            }
+            let [y, m, d] = date.ymd();
+            let [h, mi, s, us, fold] = time_fields(*local, *fold).map(|n| n as i32);
+            datetime_from_fields([y, m, d, h, mi, s, us, fold], zone)
+        }
         _ => unreachable!(),
     })
 }
@@ -672,18 +693,11 @@ fn check_datetime_range(local: i128) -> Result<(), Error> {
 fn date(local: i128, zone: Option<crate::ObjectOwner>) -> Result<crate::ObjectOwner, Error> {
     check_datetime_range(local)?;
     try_owner(Value::Date {
-        local,
+        local: Civil::from_micros(local),
         zone,
         fold: 0,
     })
 }
-fn date_fields(local: i128, fold: i32) -> [i128; 8] {
-    let ord = local.div_euclid(DAY) + 1;
-    let (y, m, d) = ymd(ord);
-    let [h, mi, s, u, fold] = time_fields(local, fold);
-    [y.into(), m.into(), d.into(), h, mi, s, u, fold]
-}
-
 fn time_fields(local: i128, fold: i32) -> [i128; 5] {
     let tod = local.rem_euclid(DAY);
     [
@@ -695,13 +709,13 @@ fn time_fields(local: i128, fold: i32) -> [i128; 5] {
     ]
 }
 
-fn date_text(local: i128, zone: &Option<crate::ObjectOwner>, sep: char) -> String {
-    let (y, m, d) = ymd(local.div_euclid(DAY) + 1);
+fn date_text(local: Civil, zone: &Option<crate::ObjectOwner>, sep: char) -> String {
+    let [y, m, d] = local.ymd();
     format!("{y:04}-{m:02}-{d:02}{sep}{}", time_text(local, zone))
 }
 
-fn time_text(local: i128, zone: &Option<crate::ObjectOwner>) -> String {
-    let [h, mi, s, u, _] = time_fields(local, 0);
+fn time_text(local: Civil, zone: &Option<crate::ObjectOwner>) -> String {
+    let [h, mi, s, u, _] = local.clock(0);
     let mut text = format!("{h:02}:{mi:02}:{s:02}");
     if u != 0 {
         text.push_str(&format!(".{u:06}"));
@@ -799,15 +813,24 @@ fn shift(dt: &Object, n: i128, sub: bool) -> Result<crate::ObjectOwner, Error> {
         Value::DateOnly(ord) => {
             // date arithmetic uses timedelta.days, even when the fractional day is negative.
             let days = n.div_euclid(DAY);
-            let ord = if sub { ord - days } else { ord + days };
+            let ord = if sub {
+                ord.ordinal() - days
+            } else {
+                ord.ordinal() + days
+            };
             if !(1..=MAX_ORD).contains(&ord) {
                 return Err(Error::new(Kind::OverflowError, "date value out of range"));
             }
-            try_owner(Value::DateOnly(ord))
+            try_owner(Value::DateOnly(Civil::from_ordinal(ord)))
         }
-        Value::Date { local, zone, .. } => {
-            date(if sub { local - n } else { local + n }, zone.clone())
-        }
+        Value::Date { local, zone, .. } => date(
+            if sub {
+                local.micros() - n
+            } else {
+                local.micros() + n
+            },
+            zone.clone(),
+        ),
         Value::Delta(left) => shift_delta(*left, n, sub),
         _ => unreachable!(),
     })
@@ -834,10 +857,10 @@ pub unsafe extern "C" fn imre_calendar_field(o: *const Object, index: usize) -> 
     let i = index.as_small().unwrap() as usize;
     let n = with(o, |v| match v {
         Value::DateOnly(ord) => {
-            let (y, m, d) = ymd(*ord);
+            let [y, m, d] = ord.ymd();
             i128::from([y, m, d][i])
         }
-        Value::Date { local, fold, .. } => date_fields(*local, *fold)[i],
+        Value::Date { local, fold, .. } => local.fields(*fold)[i],
         Value::Delta(n) => {
             let (d, s, u) = parts(*n);
             [d, s, u][i]
@@ -900,10 +923,10 @@ pub unsafe extern "C" fn imre_calendar_text(o: *const Object, iso: bool) -> *con
 fn calendar_text(value: &Value, iso: bool) -> String {
     match value {
         Value::DateOnly(ord) => {
-            let (y, m, d) = ymd(*ord);
+            let [y, m, d] = ord.ymd();
             format!("{y:04}-{m:02}-{d:02}")
         }
-        Value::Time { local, zone, .. } => time_text(*local, zone),
+        Value::Time { local, zone, .. } => time_text(Civil::from_micros(*local), zone),
         Value::Date { local, zone, .. } => date_text(*local, zone, if iso { 'T' } else { ' ' }),
         Value::Delta(n) => {
             let (d, s, u) = parts(*n);

@@ -1,16 +1,12 @@
+//! Convert argv and environment objects for the POSIX process APIs.
 use std::ffi::CString;
 
 use crate::dynamic::stdlib::os;
-use crate::dynamic::{Context, Error, Id, NONE, Result, Value, builtins};
+use crate::dynamic::{Context, Error, Id, Result, Value, builtins};
+use crate::objects::CStrings;
 
-/// Check the argument shapes before invoking path conversions, as py_posix_spawn does.
-pub(super) fn arguments(
-    ctx: &mut Context,
-    name: &str,
-    argv: Id,
-    env: Id,
-    scheduler: Option<Id>,
-) -> Result<(Vec<CString>, Option<Vec<CString>>)> {
+/// Check the sequence shape and take its length before converting any argument.
+pub(super) fn argv_len(ctx: &mut Context, name: &str, argv: Id) -> Result<usize> {
     if !ctx.builtin_slot_accepts(argv, "list") && !ctx.builtin_slot_accepts(argv, "tuple") {
         return Err(Error::new(
             "TypeError",
@@ -30,18 +26,10 @@ pub(super) fn arguments(
             format!("{name}: argv must not be empty"),
         ));
     }
-    if env != NONE && !is_mapping(ctx, env) {
-        return Err(Error::new(
-            "TypeError",
-            format!("{name}: environment must be a mapping object or None"),
-        ));
-    }
-    if scheduler.is_some_and(|value| value != NONE && !ctx.builtin_slot_accepts(value, "tuple")) {
-        return Err(Error::new(
-            "TypeError",
-            format!("{name}: scheduler must be a tuple or None"),
-        ));
-    }
+    Ok(argc)
+}
+
+pub(super) fn argv(ctx: &mut Context, name: &str, argv: Id, argc: usize) -> Result<CStrings> {
     let argv = os::fs_arguments(ctx, argv, argc)?;
     if argv[0].as_bytes().is_empty() {
         return Err(Error::new(
@@ -49,36 +37,7 @@ pub(super) fn arguments(
             format!("{name}: argv first element cannot be empty"),
         ));
     }
-    let env = if env == NONE {
-        None
-    } else {
-        let mark = ctx.heap.temporary_mark();
-        let entries = environment(ctx, env)?;
-        ctx.discard_truth(mark);
-        Some(entries)
-    };
-    Ok((argv, env))
-}
-
-/// PyMapping_Check tests the subscript slot even for sequences with no keys method.
-fn is_mapping(ctx: &Context, env: Id) -> bool {
-    ctx.slot(env, "__getitem__").is_some()
-        || ctx.dict_storage(env).is_some()
-        || ctx.builtin_slot_accepts(env, "tuple")
-        || matches!(
-            ctx.heap.get(ctx.scalar_value(env)),
-            Value::List(_)
-                | Value::Str(_)
-                | Value::SurrogateStr(_)
-                | Value::Bytes(_)
-                | Value::ByteArray(_)
-                | Value::MemoryView { .. }
-                | Value::Range(_)
-                | Value::Array(_)
-                | Value::MappingProxy(_)
-                | Value::Context(_)
-                | Value::RegexMatch(_)
-        )
+    Ok(CStrings::new(argv)?)
 }
 
 /// Keep an exact list returned by a mapping live. Other iterables are snapshotted before
@@ -113,7 +72,8 @@ fn mapping_list(ctx: &mut Context, env: Id, method: &str) -> Result<Id> {
     Ok(list)
 }
 
-fn environment(ctx: &mut Context, env: Id) -> Result<Vec<CString>> {
+pub(super) fn environment(ctx: &mut Context, env: Id) -> Result<CStrings> {
+    let mark = ctx.heap.temporary_mark();
     let size = builtins::call(ctx, "len", &[env], &[])?;
     let count = ctx.as_integer(size)? as usize;
     let mut entries = Vec::new();
@@ -151,5 +111,6 @@ fn environment(ctx: &mut Context, env: Id) -> Result<Vec<CString>> {
         entries.push(CString::new(key).expect("both fields have already been checked for NUL"));
         ctx.discard_truth(mark);
     }
-    Ok(entries)
+    ctx.discard_truth(mark);
+    Ok(CStrings::new(entries)?)
 }

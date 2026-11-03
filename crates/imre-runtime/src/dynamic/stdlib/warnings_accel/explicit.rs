@@ -1,5 +1,5 @@
 //! The `_warnings` accelerator's explicit-location argument, filter, and registry paths.
-use super::{display, ensure_state, warnings_attr, with_lock};
+use super::{WarningLocation, display, ensure_state, warnings_attr, with_lock};
 use crate::dynamic::stdlib::diagnostic_type_name;
 use crate::dynamic::{Context, Error, Id, NONE, Result, TRUE, Value, builtins};
 
@@ -77,12 +77,14 @@ pub(super) fn warn_explicit(ctx: &mut Context, args: &[Id], kwargs: &[(String, I
         ctx,
         message,
         category,
-        filename,
-        lineno,
+        WarningLocation {
+            filename,
+            lineno,
+            line,
+        },
         optional(4),
         optional(5).unwrap_or(NONE),
         optional(7).unwrap_or(NONE),
-        line,
     )
 }
 
@@ -329,12 +331,10 @@ pub(in crate::dynamic) fn emit(
     ctx: &mut Context,
     message: Id,
     category: Id,
-    filename: Id,
-    lineno: i32,
+    location: WarningLocation,
     module: Option<Id>,
     registry: Id,
     source: Id,
-    line: Option<Id>,
 ) -> Result<Id> {
     with_lock(ctx, |ctx| {
         if module == Some(NONE) {
@@ -350,7 +350,7 @@ pub(in crate::dynamic) fn emit(
         };
         let module = match module {
             Some(value) => value,
-            None => normalize_module(ctx, filename)?,
+            None => normalize_module(ctx, location.filename)?,
         };
         let (message, text, category) = if super::warn::is_warning(ctx, message)? {
             let str_fn = ctx.builtin("str");
@@ -360,14 +360,14 @@ pub(in crate::dynamic) fn emit(
             let instance = ctx.call(category, vec![message], Vec::new())?;
             (instance, message, category)
         };
-        let lineno_obj = ctx.int(i64::from(lineno));
+        let lineno_obj = ctx.int(i64::from(location.lineno));
         let key = ctx.alloc(Value::Tuple(vec![text, category, lineno_obj]));
         if let Some(dict) = registry
             && already_warned(ctx, dict, key, false)?
         {
             return Ok(NONE);
         }
-        let (action, item) = select_action(ctx, text, category, module, lineno)?;
+        let (action, item) = select_action(ctx, text, category, module, location.lineno)?;
         match ctx.str_value(action).ok() {
             Some("error") => return raise_warning(ctx, category, message),
             Some("ignore") => return Ok(NONE),
@@ -401,7 +401,7 @@ pub(in crate::dynamic) fn emit(
                 }
             }
         }
-        display::show(ctx, text, message, category, filename, lineno, source, line)?;
+        display::show(ctx, text, message, category, location, source)?;
         Ok(NONE)
     })
 }

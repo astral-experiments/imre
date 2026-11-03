@@ -37,6 +37,8 @@ assert stack.enter_context(first) is first
 bound = stack._exit_callbacks[-1][1]
 assert type(bound) is MethodType and bound.__self__ is first and bound.__func__ is Resource.__exit__
 assert stack.callback(cleanup, "between") is cleanup
+wrapper = stack._exit_callbacks[-1][1]
+assert wrapper.__annotations__ == {} and getattr(wrapper, "__annotate__", None) is None
 assert stack.enter_context(second) is second
 with stack.pop_all():
     raise KeyError("body")

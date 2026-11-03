@@ -566,7 +566,7 @@ impl Buffer {
             Self::Random(file) => {
                 return match position {
                     Some(at) => file.seek(at),
-                    None => file.seek_raw(|raw| raw.seek_raw(offset, whence)),
+                    None => file.seek_raw(|raw, _| raw.seek_raw(offset, whence)),
                 };
             }
             Self::Pipe(_) => return Err(io::Error::from_raw_os_error(libc::ESPIPE)),

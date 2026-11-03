@@ -54,9 +54,9 @@ pub(super) fn compile(
     if locale_case && !source.contains(r"\k<") {
         return Err(original);
     }
-    // Raw, octal, and hex high-byte literals all translate to \xNN. Even in
-    // bytes mode the VM encodes these literals as UTF-8.
-    if bytes
+    // Locale matching folds the subject at run time, while the compiled VM
+    // pattern only folds ASCII. A high-byte literal may need a locale mapping.
+    if locale_case
         && source
             .split(r"\x")
             .skip(1)

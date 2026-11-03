@@ -3,6 +3,7 @@ mod class_metadata;
 pub(super) mod type_parameters;
 mod worker;
 
+use imre_ast::code_flags;
 use ruff_python_ast as ast;
 use ruff_python_ast::visitor::{self, Visitor};
 use ruff_text_size::{Ranged, TextSize};
@@ -252,12 +253,6 @@ impl Function<'_, '_> {
                 {
                     let outer = self.scope.clone();
                     let params = if let Some(params) = v.type_params.as_deref() {
-                        if params
-                            .iter()
-                            .any(|param| !matches!(param, ast::TypeParam::TypeVar(_)))
-                        {
-                            self.unsupported("variadic type alias parameters");
-                        }
                         self.scope = self.parameter_scope(&outer, params, false);
                         let key = self.code_name(".type_params");
                         self.op("lookup", &[&self.scope.clone(), &key])
@@ -369,13 +364,14 @@ impl Function<'_, '_> {
                         .iter()
                         .map(|d| self.expr(&d.expression))
                         .collect::<Vec<_>>();
-                    let generator = imre_ast::code_flags::is_generator(&v.body);
-                    let body = if v.is_async && generator {
-                        Body::UnsupportedAsyncGenerator(v)
-                    } else if v.is_async || generator {
-                        Body::GeneratorFunction((&v.body, v.is_async))
-                    } else {
-                        Body::Statements(&v.body)
+                    let generator = code_flags::is_generator(&v.body);
+                    let body = match (v.is_async, generator) {
+                        (false, false) => Body::Statements(&v.body),
+                        (false, true) => Body::GeneratorFunction(&v.body, code_flags::GENERATOR),
+                        (true, false) => Body::GeneratorFunction(&v.body, code_flags::COROUTINE),
+                        (true, true) => {
+                            Body::GeneratorFunction(&v.body, code_flags::ASYNC_GENERATOR)
+                        }
                     };
                     let function = self.define(
                         v.decorator_list.first().map_or(v.start(), Ranged::start),
@@ -431,7 +427,7 @@ impl Function<'_, '_> {
                         None,
                         None,
                         None,
-                        Body::Namespace(&v.body),
+                        Body::Namespace(&v.body, v.type_params.is_some()),
                     );
                     if parameter_scope.is_some() {
                         self.scope = outer;
@@ -659,24 +655,21 @@ impl Function<'_, '_> {
         } else {
             format!("{}{name}", self.prefix)
         };
-        let prefix = if matches!(body, Body::Namespace(_)) {
+        let prefix = if matches!(body, Body::Namespace(..)) {
             format!("{qualname}.")
         } else {
             format!("{qualname}.<locals>.")
         };
         let doc = match &body {
-            Body::Statements(stmts) | Body::GeneratorFunction((stmts, _))
+            Body::Statements(stmts) | Body::GeneratorFunction(stmts, _)
                 if self.output.keep_docstrings =>
             {
                 self.source.docstring(&qualname, stmts)
             }
-            Body::UnsupportedAsyncGenerator(f) if self.output.keep_docstrings => {
-                self.source.docstring(&qualname, &f.body)
-            }
             _ => None,
         };
         let flags = match &body {
-            Body::Namespace(_) => None,
+            Body::Namespace(..) => None,
             _ => {
                 use imre_ast::code_flags::*;
                 let mut flags = OPTIMIZED | NEWLOCALS;
@@ -705,12 +698,9 @@ impl Function<'_, '_> {
                     flags |= HAS_DOCSTRING;
                 }
                 let kind = match &body {
-                    Body::GeneratorFunction((_, true)) => COROUTINE,
-                    Body::GeneratorFunction((_, false))
-                    | Body::Generator(..)
-                    | Body::YieldingLambda(_) => GENERATOR,
+                    Body::GeneratorFunction(_, flag) => *flag,
+                    Body::Generator(..) | Body::YieldingLambda(_) => GENERATOR,
                     Body::Expression(expr) if yields_in_expression(expr) => GENERATOR,
-                    Body::UnsupportedAsyncGenerator(_) => ASYNC_GENERATOR,
                     _ => 0,
                 };
                 Some(flags | kind)
@@ -782,7 +772,7 @@ impl Function<'_, '_> {
             // generator() binds the implicit .0 argument without calling the step function.
             signature["co_argcount"] = json!(1);
         }
-        if let Body::Namespace(stmts) = &body {
+        if let Body::Namespace(stmts, _) = &body {
             signature["postponed_annotations"] = json!(
                 self.source.string_annotations
                     && imre_ast::annotations::has_variable_annotation(stmts)
@@ -804,7 +794,7 @@ impl Function<'_, '_> {
             signature["class_cell"] = json!(true);
         }
         let generator = match &body {
-            Body::GeneratorFunction((stmts, is_async)) => {
+            Body::GeneratorFunction(stmts, flag) => {
                 let first = stmts[0].start();
                 let start = first.to_usize();
                 let end = stmts.last().unwrap().end().to_usize();
@@ -815,7 +805,11 @@ impl Function<'_, '_> {
                     " "
                 };
                 // Slice the suite as written so indentation inside multiline strings survives.
-                let header = if *is_async { "async def" } else { "def" };
+                let header = if *flag == code_flags::GENERATOR {
+                    "def"
+                } else {
+                    "async def"
+                };
                 let text = format!("{header} _():\n{indent}{}", &self.source.text[start..end]);
                 Some((first, text))
             }
@@ -836,20 +830,32 @@ impl Function<'_, '_> {
             (self.output.data(text.as_bytes()), self.source.line(first))
         });
         let mut closure_names = ClosureNames {
-            include_nested_reads: matches!(&body, Body::Statements(_) | Body::GeneratorFunction(_)),
+            include_nested_reads: matches!(
+                &body,
+                Body::Statements(_) | Body::GeneratorFunction(..)
+            ),
             ..ClosureNames::default()
         };
         match &body {
-            Body::Statements(stmts) | Body::GeneratorFunction((stmts, _)) => {
+            Body::Statements(stmts) | Body::GeneratorFunction(stmts, _) => {
                 closure_names.visit_body(stmts)
             }
-            Body::Namespace(stmts) => {
+            Body::Namespace(stmts, generic) => {
                 let mut bindings = ClosureNames::default();
                 bindings.visit_body(stmts);
                 class_metadata::capture(&mut bindings, stmts, self.source.string_annotations);
+                if !bindings.globals.is_empty() {
+                    signature["class_globals"] = json!(bindings.globals);
+                }
                 closure_names.nonlocals = bindings.nonlocals;
-                // Methods and nested classes can still capture the enclosing frame.
-                closure_names.incomplete = true;
+                if !generic
+                    && let Some(reads) =
+                        class_metadata::method_class_reads(stmts, self.source.string_annotations)
+                {
+                    closure_names.reads = reads;
+                } else {
+                    closure_names.incomplete = true;
+                }
             }
             Body::Expression(expr) | Body::YieldingLambda(expr) | Body::TypeAlias(expr) => {
                 closure_names.visit_expr(expr)
@@ -875,7 +881,7 @@ impl Function<'_, '_> {
             let value_format = self.integer(1);
             self.op("put", &[&defaults, &format, &value_format]);
         }
-        let in_function = self.in_function || !matches!(body, Body::Namespace(_));
+        let in_function = self.in_function || !matches!(body, Body::Namespace(..));
         signature["types"] = json!({});
         // A generator call returns a suspended frame, before it yields or returns a value.
         let scalar = |expr: &ast::Expr| {
@@ -1495,7 +1501,7 @@ fn uses_class_cell(body: &Body<'_>) -> bool {
     }
     let mut captures = ClassCell(false);
     match body {
-        Body::Statements(stmts) | Body::GeneratorFunction((stmts, _)) => captures.visit_body(stmts),
+        Body::Statements(stmts) | Body::GeneratorFunction(stmts, _) => captures.visit_body(stmts),
         Body::Expression(expr) | Body::YieldingLambda(expr) => captures.visit_expr(expr),
         _ => return false,
     }

@@ -598,10 +598,13 @@ mod page_tests {
                 assert!(expected.range(at..end).next().is_none());
             } else {
                 assert_eq!(span.index_mask, usize::MAX);
-                // The sparse directory is borrowed immutably for this traversal.
+                // SAFETY: The edited span points into one block's Vec<usize>, with two
+                // initialized words per row. The shared borrow of rows keeps the block
+                // alive and its contiguous payload unchanged for the traversal.
                 let words = unsafe { std::slice::from_raw_parts(span.data, span.len * 2) };
-                for (index, payload) in (at..end).zip(words.chunks_exact(2)) {
-                    assert_eq!(payload, expected[&index]);
+                let (payloads, _) = words.as_chunks::<2>();
+                for (index, payload) in (at..end).zip(payloads) {
+                    assert_eq!(payload, &expected[&index]);
                 }
             }
             at = end;

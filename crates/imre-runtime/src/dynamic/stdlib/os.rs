@@ -3,10 +3,16 @@ pub(in crate::dynamic) mod device;
 #[cfg(target_os = "linux")]
 pub(in crate::dynamic) mod eventfd;
 #[cfg(target_os = "linux")]
-mod vectored;
+pub(super) mod execve;
 pub(in crate::dynamic) mod scandir;
 #[cfg(target_os = "linux")]
 mod spawn_child;
+#[cfg(target_os = "linux")]
+mod vectored;
+#[cfg(target_os = "linux")]
+pub(in crate::dynamic) use spawn_child::available as fork_available;
+#[cfg(target_os = "linux")]
+pub(super) use spawn_child::fork_for_child_callbacks;
 #[cfg(target_os = "linux")]
 mod spawn_plain;
 pub(in crate::dynamic) mod stat;
@@ -90,6 +96,14 @@ pub(in crate::dynamic) fn install_capabilities(
             }
             let value = ctx.lookup_attr(module, function)?;
             builtins::set_add(ctx, set, value)?;
+        }
+        // os copies the current posix dictionary, including reassigned optional functions.
+        #[cfg(target_os = "linux")]
+        if capability == "supports_fd"
+            && let Some(execve) = ctx.module_value("posix", "execve")
+        {
+            ctx.bind(scope, "execve", execve);
+            builtins::set_add(ctx, set, execve)?;
         }
         ctx.bind(scope, capability, set);
     }
@@ -198,7 +212,27 @@ pub(super) fn memfd_create(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id
 }
 
 pub(super) fn is_process_function(name: &str) -> bool {
-    cfg!(unix) && matches!(name, "execv" | "WIFSTOPPED")
+    cfg!(unix) && matches!(name, "execv" | "times" | "WIFSTOPPED")
+}
+
+/// Audit after signature validation and before any Python fork handlers run.
+#[cfg(target_os = "linux")]
+fn audit_fork(ctx: &mut Context) -> Result<()> {
+    if ctx.finalizing.load(std::sync::atomic::Ordering::Acquire) {
+        return Err(Error::new(
+            "PythonFinalizationError",
+            "can't fork at interpreter shutdown",
+        ));
+    }
+    super::audit::event(ctx, "os.fork", &[])
+}
+
+#[cfg(target_os = "linux")]
+pub(super) fn fork(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    builtins::bind_builtin_arguments("fork", args, kwargs, [], 0)?;
+    audit_fork(ctx)?;
+    let pid = fork_for_child_callbacks(ctx)?;
+    Ok(ctx.int(i64::from(pid)))
 }
 
 /// Spawn directly for plain arguments, or let the child run the captured Python callable.
@@ -209,17 +243,24 @@ pub(super) fn spawn_exec(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]
     else {
         unreachable!("all three arguments are required")
     };
-    if ctx.finalizing.load(std::sync::atomic::Ordering::Acquire) {
-        return Err(Error::new(
-            "PythonFinalizationError",
-            "can't fork at interpreter shutdown",
-        ));
+    use crate::dynamic::at_fork::{self, Phase};
+
+    audit_fork(ctx)?;
+    let mut warn = false;
+    let result = at_fork::around(ctx, |ctx| {
+        // A before-handler can add child handlers or mutate the argument list.
+        if ctx.fork_hooks[Phase::Child as usize].is_empty()
+            && let Some(result) = spawn_plain::try_spawn(ctx, path, argv, exec)
+        {
+            warn = spawn_plain::multiple_threads(ctx);
+            return result;
+        }
+        spawn_child::fork_current(ctx)
+    });
+    if warn {
+        spawn_plain::warn_about_threads(ctx);
     }
-    super::audit::event(ctx, "os.fork", &[])?;
-    let pid = match spawn_plain::try_spawn(ctx, path, argv, exec)? {
-        Some(pid) => pid,
-        None => spawn_child::fork_for_child_callbacks(ctx)?,
-    };
+    let pid = result?;
     Ok(ctx.int(i64::from(pid)))
 }
 
@@ -266,6 +307,23 @@ fn execv(ctx: &mut Context, args: &[Id]) -> Result<Id> {
     let arguments = crate::objects::CStrings::new(arguments)?;
     super::audit::event(ctx, "os.exec", &[path, argv, NONE])?;
     Err(arguments.execv(&executable).into())
+}
+
+/// Obtain random bytes with the caller's Linux getrandom flags.
+#[cfg(target_os = "linux")]
+pub(super) fn getrandom(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    let [Some(size), flags] =
+        builtins::bind_builtin_arguments("getrandom", args, kwargs, ["size", "flags"], 1)?
+    else {
+        unreachable!()
+    };
+    let size = ssize_t(ctx, size)?;
+    let flags = flags
+        .map(|value| c_int(ctx, value))
+        .transpose()?
+        .unwrap_or(0);
+    let bytes = native::getrandom(size, flags, || ctx.dispatch_signals())?;
+    Ok(ctx.alloc(Value::Bytes(bytes)))
 }
 
 /// Read cryptographically secure bytes from the operating system.
@@ -502,9 +560,58 @@ mod utime;
 #[cfg(target_os = "linux")]
 pub(in crate::dynamic) mod xattr;
 
+fn is_sequence(ctx: &Context, id: Id) -> bool {
+    // PySequence_Check excludes dict subclasses even if they override __getitem__.
+    ctx.dict_storage(id).is_none()
+        && (matches!(
+            ctx.heap.get(ctx.scalar_value(id)),
+            Value::List(_)
+                | Value::Tuple(_)
+                | Value::NamedTuple { .. }
+                | Value::Range(_)
+                | Value::Deque(_)
+                | Value::Str(_)
+                | Value::SurrogateStr(_)
+                | Value::Bytes(_)
+                | Value::ByteArray(_)
+                | Value::Array(_)
+                | Value::MemoryView { .. }
+        ) || ctx.slot(id, "__getitem__").is_some())
+}
+
+#[cfg(unix)]
+fn setgroups(ctx: &mut Context, groups: Id) -> Result<Id> {
+    if !is_sequence(ctx, groups) {
+        return Err(Error::new(
+            "TypeError",
+            "setgroups argument must be a sequence",
+        ));
+    }
+    let count = ctx.sequence_len(groups)?;
+    if count > native::max_groups() {
+        return Err(Error::new("ValueError", "too many groups"));
+    }
+    let mut ids = Vec::new();
+    ids.try_reserve_exact(count)
+        .map_err(|_| Error::new("MemoryError", ""))?;
+    for i in 0..count {
+        let key = ctx.int(i as i64);
+        let value = ctx.get_item(groups, key)?;
+        if !ctx.builtin_slot_accepts(value, "int") && ctx.slot(value, "__index__").is_none() {
+            return Err(Error::new("TypeError", "groups must be integers"));
+        }
+        ids.push(chown::owner_id(ctx, value, true)? as libc::gid_t);
+    }
+    native::setgroups(&ids)?;
+    Ok(NONE)
+}
+
 /// POSIX functions exported as the same builtins by both os and posix.
 pub(super) fn is_descriptor_function(name: &str) -> bool {
-    if matches!(name, "getpgid" | "setpgid") {
+    if matches!(
+        name,
+        "getpgid" | "setpgid" | "setgroups" | "setregid" | "setreuid"
+    ) {
         return cfg!(unix);
     }
     if name == "_exit" {
@@ -564,6 +671,7 @@ pub(super) fn is_descriptor_function(name: &str) -> bool {
                 "copy_file_range"
                     | "get_terminal_size"
                     | "tcgetpgrp"
+                    | "tcsetpgrp"
                     | "ttyname"
                     | "preadv"
                     | "pwritev"
@@ -1074,6 +1182,11 @@ pub(super) fn descriptor(
         return Ok(ctx.int(i64::from(group)));
     }
     #[cfg(unix)]
+    if name == "setgroups" {
+        let groups = builtins::one_positional_arg("posix.setgroups", args, kwargs)?;
+        return setgroups(ctx, groups);
+    }
+    #[cfg(unix)]
     if name == "getpgid" {
         let [Some(pid)] = builtins::bind_builtin_arguments(name, args, kwargs, ["pid"], 1)? else {
             unreachable!("pid is required")
@@ -1082,20 +1195,31 @@ pub(super) fn descriptor(
         return Ok(ctx.int(i64::from(group)));
     }
     #[cfg(unix)]
-    if name == "setpgid" {
+    if matches!(name, "setpgid" | "setregid" | "setreuid") {
         if !kwargs.is_empty() {
             return Err(Error::new(
                 "TypeError",
-                "posix.setpgid() takes no keyword arguments",
+                format!("posix.{name}() takes no keyword arguments"),
             ));
         }
-        let [pid, group] = args else {
+        let [first, second] = args else {
             return Err(Error::new(
                 "TypeError",
-                format!("setpgid expected 2 arguments, got {}", args.len()),
+                format!("{name} expected 2 arguments, got {}", args.len()),
             ));
         };
-        native::setpgid(c_int(ctx, *pid)?, c_int(ctx, *group)?)?;
+        if name == "setpgid" {
+            native::setpgid(c_int(ctx, *first)?, c_int(ctx, *second)?)?;
+        } else {
+            let is_group = name == "setregid";
+            let real = chown::owner_id(ctx, *first, is_group)?;
+            let effective = chown::owner_id(ctx, *second, is_group)?;
+            if is_group {
+                native::setregid(real as libc::gid_t, effective as libc::gid_t)?;
+            } else {
+                native::setreuid(real as libc::uid_t, effective as libc::uid_t)?;
+            }
+        }
         return Ok(NONE);
     }
     if name == "open" {
@@ -1179,7 +1303,8 @@ pub(super) fn descriptor(
         } else {
             Some(file_offset(ctx, offset)?)
         };
-        return Ok(ctx.int(native::sendfile(out_fd, in_fd, offset, count)? as i64));
+        let sent = native::sendfile(out_fd, in_fd, offset, count, || ctx.dispatch_signals())?;
+        return Ok(ctx.int(sent as i64));
     }
     if name == "dup2" {
         let [Some(fd), Some(fd2), inheritable] = builtins::bind_builtin_arguments(
@@ -1278,6 +1403,17 @@ pub(super) fn descriptor(
         ));
     }
     #[cfg(target_os = "linux")]
+    if name == "tcsetpgrp" {
+        let [fd, pgid] = args else {
+            return Err(Error::new(
+                "TypeError",
+                format!("tcsetpgrp expected 2 arguments, got {}", args.len()),
+            ));
+        };
+        native::tcsetpgrp(c_int(ctx, *fd)?, c_int(ctx, *pgid)?)?;
+        return Ok(NONE);
+    }
+    #[cfg(target_os = "linux")]
     if name == "get_terminal_size" {
         let fd = match args {
             [] => libc::STDOUT_FILENO,
@@ -1360,17 +1496,26 @@ pub(super) fn descriptor(
         return posix_file_call(ctx, || unsafe { libc::posix_fallocate(fd, offset, length) });
     }
     #[cfg(unix)]
-    if matches!(name, "getpgrp" | "getppid") {
+    if matches!(name, "getpgrp" | "getppid" | "times") {
         if !args.is_empty() {
             return Err(Error::new(
                 "TypeError",
                 format!("posix.{name}() takes no arguments ({} given)", args.len()),
             ));
         }
-        // SAFETY: both calls read identifiers for the current process and take no pointers.
+        if name == "times" {
+            let values = native::times()?.map(|seconds| ctx.alloc(Value::Float(seconds)));
+            return Ok(super::fixed_structseq::record(
+                ctx,
+                super::fixed_structseq::TIMES_RESULT,
+                values.into(),
+            ));
+        }
         let id = if name == "getpgrp" {
+            // SAFETY: getpgrp takes no arguments and returns the calling process's group ID.
             unsafe { libc::getpgrp() }
         } else {
+            // SAFETY: getppid takes no arguments and returns the calling process's parent ID.
             unsafe { libc::getppid() }
         };
         return Ok(ctx.int(i64::from(id)));
@@ -1470,7 +1615,11 @@ pub(super) fn descriptor(
         }
         let fd = c_int(ctx, *fd)?;
         let offset = file_offset(ctx, *offset)?;
-        let flags = rest.first().map(|id| c_int(ctx, *id)).transpose()?.unwrap_or(0);
+        let flags = rest
+            .first()
+            .map(|id| c_int(ctx, *id))
+            .transpose()?
+            .unwrap_or(0);
         return vectored::transfer(ctx, fd, *buffers, name, Some((offset, flags)));
     }
     if matches!(name, "pread" | "pwrite") {
@@ -1489,7 +1638,9 @@ pub(super) fn descriptor(
         let bytes = native::read(fd, length, Some(offset), || ctx.dispatch_signals())?;
         return Ok(ctx.alloc(Value::Bytes(bytes)));
     }
-    if matches!(name, "read" | "readinto" | "write") || (cfg!(target_os = "linux") && matches!(name, "readv" | "writev")) {
+    if matches!(name, "read" | "readinto" | "write")
+        || (cfg!(target_os = "linux") && matches!(name, "readv" | "writev"))
+    {
         let [fd, data] = args else {
             return Err(Error::new(
                 "TypeError",

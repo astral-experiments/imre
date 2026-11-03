@@ -8,6 +8,7 @@ from fnmatch import fnmatch
 import unittest as _unittest
 from unittest import TestLoader, defaultTestLoader, _FailedTest
 
+__unittest = True
 
 VALID_MODULE_NAME = re.compile(r'[_a-z]\w*\.py$', re.IGNORECASE)
 

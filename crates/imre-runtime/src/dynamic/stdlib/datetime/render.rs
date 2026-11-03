@@ -45,8 +45,12 @@ pub(super) fn repr(
     kind: &str,
 ) -> Result<Id> {
     let Value::Calendar {
-        tzinfo, tzoffset, tzname, ..
-    } = *ctx.heap.get(ctx.scalar_value(receiver)) else {
+        tzinfo,
+        tzoffset,
+        tzname,
+        ..
+    } = *ctx.heap.get(ctx.scalar_value(receiver))
+    else {
         unreachable!()
     };
     if kind == "timezone" {

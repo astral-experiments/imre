@@ -47,6 +47,20 @@ def current():
         assert inspect.isroutine(routine)
     for value in (inspect, Callable, obj, DataDescriptor(), None):
         assert not inspect.isroutine(value)
+    partial = functools.partial(pow, 2)
+    get = type(partial).__get__
+    assert inspect.isroutine(partial) and inspect.ismethoddescriptor(partial)
+    assert get.__objclass__ is functools.partial
+    assert get(partial, None, Callable) is partial
+    bound = partial.__get__(3)
+    assert bound.__func__ is partial and bound.__self__ == 3 and bound() == 8
+    try:
+        get(function, obj)
+    except TypeError:
+        pass
+    else:
+        raise AssertionError("partial descriptor accepted a function")
+
     assert isdatadescriptor is inspect.isdatadescriptor
     assert all(isdatadescriptor(value) for value in (DataDescriptor(), SetOnly(), property(), int.numerator))
     instance_only = Descriptor()

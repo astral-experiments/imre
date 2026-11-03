@@ -56,6 +56,8 @@ mod pkgutil;
 #[cfg(target_os = "linux")]
 pub(super) mod posix_spawn;
 mod posixpath;
+#[cfg(target_os = "linux")]
+mod process_arguments;
 mod random;
 pub(super) mod readiness;
 pub(super) mod regex;
@@ -64,9 +66,9 @@ mod resource;
 mod select;
 #[cfg(unix)]
 pub(super) mod signal;
+mod socket;
 #[cfg(unix)]
 pub(super) mod ssl;
-mod socket;
 pub(super) mod structure;
 mod subprocess;
 mod system_size;
@@ -321,6 +323,14 @@ fn compiler_version(ctx: &Context) -> String {
         .to_owned()
 }
 
+pub(super) fn sys_version(ctx: &mut Context) -> Result<Id> {
+    Ok(ctx.text(format!(
+        "{} (Imre {})",
+        full_version(ctx)?,
+        compiler_version(ctx)
+    )))
+}
+
 fn path_text(ctx: &mut Context, path: &Path) -> Result<Id> {
     path.to_str()
         .map(|value| ctx.text(value))
@@ -368,11 +378,12 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("_codecs", "_imre_codec_functions") => ctx.builtin("_codecs._imre_codec_functions"),
         ("_codecs", "_imre_native_search") => ctx.builtin("encodings.search_function"),
         ("_io", "open_code") => ctx.builtin("io.open_code"),
-        ("math", "trunc" | "floor" | "ceil" | "modf" | "copysign" | "gcd" | "isnan" | "isqrt") => {
-            ctx.builtin(&format!("math.{name}"))
-        }
+        (
+            "math",
+            "trunc" | "floor" | "ceil" | "modf" | "copysign" | "gcd" | "isinf" | "isnan" | "isqrt",
+        ) => ctx.builtin(&format!("math.{name}")),
         ("enum", "auto") => ctx.enum_auto_class()?,
-        ("enum", "Enum" | "IntEnum" | "IntFlag" | "StrEnum") => {
+        ("enum", "Enum" | "Flag" | "IntEnum" | "IntFlag" | "StrEnum") => {
             ctx.builtin("enum.Enum.__copy__");
             ctx.builtin("enum.Enum.__deepcopy__");
             ctx.builtin("enum.Enum.__reduce_ex__");
@@ -449,14 +460,13 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             "_frame_locals" | "_tb_position" | "clear_frames" | "format_exc" | "format_exception"
             | "print_exc" | "print_exception",
         ) => ctx.builtin(&format!("traceback.{name}")),
-        ("struct", "Struct") | ("functools", "partial") => {
-            ctx.builtin(&format!("{module}.{name}"))
-        }
+        ("struct", "Struct") | ("functools", "partial") => ctx.builtin(&format!("{module}.{name}")),
         ("types", "MappingProxyType") => ctx.builtin("mappingproxy"),
         ("types", "ModuleType") => ctx.builtin("module"),
         ("types", "SimpleNamespace") => super::namespace::class(ctx)?,
         ("types", "TracebackType") => ctx.builtin("traceback"),
         ("types", "_coroutine_flags" | "_mark_generator") => ctx.builtin(&format!("types.{name}")),
+        ("types", "AsyncGeneratorType") => ctx.builtin("async_generator"),
         ("types", "GeneratorType") => ctx.builtin("generator"),
         ("types", "CoroutineType") => ctx.builtin("coroutine"),
         ("types", "MethodType") => ctx.builtin("method"),
@@ -466,7 +476,10 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("types", "MethodDescriptorType") => ctx.builtin("method_descriptor"),
         ("types", "FrameType") => ctx.builtin("frame"),
         ("types", "FunctionType") => ctx.builtin("function"),
-        ("types", "BuiltinFunctionType") => ctx.builtin("builtin_function_or_method"),
+        ("types", "BuiltinFunctionType" | "BuiltinMethodType") => {
+            ctx.builtin("builtin_function_or_method")
+        }
+        ("types", "ClassMethodDescriptorType") => ctx.builtin("classmethod_descriptor"),
         ("types", "EllipsisType") => ctx.builtin("ellipsis"),
         ("types", "NoneType" | "NotImplementedType") => ctx.builtin(name),
         ("types", "CodeType") => ctx.builtin("code"),
@@ -491,7 +504,11 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("types", "GenericAlias") => ctx.builtin("types.GenericAlias"),
         (
             "_typing",
-            "_get_alias_kind" | "_eval_type_expression" | "_validate_forward_ref" | "_install_generic_alias_iter",
+            "_clear_alias_caches"
+            | "_get_alias_kind"
+            | "_eval_type_expression"
+            | "_validate_forward_ref"
+            | "_install_generic_alias_iter",
         ) => ctx.builtin(&format!("typing.{name}")),
         ("_typing", "_get_args") => ctx.builtin("typing.get_args"),
         ("_typing", "_get_origin") => ctx.builtin("typing.get_origin"),
@@ -563,6 +580,8 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         #[cfg(target_os = "linux")]
         ("resource", "RLIMIT_NOFILE") => ctx.int(i64::from(libc::RLIMIT_NOFILE)),
         #[cfg(target_os = "linux")]
+        ("resource", "RLIMIT_NPROC") => ctx.int(i64::from(libc::RLIMIT_NPROC)),
+        #[cfg(target_os = "linux")]
         ("resource", "RLIMIT_STACK") => ctx.int(i64::from(libc::RLIMIT_STACK)),
         #[cfg(target_os = "linux")]
         ("resource", "RLIM_INFINITY") => resource::limit(ctx, resource::INFINITY),
@@ -601,11 +620,6 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         } else {
             std::env::consts::OS
         }),
-        ("sys", "version") => ctx.text(format!(
-            "{} (Imre {})",
-            full_version(ctx)?,
-            compiler_version(ctx)
-        )),
         ("sys", "hash_info") => fixed_structseq::current_hash_info(ctx),
         ("sys", "version_info") => version_info(ctx, &full_version(ctx)?)?,
         ("sys", "implementation") => {
@@ -643,6 +657,8 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             ctx.builtin(&format!("posix.{name}"))
         }
         ("os" | "posix", "DirEntry") => ctx.builtin(os::scandir::ENTRY),
+        #[cfg(unix)]
+        ("os" | "posix", "times_result") => ctx.builtin(fixed_structseq::TIMES_RESULT),
         ("os" | "posix", "terminal_size") => ctx.builtin(fixed_structseq::TERMINAL_SIZE),
         #[cfg(target_os = "linux")]
         ("os" | "posix", "statvfs_result") => ctx.builtin(os::stat::VFS_CLASS),
@@ -658,6 +674,10 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("os" | "posix", "fspath") => ctx.builtin("posix.fspath"),
         #[cfg(target_os = "linux")]
         ("posix", "_spawn_exec") => ctx.builtin("posix._spawn_exec"),
+        #[cfg(target_os = "linux")]
+        ("os" | "posix", name @ ("fork" | "register_at_fork")) if os::fork_available() => {
+            ctx.builtin(&format!("posix.{name}"))
+        }
         ("os" | "posix", name)
             if os::is_descriptor_function(name) || os::is_process_function(name) =>
         {
@@ -673,12 +693,13 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("posix", "_create_environ" | "putenv" | "unsetenv") => {
             ctx.builtin(&format!("posix.{name}"))
         }
+        #[cfg(target_os = "linux")]
+        ("os" | "posix", "getrandom") => ctx.builtin("posix.getrandom"),
         ("os" | "posix", "abort" | "getpid" | "urandom") if cfg!(unix) => {
             ctx.builtin(&format!("posix.{name}"))
         }
         #[cfg(not(target_os = "linux"))]
         ("os", "confstr") => ctx.builtin("os.confstr"),
-        ("os", "name") => ctx.text("posix"),
         ("posixpath", "sep") => ctx.text("/"),
         ("posixpath", "altsep") => NONE,
         ("contextvars" | "_contextvars", "ContextVar" | "Context" | "Token" | "copy_context") => {
@@ -720,6 +741,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             | "encoder_call",
         )
         | ("_imre_linecache", "source_lines")
+        | ("_imre_unittest", "format_exception")
         | ("_imre_metadata", "filenames" | "dedent" | "zip_names" | "zip_open" | "zip_read")
         | (
             "_imre_posixpath",
@@ -744,14 +766,14 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         | ("enum", "_simple_enum")
         | (
             "functools",
-            "cache" | "cmp_to_key" | "lru_cache" | "_cache_wrapper" | "reduce"
-            | "update_wrapper",
+            "cache" | "cmp_to_key" | "lru_cache" | "_cache_wrapper" | "reduce" | "update_wrapper",
         )
         | ("_string", "formatter_parser" | "formatter_field_name_split")
         | (
             "inspect",
             "iscoroutinefunction"
             | "_frame_position"
+            | "_abstract_flags"
             | "markcoroutinefunction"
             | "_native_data_descriptor"
             | "_static_member"
@@ -1105,6 +1127,15 @@ pub(super) fn call(
         ctx.heap.clear_frame(frame)?;
         return Ok(NONE);
     }
+    if name == "_imre_unittest.format_exception" {
+        let ([kind, value, tb, locals], []) = (args, kwargs) else {
+            return Err(Error::new(
+                "TypeError",
+                "_format_exception() expects four positional arguments",
+            ));
+        };
+        return traceback::format_result(ctx, *kind, *value, *tb, *locals);
+    }
     if name == "traceback._frame_locals" {
         let frame = single_argument("_frame_locals", "frame", args, kwargs)?;
         return traceback::frame_locals(ctx, frame);
@@ -1398,8 +1429,10 @@ pub(super) fn call(
     if matches!(
         name,
         "sys.get_int_max_str_digits"
+            | "sys._get_cpu_count_config"
             | "sys.get_coroutine_origin_tracking_depth"
             | "sys.getdefaultencoding"
+            | "_socket.getdefaulttimeout"
             | "_locale.getencoding"
             | "sys.getfilesystemencoding"
             | "sys.getfilesystemencodeerrors"
@@ -1441,7 +1474,17 @@ pub(super) fn call(
             ));
         }
         return Ok(match name {
-            "sys.get_coroutine_origin_tracking_depth" => ctx.int(i64::from(ctx.threads.coroutine_origin_depth)),
+            #[cfg(target_os = "linux")]
+            "sys._get_cpu_count_config" => {
+                ctx.int(i64::from(crate::sys::cpu_count::configured().unwrap_or(-1)))
+            }
+            "sys.get_coroutine_origin_tracking_depth" => {
+                ctx.int(i64::from(ctx.threads.coroutine_origin_depth))
+            }
+            "_socket.getdefaulttimeout" => {
+                let timeout = *ctx.socket_default_timeout.lock().unwrap();
+                timeout.map_or(NONE, |d| ctx.alloc(Value::Float(d.as_secs_f64())))
+            }
             "posix._create_environ" => os::environment(ctx),
             "posix.getcwd" | "posix.getcwdb" => os::getcwd(ctx, name == "posix.getcwdb")?,
             "sys.getfilesystemencoding" => ctx
@@ -1466,7 +1509,10 @@ pub(super) fn call(
                 } else {
                     crate::objects::os::getresuid()?
                 };
-                let values = ids.into_iter().map(|id| ctx.alloc(Value::Int(id))).collect();
+                let values = ids
+                    .into_iter()
+                    .map(|id| ctx.alloc(Value::Int(id)))
+                    .collect();
                 ctx.alloc(Value::Tuple(values))
             }
             "posix.getgroups" => {
@@ -1692,8 +1738,11 @@ pub(super) fn call(
     if let Some(operation) = name.strip_prefix("_imre_metadata.") {
         return metadata::call(ctx, operation, args, kwargs);
     }
-    if let Some(layout) = name.strip_suffix(".__reduce__").and_then(os::stat::layout) {
-        return os::stat::reduce(ctx, layout, args, kwargs);
+    if let Some((class, method)) = name.rsplit_once('.')
+        && let Some(layout) = os::stat::layout(class)
+        && layout.methods().contains(&method)
+    {
+        return os::stat::method(ctx, layout, method, args, kwargs);
     }
     if let Some(layout) = os::stat::layout(name) {
         return os::stat::construct(ctx, layout, args, kwargs);
@@ -1710,6 +1759,18 @@ pub(super) fn call(
     }
     if let Some(op @ ("stat" | "lstat" | "fstat")) = name.strip_prefix("posix.") {
         return os::stat::call(ctx, op, args, kwargs);
+    }
+    #[cfg(target_os = "linux")]
+    if name == "posix.execve" {
+        return os::execve::call(ctx, args, kwargs);
+    }
+    #[cfg(target_os = "linux")]
+    if name == "posix.fork" {
+        return os::fork(ctx, args, kwargs);
+    }
+    #[cfg(target_os = "linux")]
+    if name == "posix.register_at_fork" {
+        return super::at_fork::register(ctx, args, kwargs);
     }
     #[cfg(target_os = "linux")]
     if name == "posix._spawn_exec" {
@@ -1791,6 +1852,10 @@ pub(super) fn call(
         };
         let code = os::c_int(ctx, *code)?;
         return Ok(ctx.text_codepoints(crate::sys::strerror(code)?));
+    }
+    #[cfg(target_os = "linux")]
+    if name == "posix.getrandom" {
+        return os::getrandom(ctx, args, kwargs);
     }
     if name == "posix.urandom" {
         return os::urandom(ctx, args, kwargs);
@@ -2215,7 +2280,22 @@ pub(super) fn call(
         let receiver = builtins::noargs_method_receiver(ctx, owner, "__reduce__", args, kwargs)?;
         return super::typing::reduce_builtin_alias(ctx, receiver);
     }
-    if name == "types.GenericAlias" {
+    if matches!(name, "types.GenericAlias" | "types.GenericAlias.__new__") {
+        let base = ctx.builtin("types.GenericAlias");
+        let (class, args) = if name.ends_with(".__new__") {
+            let Some((&class, rest)) = args.split_first() else {
+                return Err(Error::new(
+                    "TypeError",
+                    "types.GenericAlias.__new__(): not enough arguments",
+                ));
+            };
+            if !ctx.subclass(class, base) {
+                return Err(ctx.invalid_new_subtype("types.GenericAlias", class));
+            }
+            (class, rest)
+        } else {
+            (base, args)
+        };
         if !kwargs.is_empty() {
             return Err(Error::new(
                 "TypeError",
@@ -2228,7 +2308,16 @@ pub(super) fn call(
                 format!("GenericAlias expected 2 arguments, got {}", args.len()),
             ));
         };
-        return Ok(super::typing::builtin_alias(ctx, *origin, *parameters));
+        let alias = super::typing::builtin_alias(ctx, *origin, *parameters);
+        if class == base {
+            return Ok(alias);
+        }
+        let instance = ctx.instance(class, None);
+        let Value::Instance { scalar, .. } = ctx.heap.get_mut(instance) else {
+            unreachable!()
+        };
+        *scalar = Some(alias);
+        return Ok(instance);
     }
     if let Some(name) = name.strip_prefix("operator.") {
         if name == "attrgetter" {
@@ -2322,6 +2411,9 @@ pub(super) fn call(
     }
     if name == "_socket.socketpair" {
         return socket::socketpair(ctx, args, kwargs);
+    }
+    if name == "_socket.setdefaulttimeout" {
+        return socket::setdefaulttimeout(ctx, args, kwargs);
     }
     if name == "_socket.close" {
         return socket::close(ctx, args, kwargs);
@@ -2550,6 +2642,23 @@ pub(super) fn call(
         }
         return Ok(receiver);
     }
+    if let Some((functools::LRU_CACHE_CLASS, method)) = name.rsplit_once('.')
+        && functools::COPY_METHODS.contains(&method)
+    {
+        if method == "__reduce__" {
+            let wrapper = builtins::noargs_method_receiver(
+                ctx,
+                functools::LRU_CACHE_CLASS,
+                method,
+                args,
+                kwargs,
+            )?;
+            return ctx.lookup_attr(wrapper, "__qualname__");
+        }
+        let (wrapper, _) =
+            builtins::method_receiver_args(ctx, functools::LRU_CACHE_CLASS, method, args, kwargs)?;
+        return Ok(wrapper);
+    }
     if name == "pattern.split" {
         return regex::pattern_split(ctx, args, kwargs);
     }
@@ -2657,26 +2766,33 @@ pub(super) fn call(
             } else {
                 (id, true)
             };
+            let gathered;
             let bytes = match ctx.heap.get(id) {
-                Value::Bytes(bytes) | Value::ByteArray(bytes) => bytes.as_slice(),
-                Value::Str(text) if decode && text.is_ascii() => text.as_bytes(),
-                Value::Str(_) if decode => {
+                _ if !decode => ctx.native_buffer_bytes(id)?,
+                Value::MemoryView { .. } => {
+                    gathered = ctx.memoryview_bytes(id)?;
+                    gathered.as_slice()
+                }
+                Value::Str(text) if text.is_ascii() => text.as_bytes(),
+                Value::Str(_) => {
                     return Err(Error::new(
                         "ValueError",
                         "string argument should contain only ASCII characters",
                     ));
                 }
-                _ => {
-                    let ty = ctx.type_name(id);
-                    let message = if decode {
-                        format!(
-                            "argument should be a bytes-like object or ASCII string, not '{ty}'"
+                _ => ctx.native_buffer_bytes(id).map_err(|error| {
+                    if error.kind == "TypeError" {
+                        let ty = ctx.type_name(id);
+                        Error::new(
+                            "TypeError",
+                            format!(
+                                "argument should be a bytes-like object or ASCII string, not '{ty}'"
+                            ),
                         )
                     } else {
-                        format!("a bytes-like object is required, not '{ty}'")
-                    };
-                    return Err(Error::new("TypeError", message));
-                }
+                        error
+                    }
+                })?,
             };
             let result = if decode {
                 crate::objects::base64_decode(bytes, urlsafe)?

@@ -2685,7 +2685,7 @@ impl<'a> Checker<'a> {
         if receiver.ty == Type::CodecInfo
             && matches!(
                 attribute.attr.as_str(),
-                "_is_text_encoding" | "incrementaldecoder"
+                "_is_text_encoding" | "incrementaldecoder" | "incrementalencoder"
             )
         {
             return Err(self.object_builtin_error(attribute.attr.as_str(), attribute));
@@ -4615,6 +4615,7 @@ impl<'a> Checker<'a> {
             self.graph.modules[self.module]
                 .optional_imports
                 .values()
+                .flatten()
                 .any(|alias| alias == name.id.as_str())
         })
     }
@@ -4941,7 +4942,7 @@ impl<'a> Checker<'a> {
                         if receiver.ty == Type::CodecInfo
                             && matches!(
                                 attr.attr.as_str(),
-                                "_is_text_encoding" | "incrementaldecoder"
+                                "_is_text_encoding" | "incrementaldecoder" | "incrementalencoder"
                             )
                         {
                             return Err(self.object_builtin_error(attr.attr.as_str(), attr));
@@ -6574,11 +6575,17 @@ impl<'a> Checker<'a> {
                 Intrinsic::CachedProperty => {
                     return Err(self.object_runtime_export("functools.cached_property", expression));
                 }
+                Intrinsic::Base64Decode => {
+                    return Err(self.scoped_builtin_error("base64.b64decode", expression));
+                }
                 Intrinsic::ScopedObjectExport(name) => {
                     return Err(self.scoped_builtin_error(name, expression));
                 }
                 Intrinsic::Fd(ir::FdOperation::TcGetPgrp) => {
                     return Err(self.object_runtime_export("posix.tcgetpgrp", expression));
+                }
+                Intrinsic::Fd(ir::FdOperation::TcSetPgrp) => {
+                    return Err(self.object_runtime_export("posix.tcsetpgrp", expression));
                 }
                 Intrinsic::ObjectRuntimeExport(name) => {
                     return Err(self.object_runtime_export(name, expression));
@@ -7181,10 +7188,17 @@ impl<'a> Checker<'a> {
                 if values.iter().any(|v| matches!(v.ty, Type::WeakProxy(_))) {
                     return self.weak_proxy_comparison(values, &compare.ops, expression);
                 }
-                if values
-                    .iter()
-                    .any(|value| matches!(value.ty, Type::Class(id) if self.decimal_class(id)))
-                {
+                let decimal =
+                    |value: &Expr| matches!(value.ty, Type::Class(id) if self.decimal_class(id));
+                if values.iter().any(decimal) {
+                    if values.iter().all(decimal)
+                        && compare
+                            .ops
+                            .iter()
+                            .all(|op| matches!(op, ast::CmpOp::Eq | ast::CmpOp::NotEq))
+                    {
+                        return Err(self.object_builtin_error("Decimal equality", expression));
+                    }
                     return Err(error(
                         self.source,
                         expression,
@@ -8131,7 +8145,9 @@ impl<'a> Checker<'a> {
                 if matches!(attribute.attr.as_str(), "keys" | "values" | "items")
                     && self.types.mapping(receiver.ty).is_some()
                 {
-                    return Err(self.scoped_builtin_error("bound dictionary view method", attribute));
+                    return Err(
+                        self.scoped_builtin_error("bound dictionary view method", attribute)
+                    );
                 }
                 if let Some(element) = self.types.deque_element(receiver.ty) {
                     return self.deque_attribute(attribute, receiver, element);
@@ -9119,7 +9135,9 @@ impl<'a> Checker<'a> {
         }
         match self.resolve(&call.func) {
             Some(Binding::Intrinsic(Intrinsic::Partial)) => return self.partial(call),
-            Some(Binding::Intrinsic(Intrinsic::LoggingShutdown)) => return self.logging_shutdown(call),
+            Some(Binding::Intrinsic(Intrinsic::LoggingShutdown)) => {
+                return self.logging_shutdown(call);
+            }
             Some(Binding::Intrinsic(Intrinsic::FileConfig)) if calls::has_unpacking(call) => {
                 return self.logging_file_config(call);
             }
@@ -9133,6 +9151,7 @@ impl<'a> Checker<'a> {
                 Some(Binding::Intrinsic(Intrinsic::Fd(
                     op @ (ir::FdOperation::Pipe2
                     | ir::FdOperation::TcGetPgrp
+                    | ir::FdOperation::TcSetPgrp
                     | ir::FdOperation::Read
                     | ir::FdOperation::Write
                     | ir::FdOperation::CopyFileRange),
@@ -9458,6 +9477,17 @@ impl<'a> Checker<'a> {
             Some(Binding::Intrinsic(Intrinsic::TracebackFormatter(name))) => {
                 return Err(self.object_export_error(name, call));
             }
+            Some(Binding::Intrinsic(
+                Intrinsic::StandardEnum | Intrinsic::IntEnum | Intrinsic::StrEnum,
+            )) if call.arguments.args.len() >= 2
+                || call
+                    .arguments
+                    .keywords
+                    .iter()
+                    .any(|kw| kw.arg.as_deref() == Some("names")) =>
+            {
+                return Err(self.scoped_builtin_error("enum.Enum", call));
+            }
             Some(Binding::Intrinsic(Intrinsic::BuiltinsHex)) => {
                 return Err(self.scoped_builtin_error("builtins.hex", call));
             }
@@ -9467,12 +9497,38 @@ impl<'a> Checker<'a> {
             Some(Binding::Intrinsic(Intrinsic::ScopedObjectExport(name))) => {
                 return Err(self.scoped_builtin_error(name, call));
             }
+            Some(Binding::Intrinsic(Intrinsic::ObjectRuntimeExport(name @ "math.copysign")))
+                if call.arguments.keywords.is_empty()
+                    && let [x, y] = call.arguments.args.as_ref()
+                    && self.graph.session.is_stdlib_function(
+                        self.module,
+                        &call.func,
+                        "math",
+                        "copysign",
+                    ) =>
+            {
+                let x = self
+                    .expr(x)
+                    .map_err(|_| self.object_runtime_export(name, call))?;
+                let y = self
+                    .expr(y)
+                    .map_err(|_| self.object_runtime_export(name, call))?;
+                if x.ty == Type::Float && y.ty == Type::Float {
+                    return Ok(Expr {
+                        ty: Type::Float,
+                        kind: ExprKind::Builtin(Builtin::FloatCopySign, vec![x, y]),
+                    });
+                }
+                return Err(self.object_runtime_export(name, call));
+            }
             Some(Binding::Intrinsic(Intrinsic::ObjectRuntimeExport("posix.getpid")))
                 if call.arguments.is_empty()
-                    && self
-                        .graph
-                        .session
-                        .is_stdlib_function(self.module, &call.func, "os", "getpid") =>
+                    && self.graph.session.is_stdlib_function(
+                        self.module,
+                        &call.func,
+                        "os",
+                        "getpid",
+                    ) =>
             {
                 return Ok(Expr {
                     ty: Type::Int,

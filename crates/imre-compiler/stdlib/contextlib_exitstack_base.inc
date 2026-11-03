@@ -31,7 +31,7 @@
         return result
 
     def callback(self, callback, /, *args: object, **kwds: object):
-        def _exit_wrapper(exc_type: object, exc_value: object, tb: object) -> None:
+        def _exit_wrapper(exc_type, exc, tb):
             callback(*args, **kwds)
         _exit_wrapper.__wrapped__ = callback
         self._exit_callbacks.append((True, _exit_wrapper))

@@ -397,11 +397,15 @@ _scheme_letters = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ'
 _scheme_chars = _scheme_letters + '0123456789+-.'
 
 
-def _defrag_parts(url):
-    # An empty authority or query still has a delimiter. Keep it until the
-    # fields are reassembled, and honor string operations on subclasses.
-    scheme = netloc = query = None
-    fragment = ''
+def _urlsplit(url, scheme=None, allow_fragments=True):
+    url = url.lstrip(_WHATWG_C0_CONTROL_OR_SPACE)
+    for char in ('\t', '\r', '\n'):
+        url = url.replace(char, '')
+    if scheme is not None:
+        scheme = scheme.strip(_WHATWG_C0_CONTROL_OR_SPACE)
+        for char in ('\t', '\r', '\n'):
+            scheme = scheme.replace(char, '')
+    netloc = query = fragment = None
     i = url.find(':')
     if i > 0 and url[0] in _scheme_letters:
         for c in url[:i]:
@@ -417,10 +421,14 @@ def _defrag_parts(url):
                 end = min(end, pos)
         netloc, url = url[2:end], url[end:]
         _check_netloc(netloc)
-    if '#' in url:
+    if allow_fragments and '#' in url:
         url, fragment = url.split('#', 1)
     if '?' in url:
         url, query = url.split('?', 1)
+    return scheme, netloc, url, query, fragment
+
+
+def _urlunsplit(scheme, netloc, url, query, fragment):
     if netloc is not None:
         if url and url[:1] != '/':
             url = '/' + url
@@ -431,7 +439,9 @@ def _defrag_parts(url):
         url = scheme + ':' + url
     if query is not None:
         url = url + '?' + query
-    return url, fragment or ''
+    if fragment is not None:
+        url = url + '#' + fragment
+    return url
 
 
 def urldefrag(url):
@@ -445,10 +455,9 @@ def urldefrag(url):
     if not text_input:
         url = url.decode('ascii', 'strict') if url else ''
     if '#' in url:
-        url = url.lstrip(_WHATWG_C0_CONTROL_OR_SPACE)
-        for char in ('\t', '\r', '\n'):
-            url = url.replace(char, '')
-        url, fragment = _defrag_parts(url)
+        scheme, netloc, path, query, fragment = _urlsplit(url)
+        url = _urlunsplit(scheme, netloc, path, query, None)
+        fragment = fragment or ''
     else:
         fragment = ''
     result = DefragResult(url, fragment)

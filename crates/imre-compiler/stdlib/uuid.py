@@ -1,4 +1,9 @@
-"""UUID values constructed from hexadecimal text or a 128-bit integer."""
+"""UUID values constructed from hexadecimal text, integers, or operating-system randomness."""
+
+RESERVED_NCS = "reserved for NCS compatibility"
+RFC_4122 = "specified in RFC 4122"
+RESERVED_MICROSOFT = "reserved for Microsoft compatibility"
+RESERVED_FUTURE = "reserved for future definition"
 
 
 def _from_hex(text: str) -> int:
@@ -43,6 +48,28 @@ class UUID(_UUIDValue):
     def hex(self) -> str:
         # A leading 1 keeps all 32 digits, including the UUID's leading zeroes.
         return f"{(1 << 128) | _number(self._value):x}"[1:]
+
+    @property
+    def bytes(self):
+        value = _number(self._value)
+        return bytes([(value >> shift) & 0xff for shift in range(120, -1, -8)])
+
+    @property
+    def variant(self) -> str:
+        value = _number(self._value)
+        if not value & (1 << 63):
+            return RESERVED_NCS
+        if not value & (1 << 62):
+            return RFC_4122
+        if not value & (1 << 61):
+            return RESERVED_MICROSOFT
+        return RESERVED_FUTURE
+
+    @property
+    def version(self):
+        if self.variant == RFC_4122:
+            return (_number(self._value) >> 76) & 0xf
+        return None
 
     def __str__(self) -> str:
         text = self.hex

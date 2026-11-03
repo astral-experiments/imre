@@ -1,7 +1,7 @@
 """Rounding function objects and the original operands they dispatch on."""
 
 import math
-from math import ceil, copysign, floor, isnan, modf, trunc
+from math import ceil, copysign, floor, isinf, isnan, modf, trunc
 
 
 class Hooks:
@@ -71,6 +71,12 @@ def current():
     assert not hasattr(math, "pi")
     math.pi = pi
     assert math.pi is pi
+
+    assert isinf is math.isinf
+    assert isinf(float("inf")) is True
+    assert isinf(FloatOverride("-inf")) is True
+    for value in (float("nan"), -0.0, FloatOnly(), IndexOnly()):
+        assert isinf(value) is False
 
     assert isnan is math.isnan
     assert isnan(FloatOverride("nan")) is True

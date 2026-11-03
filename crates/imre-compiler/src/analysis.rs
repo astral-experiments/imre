@@ -756,10 +756,21 @@ impl Session {
         calls: FallbackCalls,
         runtime_provider: Option<usize>,
     ) -> Result<(), String> {
-        let all_calls = matches!(calls, FallbackCalls::All | FallbackCalls::DecoratorFactories);
-        self.set_fallback_rules(all_calls, matches!(calls, FallbackCalls::DecoratorFactories));
+        let all_calls = matches!(
+            calls,
+            FallbackCalls::All | FallbackCalls::DecoratorFactories
+        );
+        self.set_fallback_rules(
+            all_calls,
+            matches!(calls, FallbackCalls::DecoratorFactories),
+        );
         let provider = runtime_provider.map(|index| self.files[index]);
-        self.errors(skipped, overloads, all_calls, provider)?;
+        let checks = if all_calls {
+            FileChecks::FallbackCalls
+        } else {
+            FileChecks::FallbackReturns
+        };
+        self.errors(skipped, overloads, checks, provider)?;
         if let FallbackCalls::Entry(entry) = calls {
             // Only the entry gained a new statement order. Imported modules retain
             // the argument-checking policy they had before the guard.
@@ -769,7 +780,7 @@ impl Session {
                 self.files[entry],
                 skipped.map_or(&[][..], |ranges| ranges[entry].as_slice()),
                 overloads[entry].as_slice(),
-                true,
+                FileChecks::FallbackCalls,
                 provider,
             );
             let errors = file_errors(&self.db, checked);
@@ -815,14 +826,14 @@ impl Session {
         DiagnosticRules::get(&self.db)
             .set_rules(&mut self.db)
             .to(self.rules.clone());
-        self.errors(skipped, overloads, false, None)
+        self.errors(skipped, overloads, FileChecks::Full, None)
     }
 
     fn errors(
         &self,
         skipped: Option<&[Vec<TextRange>]>,
         overloads: &[Vec<CheckedDiagnostic>],
-        scoped_builtin: bool,
+        checks: FileChecks,
         runtime_provider: Option<File>,
     ) -> Result<(), String> {
         let errors: Vec<_> = self
@@ -835,7 +846,7 @@ impl Session {
                     file,
                     skipped.map_or(&[][..], |ranges| ranges[index].as_slice()),
                     overloads.get(index).map_or(&[][..], Vec::as_slice),
-                    scoped_builtin,
+                    checks,
                     runtime_provider,
                 );
                 file_errors(&self.db, checked)
@@ -858,9 +869,16 @@ struct CheckedFile<'db> {
     skipped: Vec<TextRange>,
     overloads: Vec<CheckedDiagnostic>,
     #[returns(copy)]
-    scoped_builtin: bool,
+    checks: FileChecks,
     #[returns(copy)]
     runtime_provider: Option<File>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+enum FileChecks {
+    Full,
+    FallbackReturns,
+    FallbackCalls,
 }
 
 /// Files in which a checked object fallback also enforces call arguments.
@@ -974,11 +992,77 @@ impl CheckedDiagnostic {
     }
 }
 
+/// Files made only of imports and scalar bindings have no call or return sites.
+/// Other files can still resolve the names these modules export.
+fn fallback_data_module(parsed: &ParsedModuleRef) -> bool {
+    fn binding(stmt: &Stmt) -> bool {
+        let valid_alias = |alias: &ruff_python_ast::Alias| {
+            let bound = alias.asname.as_ref().unwrap_or(&alias.name);
+            alias.name.as_str() != "*" && bound.split('.').next() != Some("__debug__")
+        };
+        match stmt {
+            Stmt::Import(import) => !import.is_lazy && import.names.iter().all(valid_alias),
+            Stmt::ImportFrom(import) => {
+                !import.is_lazy
+                    && import
+                        .module
+                        .as_ref()
+                        .is_none_or(|module| module.as_str() != "__future__")
+                    && import.names.iter().all(valid_alias)
+            }
+            Stmt::Assign(assign) => {
+                (assign.value.is_literal_expr() || assign.value.is_name_expr())
+                    && assign.targets.iter().all(|target| {
+                        target
+                            .as_name_expr()
+                            .is_some_and(|name| name.id.as_str() != "__debug__")
+                    })
+            }
+            Stmt::Pass(_) => true,
+            Stmt::Expr(expr) => expr.value.is_string_literal_expr(),
+            _ => false,
+        }
+    }
+
+    parsed.has_no_syntax_errors()
+        && parsed.syntax().body.iter().all(|stmt| {
+            if let Stmt::Try(guard) = stmt {
+                let [ruff_python_ast::ExceptHandler::ExceptHandler(handler)] =
+                    guard.handlers.as_slice()
+                else {
+                    return false;
+                };
+                !guard.is_star
+                    && guard.orelse.is_empty()
+                    && guard.finalbody.is_empty()
+                    && handler.name.is_none()
+                    && handler.type_.as_deref().is_some_and(Expr::is_name_expr)
+                    && guard.body.iter().all(binding)
+                    && handler.body.iter().all(binding)
+            } else {
+                binding(stmt)
+            }
+        })
+        // Suppression comments can have diagnostics of their own.
+        && !parsed
+            .tokens()
+            .iter()
+            .any(|token| token.kind() == TokenKind::Comment)
+}
+
 /// A per-file result depends on the ty queries it actually read, including any other source
 /// consulted to render a diagnostic. Every revision still requests the result for every file.
 #[salsa::tracked(returns(ref))]
 fn file_errors<'db>(db: &'db dyn Db, checked: CheckedFile<'db>) -> Vec<String> {
     let file = checked.file(db);
+    let checks = checked.checks(db);
+    if checks != FileChecks::Full {
+        let parsed =
+            ruff_db::parsed::parsed_module(db, db.program_file(file).python_file(db)).load(db);
+        if fallback_data_module(&parsed) {
+            return Vec::new();
+        }
+    }
     #[cfg(test)]
     FILE_CHECKS.with_borrow_mut(|checks| {
         if let Some(checks) = checks {
@@ -996,7 +1080,7 @@ fn file_errors<'db>(db: &'db dyn Db, checked: CheckedFile<'db>) -> Vec<String> {
                     .and_then(|span| span.range())
                     .is_some_and(|range| {
                         skipped.iter().any(|scope| scope.contains_range(range))
-                            || (checked.scoped_builtin(db)
+                            || (checks == FileChecks::FallbackCalls
                                 && CALL_ARGUMENT_RULES.contains(&diagnostic.id().as_str())
                                 && runtime_argument(
                                     db,
@@ -1357,7 +1441,9 @@ impl AnalysisCache {
             && cached.same_files(fresh, inputs)
         {
             cached.update(fresh, inputs)?;
-            return cached.session.errors(skipped, overloads, false, None);
+            return cached
+                .session
+                .errors(skipped, overloads, FileChecks::Full, None);
         }
         if self.hints.is_some() {
             // The quiet database must retain its inference with diagnostics disabled.
@@ -1713,6 +1799,31 @@ mod diagnostic_mode_tests {
     use super::*;
 
     #[test]
+    fn data_module_skips_only_fallback_contracts() {
+        let root = Path::new("/project");
+        let mut session = Session::new(root, &[]).unwrap();
+        session
+            .add(
+                &root.join("main.py"),
+                "from missing_dependency import value\n",
+                crate::SourceKind::File,
+            )
+            .unwrap();
+        FILE_CHECKS.with_borrow_mut(|checks| *checks = Some(Vec::new()));
+        session
+            .check_fallback_contracts(None, &[vec![]], FallbackCalls::All, None)
+            .unwrap();
+        let visits = FILE_CHECKS.with_borrow_mut(Option::take).unwrap();
+        assert!(visits.is_empty());
+        assert!(
+            session
+                .check_scopes(None, &[])
+                .unwrap_err()
+                .contains("missing_dependency")
+        );
+    }
+
+    #[test]
     fn a_proved_builtin_import_keeps_the_adjacent_ty_error() {
         let root = Path::new("/project");
         let mut session = Session::new(root, &[]).unwrap();
@@ -1772,9 +1883,14 @@ mod diagnostic_mode_tests {
         let whole = TextRange::new(0.into(), 40.into());
         assert!(
             session
-                .errors(Some(&[vec![whole]]), &[], false, None)
+                .errors(Some(&[vec![whole]]), &[], FileChecks::Full, None)
                 .is_ok()
         );
-        assert_eq!(session.errors(None, &[], false, None).unwrap_err(), message);
+        assert_eq!(
+            session
+                .errors(None, &[], FileChecks::Full, None)
+                .unwrap_err(),
+            message
+        );
     }
 }

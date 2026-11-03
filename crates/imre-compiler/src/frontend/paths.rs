@@ -787,16 +787,19 @@ impl Checker<'_> {
         })
     }
 
-    /// Keep mode and dir on the typed path. The bundled function binds the
-    /// buffering argument and opens the corresponding raw or buffered stream.
+    /// Lower literal binary update modes with an optional directory. The bundled
+    /// function opens the stream for other modes and constructor options.
     pub(super) fn temporary_file(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
         if call.arguments.args.len() > 1
             || call.arguments.args.iter().any(ast::Expr::is_starred_expr)
-            || call
-                .arguments
-                .keywords
-                .iter()
-                .any(|keyword| matches!(keyword.arg.as_deref(), None | Some("buffering")))
+            || call.arguments.keywords.iter().any(|keyword| {
+                matches!(
+                    keyword.arg.as_deref(),
+                    None | Some(
+                        "buffering" | "encoding" | "newline" | "suffix" | "prefix" | "errors"
+                    )
+                )
+            })
         {
             return Err(self.scoped_builtin_error("tempfile.TemporaryFile", call));
         }
@@ -811,7 +814,7 @@ impl Checker<'_> {
                 return checker.optional_path_argument(value);
             }
             if !matches!(value, ast::Expr::StringLiteral(lit) if matches!(lit.value.to_str(), "w+b" | "wb+")) {
-                return Err(error(checker.source, value, "TemporaryFile requires a literal binary update mode (w+b or wb+)"));
+                return Err(checker.scoped_builtin_error("tempfile.TemporaryFile", call));
             }
             checker.expr_expected(value, Type::Str)
         })?;

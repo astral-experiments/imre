@@ -13,9 +13,10 @@ struct Uses {
 /// Counts every local read, including eager expression scopes and exceptional
 /// exits. Only the append receiver and the compiler's loop guards may observe
 /// the local between its unique empty initializer and its terminal conversion.
-pub(super) fn select(function: &Function, storage: &mut [Type]) {
+/// Returns each scoped append receiver and the local that owns its buffer.
+pub(super) fn select(function: &Function, storage: &mut [Type]) -> Vec<(usize, usize)> {
     if function.returns != Type::Bytes {
-        return;
+        return Vec::new();
     }
     let mut uses = vec![Uses::default(); storage.len()];
     let mut converts = false;
@@ -57,7 +58,7 @@ pub(super) fn select(function: &Function, storage: &mut [Type]) {
         _ => {}
     });
     if !converts {
-        return;
+        return Vec::new();
     }
     let mut writes = vec![0; storage.len()];
     count_writes(&function.body, &mut writes);
@@ -79,11 +80,11 @@ pub(super) fn select(function: &Function, storage: &mut [Type]) {
         uses[from].appends += uses[slot].appends;
     }
     block(&function.body, storage, &uses, &writes);
-    for (slot, from) in aliases {
-        if storage[from] == Type::ByteOutput {
-            storage[slot] = Type::ByteOutput;
-        }
+    aliases.retain(|&(_, owner)| storage[owner] == Type::ByteOutput);
+    for &(capture, _) in &aliases {
+        storage[capture] = Type::ByteOutput;
     }
+    aliases
 }
 
 fn block(body: &[Statement], storage: &mut [Type], uses: &[Uses], writes: &[usize]) {

@@ -81,8 +81,9 @@ def check_posix_pty():
 
 def check_tcgetpgrp():
     import subprocess
-    from os import tcgetpgrp
+    from os import tcgetpgrp, tcsetpgrp
 
+    assert tcsetpgrp is os.tcsetpgrp and tcsetpgrp is posix.tcsetpgrp
     assert tcgetpgrp is os.tcgetpgrp and tcgetpgrp is posix.tcgetpgrp
     master, slave = os.openpty()
     try:
@@ -94,6 +95,7 @@ def check_tcgetpgrp():
                 assert child.stdout.readline() == b"ready\n"
                 assert tcgetpgrp(Index(master)) == child.pid
                 expect_errno(tcgetpgrp, (child.stdin.fileno(),), errno.ENOTTY)
+                expect_errno(tcsetpgrp, (Index(child.stdin.fileno()), Index(child.pid)), errno.ENOTTY)
             finally:
                 child.communicate(b"done\n")
             assert child.returncode == 0
@@ -101,6 +103,7 @@ def check_tcgetpgrp():
         os.close(slave)
         os.close(master)
     expect_errno(tcgetpgrp, (slave,), errno.EBADF)
+    expect_errno(tcsetpgrp, (slave, 0), errno.EBADF)
 
 
 def check_sync(sync):
@@ -157,6 +160,45 @@ def check_sendfile():
         os.lseek(dst, 0, os.SEEK_SET)
         assert os.read(dst, 10) == b"bcef"
         expect_errno(sendfile, (-1, src, None, 0), errno.EBADF)
+
+
+def check_sendfile_interrupt():
+    import signal
+    import socket
+
+    def interrupt(signum, frame):
+        raise ValueError("sendfile interrupted")
+
+    with tempfile.TemporaryFile() as source:
+        src = source.fileno()
+        os.write(src, b"x")
+        os.lseek(src, 0, os.SEEK_SET)
+        sender, receiver = socket.socketpair()
+        with sender, receiver:
+            dst = sender.fileno()
+            sender.setblocking(False)
+            try:
+                while True:
+                    sent = os.sendfile(dst, src, 0, 1)
+                    assert sent == 1
+            except BlockingIOError:
+                pass
+            sender.setblocking(True)
+
+            # The peer stays open and never drains. Only the raising handler can end sendfile.
+            previous = signal.signal(signal.SIGALRM, interrupt)
+            try:
+                signal.alarm(1)
+                try:
+                    os.sendfile(dst, src, None, 1)
+                except ValueError as exc:
+                    assert str(exc) == "sendfile interrupted"
+                else:
+                    raise AssertionError("sendfile returned on a full socket")
+            finally:
+                signal.alarm(0)
+                signal.signal(signal.SIGALRM, previous)
+            assert os.lseek(src, 0, os.SEEK_CUR) == 0
 
 
 def check_copy_file_range():
@@ -352,6 +394,7 @@ def current():
         check_tmpfile()
         check_copy_file_range()
         check_sendfile()
+        check_sendfile_interrupt()
         check_splice()
         check_readv()
         check_preadv()

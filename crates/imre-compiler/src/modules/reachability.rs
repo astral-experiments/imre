@@ -42,27 +42,29 @@ impl References<'_> {
             }
             Some(Binding::Intrinsic(
                 intrinsic @ (Intrinsic::SysSetRecursionLimit
-                    | Intrinsic::SysGetFrameModuleName
-                    | Intrinsic::Fd(crate::ir::FdOperation::DeviceEncoding)),
+                | Intrinsic::SysGetFrameModuleName
+                | Intrinsic::Fd(crate::ir::FdOperation::DeviceEncoding)),
             )) => {
                 return match (
                     call.arguments.args.as_ref(),
                     call.arguments.keywords.as_ref(),
                 ) {
                     ([arg], []) => !matches!(arg, ast::Expr::Starred(_)),
-                    ([], [kw]) => {
-                        match intrinsic {
-                            Intrinsic::SysGetFrameModuleName => kw.arg.as_deref() == Some("depth"),
-                            Intrinsic::Fd(_) => kw.arg.as_deref() == Some("fd"),
-                            _ => false,
-                        }
-                    }
+                    ([], [kw]) => match intrinsic {
+                        Intrinsic::SysGetFrameModuleName => kw.arg.as_deref() == Some("depth"),
+                        Intrinsic::Fd(_) => kw.arg.as_deref() == Some("fd"),
+                        _ => false,
+                    },
                     _ => false,
                 };
             }
             Some(Binding::Intrinsic(
                 Intrinsic::Adler32
-                | Intrinsic::Fd(crate::ir::FdOperation::Read | crate::ir::FdOperation::Write),
+                | Intrinsic::Fd(
+                    crate::ir::FdOperation::Read
+                    | crate::ir::FdOperation::Write
+                    | crate::ir::FdOperation::TcSetPgrp,
+                ),
             )) => Some(2),
             Some(Binding::Intrinsic(Intrinsic::Credential(name))) => {
                 Some(super::credential_arity(name))

@@ -1015,7 +1015,8 @@ impl Checker<'_> {
     ) -> String {
         if matches!(
             name,
-            "assertIsInstance"
+            "addTypeEqualityFunc"
+                | "assertIsInstance"
                 | "assertNotIsInstance"
                 | "assertIsSubclass"
                 | "assertNotIsSubclass"
@@ -1025,6 +1026,7 @@ impl Checker<'_> {
                 | "assertEndsWith"
                 | "assertNotEndsWith"
                 | "assertSequenceEqual"
+                | "assertTupleEqual"
         ) && self.unittest_case(class)
         {
             return self.object_runtime_export(name, node);

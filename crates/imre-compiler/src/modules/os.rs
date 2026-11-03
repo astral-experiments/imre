@@ -111,6 +111,13 @@ pub(super) fn symbol(name: &str) -> Option<Intrinsic> {
         "POSIX_SPAWN_CLOSEFROM" if cfg!(target_os = "linux") => {
             Intrinsic::ObjectRuntimeExport("posix.POSIX_SPAWN_CLOSEFROM")
         }
+        #[cfg(target_os = "linux")]
+        "GRND_RANDOM" => Intrinsic::IntConstant(i64::from(libc::GRND_RANDOM)),
+        #[cfg(target_os = "linux")]
+        "GRND_NONBLOCK" => Intrinsic::IntConstant(i64::from(libc::GRND_NONBLOCK)),
+        "getrandom" if cfg!(target_os = "linux") => {
+            Intrinsic::ObjectRuntimeExport("posix.getrandom")
+        }
         "urandom" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.urandom"),
         "umask" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.umask"),
         "utime" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.utime"),
@@ -170,10 +177,17 @@ pub(super) fn symbol(name: &str) -> Option<Intrinsic> {
         "copy_file_range" if cfg!(target_os = "linux") => Intrinsic::Fd(FdOperation::CopyFileRange),
         "sendfile" if cfg!(target_os = "linux") => Intrinsic::ObjectRuntimeExport("posix.sendfile"),
         "readlink" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.readlink"),
+        "fork" if cfg!(all(target_os = "linux", target_env = "gnu")) => {
+            Intrinsic::ObjectRuntimeExport("posix.fork")
+        }
+        "register_at_fork" if cfg!(all(target_os = "linux", target_env = "gnu")) => {
+            Intrinsic::ObjectRuntimeExport("posix.register_at_fork")
+        }
         "_exit" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix._exit"),
         "getppid" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.getppid"),
         "WIFSTOPPED" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.WIFSTOPPED"),
         "execv" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.execv"),
+        "execve" if cfg!(target_os = "linux") => Intrinsic::ObjectRuntimeExport("posix.execve"),
         "kill" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.kill"),
         "getpgrp" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.getpgrp"),
         "getpgid" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.getpgid"),
@@ -188,6 +202,7 @@ pub(super) fn symbol(name: &str) -> Option<Intrinsic> {
             Intrinsic::ObjectRuntimeExport("posix.getgrouplist")
         }
         "getgroups" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.getgroups"),
+        "setgroups" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.setgroups"),
         "cpu_count" if cfg!(target_os = "linux") => {
             Intrinsic::ObjectRuntimeExport("posix.cpu_count")
         }
@@ -230,6 +245,8 @@ pub(super) fn symbol(name: &str) -> Option<Intrinsic> {
         "statvfs_result" if cfg!(target_os = "linux") => {
             Intrinsic::ObjectRuntimeExport("os.statvfs_result")
         }
+        "times" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.times"),
+        "times_result" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.times_result"),
         "terminal_size" => Intrinsic::ObjectRuntimeExport("os.terminal_size"),
         "close" => Intrinsic::Fd(FdOperation::Close),
         "closerange" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.closerange"),
@@ -290,6 +307,7 @@ pub(super) fn symbol(name: &str) -> Option<Intrinsic> {
         "unlockpt" if cfg!(target_os = "linux") => Intrinsic::ObjectRuntimeExport("posix.unlockpt"),
         "ptsname" if cfg!(target_os = "linux") => Intrinsic::Fd(FdOperation::PtsName),
         "tcgetpgrp" if cfg!(target_os = "linux") => Intrinsic::Fd(FdOperation::TcGetPgrp),
+        "tcsetpgrp" if cfg!(target_os = "linux") => Intrinsic::Fd(FdOperation::TcSetPgrp),
         "ttyname" if cfg!(target_os = "linux") => Intrinsic::ObjectRuntimeExport("posix.ttyname"),
         "O_NOCTTY" if cfg!(target_os = "linux") => Intrinsic::DescriptorConstant("o_noctty"),
         "get_terminal_size" if cfg!(target_os = "linux") => {

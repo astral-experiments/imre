@@ -21,8 +21,7 @@ mod bytes;
 pub(crate) use bytes::DecodeIssue;
 pub(crate) use bytes::write_repr as write_bytes_repr;
 pub(crate) use bytes::{
-    bytes_contains, bytes_contains_int, concat_bytes,
-    repeat_bytes, split_bytes, strip_bytes,
+    bytes_contains, bytes_contains_int, concat_bytes, repeat_bytes, split_bytes, strip_bytes,
 };
 pub(crate) mod cache_paths;
 mod calendar;
@@ -87,7 +86,8 @@ pub(crate) use paths::{directory_entries, path_utf8};
 pub(crate) mod posixpath;
 mod processes;
 pub(crate) use processes::{
-    BoxedPipe, BoxedPopen, BoxedPreparation, CStrings, change_environment, initial_environment,
+    BoxedPipe, BoxedPopen, BoxedPreparation, CStrings, ForkExec, PreExec, change_environment,
+    initial_environment,
 };
 mod random;
 #[cfg(target_os = "linux")]
@@ -103,7 +103,7 @@ mod source_modules;
 pub(crate) mod stdio;
 mod stdlib;
 pub(crate) use stdlib::comparator::sort_by_less;
-pub(crate) use stdlib::{format_fixed_float, replace_text};
+pub(crate) use stdlib::{format_fixed_float, format_index, replace_text};
 mod string_enums;
 mod structs;
 pub(crate) mod tempdirs;
@@ -228,7 +228,7 @@ enum Storage {
         name: crate::StrOwner,
         filename: crate::StrOwner,
     },
-    Hash(allocator_api2::boxed::Box<crate::dynamic::HashStream>),
+    Hash(allocator_api2::boxed::Box<crate::dynamic::DigestState>),
     Poll(Box<readiness::Poll>),
     NativeModule(errno::Module),
     ModuleNamespace(Rc<errno::Registry>),

@@ -8,7 +8,58 @@ def make_reader():
     return read
 
 
+def supplied_bases():
+    import gc
+
+    class GuardedTuple(tuple):
+        def __iter__(self):
+            raise AssertionError("iterated bases")
+
+        def __len__(self):
+            raise AssertionError("measured bases")
+
+        def __getitem__(self, key):
+            raise AssertionError("indexed bases")
+
+    observed = []
+
+    class Base:
+        def __init_subclass__(cls):
+            observed.append(cls.__bases__)
+
+    class Field:
+        def __set_name__(self, owner, name):
+            observed.append(owner.__bases__)
+
+    for bases in ((Base,), GuardedTuple((Base,))):
+        child = type("Child", bases, {"field": Field()})
+        assert child.__bases__ is bases
+        assert child.__mro__ == (child, Base, object)
+        assert len(observed) == 2 and all(item is bases for item in observed)
+        observed.clear()
+
+    def make_child():
+        bases = GuardedTuple((int, object))
+        bases.label = "retained"
+        return type("Child", bases, {})
+
+    child = make_child()
+    gc.collect()
+    assert type(child.__bases__) is GuardedTuple and child.__bases__.label == "retained"
+
+    empty = type("Empty", GuardedTuple(()), {})
+    assert type(empty.__bases__) is tuple and empty.__bases__ == (object,)
+    for invalid in ([Base], GuardedTuple((Base, Base))):
+        try:
+            type("Invalid", invalid, {})
+        except TypeError:
+            pass
+        else:
+            raise AssertionError("accepted invalid bases")
+
+
 def current():
+    supplied_bases()
     events = []
 
     class Base:

@@ -94,6 +94,43 @@ REJECTED = {
             "print(urlopen('data:,hello').read(), typed('wrong'))\n"
         ),
     }, "invalid-argument-type"),
+    "optional_probe_with_additional_binding": ({
+        "main.py": "from probe import other\n",
+        "probe.py": (
+            "try:\n    import sys\n    result = (other := sys.maxsize)\n"
+            "except (ImportError, AttributeError):\n    result = 0\n"
+            "import os\n"
+        ),
+    }, "imports must precede executable module statements"),
+    "optional_probe_checks_typed_calls": ({
+        "main.py": "from probe import users\nprint(users)\n",
+        "probe.py": (
+            "def take(value: int) -> int: return value\n"
+            "try:\n    import pwd\n    users = [take('wrong') for u in pwd.getpwall()]\n"
+            "except (ImportError, AttributeError):\n    users = []\n"
+            "import sys\n"
+        ),
+    }, "invalid-argument-type"),
+    "optional_from_keeps_typed_call_check": ({
+        "main.py": (
+            "try:\n    from os.path import basename as leaf\nexcept ImportError:\n    leaf = None\n"
+            "import sys\ndef typed(n: int) -> int: return n\nprint(typed('wrong'))\n"
+        ),
+    }, "expected int, got str; annotations are enforced contracts"),
+    "optional_from_rejects_stdlib_shadow": ({
+        "main.py": (
+            "try:\n    from concurrent.futures import Future\nexcept ImportError:\n    Future = None\n"
+            "import sys\n"
+        ),
+        "concurrent/__init__.py": "",
+        "concurrent/futures.py": "Future = 42\n",
+    }, "standard-library shadowing"),
+    "optional_from_unmatched_fallback": ({
+        "main.py": (
+            "try:\n    from os.path import basename\nexcept ImportError:\n    other = None\n"
+            "import sys\n"
+        ),
+    }, "imports must precede executable module statements"),
     "optional_presence_keeps_later_call_check": ({
         "main.py": (
             "try:\n    import sys as available\nexcept ImportError:\n    available = None\n"
@@ -212,6 +249,13 @@ REJECTED = {
             "    value: int = 'wrong'\n    print(value)\nrun()\n"
         ),
     }, "expected int, got str"),
+    "platform_iot_preserves_checked_calls": ({
+        "main.py": (
+            "import helper\ndef typed(value: int) -> int:\n    return value + 1\n"
+            "print(helper.win32_is_iot(), typed('wrong'))\n"
+        ),
+        "helper.py": "from platform import win32_is_iot\n",
+    }, "invalid-argument-type"),
     "unused_queue_listener_preserves_assignment": ({
         "main.py": (
             "from logging.handlers import QueueListener\ndef run() -> None:\n"
@@ -453,6 +497,12 @@ REJECTED = {
         "_operator.py": HELPER,
     }, 'shadowing is unsupported: "_operator"'),
     "py_compile_shadow": ({"main.py": "import py_compile\n", "py_compile.py": HELPER}, 'shadowing is unsupported: "py_compile"'),
+    "fractions_shadow": ({
+        "main.py": "import fractions\n", "fractions.py": HELPER,
+    }, 'shadowing is unsupported: "fractions"'),
+    "fractions_dependency_shadow": ({
+        "main.py": "import fractions\n", "numbers.py": HELPER,
+    }, 'shadowing is unsupported: "numbers"'),
     "ntpath_shadow": ({
         "main.py": "from helper import parts\nprint(parts())\n",
         "helper.py": "import ntpath\ndef parts(): return ntpath.splitdrive('C:/a')\n",
@@ -638,6 +688,20 @@ ACCEPTED = {
         ),
         "after.py": "import sys\nprint('after')\n",
     },
+    "fractions_indirect": {
+        "main.py": "from helper import total\nprint(total())\n",
+        "helper.py": (
+            "import fractions\n"
+            "from numbers import Rational\n"
+            "def total():\n"
+            "    value = fractions.Fraction(6, -8) + fractions.Fraction(1, 4)\n"
+            "    return isinstance(value, Rational), value.numerator, value.denominator\n"
+        ),
+    },
+    "platform_iot_indirect": {
+        "main.py": "import helper\nprint(helper.win32_is_iot())\n",
+        "helper.py": "from platform import win32_is_iot\n",
+    },
     "ntpath_indirect": {
         "main.py": "from helper import paths\nprint(paths())\n",
         "helper.py": (
@@ -660,6 +724,37 @@ ACCEPTED = {
             "print(parent.provider is not None)\n"
         ),
         "main.py": "from helper import value\nprint(value())\n",
+    },
+    "optional_stdlib_probe_in_dependency": {
+        "main.py": "from pkg.probe import witness\nprint(witness.checked)\n",
+        "pkg/__init__.py": "",
+        "pkg/probe.py": (
+            "import sys\n"
+            "try:\n    import pwd as accounts\n    users = [u.pw_uid for u in accounts.getpwall()]\n"
+            "except (ImportError, AttributeError):\n    users = []\n"
+            "try:\n    import math as numbers\n    from math import pi, missing_value\n"
+            "except ImportError:\n    numbers = None\n    pi = missing_value = sys.maxsize\n"
+            "from . import witness\n"
+        ),
+        "pkg/witness.py": (
+            "from importlib import import_module\n"
+            "probe = import_module('pkg.probe')\n"
+            "checked = (isinstance(probe.users, list), probe.numbers is None, probe.pi == probe.missing_value)\n"
+        ),
+    },
+    "optional_stdlib_from_in_dependency": {
+        "main.py": "from pkg.consumer import witness\nprint(witness.checked)\n",
+        "pkg/__init__.py": "",
+        "pkg/consumer.py": (
+            "try:\n    from os.path import basename as leaf\nexcept ImportError:\n    leaf = None\n"
+            "try:\n    from os.path import nonexistent_name\nexcept ImportError:\n    nonexistent_name = None\n"
+            "from . import witness\n"
+        ),
+        "pkg/witness.py": (
+            "from importlib import import_module\n"
+            "consumer = import_module('pkg.consumer')\n"
+            "checked = (consumer.leaf('a/b'), consumer.nonexistent_name is None)\n"
+        ),
     },
     "optional_import_error_alternatives": {
         "main.py": "from pkg.adapter import chosen, available, recovered\nprint(chosen, available, recovered)\n",
@@ -869,6 +964,15 @@ ACCEPTED = {
         "orchard/__init__.py": "print('package init')\n",
         "orchard/leaf.py": "print('leaf init')\nmarker = 47\n",
         "unrelated.py": "invalid syntax for an unrelated source file!\n",
+    },
+    "boxed_unittest_lazy_import": {
+        "main.py": (
+            "import sys\nimport unittest\n\n"
+            "print(unittest.TestCase.__name__, 'unittest.async_case' in sys.modules)\n"
+        ),
+        # A multiprocessing cleanup helper behind unittest's lazy getter imports test.support.
+        "test/__init__.py": "",
+        "test/support/__init__.py": "from importlib.machinery import ModuleSpec\n",
     },
     "boxed_unittest_package": {
         "main.py": (
@@ -1381,7 +1485,10 @@ def main() -> None:
                     command.append("--sanitize")
                 # Optimizing these bundled-module integration cases can take several minutes.
                 slow_optimized = name in {
-                    "email_address_parsers", "filesystem_resources", "record_warnings", "warn_named_helper", "zip_source_spec",
+                    "boxed_unittest_lazy_import",
+                    "email_address_parsers", "filesystem_resources", "fractions_indirect",
+                    "optional_stdlib_probe_in_dependency", "platform_iot_indirect", "record_warnings",
+                    "warn_named_helper", "zip_source_spec",
                 }
                 timeout = 300 if slow_optimized and level > 0 else build_timeout
                 require_success(run(command, temporary, timeout=timeout))

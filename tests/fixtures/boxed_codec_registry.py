@@ -48,6 +48,12 @@ assert codecs.register is _codecs.register
 assert codecs.unregister is _codecs.unregister
 assert codecs.lookup is _codecs.lookup
 
+for alias, name, expected in (("US-ASCII", "ascii", b"A??"), ("L1", "latin-1", b"A\xe9?")):
+    encoder = codecs.getincrementalencoder(alias)
+    assert encoder is codecs.lookup(name).incrementalencoder
+    assert encoder("replace").encode("Aé☃", final=True) == expected
+    assert encoder().encode("", final=True) == b""
+
 writer_class = codecs.getwriter(encoding="windows-1251")
 assert writer_class is codecs.lookup("cp1251").streamwriter
 stream = io.BytesIO()

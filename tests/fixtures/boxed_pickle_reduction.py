@@ -209,6 +209,11 @@ class ReducedBytes(bytes):
         return rebuild, (protocol,)
 
 
+class ReducedBytearray(bytearray):
+    def __reduce_ex__(self, protocol):
+        return rebuild, (protocol,)
+
+
 class Denied:
     def __reduce_ex__(self, protocol):
         raise TypeError("reduction denied")
@@ -324,7 +329,8 @@ def consume(streams):
     assert pickle._loads is not pickle.loads
     for stream in streams:
         for reader in (pickle.loads, pickle._loads):
-            obj, label = reader(stream)
+            obj, label, mutable = reader(stream)
+            assert type(mutable) is bytearray and mutable == b"\x00\xff"
             assert type(obj) is LabeledTuple and obj == (3, 4)
             assert obj.restored and obj.label is label and label["back"] is obj
     assert pickle._loads(b"N.", encoding=None) is None
@@ -384,6 +390,12 @@ def check_object_reducer():
 
     import copy
     import copyreg
+
+    plain = object()
+    assert plain.__reduce_ex__(0) == (copyreg._reconstructor, (object, object, None))
+    assert plain.__reduce_ex__(4) == (copyreg.__newobj__, (object,), None, None, None)
+    first, second = copy.deepcopy([plain, plain])
+    assert type(first) is object and first is second and first is not plain
 
     class Legacy:
         def __getnewargs__(self):
@@ -592,8 +604,10 @@ def produce():
         shared = ("\0\n\r\\\x1aéĀ🍏", 1 << 2048, -2147483649, True, None)
         reduced = WithProtocol()
         payload = bytes(range(256))
+        mutable = bytearray(payload)
         value = (shared, shared, reduced, reduced, WithoutProtocol(), (), dictionary_cases(protocol),
-                 (b"", payload[:-1], payload, payload, ReducedBytes(b"x")), list_cases(), mapping_items_case(protocol))
+                 (b"", payload[:-1], payload, payload, ReducedBytes(b"x")), list_cases(), mapping_items_case(protocol),
+                 (bytearray(), mutable, mutable, ReducedBytearray(b"x")))
         print(list(pickle.dumps(value, protocol)))
 
 

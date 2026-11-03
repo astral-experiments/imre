@@ -127,9 +127,20 @@ impl Context {
         Ok(self.alloc(Value::Tuple(values)))
     }
 
+    /// Class patterns require a type before performing Python's instance check.
+    pub(super) fn class_pattern_matches(&mut self, subject: Id, class: Id) -> Result<bool> {
+        if !self.is_type_object(class) {
+            return Err(Error::new(
+                "TypeError",
+                "called match pattern must be a class",
+            ));
+        }
+        self.python_instance_check(subject, class)
+    }
+
     /// Fetch keyword fields in source order before evaluating their nested patterns.
     fn match_class(&mut self, subject: Id, class: Id, names: Id) -> Result<Id> {
-        if !self.instance_of(subject, class) {
+        if !self.class_pattern_matches(subject, class)? {
             return Ok(NONE);
         }
         let Value::List(names) = self.heap.get(names) else {
@@ -181,8 +192,8 @@ impl Context {
                 };
                 Ok(self.alloc(Value::TypeAlias {
                     name: a,
+                    parameters,
                     definition: typing::AliasDefinition::Lazy {
-                        parameters,
                         evaluator: b,
                         cached: None,
                     },
@@ -369,30 +380,9 @@ impl Context {
                 }
                 Ok(a)
             }
-            "update" | "keywords" => {
-                use super::calls::MappingOperation;
-                let operation = if op == "keywords" {
-                    MappingOperation::Keywords(c)
-                } else {
-                    MappingOperation::Unpack
-                };
-                let mapping =
-                    self.for_each_mapping_item(b, a, operation, |ctx, key, val, hash| {
-                        ctx.set_dictionary_key(a, key, val, hash, true).map(|_| ())
-                    })?;
-                if !mapping {
-                    let message = if op == "keywords" {
-                        format!(
-                            "{} argument after ** must be a mapping, not {}",
-                            self.keyword_callable(c)?,
-                            self.type_name(b)
-                        )
-                    } else {
-                        "expected a mapping".into()
-                    };
-                    return Err(Error::new("TypeError", message));
-                }
-                Ok(a)
+            "update" => self.merge_mapping(a, b, super::calls::MappingOperation::Unpack),
+            "keywords" => {
+                self.merge_mapping(a, b, super::calls::MappingOperation::Keywords(Some(c)))
             }
             "unpack" => {
                 let count = usize::try_from(self.as_integer(b)?)
@@ -770,6 +760,7 @@ pub(super) fn new_context_with_heap<S: Into<String>>(
         heap,
         threads: Default::default(),
         workers: Default::default(),
+        socket_default_timeout: Default::default(),
         config,
         executable,
         helper_executable,
@@ -777,6 +768,7 @@ pub(super) fn new_context_with_heap<S: Into<String>>(
         sys_path: NONE,
         default_encoding: NONE,
         audit_hooks: Vec::new(),
+        fork_hooks: Default::default(),
         fault_file: None,
         exit_callbacks: Vec::new(),
         finalizing: Default::default(),
@@ -889,7 +881,10 @@ pub(super) unsafe extern "C" fn imre_dyn_finish(ctx: *mut Context) -> i32 {
         // keep replaced streams alive throughout the main module's execution.
         ctx.heap.release_temporaries_since(mark);
         ctx.install_import_registry()?;
-        if ctx.config["warnoptions"].as_array().is_some_and(|options| !options.is_empty()) {
+        if ctx.config["warnoptions"]
+            .as_array()
+            .is_some_and(|options| !options.is_empty())
+        {
             let mark = ctx.heap.temporary_mark();
             if let Err(error) = ctx.module("warnings") {
                 eprintln!("'import warnings' failed; traceback:");
@@ -952,7 +947,7 @@ pub(super) unsafe extern "C" fn imre_dyn_finish(ctx: *mut Context) -> i32 {
             if current.args.is_some() {
                 error.message = ctx.exception_message(current);
             }
-            eprintln!("{error}");
+            eprintln!("{}", error.report(&ctx.heap));
             1
         }
     };
@@ -1641,7 +1636,7 @@ pub(super) unsafe extern "C" fn imre_dyn_assignment_target(
 ) {
     // SAFETY: the caller owns the context and its live handle array.
     let (ctx, live) = unsafe { (&mut *ctx, live_handles(live, len)) };
-    if ctx.heap.assignment_target(live, replaced == TRUE) {
+    if ctx.heap.assignment_target(live, replaced == TRUE) && !ctx.can_skip_finalizer_sweep() {
         ctx.collect_unreachable();
     }
 }
@@ -1717,6 +1712,7 @@ impl Context {
                 .chain(self.warning_state.iter().flat_map(|state| state.roots()))
                 .chain(self.codec_entries.roots())
                 .chain(&self.audit_hooks)
+                .chain(self.fork_hooks.iter().flatten())
                 .chain(&self.exit_callbacks)
                 .copied()
                 .chain(self.workers.roots().copied())
@@ -1773,18 +1769,19 @@ impl Context {
             }
             return;
         }
-        if self.heap.has_ordinary_finalizers() {
-            if !self.heap.caller_keeps_only_finalizer() && self.heap.has_unbound_finalizer(NONE) {
-                match self.drain_acyclic_finalizers() {
-                    Ok(true) => {
-                        // Dropping a finalized instance releases its remaining strong edges,
-                        // including native resources whose close is visible to the next operand.
-                        self.collect_unreachable();
-                        return;
-                    }
-                    Err(_) => return,
-                    Ok(false) => {}
+        if self.heap.has_ordinary_finalizers()
+            && !self.heap.caller_keeps_only_finalizer()
+            && self.heap.has_unbound_finalizer(NONE)
+        {
+            match self.drain_acyclic_finalizers() {
+                Ok(true) => {
+                    // Dropping a finalized instance releases its remaining strong edges,
+                    // including native resources whose close is visible to the next operand.
+                    self.collect_unreachable();
+                    return;
                 }
+                Err(_) => return,
+                Ok(false) => {}
             }
         }
         let (heap, roots) = self.heap_and_roots();
@@ -1802,21 +1799,35 @@ impl Context {
 
     /// Publish the surviving roots before the next operand can observe a discarded writer.
     pub(super) fn discard_truth(&mut self, mark: usize) {
-        if self.heap.discard_truth_operands(mark, self.modules) {
+        if self.heap.discard_truth_operands(mark, self.modules) && !self.can_skip_finalizer_sweep()
+        {
             self.collect_unreachable();
         }
     }
 
+    /// Skip the sweep only while surviving roots keep every finalizer and weak edge alive.
+    fn can_skip_finalizer_sweep(&self) -> bool {
+        use super::stdlib::datetime::isocalendar::MODULE_REF;
+        // Each text stream has at most three owners: the wrapper, buffer and raw file.
+        self.heap.tracked_finalizer_count() <= 6
+            && !self.heap.full_collection_active()
+            && (!self.heap.has_weak_values
+                || self.heap.weak_module_kept_by(
+                    self.modules,
+                    self.builtins.get(MODULE_REF).copied().unwrap_or(NONE),
+                ))
+            && super::stdlib::io::rooted_input_chain(self)
+                .is_some_and(|input| self.heap.finalizers_kept_by(&input))
+    }
+
     /// Keep the returned value and earlier operands while dropping the completed call's temporaries.
     pub(super) fn finish_call_operands(&mut self, mark: usize, result: Id) {
-        if self.heap.discard_operands(mark, result, self.modules) {
-            if !self.heap.has_weak_values
-                && !self.heap.full_collection_active()
-                && let Some(input) = super::stdlib::io::rooted_input_chain(self)
-                && self.heap.finalizers_kept_by(&input)
-            {
-                return;
-            }
+        if !self.heap.tracks_finalizers() {
+            return;
+        }
+        if self.can_skip_finalizer_sweep() {
+            self.heap.keep_call_result(mark, result);
+        } else if self.heap.discard_operands(mark, result, self.modules) {
             self.collect_unreachable();
         }
     }

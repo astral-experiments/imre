@@ -21,9 +21,58 @@ class Comparison:
 
 
 def current():
+    # A retained instance exposes the wait status even if child setup raised.
+    retained = []
+
+    class Retained(subprocess.Popen):
+        def __init__(self, *args, **kwargs):
+            retained.append(self)
+            super().__init__(*args, **kwargs)
+
+    uid, gid = os.getuid(), os.getgid()
+    foreign_uid = 65534 if uid != 65534 else 65533
+    foreign_gid = 65534 if gid != 65534 else 65533
+    supplementary = {"extra_groups": [gid]}
+    primary = {"group": foreign_gid}
+    user = {"user": foreign_uid}
+    errors = []
+    for options in (supplementary, primary, user, {**primary, **user},
+                    {**supplementary, **primary, **user}):
+        try:
+            process = Retained(["/bin/sh", "-c", "exit 23"], **options)
+        except OSError as exc:
+            assert exc.errno in (errno.EPERM, errno.EINVAL) and exc.filename is None
+            errors.append(exc.errno)
+            process = retained[-1]
+            assert process.pid > 0 and process.returncode == 255
+            assert process.wait() == 255
+        else:
+            errors.append(None)
+            assert process.wait() == 23
+        try:
+            os.waitpid(process.pid, os.WNOHANG)
+        except ChildProcessError as exc:
+            assert exc.errno == errno.ECHILD
+        else:
+            raise AssertionError("child was not reaped")
+    # Each combined call reports the first failing operation on this host.
+    groups_error, group_error, user_error, pair_error, all_error = errors
+    assert pair_error == (group_error or user_error)
+    assert all_error == (groups_error or pair_error)
+
     missing = ["/imre-missing-platform-option-control"]
     for launch, options, error, message in (
-        (subprocess.call, {"extra_groups": [-1]},
+        (subprocess.call, {"group": -1}, ValueError, "Group ID cannot be negative, got -1"),
+        (subprocess.Popen, {"group": []}, TypeError,
+         "Group must be a string or an integer, not <class 'list'>"),
+        (subprocess.Popen, {"group": 2 ** 64}, OverflowError, "gid is greater than maximum"),
+        (subprocess.call, {"group": -1, "extra_groups": [-2], "user": -3},
+         ValueError, "Group ID cannot be negative, got -1"),
+        (subprocess.call, {"user": -1}, ValueError, "User ID cannot be negative, got -1"),
+        (subprocess.Popen, {"user": []}, TypeError, "User must be a string or an integer"),
+        (subprocess.Popen, {"user": 2 ** 64}, OverflowError, "uid is greater than maximum"),
+        (subprocess.call, {"extra_groups": [-1]}, ValueError, "Group ID cannot be negative, got -1"),
+        (subprocess.call, {"extra_groups": [-1], "user": -2},
          ValueError, "Group ID cannot be negative, got -1"),
         (subprocess.Popen, {"extra_groups": [2 ** 64]}, ValueError, "invalid group id"),
         (subprocess.Popen, {"extra_groups": [2 ** 64], "executable": b"bad\x00"},
@@ -73,3 +122,23 @@ def current():
                 expected = parent_groups if groups is None else groups
                 assert output == (str(expected) + "\n").encode()
         assert os.getgroups() == parent_groups
+
+    for option, current_id, foreign_id, report in (
+        ("group", gid, foreign_gid, "import os; print(os.getgid()); print(os.getegid())"),
+        ("user", uid, foreign_uid, "import os; print(os.getuid()); print(os.geteuid())"),
+    ):
+        for requested in (current_id, foreign_id):
+            for close_fds in (False, True):
+                try:
+                    output = subprocess.check_output([sys.executable, "-c", report],
+                                                     close_fds=close_fds, **{option: requested})
+                except OSError as exc:
+                    assert requested != current_id
+                    if exc.errno == errno.EACCES:
+                        assert exc.filename == sys.executable
+                    else:
+                        # A user namespace can reject an unmapped ID with EINVAL.
+                        assert exc.errno in (errno.EPERM, errno.EINVAL) and exc.filename is None
+                else:
+                    assert list(map(int, output.split())) == [requested, requested]
+    assert (os.getuid(), os.getgid()) == (uid, gid)
