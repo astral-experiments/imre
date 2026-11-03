@@ -2623,6 +2623,15 @@ def report(text):
         compare("-IB", writer_fixture, native_args=("run", writer_fixture, "--quiet"))
         syslog = fixtures / "logging_syslog_datagram.py"
         compare("-IB", syslog, native_args=("run", syslog, "--quiet"), native_timeout=600)
+        if sys.platform in ("linux", "darwin") and importlib.util.find_spec("_ssl"):
+            import ctypes
+            try:
+                ctypes.CDLL("libssl.3.dylib" if sys.platform == "darwin" else "libssl.so.3")
+            except OSError:
+                pass
+            else:
+                bio = fixtures / "ssl_memory_bio.py"
+                compare("-IB", bio, native_args=("run", bio, "--quiet"), native_timeout=600)
         queue_exports = fixtures / "logging_queue_exports.py"
         compare("-IB", queue_exports, native_args=("run", queue_exports, "--quiet"), native_timeout=600)
         # A from-import elsewhere in the same program would already select the boxed runtime.

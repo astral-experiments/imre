@@ -2898,7 +2898,7 @@ impl Context {
             }
             Value::HeapTypeMethod { name, owner } => {
                 let class = self.heap.get(*owner).heap_type().unwrap();
-                let kind = if *name == "__repr__" {
+                let kind = if matches!(*name, "__repr__" | "__str__") {
                     "slot wrapper"
                 } else {
                     "method"
@@ -2913,8 +2913,8 @@ impl Context {
                     format!("<built-in function {name}>")
                 } else if *name == "__new__" {
                     format!("<built-in method __new__ of type object at {receiver:#x}>")
-                } else if *name == "__repr__" {
-                    format!("<method-wrapper '__repr__' of {class} object at {receiver:#x}>")
+                } else if matches!(*name, "__repr__" | "__str__") {
+                    format!("<method-wrapper '{name}' of {class} object at {receiver:#x}>")
                 } else {
                     format!("<built-in method {name} of {class} object at {receiver:#x}>")
                 }

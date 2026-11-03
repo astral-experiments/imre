@@ -3124,7 +3124,7 @@ impl Context {
                 self.bind(scope, "pi", pi);
             }
             #[cfg(unix)]
-            "_ssl" if source.is_none() => stdlib::ssl::provider::objects::install(self, scope)?,
+            "_ssl" if source.is_none() => stdlib::ssl::provider::objects::install(self, module, scope)?,
             #[cfg(unix)]
             "_imre_ssl" if source.is_none() => stdlib::ssl::install(self, scope)?,
             "_hashlib" if source.is_none() => {

@@ -3040,7 +3040,9 @@ impl Context {
                     "Cannot subclass special typing classes",
                 ));
             }
-            if let Some(name) = self.heap.get(base).heap_type() {
+            if let Some(name) = self.heap.get(base).heap_type()
+                && name != super::value::SSL_ERROR_TYPE
+            {
                 return Err(Error::new(
                     "TypeError",
                     format!("type '{name}' is not an acceptable base type"),
