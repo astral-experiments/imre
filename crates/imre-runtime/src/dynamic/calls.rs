@@ -5978,6 +5978,7 @@ impl Context {
                 metaclass,
                 io_kind,
                 heap_type,
+                pattern_flags,
             } => {
                 let mut copied_name = String::new();
                 copied_name
@@ -5993,6 +5994,7 @@ impl Context {
                     metaclass: *metaclass,
                     io_kind: *io_kind,
                     heap_type: *heap_type,
+                    pattern_flags: *pattern_flags,
                     name: copied_name,
                     scope: *scope,
                     ancestors: copied_ancestors,

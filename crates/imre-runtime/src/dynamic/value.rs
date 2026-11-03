@@ -1021,6 +1021,8 @@ pub(super) enum Value {
         running: bool,
     },
     Class {
+        /// Type-level sequence and mapping pattern eligibility.
+        pattern_flags: super::collection_pattern::PatternFlags,
         /// Private layout tag for native I/O class generations.
         io_kind: Option<super::stdlib::io::NativeClass>,
         /// Qualified name identifying a native heap type and its module generation.
@@ -2452,6 +2454,84 @@ impl Frame {
 }
 
 impl Heap {
+    /// Builtin and immutable native types stop flag propagation at that node.
+    fn needs_pattern_flags(&self, class: Id, new: super::collection_pattern::PatternFlags) -> bool {
+        let Value::Class {
+            pattern_flags,
+            scope,
+            io_kind: None,
+            heap_type,
+            ..
+        } = self.get(class)
+        else {
+            return false;
+        };
+        if matches!(
+            *heap_type,
+            Some(super::stdlib::hashlib::md5::CLASS | super::stdlib::datetime::isocalendar::CLASS)
+        ) {
+            return false;
+        }
+        let Value::Scope(data) = self.get(*scope) else {
+            unreachable!()
+        };
+        *pattern_flags != new
+            && !data
+                .class_namespace
+                .as_ref()
+                .is_some_and(|ns| ns.immutable_type)
+    }
+
+    /// Propagate a successful ABC registration to existing nominal subclasses.
+    /// The graph lasts only for this update, so it cannot keep dead classes alive.
+    pub(super) fn set_registered_pattern_flags(
+        &mut self,
+        class: Id,
+        flags: super::collection_pattern::PatternFlags,
+    ) {
+        if !self.needs_pattern_flags(class, flags) {
+            return;
+        }
+        let mut children: HashMap<Id, Vec<Id>> = HashMap::new();
+        for (index, slot) in self.slots.iter().enumerate() {
+            let Some(Value::Class {
+                scope, ancestors, ..
+            }) = slot.value.as_ref()
+            else {
+                continue;
+            };
+            let Value::Scope(data) = self.get(*scope) else {
+                unreachable!()
+            };
+            let bases = match &data.class_namespace {
+                Some(ns) => {
+                    let Value::Tuple(bases) = self.get(ns.bases) else {
+                        continue;
+                    };
+                    bases.as_slice()
+                }
+                // Native AST classes store their single base first in the lineage.
+                None => ancestors.get(..1).unwrap_or_default(),
+            };
+            for &base in bases {
+                children.entry(base).or_default().push(index as Id);
+            }
+        }
+        let mut pending = vec![class];
+        while let Some(current) = pending.pop() {
+            if !self.needs_pattern_flags(current, flags) {
+                continue;
+            }
+            let Value::Class { pattern_flags, .. } = self.get_mut(current) else {
+                unreachable!()
+            };
+            *pattern_flags = flags;
+            if let Some(derived) = children.remove(&current) {
+                pending.extend(derived);
+            }
+        }
+    }
+
     /// Bytes reserved for each boxed value's slot metadata and trace link, including alignment.
     pub(super) fn size_overhead() -> usize {
         size_of::<Slot>() + size_of::<Cell<usize>>() - size_of::<Value>()

@@ -311,7 +311,13 @@ impl Context {
                 "TypeError",
                 "__abc_tpflags__ cannot be both Py_TPFLAGS_SEQUENCE and Py_TPFLAGS_MAPPING",
             )),
-            Some(_) => Ok(()),
+            Some(bits) => {
+                let Value::Class { pattern_flags, .. } = self.heap.get_mut(class) else {
+                    unreachable!()
+                };
+                pattern_flags.add_marker(bits);
+                Ok(())
+            }
             None => Err(Error::new(
                 "OverflowError",
                 "Python int too large to convert to C long",
