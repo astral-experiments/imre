@@ -67,16 +67,11 @@ impl Context {
 
     /// Check the mapping and its length before evaluating the pattern's key expressions.
     fn match_mapping(&mut self, subject: Id, minimum: Id) -> Result<Id> {
-        if self.dict_storage(subject).is_none()
-            && !matches!(self.heap.get(subject), Value::MappingProxy(_))
+        if !self
+            .pattern_flags(subject)
+            .has(super::collection_pattern::PatternFlags::MAPPING)
         {
-            let Some(&mapping) = self.classes.get("collections.abc.Mapping") else {
-                return Ok(FALSE);
-            };
-            let class = self.exact_type(subject)?;
-            if !self.subclass(class, mapping) {
-                return Ok(FALSE);
-            }
+            return Ok(FALSE);
         }
         if minimum == NONE {
             return Ok(TRUE);
@@ -209,13 +204,11 @@ impl Context {
             "match_class" => self.match_class(a, b, c),
             "match_mapping" => self.match_mapping(a, b),
             "match_mapping_keys" => self.match_mapping_keys(a, b),
-            "match_sequence_length"
-                if self.builtin_slot_accepts(a, "list")
-                    || self.builtin_slot_accepts(a, "tuple") =>
-            {
-                builtins::call(self, "len", &[a], &[])
-            }
-            "match_sequence_length" => Ok(NONE),
+            "match_sequence" => Ok(builtins::boolean(
+                self.pattern_flags(a)
+                    .has(super::collection_pattern::PatternFlags::SEQUENCE),
+            )),
+            "match_sequence_length" => builtins::call(self, "len", &[a], &[]),
             "builtin" => {
                 let name = copy_label(self.str_value(a)?)?;
                 Ok(self.builtin(&name))

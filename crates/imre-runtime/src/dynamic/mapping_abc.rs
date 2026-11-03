@@ -66,6 +66,9 @@ pub(super) fn class(ctx: &mut Context, name: &str) -> Result<Id> {
     }
     if name == "Mapping" {
         ctx.bind(scope, "__reversed__", NONE);
+        // This native bootstrap supplies the marker from CPython's Mapping declaration.
+        let marker = ctx.int(super::collection_pattern::PatternFlags::MAPPING.marker());
+        ctx.bind(scope, "__abc_tpflags__", marker);
     }
     if matches!(name, "Callable" | "Iterable" | "Container") {
         let alias = ctx.builtin(if name == "Callable" {
@@ -218,6 +221,10 @@ fn register(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<I
     ctx.heap.abc_registrations.push([owner, cls]);
     ctx.heap.abc_subclass_cache.retain(|_, matched| *matched);
     ctx.heap.abc_cache_token = ctx.heap.abc_cache_token.wrapping_add(1);
+    let flags = ctx.class_pattern_flags(owner);
+    if !flags.is_empty() {
+        ctx.heap.set_registered_pattern_flags(cls, flags);
+    }
     Ok(cls)
 }
 
