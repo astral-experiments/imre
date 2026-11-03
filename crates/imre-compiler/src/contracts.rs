@@ -552,6 +552,7 @@ impl Builtin {
             | Self::FaultLine(_)
             | Self::GeneratorFrameLeave
             | Self::IntSignAsFloat
+            | Self::FloatCopySign
             | Self::IsInstance(_)
             | Self::IsBuiltinSubclass
             | Self::TryDigitSums(_)

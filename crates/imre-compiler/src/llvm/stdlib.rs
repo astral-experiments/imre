@@ -186,6 +186,11 @@ impl Emitter<'_, '_> {
                 )),
                 small_integer: false,
             },
+            Builtin::FloatCopySign => self.call(
+                "llvm.copysign.f64",
+                Type::Float,
+                &[&args[0].value, &args[1].value],
+            ),
             Builtin::Abs if args[0].value.ty == Type::Int => {
                 self.call("int_abs", Type::Int, &[&args[0].value])
             }
@@ -197,6 +202,13 @@ impl Emitter<'_, '_> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn float_copysign_uses_the_llvm_intrinsic() {
+        let source = "from math import copysign\ndef sign(x: float, y: float) -> float:\n    return copysign(x, y)\nprint(sign(1.0, -0.0))";
+        let llvm = crate::compile(source, &crate::CompileOptions::default()).unwrap();
+        assert!(llvm.contains("call double @llvm.copysign.f64"));
+    }
+
     #[test]
     fn eager_sort_string_operations_and_numeric_formats_lower_together() {
         let source = r#"
