@@ -468,6 +468,18 @@ pub(super) fn bytearray_method(
     let extra = if method == "append" {
         byte = [ctx.byte_value(argument)?];
         Cow::Borrowed(byte.as_slice())
+    } else if matches!(
+        ctx.heap.get(ctx.scalar_value(argument)),
+        Value::Array(_) | Value::MemoryView { .. }
+    ) {
+        ctx.check_buffer_exporter(argument)?;
+        let bytes = ctx.native_buffer_bytes(argument).map_err(|_| {
+            type_error(format!(
+                "can't set bytearray slice from {}",
+                ctx.type_name(argument)
+            ))
+        })?;
+        Cow::Owned(super::super::copy_ids(bytes)?)
     } else {
         Cow::Owned(bytes_from_iterable(ctx, argument)?)
     };

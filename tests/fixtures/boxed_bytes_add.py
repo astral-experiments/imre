@@ -140,6 +140,30 @@ def current():
     assert append(ord("b")) is None and data[:] == b"b"
     assert data.extend(data) is None and data[:] == b"bb"
 
+    assert data.extend(words) is None
+    data.extend(memoryview(words)[1:])
+    expected = b"bb" + words.tobytes() + array("H", [772]).tobytes()
+    assert data[:] == expected
+    for unavailable in (strided, view):
+        try:
+            data.extend(unavailable)
+        except TypeError as exc:
+            assert str(exc) == "can't set bytearray slice from memoryview"
+            assert data[:] == expected
+        else:
+            raise AssertionError("bytearray.extend accepted an unavailable buffer")
+
+    with memoryview(data):
+        data.extend(array("H"))
+        try:
+            data.extend(words)
+        except BufferError:
+            assert data[:] == expected
+        else:
+            raise AssertionError("bytearray.extend resized a viewed buffer")
+    data.extend([0, 255])
+    assert data[:] == expected + b"\x00\xff"
+
     class Index:
         def __index__(self):
             data.clear()
