@@ -380,30 +380,9 @@ impl Context {
                 }
                 Ok(a)
             }
-            "update" | "keywords" => {
-                use super::calls::MappingOperation;
-                let operation = if op == "keywords" {
-                    MappingOperation::Keywords(c)
-                } else {
-                    MappingOperation::Unpack
-                };
-                let mapping =
-                    self.for_each_mapping_item(b, a, operation, |ctx, key, val, hash| {
-                        ctx.set_dictionary_key(a, key, val, hash, true).map(|_| ())
-                    })?;
-                if !mapping {
-                    let message = if op == "keywords" {
-                        format!(
-                            "{} argument after ** must be a mapping, not {}",
-                            self.keyword_callable(c)?,
-                            self.type_name(b)
-                        )
-                    } else {
-                        "expected a mapping".into()
-                    };
-                    return Err(Error::new("TypeError", message));
-                }
-                Ok(a)
+            "update" => self.merge_mapping(a, b, super::calls::MappingOperation::Unpack),
+            "keywords" => {
+                self.merge_mapping(a, b, super::calls::MappingOperation::Keywords(Some(c)))
             }
             "unpack" => {
                 let count = usize::try_from(self.as_integer(b)?)

@@ -2232,12 +2232,6 @@ impl Program {
                     })
                 }
                 Stmt::ClassDef(mut s) => {
-                    if let Some(args) = &s.arguments
-                        && (args.keywords.iter().any(|kw| kw.arg.is_none())
-                            || args.args.iter().any(|a| matches!(a, ast::Expr::Starred(_))))
-                    {
-                        return Err(unsupported("expanded class arguments"));
-                    }
                     let mut child = self.definition_body(&s.name, &s.decorator_list, line, lines);
                     if let Some(names) = &class_names {
                         child.private_names = Some(Rc::clone(names));
@@ -5088,16 +5082,11 @@ impl Context {
                 let mut values = Vec::new();
                 let mut keywords = Vec::new();
                 if let Some(args) = args {
-                    for expression in &args.args {
-                        let base = eval(self, expression)?;
-                        self.heap.keep(base);
-                        values.push(base);
-                    }
-                    for keyword in &args.keywords {
-                        let name = keyword.arg.as_ref().expect("validated class keyword");
-                        let value = eval(self, &keyword.value)?;
-                        self.heap.keep(value);
-                        keywords.push((name.to_string(), value));
+                    values = self.source_sequence_items(code, scope, &args.args)?;
+                    if !args.keywords.is_empty() {
+                        let mapping =
+                            self.source_keyword_mapping(code, scope, None, &args.keywords)?;
+                        keywords = self.keyword_args(mapping)?;
                     }
                 }
                 if *parameterized {
@@ -5475,7 +5464,7 @@ impl Context {
         &mut self,
         code: &Program,
         scope: Id,
-        callable: Id,
+        callable: Option<Id>,
         keywords: &[ast::Keyword],
     ) -> Result<Id> {
         let merged = self.dict(Vec::new());
@@ -5496,7 +5485,11 @@ impl Context {
                 }
                 named
             };
-            self.op("keywords", merged, mapping, callable)?;
+            self.merge_mapping(
+                merged,
+                mapping,
+                super::calls::MappingOperation::Keywords(callable),
+            )?;
         }
         Ok(merged)
     }
@@ -5605,7 +5598,10 @@ impl Context {
                     && self.slot(iterable, "__getitem__").is_none() =>
             {
                 let prefix = if let Some(callable) = sole_star_callable {
-                    format!("{} argument after *", self.keyword_callable(callable)?)
+                    format!(
+                        "{} argument after *",
+                        self.keyword_callable(Some(callable))?
+                    )
                 } else {
                     "Value after *".into()
                 };
@@ -5943,7 +5939,7 @@ impl Context {
                 let keywords = &v.arguments.keywords;
                 let mut kwargs = Vec::new();
                 let mapping = if keywords.iter().any(|item| item.arg.is_none()) {
-                    Some(self.source_keyword_mapping(code, scope, f, keywords)?)
+                    Some(self.source_keyword_mapping(code, scope, Some(f), keywords)?)
                 } else {
                     for item in keywords {
                         let key = item.arg.as_ref().expect("named keyword");

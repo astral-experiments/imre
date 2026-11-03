@@ -22,11 +22,12 @@ fn nonconstructible_result_type(name: &str) -> bool {
     )
 }
 
+#[derive(Clone, Copy)]
 pub(super) enum MappingOperation {
     Copy,
     Update,
     Unpack,
-    Keywords(Id),
+    Keywords(Option<Id>),
 }
 
 #[derive(Default)]
@@ -660,7 +661,10 @@ impl Context {
     }
 
     /// CPython reports the qualified callable in errors while unpacking its keywords.
-    pub(super) fn keyword_callable(&mut self, callable: Id) -> Result<String> {
+    pub(super) fn keyword_callable(&mut self, callable: Option<Id>) -> Result<String> {
+        let Some(callable) = callable else {
+            return Ok("__build_class__()".into());
+        };
         let name = match self.lookup_attr(callable, "__qualname__") {
             Ok(id) => {
                 let name = builtins::call(self, "str", &[id], &[])?;
@@ -681,6 +685,32 @@ impl Context {
             Err(e) if self.is_attribute_error(&e) => Ok(format!("{name}()")),
             Err(e) => Err(e),
         }
+    }
+
+    /// Merge mapping entries, rejecting duplicate keys when constructing call arguments.
+    pub(super) fn merge_mapping(
+        &mut self,
+        target: Id,
+        input: Id,
+        operation: MappingOperation,
+    ) -> Result<Id> {
+        let mapping =
+            self.for_each_mapping_item(input, target, operation, |ctx, key, value, hash| {
+                ctx.set_dictionary_key(target, key, value, hash, true)
+                    .map(|_| ())
+            })?;
+        if !mapping {
+            let message = match operation {
+                MappingOperation::Keywords(callable) => format!(
+                    "{} argument after ** must be a mapping, not {}",
+                    self.keyword_callable(callable)?,
+                    self.type_name(input)
+                ),
+                _ => "expected a mapping".into(),
+            };
+            return Err(Error::new("TypeError", message));
+        }
+        Ok(target)
     }
 
     /// Dict copying uses raw entries for a dict with its original iterator.
