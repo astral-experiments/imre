@@ -2212,16 +2212,6 @@ pub(super) fn call(
         let module = ctx.heap.caller_module();
         return typevar(ctx, args, kwargs, module, false);
     }
-    if operation == "cast" {
-        let [typ, value] = super::builtins::bind("cast()", args, kwargs, ["typ", "val"])?;
-        if let (Some(_), Some(value)) = (typ, value) {
-            return Ok(value);
-        }
-        return Err(Error::new(
-            "TypeError",
-            "cast() requires a type and a value",
-        ));
-    }
     if matches!(
         operation,
         "_GenericAlias" | "_CallableGenericAlias" | "_ConcatenateGenericAlias"
