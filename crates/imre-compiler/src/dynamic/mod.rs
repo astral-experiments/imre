@@ -1112,6 +1112,22 @@ pub(crate) fn compile(
             ));
         }
     }
+    if let Some(archive) = &options.stdlib_fallback {
+        // Both bootstrap names use this bundled source. One may be supplied only by
+        // the runtime providers above, after the application's imports were scanned.
+        let origin = Path::new(bundled_root).join("importlib/_bootstrap_external.py");
+        let literal = serde_json::to_string(archive).map_err(|e| e.to_string())?;
+        for (name, path, source) in &mut sources {
+            if *path == origin
+                && matches!(
+                    name.as_str(),
+                    "_frozen_importlib_external" | "importlib._bootstrap_external"
+                )
+            {
+                source.push_str(&format!("\n_installed_stdlib = {literal}\n"));
+            }
+        }
+    }
     // The bundle lives in the launcher. This absolute, non-directory path can neither
     // expose the working directory under -I nor collide with an explicit source root.
     let bundle_entry = startup
@@ -1161,6 +1177,7 @@ pub(crate) fn compile(
         Path::new(bundled_root),
         &providers,
     )?;
+    inputs.boxed_imports = true;
     Ok(Some(Compilation {
         llvm_ir,
         input_paths: inputs.files.iter().map(|(p, _, _)| p.clone()).collect(),

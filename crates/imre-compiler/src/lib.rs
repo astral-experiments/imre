@@ -106,6 +106,8 @@ pub struct CompileOptions {
     pub address_sanitizer: bool,
     /// Optional archive of bundled native provider bodies for this target and LLVM optimization.
     pub bundled_provider_archive: Option<PathBuf>,
+    /// Compiler-owned archive for a Python launcher missing its installed companion.
+    pub stdlib_fallback: Option<PathBuf>,
     /// Existing pure-Python site directory of a Python-style launcher.
     pub system_site: Option<PathBuf>,
     /// Explicit installation roots containing rebuilt native modules and their type stubs.
@@ -186,6 +188,9 @@ pub struct Compilation {
 /// Files and failed import lookups observed by the source loader.
 #[derive(Clone, Default, serde::Deserialize, serde::Serialize)]
 pub struct SourceInputs {
+    /// A native run of this image can request Python source modules at runtime.
+    #[serde(default)]
+    pub boxed_imports: bool,
     pub files: Vec<(PathBuf, PathBuf, String)>,
     pub missing: Vec<PathBuf>,
     /// Existing namespace portions and the canonical directories they resolve to.

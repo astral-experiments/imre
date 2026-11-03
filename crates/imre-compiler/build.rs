@@ -8,11 +8,7 @@ use zip::{CompressionMethod, DateTime, ZipWriter};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let out = PathBuf::from(std::env::var_os("OUT_DIR").expect("Cargo sets OUT_DIR"));
-    // Cargo puts this crate's output under <profile>/build/<crate-hash>/out.
-    let profile = out.ancestors().nth(3).expect("Cargo profile directory");
-    let filename = "imre-stdlib.zip";
-    let staged = out.join(filename);
-    let mut archive = ZipWriter::new(File::create(&staged)?);
+    let mut archive = ZipWriter::new(File::create(out.join("imre-stdlib.zip"))?);
     let options = SimpleFileOptions::default()
         .compression_method(CompressionMethod::Stored)
         .last_modified_time(DateTime::default())
@@ -32,6 +28,5 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("cargo:rerun-if-changed={license}");
     archive.set_comment(fs::read_to_string(license)?)?;
     archive.finish()?;
-    fs::rename(staged, profile.join(filename))?;
     Ok(())
 }

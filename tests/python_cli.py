@@ -82,10 +82,34 @@ def check_installed_site(imre, root, run):
     install = prefix / "bin"
     install.mkdir(parents=True)
     launcher = Path(shutil.copy2(imre, install / "imre"))
-    for name in ("libimre_runtime.a", "imre-toolchain", "imre-stdlib.zip"):
+    for name in ("libimre_runtime.a", "imre-toolchain"):
         companion = imre.with_name(name)
         if companion.exists():
             (install / name).symlink_to(companion, target_is_directory=companion.is_dir())
+    name = "xml.etree.ElementTree"
+    use_xml = "import importlib, sys; print(importlib.import_module(sys.argv[1]).Element('root').tag)"
+    archive = install / "imre-stdlib.zip"
+    # The relocated launcher works both on its own and in a release installation.
+    bare = run(launcher, "-IB", "-c", use_xml, name, timeout=300)
+    assert (bare.returncode, bare.stdout, bare.stderr) == (0, b"root\n", b""), bare
+    opaque = run(
+        launcher, "-IB", "-c", "import _imp, sys; exec(sys.argv[1])",
+        "import xml; print(xml.__name__)", timeout=300,
+    )
+    assert (opaque.returncode, opaque.stdout, opaque.stderr) == (0, b"xml\n", b""), opaque
+    assert not archive.exists()
+    exported = run(launcher, "--emit-bundled-stdlib")
+    assert exported.returncode == 0 and not exported.stderr, exported
+    archive.write_bytes(exported.stdout)
+    packaged = run(launcher, "-IB", "-c", use_xml, name, timeout=300)
+    assert (packaged.returncode, packaged.stdout, packaged.stderr) == (0, b"root\n", b""), packaged
+    shadow = root / "shadow_xml"
+    shadow.mkdir()
+    (shadow / "xml.py").write_text("marker = 73\n")
+    probe = shadow / "probe.py"
+    probe.write_text("import importlib, sys\nprint(importlib.import_module(sys.argv[1]).marker)\n")
+    local = run(launcher, "-B", probe, "xml", timeout=300)
+    assert (local.returncode, local.stdout, local.stderr) == (0, b"73\n", b""), local
     target = run(launcher, "build-target")
     assert target.returncode == 0, target.stderr
     version = json.loads(target.stdout)["python_version"]
