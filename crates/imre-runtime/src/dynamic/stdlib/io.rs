@@ -1,6 +1,6 @@
 //! Native I/O classes for runtime-loaded modules.
 
-use super::super::builtins::zeroed_bytes;
+use super::super::{Heap, builtins::zeroed_bytes};
 use super::{Context, Error, FALSE, Id, NONE, Result, TRUE, Value};
 
 /// Release one native owner's strong edge before the next observable state change.
@@ -196,22 +196,26 @@ pub(in crate::dynamic) fn rooted_input_chain(ctx: &Context) -> Option<[Id; 3]> {
     let Value::Module { scope, .. } = *ctx.heap.get(ctx.threads.system_module?) else {
         return None;
     };
-    let stdin = ctx.scope_name(scope, "__stdin__")?;
+    text_descriptor_chain(&ctx.heap, ctx.scope_name(scope, "__stdin__")?)
+}
+
+/// A text wrapper and its buffered descriptor retain the next layer through these native edges.
+pub(in crate::dynamic) fn text_descriptor_chain(heap: &Heap, stream: Id) -> Option<[Id; 3]> {
     let Value::Instance {
         memory_stream: Some(MemoryStream::Wrapper(wrapper)),
         ..
-    } = ctx.heap.get(stdin)
+    } = heap.get(stream)
     else {
         return None;
     };
     let buffer = wrapper.buffer.get()?;
-    let Value::File(file) = ctx.heap.get(buffer) else {
+    let Value::File(file) = heap.get(buffer) else {
         return None;
     };
     let super::BinaryFile::Descriptor(fd) = file.as_ref() else {
         return None;
     };
-    Some([stdin, buffer, fd.raw])
+    Some([stream, buffer, fd.raw])
 }
 
 /// Select the default text encoding from the interpreter's startup configuration.
