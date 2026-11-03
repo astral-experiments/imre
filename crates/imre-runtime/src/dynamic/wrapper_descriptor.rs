@@ -113,6 +113,9 @@ impl BuiltinDescriptor {
             Some((defaultdict::CLASS, attr)) => {
                 Some((defaultdict::CLASS, attr, defaultdict::METHODS))
             }
+            Some(("list_iterator", attr)) => {
+                Some(("list_iterator", attr, &["__iter__", "__next__"][..]))
+            }
             Some(("generator", attr)) => Some(("generator", attr, &["__iter__", "__next__"][..])),
             Some(("async_generator", attr)) => Some((
                 "async_generator",
@@ -406,8 +409,11 @@ impl BuiltinDescriptor {
             owner if DictIterator::class(owner).is_some() => {
                 matches!(ctx.heap.get(receiver), Value::DictIterator(iter) if iter.class_name() == owner)
             }
-            "generator" => matches!(ctx.heap.get(receiver), Value::Generator { .. }),
-            "async_generator" | "async_generator_asend" | "async_generator_athrow" => {
+            "list_iterator"
+            | "generator"
+            | "async_generator"
+            | "async_generator_asend"
+            | "async_generator_athrow" => {
                 ctx.heap.get(receiver).intrinsic_type_name() == Some(self.owner)
             }
             "anext_awaitable" => matches!(ctx.heap.get(receiver), Value::ANextAwaitable { .. }),
