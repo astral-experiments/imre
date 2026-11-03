@@ -768,6 +768,8 @@ pub(super) struct ClassNamespace {
     /// Attribute writes to the type object itself are forbidden, independently of its instance layout.
     pub immutable_type: bool,
     pub bases: Id,
+    /// The tuple passed to type.__new__ when it differs from the direct bases' native storage.
+    pub supplied_bases: Option<Id>,
     pub mro: Id,
     /// The defining extension module of a heap type created with module state.
     pub defining_module: Option<Id>,
@@ -1669,6 +1671,7 @@ impl Value {
                 }
                 if let Some(class) = &scope.class_namespace {
                     visit.extend([class.bases, class.mro]);
+                    visit.extend(class.supplied_bases);
                     visit.extend(class.name_override);
                     visit.extend(class.annotation_dict_cell);
                     if let Some((fields, _)) = &class.annotation_scratch {

@@ -285,6 +285,7 @@ impl Context {
         let bases = self
             .tuple_items(base_tuple)?
             .ok_or_else(|| argument(self, 2, "tuple", base_tuple))?;
+        let supplied_bases = (!bases.is_empty()).then_some(base_tuple);
         let storage = self
             .dict_storage(namespace)
             .ok_or_else(|| argument(self, 3, "dict", namespace))?;
@@ -412,6 +413,7 @@ impl Context {
         };
         let dict_cell = self.dict_named_item(namespace, "__classdictcell__");
         let class_namespace = super::value::ClassNamespace {
+            supplied_bases,
             name_override: Some(name),
             dictionary: Some(namespace),
             ..Default::default()
