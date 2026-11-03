@@ -2985,13 +2985,23 @@ impl Heap {
 
     /// A scalar and a container of scalars cannot hold an output file.
     pub(super) fn could_own_finalizer(&self, id: Id, skip_bound: bool) -> bool {
-        if self.finalizer_free_scalar(id) || (skip_bound && self.bound_in_active_frame(id)) {
+        self.could_release(id, skip_bound, |id| self.finalizer_free_scalar(id))
+    }
+
+    /// Dropping a callback result can also clear a weak reference to a native callable.
+    pub(super) fn could_release_callback_result(&self, id: Id) -> bool {
+        self.could_release(id, true, |id| match self.get(id) {
+            Value::Native(_) => self.weak_references(id).is_empty(),
+            _ => self.finalizer_free_scalar(id),
+        })
+    }
+
+    fn could_release(&self, id: Id, skip_bound: bool, inert: impl Fn(Id) -> bool) -> bool {
+        if inert(id) || (skip_bound && self.bound_in_active_frame(id)) {
             return false;
         }
         match self.get(id) {
-            Value::List(values) | Value::Tuple(values) => {
-                values.iter().any(|&item| !self.finalizer_free_scalar(item))
-            }
+            Value::List(values) | Value::Tuple(values) => values.iter().any(|&item| !inert(item)),
             Value::Dict(entries) => !entries.is_empty(),
             _ => true,
         }
