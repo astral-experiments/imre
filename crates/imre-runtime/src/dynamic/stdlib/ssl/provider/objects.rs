@@ -117,6 +117,24 @@ fn api() -> Result<&'static Api> {
 
 pub(in crate::dynamic) fn install(ctx: &mut Context, module: Id, scope: Id) -> Result<()> {
     let api = api()?;
+    // Extension functions retain the module that first installed them.
+    if matches!(
+        ctx.heap.get(module),
+        Value::Module {
+            module_state: None,
+            ..
+        }
+    ) {
+        for name in ["txt2obj", "nid2obj", "get_default_verify_paths"] {
+            let callable = ctx.builtin(&format!("_ssl.{name}"));
+            let function = ctx.alloc(Value::Method {
+                callable,
+                receiver: module,
+                explicit: false,
+            });
+            ctx.bind(scope, name, function);
+        }
+    }
     install_ssl_error(ctx, module, scope)?;
     super::bio::install(ctx, module, scope)?;
     // SAFETY: both functions read constants from the process-lifetime loaded provider.
@@ -169,10 +187,6 @@ pub(in crate::dynamic) fn install(ctx: &mut Context, module: Id, scope: Id) -> R
     }
     let flag = ctx.int(i64::from(super::HOSTFLAG_NEVER_CHECK_SUBJECT));
     ctx.bind(scope, "HOSTFLAG_NEVER_CHECK_SUBJECT", flag);
-    for name in ["txt2obj", "nid2obj"] {
-        let function = ctx.builtin(&format!("_ssl.{name}"));
-        ctx.bind(scope, name, function);
-    }
     let mut count = 0;
     // SAFETY: the header shim returns a nonempty static table with count entries.
     let options = unsafe { imre_ssl_options(number as std::ffi::c_ulong, &mut count) };
@@ -258,13 +272,82 @@ fn unknown_text(text: &CStr) -> Error {
     )
 }
 
+pub(in crate::dynamic) fn function_metadata(symbol: &str, attribute: &str) -> Option<&'static str> {
+    Some(match (symbol, attribute) {
+        ("_ssl.get_default_verify_paths", "__text_signature__") => "($module, /)",
+        ("_ssl.nid2obj", "__text_signature__") => "($module, nid, /)",
+        ("_ssl.txt2obj", "__text_signature__") => "($module, /, txt, name=False)",
+        ("_ssl.get_default_verify_paths", "__doc__") => concat!(
+            "Return search paths and environment vars that are used by ",
+            "SSLContext's set_default_verify_paths() to load default CAs.\n\n",
+            "The values are 'cert_file_env', 'cert_file', 'cert_dir_env', 'cert_dir'."
+        ),
+        ("_ssl.nid2obj", "__doc__") => {
+            "Lookup NID, short name, long name and OID of an ASN1_OBJECT by NID."
+        }
+        ("_ssl.txt2obj", "__doc__") => concat!(
+            "Lookup NID, short name, long name and OID of an ASN1_OBJECT.\n\n",
+            "By default objects are looked up by OID. With name=True short and\n",
+            "long name are also matched."
+        ),
+        _ => return None,
+    })
+}
+
 pub(in crate::dynamic) fn call(
     ctx: &mut Context,
     name: &str,
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
+    let Some((&module, args)) = args.split_first() else {
+        return Err(Error::new("TypeError", "expected an _ssl module receiver"));
+    };
+    if !matches!(
+        ctx.heap.get(module),
+        Value::Module {
+            module_state: Some(NativeModuleState::SslError(_)),
+            ..
+        }
+    ) {
+        return Err(Error::new("TypeError", "expected an _ssl module receiver"));
+    }
     let api = api()?;
+    if name == "get_default_verify_paths" {
+        if !kwargs.is_empty() {
+            return Err(Error::new(
+                "TypeError",
+                "_ssl.get_default_verify_paths() takes no keyword arguments",
+            ));
+        }
+        if !args.is_empty() {
+            return Err(Error::new(
+                "TypeError",
+                format!(
+                    "_ssl.get_default_verify_paths() takes no arguments ({} given)",
+                    args.len()
+                ),
+            ));
+        }
+        let parts = [
+            api.X509_get_default_cert_file_env,
+            api.X509_get_default_cert_file,
+            api.X509_get_default_cert_dir_env,
+            api.X509_get_default_cert_dir,
+        ]
+        .map(|get| {
+            // SAFETY: each getter returns a borrowed, terminated provider string or NULL.
+            let path = unsafe { get() };
+            if path.is_null() {
+                NONE
+            } else {
+                // SAFETY: the non-null provider string lives for the lifetime of the module.
+                let bytes = unsafe { CStr::from_ptr(path) }.to_bytes();
+                ctx.text_codepoints(crate::objects::interpreter_stdlib::fsdecode(bytes).collect())
+            }
+        });
+        return Ok(ctx.alloc(Value::Tuple(parts.into())));
+    }
     let obj = match name {
         "txt2obj" => {
             let [text, named] =

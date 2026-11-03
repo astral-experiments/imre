@@ -2,6 +2,7 @@
 
 import _imre_ssl
 import _ssl
+import os
 from _ssl import MemoryBIO
 from _ssl import OPENSSL_VERSION, OPENSSL_VERSION_INFO, OPENSSL_VERSION_NUMBER
 from _ssl import SSLError, nid2obj as _nid2obj, txt2obj as _txt2obj
@@ -215,6 +216,24 @@ def _call(function, *args):
         raise SSLError(SSL_ERROR_SSL, str(exc)) from None
 
 
+DefaultVerifyPaths = namedtuple("DefaultVerifyPaths",
+    "cafile capath openssl_cafile_env openssl_cafile openssl_capath_env "
+    "openssl_capath")
+
+def get_default_verify_paths():
+    """Return paths to default cafile and capath.
+    """
+    parts = _ssl.get_default_verify_paths()
+
+    # environment vars shadow paths
+    cafile = os.environ.get(parts[0], parts[1])
+    capath = os.environ.get(parts[2], parts[3])
+
+    return DefaultVerifyPaths(cafile if os.path.isfile(cafile) else None,
+                              capath if os.path.isdir(capath) else None,
+                              *parts)
+
+
 class _ASN1Object(namedtuple("_ASN1Object", "nid shortname longname oid")):
     """ASN.1 object identifier lookup
     """
@@ -350,6 +369,12 @@ class SSLContext:
 
     def set_default_verify_paths(self):
         _call(_imre_ssl.default_verify_paths, self._ctx)
+
+    def load_default_certs(self, purpose=Purpose.SERVER_AUTH):
+        if not isinstance(purpose, _ASN1Object):
+            raise TypeError(purpose)
+        # The native provider runs on POSIX and resolves its trust paths itself.
+        self.set_default_verify_paths()
 
     def set_alpn_protocols(self, alpn_protocols):
         wire = bytearray()
@@ -488,7 +513,7 @@ def create_default_context(purpose=Purpose.SERVER_AUTH, *, cafile=None, capath=N
     if cafile or capath or cadata:
         context.load_verify_locations(cafile, capath, cadata)
     elif context.verify_mode != CERT_NONE:
-        context.set_default_verify_paths()
+        context.load_default_certs(purpose)
     return context
 
 

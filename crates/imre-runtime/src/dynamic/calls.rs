@@ -3032,6 +3032,13 @@ impl Context {
                                 self.text(signature)
                             });
                         }
+                        #[cfg(unix)]
+                        if module_bound
+                            && let Some(text) =
+                                stdlib::ssl::provider::objects::function_metadata(method, name)
+                        {
+                            return Ok(self.text(text));
+                        }
                         let value = match name {
                             "__doc__" if method == "posix.sysconf" => {
                                 Some("Return an integer-valued system configuration variable.")
