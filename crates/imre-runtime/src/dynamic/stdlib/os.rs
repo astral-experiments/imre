@@ -10,6 +10,8 @@ mod spawn_child;
 #[cfg(target_os = "linux")]
 mod vectored;
 #[cfg(target_os = "linux")]
+pub(in crate::dynamic) use spawn_child::available as fork_available;
+#[cfg(target_os = "linux")]
 pub(super) use spawn_child::fork_for_child_callbacks;
 #[cfg(target_os = "linux")]
 mod spawn_plain;
@@ -213,6 +215,26 @@ pub(super) fn is_process_function(name: &str) -> bool {
     cfg!(unix) && matches!(name, "execv" | "times" | "WIFSTOPPED")
 }
 
+/// Audit after signature validation and before any Python fork handlers run.
+#[cfg(target_os = "linux")]
+fn audit_fork(ctx: &mut Context) -> Result<()> {
+    if ctx.finalizing.load(std::sync::atomic::Ordering::Acquire) {
+        return Err(Error::new(
+            "PythonFinalizationError",
+            "can't fork at interpreter shutdown",
+        ));
+    }
+    super::audit::event(ctx, "os.fork", &[])
+}
+
+#[cfg(target_os = "linux")]
+pub(super) fn fork(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    builtins::bind_builtin_arguments("fork", args, kwargs, [], 0)?;
+    audit_fork(ctx)?;
+    let pid = fork_for_child_callbacks(ctx)?;
+    Ok(ctx.int(i64::from(pid)))
+}
+
 /// Spawn directly for plain arguments, or let the child run the captured Python callable.
 #[cfg(target_os = "linux")]
 pub(super) fn spawn_exec(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
@@ -221,17 +243,24 @@ pub(super) fn spawn_exec(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]
     else {
         unreachable!("all three arguments are required")
     };
-    if ctx.finalizing.load(std::sync::atomic::Ordering::Acquire) {
-        return Err(Error::new(
-            "PythonFinalizationError",
-            "can't fork at interpreter shutdown",
-        ));
+    use crate::dynamic::at_fork::{self, Phase};
+
+    audit_fork(ctx)?;
+    let mut warn = false;
+    let result = at_fork::around(ctx, |ctx| {
+        // A before-handler can add child handlers or mutate the argument list.
+        if ctx.fork_hooks[Phase::Child as usize].is_empty()
+            && let Some(result) = spawn_plain::try_spawn(ctx, path, argv, exec)
+        {
+            warn = spawn_plain::multiple_threads(ctx);
+            return result;
+        }
+        spawn_child::fork_current(ctx)
+    });
+    if warn {
+        spawn_plain::warn_about_threads(ctx);
     }
-    super::audit::event(ctx, "os.fork", &[])?;
-    let pid = match spawn_plain::try_spawn(ctx, path, argv, exec)? {
-        Some(pid) => pid,
-        None => fork_for_child_callbacks(ctx)?,
-    };
+    let pid = result?;
     Ok(ctx.int(i64::from(pid)))
 }
 

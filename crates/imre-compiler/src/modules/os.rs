@@ -177,6 +177,12 @@ pub(super) fn symbol(name: &str) -> Option<Intrinsic> {
         "copy_file_range" if cfg!(target_os = "linux") => Intrinsic::Fd(FdOperation::CopyFileRange),
         "sendfile" if cfg!(target_os = "linux") => Intrinsic::ObjectRuntimeExport("posix.sendfile"),
         "readlink" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.readlink"),
+        "fork" if cfg!(all(target_os = "linux", target_env = "gnu")) => {
+            Intrinsic::ObjectRuntimeExport("posix.fork")
+        }
+        "register_at_fork" if cfg!(all(target_os = "linux", target_env = "gnu")) => {
+            Intrinsic::ObjectRuntimeExport("posix.register_at_fork")
+        }
         "_exit" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix._exit"),
         "getppid" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.getppid"),
         "WIFSTOPPED" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.WIFSTOPPED"),

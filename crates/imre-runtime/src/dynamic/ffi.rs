@@ -789,6 +789,7 @@ pub(super) fn new_context_with_heap<S: Into<String>>(
         sys_path: NONE,
         default_encoding: NONE,
         audit_hooks: Vec::new(),
+        fork_hooks: Default::default(),
         fault_file: None,
         exit_callbacks: Vec::new(),
         finalizing: Default::default(),
@@ -1732,6 +1733,7 @@ impl Context {
                 .chain(self.warning_state.iter().flat_map(|state| state.roots()))
                 .chain(self.codec_entries.roots())
                 .chain(&self.audit_hooks)
+                .chain(self.fork_hooks.iter().flatten())
                 .chain(&self.exit_callbacks)
                 .copied()
                 .chain(self.workers.roots().copied())

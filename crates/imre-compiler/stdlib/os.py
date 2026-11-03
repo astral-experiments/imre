@@ -19,6 +19,11 @@ except ImportError:
     pass
 
 try:
+    from posix import fork, register_at_fork
+except ImportError:
+    pass
+
+try:
     from posix import waitstatus_to_exitcode
 except ImportError:
     pass

@@ -3665,6 +3665,9 @@ else:
             child_callbacks = libc == "glibc" and tuple(map(int, version.split(".")[:2])) >= (2, 32)
             compare("-IB", "-c", imports + f"arithmetic.current({child_callbacks})")
             if child_callbacks:
+                plugin.write_bytes((fixtures / "boxed_os_fork.py").read_bytes())
+                compare("-IB", "-c", imports + "arithmetic.current()")
+                compare("-IB", "-c", imports + "arithmetic.threaded_spawn()")
                 plugin.write_bytes((fixtures / "boxed_subprocess_preexec.py").read_bytes())
                 compare("-IB", "-c", imports + "arithmetic.current()")
             plugin.write_bytes((fixtures / "boxed_posix_fadvise.py").read_bytes())
