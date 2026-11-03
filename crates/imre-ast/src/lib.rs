@@ -267,6 +267,24 @@ impl Mangler<'_> {
         self.remember(name.start(), &mut name.id);
     }
 
+    fn type_parameter_bindings(&self, params: &mut ast::TypeParams) {
+        let mut bindings = HashSet::new();
+        for param in &mut params.type_params {
+            let name = match param {
+                ast::TypeParam::TypeVar(p) => &mut p.name,
+                ast::TypeParam::TypeVarTuple(p) => &mut p.name,
+                ast::TypeParam::ParamSpec(p) => &mut p.name,
+            };
+            self.definition(name);
+            if !bindings.insert(name.id.clone()) {
+                self.names
+                    .borrow_mut()
+                    .duplicate_type_parameter
+                    .get_or_insert_with(|| name.clone());
+            }
+        }
+    }
+
     /// Keep the source spelling for symbol-table queries after private-name mangling.
     fn remember(&self, start: TextSize, name: &mut Name) {
         if let Some(replacement) = self.replacement(name.as_str()) {
@@ -298,21 +316,7 @@ impl Transformer for Mangler<'_> {
                         only_parameters: Some(&names),
                         ..body
                     };
-                    let mut bindings = HashSet::new();
-                    for param in &mut params.type_params {
-                        let name = match param {
-                            ast::TypeParam::TypeVar(p) => &mut p.name,
-                            ast::TypeParam::TypeVarTuple(p) => &mut p.name,
-                            ast::TypeParam::ParamSpec(p) => &mut p.name,
-                        };
-                        header.definition(name);
-                        if !bindings.insert(name.id.clone()) {
-                            self.names
-                                .borrow_mut()
-                                .duplicate_type_parameter
-                                .get_or_insert_with(|| name.clone());
-                        }
-                    }
+                    header.type_parameter_bindings(params);
                     header.visit_type_params(params);
                     if let Some(arguments) = &mut class.arguments {
                         header.visit_arguments(arguments);
@@ -333,6 +337,9 @@ impl Transformer for Mangler<'_> {
                         .insert(first.start(), Name::new(self.owner));
                 }
                 self.definition(&mut function.name);
+                if let Some(params) = &mut function.type_params {
+                    self.type_parameter_bindings(params);
+                }
             }
 
             ast::Stmt::Global(global) => {
