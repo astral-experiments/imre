@@ -1580,13 +1580,28 @@ fn subject_bytes(ctx: &Context, id: Id, bytes: bool) -> Result<&[u8]> {
     if !matches!(value, Value::Str(_) | Value::SurrogateStr(_)) {
         ctx.check_buffer_exporter(id)?;
     }
+    let bad_subject = |_| {
+        let name = match ctx.heap.get(id) {
+            Value::Native(_) => ctx
+                .builtin_type_name(id)
+                .and_then(|name| name.rsplit('.').next())
+                .unwrap_or_else(|| ctx.type_name(id)),
+            _ => ctx.type_name(id),
+        };
+        Error::new(
+            "TypeError",
+            format!(
+                "expected string or bytes-like object, got '{}'",
+                &name[..name.floor_char_boundary(200)]
+            ),
+        )
+    };
     match value {
-        Value::Bytes(_)
-        | Value::ByteArray(_)
-        | Value::Array(_)
-        | Value::MemoryView { owner: Some(_), .. } => {
+        Value::Bytes(_) | Value::ByteArray(_) | Value::Array(_) | Value::MemoryView { .. } => {
+            // SRE acquires a simple buffer before checking the pattern's type.
+            let data = ctx.native_buffer_bytes(id).map_err(bad_subject)?;
             if bytes {
-                return ctx.native_buffer_bytes(id);
+                return Ok(data);
             }
             Err(Error::new(
                 "TypeError",
@@ -1597,22 +1612,7 @@ fn subject_bytes(ctx: &Context, id: Id, bytes: bool) -> Result<&[u8]> {
             "TypeError",
             "cannot use a bytes pattern on a string-like object",
         )),
-        _ => ctx.str_value(id).map(str::as_bytes).map_err(|_| {
-            let name = match ctx.heap.get(id) {
-                Value::Native(_) => ctx
-                    .builtin_type_name(id)
-                    .and_then(|name| name.rsplit('.').next())
-                    .unwrap_or_else(|| ctx.type_name(id)),
-                _ => ctx.type_name(id),
-            };
-            Error::new(
-                "TypeError",
-                format!(
-                    "expected string or bytes-like object, got '{}'",
-                    &name[..name.floor_char_boundary(200)]
-                ),
-            )
-        }),
+        _ => ctx.str_value(id).map(str::as_bytes).map_err(bad_subject),
     }
 }
 
