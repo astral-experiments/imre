@@ -215,12 +215,9 @@ impl Context {
     }
 
     fn alloc(&mut self, value: Value) -> Id {
-        let finalizer = matches!(&value, Value::Instance { class, .. }
-            if self.class_attr(*class, "__del__").is_some());
+        let class = value.finalizer_class();
         let id = self.heap.alloc(value);
-        if finalizer {
-            self.heap.register_finalizer(id);
-        }
+        self.register_instance_finalizer(id, class);
         id
     }
     fn text(&mut self, value: impl Into<String>) -> Id {

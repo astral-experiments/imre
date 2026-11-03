@@ -1564,6 +1564,15 @@ impl Value {
         }
     }
 
+    /// Only Python instances and exception subclasses have instance finalizers.
+    pub(super) fn finalizer_class(&self) -> Option<Id> {
+        match self {
+            Self::Instance { class, .. } => Some(*class),
+            Self::Raised(error) => error.class(),
+            _ => None,
+        }
+    }
+
     pub(super) fn instance_class(&self) -> Option<Id> {
         match self {
             Self::Instance { class, .. } | Self::FrameLocalsProxy { class, .. } => Some(*class),
@@ -3939,8 +3948,8 @@ impl Heap {
         self.slots.len()
     }
 
-    pub(super) fn ordinary_instance(&self, id: Id) -> bool {
-        matches!(self.slots[id as usize].value, Some(Value::Instance { .. }))
+    pub(super) fn finalizer_class(&self, id: Id) -> Option<Id> {
+        self.slots[id as usize].value.as_ref()?.finalizer_class()
     }
 
     pub(super) fn register_finalizer(&mut self, id: Id) {
