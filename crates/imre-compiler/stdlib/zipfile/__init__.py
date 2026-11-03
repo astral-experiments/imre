@@ -820,13 +820,15 @@ compressor_names = {
     98: 'ppmd',
 }
 
-def _check_compression(compression):
+def _check_compression(compression, *, writing=False):
     if compression == ZIP_STORED:
         pass
     elif compression == ZIP_DEFLATED:
         if not zlib:
             raise RuntimeError(
                 "Compression requires the (missing) zlib module")
+        if writing and not callable(getattr(zlib, "compressobj", None)):
+            raise NotImplementedError("Writing ZIP_DEFLATED requires zlib.compressobj")
     elif compression == ZIP_BZIP2:
         if not bz2:
             raise RuntimeError(
@@ -1419,7 +1421,7 @@ class ZipFile:
         if mode not in ('r', 'w', 'x', 'a'):
             raise ValueError("ZipFile requires mode 'r', 'w', 'x', or 'a'")
 
-        _check_compression(compression)
+        _check_compression(compression, writing=mode != "r")
 
         self._allowZip64 = allowZip64
         self._didModify = False
@@ -1804,6 +1806,8 @@ class ZipFile:
                              "another write handle open on it. "
                              "Close the first handle before opening another.")
 
+        self._check_write_compression(zinfo.compress_type)
+
         # Size and CRC are overwritten with correct data after processing the file
         zinfo.compress_size = 0
         zinfo.CRC = 0
@@ -1941,17 +1945,19 @@ class ZipFile:
 
         return targetpath
 
-    def _writecheck(self, zinfo):
-        """Check for errors before writing a file to the archive."""
-        if zinfo.filename in self.NameToInfo:
-            import warnings
-            warnings.warn('Duplicate name: %r' % zinfo.filename, stacklevel=3)
+    def _check_write_compression(self, compression):
         if self.mode not in ('w', 'x', 'a'):
             raise ValueError("write() requires mode 'w', 'x', or 'a'")
         if not self.fp:
             raise ValueError(
                 "Attempt to write ZIP archive that was already closed")
-        _check_compression(zinfo.compress_type)
+        _check_compression(compression, writing=True)
+
+    def _writecheck(self, zinfo):
+        """Check for errors before writing a file to the archive."""
+        if zinfo.filename in self.NameToInfo:
+            import warnings
+            warnings.warn('Duplicate name: %r' % zinfo.filename, stacklevel=3)
         if not self._allowZip64:
             requires_zip64 = None
             if len(self.filelist) >= ZIP_FILECOUNT_LIMIT:
@@ -2019,6 +2025,11 @@ class ZipFile:
                 "Can't write to ZIP archive while an open writing handle exists."
             )
 
+        if zinfo is zinfo_or_arcname:
+            # This may be a live central-directory entry returned by getinfo().
+            self._check_write_compression(
+                zinfo.compress_type if compress_type is None else compress_type)
+
         if compress_type is not None:
             zinfo.compress_type = compress_type
 
@@ -2050,6 +2061,7 @@ class ZipFile:
             raise TypeError("Expected type str or ZipInfo")
 
         with self._lock:
+            self._check_write_compression(zinfo.compress_type)
             if self._seekable:
                 self.fp.seek(self.start_dir)
             zinfo.header_offset = self.fp.tell()  # Start of header bytes
