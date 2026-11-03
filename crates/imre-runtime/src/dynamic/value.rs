@@ -2470,6 +2470,7 @@ impl GcOrder {
 pub(super) struct MarkQueue<'a> {
     slots: &'a [Slot],
     traces: &'a [Cell<usize>],
+    scalar_leaves: &'a [bool],
     next: usize,
     mode: MarkMode<'a>,
 }
@@ -2492,12 +2493,7 @@ impl MarkQueue<'_> {
                     }
                 }
                 // A complete reachability trace needs no pending visit for an exact scalar.
-                MarkMode::SkipScalarLeaves
-                    if self.slots[id as usize]
-                        .value
-                        .as_ref()
-                        .is_some_and(Value::scalar_leaf) =>
-                {
+                MarkMode::SkipScalarLeaves if self.scalar_leaves[id as usize] => {
                     trace.set(END);
                 }
                 _ => {
@@ -2568,6 +2564,8 @@ pub(super) struct Heap {
     pub(super) loading_linked_constant: bool,
     // Keep the collector's links contiguous so it can scan marks without loading every Value.
     traces: Vec<Cell<usize>>,
+    // Marking reads this compact table before touching the much larger value slots.
+    scalar_leaves: Vec<bool>,
     gc_order: GcOrder,
     linked_string_constants: HashMap<i64, Id>,
     small_ints: HashMap<i64, Id>,
@@ -2784,6 +2782,10 @@ impl Heap {
         ];
         let mut heap = Self {
             traces: vec![Cell::new(UNMARKED); slots.len()],
+            scalar_leaves: slots
+                .iter()
+                .map(|slot| slot.value.as_ref().is_some_and(Value::scalar_leaf))
+                .collect(),
             slots,
             allocation_traces: Default::default(),
             loading_linked_constant: false,
@@ -3100,6 +3102,7 @@ impl Heap {
     }
 
     fn reserve_slot(&mut self) -> std::result::Result<(), std::collections::TryReserveError> {
+        self.scalar_leaves.try_reserve(1)?;
         self.traces.try_reserve(1)?;
         self.slots.try_reserve(1)
     }
@@ -3119,10 +3122,12 @@ impl Heap {
     fn alloc_slot_with_trace(&mut self, value: Value, trace: bool) -> Id {
         let trace = trace && self.allocation_traces.is_tracing();
         let has_gc_header = value.has_gc_header(self);
+        let scalar_leaf = value.scalar_leaf();
         let index = if self.free_head != END {
             let index = self.free_head;
             self.free_head = self.slots[index].gc_next.replace(UNMARKED);
             self.free_count -= 1;
+            self.scalar_leaves[index] = scalar_leaf;
             self.slots[index].value = Some(value);
             self.slots[index].may_have_buffer_views = false;
             self.slots[index].generation = 0;
@@ -3135,6 +3140,7 @@ impl Heap {
                 self.slots.reserve_exact(1);
                 self.next_collection = self.slots.len();
             }
+            self.scalar_leaves.push(scalar_leaf);
             self.traces.push(Cell::new(UNMARKED));
             self.slots.push(Slot::new(value));
             self.slots.len() - 1
@@ -3297,6 +3303,8 @@ impl Heap {
     }
 
     pub fn get_mut(&mut self, id: Id) -> &mut Value {
+        // The mutable borrow can replace the value with a different variant.
+        self.scalar_leaves[id as usize] = false;
         self.slots[id as usize]
             .value
             .as_mut()
@@ -3840,6 +3848,7 @@ impl Heap {
         let mut pending = MarkQueue {
             slots: &self.slots,
             traces: &self.traces,
+            scalar_leaves: &self.scalar_leaves,
             next: END,
             mode: MarkMode::SkipScalarLeaves,
         };
@@ -4118,6 +4127,7 @@ impl Heap {
         let mut pending = MarkQueue {
             slots: &self.slots,
             traces: &self.traces,
+            scalar_leaves: &self.scalar_leaves,
             next: END,
             mode: MarkMode::All,
         };
@@ -4479,6 +4489,7 @@ impl Heap {
         let mut children = MarkQueue {
             slots: &self.slots,
             traces: &self.traces,
+            scalar_leaves: &self.scalar_leaves,
             next: END,
             mode: MarkMode::All,
         };
@@ -4503,6 +4514,7 @@ impl Heap {
         let mut pending = MarkQueue {
             slots: &self.slots,
             traces: &self.traces,
+            scalar_leaves: &self.scalar_leaves,
             next: END,
             mode: MarkMode::All,
         };
@@ -4520,6 +4532,7 @@ impl Heap {
             self.get(id as Id).children(&mut MarkQueue {
                 slots: &self.slots,
                 traces: &self.traces,
+                scalar_leaves: &self.scalar_leaves,
                 next: END,
                 mode: MarkMode::Ordered(&mut scan),
             });
@@ -4959,6 +4972,21 @@ mod tests {
         let next = heap.alloc(Value::List(Vec::new()));
         assert_eq!(next, first);
         assert_eq!(heap.allocation_traces.get(next).unwrap()[0].1, 2);
+    }
+
+    #[test]
+    fn tracing_a_replaced_scalar_visits_its_new_children() {
+        let mut heap = Heap::new();
+        let mark = heap.temporary_mark();
+        let parent = heap.alloc_slot(Value::Float(1.0));
+        let child = heap.alloc_slot(Value::List(Vec::new()));
+        *heap.get_mut(parent) = Value::List(vec![child]);
+        heap.release_temporaries_since(mark);
+
+        heap.collect(std::iter::once(parent));
+        assert!(heap.slots[child as usize].value.is_some());
+        heap.collect(std::iter::empty());
+        assert!(heap.slots[child as usize].value.is_none());
     }
 
     #[test]
