@@ -2770,9 +2770,10 @@ def report(text):
         compare("-IB", metaclass_new, native_args=("run", metaclass_new, "--runtime-imports", "--quiet"))
         class_locals = fixtures / "boxed_class_locals.py"
         compare("-IB", class_locals, native_args=("run", class_locals, "--runtime-imports", "--quiet"))
-        generic = fixtures / "module_generic_function.py"
-        compare("-IB", generic, native_args=("run", generic, "--quiet"))
-        compare("-IB", generic, native_args=("run", generic, "--runtime-imports", "--quiet"))
+        for name in ("module_generic_function.py", "postponed_generic_method.py"):
+            generic = fixtures / name
+            compare("-IB", generic, native_args=("run", generic, "--quiet"))
+            compare("-IB", generic, native_args=("run", generic, "--runtime-imports", "--quiet"))
         compare("-IB", "-c", "import typing; from typing import Text; print(Text is typing.Text is str)")
         reveal = fixtures / "typing_reveal_type.py"
         for command in ((sys.executable, "-IB", reveal),
