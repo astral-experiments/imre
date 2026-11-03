@@ -54,6 +54,9 @@ pub(super) fn module_function(symbol: &str) -> Option<(&str, &str)> {
         {
             Some((module, function))
         }
+        "_socket" if matches!(function, "getdefaulttimeout" | "setdefaulttimeout") => {
+            Some((module, function))
+        }
         "_typing" if function == "_idfunc" => Some((module, function)),
         "encodings" if function == "search_function" => Some((module, function)),
         "posix"

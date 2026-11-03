@@ -117,7 +117,10 @@ struct ExposedClassBody {
     annotation_cell: Option<Id>,
 }
 
+type SocketDefaultTimeout = std::sync::Arc<std::sync::Mutex<Option<std::time::Duration>>>;
+
 pub(crate) struct Context {
+    socket_default_timeout: SocketDefaultTimeout,
     threads: lowlevel_threads::Workers,
     workers: thread_worker::Registry,
     heap: Heap,

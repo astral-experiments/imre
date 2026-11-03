@@ -1786,6 +1786,12 @@ impl IntrinsicModule {
             (Self::Socket | Self::SocketNative, "herror") => Intrinsic::HError,
             (Self::Socket, "timeout") => Intrinsic::ScopedObjectExport("socket.timeout"),
             (Self::SocketNative, "timeout") => Intrinsic::ScopedObjectExport("_socket.timeout"),
+            (Self::SocketNative, "getdefaulttimeout") => {
+                Intrinsic::ScopedObjectExport("_socket.getdefaulttimeout")
+            }
+            (Self::SocketNative, "setdefaulttimeout") => {
+                Intrinsic::ScopedObjectExport("_socket.setdefaulttimeout")
+            }
             (Self::SocketNative, name) => Intrinsic::ObjectRuntimeExport(match name {
                 "gaierror" => "_socket.gaierror",
                 "getnameinfo" => "_socket.getnameinfo",
@@ -1871,6 +1877,12 @@ impl IntrinsicModule {
             (Self::Socket, "EAI_SERVICE") => Intrinsic::ObjectRuntimeExport("socket.EAI_SERVICE"),
             (Self::Socket, "SOL_TCP") => Intrinsic::ObjectRuntimeExport("socket.SOL_TCP"),
             (Self::Socket, "SocketType") => Intrinsic::ObjectRuntimeExport("socket.SocketType"),
+            (Self::Socket, "getdefaulttimeout") => {
+                Intrinsic::ScopedObjectExport("socket.getdefaulttimeout")
+            }
+            (Self::Socket, "setdefaulttimeout") => {
+                Intrinsic::ScopedObjectExport("socket.setdefaulttimeout")
+            }
             (Self::Socket, "_GLOBAL_DEFAULT_TIMEOUT") => {
                 Intrinsic::ScopedObjectExport("socket._GLOBAL_DEFAULT_TIMEOUT")
             }
