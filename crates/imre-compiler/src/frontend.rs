@@ -6546,6 +6546,14 @@ impl<'a> Checker<'a> {
                 Intrinsic::TracebackFormatter(name) => {
                     return Err(self.object_export_error(name, expression));
                 }
+                // Calls and specialized class attributes have already been handled.
+                // A first-class datetime type needs its actual Python object.
+                Intrinsic::Calendar(_) | Intrinsic::ClockTime
+                    if ast::name::UnqualifiedName::from_expr(expression)
+                        .is_some_and(|name| !self.names.contains_key(name.segments()[0])) =>
+                {
+                    return Err(self.scoped_builtin_error("datetime class value", expression));
+                }
                 Intrinsic::CachedProperty => {
                     return Err(self.object_runtime_export("functools.cached_property", expression));
                 }

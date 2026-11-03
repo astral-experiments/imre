@@ -1646,6 +1646,15 @@ def main():
         )
         compare("-IB", names, native_args=("run", names, "--quiet"))
 
+        namespace = root / "datetime_class_namespace.py"
+        for source in (
+            "from datetime import date\nprint(date.__dict__['min'] is date.min)",
+            "from datetime import time as T\nprint(vars(T)['max'] is T.max)",
+            "import datetime as dt\ncls = dt.timedelta\nprint(vars(cls)['resolution'] is cls.resolution)",
+        ):
+            namespace.write_text(source + "\n")
+            compare("-IB", namespace, native_args=("run", namespace, "--quiet"))
+
         date_isoformat = root / "date_isoformat.py"
         for body in (
             "print(d.isoformat())",
