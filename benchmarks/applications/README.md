@@ -16,18 +16,20 @@ Median elapsed milliseconds on one AMD EPYC Milan vCPU with warm filesystem cach
 
 | Workload | Imre | Rust | CPython |
 | --- | ---: | ---: | ---: |
-| uv download catalog | 156.0 | 103.1 | 2,796.7 |
-| Source search | 53.1 | 47.2 | 188.6 |
-| Wheel verification | unsupported | 26.0 | 154.2 |
-| Road graph load | 61.2 | 65.5 | 532.2 |
-| Road routing | 103.2 | 105.7 | 1,586.5 |
-| Conformance report | 28.9 | 21.1 | 246.2 |
+| uv download catalog | 153.8 | 104.3 | 2,801.5 |
+| Source search | 53.4 | 46.2 | 184.7 |
+| Wheel verification | unsupported | 25.5 | 149.1 |
+| Road graph load | 60.5 | 60.1 | 526.9 |
+| Road routing | 103.1 | 87.1 | 1,525.9 |
+| Conformance report | 29.5 | 21.1 | 252.8 |
 
-uv’s original script on CPython took 1,174.6 ms. During the accepted CLI runs, the other 31 vCPUs averaged 0.38–1.73% busy. The receipt includes the rejected source-search batch.
+uv’s original script on CPython took 1,157.5 ms. During the accepted CLI runs, the other 31 vCPUs averaged 0.50–1.70% busy.
 
-In 24 paired rounds, skipping nonmatching split fields and sizing regular-file reads cut Imre’s source search from 162.6 to 52.7 ms. Searching whole files and counting newlines between hits cut Rust from 70.4 to 46.9 ms. In 18 routing rounds, replacing Rust’s per-node vectors with one edge table cut load plus four routes from 126.7 to 102.1 ms. Imre took 100.1 ms in those same rounds. The 95% bootstrap interval for the median paired difference (Imre minus Rust) was -3.3 to +2.0 ms. [Paired samples](../results/application-pairs.json.gz)
+In 24 paired rounds, skipping nonmatching split fields and sizing regular-file reads cut Imre’s source search from 163.1 to 54.1 ms. Searching whole files and counting newlines between hits cut Rust from 71.1 to 47.5 ms. In 20 routing rounds, Rust took 126.3 ms with per-node vectors, 103.3 ms with a flat edge table and 84.9 ms with rows of up to four packed edges stored inline. Longer rows and wider values use overflow storage. Imre took 101.0 ms on the same graph. The 95% bootstrap interval for the median paired difference (Imre minus Rust) was 15.0 to 17.5 ms. [Paired samples](../results/application-pairs.json.gz)
 
-The compiler and runtime come from `39c7de039`. Rust uses release builds. The catalog, router and conformance reporter use ThinLTO and one codegen unit. The Imre router links its runtime with ThinLTO.
+In a separate Callgrind run, loading the graph took 464 million instructions in Imre and 460 million in Rust. Including the four routes brought those totals to 845 million and 581 million.
+
+The compiler and runtime come from `3bdf94075`. Rust uses release builds. The catalog, router and conformance reporter use ThinLTO and one codegen unit. The Imre router links its runtime with ThinLTO. Imre parses integer fields directly from the input text and stores rows of up to four integer pairs inline.
 
 On this compiler, PyPA installer’s runtime-selected `hashlib.new(name)` takes the object-runtime path and fails to import `zipfile`. The Imre wheel verifier previously took 37.4 ms and rejected the damaged wheel. [Last working samples](https://github.com/astral-experiments/imre/blob/1a6d68fc8d6f3f2598bb9af658483c0415e7aa91/benchmarks/results/applications.json)
 
