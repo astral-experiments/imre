@@ -3886,7 +3886,7 @@ impl Context {
                 return Ok(TRUE);
             }
             Value::Native(ref class)
-                if class == "object"
+                if matches!(class.as_str(), "object" | "staticmethod" | "classmethod")
                     && matches!(name, "__getstate__" | "__reduce__" | "__reduce_ex__") =>
             {
                 return Ok(self.builtin(&format!("object.{name}")));
