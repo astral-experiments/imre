@@ -2022,6 +2022,12 @@ impl IntrinsicModule {
             (Self::Hashlib, "sha3_512") => Intrinsic::NamedHash("sha3_512"),
             (Self::Hashlib, "shake_128") => Intrinsic::NamedHash("shake_128"),
             (Self::Hashlib, "shake_256") => Intrinsic::NamedHash("shake_256"),
+            (Self::Base64, "standard_b64decode") => {
+                Intrinsic::ScopedObjectExport("base64.standard_b64decode")
+            }
+            (Self::Base64, "urlsafe_b64decode") => {
+                Intrinsic::ScopedObjectExport("base64.urlsafe_b64decode")
+            }
             (Self::Base64, "urlsafe_b64encode") => Intrinsic::UrlsafeB64encode,
             (Self::Base64, "encodebytes") => Intrinsic::ScopedObjectExport("base64.encodebytes"),
             (Self::Base64, "b64encode") => Intrinsic::Base64Encode,

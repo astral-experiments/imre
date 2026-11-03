@@ -6571,6 +6571,9 @@ impl<'a> Checker<'a> {
                 Intrinsic::CachedProperty => {
                     return Err(self.object_runtime_export("functools.cached_property", expression));
                 }
+                Intrinsic::Base64Decode => {
+                    return Err(self.scoped_builtin_error("base64.b64decode", expression));
+                }
                 Intrinsic::ScopedObjectExport(name) => {
                     return Err(self.scoped_builtin_error(name, expression));
                 }
