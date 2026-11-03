@@ -54,3 +54,10 @@ print(huge > float("inf"))
 print(huge < float("inf"))
 print(huge == float("nan"))
 print(huge != float("nan"))
+
+print(floating("real receiver", -0.0).real)
+print(floating("imaginary receiver", float("nan")).imag)
+try:
+    print((1.0 / floating("imaginary divisor", 0.0)).imag)
+except ZeroDivisionError:
+    print("receiver raised")
