@@ -351,7 +351,13 @@ class SSLContext:
 
     @property
     def verify_flags(self):
-        return VerifyFlags(_call(_imre_ssl.verify_flags, self._ctx))
+        return VerifyFlags(_call(_imre_ssl.verify_flags, __class__._ctx.__get__(self)))
+
+    @verify_flags.setter
+    def verify_flags(self, value):
+        if not issubclass(type(self), __class__):
+            _imre_ssl.raise_context_receiver_error("verify_flags", self)
+        _call(_imre_ssl.verify_flags, __class__._ctx.__get__(self), value)
 
     @property
     def post_handshake_auth(self):
@@ -386,6 +392,11 @@ class SSLContext:
             wire.append(len(encoded))
             wire.extend(encoded)
         _call(_imre_ssl.set_alpn_protocols, self._ctx, bytes(wire))
+
+    def get_ciphers(self, /):
+        if not issubclass(type(self), __class__):
+            _imre_ssl.raise_context_receiver_error("get_ciphers", self)
+        return _call(_imre_ssl.get_ciphers, __class__._ctx.__get__(self))
 
     def set_ciphers(self, cipherlist, /):
         _call(_imre_ssl.set_ciphers, self._ctx, cipherlist)
