@@ -1307,6 +1307,25 @@ def main():
         assert text_close.returncode == 0, text_close.stderr
         assert (text_close.stdout, text_close.stderr) == (expected.stdout, expected.stderr)
 
+        command = (
+            "import warnings\n"
+            "def warn():\n"
+            "    label = 'moved'; warnings.warn(label, DeprecationWarning)\n"
+            "warn()\n"
+        )
+        dynamic = (
+            "import sys; sys.path.append('.')\n"
+            "namespace = {}\n"
+            "exec(\"def unrelated():\\n    raise ValueError('dynamic')\", namespace)\n"
+            "namespace['unrelated']()\n"
+        )
+        form_feed = "import warnings\n# ignored\fmiddle\nwarnings.warn('failed')"
+        for source in (command, dynamic, form_feed):
+            expected = run(sys.executable, "-Werror", "-c", source)
+            actual = run(imre, "-Werror", "-c", source)
+            assert expected.returncode == actual.returncode == 1
+            assert actual.stderr == expected.stderr, (expected.stderr, actual.stderr)
+
         chained = root / "chained.py"
         chained.write_text(
             "import sys\n"
