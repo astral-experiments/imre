@@ -1964,6 +1964,7 @@ impl IntrinsicModule {
                 "socket" => "_socket.socket",
                 "socketpair" => "_socket.socketpair",
                 "close" => "_socket.close",
+                "inet_pton" => "_socket.inet_pton",
                 "getservbyname" => "_socket.getservbyname",
                 "getservbyport" => "_socket.getservbyport",
                 "gethostname" => "_socket.gethostname",
@@ -2039,6 +2040,7 @@ impl IntrinsicModule {
             }
             (Self::Socket, "socketpair") => Intrinsic::ObjectRuntimeExport("socket.socketpair"),
             (Self::Socket, "close") => Intrinsic::ObjectRuntimeExport("socket.close"),
+            (Self::Socket, "inet_pton") => Intrinsic::ObjectRuntimeExport("socket.inet_pton"),
             (Self::Socket, "getservbyname") => {
                 Intrinsic::ObjectRuntimeExport("socket.getservbyname")
             }

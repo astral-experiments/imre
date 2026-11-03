@@ -58,7 +58,12 @@ pub(super) fn module_function(symbol: &str) -> Option<(&str, &str)> {
         {
             Some((module, function))
         }
-        "_socket" if matches!(function, "getdefaulttimeout" | "setdefaulttimeout") => {
+        "_socket"
+            if matches!(
+                function,
+                "getdefaulttimeout" | "setdefaulttimeout" | "inet_pton"
+            ) =>
+        {
             Some((module, function))
         }
         "_typing" if function == "_idfunc" => Some((module, function)),
@@ -2783,6 +2788,10 @@ impl Context {
                     "__text_signature__" if symbol == "posix.getrandom" => {
                         return Ok(self.text("($module, /, size, flags=0)"));
                     }
+                    "__doc__" if symbol == "_socket.inet_pton" => {
+                        return Ok(self.text("inet_pton(af, ip) -> packed IP address string\n\nConvert an IP address from string format to a packed string suitable\nfor use with low-level network functions."));
+                    }
+                    "__text_signature__" if symbol == "_socket.inet_pton" => return Ok(NONE),
                     "__doc__" if symbol == "posix.urandom" => {
                         return Ok(self.text("Return a bytes object containing random bytes suitable for cryptographic use."));
                     }
