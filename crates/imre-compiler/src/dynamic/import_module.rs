@@ -143,6 +143,7 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
                         section("def getfile(object):", "class ClassFoundException("),
                         section("def unwrap(func, *, stop=None):", "def indentsize(line):"),
                         section("def _signature_get_partial(", "def _signature_is_builtin("),
+                        section("def _signature_is_functionlike(obj):", "def _signature_strip_non_python_syntax("),
                         section("class _void:", "class _ParameterKind("),
                         &classes,
                     ]
