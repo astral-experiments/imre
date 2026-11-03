@@ -1728,6 +1728,9 @@ impl IntrinsicModule {
             (Self::Inspect, "markcoroutinefunction") => Intrinsic::InspectCoroutine { mark: true },
             (Self::Inspect, "_sentinel") => Intrinsic::InspectSentinel,
             (Self::Contextlib, "contextmanager") => Intrinsic::ContextManager,
+            (Self::Contextlib, "ContextDecorator") => {
+                Intrinsic::ObjectRuntimeExport("contextlib.ContextDecorator")
+            }
             (Self::Contextlib, "redirect_stdout") => {
                 Intrinsic::ObjectRuntimeExport("contextlib.redirect_stdout")
             }
