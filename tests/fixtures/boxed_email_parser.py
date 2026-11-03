@@ -1,6 +1,8 @@
-from email import message_from_bytes, message_from_string
+from email import message_from_binary_file, message_from_bytes, message_from_string
+from email.errors import MissingHeaderBodySeparatorDefect
 from email.feedparser import FeedParser
 from email.message import Message
+from io import BytesIO
 
 
 def current():
@@ -12,6 +14,12 @@ def current():
     msg = message_from_bytes(b"X-Trace: wire\r\n\r\nbody\xff")
     assert msg.items() == [("X-Trace", "wire")]
     assert msg.get_payload(decode=True) == b"body\xff"
+    with BytesIO(b"X-Trace: wire\r\nbroken\r\nbody\xff") as fp:
+        msg = message_from_binary_file(fp)
+        assert fp.read() == b""
+    assert msg["X-Trace"] == "wire"
+    assert msg.get_payload(decode=True) == b"broken\nbody\xff"
+    assert [type(defect) for defect in msg.defects] == [MissingHeaderBodySeparatorDefect]
     parser = FeedParser()
     parser.feed("broken head")
     parser.feed("er\r\nbody")
