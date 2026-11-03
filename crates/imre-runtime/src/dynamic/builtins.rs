@@ -631,6 +631,11 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
             ..
         } if attr == "__reduce__" => owner,
         Value::Property(_) if super::property::METHODS.contains(&attr) => "property",
+        Value::ClassMethod { .. } | Value::StaticMethod { .. }
+            if matches!(attr, "__reduce__" | "__reduce_ex__") =>
+        {
+            "object"
+        }
         Value::ClassMethod { .. } if attr == "__get__" => "classmethod",
         Value::StaticMethod { .. } if attr == "__get__" => "staticmethod",
         Value::Generator { .. } if super::generator_protocol::generator_method(attr) => "generator",
