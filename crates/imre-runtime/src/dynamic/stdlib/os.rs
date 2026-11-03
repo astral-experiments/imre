@@ -2,6 +2,8 @@
 pub(in crate::dynamic) mod device;
 #[cfg(target_os = "linux")]
 pub(in crate::dynamic) mod eventfd;
+#[cfg(target_os = "linux")]
+pub(super) mod execve;
 pub(in crate::dynamic) mod scandir;
 #[cfg(target_os = "linux")]
 mod spawn_child;
@@ -92,6 +94,14 @@ pub(in crate::dynamic) fn install_capabilities(
             }
             let value = ctx.lookup_attr(module, function)?;
             builtins::set_add(ctx, set, value)?;
+        }
+        // os copies the current posix dictionary, including reassigned optional functions.
+        #[cfg(target_os = "linux")]
+        if capability == "supports_fd"
+            && let Some(execve) = ctx.module_value("posix", "execve")
+        {
+            ctx.bind(scope, "execve", execve);
+            builtins::set_add(ctx, set, execve)?;
         }
         ctx.bind(scope, capability, set);
     }

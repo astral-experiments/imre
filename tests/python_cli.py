@@ -3603,6 +3603,10 @@ else:
         if sys.platform == "linux":
             plugin.write_bytes((fixtures / "boxed_os_getrandom.py").read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")
+            execve = str(fixtures / "boxed_os_execve.py")
+            compare("-IB", execve, "exports", "os")
+            for mode in ("path", "fd"):
+                compare("-IB", execve, mode, "os", status=17)
             plugin.write_bytes((fixtures / "boxed_os_spawn.py").read_bytes())
             libc, version = platform.libc_ver()
             child_callbacks = libc == "glibc" and tuple(map(int, version.split(".")[:2])) >= (2, 32)

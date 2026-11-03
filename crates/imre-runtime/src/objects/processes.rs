@@ -359,6 +359,27 @@ impl CStrings {
         super::errno_error(io::Error::last_os_error())
     }
 
+    /// Replace the process using the supplied environment. Success never returns.
+    #[cfg(target_os = "linux")]
+    pub(crate) fn execve(&self, executable: &CStr, env: &Self) -> io::Error {
+        // SAFETY: the pathname and both terminated pointer arrays are live for the call.
+        unsafe {
+            libc::execve(
+                executable.as_ptr(),
+                self.pointers.as_ptr(),
+                env.pointers.as_ptr(),
+            )
+        };
+        io::Error::last_os_error()
+    }
+
+    #[cfg(target_os = "linux")]
+    pub(crate) fn fexecve(&self, fd: RawFd, env: &Self) -> io::Error {
+        // SAFETY: both terminated arrays remain live and fexecve checks the supplied fd.
+        unsafe { libc::fexecve(fd, self.pointers.as_ptr(), env.pointers.as_ptr()) };
+        io::Error::last_os_error()
+    }
+
     /// Fork with the inherited environment and descriptors; failed execs exit with 127.
     #[cfg(target_os = "linux")]
     pub(crate) fn fork_execv(command: Option<(&CStr, &Self)>) -> Result<libc::pid_t> {

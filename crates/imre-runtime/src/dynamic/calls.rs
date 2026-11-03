@@ -2835,6 +2835,12 @@ impl Context {
                     "__text_signature__" if symbol == "posix.execv" => {
                         return Ok(self.text("($module, path, argv, /)"));
                     }
+                    "__doc__" if symbol == "posix.execve" => {
+                        return Ok(self.text("Execute an executable path with arguments, replacing current process.\n\n  path\n    Path of executable file.\n  argv\n    Tuple or list of strings.\n  env\n    Dictionary of strings mapping to strings."));
+                    }
+                    "__text_signature__" if symbol == "posix.execve" => {
+                        return Ok(self.text("($module, /, path, argv, env)"));
+                    }
                     "__doc__" if symbol == "posix.getppid" => {
                         return Ok(self.text("Return the parent's process id.\n\nIf the parent process has already exited, Windows machines will still\nreturn its id; others systems will return the id of the 'init' process (1)."));
                     }

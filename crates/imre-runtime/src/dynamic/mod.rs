@@ -3040,6 +3040,7 @@ impl Context {
                 stdlib::os::sysconf::initialize(self, module, scope);
                 for name in [
                     "getrandom",
+                    "execve",
                     "get_terminal_size",
                     "lockf",
                     "posix_fadvise",

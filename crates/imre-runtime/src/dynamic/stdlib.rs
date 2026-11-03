@@ -56,6 +56,8 @@ mod pkgutil;
 #[cfg(target_os = "linux")]
 pub(super) mod posix_spawn;
 mod posixpath;
+#[cfg(target_os = "linux")]
+mod process_arguments;
 mod random;
 pub(super) mod readiness;
 pub(super) mod regex;
@@ -1729,6 +1731,10 @@ pub(super) fn call(
     }
     if let Some(op @ ("stat" | "lstat" | "fstat")) = name.strip_prefix("posix.") {
         return os::stat::call(ctx, op, args, kwargs);
+    }
+    #[cfg(target_os = "linux")]
+    if name == "posix.execve" {
+        return os::execve::call(ctx, args, kwargs);
     }
     #[cfg(target_os = "linux")]
     if name == "posix._spawn_exec" {
