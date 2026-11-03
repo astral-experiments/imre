@@ -2750,6 +2750,12 @@ def report(text):
                 compare("-IB", bio, native_args=("run", bio, "--quiet"), native_timeout=600)
                 flags = fixtures / "ssl_verify_flags.py"
                 compare("-IB", flags, native_args=("run", flags, "--quiet"), native_timeout=600)
+                certdata = fixtures.parents[1] / "benchmarks/cpython_stdlib/full/shared/upstream/Lib/test/certdata"
+                locations = fixtures / "ssl_verify_locations.py"
+                compare(
+                    "-IB", locations, certdata,
+                    native_args=("run", locations, "--quiet", "--", certdata), native_timeout=600,
+                )
         queue_exports = fixtures / "logging_queue_exports.py"
         compare("-IB", queue_exports, native_args=("run", queue_exports, "--quiet"), native_timeout=600)
         thread_hook_exports = root / "thread_hook_exports.py"

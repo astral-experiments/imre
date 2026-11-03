@@ -92,6 +92,41 @@ fn cert_path(ctx: &mut Context, path: Id, arg: &str) -> Result<CString> {
     super::os::c_path(ctx, path, "embedded null byte")
 }
 
+fn ca_data(ctx: &Context, input: Id) -> Result<provider::CaData<'_>> {
+    let invalid = || {
+        Error::new(
+            "TypeError",
+            "cadata should be an ASCII string or a bytes-like object",
+        )
+    };
+    let (bytes, pem) = match ctx.heap.get(ctx.scalar_value(input)) {
+        Value::Str(text) if text.is_ascii() => (text.as_bytes(), true),
+        Value::Str(_) | Value::SurrogateStr(_) => return Err(invalid()),
+        _ => {
+            ctx.check_buffer_exporter(input)?;
+            let bytes = ctx.native_buffer_bytes(input).map_err(|error| {
+                if error.kind == "TypeError" {
+                    invalid()
+                } else {
+                    error
+                }
+            })?;
+            (bytes, false)
+        }
+    };
+    if bytes.is_empty() {
+        return Err(Error::new("ValueError", "Empty certificate data"));
+    }
+    if bytes.len() > i32::MAX as usize {
+        return Err(Error::new("OverflowError", "Certificate data is too long."));
+    }
+    Ok(if pem {
+        provider::CaData::Pem(bytes)
+    } else {
+        provider::CaData::Der(bytes)
+    })
+}
+
 fn closed() -> Error {
     errno_error(io::Error::from_raw_os_error(libc::EBADF)).into()
 }
@@ -99,7 +134,9 @@ fn closed() -> Error {
 fn provider_error(ctx: &Context, failure: provider::Failure) -> Error {
     let message = match failure {
         provider::Failure::Io(error) => return errno_error(error).into(),
-        provider::Failure::Verify { message, .. } | provider::Failure::Other(message) => message,
+        provider::Failure::Trust { message, .. }
+        | provider::Failure::Verify { message, .. }
+        | provider::Failure::Other(message) => message,
     };
     let mut error = Error::new(PROVIDER_ERROR, message);
     error.class = ctx.builtins[PROVIDER_ERROR];
@@ -292,14 +329,41 @@ pub(super) fn call(
                 .map_err(|e| provider_error(ctx, e))?;
             Ok(NONE)
         }
-        ("load_verify_locations", &[handle, cafile]) => {
-            let path = super::posixpath::fspath(ctx, cafile)?;
-            let path = super::os::c_path(ctx, path, "embedded null byte in cafile")?;
-            context(ctx, handle)?
-                .borrow_mut()
-                .load_verify_locations(&path)
-                .map_err(|e| provider_error(ctx, e))?;
-            Ok(NONE)
+        ("load_verify_locations", &[handle, cafile, capath, cadata]) => {
+            if (cafile, capath, cadata) == (NONE, NONE, NONE) {
+                return Err(Error::new(
+                    "TypeError",
+                    "cafile, capath and cadata cannot be all omitted",
+                ));
+            }
+            let cafile = (cafile != NONE)
+                .then(|| cert_path(ctx, cafile, "cafile"))
+                .transpose()?;
+            let capath = (capath != NONE)
+                .then(|| cert_path(ctx, capath, "capath"))
+                .transpose()?;
+            let cadata = (cadata != NONE).then(|| ca_data(ctx, cadata)).transpose()?;
+            let result = context(ctx, handle)?.borrow_mut().load_verify_locations(
+                cafile.as_deref(),
+                capath.as_deref(),
+                cadata,
+            );
+            match result {
+                Ok(()) => Ok(NONE),
+                Err(provider::Failure::Trust {
+                    code,
+                    message,
+                    library,
+                    reason,
+                }) => {
+                    let code = ctx.int(code);
+                    let message = ctx.text(message);
+                    let library = library.map_or(NONE, |s| ctx.text(s));
+                    let reason = reason.map_or(NONE, |s| ctx.text(s));
+                    Ok(ctx.alloc(Value::Tuple(vec![code, message, library, reason])))
+                }
+                Err(e) => Err(provider_error(ctx, e)),
+            }
         }
         ("get_ciphers", &[handle]) => provider::ciphers::get(ctx, handle),
         ("set_ciphers", &[handle, text]) => {

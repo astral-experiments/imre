@@ -7,6 +7,8 @@ use std::sync::OnceLock;
 pub(in crate::dynamic) mod bio;
 pub(super) mod ciphers;
 pub(in crate::dynamic) mod objects;
+mod trust;
+pub(super) use trust::CaData;
 pub(in crate::dynamic) mod versions;
 
 type Handle = *mut c_void;
@@ -71,6 +73,7 @@ functions! {
     ASN1_OBJECT_free(Handle) -> ();
     BIO_s_mem() -> Handle;
     BIO_new(Handle) -> Handle;
+    BIO_new_mem_buf(*const c_void, c_int) -> Handle;
     BIO_free(Handle) -> c_int;
     BIO_ctrl_pending(Handle) -> usize;
     BIO_ctrl(Handle, c_int, c_long, Handle) -> c_long;
@@ -102,6 +105,9 @@ functions! {
     X509_get_default_cert_dir_env() -> *const c_char;
     X509_get_default_cert_dir() -> *const c_char;
     SSL_CTX_get_cert_store(Handle) -> Handle;
+    d2i_X509_bio(Handle, *mut Handle) -> Handle;
+    PEM_read_bio_X509(Handle, *mut Handle, PasswordCallback, Handle) -> Handle;
+    X509_STORE_add_cert(Handle, Handle) -> c_int;
     X509_STORE_lock(Handle) -> c_int;
     X509_STORE_unlock(Handle) -> c_int;
     X509_STORE_get0_objects(Handle) -> Handle;
@@ -203,7 +209,16 @@ pub(crate) fn version() -> Option<String> {
 
 #[derive(Debug)]
 pub(crate) enum Failure {
-    Verify { code: i64, message: String },
+    Verify {
+        code: i64,
+        message: String,
+    },
+    Trust {
+        code: i64,
+        library: Option<&'static str>,
+        reason: Option<String>,
+        message: String,
+    },
     Io(std::io::Error),
     Other(String),
 }
@@ -236,6 +251,20 @@ impl Api {
             // SAFETY: reason is the non-null library string checked above.
             let detail = unsafe { CStr::from_ptr(reason) }.to_string_lossy();
             Failure::Other(format!("{operation}: {detail}"))
+        }
+    }
+}
+
+fn clear_errno() {
+    // SAFETY: only clear this thread's errno for the following OpenSSL operation.
+    unsafe {
+        #[cfg(target_os = "linux")]
+        {
+            *libc::__errno_location() = 0;
+        }
+        #[cfg(target_os = "macos")]
+        {
+            *libc::__error() = 0;
         }
     }
 }
@@ -464,22 +493,6 @@ impl Context {
         unsafe {
             (self.api.SSL_CTX_set_post_handshake_auth)(self.handle.as_ptr(), i32::from(enabled))
         };
-    }
-
-    pub(crate) fn load_verify_locations(&mut self, cafile: &CStr) -> Result<(), Failure> {
-        self.api.clear();
-        // SAFETY: the context is live and the terminated path outlives the call.
-        if unsafe {
-            (self.api.SSL_CTX_load_verify_locations)(
-                self.handle.as_ptr(),
-                cafile.as_ptr(),
-                ptr::null(),
-            )
-        } != 1
-        {
-            return Err(self.api.file_error("SSL_CTX_load_verify_locations"));
-        }
-        Ok(())
     }
 
     pub(crate) fn load_cert_chain(
@@ -740,17 +753,10 @@ impl Session {
         loop {
             api.clear();
             let mut n = 0;
-            // SAFETY: only clear this thread's errno. All operations borrow our
-            // live SSL, and their buffers and output counter outlive each attempt.
+            clear_errno();
+            // SAFETY: all operations borrow our live SSL, and their buffers and
+            // output counter outlive each attempt.
             let (rc, label) = unsafe {
-                #[cfg(target_os = "linux")]
-                {
-                    *libc::__errno_location() = 0;
-                }
-                #[cfg(target_os = "macos")]
-                {
-                    *libc::__error() = 0;
-                }
                 match &mut operation {
                     Operation::Accept => ((api.SSL_accept)(ssl), "SSL_accept"),
                     Operation::Connect => ((api.SSL_connect)(ssl), "SSL_connect"),
