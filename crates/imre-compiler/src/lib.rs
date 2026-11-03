@@ -365,7 +365,7 @@ fn object_fallback<T>(
                     .values()
                     .any(|names| names.len() > 1)
             });
-            let all_calls = graph.check_decorated_method_calls.get()
+            let all_calls = graph.check_fallback_calls.get()
                 || !entry.optional_imports.is_empty()
                 || compound_probe
                 || !graph.needs_object_runtime.get()

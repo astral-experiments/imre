@@ -4650,6 +4650,14 @@ impl<'a> Checker<'a> {
     ) -> Result<(Vec<Statement>, bool), String> {
         let result = self.lower_statement(statement);
         if let Err(error) = &result {
+            // A boxed operation in a checked source file must not hide a bad call in
+            // another function, whether this operation is deferred or stops lowering.
+            if self.inference.is_none()
+                && !self.graph.modules[self.module].bundled
+                && self.failure_kind(error) == Some(FailureKind::ObjectOperation)
+            {
+                self.graph.check_fallback_calls.set(true);
+            }
             let discarded = match statement {
                 ast::Stmt::Expr(expr) => narrowing::expression_assignments(&expr.value).is_empty(),
                 // At function scope this suffix includes every later use of the binding.
