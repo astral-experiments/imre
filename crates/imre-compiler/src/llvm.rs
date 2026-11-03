@@ -394,6 +394,7 @@ fn emit_program(
         affine_literal_lengths: Vec::new(),
         length_roots: Vec::new(),
         length_snapshots: Vec::new(),
+        guarded_integer_lists: Vec::new(),
         expression_rebound: Vec::new(),
         small_locals: Vec::new(),
         temporaries: Vec::new(),
@@ -618,6 +619,7 @@ struct Emitter<'a, 'module> {
     affine_literal_lengths: Vec<(usize, i32)>,
     length_roots: Vec<Option<usize>>,
     length_snapshots: Vec<Option<LengthSnapshot>>,
+    guarded_integer_lists: Vec<(usize, String, String)>,
     expression_rebound: Vec<bool>,
     small_locals: Vec<bool>,
     temporaries: Vec<Value>,
@@ -1180,6 +1182,66 @@ impl Emitter<'_, '_> {
         self.instruction(format!(
             "phi i64 [{word}, %{cached}], [{ordinary}, %{fallback}]"
         ))
+    }
+
+    /// The successful loop-version guard proves each input stays rooted and
+    /// cannot alias an append target until this arm exits.
+    fn borrow_guarded_integer_lists(&mut self, condition: &Expr) {
+        let ExprKind::Boolean(true, guards) = &condition.kind else {
+            return;
+        };
+        for guard in guards {
+            if let ExprKind::Builtin(Builtin::ListAllI32, args) = &guard.kind
+                && let ExprKind::Local(slot) = args[0].kind
+            {
+                let receiver = self.borrow_slot(slot);
+                let length = self.list_length(&receiver);
+                let length = self.index_word(&length, true);
+                let data = self.instruction(format!(
+                    "call ptr @imre_list_data_readonly(ptr {})",
+                    receiver.operand
+                ));
+                self.guarded_integer_lists.push((slot, length, data));
+            }
+        }
+    }
+
+    /// Inline the bounds check and borrowed word load in the guarded version.
+    /// The ordinary checked access supplies the exception on the cold edge.
+    fn guarded_integer_word(
+        &mut self,
+        source: &Expr,
+        receiver: &Value,
+        index: &Value,
+    ) -> Option<String> {
+        let ExprKind::Local(slot) = source.kind else {
+            return None;
+        };
+        let (_, length, data) = self
+            .guarded_integer_lists
+            .iter()
+            .rev()
+            .find(|(root, _, _)| *root == slot)?
+            .clone();
+        let at = self.index_word(index, true);
+        let valid = self.instruction(format!("icmp ult i64 {at}, {length}"));
+        let (fast, slow, end) = (self.label(), self.label(), self.label());
+        self.branch(&valid, &fast, &slow);
+        self.start(&fast);
+        let word = self.load_list_word(&data, &at);
+        self.jump(&end);
+        self.start(&slow);
+        let at = self.native_index(index);
+        let ordinary = self
+            .runtime_call(&LIST_BORROW_INDEX, [receiver, &at])
+            .value
+            .operand;
+        let slow_exit = self.current.clone();
+        self.jump(&end);
+        self.start(&end);
+        Some(self.instruction(format!(
+            "phi i64 [{word}, %{fast}], [{ordinary}, %{slow_exit}]"
+        )))
     }
 
     fn load_list_word(&mut self, data: &str, index: &str) -> String {
@@ -2378,11 +2440,14 @@ impl Emitter<'_, '_> {
                 self.route(Completion::Return(value));
             }
             Statement::If(test, yes, no) => {
-                let test = self.expr(test);
+                let condition = self.expr(test);
                 let (yes_label, no_label, end) = (self.label(), self.label(), self.label());
-                self.branch(&test.operand, &yes_label, &no_label);
+                self.branch(&condition.operand, &yes_label, &no_label);
                 self.start(&yes_label);
+                let prior = self.guarded_integer_lists.len();
+                self.borrow_guarded_integer_lists(test);
                 self.block(yes);
+                self.guarded_integer_lists.truncate(prior);
                 let yes_ends = self.terminated;
                 if !yes_ends {
                     self.jump(&end);
@@ -6816,6 +6881,12 @@ impl Emitter<'_, '_> {
                     index.small_integer = true;
                     let index = self.index_word(&index, true);
                     self.proven_list_word(slot, &args[0].value, &index)
+                } else if matches!(builtin, Builtin::ListGetI32)
+                    && self.nonnegative_index(&expressions[1])
+                    && let Some(word) =
+                        self.guarded_integer_word(&expressions[0], &args[0].value, &args[1].value)
+                {
+                    word
                 } else if self.nonnegative_index(&expressions[1]) {
                     let index = self.native_index(&args[1].value);
                     self.runtime_call(&LIST_BORROW_INDEX, [&args[0].value, &index])
@@ -11118,6 +11189,32 @@ def handler(a: defaultdict[str, list[int]], b: defaultdict[str, list[int]]) -> l
             );
             assert!(body.contains("icmp sle i64"));
         }
+    }
+
+    #[test]
+    fn guarded_reads_borrow_stable_list_storage_once() {
+        let source = r#"
+def transform(values: list[int], count: int) -> int:
+    out: list[int] = []
+    for i in range(0, count, 3):
+        out.append(values[i] + 31 * values[i + 1] + 257 * values[i + 2])
+    return sum(out)
+"#;
+        let llvm = compile(source, &CompileOptions::default()).unwrap();
+        let body = llvm
+            .split("\ndefine ")
+            .find(|function| function.contains("call ptr @imre_list_data_readonly("))
+            .unwrap();
+        assert_eq!(
+            body.matches("call ptr @imre_list_data_readonly(").count(),
+            1
+        );
+        let (_, fast) = body
+            .split_once("call ptr @imre_list_data_readonly(")
+            .unwrap();
+        assert!(fast.contains("icmp ult i64"));
+        assert!(fast.contains("getelementptr inbounds i64"));
+        assert!(fast.contains("call i64 @imre_list_borrow_index("));
     }
 
     #[test]
