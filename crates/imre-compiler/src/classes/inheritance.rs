@@ -60,6 +60,15 @@ pub(super) fn resolve(
                         );
                     }
                     Some(Binding::Intrinsic(Intrinsic::ObjectRuntimeExport(
+                        "contextlib.ContextDecorator",
+                    ))) => {
+                        graph.needs_object_runtime.set(true);
+                        return Err(module.error(
+                            argument,
+                            "ContextDecorator subclasses require object lowering",
+                        ));
+                    }
+                    Some(Binding::Intrinsic(Intrinsic::ObjectRuntimeExport(
                         "codecs.IncrementalDecoder" | "codecs.CodecInfo",
                     ))) => {
                         graph.needs_object_runtime.set(true);
