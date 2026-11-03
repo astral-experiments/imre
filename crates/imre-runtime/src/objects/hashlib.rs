@@ -457,7 +457,8 @@ pub(crate) fn hex_text(bytes: &[u8]) -> Result<Str> {
     let mut text = Str::try_with_capacity(length).map_err(|_| Error::allocation())?;
     // SAFETY: every write is an ASCII digit within the reserved capacity.
     let space = unsafe { text.spare_capacity_mut() };
-    for (&byte, pair) in bytes.iter().zip(space[..length].chunks_exact_mut(2)) {
+    let (pairs, _) = space[..length].as_chunks_mut::<2>();
+    for (&byte, pair) in bytes.iter().zip(pairs) {
         pair[0].write(HEX[usize::from(byte >> 4)]);
         pair[1].write(HEX[usize::from(byte & 15)]);
     }

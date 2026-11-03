@@ -238,17 +238,16 @@ impl Popen {
         }
         let budget = pending.remaining();
         let exchange = pending.finish();
-        if matches!(exchange, Exchange::Done(_)) {
-            if self
+        if matches!(exchange, Exchange::Done(_))
+            && self
                 .control
                 .wait_with(
                     budget.map(Deadline::Float).as_ref(),
                     crate::objects::stdlib::check_interrupt,
                 )?
                 .is_none()
-            {
-                return Ok(Exchange::Timeout([None, None], budget));
-            }
+        {
+            return Ok(Exchange::Timeout([None, None], budget));
         }
         Ok(exchange)
     }

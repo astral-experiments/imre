@@ -55,6 +55,7 @@ fn nanoseconds(ctx: &mut Context, value: Option<Id>) -> Result<i64> {
 }
 
 fn timespec(ns: i64, name: &str) -> Result<libc::timespec> {
+    #[allow(clippy::useless_conversion, reason = "time_t can be narrower than i64")]
     let tv_sec = ns
         .div_euclid(BILLION)
         .try_into()
