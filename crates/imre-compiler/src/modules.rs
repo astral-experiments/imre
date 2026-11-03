@@ -1723,6 +1723,11 @@ impl IntrinsicModule {
             (Self::Inspect, "signature") => Intrinsic::ObjectRuntimeExport("inspect.signature"),
             (Self::Inspect, "getattr_static") => Intrinsic::InspectGetattrStatic,
             (Self::Inspect, "ismethoddescriptor") => Intrinsic::InspectIsMethodDescriptor,
+            (Self::Inspect, "isasyncgen") => Intrinsic::ObjectRuntimeExport("inspect.isasyncgen"),
+            (Self::Inspect, "isawaitable") => Intrinsic::ObjectRuntimeExport("inspect.isawaitable"),
+            (Self::Inspect, "isasyncgenfunction") => {
+                Intrinsic::ObjectRuntimeExport("inspect.isasyncgenfunction")
+            }
             (Self::Inspect, "iscoroutinefunction") => Intrinsic::InspectCoroutine { mark: false },
             (Self::Inspect, "markcoroutinefunction") => Intrinsic::InspectCoroutine { mark: true },
             (Self::Inspect, "_sentinel") => Intrinsic::InspectSentinel,
@@ -2256,6 +2261,9 @@ impl IntrinsicModule {
             (Self::Types, "TracebackType") => Intrinsic::NominalClass("traceback"),
             (Self::Types, "FrameType") => Intrinsic::NominalClass("frame"),
             (Self::Types, "CodeType") => Intrinsic::NominalClass("code"),
+            (Self::Types, "AsyncGeneratorType") => {
+                Intrinsic::ObjectRuntimeExport("types.AsyncGeneratorType")
+            }
             (Self::Types, "CellType") => Intrinsic::ObjectRuntimeExport("types.CellType"),
             (Self::Codecs, "getincrementaldecoder") => {
                 Intrinsic::ObjectRuntimeExport("codecs.getincrementaldecoder")

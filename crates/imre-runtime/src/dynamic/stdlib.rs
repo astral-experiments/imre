@@ -567,6 +567,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("types", "TracebackType") => ctx.builtin("traceback"),
         ("types", "_coroutine_flags" | "_mark_generator") => ctx.builtin(&format!("types.{name}")),
         ("types", "GeneratorType") => ctx.builtin("generator"),
+        ("types", "AsyncGeneratorType") => ctx.builtin("async_generator"),
         ("types", "CoroutineType") => ctx.builtin("coroutine"),
         ("types", "MethodType") => ctx.builtin("method"),
         ("types", "MemberDescriptorType") => ctx.builtin("member_descriptor"),

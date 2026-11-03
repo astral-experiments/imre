@@ -1,4 +1,4 @@
-use super::{Context, Error, Id, Result, Value};
+use super::{Context, Error, Id, NONE, Result, Value};
 
 impl Context {
     /// Release the interpreter's reference to the script before collecting its globals.
@@ -96,7 +96,9 @@ impl Context {
             _ => None,
         };
         let generator = matches!(self.heap.get(owner), Value::Generator { .. });
-        let found = scan.is_some() || generator || self.slot(owner, "__del__").is_some();
+        let async_generator = matches!(self.heap.get(owner), Value::AsyncGenerator { .. } | Value::AsyncGeneratorOp(_));
+        let found =
+            scan.is_some() || generator || async_generator || self.slot(owner, "__del__").is_some();
         self.heap.take_finalizer(owner, found);
         super::stdlib::io::note_writer_finalizer(self, owner);
         if !found {
@@ -114,6 +116,22 @@ impl Context {
         }
         if let Some(scan) = scan {
             super::stdlib::os::scandir::finalize(self, owner, &scan);
+        } else if let Value::AsyncGeneratorOp(op) = *self.heap.get(owner) {
+            self.warn_unawaited_async_generator_op(op);
+        } else if let Value::AsyncGenerator {
+            frame,
+            closed,
+            finalizer,
+            ..
+        } = *self.heap.get(owner)
+        {
+            let result = match finalizer {
+                Some(hook) if hook != NONE && !closed => self.call(hook, vec![owner], Vec::new()),
+                _ => self.generator_close(frame),
+            };
+            if let Err(error) = result {
+                super::unraisable::report(self, error, false, Some(owner), "Exception ignored while finalizing generator");
+            }
         } else if generator {
             if let Err(error) = self.generator_close(owner) {
                 eprintln!("Exception ignored while calling __del__: {error}");
