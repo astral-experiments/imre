@@ -3,6 +3,7 @@ import builtins
 import codecs
 import copyreg
 import pickle
+from collections import namedtuple
 from typing import ParamSpec
 
 
@@ -578,20 +579,23 @@ class RecordFamily:
         right: object
 
 
-def check_namedtuple_reducer():
+FactoryRecord = namedtuple("FactoryRecord", ("left", "right"))
+
+
+def check_namedtuple_reducer(record):
     from copy import copy, deepcopy
     import copyreg
 
     shared = []
-    value = RecordFamily.Record(shared, shared)
+    value = record(shared, shared)
     assert value.__getnewargs__() == (shared, shared)
     for protocol in range(pickle.HIGHEST_PROTOCOL + 1):
         if protocol < 2:
             assert value.__reduce_ex__(protocol) == (
-                copyreg._reconstructor, (RecordFamily.Record, tuple, (shared, shared)))
+                copyreg._reconstructor, (record, tuple, (shared, shared)))
         else:
             assert value.__reduce_ex__(protocol) == (
-                copyreg.__newobj__, (RecordFamily.Record, shared, shared), None, None, None)
+                copyreg.__newobj__, (record, shared, shared), None, None, None)
         restored = pickle.loads(pickle.dumps(value, protocol))
         assert type(restored) is type(value)
         assert restored.left is restored.right and restored.left is not shared
@@ -621,7 +625,8 @@ def check_list_items(protocol):
 
 
 def produce():
-    check_namedtuple_reducer()
+    for record in (RecordFamily.Record, FactoryRecord):
+        check_namedtuple_reducer(record)
     check_object_reducer()
     check_builtin_method_reduction()
     check_python_method_reduction()

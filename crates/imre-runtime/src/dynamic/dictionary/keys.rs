@@ -437,25 +437,15 @@ impl Context {
     }
 
     fn tuple_keys(&self, key: Id) -> Result<Option<SmallVec<[Id; 3]>>> {
+        let (Value::Tuple(values) | Value::NamedTuple { values, .. }) = self.tuple_backing(key)
+        else {
+            return Ok(None);
+        };
         let mut items = SmallVec::new();
-        match self.tuple_backing(key) {
-            Value::Tuple(values) | Value::NamedTuple { values, .. } => {
-                items
-                    .try_reserve(values.len())
-                    .map_err(|_| Error::new("MemoryError", ""))?;
-                items.extend_from_slice(values);
-            }
-            Value::Instance { class, fields, .. } => {
-                let Some(names) = self.namedtuple_fields(*class) else {
-                    return Ok(None);
-                };
-                items
-                    .try_reserve(names.len())
-                    .map_err(|_| Error::new("MemoryError", ""))?;
-                items.extend(names.iter().map(|name| fields[name]));
-            }
-            _ => return Ok(None),
-        }
+        items
+            .try_reserve(values.len())
+            .map_err(|_| Error::new("MemoryError", ""))?;
+        items.extend_from_slice(values);
         Ok(Some(items))
     }
 

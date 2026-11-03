@@ -1433,11 +1433,6 @@ impl Context {
         Err(Error::new("AttributeError", "readonly attribute"))
     }
 
-    /// Check whether an inline value is an immutable tuple position.
-    fn has_namedtuple_field(&self, class: Id, name: &str) -> bool {
-        matches!(self.heap.get(class), Value::Class { namedtuple_fields: Some(names), .. } if names.iter().any(|field| field == name))
-    }
-
     pub(super) fn is_type_object(&self, obj: Id) -> bool {
         match self.heap.get(obj) {
             Value::Class { .. } => true,
@@ -1781,7 +1776,6 @@ impl Context {
             {
                 true
             }
-            ("tuple", Value::Instance { class, .. }) => self.namedtuple_fields(*class).is_some(),
             (
                 name,
                 Value::NamedTuple {
@@ -2254,8 +2248,7 @@ impl Context {
             {
                 return self.bind_attribute(member, obj, class);
             }
-            let inline =
-                inline.filter(|_| !layout.declared_slot && !self.has_namedtuple_field(class, name));
+            let inline = inline.filter(|_| !layout.declared_slot);
             let field = if inline.is_some()
                 || namespace.is_none()
                 || member.is_some_and(|member| self.data_descriptor(member))
@@ -5204,9 +5197,7 @@ impl Context {
                 if self.heap.get(class).heap_type().is_some() {
                     self.check_instance_field(obj, name)?;
                 }
-                if (layout.declared_slot && !layout.active_slot)
-                    || self.has_namedtuple_field(class, name)
-                {
+                if layout.declared_slot && !layout.active_slot {
                     return Err(self.missing_attribute(obj, name));
                 }
                 let Value::Instance { fields, .. } = self.heap.get_mut(obj) else {
@@ -5409,11 +5400,7 @@ impl Context {
         let mut ordinary = Vec::new();
         let mut retained = indexmap::IndexMap::new();
         for (name, value) in original {
-            if self.instance_layout(class, &name).declared_slot
-                || self
-                    .namedtuple_fields(class)
-                    .is_some_and(|names| names.contains(&name))
-            {
+            if self.instance_layout(class, &name).declared_slot {
                 retained.insert(name, value);
             } else {
                 ordinary.push((name, value));
@@ -6245,10 +6232,8 @@ impl Context {
             }
             if !layout.active_slot {
                 let storage = namespace.or_else(|| {
-                    (layout.materialize_dictionary_on_write
-                        || layout.declared_slot
-                        || self.has_namedtuple_field(class, name))
-                    .then(|| self.instance_dictionary(obj, class))
+                    (layout.materialize_dictionary_on_write || layout.declared_slot)
+                        .then(|| self.instance_dictionary(obj, class))
                 });
                 if let Some(storage) = storage {
                     return self.update_dictionary_field(obj, storage, name, Some(value));
@@ -6615,6 +6600,49 @@ impl Context {
         Ok(instance)
     }
 
+    /// Allocate the requested tuple subtype from the iterable before invoking any initializer.
+    fn new_tuple(&mut self, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+        let Some((&class, args)) = args.split_first() else {
+            return Err(Error::new(
+                "TypeError",
+                "tuple.__new__(): not enough arguments",
+            ));
+        };
+        let name = match self.heap.get(class) {
+            Value::Native(name) => Some(name.as_str()),
+            class => class.heap_type(),
+        };
+        match name {
+            Some(stdlib::flags::TYPE) => {
+                return Err(Error::new(
+                    "TypeError",
+                    "cannot create 'sys.flags' instances",
+                ));
+            }
+            Some(
+                name
+                @ (stdlib::fixed_structseq::SCHED_PARAM | stdlib::datetime::isocalendar::CLASS),
+            ) => {
+                return Err(Error::new(
+                    "TypeError",
+                    format!("tuple.__new__({name}) is not safe, use {name}.__new__()"),
+                ));
+            }
+            _ => {}
+        }
+        if !kwargs.is_empty() {
+            let tuple = self.builtin("tuple");
+            if self.subclass(class, tuple)
+                && (class == tuple || self.class_attr(class, "__init__").is_none_or(|init| {
+                    matches!(self.heap.get(init), Value::Native(name) if name == "object.__init__")
+                }))
+            {
+                return Err(Error::new("TypeError", "tuple() takes no keyword arguments"));
+            }
+        }
+        self.new_immutable_scalar("tuple", class, args, &[])
+    }
+
     /// Create empty mapping storage for the requested type without running its initializer.
     fn new_dict(&mut self, args: &[Id]) -> Result<Id> {
         let Some(&class) = args.first() else {
@@ -6938,12 +6966,7 @@ impl Context {
             Value::Native(name) if name == "_thread._local.__new__" => {
                 super::thread_local::allocate(self, &args, &kwargs)
             }
-            Value::Native(name) if name == "tuple.__new__" => {
-                if args.first().is_some_and(|&class| matches!(self.heap.get(class), Value::Native(name) if name == stdlib::flags::TYPE)) {
-                    return Err(Error::new("TypeError", "cannot create 'sys.flags' instances"));
-                }
-                super::namedtuple::allocate(self, &args, &kwargs)
-            }
+            Value::Native(name) if name == "tuple.__new__" => self.new_tuple(&args, &kwargs),
             Value::Native(name)
                 if name
                     .strip_suffix(".__sizeof__")

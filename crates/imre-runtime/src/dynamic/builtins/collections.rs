@@ -360,11 +360,6 @@ fn unhashable_part(ctx: &Context, value: Id) -> Option<Id> {
         Value::Tuple(values) | Value::NamedTuple { values, .. } => {
             values.iter().find_map(|&x| unhashable_part(ctx, x))
         }
-        Value::Instance { class, fields, .. } => ctx.namedtuple_fields(*class).and_then(|names| {
-            names
-                .iter()
-                .find_map(|name| unhashable_part(ctx, fields[name]))
-        }),
         _ => None,
     }
 }
@@ -1553,10 +1548,6 @@ pub(super) fn builtin_slot(
                 | Value::Tuple(items)
                 | Value::NamedTuple { values: items, .. } => items.len(),
                 Value::Set { entries, .. } => entries.len(),
-                Value::Instance { class, .. } => ctx
-                    .namedtuple_fields(*class)
-                    .expect("validated tuple receiver")
-                    .len(),
                 _ => unreachable!("validated collection receiver"),
             };
             return Ok(ctx.int(length as i64));
