@@ -217,6 +217,10 @@ pub(super) fn symbol(name: &str) -> Option<Intrinsic> {
         "strerror" => Intrinsic::Strerror,
         "stat_result" => Intrinsic::StatResult,
         "fstat" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.fstat"),
+        "confstr" if cfg!(target_os = "linux") => Intrinsic::ObjectRuntimeExport("posix.confstr"),
+        "confstr_names" if cfg!(target_os = "linux") => {
+            Intrinsic::ObjectRuntimeExport("posix.confstr_names")
+        }
         "sysconf" if cfg!(target_os = "linux") => Intrinsic::ObjectRuntimeExport("posix.sysconf"),
         "sysconf_names" if cfg!(target_os = "linux") => {
             Intrinsic::ObjectRuntimeExport("posix.sysconf_names")
