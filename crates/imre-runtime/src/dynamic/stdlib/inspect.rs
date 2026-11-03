@@ -50,29 +50,6 @@ pub(super) fn call(
                 FALSE
             });
         }
-        "_signature_identifier" => {
-            // A str subclass can replace either the method or attribute lookup.
-            if let Value::Instance { class, .. } = *ctx.heap.get(obj) {
-                let overridden = ["isidentifier", "__getattribute__", "__getattr__"]
-                    .iter()
-                    .any(|name| ctx.class_attr(class, name).is_some());
-                match ctx.lookup_attr(obj, "isidentifier") {
-                    Ok(method) => return ctx.call(method, Vec::new(), Vec::new()),
-                    Err(err) if !overridden && ctx.is_attribute_error(&err) => {}
-                    Err(err) => return Err(err),
-                }
-            }
-            let name = ctx.str_value(obj)?;
-            let valid = ruff_python_stdlib::identifiers::is_identifier(name)
-                || ruff_python_stdlib::keyword::is_keyword(name);
-            return Ok(if valid { TRUE } else { FALSE });
-        }
-        "_signature_mapping" => {
-            let storage = ctx
-                .dict_storage(obj)
-                .ok_or_else(|| super::Error::new("TypeError", "expected a parameter dictionary"))?;
-            return Ok(ctx.alloc(Value::MappingProxy(storage)));
-        }
         "_frame_position" => match *ctx.heap.get(obj) {
             Value::Traceback { .. } => return Ok(super::traceback::tb_position(ctx, obj)),
             Value::PythonFrame { lineno, .. } => {

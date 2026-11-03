@@ -1,3 +1,4 @@
+from collections import OrderedDict
 import inspect
 import warnings
 from annotationlib import Format
@@ -168,6 +169,7 @@ assert str(inspect.signature(ClassCall())) == "(item)"
 
 update_wrapper(wrapper, original)
 sig = Signature.from_callable(wrapper)
+assert type(sig.parameters.copy()) is OrderedDict
 print(str(sig), sig.return_annotation is str)
 print([(p.name, p.kind.name) for p in sig.parameters.values()])
 print(sig.parameters["a"].default is Parameter.empty, sig.parameters["flag"].default)
@@ -197,10 +199,11 @@ try:
     sig.parameters["other"] = sig.parameters["a"]
 except TypeError:
     print("immutable parameters")
-try:
-    Parameter("not a name", Parameter.KEYWORD_ONLY)
-except ValueError:
-    print("invalid name")
+for name in ("not a name", "x\ud800"):
+    try:
+        Parameter(name, Parameter.KEYWORD_ONLY)
+    except ValueError:
+        print("invalid name")
 
 pair.__defaults__ = (1, 2, 3)
 print(inspect.signature(pair))
