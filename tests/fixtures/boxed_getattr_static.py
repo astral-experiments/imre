@@ -1,4 +1,7 @@
 import sys
+import gc
+import weakref
+
 from inspect import getattr_static
 from types import SimpleNamespace
 
@@ -210,3 +213,19 @@ except TypeError:
 else:
     raise AssertionError("cyclic bases accepted")
 assert Rebased.__bases__ is bases and instance.value == 3
+
+
+def transient_subclass():
+    class Temporary(Rebased):
+        pass
+
+    return weakref.ref(Temporary)
+
+
+gone = transient_subclass()
+gc.collect()
+assert gone() is None
+occupants = [{} for _ in range(64)]
+Rebased.__bases__ = (Old,)
+assert Descendant.__mro__ == (Descendant, Rebased, Old, dict, object)
+assert instance.value == 4
