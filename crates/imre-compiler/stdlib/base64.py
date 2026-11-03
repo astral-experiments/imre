@@ -10,8 +10,11 @@ def _bytes_from_decode_data(s):
             raise ValueError("string argument should contain only ASCII characters")
     if isinstance(s, (bytes, bytearray)):
         return s
-    raise TypeError("argument should be a bytes-like object or ASCII "
-                    "string, not %r" % s.__class__.__name__) from None
+    try:
+        return memoryview(s).tobytes()
+    except TypeError:
+        raise TypeError("argument should be a bytes-like object or ASCII "
+                        "string, not %r" % s.__class__.__name__) from None
 
 
 def b64encode(s, altchars=None):
@@ -62,6 +65,17 @@ def standard_b64encode(s):
     return b64encode(s)
 
 
+def standard_b64decode(s):
+    """Decode bytes encoded with the standard Base64 alphabet.
+
+    Argument s is a bytes-like object or ASCII string to decode.  The result
+    is returned as a bytes object.  A binascii.Error is raised if the input
+    is incorrectly padded.  Characters that are not in the standard alphabet
+    are discarded prior to the padding check.
+    """
+    return b64decode(s)
+
+
 def _input_type_check(s):
     try:
         m = memoryview(s)
@@ -80,6 +94,22 @@ def _input_type_check(s):
 
 MAXLINESIZE = 76 # Excluding the CRLF
 MAXBINSIZE = (MAXLINESIZE//4)*3
+
+
+def encode(input, output):
+    """Encode a file; input and output are binary files."""
+    while s := input.read(MAXBINSIZE):
+        while len(s) < MAXBINSIZE and (ns := input.read(MAXBINSIZE-len(s))):
+            s += ns
+        line = binascii.b2a_base64(s)
+        output.write(line)
+
+
+def decode(input, output):
+    """Decode a file; input and output are binary files."""
+    while line := input.readline():
+        s = binascii.a2b_base64(line)
+        output.write(s)
 
 
 def encodebytes(s):

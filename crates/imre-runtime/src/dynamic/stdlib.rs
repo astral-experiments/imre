@@ -2722,26 +2722,33 @@ pub(super) fn call(
             } else {
                 (id, true)
             };
+            let gathered;
             let bytes = match ctx.heap.get(id) {
-                Value::Bytes(bytes) | Value::ByteArray(bytes) => bytes.as_slice(),
-                Value::Str(text) if decode && text.is_ascii() => text.as_bytes(),
-                Value::Str(_) if decode => {
+                _ if !decode => ctx.native_buffer_bytes(id)?,
+                Value::MemoryView { .. } => {
+                    gathered = ctx.memoryview_bytes(id)?;
+                    gathered.as_slice()
+                }
+                Value::Str(text) if text.is_ascii() => text.as_bytes(),
+                Value::Str(_) => {
                     return Err(Error::new(
                         "ValueError",
                         "string argument should contain only ASCII characters",
                     ));
                 }
-                _ => {
-                    let ty = ctx.type_name(id);
-                    let message = if decode {
-                        format!(
-                            "argument should be a bytes-like object or ASCII string, not '{ty}'"
+                _ => ctx.native_buffer_bytes(id).map_err(|error| {
+                    if error.kind == "TypeError" {
+                        let ty = ctx.type_name(id);
+                        Error::new(
+                            "TypeError",
+                            format!(
+                                "argument should be a bytes-like object or ASCII string, not '{ty}'"
+                            ),
                         )
                     } else {
-                        format!("a bytes-like object is required, not '{ty}'")
-                    };
-                    return Err(Error::new("TypeError", message));
-                }
+                        error
+                    }
+                })?,
             };
             let result = if decode {
                 crate::objects::base64_decode(bytes, urlsafe)?

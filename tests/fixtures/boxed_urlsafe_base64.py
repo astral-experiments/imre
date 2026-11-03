@@ -34,6 +34,17 @@ def check():
     mutable = bytearray(b"\xfb\xff")
     encoded = base64.urlsafe_b64encode(mutable)
     print(encoded.rstrip(bytearray(b"=")).decode("ascii"), list(base64.urlsafe_b64decode(bytearray(encoded))))
+    from array import array
+    from base64 import urlsafe_b64decode as decode, urlsafe_b64encode as encode
+
+    print(encode(array("B", b"\xfb\xff")), decode(array("B", b"-_8=")))
+    print(encode(memoryview(bytearray(b"!\xfb\xff!"))[1:-1]))
+    strided = memoryview(bytearray(b"-._.8.=."))[::2]
+    print(decode(strided))
+    try:
+        encode(strided)
+    except BufferError as error:
+        print(str(error))
     for codec in (base64.urlsafe_b64encode, base64.urlsafe_b64decode):
         for call in (
             lambda: codec(),
