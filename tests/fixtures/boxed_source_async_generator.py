@@ -307,4 +307,68 @@ async def broken(error):
         assert hooks == ["first", "final"] and events[-1] == "closed"
     finally:
         sys.set_asyncgen_hooks(*old_hooks)
+    async_for_protocol(scope)
     print("source async generator protocol")
+
+
+def async_for_protocol(scope):
+    exec("""\
+class Cursor:
+    def __aiter__(self):
+        return self
+    async def __anext__(self):
+        value = await Gate()
+        if value is None:
+            raise End()
+        return value
+
+async def visit():
+    items = []
+    async for value in await Gate():
+        if value == "break":
+            break
+        items.append(value)
+    else:
+        items.append("else")
+    return items
+
+class BadAwait:
+    def __await__(self):
+        raise End("conversion")
+
+class Invalid(Cursor):
+    def __anext__(self):
+        return BadAwait()
+
+async def bad_target():
+    class Target:
+        def __setattr__(self, key, value):
+            raise End("assignment")
+    target = Target()
+    async for target.attr in Cursor():
+        raise AssertionError("body reached")
+""", scope)
+    for last, expected in ((None, ["one", "else"]), ("break", ["one"])):
+        c = scope["visit"]()
+        assert c.send(None) == "suspended"
+        assert c.send(scope["Cursor"]()) == "suspended"
+        assert c.send("one") == "suspended"
+        assert finish(c, last) == expected
+
+    try:
+        finish(scope["consume"](scope["Invalid"]))
+    except TypeError as exc:
+        assert "invalid object from __anext__: BadAwait" in str(exc)
+        assert isinstance(exc.__cause__, scope["End"])
+        assert exc.__cause__ is exc.__context__
+    else:
+        raise AssertionError("await conversion error interpreted as exhaustion")
+
+    c = scope["bad_target"]()
+    assert c.send(None) == "suspended"
+    try:
+        c.send("item")
+    except scope["End"] as exc:
+        assert exc.args == ("assignment",)
+    else:
+        raise AssertionError("target assignment error interpreted as exhaustion")
