@@ -1987,6 +1987,8 @@ impl IntrinsicModule {
                 "close" => "_socket.close",
                 "inet_aton" => "_socket.inet_aton",
                 "inet_pton" => "_socket.inet_pton",
+                "inet_ntoa" => "_socket.inet_ntoa",
+                "inet_ntop" => "_socket.inet_ntop",
                 "getservbyname" => "_socket.getservbyname",
                 "getservbyport" => "_socket.getservbyport",
                 "gethostname" => "_socket.gethostname",
@@ -2064,6 +2066,8 @@ impl IntrinsicModule {
             (Self::Socket, "close") => Intrinsic::ObjectRuntimeExport("socket.close"),
             (Self::Socket, "inet_aton") => Intrinsic::ObjectRuntimeExport("socket.inet_aton"),
             (Self::Socket, "inet_pton") => Intrinsic::ObjectRuntimeExport("socket.inet_pton"),
+            (Self::Socket, "inet_ntoa") => Intrinsic::ObjectRuntimeExport("socket.inet_ntoa"),
+            (Self::Socket, "inet_ntop") => Intrinsic::ObjectRuntimeExport("socket.inet_ntop"),
             (Self::Socket, "getservbyname") => {
                 Intrinsic::ObjectRuntimeExport("socket.getservbyname")
             }

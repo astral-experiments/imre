@@ -74,6 +74,8 @@ pub(in super::super) fn install_lowlevel_socket(ctx: &mut Context, scope: Id) ->
         "setdefaulttimeout",
         "inet_aton",
         "inet_pton",
+        "inet_ntoa",
+        "inet_ntop",
     ] {
         let function = ctx.builtin(&format!("_socket.{name}"));
         ctx.bind(scope, name, function);
@@ -109,6 +111,8 @@ pub(in super::super) fn import_socket_constants(ctx: &mut Context, scope: Id) ->
             "setdefaulttimeout",
             "inet_aton",
             "inet_pton",
+            "inet_ntoa",
+            "inet_ntop",
         ])
     {
         match ctx.lookup_attr(low, name) {
@@ -708,6 +712,68 @@ pub(super) fn inet_pton(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)])
         _ => return Err(Error::new("OSError", "unknown address family")),
     };
     Ok(ctx.alloc(Value::Bytes(bytes.to_vec())))
+}
+
+/// Format a contiguous packed address while its Python buffer export is live.
+pub(super) fn format_packed_address(
+    ctx: &mut Context,
+    name: &str,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Id> {
+    let (family, packed) = if name == "_socket.inet_ntoa" {
+        let packed = super::super::builtins::one_positional_arg(name, args, kwargs)?;
+        (libc::AF_INET, packed)
+    } else {
+        if !kwargs.is_empty() {
+            return Err(Error::new(
+                "TypeError",
+                "inet_ntop() takes no keyword arguments",
+            ));
+        }
+        let [family, packed] = args else {
+            return Err(Error::new(
+                "TypeError",
+                format!(
+                    "inet_ntop() takes exactly 2 arguments ({} given)",
+                    args.len()
+                ),
+            ));
+        };
+        (ctx.index_c_int(*family)?, *packed)
+    };
+    let format = |bytes: &[u8]| -> Result<String> {
+        match family {
+            libc::AF_INET => {
+                let octets = <[u8; 4]>::try_from(bytes).map_err(|_| {
+                    if name == "_socket.inet_ntoa" {
+                        Error::new("OSError", "packed IP wrong length for inet_ntoa")
+                    } else {
+                        Error::new("ValueError", "invalid length of packed IP address string")
+                    }
+                })?;
+                Ok(std::net::Ipv4Addr::from(octets).to_string())
+            }
+            libc::AF_INET6 => {
+                let s6_addr = bytes.try_into().map_err(|_| {
+                    Error::new("ValueError", "invalid length of packed IP address string")
+                })?;
+                Ok(native::ipv6_text(&libc::in6_addr { s6_addr })?)
+            }
+            _ => Err(Error::new(
+                "ValueError",
+                format!("unknown address family {family}"),
+            )),
+        }
+    };
+    let text = if let Some(method) = ctx.python_buffer_method(packed, true)? {
+        ctx.with_contiguous_python_buffer(packed, method, 0, |ctx, view| {
+            format(ctx.view_bytes(view)?)
+        })?
+    } else {
+        format(ctx.native_buffer_bytes(packed)?)?
+    };
+    Ok(ctx.text(text))
 }
 
 fn lookup_service(

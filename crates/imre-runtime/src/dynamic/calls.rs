@@ -61,7 +61,12 @@ pub(super) fn module_function(symbol: &str) -> Option<(&str, &str)> {
         "_socket"
             if matches!(
                 function,
-                "getdefaulttimeout" | "setdefaulttimeout" | "inet_aton" | "inet_pton"
+                "getdefaulttimeout"
+                    | "setdefaulttimeout"
+                    | "inet_aton"
+                    | "inet_pton"
+                    | "inet_ntoa"
+                    | "inet_ntop"
             ) =>
         {
             Some((module, function))
@@ -2797,7 +2802,20 @@ impl Context {
                     "__doc__" if symbol == "_socket.inet_pton" => {
                         return Ok(self.text("inet_pton(af, ip) -> packed IP address string\n\nConvert an IP address from string format to a packed string suitable\nfor use with low-level network functions."));
                     }
-                    "__text_signature__" if symbol == "_socket.inet_pton" => return Ok(NONE),
+                    "__text_signature__"
+                        if matches!(symbol.as_str(), "_socket.inet_pton" | "_socket.inet_ntop") =>
+                    {
+                        return Ok(NONE);
+                    }
+                    "__text_signature__" if symbol == "_socket.inet_ntoa" => {
+                        return Ok(self.text("($module, packed_ip, /)"));
+                    }
+                    "__doc__" if symbol == "_socket.inet_ntop" => {
+                        return Ok(self.text("inet_ntop(af, packed_ip) -> string formatted IP address\n\nConvert a packed IP address of the given family to string format."));
+                    }
+                    "__doc__" if symbol == "_socket.inet_ntoa" => {
+                        return Ok(self.text("Convert an IP address from 32-bit packed binary format to string format."));
+                    }
                     "__doc__" if symbol == "posix.urandom" => {
                         return Ok(self.text("Return a bytes object containing random bytes suitable for cryptographic use."));
                     }

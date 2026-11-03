@@ -563,13 +563,14 @@ impl Context {
                 _ => Err(Error::new("ValueError", "I/O operation on closed file.")),
             },
             Value::Bytes(bytes) | Value::ByteArray(bytes) => Ok(bytes),
-            _ => Err(Error::new(
-                "TypeError",
-                format!(
-                    "a bytes-like object is required, not '{}'",
-                    self.type_name(id)
-                ),
-            )),
+            _ => {
+                let name = self.type_name(id);
+                let name = &name[..name.floor_char_boundary(100)];
+                Err(Error::new(
+                    "TypeError",
+                    format!("a bytes-like object is required, not '{name}'"),
+                ))
+            }
         }
     }
 
