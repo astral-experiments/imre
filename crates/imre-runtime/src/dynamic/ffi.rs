@@ -879,8 +879,7 @@ pub(super) unsafe extern "C" fn imre_dyn_finish(ctx: *mut Context) -> i32 {
             Ok(main)
         }
     });
-    #[cfg(unix)]
-    let interrupted = result
+    let mut interrupted = result
         .as_ref()
         .is_err_and(|e| ctx.is_builtin_error(e, "KeyboardInterrupt"));
     let status = match result {
@@ -891,6 +890,13 @@ pub(super) unsafe extern "C" fn imre_dyn_finish(ctx: *mut Context) -> i32 {
             ctx.heap.release_temporaries_since(mark);
             status
         }
+        Err(error) if let Some(sys) = ctx.threads.system_module => {
+            let mark = ctx.heap.temporary_mark();
+            let status = super::excepthook::report(&mut ctx, sys, error, &mut interrupted);
+            ctx.heap.release_temporaries_since(mark);
+            status
+        }
+        // Startup can fail before the interpreter has created its sys module.
         Err(error) if ctx.is_os_error(&error) && error.args.is_some() => {
             if stdlib::traceback::chain_link(&error).is_some() {
                 stdlib::traceback::report_chain(&mut ctx, error);
@@ -968,7 +974,7 @@ pub(super) unsafe extern "C" fn imre_dyn_finish(ctx: *mut Context) -> i32 {
 }
 
 /// Read the live code at shutdown, including overrides on SystemExit subclasses.
-fn report_system_exit(ctx: &mut Context, error: Error) -> i32 {
+pub(super) fn report_system_exit(ctx: &mut Context, error: Error) -> i32 {
     use std::io::Write;
 
     let instance = error
