@@ -4,6 +4,8 @@ import struct
 ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
 initial = ctx.verify_flags
 assert isinstance(initial, ssl.VerifyFlags)
+assert not initial & ssl.VERIFY_CRL_CHECK_LEAF
+assert bool(ssl.VERIFY_CRL_CHECK_LEAF)
 other = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
 ctx.verify_flags = ssl.VERIFY_CRL_CHECK_CHAIN
 assert ctx.verify_flags == ssl.VERIFY_CRL_CHECK_CHAIN
