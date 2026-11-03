@@ -1249,6 +1249,28 @@ pub(super) fn descriptor(
         };
         return Ok(ctx.int(i64::from(code)));
     }
+    #[cfg(target_os = "linux")]
+    if matches!(name, "posix_openpt" | "grantpt" | "unlockpt") {
+        let value = builtins::one_positional_arg(&format!("posix.{name}"), args, kwargs)?;
+        if name == "posix_openpt" {
+            let flags = c_int(ctx, value)?;
+            return Ok(ctx.int(i64::from(native::posix_openpt(flags)?)));
+        }
+        stat::warn_bool_fd(ctx, value)?;
+        let fd = super::select::fd(ctx, value)?;
+        // SAFETY: each function borrows a descriptor and reports failure through errno.
+        let status = unsafe {
+            if name == "grantpt" {
+                libc::grantpt(fd)
+            } else {
+                libc::unlockpt(fd)
+            }
+        };
+        if status == -1 {
+            return Err(super::os_error(std::io::Error::last_os_error()));
+        }
+        return Ok(NONE);
+    }
     if !kwargs.is_empty() {
         return Err(Error::new(
             "TypeError",
