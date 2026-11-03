@@ -55,5 +55,15 @@ def main() -> None:
     measure(thin, len(thin), 701, 701 + 32768, -13.0)
     measure(thin, len(thin), 123, 123 + len(thin) + 32768, 5.0)
 
+    # Sparse physical edits can repeat one payload, or contain distinct rows.
+    sparse = [Reading(-11.0, False)] * 65535
+    for j in range(53):
+        sparse[(6931 * j + 32768) % len(sparse)] = other
+    measure(sparse, len(sparse), 701, 701 + 32768, -13.0)
+    measure(sparse, 65531, 123, 123 + 2 * 65531 + 12345, 5.0)
+    measure(sparse, len(sparse), 73, 9001, 0.5)
+    sparse[32768] = Reading(19.0, False)
+    measure(sparse, len(sparse), 19, 49002, 0.0)
+
 
 main()

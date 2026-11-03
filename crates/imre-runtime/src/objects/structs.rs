@@ -483,7 +483,7 @@ pub unsafe extern "C" fn imre_struct_cycle_prefix(
     }
 }
 
-/// Borrowed dictionary payloads and flat tags for a stable scalar row scan.
+/// Borrowed dictionary rows. Sparse indexed counts omit the flat tag array.
 #[repr(C)]
 pub struct BinaryRead {
     rows: [*const usize; 2],
@@ -524,6 +524,74 @@ pub unsafe extern "C" fn imre_struct_binary_prefix(
                 words: binary.bits.len(),
             });
             count as i64
+        })
+    }
+}
+
+/// Count visits to a common alternate payload by walking the physical sparse edits.
+/// With a coprime stride, each row has one ordinal per period. The partial period
+/// contributes one more visit exactly when that ordinal precedes the cut.
+///
+/// # Safety
+/// The rooted scalar list covers `n` rows, with `0 < n <= 2^32` and both
+/// `first` and `inverse` reduced modulo `n`. The writable descriptor borrows
+/// the unmodified list through the fold.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_struct_sparse_indexed_count(
+    list: *const Object,
+    out: *mut BinaryRead,
+    n: u64,
+    first: u64,
+    inverse: u64,
+    visits: u64,
+) -> i64 {
+    // SAFETY: the typed loop roots the list and reserves the output descriptor.
+    unsafe {
+        object(list).0.with(|storage| {
+            let Storage::Sequence(words) = storage else {
+                return -1;
+            };
+            let Some(rows) = words.rows() else { return -1 };
+            let RowStorage::Repeated(base, Overrides::Sparse(edits)) = &rows.storage else {
+                return -1;
+            };
+            // Amortize the physical scan even when a third payload declines the fold.
+            if edits.len as u64 > visits / 32 {
+                return -1;
+            }
+            let (periods, tail) = (visits / n, visits % n);
+            let mut alternate = None;
+            let mut hits = 0;
+            for (i, (at, row)) in edits.iter(rows.layout.length).enumerate() {
+                if i.is_multiple_of(1024)
+                    && crate::signals::TRIPPED.load(std::sync::atomic::Ordering::Relaxed)
+                {
+                    return -1;
+                }
+                let at = at as u64;
+                if at >= n {
+                    continue;
+                }
+                if *alternate.get_or_insert(row) != row {
+                    return -1;
+                }
+                let delta = if at >= first {
+                    at - first
+                } else {
+                    at + n - first
+                };
+                let rank = delta * inverse % n;
+                hits += periods + u64::from(rank < tail);
+            }
+            let Some(alternate) = alternate else {
+                return -1;
+            };
+            out.write(BinaryRead {
+                rows: [base.word as *const usize, alternate.as_ptr()],
+                bits: std::ptr::null(),
+                words: 0,
+            });
+            hits as i64
         })
     }
 }

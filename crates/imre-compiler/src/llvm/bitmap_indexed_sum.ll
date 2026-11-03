@@ -1,5 +1,5 @@
-; Visit the flat bitmap in modular index order. The dictionary view has at least
-; one allocated word, and omitted trailing words represent default rows.
+; Sum two projected rows, using precomputed visit counts or a flat tag bitmap.
+; Missing trailing bitmap words represent default rows.
 define internal { double, i64 } @imre_bitmap_indexed_sum(ptr %view, i64 %start, i64 %stop, i64 %modulus, i64 %tagged_length, i64 %prefix_ones, i64 %scale, i64 %offset, double %initial, double %zero, double %one) noinline nounwind {
 entry:
   %n = lshr i64 %modulus, 1
@@ -16,7 +16,10 @@ entry:
   %words_ptr = getelementptr i64, ptr %view, i64 3
   %bits = load ptr, ptr %bits_ptr
   %words = load i64, ptr %words_ptr
-  br label %poll
+  %precounted = icmp eq ptr %bits, null
+  br i1 %precounted, label %precounted_result, label %poll
+precounted_result:
+  ret { double, i64 } %cycles
 poll:
   %cursor = phi i64 [ %base_cursor, %entry ], [ %end, %inner ]
   %at = phi i64 [ %first, %entry ], [ %next, %inner ]
@@ -74,6 +77,21 @@ define internal { double, i64 } @imre_bitmap_permutation_prefix(ptr %view, i64 %
 entry:
   %distance = sub i64 %stop, %start
   %remaining = lshr i64 %distance, 1
+  %bits_ptr = getelementptr ptr, ptr %view, i64 2
+  %bits = load ptr, ptr %bits_ptr
+  %precounted = icmp eq ptr %bits, null
+  br i1 %precounted, label %sparse_counts, label %plan
+sparse_counts:
+  ; Sparse traversal supplied visit counts directly. The same exactness bound
+  ; and signal checkpoint apply before committing either representation.
+  %safe_zero = call i1 @imre_exact_fadd_bound(double %initial, double %zero, i64 %remaining)
+  %safe_one = call i1 @imre_exact_fadd_bound(double %initial, double %one, i64 %remaining)
+  %safe_terms = and i1 %safe_zero, %safe_one
+  %tripped = load atomic volatile i8, ptr @imre_signal_tripped monotonic, align 1
+  %sparse_clear = icmp eq i8 %tripped, 0
+  %safe = and i1 %safe_terms, %sparse_clear
+  br i1 %safe, label %counts, label %miss
+plan:
   ; Counting a tag also checks for interrupts. Require at most one omitted
   ; row per two visited rows before choosing the complement.
   %third = udiv i64 %n, 3
@@ -107,9 +125,9 @@ orbit:
   %both = and i1 %long_prefix, %long_suffix
   %invert = and i1 %narrow, %both
   %fold_partial = or i1 %shorter, %invert
-  %visits = select i1 %fold_partial, i64 %remaining, i64 %whole
-  %exact_zero = call i1 @imre_exact_fadd_bound(double %initial, double %zero, i64 %visits)
-  %exact_one = call i1 @imre_exact_fadd_bound(double %initial, double %one, i64 %visits)
+  %bitmap_visits = select i1 %fold_partial, i64 %remaining, i64 %whole
+  %exact_zero = call i1 @imre_exact_fadd_bound(double %initial, double %zero, i64 %bitmap_visits)
+  %exact_one = call i1 @imre_exact_fadd_bound(double %initial, double %one, i64 %bitmap_visits)
   %exact = and i1 %exact_zero, %exact_one
   %eligible = and i1 %exact, %permutation
   br i1 %eligible, label %interrupt, label %miss
@@ -118,9 +136,7 @@ interrupt:
   %clear = icmp eq i8 %signal, 0
   br i1 %clear, label %reduce, label %miss
 reduce:
-  %bits_ptr = getelementptr ptr, ptr %view, i64 2
   %words_ptr = getelementptr i64, ptr %view, i64 3
-  %bits = load ptr, ptr %bits_ptr
   %words = load i64, ptr %words_ptr
   ; The existing prefix count excludes the physical last row.
   %last = sub i64 %n, 1
@@ -149,7 +165,8 @@ partial_count:
   %included = add i64 %full_ones, %partial_ones
   br i1 %interrupted, label %miss, label %counts
 counts:
-  %ones = phi i64 [ %full_ones, %direct ], [ %included, %partial_count ]
+  %visits = phi i64 [ %bitmap_visits, %direct ], [ %bitmap_visits, %partial_count ], [ %remaining, %sparse_counts ]
+  %ones = phi i64 [ %full_ones, %direct ], [ %included, %partial_count ], [ %prefix_ones, %sparse_counts ]
   %zeros = sub i64 %visits, %ones
   %nf_zero = uitofp i64 %zeros to double
   %nf_one = uitofp i64 %ones to double
@@ -254,3 +271,38 @@ exit:
 }
 
 declare i64 @llvm.cttz.i64(i64, i1 immarg)
+
+; A flat tag view supplies a physical prefix count. Sparse rows instead supply
+; the exact visited count and two payloads, with a null tag pointer.
+define internal i64 @imre_indexed_dictionary(ptr %list, ptr %view, i64 %start, i64 %stop, i64 %modulus, i64 %scale, i64 %offset) nounwind {
+entry:
+  %bitmap = call i64 @imre_struct_binary_prefix(ptr %list, ptr %view)
+  %present = icmp sge i64 %bitmap, 0
+  br i1 %present, label %done, label %bounds
+bounds:
+  %n = lshr i64 %modulus, 1
+  %narrow = icmp ule i64 %n, 4294967296
+  %distance = sub i64 %stop, %start
+  %visits = lshr i64 %distance, 1
+  %large = icmp uge i64 %visits, 256
+  %eligible = and i1 %narrow, %large
+  br i1 %eligible, label %orbit, label %done
+orbit:
+  %step = urem i64 %scale, %n
+  %proof = call { i64, i64 } @imre_modular_bezout(i64 %step, i64 %n)
+  %gcd = extractvalue { i64, i64 } %proof, 0
+  %permutation = icmp eq i64 %gcd, 1
+  br i1 %permutation, label %sparse, label %done
+sparse:
+  %coefficient = extractvalue { i64, i64 } %proof, 1
+  %negative = icmp slt i64 %coefficient, 0
+  %positive = add i64 %coefficient, %n
+  %inverse = select i1 %negative, i64 %positive, i64 %coefficient
+  %tag = call i64 @imre_bounded_modular_index(i64 %start, i64 %scale, i64 %offset, i64 %modulus)
+  %first = lshr i64 %tag, 1
+  %count = call i64 @imre_struct_sparse_indexed_count(ptr %list, ptr %view, i64 %n, i64 %first, i64 %inverse, i64 %visits)
+  br label %done
+done:
+  %result = phi i64 [ %bitmap, %entry ], [ -1, %bounds ], [ -1, %orbit ], [ %count, %sparse ]
+  ret i64 %result
+}
