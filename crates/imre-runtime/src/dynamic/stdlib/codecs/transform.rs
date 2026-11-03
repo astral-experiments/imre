@@ -242,6 +242,7 @@ pub(in crate::dynamic) fn decode_named(
             };
             ctx.alloc(Value::MemoryView {
                 owner: Some(owner),
+                lease: None,
                 anonymous: true,
                 layout: None,
                 readonly: true,

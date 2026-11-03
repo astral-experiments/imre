@@ -407,6 +407,7 @@ impl Context {
             let Value::MemoryView {
                 anonymous,
                 readonly,
+                lease,
                 ..
             } = *self.heap.get(view)
             else {
@@ -416,6 +417,7 @@ impl Context {
             self.heap.reserve_temporaries(1)?;
             let child = self.alloc(Value::MemoryView {
                 owner: Some(owner),
+                lease,
                 anonymous,
                 readonly,
                 hash: None,

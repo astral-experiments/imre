@@ -382,32 +382,43 @@ impl Context {
         })
     }
 
-    /// Acquiring a Python-defined buffer can replace the native storage or install a release callback.
-    fn check_buffer_exporter(&self, object: Id) -> Result<()> {
+    /// Find the Python acquisition slot, keeping native base descriptors in MRO order.
+    fn python_buffer_method(&self, object: Id) -> Result<Option<Id>> {
         let Value::Instance { class, .. } = self.heap.get(object) else {
-            return Ok(());
+            return Ok(None);
         };
-        let python_slot = |slot| {
+        let slot = |name| {
             self.find_in_mro(*class, |base| match self.heap.get(base) {
-                Value::Class { .. } => self.own_class_attr(base, slot).map(|_| true),
-                Value::Native(name)
-                    if matches!(name.as_str(), "array.array" | "bytearray")
-                        || (name == "bytes" && slot == "__buffer__") =>
+                Value::Class { .. } => self.own_class_attr(base, name).map(Some),
+                Value::Native(base)
+                    if matches!(base.as_str(), "array.array" | "bytearray")
+                        || (base == "bytes" && name == "__buffer__") =>
                 {
-                    Some(false)
+                    Some(None)
                 }
                 _ => None,
             })
         };
-        if match python_slot("__buffer__") {
-            Some(true) => true,
-            Some(false) => python_slot("__release_buffer__") == Some(true),
-            None => false,
-        } {
-            return Err(Error::new(
-                "NotImplementedError",
-                "Python-defined buffer hooks are unsupported",
-            ));
+        let Some(method) = slot("__buffer__") else {
+            return Ok(None);
+        };
+        // A Python release hook must run even when the last derived view dies in GC.
+        if slot("__release_buffer__").flatten().is_some() {
+            return Err(Self::unsupported_buffer_hooks());
+        }
+        Ok(method)
+    }
+
+    fn unsupported_buffer_hooks() -> Error {
+        Error::new(
+            "NotImplementedError",
+            "Python-defined buffer hooks are unsupported",
+        )
+    }
+
+    fn check_buffer_exporter(&self, object: Id) -> Result<()> {
+        if self.python_buffer_method(object)?.is_some() {
+            return Err(Self::unsupported_buffer_hooks());
         }
         Ok(())
     }
@@ -517,21 +528,47 @@ impl Context {
     }
 
     fn new_memoryview(&mut self, object: Id) -> Result<Id> {
-        self.check_buffer_exporter(object)?;
-        let (owner, anonymous, layout) = match *self.heap.get(self.scalar_value(object)) {
-            Value::Bytes(_) | Value::ByteArray(_) => (object, false, None),
+        if let Some(method) = self.python_buffer_method(object)? {
+            let class = self.exact_type(object)?;
+            let method = self.bind_attribute(method, object, class)?;
+            // PyMemoryView_FromObject requests PyBUF_FULL_RO, including shape and strides.
+            let flags = self.int(0x11c);
+            let view = self.call(method, vec![flags], vec![])?;
+            if !matches!(self.heap.get(view), Value::MemoryView { .. }) {
+                return Err(Error::new(
+                    "TypeError",
+                    "__buffer__ returned non-memoryview object",
+                ));
+            }
+            let outer = self.new_memoryview(view)?;
+            let wrapper = self.alloc(Value::BufferWrapper);
+            let export = self.alloc(Value::PythonBufferLease {
+                exporter: object,
+                view,
+                wrapper,
+            });
+            self.heap.note_buffer_view(view);
+            let Value::MemoryView { lease, .. } = self.heap.get_mut(outer) else {
+                unreachable!()
+            };
+            *lease = Some(export);
+            return Ok(outer);
+        }
+        let (owner, anonymous, layout, lease) = match *self.heap.get(self.scalar_value(object)) {
+            Value::Bytes(_) | Value::ByteArray(_) => (object, false, None, None),
             Value::MemoryView {
                 owner,
                 anonymous,
                 layout,
+                lease,
                 ..
-            } => (Self::memoryview_owner(owner)?, anonymous, layout),
+            } => (Self::memoryview_owner(owner)?, anonymous, layout, lease),
             Value::BytesIoBuffer { .. } => {
                 let len = self.view_element_count(object)?;
                 self.invalidate_stream_snapshot(object);
-                (object, false, Some(memoryview::ViewLayout::full(len)))
+                (object, false, Some(memoryview::ViewLayout::full(len)), None)
             }
-            Value::Array(ref a) if a.view_layout().0 != "w" => (object, false, None),
+            Value::Array(ref a) if a.view_layout().0 != "w" => (object, false, None, None),
             Value::Array(_) => {
                 return Err(Error::new(
                     "NotImplementedError",
@@ -561,6 +598,7 @@ impl Context {
         );
         Ok(self.alloc(Value::MemoryView {
             owner: Some(owner),
+            lease,
             anonymous,
             layout,
             readonly,
@@ -611,7 +649,7 @@ impl Context {
             return Ok(false);
         }
         let (heap, roots) = self.heap_and_roots();
-        heap.has_live_buffer_view(storage, roots)
+        Ok(heap.live_buffer_export_count(storage, roots)? != 0)
     }
 
     fn check_bytearray_resize(&mut self, id: Id) -> Result<()> {

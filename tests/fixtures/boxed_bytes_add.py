@@ -80,9 +80,36 @@ def current():
     holder = [left]
     holder[0] += b"!"
     assert holder[0] is alias and alias == result + result + b"!"
-    empty = bytearray()
-    empty += empty
-    assert empty == b""
+    left = bytearray()
+    alias = left
+    left += left
+    signed = array("b", [-1, 0])
+    export = memoryview(left)
+    left += array("b")
+    assert left is alias and left == b""
+    try:
+        left += signed
+    except BufferError:
+        assert left is alias and left == b""
+    else:
+        raise AssertionError("in-place addition resized a viewed bytearray")
+
+    export.release()
+    left += signed
+    left += memoryview(words)[1:]
+    expected = b"\xff\x00" + array("H", [772]).tobytes()
+    assert left is alias and left == expected
+    for rhs, name in ((strided, "memoryview"), (view, "memoryview"), (Refuse(), "Refuse"), ([65], "list")):
+        try:
+            left += rhs
+        except TypeError as exc:
+            assert str(exc) == "can't concat " + name + " to bytearray"
+            assert left is alias and left == expected
+        else:
+            raise AssertionError("in-place addition accepted an invalid buffer")
+
+    left += Reflected(b"abc")
+    assert left == "reflected" and alias == expected
 
     from binascii import b2a_base64
 

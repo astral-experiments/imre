@@ -14,6 +14,7 @@ fn nonconstructible_result_type(name: &str) -> bool {
             | HashState::OPENSSL_CLASS
             | KEY_WRAPPER
             | "anext_awaitable"
+            | "_buffer_wrapper"
             | value::REGEX_PATTERN_TYPE
             | value::REGEX_MATCH_TYPE
             | value::REGEX_SCANNER_TYPE
@@ -1477,6 +1478,7 @@ impl Context {
                             | "weakref.CallableProxyType"
                             | super::thread_local::CLASS
                             | "_io._BytesIOBuffer"
+                            | "_buffer_wrapper"
                             | stdlib::os::scandir::ENTRY
                             | stdlib::os::scandir::ITER
                             | super::thread_rlock::CLASS
@@ -1675,6 +1677,7 @@ impl Context {
             | ("itertools.repeat", Value::Repeat(_))
             | (super::thread_local::CLASS, Value::ThreadLocal(_))
             | ("_io._BytesIOBuffer", Value::BytesIoBuffer { .. })
+            | ("_buffer_wrapper", Value::BufferWrapper)
             | (stdlib::os::scandir::ENTRY, Value::DirEntry(_))
             | (stdlib::os::scandir::ITER, Value::Scandir(_))
             | (super::thread_rlock::CLASS, Value::HandlerLock(_))
@@ -2415,7 +2418,10 @@ impl Context {
                 return Ok(self.text("The type of the None singleton."));
             }
             Value::MemoryView {
-                owner, anonymous, ..
+                owner,
+                anonymous,
+                lease,
+                ..
             } if matches!(
                 name,
                 "obj"
@@ -2438,7 +2444,13 @@ impl Context {
                 let (format, width) = self.view_format_width(owner, view);
                 return Ok(match name {
                     "obj" => {
-                        if anonymous {
+                        if let Some(lease) = lease {
+                            let Value::PythonBufferLease { wrapper, .. } = *self.heap.get(lease)
+                            else {
+                                unreachable!()
+                            };
+                            wrapper
+                        } else if anonymous {
                             NONE
                         } else {
                             owner

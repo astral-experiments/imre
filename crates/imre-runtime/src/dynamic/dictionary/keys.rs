@@ -542,10 +542,16 @@ impl Context {
         if let Value::Union(union) = *self.heap.get(key) {
             return union.hash(self).map(ControlFlow::Break);
         }
-        if matches!(self.heap.get(key), Value::BytesIoBuffer { .. }) {
+        if matches!(
+            self.heap.get(key),
+            Value::BytesIoBuffer { .. } | Value::BufferWrapper
+        ) {
             return Ok(ControlFlow::Break(Self::identity_hash(key)));
         }
-        if let Value::MemoryView { owner, hash, .. } = *self.heap.get(key) {
+        if let Value::MemoryView {
+            owner, lease, hash, ..
+        } = *self.heap.get(key)
+        {
             if let Some(hash) = hash {
                 return Ok(ControlFlow::Break(hash));
             }
@@ -564,7 +570,10 @@ impl Context {
                 ));
             }
             let hash = self.with_buffer_export(key, |ctx| {
-                ctx.dictionary_hash(owner)?;
+                // A Python acquisition exposes a hashable buffer wrapper as its owner.
+                if lease.is_none() {
+                    ctx.dictionary_hash(owner)?;
+                }
                 Ok(crate::python_hash::bytes(&ctx.memoryview_bytes(key)?))
             })?;
             if let Value::MemoryView { hash: cached, .. } = self.heap.get_mut(key) {

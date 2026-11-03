@@ -1124,7 +1124,7 @@ def check_pickle_reductions(imre, root, run):
 
         obj = LabeledTuple((3, 4))
         obj.label = {"back": obj}
-        streams = [pickle.dumps((obj, obj.label), protocol) for protocol in range(6)]
+        streams = [pickle.dumps((obj, obj.label, bytearray(b"\0\xff")), protocol) for protocol in range(6)]
         entry.write_text(
             "from boxed_pickle_reduction import consume, produce\n"
             f"consume({streams!r})\nproduce()\n"
@@ -1149,6 +1149,10 @@ def check_pickle_reductions(imre, root, run):
                 payload = bytes(range(256))
                 assert value[7] == (b"", payload[:-1], payload, payload, ("rebuilt", protocol))
                 assert value[7][2] is value[7][3]
+                empty, mutable, alias, reduced = value[10]
+                assert type(empty) is bytearray and not empty
+                assert type(mutable) is bytearray and mutable == payload and mutable is alias
+                assert reduced == ("rebuilt", protocol)
                 mapping = value[9]
                 assert list(mapping) == ["z", "a", "m"] and mapping["m"] == 42
                 assert mapping["z"] is mapping and mapping.state is mapping["a"]

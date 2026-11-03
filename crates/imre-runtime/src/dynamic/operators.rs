@@ -4403,6 +4403,22 @@ impl Context {
         Ok(result)
     }
 
+    /// Acquire contiguous native bytes using the sequence concatenation error convention.
+    fn concat_buffer(&self, left: Id, right: Id) -> Result<&[u8]> {
+        self.check_buffer_exporter(right)
+            .and_then(|()| self.native_buffer_bytes(right))
+            .map_err(|_| {
+                let name = |id| {
+                    let name = self.type_name(id);
+                    &name[..name.floor_char_boundary(100)]
+                };
+                Error::new(
+                    "TypeError",
+                    format!("can't concat {} to {}", name(right), name(left)),
+                )
+            })
+    }
+
     fn binary_operation(&mut self, op: &str, a: Id, b: Id, inplace: bool) -> Result<Id> {
         if !inplace && op == "|" {
             let weak_proxy = |id| matches!(self.heap.get(id), Value::Weak(wr) if wr.kind != weakref::Kind::Reference);
@@ -4432,6 +4448,27 @@ impl Context {
         }
         if let Some(result) = self.binary_special(op, a, b)? {
             return Ok(result);
+        }
+        if inplace
+            && op == "+"
+            && let storage = self.scalar_value(a)
+            && matches!(self.heap.get(storage), Value::ByteArray(_))
+        {
+            if self.concat_buffer(a, b)?.is_empty() {
+                return Ok(a);
+            }
+            // Reading the right-hand buffer exports it during the resize.
+            if storage == self.scalar_value(b) {
+                return Err(Self::exported_bytearray_error());
+            }
+            self.check_bytearray_resize(storage)?;
+            let bytes =
+                crate::objects::concat_bytes(self.bytes_like(a)?, self.native_buffer_bytes(b)?)?;
+            let Value::ByteArray(left) = self.heap.get_mut(storage) else {
+                unreachable!()
+            };
+            *left = bytes;
+            return Ok(a);
         }
         if inplace && op == "+" && matches!(self.heap.get(a), Value::Deque(_)) {
             deque::extend(self, a, b, false)?;
@@ -4593,14 +4630,7 @@ impl Context {
             }
             "+" => match (self.heap.get(a), self.heap.get(b)) {
                 (Value::Bytes(x), _) => {
-                    let y = self
-                        .check_buffer_exporter(b)
-                        .and_then(|()| self.native_buffer_bytes(b))
-                        .map_err(|_| {
-                            let name = self.type_name(b);
-                            let name = &name[..name.floor_char_boundary(100)];
-                            Error::new("TypeError", format!("can't concat {name} to bytes"))
-                        })?;
+                    let y = self.concat_buffer(a, b)?;
                     if y.is_empty() {
                         return Ok(a);
                     }
@@ -5443,25 +5473,6 @@ impl Context {
             && matches!(self.heap.get(right), Value::Set { .. })
         {
             return self.set_binary(op, a, right, true);
-        }
-        if op == "+"
-            && matches!(self.heap.get(a), Value::ByteArray(_))
-            && let Value::Bytes(right) | Value::ByteArray(right) = self.heap.get(b)
-        {
-            if right.is_empty() {
-                return Ok(a);
-            }
-            // Reading the right-hand buffer exports it during the resize.
-            if a == b {
-                return Err(Self::exported_bytearray_error());
-            }
-            self.check_bytearray_resize(a)?;
-            let bytes = crate::objects::concat_bytes(self.bytes_like(a)?, self.bytes_like(b)?)?;
-            let Value::ByteArray(left) = self.heap.get_mut(a) else {
-                unreachable!()
-            };
-            *left = bytes;
-            return Ok(a);
         }
         if op == "|" && matches!(self.heap.get(a), Value::Dict(_) | Value::DefaultDict { .. }) {
             builtins::update_dict(self, a, Some(b), &[])?;
