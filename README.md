@@ -153,7 +153,7 @@ CPython 3.14.5 discovers **1,217 test occurrences** in these six families on Lin
 | `ssl` | 30 | 195 | Eight more originals passed for certificate conversion and time, default trust paths and stores, cipher enumeration, and verification flags. Creating a default context with combined trust inputs still fails. |
 | `types` | 119 | 141 | The original descriptor `__get__` signature test passed on stock and both native levels. The family has 119 paired passes across 141 registrations. |
 | `warnings` | 177 | 187 | The [intact suite](benchmarks/cpython_stdlib/full/warnings/receipts/76aed745/intact/verify.py) finished all 187 originals. Stock passed 181 and skipped six. Native O0 and O3 each passed 177, shared the six stock skips, and skipped four CPython-only tests. All 18 subtests passed. No warnings omissions. |
-| `weakref` | 169 | 183 | All 46 WeakSet originals and 123 weakref originals passed. The added finalizer test ran its real shutdown child on stock and at both native levels. |
+| `weakref` | 169 | 183 | All 46 WeakSet originals and 123 weakref originals passed. Seven [CPython-specific tests](docs/stdlib-omissions.md#weakref) have individual omission decisions. Seven other originals remain unpaired. |
 | **Measured total (6 of 6 families)** | **643** | **1,217** |  |
 
 ## Design
