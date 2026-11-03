@@ -500,6 +500,18 @@ fn allocate_alias(
     }))
 }
 
+/// Snapshot an unnamed typing alias's origin module after collecting its parameters.
+fn capture_alias_module(ctx: &mut Context, alias: Id, origin: Id) -> Result<()> {
+    let module = ctx.lookup_attr(origin, "__module__")?;
+    let key = ctx.text("__module__");
+    let fields = ctx.dict(vec![(key, module)]);
+    let Value::GenericAlias(alias) = ctx.heap.get_mut(alias) else {
+        unreachable!()
+    };
+    alias.naming_fields = Some(fields);
+    Ok(())
+}
+
 /// Return the single declared argument of a typing.Unpack alias.
 fn unpack_arg(ctx: &Context, alias: &Alias) -> Option<Id> {
     if alias.kind != AliasKind::Unpack {
@@ -605,7 +617,7 @@ fn literal_alias(ctx: &mut Context, origin: Id, parameters: Id) -> Result<Id> {
     };
     let args = ctx.alloc(Value::Tuple(flat));
     let variables = collect_type_parameters(ctx, args, false)?;
-    Ok(allocate_alias(
+    let alias = allocate_alias(
         ctx,
         AliasKind::Literal(members),
         origin,
@@ -613,7 +625,9 @@ fn literal_alias(ctx: &mut Context, origin: Id, parameters: Id) -> Result<Id> {
         variables,
         None,
         true,
-    ))
+    );
+    capture_alias_module(ctx, alias, origin)?;
+    Ok(alias)
 }
 
 /// PEP 585 keeps a tuple supplied to the constructor as the alias's actual arguments.
@@ -1476,11 +1490,16 @@ pub(super) fn attribute(ctx: &mut Context, value: Id, name: &str) -> Option<Resu
                 explicit: false,
             })
         }
+        Value::Native(class)
+            if matches!(
+                class.as_str(),
+                "typing._LiteralGenericAlias" | "typing._ConcatenateGenericAlias"
+            ) && name == "__reduce__" =>
+        {
+            let base = ctx.builtin("typing._GenericAlias");
+            return Some(ctx.lookup_attr(base, name));
+        }
         Value::Native(class) if class == "typing._ConcatenateGenericAlias" => match name {
-            "__reduce__" => {
-                let base = ctx.builtin("typing._GenericAlias");
-                return Some(ctx.lookup_attr(base, name));
-            }
             "__base__" => ctx.builtin("typing._GenericAlias"),
             "__bases__" => {
                 let parent = ctx.builtin("typing._GenericAlias");
@@ -1559,10 +1578,7 @@ pub(super) fn attribute(ctx: &mut Context, value: Id, name: &str) -> Option<Resu
         Value::Native(class) if name == "__reduce__" && class == "typing._CallableGenericAlias" => {
             ctx.module_value("typing", "_reduce_callable_alias")?
         }
-        Value::GenericAlias(alias)
-            if name == "__reduce__"
-                && (alias.kind.is_typing_alias() || alias.is_builtin_alias()) =>
-        {
+        Value::GenericAlias(alias) if name == "__reduce__" => {
             let class = ctx.builtin(alias.kind.class());
             return Some(
                 ctx.lookup_attr(class, name)
@@ -1697,6 +1713,24 @@ pub(super) fn attribute(ctx: &mut Context, value: Id, name: &str) -> Option<Resu
             }
             _ => return None,
         },
+        Value::GenericAlias(a)
+            if matches!(name, "__module__" | "__name__" | "__qualname__")
+                && let Some(fields) = a.naming_fields =>
+        {
+            if let Some(local) = ctx.dict_named_item(fields, name) {
+                local
+            } else if name == "__module__" {
+                let class = ctx.builtin(a.kind.class());
+                return Some(ctx.lookup_attr(class, name));
+            } else {
+                let origin = a.origin;
+                return Some(
+                    ctx.with_slot_depth("maximum recursion depth exceeded", |ctx| {
+                        ctx.lookup_attr(origin, "__name__")
+                    }),
+                );
+            }
+        }
         Value::GenericAlias(a) if matches!(a.kind, AliasKind::Literal(_)) => {
             if let Some((_, field)) = a
                 .instance_fields()
@@ -1753,26 +1787,8 @@ pub(super) fn attribute(ctx: &mut Context, value: Id, name: &str) -> Option<Resu
             "__name__" | "__qualname__" | "__module__" if a.kind == AliasKind::Unpack => {
                 return Some(ctx.lookup_attr(a.origin, name));
             }
-            "__module__" | "__name__" | "__qualname__" if let Some(fields) = a.naming_fields => {
-                if let Some(local) = ctx.dict_named_item(fields, name) {
-                    local
-                } else if name == "__module__" {
-                    let class = ctx.builtin(a.kind.class());
-                    return Some(ctx.lookup_attr(class, name));
-                } else {
-                    let origin = a.origin;
-                    return Some(
-                        ctx.with_slot_depth("maximum recursion depth exceeded", |ctx| {
-                            ctx.lookup_attr(origin, "__name__")
-                        }),
-                    );
-                }
-            }
             "__name__" | "__qualname__" | "_name" if let Some(label) = a.name => label,
             "__module__" if a.name.is_some() => ctx.text("typing"),
-            "__name__" | "__qualname__" if a.kind == AliasKind::Concatenate => {
-                return Some(ctx.lookup_attr(a.origin, "__name__"));
-            }
             "copy_with" if a.kind == AliasKind::Concatenate => {
                 helper_method(ctx, value, "_concatenate_copy_with")?
             }
@@ -2374,18 +2390,11 @@ pub(super) fn call(
             .iter()
             .any(|key| ctx.classes.get(*key) == Some(&origin));
         let parameters = collect_type_parameters(ctx, args, enforce_order)?;
-        let naming_fields = if kind == AliasKind::Generic
+        let result = allocate_alias(ctx, kind, origin, args, parameters, name, instantiable);
+        if matches!(kind, AliasKind::Generic | AliasKind::Concatenate)
             && name.is_none_or(|name| ctx.str_value(name).is_ok_and(str::is_empty))
         {
-            let module = ctx.lookup_attr(origin, "__module__")?;
-            let key = ctx.text("__module__");
-            Some(ctx.dict(vec![(key, module)]))
-        } else {
-            None
-        };
-        let result = allocate_alias(ctx, kind, origin, args, parameters, name, instantiable);
-        if let Value::GenericAlias(alias) = ctx.heap.get_mut(result) {
-            alias.naming_fields = naming_fields;
+            capture_alias_module(ctx, result, origin)?;
         }
         return Ok(result);
     }

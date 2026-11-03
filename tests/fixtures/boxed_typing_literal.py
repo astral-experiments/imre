@@ -1,3 +1,5 @@
+import pickle
+import typing
 from typing import Literal, get_args, get_origin
 
 
@@ -8,6 +10,15 @@ def current():
     print(Literal[1] == Literal[True], Literal[Literal[1], True, 1].__args__)
     print({Literal[1, 2]: "value"}[Literal[2, 1]])
 
+    for value in (Literal[typing.Any], Literal[1, 2], Literal[True, 2]):
+        assert value.__name__ == value.__qualname__ == "Literal"
+        assert value.__module__ == "typing"
+        assert type(value).__reduce__ is typing._GenericAlias.__reduce__
+        assert type(value).__reduce__(value) == value.__reduce__()
+        for protocol in range(pickle.HIGHEST_PROTOCOL + 1):
+            assert pickle.loads(pickle.dumps(value, protocol)) is value
+    assert Literal[1, 2] is not Literal[True, 2]
+
     class Origin:
         marker = object()
 
@@ -16,6 +27,11 @@ def current():
             return ["marker", "__hidden__", "marker", key, key]
 
     alias = type(ssl_mode)(Origin(), (1,))
+    assert alias.__module__ == Origin.__module__
+    alias.__module__ = "alias module"
+    assert alias.__module__ == "alias module" and Origin.__module__ != alias.__module__
+    del alias.__module__
+    assert alias.__module__ == "typing"
     names = dir(alias)
     fields = {"__args__", "__parameters__", "__origin__", "_inst", "_name"}
     methods = {"__format__", "__getstate__", "__init_subclass__", "__mro_entries__"}

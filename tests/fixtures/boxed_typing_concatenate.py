@@ -11,6 +11,7 @@ prefix = typing.Concatenate[T, P]
 assert type(prefix).__bases__ == (typing._GenericAlias,)
 assert isinstance(prefix, typing._GenericAlias)
 assert prefix.__name__ == prefix.__qualname__ == "Concatenate"
+assert prefix.__module__ == "typing"
 assert {"copy_with", "__origin__", "__args__", "__parameters__"} <= set(dir(prefix))
 assert prefix.copy_with((int, [])) == (int,)
 assert prefix.copy_with((str, typing.Concatenate[int, Q])) == typing.Concatenate[str, int, Q]
@@ -28,6 +29,29 @@ class Origin:
 custom = type(prefix)(Origin, (int, P))
 assert "public_member" in dir(custom) and "__origin_only__" not in dir(custom)
 assert custom.public_member is Origin.public_member and custom.public_member(P) is P
+assert custom.__module__ == Origin.__module__
+Origin.__module__ = "moved"
+assert custom.__module__ != "moved"
+custom.__module__ = "local"
+assert custom.__module__ == "local" and Origin.__module__ == "moved"
+assert custom.copy_with((str, P)).__module__ == "moved"
+del custom.__module__
+assert custom.__module__ == type(custom).__module__ == "typing"
+
+
+class MissingModule:
+    @property
+    def __module__(self):
+        raise RuntimeError("missing origin module")
+
+
+try:
+    type(prefix)(MissingModule(), (int, P))
+except RuntimeError as error:
+    assert str(error) == "missing origin module"
+else:
+    raise AssertionError("creating an unnamed alias should read the origin module")
+assert type(prefix)(MissingModule(), (int, P), name="Named").__module__ == "typing"
 
 
 assert P.__typing_subst__([None, bytes]) == (type(None), bytes)
