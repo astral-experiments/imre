@@ -495,7 +495,6 @@ _mock_magics = set("__%s__" % name for name in (
     "rlshift rmatmul rmod rmul ror round rpow rrshift rshift rsub rtruediv rxor set setitem "
     "setstate sizeof str sub subclasses truediv trunc xor"
 ).split())
-_file_magics = ("__enter__", "__exit__", "__iter__", "__next__")
 
 
 class _MagicSlot:
@@ -521,7 +520,7 @@ class _MagicSlot:
 
 
 class MagicMock(Mock):
-    _mock_auto_magics = _file_magics
+    _mock_auto_magics = ("__enter__", "__exit__", "__getitem__", "__iter__", "__next__")
 
 
 def seal(mock):
