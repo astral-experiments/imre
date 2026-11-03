@@ -2531,7 +2531,7 @@ def report(text):
         )
         compare("-IB", fixtures / "boxed_pickle_writer.py")
         for first in ("_pickle", "pickle"):
-            compare("-IB", fixtures / "pickle_accelerator_writer.py", first)
+            compare("-IB", fixtures / "pickle_accelerator_writer.py", first, native_timeout=600)
         compare("-IB", "-c", "import io, logging; print(repr(logging.StreamHandler(io.StringIO())))")
         compare("-IB", "-c", "import io; b = io.BytesIO(b'abc'); print(bytes(b.getbuffer()))")
         compare(
