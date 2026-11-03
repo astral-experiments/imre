@@ -136,8 +136,8 @@ in the denominator. The [omission decisions](docs/stdlib-omissions.md) explain e
 | `threading` | 83 | 228 | 1 | All 228 original registrations ran in ordinary and boxed builds at both levels. Each passed 83, skipped 32 and reported failures on 113 IDs. The bound worker callback still blocks 58 Bunch fixture cases. |
 | `typing` | 688 | 712 | 0 | 688 originals passed across class, doctest and selected runs. The latest ParamSpec alias test and its 14 subtests passed on stock and ordinary public native O0/O3. Other tests still fail in some full classes. |
 | `unittest` | 275 | 1,090 | 0 | The intact package passed 160 cases. On public #3601, the unchanged test_assertions and test_case files ran all 150 originals with runtime imports. Their 109 paired passes added 81 distinct cases. Another 34 original mock methods passed in focused runs. |
-| `urllib` | 173 | 178 | 0 | Both unchanged scripts compiled and exited 0 in ordinary and runtime-import modes at both native levels. Four HTTP tests now pass with SSL enabled. Three originals matched only in child callbacks, and two Windows cases skipped on stock Linux. |
-| **Total** | **8,675** | **13,328** | **27** | **3 complete suites match stock on `main`** |
+| `urllib` | 173 | 178 | 0 | Both unchanged upstream scripts completed on public `main` at O0 and O3 with ordinary and runtime imports. All 178 tests matched stock in order, including 173 successful parents, three with only child outcomes, and two Windows skips. |
+| **Total** | **8,675** | **13,328** | **27** | **4 complete suites match stock on `main`** |
 
 See the [standard library coverage report](docs/stdlib.md) for the Linux test
 results and import coverage recorded in this repository.
@@ -150,11 +150,11 @@ CPython 3.14.5 discovers **1,217 test occurrences** in these six families on Lin
 | --- | ---: | ---: | --- |
 | `contextlib` | 74 | 149 | 74 of 91 synchronous originals matched stock in selected ordinary O0/O3 runs across six public revisions. Some shared a process with another failing case. The intact native module stopped before registration. The 58 async originals await measurement. |
 | `inspect` | 0 | 362 | Stock ran 362 originals, with 361 passes and one skip. On public revision `00755c8c`, native compilation stopped before discovery, and a compiled import stopped at `_pickle`. Separate replays passed 44 tests in renamed modules. |
-| `ssl` | 5 | 195 | Each public MemoryBIO replay discovered all 195 originals before selecting one. The five selected originals passed on stock and native O0/O3, with teardown and successful exits in all 15 owning processes. |
+| `ssl` | 22 | 195 | Five MemoryBIO originals and 17 socket, context, and enumeration tests passed on stock and on the same public compiler at O0 and O3. Each run discovered all 195 originals. |
 | `types` | 111 | 141 | On public `ce052eab`, the intact `test_types` runs recorded 100 paired passes and exited 1. `test_dynamicclassattribute` recorded 11 paired passes and exited 0 at both native levels. Two stock skips remain in the denominator. |
 | `warnings` | 177 | 187 | The [parent ledger](benchmarks/cpython_stdlib/full/warnings/receipts/) records 158 in-process passes and 19 passes with native interpreter children at O0 and O3. Six parents skipped on stock. The other four passed on stock and skipped on Imre under CPython-only decorators. No warnings omissions. |
-| `weakref` | 168 | 183 | Selected stock and native O0/O3 runs passed 122 of 137 weakref originals. The intact 46-test WeakSet suite passed on all three. The separate intact native weakref suite still exits 1. |
-| **Measured total (6 of 6 families)** | **535** | **1,217** | |
+| `weakref` | 169 | 183 | All 46 WeakSet originals and 123 weakref originals passed. The added finalizer test ran its real shutdown child on stock and at both native levels. |
+| **Measured total (6 of 6 families)** | **553** | **1,217** |  |
 
 ## Design
 
