@@ -6,11 +6,7 @@ impl Checker<'_> {
     pub(super) fn zipfile_constructor(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
         let args = call.arguments.args.as_ref();
         if args.len() > 2 {
-            return Err(error(
-                self.source,
-                call,
-                "ZipFile supports a file and a literal read mode",
-            ));
+            return Err(self.scoped_builtin_error("zipfile.ZipFile", call));
         }
         let mut file = args.first();
         let mut mode = args.get(1);
@@ -19,22 +15,14 @@ impl Checker<'_> {
                 Some("file") if file.is_none() => file = Some(&keyword.value),
                 Some("mode") if mode.is_none() => mode = Some(&keyword.value),
                 _ => {
-                    return Err(error(
-                        self.source,
-                        keyword,
-                        "unsupported or repeated ZipFile argument",
-                    ));
+                    return Err(self.scoped_builtin_error("zipfile.ZipFile", call));
                 }
             }
         }
         if let Some(mode) = mode
             && !matches!(mode, ast::Expr::StringLiteral(literal) if literal.value.to_str() == "r")
         {
-            return Err(error(
-                self.source,
-                mode,
-                "ZipFile supports literal read mode 'r'",
-            ));
+            return Err(self.scoped_builtin_error("zipfile.ZipFile", call));
         }
         let file = file.ok_or_else(|| error(self.source, call, "ZipFile requires a file"))?;
         let value = self.expr(file)?;

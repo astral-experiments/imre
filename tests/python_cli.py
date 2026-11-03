@@ -1622,6 +1622,12 @@ def main():
             message = f"can't find '__main__' module in '{root / 'empty_entry'}'"
             assert missing.returncode == 1 and missing.stderr.decode().rstrip().endswith(message)
 
+        compare("-IB", "-c", r"""import zipfile
+with zipfile.ZipFile('stored.zip', 'w') as archive:
+    archive.writestr('wheel/data', b'\x00\xff')
+with zipfile.ZipFile('stored.zip') as archive:
+    print(archive.namelist(), archive.read('wheel/data'))""")
+
         archive = root / "application"
         with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as app:
             for prefix in ("", "sub/"):
