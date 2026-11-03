@@ -264,22 +264,24 @@ fn reduce_without_newargs(
 }
 
 fn default_reduction(ctx: &mut Context, obj: Id, protocol: i32) -> Result<Id> {
-    if !matches!(ctx.heap.get(obj), Value::DirEntry(_)) {
-        return default_instance_reduce(ctx, obj, protocol);
+    match ctx.heap.get(obj) {
+        Value::DirEntry(_) if protocol < 2 => {
+            // copyreg's legacy reducer records the class even when its instances cannot be created.
+            let copyreg = ctx.module("copyreg")?;
+            let reconstructor = ctx.lookup_attr(copyreg, "_reconstructor")?;
+            let class = ctx.exact_type(obj)?;
+            let base = ctx.builtin("object");
+            let args = ctx.alloc(Value::Tuple(vec![class, base, NONE]));
+            Ok(ctx.alloc(Value::Tuple(vec![reconstructor, args])))
+        }
+        Value::DirEntry(_) | Value::ClassMethod { .. } | Value::StaticMethod { .. } => {
+            Err(Error::new(
+                "TypeError",
+                format!("cannot pickle '{}' object", ctx.type_name(obj)),
+            ))
+        }
+        _ => default_instance_reduce(ctx, obj, protocol),
     }
-    if protocol >= 2 {
-        return Err(Error::new(
-            "TypeError",
-            format!("cannot pickle '{}' object", ctx.type_name(obj)),
-        ));
-    }
-    // copyreg's legacy reducer records the class even when its instances cannot be created.
-    let copyreg = ctx.module("copyreg")?;
-    let reconstructor = ctx.lookup_attr(copyreg, "_reconstructor")?;
-    let class = ctx.exact_type(obj)?;
-    let base = ctx.builtin("object");
-    let args = ctx.alloc(Value::Tuple(vec![class, base, NONE]));
-    Ok(ctx.alloc(Value::Tuple(vec![reconstructor, args])))
 }
 
 /// Delegate to the instance hook only when its class overrides object's reducer.
