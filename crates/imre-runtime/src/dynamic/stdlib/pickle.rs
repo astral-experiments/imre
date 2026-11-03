@@ -220,7 +220,8 @@ fn default_instance_reduce(ctx: &mut Context, receiver: Id, protocol: i32) -> Re
     let cursor = ctx
         .allocation_base(class)
         .and_then(|base| ctx.itertools_layout(base).map(|name| (base, name)));
-    if cursor.is_some() || ctx.namedtuple_fields(class).is_some() {
+    if class == ctx.builtin("object") || cursor.is_some() || ctx.namedtuple_fields(class).is_some()
+    {
         return native_layout_reduce(ctx, receiver, class, protocol, cursor);
     }
     // A native base may have state beyond the Python dictionary and slots.

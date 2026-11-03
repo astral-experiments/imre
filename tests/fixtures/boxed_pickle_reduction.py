@@ -385,6 +385,12 @@ def check_object_reducer():
     import copy
     import copyreg
 
+    plain = object()
+    assert plain.__reduce_ex__(0) == (copyreg._reconstructor, (object, object, None))
+    assert plain.__reduce_ex__(4) == (copyreg.__newobj__, (object,), None, None, None)
+    first, second = copy.deepcopy([plain, plain])
+    assert type(first) is object and first is second and first is not plain
+
     class Legacy:
         def __getnewargs__(self):
             raise AssertionError("legacy reduction requested new arguments")
