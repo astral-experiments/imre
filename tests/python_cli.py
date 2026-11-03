@@ -1692,6 +1692,20 @@ def main():
         )
         compare("-B", tokenize_script)
 
+        config_script = root / "config_entry.py"
+        config_script.write_text(
+            "from configparser import ConfigParser\n"
+            "config = ConfigParser()\n"
+            "config.read_string('[DEFAULT]\\nroot=/opt\\n[app]\\npath=%(root)s/bin')\n"
+            "print(config['app']['path'])\n"
+        )
+        config_env = {"IMREFLAGS": "--opt-level 0"}
+        compare("-B", config_script, extra=config_env, native_timeout=600)
+        compare(
+            "-B", "-c", "import sys; print(__import__(sys.argv[1]).ConfigParser.__name__)",
+            "configparser", extra=config_env, native_timeout=600,
+        )
+
         ftp_script = root / "ftp_entry.py"
         ftp_script.write_text("import ftplib\nprint(ftplib.FTP().encoding, ftplib.parse257('257 \"home\"'))\n")
         compare("-B", ftp_script)
