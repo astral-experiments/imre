@@ -1759,6 +1759,40 @@ impl Context {
         self.alloc(Value::MappingProxy(dictionary))
     }
 
+    /// The own members of object use the same interned descriptors as attribute lookup.
+    fn raw_object_member(&mut self, name: &str) -> Option<Id> {
+        if crate::objects::OBJECT_METHODS.contains(&name) || name == "__class__" {
+            return Some(self.builtin(&format!("object.{name}")));
+        }
+        if name == "__doc__" {
+            let doc = self.builtins.get("object.__doc__").copied().unwrap_or_else(|| {
+                let doc = self.text(Self::OBJECT_DOC);
+                self.builtins.insert("object.__doc__".to_owned(), doc);
+                doc
+            });
+            return Some(doc);
+        }
+        None
+    }
+
+    fn object_dictionary(&mut self) -> Id {
+        let dict = if let Some(&dict) = self.builtins.get("object.__dict__") {
+            dict
+        } else {
+            let mut entries = Vec::new();
+            for name in crate::objects::OBJECT_METHODS.iter().copied().chain(["__class__", "__doc__"]) {
+                let value = self.raw_object_member(name).unwrap();
+                entries.push((self.heap.code_name(name), value));
+            }
+            let dict = self.dict(entries);
+            self.builtins.insert("object.__dict__".into(), dict);
+            dict
+        };
+        self.alloc(Value::MappingProxy(dict))
+    }
+
+    const OBJECT_DOC: &'static str = "The base class of the class hierarchy.\n\nWhen called, it accepts no arguments and returns a new featureless\ninstance that has no instance attributes and cannot be given any.\n";
+
     /// Expose the implemented members of an immutable native type through ordinary class lookup.
     fn native_class_dictionary(
         &mut self,
@@ -2222,7 +2256,7 @@ impl Context {
                 defaultdict::METHODS
             }
             "list" => builtins::LIST_METHODS,
-            "method_descriptor" | "wrapper_descriptor" => &["__get__"],
+            "method_descriptor" | "wrapper_descriptor" | "classmethod_descriptor" => &["__get__"],
             "tuple" => &["__repr__", "__getitem__", "__len__", "count", "index"],
             "set" | "frozenset" => builtins::set_methods(name),
             "bytearray" => {

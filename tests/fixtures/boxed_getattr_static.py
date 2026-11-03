@@ -119,4 +119,42 @@ except AttributeError as error:
     assert error.args == ("readonly attribute",)
 else:
     raise AssertionError("namespace dictionary was replaced")
+namespace = vars(object)
+assert type(namespace).__name__ == "mappingproxy"
+assert "__dict__" not in namespace
+assert object.__class__ is type and Child.__class__ is type(Child)
+assert namespace["__class__"] is class_field
+assert namespace["__delattr__"] is object.__delattr__ is Child.__delattr__
+class Ordinary:
+    pass
+
+
+assert Ordinary.__class__ is type
+ordinary = Ordinary()
+ordinary.marker = 42
+bound = ordinary.__delattr__
+assert type(bound).__name__ == "method-wrapper" and bound.__self__ is ordinary
+bound("marker")
+assert not hasattr(ordinary, "marker")
+assert namespace["__eq__"](item, item) is True
+assert namespace["__eq__"](item, Child()) is NotImplemented
+assert namespace["__ge__"](item, item) is NotImplemented
+hook = namespace["__subclasshook__"]
+assert type(hook).__name__ == "classmethod_descriptor"
+assert hook.__get__(None, Child).__self__ is Child
+assert Child.__subclasshook__(Base) is NotImplemented
+assert object.__dir__(object()) == list(namespace)
+ordinary.z_last = 1
+ordinary.a_first = 2
+directory = namespace["__dir__"](ordinary)
+expected = list(dict.fromkeys([*vars(ordinary), *vars(Ordinary), *namespace]))
+assert type(directory) is list and directory == expected
+assert dir(ordinary) == sorted(expected)
+assert ordinary.__dir__() == directory and ordinary.__dir__() is not directory
+try:
+    namespace["missing"] = 3
+except TypeError:
+    pass
+else:
+    raise AssertionError("object namespace was writable")
 print("static attributes")

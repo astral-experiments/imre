@@ -1443,6 +1443,11 @@ pub(super) fn call(
             | "object.__repr__"
             | "object.__str__"
             | "object.__ne__"
+            | "object.__eq__"
+            | "object.__lt__"
+            | "object.__le__"
+            | "object.__gt__"
+            | "object.__ge__"
             | "mappingproxy.__lt__"
             | "mappingproxy.__le__"
             | "mappingproxy.__eq__"
@@ -1487,6 +1492,9 @@ pub(super) fn call(
                 )));
             };
             if owner == "object" {
+                if method != "__ne__" {
+                    return Ok(if method == "__eq__" && receiver == *other { TRUE } else { NOT_IMPLEMENTED });
+                }
                 return ctx.with_slot_depth(
                     "maximum recursion depth exceeded while calling a Python object",
                     |ctx| ctx.object_ne(receiver, *other),
@@ -1551,23 +1559,45 @@ pub(super) fn call(
         }
         return Ok(ctx.int(Context::identity_hash(receiver)));
     }
-    if name == "object.__init_subclass__" {
-        let [class, rest @ ..] = args else {
-            return Err(type_error("missing class for __init_subclass__"));
+    if name == "object.__dir__" {
+        let [receiver, rest @ ..] = args else {
+            return Err(type_error("unbound method object.__dir__() needs an argument"));
         };
+        if !kwargs.is_empty() {
+            return Err(type_error("object.__dir__() takes no keyword arguments"));
+        }
+        if !rest.is_empty() {
+            return Err(type_error(format!("object.__dir__() takes no arguments ({} given)", rest.len())));
+        }
+        let directory = dir::namespace_directory(ctx, *receiver, true)?;
+        let keys = ctx.dict_entries(directory).unwrap().iter().map(|&(key, _)| key).collect();
+        return Ok(ctx.alloc(Value::List(keys)));
+    }
+    if matches!(name, "object.__init_subclass__" | "object.__subclasshook__") {
+        let method = name.strip_prefix("object.").unwrap();
+        let [class, rest @ ..] = args else {
+            return Err(type_error(format!("descriptor '{method}' of 'object' object needs an argument")));
+        };
+        super::stdlib::datetime::validate_classmethod_receiver(ctx, "object", method, *class)?;
         if !kwargs.is_empty() {
             let name = ctx
                 .own_class_attr(*class, "__qualname__")
                 .and_then(|id| ctx.str_value(id).ok())
                 .unwrap_or_else(|| ctx.class_name(*class));
             return Err(type_error(format!(
-                "{name}.__init_subclass__() takes no keyword arguments"
+                "{name}.{method}() takes no keyword arguments"
             )));
+        }
+        if method == "__subclasshook__" {
+            if rest.len() != 1 {
+                return Err(type_error(format!("{}.{method}() takes exactly one argument ({} given)", ctx.class_name(*class), rest.len())));
+            }
+            return Ok(NOT_IMPLEMENTED);
         }
         if !rest.is_empty() {
             return Err(type_error(format!(
-                "{}.__init_subclass__() takes no arguments",
-                ctx.class_name(*class)
+                "{}.__init_subclass__() takes no arguments ({} given)",
+                ctx.class_name(*class), rest.len()
             )));
         }
         return Ok(NONE);
