@@ -1,7 +1,7 @@
 import inspect
-from functools import partial, update_wrapper
+from functools import partial, partialmethod, update_wrapper
 from inspect import CO_ASYNC_GENERATOR, CO_COROUTINE, CO_GENERATOR
-from inspect import cleandoc, iscoroutinefunction, markcoroutinefunction
+from inspect import cleandoc, isasyncgenfunction, iscoroutinefunction, markcoroutinefunction
 
 
 assert inspect.cleandoc is cleandoc
@@ -86,3 +86,53 @@ plain.__code__ = view.__code__
 print(iscoroutinefunction(plain), iscoroutinefunction(alias))
 plain.__code__ = saved
 print(iscoroutinefunction(plain), iscoroutinefunction(alias))
+
+# Inspect the executable code flag without calling the function.
+def sync_generator():
+    yield 1
+
+
+async def nested_only():
+    def inner():
+        yield 1
+
+
+class Sources:
+    async def events(self, first):
+        yield first
+
+    first = partialmethod(events, 1)
+
+
+class FunctionLike:
+    __name__ = "events"
+    __code__ = Sources.events.__code__
+    __defaults__ = None
+    __kwdefaults__ = None
+
+    def __call__(self):
+        raise AssertionError("inspection called a function-like object")
+
+
+assert inspect.isasyncgenfunction is isasyncgenfunction
+flags = CO_ASYNC_GENERATOR | CO_COROUTINE | CO_GENERATOR
+assert async_generator.__code__.co_flags & flags == CO_ASYNC_GENERATOR
+assert nested_only.__code__.co_flags & flags == CO_COROUTINE
+assert sync_generator.__code__.co_flags & flags == CO_GENERATOR
+sources = Sources()
+for obj in (async_generator, Sources.events, sources.events, partial(partial(sources.events), 1),
+            Sources.first, sources.first, vars(Sources)["first"], FunctionLike()):
+    assert isasyncgenfunction(obj=obj)
+for obj in (view, sync_generator, nested_only, marked_factory, factory, FunctionLike, 1):
+    assert not isasyncgenfunction(obj)
+duck = FunctionLike()
+duck.__defaults__ = []
+assert not isasyncgenfunction(duck)
+
+saved = plain.__code__
+plain.__code__ = async_generator.__code__
+assert isasyncgenfunction(plain) and isasyncgenfunction(alias)
+assert not iscoroutinefunction(plain)
+plain.__code__ = saved
+assert not isasyncgenfunction(plain) and not isasyncgenfunction(alias)
+print("async generator function flags")

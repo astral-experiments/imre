@@ -19,7 +19,10 @@ pub(super) fn coroutine_method(owner: &str, name: &str) -> bool {
     match owner {
         "coroutine" => matches!(name, "send" | "throw" | "close" | "__await__"),
         "coroutine_wrapper" => matches!(name, "send" | "throw" | "close" | "__iter__" | "__next__"),
-        "anext_awaitable" => ANEXT_METHODS.contains(&name),
+        "async_generator" => super::async_generator::METHODS.contains(&name),
+        "async_generator_asend" | "async_generator_athrow" | "anext_awaitable" => {
+            ANEXT_METHODS.contains(&name)
+        }
         _ => false,
     }
 }
@@ -52,6 +55,10 @@ impl Context {
     }
 
     pub(super) fn set_generator_name(&mut self, obj: Id, field: &str, value: Id) -> Result<()> {
+        let obj = match *self.heap.get(obj) {
+            Value::AsyncGenerator { frame, .. } => frame,
+            _ => obj,
+        };
         if !matches!(self.heap.get(self.scalar_value(value)), Value::Str(_)) {
             return Err(Error::new(
                 "TypeError",
@@ -89,10 +96,15 @@ impl Context {
     /// Obtain the iterator for one awaitable, including a coroutine already driven by its owner.
     fn get_await_iterator(&mut self, awaitable: Id, context_method: Option<&str>) -> Result<Id> {
         if matches!(self.heap.get(awaitable), Value::Coroutine { .. }) {
-            return Ok(self.alloc(Value::CoroutineWrapper(awaitable)));
+            return Ok(self.alloc(Value::CoroutineWrapper {
+                coroutine: awaitable,
+                implicit: true,
+            }));
         }
-        if matches!(self.heap.get(awaitable), Value::ANextAwaitable { .. })
-            || self.is_generator_coroutine(awaitable)
+        if matches!(
+            self.heap.get(awaitable),
+            Value::ANextAwaitable { .. } | Value::AsyncGeneratorOp(_)
+        ) || self.is_generator_coroutine(awaitable)
         {
             return Ok(awaitable);
         }
@@ -177,7 +189,7 @@ impl Context {
         let receiver = args[0];
         let coroutine = match (owner, self.heap.get(receiver)) {
             ("coroutine", Value::Coroutine { .. }) => receiver,
-            ("coroutine_wrapper", Value::CoroutineWrapper(coroutine)) => *coroutine,
+            ("coroutine_wrapper", Value::CoroutineWrapper { coroutine, .. }) => *coroutine,
             _ => {
                 return Err(Error::new(
                     "TypeError",
@@ -192,7 +204,12 @@ impl Context {
             unreachable!("coroutine receiver")
         };
         match method {
-            "__await__" => return Ok(self.alloc(Value::CoroutineWrapper(coroutine))),
+            "__await__" => {
+                return Ok(self.alloc(Value::CoroutineWrapper {
+                    coroutine,
+                    implicit: false,
+                }));
+            }
             "__iter__" => return Ok(receiver),
             _ => {}
         }
@@ -278,9 +295,11 @@ impl Context {
                 .lookup_attr(iter, "send")
                 .and_then(|method| self.call(method, vec![value], Vec::new()))
                 .map(Some),
-            GeneratorInput::Throw { error, .. }
-                if self.is_builtin_error(&error, "GeneratorExit") =>
-            {
+            GeneratorInput::Throw {
+                error,
+                close_delegate: true,
+                ..
+            } if self.is_builtin_error(&error, "GeneratorExit") => {
                 match self.lookup_attr(iter, "close") {
                     Ok(method) => {
                         self.call(method, Vec::new(), Vec::new())?;
@@ -290,7 +309,7 @@ impl Context {
                 }
                 return Err(error);
             }
-            GeneratorInput::Throw { error, args } => {
+            GeneratorInput::Throw { error, args, .. } => {
                 let method = match self.lookup_attr(iter, "throw") {
                     Ok(method) => method,
                     Err(missing) if self.is_attribute_error(&missing) => return Err(error),
@@ -310,6 +329,16 @@ impl Context {
     }
 
     pub(super) fn generator_throw(&mut self, id: Id, args: &[Id]) -> Result<Id> {
+        self.throw_into_frame(id, args, true)?
+            .ok_or_else(|| self.exception("StopIteration", &[]))
+    }
+
+    pub(super) fn throw_into_frame(
+        &mut self,
+        id: Id,
+        args: &[Id],
+        close_delegate: bool,
+    ) -> Result<Option<Id>> {
         let mut error = self.generator_exception(args)?;
         let Value::Generator {
             code,
@@ -366,9 +395,9 @@ impl Context {
             GeneratorInput::Throw {
                 error,
                 args: super::copy_ids(args)?,
+                close_delegate,
             },
-        )?
-        .ok_or_else(|| self.exception("StopIteration", &[]))
+        )
     }
 
     pub(super) fn generator_close(&mut self, id: Id) -> Result<Id> {
@@ -405,6 +434,7 @@ impl Context {
             GeneratorInput::Throw {
                 error: exit,
                 args: Vec::new(),
+                close_delegate: true,
             },
         ) {
             Ok(None) => Ok(NONE),

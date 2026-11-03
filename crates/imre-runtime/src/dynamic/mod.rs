@@ -3,6 +3,7 @@
 
 mod abstract_class;
 mod array;
+mod async_generator;
 mod atexit;
 mod builtins;
 mod calls;
@@ -668,7 +669,8 @@ impl Context {
                 | Value::CallableIterator(_)
                 | Value::FormatIterator { .. }
                 | Value::Generator { .. }
-                | Value::CoroutineWrapper(_)
+                | Value::CoroutineWrapper { .. }
+                | Value::AsyncGeneratorOp(_)
                 | Value::ANextAwaitable { .. }
                 | Value::BufferedRandom(..)
                 | Value::File(_)
@@ -831,7 +833,8 @@ impl Context {
                 | Value::Filter { .. }
                 | Value::Zip { .. }
                 | Value::Generator { .. }
-                | Value::CoroutineWrapper(_)
+                | Value::CoroutineWrapper { .. }
+                | Value::AsyncGeneratorOp(_)
                 | Value::ANextAwaitable { .. }
                 | Value::BufferedRandom(..)
                 | Value::File(_)
@@ -1136,10 +1139,13 @@ impl Context {
             }
             return self.with_weak_target(target, |ctx| ctx.next_item(target));
         }
+        if matches!(self.heap.get(id), Value::AsyncGeneratorOp(_)) {
+            return self.drive_async_generator_op(id, NONE, None).map(Some);
+        }
         if matches!(self.heap.get(id), Value::ANextAwaitable { .. }) {
             return self.call_anext_method("__next__", &[id]).map(Some);
         }
-        if matches!(self.heap.get(id), Value::CoroutineWrapper(_)) {
+        if matches!(self.heap.get(id), Value::CoroutineWrapper { .. }) {
             return self
                 .call_coroutine_method("coroutine_wrapper", "__next__", &[id])
                 .map(Some);
@@ -1424,6 +1430,7 @@ impl Context {
             self.heap.get(id),
             Value::AstWalk { .. }
                 | Value::Template { .. }
+                | Value::AsyncGeneratorOp(_)
                 | Value::ANextAwaitable { .. }
                 | Value::TemplateIter { .. }
                 | Value::GenericAliasIterator(_)

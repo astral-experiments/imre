@@ -14,6 +14,9 @@ fn nonconstructible_result_type(name: &str) -> bool {
             | HashState::OPENSSL_CLASS
             | KEY_WRAPPER
             | "anext_awaitable"
+            | "async_generator"
+            | "async_generator_asend"
+            | "async_generator_athrow"
             | value::REGEX_PATTERN_TYPE
             | value::REGEX_MATCH_TYPE
             | value::REGEX_SCANNER_TYPE
@@ -749,6 +752,11 @@ impl Context {
     }
 
     pub(super) fn bound_slot(&mut self, object: Id, name: &str) -> Result<Option<Id>> {
+        if matches!(self.heap.get(object), Value::AsyncGenerator { .. })
+            && matches!(name, "__aiter__" | "__anext__")
+        {
+            return self.lookup_attr(object, name).map(Some);
+        }
         if name == "__repr__"
             && matches!(self.heap.get(object), Value::Weak(wr) if wr.kind == weakref::Kind::Reference)
         {
@@ -1370,6 +1378,7 @@ impl Context {
                             | "float"
                             | "code"
                             | "coroutine"
+                            | "async_generator"
                             | "cell"
                             | "function"
                             | "module"
@@ -2842,6 +2851,24 @@ impl Context {
                 }
                 _ => {}
             },
+            Value::AsyncGenerator {frame, running, ..} => {
+                let Value::Generator {name: simple, qualname, code, offset, running: executing, ..} = *self.heap.get(frame) else { unreachable!() };
+                match name {
+                    "__name__" => return Ok(simple),
+                    "__qualname__" => return Ok(qualname),
+                    "ag_await" => return Ok(self.async_generator_await(frame)),
+                    "ag_suspended" => return Ok(builtins::boolean(!executing && offset.is_some_and(|ip| ip != 0))),
+                    "ag_running" => return Ok(builtins::boolean(running)),
+                    "ag_code" | "ag_frame" => {
+                        if !self.audit_hooks.is_empty() {
+                            let attribute = self.text(name);
+                            stdlib::audit::event(self, "object.__getattr__", &[obj, attribute])?;
+                        }
+                        return if name == "ag_code" { Ok(code) } else { self.generator_frame(frame) };
+                    }
+                    _ => {}
+                }
+            }
             Value::Coroutine { origin, .. } if name == "cr_origin" => return Ok(origin),
             Value::Native(ref class) if class == "coroutine" && name == "cr_origin" => {
                 return Ok(self.readonly_member("coroutine", "cr_origin"));
@@ -4485,7 +4512,7 @@ impl Context {
     pub(super) fn default_delete_attr(&mut self, obj: Id, name: &str) -> Result<()> {
         self.check_immutable_type_write(obj, name)?;
         if matches!(name, "__name__" | "__qualname__")
-            && matches!(self.heap.get(obj), Value::Generator { .. })
+            && matches!(self.heap.get(obj), Value::Generator { .. } | Value::AsyncGenerator { .. })
         {
             return self.set_generator_name(obj, name, NONE);
         }
@@ -5132,7 +5159,7 @@ impl Context {
     pub(super) fn default_set_attr(&mut self, obj: Id, name: &str, value: Id) -> Result<()> {
         self.check_immutable_type_write(obj, name)?;
         if matches!(name, "__name__" | "__qualname__")
-            && matches!(self.heap.get(obj), Value::Generator { .. })
+            && matches!(self.heap.get(obj), Value::Generator { .. } | Value::AsyncGenerator { .. })
         {
             return self.set_generator_name(obj, name, value);
         }
@@ -6155,6 +6182,9 @@ impl Context {
                                 | "generator"
                                 | "coroutine"
                                 | "coroutine_wrapper"
+                                | "async_generator"
+                                | "async_generator_asend"
+                                | "async_generator_athrow"
                                 | "anext_awaitable"
                                 | "dict"
                                 | "list"

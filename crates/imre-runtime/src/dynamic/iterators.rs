@@ -137,11 +137,18 @@ impl Context {
 
     /// Preserve an escaping StopIteration as the cause and context of the frame's RuntimeError.
     pub(super) fn frame_error(&mut self, error: Error, code: Id) -> Error {
-        if !self.is_stop_iteration(&error) {
+        let async_generator =
+            self.code_object(code).flags & imre_ast::code_flags::ASYNC_GENERATOR != 0;
+        let async_stop = async_generator && self.is_builtin_error(&error, "StopAsyncIteration");
+        if !async_stop && !self.is_stop_iteration(&error) {
             return error;
         }
         let cause = self.raised_instance(error);
-        let message = if self.code_object(code).coroutine {
+        let message = if async_stop {
+            "async generator raised StopAsyncIteration"
+        } else if async_generator {
+            "async generator raised StopIteration"
+        } else if self.code_object(code).coroutine {
             "coroutine raised StopIteration"
         } else {
             "generator raised StopIteration"

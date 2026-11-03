@@ -1002,7 +1002,18 @@ pub(super) enum Value {
         frame: Id,
         origin: Id,
     },
-    CoroutineWrapper(Id),
+    CoroutineWrapper {
+        coroutine: Id,
+        implicit: bool,
+    },
+    AsyncGenerator {
+        frame: Id,
+        running: bool,
+        closed: bool,
+        finalizer: Option<Id>,
+    },
+    AsyncGeneratorOp(super::async_generator::Operation),
+    AsyncGeneratorYield(Id),
     ANextAwaitable {
         wrapped: Id,
         default: Id,
@@ -1355,7 +1366,10 @@ impl Value {
             Self::Cell(_) => "cell",
             Self::Generator { .. } => "generator",
             Self::Coroutine { .. } => "coroutine",
-            Self::CoroutineWrapper(_) => "coroutine_wrapper",
+            Self::CoroutineWrapper { .. } => "coroutine_wrapper",
+            Self::AsyncGenerator { .. } => "async_generator",
+            Self::AsyncGeneratorOp(op) => op.class(),
+            Self::AsyncGeneratorYield(_) => "async_generator_wrapped_value",
             Self::ANextAwaitable { .. } => "anext_awaitable",
             Self::NoDefault => "NoDefaultType",
             Self::TypeAlias { .. } => "typing.TypeAliasType",
@@ -1615,7 +1629,15 @@ impl Value {
             }
             Self::Cell(value) => visit.extend(value),
             Self::Coroutine { frame, origin } => visit.extend([*frame, *origin]),
-            Self::CoroutineWrapper(coroutine) => visit.push(*coroutine),
+            Self::CoroutineWrapper { coroutine, .. } => visit.push(*coroutine),
+            Self::AsyncGenerator {
+                frame, finalizer, ..
+            } => {
+                visit.push(*frame);
+                visit.extend(*finalizer);
+            }
+            Self::AsyncGeneratorYield(value) => visit.push(*value),
+            Self::AsyncGeneratorOp(op) => op.trace(visit),
             Self::ANextAwaitable { wrapped, default } => visit.extend([*wrapped, *default]),
             Self::Function {
                 closure,
