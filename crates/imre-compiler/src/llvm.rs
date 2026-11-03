@@ -4098,7 +4098,7 @@ impl Emitter<'_, '_> {
                 ..value
             };
         }
-        if let Some(value) = self.rsplit_last(builtin, expressions) {
+        if let Some(value) = self.selected_split(builtin, expressions) {
             return value;
         }
         // Truth consumes immediately and cannot rebind the slot. Transfer the
@@ -9527,6 +9527,7 @@ declare i32 @imre_str_get_part(ptr, i64, ptr, ptr)
 declare ptr @imre_int_str_part(i64, ptr, ptr)
 declare ptr @imre_str_split_whitespace(ptr)
 declare ptr @imre_str_split(ptr, ptr, i64, i32)
+declare ptr @imre_str_split_first(ptr, ptr)
 declare ptr @imre_str_rsplit_last(ptr, ptr)
 declare ptr @imre_str_unquote_rsplit_last(ptr, ptr)
 declare ptr @imre_str_strip(ptr, ptr, i32)

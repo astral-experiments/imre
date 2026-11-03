@@ -668,18 +668,25 @@ impl Expr {
         }
     }
 
-    /// Arguments of an explicit right split with a single split and final-field access.
-    pub(crate) fn last_rsplit_args(&self, index: &Self) -> Option<&[Expr]> {
-        let ExprKind::Builtin(Builtin::Text(TextOperation::Split(true)), args) = &self.kind else {
+    /// A single explicit split whose immediately selected field is its prefix
+    /// (`split(sep, 1)[0]`) or its suffix (`rsplit(sep, 1)[-1]`).
+    pub(crate) fn selected_split_args(&self, index: &Self) -> Option<(bool, &[Expr])> {
+        let ExprKind::Builtin(Builtin::Text(TextOperation::Split(reverse)), args) = &self.kind
+        else {
             return None;
         };
         let [_, separator, limit] = args.as_slice() else {
             return None;
         };
-        (matches!(separator.kind, ExprKind::Present(_))
-            && matches!(&limit.kind, ExprKind::Int(n) if n == "1")
-            && matches!(&index.kind, ExprKind::Negate(one) if matches!(&one.kind, ExprKind::Int(n) if n == "1")))
-            .then_some(args)
+        let selected = if *reverse {
+            matches!(&index.kind, ExprKind::Negate(one) if matches!(&one.kind, ExprKind::Int(n) if n == "1"))
+        } else {
+            matches!(&index.kind, ExprKind::Int(n) if n == "0")
+        };
+        (selected
+            && matches!(separator.kind, ExprKind::Present(_))
+            && matches!(&limit.kind, ExprKind::Int(n) if n == "1"))
+        .then_some((*reverse, args))
     }
 }
 
