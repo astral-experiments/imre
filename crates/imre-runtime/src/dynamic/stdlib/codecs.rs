@@ -535,7 +535,7 @@ fn box_native_entry(ctx: &mut Context, entry: CodecInfo) -> Result<Id> {
     };
     let module = ctx.module(&format!("encodings.{suffix}"))?;
     // Keep the pending constructor arguments across Python-visible module lookups.
-    ctx.heap.reserve_temporaries(5)?;
+    ctx.heap.reserve_temporaries(6)?;
     ctx.heap.keep(module);
     let codecs = ctx.lookup_attr(module, "codecs")?;
     let class = ctx.lookup_attr(codecs, "CodecInfo")?;
@@ -561,12 +561,19 @@ fn box_native_entry(ctx: &mut Context, entry: CodecInfo) -> Result<Id> {
     };
     ctx.heap.keep(encode);
     ctx.heap.keep(decode);
-    let name = ctx.text(codec.name());
-    // getregentry resolves IncrementalDecoder as a global in its encoding module.
-    let incremental = match *ctx.heap.get(module) {
-        Value::Module { scope, .. } => ctx.lookup(scope, "IncrementalDecoder")?,
-        _ => ctx.lookup_attr(module, "IncrementalDecoder")?,
+    // getregentry resolves the factories as globals in the encoding module.
+    let factory = |ctx: &mut Context, name: &str| match *ctx.heap.get(module) {
+        Value::Module { scope, .. } => ctx.lookup(scope, name),
+        _ => ctx.lookup_attr(module, name),
     };
+    let encoder = if matches!(codec, Codec::Utf8 { signature: false }) {
+        factory(ctx, "IncrementalEncoder")?
+    } else {
+        NONE
+    };
+    ctx.heap.keep(encoder);
+    let decoder = factory(ctx, "IncrementalDecoder")?;
+    let name = ctx.text(codec.name());
     let id = ctx.call(
         class,
         Vec::new(),
@@ -574,8 +581,8 @@ fn box_native_entry(ctx: &mut Context, entry: CodecInfo) -> Result<Id> {
             ("name".into(), name),
             ("encode".into(), encode),
             ("decode".into(), decode),
-            ("incrementalencoder".into(), NONE),
-            ("incrementaldecoder".into(), incremental),
+            ("incrementalencoder".into(), encoder),
+            ("incrementaldecoder".into(), decoder),
             ("streamreader".into(), NONE),
             ("streamwriter".into(), writer),
         ],
