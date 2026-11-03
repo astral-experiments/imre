@@ -6207,12 +6207,16 @@ impl Context {
     /// The first non-Python base owns the instance layout. Native classes
     /// represented with a class namespace (e.g. BytesIO) have no Python class cell.
     pub(super) fn allocation_base(&self, class: Id) -> Option<Id> {
+        if self.builtins.get("typing.Any") == Some(&class) {
+            return self.builtins.get("object").copied();
+        }
         self.find_in_mro(class, |base| self.owns_allocation(base).then_some(base))
     }
 
     fn owns_allocation(&self, base: Id) -> bool {
         match self.heap.get(base) {
-            Value::Native(_) => true,
+            // Any is a Python class with ordinary instance storage despite its native identity.
+            Value::Native(name) => name != "typing.Any",
             Value::Class { .. } if self.itertools_layout(base).is_some() => true,
             // These bootstrapped classes inherit their allocator from the next base.
             Value::Class { name, scope, .. } => {

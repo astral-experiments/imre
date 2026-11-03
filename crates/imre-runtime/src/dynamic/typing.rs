@@ -1480,7 +1480,10 @@ pub(super) fn attribute(ctx: &mut Context, value: Id, name: &str) -> Option<Resu
         && let Some(&dictionary) = ctx.native_type_dicts.get(&value)
         && let Some(member) = ctx.dict_named_item(dictionary, name)
     {
-        return Some(Ok(member));
+        return Some(Ok(match *ctx.heap.get(member) {
+            Value::StaticMethod { callable, .. } => callable,
+            _ => member,
+        }));
     }
     let attr = match ctx.heap.get(value) {
         Value::Native(class)
@@ -2680,6 +2683,24 @@ pub(super) fn call(
         },
         ("_eval_type_expression", [text, globals, locals]) => {
             ctx.eval_type_expression(*text, *globals, *locals)
+        }
+        ("_install_any_namespace", [template]) => {
+            let Value::Class { scope, .. } = *ctx.heap.get(*template) else {
+                return Err(Error::new("TypeError", "expected a class"));
+            };
+            let class = ctx.builtin("typing.Any");
+            let dictionary = ctx.class_namespace_dict(scope, false);
+            // The constructor's super() and instance layout descriptors belong to the public class.
+            if let Some(cell) = ctx.scope_data(scope).class_cell {
+                ctx.heap.replace_cell(cell, Some(class));
+            }
+            for name in ["__dict__", "__weakref__"] {
+                let key = ctx.heap.code_name(name);
+                let descriptor = ctx.alloc(Value::LayoutDescriptor(class, name));
+                ctx.put_item(dictionary, key, descriptor)?;
+            }
+            ctx.native_type_dicts.insert(class, dictionary);
+            Ok(class)
         }
         // Keep the source method (and its defining globals) on the native alias class.
         ("_install_generic_alias_iter", [methods]) => {
