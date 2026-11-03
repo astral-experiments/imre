@@ -4417,9 +4417,10 @@ impl Context {
                 return Ok(self.builtin(&format!("{class}.{name}")));
             }
             Value::Native(ref class)
-                if class == "enumerate" && matches!(name, "__iter__" | "__next__") =>
+                if matches!(class.as_str(), "list_iterator" | "enumerate")
+                    && matches!(name, "__iter__" | "__next__") =>
             {
-                return Ok(self.builtin(&format!("enumerate.{name}")));
+                return Ok(self.builtin(&format!("{class}.{name}")));
             }
             Value::Native(ref class) if class == "str" && name == "__new__" => {
                 return Ok(self.builtin("str.__new__"));
@@ -6826,6 +6827,7 @@ impl Context {
                                 | "async_generator_athrow"
                                 | "dict"
                                 | "list"
+                                | "list_iterator"
                                 | "map"
                                 | "filter"
                                 | "mappingproxy"

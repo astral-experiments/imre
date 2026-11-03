@@ -672,6 +672,10 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         Value::DictIterator(iter) if DictIterator::methods(iter.class_name()).contains(&attr) => {
             iter.class_name()
         }
+        Value::Iterator {
+            kind: "list_iterator",
+            ..
+        } if matches!(attr, "__iter__" | "__next__") => "list_iterator",
         Value::RangeIterator(iter)
             if matches!(attr, "__iter__" | "__next__" | "__length_hint__") =>
         {
@@ -2104,7 +2108,9 @@ pub(super) fn call(
             "range" | "range_iterator" | "longrange_iterator" => {
                 super::range::method(ctx, owner, method, args, kwargs)
             }
-            "map" | "filter" | "enumerate" => ctx.iterator_method(owner, method, args, kwargs),
+            "list_iterator" | "map" | "filter" | "enumerate" => {
+                ctx.iterator_method(owner, method, args, kwargs)
+            }
             "property" => super::property::method(ctx, method, args, kwargs),
             "function" | "cell" | "mappingproxy" if method == "__new__" => {
                 let Some((&class, args)) = args.split_first() else {
