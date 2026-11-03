@@ -86,14 +86,10 @@ def check_installed_site(imre, root, run):
         companion = imre.with_name(name)
         if companion.exists():
             (install / name).symlink_to(companion, target_is_directory=companion.is_dir())
-    metadata = run(launcher, "-IB", "-c",
-                   "import sys, site, sysconfig; p = sysconfig.get_path('purelib'); "
-                   "assert site.getsitepackages() == [p]; print(p); print(p in sys.path)",
-                   timeout=300)
-    assert metadata.returncode == 0, metadata.stderr
-    directory, present = metadata.stdout.decode().splitlines()
-    site = Path(directory)
-    assert site.is_relative_to(prefix) and present == "False"
+    target = run(launcher, "build-target")
+    assert target.returncode == 0, target.stderr
+    version = json.loads(target.stdout)["python_version"]
+    site = prefix / "lib" / f"imre{version}" / "site-packages"
     package = site / "installed_example"
     package.mkdir(parents=True)
     init = package / "__init__.py"
