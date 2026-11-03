@@ -1402,6 +1402,9 @@ impl Context {
                             | "datetime.timedelta"
                             | "datetime.timezone"
                             | stdlib::datetime::TZINFO
+                            | "socket.socket"
+                            | "struct.Struct"
+                            | "hmac.HMAC"
                             | "collections.defaultdict"
                             | "_contextvars.Context"
                             | "_contextvars.ContextVar"

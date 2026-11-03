@@ -158,7 +158,7 @@ pub(super) fn attribute(ctx: &mut Context, name: &str) -> Result<Id> {
         "close" => Ok(ctx.builtin("_socket.close")),
         "getfqdn" => Ok(ctx.alloc(Value::Native("socket.getfqdn".into()))),
         "error" => Ok(ctx.builtin("OSError")),
-        "timeout" => Ok(ctx.alloc(Value::Native("TimeoutError".into()))),
+        "timeout" => Ok(ctx.builtin("TimeoutError")),
         _ => Err(Error::new(
             "AttributeError",
             format!("module 'socket' has no attribute '{name}'"),
