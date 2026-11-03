@@ -295,6 +295,16 @@ impl Context {
         Ok(child)
     }
 
+    /// Acquire a contiguous source before checking the exporter’s element size.
+    pub(super) fn byte_sized_buffer(&self, input: Id) -> Result<&[u8]> {
+        let span = self.buffer_span(input)?;
+        let data = span.contiguous()?;
+        if span.width != 1 {
+            return Err(Error::new("TypeError", "a bytes-like object is required"));
+        }
+        Ok(data)
+    }
+
     pub(super) fn view_bytes(&self, view: Id) -> Result<&[u8]> {
         self.buffer_span(view)?.contiguous()
     }
