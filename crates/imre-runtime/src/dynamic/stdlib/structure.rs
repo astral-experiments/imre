@@ -4,13 +4,36 @@ use std::rc::Rc;
 use num_traits::ToPrimitive;
 
 use super::{
-    Context, Error, Id, Result, Value,
+    Context, Error, Id, NONE, Result, Value,
     system::{StructFormat, UnpackedField},
 };
 use crate::objects::Codec;
 
-fn format_error(message: impl Into<String>) -> Error {
-    Error::new("struct.error", message)
+/// Keep the exception identity shared by the module, compiled layouts, and native errors.
+pub(in super::super) fn install(ctx: &mut Context, scope: Id) -> Result<()> {
+    let class = if let Some(&class) = ctx.builtins.get("struct.error") {
+        class
+    } else {
+        let fields = ctx.scope("struct", None);
+        let module = ctx.text("struct");
+        ctx.bind(fields, "__module__", module);
+        let qualname = ctx.text("error");
+        ctx.bind(fields, "__qualname__", qualname);
+        ctx.bind(fields, "__doc__", NONE);
+        let base = ctx.builtin("Exception");
+        let class = ctx.allocate_class("error".into(), fields, vec![base])?;
+        ctx.install_weakref_descriptor(class, fields);
+        ctx.builtins.insert("struct.error".into(), class);
+        class
+    };
+    ctx.bind(scope, "error", class);
+    Ok(())
+}
+
+fn format_error(ctx: &Context, message: impl Into<String>) -> Error {
+    let mut error = Error::new("struct.error", message);
+    error.class = ctx.builtins["struct.error"];
+    error
 }
 
 pub(super) fn new(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
@@ -55,7 +78,7 @@ pub(super) fn parse(ctx: &Context, format: Id) -> Result<(&str, StructFormat)> {
             text.as_str()
         }
         Value::Bytes(data) => {
-            std::str::from_utf8(data).map_err(|_| format_error("bad char in struct format"))?
+            std::str::from_utf8(data).map_err(|_| format_error(ctx, "bad char in struct format"))?
         }
         _ => {
             return Err(Error::new(
@@ -68,15 +91,18 @@ pub(super) fn parse(ctx: &Context, format: Id) -> Result<(&str, StructFormat)> {
         }
     };
     if format.contains('\0') {
-        return Err(format_error("embedded null character"));
+        return Err(format_error(ctx, "embedded null character"));
     }
-    Ok((format, StructFormat::parse(format).map_err(format_error)?))
+    Ok((
+        format,
+        StructFormat::parse(format).map_err(|message| format_error(ctx, message))?,
+    ))
 }
 
 pub(super) fn unpack(ctx: &mut Context, layout: &StructFormat, buffer: Id) -> Result<Id> {
     let fields = layout
         .unpack(ctx.bytes_like(buffer)?)
-        .map_err(format_error)?;
+        .map_err(|message| format_error(ctx, message))?;
     let items = fields
         .into_iter()
         .map(|field| match field {
@@ -124,10 +150,13 @@ pub(super) fn method(
 pub(super) fn pack(ctx: &mut Context, layout: &StructFormat, args: &[Id]) -> Result<Id> {
     let count = layout.item_count;
     if args.len() != count {
-        return Err(format_error(format!(
-            "pack expected {count} items for packing (got {})",
-            args.len()
-        )));
+        return Err(format_error(
+            ctx,
+            format!(
+                "pack expected {count} items for packing (got {})",
+                args.len()
+            ),
+        ));
     }
     let mut output = super::super::builtins::zeroed_bytes(layout.size as i64)?;
     for ((code, range), &id) in layout.items().zip(args) {
@@ -136,7 +165,7 @@ pub(super) fn pack(ctx: &mut Context, layout: &StructFormat, args: &[Id]) -> Res
             let (Value::Bytes(bytes) | Value::ByteArray(bytes)) =
                 ctx.heap.get(ctx.scalar_value(id))
             else {
-                return Err(format_error("argument for 's' must be a bytes object"));
+                return Err(format_error(ctx, "argument for 's' must be a bytes object"));
             };
             let length = target.len().min(bytes.len());
             target[..length].copy_from_slice(&bytes[..length]);
@@ -158,7 +187,7 @@ fn double_field(ctx: &mut Context, id: Id) -> Result<f64> {
         return Ok(value);
     }
     let Ok(Some(number)) = super::super::builtins::from_numeric(ctx, id) else {
-        return Err(format_error("required argument is not a float"));
+        return Err(format_error(ctx, "required argument is not a float"));
     };
     let Value::Float(value) = *ctx.heap.get(number) else {
         unreachable!("float conversion returned a non-float")
@@ -167,9 +196,9 @@ fn double_field(ctx: &mut Context, id: Id) -> Result<f64> {
 }
 
 fn integer_field(ctx: &mut Context, id: Id, code: u8, width: usize) -> Result<u64> {
-    let value = ctx
-        .index_value(id)
-        .and_then(|value| value.ok_or_else(|| format_error("required argument is not an integer")));
+    let value = ctx.index_value(id).and_then(|value| {
+        value.ok_or_else(|| format_error(ctx, "required argument is not an integer"))
+    });
     if matches!(code, b'b' | b'i' | b'l') {
         let max = i64::MAX >> ((8 - width) * 8);
         let min = !max;
@@ -187,10 +216,13 @@ fn integer_field(ctx: &mut Context, id: Id, code: u8, width: usize) -> Result<u6
             .filter(|n| (min..=max).contains(n))
             .map(|n| n as u64)
             .ok_or_else(|| {
-                format_error(format!(
-                    "'{}' format requires {min} <= number <= {max}",
-                    char::from(code)
-                ))
+                format_error(
+                    ctx,
+                    format!(
+                        "'{}' format requires {min} <= number <= {max}",
+                        char::from(code)
+                    ),
+                )
             });
     }
     let value = value?;
@@ -204,10 +236,13 @@ fn integer_field(ctx: &mut Context, id: Id, code: u8, width: usize) -> Result<u6
             .to_i64()
             .and_then(|v| isize::try_from(v).ok())
             .map(|v| v as usize as u64)
-            .ok_or_else(|| format_error("int too large to convert"));
+            .ok_or_else(|| format_error(ctx, "int too large to convert"));
     }
-    Err(format_error(format!(
-        "'{}' format requires 0 <= number <= {max}",
-        char::from(code)
-    )))
+    Err(format_error(
+        ctx,
+        format!(
+            "'{}' format requires 0 <= number <= {max}",
+            char::from(code)
+        ),
+    ))
 }

@@ -67,7 +67,7 @@ pub(super) mod signal;
 #[cfg(unix)]
 pub(super) mod ssl;
 mod socket;
-mod structure;
+pub(super) mod structure;
 mod subprocess;
 mod system_size;
 pub(super) mod traceback;
@@ -833,7 +833,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         )
         | ("_imre_zipimport", "exists" | "isfile" | "index" | "read" | "contains" | "invalidate")
         | ("platform", "system" | "node" | "release" | "version" | "machine" | "mac_ver")
-        | ("struct", "Struct" | "calcsize" | "pack" | "unpack" | "error")
+        | ("struct", "Struct" | "calcsize" | "pack" | "unpack")
         | ("base64", "urlsafe_b64encode" | "urlsafe_b64decode")
         | ("random", "random" | "choice" | "choices" | "shuffle")
         | ("codecs", "register_error" | "lookup_error")
