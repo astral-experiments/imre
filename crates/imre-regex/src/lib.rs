@@ -1163,6 +1163,9 @@ fn tokenize(
     // of the forward-assertion fallback so a stalled iteration cannot change a capture.
     let byte_lookahead =
         alphabet == Alphabet::Bytes && has_lookaround && !has_lookbehind && !nullable_repeat;
+    // Literal dollar signs are hex-escaped. A real anchor can use the runtime's
+    // zero-width final-newline assertion when the regular matcher cannot lower it.
+    let dollar_assertion = !has_lookaround && !nullable_repeat && output.contains('$');
     // A conditional reads capture participation even without a backreference.
     // A stalled optional iteration can change which capture is set.
     let standalone_condition = highest_condition != 0 && !has_lookaround && !nullable_repeat;
@@ -1174,6 +1177,7 @@ fn tokenize(
             if !has_reference
                 && !text_assertions
                 && !byte_lookahead
+                && !dollar_assertion
                 && !standalone_condition
                 && !(has_atomic && (alphabet != Alphabet::Bytes || !has_lookbehind)) =>
         {
