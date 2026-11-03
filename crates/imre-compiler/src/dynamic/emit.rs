@@ -28,6 +28,7 @@ declare void @imre_dyn_discard_truth(ptr, i64)
 declare void @imre_dyn_named_assignment(ptr, i64, i64, i64)
 declare void @imre_dyn_assignment_target(ptr, ptr, i64, i64)
 declare i64 @imre_dyn_op_at(ptr, ptr, i64, i64, i64, ptr)
+declare void @imre_dyn_call_position(ptr, ptr)
 declare i64 @imre_dyn_scoped_call_at(ptr, i64, i64, i64, i64, ptr, i64)
 declare void @imre_dyn_expression_line(ptr, i32)
 declare void @imre_dyn_statement_with_exception(ptr, ptr, i64, ptr, i32, i64)
@@ -277,6 +278,16 @@ impl SourceMap<'_> {
                 .object_docstring(qualname)
                 .map(str::to_owned)
         })
+    }
+
+    fn line_and_column(&self, offset: ruff_text_size::TextSize) -> (usize, usize) {
+        let line = self.line(offset);
+        let start = if line == 1 {
+            0
+        } else {
+            self.newlines[line - 2] + 1
+        };
+        (line, usize::from(offset) - start)
     }
 
     fn line(&self, offset: ruff_text_size::TextSize) -> usize {
@@ -729,13 +740,8 @@ impl Function<'_, '_> {
                 .get(prefix_end..end)?
                 .iter()
                 .position(|&b| b == opener)?;
-        let line = self.source.line(range.start());
-        let beginning = if line == 1 {
-            0
-        } else {
-            self.source.newlines[line - 2] + 1
-        };
-        Some([line, start - beginning, split - beginning, end - beginning])
+        let (line, col) = self.source.line_and_column(range.start());
+        Some([line, col, col + (split - start), col + (end - start)])
     }
 
     /// Store the handles that must survive the next statement or assignment target.

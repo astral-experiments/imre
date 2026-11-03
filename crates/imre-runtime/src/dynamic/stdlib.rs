@@ -861,6 +861,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         | (
             "inspect",
             "iscoroutinefunction"
+            | "_frame_position"
             | "markcoroutinefunction"
             | "_native_data_descriptor"
             | "_static_member"

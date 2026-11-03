@@ -284,7 +284,7 @@ impl Context {
             let code = self.code_object(frame.code);
             let line = match (frame.expression, &code.body) {
                 (ExpressionPosition::Line(line), _) => line,
-                (ExpressionPosition::Offset(offset), Body::Source(program)) => {
+                (ExpressionPosition::Source { offset, .. }, Body::Source(program)) => {
                     program.expression_line(offset).unwrap_or(location.line)
                 }
                 _ => location.line,
@@ -297,6 +297,25 @@ impl Context {
             }
         }
         self.alloc(Value::Tuple(frames))
+    }
+
+    /// Resolve the executing operation only when a Python caller inspects this frame.
+    pub(super) fn frame_position(&self, object: Id) -> Option<[u32; 4]> {
+        let frame = self
+            .heap
+            .frames
+            .iter()
+            .rev()
+            .find(|frame| frame.object == Some(object))?;
+        if let Some(position) = frame.call_position {
+            return Some(position);
+        }
+        match (frame.expression, &self.code_object(frame.code).body) {
+            (ExpressionPosition::Source { range, .. }, Body::Source(program)) => {
+                program.expression_range(range)
+            }
+            _ => None,
+        }
     }
 
     /// Return the same Python frame to introspection and traceback construction.
@@ -2357,7 +2376,10 @@ pub(super) enum ExpressionPosition {
     #[default]
     Statement,
     Line(u32),
-    Offset(ruff_text_size::TextSize),
+    Source {
+        offset: ruff_text_size::TextSize,
+        range: ruff_text_size::TextRange,
+    },
 }
 
 struct Frame {
@@ -2367,6 +2389,7 @@ struct Frame {
     live: Vec<Id>,
     location: Option<Location>,
     expression: ExpressionPosition,
+    call_position: Option<[u32; 4]>,
     object: Option<Id>,
     inherited: Id,
     active: Id,
@@ -2383,6 +2406,7 @@ impl Frame {
             live: Vec::new(),
             location: None,
             expression: ExpressionPosition::Statement,
+            call_position: None,
             object: None,
             inherited,
             active: inherited,
@@ -3335,6 +3359,10 @@ impl Heap {
         self.warning_frames()
             .nth((level.max(1) - 1) as usize)
             .map(|(location, scope)| (location.clone(), scope))
+    }
+
+    pub(super) fn set_call_position(&mut self, position: Option<[u32; 4]>) {
+        self.frames.last_mut().unwrap().call_position = position;
     }
 
     pub(super) fn replace_expression(
