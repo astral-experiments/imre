@@ -127,6 +127,10 @@ class DescriptorInit:
     __init__ = InitDescriptor()
 
 
+def documented(*args, **kwargs):
+    pass
+
+
 proxy = FunctionProxy(original)
 assert inspect.signature(proxy) == inspect.signature(original)
 proxy.__defaults__ = (5,)
@@ -271,3 +275,16 @@ assert sig.parameters["instance"].kind is Parameter.POSITIONAL_ONLY
 
 assert str(inspect.signature(object.__init__)) == "(self, /, *args, **kwargs)"
 assert str(inspect.signature(object().__init__)) == "(*args, **kwargs)"
+
+documented.__self__ = object()
+documented.__text_signature__ = "($self, /, value, *, retries=1)"
+assert str(inspect.signature(documented, annotation_format=Format.STRING)) == "(value, *, retries=1)"
+assert inspect.getfullargspec(documented).args == ["self", "value"]
+
+documented.__text_signature__ = "(self, 123)"
+try:
+    inspect.signature(documented)
+except ValueError:
+    pass
+else:
+    raise AssertionError("invalid function text signature was accepted")
