@@ -2417,6 +2417,8 @@ struct CycleSet {
     incoming: Vec<usize>,
     work: Vec<usize>,
     cyclic_callbacks: usize,
+    /// Last cohort member visited for finalization, or UNMARKED before the first visit.
+    finalizer_cursor: usize,
 }
 
 impl CycleSet {
@@ -2433,6 +2435,7 @@ impl CycleSet {
             incoming,
             work,
             cyclic_callbacks: 0,
+            finalizer_cursor: UNMARKED,
         })
     }
 
@@ -3768,6 +3771,12 @@ impl Heap {
         if self.slots[id as usize].finalization == Finalization::None {
             self.slots[id as usize].finalization = Finalization::Pending;
             self.ordinary_finalizers.push(id);
+            if let Some(cohort) = &mut self.full_collection
+                && cohort.incoming.get(id as usize).is_some_and(|&n| n != 0)
+            {
+                // A callback can add __del__ to an earlier member of the cohort.
+                cohort.finalizer_cursor = UNMARKED;
+            }
             self.frames.last_mut().unwrap().created_finalizer = true;
         }
     }
@@ -3791,22 +3800,28 @@ impl Heap {
         !self.ordinary_finalizers.is_empty()
     }
 
-    pub(super) fn pending_full_finalizer(&self) -> Option<Id> {
+    /// Resume in GC order at a cohort member, which stays rooted throughout callbacks.
+    pub(super) fn pending_full_finalizer(&mut self) -> Option<Id> {
         if !self.has_ordinary_finalizers() {
             return None;
         }
-        let cohort = self.full_collection.as_ref()?;
-        let mut index = self.gc_order.head;
+        let cohort = self.full_collection.as_mut()?;
+        let mut index = if cohort.finalizer_cursor == UNMARKED {
+            self.gc_order.head
+        } else {
+            cohort.finalizer_cursor
+        };
         while index != END {
             let slot = &self.slots[index];
             if slot.finalization == Finalization::Pending
-                && cohort.incoming.get(index).is_some_and(|&count| count != 0)
+                && cohort.incoming.get(index).is_some_and(|&n| n != 0)
             {
-                return Some(index as Id);
+                break;
             }
             index = slot.gc_next.get();
         }
-        None
+        cohort.finalizer_cursor = index;
+        (index != END).then_some(index as Id)
     }
 
     pub(super) fn take_finalizer(&mut self, id: Id, found: bool) {
@@ -3879,6 +3894,15 @@ impl Heap {
             }
         }
         if remaining == 0 {
+            return Ok(None);
+        }
+        // mark_roots retains the entire collection cohort while its finalizers run.
+        if let Some(cohort) = &self.full_collection
+            && self.ordinary_finalizers.iter().all(|&id| {
+                cohort.incoming.get(id as usize).is_some_and(|&n| n != 0)
+                    || stdin.is_some_and(|chain| chain.contains(&id))
+            })
+        {
             return Ok(None);
         }
         // Closing a bound text stream can leave its wrapper, buffer and raw file alive.
@@ -5047,6 +5071,60 @@ mod reachability_tests {
         let reused = heap.alloc(Value::List(Vec::new()));
         assert_eq!(original, reused);
         assert_eq!(heap.slots[reused as usize].generation, 0);
+    }
+
+    #[test]
+    fn newly_registered_cohort_finalizers_keep_collection_order() {
+        let mut heap = Heap::new();
+        let mark = heap.temporary_mark();
+        let [first, middle, last] = std::array::from_fn(|_| {
+            let id = heap.alloc(Value::List(Vec::new()));
+            let Value::List(edges) = heap.get_mut(id) else {
+                unreachable!()
+            };
+            edges.push(id);
+            id
+        });
+        heap.register_finalizer(middle);
+        heap.register_finalizer(last);
+        heap.release_temporaries_since(mark);
+        heap.begin_collection(std::iter::empty(), 2).unwrap();
+
+        assert_eq!(heap.pending_full_finalizer(), Some(middle));
+        heap.take_finalizer(middle, true);
+        heap.register_finalizer(first);
+        for owner in [first, last] {
+            assert_eq!(heap.pending_full_finalizer(), Some(owner));
+            heap.take_finalizer(owner, true);
+        }
+        assert_eq!(heap.pending_full_finalizer(), None);
+    }
+
+    #[test]
+    fn collection_roots_preserve_new_acyclic_finalizers() {
+        let mut heap = Heap::new();
+        let mark = heap.temporary_mark();
+        let cycle = heap.alloc(Value::List(Vec::new()));
+        let Value::List(edges) = heap.get_mut(cycle) else {
+            unreachable!()
+        };
+        edges.push(cycle);
+        heap.register_finalizer(cycle);
+        heap.release_temporaries_since(mark);
+        heap.begin_collection(std::iter::empty(), 2).unwrap();
+        assert_eq!(
+            heap.acyclic_finalizer(std::iter::empty(), None).unwrap(),
+            None
+        );
+
+        let mark = heap.temporary_mark();
+        let ordinary = heap.alloc(Value::List(Vec::new()));
+        heap.register_finalizer(ordinary);
+        heap.release_temporaries_since(mark);
+        assert_eq!(
+            heap.acyclic_finalizer(std::iter::empty(), None).unwrap(),
+            Some(ordinary)
+        );
     }
 
     #[test]
