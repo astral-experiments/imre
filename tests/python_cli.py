@@ -2545,6 +2545,15 @@ def report(text):
             queue_lookup.write_text(f"{statement}\nprint({name}.QueueListener.__name__)\n")
             checked = run(imre, "check", queue_lookup)
             assert checked.returncode == 0, checked.stderr
+        socket_alias = root / "socket_timeout_alias.py"
+        socket_alias.write_text(
+            "from _socket import timeout as low_timeout\nfrom socket import timeout\n"
+            "try:\n    raise low_timeout('expired')\nexcept timeout as exc:\n    print(str(exc))\n"
+        )
+        compare("-IB", socket_alias, native_args=("run", socket_alias, "--quiet"))
+        socket_alias.write_text("from _socket import timeout\nvalue: int = 'wrong'\nprint(value)\n")
+        bad_alias = run(imre, "check", socket_alias)
+        assert bad_alias.returncode != 0 and b"expected int" in bad_alias.stderr, bad_alias.stderr
         io_fixture = fixtures / "boxed_io_indirect_import.py"
         compare("-IB", io_fixture, native_args=("run", io_fixture, "--runtime-imports", "--quiet"))
         for name in ("boxed_prelinked_coroutine.py", "boxed_coroutine_origin.py"):
