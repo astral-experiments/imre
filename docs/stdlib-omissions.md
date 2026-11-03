@@ -70,6 +70,15 @@ These seven originals inspect CPython’s regex implementation. Their paired cou
 | [`test.test_re.ImplementationTest.test_signedness`](https://github.com/python/cpython/blob/5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/test_re.py#L2922-L2924) | 1 | The original inspects the signs of `re._compiler.MAXREPEAT` and `MAXGROUPS`. Those internal representations depend on the compiler. Legal counts, group references and their user-visible limit errors remain in scope. | `test.test_re.ReTests.test_symbolic_groups`, `test.test_re.ReTests.test_re_groupref_overflow`, `test.test_re.ReTests.test_repeat_minmax_overflow` |
 | [`test.test_re.ImplementationTest.test_sre_template_invalid_group_index`](https://github.com/python/cpython/blob/5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/test_re.py#L3021-L3030) | 1 | The original supplies malformed token lists to the private `_sre.template` constructor and asserts two `TypeError` messages. Public replacement strings have no token-list argument. Replacement parsing, invalid references and `Match.expand` results remain in scope. | `test.test_re.ReTests.test_expand`, `test.test_re.ReTests.test_sub_template_numeric_escape` |
 
+### `subprocess`
+
+Two POSIX callback tests inspect CPython’s private `subprocess._fork_exec` selector after a child fails. Pinned CPython and Imre at both optimization levels agreed on the public exception and child cleanup in each case.
+
+| Original test | Occurrence | Reason for omission | Public behavior checked |
+| --- | --- | --- | --- |
+| [`test.test_subprocess.POSIXProcessTestCase.test_preexec_exception`](https://github.com/python/cpython/blob/5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/test_subprocess.py#L2428-L2442) | 1 | The callback raises a `ValueError`. The test accepts a `SubprocessError` in the parent, then requires `subprocess._fork_exec` to be truthy. Imre propagates the accepted error through its own process implementation. | `Popen` raised `SubprocessError` after the callback failed. The child exited 255 before running the target program, and the parent reaped it. |
+| [`test.test_subprocess.POSIXProcessTestCase.test_surrogates_error_message`](https://github.com/python/cpython/blob/5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/test_subprocess.py#L2914-L2931) | 1 | The callback raises a `ValueError` containing `U+DCFF`. The test checks that `subprocess._fork_exec` exists before it compares the generic `SubprocessError` message. The private helper identifies which CPython implementation produced the error. | `subprocess.call` raised `SubprocessError` with the exact message Exception occurred in preexec_fn. The child exited 255 before executing the target, and the parent restored its file descriptors. |
+
 ### `tempfile`
 
 Stock passed both originals. The ordinary and boxed native runs reported the upstream CPython-specific skip at both optimization levels. The related cleanup originals passed in all four native runs. [Tested Imre revision](https://github.com/astral-experiments/imre/commit/0d7959f15485a6cda6da1f73c4a8ef873d506d6a)
