@@ -1123,7 +1123,16 @@ pub(super) fn call(
         return Ok(ctx.alloc(Value::Bytes(Vec::new())));
     }
     if name == "write" {
-        ctx.bytes_like(args[0])?;
+        let input = args[0];
+        ctx.check_buffer_exporter(input)?;
+        let bytes = ctx.native_buffer_bytes(input)?;
+        let raw = raw.ok_or_else(closed)?;
+        let count = raw.access(|fd| {
+            raw.check_direction(false)?;
+            // SAFETY: the write only reads the borrowed contiguous buffer during this call.
+            transfer(|| unsafe { libc::write(fd, bytes.as_ptr().cast(), bytes.len()) })
+        })?;
+        return Ok(count.map_or(NONE, |n| ctx.int(n as i64)));
     }
     if name == "readinto" && ctx.writable_byte_span(args[0])?.is_none() {
         return Err(Error::new(
@@ -1202,15 +1211,6 @@ pub(super) fn call(
             raw.check_direction(true)?;
             let buf = files::readinto_bytes(ctx, args[0])?;
             Ok(read_into(fd, buf)?.map_or(NONE, |n| ctx.int(n as i64)))
-        }
-        "write" => {
-            raw.check_direction(false)?;
-            let bytes = ctx.bytes_like(args[0])?;
-            // SAFETY: write reads only the live bytes slice for this call.
-            Ok(
-                transfer(|| unsafe { libc::write(fd, bytes.as_ptr().cast(), bytes.len()) })?
-                    .map_or(NONE, |n| ctx.int(n as i64)),
-            )
         }
         _ => Err(Error::new(
             "AttributeError",

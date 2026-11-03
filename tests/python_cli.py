@@ -3364,6 +3364,7 @@ for name in ("md4", "ripemd160"):
             "boxed_io_unsupported_operation.py",
             "boxed_io_reimport.py",
             "boxed_fileio_opener.py",
+            "boxed_fileio_write.py",
             "boxed_open_opener.py",
             "boxed_io_text_encoding.py",
             "boxed_locale.py",
