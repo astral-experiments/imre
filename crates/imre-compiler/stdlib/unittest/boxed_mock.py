@@ -159,6 +159,11 @@ _FixedMock = Mock
 _unset_return = object()
 
 
+def _is_instance_mock(value):
+    # A spec or proxy can report a different __class__.
+    return issubclass(type(value), Mock)
+
+
 def _is_exception(value):
     return isinstance(value, BaseException) or isinstance(value, type) and issubclass(value, BaseException)
 
@@ -177,22 +182,24 @@ class Mock(_FixedMock):
     _mock_sealed = False
     _mock_methods = None
     _mock_strict = False
+    _spec_class = None
     _mock_auto_magics = ()
 
     def __new__(cls, spec=None, *, spec_set=None, **kwargs):
-        # Special methods are looked up on the type, independently of instance attributes.
-        owner = type(cls.__name__, (cls,), {})
-        instance = object.__new__(owner)
-        methods = spec_set if spec_set is not None else spec
-        for name in cls._mock_auto_magics:
-            if methods is None or type(methods) in (list, tuple) and name in methods:
-                setattr(owner, name, _MagicSlot(name, instance))
-        return instance
+        # Give each mock its own class for special-method lookup.
+        return object.__new__(type(cls.__name__, (cls,), {}))
 
     def __init__(self, spec=None, *, spec_set=None, name=None, side_effect=None, return_value=_unset_return, **attrs):
         methods = spec_set if spec_set is not None else spec
-        if methods is not None and type(methods) not in (list, tuple):
+        if isinstance(methods, type):
+            object.__setattr__(self, "_spec_class", methods)
+            methods = dir(methods)
+        elif methods is not None and type(methods) not in (list, tuple):
             raise NotImplementedError("mock specifications from objects are not supported")
+        owner = type(self)
+        for magic in owner._mock_auto_magics:
+            if methods is None or magic in methods:
+                setattr(owner, magic, _MagicSlot(magic, self))
         object.__setattr__(self, "_mock_methods", methods)
         object.__setattr__(self, "_mock_strict", spec_set is not None)
         super().__init__(name=name)
@@ -207,6 +214,12 @@ class Mock(_FixedMock):
                     raise TypeError(f"Mock.__init__() got an unexpected keyword argument '{key}'")
             self.configure_mock(**attrs)
 
+    @property
+    def __class__(self):
+        if self._spec_class is None:
+            return type(self)
+        return self._spec_class
+
     def configure_mock(self, /, **attrs):
         for path in sorted(attrs, key=lambda name: name.count(".")):
             target = self
@@ -220,7 +233,7 @@ class Mock(_FixedMock):
         child._suffix = suffix
 
     def _adopt(self, value, suffix, *, magic=False):
-        if not isinstance(value, Mock) or value._node._mock_name or hasattr(value._node, "_owner"):
+        if not _is_instance_mock(value) or value._node._mock_name or hasattr(value._node, "_owner"):
             return False
         ancestor = self
         while ancestor is not None:
@@ -249,7 +262,7 @@ class Mock(_FixedMock):
         if name in _mock_magics:
             if self._mock_methods is not None and name not in self._mock_methods:
                 raise AttributeError(f"Mock object has no attribute {name!r}")
-            if isinstance(value, Mock):
+            if _is_instance_mock(value):
                 if self._adopt(value, "." + name, magic=True):
                     value._node._magic = True
                 if not hasattr(self._node, "_assigned_children"):
@@ -270,6 +283,9 @@ class Mock(_FixedMock):
         if name not in ("_node", "_nodes", "_mock_sealed", "return_value", "side_effect", "mock_calls", "method_calls"):
             if self._mock_strict and name not in self._mock_methods and name not in self.__dict__:
                 raise AttributeError(f"Mock object has no attribute {name!r}")
+            if name == "__class__":
+                object.__setattr__(self, "_spec_class", value)
+                return
             adopted = self._adopt(value, "." + name)
             if self._mock_sealed and not adopted and not hasattr(self, name):
                 raise AttributeError("Cannot set " + self._mock_path() + "." + name)
@@ -397,7 +413,7 @@ class Mock(_FixedMock):
             visited.append(id(current))
             node = current._node
             # A generated magic method retains its protocol return value on reset.
-            if clear_return and isinstance(current, MagicMock) and node._mock_name:
+            if clear_return and issubclass(type(current), MagicMock) and node._mock_name:
                 name = node._mock_name
                 if "__%s__" % name[2:-2] == name:
                     clear_return = False
@@ -406,7 +422,7 @@ class Mock(_FixedMock):
             current.method_calls = _CallList()
             if node._result != -1:
                 result = current.return_value
-                if isinstance(result, Mock):
+                if _is_instance_mock(result):
                     pending.append((result, False, False))
             children = {name: current._at(index) for name, index in node._children.items()}
             children.update(getattr(node, "_assigned_children", {}))
@@ -513,7 +529,7 @@ def seal(mock):
             names.add("return_value")
         for name in names:
             value = getattr(current, name)
-            if isinstance(value, Mock) and getattr(value._node, "_owner", None) is current:
+            if _is_instance_mock(value) and getattr(value._node, "_owner", None) is current:
                 pending.append(value)
 
 

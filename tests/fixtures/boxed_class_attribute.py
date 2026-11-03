@@ -151,9 +151,43 @@ def ordinary_slot_members():
     assert obj.__dict__["field"] == 3 and root.__get__(obj, Child) == 1
 
 
+def reported_instance_checks():
+    class Child(Loud):
+        pass
+
+    class Hidden:
+        @property
+        def __class__(self):
+            raise AttributeError("missing")
+
+    class Reject(type):
+        def __instancecheck__(cls, obj):
+            return False
+
+    class Reported(metaclass=Reject):
+        pass
+
+    class Proxy:
+        __class__ = Reported
+
+    assert isinstance(Child(), Loud)
+    assert isinstance(Advertised(), str)
+    assert isinstance(Guarded(), str)
+    assert not isinstance(Data(), str)
+    assert not isinstance(Hidden(), str)
+    assert not isinstance(Proxy(), Reported)
+    try:
+        isinstance(Loud(), str)
+    except LookupError as error:
+        assert error.args == ("called",)
+    else:
+        raise AssertionError("isinstance suppressed the reported class error")
+
+
 def current():
     ordinary_slot_members()
     class_patterns()
+    reported_instance_checks()
 
     class Journal:
         pass

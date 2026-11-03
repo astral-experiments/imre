@@ -26,6 +26,45 @@ assert handle.__exit__.return_value is False
 assert handle.method_calls == [call.assert_worker(), call._private()]
 assert handle.mock_calls[:4] == [call.assert_worker(), call._private(), call.__enter__(), call.__exit__(None, None, None)]
 
+class Readable:
+    def read(self): pass
+
+
+class Reader(Readable):
+    def __iter__(self): return self
+    def __next__(self): raise StopIteration
+
+
+specified = MagicMock(Reader)
+assert specified.__class__ is Reader
+assert isinstance(specified, Reader) and isinstance(specified, Readable)
+assert not hasattr(specified, "__enter__") and not hasattr(specified, "write")
+specified.extra = 42
+specified.read(3)
+specified.read.assert_called_once_with(3)
+specified.__iter__ = lambda self: self
+specified.__next__.return_value = 7
+assert iter(specified) is specified and next(specified) == 7
+specified.__next__.assert_called_once_with()
+
+strict = Mock(spec_set=Reader)
+assert strict.__class__ is Reader
+strict.read = 3
+with check.assertRaises(AttributeError):
+    strict.write = 4
+assert handle.__class__ is type(handle)
+
+
+class ReportedMock:
+    @property
+    def __class__(self): return Mock
+
+
+reported = ReportedMock()
+specified.return_value = reported
+specified.reset_mock()
+assert specified.return_value is reported
+
 plain = Mock(["__len__", "__custom__"])
 assert not hasattr(plain, "__len__")
 plain.__custom__(1)

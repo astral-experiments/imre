@@ -2779,7 +2779,23 @@ impl Context {
                         return Ok(result);
                     }
                 }
-                Ok(self.instance_of(value, class))
+                if self.instance_of(value, class) {
+                    return Ok(true);
+                }
+                // Fixed native values cannot override their reported class.
+                let Some(actual) = self.heap.get(value).instance_class() else {
+                    return Ok(false);
+                };
+                if !self.is_type_object(class) {
+                    return Ok(false);
+                }
+                match self.lookup_attr(value, "__class__") {
+                    Ok(reported) => Ok(reported != actual
+                        && self.is_type_object(reported)
+                        && self.direct_subclass(reported, class)),
+                    Err(error) if self.is_attribute_error(&error) => Ok(false),
+                    Err(error) => Err(error),
+                }
             }
         }
     }
