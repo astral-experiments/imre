@@ -7019,8 +7019,8 @@ impl Context {
         enum_base: bool,
     ) -> Result<Option<Id>> {
         // NamedTuple's marker is replaced with tuple before allocating the class.
-        let marker = self.builtins.get("typing.NamedTuple").copied();
-        let metaclass_bases = bases.iter().copied().filter(|base| Some(*base) != marker);
+        let namedtuple = self.namedtuple_base(bases);
+        let metaclass_bases = bases.iter().copied().filter(|base| Some(*base) != namedtuple);
         if explicit.is_none()
             && !metaclass_bases.clone().any(|base| {
                 !self.is_type_object(base)
@@ -7062,7 +7062,7 @@ impl Context {
         if winner == type_class {
             return Ok(None);
         }
-        if enum_base {
+        if enum_base || namedtuple.is_some() {
             return Err(conflict());
         }
         let is_abc = self.builtins.get("abc.ABCMeta") == Some(&winner);

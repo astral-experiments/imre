@@ -192,6 +192,22 @@ for bad_base in (object(), BadBaseHook()):
         raise AssertionError("accepted a non-type base")
     assert ran == [True]
 
+
+
+class OtherMeta(type):
+    pass
+
+
+ran = []
+try:
+    class InvalidTuple(t.NamedTuple, metaclass=OtherMeta):
+        ran.append(True)
+except TypeError as error:
+    assert "metaclass conflict" in str(error)
+else:
+    raise AssertionError("accepted incompatible NamedTuple metaclasses")
+assert not ran
+
 import collections.abc as cabc
 
 
