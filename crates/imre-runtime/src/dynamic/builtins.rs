@@ -743,7 +743,9 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         {
             "bytearray"
         }
-        Value::Struct { .. } if matches!(attr, "pack" | "unpack") => "struct.Struct",
+        Value::Struct { .. } if matches!(attr, "pack" | "unpack" | "unpack_from") => {
+            "struct.Struct"
+        }
         Value::Hash(state)
             if crate::objects::HashState::is_provider_class(state.lock().class_name())
                 && matches!(attr, "update" | "copy" | "digest" | "hexdigest") =>

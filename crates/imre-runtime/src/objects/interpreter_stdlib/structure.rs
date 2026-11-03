@@ -133,6 +133,34 @@ impl StructFormat {
         }
     }
 
+    /// Decode a record at a byte offset, with negative offsets measured from the end.
+    pub(crate) fn unpack_from(
+        &self,
+        buffer: &[u8],
+        offset: isize,
+    ) -> Result<Vec<UnpackedField>, String> {
+        let len = buffer.len();
+        let size = self.size;
+        let start = if offset < 0 {
+            let distance = offset.unsigned_abs();
+            if size > distance {
+                return Err(format!(
+                    "not enough data to unpack {size} bytes at offset {offset}"
+                ));
+            }
+            len.checked_sub(distance)
+                .ok_or_else(|| format!("offset {offset} out of range for {len}-byte buffer"))?
+        } else {
+            offset as usize
+        };
+        // Both the parsed size and the nonnegative offset fit in isize.
+        let end = start + size;
+        let record = buffer.get(start..end).ok_or_else(|| format!(
+            "unpack_from requires a buffer of at least {end} bytes for unpacking {size} bytes at offset {start} (actual buffer size is {len})"
+        ))?;
+        self.unpack(record)
+    }
+
     pub(crate) fn unpack(&self, buffer: &[u8]) -> Result<Vec<UnpackedField>, String> {
         if buffer.len() != self.size {
             return Err(format!("unpack requires a buffer of {} bytes", self.size));

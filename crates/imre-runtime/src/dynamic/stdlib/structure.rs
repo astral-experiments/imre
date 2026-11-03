@@ -3,6 +3,7 @@ use std::rc::Rc;
 
 use num_traits::ToPrimitive;
 
+use super::super::builtins::bind_builtin_arguments;
 use super::{
     Context, Error, Id, NONE, Result, Value,
     system::{StructFormat, UnpackedField},
@@ -103,6 +104,10 @@ pub(super) fn unpack(ctx: &mut Context, layout: &StructFormat, buffer: Id) -> Re
     let fields = layout
         .unpack(ctx.bytes_like(buffer)?)
         .map_err(|message| format_error(ctx, message))?;
+    Ok(unpacked_tuple(ctx, fields))
+}
+
+fn unpacked_tuple(ctx: &mut Context, fields: Vec<UnpackedField>) -> Id {
     let items = fields
         .into_iter()
         .map(|field| match field {
@@ -112,7 +117,50 @@ pub(super) fn unpack(ctx: &mut Context, layout: &StructFormat, buffer: Id) -> Re
             UnpackedField::Bytes(bytes) => ctx.alloc(Value::Bytes(bytes)),
         })
         .collect();
-    Ok(ctx.alloc(Value::Tuple(items)))
+    ctx.alloc(Value::Tuple(items))
+}
+
+pub(super) fn module_unpack_from(
+    ctx: &mut Context,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Id> {
+    // Only the format is positional-only. Argument Clinic checks total arity first.
+    if args.is_empty() && kwargs.len() <= 3 {
+        return Err(Error::new(
+            "TypeError",
+            "unpack_from() takes at least 1 positional argument (0 given)",
+        ));
+    }
+    let [Some(format), Some(buffer), offset] =
+        bind_builtin_arguments("unpack_from", args, kwargs, ["", "buffer", "offset"], 2)?
+    else {
+        unreachable!("required format and buffer")
+    };
+    let (_, layout) = parse(ctx, format)?;
+    unpack_from(ctx, &layout, buffer, offset)
+}
+
+fn unpack_from(
+    ctx: &mut Context,
+    layout: &StructFormat,
+    buffer: Id,
+    offset: Option<Id>,
+) -> Result<Id> {
+    // Acquire the buffer before __index__, then read its current bytes under the same export.
+    let decode = |ctx: &mut Context, view| {
+        let offset = offset.map_or(Ok(0), |id| super::os::ssize_t(ctx, id))?;
+        layout
+            .unpack_from(ctx.native_buffer_bytes(view)?, offset)
+            .map_err(|message| format_error(ctx, message))
+    };
+    let fields = if let Some(method) = ctx.python_buffer_method(buffer, true)? {
+        ctx.with_contiguous_python_buffer(buffer, method, 0, decode)
+    } else {
+        ctx.native_buffer_bytes(buffer)?;
+        ctx.with_buffer_export(buffer, |ctx| decode(ctx, buffer))
+    }?;
+    Ok(unpacked_tuple(ctx, fields))
 }
 
 pub(super) fn method(
@@ -125,13 +173,21 @@ pub(super) fn method(
     let Value::Struct { layout, .. } = ctx.heap.get(receiver) else {
         unreachable!("bound Struct method")
     };
+    let layout = Rc::clone(layout);
+    if name == "unpack_from" {
+        let [Some(buffer), offset] =
+            bind_builtin_arguments("unpack_from", args, kwargs, ["buffer", "offset"], 1)?
+        else {
+            unreachable!("required buffer")
+        };
+        return unpack_from(ctx, &layout, buffer, offset);
+    }
     if !kwargs.is_empty() {
         return Err(Error::new(
             "TypeError",
             format!("Struct.{name}() takes no keyword arguments"),
         ));
     }
-    let layout = Rc::clone(layout);
     if name == "unpack" {
         let [id] = args else {
             return Err(Error::new(
