@@ -68,7 +68,8 @@ impl References<'_> {
                 Some(super::credential_arity(name))
             }
             Some(Binding::Intrinsic(
-                Intrinsic::Fd(crate::ir::FdOperation::Pipe2) | Intrinsic::Mktime,
+                Intrinsic::Fd(crate::ir::FdOperation::Pipe2 | crate::ir::FdOperation::TcGetPgrp)
+                | Intrinsic::Mktime,
             )) => Some(1),
             _ => None,
         };

@@ -2815,6 +2815,8 @@ impl Context {
                 #[cfg(target_os = "linux")]
                 "fdatasync",
                 #[cfg(target_os = "linux")]
+                "tcgetpgrp",
+                #[cfg(target_os = "linux")]
                 "ttyname",
                 "getegid",
                 #[cfg(target_os = "linux")]

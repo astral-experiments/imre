@@ -6552,6 +6552,9 @@ impl<'a> Checker<'a> {
                 Intrinsic::ScopedObjectExport(name) => {
                     return Err(self.scoped_builtin_error(name, expression));
                 }
+                Intrinsic::Fd(ir::FdOperation::TcGetPgrp) => {
+                    return Err(self.object_runtime_export("posix.tcgetpgrp", expression));
+                }
                 Intrinsic::ObjectRuntimeExport(name) => {
                     return Err(self.object_runtime_export(name, expression));
                 }
@@ -9095,6 +9098,7 @@ impl<'a> Checker<'a> {
                 }
                 Some(Binding::Intrinsic(Intrinsic::Fd(
                     op @ (ir::FdOperation::Pipe2
+                    | ir::FdOperation::TcGetPgrp
                     | ir::FdOperation::Read
                     | ir::FdOperation::Write
                     | ir::FdOperation::CopyFileRange),
