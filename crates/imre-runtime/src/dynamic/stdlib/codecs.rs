@@ -616,8 +616,8 @@ pub(in crate::dynamic) fn encode_text(
     let errors = if let StrEncoder::Registered(codec) = encoder {
         match encode_error::registered(ctx, codec, errors) {
             Some(encode_error::Handler::Python(callback)) => {
-                let escape_prefix = errors == "surrogateescape";
-                return encode_error::encode(ctx, id, codec, callback, escape_prefix);
+                let errors = errors.to_owned();
+                return encode_error::encode(ctx, id, codec, callback, &errors);
             }
             Some(encode_error::Handler::Builtin(name)) => name,
             None => errors,
