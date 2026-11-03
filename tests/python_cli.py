@@ -2978,6 +2978,7 @@ for name in ("md4", "ripemd160"):
             "boxed_exception_notes.py",
             "boxed_warning_categories.py",
             "boxed_warnings.py",
+            "boxed_warnings_accelerator.py",
             "boxed_oserror.py",
             "boxed_type_identity.py",
             "boxed_type_namespace.py",

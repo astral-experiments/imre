@@ -725,9 +725,9 @@ pub(super) unsafe extern "C" fn imre_dyn_new(
     );
     if let Some(options) = config["warnoptions"].as_array() {
         for option in options.iter().filter_map(|value| value.as_str()) {
-            if let Err(reason) = crate::objects::warnings::startup_filter(option) {
-                eprintln!("Invalid -W option ignored: {reason}");
-            }
+            // Keep the native typed fallback in sync. The public warnings module
+            // diagnoses invalid options once, using the full Python category lookup.
+            let _ = crate::objects::warnings::startup_filter(option);
         }
     }
     // SAFETY: main supplies argc pointers to NUL-terminated strings that remain
@@ -775,6 +775,7 @@ pub(super) fn new_context<S: Into<String>>(
         zip_directories: HashMap::new(),
         zip_path_importers: NONE,
         codec_entries: Default::default(),
+        warning_state: None,
         frozen_override: 0,
         modules: NONE,
         import_missing: NONE,
@@ -870,6 +871,14 @@ pub(super) unsafe extern "C" fn imre_dyn_finish(ctx: *mut Context) -> i32 {
         // keep replaced streams alive throughout the main module's execution.
         ctx.heap.release_temporaries_since(mark);
         ctx.install_import_registry()?;
+        if ctx.config["warnoptions"].as_array().is_some_and(|options| !options.is_empty()) {
+            let mark = ctx.heap.temporary_mark();
+            if let Err(error) = ctx.module("warnings") {
+                eprintln!("'import warnings' failed; traceback:");
+                stdlib::traceback::report_chain(&mut ctx, error);
+            }
+            ctx.heap.release_temporaries_since(mark);
+        }
         let main = ctx
             .load_bootstrap_module("__main__", None, NONE)?
             .ok_or_else(|| Context::missing_module("__main__"))?;
@@ -1669,6 +1678,7 @@ impl Context {
                 .chain(self.builtins.values())
                 .chain(self.native_type_dicts.values())
                 .chain(self.native_code_objects.values())
+                .chain(self.warning_state.iter().flat_map(|state| state.roots()))
                 .chain(self.codec_entries.roots())
                 .chain(&self.audit_hooks)
                 .chain(&self.exit_callbacks)

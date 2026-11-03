@@ -143,6 +143,7 @@ pub(crate) struct Context {
     zip_directories: HashMap<String, crate::objects::ZipArchive>,
     zip_path_importers: Id,
     codec_entries: stdlib::codecs::Registry,
+    warning_state: Option<stdlib::warnings_accel::State>,
     frozen_override: i32,
     // The interpreter keeps its original dictionary even when Python reassigns sys.modules.
     modules: Id,
@@ -3262,6 +3263,7 @@ impl Context {
                 }
             }
             "_locale" => stdlib::locale::install(self, module, scope)?,
+            "_warnings" => stdlib::warnings_accel::install(self, module, scope)?,
             "time" => stdlib::time::install_timezone(self, scope)?,
             "struct" => stdlib::structure::install(self, scope)?,
             "pickle" => stdlib::pickle::install(self, scope)?,

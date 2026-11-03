@@ -173,15 +173,10 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
                 const UPSTREAM: &str = include_str!(
                     "../../../benchmarks/cpython_stdlib/full/warnings/upstream/Lib/_py_warnings.py"
                 );
-                // Native import warnings may be emitted while all imports are disabled.
-                // Dispatch their WarningMessage without priming the Python line cache.
                 UPSTREAM
                     // A promoted warning owns its traceback. Letting its frame keep the
                     // exception alive would also keep the warning's source until cyclic GC.
                     .replace("            raise message", "            try:\n                raise message\n            finally:\n                del message")
-                    .replace("def warn_explicit(", "_native_import_warning = object()\n\ndef warn_explicit(")
-                    .replace("    import linecache\n    linecache.getlines(filename, module_globals)",
-                             "    if module_globals is not _native_import_warning:\n        import linecache\n        linecache.getlines(filename, module_globals)")
             })))
         }
         "re" => Some(("re/__init__.py", include_str!("../stdlib/re/__init__.py"))),
@@ -566,6 +561,7 @@ pub(crate) enum IntrinsicModule {
     Fnmatch,
     Time,
     Warnings,
+    WarningsNative,
     Tomli,
     TomliW,
     Shutil,
@@ -1091,6 +1087,7 @@ impl IntrinsicModule {
             "fnmatch" => Some(Self::Fnmatch),
             "time" => Some(Self::Time),
             "warnings" => Some(Self::Warnings),
+            "_warnings" => Some(Self::WarningsNative),
             "tomli" => Some(Self::Tomli),
             "tomli_w" => Some(Self::TomliW),
             "shutil" => Some(Self::Shutil),
@@ -1750,6 +1747,31 @@ impl IntrinsicModule {
             (Self::Contextlib, "chdir") => Intrinsic::ObjectRuntimeExport("contextlib.chdir"),
             (Self::Contextlib, "closing") => Intrinsic::ObjectRuntimeExport("contextlib.closing"),
             (Self::Contextlib, "nullcontext") => Intrinsic::NullContext,
+            (Self::WarningsNative, "warn") => Intrinsic::ObjectRuntimeExport("_warnings.warn"),
+            (Self::WarningsNative, "warn_explicit") => {
+                Intrinsic::ObjectRuntimeExport("_warnings.warn_explicit")
+            }
+            (Self::WarningsNative, "_acquire_lock") => {
+                Intrinsic::ObjectRuntimeExport("_warnings._acquire_lock")
+            }
+            (Self::WarningsNative, "_release_lock") => {
+                Intrinsic::ObjectRuntimeExport("_warnings._release_lock")
+            }
+            (Self::WarningsNative, "_filters_mutated_lock_held") => {
+                Intrinsic::ObjectRuntimeExport("_warnings._filters_mutated_lock_held")
+            }
+            (Self::WarningsNative, "filters") => {
+                Intrinsic::ObjectRuntimeExport("_warnings.filters")
+            }
+            (Self::WarningsNative, "_defaultaction") => {
+                Intrinsic::ObjectRuntimeExport("_warnings._defaultaction")
+            }
+            (Self::WarningsNative, "_onceregistry") => {
+                Intrinsic::ObjectRuntimeExport("_warnings._onceregistry")
+            }
+            (Self::WarningsNative, "_warnings_context") => {
+                Intrinsic::ObjectRuntimeExport("_warnings._warnings_context")
+            }
             (Self::Warnings, "warn") => Intrinsic::ObjectRuntimeExport("warnings.warn"),
             (Self::Warnings, "warn_explicit") => {
                 Intrinsic::ObjectRuntimeExport("warnings.warn_explicit")
