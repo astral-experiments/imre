@@ -2771,6 +2771,7 @@ for name in ("md4", "ripemd160"):
             "boxed_simple_namespace.py",
             "boxed_namedtuple_repr.py",
             "boxed_namedtuple_factory.py",
+            "boxed_sequence_registration.py",
             "boxed_slice_deep_repr.py",
             "boxed_slice_repr_cycles.py",
             "boxed_source_exec.py",

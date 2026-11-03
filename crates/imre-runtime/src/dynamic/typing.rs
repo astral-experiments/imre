@@ -3150,7 +3150,14 @@ impl Context {
                 self.bind_local(scope, name, method);
             }
         }
+        let pattern_flags = mro
+            .iter()
+            .skip(1)
+            .map(|&base| self.class_pattern_flags(base))
+            .find(|flags| !flags.is_empty())
+            .unwrap_or_default();
         let class = self.alloc(Value::Class {
+            pattern_flags,
             io_kind: None,
             heap_type: None,
             metaclass: None,
