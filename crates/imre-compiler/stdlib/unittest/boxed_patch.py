@@ -69,30 +69,86 @@ def _get_target(target):
     return lambda: _patch_owner(owner), attribute
 
 
+def _is_async_spec(spec):
+    if _is_instance_mock(spec):
+        return False
+    from inspect import isawaitable, iscoroutinefunction
+    spec = getattr(spec, '__func__', spec)
+    return iscoroutinefunction(spec) or isawaitable(spec)
+
+
 class _patch:
     _active_patches = []
 
-    def __init__(self, getter, attribute, new, create, *, new_callable=None, **kwargs):
+    def __init__(self, getter, attribute, new, create, *, spec=None, spec_set=None,
+                 new_callable=None, **kwargs):
         if new_callable is not None:
             if new is not DEFAULT:
                 raise ValueError("Cannot use 'new' and 'new_callable' together")
             if kwargs.get('autospec') is not None:
                 raise ValueError("Cannot use 'autospec' and 'new_callable' together")
-        # These are patch options, not arguments to the replacement factory.
-        for option in ('spec', 'spec_set', 'autospec', 'unsafe'):
+        for option in ('autospec', 'unsafe'):
             if option in kwargs:
                 raise TypeError(f"unsupported patch option: {option!r}")
         self.getter = getter
         self.attribute = attribute
         self.new = new
         self.create = create
+        if _is_instance_mock(spec):
+            raise InvalidSpecError(f"Cannot spec attr {attribute!r} as the spec "
+                                   f"has already been mocked out. [spec={spec!r}]")
+        if _is_instance_mock(spec_set):
+            raise InvalidSpecError(f"Cannot spec attr {attribute!r} as the spec_set "
+                                   f"target has already been mocked out. [spec_set={spec_set!r}]")
+        self.spec = spec
+        self.spec_set = spec_set
         self.new_callable = new_callable
         self.mock_kwargs = kwargs
         self.is_started = False
 
+    def _new_mock(self, original, spec, spec_set):
+        if spec is True:
+            spec = original
+        if spec_set is True:
+            spec_set = original if spec is None else spec
+            spec = None
+        effective_spec = spec if spec_set is None else spec_set
+        if effective_spec is not None and original is DEFAULT:
+            raise TypeError("Can't use 'spec' with create=True")
+
+        factory = self.new_callable
+        is_names = type(effective_spec) in (list, tuple)
+        if factory is None:
+            factory = MagicMock
+            if effective_spec is not None:
+                if _is_async_spec(effective_spec) or (spec is None and _is_async_spec(original)):
+                    raise NotImplementedError("patching asynchronous specs is not supported")
+                callable_spec = '__call__' in effective_spec if is_names else callable(effective_spec)
+                if not callable_spec:
+                    factory = NonCallableMagicMock
+
+        options = {}
+        if effective_spec is not None:
+            options['spec' if spec_set is None else 'spec_set'] = effective_spec
+        if isinstance(factory, type) and issubclass(factory, NonCallableMock):
+            options['name'] = self.attribute
+        options.update(self.mock_kwargs)
+        replacement = factory(**options)
+        if effective_spec is not None and isinstance(original, type) and _is_instance_mock(replacement):
+            # The class can be called, while the instances it stands for may not be.
+            if not is_names and not _instance_callable(effective_spec):
+                factory = NonCallableMagicMock
+            options.pop('name')
+            replacement.return_value = factory(**options)
+        return replacement
+
     def __enter__(self):
         if self.is_started:
             raise RuntimeError("Patch is already started")
+        spec = None if self.spec is False else self.spec
+        spec_set = None if self.spec_set is False else self.spec_set
+        if spec is not None and spec_set not in (True, None):
+            raise TypeError("Can't provide explicit spec_set *and* spec or autospec")
         target = self.getter()
         name = self.attribute
         try:
@@ -107,12 +163,7 @@ class _patch:
             raise AttributeError(f"{target} does not have the attribute {name!r}")
         replacement = self.new
         if replacement is DEFAULT:
-            factory = MagicMock if self.new_callable is None else self.new_callable
-            kwargs = {}
-            if isinstance(factory, type) and issubclass(factory, NonCallableMock):
-                kwargs['name'] = name
-            kwargs.update(self.mock_kwargs)
-            replacement = factory(**kwargs)
+            replacement = self._new_mock(original, spec, spec_set)
         elif self.mock_kwargs:
             raise TypeError("Can't pass kwargs to a mock we aren't creating")
         setattr(target, name, replacement)
@@ -160,6 +211,7 @@ class _patch:
                     # Some boxed builtins are callable without exposing __call__.
                     if hasattr(method, '__call__') or isinstance(method, type(len)):
                         patcher = _patch(self.getter, self.attribute, self.new, self.create,
+                                         spec=self.spec, spec_set=self.spec_set,
                                          new_callable=self.new_callable, **self.mock_kwargs)
                         setattr(func, name, patcher(method))
             return func
@@ -181,15 +233,15 @@ class _patch:
         return patched
 
 
-def _patch_attribute(self, target, new=DEFAULT, *, create=False, **kwargs):
+def _patch_attribute(self, target, new=DEFAULT, spec=None, create=False, spec_set=None, **kwargs):
     getter, attribute = _get_target(target)
-    return _patch(getter, attribute, new, create, **kwargs)
+    return _patch(getter, attribute, new, create, spec=spec, spec_set=spec_set, **kwargs)
 
 
-def _patch_object(target, attribute, new=DEFAULT, *, create=False, **kwargs):
+def _patch_object(target, attribute, new=DEFAULT, spec=None, create=False, spec_set=None, **kwargs):
     if type(target) is str:
         raise TypeError(f"{target!r} must be the actual object to be patched, not a str")
-    return _patch(lambda: target, attribute, new, create, **kwargs)
+    return _patch(lambda: target, attribute, new, create, spec=spec, spec_set=spec_set, **kwargs)
 
 
 class _BoxedDictionaryPatch(_DictionaryPatch, ContextDecorator):

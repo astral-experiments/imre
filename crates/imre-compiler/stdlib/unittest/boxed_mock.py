@@ -182,6 +182,12 @@ def _callable(value):
     return getattr(value, "__call__", callable(value) or None) is not None
 
 
+def _instance_callable(spec):
+    if isinstance(spec, type):
+        return any(base.__dict__.get("__call__") is not None for base in spec.__mro__)
+    return getattr(spec, "__call__", None) is not None
+
+
 class NonCallableMock(_FixedMock):
     _mock_sealed = False
     _mock_methods = None
@@ -316,7 +322,7 @@ class NonCallableMock(_FixedMock):
     def _get_child_mock(self, /, **kwargs):
         # Each instance has a private subclass for its own protocol slots.
         factory = type(self).__mro__[1]
-        if not issubclass(factory, Mock):
+        if not issubclass(factory, CallableMixin):
             factory = MagicMock if issubclass(factory, NonCallableMagicMock) else Mock
         return factory(**kwargs)
 
@@ -534,7 +540,7 @@ class _MagicSlot:
         return child
 
 
-class Mock(NonCallableMock):
+class CallableMixin:
     def __call__(self, /, *args, **kwargs):
         node = self._node
         signature = getattr(node, "_spec_signature", None)
@@ -583,6 +589,10 @@ class Mock(NonCallableMock):
         return self.return_value
 
 
+class Mock(CallableMixin, NonCallableMock):
+    pass
+
+
 class MagicMock(Mock):
     _mock_auto_magics = ("__enter__", "__exit__", "__getitem__", "__iter__", "__next__")
 
@@ -619,7 +629,7 @@ def _make_autospec(spec, strict, as_instance, name=None, target=None):
     if is_class:
         if not as_instance:
             target = partial(spec.__init__, None)
-        elif any("__call__" in base.__dict__ for base in spec.__mro__):
+        elif _instance_callable(spec):
             target = _autospec_target(spec, "__call__", spec.__call__)
     elif target is None and callable(spec):
         target = spec
