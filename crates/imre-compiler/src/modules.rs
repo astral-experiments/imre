@@ -2243,6 +2243,12 @@ impl IntrinsicModule {
             (Self::UrllibRequest, "HTTPBasicAuthHandler") => {
                 Intrinsic::ScopedObjectExport("urllib.request.HTTPBasicAuthHandler")
             }
+            (Self::UrllibRequest, "AbstractDigestAuthHandler") => {
+                Intrinsic::ScopedObjectExport("urllib.request.AbstractDigestAuthHandler")
+            }
+            (Self::UrllibRequest, "HTTPDigestAuthHandler") => {
+                Intrinsic::ScopedObjectExport("urllib.request.HTTPDigestAuthHandler")
+            }
             (Self::UrllibRequest, "Request") => {
                 Intrinsic::ScopedObjectExport("urllib.request.Request")
             }
