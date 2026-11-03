@@ -2315,6 +2315,13 @@ impl IntrinsicModule {
             }
             (Self::Thread, "allocate") => Intrinsic::ObjectRuntimeExport("_thread.allocate"),
             (Self::Thread, "error") => Intrinsic::ObjectRuntimeExport("_thread.error"),
+            (Self::Threading, "ExceptHookArgs") => {
+                Intrinsic::ObjectRuntimeExport("threading.ExceptHookArgs")
+            }
+            (Self::Threading, "excepthook") => Intrinsic::ObjectRuntimeExport("threading.excepthook"),
+            (Self::Threading, "__excepthook__") => {
+                Intrinsic::ObjectRuntimeExport("threading.__excepthook__")
+            }
             (Self::Threading, "ThreadError") => {
                 Intrinsic::ObjectRuntimeExport("threading.ThreadError")
             }
