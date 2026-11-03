@@ -2982,6 +2982,12 @@ impl Context {
                 return Ok(self.builtin(&format!("generator.{name}")));
             }
             Value::Native(ref class)
+                if matches!(class.as_str(), "classmethod" | "staticmethod")
+                    && name == "__text_signature__" =>
+            {
+                return Ok(self.text("(function, /)"));
+            }
+            Value::Native(ref class)
                 if matches!(
                     class.as_str(),
                     "classmethod" | "staticmethod" | "functools.partial"

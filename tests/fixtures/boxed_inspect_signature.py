@@ -48,6 +48,8 @@ class C:
 
 
 class CallableInstance:
+    __text_signature__ = "(name, /)"
+
     def __call__(self, item, /, *, count=1):
         return item * count
 
@@ -131,6 +133,15 @@ class DescriptorInit:
     __init__ = InitDescriptor()
 
 
+class InheritedAdapter(staticmethod):
+    pass
+
+
+class NamedAdapter(staticmethod):
+    def __init__(self, callback, *, name):
+        super().__init__(callback)
+
+
 class JoinMeta(type):
     def __call__(cls, *args, **kwargs):
         return ":".join(*args, **kwargs)
@@ -188,9 +199,10 @@ else:
     raise AssertionError("string formatting with eval_str was silently accepted")
 
 
+assert str(inspect.signature(CallableInstance)) == "()"
 target = CallableInstance()
 target.__call__ = lambda shadow: None
-assert str(inspect.signature(target)) == "(item, /, *, count=1)"
+assert str(inspect.signature(target)) == "(name, /)"
 target.__text_signature__ = "(value, /, *, width=80)"
 assert str(inspect.signature(target)) == "(value, /, *, width=80)"
 target.__text_signature__ = ""
@@ -276,6 +288,12 @@ DeprecatedChild.__new__.__signature__ = Signature([
 ])
 assert str(inspect.signature(DeprecatedChild)) == "(*, published)"
 
+
+for adapter in (classmethod, staticmethod):
+    assert adapter.__text_signature__ == "(function, /)"
+    assert str(inspect.signature(adapter)) == "(function, /)"
+assert str(inspect.signature(InheritedAdapter)) == "(function, /)"
+assert str(inspect.signature(NamedAdapter)) == "(callback, *, name)"
 
 assert str(inspect.signature(DescriptorInit)) == "(selected)"
 
