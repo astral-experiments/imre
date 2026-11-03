@@ -32,7 +32,9 @@ pub(super) fn collect(graph: &SourceGraph, types: &Types) -> Result<(), String> 
                 ));
             };
             if !call.arguments.keywords.is_empty() {
-                return Err(fail("namedtuple declaration options are not supported"));
+                let error =
+                    fail("namedtuple keyword options require native Python object operations");
+                return Err(graph.require_object_class_layout(error));
             }
             let name = name.value.to_string();
             let fields: Vec<String> = if let ast::Expr::StringLiteral(value) = names {
