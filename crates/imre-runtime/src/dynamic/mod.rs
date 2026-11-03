@@ -245,6 +245,27 @@ impl Context {
         self.heap.dict_storage(value)
     }
 
+    /// PyMapping_Check tests the subscript slot even for sequences with no keys method.
+    fn has_mapping_subscription(&self, value: Id) -> bool {
+        self.slot(value, "__getitem__").is_some()
+            || self.dict_storage(value).is_some()
+            || self.builtin_slot_accepts(value, "tuple")
+            || matches!(
+                self.heap.get(self.scalar_value(value)),
+                Value::List(_)
+                    | Value::Str(_)
+                    | Value::SurrogateStr(_)
+                    | Value::Bytes(_)
+                    | Value::ByteArray(_)
+                    | Value::MemoryView { .. }
+                    | Value::Range(_)
+                    | Value::Array(_)
+                    | Value::MappingProxy(_)
+                    | Value::Context(_)
+                    | Value::RegexMatch(_)
+            )
+    }
+
     /// The native elements inherited by a Python-defined list or tuple subclass.
     fn sequence_payload(&self, object: Id) -> Option<(Id, &[Id])> {
         let Value::Instance {
@@ -1947,7 +1968,9 @@ impl Context {
         if let Some(&cell) = self.scope_data(scope).closure.cells.get(name) {
             return Ok(self.heap.replace_cell(cell, None).is_some());
         }
-        if let Some(locals) = self.scope_data(scope).exec_locals {
+        let frame = self.scope_data(scope);
+        if let Some(locals) = frame.exec_locals.or(frame.class_body_mapping()) {
+            // DELETE_NAME reports a missing name on deletion failure, even for a colliding key.
             return Ok(self.delete_item(locals, key).is_ok());
         }
         if let Some(namespace) = self.scope_data(scope).binding_namespace(name) {
@@ -2094,7 +2117,17 @@ impl Context {
     fn lookup(&mut self, mut scope: Id, name: &str) -> Result<Id> {
         let origin = scope;
         loop {
-            scope = self.binding_scope(scope, name);
+            let target = self.binding_scope(scope, name);
+            let frame = self.scope_data(scope);
+            if target != scope
+                && frame.class_body_mapping().is_some()
+                && frame.closure.nonlocals.contains(name)
+                && let Some(value) = self.lookup_scope_name(scope, name)?
+            {
+                // LOAD_FROM_DICT_OR_DEREF checks class locals before its enclosing cell.
+                return Ok(value);
+            }
+            scope = target;
             if let Some(locals) = self.scope_data(scope).exec_locals {
                 match self.load_exec_name(locals, name) {
                     Err(error) if self.is_builtin_error(&error, "KeyError") => {}
@@ -2238,7 +2271,7 @@ impl Context {
             self.builtin(symbol);
         }
         let methods = match name {
-            "type" => &["mro"][..],
+            "type" => &["mro", "__prepare__"][..],
             "object" => &[
                 "__hash__",
                 "__ne__",
