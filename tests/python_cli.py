@@ -1229,9 +1229,12 @@ def check_unittest_module_main(imre, root, run):
     (package / "sample.py").write_text(
         "import unittest\n"
         "import os, sys\n"
+        "from fractions import Fraction\n"
         "class Passing(unittest.TestCase):\n"
         "    def test_one(self):\n"
         "        self.assertEqual(sys.argv[0], os.path.basename(sys.executable) + ' -m unittest')\n"
+        "        self.assertEqual((Fraction('6/8') + Fraction(1, 6)).as_integer_ratio(), (11, 12))\n"
+        "        self.assertRaises(ZeroDivisionError, Fraction, '1/0')\n"
         "        print(self.id())\n"
         "class Failing(unittest.TestCase):\n"
         "    def test_one(self): self.fail('deliberate failure')\n"
