@@ -22,6 +22,7 @@ mod dictionary;
 mod displayhook;
 mod enums;
 mod excepthook;
+mod exception_group;
 mod ffi;
 mod finalizers;
 mod frame_locals;
@@ -1571,6 +1572,26 @@ impl Context {
         Ok(buffer)
     }
 
+    /// Check the Python sequence protocol without consuming iterators.
+    pub(super) fn is_sequence(&self, id: Id) -> bool {
+        // PySequence_Check excludes dict subclasses even if they override __getitem__.
+        self.dict_storage(id).is_none()
+            && (matches!(
+                self.heap.get(self.scalar_value(id)),
+                Value::List(_)
+                    | Value::Tuple(_)
+                    | Value::NamedTuple { .. }
+                    | Value::Range(_)
+                    | Value::Deque(_)
+                    | Value::Str(_)
+                    | Value::SurrogateStr(_)
+                    | Value::Bytes(_)
+                    | Value::ByteArray(_)
+                    | Value::Array(_)
+                    | Value::MemoryView { .. }
+            ) || self.slot(id, "__getitem__").is_some())
+    }
+
     fn items(&mut self, id: Id) -> Result<Vec<Id>> {
         if matches!(self.heap.get(id), Value::TypeVarTuple { .. }) {
             return Ok(vec![typing::unpack_parameter(self, id)?]);
@@ -2473,10 +2494,20 @@ impl Context {
             self.builtin("BaseException.add_note");
             self.builtin("BaseException.with_traceback");
         }
+        if matches!(name, "BaseExceptionGroup" | "ExceptionGroup") {
+            self.readonly_member("BaseExceptionGroup", "message");
+            self.readonly_member("BaseExceptionGroup", "exceptions");
+        }
         if let Some(symbol) = object_size::descriptor(name) {
             self.builtin(symbol);
         }
         let methods = match name {
+            "BaseExceptionGroup" | "ExceptionGroup" => {
+                for method in exception_group::METHODS {
+                    self.builtin(&format!("BaseExceptionGroup.{method}"));
+                }
+                &[][..]
+            }
             "type" => &["mro", "__prepare__"][..],
             "object" => &[
                 "__hash__",

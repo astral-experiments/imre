@@ -3521,6 +3521,7 @@ for name in ("md4", "ripemd160"):
             "boxed_descriptors.py",
             "boxed_exception_repr.py",
             "boxed_exception_notes.py",
+            "boxed_exception_groups.py",
             "boxed_warning_categories.py",
             "boxed_warnings.py",
             "boxed_warnings_accelerator.py",

@@ -235,6 +235,16 @@ impl Context {
                 return mro.iter().find_map(|&base| self.own_class_attr(base, name));
             }
         }
+        if (super::exception_group::METHODS.contains(&name)
+            || matches!(name, "message" | "exceptions"))
+            && let Some(mro) = self.published_mro(class)
+            && self
+                .builtins
+                .get("BaseExceptionGroup")
+                .is_some_and(|base| mro.contains(base))
+        {
+            return mro.iter().find_map(|&base| self.own_class_attr(base, name));
+        }
         if name == "__hash__" {
             if matches!(self.heap.get(class), Value::Native(_)) {
                 return self.own_class_attr(class, name);
@@ -310,11 +320,12 @@ impl Context {
                         .filter_map(|name| self.builtins.get(name))
                         .find_map(|&base| lookup(base));
                 }
-                if matches!(self.heap.get(class), Value::Native(name) if name == "datetime.datetime") {
-                    self.builtins.get("datetime.date").and_then(|&base| lookup(base))
-                } else {
-                    None
-                }
+                let base = match self.heap.get(class) {
+                    Value::Native(name) if name == "datetime.datetime" => "datetime.date",
+                    Value::Native(name) if name == "ExceptionGroup" => "BaseExceptionGroup",
+                    _ => return None,
+                };
+                self.builtins.get(base).and_then(|&base| lookup(base))
             });
         };
         std::iter::once(class)
@@ -386,6 +397,14 @@ impl Context {
                 Some(NONE)
             }
             Value::Native(kind) if builtins::is_exception(kind) => match name {
+                name if kind == "BaseExceptionGroup"
+                    && (super::exception_group::METHODS.contains(&name)
+                        || matches!(name, "message" | "exceptions")) =>
+                {
+                    self.builtins
+                        .get(&format!("BaseExceptionGroup.{name}"))
+                        .copied()
+                }
                 name if kind == "BaseException"
                     && let Some(symbol) = builtins::base_exception_method(name) =>
                 {
@@ -610,12 +629,16 @@ impl Context {
         }
     }
 
-    /// Find a Python-declared member on an exception that retains its original class.
+    /// Find a member declared by an exception subclass or its native group base.
     fn exception_member(&self, object: Id, name: &str) -> Option<Id> {
         let Value::Raised(error) = self.heap.get(object) else {
             return None;
         };
-        self.class_attr(error.class()?, name)
+        let class = error.class().or_else(|| {
+            error.group()?;
+            self.builtins.get(error.kind.as_ref()).copied()
+        })?;
+        self.class_attr(class, name)
     }
 
     /// Bind an override only if it precedes the built-in numeric method in the MRO.
@@ -1389,6 +1412,16 @@ impl Context {
     }
 
     pub(super) fn read_member(&mut self, owner: &str, field: &str, receiver: Id) -> Result<Id> {
+        if owner == "BaseExceptionGroup"
+            && let Value::Raised(error) = self.heap.get(receiver)
+            && let Some([message, exceptions]) = error.group()
+        {
+            return Ok(match field {
+                "message" => message,
+                "exceptions" => exceptions,
+                _ => unreachable!("unknown exception group member"),
+            });
+        }
         if owner == "super" {
             return self.super_field(receiver, field);
         }
@@ -2291,9 +2324,8 @@ impl Context {
         }
         if let Value::Raised(error) = self.heap.get(obj) {
             let dictionary = error.trace.as_ref().and_then(|trace| trace.dictionary);
-            if let Some(class) = error.class()
-                && let Some(member) = self.class_attr(class, name)
-            {
+            if let Some(member) = self.exception_member(obj, name) {
+                let class = self.exact_type(obj)?;
                 let field = if self.readable_data_descriptor(member) {
                     None
                 } else {
@@ -4456,6 +4488,9 @@ impl Context {
                             name,
                             "__new__" | "__init__" | "add_note" | "with_traceback"
                         ))
+                    || (matches!(class.as_str(), "BaseExceptionGroup" | "ExceptionGroup")
+                        && (super::exception_group::METHODS.contains(&name)
+                            || matches!(name, "message" | "exceptions")))
                     || (class == "memoryview" && builtins::MEMORYVIEW_METHODS.contains(&name))
                     || (class == "bytes" && builtins::BYTES_METHODS.contains(&name))
                     || (class == "complex" && super::complex::METHODS.contains(&name))
@@ -6961,6 +6996,12 @@ impl Context {
                 if matches!(name.as_str(), "object.__reduce__" | "object.__reduce_ex__") =>
             {
                 stdlib::pickle::object_reduce(self, &name["object.".len()..], &args, &kwargs)
+            }
+            Value::Native(ref name)
+                if let Some(method) = name.strip_prefix("BaseExceptionGroup.")
+                    && super::exception_group::METHODS.contains(&method) =>
+            {
+                super::exception_group::call(self, method, &args, &kwargs)
             }
             Value::Native(name) if builtins::is_enum_base(&name) => {
                 self.functional_enum(callable, args, kwargs)

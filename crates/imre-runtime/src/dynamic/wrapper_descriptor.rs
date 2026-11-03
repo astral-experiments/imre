@@ -163,6 +163,9 @@ impl BuiltinDescriptor {
             Some(("complex", attr)) => Some(("complex", attr, super::complex::METHODS)),
             Some(("bytearray", attr)) => Some(("bytearray", attr, builtins::BYTEARRAY_METHODS)),
             Some(("memoryview", attr)) => Some(("memoryview", attr, builtins::MEMORYVIEW_METHODS)),
+            Some(("BaseExceptionGroup", attr)) => {
+                Some(("BaseExceptionGroup", attr, super::exception_group::METHODS))
+            }
             Some(("BaseException", attr)) => {
                 Some(("BaseException", attr, &["add_note", "with_traceback"][..]))
             }
@@ -437,6 +440,9 @@ impl BuiltinDescriptor {
             "typing.Union" => matches!(ctx.heap.get(receiver), Value::Union(_)),
             super::namedtuple::GETTER => {
                 matches!(ctx.heap.get(receiver), Value::TupleGetter { .. })
+            }
+            "BaseExceptionGroup" => {
+                matches!(ctx.heap.get(receiver), Value::Raised(error) if error.group().is_some())
             }
             "object" => true,
             "type" => ctx.is_type_object(receiver),

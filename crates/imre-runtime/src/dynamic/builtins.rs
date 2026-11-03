@@ -68,6 +68,7 @@ pub(super) fn exception_ancestors(
         IndentationError,
         SyntaxError,
         Warning,
+        BaseExceptionGroup,
         Exception,
         BaseException,
     ]
@@ -178,6 +179,7 @@ pub(super) fn exception_initializer(kind: &str) -> &'static str {
 pub(super) fn exception_new_owner(name: &str) -> &str {
     match name {
         "KeyError" => "LookupError",
+        "ExceptionGroup" => "BaseExceptionGroup",
         "SystemExit" | "GeneratorExit" | "KeyboardInterrupt" => "BaseException",
         "NameError"
         | "UnboundLocalError"
@@ -2829,6 +2831,17 @@ pub(super) fn call(
             let mut error = ctx.exception(name, args);
             ctx.retain_syntax_fields(&mut error, fields)?;
             Ok(ctx.alloc(Value::Raised(error)))
+        }
+        "BaseExceptionGroup" | "ExceptionGroup" => {
+            let class = ctx.builtin(name);
+            let group = exceptions::allocate_group(ctx, class, args)?;
+            if !kwargs.is_empty() {
+                return Err(type_error(format!(
+                    "{}() takes no keyword arguments",
+                    ctx.type_name(group)
+                )));
+            }
+            Ok(group)
         }
         name if is_exception(name) => {
             positional(name, kwargs)?;

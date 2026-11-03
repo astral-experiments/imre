@@ -562,28 +562,9 @@ mod utime;
 #[cfg(target_os = "linux")]
 pub(in crate::dynamic) mod xattr;
 
-fn is_sequence(ctx: &Context, id: Id) -> bool {
-    // PySequence_Check excludes dict subclasses even if they override __getitem__.
-    ctx.dict_storage(id).is_none()
-        && (matches!(
-            ctx.heap.get(ctx.scalar_value(id)),
-            Value::List(_)
-                | Value::Tuple(_)
-                | Value::NamedTuple { .. }
-                | Value::Range(_)
-                | Value::Deque(_)
-                | Value::Str(_)
-                | Value::SurrogateStr(_)
-                | Value::Bytes(_)
-                | Value::ByteArray(_)
-                | Value::Array(_)
-                | Value::MemoryView { .. }
-        ) || ctx.slot(id, "__getitem__").is_some())
-}
-
 #[cfg(unix)]
 fn setgroups(ctx: &mut Context, groups: Id) -> Result<Id> {
-    if !is_sequence(ctx, groups) {
+    if !ctx.is_sequence(groups) {
         return Err(Error::new(
             "TypeError",
             "setgroups argument must be a sequence",

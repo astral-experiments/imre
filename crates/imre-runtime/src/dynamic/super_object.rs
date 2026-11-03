@@ -48,7 +48,10 @@ impl Context {
         } else {
             if let Value::Native(name) = self.heap.get(class) {
                 match name.as_str() {
-                    name if published && let Some(kind) = builtins::exception_kind(name) => {
+                    name if (published
+                        || matches!(name, "ExceptionGroup" | "BaseExceptionGroup"))
+                        && let Some(kind) = builtins::exception_kind(name) =>
+                    {
                         for base in builtins::exception_ancestors(kind) {
                             lineage.push(self.builtin(base));
                         }
@@ -124,8 +127,12 @@ impl Context {
             return tuple;
         }
         let lineage = self.base_lineage(class, true);
-        // The classes exported directly by builtins have at most one direct base.
-        let types = if name == "__bases__" {
+        let types = if name == "__bases__" && self.class_name(class) == "ExceptionGroup" {
+            vec![
+                self.builtin("BaseExceptionGroup"),
+                self.builtin("Exception"),
+            ]
+        } else if name == "__bases__" {
             lineage.get(1).copied().into_iter().collect()
         } else {
             lineage
@@ -485,7 +492,8 @@ impl Context {
         name: &str,
     ) -> Result<Option<Id>> {
         if owner != NONE {
-            let exception_method = builtins::base_exception_method(name).is_some();
+            let exception_method = builtins::base_exception_method(name).is_some()
+                || super::exception_group::METHODS.contains(&name);
             let lineage = self.base_lineage(owner, exception_method);
             let after = lineage.iter().skip_while(|&&class| class != start).skip(1);
             let instance = if owner == receiver { NONE } else { receiver };

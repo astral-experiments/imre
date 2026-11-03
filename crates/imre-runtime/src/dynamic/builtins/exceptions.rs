@@ -25,7 +25,10 @@ pub(super) fn allocate(ctx: &mut Context, owner: &str, args: &[Id]) -> Result<Id
             "{owner}.__new__({name}): {name} is not a subtype of {owner}"
         )));
     }
-    for specialized in ["OSError", "MemoryError"] {
+    if owner == "BaseExceptionGroup" {
+        return allocate_group(ctx, class, args);
+    }
+    for specialized in ["OSError", "MemoryError", "BaseExceptionGroup"] {
         if owner != specialized {
             let base = ctx.builtin(specialized);
             if ctx.subclass(class, base) {
@@ -54,6 +57,79 @@ pub(super) fn allocate(ctx: &mut Context, owner: &str, args: &[Id]) -> Result<Id
         error.tracing().import_message = Some(NONE);
     }
     error.class = python_class.unwrap_or(NONE);
+    Ok(ctx.alloc(Value::Raised(error)))
+}
+
+/// Construct an exception group, retaining the original args and a separate child tuple.
+pub(super) fn allocate_group(ctx: &mut Context, mut class: Id, args: &[Id]) -> Result<Id> {
+    let [message, source] = *args else {
+        return Err(type_error(format!(
+            "BaseExceptionGroup.__new__() takes exactly 2 arguments ({} given)",
+            args.len()
+        )));
+    };
+    if ctx.string_storage(message).is_none() {
+        return Err(type_error(format!(
+            "BaseExceptionGroup.__new__() argument 1 must be str, not {}",
+            ctx.type_name(message)
+        )));
+    }
+    if !ctx.is_sequence(source) {
+        return Err(type_error(
+            "second argument (exceptions) must be a sequence",
+        ));
+    }
+    let source_type = ctx.exact_type(source)?;
+    let list = ctx.builtin("list");
+    let tuple = ctx.builtin("tuple");
+    let sequence_repr = if ctx.subclass(source_type, list) || ctx.subclass(source_type, tuple) {
+        None
+    } else {
+        Some(super::text::construct(ctx, "repr", &[source], &[])?)
+    };
+    let members = super::collections::construct(ctx, "tuple", &[source], &[])?;
+    let exception = ctx.builtin("Exception");
+    let Value::Tuple(children) = ctx.heap.get(members) else {
+        unreachable!()
+    };
+    if children.is_empty() {
+        return Err(Error::new(
+            "ValueError",
+            "second argument (exceptions) must be a non-empty sequence",
+        ));
+    }
+    let mut only_exceptions = true;
+    for (index, &child) in children.iter().enumerate() {
+        let Value::Raised(error) = ctx.heap.get(child) else {
+            return Err(Error::new(
+                "ValueError",
+                format!("Item {index} of second argument (exceptions) is not an exception"),
+            ));
+        };
+        only_exceptions &= ctx.raised_error_matches(error, exception);
+    }
+
+    if class == ctx.builtin("BaseExceptionGroup") && only_exceptions {
+        class = ctx.builtin("ExceptionGroup");
+    } else if !only_exceptions && ctx.subclass(class, exception) {
+        return Err(type_error(if class == ctx.builtin("ExceptionGroup") {
+            "Cannot nest BaseExceptions in an ExceptionGroup".to_owned()
+        } else {
+            format!("Cannot nest BaseExceptions in '{}'", ctx.class_name(class))
+        }));
+    }
+    let name = ctx.class_name(class).to_owned();
+    let mut error = Error::new(&name, "");
+    error.args = Some(ctx.alloc(Value::Tuple(args.to_vec())));
+    if matches!(ctx.heap.get(class), Value::Class { .. }) {
+        error.class = class;
+    }
+    error.tracing().group = Some(crate::dynamic::value::GroupData {
+        message,
+        exceptions: members,
+        sequence_repr,
+    });
+    error.message = ctx.exception_message(&error);
     Ok(ctx.alloc(Value::Raised(error)))
 }
 
