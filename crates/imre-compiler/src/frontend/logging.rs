@@ -17,6 +17,38 @@ fn text(value: &str) -> Expr {
     }
 }
 
+/// Recognize a full version-1 configuration whose object definitions the native
+/// logger registry cannot construct. Later duplicate keys replace earlier ones.
+fn defines_logging_objects(config: &ast::ExprDict) -> bool {
+    let Some(fields) = config
+        .items
+        .iter()
+        .map(|item| {
+            let key = item.key.as_ref()?.as_string_literal_expr()?;
+            Some((key.value.to_str(), &item.value))
+        })
+        .collect::<Option<HashMap<_, _>>>()
+    else {
+        return false;
+    };
+    let Some(ast::Expr::NumberLiteral(version)) = fields.get("version") else {
+        return false;
+    };
+    if !matches!(&version.value, ast::Number::Int(n) if n.as_i64() == Some(1))
+        || fields
+            .get("incremental")
+            .is_some_and(|flag| !ast::helpers::is_const_false(flag))
+    {
+        return false;
+    }
+    ["handlers", "formatters", "filters"].iter().any(|name| {
+        fields
+            .get(name)
+            .and_then(|section| section.as_dict_expr())
+            .is_some_and(|dict| dict.items.iter().any(|item| item.key.is_some()))
+    })
+}
+
 impl Checker<'_> {
     fn handler_type(&self) -> Option<Type> {
         let id = self.graph.logging_definition("Handler")?;
@@ -133,8 +165,10 @@ impl Checker<'_> {
     ) -> Result<Expr, String> {
         let parameters = [parameter("config", documents::MAP, None)];
         let mut scalar = None;
+        let mut needs_objects = false;
         let mut args = self.arguments_with(call, &parameters, None, |checker, _, argument| {
-            if matches!(argument, ast::Expr::Dict(_)) {
+            if let ast::Expr::Dict(config) = argument {
+                needs_objects = defines_logging_objects(config);
                 return checker.expr_expected(argument, documents::MAP);
             }
             let value = checker.expr(argument)?;
@@ -153,6 +187,11 @@ impl Checker<'_> {
             }
             checker.document_coerce(value, documents::MAP, argument)
         })?;
+        if needs_objects {
+            let error = self.scoped_builtin_error("logging.config.dictConfig", call);
+            self.defer_object_error(&error);
+            return Ok(Expr::none());
+        }
         let op = if let Some(kind) = scalar {
             args.order.push(args.values.len());
             args.values.push(Expr::integer(kind));
