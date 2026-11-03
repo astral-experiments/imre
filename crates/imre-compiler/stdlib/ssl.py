@@ -2,8 +2,9 @@
 
 import _imre_ssl
 import _ssl
+from _ssl import MemoryBIO
 from _ssl import OPENSSL_VERSION, OPENSSL_VERSION_INFO, OPENSSL_VERSION_NUMBER
-from _ssl import nid2obj as _nid2obj, txt2obj as _txt2obj
+from _ssl import SSLError, nid2obj as _nid2obj, txt2obj as _txt2obj
 from collections import namedtuple
 from enum import Enum as _Enum, IntEnum as _IntEnum, IntFlag as _IntFlag, _simple_enum
 
@@ -178,15 +179,6 @@ class _TLSMessageType:
     NEXT_PROTO = 67
     MESSAGE_HASH = 254
     CHANGE_CIPHER_SPEC = 0x0101
-
-
-class SSLError(OSError):
-    """An error occurred in the SSL implementation."""
-
-    def __str__(self):
-        if isinstance(self.strerror, str):
-            return self.strerror
-        return str(self.args)
 
 
 class SSLZeroReturnError(SSLError):
