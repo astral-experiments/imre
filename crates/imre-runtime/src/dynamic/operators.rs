@@ -4572,7 +4572,15 @@ impl Context {
                 return self.concat_list(storage, b);
             }
             "+" => match (self.heap.get(a), self.heap.get(b)) {
-                (Value::Bytes(x), Value::Bytes(y) | Value::ByteArray(y)) => {
+                (Value::Bytes(x), _) => {
+                    let y = self
+                        .check_buffer_exporter(b)
+                        .and_then(|()| self.native_buffer_bytes(b))
+                        .map_err(|_| {
+                            let name = self.type_name(b);
+                            let name = &name[..name.floor_char_boundary(100)];
+                            Error::new("TypeError", format!("can't concat {name} to bytes"))
+                        })?;
                     if y.is_empty() {
                         return Ok(a);
                     }
@@ -4581,12 +4589,6 @@ impl Context {
                     }
                     let bytes = crate::objects::concat_bytes(x, y)?;
                     return Ok(self.alloc(Value::Bytes(bytes)));
-                }
-                (Value::Bytes(_), _) => {
-                    return Err(Error::new(
-                        "TypeError",
-                        format!("can't concat {} to bytes", self.type_name(b)),
-                    ));
                 }
                 (Value::ByteArray(x), Value::Bytes(y) | Value::ByteArray(y)) => {
                     let bytes = crate::objects::concat_bytes(x, y)?;

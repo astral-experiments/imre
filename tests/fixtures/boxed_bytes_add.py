@@ -22,6 +22,45 @@ def current():
     assert isinstance(saved, bytes) and saved == result
     assert isinstance(copied, bytes) and copied == last
 
+    data = bytearray(b"abc")
+    view = memoryview(data)
+    saved = add(first, view[1:])
+    data[1] = ord("x")
+    assert type(saved) is bytes and saved == first + b"bc"
+    assert add(first, view[:0]) is first
+
+    from array import array
+    words = array("H", [258, 772])
+    assert add(first, words) == first + words.tobytes()
+    assert add(first, memoryview(words)[1:]) == first + array("H", [772]).tobytes()
+
+    strided = view[::2]
+    view.release()
+    for unavailable in (strided, view):
+        try:
+            add(first, unavailable)
+        except TypeError as exc:
+            assert str(exc) == "can't concat memoryview to bytes"
+        else:
+            raise AssertionError("bytes accepted an unavailable contiguous buffer")
+
+    class Refuse:
+        def __buffer__(self, flags):
+            raise RuntimeError("cannot export")
+
+    try:
+        add(first, Refuse())
+    except TypeError as exc:
+        assert str(exc) == "can't concat Refuse to bytes"
+    else:
+        raise AssertionError("bytes concatenated a refused buffer")
+
+    class Reflected(bytearray):
+        def __radd__(self, other):
+            return "reflected"
+
+    assert add(first, Reflected(b"abc")) == "reflected"
+
     left = bytearray(first)
     alias = left
     joined = add(left, last)
