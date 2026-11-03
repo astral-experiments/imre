@@ -36,5 +36,16 @@ def main() -> None:
         zeros[2 * j] = marked
     measure(zeros, len(zeros), 0, 8192, -0.0)
 
+    # Each partial permutation visits just the negative-zero row.
+    for base, edit, start, stop in [(-0.0, 0.0, 3072, 4096), (0.0, -0.0, 0, 3072)]:
+        partial = [Reading(base, False)] * 4096
+        replacement = Reading(edit, True)
+        for j in range(start, stop):
+            partial[(7 * j + 2) % len(partial)] = replacement
+        measure(partial, len(partial), 0, 3072, -0.0)
+
+    measure(rows, len(rows), 31, 31 + len(rows) - 1, -11.0)
+    measure(rows, len(rows), 23, 23 + 3 * len(rows) - 17, 5.0)
+
 
 main()
