@@ -44,6 +44,7 @@ const struct entry *imre_platform_{table}_entries(size_t *length) {{
 
 fn add_configuration_queries(c: &mut String) {
     c.push_str("#include <unistd.h>\n");
+    add_confname_table(c, "confstr", include_str!("native/confstr-names.txt"));
     add_confname_table(c, "sysconf", include_str!("native/sysconf-names.txt"));
     add_confname_table(c, "pathconf", include_str!("native/pathconf-names.txt"));
     c.push_str(
@@ -115,10 +116,15 @@ fn main() {
         c.push_str("#include <netdb.h>\nint imre_socket_host_errno(void) { return h_errno; }\n");
     }
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("linux") {
+        println!("cargo:rerun-if-changed=native/confstr-names.txt");
         println!("cargo:rerun-if-changed=native/sysconf-names.txt");
         println!("cargo:rerun-if-changed=native/pathconf-names.txt");
         add_configuration_queries(&mut c);
     }
+    c.push_str(
+        "#include <limits.h>\n#ifndef NGROUPS_MAX\n#define NGROUPS_MAX 64\n#endif\n\
+         size_t imre_platform_max_groups(void) { return NGROUPS_MAX; }\n",
+    );
     let path = out_dir.join("platform.c");
     std::fs::write(&path, c).unwrap();
     println!("cargo:rerun-if-changed=native/ssl_capabilities.c");

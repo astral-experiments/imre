@@ -827,6 +827,11 @@ fn collect_class(
                         "StrEnum methods cannot override member metadata or special behavior",
                     ));
                 }
+                if name == "__del__" && graph.command_startup.is_some() {
+                    let error = module.error(method, "class finalizers require the object runtime");
+                    graph.class_body_error.replace(Some(error.clone()));
+                    return Err(error);
+                }
                 let unary_protocol = matches!(
                     name,
                     "__str__" | "__repr__" | "__bool__" | "__index__" | "__iter__" | "__copy__"

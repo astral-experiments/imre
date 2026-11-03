@@ -4477,6 +4477,7 @@ impl Emitter<'_, '_> {
                     LockExit => "imre_log_lock_exit",
                     LockReset => "imre_log_lock_reset",
                     HandlerLookup => "imre_log_handler_lookup",
+                    HandlerNames => "imre_log_handler_names",
                     FileEncodingUsesUtf8 => "imre_sys_utf8_mode",
                     PrintActiveException => "imre_log_print_active_exception",
                     Handlers => "imre_log_handlers",
@@ -8861,6 +8862,7 @@ declare void @imre_os_pipe(ptr)
 declare void @imre_os_pipe2(ptr, i64)
 declare i32 @imre_os_isatty(i64)
 declare ptr @imre_os_ptsname(i64, ptr, ptr, i64)
+declare i64 @imre_os_tcgetpgrp(i64)
 declare i64 @imre_os_device_encoding(i64)
 declare i32 @imre_os_get_blocking(i64)
 declare void @imre_os_set_blocking(i64, i64)
@@ -9718,6 +9720,7 @@ declare i1 @imre_log_lock_locked(ptr)
 declare i64 @imre_log_lock_count(ptr)
 declare void @imre_log_lock_reset(ptr)
 declare i64 @imre_log_handler_lookup(ptr)
+declare ptr @imre_log_handler_names()
 declare void @imre_log_print_active_exception()
 declare ptr @imre_log_new(ptr, i64)
 declare void @imre_log_add_level(i64, ptr)

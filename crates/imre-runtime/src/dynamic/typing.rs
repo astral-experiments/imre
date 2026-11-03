@@ -2990,13 +2990,13 @@ impl Context {
         &mut self,
         name: String,
         scope: Id,
-        bases: Vec<Id>,
+        mut bases: Vec<Id>,
         layout: ClassLayout,
         namedtuple_namespace: Option<Id>,
     ) -> Result<Id> {
-        let mut bases = self.validate_class_bases(bases, layout)?;
         let declared_fields =
             self.namedtuple_layout(&name, &mut bases, scope, namedtuple_namespace)?;
+        let bases = self.validate_class_bases(bases, layout)?;
         let ancestors = self.linearized_bases(&bases, false)?;
         let layout_base = self.member_layout_base(&bases)?;
         let slots = self.declared_slot_names(self.scope_name(scope, "__slots__"), layout_base)?;
@@ -3019,6 +3019,9 @@ impl Context {
         layout: ClassLayout,
     ) -> Result<Vec<Id>> {
         for &base in &bases {
+            if !self.is_type_object(base) {
+                return Err(Error::new("TypeError", "bases must be types"));
+            }
             if self.classes.get("typing.Union") == Some(&base) {
                 return Err(Error::new(
                     "TypeError",
@@ -3193,7 +3196,14 @@ impl Context {
                 self.bind_local(scope, name, method);
             }
         }
+        let pattern_flags = mro
+            .iter()
+            .skip(1)
+            .map(|&base| self.class_pattern_flags(base))
+            .find(|flags| !flags.is_empty())
+            .unwrap_or_default();
         let class = self.alloc(Value::Class {
+            pattern_flags,
             io_kind: None,
             heap_type: None,
             metaclass: None,

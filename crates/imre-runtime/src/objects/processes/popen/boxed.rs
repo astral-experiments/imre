@@ -18,7 +18,6 @@ pub(crate) struct BoxedLaunch {
     pub(crate) streams: [(u32, Option<Int>); 3],
     pub(crate) handles: PreparedHandles,
     pub(crate) bufsize: Int,
-    pub(crate) pipesize: Int,
 }
 
 impl BoxedPreparation {
@@ -26,7 +25,6 @@ impl BoxedPreparation {
         streams: [(u32, Option<Int>); 3],
         mut handles: PreparedHandles,
         bufsize: Int,
-        pipesize: Int,
     ) -> Result<(Self, [Int; 6])> {
         if handles.parents.iter().any(Option::is_some) {
             let size = bufsize
@@ -63,7 +61,6 @@ impl BoxedPreparation {
             streams,
             handles,
             bufsize,
-            pipesize,
         });
         Ok((Self { launch, pipes }, fds))
     }
@@ -174,17 +171,17 @@ impl BoxedPopen {
         direct: Option<bool>,
         search_path: Option<Vec<u8>>,
         streams: [(u32, Option<Int>); 3],
-        handles: Option<PreparedHandles>,
+        handles: PreparedHandles,
         close_fds: bool,
         restore_signals: bool,
         cwd: Option<Vec<u8>>,
         env: Option<ByteEnvironment>,
         bufsize: Int,
-        pipesize: Int,
         start_new_session: bool,
         process_group: i32,
         umask: i32,
         keep: Vec<RawFd>,
+        extra_groups: Option<Vec<libc::gid_t>>,
     ) -> std::result::Result<Self, BoxedLaunchError> {
         let mut words = Words::new(8);
         words
@@ -227,8 +224,7 @@ impl BoxedPopen {
         }
         let mut site = None;
         let mut extras = LaunchExtras {
-            pipe_size: handles.is_none().then_some((pipesize.0, 2)),
-            prepared: handles,
+            prepared: Some(handles),
             failure_site: Some(&mut site),
             direct,
             search_path,
@@ -236,6 +232,7 @@ impl BoxedPopen {
             boxed_child: Some(ChildAttributes {
                 new_session: start_new_session,
                 group: process_group,
+                extra_groups,
                 mask: (umask >= 0).then_some(umask as libc::mode_t),
                 keep,
             }),
@@ -271,10 +268,6 @@ impl BoxedPopen {
         Ok(Self(
             unsafe { triomphe::UniqueArc::assume_init(owner) }.shareable(),
         ))
-    }
-
-    pub(crate) fn pipe(&self, index: usize) -> Option<crate::ObjectOwner> {
-        self.0.borrow().pipes.get(index)?.clone()
     }
 
     pub(crate) fn pid(&self) -> i32 {

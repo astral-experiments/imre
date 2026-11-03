@@ -67,16 +67,11 @@ impl Context {
 
     /// Check the mapping and its length before evaluating the pattern's key expressions.
     fn match_mapping(&mut self, subject: Id, minimum: Id) -> Result<Id> {
-        if self.dict_storage(subject).is_none()
-            && !matches!(self.heap.get(subject), Value::MappingProxy(_))
+        if !self
+            .pattern_flags(subject)
+            .has(super::collection_pattern::PatternFlags::MAPPING)
         {
-            let Some(&mapping) = self.classes.get("collections.abc.Mapping") else {
-                return Ok(FALSE);
-            };
-            let class = self.exact_type(subject)?;
-            if !self.subclass(class, mapping) {
-                return Ok(FALSE);
-            }
+            return Ok(FALSE);
         }
         if minimum == NONE {
             return Ok(TRUE);
@@ -209,13 +204,11 @@ impl Context {
             "match_class" => self.match_class(a, b, c),
             "match_mapping" => self.match_mapping(a, b),
             "match_mapping_keys" => self.match_mapping_keys(a, b),
-            "match_sequence_length"
-                if self.builtin_slot_accepts(a, "list")
-                    || self.builtin_slot_accepts(a, "tuple") =>
-            {
-                builtins::call(self, "len", &[a], &[])
-            }
-            "match_sequence_length" => Ok(NONE),
+            "match_sequence" => Ok(builtins::boolean(
+                self.pattern_flags(a)
+                    .has(super::collection_pattern::PatternFlags::SEQUENCE),
+            )),
+            "match_sequence_length" => builtins::call(self, "len", &[a], &[]),
             "builtin" => {
                 let name = copy_label(self.str_value(a)?)?;
                 Ok(self.builtin(&name))
@@ -1707,15 +1700,8 @@ impl Context {
     }
 
     pub(super) fn checkpoint(&mut self, live: &[Id], location: value::Location, caught: Id) {
-        if self.heap.has_ordinary_finalizers() {
-            self.heap.publish_statement(live, location, caught);
-            self.collect_garbage();
-            return;
-        }
-        let (heap, roots) = self.heap_and_roots();
-        if let Some(callbacks) = heap.statement(roots, live, location, caught) {
-            self.run_weak_callbacks(callbacks);
-        }
+        self.heap.publish_statement(live, location, caught);
+        self.collect_garbage();
     }
 
     /// Collect unreachable values before a native iterator step grows the heap.
@@ -1729,15 +1715,22 @@ impl Context {
 
     /// Run deferred callbacks when a native loop reaches a collection point.
     pub(super) fn collect_garbage(&mut self) {
-        let automatic_gc = self
-            .heap
-            .automatic_gc
-            .load(std::sync::atomic::Ordering::Relaxed);
-        if self.heap.has_ordinary_finalizers() {
-            if automatic_gc && self.heap.cycles_due() {
-                let _ = self.collect_generation(2);
-                return;
+        if self.heap.gc_schedule.requested() {
+            // Root publication is complete here. Retire ordinary expression temporaries
+            // before deciding whether live GC allocations exceed the threshold.
+            self.heap.gc_schedule.begin_settling();
+            self.collect_unreachable();
+            self.heap.gc_schedule.end_settling();
+            if let Some(generation) = self
+                .heap
+                .gc_schedule
+                .generation_if_due(&self.heap.gc_settings)
+            {
+                let _ = self.collect_generation(generation);
             }
+            return;
+        }
+        if self.heap.has_ordinary_finalizers() {
             if !self.heap.caller_keeps_only_finalizer() && self.heap.has_unbound_finalizer(NONE) {
                 match self.drain_acyclic_finalizers() {
                     Ok(true) => {
@@ -1752,7 +1745,7 @@ impl Context {
             }
         }
         let (heap, roots) = self.heap_and_roots();
-        if let Some(callbacks) = heap.collect_if_due(roots, automatic_gc) {
+        if let Some(callbacks) = heap.collect_if_due(roots) {
             self.run_weak_callbacks(callbacks);
         }
     }
@@ -1798,6 +1791,8 @@ impl Context {
         let mark = self.heap.temporary_mark();
         let (heap, roots) = self.heap_and_roots();
         let callbacks = heap.begin_collection(roots, generation)?;
+        let check_older_owners = generation < 2
+            && (!callbacks.is_empty() || self.heap.full_collection_members().next().is_some());
         let mut released = 0;
         if !callbacks.is_empty() {
             self.run_weak_callbacks(callbacks.iter().copied());
@@ -1817,8 +1812,8 @@ impl Context {
         if let Some(callbacks) = callbacks {
             self.run_weak_callbacks(callbacks);
         }
-        if generation < 2 && count != 0 {
-            // Clearing young cycles can release the last owner of an older acyclic value.
+        if check_older_owners {
+            // Even a resurrected cycle can release its last edge to an older acyclic value.
             self.collect_unreachable();
         }
         self.heap.end_full_collection();

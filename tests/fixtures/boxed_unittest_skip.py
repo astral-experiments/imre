@@ -58,6 +58,19 @@ def current():
             self.addCleanup(self.fail, "from cleanup")
             self.fail("from the body")
 
+        def test_skipped_then_expected(self):
+            self.addCleanup(order.append, "cleanup")
+            with self.subTest(part="skipped"):
+                self.skipTest("skip")
+            with self.subTest(part="expected"):
+                self.fail("expected failure")
+            order.append("continued")
+
+    order = []
+    mixed = Expected("test_skipped_then_expected").run()
+    assert order == ["continued", "cleanup"]
+    assert len(mixed.skipped) == 1 and not mixed.expectedFailures
+
     failed = Expected("test_error")
     passed = Expected("test_pass")
     cleanup = Expected("test_cleanup")

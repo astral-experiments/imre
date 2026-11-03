@@ -1,9 +1,9 @@
 //! Values shared by native functions loading Python modules through `sys.path`.
 
+use super::gc_schedule::{GcSchedule, GcSettings};
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
 use std::fmt;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Weak};
 
 use super::Context;
@@ -1021,6 +1021,8 @@ pub(super) enum Value {
         running: bool,
     },
     Class {
+        /// Type-level sequence and mapping pattern eligibility.
+        pattern_flags: super::collection_pattern::PatternFlags,
         /// Private layout tag for native I/O class generations.
         io_kind: Option<super::stdlib::io::NativeClass>,
         /// Qualified name identifying a native heap type and its module generation.
@@ -1457,6 +1459,45 @@ impl Value {
             Self::Tuple(items) => !items.is_empty(),
             _ => true,
         }
+    }
+
+    /// Whether allocating this boxed slot represents a Python object allocated with a GC header.
+    fn has_gc_header(&self, heap: &Heap) -> bool {
+        use crate::objects::HashState;
+        match self {
+            // A calendar subclass has its own instance slot. Its scalar payload stays untracked,
+            // including when a time or datetime retains a user-defined tzinfo.
+            Self::Calendar { .. } => false,
+            // The BytesIO instance owns its single GC header. Its byte buffer adds none.
+            Self::BytesIoStorage(_) => false,
+            Self::Instance { class, .. } => !matches!(
+                heap.get(*class),
+                Self::Native(name) if matches!(name.as_str(), "object" | super::stdlib::datetime::TZINFO)
+            ),
+            // OpenSSL hashes have no GC header. The fallback MD5 instance owns a separate boxed
+            // state, whereas a BLAKE2 or SHA-3 provider object is represented directly by its state.
+            Self::Hash(state) => !matches!(
+                state.lock().class_name(),
+                HashState::CLASS | HashState::XOF_CLASS | HashState::OPENSSL_CLASS | super::stdlib::hashlib::md5::CLASS
+            ),
+            _ => self.gc_object(),
+        }
+    }
+
+    fn scalar_leaf(&self) -> bool {
+        matches!(
+            self,
+            Value::None
+                | Value::Bool(_)
+                | Value::Int(_)
+                | Value::Float(_)
+                | Value::Complex(_)
+                | Value::Str(_)
+                | Value::SurrogateStr(_)
+                | Value::Bytes(_)
+                | Value::ByteArray(_)
+                | Value::Native(_)
+        )
     }
 
     fn children(&self, visit: &mut MarkQueue<'_>) {
@@ -2133,6 +2174,8 @@ struct Slot {
     // Previous in collection order while occupied.
     gc_prev: Cell<usize>,
     untracked_tuple: Cell<bool>,
+    // GC-header allocations still contribute pressure when a tuple becomes untracked.
+    has_gc_header: bool,
     may_have_buffer_views: bool,
     finalization: Finalization,
     generation: u8,
@@ -2145,6 +2188,7 @@ impl Slot {
             gc_next: Cell::new(UNMARKED),
             gc_prev: Cell::new(UNMARKED),
             untracked_tuple: Cell::new(false),
+            has_gc_header: false,
             may_have_buffer_views: false,
             finalization: Finalization::None,
             generation: 0,
@@ -2217,21 +2261,39 @@ pub(super) struct MarkQueue<'a> {
     slots: &'a [Slot],
     traces: &'a [Cell<usize>],
     next: usize,
-    ordered: Option<&'a mut GcOrder>,
+    mode: MarkMode<'a>,
+}
+
+enum MarkMode<'a> {
+    All,
+    SkipScalarLeaves,
+    Ordered(&'a mut GcOrder),
 }
 
 impl MarkQueue<'_> {
     pub(super) fn push(&mut self, id: Id) {
         let trace = &self.traces[id as usize];
         if trace.get() == UNMARKED {
-            if let Some(order) = &mut self.ordered {
-                trace.set(END);
-                if self.slots[id as usize].gc_next.get() == UNMARKED {
-                    order.push(id as usize, self.slots);
+            match &mut self.mode {
+                MarkMode::Ordered(order) => {
+                    trace.set(END);
+                    if self.slots[id as usize].gc_next.get() == UNMARKED {
+                        order.push(id as usize, self.slots);
+                    }
                 }
-            } else {
-                trace.set(self.next);
-                self.next = id as usize;
+                // A complete reachability trace needs no pending visit for an exact scalar.
+                MarkMode::SkipScalarLeaves
+                    if self.slots[id as usize]
+                        .value
+                        .as_ref()
+                        .is_some_and(Value::scalar_leaf) =>
+                {
+                    trace.set(END);
+                }
+                _ => {
+                    trace.set(self.next);
+                    self.next = id as usize;
+                }
             }
         }
     }
@@ -2312,8 +2374,8 @@ pub(super) struct Heap {
     fault_generation: Cell<Option<u32>>,
     fault_workers: RefCell<Option<Weak<()>>>,
     next_collection: usize,
-    // Worker heaps share the interpreter’s automatic cyclic collection setting.
-    pub(super) automatic_gc: Arc<AtomicBool>,
+    pub(super) gc_settings: Arc<GcSettings>,
+    pub(super) gc_schedule: GcSchedule,
     weak: HashMap<Id, Vec<Id>>,
     // Callback rollback can borrow a handle without extending the object's lifetime.
     pub(super) borrowed_hooks: Vec<Id>,
@@ -2392,6 +2454,84 @@ impl Frame {
 }
 
 impl Heap {
+    /// Builtin and immutable native types stop flag propagation at that node.
+    fn needs_pattern_flags(&self, class: Id, new: super::collection_pattern::PatternFlags) -> bool {
+        let Value::Class {
+            pattern_flags,
+            scope,
+            io_kind: None,
+            heap_type,
+            ..
+        } = self.get(class)
+        else {
+            return false;
+        };
+        if matches!(
+            *heap_type,
+            Some(super::stdlib::hashlib::md5::CLASS | super::stdlib::datetime::isocalendar::CLASS)
+        ) {
+            return false;
+        }
+        let Value::Scope(data) = self.get(*scope) else {
+            unreachable!()
+        };
+        *pattern_flags != new
+            && !data
+                .class_namespace
+                .as_ref()
+                .is_some_and(|ns| ns.immutable_type)
+    }
+
+    /// Propagate a successful ABC registration to existing nominal subclasses.
+    /// The graph lasts only for this update, so it cannot keep dead classes alive.
+    pub(super) fn set_registered_pattern_flags(
+        &mut self,
+        class: Id,
+        flags: super::collection_pattern::PatternFlags,
+    ) {
+        if !self.needs_pattern_flags(class, flags) {
+            return;
+        }
+        let mut children: HashMap<Id, Vec<Id>> = HashMap::new();
+        for (index, slot) in self.slots.iter().enumerate() {
+            let Some(Value::Class {
+                scope, ancestors, ..
+            }) = slot.value.as_ref()
+            else {
+                continue;
+            };
+            let Value::Scope(data) = self.get(*scope) else {
+                unreachable!()
+            };
+            let bases = match &data.class_namespace {
+                Some(ns) => {
+                    let Value::Tuple(bases) = self.get(ns.bases) else {
+                        continue;
+                    };
+                    bases.as_slice()
+                }
+                // Native AST classes store their single base first in the lineage.
+                None => ancestors.get(..1).unwrap_or_default(),
+            };
+            for &base in bases {
+                children.entry(base).or_default().push(index as Id);
+            }
+        }
+        let mut pending = vec![class];
+        while let Some(current) = pending.pop() {
+            if !self.needs_pattern_flags(current, flags) {
+                continue;
+            }
+            let Value::Class { pattern_flags, .. } = self.get_mut(current) else {
+                unreachable!()
+            };
+            *pattern_flags = flags;
+            if let Some(derived) = children.remove(&current) {
+                pending.extend(derived);
+            }
+        }
+    }
+
     /// Bytes reserved for each boxed value's slot metadata and trace link, including alignment.
     pub(super) fn size_overhead() -> usize {
         size_of::<Slot>() + size_of::<Cell<usize>>() - size_of::<Value>()
@@ -2423,7 +2563,8 @@ impl Heap {
             fault_generation: Cell::new(None),
             fault_workers: RefCell::new(None),
             next_collection: 4096,
-            automatic_gc: Arc::new(AtomicBool::new(true)),
+            gc_settings: Arc::default(),
+            gc_schedule: GcSchedule::default(),
             weak: HashMap::new(),
             borrowed_hooks: Vec::new(),
             has_weak_values: false,
@@ -2688,7 +2829,16 @@ impl Heap {
         self.slots.try_reserve(1)
     }
 
+    pub(super) fn gc_thresholds(&self) -> [i32; 3] {
+        self.gc_settings.thresholds()
+    }
+
+    pub(super) fn set_gc_thresholds(&self, thresholds: &[i32]) {
+        self.gc_settings.set_thresholds(thresholds);
+    }
+
     fn alloc_slot(&mut self, value: Value) -> Id {
+        let has_gc_header = value.has_gc_header(self);
         let index = if self.free_head != END {
             let index = self.free_head;
             self.free_head = self.slots[index].gc_next.replace(UNMARKED);
@@ -2711,6 +2861,11 @@ impl Heap {
         };
         self.gc_order.push(index, &self.slots);
         self.slots[index].untracked_tuple.set(false);
+        self.slots[index].has_gc_header = has_gc_header;
+        if has_gc_header {
+            let collecting = self.full_collection_active();
+            self.gc_schedule.allocated(&self.gc_settings, collecting);
+        }
         self.slots[index].finalization = Finalization::None;
         let id = index as Id;
         self.keep(id);
@@ -2935,19 +3090,7 @@ impl Heap {
     }
 
     fn finalizer_free_scalar(&self, id: Id) -> bool {
-        matches!(
-            self.get(id),
-            Value::None
-                | Value::Bool(_)
-                | Value::Int(_)
-                | Value::Float(_)
-                | Value::Complex(_)
-                | Value::Str(_)
-                | Value::SurrogateStr(_)
-                | Value::Bytes(_)
-                | Value::ByteArray(_)
-                | Value::Native(_)
-        )
+        self.get(id).scalar_leaf()
     }
 
     /// Regex matches and patterns on exact text or bytes hold only their subject and pattern source.
@@ -3354,7 +3497,7 @@ impl Heap {
             slots: &self.slots,
             traces: &self.traces,
             next: END,
-            ordered: None,
+            mode: MarkMode::SkipScalarLeaves,
         };
         self.mark_roots(globals, &mut pending);
         while let Some(id) = pending.pop() {
@@ -3580,7 +3723,7 @@ impl Heap {
             slots: &self.slots,
             traces: &self.traces,
             next: END,
-            ordered: None,
+            mode: MarkMode::All,
         };
         self.mark_roots(roots, &mut pending);
         while remaining != 0
@@ -3706,6 +3849,7 @@ impl Heap {
         true
     }
 
+    #[cfg(test)]
     pub fn statement(
         &mut self,
         globals: impl Iterator<Item = Id>,
@@ -3714,7 +3858,7 @@ impl Heap {
         caught: Id,
     ) -> Option<WeakCallbacks> {
         self.publish_statement(live, location, caught);
-        self.collect_if_due(globals, self.automatic_gc.load(Ordering::Relaxed))
+        self.collect_if_due(globals)
     }
 
     pub(super) fn publish_statement(&mut self, live: &[Id], location: Location, caught: Id) {
@@ -3751,25 +3895,18 @@ impl Heap {
 
     /// A discarded owner or the allocation threshold has requested a sweep.
     pub(super) fn collection_requested(&self) -> bool {
-        self.collect_next_statement || self.cycles_due()
+        self.collect_next_statement || self.watermark_due() || self.gc_schedule.requested()
     }
 
-    /// Collect when a discarded owner or the heap threshold requests a sweep.
+    /// Reclaim expression temporaries at the heap watermark even with cyclic GC disabled.
     pub(super) fn collect_if_due(
         &mut self,
         globals: impl Iterator<Item = Id>,
-        automatic_gc: bool,
     ) -> Option<WeakCallbacks> {
-        let cycles_due = self.cycles_due();
-        if !std::mem::take(&mut self.collect_next_statement) && !cycles_due {
-            return None;
-        }
-        if cycles_due && automatic_gc {
-            self.mark(globals);
-            self.promote_generation(2);
-            self.sweep()
-        } else {
+        if std::mem::take(&mut self.collect_next_statement) || self.watermark_due() {
             self.collect(globals)
+        } else {
+            None
         }
     }
 
@@ -3797,7 +3934,7 @@ impl Heap {
         false
     }
 
-    pub(super) fn cycles_due(&self) -> bool {
+    fn watermark_due(&self) -> bool {
         self.slots.len() >= self.next_collection
             && self.free_head == END
             && !self.full_collection_active()
@@ -3872,7 +4009,7 @@ impl Heap {
             slots: &self.slots,
             traces: &self.traces,
             next: END,
-            ordered: None,
+            mode: MarkMode::All,
         };
         value.children(&mut children);
         while let Some(id) = children.pop() {
@@ -3896,7 +4033,7 @@ impl Heap {
             slots: &self.slots,
             traces: &self.traces,
             next: END,
-            ordered: None,
+            mode: MarkMode::All,
         };
         self.mark_roots(globals, &mut pending);
         while pending.pop().is_some() {}
@@ -3913,7 +4050,7 @@ impl Heap {
                 slots: &self.slots,
                 traces: &self.traces,
                 next: END,
-                ordered: Some(&mut scan),
+                mode: MarkMode::Ordered(&mut scan),
             });
             if slot.generation <= generation
                 && newly_reachable.is_none_or(|cohort| cohort[id] != 0)
@@ -3997,6 +4134,7 @@ impl Heap {
         generation: u8,
     ) -> Result<WeakCallbacks> {
         let mut cycles = CycleSet::new(self.slots.len())?;
+        self.gc_schedule.start_collection(generation);
         self.mark_full(globals, &mut cycles.work, generation, None);
         self.identify_cycles(&mut cycles);
         if generation < 2 {
@@ -4026,6 +4164,20 @@ impl Heap {
                     }
                 }
             }
+        }
+        if generation != 0 {
+            let survivors = self
+                .slots
+                .iter()
+                .zip(&self.traces)
+                .filter(|(slot, trace)| {
+                    trace.get() != UNMARKED
+                        && slot.generation <= generation
+                        && slot.has_gc_header
+                        && slot.gc_tracked(self)
+                })
+                .count();
+            self.gc_schedule.record_survivors(generation, survivors);
         }
         self.promote_generation(generation);
         let mut callbacks = self.clear_weak_targets(Some(&cycles.incoming), None);
@@ -4278,6 +4430,9 @@ impl Heap {
             if self.traces[id].replace(UNMARKED) == UNMARKED && slot.value.is_some() {
                 self.gc_order.remove(id, &self.slots);
                 let slot = &mut self.slots[id];
+                if slot.has_gc_header {
+                    self.gc_schedule.freed();
+                }
                 slot.value = None;
                 self.immutable_hashes.remove(&(id as Id));
                 slot.gc_next.set(self.free_head);
@@ -4325,6 +4480,24 @@ mod tests {
                     slot.gc_prev.get() == UNMARKED && slot.gc_next.get() == UNMARKED
                 })
             );
+        }
+    }
+
+    #[test]
+    fn hash_state_pressure_depends_on_the_python_allocation() {
+        use super::super::stdlib::hashlib::{digest::SharedHash, md5};
+        use crate::objects::HashState;
+        let heap = Heap::new();
+        for (algorithm, class, expected) in [
+            ("sha256", None, false),
+            ("sha256", Some(HashState::OPENSSL_CLASS), false),
+            ("md5", Some(md5::CLASS), false), // Its separate Python instance owns the header.
+            ("sha3_256", Some("_sha3.sha3_256"), true),
+        ] {
+            let provider = HashState::provider(algorithm)
+                .unwrap_or_else(|_| panic!("missing hash provider for {algorithm}"));
+            let hash = Value::Hash(SharedHash::new(provider.create(class, &[])));
+            assert_eq!(hash.has_gc_header(&heap), expected);
         }
     }
 
@@ -4475,7 +4648,8 @@ mod tests {
     fn prompt_sweep_preserves_cycle_descendants_and_pending_owners() {
         let mut heap = Heap::new();
         let mark = heap.temporary_mark();
-        let leaf = heap.alloc(Value::List(Vec::new()));
+        let scalar = heap.alloc(Value::Str("leaf".into()));
+        let leaf = heap.alloc(Value::List(vec![scalar]));
         let cycle = heap.alloc(Value::List(vec![leaf, leaf]));
         let Value::List(items) = heap.get_mut(cycle) else {
             unreachable!()
@@ -4488,7 +4662,7 @@ mod tests {
         heap.release_temporaries_since(mark);
 
         heap.collect(std::iter::empty());
-        for id in [leaf, cycle, child, owner] {
+        for id in [scalar, leaf, cycle, child, owner] {
             assert!(heap.slots[id as usize].value.is_some());
         }
         assert!(heap.slots[discarded as usize].value.is_none());

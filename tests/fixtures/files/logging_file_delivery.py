@@ -1,6 +1,7 @@
 import codecs
 import io
 import logging
+from logging import getHandlerNames as handler_names
 from pathlib import Path
 
 
@@ -11,6 +12,8 @@ def exercise() -> None:
     logger.setLevel(logging.DEBUG)
     handler = logging.FileHandler(path, encoding="utf-8", delay=True)
     handler.name = "output"
+    names = handler_names()
+    assert "output" in names
     handler.setLevel(logging.ERROR)
     handler.setFormatter(logging.Formatter("[%(name)s] %(message)s"))
     logger.addHandler(handler)
@@ -47,6 +50,7 @@ def exercise() -> None:
         print(file.closed)
     print(handler.stream is None)
     print(logging.getHandlerByName("output") is None)
+    assert "output" not in logging.getHandlerNames() and "output" in names
     logger.removeHandler(handler)
     print(len(logger.handlers))
     path.unlink()

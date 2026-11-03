@@ -230,48 +230,54 @@ pub(in crate::dynamic) fn members(class: &str) -> Option<Members> {
 }
 
 impl Members {
-    pub(in crate::dynamic) fn owns(&self, name: &str) -> bool {
-        matches!(name, "__new__" | "min" | "max" | "resolution")
-            || (self.owner == "datetime.timezone" && name == "utc")
-            || self.fields.contains(&name)
-            || self.methods.contains(&name)
-    }
-}
-
-/// Install descriptors once, so inherited access goes through the ordinary class MRO.
-pub(in crate::dynamic) fn install_members(ctx: &mut Context, class: &str) {
-    let Some(members) = members(class) else {
-        return;
-    };
-    if class == "datetime.datetime" {
-        ctx.builtin("datetime.date");
-    }
-    if class == "datetime.timezone" {
-        ctx.builtin(TZINFO);
-        utc(ctx);
-        for (name, max) in [("min", false), ("max", true)] {
-            let id = store(ctx, Calendar::zone_limit(max), NONE);
-            ctx.builtins.insert(format!("{class}.{name}"), id);
+    /// Publish this type's own descriptors and constants without binding or copying them.
+    pub(in crate::dynamic) fn install(self, ctx: &mut Context, class: Id) {
+        let owner = self.owner;
+        if let Some(base) = Context::native_base(owner) {
+            ctx.builtin(base);
         }
-    } else {
-        ctx.builtin(&format!("{class}.__new__"));
-    }
-    for method in members.methods {
-        ctx.builtin(&format!("{class}.{method}"));
-    }
-    for &field in members.fields {
-        if class == "datetime.timedelta" {
-            ctx.readonly_member(members.owner, field);
-        } else {
-            let get = ctx.builtin(&format!("datetime._get.{class}.{field}"));
-            let descriptor = ctx.alloc(Value::GetSetDescriptor {
-                owner: members.owner,
-                name: field,
-                get,
-                set: None,
-            });
-            ctx.builtins.insert(format!("{class}.{field}"), descriptor);
+        let mut entries = Vec::new();
+        if owner != "datetime.timezone" {
+            let new = ctx.builtin(&format!("{owner}.__new__"));
+            entries.push((ctx.heap.code_name("__new__"), new));
         }
+        for &method in self.methods {
+            let value = ctx.builtin(&format!("{owner}.{method}"));
+            entries.push((ctx.heap.code_name(method), value));
+        }
+        for &field in self.fields {
+            let descriptor = if owner == "datetime.timedelta" {
+                ctx.readonly_member(owner, field)
+            } else {
+                let get = ctx.builtin(&format!("datetime._get.{owner}.{field}"));
+                let descriptor = ctx.alloc(Value::GetSetDescriptor {
+                    owner,
+                    name: field,
+                    get,
+                    set: None,
+                });
+                ctx.builtins.insert(format!("{owner}.{field}"), descriptor);
+                descriptor
+            };
+            entries.push((ctx.heap.code_name(field), descriptor));
+        }
+        if let Some(constants) = Calendar::class_constants(owner) {
+            for (field, value) in ["min", "max", "resolution"].into_iter().zip(constants) {
+                let id = store(ctx, value, NONE);
+                ctx.builtins.insert(format!("{owner}.{field}"), id);
+                entries.push((ctx.heap.code_name(field), id));
+            }
+        } else if owner == "datetime.timezone" {
+            let utc = utc(ctx);
+            entries.push((ctx.heap.code_name("utc"), utc));
+            for (field, max) in [("min", false), ("max", true)] {
+                let id = store(ctx, Calendar::zone_limit(max), NONE);
+                ctx.builtins.insert(format!("{owner}.{field}"), id);
+                entries.push((ctx.heap.code_name(field), id));
+            }
+        }
+        let dictionary = ctx.dict(entries);
+        ctx.native_type_dicts.insert(class, dictionary);
     }
 }
 

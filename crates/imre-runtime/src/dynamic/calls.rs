@@ -94,7 +94,13 @@ pub(super) fn module_function(symbol: &str) -> Option<(&str, &str)> {
         }
         #[cfg(target_os = "linux")]
         "resource" if matches!(function, "getrlimit" | "setrlimit") => Some((module, function)),
-        "gc" if matches!(function, "enable" | "disable" | "isenabled") => Some((module, function)),
+        "gc" if matches!(
+            function,
+            "enable" | "disable" | "isenabled" | "get_threshold" | "set_threshold"
+        ) =>
+        {
+            Some((module, function))
+        }
         "zlib" if matches!(function, "adler32" | "crc32" | "compress" | "decompress") => {
             Some((module, function))
         }
@@ -372,8 +378,6 @@ impl Context {
                         | weakref::PROXY_TYPE
                         | weakref::REFERENCE_TYPE
                 ) || (kind == super::deque::CLASS && super::deque::owns(name))
-                    || stdlib::datetime::members(kind)
-                    .is_some_and(|members| members.owns(name))
                     || (kind == stdlib::fixed_structseq::SCHED_PARAM
                         && matches!(name, "__reduce__" | "__replace__"))
                     || (kind == "function" && name == "__call__")
@@ -1402,6 +1406,9 @@ impl Context {
                             | "datetime.timedelta"
                             | "datetime.timezone"
                             | stdlib::datetime::TZINFO
+                            | "socket.socket"
+                            | "struct.Struct"
+                            | "hmac.HMAC"
                             | "collections.defaultdict"
                             | "_contextvars.Context"
                             | "_contextvars.ContextVar"
@@ -2654,12 +2661,17 @@ impl Context {
                     {
                         return Ok(self.text("($module, /)"));
                     }
+                    "__text_signature__" if symbol == "gc.set_threshold" => return Ok(NONE),
                     "__doc__" if module == "gc" => {
                         let doc = match function {
                             "enable" => "Enable automatic garbage collection.",
                             "disable" => "Disable automatic garbage collection.",
                             "isenabled" => {
                                 "Returns true if automatic garbage collection is enabled."
+                            }
+                            "get_threshold" => "Return the current collection thresholds.",
+                            "set_threshold" => {
+                                "set_threshold(threshold0, [threshold1, [threshold2]])\nSet the collection thresholds (the collection frequency).\n\nSetting 'threshold0' to zero disables collection."
                             }
                             _ => unreachable!("registered GC control"),
                         };
@@ -2725,6 +2737,7 @@ impl Context {
                                 | "gc.enable"
                                 | "gc.disable"
                                 | "gc.isenabled"
+                                | "gc.get_threshold"
                                 | "_signal.sigpending"
                                 | "_thread.allocate"
                                 | "_thread.allocate_lock"
@@ -2988,7 +3001,12 @@ impl Context {
                             "__doc__" if method == "posix.sysconf" => {
                                 Some("Return an integer-valued system configuration variable.")
                             }
-                            "__text_signature__" if method == "posix.sysconf" => {
+                            "__doc__" if method == "posix.confstr" => {
+                                Some("Return a string-valued system configuration variable.")
+                            }
+                            "__text_signature__"
+                                if matches!(method.as_str(), "posix.sysconf" | "posix.confstr") =>
+                            {
                                 Some("($module, name, /)")
                             }
                             "__qualname__" if module_bound => method.rsplit('.').next(),
@@ -5960,6 +5978,7 @@ impl Context {
                 metaclass,
                 io_kind,
                 heap_type,
+                pattern_flags,
             } => {
                 let mut copied_name = String::new();
                 copied_name
@@ -5975,6 +5994,7 @@ impl Context {
                     metaclass: *metaclass,
                     io_kind: *io_kind,
                     heap_type: *heap_type,
+                    pattern_flags: *pattern_flags,
                     name: copied_name,
                     scope: *scope,
                     ancestors: copied_ancestors,
@@ -7015,9 +7035,13 @@ impl Context {
         typed_dict_meta: Option<Id>,
         enum_base: bool,
     ) -> Result<Option<Id>> {
+        // NamedTuple's marker is replaced with tuple before allocating the class.
+        let namedtuple = self.namedtuple_base(bases);
+        let metaclass_bases = bases.iter().copied().filter(|base| Some(*base) != namedtuple);
         if explicit.is_none()
-            && !bases.iter().any(|&base| {
-                self.is_bundled_abc(base)
+            && !metaclass_bases.clone().any(|base| {
+                !self.is_type_object(base)
+                    || self.is_bundled_abc(base)
                     || matches!(self.heap.get(base), Value::Class { metaclass: Some(meta), .. }
                         if Some(*meta) != typed_dict_meta)
             })
@@ -7038,7 +7062,7 @@ impl Context {
                 "metaclass conflict: the metaclass of a derived class must be a (non-strict) subclass of the metaclasses of all its bases",
             )
         };
-        for &base in bases {
+        for base in metaclass_bases {
             let meta =
                 if self.heap.get(base).instance_class().is_none() && self.is_bundled_abc(base) {
                     self.abc_meta()
@@ -7055,7 +7079,7 @@ impl Context {
         if winner == type_class {
             return Ok(None);
         }
-        if enum_base {
+        if enum_base || namedtuple.is_some() {
             return Err(conflict());
         }
         let is_abc = self.builtins.get("abc.ABCMeta") == Some(&winner);

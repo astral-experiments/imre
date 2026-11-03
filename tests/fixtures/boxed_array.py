@@ -268,6 +268,16 @@ def current():
                 raise AssertionError("invalid array buffer was accepted")
         assert view.tobytes() == array('i', [-9, 0x12345678]).tobytes()
     loaded.frombytes(bytearray(sample.tobytes()))
+
+    backing = bytearray(b"prefix-data-suffix")
+    sliced = memoryview(backing)[7:11]
+    copied = array('B')
+    copied.frombytes(sliced)
+    backing[7] = 0
+    assert copied.tobytes() == b"data"
+    cast_slice = memoryview(sample).cast('B')[1:-1]
+    copied.frombytes(cast_slice)
+    assert copied.tobytes() == b"data" + sample.tobytes()[1:-1]
     assert loaded.tolist() == [-9, 0x12345678, 0x12345678]
     one_byte = array('B', [1])
     try:

@@ -15,7 +15,8 @@ use super::super::stdlib::codecs::{decode_named, encode_text_object};
 use super::*;
 
 use crate::objects::{
-    Case, python_whitespace, split_parts, translate, visit_line_fields as split_lines,
+    Case, is_line_boundary, python_whitespace, split_parts, translate,
+    visit_line_fields as split_lines,
 };
 
 mod bytes_fields;
@@ -1493,6 +1494,52 @@ fn strip_string(ctx: &mut Context, receiver: Id, name: &str, chars: Option<Id>) 
     }
 }
 
+/// Keep unpaired surrogates as line content without converting them to UTF-8.
+fn split_string_lines(ctx: &mut Context, receiver: Id, keep: bool) -> Result<Id> {
+    let storage = ctx
+        .string_storage(receiver)
+        .expect("validated str receiver");
+    let mut values = Vec::new();
+    if matches!(ctx.heap.get(storage), Value::SurrogateStr(_)) {
+        let mut start = 0;
+        loop {
+            let points = ctx.string_codepoints(storage)?;
+            let rest = &points[start..];
+            if rest.is_empty() {
+                break;
+            }
+            let boundary = rest
+                .iter()
+                .position(|&point| is_line_boundary(point))
+                .unwrap_or(rest.len());
+            let ending = match &rest[boundary..] {
+                [0x0d, 0x0a, ..] => 2,
+                [] => 0,
+                _ => 1,
+            };
+            let end = if keep { boundary + ending } else { boundary };
+            let line = if receiver == storage && end == points.len() {
+                storage
+            } else {
+                let field = super::super::copy_ids(&rest[..end])?;
+                ctx.text_codepoints(field)
+            };
+            values.push(line);
+            start += boundary + ending;
+        }
+    } else {
+        let source = ctx.str_value(storage)?.to_owned();
+        split_lines(&source, keep, |field| {
+            values.push(if receiver == storage && field.len() == source.len() {
+                storage
+            } else {
+                ctx.text(field)
+            });
+        });
+    }
+    Ok(ctx.alloc(Value::List(values)))
+}
+
 fn split_string(
     ctx: &mut Context,
     receiver: Id,
@@ -1673,6 +1720,77 @@ fn replace_points(ctx: &mut Context, receiver: Id, old: Id, new: Id, limit: usiz
     }
     result.extend_from_slice(&value[copied..]);
     Ok(ctx.text_codepoints(result))
+}
+
+/// Replace nonoverlapping bytes, keeping both arguments exported during count conversion.
+fn binary_replace(
+    ctx: &mut Context,
+    receiver: Id,
+    old: Id,
+    new: Id,
+    count: Option<Id>,
+) -> Result<Id> {
+    for buffer in [old, new] {
+        ctx.check_buffer_exporter(buffer)?;
+        ctx.native_buffer_bytes(buffer)?;
+    }
+    let limit = ctx.with_buffer_export(old, |ctx| {
+        ctx.with_buffer_export(new, |ctx| {
+            let mark = ctx.heap.temporary_mark();
+            let result = split_limit(ctx, count);
+            // A temporary __index__ result can finalize before either export is released.
+            let collect = ctx.heap.discard_truth_operands(mark, ctx.modules);
+            if let Err(error) = &result {
+                for root in error.roots() {
+                    ctx.heap.keep(root);
+                }
+            }
+            if collect {
+                ctx.collect_unreachable();
+            }
+            result
+        })
+    })?;
+    // __index__ may change the contents of either operand or resize a separate receiver.
+    let source = ctx.bytes_like(receiver)?;
+    let old = ctx.native_buffer_bytes(old)?;
+    let new = ctx.native_buffer_bytes(new)?;
+    let matches = memchr::memmem::Finder::new(old);
+    let positions = || matches.find_iter(source).take(limit);
+    let count = if old.is_empty() && new.is_empty() {
+        0
+    } else {
+        positions().count()
+    };
+    let exact_bytes = matches!(ctx.heap.get(receiver), Value::Bytes(_));
+    if count == 0 && exact_bytes {
+        return Ok(receiver);
+    }
+    let retained = source.len() - count * old.len();
+    let size = new
+        .len()
+        .checked_mul(count)
+        .and_then(|extra| retained.checked_add(extra))
+        .filter(|&len| len <= isize::MAX as usize)
+        .ok_or_else(|| Error::new("OverflowError", "replace bytes is too long"))?;
+    let mut result = Vec::new();
+    result
+        .try_reserve_exact(size)
+        .map_err(|_| crate::Error::memory_error())?;
+    let mut copied = 0;
+    for start in positions().take(count) {
+        result.extend_from_slice(&source[copied..start]);
+        result.extend_from_slice(new);
+        copied = start + old.len();
+    }
+    result.extend_from_slice(&source[copied..]);
+    Ok(ctx.alloc(
+        if matches!(ctx.heap.get(ctx.scalar_value(receiver)), Value::Bytes(_)) {
+            Value::Bytes(result)
+        } else {
+            Value::ByteArray(result)
+        },
+    ))
 }
 
 /// Left-justify a binary sequence after converting the width, which may mutate either argument.
@@ -1894,6 +2012,7 @@ pub(super) fn method(
                 "endswith"
                     | "ljust"
                     | "lstrip"
+                    | "replace"
                     | "rstrip"
                     | "split"
                     | "splitlines"
@@ -2496,6 +2615,32 @@ pub(super) fn method(
         }
         return Ok(FALSE);
     }
+    if name == "replace" && matches!(owner, "bytes" | "bytearray") {
+        if !kwargs.is_empty() {
+            return Err(type_error(format!(
+                "{owner}.replace() takes no keyword arguments"
+            )));
+        }
+        if args.len() < 2 {
+            return Err(type_error(format!(
+                "replace expected at least 2 arguments, got {}",
+                args.len()
+            )));
+        }
+        if args.len() > 3 {
+            return Err(type_error(format!(
+                "replace expected at most 3 arguments, got {}",
+                args.len()
+            )));
+        }
+        return binary_replace(
+            ctx,
+            original_receiver,
+            args[0],
+            args[1],
+            args.get(2).copied(),
+        );
+    }
     if name == "replace" {
         let total = args.len() + kwargs.len();
         if total > 3 {
@@ -2551,6 +2696,11 @@ pub(super) fn method(
     if owner == "str" && matches!(name, "split" | "rsplit") {
         return split_string(ctx, receiver, name, args, kwargs);
     }
+    if owner == "str" && name == "splitlines" {
+        let [keep] = bind_method_arguments(name, args, kwargs, ["keepends"], 1)?;
+        let keep = ctx.optional_truth(keep, false)?;
+        return split_string_lines(ctx, receiver, keep);
+    }
     let source = ctx.str_value(receiver)?.to_owned();
     match name {
         "format" => format_string(ctx, &source, FormatSource::Arguments(args, kwargs)),
@@ -2595,13 +2745,6 @@ pub(super) fn method(
                 }
             };
             Ok(ctx.alloc(Value::Tuple(fields)))
-        }
-        "splitlines" => {
-            let [keep] = bind_method_arguments(name, args, kwargs, ["keepends"], 1)?;
-            let keep = ctx.optional_truth(keep, false)?;
-            let mut values = Vec::new();
-            split_lines(&source, keep, |field| values.push(ctx.text(field)));
-            Ok(ctx.alloc(Value::List(values)))
         }
         "capitalize" | "upper" => {
             positional(name, kwargs)?;

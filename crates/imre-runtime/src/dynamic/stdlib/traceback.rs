@@ -9,6 +9,7 @@ use super::{Context, Error, Id, NONE, Result, Value, argument, option};
 
 struct FrameLine<'a> {
     file: &'a str,
+    command_source: Option<&'a str>,
     name: &'a str,
     line: i64,
     span: Option<[u32; 3]>,
@@ -36,7 +37,10 @@ impl FrameLine<'_> {
         let Some(raw) = usize::try_from(self.line)
             .ok()
             .and_then(|line| line.checked_sub(1))
-            .and_then(|i| source?.lines().nth(i))
+            .and_then(|i| match self.command_source {
+                Some(command) => crate::objects::line_field(command, i),
+                None => source?.lines().nth(i),
+            })
         else {
             return out;
         };
@@ -423,8 +427,18 @@ pub(in crate::dynamic) fn format_frames(
             unreachable!()
         };
         let code = ctx.code_object(code);
+        let file = ctx.str_value(code.filename)?;
+        // Dynamic exec/compile can use the same filename as the boxed -c entry.
+        // Only the native definitions emitted from that entry share its source.
+        let command_source =
+            if file == "<string>" && matches!(code.body, crate::dynamic::value::Body::Native(_)) {
+                ctx.config["command_source"].as_str()
+            } else {
+                None
+            };
         stack.push(FrameLine {
-            file: ctx.str_value(code.filename)?,
+            file,
+            command_source,
             name: ctx.str_value(code.name)?,
             line: lineno,
             span,
@@ -453,10 +467,13 @@ pub(in crate::dynamic) fn format_frames(
                 })
                 .count();
             for frame in &stack[i..i + same.min(3)] {
-                let contents = sources
-                    .entry(frame.file)
-                    .or_insert_with(|| std::fs::read_to_string(frame.file).ok());
-                lines.push(frame.format(contents.as_deref()));
+                let source = frame.command_source.or_else(|| {
+                    sources
+                        .entry(frame.file)
+                        .or_insert_with(|| std::fs::read_to_string(frame.file).ok())
+                        .as_deref()
+                });
+                lines.push(frame.format(source));
             }
             if same > 3 {
                 let count = same - 3;

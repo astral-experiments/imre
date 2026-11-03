@@ -1307,6 +1307,25 @@ def main():
         assert text_close.returncode == 0, text_close.stderr
         assert (text_close.stdout, text_close.stderr) == (expected.stdout, expected.stderr)
 
+        command = (
+            "import warnings\n"
+            "def warn():\n"
+            "    label = 'moved'; warnings.warn(label, DeprecationWarning)\n"
+            "warn()\n"
+        )
+        dynamic = (
+            "import sys; sys.path.append('.')\n"
+            "namespace = {}\n"
+            "exec(\"def unrelated():\\n    raise ValueError('dynamic')\", namespace)\n"
+            "namespace['unrelated']()\n"
+        )
+        form_feed = "import warnings\n# ignored\fmiddle\nwarnings.warn('failed')"
+        for source in (command, dynamic, form_feed):
+            expected = run(sys.executable, "-Werror", "-c", source)
+            actual = run(imre, "-Werror", "-c", source)
+            assert expected.returncode == actual.returncode == 1
+            assert actual.stderr == expected.stderr, (expected.stderr, actual.stderr)
+
         chained = root / "chained.py"
         chained.write_text(
             "import sys\n"
@@ -1448,6 +1467,8 @@ def main():
         bytecode.write_bytes(b"")
         compare(bytecode, status=1, stderr=b"EOFError: EOF read where not expected\n")
         if sys.version_info[:2] == (3, 14):
+            compare("-I", "-c", "import warnings; [print(f) for f in warnings._get_filters()]",
+                    native_timeout=600)
             renamed = root / "bad_bytecode"
             renamed.write_bytes(importlib.util.MAGIC_NUMBER[:2] + b"xx")
             compare(renamed, status=1, stderr=b"RuntimeError: Bad magic number in .pyc file\n")
@@ -1645,6 +1666,15 @@ def main():
             "print(date.__module__, datetime.__qualname__, timedelta.__module__)\n"
         )
         compare("-IB", names, native_args=("run", names, "--quiet"))
+
+        namespace = root / "datetime_class_namespace.py"
+        for source in (
+            "from datetime import date\nprint(date.__dict__['min'] is date.min)",
+            "from datetime import time as T\nprint(vars(T)['max'] is T.max)",
+            "import datetime as dt\ncls = dt.timedelta\nprint(vars(cls)['resolution'] is cls.resolution)",
+        ):
+            namespace.write_text(source + "\n")
+            compare("-IB", namespace, native_args=("run", namespace, "--quiet"))
 
         date_isoformat = root / "date_isoformat.py"
         for body in (
@@ -1977,6 +2007,13 @@ def main():
             extra={"PYTHONDONTWRITEBYTECODE": "1", "IMREFLAGS": "--bogus"},
         )
         compare("-B", "-c", "import sys\nsys.exit(37)", status=37)
+        compare(
+            "-B", "-c",
+            "class Owner:\n"
+            "    def __del__(self): print('finalized')\n"
+            "owner = Owner()",
+            native_timeout=300,
+        )
         compare(
             "-B", "-c",
             "import atexit, os\n"
@@ -2534,6 +2571,8 @@ def report(text):
         compare("-IB", pair_fixture, native_args=("run", pair_fixture, "--quiet"))
         writer_fixture = fixtures / "io_buffered_writer_type.py"
         compare("-IB", writer_fixture, native_args=("run", writer_fixture, "--quiet"))
+        syslog = fixtures / "logging_syslog_datagram.py"
+        compare("-IB", syslog, native_args=("run", syslog, "--quiet"), native_timeout=600)
         queue_exports = fixtures / "logging_queue_exports.py"
         compare("-IB", queue_exports, native_args=("run", queue_exports, "--quiet"), native_timeout=600)
         thread_hook_exports = root / "thread_hook_exports.py"
@@ -2551,6 +2590,15 @@ def report(text):
             queue_lookup.write_text(f"{statement}\nprint({name}.QueueListener.__name__)\n")
             checked = run(imre, "check", queue_lookup)
             assert checked.returncode == 0, checked.stderr
+        socket_alias = root / "socket_timeout_alias.py"
+        socket_alias.write_text(
+            "from _socket import timeout as low_timeout\nfrom socket import timeout\n"
+            "try:\n    raise low_timeout('expired')\nexcept timeout as exc:\n    print(str(exc))\n"
+        )
+        compare("-IB", socket_alias, native_args=("run", socket_alias, "--quiet"))
+        socket_alias.write_text("from _socket import timeout\nvalue: int = 'wrong'\nprint(value)\n")
+        bad_alias = run(imre, "check", socket_alias)
+        assert bad_alias.returncode != 0 and b"expected int" in bad_alias.stderr, bad_alias.stderr
         io_fixture = fixtures / "boxed_io_indirect_import.py"
         compare("-IB", io_fixture, native_args=("run", io_fixture, "--runtime-imports", "--quiet"))
         for name in ("boxed_prelinked_coroutine.py", "boxed_coroutine_origin.py"):
@@ -2760,12 +2808,18 @@ for name in ("md4", "ripemd160"):
                 native_args=("run", open_fixture, *import_flags, "--quiet"),
                 native_timeout=300,
             )
+        compare(
+            "-B", "-c",
+            "from ast import BinOp, ClassDef\nimport ast\n"
+            "assert BinOp is ast.BinOp and ClassDef is ast.ClassDef\n",
+        )
         for name in ("boxed_unittest_mock_any.py", "boxed_unittest_mock_side_effect.py", "boxed_unittest_mock_call.py"):
             fixture = fixtures / name
             compare("-IB", fixture, native_args=("run", fixture, "--quiet"))
             compare("-IB", fixture, native_args=("run", fixture, "--runtime-imports", "--quiet"))
         for fixture in (
             "boxed_ast.py",
+            "boxed_ast_compound.py",
             "boxed_ast_encoded_source.py",
             "boxed_ast_visitors.py",
             "boxed_ast_literal_eval.py",
@@ -2779,6 +2833,7 @@ for name in ("md4", "ripemd160"):
             "boxed_simple_namespace.py",
             "boxed_namedtuple_repr.py",
             "boxed_namedtuple_factory.py",
+            "boxed_sequence_registration.py",
             "boxed_slice_deep_repr.py",
             "boxed_slice_repr_cycles.py",
             "boxed_source_exec.py",
@@ -2844,6 +2899,7 @@ for name in ("md4", "ripemd160"):
             "boxed_functools_reduce.py",
             "boxed_functools_singledispatch.py",
             "boxed_functools_partialmethod.py",
+            "boxed_asynccontextmanager_protocol.py",
             "boxed_contextmanager.py",
             "boxed_contextlib_aclosing.py",
             "boxed_total_ordering.py",
@@ -3328,6 +3384,8 @@ else:
             plugin.write_bytes((fixtures / "boxed_fcntl.py").read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")
             plugin.write_bytes((fixtures / "boxed_posix_rtld_flags.py").read_bytes())
+            compare("-IB", "-c", imports + "arithmetic.current()")
+            plugin.write_bytes((fixtures / "boxed_posix_confstr.py").read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")
             plugin.write_bytes((fixtures / "boxed_posix_sysconf.py").read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")

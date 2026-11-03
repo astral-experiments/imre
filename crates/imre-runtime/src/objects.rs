@@ -1333,6 +1333,11 @@ fn plain_ascii_line(bytes: &[u8]) -> bool {
     }) && tail.iter().all(|byte| (32..128).contains(byte))
 }
 
+/// Recognize the line boundaries used by Python's str.splitlines.
+pub(crate) fn is_line_boundary(point: u32) -> bool {
+    matches!(point, 0x0a..=0x0d | 0x1c..=0x1e | 0x85 | 0x2028 | 0x2029)
+}
+
 /// Python line offsets computed once per delimiter, with the common physical
 /// ASCII-line and ordinary CR/LF inputs staying on byte-oriented paths.
 struct LineOffsets {
@@ -1388,21 +1393,9 @@ impl LineOffsets {
             Boundaries::CrLf => {
                 memchr::memchr2(b'\r', b'\n', remaining.as_bytes()).map(|at| (at, 1))
             }
-            Boundaries::Unicode => remaining.char_indices().find_map(|(at, c)| {
-                matches!(
-                    c,
-                    '\n' | '\r'
-                        | '\x0b'
-                        | '\x0c'
-                        | '\x1c'
-                        | '\x1d'
-                        | '\x1e'
-                        | '\u{85}'
-                        | '\u{2028}'
-                        | '\u{2029}'
-                )
-                .then_some((at, c.len_utf8()))
-            }),
+            Boundaries::Unicode => remaining
+                .char_indices()
+                .find_map(|(at, c)| is_line_boundary(u32::from(c)).then_some((at, c.len_utf8()))),
         };
         let Some((offset, length)) = boundary else {
             self.start = value.len();
@@ -1517,6 +1510,14 @@ unsafe fn split_string_lines<const KEEP: bool>(value: *const Str) -> *const Obje
         }),
         std::ptr::null(),
     )
+}
+
+/// Retrieve one field using Python's str.splitlines boundaries.
+pub(crate) fn line_field(value: &str, index: usize) -> Option<&str> {
+    let mut offsets = LineOffsets::new(value);
+    std::iter::from_fn(|| offsets.next(value))
+        .nth(index)
+        .map(|range| &value[range])
 }
 
 /// Visit line fields using the same scanner as native str.splitlines.

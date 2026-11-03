@@ -1,4 +1,7 @@
+import errno
+import os
 import subprocess
+import sys
 import warnings
 
 
@@ -20,6 +23,13 @@ class Comparison:
 def current():
     missing = ["/imre-missing-platform-option-control"]
     for launch, options, error, message in (
+        (subprocess.call, {"extra_groups": [-1]},
+         ValueError, "Group ID cannot be negative, got -1"),
+        (subprocess.Popen, {"extra_groups": [2 ** 64]}, ValueError, "invalid group id"),
+        (subprocess.Popen, {"extra_groups": [2 ** 64], "executable": b"bad\x00"},
+         ValueError, "embedded null byte"),
+        (subprocess.Popen, {"extra_groups": [2 ** 64], "env": {"A": "bad\x00"}},
+         ValueError, "embedded null byte"),
         (subprocess.call, {"startupinfo": False, "creationflags": Comparison()},
          ValueError, "startupinfo is only supported on Windows platforms"),
         (subprocess.check_call, {"creationflags": []},
@@ -50,3 +60,16 @@ def current():
                           startupinfo=None, creationflags=ZeroFlags()) as child:
         assert child.communicate() == (b"ready", None)
         assert child.returncode == 47 and child.stdout.closed
+
+    parent_groups = os.getgroups()
+    report_groups = [sys.executable, "-c", "import os; print(os.getgroups())"]
+    for groups in (None, [], [os.getegid()]):
+        try:
+            output = subprocess.check_output(report_groups, extra_groups=groups)
+        except PermissionError as exc:
+            assert groups is not None and exc.errno == errno.EPERM and exc.filename is None
+        else:
+            if groups is None or sys.platform == "linux":
+                expected = parent_groups if groups is None else groups
+                assert output == (str(expected) + "\n").encode()
+        assert os.getgroups() == parent_groups

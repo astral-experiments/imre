@@ -7,6 +7,7 @@ mod atexit;
 mod builtins;
 mod calls;
 mod class_annotations;
+mod collection_pattern;
 mod complex;
 mod defaultdict;
 mod deque;
@@ -17,6 +18,7 @@ mod enums;
 mod ffi;
 mod finalizers;
 mod function_fields;
+mod gc_schedule;
 mod generator_protocol;
 mod import_meta;
 mod importlib;
@@ -2164,14 +2166,8 @@ impl Context {
         if builtins::is_enum_base(name) {
             self.install_enum_base(value, name);
         }
-        if let Some(constants) = crate::objects::Calendar::class_constants(name) {
-            stdlib::datetime::install_members(self, name);
-            for (field, value) in ["min", "max", "resolution"].into_iter().zip(constants) {
-                let id = stdlib::datetime::store(self, value, NONE);
-                self.builtins.insert(format!("{name}.{field}"), id);
-            }
-        } else if matches!(name, "datetime.timezone" | stdlib::datetime::TZINFO) {
-            stdlib::datetime::install_members(self, name);
+        if let Some(members) = stdlib::datetime::members(name) {
+            members.install(self, value);
         }
         if let Some(class) = typing::ParameterClass::lookup(name) {
             class.install(self, value);
@@ -2819,6 +2815,8 @@ impl Context {
                 #[cfg(target_os = "linux")]
                 "fdatasync",
                 #[cfg(target_os = "linux")]
+                "tcgetpgrp",
+                #[cfg(target_os = "linux")]
                 "ttyname",
                 "getegid",
                 #[cfg(target_os = "linux")]
@@ -3074,7 +3072,13 @@ impl Context {
                 #[cfg(target_os = "linux")]
                 {
                     let posix = self.module("posix")?;
-                    for attr in ["fpathconf", "pathconf", "pathconf_names"] {
+                    for attr in [
+                        "confstr",
+                        "confstr_names",
+                        "fpathconf",
+                        "pathconf",
+                        "pathconf_names",
+                    ] {
                         let value = self.lookup_attr(posix, attr)?;
                         self.bind(scope, attr, value);
                     }
@@ -3473,6 +3477,22 @@ impl Context {
             {
                 // Fresh bootstrap imports run while the replacement package is still initializing.
                 self.bootstrap_file_spec = make_spec;
+            }
+            // The private implementation supplies the accelerator's immutable OrderedDict.
+            // A separately loaded pure-Python OrderedDict retains its writable namespace.
+            if name == "_imre_ordered_dict"
+                && self.config["bundled_root"].as_str().is_some_and(|root| {
+                    path == std::path::Path::new(root).join("_imre_ordered_dict.py")
+                })
+                && let Some(owner) = self.scope_name(scope, "OrderedDict")
+                && let Value::Class {
+                    scope: class_scope, ..
+                } = *self.heap.get(owner)
+                && self.root_scope(class_scope) == scope
+                && let Value::Scope(frame) = self.heap.get_mut(class_scope)
+                && let Some(namespace) = &mut frame.class_namespace
+            {
+                namespace.immutable_type = true;
             }
             if name == "itertools"
                 && self.config["bundled_root"]
