@@ -68,6 +68,11 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
             "unittest/util.py",
             include_str!("../stdlib/unittest/util.py"),
         )),
+        // CPython 3.14.5 Lib/unittest/async_case.py. See licenses/CPython.txt.
+        "unittest.async_case" => Some((
+            "unittest/async_case.py",
+            include_str!("../stdlib/unittest/async_case.py"),
+        )),
         "unittest.case" => Some((
             "unittest/case.py",
             include_str!("../stdlib/unittest/boxed_case.py"),
@@ -1026,7 +1031,9 @@ impl Intrinsic {
     pub(crate) fn scoped_class_base(self) -> Option<&'static str> {
         match self {
             Self::SOCKETSERVER_CLASS => Some("socketserver base class"),
-            Self::ScopedObjectExport("enum.Flag") => Some("enum.Flag"),
+            Self::ScopedObjectExport(name @ ("enum.Flag" | "unittest.IsolatedAsyncioTestCase")) => {
+                Some(name)
+            }
             _ => None,
         }
     }
@@ -2458,6 +2465,11 @@ impl SourceModule {
             return Some(Binding::Intrinsic(Intrinsic::SOCKETSERVER_CLASS));
         }
         if self.is_bundled("unittest") {
+            if name == "IsolatedAsyncioTestCase" {
+                return Some(Binding::Intrinsic(Intrinsic::ScopedObjectExport(
+                    "unittest.IsolatedAsyncioTestCase",
+                )));
+            }
             let export = match name {
                 "registerResult" => Some("unittest.registerResult"),
                 "removeResult" => Some("unittest.removeResult"),
