@@ -314,8 +314,7 @@ impl Session {
         if let Some(error) = parsed.errors().first() {
             return Err(format!("{path}: {error}"));
         }
-        check_star_import_scopes(source, &parsed.syntax().body)
-            .map_err(|error| format!("{path}:{error}"))?;
+        check_scope_syntax(source, parsed.syntax()).map_err(|error| format!("{path}:{error}"))?;
         check_handler_count(parsed.tokens()).map_err(|error| format!("{path}: {error}"))?;
         // The parser has already checked Python indentation; file inputs additionally
         // enforce Imre's source-file policy. -c accepts legal tab-indented blocks.
@@ -349,6 +348,12 @@ impl Session {
         self.files.push(file);
         self.tuple_spreads.push(spreads);
         Ok(parsed)
+    }
+
+    pub(crate) fn has_valid_semantic_syntax(&self, module: usize) -> bool {
+        ty_python_core::semantic_index(&self.db, self.db.program_file(self.files[module]))
+            .semantic_syntax_errors()
+            .is_empty()
     }
 
     /// Width proved before ty expands the display's field types.
@@ -407,6 +412,17 @@ impl Session {
             copy.files.push(file);
         }
         Ok(copy)
+    }
+
+    /// Whether this definition needs Python argument binding in a suspended generator frame.
+    pub(crate) fn is_untyped_generator_local(
+        &self,
+        module: usize,
+        function: &ruff_python_ast::StmtFunctionDef,
+    ) -> bool {
+        let index =
+            ty_python_core::semantic_index(&self.db, self.db.program_file(self.files[module]));
+        untyped_generator_local(index, function).is_some()
     }
 
     /// Fold a local import only while that statement is the sole binding reaching this read.
@@ -522,6 +538,48 @@ impl Session {
                         .definition(&self.db, &env)
                         .as_ref()
                         == Some(&definition)
+                })
+        })
+    }
+
+    /// Check the class definition at the use site, including aliases and local shadowing.
+    pub(crate) fn is_stdlib_class(
+        &self,
+        module: usize,
+        expr: &Expr,
+        owner: &str,
+        name: &str,
+    ) -> bool {
+        use ty_python_semantic::types::{Type, TypeDefinition};
+        self.hint_reads.set(self.hint_reads.get() + 1);
+        let model = SemanticModel::new(&self.db, self.db.program_file(self.files[module]));
+        let Some(ty @ Type::ClassLiteral(_)) = expr.inferred_type(&model) else {
+            return false;
+        };
+        matches!(ty.definition(&self.db, &model.program_environment()),
+            Some(TypeDefinition::StaticClass(class))
+                if class.name(&self.db).as_deref() == Some(name)
+                    && class.file(&self.db).path(&self.db).is_vendored_path()
+                    && model.resolve_module(Some(owner), 0).and_then(|m| m.file(&self.db))
+                        == Some(class.file(&self.db)))
+    }
+
+    /// Identify exact OrderedDict and deque class objects even when imported under another name.
+    pub(crate) fn is_collections_storage_base(&self, module: usize, base: &Expr) -> bool {
+        use ty_python_semantic::types::{KnownClass, ProgramEnvironment, Type as Ty};
+        self.hint_reads.set(self.hint_reads.get() + 1);
+        let file = self.db.program_file(self.files[module]);
+        let model = SemanticModel::new(&self.db, file);
+        let Some(owner @ Ty::ClassLiteral(_)) = base.inferred_type(&model) else {
+            return false;
+        };
+        let env = ProgramEnvironment::from_file(file);
+        owner.definition(&self.db, &env).is_some_and(|definition| {
+            [KnownClass::OrderedDict, KnownClass::Deque]
+                .into_iter()
+                .any(|class| {
+                    let canonical = class.to_instance(&self.db, &env);
+                    canonical.definition(&self.db, &env).as_ref() == Some(&definition)
                 })
         })
     }
@@ -1009,6 +1067,21 @@ fn runtime_argument(
     let Some(callee) = call.func.inferred_type(&model) else {
         return false;
     };
+    if rule == "too-many-positional-arguments"
+        && call.arguments.args.iter().any(|arg| arg.range() == range)
+        && matches!(callee, Type::FunctionLiteral(_))
+        && let Some(ty_python_semantic::types::TypeDefinition::Function(definition)) =
+            callee.definition(db, &model.program_environment())
+        && definition.file(db) == file.file(db)
+        && let ty_python_core::definition::DefinitionKind::Function(function) = definition.kind(db)
+    {
+        let index = ty_python_core::semantic_index(db, file);
+        if let Some(scope) = untyped_generator_local(index, function.node(&parsed))
+            && index.try_expression_scope_id(call.func.as_ref()) == Some(scope)
+        {
+            return true;
+        }
+    }
     let uses_runtime_provider = |ty: Type<'_>| {
         ty.definition(db, &model.program_environment())
             .and_then(|definition| definition.definition())
@@ -1048,6 +1121,26 @@ fn resolves_to_stdlib_function(
             .resolve_module(Some(owner), 0)
             .and_then(|m| m.file(db))
             == Some(def.file(db))
+}
+
+/// An unannotated local function in a generator binds its arguments when iteration reaches the call.
+fn untyped_generator_local(
+    index: &ty_python_core::SemanticIndex,
+    function: &ruff_python_ast::StmtFunctionDef,
+) -> Option<ty_python_core::FileScopeId> {
+    if !function.decorator_list.is_empty()
+        || function.type_params.is_some()
+        || function.returns.is_some()
+        || function.parameters.iter().any(|p| p.annotation().is_some())
+    {
+        return None;
+    }
+    let local =
+        index.try_node_scope(ty_python_core::scope::NodeWithScopeRef::Function(function))?;
+    index
+        .scope(local)
+        .parent()
+        .filter(|scope| scope.is_generator_function(index))
 }
 
 /// A context manager wraps a suspended generator. Its preserved annotation
@@ -1310,42 +1403,26 @@ impl<'a> Visitor<'a> for LoopTransfers {
     fn visit_expr(&mut self, _expr: &'a Expr) {}
 }
 
-/// Wildcard imports can only publish names in a module body, including its conditional suites.
-pub(crate) fn check_star_import_scopes(source: &str, body: &[Stmt]) -> Result<(), String> {
-    #[derive(Default)]
-    struct Scopes {
-        nested: bool,
-        invalid: Option<TextRange>,
-    }
-    impl<'a> Visitor<'a> for Scopes {
-        fn visit_stmt(&mut self, stmt: &'a Stmt) {
-            if self.invalid.is_some() {
-                return;
-            }
-            if self.nested
-                && let Stmt::ImportFrom(import) = stmt
-                && let Some(alias) = import.names.iter().find(|alias| alias.name.as_str() == "*")
-            {
-                self.invalid = Some(alias.range());
-                return;
-            }
-            let outer = self.nested;
-            self.nested |= matches!(stmt, Stmt::ClassDef(_) | Stmt::FunctionDef(_));
-            walk_stmt(self, stmt);
-            self.nested = outer;
-        }
-        fn visit_expr(&mut self, _: &'a Expr) {}
-    }
-    let mut scopes = Scopes::default();
-    scopes.visit_body(body);
-    match scopes.invalid {
-        Some(range) => Err(crate::frontend::error(
+/// Check code-scope restrictions shared by typed and object compilation.
+pub(crate) fn check_scope_syntax(
+    source: &str,
+    module: &ruff_python_ast::ModModule,
+) -> Result<(), String> {
+    if let Some(range) = imre_ast::misplaced_star_import(&module.body) {
+        return Err(crate::frontend::error(
             source,
             &range,
             "SyntaxError: import * only allowed at module level",
-        )),
-        None => Ok(()),
+        ));
     }
+    if let Some((range, message)) = imre_ast::async_generators::syntax_error(module) {
+        return Err(crate::frontend::error(
+            source,
+            &range,
+            &format!("SyntaxError: {message}"),
+        ));
+    }
+    Ok(())
 }
 
 struct SuiteLimits<'t> {

@@ -12,6 +12,7 @@ mod defaultdict;
 mod deque;
 mod dictionary;
 mod displayhook;
+mod excepthook;
 mod enums;
 mod ffi;
 mod finalizers;
@@ -72,6 +73,7 @@ use value::{
 struct SourceModule {
     path: PathBuf,
     code: Code,
+    bundled_text: Option<&'static [u8]>,
 }
 
 enum IteratorSlice<'a> {
@@ -141,6 +143,7 @@ pub(crate) struct Context {
     zip_directories: HashMap<String, crate::objects::ZipArchive>,
     zip_path_importers: Id,
     codec_entries: stdlib::codecs::Registry,
+    warning_state: Option<stdlib::warnings_accel::State>,
     frozen_override: i32,
     // The interpreter keeps its original dictionary even when Python reassigns sys.modules.
     modules: Id,
@@ -232,13 +235,8 @@ impl Context {
     fn int(&mut self, value: i64) -> Id {
         self.alloc(Value::Int(crate::Int::from(value)))
     }
-    /// The builtin mapping payload is independent of a subclass instance's attributes.
     fn dict_storage(&self, value: Id) -> Option<Id> {
-        match self.heap.get(value) {
-            Value::Dict(_) | Value::DefaultDict { .. } => Some(value),
-            Value::Instance { dictionary, .. } => *dictionary,
-            _ => None,
-        }
+        self.heap.dict_storage(value)
     }
 
     /// The native elements inherited by a Python-defined list or tuple subclass.
@@ -267,8 +265,9 @@ impl Context {
     /// Slot descriptors require the native layout even when a proxy passes isinstance.
     fn builtin_slot_accepts(&self, object: Id, owner: &str) -> bool {
         match (owner, self.heap.get(self.scalar_value(object))) {
-            ("builtin_function_or_method", _) => {
-                self.builtin_type_name(object) == Some("builtin_function_or_method")
+            (weakref::PROXY_TYPE, Value::Weak(wr)) => wr.kind == weakref::Kind::Proxy,
+            ("builtin_function_or_method" | "method", _) => {
+                self.builtin_type_name(object) == Some(owner)
             }
             ("list", Value::List(_)) | ("tuple", Value::Tuple(_) | Value::NamedTuple { .. }) => {
                 true
@@ -277,14 +276,18 @@ impl Context {
             (_, Value::DictView { .. }) => {
                 Self::dict_view_owner(self.type_name(object)) == Some(owner)
             }
-            ("bool", Value::Bool(_))
+            ("types.GenericAlias", Value::GenericAlias(alias)) => alias.is_builtin_alias(),
+            ("generic_alias_iterator", Value::GenericAliasIterator(_))
+            | ("bool", Value::Bool(_))
             | ("int", Value::Int(_) | Value::Bool(_))
             | ("float", Value::Float(_))
+            | ("mappingproxy", Value::MappingProxy(_))
             | ("super", Value::Super { .. })
             | ("complex", Value::Complex(_))
             | ("str", Value::Str(_) | Value::SurrogateStr(_))
             | ("bytes", Value::Bytes(_))
             | ("bytearray", Value::ByteArray(_))
+            | ("array.array", Value::Array(_))
             | ("set", Value::Set { frozen: false, .. })
             | ("frozenset", Value::Set { frozen: true, .. })
             | (value::REGEX_PATTERN_TYPE, Value::RegexPattern(_))
@@ -295,10 +298,7 @@ impl Context {
     }
 
     fn dict_entries(&self, value: Id) -> Option<&[(Id, Id)]> {
-        match self.heap.get(self.dict_storage(value)?) {
-            Value::Dict(entries) | Value::DefaultDict { entries, .. } => Some(entries),
-            _ => unreachable!("dictionary payload"),
-        }
+        self.heap.dict_entries(value)
     }
 
     fn dict(&mut self, entries: Vec<(Id, Id)>) -> Id {
@@ -649,8 +649,9 @@ impl Context {
         })
     }
     fn is_native_iterator(&self, id: Id) -> bool {
+        let value = self.heap.get(id);
         matches!(
-            self.heap.get(id),
+            value,
             Value::Iterator { .. }
                 | Value::TemplateIter { .. }
                 | Value::RangeIterator(_)
@@ -668,13 +669,14 @@ impl Context {
                 | Value::FormatIterator { .. }
                 | Value::Generator { .. }
                 | Value::CoroutineWrapper(_)
+                | Value::ANextAwaitable { .. }
                 | Value::BufferedRandom(..)
                 | Value::File(_)
                 | Value::TextFile(_)
                 | Value::Enumerate { .. }
                 | Value::Count { .. }
                 | Value::Repeat(_)
-        )
+        ) || value.is_weak_proxy()
     }
 
     /// Select the inherited binary iterator for an exact value or a subclass with native storage.
@@ -688,6 +690,10 @@ impl Context {
 
     /// Keeps sequence iterators on their source and respects an existing iterator's cursor.
     fn iterator(&mut self, id: Id) -> Result<Id> {
+        let target = self.weak_proxy_target(id)?;
+        if target != id {
+            return self.with_weak_target(target, |ctx| ctx.iterator(target));
+        }
         if self.is_native_iterator(id) {
             let closed = match self.heap.get(id) {
                 Value::BufferedRandom(file, _) => file.borrow().closed(),
@@ -826,11 +832,13 @@ impl Context {
                 | Value::Zip { .. }
                 | Value::Generator { .. }
                 | Value::CoroutineWrapper(_)
+                | Value::ANextAwaitable { .. }
                 | Value::BufferedRandom(..)
                 | Value::File(_)
                 | Value::TextFile(_)
                 | Value::Enumerate { .. }
         ) || value.instance_class().is_some()
+            || value.is_weak_proxy()
         {
             return Ok(self.alloc(Value::LoopIterator {
                 source,
@@ -1115,6 +1123,22 @@ impl Context {
 
     /// Advances a boxed iterator once, leaving its remaining values available to other callers.
     fn next_result(&mut self, id: Id) -> Result<Option<Id>> {
+        let target = self.weak_proxy_target(id)?;
+        if target != id {
+            if !self.is_native_iterator(target) && self.slot(target, "__next__").is_none() {
+                return Err(Error::new(
+                    "TypeError",
+                    format!(
+                        "Weakref proxy referenced a non-iterator '{:.200}' object",
+                        self.type_name(target)
+                    ),
+                ));
+            }
+            return self.with_weak_target(target, |ctx| ctx.next_item(target));
+        }
+        if matches!(self.heap.get(id), Value::ANextAwaitable { .. }) {
+            return self.call_anext_method("__next__", &[id]).map(Some);
+        }
         if matches!(self.heap.get(id), Value::CoroutineWrapper(_)) {
             return self
                 .call_coroutine_method("coroutine_wrapper", "__next__", &[id])
@@ -1400,6 +1424,7 @@ impl Context {
             self.heap.get(id),
             Value::AstWalk { .. }
                 | Value::Template { .. }
+                | Value::ANextAwaitable { .. }
                 | Value::TemplateIter { .. }
                 | Value::GenericAliasIterator(_)
                 | Value::SequenceIterator { .. }
@@ -1420,6 +1445,7 @@ impl Context {
                 | Value::Repeat(_)
                 | Value::Enumerate { .. }
         ) || matches!(self.heap.get(id), Value::GenericAlias(alias) if alias.is_builtin_alias() || alias.kind.iterates_unpack())
+            || self.heap.get(id).is_weak_proxy()
             || self.slot(id, "__iter__").is_some()
             || self.slot(id, "__getitem__").is_some()
         {
@@ -2109,6 +2135,12 @@ impl Context {
             let dictionary = self.dict(entries);
             self.native_type_dicts.insert(value, dictionary);
         }
+        if name == "coroutine" {
+            let origin = self.readonly_member("coroutine", "cr_origin");
+            let key = self.heap.code_name("cr_origin");
+            let dictionary = self.dict(vec![(key, origin)]);
+            self.native_type_dicts.insert(value, dictionary);
+        }
         if name == deque::CLASS {
             deque::install(self);
         }
@@ -2168,7 +2200,7 @@ impl Context {
             ],
             "dict" => builtins::DICT_METHODS,
             "function" => &["__call__"],
-            "builtin_function_or_method" => &["__reduce__"],
+            "builtin_function_or_method" | "method" => &["__reduce__"],
             defaultdict::CLASS => {
                 self.builtin("dict");
                 defaultdict::METHODS
@@ -2176,23 +2208,7 @@ impl Context {
             "list" => builtins::LIST_METHODS,
             "method_descriptor" | "wrapper_descriptor" => &["__get__"],
             "tuple" => &["__repr__", "__getitem__", "__len__", "count", "index"],
-            "set" => &[
-                "__repr__",
-                "__reduce__",
-                "difference",
-                "intersection",
-                "issubset",
-                "union",
-                "update",
-            ],
-            "frozenset" => &[
-                "__repr__",
-                "__reduce__",
-                "difference",
-                "intersection",
-                "issubset",
-                "union",
-            ],
+            "set" | "frozenset" => builtins::set_methods(name),
             "bytearray" => {
                 self.builtin("bytearray.fromhex");
                 builtins::BYTEARRAY_METHODS
@@ -2242,6 +2258,7 @@ impl Context {
             }
             thread_local::CLASS => &["__new__", "__getattribute__", "__setattr__", "__delattr__"],
             stdlib::fixed_structseq::SCHED_PARAM => &["__new__", "__reduce__", "__replace__"],
+            weakref::PROXY_TYPE => weakref::PROXY_METHODS,
             weakref::REFERENCE_TYPE => weakref::REFERENCE_METHODS,
             _ => &[],
         };
@@ -2783,9 +2800,38 @@ impl Context {
             let posix = if name == "os" { Some(self.module("posix")?) } else { None };
             #[cfg(target_os = "linux")]
             stdlib::posix_spawn::initialize(self, scope, posix)?;
-            for attr in ["chown", "fchown", "lchown", "getuid", "geteuid", "getgid", "getgroups"] {
+            for attr in [
+                "fchdir", "chown", "fchown", "lchown", "getuid", "geteuid", "getgid", "getgroups",
+                "getpgrp",
+            ] {
                 let value = match posix {
-                    Some(posix) => self.lookup_attr(posix, attr)?,
+                    Some(posix) => match self.lookup_attr(posix, attr) {
+                        Ok(value) => value,
+                        Err(error) if self.is_attribute_error(&error) => continue,
+                        Err(error) => return Err(error),
+                    },
+                    None => self.builtin(&format!("posix.{attr}")),
+                };
+                self.bind(scope, attr, value);
+            }
+            for attr in [
+                "fsync",
+                #[cfg(target_os = "linux")]
+                "fdatasync",
+                #[cfg(target_os = "linux")]
+                "ttyname",
+                "getegid",
+                #[cfg(target_os = "linux")]
+                "getresgid",
+                #[cfg(target_os = "linux")]
+                "getresuid",
+            ] {
+                let value = match posix {
+                    Some(module) => match self.lookup_attr(module, attr) {
+                        Ok(value) => value,
+                        Err(error) if self.is_attribute_error(&error) => continue,
+                        Err(error) => return Err(error),
+                    },
                     None => self.builtin(&format!("posix.{attr}")),
                 };
                 self.bind(scope, attr, value);
@@ -2821,8 +2867,12 @@ impl Context {
             }
             "_imre_itertools" => {
                 for attr in [
+                    "_accumulate_allocate",
+                    "_accumulate_state",
                     "_cycle_allocate",
                     "_cycle_next",
+                    "_pairwise_allocate",
+                    "_pairwise_next",
                     "_starmap_allocate",
                     "_starmap_next",
                     "_zip_longest_allocate",
@@ -2877,12 +2927,17 @@ impl Context {
                     "lockf",
                     "posix_fadvise",
                     "ptsname",
+                    "preadv",
+                    "pwritev",
                     "readv",
+                    "writev",
                     "splice",
                 ] {
                     let function = self.builtin(&format!("posix.{name}"));
                     self.bind(scope, name, function);
                 }
+                let getgrouplist = self.builtin("posix.getgrouplist");
+                self.bind(scope, "getgrouplist", getgrouplist);
                 for (attr, flag) in [
                     ("SPLICE_F_MOVE", libc::SPLICE_F_MOVE),
                     ("SPLICE_F_NONBLOCK", libc::SPLICE_F_NONBLOCK),
@@ -2892,6 +2947,11 @@ impl Context {
                     self.bind(scope, attr, value);
                 }
                 for (attr, flag) in [
+                    ("RWF_APPEND", libc::RWF_APPEND),
+                    ("RWF_DSYNC", libc::RWF_DSYNC),
+                    ("RWF_SYNC", libc::RWF_SYNC),
+                    ("RWF_HIPRI", libc::RWF_HIPRI),
+                    ("RWF_NOWAIT", libc::RWF_NOWAIT),
                     ("O_PATH", libc::O_PATH),
                     ("O_NOCTTY", libc::O_NOCTTY),
                     ("O_TMPFILE", libc::O_TMPFILE),
@@ -2957,6 +3017,8 @@ impl Context {
             }
             "threading" if source.is_none() => {
                 let thread = self.module("_thread")?;
+                let error = self.lookup_attr(thread, "error")?;
+                self.bind(scope, "ThreadError", error);
                 let limit = self.lookup_attr(thread, "TIMEOUT_MAX")?;
                 self.bind(scope, "TIMEOUT_MAX", limit);
             }
@@ -2964,10 +3026,29 @@ impl Context {
                 #[cfg(target_os = "linux")]
                 if source.is_none() {
                     let posix = self.module("posix")?;
+                    for attr in stdlib::os::scheduler::SCHEDULER_EXPORTS
+                        .into_iter()
+                        .chain(["sched_getscheduler", "sched_param"])
+                        .chain(stdlib::os::scheduler::POLICIES.map(|(name, _)| name))
+                    {
+                        match self.lookup_attr(posix, attr) {
+                            Ok(value) => self.bind(scope, attr, value),
+                            Err(error) if self.is_attribute_error(&error) => continue,
+                            Err(error) => return Err(error),
+                        }
+                    }
                     for attr in [
                         "get_terminal_size",
                         "ptsname",
+                        "preadv",
+                        "pwritev",
                         "readv",
+                        "writev",
+                        "RWF_APPEND",
+                        "RWF_DSYNC",
+                        "RWF_SYNC",
+                        "RWF_HIPRI",
+                        "RWF_NOWAIT",
                         "O_NOCTTY",
                         "splice",
                         "SPLICE_F_MOVE",
@@ -2981,6 +3062,19 @@ impl Context {
                         "XATTR_REPLACE",
                         "XATTR_SIZE_MAX",
                     ] {
+                        let value = self.lookup_attr(posix, attr)?;
+                        self.bind(scope, attr, value);
+                    }
+                    match self.lookup_attr(posix, "getgrouplist") {
+                        Ok(value) => self.bind(scope, "getgrouplist", value),
+                        Err(error) if self.is_attribute_error(&error) => (),
+                        Err(error) => return Err(error),
+                    }
+                }
+                #[cfg(target_os = "linux")]
+                {
+                    let posix = self.module("posix")?;
+                    for attr in ["fpathconf", "pathconf", "pathconf_names"] {
                         let value = self.lookup_attr(posix, attr)?;
                         self.bind(scope, attr, value);
                     }
@@ -3016,6 +3110,10 @@ impl Context {
                 let pi = self.alloc(Value::Float(std::f64::consts::PI));
                 self.bind(scope, "pi", pi);
             }
+            #[cfg(unix)]
+            "_ssl" if source.is_none() => stdlib::ssl::provider::objects::install(self, scope)?,
+            #[cfg(unix)]
+            "_imre_ssl" if source.is_none() => stdlib::ssl::install(self, scope)?,
             "_hashlib" if source.is_none() => {
                 stdlib::hashlib::install_openssl(self, module, scope)?
             }
@@ -3165,7 +3263,9 @@ impl Context {
                 }
             }
             "_locale" => stdlib::locale::install(self, module, scope)?,
+            "_warnings" => stdlib::warnings_accel::install(self, module, scope)?,
             "time" => stdlib::time::install_timezone(self, scope)?,
+            "struct" => stdlib::structure::install(self, scope)?,
             "pickle" => stdlib::pickle::install(self, scope)?,
             "urllib.parse" => stdlib::urllib::initialize(self, scope),
             "_io" => stdlib::io::install_native(self, scope, module),
@@ -3197,16 +3297,23 @@ impl Context {
                 self.bind(scope, "byteorder", byteorder);
                 let thread_info = stdlib::fixed_structseq::thread_info(self);
                 self.bind(scope, "thread_info", thread_info);
+                for name in ["get_coroutine_origin_tracking_depth", "set_coroutine_origin_tracking_depth"] {
+                    let callable = self.builtin(&format!("sys.{name}"));
+                    self.bind(scope, name, callable);
+                }
                 for name in [
                     "audit",
                     "addaudithook",
                     "getsizeof",
                     "getrecursionlimit",
+                    "get_asyncgen_hooks",
+                    "set_asyncgen_hooks",
                     "is_finalizing",
                     "setrecursionlimit",
                     "_getframe",
                     "_getframemodulename",
                     "displayhook",
+                    "excepthook",
                     "unraisablehook",
                     "get_int_max_str_digits",
                     "set_int_max_str_digits",
@@ -3220,6 +3327,8 @@ impl Context {
                     self.bind(scope, name, function);
                     if name == "displayhook" {
                         self.bind(scope, "__displayhook__", function);
+                    } else if name == "excepthook" {
+                        self.bind(scope, "__excepthook__", function);
                     } else if name == "unraisablehook" {
                         self.bind(scope, "__unraisablehook__", function);
                         if self.threads.system_module.is_none() {
@@ -3290,6 +3399,8 @@ impl Context {
             _ => {}
         }
         if name == "_thread" && source.is_none() {
+            let error = self.builtin("RuntimeError");
+            self.bind(scope, "error", error);
             #[cfg(unix)]
             {
                 let interrupt = self.builtin("_thread.interrupt_main");
@@ -3370,6 +3481,8 @@ impl Context {
             {
                 self.freeze_itertools_types(scope);
                 for (name, owner) in [
+                    ("accumulate", "itertools.accumulate"),
+                    ("pairwise", "itertools.pairwise"),
                     ("starmap", "itertools.starmap"),
                     ("takewhile", "itertools.takewhile"),
                     ("dropwhile", "itertools.dropwhile"),
@@ -3397,6 +3510,14 @@ impl Context {
                 && let Some(class) = self.scope_name(scope, "PatternError")
             {
                 self.classes.insert("re.PatternError".into(), class);
+            }
+            if name == "_collections_abc"
+                && self.typing.abc_callable_reducer.is_none()
+                && self.config["bundled_root"].as_str().is_some_and(|root| {
+                    path == std::path::Path::new(root).join("_collections_abc.py")
+                })
+            {
+                self.typing.abc_callable_reducer = self.scope_name(scope, "_reduce_callable_alias");
             }
             if name == "typing"
                 && self.typing.callable_factory.is_none()

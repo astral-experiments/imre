@@ -5,9 +5,18 @@ import sys
 import types
 
 __all__ = [
-    "Format", "ForwardRef", "get_annotate_from_class_namespace",
-    "get_annotations", "annotations_to_string", "type_repr",
+    "Format",
+    "ForwardRef",
+    "call_annotate_function",
+    "call_evaluate_function",
+    "get_annotate_from_class_namespace",
+    "get_annotations",
+    "annotations_to_string",
+    "type_repr",
 ]
+
+
+_sentinel = object()
 
 
 class Format(enum.IntEnum):
@@ -169,6 +178,21 @@ def _make_forward_ref(arg, module=None, owner=None, *, is_argument=True, is_clas
     return ForwardRef(arg, module=module, owner=owner, is_argument=is_argument, is_class=is_class)
 
 
+def _render_tokens(tokens, extra_names=None):
+    """Render spelling, captured-name, and deferred constant tokens for an annotation."""
+    parts = []
+    for token in tokens:
+        if type(token) is str:
+            parts.append(token)
+        else:
+            key, value = token
+            if type(key) is str:
+                parts.append(type_repr(extra_names[key]) if extra_names and key in extra_names else key)
+            else:
+                parts.append(key(value))
+    return "".join(parts)
+
+
 class ForwardRef:
     """An unevaluated annotation with its defining scope."""
 
@@ -208,21 +232,15 @@ class ForwardRef:
 
     @property
     def __forward_arg__(self):
+        if self.__arg__ is None:
+            self.__arg__ = _render_tokens(self.__ast_node__)
         return self.__arg__
 
     @property
     def __resolved_str__(self):
         if self.__resolved_str_cache__ is None:
-            if self.__ast_node__ is None:
-                rendered = self.__forward_arg__
-            else:
-                # Preserve literal tokens and render captured values only when
-                # the caller asks to see them. Their repr can execute user code.
-                rendered = "".join(
-                    part if type(part) is str else type_repr(part[1])
-                    for part in self.__ast_node__
-                )
-            self.__resolved_str_cache__ = rendered
+            self.__resolved_str_cache__ = (_render_tokens(self.__ast_node__, self.__extra_names__)
+                                           if self.__extra_names__ else self.__forward_arg__)
         return self.__resolved_str_cache__
 
     def evaluate(self, *, globals=None, locals=None, type_params=None, owner=None,
@@ -322,6 +340,29 @@ class ForwardRef:
             return tuple(sorted((name, id(cell)) for name, cell in cells.items()))
         return id(cells)
 
+    def _evaluate(self, globalns, localns, type_params=_sentinel, *, recursive_guard):
+        import typing
+        import warnings
+
+        if type_params is _sentinel:
+            typing._deprecation_warning_for_no_type_params_passed(
+                "typing.ForwardRef._evaluate"
+            )
+            type_params = ()
+        warnings._deprecated(
+            "ForwardRef._evaluate",
+            "{name} is a private API and is retained for compatibility, but will be removed"
+            " in Python 3.16. Use ForwardRef.evaluate() or typing.evaluate_forward_ref() instead.",
+            remove=(3, 16),
+        )
+        return typing.evaluate_forward_ref(
+            self,
+            globals=globalns,
+            locals=localns,
+            type_params=type_params,
+            _recursive_guard=recursive_guard,
+        )
+
     def __eq__(self, other):
         if not isinstance(other, ForwardRef):
             return NotImplemented
@@ -388,6 +429,73 @@ def _rewrite_star_unpack(arg):
         return arg
 
 
+def _stringify_single(value):
+    if value is ...:
+        return "..."
+    if isinstance(value, str):
+        return value
+    from string.templatelib import Template
+    if isinstance(value, Template):
+        return _template_repr(value)
+    return repr(value)
+
+
+def call_evaluate_function(evaluate, format, *, owner=None):
+    """Call the evaluator for a type alias or type parameter in the requested format."""
+    return call_annotate_function(evaluate, format, owner=owner, _is_evaluate=True)
+
+
+def call_annotate_function(annotate, format, *, owner=None, _is_evaluate=False):
+    """Call an annotation provider, replaying it in the requested format if needed."""
+    if format == Format.VALUE_WITH_FAKE_GLOBALS:
+        raise ValueError("The VALUE_WITH_FAKE_GLOBALS format is for internal use only")
+    try:
+        return annotate(format)
+    except NotImplementedError:
+        pass
+
+    if format == Format.STRING:
+        try:
+            annotate(Format.VALUE_WITH_FAKE_GLOBALS)
+        except NotImplementedError:
+            return annotations_to_string(annotate(Format.VALUE))
+        except Exception:
+            pass
+        from typing import _typeddict_replay
+        func, _ = _typeddict_replay(annotate, owner, format, False)
+        result = func(Format.VALUE_WITH_FAKE_GLOBALS)
+        if _is_evaluate:
+            return _stringify_single(result)
+        return {key: _stringify_single(value) for key, value in result.items()}
+
+    if format == Format.FORWARDREF:
+        from typing import _typeddict_replay
+        func, names = _typeddict_replay(annotate, owner, format, True)
+        try:
+            result = func(Format.VALUE_WITH_FAKE_GLOBALS)
+        except NotImplementedError:
+            return annotate(Format.VALUE)
+        except Exception:
+            pass
+        else:
+            names.finish()
+            return result
+
+        # An operation on a known value can fail. Replay with symbolic globals,
+        # then evaluate the ForwardRefs for which the available names suffice.
+        func, names = _typeddict_replay(annotate, owner, format, False)
+        result = func(Format.VALUE_WITH_FAKE_GLOBALS)
+        names.finish()
+        if _is_evaluate:
+            return result.evaluate(format=Format.FORWARDREF) if isinstance(result, ForwardRef) else result
+        return {key: value.evaluate(format=Format.FORWARDREF)
+                if isinstance(value, ForwardRef) else value for key, value in result.items()}
+
+    if format == Format.VALUE:
+        raise RuntimeError("annotate function does not support VALUE format")
+    raise ValueError(f"Invalid format: {format!r}")
+
+
 def _get_and_call_annotate(obj, format):
     """Get the __annotate__ function and call it.
 
@@ -395,8 +503,7 @@ def _get_and_call_annotate(obj, format):
     """
     annotate = getattr(obj, "__annotate__", None)
     if annotate is not None:
-        from typing import _call_annotate
-        ann = _call_annotate(annotate, format, owner=obj)
+        ann = call_annotate_function(annotate, format, owner=obj)
         if not isinstance(ann, dict):
             raise ValueError(f"{obj!r}.__annotate__ returned a non-dict")
         return ann

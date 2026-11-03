@@ -31,6 +31,10 @@ REJECTED = {
         "    future = read()\n    value = 2\n    return await future\n"
         "print(asyncio.run(outer()))"
     ),
+    "platform_option_first_party_contract": (
+        "def needs_int(value: int) -> int:\n    return value\n"
+        "run(['command'], creationflags=0)\nprint(needs_int('wrong'))"
+    ),
     "missing_args": "run(capture_output=True, encoding='utf-8')",
     "duplicate_args": "run(['command'], args=['other'], capture_output=True, encoding='utf-8')",
     "extra_positional": "run(['command'], True, capture_output=True, encoding='utf-8')",
@@ -312,6 +316,9 @@ def main() -> None:
             result = files.run([compiler, "check", str(path)], temporary)
             assert result.returncode > 0 and result.stderr, (name, result)
             assert b"panicked" not in result.stderr and b"Sanitizer" not in result.stderr, (name, result.stderr)
+            if name == "platform_option_first_party_contract":
+                line = len((IMPORTS + source).splitlines())
+                assert f"{path}:{line}:17: Imre: expected int, got str".encode() in result.stderr, result.stderr
             if name == "expanded_args":
                 assert b"argument unpacking requires a source-defined function or method" in result.stderr, result.stderr
             if name == "expanded_kwargs":

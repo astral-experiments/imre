@@ -394,12 +394,14 @@ pub(super) fn copy(ctx: &mut Context, receiver: Id) -> Result<Id> {
     }
     let result = ctx.call(class, args, Vec::new())?;
     if !matches!(ctx.heap.get(ctx.scalar_value(result)), Value::Deque(_)) {
+        let receiver_name = ctx.type_name(receiver);
+        let result_name = ctx.type_name(result);
         return Err(Error::new(
             "TypeError",
             format!(
                 "{}() must return a deque, not {}",
-                ctx.type_name(receiver),
-                ctx.type_name(result)
+                &receiver_name[..receiver_name.floor_char_boundary(200)],
+                &result_name[..result_name.floor_char_boundary(200)]
             ),
         ));
     }
@@ -565,13 +567,29 @@ pub(super) fn compare(ctx: &mut Context, op: &str, left: Id, right: Id) -> Resul
         roots: usize,
         element_roots: usize,
         pending: Option<(Id, Id, bool)>,
-        repeated: bool,
+    }
+
+    fn finish_frame(
+        ctx: &mut Context,
+        frames: &mut Vec<Frame>,
+        active: &mut HashMap<(Id, Id), usize>,
+    ) {
+        let frame = frames.pop().unwrap();
+        let pair = (frame.left, frame.right);
+        let count = active.get_mut(&pair).unwrap();
+        *count -= 1;
+        if *count == 0 {
+            active.remove(&pair);
+        } else {
+            ctx.deque_comparison_repeats -= 1;
+        }
+        ctx.heap.release_temporaries_since(frame.roots);
     }
 
     ctx.check_call_depth(0)?;
     ctx.call_depth += 1;
     let roots = ctx.heap.temporary_mark();
-    let mut repeated_depth = 0;
+    let previous_repeats = ctx.deque_comparison_repeats;
     let result = stacker::maybe_grow(1024 * 1024, 4 * 1024 * 1024, || {
         let mut active: HashMap<(Id, Id), usize> = HashMap::new();
         let mut frames: Vec<Frame> = Vec::new();
@@ -613,7 +631,6 @@ pub(super) fn compare(ctx: &mut Context, op: &str, left: Id, right: Id) -> Resul
                 }
                 active.insert((a, b), repeats + 1);
                 if repeats > 0 {
-                    repeated_depth += 1;
                     ctx.deque_comparison_repeats += 1;
                 }
                 frames
@@ -639,7 +656,6 @@ pub(super) fn compare(ctx: &mut Context, op: &str, left: Id, right: Id) -> Resul
                     roots: mark,
                     element_roots: ctx.heap.temporary_mark(),
                     pending: None,
-                    repeated: repeats > 0,
                 });
                 continue;
             }
@@ -648,40 +664,18 @@ pub(super) fn compare(ctx: &mut Context, op: &str, left: Id, right: Id) -> Resul
                     return Ok(value);
                 };
                 let (x, y, final_pass) = parent.pending.take().expect("waiting parent");
-                if !final_pass && !value {
+                if final_pass {
+                    finish_frame(ctx, &mut frames, &mut active);
+                    answer = Some(value);
+                } else if !value {
                     if matches!(parent.cursor, Cursor::Sequence(_)) {
                         let value = !parent.equal_op;
-                        let parent = frames.pop().unwrap();
-                        if parent.repeated {
-                            repeated_depth -= 1;
-                            ctx.deque_comparison_repeats -= 1;
-                        }
-                        let count = active.get_mut(&(parent.left, parent.right)).unwrap();
-                        *count -= 1;
-                        if *count == 0 {
-                            active.remove(&(parent.left, parent.right));
-                        }
-                        ctx.heap.release_temporaries_since(parent.roots);
+                        finish_frame(ctx, &mut frames, &mut active);
                         answer = Some(value);
                     } else {
                         parent.pending = Some((x, y, true));
                         request = Some((x, y, parent.equal_op));
                     }
-                } else if !final_pass {
-                    ctx.heap.release_temporaries_since(parent.element_roots);
-                } else {
-                    let parent = frames.pop().unwrap();
-                    if parent.repeated {
-                        repeated_depth -= 1;
-                        ctx.deque_comparison_repeats -= 1;
-                    }
-                    let count = active.get_mut(&(parent.left, parent.right)).unwrap();
-                    *count -= 1;
-                    if *count == 0 {
-                        active.remove(&(parent.left, parent.right));
-                    }
-                    ctx.heap.release_temporaries_since(parent.roots);
-                    answer = Some(value);
                 }
                 continue;
             }
@@ -700,17 +694,7 @@ pub(super) fn compare(ctx: &mut Context, op: &str, left: Id, right: Id) -> Resul
                     };
                     if a.len() != b.len() {
                         let value = !frame.equal_op;
-                        let frame = frames.pop().unwrap();
-                        if frame.repeated {
-                            repeated_depth -= 1;
-                            ctx.deque_comparison_repeats -= 1;
-                        }
-                        let count = active.get_mut(&(frame.left, frame.right)).unwrap();
-                        *count -= 1;
-                        if *count == 0 {
-                            active.remove(&(frame.left, frame.right));
-                        }
-                        ctx.heap.release_temporaries_since(frame.roots);
+                        finish_frame(ctx, &mut frames, &mut active);
                         answer = Some(value);
                         continue;
                     }
@@ -721,17 +705,7 @@ pub(super) fn compare(ctx: &mut Context, op: &str, left: Id, right: Id) -> Resul
             };
             let (Some(x), Some(y)) = (x, y) else {
                 let value = if frame.equal_op { x == y } else { x != y };
-                let frame = frames.pop().unwrap();
-                if frame.repeated {
-                    repeated_depth -= 1;
-                    ctx.deque_comparison_repeats -= 1;
-                }
-                let count = active.get_mut(&(frame.left, frame.right)).unwrap();
-                *count -= 1;
-                if *count == 0 {
-                    active.remove(&(frame.left, frame.right));
-                }
-                ctx.heap.release_temporaries_since(frame.roots);
+                finish_frame(ctx, &mut frames, &mut active);
                 answer = Some(value);
                 continue;
             };
@@ -755,23 +729,13 @@ pub(super) fn compare(ctx: &mut Context, op: &str, left: Id, right: Id) -> Resul
                     let value = ctx.binary(operation, x, y)?;
                     ctx.truth(value)?
                 };
-                let frame = frames.pop().unwrap();
-                if frame.repeated {
-                    repeated_depth -= 1;
-                    ctx.deque_comparison_repeats -= 1;
-                }
-                let count = active.get_mut(&(frame.left, frame.right)).unwrap();
-                *count -= 1;
-                if *count == 0 {
-                    active.remove(&(frame.left, frame.right));
-                }
-                ctx.heap.release_temporaries_since(frame.roots);
+                finish_frame(ctx, &mut frames, &mut active);
                 answer = Some(value);
             }
         }
     });
     ctx.heap.release_temporaries_since(roots);
-    ctx.deque_comparison_repeats -= repeated_depth;
+    ctx.deque_comparison_repeats = previous_repeats;
     ctx.call_depth -= 1;
     result
 }

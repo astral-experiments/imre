@@ -1,6 +1,7 @@
 """POSIX lexical operations shared by os.path and posixpath."""
 # os reads these constants while the two modules import each other.
 curdir = "."
+pardir = ".."
 defpath = "/bin:/usr/bin"
 extsep = "."
 sep = "/"
@@ -82,6 +83,16 @@ def basename(p):
     p = os.fspath(p)
     sep = b"/" if isinstance(p, bytes) else "/"
     return p[p.rfind(sep) + 1:]
+
+
+def dirname(p):
+    """Returns the directory component of a pathname"""
+    p = os.fspath(p)
+    sep = b"/" if isinstance(p, bytes) else "/"
+    head = p[:p.rfind(sep) + 1]
+    if head and head != sep * len(head):
+        head = head.rstrip(sep)
+    return head
 
 
 def splitext(p):

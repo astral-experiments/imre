@@ -61,17 +61,15 @@ impl<'a> Visitor<'a> for ClosureNames {
                         !child.locals.contains(name) && !child.globals.contains(name)
                     }));
                 }
-                // Loading a name or a literal cannot introduce a binding in the
-                // defining frame. Keep the conservative fallback for other expressions.
+                // A bare decorator name cannot introduce a binding in the defining frame.
                 for decorator in &f.decorator_list {
                     self.visit_decorator(decorator);
                     self.locals_incomplete |= !decorator.expression.is_name_expr();
                 }
                 for param in f.parameters.iter_non_variadic_params() {
                     if let Some(default) = &param.default {
+                        // Defaults run here. Their expression walk records enclosing bindings.
                         self.visit_expr(default);
-                        self.locals_incomplete |=
-                            !default.is_literal_expr() && !default.is_name_expr();
                     }
                 }
             }
@@ -766,6 +764,10 @@ impl Function<'_, '_> {
         if let Some(flags) = flags {
             signature["code_flags"] = json!(flags);
         }
+        if matches!(body, Body::Generator(..)) {
+            // generator() binds the implicit .0 argument without calling the step function.
+            signature["co_argcount"] = json!(1);
+        }
         if let Body::Namespace(stmts) = &body {
             signature["postponed_annotations"] = json!(
                 self.source.string_annotations
@@ -1333,8 +1335,8 @@ impl Function<'_, '_> {
             let (cleanup, outer) = &active[index];
             let previous = std::mem::replace(&mut self.error, outer.clone());
             match cleanup {
-                Cleanup::With { exit, caught } => {
-                    self.op("exit_context", &[exit, "0", caught]);
+                Cleanup::With { line, exit, caught } => {
+                    self.exit_context(*line, &[exit, "0", caught]);
                 }
                 Cleanup::ExceptionName(name) => self.clear_exception_name(name),
                 Cleanup::PendingValue {
@@ -1378,11 +1380,26 @@ impl Function<'_, '_> {
         self.exits = active;
     }
 
+    fn exit_context(&mut self, line: usize, args: &[&str]) -> String {
+        // Providers without a compiled exit keep their existing IR and cache symbol.
+        if !self.output.declared_statement_line {
+            self.output
+                .functions
+                .push_str("declare void @imre_dyn_set_statement_line(ptr, i32)\n");
+            self.output.declared_statement_line = true;
+        }
+        self.line(&format!(
+            "call void @imre_dyn_set_statement_line(ptr %ctx, i32 {line})"
+        ));
+        self.op("exit_context", args)
+    }
+
     fn with(&mut self, items: &[ast::WithItem], body: &[ast::Stmt]) {
         let Some((item, rest)) = items.split_first() else {
             self.statements(body);
             return;
         };
+        let line = self.source.line(item.context_expr.start());
         let manager = self.expr(&item.context_expr);
         let exit = self.op("lookup_exit", &[&manager]);
         let enter = self.op("lookup_enter", &[&manager]);
@@ -1393,6 +1410,7 @@ impl Function<'_, '_> {
         let caught = self.caught.last().cloned().unwrap_or_else(|| "0".into());
         self.exits.push((
             Cleanup::With {
+                line,
                 exit: exit.clone(),
                 caught: caught.clone(),
             },
@@ -1407,12 +1425,12 @@ impl Function<'_, '_> {
         self.exits.pop();
         self.error = outer;
         if !self.terminated {
-            self.op("exit_context", &[&exit, "0", &caught]);
+            self.exit_context(line, &[&exit, "0", &caught]);
             self.jump(&done);
         }
         self.label(&handler);
         let exc = self.op("take_error", &[]);
-        let result = self.op("exit_context", &[&exit, &exc]);
+        let result = self.exit_context(line, &[&exit, &exc]);
         let suppress = self.truth(&result);
         let propagate = self.name("b");
         self.branch(&suppress, &done, &propagate);

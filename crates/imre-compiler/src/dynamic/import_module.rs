@@ -8,7 +8,6 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
     }
     match name {
         "types" => {
-            // PEP 3115/560 class construction uses only builtins; native types remain module exports.
             const UPSTREAM: &str = include_str!(
                 "../../../../benchmarks/cpython_stdlib/full/types/upstream/Lib/types.py"
             );
@@ -20,15 +19,42 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
                     let (helpers, _) = UPSTREAM[start..]
                         .split_once("def get_original_bases(")
                         .unwrap();
+                    let descriptor = UPSTREAM.find("class DynamicClassAttribute:").unwrap();
+                    let coroutine = UPSTREAM.find("def coroutine(func):").unwrap();
                     format!(
-                        "{helpers}{}",
-                        include_str!("../../stdlib/types_original_bases.py")
+                        "{helpers}{}\n{}\n{}",
+                        include_str!("../../stdlib/types_original_bases.py"),
+                        &UPSTREAM[descriptor..coroutine],
+                        include_str!("../../stdlib/types_coroutine.py"),
                     )
                 }),
             ))
         }
+        "http.server" => {
+            const UPSTREAM: &str = include_str!(
+                "../../../../benchmarks/cpython_stdlib/full/http/upstream/Lib/http/server.py"
+            );
+            static SOURCE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+            Some(("http/server.py", SOURCE.get_or_init(|| {
+                let start = UPSTREAM.find("class SimpleHTTPRequestHandler(").unwrap();
+                let (handler, _) = UPSTREAM[start..]
+                    .split_once("# Utilities for CGIHTTPRequestHandler")
+                    .unwrap();
+                // The existing server's _escape implements html.escape with quote=False.
+                let handler = handler
+                    .replace("html.escape(displaypath, quote=False)", "_escape(displaypath)")
+                    .replace("html.escape(displayname, quote=False)", "_escape(displayname)");
+                format!(
+                    "{}\nimport datetime\nimport email.utils\nimport io\nimport mimetypes\nimport os\nimport posixpath\nimport shutil\nimport urllib.parse\n\n{handler}",
+                    include_str!("../../stdlib/http/server.py")
+                )
+            })))
+        }
         "reprlib" => Some(("reprlib.py", include_str!("../../stdlib/reprlib.py"))),
-        "datetime" => Some(("datetime.py", include_str!("../../stdlib/datetime.py"))),
+        "datetime" => Some((
+            "datetime.py",
+            include_str!("../../../../benchmarks/cpython_stdlib/full/datetime/upstream/Lib/datetime.py"),
+        )),
         "enum" => Some(("enum.py", include_str!("../../stdlib/enum.py"))),
         "json" => Some((
             "json/__init__.py",
@@ -110,6 +136,16 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
                         let begin = UPSTREAM.find(start).unwrap();
                         UPSTREAM[begin..].split_once(end).unwrap().0
                     };
+                    // Some native descriptors implement assignment in the runtime without a
+                    // Python-visible setter on their type.
+                    let descriptors = section(
+                        "def ismethoddescriptor(object):",
+                        "if hasattr(types, 'MemberDescriptorType'):",
+                    )
+                    .replace(
+                        "or hasattr(tp, \"__delete__\")",
+                        "or hasattr(tp, \"__delete__\") or _native_data_descriptor(object)",
+                    );
                     let classes = section("_POSITIONAL_ONLY         = ", "class BufferFlags(")
                         .replace("name.isidentifier()", "_signature_identifier(name)")
                         .replace(
@@ -121,12 +157,13 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
                         include_str!("../../stdlib/inspect_signature.py"),
                         "import functools\nimport importlib.machinery\nimport linecache\nimport os\nimport sys",
                         section("def ismodule(object):", "def ispackage(object):"),
-                        section("def ismethoddescriptor(object):", "if hasattr(types, 'MemberDescriptorType'):"),
+                        &descriptors,
                         section("def isfunction(object):", "def _has_code_flag("),
                         section("def istraceback(object):", "def isabstract(object):"),
                         section("def getfile(object):", "class ClassFoundException("),
                         section("def unwrap(func, *, stop=None):", "def indentsize(line):"),
-                        section("def _signature_bound_method(", "def _signature_is_builtin("),
+                        section("def _signature_get_partial(", "def _signature_is_builtin("),
+                        section("def _signature_is_functionlike(obj):", "def _signature_strip_non_python_syntax("),
                         section("class _void:", "class _ParameterKind("),
                         &classes,
                     ]
@@ -210,6 +247,7 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
         // CPython 3.14.5 Lib/shutil.py. See stdlib/docstrings/LICENSE.
         "shutil" => Some(("shutil.py", include_str!("../../stdlib/shutil.py"))),
         "socket" => Some(("socket.py", include_str!("../../stdlib/socket.py"))),
+        "ssl" => Some(("ssl.py", include_str!("../../stdlib/ssl.py"))),
         "tempfile" => Some((
             "tempfile.py",
             concat!(

@@ -173,12 +173,7 @@ pub(super) fn global(
     name: &str,
     fix_imports: bool,
 ) -> Result<()> {
-    if protocol >= 4 {
-        string(out, protocol, module)?;
-        string(out, protocol, name)?;
-        out.push(0x93); // STACK_GLOBAL
-        return Ok(());
-    }
+    debug_assert!(protocol < 4);
     let (module, name) = if protocol < 3 && fix_imports {
         legacy_global(module, name)?
     } else {
@@ -247,6 +242,9 @@ fn legacy_global<'a>(module: &'a str, name: &'a str) -> Result<(&'a str, &'a str
             _ => (module, name),
         });
     }
+    if module == "collections.abc" {
+        return Ok(("_abcoll", name));
+    }
     if module == "copyreg" {
         return Ok(("copy_reg", name));
     }
@@ -260,7 +258,6 @@ fn legacy_global<'a>(module: &'a str, name: &'a str) -> Result<(&'a str, &'a str
         "_pickle",
         "_socket",
         "_thread",
-        "collections.abc",
         "configparser",
         "dbm",
         "dbm.bsd",

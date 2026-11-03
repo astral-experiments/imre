@@ -42,6 +42,104 @@ fn pickling_error(ctx: &Context, message: impl Into<String>) -> Error {
     error
 }
 
+fn dotted_attribute(ctx: &mut Context, mut value: Id, name: &str) -> Result<Id> {
+    for part in name.split('.') {
+        ctx.heap.keep(value);
+        value = ctx.lookup_attr(value, part)?;
+    }
+    Ok(value)
+}
+
+/// Find an identity match in the public module registry, before falling back to __main__.
+fn find_global_module(ctx: &mut Context, obj: Id, name: &str) -> Result<Option<Id>> {
+    let modules = ctx.public_modules()?;
+    ctx.heap.keep(modules);
+    // The accelerator uses PyDict_Next for an exact dict; a module lookup may add entries.
+    let iterator = if matches!(ctx.heap.get(modules), Value::Dict(_)) {
+        None
+    } else {
+        let iterator = ctx.iterator(modules)?;
+        ctx.heap.keep(iterator);
+        Some(iterator)
+    };
+    let mut index = 0;
+    let roots = ctx.heap.temporary_mark();
+    loop {
+        ctx.heap.release_temporaries_since(roots);
+        let (key, module) = if let Some(iterator) = iterator {
+            let Some(key) = ctx.next_item(iterator)? else {
+                break;
+            };
+            ctx.heap.keep(key);
+            (key, ctx.get_item(modules, key)?)
+        } else {
+            let Value::Dict(entries) = ctx.heap.get(modules) else {
+                unreachable!()
+            };
+            let Some((position, key, module)) = entries.at(index) else {
+                break;
+            };
+            index = position + 1;
+            (key, module)
+        };
+        if module == NONE || ctx.str_value(key).is_ok_and(|name| name == "__main__") {
+            continue;
+        }
+        ctx.heap.keep(key);
+        match dotted_attribute(ctx, module, name) {
+            Ok(candidate) if candidate == obj => return Ok(Some(key)),
+            Err(error) if !ctx.is_attribute_error(&error) => return Err(error),
+            _ => {}
+        }
+    }
+    Ok(None)
+}
+
+fn global_module(ctx: &mut Context, obj: Id, name: &str) -> Result<Id> {
+    let module = if matches!(obj, ELLIPSIS | NOT_IMPLEMENTED) {
+        ctx.text("builtins")
+    } else {
+        let module = match ctx.lookup_attr(obj, "__module__") {
+            Err(error) if ctx.is_attribute_error(&error) => NONE,
+            result => result?,
+        };
+        if module != NONE {
+            module
+        } else if let Some(module) = find_global_module(ctx, obj, name)? {
+            return Ok(module);
+        } else {
+            ctx.text("__main__")
+        }
+    };
+    ctx.heap.keep(module);
+    let module_name = ctx.str_value(module)?.to_owned();
+    let resolved = if module_name == "builtins" && super::super::builtins::is_builtin(name) {
+        ctx.builtin(name)
+    } else {
+        let current = ctx.module(&module_name).map_err(|e| {
+            if ctx.is_builtin_error(&e, "ModuleNotFoundError") {
+                pickling_error(ctx, format!("Can't import module {module_name}"))
+            } else {
+                e
+            }
+        })?;
+        dotted_attribute(ctx, current, name).map_err(|e| {
+            if ctx.is_attribute_error(&e) {
+                pickling_error(ctx, format!("Can't find {name} in {module_name}"))
+            } else {
+                e
+            }
+        })?
+    };
+    if resolved != obj {
+        return Err(pickling_error(
+            ctx,
+            format!("object differs from {module_name}.{name}"),
+        ));
+    }
+    Ok(module)
+}
+
 fn unsupported_reducer(ctx: &Context, obj: Id) -> Error {
     Error::new(
         "NotImplementedError",
@@ -57,8 +155,8 @@ fn native_layout_reduce(
     protocol: i32,
     cursor: Option<(Id, &'static str)>,
 ) -> Result<Id> {
-    let copyreg = ctx.module("copyreg")?;
     if protocol < 2 {
+        let copyreg = ctx.module("copyreg")?;
         let reducer = ctx.lookup_attr(copyreg, "_reduce_ex_with_base")?;
         ctx.heap.keep(reducer);
         let reported_class = ctx.lookup_attr(receiver, "__class__")?;
@@ -77,6 +175,16 @@ fn native_layout_reduce(
             Vec::new(),
         );
     }
+    reduce_newobj(ctx, receiver, class, cursor)
+}
+
+/// Consult the class's constructor argument hooks before collecting binary-protocol state.
+fn reduce_newobj(
+    ctx: &mut Context,
+    receiver: Id,
+    class: Id,
+    cursor: Option<(Id, &'static str)>,
+) -> Result<Id> {
     let extended = ctx.class_attr(class, "__getnewargs_ex__");
     let hook = extended.or_else(|| ctx.class_attr(class, "__getnewargs__"));
     let Some(hook) = hook else {
@@ -85,6 +193,7 @@ fn native_layout_reduce(
     let method = ctx.bind_attribute(hook, receiver, class)?;
     let args = ctx.call(method, Vec::new(), Vec::new())?;
     ctx.heap.keep(args);
+    let copyreg = ctx.module("copyreg")?;
     let reducer = ctx.lookup_attr(copyreg, "_reduce_newobj")?;
     let extended = super::super::builtins::boolean(extended.is_some());
     ctx.call(reducer, vec![receiver, args, extended], Vec::new())
@@ -121,13 +230,7 @@ fn default_instance_reduce(ctx: &mut Context, receiver: Id, protocol: i32) -> Re
         let protocol = ctx.int(i64::from(protocol));
         return ctx.call(reducer, vec![receiver, protocol], Vec::new());
     }
-    if ctx.class_attr(class, "__getnewargs_ex__").is_some()
-        || ctx.class_attr(class, "__getnewargs__").is_some()
-    {
-        return Err(unsupported_reducer(ctx, receiver));
-    }
-
-    reduce_without_newargs(ctx, receiver, class, None)
+    reduce_newobj(ctx, receiver, class, None)
 }
 
 fn reduce_without_newargs(
@@ -161,22 +264,24 @@ fn reduce_without_newargs(
 }
 
 fn default_reduction(ctx: &mut Context, obj: Id, protocol: i32) -> Result<Id> {
-    if !matches!(ctx.heap.get(obj), Value::DirEntry(_)) {
-        return default_instance_reduce(ctx, obj, protocol);
+    match ctx.heap.get(obj) {
+        Value::DirEntry(_) if protocol < 2 => {
+            // copyreg's legacy reducer records the class even when its instances cannot be created.
+            let copyreg = ctx.module("copyreg")?;
+            let reconstructor = ctx.lookup_attr(copyreg, "_reconstructor")?;
+            let class = ctx.exact_type(obj)?;
+            let base = ctx.builtin("object");
+            let args = ctx.alloc(Value::Tuple(vec![class, base, NONE]));
+            Ok(ctx.alloc(Value::Tuple(vec![reconstructor, args])))
+        }
+        Value::DirEntry(_) | Value::ClassMethod { .. } | Value::StaticMethod { .. } => {
+            Err(Error::new(
+                "TypeError",
+                format!("cannot pickle '{}' object", ctx.type_name(obj)),
+            ))
+        }
+        _ => default_instance_reduce(ctx, obj, protocol),
     }
-    if protocol >= 2 {
-        return Err(Error::new(
-            "TypeError",
-            format!("cannot pickle '{}' object", ctx.type_name(obj)),
-        ));
-    }
-    // copyreg's legacy reducer records the class even when its instances cannot be created.
-    let copyreg = ctx.module("copyreg")?;
-    let reconstructor = ctx.lookup_attr(copyreg, "_reconstructor")?;
-    let class = ctx.exact_type(obj)?;
-    let base = ctx.builtin("object");
-    let args = ctx.alloc(Value::Tuple(vec![class, base, NONE]));
-    Ok(ctx.alloc(Value::Tuple(vec![reconstructor, args])))
 }
 
 /// Delegate to the instance hook only when its class overrides object's reducer.
@@ -457,55 +562,25 @@ impl Pickler {
                 ctx.str_value(id)?.to_owned()
             }
         };
-        let module = if matches!(obj, ELLIPSIS | NOT_IMPLEMENTED) {
-            "builtins".to_owned()
-        } else {
-            let module = ctx.lookup_attr(obj, "__module__")?;
-            ctx.str_value(module)?.to_owned()
-        };
-        if name
-            .split('.')
-            .any(|part| part == "<locals>" || part.is_empty())
-        {
+        if name.split('.').any(|part| part == "<locals>") {
             return Err(pickling_error(
                 ctx,
                 format!("Can't pickle local object '{name}'"),
             ));
         }
-        let resolved = if module == "builtins" && super::super::builtins::is_builtin(&name) {
-            ctx.builtin(&name)
-        } else {
-            let mut current = ctx.module(&module).map_err(|e| {
-                if ctx.is_builtin_error(&e, "ModuleNotFoundError") {
-                    pickling_error(ctx, format!("Can't import module {module}"))
-                } else {
-                    e
-                }
-            })?;
-            for part in name.split('.') {
-                current = ctx.lookup_attr(current, part).map_err(|e| {
-                    if ctx.is_attribute_error(&e) {
-                        pickling_error(ctx, format!("Can't find {name} in {module}"))
-                    } else {
-                        e
-                    }
-                })?;
-            }
-            current
-        };
-        if resolved != obj {
-            return Err(pickling_error(
-                ctx,
-                format!("object differs from {module}.{name}"),
-            ));
+        let module = global_module(ctx, obj, &name)?;
+        ctx.heap.keep(module);
+        if self.protocol >= 4 {
+            self.save(ctx, module)?;
+            let name = ctx.text(name);
+            self.save(ctx, name)?;
+            self.out.push(0x93); // STACK_GLOBAL
+            return self.remember(ctx, obj);
         }
+
         // Before STACK_GLOBAL, rebuild dotted names as getattr(getattr(outer, ...), ...).
-        let (global_name, suffix) = if self.protocol < 4 {
-            name.split_once('.').unwrap_or((&name, ""))
-        } else {
-            (name.as_str(), "")
-        };
-        let attributes = suffix.split_terminator('.');
+        let mut attributes = name.split('.');
+        let global_name = attributes.next().unwrap();
         for _ in attributes.clone() {
             let getattr = ctx.builtin("getattr");
             self.save(ctx, getattr)?;
@@ -514,7 +589,7 @@ impl Pickler {
         encoding::global(
             &mut self.out,
             self.protocol,
-            &module,
+            ctx.str_value(module)?,
             global_name,
             self.fix_imports,
         )

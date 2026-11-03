@@ -67,4 +67,54 @@ def current():
                 assert isinstance(exc, ProcessLookupError)
         else:
             raise AssertionError("kernel accepted invalid PID")
+    class Policy:
+        def __index__(self):
+            return os.SCHED_RR
+
+    for name in ("sched_get_priority_min", "sched_get_priority_max"):
+        bound = getattr(os, name)
+        assert bound is vars(posix)[name]
+        assert bound.__text_signature__ == "($module, /, policy)"
+        assert bound(policy=Policy()) == bound(os.SCHED_RR)
+        assert bound(os.SCHED_OTHER) == 0
+        for invalid, error in ((-23, OSError), (1 << 32, OverflowError), (None, TypeError)):
+            try:
+                bound(invalid)
+            except error as exc:
+                if isinstance(exc, OSError):
+                    assert exc.errno == errno.EINVAL
+            else:
+                raise AssertionError("invalid scheduling policy accepted")
+    assert os.sched_get_priority_min(os.SCHED_RR) <= os.sched_get_priority_max(os.SCHED_RR)
+    assert os.sched_yield is posix.sched_yield and os.sched_yield() is None
+    affinity = os.sched_getaffinity(0)
+    assert type(affinity) is set and affinity == posix.sched_getaffinity(Pid())
+
+    class Cpu:
+        def __index__(self):
+            return min(affinity)
+
+    try:
+        assert os.sched_setaffinity(0, iter([Cpu(), Cpu()])) is None
+        assert os.sched_getaffinity(0) == {min(affinity)}
+    finally:
+        os.sched_setaffinity(0, affinity)
+    assert os.sched_getaffinity(0) == affinity
+
+    for mask, error in (([], OSError), ([-1], ValueError), ([1 << 31], OverflowError),
+                        ([None], TypeError)):
+        try:
+            os.sched_setaffinity(0, mask)
+        except error as exc:
+            if isinstance(exc, OSError):
+                assert exc.errno == errno.EINVAL
+        else:
+            raise AssertionError("invalid affinity mask accepted")
+    assert type(os.sched_rr_get_interval(0)) is float
+    try:
+        os.sched_rr_get_interval(-1)
+    except OSError as exc:
+        assert exc.errno == errno.EINVAL
+    else:
+        raise AssertionError("interval query accepted an invalid PID")
     print("Linux scheduler policy query passed")

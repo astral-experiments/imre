@@ -4,7 +4,7 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use super::super::codecs;
-use super::{Context, Error, Id, MemoryStream, NONE, Result, Value};
+use super::{Context, Error, Id, MemoryStream, NONE, Result, TRUE, Value};
 use crate::dynamic::builtins::boolean;
 use crate::objects::{Codec, DecodeIssue, FixedUnicode};
 
@@ -24,6 +24,7 @@ const NATIVE_ORDER: i32 = if cfg!(target_endian = "little") {
 pub(super) const METHODS: &[&str] = &[
     "__init__",
     "__next__",
+    "__repr__",
     "_CHUNK_SIZE",
     "buffer",
     "encoding",
@@ -281,6 +282,101 @@ fn initialize(ctx: &mut Context, receiver: Id, args: &[Id], kwargs: &[(String, I
         ctx.heap.weak_edge_removed(buffer);
     }
     Ok(NONE)
+}
+
+/// Render public name and mode under the same recursion guard as other I/O objects.
+pub(super) fn repr(ctx: &mut Context, receiver: Id) -> Result<Id> {
+    let class = ctx.exact_type(receiver)?;
+    let standard_output = matches!(ctx.heap.get(receiver), Value::TextFile(_));
+    if !standard_output {
+        Wrapper::from_receiver(ctx, receiver)?;
+    }
+    let name = if ctx.heap.get(class).io_kind() == Some("TextIOWrapper") {
+        "_io.TextIOWrapper"
+    } else {
+        ctx.class_name(class)
+    };
+    let name = &name[..name.floor_char_boundary(100)];
+    if ctx.repr_ancestors.contains(&receiver) {
+        return Err(Error::new(
+            "RuntimeError",
+            format!("reentrant call inside {name}.__repr__"),
+        ));
+    }
+    let mut output = format!("<{name}")
+        .chars()
+        .map(u32::from)
+        .collect::<Vec<_>>();
+    ctx.repr_ancestors
+        .try_reserve(1)
+        .map_err(|_| crate::Error::allocation())?;
+    let roots = ctx.heap.temporary_mark();
+    ctx.heap.keep(receiver);
+    ctx.repr_ancestors.push(receiver);
+    let mut result = Ok(());
+    for (field, label) in [
+        ("name", " name="),
+        ("mode", " mode="),
+        ("encoding", " encoding="),
+    ] {
+        let field_mark = ctx.heap.temporary_mark();
+        let mut rendered_mark = None;
+        result = (|| {
+            let value = if field == "encoding" && !standard_output {
+                // Either public getter can reinitialize the wrapper before its private encoding is used.
+                Wrapper::from_receiver(ctx, receiver)?.encoding.get()
+            } else {
+                match ctx.lookup_attr(receiver, field) {
+                    Ok(value) => value,
+                    Err(err)
+                        if field != "encoding"
+                            && (ctx.is_attribute_error(&err)
+                                || field == "name" && ctx.is_builtin_error(&err, "ValueError")) =>
+                    {
+                        return Ok(());
+                    }
+                    Err(err) => return Err(err),
+                }
+            };
+            ctx.heap.keep(value);
+            rendered_mark = Some(ctx.heap.temporary_mark());
+            let shown = crate::dynamic::builtins::call(ctx, "repr", &[value], &[])?;
+            ctx.heap.keep(shown);
+            let text = ctx.string_codepoints(shown)?;
+            output
+                .try_reserve(label.len() + text.len() + 1)
+                .map_err(|_| crate::Error::allocation())?;
+            output.extend(label.bytes().map(u32::from));
+            output.extend_from_slice(&text);
+            Ok(())
+        })();
+        // %R drops the rendered string before the field value, including on a bad return.
+        // Their finalizers can reenter this guard or reinitialize the next field.
+        for mark in rendered_mark.into_iter().chain([field_mark]) {
+            let collect = ctx.heap.discard_truth_operands(mark, ctx.modules);
+            if let Err(error) = &result {
+                for root in error.roots() {
+                    ctx.heap.keep(root);
+                }
+            }
+            if collect {
+                ctx.collect_unreachable();
+            }
+        }
+        if result.is_err() {
+            break;
+        }
+    }
+    ctx.repr_ancestors.pop();
+    ctx.heap.release_temporaries_since(roots);
+    if let Err(error) = result {
+        for root in error.roots() {
+            ctx.heap.keep(root);
+        }
+        return Err(error);
+    }
+    output.push(u32::from('>'));
+    Ok(ctx.text_codepoints(output))
 }
 
 impl Wrapper {
@@ -737,6 +833,24 @@ pub(super) fn call(
             let closed = ctx.lookup_attr(buffer, "closed")?;
             if ctx.truth(closed)? || w.buffer.get().is_none() {
                 return Ok(NONE);
+            }
+            if let Value::Instance {
+                class,
+                member_values: Some(members),
+                ..
+            } = ctx.heap.get(receiver)
+                && let Some(base) = ctx.find_in_mro(*class, |base| {
+                    (ctx.heap.get(base).io_kind() == Some("TextIOWrapper")).then_some(base)
+                })
+                && let Some(member) = ctx.own_class_attr(base, "_finalizing")
+                && members.get(&member) == Some(&TRUE)
+            {
+                // A warning hook can raise or replace the buffer before flush and close.
+                let mark = ctx.heap.temporary_mark();
+                let _ = Wrapper::invoke_buffer(ctx, receiver, "_dealloc_warn", vec![receiver]);
+                if ctx.heap.discard_truth_operands(mark, ctx.modules) {
+                    ctx.collect_unreachable();
+                }
             }
             let flushed = invoke(ctx, receiver, "flush", vec![]);
             if let Err(error) = &flushed {

@@ -1,0 +1,122 @@
+{
+  "source": {
+    "cpython": "5607950ef232dad16d75c0cf53101d9649d89115",
+    "imre": "63870c091308c11fc6789a3884f67f7c24f73ac0",
+    "platform": "Linux",
+    "cpython_test_tree": "b4324777842d3e16d2f95dc24789b2a80486541a",
+    "source_sha256": {
+      "selected.py": "84f65664f3d822deb78dd42189e0bdb0e4247c0bea9c5e99b980f6ab2640afc3",
+      "events.py": "6dfb88eca555bc2bff4cb630b2697fcab564c68964b4d565a2058e380fcb553f",
+      "test/test_collections.py": "05cbe2cffea715ba614dee640048134de3e06411f7a987acfe0451348b2ca0bb",
+      "test/test_deque.py": "2b4f83f0c9fefa5a295d76e932753ffd6449ca321178e7fec9036aadbf50a7c1",
+      "test/test_ordered_dict.py": "fc6a7825a09c081136266ba959b9bf3a377aa3434a0aaf41cfbc73faaf314f5d",
+      "test/test_userstring.py": "44007a212bf0e262c6a64033e1144928208259f2a041e8318975cea78f2f5b7c",
+      "test/string_tests.py": "da69e072f4b439480d1fd434973e0fe8e969abb8d5150cadf6580106038ee04b",
+      "test/support/__init__.py": "ab77f9f5d2a4cd07f21550980fc84a224553a8d7c7ffdda409ebd7f3ee1941c4"
+    }
+  },
+  "products": {
+    "stock_python_sha256": "1d6937cc20733bbc198953b53345467a4f0ddd809784b917bd76dbc7d116a545",
+    "boxed-O0": {
+      "build_returncode": 0,
+      "build_timeout_seconds": 800.0,
+      "build_elapsed_seconds": 349.448878,
+      "imre_sha256": "96ec1f1e0938f7bbe8ac558686abe003cde9b354718bbb8503f761f9c0f92567",
+      "runtime_sha256": "d110629e53cf353a9c7425371c311ed879cf9d2756cff5aa36a6a3c79d6c12a7",
+      "clang_sha256": "5624bd7b6749cabed00db942defaf946994f64b73ba7ed6b5fd2e42e232285f1",
+      "native_sha256": "7685bbe77bd6fde1bced860d003c732e4e3c5838666aa3ced52de5f9c5b383d1"
+    },
+    "boxed-O3": {
+      "build_returncode": 0,
+      "build_timeout_seconds": 1800.0,
+      "build_elapsed_seconds": 333.833281,
+      "imre_sha256": "96ec1f1e0938f7bbe8ac558686abe003cde9b354718bbb8503f761f9c0f92567",
+      "runtime_sha256": "d110629e53cf353a9c7425371c311ed879cf9d2756cff5aa36a6a3c79d6c12a7",
+      "clang_sha256": "5624bd7b6749cabed00db942defaf946994f64b73ba7ed6b5fd2e42e232285f1",
+      "native_sha256": "3b9ae8a97eca26fca34006d61eed20f13eed1b687676dae545eca4a2d04628f2",
+      "initial_build": {
+        "returncode": -9,
+        "timed_out": true,
+        "timeout_seconds": 800.0,
+        "elapsed_seconds": 800.035858,
+        "original_processes_started": 0
+      }
+    }
+  },
+  "methods": {
+    "test.test_collections.TestChainMap.test_basics": {
+      "occurrence": 1,
+      "callbacks_in_all_three_processes": [
+        "REGISTER\ttest.test_collections.TestChainMap.test_basics\t1",
+        "REGISTERED_COUNT\t1",
+        "START\ttest.test_collections.TestChainMap.test_basics\t1\t''",
+        "PASS\ttest.test_collections.TestChainMap.test_basics\t1\t''",
+        "STOP\ttest.test_collections.TestChainMap.test_basics\t1\t''",
+        "RUNNER_COUNT\t1"
+      ],
+      "processes": {
+        "stock": {
+          "returncode": 0,
+          "timeout_seconds": 180.0,
+          "elapsed_seconds": 0.215328,
+          "stdout_sha256": "4cf05184283cf38f57c1e25bf4dbd8a7bc10a550f7f6387e8d3552cef99f87f3",
+          "stderr_sha256": "573dc1fba6c75203b193fae38e36ec70d620d3e50cbf752950a3fafadea61287"
+        },
+        "boxed-O0": {
+          "returncode": 0,
+          "timeout_seconds": 180.0,
+          "elapsed_seconds": 56.097753,
+          "stdout_sha256": "4cf05184283cf38f57c1e25bf4dbd8a7bc10a550f7f6387e8d3552cef99f87f3",
+          "stderr_sha256": "4607642784c5112b9fc70860ce2a973d49cd94df2ca2fdb05f3229473cfdf003"
+        },
+        "boxed-O3": {
+          "returncode": 0,
+          "timeout_seconds": 180.0,
+          "elapsed_seconds": 11.367825,
+          "stdout_sha256": "4cf05184283cf38f57c1e25bf4dbd8a7bc10a550f7f6387e8d3552cef99f87f3",
+          "stderr_sha256": "2791fcfe0026b73e105d36c360eb681aa725677d1f5af7e82ea63be6e17c6036"
+        }
+      }
+    },
+    "test.test_collections.TestCounter.test_copying": {
+      "occurrence": 1,
+      "callbacks_in_all_three_processes": [
+        "REGISTER\ttest.test_collections.TestCounter.test_copying\t1",
+        "REGISTERED_COUNT\t1",
+        "START\ttest.test_collections.TestCounter.test_copying\t1\t''",
+        "SUBTEST\ttest.test_collections.TestCounter.test_copying\t1\t('test.test_collections.TestCounter.test_copying (proto=0)', None)",
+        "SUBTEST\ttest.test_collections.TestCounter.test_copying\t1\t('test.test_collections.TestCounter.test_copying (proto=1)', None)",
+        "SUBTEST\ttest.test_collections.TestCounter.test_copying\t1\t('test.test_collections.TestCounter.test_copying (proto=2)', None)",
+        "SUBTEST\ttest.test_collections.TestCounter.test_copying\t1\t('test.test_collections.TestCounter.test_copying (proto=3)', None)",
+        "SUBTEST\ttest.test_collections.TestCounter.test_copying\t1\t('test.test_collections.TestCounter.test_copying (proto=4)', None)",
+        "SUBTEST\ttest.test_collections.TestCounter.test_copying\t1\t('test.test_collections.TestCounter.test_copying (proto=5)', None)",
+        "PASS\ttest.test_collections.TestCounter.test_copying\t1\t''",
+        "STOP\ttest.test_collections.TestCounter.test_copying\t1\t''",
+        "RUNNER_COUNT\t1"
+      ],
+      "processes": {
+        "stock": {
+          "returncode": 0,
+          "timeout_seconds": 100.0,
+          "elapsed_seconds": 0.440058,
+          "stdout_sha256": "d7a95890600055b6034f748462be9e1115fc149e0b78e87e18768d25a24cf0dc",
+          "stderr_sha256": "cb7f3d7a0c76b7890b0983edc968623a4761f141409b00143e0e88e4b1a75dff"
+        },
+        "boxed-O0": {
+          "returncode": 0,
+          "timeout_seconds": 100.0,
+          "elapsed_seconds": 71.889946,
+          "stdout_sha256": "d7a95890600055b6034f748462be9e1115fc149e0b78e87e18768d25a24cf0dc",
+          "stderr_sha256": "8c870eccd078cbae845f2352dfc591516078cb9f7790d316a9fdd605d9cc0654"
+        },
+        "boxed-O3": {
+          "returncode": 0,
+          "timeout_seconds": 100.0,
+          "elapsed_seconds": 10.527022,
+          "stdout_sha256": "d7a95890600055b6034f748462be9e1115fc149e0b78e87e18768d25a24cf0dc",
+          "stderr_sha256": "980b22aea2f5679653ef2c337314c7b129eb0c914e1b7b278dc08903be7b7462"
+        }
+      }
+    }
+  }
+}

@@ -74,6 +74,24 @@ pub(super) fn frame_locals(ctx: &mut Context, frame: Id) -> Result<Id> {
     }
 }
 
+/// Return the recorded line and expression byte range of a native traceback node.
+pub(super) fn tb_position(ctx: &mut Context, tb: Id) -> Id {
+    let Value::Traceback { lineno, span, .. } = *ctx.heap.get(tb) else {
+        return NONE;
+    };
+    let line = ctx.int(lineno);
+    let positions = match span {
+        Some([start, _, end]) => vec![
+            line,
+            line,
+            ctx.int(i64::from(start)),
+            ctx.int(i64::from(end)),
+        ],
+        None => vec![line, NONE, NONE, NONE],
+    };
+    ctx.alloc(Value::Tuple(positions))
+}
+
 /// Visit the public traceback protocol, ignoring frames that cannot be cleared yet.
 pub(super) fn clear_frames(ctx: &mut Context, mut tb: Id) -> Result<Id> {
     let runtime_error = ctx.builtin("RuntimeError");
@@ -191,10 +209,15 @@ pub(in crate::dynamic) fn chain_link(error: &Error) -> Option<(Id, &'static str)
 
 /// Render an uncaught chain before shutdown releases its Python exception objects.
 pub(in crate::dynamic) fn report_chain(ctx: &mut Context, error: Error) {
+    let exception = ctx.raised_instance(error);
+    display(ctx, exception);
+}
+
+/// Write the Python exception to the live stderr, retaining the low-level fallback.
+pub(in crate::dynamic) fn display(ctx: &mut Context, exception: Id) {
     use std::io::Write;
 
     let mark = ctx.heap.temporary_mark();
-    let exception = ctx.raised_instance(error);
     ctx.heap.keep(exception);
     if print_uncaught(ctx, exception).is_err() {
         // stderr itself may be gone or unwritable. Keep the exception's arguments

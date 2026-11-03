@@ -59,6 +59,9 @@ impl BuiltinDescriptor {
             });
         }
         let slots = match symbol.rsplit_once('.') {
+            Some((weakref::PROXY_TYPE, attr)) => {
+                Some((weakref::PROXY_TYPE, attr, weakref::PROXY_METHODS))
+            }
             Some((stdlib::os::scandir::ENTRY, attr)) => Some((
                 stdlib::os::scandir::ENTRY,
                 attr,
@@ -101,6 +104,9 @@ impl BuiltinDescriptor {
                 Some((defaultdict::CLASS, attr, defaultdict::METHODS))
             }
             Some(("generator", attr)) => Some(("generator", attr, &["__iter__", "__next__"][..])),
+            Some(("anext_awaitable", attr)) => {
+                Some(("anext_awaitable", attr, generator_protocol::ANEXT_METHODS))
+            }
             Some(("mappingproxy", attr)) => {
                 Some(("mappingproxy", attr, builtins::MAPPING_PROXY_METHODS))
             }
@@ -121,29 +127,12 @@ impl BuiltinDescriptor {
                 Some(("member_descriptor", attr, super::namedtuple::MEMBER_SLOTS))
             }
             Some(("frame", attr)) => Some(("frame", attr, &["clear"][..])),
-            Some(("set", attr)) => Some((
-                "set",
-                attr,
-                &[
-                    "__reduce__",
-                    "difference",
-                    "intersection",
-                    "issubset",
-                    "union",
-                    "update",
-                ][..],
-            )),
-            Some(("frozenset", attr)) => Some((
-                "frozenset",
-                attr,
-                &[
-                    "__reduce__",
-                    "difference",
-                    "intersection",
-                    "issubset",
-                    "union",
-                ][..],
-            )),
+            Some(("set", attr)) if attr != "__class_getitem__" => {
+                Some(("set", attr, builtins::set_methods("set")))
+            }
+            Some(("frozenset", attr)) if attr != "__class_getitem__" => {
+                Some(("frozenset", attr, builtins::set_methods("frozenset")))
+            }
             Some(("list", attr)) => Some(("list", attr, builtins::LIST_METHODS)),
             Some(("range", attr)) => Some(("range", attr, range::METHODS)),
             Some((stdlib::fixed_structseq::SCHED_PARAM, attr)) => Some((
@@ -153,6 +142,15 @@ impl BuiltinDescriptor {
             )),
             Some((class, attr)) if let Some(layout) = stdlib::os::stat::layout(class) => {
                 Some((layout.class, attr, &["__reduce__"][..]))
+            }
+            Some((namespace::CLASS, attr)) => {
+                Some((namespace::CLASS, attr, &["__reduce__", "__replace__"][..]))
+            }
+            Some(("types.GenericAlias", attr)) => {
+                Some(("types.GenericAlias", attr, &["__reduce__"][..]))
+            }
+            Some(("generic_alias_iterator", attr)) => {
+                Some(("generic_alias_iterator", attr, &["__reduce__"][..]))
             }
             Some(("typing.TypeAliasType", attr)) => {
                 Some(("typing.TypeAliasType", attr, &["__reduce__"][..]))
@@ -169,6 +167,7 @@ impl BuiltinDescriptor {
                 method: !name.starts_with("__")
                     || (deque::iterator_class(owner).is_some() && name == "__length_hint__")
                     || (owner == "list" && name == "__getitem__")
+                    || (matches!(owner, "set" | "frozenset") && name == "__contains__")
                     || (owner == defaultdict::CLASS && name == "__missing__")
                     || matches!(
                         name,
@@ -207,6 +206,7 @@ impl BuiltinDescriptor {
             "frozenset.__sizeof__" => ("frozenset", "__sizeof__"),
             "object.__getstate__" => ("object", "__getstate__"),
             "object.__reduce__" => ("object", "__reduce__"),
+            "method.__reduce__" => ("method", "__reduce__"),
             "builtin_function_or_method.__reduce__" => ("builtin_function_or_method", "__reduce__"),
             "object.__reduce_ex__" => ("object", "__reduce_ex__"),
             "int.__add__" => ("int", "__add__"),
@@ -233,6 +233,8 @@ impl BuiltinDescriptor {
             "str.istitle" => ("str", "istitle"),
             "float.__format__" => ("float", "__format__"),
             "collections._tuplegetter.__repr__" => (super::namedtuple::GETTER, "__repr__"),
+            "object.__init__" => ("object", "__init__"),
+            "object.__lt__" => ("object", "__lt__"),
             "object.__hash__" => ("object", "__hash__"),
             "object.__ne__" => ("object", "__ne__"),
             "object.__repr__" => ("object", "__repr__"),
@@ -249,11 +251,13 @@ impl BuiltinDescriptor {
             "dict.__ior__" => ("dict", "__ior__"),
             "dict.__eq__" => ("dict", "__eq__"),
             "dict.__repr__" => ("dict", "__repr__"),
+            "dict.__reversed__" => ("dict", "__reversed__"),
+            "mappingproxy.__getitem__" => ("mappingproxy", "__getitem__"),
+            "mappingproxy.__hash__" => ("mappingproxy", "__hash__"),
             "mappingproxy.__repr__" => ("mappingproxy", "__repr__"),
             "mappingproxy.__str__" => ("mappingproxy", "__str__"),
+            "mappingproxy.__contains__" => ("mappingproxy", "__contains__"),
             "tuple.__repr__" => ("tuple", "__repr__"),
-            "set.__repr__" => ("set", "__repr__"),
-            "frozenset.__repr__" => ("frozenset", "__repr__"),
             "types.SimpleNamespace.__init__" => (super::namespace::CLASS, "__init__"),
             "types.SimpleNamespace.__repr__" => (super::namespace::CLASS, "__repr__"),
             "types.SimpleNamespace.__eq__" => (super::namespace::CLASS, "__eq__"),
@@ -279,6 +283,7 @@ impl BuiltinDescriptor {
                     | "__getstate__"
                     | "__reduce__"
                     | "__reduce_ex__"
+                    | "__reversed__"
                     | "count"
                     | "index"
                     | "isascii"
@@ -344,6 +349,7 @@ impl BuiltinDescriptor {
                 matches!(ctx.heap.get(receiver), Value::DictIterator(iter) if iter.class_name() == owner)
             }
             "generator" => matches!(ctx.heap.get(receiver), Value::Generator { .. }),
+            "anext_awaitable" => matches!(ctx.heap.get(receiver), Value::ANextAwaitable { .. }),
             owner if typing::ParameterClass::lookup(owner).is_some() => {
                 ctx.builtin_type_name(receiver) == Some(owner)
             }
@@ -355,9 +361,7 @@ impl BuiltinDescriptor {
             "function" => matches!(ctx.heap.get(receiver), Value::Function { .. }),
             "classmethod" => matches!(ctx.heap.get(receiver), Value::ClassMethod { .. }),
             "functools.KeyWrapper" => matches!(ctx.heap.get(receiver), Value::KeyWrapper { .. }),
-            super::namespace::CLASS => {
-                ctx.instance_of(receiver, ctx.classes[super::namespace::CLASS])
-            }
+            super::namespace::CLASS => namespace::instance_class(ctx, receiver).is_some(),
             "frame" => matches!(ctx.heap.get(receiver), Value::PythonFrame { .. }),
             "BaseException" => matches!(ctx.heap.get(receiver), Value::Raised(_)),
             class @ (stdlib::fixed_structseq::SCHED_PARAM
@@ -412,6 +416,8 @@ impl BuiltinDescriptor {
         receiver: Option<Id>,
     ) -> Option<Id> {
         Some(match name {
+            "__doc__" if self.owner == weakref::PROXY_TYPE => NONE,
+            "__text_signature__" if self.owner == weakref::PROXY_TYPE => ctx.text("($self, /)"),
             "__doc__" | "__text_signature__" if self.owner == deque::CLASS => {
                 let member = deque::member(self.name)?;
                 ctx.text(if name == "__doc__" { member.doc } else { member.signature })
@@ -425,6 +431,18 @@ impl BuiltinDescriptor {
                     ("__length_hint__", _) => "Private method returning an estimate of len(list(it)).",
                     _ => "Return state information for pickling.",
                 })
+            }
+            "__doc__" if self.owner == namespace::CLASS && self.name == "__reduce__" => {
+                ctx.text("Return state information for pickling")
+            }
+            "__text_signature__" if self.owner == namespace::CLASS && self.name == "__reduce__" => {
+                ctx.text("($self, /)")
+            }
+            "__doc__" if self.owner == namespace::CLASS && self.name == "__replace__" => ctx.text(
+                "Return a copy of the namespace object with new values for the specified attributes.",
+            ),
+            "__text_signature__" if self.owner == namespace::CLASS && self.name == "__replace__" => {
+                ctx.text("($self, /, **changes)")
             }
             "__doc__" | "__text_signature__" if self.owner == defaultdict::CLASS => {
                 let (doc, signature) = defaultdict::metadata(self.name)?;
@@ -452,7 +470,7 @@ impl BuiltinDescriptor {
                     match ctx.heap.get(receiver) {
                         _ if self.owner == "type" => ctx.class_qualname(receiver),
                         _ if matches!(self.owner, value::REGEX_PATTERN_TYPE | value::REGEX_MATCH_TYPE) => self.owner.rsplit('.').next()?,
-                        _ if self.owner == "builtin_function_or_method" => self.owner,
+                        _ if matches!(self.owner, "builtin_function_or_method" | "method") => self.owner,
                         Value::Deque(_) if self.owner == deque::CLASS => "deque",
                         Value::DefaultDict { .. } if self.owner == defaultdict::CLASS => "defaultdict",
                         Value::NamedTuple { class: Some(owner), .. } if let Some(layout) = stdlib::os::stat::layout(owner) => layout.name(),
@@ -481,6 +499,14 @@ impl BuiltinDescriptor {
                     "($self, /)"
                 })
             }
+            "__doc__" if self.name == "__lt__" => ctx.text("Return self<value."),
+            "__text_signature__" if self.name == "__lt__" => ctx.text("($self, value, /)"),
+            "__doc__" if self.owner == "object" && self.name == "__init__" => {
+                ctx.text("Initialize self.  See help(type(self)) for accurate signature.")
+            }
+            "__text_signature__" if self.owner == "object" && self.name == "__init__" => {
+                ctx.text("($self, /, *args, **kwargs)")
+            }
             "__doc__" if self.name == "__getattribute__" => ctx.text("Return getattr(self, name)."),
             "__text_signature__" if self.name == "__getattribute__" => ctx.text("($self, name, /)"),
             "__doc__" if self.owner == "itertools.repeat" && self.name == "__length_hint__" => {
@@ -489,7 +515,12 @@ impl BuiltinDescriptor {
             "__text_signature__" if self.owner == "itertools.repeat" && self.name == "__length_hint__" => {
                 ctx.text("($self, /)")
             }
+            "__doc__" if self.owner == "dict" && self.name == "__reversed__" => {
+                ctx.text("Return a reverse iterator over the dict keys.")
+            }
+            "__text_signature__" if self.owner == "dict" && self.name == "__reversed__" => ctx.text("($self, /)"),
             "__doc__" if self.owner == "mappingproxy" && self.method => ctx.text(match self.name {
+                "__reversed__" => "D.__reversed__() -> reverse iterator",
                 "keys" => "D.keys() -> a set-like object providing a view on D's keys",
                 "values" => "D.values() -> an object providing a view on D's values",
                 "items" => "D.items() -> a set-like object providing a view on D's items",
@@ -506,10 +537,17 @@ impl BuiltinDescriptor {
             "__text_signature__" if self.name == "__call__" => {
                 ctx.text("($self, /, *args, **kwargs)")
             }
+            "__doc__" if self.name == "__getitem__" && self.owner == "mappingproxy" => {
+                ctx.text("Return self[key].")
+            }
+            "__text_signature__" if self.name == "__getitem__" && self.owner == "mappingproxy" => {
+                ctx.text("($self, key, /)")
+            }
+            "__doc__" if self.name == "__hash__" => ctx.text("Return hash(self)."),
             "__doc__" if self.name == "__repr__" => ctx.text("Return repr(self)."),
             "__doc__" if self.name == "__iter__" => ctx.text("Implement iter(self)."),
             "__doc__" if self.name == "__next__" => ctx.text("Implement next(self)."),
-            "__text_signature__" if matches!(self.name, "__iter__" | "__next__" | "__repr__") => {
+            "__text_signature__" if matches!(self.name, "__hash__" | "__iter__" | "__next__" | "__repr__") => {
                 ctx.text("($self, /)")
             }
             "__doc__" if self.name == "__contains__" => ctx.text("Return bool(key in self)."),
@@ -555,10 +593,14 @@ impl BuiltinDescriptor {
             )),
             "__doc__" | "__text_signature__" if self.method => {
                 let value = match (self.name, name) {
+                    ("intersection_update", "__doc__") if self.owner == "set" => {
+                        "Update the set, keeping only elements found in it and all others."
+                    }
+                    ("intersection_update", _) if self.owner == "set" => "($self, /, *others)",
                     ("utctimetuple", "__doc__") if self.owner == "datetime.datetime" => "Return UTC time tuple, compatible with time.localtime().",
                     ("utctimetuple", _) if self.owner == "datetime.datetime" => "($self, /)",
-                    ("__reduce__", "__doc__") if self.owner == "builtin_function_or_method" => return Some(NONE),
-                    ("__reduce__", _) if self.owner == "builtin_function_or_method" => "($self, /)",
+                    ("__reduce__", "__doc__") if matches!(self.owner, "builtin_function_or_method" | "method" | "types.GenericAlias" | "generic_alias_iterator") => return Some(NONE),
+                    ("__reduce__", _) if matches!(self.owner, "builtin_function_or_method" | "method" | "types.GenericAlias" | "generic_alias_iterator") => "($self, /)",
                     ("__reduce__", "__doc__") if self.owner == stdlib::datetime::TZINFO => "-> (cls, state)",
                     ("__reduce__", _) if self.owner == stdlib::datetime::TZINFO => "($self, /)",
                     ("tzname", "__doc__") if self.owner == "datetime.timezone" => "If name is specified when timezone is created, returns the name.  Otherwise returns offset as 'UTC(+|-)HH:MM'.",

@@ -1,5 +1,5 @@
-"""Compatibility imports for filesystem resource readers."""
+"""Compatibility imports for resource readers."""
 
-from .resources.readers import MultiplexedPath, NamespaceReader
+from .resources.readers import FileReader, MultiplexedPath, NamespaceReader, ZipReader
 
-__all__ = ["MultiplexedPath", "NamespaceReader"]
+__all__ = ["FileReader", "ZipReader", "MultiplexedPath", "NamespaceReader"]

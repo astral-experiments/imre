@@ -9,10 +9,12 @@ use super::{Context, Error, Id, NONE, Result, Value, argument};
 use crate::dynamic::builtins::bind;
 
 mod assertions;
+mod escapes;
 mod flags;
 mod group_names;
+#[cfg(target_os = "linux")]
+mod locale;
 mod lookahead;
-mod named_escapes;
 mod progress;
 mod scanner;
 mod split;
@@ -131,6 +133,10 @@ impl Pattern {
             (Some(a), Some(b)) if a.same_program(b) => {}
             _ => return false,
         }
+        #[cfg(target_os = "linux")]
+        if let (Matcher::Locale(a), Matcher::Locale(b)) = (&self.regex, &other.regex) {
+            return a.same_program(b);
+        }
         if self.engine_source == other.engine_source {
             return true;
         }
@@ -190,6 +196,43 @@ impl Pattern {
                 labels.push(format!("0x{remaining:x}"));
             }
             format!("re.compile({source}, {})", labels.join("|"))
+        }
+    }
+
+    /// Describe the matcher and translated program that this Pattern will execute.
+    fn debug_program(&self, output: &mut String) {
+        let source: &dyn std::fmt::Debug = &self.engine_source;
+        let (backend, program) = match &self.regex {
+            Matcher::Standard(_) => ("regex-automata meta", source),
+            #[cfg(target_os = "linux")]
+            Matcher::Locale(locale) => (
+                "regex-automata meta, LC_CTYPE at search time",
+                locale.program(),
+            ),
+            Matcher::Lookahead(_) => ("fancy-regex", source),
+            Matcher::Guarded(_) => ("progress-aware PikeVM", source),
+            Matcher::Asserted(_) => ("assertion-aware Thompson NFA", source),
+        };
+        let kind = if self.bytes { "bytes" } else { "str" };
+        write!(
+            output,
+            "Imre regex ({backend}, {kind}, flags={:#x}, groups={})\n  program {:?}",
+            self.flags,
+            self.group_count(),
+            program,
+        )
+        .unwrap();
+        for (slot, guard) in &self.assertions {
+            write!(
+                output,
+                "\n  assertion {slot} {:?} width={} {:?}",
+                guard.kind, guard.width, guard.program,
+            )
+            .unwrap();
+        }
+        if let Some(surrogates) = &self.surrogate_literals {
+            output.push_str("\n  surrogate matcher\n");
+            surrogates.debug_program(output);
         }
     }
 
@@ -290,6 +333,10 @@ impl Pattern {
                     .strip_suffix(imre_regex::FINAL_NEWLINE_ANCHOR)
                     .unwrap_or(&self.engine_source);
                 let full = format!(r"(?:{source})\z");
+                #[cfg(target_os = "linux")]
+                if let Matcher::Locale(matcher) = &self.regex {
+                    return Ok(Matcher::Locale(Box::new(matcher.full())));
+                }
                 if let Matcher::Lookahead(matcher) = &self.regex {
                     return matcher
                         .with_source(&full)
@@ -431,7 +478,7 @@ fn raw_pattern(pattern: &str, ascii: bool, flags: i64) -> Option<(String, bool, 
         pattern.contains("(?") && pattern.contains('u') && (ascii || pattern.contains('-'));
     let mut boundaries = Vec::new();
     let mut prefer_translation = false;
-    let mut possessive = false;
+    let mut prefer_backtracking = false;
     let mut result = String::with_capacity(pattern.len());
     let mut chars = pattern.chars().peekable();
     let mut in_class = false;
@@ -451,7 +498,7 @@ fn raw_pattern(pattern: &str, ascii: bool, flags: i64) -> Option<(String, bool, 
             }
             // The regular backend reads a possessive modifier as another repetition.
             // Ask the Python tokenizer to bind it to its operand.
-            possessive |= !in_class && matches!(c, '*' | '+' | '?') && chars.peek() == Some(&'+');
+            prefer_backtracking |= !in_class && matches!(c, '*' | '+' | '?') && chars.peek() == Some(&'+');
             if c == '{' && !in_class {
                 if !imre_regex::starts_counted_repeat(chars.clone()) {
                     prefer_translation = true;
@@ -459,7 +506,7 @@ fn raw_pattern(pattern: &str, ascii: bool, flags: i64) -> Option<(String, bool, 
                     let mut suffix = chars
                         .clone()
                         .skip_while(|c| c.is_ascii_digit() || *c == ',');
-                    possessive |= suffix.next() == Some('}') && suffix.next() == Some('+');
+                    prefer_backtracking |= suffix.next() == Some('}') && suffix.next() == Some('+');
                     if chars.peek() == Some(&',') {
                         // Python treats an omitted lower bound as zero, including in {,}.
                         result.push_str("{0");
@@ -467,9 +514,13 @@ fn raw_pattern(pattern: &str, ascii: bool, flags: i64) -> Option<(String, bool, 
                     }
                 }
             }
-            if c == '$' && !in_class && flags & MULTILINE == 0 && chars.peek().is_none() {
-                result.push_str(imre_regex::FINAL_NEWLINE_ANCHOR);
-                continue;
+            if c == '$' && !in_class && flags & MULTILINE == 0 {
+                if chars.peek().is_none() {
+                    result.push_str(imre_regex::FINAL_NEWLINE_ANCHOR);
+                    continue;
+                }
+                // Inside a pattern, the final newline must remain available to the suffix.
+                prefer_backtracking = true;
             }
             if c == '[' && !in_class {
                 in_class = true;
@@ -534,7 +585,7 @@ fn raw_pattern(pattern: &str, ascii: bool, flags: i64) -> Option<(String, bool, 
     if check_unicode && !raw_unicode_compatible(&result, ascii, &boundaries) {
         return None;
     }
-    Some((result, prefer_translation, possessive))
+    Some((result, prefer_translation, prefer_backtracking))
 }
 
 /// Report offsets in the user's spelling before byte escaping, case folding or verbose translation.
@@ -554,7 +605,7 @@ fn syntax_diagnostic(ctx: &Context, source: Id, flags: i64) -> Option<(String, u
         _ => Cow::Borrowed(ctx.str_value(source).ok()?),
     };
     let bytes = matches!(ctx.heap.get(ctx.scalar_value(source)), Value::Bytes(_));
-    let normalized = match named_escapes::normalize(&text, bytes, flags) {
+    let normalized = match escapes::normalize(&text, bytes, flags, true) {
         Ok(normalized) => normalized,
         Err(error) => return Some(error),
     };
@@ -833,8 +884,9 @@ fn compile_uncached(ctx: &mut Context, id: Id, flags: Option<Id>) -> Result<Id> 
             .to_i64()
             .unwrap()
     });
+    let debug = flags & DEBUG;
     let unknown = flags & !KNOWN_FLAGS;
-    let flags = flags & KNOWN_FLAGS;
+    let flags = flags & KNOWN_FLAGS & !DEBUG;
     let scalar = ctx.heap.get(ctx.scalar_value(id));
     let bytes = matches!(scalar, Value::Bytes(_));
     let projections = if let Value::SurrogateStr(points) = scalar {
@@ -976,7 +1028,14 @@ fn compile_uncached(ctx: &mut Context, id: Id, flags: Option<Id>) -> Result<Id> 
             "Python int too large to convert to C int",
         ));
     }
-    pattern.flags |= unknown;
+    pattern.flags |= unknown | debug;
+    if debug != 0 {
+        let mut output = String::new();
+        pattern.debug_program(&mut output);
+        let print = ctx.builtin("print");
+        let text = ctx.text(output);
+        ctx.call(print, vec![text], Vec::new())?;
+    }
     Ok(ctx.alloc(Value::RegexPattern(Rc::new(pattern))))
 }
 
@@ -1003,12 +1062,6 @@ fn check_flags(flags: i64, bytes: bool) -> Result<()> {
         return Err(Error::new(
             "ValueError",
             "ASCII and UNICODE flags are incompatible",
-        ));
-    }
-    if flags & DEBUG != 0 {
-        return Err(Error::new(
-            "NotImplementedError",
-            "unsupported native regular expression flags",
         ));
     }
     Ok(())
@@ -1062,7 +1115,7 @@ fn prepare(
             .expect("text pattern")
             .to_owned()
     };
-    let source = match named_escapes::normalize(&source, bytes, flags) {
+    let source = match escapes::normalize(&source, bytes, flags, false) {
         Ok(Some(names)) => names.text,
         Ok(None) => source,
         Err((message, _)) => return Err(message),
@@ -1095,7 +1148,7 @@ fn prepare(
         None => raw_pattern(&source, ascii, flags),
     };
     let prepared =
-        if let Some((raw, prefer_translation, possessive)) = raw {
+        if let Some((raw, prefer_translation, prefer_backtracking)) = raw {
             let original = || {
                 if let Some((msg, _)) = imre_regex::repeat_diagnostic(&source, flags & VERBOSE != 0) {
                     return Err(msg.to_owned());
@@ -1107,7 +1160,7 @@ fn prepare(
                     build(raw)
                 }
             };
-            let committed = possessive.then(|| backtrack(String::new()).ok()).flatten();
+            let committed = prefer_backtracking.then(|| backtrack(String::new()).ok()).flatten();
             match committed {
                 Some((source, Matcher::Lookahead(matcher))) if matcher.total_close_order() => {
                     Ok((source, Matcher::Lookahead(matcher)))
@@ -1239,6 +1292,15 @@ fn prepare(
             Ok((source, matcher))
         })
         .or_else(backtrack)?;
+    #[cfg(target_os = "linux")]
+    let regex = if bytes
+        && flags & (LOCALE | IGNORECASE) == LOCALE | IGNORECASE
+        && let Some(locale) = locale::LocaleMatcher::parse(&source, flags, regex.group_info())
+    {
+        Matcher::Locale(Box::new(locale))
+    } else {
+        regex
+    };
     Ok(Pattern {
         source: id,
         flags: if ascii { flags } else { flags | UNICODE },

@@ -58,6 +58,7 @@ const EMPTY_TUPLE: Id = 5;
 
 pub(super) const REGEX_PATTERN_TYPE: &str = "re.Pattern";
 pub(super) const REGEX_MATCH_TYPE: &str = "re.Match";
+pub(super) const REGEX_SCANNER_TYPE: &str = "_sre.SRE_Scanner";
 pub(super) const REGEX_COPY_METHODS: &[&str] = &["__copy__", "__deepcopy__"];
 pub(super) const TEMPLATE_TYPE: &str = "string.templatelib.Template";
 pub(super) const TEMPLATE_ITER_TYPE: &str = "string.templatelib.TemplateIter";
@@ -265,6 +266,39 @@ impl Context {
             .publish_fault_frames(crate::fault_handler::generation());
     }
 
+    /// Capture code metadata at creation without extending the life of any caller frame.
+    pub(super) fn coroutine_origin(&mut self) -> Id {
+        let depth = self.threads.coroutine_origin_depth as usize;
+        if depth == 0 {
+            return NONE;
+        }
+        let mut frames = Vec::new();
+        for index in (0..self.heap.frames.len()).rev() {
+            let frame = &self.heap.frames[index];
+            let Some(location) = &frame.location else {
+                continue;
+            };
+            if frame.code == NONE {
+                continue;
+            }
+            let code = self.code_object(frame.code);
+            let line = match (frame.expression, &code.body) {
+                (ExpressionPosition::Line(line), _) => line,
+                (ExpressionPosition::Offset(offset), Body::Source(program)) => {
+                    program.expression_line(offset).unwrap_or(location.line)
+                }
+                _ => location.line,
+            };
+            let (file, name) = (code.filename, code.name);
+            let line = self.int(i64::from(line));
+            frames.push(self.alloc(Value::Tuple(vec![file, line, name])));
+            if frames.len() == depth {
+                break;
+            }
+        }
+        self.alloc(Value::Tuple(frames))
+    }
+
     /// Return the same Python frame to introspection and traceback construction.
     pub(super) fn active_frame(&mut self, depth: usize) -> Result<Option<(Location, Id)>> {
         let Some((index, _)) = self
@@ -334,6 +368,47 @@ impl Context {
             previous = object;
         }
         Ok(Some((location, previous)))
+    }
+
+    /// Reuse the activation's Python frame even when first observed between resumptions.
+    pub(super) fn generator_frame(&mut self, id: Id) -> Result<Id> {
+        let Value::Generator {
+            frame,
+            scope,
+            code,
+            lineno,
+            ..
+        } = *self.heap.get(id)
+        else {
+            unreachable!("generator frame owner")
+        };
+        if let Some(frame) = frame {
+            return Ok(frame);
+        }
+        if scope == NONE {
+            return Ok(NONE);
+        }
+        if let Some(index) =
+            self.heap.frames.iter().rposition(
+                |frame| matches!(frame.owner, FrameOwner::Generator(owner) if owner == id),
+            )
+            && let Some((_, frame)) = self.materialize_frame(index)?
+        {
+            return Ok(frame);
+        }
+        let globals = self.module_globals(scope)?;
+        let object = self.alloc(Value::PythonFrame {
+            scope,
+            code,
+            globals,
+            back: None,
+            lineno,
+        });
+        let Value::Generator { frame, .. } = self.heap.get_mut(id) else {
+            unreachable!()
+        };
+        *frame = Some(object);
+        Ok(object)
     }
 
     /// A suspended or finished generator has no resumer; an active one may have a new caller.
@@ -752,6 +827,7 @@ pub(super) struct ExecGlobals {
 #[derive(Clone)]
 pub(super) struct BoxedTextFile {
     pub(super) file: crate::objects::TextFile,
+    pub(super) finalizing: bool,
     pub(super) line_buffering: bool,
     pub(super) buffer: Option<Id>,
 }
@@ -849,6 +925,10 @@ pub(super) enum Value {
     },
     MetadataArchive(std::rc::Rc<crate::objects::ZipArchive>),
     HandlerLock(std::sync::Arc<crate::objects::logging::HandlerLock>),
+    #[cfg(unix)]
+    TlsContext(std::rc::Rc<std::cell::RefCell<super::stdlib::ssl::provider::Context>>),
+    #[cfg(unix)]
+    TlsSession(std::rc::Rc<std::cell::RefCell<Option<super::stdlib::ssl::provider::Session>>>),
     Socket(crate::ObjectOwner),
     Deque(Box<crate::objects::DequeRing<Id>>),
     GenericAliasIterator(Option<Id>),
@@ -918,11 +998,21 @@ pub(super) enum Value {
     },
     Code(CodeObject),
     // The coroutine owns its private suspended frame. Each await iterator owns the coroutine.
-    Coroutine(Id),
+    Coroutine {
+        frame: Id,
+        origin: Id,
+    },
     CoroutineWrapper(Id),
+    ANextAwaitable {
+        wrapped: Id,
+        default: Id,
+    },
     Generator {
         owner: FrameOwner,
         frame: Option<Id>,
+        name: Id,
+        qualname: Id,
+        lineno: u32,
         code: Id,
         scope: Id,
         iterators: Vec<Id>,
@@ -1118,6 +1208,7 @@ pub(super) enum Value {
         name: &'static str,
         unsupported: Id,
     },
+    ProcessPreparation(std::rc::Rc<std::cell::RefCell<crate::objects::BoxedPreparation>>),
     ProcessHandle {
         child: crate::objects::BoxedPopen,
         reported: bool,
@@ -1192,6 +1283,10 @@ impl Value {
     pub(super) fn intrinsic_type_name(&self) -> Option<&str> {
         Some(match self {
             Self::Selector(handle) => handle.borrow().class_name(),
+            #[cfg(unix)]
+            Self::TlsContext(_) => "_imre_ssl.Context",
+            #[cfg(unix)]
+            Self::TlsSession(_) => "_imre_ssl.Session",
             Self::Context(_) => "_contextvars.Context",
             Self::ContextVar { .. } => "_contextvars.ContextVar",
             Self::ContextToken { .. } => "_contextvars.Token",
@@ -1222,6 +1317,7 @@ impl Value {
             Self::ByteArray(_) => "bytearray",
             Self::File(_) | Self::TextFile(_) => return self.native_io_class_name(),
             Self::ProcessHandle { .. } => "_imre_subprocess.Handle",
+            Self::ProcessPreparation(_) => "_imre_subprocess.Prepared",
             Self::BufferedRandom(..) => "_io.BufferedRandom",
             Self::GenericAliasIterator(_) => "generic_alias_iterator",
             Self::SequenceIterator { .. } => "iterator",
@@ -1233,7 +1329,7 @@ impl Value {
             Self::CallableIterator(_) => "callable_iterator",
             Self::RegexPattern(_) => REGEX_PATTERN_TYPE,
             Self::RegexMatch(_) => REGEX_MATCH_TYPE,
-            Self::RegexScanner { .. } => "_sre.SRE_Scanner",
+            Self::RegexScanner { .. } => REGEX_SCANNER_TYPE,
             Self::Tuple(_) => "tuple",
             Self::Slice(_) => "slice",
             Self::Template { .. } => TEMPLATE_TYPE,
@@ -1258,8 +1354,9 @@ impl Value {
             Self::Code(_) => "code",
             Self::Cell(_) => "cell",
             Self::Generator { .. } => "generator",
-            Self::Coroutine(_) => "coroutine",
+            Self::Coroutine { .. } => "coroutine",
             Self::CoroutineWrapper(_) => "coroutine_wrapper",
+            Self::ANextAwaitable { .. } => "anext_awaitable",
             Self::NoDefault => "NoDefaultType",
             Self::TypeAlias { .. } => "typing.TypeAliasType",
             Self::Class { .. } => "type",
@@ -1354,6 +1451,7 @@ impl Value {
             | Self::Native(_)
             | Self::Scope(_)
             | Self::LoopIterator { .. }
+            | Self::ProcessPreparation(_)
             | Self::ProcessHandle { .. }
             | Self::Yielded(_) => false,
             Self::Tuple(items) => !items.is_empty(),
@@ -1516,7 +1614,9 @@ impl Value {
                 visit.extend(constructor);
             }
             Self::Cell(value) => visit.extend(value),
-            Self::Coroutine(frame) | Self::CoroutineWrapper(frame) => visit.push(*frame),
+            Self::Coroutine { frame, origin } => visit.extend([*frame, *origin]),
+            Self::CoroutineWrapper(coroutine) => visit.push(*coroutine),
+            Self::ANextAwaitable { wrapped, default } => visit.extend([*wrapped, *default]),
             Self::Function {
                 closure,
                 scope,
@@ -1549,13 +1649,15 @@ impl Value {
             Self::Generator {
                 owner,
                 frame,
+                name,
+                qualname,
                 code,
                 scope,
                 iterators,
                 protected,
                 ..
             } => {
-                visit.extend([*code, *scope, owner.root()]);
+                visit.extend([*code, *scope, *name, *qualname, owner.root()]);
                 visit.extend(*frame);
                 visit.extend(iterators);
                 visit.extend(
@@ -1792,7 +1894,10 @@ impl Value {
             | Self::NoDefault
             | Self::PartialPlaceholder
             | Self::TokenMissing
+            | Self::ProcessPreparation(_)
             | Self::ProcessHandle { .. } => {}
+            #[cfg(unix)]
+            Self::TlsContext(_) | Self::TlsSession(_) => {}
             Self::TextFile(file) => visit.extend(file.buffer),
             Self::BufferedRandom(_, name) => visit.push(*name),
         }
@@ -2209,6 +2314,8 @@ pub(super) struct Heap {
     // Worker heaps share the interpreter’s automatic cyclic collection setting.
     pub(super) automatic_gc: Arc<AtomicBool>,
     weak: HashMap<Id, Vec<Id>>,
+    // Callback rollback can borrow a handle without extending the object's lifetime.
+    pub(super) borrowed_hooks: Vec<Id>,
     // A dead proxy is still observable after its registry entry disappears.
     pub(super) has_weak_values: bool,
     collect_next_statement: bool,
@@ -2216,6 +2323,8 @@ pub(super) struct Heap {
     file_writers: Vec<Id>,
     // Weak registrations. The slot remembers prior finalization across resurrection.
     ordinary_finalizers: Vec<Id>,
+    // During shutdown, remember if a sweep discarded unflushed Python-backed output.
+    pub(super) discarded_shutdown_write: Option<bool>,
     // Non-owning positions of a frame, its bound-method operand, and a receiver field.
     caller_finalizer_field: Option<(usize, usize, usize)>,
 }
@@ -2242,12 +2351,21 @@ impl FrameOwner {
     }
 }
 
+#[derive(Clone, Copy, Default)]
+pub(super) enum ExpressionPosition {
+    #[default]
+    Statement,
+    Line(u32),
+    Offset(ruff_text_size::TextSize),
+}
+
 struct Frame {
     owner: FrameOwner,
     scope: Id,
     code: Id,
     live: Vec<Id>,
     location: Option<Location>,
+    expression: ExpressionPosition,
     object: Option<Id>,
     inherited: Id,
     active: Id,
@@ -2263,6 +2381,7 @@ impl Frame {
             code,
             live: Vec::new(),
             location: None,
+            expression: ExpressionPosition::Statement,
             object: None,
             inherited,
             active: inherited,
@@ -2305,16 +2424,54 @@ impl Heap {
             next_collection: 4096,
             automatic_gc: Arc::new(AtomicBool::new(true)),
             weak: HashMap::new(),
+            borrowed_hooks: Vec::new(),
             has_weak_values: false,
             collect_next_statement: false,
             file_writers: Vec::new(),
             ordinary_finalizers: Vec::new(),
+            discarded_shutdown_write: None,
             caller_finalizer_field: None,
         };
         for id in 0..heap.slots.len() {
             heap.gc_order.push(id, &heap.slots);
         }
         heap
+    }
+
+    /// The builtin mapping payload is independent of a subclass instance's attributes.
+    pub(super) fn dict_storage(&self, value: Id) -> Option<Id> {
+        match self.get(value) {
+            Value::Dict(_) | Value::DefaultDict { .. } => Some(value),
+            Value::Instance { dictionary, .. } => *dictionary,
+            _ => None,
+        }
+    }
+
+    pub(super) fn dict_entries(&self, value: Id) -> Option<&[(Id, Id)]> {
+        match self.get(self.dict_storage(value)?) {
+            Value::Dict(entries) | Value::DefaultDict { entries, .. } => Some(entries),
+            _ => unreachable!("dictionary payload"),
+        }
+    }
+
+    pub(super) fn dict_named_item(&self, dict: Id, name: &str) -> Option<Id> {
+        self.dict_entries(dict)?.iter().find_map(|&(key, value)| {
+            matches!(self.get(key), Value::Str(k) if k == name).then_some(value)
+        })
+    }
+
+    /// Look up native backing fields on either side of ordinary dictionary materialization.
+    pub(super) fn raw_instance_field(&self, obj: Id, name: &str) -> Option<Id> {
+        let Value::Instance {
+            fields, namespace, ..
+        } = self.get(obj)
+        else {
+            return None;
+        };
+        fields
+            .get(name)
+            .copied()
+            .or_else(|| self.dict_named_item((*namespace)?, name))
     }
 
     pub fn weak_references(&self, target: Id) -> &[Id] {
@@ -2704,6 +2861,12 @@ impl Heap {
     /// Release the activation and report whether a returning function may have dropped a writer.
     pub fn leave(&mut self, value: Id, returning: bool) -> bool {
         let frame = self.frames.pop().expect("returning native activation");
+        if let FrameOwner::Generator(id) = frame.owner
+            && let Some(location) = &frame.location
+            && let Value::Generator { lineno, .. } = self.get_mut(id)
+        {
+            *lineno = location.line;
+        }
         let depth = self.python_depth();
         if depth == 0 {
             // Explicit dumps can publish a snapshot even while disabled.
@@ -2879,13 +3042,23 @@ impl Heap {
 
     /// A scalar and a container of scalars cannot hold an output file.
     pub(super) fn could_own_finalizer(&self, id: Id, skip_bound: bool) -> bool {
-        if self.finalizer_free_scalar(id) || (skip_bound && self.bound_in_active_frame(id)) {
+        self.could_release(id, skip_bound, |id| self.finalizer_free_scalar(id))
+    }
+
+    /// Dropping a callback result can also clear a weak reference to a native callable.
+    pub(super) fn could_release_callback_result(&self, id: Id) -> bool {
+        self.could_release(id, true, |id| match self.get(id) {
+            Value::Native(_) => self.weak_references(id).is_empty(),
+            _ => self.finalizer_free_scalar(id),
+        })
+    }
+
+    fn could_release(&self, id: Id, skip_bound: bool, inert: impl Fn(Id) -> bool) -> bool {
+        if inert(id) || (skip_bound && self.bound_in_active_frame(id)) {
             return false;
         }
         match self.get(id) {
-            Value::List(values) | Value::Tuple(values) => {
-                values.iter().any(|&item| !self.finalizer_free_scalar(item))
-            }
+            Value::List(values) | Value::Tuple(values) => values.iter().any(|&item| !inert(item)),
             Value::Dict(entries) => !entries.is_empty(),
             _ => true,
         }
@@ -2983,6 +3156,27 @@ impl Heap {
         std::mem::replace(&mut self.frames.last_mut().unwrap().active, exception)
     }
 
+    /// Discard a never-entered frame or a compiled comprehension with no exception handlers.
+    pub(super) fn discard_generator_frame(&mut self, id: Id) {
+        let Value::Generator {
+            offset,
+            owner,
+            frame,
+            scope,
+            iterators,
+            ..
+        } = self.get_mut(id)
+        else {
+            unreachable!("checked generator");
+        };
+        *offset = None;
+        *owner = FrameOwner::Module(NONE);
+        *frame = None;
+        *scope = NONE;
+        iterators.clear();
+        self.disarm_generator_finalizer(id);
+    }
+
     /// Drop the frame's ownership of completed locals without changing captured closure cells.
     pub(super) fn clear_frame(&mut self, value: Id) -> Result<()> {
         let Value::PythonFrame { scope, .. } = *self.get(value) else {
@@ -2997,11 +3191,25 @@ impl Heap {
                 "cannot clear an executing frame",
             ));
         }
-        if self.slots.iter().any(|slot| {
-            matches!(&slot.value,
-            Some(Value::Generator { scope: owner, offset: Some(_), .. }) if *owner == scope)
-        }) {
-            return Err(Error::new("RuntimeError", "cannot clear a suspended frame"));
+        if let Some((id, offset)) = self
+            .slots
+            .iter()
+            .enumerate()
+            .find_map(|(id, slot)| match &slot.value {
+                Some(Value::Generator {
+                    frame: Some(frame),
+                    offset: Some(offset),
+                    ..
+                }) if *frame == value => Some((id as Id, *offset)),
+                _ => None,
+            })
+        {
+            if offset != 0 {
+                return Err(Error::new("RuntimeError", "cannot clear a suspended frame"));
+            }
+            // The surviving Python frame keeps its locals after closing the unstarted generator.
+            self.discard_generator_frame(id);
+            return Ok(());
         }
         let Value::PythonFrame { scope, .. } = self.get_mut(value) else {
             unreachable!()
@@ -3113,18 +3321,25 @@ impl Heap {
         self.frames.last().unwrap().scope
     }
 
+    /// Iterate over live Python warning locations, starting at the innermost caller.
+    pub(super) fn warning_frames(&self) -> impl Iterator<Item = (&Location, Id)> {
+        self.frames.iter().rev().filter_map(|frame| {
+            frame.location.as_ref().map(|location| (location, frame.scope))
+        })
+    }
+
     /// Python stack levels start at one and exclude the native root frame.
     pub fn warning_frame(&self, level: i32) -> Option<(Location, Id)> {
-        self.frames
-            .iter()
-            .rev()
-            .filter_map(|frame| {
-                frame
-                    .location
-                    .clone()
-                    .map(|location| (location, frame.scope))
-            })
+        self.warning_frames()
             .nth((level.max(1) - 1) as usize)
+            .map(|(location, scope)| (location.clone(), scope))
+    }
+
+    pub(super) fn replace_expression(
+        &mut self,
+        position: ExpressionPosition,
+    ) -> ExpressionPosition {
+        std::mem::replace(&mut self.frames.last_mut().unwrap().expression, position)
     }
 
     pub fn current_location(&self) -> Option<Location> {
@@ -3506,12 +3721,13 @@ impl Heap {
         frame.active = active;
         let line = location.line;
         frame.location = Some(location);
+        frame.expression = ExpressionPosition::Statement;
         frame.live.clear();
         frame.live.extend(live);
         self.set_statement_line(line);
     }
 
-    /// A match statement can execute separate pattern and guard expressions in one step.
+    /// Update the current source line without crossing a statement boundary.
     pub(super) fn set_statement_line(&mut self, line: u32) {
         let frame = self.frames.last_mut().unwrap();
         frame
@@ -3954,7 +4170,34 @@ impl Heap {
         self.full_collection = None;
     }
 
+    pub(super) fn has_pending_callback_write(&self) -> bool {
+        self.discarded_shutdown_write == Some(true)
+            || self
+                .slots
+                .iter()
+                .filter_map(|slot| slot.value.as_ref())
+                .any(|value| super::stdlib::io::pending_callback_write(self, value))
+    }
+
     fn sweep(&mut self) -> Option<WeakCallbacks> {
+        // Finalizers have had their chance to flush or resurrect the writer. Check its
+        // actual buffer before recycling any slot, including its raw stream or class.
+        if self.discarded_shutdown_write == Some(false)
+            && self.slots.iter().zip(&self.traces).any(|(slot, mark)| {
+                mark.get() == UNMARKED
+                    && slot
+                        .value
+                        .as_ref()
+                        .is_some_and(|value| super::stdlib::io::pending_callback_write(self, value))
+            })
+        {
+            self.discarded_shutdown_write = Some(true);
+        }
+        for id in &mut self.borrowed_hooks {
+            if self.traces[*id as usize].get() == UNMARKED {
+                *id = NONE;
+            }
+        }
         self.ordinary_finalizers
             .retain(|&id| self.traces[id as usize].get() != UNMARKED);
         self.file_writers.retain(|&id| {

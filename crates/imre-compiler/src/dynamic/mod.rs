@@ -110,6 +110,8 @@ impl Imports {
                 name,
                 "_imp"
                     | "_hashlib"
+                    | "ssl"
+                    | "_ssl"
                     | "atexit"
                     | "faulthandler"
                     | "code"
@@ -160,6 +162,8 @@ fn boxed_sys_export(name: &str) -> bool {
             | "implementation"
             | "exit"
             | "exc_info"
+            | "excepthook"
+            | "__excepthook__"
             | "exception"
     )
 }
@@ -478,6 +482,7 @@ fn resolve(owner: &str, package: bool, level: u32, name: &str) -> Option<String>
 
 pub(crate) enum ObjectOperation<'a> {
     Builtin,
+    OrderedCommandImport,
     ClassBody(&'a crate::modules::SourceGraph),
 }
 
@@ -524,6 +529,7 @@ pub(crate) fn compile(
         || [
             "__future__",
             "hashlib",
+            "ssl",
             "_imp",
             "atexit",
             "faulthandler",
@@ -556,7 +562,8 @@ pub(crate) fn compile(
     let provider_hint = startup.is_some()
         && !options.runtime_imports
         && (src.contains("logging") || src.contains("tokenize") || !src.is_ascii());
-    if !object_hint && !provider_hint {
+    let ordered_command = matches!(operation, Some(ObjectOperation::OrderedCommandImport));
+    if !object_hint && !provider_hint && !ordered_command {
         return Ok(None);
     }
     let Ok(mut first) = imports(
@@ -585,7 +592,7 @@ pub(crate) fn compile(
     let object_entry = object_hint
         && (module_entry.is_some()
             || first.runtime_imports
-            || operation.is_some()
+            || (operation.is_some() && !ordered_command)
             || (runtime_imports && !first.names.is_empty())
             || (first.uses_import_builtin && (startup.is_some() || options.runtime_imports))
             || provider_script);
@@ -593,7 +600,15 @@ pub(crate) fn compile(
     // startup fallback needs to verify that the imported provider is bundled.
     let logging_script = !object_entry && provider_hint && first.imports_logging;
     let tokenize_script = !object_entry && imports_provider("tokenize");
-    if !object_entry && !logging_script && !tokenize_script {
+    let ordered_only = !object_entry && !logging_script && !tokenize_script;
+    if ordered_only
+        && (!ordered_command
+            || first.uses_import_builtin
+            || first
+                .names
+                .iter()
+                .any(|(level, name)| *level != 0 || name == "__future__"))
+    {
         return Ok(None);
     }
     let provider_script = provider_script || logging_script || tokenize_script;
@@ -691,9 +706,16 @@ pub(crate) fn compile(
             if uses_import_builtin && !seen.contains("pprint") {
                 imports.names.push((0, "pprint".to_owned()));
             }
-            // Preserve sysconfig's getters when a runtime-computed import selects the module.
-            if (uses_import_builtin || seen.contains("importlib")) && !seen.contains("sysconfig") {
-                imports.names.push((0, "sysconfig".to_owned()));
+            // A runtime-selected HTTP child needs its server and transitive providers.
+            if uses_import_builtin && seen.contains("http") && !seen.contains("http.server") {
+                imports.names.push((0, "http.server".to_owned()));
+            }
+            if uses_import_builtin || seen.contains("importlib") {
+                for name in ["py_compile", "sysconfig"] {
+                    if !seen.contains(name) {
+                        imports.names.push((0, name.to_owned()));
+                    }
+                }
             }
             // The native time.strptime classmethod imports its Python parser on first use.
             if seen.contains("_datetime") && !seen.contains("_strptime") {
@@ -827,6 +849,9 @@ pub(crate) fn compile(
                     } else {
                         inputs.missing.extend([init, file]);
                         if stem.is_dir() {
+                            if ordered_only {
+                                return Ok(None);
+                            }
                             inputs.directories.push((
                                 stem.clone(),
                                 stem.canonicalize().map_err(|e| e.to_string())?,
@@ -837,6 +862,11 @@ pub(crate) fn compile(
                         }
                         continue;
                     };
+                    // A late command import can use the runtime's builtins and bundled
+                    // providers. Leave project-source imports on their original route.
+                    if ordered_only {
+                        return Ok(None);
+                    }
                     // Bundled providers cannot stand in for earlier project modules.
                     if initial.contains(root)
                         && ((request_script && prefix == "urllib")
@@ -960,6 +990,7 @@ const RUNTIME_PROVIDERS: &[&str] = &[
     "_frozen_importlib",
     "_frozen_importlib_external",
     "_opcode_metadata",
+    "_py_warnings",
     "_tokenize",
     "abc",
     "annotationlib",
@@ -990,12 +1021,14 @@ const RUNTIME_PROVIDERS: &[&str] = &[
     "re",
     "re._constants",
     "signal",
+    "ssl",
     "stat",
     "string",
     "string.templatelib",
     "subprocess",
     "token",
     "types",
+    "warnings",
     "zipimport",
 ];
 

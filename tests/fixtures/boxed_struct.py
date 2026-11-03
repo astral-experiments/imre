@@ -2,6 +2,23 @@ import struct
 
 
 def current():
+    from struct import error
+
+    assert error is struct.error and error.__bases__ == (Exception,)
+    assert (error.__module__, error.__name__, error.__qualname__) == ("struct", "error", "error")
+    saved = struct.Struct(">I")
+    struct.error = ValueError
+    try:
+        try:
+            saved.unpack(b"x")
+        except error as caught:
+            assert type(caught) is error
+            assert caught.args == ("unpack requires a buffer of 4 bytes",)
+        else:
+            raise AssertionError("short struct buffer was accepted")
+    finally:
+        struct.error = error
+
     for prefix in ("", "@", "=", "<", ">", "!"):
         layout = struct.Struct(prefix + "B2xI")
         assert layout.size == struct.calcsize(prefix + "3BI")

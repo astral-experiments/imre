@@ -29,7 +29,7 @@ pub(in crate::dynamic) use descriptor_buffer::{
 pub(in crate::dynamic) use rwpair::deallocate_exact_pair;
 mod bytes_io;
 mod bytes_writer;
-pub(in crate::dynamic) use bytes_writer::has_pending_callback_write;
+pub(in crate::dynamic) use bytes_writer::pending_callback_write;
 mod docstrings;
 mod file_io;
 pub(super) use file_io::{
@@ -38,7 +38,6 @@ pub(super) use file_io::{
 };
 pub(in crate::dynamic) use file_io::{open, popen_pipe};
 mod text_wrapper;
-pub(super) use text_wrapper::text_options;
 
 #[derive(Clone, Copy)]
 pub(in crate::dynamic) enum NativeClass {
@@ -119,6 +118,7 @@ pub(in crate::dynamic) fn standard_output(ctx: &mut Context, stderr: bool) -> Re
         ctx.alloc(Value::TextFile(super::super::value::BoxedTextFile {
             file,
             buffer: Some(buffer),
+            finalizing: false,
             line_buffering: stderr || crate::stdio_settings().stdout_line_buffered,
         })),
     )
@@ -552,6 +552,11 @@ fn class(
         NEWLINE_DECODER => newline_decoder::CLASS,
         _ => "_io._IOBase",
     };
+    if wrapper {
+        let name = ctx.text("_finalizing");
+        let member = ctx.alloc(Value::SlotMember { owner, name });
+        ctx.bind(scope, "_finalizing", member);
+    }
     let unsupported = ctx.scope_name(module, "UnsupportedOperation").unwrap();
     for &name in methods {
         let method = ctx.alloc(Value::IoMethod {
@@ -865,7 +870,9 @@ pub(in super::super) fn call(
         Some("BufferedReader" | "BufferedWriter" | "BufferedRWPair" | "BufferedRandom")
     ) {
         owner_kind
-    } else if owner_kind == Some("TextIOWrapper") && matches!(name, "__next__" | "truncate") {
+    } else if owner_kind == Some("TextIOWrapper")
+        && matches!(name, "__next__" | "__repr__" | "truncate")
+    {
         Some("TextIOWrapper")
     } else if bytes_io {
         Some("BytesIO")
@@ -883,8 +890,8 @@ pub(in super::super) fn call(
             ) => {
                 format!("descriptor '__init__' of '_io.{class}' object needs an argument")
             }
-            (Some("TextIOWrapper"), "__next__") => {
-                "descriptor '__next__' of '_io.TextIOWrapper' object needs an argument".into()
+            (Some("TextIOWrapper"), name @ ("__next__" | "__repr__")) => {
+                format!("descriptor '{name}' of '_io.TextIOWrapper' object needs an argument")
             }
             (Some(class), _) => format!("unbound method {class}.{name}() needs an argument"),
             _ => format!("unbound I/O method {name} needs a receiver"),
@@ -912,12 +919,12 @@ pub(in super::super) fn call(
                     "descriptor '__init__' requires a '_io.{class}' object but received a '{actual}'"
                 )
             }
-            (Some("TextIOWrapper"), "__next__") => {
+            (Some("TextIOWrapper"), name @ ("__next__" | "__repr__")) => {
                 let actual = receiver_class
                     .and_then(|class| ctx.heap.get(class).io_kind())
                     .map_or_else(|| actual.to_string(), |_| format!("_io.{actual}"));
                 format!(
-                    "descriptor '__next__' requires a '_io.TextIOWrapper' object but received a '{actual}'"
+                    "descriptor '{name}' requires a '_io.TextIOWrapper' object but received a '{actual}'"
                 )
             }
             (Some(class), _) => format!(
@@ -927,6 +934,21 @@ pub(in super::super) fn call(
         };
         return Err(Error::new("TypeError", message));
     };
+    if owner_kind == Some("TextIOWrapper") && name == "__repr__" {
+        if !kwargs.is_empty() {
+            return Err(Error::new(
+                "TypeError",
+                "wrapper __repr__() takes no keyword arguments",
+            ));
+        }
+        if !rest.is_empty() {
+            return Err(Error::new(
+                "TypeError",
+                format!("expected 0 arguments, got {}", rest.len()),
+            ));
+        }
+        return text_wrapper::repr(ctx, receiver);
+    }
     match owner_kind {
         Some("TextIOWrapper")
             if name == "__next__" && matches!(ctx.heap.get(receiver), Value::Instance { .. }) =>

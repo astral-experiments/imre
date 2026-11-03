@@ -261,7 +261,9 @@ pub(super) fn generic_attr_target(ctx: &Context, mut obj: Id, name: &str, writin
 pub(super) struct Registry {
     alias_caches: [Option<Id>; 2],
     pub(super) callable_factory: Option<Id>,
+    pub(super) abc_callable_reducer: Option<Id>,
     no_default: Option<Id>,
+    no_default_doc: Option<Id>,
     overloads: HashMap<(String, String), Vec<(u32, Id)>>,
 }
 
@@ -271,10 +273,14 @@ impl Registry {
             .iter()
             .flatten()
             .chain(self.callable_factory.iter())
+            .chain(self.abc_callable_reducer.iter())
             .chain(self.no_default.iter())
+            .chain(self.no_default_doc.iter())
             .chain(self.overloads.values().flatten().map(|(_, value)| value))
     }
 }
+
+const NO_DEFAULT_DOC: &str = "The type of the NoDefault singleton.";
 
 pub(super) fn no_default(ctx: &mut Context) -> Id {
     if let Some(value) = ctx.typing.no_default {
@@ -282,6 +288,7 @@ pub(super) fn no_default(ctx: &mut Context) -> Id {
     }
     let value = ctx.alloc(Value::NoDefault);
     ctx.typing.no_default = Some(value);
+    ctx.typing.no_default_doc = Some(ctx.text(NO_DEFAULT_DOC));
     value
 }
 
@@ -592,6 +599,35 @@ pub(super) fn builtin_alias(ctx: &mut Context, origin: Id, args: Id) -> Id {
     )
 }
 
+/// Rebuild PEP 585 aliases and their one-shot unpacking iterators through public constructors.
+pub(super) fn reduce_builtin_alias(ctx: &mut Context, receiver: Id) -> Result<Id> {
+    let (constructor, args) = match ctx.heap.get(receiver) {
+        Value::GenericAlias(alias) => {
+            let (origin, args) = (alias.origin, alias.args);
+            if alias.unpacked {
+                let plain = builtin_alias(ctx, origin, args);
+                let iterator = ctx.iterator(plain)?;
+                ctx.heap.keep(iterator);
+                (super::builtins::frame_builtin(ctx, "next")?, vec![iterator])
+            } else {
+                (ctx.exact_type(receiver)?, vec![origin, args])
+            }
+        }
+        Value::GenericAliasIterator(_) => {
+            // Looking up iter can advance the receiver through a custom builtins mapping.
+            let iter = super::builtins::frame_builtin(ctx, "iter")?;
+            let Value::GenericAliasIterator(source) = *ctx.heap.get(receiver) else {
+                unreachable!()
+            };
+            let source = source.unwrap_or_else(|| ctx.heap.packed_tuple(Vec::new(), false));
+            (iter, vec![source])
+        }
+        _ => unreachable!("validated generic alias or iterator"),
+    };
+    let args = ctx.alloc(Value::Tuple(args));
+    Ok(ctx.alloc(Value::Tuple(vec![constructor, args])))
+}
+
 /// Construct the collections.abc subclass of GenericAlias, including direct keyword calls.
 pub(super) fn abc_callable_alias(
     ctx: &mut Context,
@@ -770,6 +806,7 @@ pub(super) fn subscribe(ctx: &mut Context, target: Id, index: Id) -> Option<Resu
                     | "list"
                     | "tuple"
                     | "set"
+                    | "frozenset"
                     | "type"
                     | super::value::REGEX_PATTERN_TYPE
                     | super::value::REGEX_MATCH_TYPE
@@ -1347,6 +1384,10 @@ pub(super) fn attribute(ctx: &mut Context, value: Id, name: &str) -> Option<Resu
             })
         }
         Value::Native(class) if class == "typing._ConcatenateGenericAlias" => match name {
+            "__reduce__" => {
+                let base = ctx.builtin("typing._GenericAlias");
+                return Some(ctx.lookup_attr(base, name));
+            }
             "__base__" => ctx.builtin("typing._GenericAlias"),
             "__bases__" => {
                 let parent = ctx.builtin("typing._GenericAlias");
@@ -1391,12 +1432,31 @@ pub(super) fn attribute(ctx: &mut Context, value: Id, name: &str) -> Option<Resu
             let module = class.rsplit_once('.').unwrap().0.to_owned();
             ctx.text(module)
         }
+        Value::Native(class)
+            if name == "__reduce__"
+                && matches!(
+                    class.as_str(),
+                    "types.GenericAlias" | "generic_alias_iterator"
+                ) =>
+        {
+            ctx.builtin(&format!("{class}.__reduce__"))
+        }
+        Value::GenericAliasIterator(_) if name == "__reduce__" => {
+            let class = ctx.builtin("generic_alias_iterator");
+            let reducer = ctx.builtin("generic_alias_iterator.__reduce__");
+            return Some(ctx.bind_attribute(reducer, value, class));
+        }
+        Value::Native(class)
+            if name == "__reduce__" && class == "collections.abc._CallableGenericAlias" =>
+        {
+            ctx.typing.abc_callable_reducer?
+        }
         Value::Native(class) if name == "__reduce__" && class == "typing._CallableGenericAlias" => {
             ctx.module_value("typing", "_reduce_callable_alias")?
         }
         Value::GenericAlias(alias)
             if name == "__reduce__"
-                && matches!(alias.kind, AliasKind::Generic | AliasKind::Callable) =>
+                && (alias.kind.is_typing_alias() || alias.is_builtin_alias()) =>
         {
             let class = ctx.builtin(alias.kind.class());
             return Some(
@@ -1404,6 +1464,7 @@ pub(super) fn attribute(ctx: &mut Context, value: Id, name: &str) -> Option<Resu
                     .and_then(|reducer| ctx.bind_attribute(reducer, value, class)),
             );
         }
+        Value::NoDefault if name == "__doc__" => ctx.typing.no_default_doc?,
         Value::NoDefault if name == "__reduce__" => {
             let callable = ctx.builtin("typing.NoDefault.__reduce__");
             ctx.alloc(Value::Method {
@@ -1411,6 +1472,9 @@ pub(super) fn attribute(ctx: &mut Context, value: Id, name: &str) -> Option<Resu
                 receiver: value,
                 explicit: false,
             })
+        }
+        Value::Native(class) if class == "NoDefaultType" && name == "__doc__" => {
+            ctx.text(NO_DEFAULT_DOC)
         }
         Value::Native(class) if class == "NoDefaultType" && name == "__module__" => {
             ctx.text("builtins")
@@ -3045,6 +3109,7 @@ impl Context {
                             | "ellipsis"
                             | super::value::REGEX_PATTERN_TYPE
                             | super::value::REGEX_MATCH_TYPE
+                            | super::value::REGEX_SCANNER_TYPE
                             | super::value::TEMPLATE_ITER_TYPE
                             | super::value::TEMPLATE_TYPE
                             | super::value::INTERPOLATION_TYPE

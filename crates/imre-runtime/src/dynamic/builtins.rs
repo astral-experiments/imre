@@ -17,7 +17,7 @@ mod text;
 mod translation;
 pub(super) use collections::{
     clear_container, copy_dict, hashable, list_extend, remove_dict_item, remove_dict_item_hashed,
-    set_add, set_member, sort_values, update as update_dict, update_set,
+    remove_table_entry, set_add, set_member, sort_values, update as update_dict, update_set,
 };
 pub(super) use text::{
     bytes_from_iterable, bytes_percent, format_conversion, format_value, percent, zeroed_bytes,
@@ -62,6 +62,7 @@ pub(super) fn exception_ancestors(
         ImportError,
         NameError,
         RuntimeError,
+        IndentationError,
         SyntaxError,
         Warning,
         Exception,
@@ -114,6 +115,7 @@ const FUNCTIONS: &[&str] = &[
     "eval",
     "iter",
     "next",
+    "anext",
 ];
 
 const TYPES: &[&str] = &[
@@ -213,7 +215,8 @@ pub(super) fn native_implementation(symbol: &str) -> &str {
     }
 }
 
-pub(super) const MAPPING_PROXY_METHODS: &[&str] = &["keys", "values", "items", "get", "copy"];
+pub(super) const MAPPING_PROXY_METHODS: &[&str] =
+    &["keys", "values", "items", "get", "copy", "__reversed__"];
 
 /// Static constructors retain their declaring type as `__self__` even on instances.
 pub(super) fn constructor_owner(name: &str) -> Option<&str> {
@@ -224,11 +227,13 @@ pub(super) fn constructor_owner(name: &str) -> Option<&str> {
             | "dict"
             | "float"
             | "function"
+            | "cell"
             | "int"
             | "str"
             | "super"
             | "type"
             | super::thread_local::CLASS
+            | super::namespace::CLASS
     ) || super::stdlib::itertools::cursor_type(owner).is_some()
         || super::deque::iterator_class(owner).is_some()
         || is_exception(owner)
@@ -320,6 +325,7 @@ pub(super) fn is_final_iterator_type(name: &str) -> bool {
         "iterator"
             | "generator"
             | "coroutine_wrapper"
+            | "anext_awaitable"
             | "list_iterator"
             | "list_reverseiterator"
             | "tuple_iterator"
@@ -348,6 +354,7 @@ pub(super) fn is_enum_base(name: &str) -> bool {
 }
 
 pub(super) const DICT_METHODS: &[&str] = &[
+    "__reversed__",
     "__or__",
     "__ror__",
     "__ior__",
@@ -387,10 +394,66 @@ const SET_OPERATORS: &[&str] = &[
     "__iand__", "__ior__", "__isub__", "__ixor__",
 ];
 
-/// Methods shared by the two native real number classes.
+/// Methods for the two native real number classes.
 pub(super) fn real_methods(owner: &str) -> &'static [&'static str] {
     match owner {
-        "int" | "float" => &["__abs__", "__float__", "__int__", "__round__", "__trunc__"],
+        "int" => &[
+            "__abs__",
+            "__float__",
+            "__int__",
+            "__lt__",
+            "__round__",
+            "__trunc__",
+        ],
+        "float" => &["__abs__", "__float__", "__int__", "__round__", "__trunc__"],
+        _ => &[],
+    }
+}
+
+/// Set methods shared by registration, attribute lookup, and directory enumeration.
+pub(super) fn set_methods(owner: &str) -> &'static [&'static str] {
+    match owner {
+        "set" => &[
+            "__class_getitem__",
+            "__contains__",
+            "__iter__",
+            "__len__",
+            "__reduce__",
+            "__repr__",
+            "add",
+            "clear",
+            "copy",
+            "difference",
+            "difference_update",
+            "discard",
+            "intersection",
+            "intersection_update",
+            "isdisjoint",
+            "issubset",
+            "issuperset",
+            "pop",
+            "remove",
+            "symmetric_difference",
+            "symmetric_difference_update",
+            "union",
+            "update",
+        ],
+        "frozenset" => &[
+            "__class_getitem__",
+            "__contains__",
+            "__iter__",
+            "__len__",
+            "__reduce__",
+            "__repr__",
+            "copy",
+            "difference",
+            "intersection",
+            "isdisjoint",
+            "issubset",
+            "issuperset",
+            "symmetric_difference",
+            "union",
+        ],
         _ => &[],
     }
 }
@@ -578,16 +641,28 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
             ..
         } if attr == "__reduce__" => owner,
         Value::Property(_) if super::property::METHODS.contains(&attr) => "property",
+        Value::ClassMethod { .. } | Value::StaticMethod { .. }
+            if matches!(attr, "__reduce__" | "__reduce_ex__") =>
+        {
+            "object"
+        }
         Value::ClassMethod { .. } if attr == "__get__" => "classmethod",
         Value::StaticMethod { .. } if attr == "__get__" => "staticmethod",
         Value::Generator { .. } if super::generator_protocol::generator_method(attr) => "generator",
-        Value::Coroutine(_) if super::generator_protocol::coroutine_method("coroutine", attr) => {
+        Value::Coroutine { .. }
+            if super::generator_protocol::coroutine_method("coroutine", attr) =>
+        {
             "coroutine"
         }
         Value::CoroutineWrapper(_)
             if super::generator_protocol::coroutine_method("coroutine_wrapper", attr) =>
         {
             "coroutine_wrapper"
+        }
+        Value::ANextAwaitable { .. }
+            if super::generator_protocol::coroutine_method("anext_awaitable", attr) =>
+        {
+            "anext_awaitable"
         }
         Value::MemoryView { .. } if MEMORYVIEW_METHODS.contains(&attr) => "memoryview",
         Value::Bytes(_) if BYTES_METHODS.contains(&attr) => "bytes",
@@ -664,45 +739,12 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
             "tuple"
         }
         Value::Tuple(_) if matches!(attr, "__getitem__" | "__repr__") => "tuple",
-        Value::Set { frozen: false, .. } if SET_OPERATORS.contains(&attr) => "set",
-        Value::Set { frozen: true, .. } if FROZENSET_OPERATORS.contains(&attr) => "frozenset",
-        Value::Set { frozen: false, .. }
-            if matches!(
-                attr,
-                "add"
-                    | "copy"
-                    | "discard"
-                    | "difference"
-                    | "intersection"
-                    | "pop"
-                    | "remove"
-                    | "union"
-                    | "difference_update"
-                    | "update"
-                    | "issuperset"
-                    | "issubset"
-                    | "__contains__"
-                    | "__reduce__"
-                    | "__repr__"
-            ) =>
-        {
-            "set"
-        }
-        Value::Set { frozen: true, .. }
-            if matches!(
-                attr,
-                "copy"
-                    | "difference"
-                    | "intersection"
-                    | "union"
-                    | "issuperset"
-                    | "issubset"
-                    | "__contains__"
-                    | "__reduce__"
-                    | "__repr__"
-            ) =>
-        {
-            "frozenset"
+        Value::Set { frozen, .. } => {
+            let owner = if *frozen { "frozenset" } else { "set" };
+            if !(set_methods(owner).contains(&attr) || set_operators(owner).contains(&attr)) {
+                return None;
+            }
+            owner
         }
         Value::DefaultDict { .. } if super::defaultdict::METHODS.contains(&attr) => {
             super::defaultdict::CLASS
@@ -1115,7 +1157,7 @@ pub(super) fn method_receiver_args<'a>(
     Ok((receiver, rest))
 }
 
-fn noargs_method_receiver(
+pub(super) fn noargs_method_receiver(
     ctx: &Context,
     owner: &str,
     method: &str,
@@ -1124,12 +1166,32 @@ fn noargs_method_receiver(
 ) -> Result<Id> {
     let (receiver, rest) = method_receiver_args(ctx, owner, method, args, kwargs)?;
     if !rest.is_empty() {
+        let short = owner.rsplit('.').next().unwrap_or(owner);
         return Err(type_error(format!(
-            "{owner}.{method}() takes no arguments ({} given)",
+            "{short}.{method}() takes no arguments ({} given)",
             rest.len()
         )));
     }
     Ok(receiver)
+}
+
+/// Look up a reconstruction callable in the current frame's builtins, as PyEval_GetBuiltin does.
+pub(super) fn frame_builtin(ctx: &mut Context, name: &str) -> Result<Id> {
+    let scope = ctx.heap.current_scope();
+    let builtins = if scope != NONE
+        && let Some(globals) = ctx.scope_data(ctx.root_scope(scope)).exec_globals
+    {
+        globals.builtins
+    } else {
+        ctx.default_source_builtins()?
+    };
+    ctx.load_exec_name(builtins, name).map_err(|error| {
+        if ctx.is_builtin_error(&error, "KeyError") {
+            Error::new("AttributeError", name)
+        } else {
+            error
+        }
+    })
 }
 
 /// Reduce a builtin using its stored receiver and name, without consulting receiver attributes.
@@ -1156,22 +1218,13 @@ fn reduce_builtin_method(ctx: &mut Context, method: Id) -> Result<Id> {
     else {
         return Ok(ctx.text(name));
     };
-    let scope = ctx.heap.current_scope();
-    let builtins = if scope != NONE
-        && let Some(globals) = ctx.scope_data(ctx.root_scope(scope)).exec_globals
-    {
-        globals.builtins
-    } else {
-        ctx.default_source_builtins()?
-    };
-    let getattr = ctx.load_exec_name(builtins, "getattr").map_err(|error| {
-        if ctx.is_builtin_error(&error, "KeyError") {
-            Error::new("AttributeError", "getattr")
-        } else {
-            error
-        }
-    })?;
     let name = ctx.text(name);
+    bound_method_reduction(ctx, receiver, name)
+}
+
+/// Rebuild a bound method by looking up its name on the restored receiver.
+fn bound_method_reduction(ctx: &mut Context, receiver: Id, name: Id) -> Result<Id> {
+    let getattr = frame_builtin(ctx, "getattr")?;
     let args = ctx.alloc(Value::Tuple(vec![receiver, name]));
     Ok(ctx.alloc(Value::Tuple(vec![getattr, args])))
 }
@@ -1216,6 +1269,14 @@ pub(super) fn call(
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
+    if name == "method.__reduce__" {
+        let method = noargs_method_receiver(ctx, "method", "__reduce__", args, kwargs)?;
+        let Value::Method { callable, receiver, .. } = *ctx.heap.get(method) else {
+            unreachable!("validated Python method")
+        };
+        let name = ctx.lookup_attr(callable, "__name__")?;
+        return bound_method_reduction(ctx, receiver, name);
+    }
     if name == "builtin_function_or_method.__reduce__" {
         let method = noargs_method_receiver(
             ctx, "builtin_function_or_method", "__reduce__", args, kwargs,
@@ -1275,6 +1336,11 @@ pub(super) fn call(
                 )));
             }
         };
+        let mapping = if method == "__reversed__" {
+            ctx.mapping_proxy_target(mapping)
+        } else {
+            mapping
+        };
         let bound = ctx.lookup_attr(mapping, method)?;
         return ctx.call(bound, forwarded, Vec::new());
     }
@@ -1314,6 +1380,9 @@ pub(super) fn call(
     if matches!(name, "delattr" | "object.__delattr__") {
         return delete_attribute(ctx, name, args, kwargs);
     }
+    if name == "types.SimpleNamespace.__new__" {
+        return super::namespace_init::allocate(ctx, args);
+    }
     if let Some(owner) = name.strip_suffix(".__new__")
         && is_exception(owner)
     {
@@ -1331,6 +1400,7 @@ pub(super) fn call(
             | "object.__repr__"
             | "object.__str__"
             | "object.__ne__"
+            | "mappingproxy.__hash__"
             | "mappingproxy.__repr__"
             | "mappingproxy.__str__"
             | "super.__repr__"
@@ -1373,6 +1443,10 @@ pub(super) fn call(
             )));
         }
         if owner == "mappingproxy" {
+            if method == "__hash__" {
+                let hash = ctx.dictionary_hash(receiver)?;
+                return Ok(ctx.int(hash));
+            }
             if method == "__str__" {
                 return call(ctx, "str", &[receiver], &[]);
             }
@@ -1423,14 +1497,20 @@ pub(super) fn call(
         }
         if args.len() != 1 || !kwargs.is_empty() {
             if let Some(&receiver) = args.first() {
-                let tuple = ctx.builtin("tuple");
-                if ctx.instance_of(receiver, tuple) {
-                    let class = ctx.exact_type(receiver)?;
-                    if ctx
-                        .class_attr(class, "__init__")
-                        .is_none_or(|init| Some(&init) == ctx.builtins.get("object.__init__"))
+                let class = ctx.exact_type(receiver)?;
+                let init = ctx.class_attr(class, "__init__");
+                if init.is_none_or(|init| Some(&init) == ctx.builtins.get("object.__init__")) {
+                    let new =
+                        ctx.class_attr(class, "__new__")
+                            .map(|slot| match *ctx.heap.get(slot) {
+                                Value::StaticMethod { callable, .. } => callable,
+                                _ => slot,
+                            });
+                    let tuple = ctx.builtin("tuple");
+                    if ctx.instance_of(receiver, tuple)
+                        || new.is_some_and(|new| Some(&new) != ctx.builtins.get("object.__new__"))
                     {
-                        // Tuple subtypes consume their constructor arguments in __new__.
+                        // The allocator consumed the arguments; the inherited initializer does nothing.
                         return Ok(NONE);
                     }
                 }
@@ -1446,6 +1526,32 @@ pub(super) fn call(
         && !is_exception(name)
     {
         return match owner {
+            "object" | "int" if method == "__lt__" => {
+                let Some((&receiver, rest)) = args.split_first() else {
+                    return Err(type_error(format!(
+                        "descriptor '__lt__' of '{owner}' object needs an argument"
+                    )));
+                };
+                if owner == "int" && !ctx.builtin_slot_accepts(receiver, "int") {
+                    return Err(type_error(format!(
+                        "descriptor '__lt__' requires a 'int' object but received a '{}'",
+                        ctx.type_name(receiver)
+                    )));
+                }
+                positional(name, kwargs)?;
+                let [other] = rest else {
+                    return Err(type_error(format!(
+                        "expected 1 argument, got {}",
+                        rest.len()
+                    )));
+                };
+                if owner == "object" || !ctx.builtin_slot_accepts(*other, "int") {
+                    return Ok(NOT_IMPLEMENTED);
+                }
+                Ok(boolean(
+                    ctx.as_int(receiver)?.cmp(&ctx.as_int(*other)?).is_lt(),
+                ))
+            }
             "super" if method == "__new__" => ctx.super_new(args, kwargs),
             "super" if method == "__init__" => ctx.super_init(args, kwargs),
             "int" | "float" | "str" | "bytes" if method == "__new__" => {
@@ -1473,6 +1579,16 @@ pub(super) fn call(
                     1 | 3 => Ok(NONE),
                     _ => Err(type_error("type.__init__() takes 1 or 3 arguments")),
                 }
+            }
+            "anext_awaitable" => {
+                positional(name, kwargs)?;
+                let (min, max) = match method {
+                    "send" => (2, 2),
+                    "throw" => (1, usize::MAX),
+                    _ => (1, 1),
+                };
+                arity(name, args, min, max)?;
+                ctx.call_anext_method(method, args)
             }
             "coroutine" | "coroutine_wrapper" => {
                 positional(name, kwargs)?;
@@ -1631,6 +1747,9 @@ pub(super) fn call(
                 collections::builtin_slot(ctx, name, args, kwargs)
             }
             "str" if method == "__str__" => collections::builtin_slot(ctx, name, args, kwargs),
+            "mappingproxy" if method == "__contains__" => {
+                collections::builtin_slot(ctx, name, args, kwargs)
+            }
             "bool" | "int" | "float" | "str" | "bytes" | "bytearray" if method == "__repr__" => {
                 collections::builtin_slot(ctx, name, args, kwargs)
             }
@@ -1656,13 +1775,15 @@ pub(super) fn call(
             "bytearray" if BYTEARRAY_METHODS.contains(&method) => {
                 text::bytearray_method(ctx, name, method, args, kwargs)
             }
-            "tuple" if method == "__getitem__" => {
+            "tuple" | "mappingproxy" if method == "__getitem__" => {
                 let (&receiver, args) = args.split_first().ok_or_else(|| {
-                    type_error("descriptor '__getitem__' of 'tuple' object needs an argument")
+                    type_error(format!(
+                        "descriptor '__getitem__' of '{owner}' object needs an argument"
+                    ))
                 })?;
-                if !ctx.builtin_slot_accepts(receiver, "tuple") {
+                if !ctx.builtin_slot_accepts(receiver, owner) {
                     return Err(type_error(format!(
-                        "descriptor '__getitem__' requires a 'tuple' object but received a '{}'",
+                        "descriptor '__getitem__' requires a '{owner}' object but received a '{}'",
                         ctx.type_name(receiver)
                     )));
                 }
@@ -1677,6 +1798,9 @@ pub(super) fn call(
                         args.len()
                     )));
                 };
+                if owner == "mappingproxy" {
+                    return ctx.get_item(receiver, *key);
+                }
                 ctx.sequence_subscript(receiver, *key)
             }
             "set" | "frozenset" if set_operator(method).is_some() => {
@@ -1757,14 +1881,16 @@ pub(super) fn call(
             }
             "map" | "filter" | "enumerate" => ctx.iterator_method(owner, method, args, kwargs),
             "property" => super::property::method(ctx, method, args, kwargs),
-            "function" if method == "__new__" => {
+            "function" | "cell" if method == "__new__" => {
                 let Some((&class, args)) = args.split_first() else {
-                    return Err(type_error("function.__new__(): not enough arguments"));
+                    return Err(type_error(format!(
+                        "{owner}.__new__(): not enough arguments"
+                    )));
                 };
-                if class != ctx.builtin("function") {
-                    return Err(ctx.invalid_new_subtype("function", class));
+                if class != ctx.builtin(owner) {
+                    return Err(ctx.invalid_new_subtype(owner, class));
                 }
-                ctx.construct_function(args, kwargs)
+                call(ctx, owner, args, kwargs)
             }
             "function" | "staticmethod" if method == "__get__" => {
                 positional(name, kwargs)?;
@@ -1998,7 +2124,7 @@ pub(super) fn call(
             };
             Ok(ctx.int(i64::from(code)))
         }
-        "iter" | "next" => {
+        "iter" | "next" | "anext" => {
             if !kwargs.is_empty() {
                 return Err(type_error(format!("{name}() takes no keyword arguments")));
             }
@@ -2006,6 +2132,19 @@ pub(super) fn call(
                 [] => Err(type_error(format!(
                     "{name} expected at least 1 argument, got 0"
                 ))),
+                [iterator, ..] if name == "anext" && args.len() <= 2 => {
+                    let Some(method) = ctx.bound_slot(*iterator, "__anext__")? else {
+                        return Err(type_error(format!(
+                            "'{:.200}' object is not an async iterator",
+                            ctx.type_name(*iterator)
+                        )));
+                    };
+                    let wrapped = ctx.call(method, Vec::new(), Vec::new())?;
+                    match args.get(1) {
+                        Some(&default) => Ok(ctx.alloc(Value::ANextAwaitable { wrapped, default })),
+                        None => Ok(wrapped),
+                    }
+                }
                 [iterable] if name == "iter" => ctx.iterator(*iterable),
                 [iterator] => ctx
                     .next_result(*iterator)?
@@ -2042,6 +2181,9 @@ pub(super) fn call(
             positional(name, kwargs)?;
             arity(name, args, 1, 1)?;
             let object = args[0];
+            if matches!(ctx.heap.get(object), Value::MappingProxy(_)) {
+                return call(ctx, "mappingproxy.__reversed__", args, kwargs);
+            }
             if let Value::Range(range) = ctx.heap.get(object) {
                 return Ok(ctx.alloc(Value::RangeIterator(range.iter(true))));
             }
@@ -2133,6 +2275,10 @@ pub(super) fn call(
                 } => bindings.len(),
                 Value::Dict(v) | Value::DefaultDict { entries: v, .. } => v.len(),
                 Value::DictView { dict, .. } => collections::entries(ctx, *dict)?.len(),
+                value if value.is_weak_proxy() => {
+                    let target = ctx.weak_proxy_target(args[0])?;
+                    return ctx.with_weak_target(target, |ctx| call(ctx, "len", &[target], &[]));
+                }
                 Value::MappingProxy(_) => {
                     let mapping = ctx.mapping_proxy_target(args[0]);
                     return call(ctx, "len", &[mapping], &[]);
@@ -2350,13 +2496,25 @@ pub(super) fn call(
                 _ => ELLIPSIS,
             })
         }
+        "cell" => {
+            if !kwargs.is_empty() {
+                return Err(type_error("cell() takes no keyword arguments"));
+            }
+            if args.len() > 1 {
+                return Err(type_error(format!(
+                    "cell expected at most 1 argument, got {}",
+                    args.len()
+                )));
+            }
+            Ok(ctx.alloc(Value::Cell(args.first().copied())))
+        }
         "function" => ctx.construct_function(args, kwargs),
         "ImportError" | "ModuleNotFoundError" => {
             let mut error = ctx.exception(name, args);
             exceptions::initialize_import(&mut error, args, kwargs)?;
             Ok(ctx.alloc(Value::Raised(error)))
         }
-        name @ ("SyntaxError" | "IndentationError") => {
+        name @ ("SyntaxError" | "IndentationError" | "TabError") => {
             positional(name, kwargs)?;
             let mut fields = ctx.syntax_fields(args);
             if let [_, info] = args {

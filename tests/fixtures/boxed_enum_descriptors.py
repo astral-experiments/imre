@@ -66,6 +66,11 @@ def current():
         def __repr__(self):
             return "bits"
 
+    for member in (C.B, Status.OK, Bits(3)):
+        factory, arguments = member.__reduce_ex__(proto=4)
+        assert factory is type(member) and arguments == (member.value,)
+        assert factory(*arguments) is member
+
     assert IntEnum.__str__ is IntFlag.__str__ is int.__repr__
     assert (repr(Status.OK), str(Status.OK)) == ("status", "1")
     assert (repr(Bits(3)), str(Bits(3))) == ("bits", "3")
@@ -77,3 +82,28 @@ def current():
     import re
     assert re.RegexFlag.__str__ is object.__str__
     assert str(re.RegexFlag(2)) == repr(re.RegexFlag(2))
+
+    # A tuple mixin's generic alias must not mask an enum name or a metaclass slot.
+    from collections import namedtuple
+    from types import GenericAlias
+
+    class Pair(namedtuple("Pair", "x y"), Enum):
+        ORIGIN = (0, 0)
+
+    assert Pair["ORIGIN"] is Pair.ORIGIN
+    try:
+        Pair["missing"]
+    except KeyError as exc:
+        assert exc.args == ("missing",)
+    else:
+        raise AssertionError("enum lookup accepted a missing member")
+
+    class Meta(type):
+        def __getitem__(cls, key):
+            return ("metaclass", key)
+
+    class Specialized(tuple, metaclass=Meta):
+        pass
+
+    assert Specialized[int] == ("metaclass", int)
+    assert type(tuple[int]) is GenericAlias and tuple[int].__args__ == (int,)

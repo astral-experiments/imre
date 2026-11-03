@@ -115,6 +115,11 @@ pub(super) fn symbol(name: &str) -> Option<Intrinsic> {
         "umask" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.umask"),
         "utime" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.utime"),
         "chdir" if cfg!(unix) => Intrinsic::Chdir,
+        "fchdir" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.fchdir"),
+        "fsync" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.fsync"),
+        "fdatasync" if cfg!(target_os = "linux") => {
+            Intrinsic::ObjectRuntimeExport("posix.fdatasync")
+        }
         "chmod" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.chmod"),
         "fchmod" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.fchmod"),
         "chown" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.chown"),
@@ -125,6 +130,33 @@ pub(super) fn symbol(name: &str) -> Option<Intrinsic> {
         "mknod" if cfg!(target_os = "linux") => Intrinsic::ObjectRuntimeExport("posix.mknod"),
         "sched_param" if cfg!(target_os = "linux") => {
             Intrinsic::ObjectRuntimeExport("posix.sched_param")
+        }
+        "sched_get_priority_min" if cfg!(target_os = "linux") => {
+            Intrinsic::ObjectRuntimeExport("posix.sched_get_priority_min")
+        }
+        "sched_get_priority_max" if cfg!(target_os = "linux") => {
+            Intrinsic::ObjectRuntimeExport("posix.sched_get_priority_max")
+        }
+        "sched_yield" if cfg!(target_os = "linux") => {
+            Intrinsic::ObjectRuntimeExport("posix.sched_yield")
+        }
+        "sched_getaffinity" if cfg!(target_os = "linux") => {
+            Intrinsic::ObjectRuntimeExport("posix.sched_getaffinity")
+        }
+        "sched_setaffinity" if cfg!(target_os = "linux") => {
+            Intrinsic::ObjectRuntimeExport("posix.sched_setaffinity")
+        }
+        "sched_rr_get_interval" if cfg!(target_os = "linux") => {
+            Intrinsic::ObjectRuntimeExport("posix.sched_rr_get_interval")
+        }
+        "sched_getparam" if cfg!(target_os = "linux") => {
+            Intrinsic::ObjectRuntimeExport("posix.sched_getparam")
+        }
+        "sched_setparam" if cfg!(target_os = "linux") => {
+            Intrinsic::ObjectRuntimeExport("posix.sched_setparam")
+        }
+        "sched_setscheduler" if cfg!(target_os = "linux") => {
+            Intrinsic::ObjectRuntimeExport("posix.sched_setscheduler")
         }
         "sched_getscheduler" if cfg!(target_os = "linux") => {
             Intrinsic::ObjectRuntimeExport("posix.sched_getscheduler")
@@ -143,6 +175,7 @@ pub(super) fn symbol(name: &str) -> Option<Intrinsic> {
         "WIFSTOPPED" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.WIFSTOPPED"),
         "execv" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.execv"),
         "kill" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.kill"),
+        "getpgrp" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.getpgrp"),
         "getpgid" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.getpgid"),
         "setpgid" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.setpgid"),
         "getsid" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.getsid"),
@@ -151,6 +184,9 @@ pub(super) fn symbol(name: &str) -> Option<Intrinsic> {
             Intrinsic::ObjectRuntimeExport("posix.waitstatus_to_exitcode")
         }
         "WNOHANG" if cfg!(unix) => Intrinsic::DescriptorConstant("wnohang"),
+        "getgrouplist" if cfg!(target_os = "linux") => {
+            Intrinsic::ObjectRuntimeExport("posix.getgrouplist")
+        }
         "getgroups" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.getgroups"),
         "cpu_count" if cfg!(target_os = "linux") => {
             Intrinsic::ObjectRuntimeExport("posix.cpu_count")
@@ -194,6 +230,19 @@ pub(super) fn symbol(name: &str) -> Option<Intrinsic> {
         "close" => Intrinsic::Fd(FdOperation::Close),
         "closerange" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.closerange"),
         "read" => Intrinsic::Fd(FdOperation::Read),
+        "pwritev" if cfg!(target_os = "linux") => Intrinsic::ObjectRuntimeExport("posix.pwritev"),
+        #[cfg(target_os = "linux")]
+        "RWF_DSYNC" => Intrinsic::IntConstant(i64::from(libc::RWF_DSYNC)),
+        #[cfg(target_os = "linux")]
+        "RWF_SYNC" => Intrinsic::IntConstant(i64::from(libc::RWF_SYNC)),
+        #[cfg(target_os = "linux")]
+        "RWF_APPEND" => Intrinsic::IntConstant(i64::from(libc::RWF_APPEND)),
+        "preadv" if cfg!(target_os = "linux") => Intrinsic::ObjectRuntimeExport("posix.preadv"),
+        #[cfg(target_os = "linux")]
+        "RWF_HIPRI" => Intrinsic::IntConstant(i64::from(libc::RWF_HIPRI)),
+        #[cfg(target_os = "linux")]
+        "RWF_NOWAIT" => Intrinsic::IntConstant(i64::from(libc::RWF_NOWAIT)),
+        "writev" if cfg!(target_os = "linux") => Intrinsic::ObjectRuntimeExport("posix.writev"),
         "readv" if cfg!(target_os = "linux") => Intrinsic::ObjectRuntimeExport("posix.readv"),
         "readinto" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.readinto"),
         "lockf" if cfg!(target_os = "linux") => Intrinsic::ObjectRuntimeExport("posix.lockf"),
@@ -231,6 +280,7 @@ pub(super) fn symbol(name: &str) -> Option<Intrinsic> {
         "dup" => Intrinsic::Fd(FdOperation::Dup),
         "dup2" => Intrinsic::Fd(FdOperation::Dup2),
         "ptsname" if cfg!(target_os = "linux") => Intrinsic::Fd(FdOperation::PtsName),
+        "ttyname" if cfg!(target_os = "linux") => Intrinsic::ObjectRuntimeExport("posix.ttyname"),
         "O_NOCTTY" if cfg!(target_os = "linux") => Intrinsic::DescriptorConstant("o_noctty"),
         "get_terminal_size" if cfg!(target_os = "linux") => {
             Intrinsic::ObjectRuntimeExport("posix.get_terminal_size")

@@ -156,6 +156,56 @@ def _make_filterfalse(_allocate, _state):
 filterfalse = _make_filterfalse(_itertools._predicate_allocate, _itertools._predicate_state)
 
 
+def _make_accumulate(_allocate, _state):
+    class State:
+        __slots__ = ("source", "func", "total", "started", "pending")
+
+        def __init__(self, iterable, func, initial):
+            self.source = iter(iterable)
+            self.func = func
+            self.total = initial
+            self.pending = initial is not None
+            self.started = self.pending
+
+        def advance(self):
+            if self.pending:
+                self.pending = False
+                return self.total
+            item = next(self.source)
+            if self.started:
+                item = self.total + item if self.func is None else self.func(self.total, item)
+            self.total = item
+            self.started = True
+            return item
+
+
+    class accumulate:
+        """Return series of accumulated sums (or other binary function results)."""
+
+        __slots__ = ()
+
+        def __new__(cls, /, iterable, func=None, *, initial=None):
+            if not issubclass(cls, __class__):
+                raise TypeError("expected an accumulate subclass")
+            return _allocate(__class__, cls, State(iterable, func, initial))
+
+        def __init__(self, *args, **kwargs):
+            if (args or kwargs) and type(self).__init__ is not __class__.__init__:
+                object.__init__(self, *args, **kwargs)
+
+        def __iter__(self):
+            return self
+
+        def __next__(self):
+            return _state(__class__, self).advance()
+
+    accumulate.__qualname__ = "accumulate"
+    return accumulate
+
+
+accumulate = _make_accumulate(_itertools._accumulate_allocate, _itertools._accumulate_state)
+
+
 def _make_starmap(_allocate, _advance):
     class starmap:
         """Apply a function to the arguments from each input row."""
@@ -280,6 +330,43 @@ def _make_dropwhile(_allocate, _state):
 
 
 dropwhile = _make_dropwhile(_itertools._predicate_allocate, _itertools._predicate_state)
+
+
+def _make_pairwise(_allocate, _advance):
+    class pairwise:
+        """Return successive overlapping pairs from the input iterator."""
+
+        __slots__ = ()
+
+        def __new__(cls, /, *args, **kwargs):
+            if cls is not __class__:
+                if not isinstance(cls, type):
+                    raise TypeError(f"itertools.pairwise.__new__(X): X is not a type object ({type(cls).__name__})")
+                if not issubclass(cls, __class__):
+                    raise TypeError(f"itertools.pairwise.__new__({cls.__name__}): {cls.__name__} is not a subtype of itertools.pairwise")
+            if kwargs and (cls is __class__ or cls.__init__ is __class__.__init__ or cls.__init__ is object.__init__):
+                raise TypeError("pairwise() takes no keyword arguments")
+            if len(args) != 1:
+                raise TypeError(f"pairwise expected 1 argument, got {len(args)}")
+            return _allocate(__class__, cls, iter(args[0]))
+
+        def __init__(self, *args, **kwargs):
+            if (args or kwargs) and type(self).__init__ is not __class__.__init__:
+                raise TypeError("object.__init__() takes exactly one argument (the instance to initialize)")
+
+        def __iter__(self):
+            if not isinstance(self, __class__):
+                raise TypeError("expected a pairwise instance")
+            return self
+
+        def __next__(self):
+            return _advance(__class__, self)
+
+    pairwise.__qualname__ = "pairwise"
+    return pairwise
+
+
+pairwise = _make_pairwise(_itertools._pairwise_allocate, _itertools._pairwise_next)
 
 
 def _make_compress(_allocate, _state):

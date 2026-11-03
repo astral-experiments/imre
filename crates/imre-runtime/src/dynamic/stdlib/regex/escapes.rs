@@ -1,4 +1,4 @@
-//! Preserve source positions when replacing Python's named escapes with hexadecimal literals.
+//! Validate Python pattern escapes and preserve positions when replacing a named scalar.
 use super::*;
 
 pub(super) struct Spelling {
@@ -19,13 +19,18 @@ pub(super) fn normalize(
     text: &str,
     bytes: bool,
     flags: i64,
+    diagnose_headers: bool,
 ) -> std::result::Result<Option<Spelling>, (String, usize)> {
-    if !text.contains(r"\N") {
+    if !(diagnose_headers && text.contains("(?"))
+        && !text.as_bytes().windows(2).any(|pair| {
+            pair[0] == b'\\' && matches!(pair[1], b'N' | b'x' | b'u' | b'U' | b'0'..=b'9')
+        })
+    {
         return Ok(None);
     }
     let leading = flags::parse(text.as_bytes(), flags, bytes);
     let skip = text[..leading.skip].chars().count();
-    let names = imre_regex::named_escapes(
+    let escapes = imre_regex::pattern_escapes(
         &text[leading.skip..],
         leading.bits & VERBOSE != 0,
         alphabet(bytes, bytes || leading.bits & ASCII != 0, leading.bits),
@@ -33,24 +38,31 @@ pub(super) fn normalize(
         flags::scoped_verbose,
         group_names::valid,
     );
-    if let Some((error, start)) = names.error {
+    if let Some((error, start)) = escapes.error {
         let at = skip + start;
         return Err(match error {
-            imre_regex::NamedEscapeError::Syntax(message, offset) => (message.into(), at + offset),
-            imre_regex::NamedEscapeError::Undefined(name) => {
+            imre_regex::EscapeError::Syntax(message, offset) => (message, at + offset),
+            imre_regex::EscapeError::Undefined(name) => {
                 let repr = crate::objects::exceptions::string_repr(&name);
                 (format!("undefined character name {repr}"), at)
             }
         });
     }
-    if names.scalars.is_empty() {
+    if diagnose_headers && let Some(open) = escapes.rejected_header {
+        let at = skip + open;
+        let byte = text.char_indices().nth(at).unwrap().0;
+        if let Some((message, offset)) = flags::header_error(&text[byte..], bytes) {
+            return Err((message, at + offset));
+        }
+    }
+    if escapes.named_scalars.is_empty() {
         return Ok(None);
     }
     let mut source = String::with_capacity(text.len());
-    let mut ends = Vec::with_capacity(names.scalars.len());
+    let mut ends = Vec::with_capacity(escapes.named_scalars.len());
     let mut input = text.chars();
     let (mut original, mut after) = (0, 0);
-    for (start, end, scalar) in names.scalars {
+    for (start, end, scalar) in escapes.named_scalars {
         let plain = skip + start - original;
         source.extend(input.by_ref().take(plain));
         for _ in start..end {

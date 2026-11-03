@@ -97,6 +97,79 @@ def check_builtin_method_reduction():
         del copyreg.dispatch_table[type(method)]
 
 
+class MethodReceiver:
+    def read(self, value):
+        return value
+
+    @classmethod
+    def factory(cls):
+        return cls()
+
+
+def check_method_descriptors():
+    for kind in (staticmethod, classmethod):
+        wrapper = kind(MethodReceiver.read)
+        assert kind.__reduce__ is object.__reduce__
+        assert kind.__reduce_ex__ is object.__reduce_ex__
+        for dumps in (pickle.dumps, pickle._dumps):
+            for protocol in range(6):
+                try:
+                    dumps(wrapper, protocol)
+                except TypeError as error:
+                    assert str(error) == f"cannot pickle '{kind.__name__}' object"
+                else:
+                    raise AssertionError("pickled a method descriptor")
+
+        wrapper.__reduce_ex__ = lambda protocol: (int, (protocol,))
+        for dumps in (pickle.dumps, pickle._dumps):
+            assert pickle.loads(dumps(wrapper, 4)) == 4
+
+
+def check_python_method_reduction():
+    receiver = MethodReceiver()
+    method = receiver.read
+    kind = type(method)
+    descriptor = kind.__reduce__
+    assert descriptor.__qualname__ == "method.__reduce__"
+    assert descriptor.__objclass__ is kind and descriptor.__text_signature__ == "($self, /)"
+    assert descriptor.__doc__ is None
+    method.__func__.__reduce__ = None
+    try:
+        expected = (getattr, (receiver, "read"))
+        assert method.__reduce__() == descriptor(method) == expected
+        assert kind.__reduce_ex__(method, 4) == expected
+        assert eval("m.__reduce__()[0]", {"__builtins__": {"getattr": 9}, "m": method}) == 9
+        assert receiver.factory.__reduce__() == (getattr, (MethodReceiver, "factory"))
+        for protocol in range(6):
+            cloned, bound = pickle.loads(pickle.dumps((receiver, method), protocol))
+            assert bound.__self__ is cloned and bound(37) == 37
+    finally:
+        del method.__func__.__reduce__
+
+    class Callable:
+        def __call__(self):
+            pass
+
+    target = Callable()
+    explicit = kind(target, receiver)
+    try:
+        descriptor(explicit)
+    except AttributeError:
+        pass
+    else:
+        raise AssertionError("method reduction did not read callable.__name__")
+    target.__name__ = []
+    assert descriptor(explicit)[1][1] is target.__name__
+    assert descriptor(kind(len, receiver)) == (getattr, (receiver, "len"))
+    for args, kwargs in (((), {}), ((len,), {}), ((method, 1), {}), ((method,), {"x": 1})):
+        try:
+            descriptor(*args, **kwargs)
+        except TypeError:
+            pass
+        else:
+            raise AssertionError("accepted invalid Python method reducer arguments")
+
+
 class WithoutProtocol:
     def __reduce__(self):
         return str, (37,)
@@ -310,6 +383,27 @@ def check_object_reducer():
         else:
             raise AssertionError("legacy reduction accepted slots without a custom state hook")
 
+    from collections import UserString
+    text = UserString("saved")
+    text.items = [text]
+    copy_of_text = copy.deepcopy(text)
+    assert type(copy_of_text) is UserString and copy_of_text == text
+    assert copy_of_text.items is not text.items and copy_of_text.items[0] is copy_of_text
+
+    class Extended:
+        def __getnewargs__(self):
+            raise AssertionError("ordinary hook took precedence")
+
+        def __getnewargs_ex__(self):
+            return ("first",), {"keyword": "second"}
+
+    value = Extended()
+    value.__getnewargs_ex__ = lambda: ((), {})
+    constructor, args, state, listitems, dictitems = value.__reduce_ex__(4)
+    assert constructor is copyreg.__newobj_ex__
+    assert args == (Extended, ("first",), {"keyword": "second"})
+    assert state is value.__dict__ and listitems is None and dictitems is None
+
     plain = Plain({})
     for protocol in (2, 3, 4, 5):
         constructor, args, state, listitems, dictitems = plain.__reduce_ex__(protocol)
@@ -451,6 +545,8 @@ def produce():
     check_namedtuple_reducer()
     check_object_reducer()
     check_builtin_method_reduction()
+    check_python_method_reduction()
+    check_method_descriptors()
     assert _codecs.encode is codecs.encode and codecs.encode.__module__ == "_codecs"
     for protocol in range(pickle.HIGHEST_PROTOCOL + 1):
         check_global_names(protocol)

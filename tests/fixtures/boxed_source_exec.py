@@ -61,6 +61,33 @@ def decode_allocation():
     print(config["VALUE"])
 
 
+def async_generator_syntax():
+    # Scope checks also visit dead code and defaults evaluated by the enclosing function.
+    filename = "async-scope.py"
+    for source, message, line, start, end in (
+        ("async def f():\n    é=1; yield from ()", "'yield from' inside async function", 2, 11, 24),
+        ("async def f():\n    return 5\n    if False: yield 1", "'return' with value in async generator", 2, 5, 13),
+        ("async def f():\n    def child(x=(yield)): pass\n    return 5", "'return' with value in async generator", 3, 5, 13),
+    ):
+        try:
+            compile(source, filename, "exec")
+        except SyntaxError as error:
+            assert error.args == (message, (filename, line, start, None, line, end))
+        else:
+            raise AssertionError(source)
+    for body, expected in (
+        ("return 1\n    yield\n    g(x=1, x=2)", "'return' with value in async generator"),
+        ("g(x=1, x=2)\n    yield\n    return 1", "keyword argument repeated: x"),
+    ):
+        try:
+            compile("async def f():\n    " + body, filename, "exec")
+        except SyntaxError as error:
+            assert error.msg == expected
+        else:
+            raise AssertionError(body)
+    compile("async def f():\n    def nested(): yield from ()\n    return nested", filename, "exec")
+
+
 def syntax_members():
     try:
         compile(b"# coding: unknown-encoding\n", "dir/one.py", "exec")
@@ -743,6 +770,48 @@ def exec_caller_namespaces():
     assert separate == {"result": 8}
 
 
+def source_set_displays():
+    events = []
+
+    def mark(value):
+        events.append(value)
+        return value
+
+    scope = {"mark": mark}
+    assert eval("{mark(1), *mark((1, 2)), *(), mark(3)}", scope) == {1, 2, 3}
+    assert events == [1, (1, 2), 3]
+
+    # A 30-element display evaluates the entire prefix. A 31-element display hashes as it goes.
+    for count, expected in ((28, [[]] + [1] * 28), (29, [[]])):
+        events.clear()
+        try:
+            eval("{mark([])," + "mark(1)," * count + "*mark(())}", scope)
+        except TypeError as error:
+            assert "unhashable type: 'list'" in str(error)
+        else:
+            raise AssertionError("accepted an unhashable set element")
+        assert events == expected, events
+
+    class Key:
+        def __init__(self, value):
+            self.value = value
+
+        def __hash__(self):
+            events.append(self.value)
+            return 1
+
+        def __eq__(self, other):
+            return True
+
+        def __del__(self):
+            events.append(-self.value)
+
+    scope["Key"] = Key
+    events.clear()
+    result = eval("{Key(1), Key(2), Key(3), *mark(())}", scope)
+    assert len(result) == 1 and events == [1, 2, -2, 3, -3, ()], events
+
+
 def starred_calls():
     events = []
 
@@ -940,6 +1009,7 @@ def caller_namespaces(argument):
 
 def current():
     starred_calls()
+    source_set_displays()
     caller_namespaces(3)
     source_eval()
     exec_caller_namespaces()
@@ -960,6 +1030,7 @@ def current():
     source_nested_functions()
     check_source_lambdas()
     syntax_members()
+    async_generator_syntax()
     for data in (b"\xef\xbb\xbfVALUE = 61", bytearray(b"#!python\r# coding: latin-1\rVALUE = '\xe9'")):
         config = {}
         exec(compile(data, "settings.py", "exec"), config)

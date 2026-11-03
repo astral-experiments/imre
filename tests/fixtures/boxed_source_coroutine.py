@@ -1,4 +1,5 @@
 import types
+import weakref
 
 
 class Pause:
@@ -64,13 +65,44 @@ async def forward(awaitable):
     forward = scope["forward"]
     old = suspend(token)
     original_code = suspend.__code__
-    assert types.coroutine(suspend) is suspend
+    proxy = weakref.proxy(suspend)
+    assert types.coroutine(proxy) is proxy
     marked_code = suspend.__code__
     assert old.gi_code is original_code and marked_code is not original_code
     assert types.coroutine(suspend) is suspend and suspend.__code__ is marked_code
 
     fresh = suspend(token)
     assert fresh.gi_code is marked_code
+
+    class Factory:
+        def __call__(self, value, *, expected):
+            assert value is expected
+            return value
+
+    factory = Factory()
+    decorated = types.coroutine(factory)
+    assert decorated.__wrapped__ is factory
+    assert decorated(fresh, expected=fresh) is fresh
+    wrapped = decorated(old, expected=old)
+    assert isinstance(wrapped, types._GeneratorWrapper)
+    assert wrapped.__await__() is old
+    assert decorated(token, expected=token) is token
+
+    class Impostor:
+        __class__ = types.GeneratorType
+
+        @property
+        def gi_code(self):
+            raise error
+
+    impostor = Impostor()
+    try:
+        decorated(impostor, expected=impostor)
+    except ValueError as caught:
+        assert caught is error
+    else:
+        raise AssertionError("factory result lost gi_code exception")
+
     relay = forward(fresh)
     assert relay.send(None) is token
     result = object()

@@ -36,6 +36,16 @@ try:
     shutil.copytree("src", "invalid\0destination")
 except ValueError as exc:
     print(str(exc))
+
+if sys.argv[1] == "bytes":
+    print(repr(shutil.copytree(b"dst", b"new/raw-\xff/./")))
+else:
+    dest = "new/leaf/."
+    print(repr(shutil.copytree("dst", dest)))
+    try:
+        shutil.copytree("dst", dest)
+    except FileExistsError as exc:
+        print(exc.filename is dest)
 '''
 
 
@@ -54,5 +64,7 @@ def run(tools, work):
             (source / "sibling").write_bytes(b"kept")
             completed = subprocess.run([*command, kind], cwd=folder, capture_output=True, check=True, timeout=30)
             assert (folder / "dst/sibling").read_bytes() == b"kept"
+            leaf = os.fsdecode(b"raw-\xff") if kind == "bytes" else "leaf"
+            assert (folder / "new" / leaf / "sibling").read_bytes() == b"kept"
             observed.append((completed.stdout, completed.stderr))
         assert observed[0] == observed[1], (kind, observed)

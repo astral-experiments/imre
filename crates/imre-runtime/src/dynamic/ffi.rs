@@ -725,9 +725,9 @@ pub(super) unsafe extern "C" fn imre_dyn_new(
     );
     if let Some(options) = config["warnoptions"].as_array() {
         for option in options.iter().filter_map(|value| value.as_str()) {
-            if let Err(reason) = crate::objects::warnings::startup_filter(option) {
-                eprintln!("Invalid -W option ignored: {reason}");
-            }
+            // Keep the native typed fallback in sync. The public warnings module
+            // diagnoses invalid options once, using the full Python category lookup.
+            let _ = crate::objects::warnings::startup_filter(option);
         }
     }
     // SAFETY: main supplies argc pointers to NUL-terminated strings that remain
@@ -775,6 +775,7 @@ pub(super) fn new_context<S: Into<String>>(
         zip_directories: HashMap::new(),
         zip_path_importers: NONE,
         codec_entries: Default::default(),
+        warning_state: None,
         frozen_override: 0,
         modules: NONE,
         import_missing: NONE,
@@ -820,14 +821,32 @@ pub(super) unsafe extern "C" fn imre_dyn_register(
     file: *const c_char,
     code: Code,
 ) {
-    // SAFETY: all inputs come from generated module definitions in the same binary.
+    // SAFETY: earlier native code supplies the same static names and initializer, without text.
+    unsafe { imre_dyn_register_source(ctx, name, file, std::ptr::null(), 0, code) }
+}
+
+/// Register a compiled initializer and the exact Python text of a bundled provider.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_register_source(
+    ctx: *mut Context,
+    name: *const c_char,
+    file: *const c_char,
+    text: *const u8,
+    len: u64,
+    code: Code,
+) {
+    // SAFETY: module names and filenames are static compiler-emitted strings.
     let (ctx, name, file) = unsafe { (&mut *ctx, cstr(name), cstr(file)) };
+    // SAFETY: non-null text points to a static source constant with exactly len bytes.
+    let bundled_text =
+        (!text.is_null()).then(|| unsafe { std::slice::from_raw_parts(text, len as usize) });
     ctx.sources
         .entry(name.to_owned())
         .or_default()
         .push(SourceModule {
             path: file.into(),
             code,
+            bundled_text,
         });
 }
 
@@ -852,6 +871,14 @@ pub(super) unsafe extern "C" fn imre_dyn_finish(ctx: *mut Context) -> i32 {
         // keep replaced streams alive throughout the main module's execution.
         ctx.heap.release_temporaries_since(mark);
         ctx.install_import_registry()?;
+        if ctx.config["warnoptions"].as_array().is_some_and(|options| !options.is_empty()) {
+            let mark = ctx.heap.temporary_mark();
+            if let Err(error) = ctx.module("warnings") {
+                eprintln!("'import warnings' failed; traceback:");
+                stdlib::traceback::report_chain(&mut ctx, error);
+            }
+            ctx.heap.release_temporaries_since(mark);
+        }
         let main = ctx
             .load_bootstrap_module("__main__", None, NONE)?
             .ok_or_else(|| Context::missing_module("__main__"))?;
@@ -861,8 +888,7 @@ pub(super) unsafe extern "C" fn imre_dyn_finish(ctx: *mut Context) -> i32 {
             Ok(main)
         }
     });
-    #[cfg(unix)]
-    let interrupted = result
+    let mut interrupted = result
         .as_ref()
         .is_err_and(|e| ctx.is_builtin_error(e, "KeyboardInterrupt"));
     let status = match result {
@@ -873,6 +899,13 @@ pub(super) unsafe extern "C" fn imre_dyn_finish(ctx: *mut Context) -> i32 {
             ctx.heap.release_temporaries_since(mark);
             status
         }
+        Err(error) if let Some(sys) = ctx.threads.system_module => {
+            let mark = ctx.heap.temporary_mark();
+            let status = super::excepthook::report(&mut ctx, sys, error, &mut interrupted);
+            ctx.heap.release_temporaries_since(mark);
+            status
+        }
+        // Startup can fail before the interpreter has created its sys module.
         Err(error) if ctx.is_os_error(&error) && error.args.is_some() => {
             if stdlib::traceback::chain_link(&error).is_some() {
                 stdlib::traceback::report_chain(&mut ctx, error);
@@ -910,6 +943,17 @@ pub(super) unsafe extern "C" fn imre_dyn_finish(ctx: *mut Context) -> i32 {
     // Exit callbacks run before Python enters its finalization phase.
     ctx.finalizing
         .store(true, std::sync::atomic::Ordering::Release);
+    ctx.heap.discarded_shutdown_write = Some(false);
+    ctx.heap.release_temporaries_since(mark);
+    if let Err(error) = ctx.release_main_at_shutdown() {
+        super::unraisable::report(
+            &mut ctx,
+            error,
+            false,
+            None,
+            "Exception ignored during main module cleanup",
+        );
+    }
     if let Err(error) = ctx.finalize_shutdown_resources() {
         super::unraisable::report(
             &mut ctx,
@@ -921,7 +965,7 @@ pub(super) unsafe extern "C" fn imre_dyn_finish(ctx: *mut Context) -> i32 {
     }
     stdlib::io::prepare_writer_shutdown(&ctx);
     crate::fault_handler::disable();
-    if status == 0 && stdlib::io::has_pending_callback_write(&ctx) {
+    if status == 0 && ctx.heap.has_pending_callback_write() {
         use std::io::Write;
 
         let _ = writeln!(
@@ -939,7 +983,7 @@ pub(super) unsafe extern "C" fn imre_dyn_finish(ctx: *mut Context) -> i32 {
 }
 
 /// Read the live code at shutdown, including overrides on SystemExit subclasses.
-fn report_system_exit(ctx: &mut Context, error: Error) -> i32 {
+pub(super) fn report_system_exit(ctx: &mut Context, error: Error) -> i32 {
     use std::io::Write;
 
     let instance = error
@@ -1125,6 +1169,15 @@ pub(super) unsafe extern "C" fn imre_dyn_op_at(
     }
     // SAFETY: the emitter supplies null or a native [4 x i32] module constant.
     finish_at(ctx, result, unsafe { span.as_ref() })
+}
+
+/// Publish a continued expression's source line without changing its statement's GC roots.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_expression_line(ctx: *mut Context, line: u32) {
+    // SAFETY: generated code owns the active context for this frame.
+    let ctx = unsafe { &mut *ctx };
+    ctx.heap
+        .replace_expression(value::ExpressionPosition::Line(line));
 }
 
 /// Invoke a compiled call using the root mark taken before its operands were evaluated.
@@ -1557,6 +1610,16 @@ pub(super) unsafe extern "C" fn imre_dyn_assignment_target(
     }
 }
 
+/// Move the executing frame to an implicit call site without releasing statement temporaries.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_set_statement_line(ctx: *mut Context, line: u32) {
+    // SAFETY: the generated caller owns the context and has entered a statement.
+    let ctx = unsafe { &mut *ctx };
+    ctx.heap.set_statement_line(line);
+    ctx.heap
+        .replace_expression(value::ExpressionPosition::Statement);
+}
+
 #[unsafe(no_mangle)]
 pub(super) unsafe extern "C" fn imre_dyn_statement_with_exception(
     ctx: *mut Context,
@@ -1615,6 +1678,7 @@ impl Context {
                 .chain(self.builtins.values())
                 .chain(self.native_type_dicts.values())
                 .chain(self.native_code_objects.values())
+                .chain(self.warning_state.iter().flat_map(|state| state.roots()))
                 .chain(self.codec_entries.roots())
                 .chain(&self.audit_hooks)
                 .chain(&self.exit_callbacks)

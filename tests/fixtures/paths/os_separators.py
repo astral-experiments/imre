@@ -1,7 +1,7 @@
 import os
 import os.path
 import posixpath
-from os import altsep, extsep, linesep, pathsep, sep
+from os import altsep, extsep, linesep, pardir, pathsep, sep
 from os.path import altsep as path_altsep
 from os.path import pathsep as path_list_sep
 from os.path import sep as path_sep
@@ -9,6 +9,7 @@ from posixpath import pathsep as posix_pathsep
 
 
 assert extsep == os.path.extsep == posixpath.extsep == "."
+assert pardir == os.pardir == os.path.pardir == posixpath.pardir == ".."
 print(sep == os.sep)
 print(path_sep == os.path.sep)
 print(sep is path_sep)

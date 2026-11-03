@@ -1,6 +1,6 @@
 import sys
 import warnings
-from warnings import warn
+from warnings import deprecated, warn, warn_explicit
 
 
 def emit():
@@ -8,7 +8,21 @@ def emit():
 
 
 def current():
-    assert warn is warnings.warn
+    assert deprecated is warnings.deprecated and warn is warnings.warn
+
+    @deprecated("use double instead")
+    def twice(value):
+        return value * 2
+
+    with warnings.catch_warnings(record=True) as captured:
+        warnings.simplefilter("always", DeprecationWarning)
+        line = sys._getframe().f_lineno + 1
+        assert twice(21) == 42
+    assert len(captured) == 1
+    assert captured[0].category is DeprecationWarning
+    assert str(captured[0].message) == twice.__deprecated__ == "use double instead"
+    assert captured[0].filename == __file__ and captured[0].lineno == line
+
     with warnings.catch_warnings(record=True) as captured:
         warnings.simplefilter("always", DeprecationWarning)
         line = sys._getframe().f_lineno + 1
@@ -18,6 +32,18 @@ def current():
         assert warning.category is DeprecationWarning
         assert str(warning.message) == "from the caller"
         assert warning.filename == __file__ and warning.lineno == line
+
+    assert warn_explicit is warnings.warn_explicit
+    with warnings.catch_warnings(record=True) as captured:
+        warnings.simplefilter("default", UserWarning)
+        registry = {}
+        for lineno in (7, 7, 8):
+            result = warn_explicit("explicit", UserWarning, "sample.py", lineno, registry=registry)
+            assert result is None
+        assert len(captured) == 2
+        for warning, lineno in zip(captured, (7, 8)):
+            assert warning.category is UserWarning and str(warning.message) == "explicit"
+            assert warning.filename == "sample.py" and warning.lineno == lineno
 
     with warnings.catch_warnings():
         warnings.simplefilter("error", UserWarning)

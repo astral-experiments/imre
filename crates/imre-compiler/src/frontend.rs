@@ -2628,10 +2628,21 @@ impl<'a> Checker<'a> {
             _ if operation => "set binary operator",
             "__iand__" | "__ior__" | "__isub__" | "__ixor__" => "set in-place operator",
             "union" => "set.union",
+            "symmetric_difference" => "set.symmetric_difference",
             "difference_update" => "set.difference_update",
+            "intersection_update" => "set.intersection_update",
+            "symmetric_difference_update" => "set.symmetric_difference_update",
+            "add" if self.unshadowed_builtin(&attribute.value, "set") => "set.add",
+            "copy" => "set.copy",
+            "issuperset" => "set.issuperset",
+            "__iter__" => "set.__iter__",
+            "__len__" => "set.__len__",
+            "__class_getitem__" => "set.__class_getitem__",
+            "clear" => "set.clear",
             "pop" => "set.pop",
             "remove" => "set.remove",
             "update" => "set.update",
+            "isdisjoint" => "set.isdisjoint",
             "issubset" => "set.issubset",
             _ => return None,
         };
@@ -2640,14 +2651,21 @@ impl<'a> Checker<'a> {
         {
             return Some(name);
         }
-        if (operation || matches!(attribute.attr.as_str(), "issubset" | "union"))
-            && (receiver == Some(Type::FrozenStrings)
-                || self.unshadowed_builtin(&attribute.value, "frozenset"))
+        if receiver == Some(Type::FrozenStrings)
+            || self.unshadowed_builtin(&attribute.value, "frozenset")
         {
             return Some(match attribute.attr.as_str() {
+                _ if operation => name,
+                "__class_getitem__" => "frozenset.__class_getitem__",
+                "__iter__" => "frozenset.__iter__",
+                "__len__" => "frozenset.__len__",
+                "copy" => "frozenset.copy",
+                "isdisjoint" => "frozenset.isdisjoint",
                 "issubset" => "frozenset.issubset",
+                "issuperset" => "frozenset.issuperset",
+                "symmetric_difference" => "frozenset.symmetric_difference",
                 "union" => "frozenset.union",
-                _ => name,
+                _ => return None,
             });
         }
         None
@@ -2668,6 +2686,9 @@ impl<'a> Checker<'a> {
             )
         {
             return Err(self.object_builtin_error(attribute.attr.as_str(), attribute));
+        }
+        if matches!(receiver.ty, Type::Coroutine(_)) && attribute.attr.as_str() == "cr_origin" {
+            return Err(self.object_builtin_error("coroutine.cr_origin", attribute));
         }
         if receiver.ty == Type::BinaryIO && matches!(attribute.attr.as_str(), "name" | "mode") {
             return Err(self.object_builtin_error("binary file metadata", attribute));
@@ -4182,7 +4203,6 @@ impl<'a> Checker<'a> {
             && set_element.is_none()
             && self.types.deque_element(iterable.ty).is_none()
             && !string
-            && !bytes
         {
             Some(self.hidden(Type::Int))
         } else {
@@ -4206,7 +4226,9 @@ impl<'a> Checker<'a> {
                 Expr {
                     ty: element,
                     kind: ExprKind::Builtin(
-                        if matches!(self.locals[captured], Type::VarTuple(_)) {
+                        if bytes {
+                            Builtin::BytesGet
+                        } else if matches!(self.locals[captured], Type::VarTuple(_)) {
                             Builtin::TupleIndex
                         } else if matches!(self.locals[captured], Type::List(_)) {
                             Builtin::SequenceGetInBounds
@@ -4242,8 +4264,6 @@ impl<'a> Checker<'a> {
                     kind: ExprKind::Builtin(
                         if string {
                             Builtin::StringIter
-                        } else if bytes {
-                            Builtin::BytesIter
                         } else if self.types.deque_element(self.locals[captured]).is_some() {
                             Builtin::DequeIter { reverse: false }
                         } else if set_element.is_some() {
@@ -4846,6 +4866,7 @@ impl<'a> Checker<'a> {
                     && self.resolve(&call.func)
                         == Some(Binding::Intrinsic(Intrinsic::SubprocessRun))
                     && call.arguments.find_keyword("stdout").is_some()
+                    && !processes::boxed_launch_keywords(call)
                 {
                     Some(Statement::Expr(self.process_run(call, true)?))
                 } else if let ast::Expr::Call(call) = &*expression.value
@@ -4905,6 +4926,11 @@ impl<'a> Checker<'a> {
                     }
                     if let ast::Expr::Attribute(attr) = target {
                         let receiver = self.expr(&attr.value)?;
+                        if matches!(receiver.ty, Type::Coroutine(_))
+                            && attr.attr.as_str() == "cr_origin"
+                        {
+                            return Err(self.object_builtin_error("coroutine.cr_origin", attr));
+                        }
                         if receiver.ty == Type::CodecInfo
                             && matches!(
                                 attr.attr.as_str(),
@@ -6507,6 +6533,9 @@ impl<'a> Checker<'a> {
                 Intrinsic::CodecGetWriter => {
                     return Err(self.object_builtin_error("codecs.getwriter", expression));
                 }
+                Intrinsic::Popen | Intrinsic::CompletedProcess if cfg!(unix) => {
+                    return Err(self.scoped_builtin_error("subprocess process class", expression));
+                }
                 Intrinsic::SplitResult { .. } => {
                     return Err(self.scoped_builtin_error("urllib.parse result class", expression));
                 }
@@ -7831,7 +7860,17 @@ impl<'a> Checker<'a> {
                         self.scoped_builtin_error("urllib.parse result counterpart", attribute)
                     );
                 }
-                if let Some((_, declaration)) = self.namedtuple_factory(&attribute.value) {
+                if let Some((origin, declaration)) = self.namedtuple_factory(&attribute.value) {
+                    if matches!(origin, crate::types::TupleOrigin::Declaration(_))
+                        && declaration
+                            .fields
+                            .iter()
+                            .any(|field| field == attribute.attr.as_str())
+                    {
+                        return Err(
+                            self.scoped_builtin_error("namedtuple field descriptor", attribute)
+                        );
+                    }
                     return self.namedtuple_class_attribute(attribute, &declaration);
                 }
                 if let Some(method) = ir::StrDescriptor::named(attribute.attr.as_str())
@@ -8730,6 +8769,20 @@ impl<'a> Checker<'a> {
         if let Some(expanded) = self.expand_closed_call(call) {
             return self.call_on(&expanded, receiver);
         }
+        if processes::boxed_launch_keywords(call)
+            && matches!(
+                self.resolve(&call.func),
+                Some(Binding::Intrinsic(
+                    Intrinsic::Popen
+                        | Intrinsic::SubprocessCall
+                        | Intrinsic::SubprocessCheckCall
+                        | Intrinsic::SubprocessRun
+                        | Intrinsic::CheckOutput
+                ))
+            )
+        {
+            return Err(self.scoped_builtin_error("subprocess launch keywords", call));
+        }
         if self.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::OrderedDict)) {
             return self.ordered_dict_constructor(call, None);
         }
@@ -9027,8 +9080,12 @@ impl<'a> Checker<'a> {
         if let Some(copy) = self.dataclass_copy(call)? {
             return Ok(copy);
         }
-        if self.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::Partial)) {
-            return self.partial(call);
+        match self.resolve(&call.func) {
+            Some(Binding::Intrinsic(Intrinsic::Partial)) => return self.partial(call),
+            Some(Binding::Intrinsic(Intrinsic::FileConfig)) if calls::has_unpacking(call) => {
+                return self.logging_file_config(call);
+            }
+            _ => {}
         }
         if calls::starred(call) {
             match self.resolve(&call.func) {
@@ -11083,6 +11140,13 @@ impl<'a> Checker<'a> {
                 ),
             });
         }
+        if cfg!(unix)
+            && let [value] = args.as_slice()
+            && matches!(value.ty, Type::Popen(..) | Type::ActivePopen)
+            && self.unshadowed_builtin(&call.func, "repr")
+        {
+            return Err(self.scoped_builtin_error("subprocess.Popen repr", call));
+        }
         if name.id == "repr"
             && args.len() == 1
             && matches!(
@@ -11144,6 +11208,16 @@ impl<'a> Checker<'a> {
             self.reject_builtin_keywords(call)?;
             let key = self.coerce(key.clone(), Type::Str, &call.arguments.args[1])?;
             return Ok(self.implementation_hasattr(receiver.clone(), key));
+        }
+        if matches!(
+            (name.id.as_str(), args.len()),
+            ("getattr", 2 | 3) | ("hasattr" | "delattr", 2) | ("setattr", 3)
+        ) && self.unshadowed_builtin(&call.func, name.id.as_str())
+            && matches!(args[0].ty, Type::Coroutine(_))
+            && matches!(&args[1].kind, ExprKind::Str(member) if member == "cr_origin")
+        {
+            self.reject_builtin_keywords(call)?;
+            return Err(self.object_builtin_error("coroutine.cr_origin", call));
         }
         if self.unshadowed_builtin(&call.func, "getattr")
             && let [receiver, attribute] | [receiver, attribute, _] = args.as_slice()

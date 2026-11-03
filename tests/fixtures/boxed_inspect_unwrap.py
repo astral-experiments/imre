@@ -1,4 +1,5 @@
 import inspect
+import sys
 from inspect import unwrap
 
 
@@ -30,4 +31,21 @@ def current():
     else:
         raise AssertionError("unwrap accepted a cycle")
     assert unwrap(outer, stop=lambda x: x is inner) is inner
+    saved_limit = sys.getrecursionlimit()
+    try:
+        sys.setrecursionlimit(80)
+        chain = original
+        for _ in range(sys.getrecursionlimit()):
+            def layer():
+                pass
+            layer.__wrapped__ = chain
+            chain = layer
+        try:
+            inspect.signature(chain)
+        except ValueError as exc:
+            assert "wrapper loop" in str(exc)
+        else:
+            raise AssertionError("signature exceeded the wrapper limit")
+    finally:
+        sys.setrecursionlimit(saved_limit)
     print(original())

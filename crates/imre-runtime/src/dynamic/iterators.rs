@@ -81,16 +81,7 @@ impl Context {
         };
         self.bind(scope, ".0", source);
         self.bind(scope, ".iterator", iter);
-        Ok(self.alloc(Value::Generator {
-            owner: FrameOwner::Function(function),
-            frame: None,
-            code,
-            scope,
-            iterators: Vec::new(),
-            protected: Vec::new(),
-            running: false,
-            offset: Some(0),
-        }))
+        Ok(self.new_generator(code, scope, FrameOwner::Function(function)))
     }
 
     /// Runs the compiled body until it yields one item, returns, or raises.
@@ -123,6 +114,7 @@ impl Context {
         let Value::Generator {
             running,
             offset,
+            scope,
             owner,
             frame,
             ..
@@ -136,6 +128,7 @@ impl Context {
             *offset = Some(1);
         } else {
             *offset = None;
+            *scope = NONE;
             *frame = None;
             *owner = FrameOwner::Module(NONE);
         }

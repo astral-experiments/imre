@@ -786,9 +786,19 @@ impl Checker<'_> {
         })
     }
 
-    /// Bind the default binary update mode and an optional temporary directory.
+    /// Keep mode and dir on the typed path. The bundled function binds the
+    /// buffering argument and opens the corresponding raw or buffered stream.
     pub(super) fn temporary_file(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
-        calls::reject_unpacking(call, self.source)?;
+        if call.arguments.args.len() > 1
+            || call.arguments.args.iter().any(ast::Expr::is_starred_expr)
+            || call
+                .arguments
+                .keywords
+                .iter()
+                .any(|keyword| matches!(keyword.arg.as_deref(), None | Some("buffering")))
+        {
+            return Err(self.scoped_builtin_error("tempfile.TemporaryFile", call));
+        }
         let directory = self.types.optional(Type::Str);
         let mut params = [
             parameter("mode", Type::Str, Some(unpacking::string("w+b"))),
@@ -807,10 +817,19 @@ impl Checker<'_> {
         Ok(self.ordered_path_operation(PathOperation::TemporaryFile, Type::BinaryIO, args))
     }
 
-    /// A temporary-directory manager exists only at this immediate `with`
-    /// boundary. Its owned name is retained privately for finally cleanup.
+    /// Lower the keyword-only path fast path. The bundled class owns argument
+    /// binding and cleanup policy for the full constructor.
     pub(super) fn temporary_directory(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
-        calls::reject_unpacking(call, self.source)?;
+        if !call.arguments.args.is_empty()
+            || call.arguments.keywords.iter().any(|keyword| {
+                matches!(
+                    keyword.arg.as_deref(),
+                    None | Some("ignore_cleanup_errors" | "delete")
+                )
+            })
+        {
+            return Err(self.scoped_builtin_error("tempfile.TemporaryDirectory", call));
+        }
         let directory = self.types.optional(Type::Str);
         let mut params = vec![
             parameter("dir", directory, Some(Expr::absent(directory))),

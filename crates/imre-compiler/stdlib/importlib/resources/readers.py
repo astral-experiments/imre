@@ -1,4 +1,4 @@
-"""Traversable readers for namespace package resources (CPython 3.14.5)."""
+"""Traversable readers for filesystem, ZIP and namespace package resources (CPython 3.14.5)."""
 
 from __future__ import annotations
 
@@ -15,11 +15,55 @@ from collections.abc import Iterator
 from . import abc
 from ._itertools import only
 
-__all__ = ["MultiplexedPath", "NamespaceReader"]
+__all__ = ["FileReader", "ZipReader", "MultiplexedPath", "NamespaceReader"]
 
 
 def remove_duplicates(items):
     return iter(collections.OrderedDict.fromkeys(items))
+
+
+class FileReader(abc.TraversableResources):
+    def __init__(self, loader):
+        self.path = pathlib.Path(loader.path).parent
+
+    def resource_path(self, resource):
+        """
+        Return the file system path to prevent
+        `resources.path()` from creating a temporary
+        copy.
+        """
+        return str(self.path.joinpath(resource))
+
+    def files(self):
+        return self.path
+
+
+class ZipReader(abc.TraversableResources):
+    def __init__(self, loader, module):
+        self.prefix = loader.prefix.replace('\\', '/')
+        if loader.is_package(module):
+            _, _, name = module.rpartition('.')
+            self.prefix += name + '/'
+        self.archive = loader.archive
+
+    def open_resource(self, resource):
+        try:
+            return super().open_resource(resource)
+        except KeyError as exc:
+            raise FileNotFoundError(exc.args[0])
+
+    def is_resource(self, path):
+        """
+        Workaround for `zipfile.Path.is_file` returning true
+        for non-existent paths.
+        """
+        target = self.files().joinpath(path)
+        return target.is_file() and target.exists()
+
+    def files(self):
+        import zipfile
+
+        return zipfile.Path(self.archive, self.prefix)
 
 
 class MultiplexedPath(abc.Traversable):

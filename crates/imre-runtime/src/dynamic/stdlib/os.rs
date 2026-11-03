@@ -3,7 +3,7 @@ pub(in crate::dynamic) mod device;
 #[cfg(target_os = "linux")]
 pub(in crate::dynamic) mod eventfd;
 #[cfg(target_os = "linux")]
-mod readv;
+mod vectored;
 pub(in crate::dynamic) mod scandir;
 #[cfg(target_os = "linux")]
 mod spawn_child;
@@ -57,6 +57,8 @@ pub(in crate::dynamic) fn install_capabilities(
                 "chown",
                 "listdir",
                 "scandir",
+                #[cfg(target_os = "linux")]
+                "pathconf",
                 "stat",
                 #[cfg(target_os = "linux")]
                 "statvfs",
@@ -508,7 +510,10 @@ pub(super) fn is_descriptor_function(name: &str) -> bool {
     if name == "_exit" {
         return cfg!(unix);
     }
-    if matches!(name, "device_encoding" | "pread" | "pwrite" | "readinto") {
+    if matches!(
+        name,
+        "device_encoding" | "fchdir" | "fsync" | "pread" | "pwrite" | "readinto"
+    ) {
         return cfg!(unix);
     }
     matches!(
@@ -558,9 +563,14 @@ pub(super) fn is_descriptor_function(name: &str) -> bool {
                 name,
                 "copy_file_range"
                     | "get_terminal_size"
+                    | "ttyname"
+                    | "preadv"
+                    | "pwritev"
                     | "readv"
+                    | "writev"
                     | "splice"
                     | "lockf"
+                    | "fdatasync"
                     | "mknod"
                     | "posix_fadvise"
                     | "posix_fallocate"
@@ -998,6 +1008,35 @@ pub(super) fn descriptor(
     if name == "utime" {
         return utime::call(ctx, args, kwargs);
     }
+    let fd_call: Option<unsafe extern "C" fn(i32) -> i32> = match name {
+        "fchdir" => Some(libc::fchdir),
+        "fsync" => Some(libc::fsync),
+        #[cfg(target_os = "linux")]
+        "fdatasync" => Some(libc::fdatasync),
+        _ => None,
+    };
+    if let Some(call) = fd_call {
+        let [Some(fd)] = builtins::bind_builtin_arguments(name, args, kwargs, ["fd"], 1)? else {
+            unreachable!("a descriptor is required");
+        };
+        stat::warn_bool_fd(ctx, fd)?;
+        let fd = super::select::fd(ctx, fd)?;
+        if name == "fchdir" {
+            let audit_fd = ctx.int(i64::from(fd));
+            super::audit::event(ctx, "os.chdir", &[audit_fd])?;
+        }
+        loop {
+            // SAFETY: these calls borrow the descriptor and validate it in the kernel.
+            if unsafe { call(fd) } == 0 {
+                return Ok(NONE);
+            }
+            let error = std::io::Error::last_os_error();
+            if error.kind() != std::io::ErrorKind::Interrupted {
+                return Err(super::os_error(error));
+            }
+            ctx.dispatch_signals()?;
+        }
+    }
     if name == "chdir" {
         return chdir(ctx, args, kwargs);
     }
@@ -1240,19 +1279,23 @@ pub(super) fn descriptor(
         ));
     }
     #[cfg(target_os = "linux")]
-    if name == "ptsname" {
+    if matches!(name, "ptsname" | "ttyname") {
         let [fd] = args else {
             return Err(Error::new(
                 "TypeError",
                 format!(
-                    "posix.ptsname() takes exactly one argument ({} given)",
+                    "posix.{name}() takes exactly one argument ({} given)",
                     args.len()
                 ),
             ));
         };
-        stat::warn_bool_fd(ctx, *fd)?;
-        let fd = super::select::fd(ctx, *fd)?;
-        let bytes = native::ptsname(fd).map_err(super::os_error)?;
+        let bytes = if name == "ttyname" {
+            native::ttyname(c_int(ctx, *fd)?)?
+        } else {
+            stat::warn_bool_fd(ctx, *fd)?;
+            let fd = super::select::fd(ctx, *fd)?;
+            native::ptsname(fd).map_err(super::os_error)?
+        };
         let codec = crate::objects::Codec::lookup(crate::sys::filesystem_encoding()?.as_str())?;
         return Ok(ctx.text_codepoints(codec.decode_filesystem(&bytes)?));
     }
@@ -1287,15 +1330,21 @@ pub(super) fn descriptor(
         // SAFETY: posix_fallocate borrows the fd and takes signed offsets by value.
         return posix_file_call(ctx, || unsafe { libc::posix_fallocate(fd, offset, length) });
     }
-    if name == "getppid" {
+    #[cfg(unix)]
+    if matches!(name, "getpgrp" | "getppid") {
         if !args.is_empty() {
             return Err(Error::new(
                 "TypeError",
-                format!("posix.getppid() takes no arguments ({} given)", args.len()),
+                format!("posix.{name}() takes no arguments ({} given)", args.len()),
             ));
         }
-        // SAFETY: getppid reads the calling process's parent PID and takes no arguments.
-        return Ok(ctx.int(i64::from(unsafe { libc::getppid() })));
+        // SAFETY: both calls read identifiers for the current process and take no pointers.
+        let id = if name == "getpgrp" {
+            unsafe { libc::getpgrp() }
+        } else {
+            unsafe { libc::getppid() }
+        };
+        return Ok(ctx.int(i64::from(id)));
     }
     if name == "kill" {
         let [pid, signal] = args else {
@@ -1376,6 +1425,25 @@ pub(super) fn descriptor(
         }
         return Ok(ctx.alloc(Value::Tuple(result)));
     }
+    #[cfg(target_os = "linux")]
+    if matches!(name, "preadv" | "pwritev") {
+        let [fd, buffers, offset, rest @ ..] = args else {
+            return Err(Error::new(
+                "TypeError",
+                format!("{name} expected at least 3 arguments, got {}", args.len()),
+            ));
+        };
+        if rest.len() > 1 {
+            return Err(Error::new(
+                "TypeError",
+                format!("{name} expected at most 4 arguments, got {}", args.len()),
+            ));
+        }
+        let fd = c_int(ctx, *fd)?;
+        let offset = file_offset(ctx, *offset)?;
+        let flags = rest.first().map(|id| c_int(ctx, *id)).transpose()?.unwrap_or(0);
+        return vectored::transfer(ctx, fd, *buffers, name, Some((offset, flags)));
+    }
     if matches!(name, "pread" | "pwrite") {
         let [fd, data, offset] = args else {
             return Err(Error::new(
@@ -1392,7 +1460,7 @@ pub(super) fn descriptor(
         let bytes = native::read(fd, length, Some(offset), || ctx.dispatch_signals())?;
         return Ok(ctx.alloc(Value::Bytes(bytes)));
     }
-    if matches!(name, "read" | "readinto" | "write") || (cfg!(target_os = "linux") && name == "readv") {
+    if matches!(name, "read" | "readinto" | "write") || (cfg!(target_os = "linux") && matches!(name, "readv" | "writev")) {
         let [fd, data] = args else {
             return Err(Error::new(
                 "TypeError",
@@ -1401,8 +1469,8 @@ pub(super) fn descriptor(
         };
         let fd = c_int(ctx, *fd)?;
         #[cfg(target_os = "linux")]
-        if name == "readv" {
-            return readv::readv(ctx, fd, *data);
+        if matches!(name, "readv" | "writev") {
+            return vectored::transfer(ctx, fd, *data, name, None);
         }
         return if name == "read" {
             let length = ssize_t(ctx, *data)?;

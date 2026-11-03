@@ -1275,7 +1275,6 @@ pub(crate) enum Builtin {
     TryDigitSums([[u8; 10]; 2]),
     Bytes,
     BytesGet,
-    BytesIter,
     Encode,
     Decode,
     DecodeAscii,

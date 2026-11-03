@@ -17,7 +17,56 @@ def current():
     assert module.ForwardRef is annotationlib.ForwardRef
     print(module.Format.VALUE, module.Format.FORWARDREF.value, module.Format.STRING.value)
 
+    def field(format, exc=NotImplementedError):
+        if format > 2:
+            raise exc
+        return {"x": UnboundFieldType}
+
+    def limit(format, exc=NotImplementedError):
+        if format > 2:
+            raise exc
+        return UnboundFieldType
+
+    assert module.call_annotate_function(field, module.Format.STRING) == {"x": "UnboundFieldType"}
+    ref = module.call_evaluate_function(limit, module.Format.FORWARDREF, owner=field)
+    assert type(ref) is module.ForwardRef and ref.__owner__ is field
+    assert module.call_evaluate_function(limit, 4) == "UnboundFieldType"
+
+    class Opaque:
+        def __repr__(self):
+            raise AssertionError("rendered an opaque FORWARDREF operand")
+    token = Opaque()
+    def unknown(format, item=token, exc=NotImplementedError):
+        if format > 2:
+            raise exc
+        range[1]
+        return UnboundFieldType[item]
+    ref = module.call_evaluate_function(unknown, module.Format.FORWARDREF)
+    assert ref.__forward_arg__ == "UnboundFieldType[__annotationlib_name_1__]"
+    assert ref.__extra_names__["__annotationlib_name_1__"] is token
+
     assert typing.evaluate_forward_ref is evaluate_forward_ref
+    import warnings
+    bound = module.ForwardRef('ForwardRef', module='annotationlib')
+    scope = {'ForwardRef': int}
+    assert typing._eval_type(bound, scope, {}, ()) is int
+    assert typing._eval_type(list[bound], scope, {}, (), prefer_fwd_module=True) == list[module.ForwardRef]
+    assert typing._eval_type(bound, scope, {'ForwardRef': bytes}, (), prefer_fwd_module=True) is bytes
+
+    ref = module.ForwardRef("int")
+    with warnings.catch_warnings(record=True) as captured:
+        warnings.simplefilter("always")
+        assert typing._eval_type(list["int"], {}, {}) == list[int]
+        assert ref._evaluate({}, {}, recursive_guard=frozenset()) is int
+        assert ref._evaluate({}, {}, (), recursive_guard=frozenset({"int"})) is ref
+    assert len(captured) == 4
+    for warning in captured:
+        assert warning.category is DeprecationWarning and warning.filename == __file__
+    assert "'typing._eval_type' is deprecated" in str(captured[0].message)
+    assert "'typing.ForwardRef._evaluate' is deprecated" in str(captured[1].message)
+    assert "ForwardRef._evaluate is a private API" in str(captured[2].message)
+    assert str(captured[3].message) == str(captured[2].message)
+
     class RawMeta(type):
         def __eq__(cls, other):
             raise AssertionError("compared the type of a raw result")

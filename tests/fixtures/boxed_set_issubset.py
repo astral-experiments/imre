@@ -95,7 +95,49 @@ class BrokenEquality:
         raise ValueError("equality reached")
 
 
+def check_disjoint():
+    class Mutable(set):
+        pass
+
+    class Frozen(frozenset):
+        pass
+
+    assert Mutable.isdisjoint is set.isdisjoint
+    assert Frozen.isdisjoint is frozenset.isdisjoint
+    assert type(Mutable.isdisjoint).__name__ == "method_descriptor"
+
+    class Key:
+        locked = False
+        def __hash__(self):
+            assert not self.locked
+            return 53
+
+    key = Key()
+    left, right = {key}, frozenset((key,))
+    key.locked = True
+    assert not set.isdisjoint(left, right)
+    assert not frozenset.isdisjoint(right, left)
+
+    class Child(set):
+        def __iter__(self):
+            yield 2
+            raise AssertionError("advanced past the common key")
+
+    other = Child([9])
+    assert not other.isdisjoint(other)
+    assert not {2}.isdisjoint(other)
+    assert not {2}.isdisjoint(iter([1, 2, []]))
+    assert frozenset((5,)).isdisjoint([6, 6])
+    try:
+        set().isdisjoint([set()])
+    except TypeError:
+        pass
+    else:
+        raise AssertionError("accepted an unhashable key")
+
+
 def current():
+    check_disjoint()
     for kind in (set, frozenset):
         members = kind([1, 2])
         method = members.issubset

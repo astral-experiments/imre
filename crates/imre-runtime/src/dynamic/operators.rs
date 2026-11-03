@@ -301,12 +301,26 @@ impl Context {
         if let Ok(integer) = self.as_int(value) {
             return Ok(Some((value, integer)));
         }
+        let target = self.weak_proxy_target(value)?;
+        if target != value {
+            return self.with_weak_target(target, |ctx| ctx.exact_index_result(target).map(Some));
+        }
         let Some(index) = self.bound_slot(value, "__index__")? else {
             return Ok(None);
         };
         let result = self.call(index, Vec::new(), Vec::new())?;
         let number = self.integer_slot_result(result, "__index__")?;
         Ok(Some((result, number)))
+    }
+
+    /// Return an exact int for PyNumber_Index, preserving an already exact result.
+    pub(super) fn exact_index_result(&mut self, value: Id) -> Result<(Id, crate::Int)> {
+        let (index, number) = self.require_index_result(value)?;
+        if matches!(self.heap.get(index), Value::Int(_)) {
+            Ok((index, number))
+        } else {
+            Ok((self.alloc(Value::Int(number.clone())), number))
+        }
     }
 
     fn integer_slot_result(&mut self, result: Id, slot: &str) -> Result<crate::Int> {
@@ -1086,9 +1100,14 @@ impl Context {
         if subset_len > superset_len || (subset_len == superset_len && matches!(op, "<" | ">")) {
             return Ok(FALSE);
         }
+        self.set_members_match(subset, superset, true)
+    }
+
+    /// Test stored keys with their insertion hashes, stopping at the first mismatch.
+    pub(super) fn set_members_match(&mut self, source: Id, other: Id, present: bool) -> Result<Id> {
         let mut position = 0;
-        while let Some((at, key, _, hash)) = self.dictionary_pair(subset, position) {
-            let member = self.find_dictionary_key(superset, key, hash);
+        while let Some((at, key, _, hash)) = self.dictionary_pair(source, position) {
+            let member = self.find_dictionary_key(other, key, hash);
             if let Err(error) = &member {
                 for id in error.roots() {
                     self.heap.keep(id);
@@ -1099,7 +1118,7 @@ impl Context {
             let mark = self.heap.temporary_mark();
             self.heap.keep(key);
             self.discard_truth(mark);
-            if member?.1.is_none() {
+            if member?.1.is_some() != present {
                 return Ok(FALSE);
             }
             position = at + 1;
@@ -1342,8 +1361,11 @@ impl Context {
         let class = match self.heap.get(id) {
             Value::Instance { class, .. } => *class,
             Value::Raised(error) => error.class()?,
+            Value::Weak(wr) if wr.kind == weakref::Kind::Reference && name == "__repr__" => {
+                *self.builtins.get(weakref::REFERENCE_TYPE)?
+            }
             value if name == "__repr__" => match value.native_io_class_name()? {
-                class @ ("_io.BufferedReader" | "_io.BufferedWriter") => {
+                class @ ("_io.BufferedReader" | "_io.BufferedWriter" | "_io.TextIOWrapper") => {
                     *self.builtins.get(class)?
                 }
                 _ => return None,
@@ -2919,20 +2941,6 @@ impl Context {
         }
         result
     }
-    /// Keep an upgraded proxy alive through a subscription that can call Python.
-    fn proxy_subscript<T>(
-        &mut self,
-        target: Id,
-        operation: impl FnOnce(&mut Self) -> Result<T>,
-    ) -> Result<T> {
-        self.heap.reserve_temporaries(1)?;
-        let mark = self.heap.temporary_mark();
-        self.heap.keep(target);
-        let result = operation(self);
-        self.heap.release_weak_target(mark, target);
-        result
-    }
-
     pub(super) fn get_item(&mut self, obj: Id, key: Id) -> Result<Id> {
         if self.raw_read_window(obj).is_some() && !self.view_is_readonly(obj)? {
             return self.raw_view_get(obj, key);
@@ -2942,7 +2950,7 @@ impl Context {
         }
         let target = self.weak_proxy_target(obj)?;
         if target != obj {
-            return self.proxy_subscript(target, |ctx| ctx.get_item(target, key));
+            return self.with_weak_target(target, |ctx| ctx.get_item(target, key));
         }
         if matches!(self.heap.get(obj), Value::Deque(_)) {
             return deque::IndexOp::Get.apply(self, obj, key, false);
@@ -2951,9 +2959,6 @@ impl Context {
             return m.clone().group_item(self, key);
         }
         if let Some(value) = super::union::subscribe(self, obj, key) {
-            return value;
-        }
-        if let Some(value) = super::typing::subscribe(self, obj, key) {
             return value;
         }
         if let Some(getter) = self.bound_slot(obj, "__getitem__")? {
@@ -2965,6 +2970,9 @@ impl Context {
                 .filter(|&names| matches!(self.heap.get(names), Value::Dict(_)))
                 .ok_or_else(|| Error::new("TypeError", "enum member names must be a dictionary"))?;
             return self.get_item(names, key);
+        }
+        if let Some(value) = super::typing::subscribe(self, obj, key) {
+            return value;
         }
         if matches!(self.heap.get(obj), Value::MappingProxy(_)) {
             return self.get_item(self.mapping_proxy_target(obj), key);
@@ -3175,7 +3183,7 @@ impl Context {
         }
         let target = self.weak_proxy_target(obj)?;
         if target != obj {
-            return self.proxy_subscript(target, |ctx| ctx.put_item(target, key, val));
+            return self.with_weak_target(target, |ctx| ctx.put_item(target, key, val));
         }
         if matches!(self.heap.get(obj), Value::Array(_))
             && !matches!(self.heap.get(key), Value::Slice(_))
@@ -3234,7 +3242,14 @@ impl Context {
         Ok(())
     }
     pub(super) fn contains(&mut self, item: Id, container: Id) -> Result<bool> {
+        let container = self.mapping_proxy_target(container);
         if let Some(hook) = self.bound_slot(container, "__contains__")? {
+            if hook == NONE {
+                return Err(Error::new(
+                    "TypeError",
+                    format!("'{}' object is not a container", self.type_name(container)),
+                ));
+            }
             let result = self.call(hook, vec![item], Vec::new())?;
             return self.truth(result);
         }
@@ -3672,7 +3687,7 @@ impl Context {
 
     /// Binary XOR starts with the right table and toggles left keys, so its right
     /// residents get the first comparison. In-place XOR toggles the left table.
-    fn set_xor(&mut self, left: Id, right: Id, inplace: bool) -> Result<Id> {
+    pub(super) fn set_xor(&mut self, left: Id, right: Id, inplace: bool) -> Result<Id> {
         let frozen = matches!(self.heap.get(left), Value::Set { frozen: true, .. });
         let (result, source) = if inplace && !frozen {
             if left == right {
@@ -3681,13 +3696,14 @@ impl Context {
             }
             (left, right)
         } else {
-            let Value::Set { entries, .. } = self.heap.get(right) else {
-                unreachable!()
-            };
-            let entries = entries.try_clone()?;
-            (self.alloc(Value::Set { entries, frozen }), left)
+            let result = self.alloc(Value::Set {
+                entries: Default::default(),
+                frozen,
+            });
+            builtins::update_set(self, result, right)?;
+            (result, left)
         };
-        self.visit_set_operand(source, |ctx, key, hash| {
+        self.visit_set_operand(source, true, |ctx, key, hash| {
             let roots = ctx.heap.temporary_mark();
             ctx.heap.keep(key);
             let toggle = ctx
@@ -3724,13 +3740,16 @@ impl Context {
         Ok(result)
     }
 
-    /// Visit an operand with cached hashes when its keys already belong to a set.
+    /// Visit stored set keys, and optionally exact dictionary keys, with their cached hashes.
     fn visit_set_operand(
         &mut self,
         source: Id,
+        use_dict_hashes: bool,
         mut visit: impl FnMut(&mut Self, Id, Option<i64>) -> Result<()>,
     ) -> Result<()> {
-        let iterator = if matches!(self.heap.get(source), Value::Set { .. }) {
+        let iterator = if matches!(self.heap.get(source), Value::Set { .. })
+            || (use_dict_hashes && matches!(self.heap.get(source), Value::Dict(_)))
+        {
             None
         } else {
             let iterator = self.iterator(source)?;
@@ -3780,7 +3799,7 @@ impl Context {
         } else {
             source
         };
-        self.visit_set_operand(source, |ctx, key, hash| {
+        self.visit_set_operand(source, false, |ctx, key, hash| {
             ctx.discard_difference_key(target, key, hash)
         })
     }
@@ -3797,7 +3816,7 @@ impl Context {
     }
 
     fn filter_difference(&mut self, result: Id, left: Id, right: Id) -> Result<()> {
-        self.visit_set_operand(left, |ctx, key, hash| {
+        self.visit_set_operand(left, false, |ctx, key, hash| {
             ctx.heap.keep(key);
             if ctx.find_dictionary_key(right, key, hash)?.1.is_none() {
                 ctx.set_dictionary_key(result, key, NONE, hash, false)?;
@@ -3959,7 +3978,7 @@ impl Context {
                 (view, other)
             }
         };
-        self.visit_set_operand(source, |ctx, key, hash| {
+        self.visit_set_operand(source, false, |ctx, key, hash| {
             let present = if let Some(view) = ctx.set_view(container) {
                 ctx.view_member(view, key, hash)?
             } else {
@@ -3971,19 +3990,24 @@ impl Context {
             Ok(())
         })?;
         if mutate {
-            let Value::Set { entries, .. } = self.heap.get_mut(result) else {
-                unreachable!()
-            };
-            let selected = std::mem::take(entries);
-            let Value::Set { entries, .. } = self.heap.get_mut(left) else {
-                unreachable!()
-            };
-            for (key, _) in std::mem::replace(entries, selected) {
-                self.heap.weak_edge_removed(key);
-            }
+            self.replace_set_entries(left, result);
             return Ok(left);
         }
         Ok(result)
+    }
+
+    /// Install the completed intersection before releasing any of the receiver's old keys.
+    pub(super) fn replace_set_entries(&mut self, receiver: Id, result: Id) {
+        let Value::Set { entries, .. } = self.heap.get_mut(result) else {
+            unreachable!()
+        };
+        let selected = std::mem::take(entries);
+        let Value::Set { entries, .. } = self.heap.get_mut(receiver) else {
+            unreachable!()
+        };
+        for (key, _) in std::mem::replace(entries, selected) {
+            self.heap.weak_edge_removed(key);
+        }
     }
 
     /// Identify the dictionary views with set-like membership and comparison slots.
@@ -5340,7 +5364,7 @@ impl Context {
         }
         let target = self.weak_proxy_target(obj)?;
         if target != obj {
-            return self.proxy_subscript(target, |ctx| ctx.delete_item(target, key));
+            return self.with_weak_target(target, |ctx| ctx.delete_item(target, key));
         }
         if matches!(self.heap.get(obj), Value::Deque(_)) {
             return deque::IndexOp::Delete

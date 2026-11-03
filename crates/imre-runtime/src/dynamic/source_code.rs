@@ -14,6 +14,9 @@ use super::*;
 
 pub(super) struct Program {
     pub filename: Rc<str>,
+    // All nested code shares a source map. Prelinked suspended suites start in a synthetic header.
+    source_lines: Rc<[usize]>,
+    linked_body_line: Option<u32>,
     pub name: String,
     qualname: String,
     nested_global: bool,
@@ -1296,6 +1299,8 @@ impl Program {
             };
             let mut child = Self::new(self.filename.clone(), name, self.has_named_bindings);
             child.strip_docstrings = self.strip_docstrings;
+            child.source_lines = self.source_lines.clone();
+            child.linked_body_line = self.linked_body_line;
             child.qualname =
                 Self::qualified_name(&self.qualname, self.class_attributes.is_some(), name);
             child.method_imports = self.method_imports.clone();
@@ -1564,8 +1569,23 @@ impl Program {
         )
     }
 
+    pub(super) fn expression_line(&self, offset: ruff_text_size::TextSize) -> Option<u32> {
+        if self.source_lines.is_empty() {
+            return None;
+        }
+        let line = self
+            .source_lines
+            .partition_point(|&start| start <= offset.to_usize()) as u32;
+        Some(
+            self.linked_body_line
+                .map_or(line, |base| base + line.saturating_sub(2)),
+        )
+    }
+
     fn nested_program(&self, name: &str) -> Self {
         let mut child = Self::new(self.filename.clone(), name, self.has_named_bindings);
+        child.source_lines = self.source_lines.clone();
+        child.linked_body_line = self.linked_body_line;
         child.strip_docstrings = self.strip_docstrings;
         child
     }
@@ -1573,6 +1593,8 @@ impl Program {
     fn new(filename: Rc<str>, name: &str, has_named_bindings: bool) -> Self {
         Self {
             filename,
+            source_lines: Rc::default(),
+            linked_body_line: None,
             name: name.to_owned(),
             qualname: name.to_owned(),
             nested_global: false,
@@ -2645,18 +2667,45 @@ impl Context {
         } else {
             &source
         };
+        let normalized;
+        let source = if source.contains('\r') {
+            normalized = source.replace("\r\n", "\n").replace('\r', "\n");
+            normalized.as_str()
+        } else {
+            source
+        };
         let parsed = ruff_python_parser::parse(source, parser_mode.into())
             .map_err(|error| Error::new("SyntaxError", format!("{filename}: {error}")))?;
         if interactive && let ast::Mod::Module(module) = parsed.syntax() {
             check_single_input(&module.body, parsed.tokens())?;
         }
         let spellings = string_replacements(source, parsed.tokens());
-        let lines = line_starts(source.match_indices('\n').map(|(offset, _)| offset + 1))?;
-        if let Some(keyword) = imre_ast::repeated_keyword(parsed.syntax().into()) {
-            let message = format!(
-                "keyword argument repeated: {}",
-                keyword.arg.as_ref().unwrap()
-            );
+        let lines: Rc<[usize]> =
+            line_starts(source.match_indices('\n').map(|(offset, _)| offset + 1))?.into();
+        let async_error = match parsed.syntax() {
+            ast::Mod::Module(module) => {
+                let error = imre_ast::async_generators::syntax_error(module);
+                if error.is_some() && imre_ast::misplaced_star_import(&module.body).is_some() {
+                    return Err(Error::new(
+                        "SyntaxError",
+                        "import * only allowed at module level",
+                    ));
+                }
+                error
+            }
+            _ => None,
+        };
+        let invalid = async_error
+            .map(|(range, msg)| (range, msg.to_owned()))
+            .or_else(|| {
+                let keyword = imre_ast::repeated_keyword(parsed.syntax().into())?;
+                let name = keyword.arg.as_ref().unwrap();
+                Some((
+                    keyword.range(),
+                    format!("keyword argument repeated: {name}"),
+                ))
+            });
+        if let Some((range, message)) = invalid {
             let position = |offset: usize| {
                 let mut line = 1;
                 let mut line_start = 0;
@@ -2668,8 +2717,8 @@ impl Context {
                 }
                 (line, offset - line_start + 1)
             };
-            let (line, column) = position(keyword.start().to_usize());
-            let (end_line, end_column) = position(keyword.end().to_usize());
+            let (line, column) = position(range.start().to_usize());
+            let (end_line, end_column) = position(range.end().to_usize());
             let msg = self.text(&message);
             let details = vec![
                 filename_id,
@@ -2711,6 +2760,7 @@ impl Context {
             return Err(error);
         }
         let mut code = Program::new(Rc::from(filename), "<module>", source.contains(":="));
+        code.source_lines = lines.clone();
         code.strip_docstrings = self.config["optimize"].as_i64().unwrap_or(0) >= 2;
         code.interactive = interactive;
         code.template_expressions = Rc::new(imre_ast::strings::template_expressions(
@@ -2874,9 +2924,7 @@ impl Context {
     }
 
     pub(super) fn dict_named_item(&self, dict: Id, name: &str) -> Option<Id> {
-        self.dict_entries(dict)?.iter().find_map(|&(key, value)| {
-            matches!(self.heap.get(key), Value::Str(k) if k == name).then_some(value)
-        })
+        self.heap.dict_named_item(dict, name)
     }
 
     /// Attach the name at the failed lookup, leaving exceptions raised by Python code alone.
@@ -3073,6 +3121,9 @@ impl Context {
             let value = self.builtin(name);
             self.bind(scope, name, value);
         }
+        let os_error = self.builtin("OSError");
+        self.bind(scope, "EnvironmentError", os_error);
+        self.bind(scope, "IOError", os_error);
         let dict = self.module_globals(scope)?;
         // Reimporting an evicted module leaves existing frames' builtins intact.
         self.source_builtins.get_or_insert(dict);
@@ -3398,18 +3449,10 @@ impl Context {
             Body::Native(_) => unreachable!("source function"),
         };
         if kind != FunctionKind::Plain {
-            let frame = self.alloc(Value::Generator {
-                owner,
-                frame: None,
-                code,
-                scope,
-                iterators: Vec::new(),
-                protected: Vec::new(),
-                offset: Some(0),
-                running: false,
-            });
+            let frame = self.new_generator(code, scope, owner);
             Ok(if kind == FunctionKind::Coroutine {
-                self.alloc(Value::Coroutine(frame))
+                let origin = self.coroutine_origin();
+                self.alloc(Value::Coroutine { frame, origin })
             } else {
                 frame
             })
@@ -3465,13 +3508,16 @@ impl Context {
             .private_scope
             .or(postponed.then_some(("", true)))
             .map(|(owner, postponed)| Rc::new(imre_ast::lower_in(&mut def.body, owner, postponed)));
-        let lines = line_starts(source.match_indices('\n').map(|(offset, _)| offset + 1))?;
+        let lines: Rc<[usize]> =
+            line_starts(source.match_indices('\n').map(|(offset, _)| offset + 1))?.into();
         let mut program = Program::new(
             self.str_value(code.filename)?.into(),
             self.str_value(code.name)?,
             source.contains(":="),
         );
         program.strip_docstrings = self.config["optimize"].as_i64().unwrap_or(0) >= 2;
+        program.source_lines = lines.clone();
+        program.linked_body_line = Some(body_line);
         program.method_imports = Rc::new(signature.method_imports);
         program.template_expressions = Rc::new(template_expressions);
         program.private_names = private_names;
@@ -4851,9 +4897,19 @@ impl Context {
     }
 
     fn source_expr(&mut self, code: &Program, scope: Id, expr: &ast::Expr) -> Result<Id> {
-        let value = stacker::maybe_grow(128 * 1024, 2 * 1024 * 1024, || {
+        let position = imre_ast::expression_position(
+            expr,
+            &code.method_imports,
+            code.private_names.as_deref(),
+        );
+        let previous = self
+            .heap
+            .replace_expression(value::ExpressionPosition::Offset(position));
+        let result = stacker::maybe_grow(128 * 1024, 2 * 1024 * 1024, || {
             self.source_expr_inner(code, scope, expr)
-        })?;
+        });
+        self.heap.replace_expression(previous);
+        let value = result?;
         self.heap.keep(value);
         Ok(value)
     }
@@ -5109,6 +5165,57 @@ impl Context {
             }
         }
         Ok(items)
+    }
+
+    fn source_set_display(
+        &mut self,
+        code: &Program,
+        scope: Id,
+        elements: &[ast::Expr],
+    ) -> Result<Id> {
+        // CPython's BUILD_SET batches leading operands only within its stack-use guideline.
+        let prefix_len = if elements.len() <= 30 {
+            elements
+                .iter()
+                .take_while(|item| !matches!(item, ast::Expr::Starred(_)))
+                .count()
+        } else {
+            0
+        };
+        let (prefix, rest) = elements.split_at(prefix_len);
+        let mark = self.heap.temporary_mark();
+        let mut keys = Vec::with_capacity(prefix_len);
+        for expr in prefix {
+            let operand = self.heap.temporary_mark();
+            let key = self.source_expr(code, scope, expr)?;
+            keys.push(self.keep_source_result(operand, key)?);
+        }
+        let result = self.alloc(Value::Set {
+            entries: Default::default(),
+            frozen: false,
+        });
+        // Pop keys in insertion order. A rejected duplicate may finalize before the next hash.
+        self.heap.release_temporaries_since(mark);
+        self.heap.keep(result);
+        for &key in keys.iter().rev() {
+            self.heap.keep(key);
+        }
+        for (index, key) in keys.into_iter().enumerate() {
+            builtins::set_add(self, result, key)?;
+            self.discard_truth(mark + prefix_len - index);
+        }
+        for expr in rest {
+            let operand = self.heap.temporary_mark();
+            if let ast::Expr::Starred(star) = expr {
+                let iterable = self.source_expr(code, scope, &star.value)?;
+                builtins::update_set(self, result, iterable)?;
+            } else {
+                let key = self.source_expr(code, scope, expr)?;
+                builtins::set_add(self, result, key)?;
+            }
+            self.discard_truth(operand);
+        }
+        Ok(result)
     }
 
     fn extend_source_items(
@@ -5400,21 +5507,7 @@ impl Context {
                 };
                 self.source_eager_comprehension(code, scope, elt, generators, kind, targets)
             }
-            Expr::Set(display) => {
-                let items = display
-                    .elts
-                    .iter()
-                    .map(|item| eval(self, item))
-                    .collect::<Result<Vec<_>>>()?;
-                let result = self.alloc(Value::Set {
-                    entries: Default::default(),
-                    frozen: false,
-                });
-                for item in items {
-                    builtins::set_add(self, result, item)?;
-                }
-                Ok(result)
-            }
+            Expr::Set(display) => self.source_set_display(code, scope, &display.elts),
             Expr::Dict(v) => {
                 let result = self.dict(vec![]);
                 for item in &v.items {

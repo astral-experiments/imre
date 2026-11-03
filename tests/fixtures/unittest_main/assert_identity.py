@@ -1,4 +1,5 @@
 import unittest
+from typing import ClassVar
 
 
 class Display:
@@ -40,6 +41,18 @@ class InterruptedDisplay:
 
 
 class IdentityTest(unittest.TestCase):
+    os_error: ClassVar[type[Exception]] = EnvironmentError
+
+    def test_builtin_exception_alias_name(self):
+        with self.assertRaises(AssertionError) as missing:
+            with self.assertRaises(IOError):
+                pass
+        self.assertEqual(str(missing.exception), "OSError not raised")
+        with self.assertRaises(AssertionError) as missing_attribute:
+            with self.assertRaises(self.os_error):
+                pass
+        self.assertEqual(str(missing_attribute.exception), "OSError not raised")
+
     def test_text_and_bytes_instance(self):
         log: list[str] = []
         self.assertIsInstance("text", str, message(log))

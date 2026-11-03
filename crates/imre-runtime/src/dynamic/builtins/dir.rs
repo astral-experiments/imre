@@ -100,20 +100,23 @@ fn object_names(ctx: &mut Context, object: Id) -> Result<Id> {
         {
             ctx.builtin("builtin_function_or_method")
         }
+        value if value.is_weak_proxy() => return namespace_directory(ctx, object, true),
         Value::Class { .. } if ctx.has_base(object, "tuple") => {
-            return tuple_directory(ctx, object, false);
+            return namespace_directory(ctx, object, false);
         }
         Value::Instance { class, .. } if ctx.has_base(*class, "tuple") => {
-            return tuple_directory(ctx, object, true);
+            return namespace_directory(ctx, object, true);
         }
         Value::Class { .. } | Value::Native(_) => object,
         Value::Count { .. }
+        | Value::Coroutine { .. }
         | Value::Repeat(_)
         | Value::DequeIterator { .. }
         | Value::Union(_)
         | Value::Dict(_)
         | Value::Tuple(_)
         | Value::List(_)
+        | Value::Set { .. }
         | Value::Str(_)
         | Value::SurrogateStr(_) => ctx.exact_type(object)?,
         Value::NamedTuple {
@@ -193,7 +196,7 @@ fn optional_attr(ctx: &mut Context, object: Id, name: &str) -> Result<Option<Id>
 }
 
 /// Copy the instance dictionary before a reported __class__ can mutate it.
-fn tuple_directory(ctx: &mut Context, object: Id, instance: bool) -> Result<Id> {
+fn namespace_directory(ctx: &mut Context, object: Id, instance: bool) -> Result<Id> {
     let dictionary = if instance
         && let Some(source) = optional_attr(ctx, object, "__dict__")?
         && let Some(storage) = ctx.dict_storage(source)
@@ -210,7 +213,7 @@ fn tuple_directory(ctx: &mut Context, object: Id, instance: bool) -> Result<Id> 
         Some(object)
     };
     if let Some(class) = class {
-        merge_tuple_names(ctx, class, dictionary)?;
+        merge_class_names(ctx, class, dictionary)?;
     }
     Ok(dictionary)
 }
@@ -237,7 +240,7 @@ fn contributes_dict_descriptor(ctx: &mut Context, class: Id, mapping: Id) -> Res
 }
 
 /// Merge each reported namespace before reading its bases, as in object.__dir__.
-fn merge_tuple_names(ctx: &mut Context, class: Id, dictionary: Id) -> Result<()> {
+fn merge_class_names(ctx: &mut Context, class: Id, dictionary: Id) -> Result<()> {
     if matches!(ctx.heap.get(class), Value::Native(name) if super::is_builtin_type(name)) {
         let mut names = BTreeSet::new();
         class_names(ctx, class, &mut names)?;
@@ -288,7 +291,7 @@ fn merge_tuple_names(ctx: &mut Context, class: Id, dictionary: Id) -> Result<()>
             for i in 0..count {
                 let index = ctx.int(i);
                 let base = ctx.get_item(bases, index)?;
-                merge_tuple_names(ctx, base, dictionary)?;
+                merge_class_names(ctx, base, dictionary)?;
             }
         }
         ctx.heap.release_temporaries_since(mark);
@@ -422,7 +425,7 @@ fn class_names(ctx: &Context, class: Id, names: &mut BTreeSet<String>) -> Result
         Value::Native(name)
             if matches!(
                 name.as_str(),
-                "builtin_function_or_method" | "dict" | "list" | "str"
+                "builtin_function_or_method" | "dict" | "list" | "str" | "set" | "frozenset"
             ) =>
         {
             class_names(ctx, ctx.builtins["object"], names)?;
@@ -438,6 +441,7 @@ fn class_names(ctx: &Context, class: Id, names: &mut BTreeSet<String>) -> Result
                         "__text_signature__",
                     ],
                 ),
+                "set" | "frozenset" => (super::set_methods(name), super::set_operators(name)),
                 "dict" => (
                     super::DICT_METHODS,
                     &["__class_getitem__", "__or__", "__reversed__", "__ror__"],

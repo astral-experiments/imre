@@ -39,6 +39,28 @@ def format_stack(f=None, limit=None):
     return format_list(extract_stack(f, limit=limit))
 
 
+def extract_tb(tb, limit=None):
+    """Return a StackSummary of the traceback, starting at its outermost frame."""
+    return StackSummary._extract_from_extended_frame_gen(_walk_tb_positions(tb), limit=limit)
+
+
+def _walk_tb_positions(tb):
+    from traceback import _tb_position
+    while tb is not None:
+        frame = tb.tb_frame
+        positions = _tb_position(tb)
+        if positions is None:
+            # Traceback-like objects can expose the Python instruction-position protocol.
+            positions = (None, None, None, None)
+            lasti = tb.tb_lasti
+            if lasti >= 0:
+                positions = next(itertools.islice(frame.f_code.co_positions(), lasti // 2, None))
+            if positions[0] is None:
+                positions = (tb.tb_lineno,) + positions[1:]
+        yield frame, positions
+        tb = tb.tb_next
+
+
 def extract_stack(f=None, limit=None):
     """Extract the raw traceback from the current stack frame.
 

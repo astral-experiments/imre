@@ -29,6 +29,7 @@ declare void @imre_dyn_named_assignment(ptr, i64, i64, i64)
 declare void @imre_dyn_assignment_target(ptr, ptr, i64, i64)
 declare i64 @imre_dyn_op_at(ptr, ptr, i64, i64, i64, ptr)
 declare i64 @imre_dyn_scoped_call_at(ptr, i64, i64, i64, i64, ptr, i64)
+declare void @imre_dyn_expression_line(ptr, i32)
 declare void @imre_dyn_statement_with_exception(ptr, ptr, i64, ptr, i32, i64)
 ";
 
@@ -45,8 +46,9 @@ pub(crate) fn emit(
         ..Output::default()
     };
     let config = output.data(config.as_bytes());
+    // Entry-only registration must not change fingerprints of unrelated packed providers.
     let mut main = format!(
-        "define i32 @main(i32 %argc, ptr %argv) {{\nentry:\n  %ctx = call ptr @imre_dyn_new(i32 %argc, ptr %argv, ptr {config})\n"
+        "declare void @imre_dyn_register_source(ptr, ptr, ptr, ptr, i64, ptr)\n\ndefine i32 @main(i32 %argc, ptr %argv) {{\nentry:\n  %ctx = call ptr @imre_dyn_new(i32 %argc, ptr %argv, ptr {config})\n"
     );
     let mut declarations = HashSet::new();
     for (unit, (name, path, source)) in modules.iter().enumerate() {
@@ -68,9 +70,15 @@ pub(crate) fn emit(
         } else {
             output.module(unit, name, path, source, &file, bundled)?
         };
+        // Retain the text of virtual providers alongside the installed initializer.
+        let (text, len) = if bundled {
+            (output.data(source.as_bytes()), source.len())
+        } else {
+            ("null".to_owned(), 0)
+        };
         writeln!(
             main,
-            "  call void @imre_dyn_register(ptr %ctx, ptr {module_name}, ptr {file}, ptr {code})"
+            "  call void @imre_dyn_register_source(ptr %ctx, ptr {module_name}, ptr {file}, ptr {text}, i64 {len}, ptr {code})"
         )
         .unwrap();
     }
@@ -123,7 +131,7 @@ impl Output {
     ) -> Result<String, String> {
         let parsed = ruff_python_parser::parse_module(source)
             .map_err(|err| format!("{}: {err}", path.display()))?;
-        crate::analysis::check_star_import_scopes(source, &parsed.syntax().body)
+        crate::analysis::check_scope_syntax(source, parsed.syntax())
             .map_err(|error| format!("{}:{error}", path.display()))?;
         if let Some(keyword) = imre_ast::repeated_keyword(parsed.syntax().into()) {
             let name = keyword.arg.as_ref().expect("repeated named argument");
@@ -285,6 +293,7 @@ enum StringConstant {
 #[derive(Default)]
 struct Output {
     keep_docstrings: bool,
+    declared_statement_line: bool,
     string_constant_slots: HashMap<(usize, StringConstant), usize>,
     strings: HashMap<Vec<u8>, u32>,
     interned_identifiers: BTreeSet<String>,
@@ -392,6 +401,7 @@ impl Output {
             exits: Vec::new(),
             caught: Vec::new(),
             simple_call: None,
+            expression_line: 0,
         };
         match body {
             Body::Namespace(stmts) => {
@@ -501,11 +511,13 @@ struct Function<'a, 'p> {
     exits: Vec<(Cleanup, String)>,
     caught: Vec<String>,
     simple_call: Option<ruff_text_size::TextRange>,
+    expression_line: usize,
 }
 
 #[derive(Clone)]
 enum Cleanup {
     With {
+        line: usize,
         exit: String,
         caught: String,
     },
@@ -740,6 +752,7 @@ impl Function<'_, '_> {
     fn checkpoint(&mut self, node: &impl Ranged) {
         let (ptr, count) = self.live_handles();
         let line = self.source.line(node.start());
+        self.expression_line = line;
         self.line(&format!(
             "call void @imre_dyn_statement_with_exception(ptr %ctx, ptr {ptr}, i64 {count}, ptr {}, i32 {line}, i64 {})",
             self.source.file, self.caught.last().map_or("0", String::as_str)
@@ -777,6 +790,16 @@ mod tests {
     use super::*;
 
     #[test]
+    fn declare_exit_line_only_for_compiled_with() {
+        let path = Path::new("<imre stdlib>/example.py");
+        let declare = "declare void @imre_dyn_set_statement_line";
+        for (source, expected) in [("value = 1", 0), ("with a, b:\n    pass", 1)] {
+            let (_, ir) = provider("example", path, source, true).unwrap().unwrap();
+            assert_eq!(ir.matches(declare).count(), expected);
+        }
+    }
+
+    #[test]
     fn provider_substitution() {
         let root = Path::new("<imre stdlib>");
         let path = root.join("example.py");
@@ -810,7 +833,7 @@ mod tests {
             let declared = format!("declare i64 @{symbol}(ptr, i64)");
             assert_eq!(ir.lines().filter(|line| *line == declared).count(), 1);
             ir.lines()
-                .filter(|line| line.contains("call void @imre_dyn_register("))
+                .filter(|line| line.contains("call void @imre_dyn_register_source("))
                 .map(|line| line.ends_with(&format!("@{symbol})")))
                 .collect::<Vec<_>>()
         };

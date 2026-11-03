@@ -8,6 +8,81 @@ pub(crate) struct BoxedPopen(triomphe::Arc<RefCell<Popen>>);
 #[derive(Clone)]
 pub(crate) struct BoxedPipe(crate::ObjectOwner);
 
+/// The constructor retains every owned descriptor until the virtual launch hook runs.
+pub(crate) struct BoxedPreparation {
+    pub(crate) launch: Option<BoxedLaunch>,
+    pipes: Pipes,
+}
+
+pub(crate) struct BoxedLaunch {
+    pub(crate) streams: [(u32, Option<Int>); 3],
+    pub(crate) handles: PreparedHandles,
+    pub(crate) bufsize: Int,
+    pub(crate) pipesize: Int,
+}
+
+impl BoxedPreparation {
+    pub(crate) fn new(
+        streams: [(u32, Option<Int>); 3],
+        mut handles: PreparedHandles,
+        bufsize: Int,
+        pipesize: Int,
+    ) -> Result<(Self, [Int; 6])> {
+        if handles.parents.iter().any(Option::is_some) {
+            let size = bufsize
+                .to_i64()
+                .and_then(|n| i32::try_from(n).ok())
+                .ok_or_else(c_int_overflow)?;
+            handles.wrap_parents(false, size)?;
+        }
+
+        let mut child = handles.child_fds.map(|fd| Int::from(i64::from(fd)));
+        for (index, (_, redirect)) in streams.iter().enumerate() {
+            if let Some(fd) = redirect {
+                child[index] = fd.clone();
+            }
+        }
+        if streams[2].0 == 5 {
+            child[2] = if child[1].as_small() == Some(-1) {
+                Int::from(1)
+            } else {
+                child[1].clone()
+            };
+        }
+        let mut parent = [-1; 3];
+        for (index, file) in handles.pipes.iter().enumerate() {
+            if let Some(file) = file {
+                parent[index] = BoxedPipe(file.clone()).fileno()?;
+            }
+        }
+        let [stdin, stdout, stderr] = child;
+        let [write, read, err] = parent.map(|fd| Int::from(i64::from(fd)));
+        let fds = [stdin, write, read, stdout, err, stderr];
+        let pipes = handles.pipes.clone();
+        let launch = Some(BoxedLaunch {
+            streams,
+            handles,
+            bufsize,
+            pipesize,
+        });
+        Ok((Self { launch, pipes }, fds))
+    }
+
+    pub(crate) fn pipe(&self, index: usize) -> Option<crate::ObjectOwner> {
+        self.pipes[index].clone()
+    }
+
+    pub(crate) fn release(&mut self, failed: bool) {
+        // A hook can retain or replace a public wrapper or raise after calling super.
+        for file in std::mem::take(&mut self.pipes).into_iter().flatten() {
+            if failed {
+                let _ = BoxedPipe(file).close();
+            }
+        }
+        self.launch = None;
+    }
+}
+
 pub(crate) struct BoxedLaunchError {
     pub(crate) error: Error,
     // Only a tagged chdir/exec failure identifies an original Python path object.
@@ -31,6 +106,18 @@ pub(crate) struct BoxedCommunication {
 }
 
 impl PreparedHandles {
+    pub(crate) fn inherit_stderr(&mut self, stream: &mut (u32, Option<Int>), stdout: Int) {
+        if stdout.as_small() == Some(1) {
+            return;
+        }
+        self.child_fds[2] = redirect_number(&stdout).0;
+        *stream = if stdout.as_small() == Some(-1) {
+            (0, None)
+        } else {
+            (6, Some(stdout))
+        };
+    }
+
     pub(crate) fn uses_posix_spawn(
         &self,
         directory: bool,

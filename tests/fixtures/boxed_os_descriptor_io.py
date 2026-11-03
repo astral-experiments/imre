@@ -27,6 +27,59 @@ def expect_errno(operation, args, number):
         raise AssertionError("descriptor operation unexpectedly succeeded")
 
 
+def check_ttyname():
+    from os import ttyname
+
+    assert ttyname is posix.ttyname and ttyname is os.ttyname
+    master, slave = os.openpty()
+    try:
+        path = ttyname(Index(slave))
+        assert path == os.ptsname(master)
+        assert os.path.samestat(os.stat(path), os.fstat(slave))
+        with tempfile.TemporaryFile() as file:
+            expect_errno(ttyname, (file.fileno(),), errno.ENOTTY)
+    finally:
+        os.close(slave)
+        os.close(master)
+    expect_errno(ttyname, (slave,), errno.EBADF)
+
+
+def check_sync(sync):
+    with tempfile.TemporaryFile() as file:
+        fd = file.fileno()
+        os.write(fd, b"abc")
+        os.lseek(fd, 1, os.SEEK_SET)
+        assert sync(fd=file) is None
+        assert os.read(fd, 2) == b"bc"
+    expect_errno(sync, (fd,), errno.EBADF)
+
+
+def check_fchdir():
+    from os import fchdir
+
+    assert fchdir is posix.fchdir and fchdir is os.fchdir
+    previous = os.getcwd()
+    with tempfile.TemporaryDirectory() as directory:
+        parent = os.open(".", os.O_RDONLY)
+        try:
+            child = os.open(directory, os.O_RDONLY)
+            try:
+                assert fchdir(fd=child) is None
+                assert os.path.samestat(os.stat("."), os.fstat(child))
+                with tempfile.TemporaryFile() as file:
+                    expect_errno(fchdir, (file,), errno.ENOTDIR)
+                assert os.path.samestat(os.stat("."), os.fstat(child))
+            finally:
+                try:
+                    fchdir(parent)
+                finally:
+                    os.close(child)
+            expect_errno(fchdir, (child,), errno.EBADF)
+        finally:
+            os.close(parent)
+    assert os.getcwd() == previous
+
+
 def check_sendfile():
     from os import sendfile
 
@@ -110,6 +163,92 @@ def check_readv():
     expect_errno(readv, (fd, [first]), errno.EBADF)
 
 
+def check_preadv():
+    from os import preadv
+
+    assert preadv is os.preadv is posix.preadv
+    assert os.RWF_HIPRI == posix.RWF_HIPRI
+    assert os.RWF_NOWAIT == posix.RWF_NOWAIT
+    with tempfile.TemporaryFile() as source:
+        fd = source.fileno()
+        os.write(fd, b"abcdef")
+        os.lseek(fd, 1, os.SEEK_SET)
+        head, tail = bytearray(b".."), bytearray(b"...")
+        assert preadv(fd, [head, tail], 2) == 4
+        assert (head, tail) == (b"cd", b"ef.")
+        assert preadv(fd, [head], 6, 0) == 0
+        expect_errno(preadv, (fd, [head], -2), errno.EINVAL)
+        assert os.lseek(fd, 0, os.SEEK_CUR) == 1
+        try:
+            preadv(fd, [head], 0, 1 << 30)
+        except NotImplementedError:
+            pass  # libc supplies only the flags-free preadv.
+        except OSError as error:
+            assert error.errno in (errno.EINVAL, errno.EOPNOTSUPP)
+        else:
+            raise AssertionError("unsupported preadv flag succeeded")
+        assert os.lseek(fd, 0, os.SEEK_CUR) == 1
+    expect_errno(preadv, (fd, [head], 0), errno.EBADF)
+
+
+def check_writev():
+    from os import writev
+
+    assert writev is os.writev is posix.writev
+    data = bytearray(b"abc")
+    with tempfile.TemporaryFile() as target:
+        fd = target.fileno()
+        parts = (b"<", data, memoryview(data)[1:], memoryview(b"|>"))
+        assert writev(fd, parts) == 8
+        assert os.lseek(fd, 0, os.SEEK_CUR) == 8
+        assert os.pread(fd, 8, 0) == b"<abcbc|>"
+        assert writev(fd, []) == 0
+        probe = bytearray(b"unchanged")
+        try:
+            writev(fd, [probe, object()])
+        except TypeError:
+            pass
+        else:
+            raise AssertionError("writev accepted a non-buffer")
+        probe.append(0)
+        assert os.lseek(fd, 0, os.SEEK_CUR) == 8
+    expect_errno(writev, (fd, [b"x"]), errno.EBADF)
+
+    reader, writer = os.pipe()
+    os.close(reader)
+    try:
+        expect_errno(writev, (writer, [b"x", b"y"]), errno.EPIPE)
+    finally:
+        os.close(writer)
+
+
+def check_pwritev():
+    from os import pwritev
+
+    assert pwritev is os.pwritev is posix.pwritev
+    with tempfile.TemporaryFile() as target:
+        fd = target.fileno()
+        os.write(fd, b"abcdef")
+        os.lseek(fd, 1, os.SEEK_SET)
+        assert pwritev(fd, [b"X", bytearray(b"Y"), memoryview(b"Z")], 2) == 3
+        assert os.pread(fd, 6, 0) == b"abXYZf"
+        expect_errno(pwritev, (fd, [b"!"], -2), errno.EINVAL)
+        assert os.lseek(fd, 0, os.SEEK_CUR) == 1
+        if hasattr(os, "RWF_APPEND"):
+            try:
+                n = pwritev(fd, [b"!", b"?"], 0, os.RWF_APPEND)
+            except NotImplementedError:
+                pass  # The linked libc implements only pwritev.
+            except OSError as error:
+                assert error.errno in (errno.EINVAL, errno.EOPNOTSUPP)
+            else:
+                assert n == 2 and os.pread(fd, 8, 0) == b"abXYZf!?"
+                assert os.lseek(fd, 0, os.SEEK_CUR) == 1
+                assert pwritev(fd, [b"+"], -1, os.RWF_APPEND) == 1
+                assert os.lseek(fd, 0, os.SEEK_CUR) == 9
+                assert os.pread(fd, 9, 0) == b"abXYZf!?+"
+
+
 def check_splice():
     from os import splice
 
@@ -138,12 +277,25 @@ def check_splice():
 
 
 def current():
+    from os import fsync
+
+    assert fsync is os.fsync and fsync is posix.fsync
+    check_sync(fsync)
+    check_fchdir()
     if sys.platform == "linux":
+        from os import fdatasync
+
+        assert fdatasync is os.fdatasync and fdatasync is posix.fdatasync
+        check_sync(fdatasync)
+        check_ttyname()
         check_tmpfile()
         check_copy_file_range()
         check_sendfile()
         check_splice()
         check_readv()
+        check_preadv()
+        check_writev()
+        check_pwritev()
     assert os.strerror is posix.strerror
     try:
         os.fstat(-1)

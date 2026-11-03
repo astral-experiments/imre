@@ -15,7 +15,68 @@ class Wrapper(io.TextIOWrapper):
         super().__init__(raw, **kwargs)
 
 
+def check_repr():
+    for stream in (sys.stdin, sys.stdout, sys.stderr):
+        expected = f"<_io.TextIOWrapper name={stream.name!r} mode={stream.mode!r} encoding={stream.encoding!r}>"
+        assert repr(stream) == stream.__repr__() == expected
+
+    class Named(io.TextIOWrapper):
+        @property
+        def name(self):
+            if self.problem:
+                raise self.problem
+            return self.field() if isinstance(self.field, type) else self.field
+
+        @property
+        def encoding(self):
+            raise AssertionError("repr used the public encoding property")
+
+    class Reinit:
+        def __repr__(self):
+            io.TextIOWrapper.__init__(text, io.BytesIO(), encoding="ascii")
+            return "changed"
+
+    with Named(io.BytesIO(), encoding="utf-8") as text:
+        text.field = text
+        text.problem = KeyError("name lookup")
+        try:
+            repr(text)
+        except KeyError as error:
+            assert error is text.problem
+        else:
+            raise AssertionError("name error was swallowed")
+        text.problem = None
+        try:
+            repr(text)
+        except RuntimeError as error:
+            assert str(error) == "reentrant call inside Named.__repr__"
+        else:
+            raise AssertionError("recursive name did not raise")
+        text.field = Reinit()
+        assert repr(text) == "<Named name=changed encoding='ascii'>"
+
+        order = []
+
+        class Shown(str):
+            def __del__(self):
+                order.append("shown")
+
+        class Name:
+            def __repr__(self):
+                return holder.pop()
+
+            def __del__(self):
+                order.append("name")
+
+        holder = [Shown("rendered")]
+        text.field = Name
+        assert repr(text) == "<Named name=rendered encoding='ascii'>"
+        assert order == ["shown", "name"]
+        text.field = None
+
+
 def current():
+    check_repr()
     assert original_type is type(sys.stdout) is io.TextIOWrapper is _io.TextIOWrapper
     assert sys.stdout.truncate.__self__ is sys.stdout
     assert sys.stderr.truncate.__self__ is sys.stderr
@@ -319,6 +380,49 @@ def current():
         stream.write("é")
         assert stream.truncate() == (b"\xc3\xa9", None)
         assert stream.truncate(marker)[1] is marker
+
+    class WarningBuffer(io.BytesIO):
+        def _dealloc_warn(self, source):
+            warnings.append(source is stream)
+            raise RuntimeError("ignored warning hook")
+
+        def close(self):
+            flushed.append(self.getvalue())
+            super().close()
+
+    warnings, flushed = [], []
+    for finalize in (False, True):
+        stream = io.TextIOWrapper(WarningBuffer(), encoding="ascii")
+        stream.__dict__["_finalizing"] = True
+        assert stream._finalizing is False
+        stream.write("pending")
+        if finalize:
+            stream.__del__()
+        else:
+            stream.close()
+        assert stream.closed
+    assert warnings == [True]
+    assert flushed == [b"pending", b"pending"]
+
+    del sys.modules["_io"]
+    try:
+        fresh = __import__("_io")
+        foreign = fresh.TextIOWrapper._finalizing
+        original = _io.TextIOWrapper._finalizing
+        with fresh.TextIOWrapper(fresh.BytesIO()) as fresh_stream:
+            foreign.__set__(fresh_stream, True)
+            assert foreign.__get__(fresh_stream) is True
+            for member, other in ((foreign, sys.stdout), (foreign, sys.stderr), (original, fresh_stream)):
+                for operation, args in ((member.__get__, ()), (member.__set__, (False,))):
+                    try:
+                        operation(other, *args)
+                    except TypeError as error:
+                        assert str(error) == "descriptor '_finalizing' for '_io.TextIOWrapper' objects doesn't apply to a '_io.TextIOWrapper' object"
+                    else:
+                        raise AssertionError("foreign finalizing member accepted the wrapper")
+            assert foreign.__get__(fresh_stream) is True
+    finally:
+        sys.modules["_io"] = _io
 
     print("wrapped binary streams")
 
