@@ -56,6 +56,41 @@ fn arguments<const N: usize>(
     Ok(values)
 }
 
+pub(super) fn randint(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    let bounds = arguments("Random.randint", ["a", "b"], 2, "3", args, kwargs)?;
+    let [Some(start), Some(stop)] = bounds else {
+        let missing: Vec<_> = ["a", "b"]
+            .into_iter()
+            .zip(bounds)
+            .filter_map(|(name, value)| value.is_none().then_some(name))
+            .collect();
+        return Err(super::super::calls::missing_arguments_error(
+            "Random.randint",
+            "positional",
+            &missing,
+        ));
+    };
+    let start = ctx.index_integer(start)?;
+    let stop = ctx.index_integer(stop)?;
+    let draw = objects::randint(&start.big(), &stop.big())?;
+    Ok(ctx.alloc(Value::Int(Int::new(draw))))
+}
+
+pub(super) fn randbytes(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    let [length] = arguments("Random.randbytes", ["n"], 1, "2", args, kwargs)?;
+    let length = length.ok_or_else(|| {
+        super::super::calls::missing_arguments_error("Random.randbytes", "positional", &["n"])
+    })?;
+    // Random.randbytes calls getrandbits(n * 8) before to_bytes indexes n.
+    let eight = ctx.int(8);
+    let count = ctx.binary("*", length, eight)?;
+    let count = ctx.index_integer(count)?;
+    let draw = objects::random_bits(&count)?;
+    let draw = ctx.alloc(Value::Int(Int::new(draw)));
+    let little = ctx.text("little");
+    builtins::call(ctx, "int.to_bytes", &[draw, length, little], &[])
+}
+
 /// Select the original element through Python's length and subscription protocols.
 pub(super) fn choice(
     ctx: &mut Context,

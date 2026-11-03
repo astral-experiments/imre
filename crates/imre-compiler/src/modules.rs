@@ -2169,6 +2169,7 @@ impl IntrinsicModule {
                 Intrinsic::PurePath(crate::ir::PathFlavor::Windows)
             }
             (Self::Random, "shuffle") => Intrinsic::Random(crate::ir::RandomOperation::Shuffle),
+            (Self::Random, "randbytes") => Intrinsic::ObjectRuntimeExport("random.randbytes"),
             (Self::Random, "choices") => Intrinsic::ObjectRuntimeExport("random.choices"),
             (Self::Random, "choice") => Intrinsic::RandomChoice { secure: false },
             (Self::Secrets, "choice") => Intrinsic::RandomChoice { secure: true },
