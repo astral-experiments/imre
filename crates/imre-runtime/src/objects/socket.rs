@@ -1,5 +1,4 @@
-//! One socket object owns a non-inheritable fd. All aliases observe explicit
-//! close; dropping the last owner closes silently, including on error paths.
+//! A socket closes its descriptor on explicit close or drop, unless detached.
 use super::exceptions::{Error, Kind, Result, finish};
 use super::records::{RecordDescriptor, imre_record_new};
 use super::{Bytes, Int, Object, Storage, StorageCell, Str, c_int, errno_error};
@@ -421,8 +420,14 @@ fn handle(
     }
     #[cfg(target_vendor = "apple")]
     setopt(raw, libc::SOL_SOCKET, libc::SO_NOSIGPIPE, 1).map_err(errno_error)?;
+    let socket = socket_state(family, kind, proto, blocking)?;
+    state(&socket, |s| s.fd = fd.into_raw_fd());
+    Ok(socket)
+}
+
+fn socket_state(family: i32, kind: i32, proto: i32, blocking: bool) -> Result<crate::ObjectOwner> {
     Socket {
-        fd: fd.into_raw_fd(),
+        fd: -1,
         family,
         kind,
         proto,
@@ -431,6 +436,60 @@ fn handle(
         close_requested: false,
     }
     .into_owner()
+}
+
+/// Adopt the caller’s descriptor after validating it and filling omitted metadata.
+pub(crate) fn adopt(
+    raw: RawFd,
+    mut family: i32,
+    mut kind: i32,
+    mut proto: i32,
+) -> Result<crate::ObjectOwner> {
+    if raw < 0 {
+        return Err(Error::new(Kind::ValueError, "negative file descriptor"));
+    }
+    match peer_call(|addr, len| {
+        // SAFETY: peer_call supplies writable sockaddr storage and its capacity.
+        unsafe { libc::getsockname(raw, addr, len) }
+    }) {
+        Ok((_, addr, _)) if family == -1 => family = i32::from(addr.ss_family),
+        Err(e)
+            if family == -1 || matches!(e.raw_os_error(), Some(libc::EBADF | libc::ENOTSOCK)) =>
+        {
+            return Err(errno_error(e));
+        }
+        // Some valid families (e.g. AF_ALG) do not implement getsockname.
+        _ => {}
+    }
+    if kind == -1 {
+        kind = int_option(raw, libc::SOL_SOCKET, libc::SO_TYPE)?;
+    }
+    #[cfg(target_os = "linux")]
+    if proto == -1 {
+        proto = int_option(raw, libc::SOL_SOCKET, libc::SO_PROTOCOL)?;
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        proto = 0;
+    }
+    #[cfg(target_os = "linux")]
+    let (kind, blocking) = (
+        kind & !(libc::SOCK_NONBLOCK | libc::SOCK_CLOEXEC),
+        kind & libc::SOCK_NONBLOCK == 0,
+    );
+    #[cfg(not(target_os = "linux"))]
+    let blocking = true;
+    let socket = socket_state(family, kind, proto, blocking)?;
+    state(&socket, |s| s.fd = raw);
+    Ok(socket)
+}
+
+/// Return the underlying descriptor and disable subsequent closes by this socket.
+pub(crate) fn detach(socket: &Object) -> RawFd {
+    state(socket, |s| {
+        s.close_requested = true;
+        std::mem::replace(&mut s.fd, -1)
+    })
 }
 
 pub(crate) fn open(family: i32, ty: i32, proto: i32) -> Result<crate::ObjectOwner> {
@@ -1844,7 +1903,7 @@ pub extern "C" fn imre_socket_setsockopt_bytes(
 }
 
 pub(crate) fn get_option_into(
-    s: &Object,
+    raw: RawFd,
     level: i32,
     name: i32,
     buffer: &mut [u8],
@@ -1853,15 +1912,19 @@ pub(crate) fn get_option_into(
         .map_err(|_| Error::new(Kind::OverflowError, "getsockopt buffer too large"))?;
     // SAFETY: the buffer is writable for the supplied capacity; the kernel returns its used length.
     checked(unsafe {
-        libc::getsockopt(fd(s), level, name, buffer.as_mut_ptr().cast(), &raw mut len)
+        libc::getsockopt(raw, level, name, buffer.as_mut_ptr().cast(), &raw mut len)
     })
     .map_err(errno_error)?;
     Ok(len as usize)
 }
 
 pub(crate) fn get_option(s: &Object, level: i32, name: i32) -> Result<i32> {
+    int_option(fd(s), level, name)
+}
+
+fn int_option(raw: RawFd, level: i32, name: i32) -> Result<i32> {
     let mut bytes = [0; size_of::<i32>()];
-    get_option_into(s, level, name, &mut bytes)?;
+    get_option_into(raw, level, name, &mut bytes)?;
     Ok(i32::from_ne_bytes(bytes))
 }
 

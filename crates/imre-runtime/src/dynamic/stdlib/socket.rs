@@ -925,7 +925,7 @@ fn getsockopt(
         return Err(Error::new("OSError", "getsockopt buflen out of range"));
     }
     let mut bytes = vec![0; len as usize];
-    let used = native::get_option_into(socket, level, name, &mut bytes)?;
+    let used = native::get_option_into(native::fd(socket), level, name, &mut bytes)?;
     bytes.truncate(used);
     Ok(ctx.alloc(Value::Bytes(bytes)))
 }
@@ -1030,13 +1030,30 @@ pub(super) fn call(
 ) -> Result<Id> {
     match name {
         "socket" => {
-            let keys = ["family", "type", "proto"];
+            let keys = ["family", "type", "proto", "fileno"];
             check_args(name, args, kwargs, keys.len(), &keys)?;
-            let handle = native::open(
-                int_option(ctx, args, kwargs, 0, "family", -1)?,
-                int_option(ctx, args, kwargs, 1, "type", -1)?,
-                int_option(ctx, args, kwargs, 2, "proto", -1)?,
-            )?;
+            // Bind like the public Python constructor before invoking any __index__ methods.
+            let mut values = [None; 4];
+            for (i, key) in keys.iter().enumerate() {
+                values[i] = option(args, i, kwargs, key).map_err(|_| {
+                    Error::new(
+                        "TypeError",
+                        format!("socket.__init__() got multiple values for argument '{key}'"),
+                    )
+                })?;
+            }
+            let [family, kind, proto, fileno] = values;
+            let mut number = |value: Option<Id>| {
+                value
+                    .map(|v| ctx.index_c_int(v))
+                    .transpose()
+                    .map(|v| v.unwrap_or(-1))
+            };
+            let (family, kind, proto) = (number(family)?, number(kind)?, number(proto)?);
+            let handle = match fileno {
+                None | Some(NONE) => native::open(family, kind, proto)?,
+                Some(value) => native::adopt(ctx.index_c_long(value)? as i32, family, kind, proto)?,
+            };
             return new_socket(ctx, handle);
         }
         "if_nameindex" => {
@@ -1183,6 +1200,7 @@ pub(super) fn call(
     match method {
         "__enter__" => return Ok(*receiver),
         "__exit__" | "close" => native::close(&s)?,
+        "detach" => return Ok(ctx.int(i64::from(native::detach(&s)))),
         "fileno" | "listen" | "accept" | "getsockname" | "getpeername" => {
             return endpoint_method(ctx, method, &s, args);
         }

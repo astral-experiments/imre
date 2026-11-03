@@ -60,3 +60,15 @@ try:
 except OSError as exc:
     if exc.errno not in (errno.EAFNOSUPPORT, errno.EADDRNOTAVAIL, errno.EPROTONOSUPPORT):
         raise
+
+
+with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as original:
+    original.bind(("127.0.0.1", 0))
+    address = original.getsockname()
+    with socket.socket(fileno=original.fileno()) as adopted:
+        assert original.detach() == adopted.fileno()
+        assert original.fileno() == -1
+        assert adopted.getsockname() == address
+        assert adopted.type == socket.SOCK_DGRAM
+        adopted.sendto(b"adopted", address)
+        assert adopted.recvfrom(32) == (b"adopted", address)

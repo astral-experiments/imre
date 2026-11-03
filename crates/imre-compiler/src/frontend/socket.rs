@@ -45,6 +45,16 @@ impl Checker<'_> {
     }
 
     pub(super) fn socket_constructor(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
+        if call.arguments.args.len() >= 4
+            || call.arguments.args.iter().any(ast::Expr::is_starred_expr)
+            || call
+                .arguments
+                .keywords
+                .iter()
+                .any(|kw| matches!(kw.arg.as_deref(), None | Some("fileno")))
+        {
+            return Err(self.object_builtin_error("socket.socket(fileno)", call));
+        }
         let params = [
             ("family", constant("af_inet")),
             ("type", constant("sock_stream")),
@@ -121,6 +131,7 @@ impl Checker<'_> {
                     ("value", int, None),
                 ],
             ),
+            "detach" => return Err(self.object_builtin_error("socket.detach", call)),
             _ => return Err(error(self.source, call, "unsupported socket method")),
         };
         let params: Vec<_> = params
