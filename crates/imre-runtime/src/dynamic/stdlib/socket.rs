@@ -37,9 +37,14 @@ const IMPORTED_CONSTANTS: &[(&str, i32)] = &[
     ("IPPROTO_UDP", libc::IPPROTO_UDP),
     ("SOL_SOCKET", libc::SOL_SOCKET),
     ("SO_TYPE", libc::SO_TYPE),
+    ("SO_ERROR", libc::SO_ERROR),
     ("SO_REUSEADDR", libc::SO_REUSEADDR),
     ("SO_REUSEPORT", libc::SO_REUSEPORT),
     ("SOCK_DGRAM", libc::SOCK_DGRAM),
+    #[cfg(target_os = "linux")]
+    ("SOCK_CLOEXEC", libc::SOCK_CLOEXEC),
+    #[cfg(target_os = "linux")]
+    ("SOCK_NONBLOCK", libc::SOCK_NONBLOCK),
     ("SOCK_RAW", libc::SOCK_RAW),
     ("SOCK_RDM", libc::SOCK_RDM),
     ("SOCK_SEQPACKET", libc::SOCK_SEQPACKET),
