@@ -82,6 +82,7 @@ functions! {
     BIO_clear_flags(Handle, c_int) -> ();
     BIO_read(Handle, *mut c_void, c_int) -> c_int;
     BIO_write(Handle, *const c_void, c_int) -> c_int;
+    TLS_method() -> Handle;
     TLS_client_method() -> Handle;
     TLS_server_method() -> Handle;
     SSL_CTX_set_default_passwd_cb(Handle, PasswordCallback) -> ();
@@ -97,6 +98,7 @@ functions! {
     SSL_CTX_get_options(Handle) -> u64;
     SSL_CTX_set_options(Handle, u64) -> u64;
     SSL_CTX_clear_options(Handle, u64) -> u64;
+    SSL_CTX_get_verify_mode(Handle) -> c_int;
     SSL_CTX_set_verify(Handle, c_int, VerifyCallback) -> ();
     SSL_CTX_set_cipher_list(Handle, *const c_char) -> c_int;
     SSL_CTX_get_security_level(Handle) -> c_int;
@@ -275,37 +277,50 @@ unsafe extern "C" fn reject_password(_: *mut c_char, _: c_int, _: c_int, _: Hand
     -1
 }
 
+// Method selectors exposed by CPython, distinct from TLS wire versions.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum Protocol {
+    Tls = 2,
+    Client = 16,
+    Server = 17,
+}
+
+const SSL_VERIFY_PEER: c_int = 1;
+const SSL_VERIFY_FAIL_IF_NO_PEER_CERT: c_int = 2;
+const VERIFY_REQUIRED: c_int = SSL_VERIFY_PEER | SSL_VERIFY_FAIL_IF_NO_PEER_CERT;
+
 pub(crate) struct Context {
     api: &'static Api,
     handle: NonNull<c_void>,
-    server: bool,
+    pub(super) protocol: Protocol,
+    pub(super) check_hostname: bool,
 }
 
 impl Context {
-    pub(crate) fn is_server(&self) -> bool {
-        self.server
-    }
-
-    pub(crate) fn new(server: bool) -> Result<Self, Failure> {
+    pub(super) fn new(protocol: Protocol) -> Result<Self, Failure> {
         let api = api().ok_or_else(|| Failure::Other("OpenSSL 3 TLS is unavailable".into()))?;
         api.clear();
-        // SAFETY: both methods are process-lifetime constants in this provider.
-        let method = if server {
-            api.TLS_server_method
-        } else {
-            api.TLS_client_method
+        // SAFETY: the selected method is a process-lifetime constant in this provider.
+        let method = match protocol {
+            Protocol::Tls => api.TLS_method,
+            Protocol::Client => api.TLS_client_method,
+            Protocol::Server => api.TLS_server_method,
         };
         let handle = NonNull::new(unsafe { (api.SSL_CTX_new)(method()) })
             .ok_or_else(|| api.error("SSL_CTX_new"))?;
         let mut ctx = Self {
             api,
             handle,
-            server,
+            protocol,
+            check_hostname: protocol == Protocol::Client,
         };
-        // SAFETY: the context is live and owns both settings. Clients verify the peer.
-        // Servers have CPython's default policy of no client authentication.
+        ctx.set_verify_bits(if ctx.check_hostname {
+            VERIFY_REQUIRED
+        } else {
+            0
+        });
+        // SAFETY: the context owns the callback, which has static lifetime.
         unsafe {
-            (api.SSL_CTX_set_verify)(handle.as_ptr(), if server { 0 } else { 0x01 | 0x02 }, None);
             (api.SSL_CTX_set_default_passwd_cb)(handle.as_ptr(), reject_password);
         }
         // SAFETY: arguments implement the SSL_CTX_set_min_proto_version macro.
@@ -340,6 +355,48 @@ impl Context {
         ctx.add_verify_flags(X509_V_FLAG_TRUSTED_FIRST)?;
         ctx.set_ciphers(CIPHERS)?;
         Ok(ctx)
+    }
+
+    fn verify_bits(&self) -> c_int {
+        // SAFETY: SSL_CTX_get_verify_mode reads this live context.
+        unsafe { (self.api.SSL_CTX_get_verify_mode)(self.handle.as_ptr()) }
+    }
+
+    fn set_verify_bits(&mut self, bits: c_int) {
+        // SAFETY: OpenSSL copies the mode. A null callback retains default verification.
+        unsafe { (self.api.SSL_CTX_set_verify)(self.handle.as_ptr(), bits, None) };
+    }
+
+    pub(super) fn verify_mode(&self) -> Result<i64, Failure> {
+        match self.verify_bits() & VERIFY_REQUIRED {
+            0 => Ok(0),
+            SSL_VERIFY_PEER => Ok(1),
+            VERIFY_REQUIRED => Ok(2),
+            _ => Err(Failure::Other(
+                "invalid return value from SSL_CTX_get_verify_mode".into(),
+            )),
+        }
+    }
+
+    pub(super) fn set_verify_mode(&mut self, mode: c_int) -> Result<(), &'static str> {
+        let bits = match mode {
+            0 if self.check_hostname => {
+                return Err("Cannot set verify_mode to CERT_NONE when check_hostname is enabled.");
+            }
+            0 => 0,
+            1 => SSL_VERIFY_PEER,
+            2 => VERIFY_REQUIRED,
+            _ => return Err("invalid value for verify_mode"),
+        };
+        self.set_verify_bits(bits);
+        Ok(())
+    }
+
+    pub(super) fn set_check_hostname(&mut self, enabled: bool) {
+        if enabled && self.verify_bits() == 0 {
+            self.set_verify_bits(VERIFY_REQUIRED);
+        }
+        self.check_hostname = enabled;
     }
 
     fn add_verify_flags(&mut self, flags: c_ulong) -> Result<(), Failure> {
@@ -640,12 +697,8 @@ impl Session {
         ctx: &Context,
         socket: crate::ObjectOwner,
         host: Option<&str>,
+        server: bool,
     ) -> Result<Self, Failure> {
-        if ctx.server == host.is_some() {
-            return Err(Failure::Other(
-                "TLS role and server hostname disagree".into(),
-            ));
-        }
         let api = ctx.api;
         api.clear();
         // SAFETY: SSL_new takes its own reference to this live context.
@@ -655,24 +708,25 @@ impl Session {
             api,
             handle,
             socket,
-            server: ctx.server,
+            server,
         };
         if let Some(host) = host {
-            session.set_peer_name(host)?;
+            session.set_peer_name(host, ctx.check_hostname)?;
         }
         // SAFETY: SSL_set_fd creates a non-closing socket BIO. The owned descriptor
         // remains valid for the full lifetime of this SSL object.
         if unsafe { (api.SSL_set_fd)(handle.as_ptr(), socket::fd(&session.socket)) } != 1 {
             return Err(api.error("SSL_set_fd"));
         }
-        if ctx.server {
-            session.blocking_io(Operation::Accept)?;
-            return Ok(session);
-        }
-        let connected = session.blocking_io(Operation::Connect);
+        let handshake = session.blocking_io(if server {
+            Operation::Accept
+        } else {
+            Operation::Connect
+        });
+        let verify_peer = ctx.verify_bits() & SSL_VERIFY_PEER != 0;
         // SAFETY: this live SSL contains the verification result of that handshake.
         let code = unsafe { (api.SSL_get_verify_result)(handle.as_ptr()) };
-        if code != 0 {
+        if verify_peer && code != 0 {
             // SAFETY: OpenSSL documents this as a static string for every result code.
             let msg = unsafe { CStr::from_ptr((api.X509_verify_cert_error_string)(code)) };
             return Err(Failure::Verify {
@@ -680,17 +734,20 @@ impl Session {
                 message: msg.to_string_lossy().into_owned(),
             });
         }
-        connected?;
+        handshake?;
         // A user-selected anonymous TLS 1.2 cipher can omit the certificate and
         // still yield X509_V_OK. This client requires an authenticated peer.
         // SAFETY: only test the borrowed pointer for presence while SSL is live.
-        if unsafe { (api.SSL_get0_peer_certificate)(handle.as_ptr()) }.is_null() {
+        if !server
+            && verify_peer
+            && unsafe { (api.SSL_get0_peer_certificate)(handle.as_ptr()) }.is_null()
+        {
             return Err(Failure::Other("peer did not return a certificate".into()));
         }
         Ok(session)
     }
 
-    fn set_peer_name(&self, host: &str) -> Result<(), Failure> {
+    fn set_peer_name(&self, host: &str, check_hostname: bool) -> Result<(), Failure> {
         let api = self.api;
         let ssl = self.handle.as_ptr();
         if host.is_empty() || host.starts_with('.') || !host.is_ascii() {
@@ -707,12 +764,15 @@ impl Session {
             // SAFETY: the parsed ASN1_OCTET_STRING contains the address in network
             // byte order. OpenSSL copies its bytes before we release it.
             let rc = unsafe {
-                let param = (api.SSL_get0_param)(ssl);
-                let rc = (api.X509_VERIFY_PARAM_set1_ip)(
-                    param,
-                    (api.ASN1_STRING_get0_data)(ip),
-                    (api.ASN1_STRING_length)(ip) as usize,
-                );
+                let rc = if check_hostname {
+                    (api.X509_VERIFY_PARAM_set1_ip)(
+                        (api.SSL_get0_param)(ssl),
+                        (api.ASN1_STRING_get0_data)(ip),
+                        (api.ASN1_STRING_length)(ip) as usize,
+                    )
+                } else {
+                    1
+                };
                 (api.ASN1_OCTET_STRING_free)(ip);
                 rc
             };
@@ -734,7 +794,7 @@ impl Session {
             // SAFETY: OpenSSL copies the terminated name in both calls. Host flags
             // are inherited from the context. IP literals took the separate verification path above.
             unsafe {
-                if (api.SSL_set1_host)(ssl, name.as_ptr()) != 1 {
+                if check_hostname && (api.SSL_set1_host)(ssl, name.as_ptr()) != 1 {
                     return Err(api.error("SSL_set1_host"));
                 }
                 if (api.SSL_ctrl)(
