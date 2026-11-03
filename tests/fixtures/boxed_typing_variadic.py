@@ -105,6 +105,22 @@ def current():
     assert type(specialized) is type(template)
     assert specialized.__typing_unpacked_tuple_args__ == (int, ...)
     assert Tuple[t, *Tuple[tuple[*ts], ...]][str, int, bool] == Tuple[str, *Tuple[tuple[int, bool], ...]]
+    try:
+        template[int, str]
+    except TypeError as error:
+        assert error.__context__ is None
+    else:
+        raise AssertionError("accepted excess Unpack arguments")
+
+    import typing
+    replacement = ModuleType("typing")
+    replacement._typevar_subst = typing._typevar_subst
+    replacement._specialize_generic_alias = lambda *args: "wrong"
+    sys.modules["typing"] = replacement
+    try:
+        assert template[bytes].__args__[0].__args__ == (bytes, ...)
+    finally:
+        sys.modules["typing"] = typing
     spelled, = list[t]
     assert spelled.__typing_unpacked_tuple_args__ is None
     assert spelled[int] == next(iter(list[int]))
@@ -116,7 +132,6 @@ def current():
     from typing import Generic
     class Pack(Generic[*ts]): pass
 
-    import typing
     from types import GeneratorType
     from typing import Concatenate, Literal
     from collections.abc import Iterable

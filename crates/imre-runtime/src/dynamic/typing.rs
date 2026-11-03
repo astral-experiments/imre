@@ -744,14 +744,17 @@ pub(super) fn subscribe(ctx: &mut Context, target: Id, index: Id) -> Option<Resu
         && (alias.name.is_some()
             || matches!(
                 alias.kind,
-                AliasKind::Concatenate
-                    | AliasKind::Callable
-                    | AliasKind::AbcCallable
-                    | AliasKind::Unpack
+                AliasKind::Concatenate | AliasKind::Callable | AliasKind::AbcCallable
             )
+            || (alias.kind == AliasKind::Unpack
+                && matches!(ctx.heap.get(alias.parameters), Value::Tuple(params) if !params.is_empty()))
             || (alias.kind == AliasKind::Generic
                 && matches!(ctx.heap.get(alias.origin), Value::Class { .. })))
     {
+        let class = ctx.builtin("typing._GenericAlias");
+        if let Some(getitem) = ctx.own_class_attr(class, "__getitem__") {
+            return Some(ctx.call(getitem, vec![target, index], Vec::new()));
+        }
         return Some(typing_alias_helper(
             ctx,
             "_specialize_generic_alias",
@@ -759,7 +762,7 @@ pub(super) fn subscribe(ctx: &mut Context, target: Id, index: Id) -> Option<Resu
         ));
     }
     if let Value::GenericAlias(alias) = ctx.heap.get(target)
-        && matches!(alias.kind, AliasKind::Literal(_))
+        && matches!(alias.kind, AliasKind::Literal(_) | AliasKind::Unpack)
         && matches!(ctx.heap.get(alias.parameters), Value::Tuple(params) if params.is_empty())
     {
         return Some(ctx.checked_format(target, true).and_then(|name| {
@@ -2496,10 +2499,12 @@ pub(super) fn call(
                     "missing native typing._GenericAlias dictionary",
                 )
             })?;
-            if ctx.dict_named_item(dictionary, "__iter__").is_none() {
-                let method = ctx.lookup_attr(*methods, "__iter__")?;
-                let key = ctx.text("__iter__");
-                ctx.put_item(dictionary, key, method)?;
+            for name in ["__iter__", "__getitem__"] {
+                if ctx.dict_named_item(dictionary, name).is_none() {
+                    let method = ctx.lookup_attr(*methods, name)?;
+                    let key = ctx.text(name);
+                    ctx.put_item(dictionary, key, method)?;
+                }
             }
             Ok(class)
         }

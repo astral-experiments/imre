@@ -1998,6 +1998,9 @@ class _GenericAlias:
     def __iter__(self):
         yield Unpack[self]
 
+    def __getitem__(self, args):
+        return _specialize_generic_alias(self, args)
+
 
 def _concatenate_copy_with(self, params):
     if isinstance(params[-1], (list, tuple)):
@@ -2453,7 +2456,9 @@ def _specialize_generic_alias_uncached(alias, args):
         return _rebuild_builtin_alias(alias, substituted_args())
     if isinstance(alias, _typing.Union):
         return _typing.Union[substituted_args()]
-    if isinstance(alias, (_AnnotatedAlias, _typing._ConcatenateGenericAlias, _typing._UnpackGenericAlias)):
+    if _typing_runtime._get_alias_kind(alias) == "unpack":
+        return _SpecialGenericAlias.copy_with(alias, substituted_args())
+    if isinstance(alias, (_AnnotatedAlias, _typing._ConcatenateGenericAlias)):
         return alias.copy_with(substituted_args())
     if type(alias) is _typing._CallableGenericAlias:
         # typing flattens each substituted tuple, even one in the result position.
@@ -2478,7 +2483,8 @@ def _specialize_generic_alias(alias, args):
     try:
         return _cached_generic_specialization(alias, args)
     except TypeError:
-        return _specialize_generic_alias_uncached(alias, args)
+        pass
+    return _specialize_generic_alias_uncached(alias, args)
 
 
 class _TypedCacheSpecialForm(_SpecialForm, _root=True):
