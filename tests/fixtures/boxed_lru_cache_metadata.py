@@ -1,3 +1,5 @@
+import gc
+import weakref
 from functools import lru_cache
 
 
@@ -88,3 +90,16 @@ def current():
     assert method(4) == Example.method.__wrapped__(receiver, 4) == 4
     assert lru_cache(method).__wrapped__ is method
     print(outer(3, scale=4), cached.custom, calls)
+
+    wrapper = lru_cache(lambda: 7)
+    ref, proxy = weakref.ref(wrapper), weakref.proxy(wrapper)
+    assert ref() is wrapper and proxy() == 7
+    del wrapper
+    gc.collect()
+    assert ref() is None
+    try:
+        proxy()
+    except ReferenceError:
+        pass
+    else:
+        raise AssertionError("dead cache wrapper proxy remained callable")

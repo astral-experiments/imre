@@ -307,6 +307,7 @@ impl Context {
             | Value::MemoryView { .. }
             | Value::File(_)
             | Value::Partial { .. }
+            | Value::Cached { .. }
             | Value::HandlerLock(_)
             | Value::PrimitiveLock(_)
             | Value::Native(_) => true,
