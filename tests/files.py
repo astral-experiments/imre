@@ -620,6 +620,7 @@ if sys.platform == "linux":
 
         master, slave = os.openpty()
         try:
+            assert os.tcgetpgrp(master) == 0
             reopened = os.open(os.ptsname(master), os.O_RDWR | os.O_NOCTTY)
             try:
                 assert os.write(reopened, b'pty') == 3
@@ -635,6 +636,12 @@ if sys.platform == "linux":
         finally:
             os.close(slave)
             os.close(master)
+        try:
+            os.tcgetpgrp(master)
+        except OSError as error:
+            assert error.errno == errno.EBADF
+        else:
+            raise AssertionError("closed tcgetpgrp descriptor")
     """
 
 ERRORS = {
