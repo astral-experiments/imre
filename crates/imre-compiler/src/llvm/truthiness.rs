@@ -136,8 +136,9 @@ impl Emitter<'_, '_> {
                     self.instruction(format!("icmp ne i32 {bit}, 0"))
                 }
                 Type::List(_) => {
-                    let length = self
-                        .instruction(format!("call i32 @sequence_header(ptr {})", value.operand));
+                    let helper = self.sequence_helper("sequence_header");
+                    let length =
+                        self.instruction(format!("call i32 @{helper}(ptr {})", value.operand));
                     self.instruction(format!("icmp ugt i32 {length}, 1"))
                 }
                 Type::ListInt

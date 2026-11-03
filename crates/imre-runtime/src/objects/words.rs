@@ -480,25 +480,26 @@ pub struct SequenceLayout {
     inline_words: usize,
 }
 
-/// Generated main calls this once before running user code. Returning the
-/// sequence offsets keeps Rust's enum and inline-buffer layout private.
+/// Acknowledge the launcher before user code runs. Only programs that access
+/// sequence storage directly need the runtime's header and inline-buffer offsets.
 #[unsafe(no_mangle)]
-pub extern "C" fn imre_seq_layout() -> SequenceLayout {
+pub extern "C" fn imre_typed_start(want_original: u32, layout: Option<&mut SequenceLayout>) {
     #[cfg(any(target_os = "linux", target_os = "macos"))]
-    let _ = crate::run_start::wait_for_cleanup(false);
-    sequence_layout()
-}
-
-/// Request the launcher's unmodified OS arguments before releasing its socket.
-#[unsafe(no_mangle)]
-pub extern "C" fn imre_seq_layout_with_orig_argv() -> SequenceLayout {
-    #[cfg(any(target_os = "linux", target_os = "macos"))]
-    super::args::save_launcher_arguments(crate::run_start::wait_for_cleanup(true));
-    sequence_layout()
+    {
+        let args = crate::run_start::wait_for_cleanup(want_original != 0);
+        if want_original != 0 {
+            super::args::save_launcher_arguments(args);
+        }
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    let _ = want_original;
+    crate::initialize_io();
+    if let Some(layout) = layout {
+        *layout = sequence_layout();
+    }
 }
 
 fn sequence_layout() -> SequenceLayout {
-    crate::initialize_io();
     let mut sample = Words::new(0);
     sample.values.push(0);
     // One non-owning word fits inline and needs no destructor.
@@ -568,7 +569,7 @@ mod tests {
             let word = crate::ObjectOwner::as_ptr(&child) as usize;
             let sequence = crate::ObjectOwner::from_raw(imre_seq_new(5));
             let alias = crate::ObjectOwner::clone(&sequence);
-            let layout = imre_seq_layout();
+            let layout = sequence_layout();
             let cached = crate::ObjectOwner::as_ptr(&sequence)
                 .byte_add(layout.header)
                 .cast::<u32>();
@@ -663,7 +664,7 @@ mod tests {
                 crate::ObjectOwner::from_raw(imre_str_list_copy(crate::ObjectOwner::as_ptr(&diff)));
             drop(held);
             drop(input);
-            let layout = imre_seq_layout();
+            let layout = sequence_layout();
             let handle = crate::ObjectOwner::as_ptr(&diff);
             assert_eq!(
                 handle.byte_add(layout.header).cast::<u32>().read(),
