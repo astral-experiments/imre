@@ -1,0 +1,94 @@
+{
+  "public_head": "dfe0f18ebecfc5b302a5747f79079d48b9eb86eb",
+  "source": "Lib/test/test_warnings/__init__.py",
+  "source_sha256": "3b00dac0c24bbaf28b3f442402c95d7850f50b567f94d8378d950513150e0943",
+  "support": "Lib/test/support/__init__.py",
+  "support_sha256": "ab77f9f5d2a4cd07f21550980fc84a224553a8d7c7ffdda409ebd7f3ee1941c4",
+  "cpython_only_definition_line": 1258,
+  "impl_detail_definition_line": 1264,
+  "check_impl_detail_definition_line": 1287,
+  "sys_implementation_name_guard_line": 1295,
+  "gates": [
+    {
+      "id": "test.test_warnings.LocksTest.test_release_lock_no_lock",
+      "occurrence": 1,
+      "stock": "PASS",
+      "decorator": "@support.cpython_only",
+      "decorator_line": 1555,
+      "public_behavior_exercised_on_stock": "C accelerator raises RuntimeError when releasing an unacquired warning lock.",
+      "native_callback": {
+        "O0": {
+          "line": 494,
+          "reason": "implementation detail specific to cpython"
+        },
+        "O3": {
+          "line": 494,
+          "reason": "implementation detail specific to cpython"
+        }
+      },
+      "omitted": false,
+      "additional_requirement": {
+        "line": 1556,
+        "decorator": "@unittest.skipUnless(c_warnings, 'C module is required')",
+        "triggered": false
+      }
+    },
+    {
+      "id": "test.test_warnings._WarningsTests.test_issue31411",
+      "occurrence": 1,
+      "stock": "PASS",
+      "decorator": "@support.cpython_only",
+      "decorator_line": 1144,
+      "public_behavior_exercised_on_stock": "warn_explicit raises TypeError for an invalid once registry.",
+      "native_callback": {
+        "O0": {
+          "line": 747,
+          "reason": "implementation detail specific to cpython"
+        },
+        "O3": {
+          "line": 747,
+          "reason": "implementation detail specific to cpython"
+        }
+      },
+      "omitted": false
+    },
+    {
+      "id": "test.test_warnings._WarningsTests.test_issue31416",
+      "occurrence": 1,
+      "stock": "PASS",
+      "decorator": "@support.cpython_only",
+      "decorator_line": 1155,
+      "public_behavior_exercised_on_stock": "warn_explicit raises TypeError for an invalid filter action or default action.",
+      "native_callback": {
+        "O0": {
+          "line": 750,
+          "reason": "implementation detail specific to cpython"
+        },
+        "O3": {
+          "line": 750,
+          "reason": "implementation detail specific to cpython"
+        }
+      },
+      "omitted": false
+    },
+    {
+      "id": "test.test_warnings._WarningsTests.test_issue31566",
+      "occurrence": 1,
+      "stock": "PASS",
+      "decorator": "@support.cpython_only",
+      "decorator_line": 1170,
+      "public_behavior_exercised_on_stock": "warn emits the configured UserWarning with bytes __name__ and None __file__.",
+      "native_callback": {
+        "O0": {
+          "line": 753,
+          "reason": "implementation detail specific to cpython"
+        },
+        "O3": {
+          "line": 753,
+          "reason": "implementation detail specific to cpython"
+        }
+      },
+      "omitted": false
+    }
+  ]
+}
