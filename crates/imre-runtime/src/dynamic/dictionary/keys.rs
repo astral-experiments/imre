@@ -562,7 +562,7 @@ impl Context {
                     "cannot hash writable memoryview object",
                 ));
             }
-            let (format, _) = self.view_format_width(owner, self.view_layout(key)?);
+            let (format, _) = self.view_format_width(owner, &self.view_layout(key)?);
             if !matches!(format.trim_start_matches('@'), "B" | "b" | "c") {
                 return Err(Error::new(
                     "ValueError",

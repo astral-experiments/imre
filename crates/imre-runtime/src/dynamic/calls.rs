@@ -2506,8 +2506,7 @@ impl Context {
             {
                 let owner = Self::memoryview_owner(owner)?;
                 let view = self.view_layout(obj)?;
-                let len = view.len;
-                let (format, width) = self.view_format_width(owner, view);
+                let (format, width) = self.view_format_width(owner, &view);
                 return Ok(match name {
                     "obj" => {
                         if let Some(lease) = lease {
@@ -2523,21 +2522,24 @@ impl Context {
                         }
                     }
                     "readonly" => builtins::boolean(self.view_is_readonly(obj)?),
-                    "ndim" => self.int(1),
+                    "ndim" => self.int(view.shape().len() as i64),
                     "strides" => {
-                        let stride = self.int(view.stride.wrapping_mul(width as i64));
-                        self.alloc(Value::Tuple(vec![stride]))
+                        let strides = view
+                            .strides(width)
+                            .into_iter()
+                            .map(|n| self.int(n))
+                            .collect();
+                        self.alloc(Value::Tuple(strides))
                     }
                     "suboffsets" => self.alloc(Value::Tuple(vec![])),
-                    "contiguous" | "c_contiguous" | "f_contiguous" => {
-                        builtins::boolean(view.is_contiguous())
-                    }
-                    "nbytes" => self.int((len * width) as i64),
+                    "c_contiguous" | "contiguous" => builtins::boolean(view.is_contiguous()),
+                    "f_contiguous" => builtins::boolean(view.is_f_contiguous()),
+                    "nbytes" => self.int((view.len * width) as i64),
                     "itemsize" => self.int(width as i64),
                     "format" => self.text(format),
                     _ => {
-                        let length = self.int(len as i64);
-                        self.alloc(Value::Tuple(vec![length]))
+                        let shape = view.shape().iter().map(|&n| self.int(n as i64)).collect();
+                        self.alloc(Value::Tuple(shape))
                     }
                 });
             }
@@ -3714,12 +3716,16 @@ impl Context {
             {
                 return Ok(self.builtin(&format!("tuple.{name}")));
             }
-            Value::Native(ref class) if matches!(class.as_str(), "map" | "filter") => match name {
-                "__iter__" | "__next__" => return Ok(self.builtin(&format!("{class}.{name}"))),
-                "__name__" | "__qualname__" => return Ok(self.text(class.clone())),
-                "__module__" => return Ok(self.text("builtins")),
-                _ => {}
-            },
+            Value::Native(ref class)
+                if matches!(class.as_str(), "map" | "filter" | "memory_iterator") =>
+            {
+                match name {
+                    "__iter__" | "__next__" => return Ok(self.builtin(&format!("{class}.{name}"))),
+                    "__name__" | "__qualname__" => return Ok(self.text(class.clone())),
+                    "__module__" => return Ok(self.text("builtins")),
+                    _ => {}
+                }
+            }
             Value::Native(ref class)
                 if matches!(name, "__module__" | "__name__" | "__qualname__")
                     && let Some(short) = class.strip_prefix("datetime.")
@@ -6904,6 +6910,7 @@ impl Context {
                                 | "super"
                                 | "enumerate"
                                 | "generator"
+                                | "memory_iterator"
                                 | "coroutine"
                                 | "coroutine_wrapper"
                                 | "anext_awaitable"

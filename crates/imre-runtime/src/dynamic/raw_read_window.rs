@@ -109,7 +109,7 @@ impl Context {
                 if !view.is_contiguous() {
                     return Ok(None);
                 }
-                let (_, width) = self.view_format_width(owner, view);
+                let (_, width) = self.view_format_width(owner, &view);
                 (owner, view.byte_start(width), view.len * width)
             }
             Value::BytesIoBuffer { .. } => (object, 0, self.view_element_count(object)?),

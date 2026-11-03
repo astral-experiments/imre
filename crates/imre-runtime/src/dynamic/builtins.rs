@@ -362,6 +362,7 @@ pub(super) fn is_final_iterator_type(name: &str) -> bool {
             | "list_reverseiterator"
             | "tuple_iterator"
             | "generic_alias_iterator"
+            | "memory_iterator"
             | "bytes_iterator"
             | "bytearray_iterator"
             | "range_iterator"
@@ -528,6 +529,7 @@ pub(super) fn set_operator(method: &str) -> Option<&'static str> {
 
 pub(super) const MEMORYVIEW_METHODS: &[&str] = &[
     "cast",
+    "__iter__",
     "__enter__",
     "__exit__",
     "release",
@@ -718,6 +720,9 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
             if super::async_generator::method(kind.type_name(), attr) =>
         {
             kind.type_name()
+        }
+        Value::MemoryIterator { .. } if matches!(attr, "__iter__" | "__next__") => {
+            "memory_iterator"
         }
         Value::Generator { .. } if super::generator_protocol::generator_method(attr) => "generator",
         Value::Coroutine { .. }
@@ -1819,7 +1824,7 @@ pub(super) fn call(
                 arity(name, args, min, max)?;
                 ctx.call_coroutine_method(owner, method, args)
             }
-            "generator" if matches!(method, "__iter__" | "__next__") => {
+            "generator" | "memory_iterator" if matches!(method, "__iter__" | "__next__") => {
                 ctx.iterator_method(owner, method, args, kwargs)
             }
             "generator" if method == "send" => {
@@ -2066,7 +2071,7 @@ pub(super) fn call(
                     }
                     let [order] =
                         bind_method_arguments("tobytes", &args[1..], kwargs, ["order"], 1)?;
-                    if let Some(order) = order.filter(|&id| id != NONE) {
+                    let fortran = if let Some(order) = order.filter(|&id| id != NONE) {
                         let value = ctx.str_value(order).map_err(|_| {
                             type_error(format!(
                                 "tobytes() argument 'order' must be str or None, not {}",
@@ -2076,11 +2081,14 @@ pub(super) fn call(
                         if !matches!(value, "C" | "F" | "A") {
                             return Err(Error::new("ValueError", "order must be 'C', 'F' or 'A'"));
                         }
-                    }
+                        value == "F"
+                    } else {
+                        false
+                    };
                     if !matches!(ctx.heap.get(args[0]), Value::MemoryView { .. }) {
                         return Err(type_error("expected memoryview"));
                     }
-                    let bytes = ctx.memoryview_bytes(args[0])?;
+                    let bytes = ctx.memoryview_bytes_order(args[0], fortran)?;
                     return Ok(ctx.alloc(Value::Bytes(bytes)));
                 }
                 positional(name, kwargs)?;
@@ -2100,6 +2108,9 @@ pub(super) fn call(
                 let Value::MemoryView { owner, .. } = *ctx.heap.get(args[0]) else {
                     return Err(type_error("expected memoryview"));
                 };
+                if method == "__iter__" {
+                    return ctx.memoryview_iterator(args[0]);
+                }
                 if method == "__enter__" {
                     Context::memoryview_owner(owner)?;
                     return Ok(args[0]);
@@ -2561,7 +2572,7 @@ pub(super) fn call(
                 Value::Str(v) => v.chars().count(),
                 Value::SurrogateStr(points) => points.len(),
                 Value::Bytes(v) | Value::ByteArray(v) => v.len(),
-                Value::MemoryView { .. } => ctx.view_layout(args[0])?.len,
+                Value::MemoryView { .. } => ctx.view_layout(args[0])?.first_len()?,
                 Value::Range(range) => {
                     return range.len.to_i64().map(|n| ctx.int(n)).ok_or_else(|| {
                         Error::new(
