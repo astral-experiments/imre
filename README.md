@@ -104,7 +104,7 @@ with Rust-competitive performance.
 
 ## Standard library test results
 
-As of November 3, 2026, Imre has a paired pass for **8,675 of 13,328 tests (65.1%)** in the original 25 standard library module families.
+As of November 3, 2026, Imre has a paired pass for **8,684 of 13,328 tests (65.2%)** in the original 25 standard library module families.
 A **paired pass** means that CPython 3.14.5 passed the original test and Imre passed it at both
 `-O0` and `-O3`. The total combines focused and intact suite runs across revisions, including
 development branches. Each original test occurrence counts once. Skipped and omitted tests remain
@@ -125,7 +125,7 @@ in the denominator. The [omission decisions](docs/stdlib-omissions.md) explain e
 | `itertools` | 112 | 138 | 0 | Selected runs account for 112 original passes. Public 90955053 resolved the typing.Iterable import. The unchanged 137-case primary now reaches a module-level type alias in _pyrepl/types.py and stops before discovery at both native levels. A separate GIL companion supplies the 138th registration. |
 | `json` | 214 | 216 | 0 | All 34 unmodified CLI originals passed, with 32 child subtests and 64 tool subprocesses per lane. The O0/O3 children ran native code. Two help cases matched the upstream usage-prefix assertion while their full stdout differed from stock. |
 | `logging` | 225 | 272 | 0 | Both invalid queue configurations failed as expected without starting a multiprocessing manager. This adds one original to the earlier queue and logging results. |
-| `os` | 373 | 579 | 0 | 32 more ordinary Linux originals passed on stock and public native O0/O3. This includes the earlier posix_spawnp test. Three successes that require a specially configured reference remain separate. |
+| `os` | 382 | 579 | 0 | 382 ordinary Linux `os` and `posix` originals passed on pinned CPython and native O0/O3. The latest nine cover file transfers, vectored I/O, invalid descriptors and `confstr`. Configured-only cases remain separate. |
 | `pathlib` | 970 | 1,369 | 1 | Eight inherited group and home-directory tests passed on the reviewed head merged in #4448. Earlier package discovery and focused runs contribute to the total. |
 | `re` | 147 | 165 | 7 | Seven CPython compiler and bytecode checks have explicit omissions. The 147 paired originals include focused and complete runs. |
 | `shutil` | 154 | 223 | 0 | Stock and public native O0/O3 each discovered all 223 originals and ran the same 49 additional tests. All three owners exited 0 with identical parent callbacks and four successful subtests. |
@@ -137,7 +137,7 @@ in the denominator. The [omission decisions](docs/stdlib-omissions.md) explain e
 | `typing` | 688 | 712 | 0 | 688 originals passed across class, doctest and selected runs. The latest ParamSpec alias test and its 14 subtests passed on stock and ordinary public native O0/O3. Other tests still fail in some full classes. |
 | `unittest` | 275 | 1,090 | 0 | The intact package passed 160 cases. On public #3601, the unchanged test_assertions and test_case files ran all 150 originals with runtime imports. Their 109 paired passes added 81 distinct cases. Another 34 original mock methods passed in focused runs. |
 | `urllib` | 173 | 178 | 0 | Both unchanged upstream scripts completed on public `main` at O0 and O3 with ordinary and runtime imports. All 178 tests matched stock in order, including 173 successful parents, three with only child outcomes, and two Windows skips. |
-| **Total** | **8,675** | **13,328** | **27** | **4 complete suites match stock on `main`** |
+| **Total** | **8,684** | **13,328** | **27** | **4 complete suites match stock on `main`** |
 
 See the [standard library coverage report](docs/stdlib.md) for the Linux test
 results and import coverage recorded in this repository.
