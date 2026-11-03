@@ -149,6 +149,7 @@ impl Checker<'_> {
                 self.types.optional(handler),
                 vec![parameter("name", Type::Str, None)],
             ),
+            Intrinsic::HandlerNames => (Log::HandlerNames, Type::FrozenStrings, vec![]),
             Intrinsic::FileEncodingUsesUtf8 => (Log::FileEncodingUsesUtf8, Type::Bool, vec![]),
             Intrinsic::PrintActiveException => (Log::PrintActiveException, Type::None, vec![]),
             _ => unreachable!(),
@@ -200,6 +201,20 @@ impl Checker<'_> {
             Log::DictConfig
         };
         Ok(self.ordered_builtin(Builtin::Logging(op), Type::None, args))
+    }
+
+    /// Use the public weak registry, which keeps live handlers available to later shutdown calls.
+    pub(super) fn logging_shutdown(&self, call: &ast::ExprCall) -> Result<Expr, String> {
+        if !call.arguments.is_empty() {
+            return Err(error(
+                self.source,
+                call,
+                "logging.shutdown arguments require --runtime-imports",
+            ));
+        }
+        let error = self.scoped_builtin_error("logging.shutdown", call);
+        self.defer_object_error(&error);
+        Ok(Expr::none())
     }
 
     /// Read the configuration path only after evaluating all call arguments.

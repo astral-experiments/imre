@@ -2,6 +2,8 @@
 use super::{Emitter, Value};
 use crate::ir::{Binary, Builtin, Compare, Expr, ExprKind, Function, Statement, Type};
 
+const MAX_SMALL: i64 = (1_i64 << 62) - 1;
+
 /// A nonnegative contribution of the form `scale * ordinal + offset`.
 #[derive(Clone, Copy, Default)]
 struct Affine {
@@ -54,6 +56,7 @@ struct Reduction<'a> {
     lengths: &'a [(usize, i32)],
     values: Vec<(usize, Scalar)>,
     scope_budget: usize,
+    max_ordinal: i64,
     sum: Option<usize>,
     increment: Affine,
     cycle: Cycle,
@@ -112,11 +115,11 @@ impl Reduction<'_> {
     }
 
     /// Resolve a scalar only after it was initialized in this iteration.
-    fn expression(&self, expr: &Expr) -> Option<Affine> {
+    fn expression(&mut self, expr: &Expr) -> Option<Affine> {
         if expr.ty != Type::Int {
             return None;
         }
-        match &expr.kind {
+        let value = match &expr.kind {
             ExprKind::Local(slot) if *slot == self.target => Some(Affine {
                 scale: 1,
                 offset: 0,
@@ -150,7 +153,13 @@ impl Reduction<'_> {
                 }
             }
             _ => None,
+        }?;
+        // An intermediate may have a larger coefficient than its use (for example, x * 0).
+        if value.scale != 0 {
+            let limit = (MAX_SMALL - i64::from(value.offset)) / i64::from(value.scale);
+            self.max_ordinal = self.max_ordinal.min(limit);
         }
+        Some(value)
     }
 
     /// Count equal or unequal residues in a full cycle, independently of its starting ordinal.
@@ -307,6 +316,7 @@ impl Emitter<'_, '_> {
             lengths: &self.affine_literal_lengths,
             values: Vec::new(),
             scope_budget: 32,
+            max_ordinal: MAX_SMALL,
             sum: None,
             increment: Affine::default(),
             cycle: Cycle {
@@ -321,6 +331,7 @@ impl Emitter<'_, '_> {
             return;
         }
         let count = 1023 / plan.cycle.period * plan.cycle.period;
+        let max_start = plan.max_ordinal - count;
         let scale = i64::from(plan.increment.scale) * count;
         let Some(offset) = (count / plan.cycle.period)
             .checked_mul(plan.cycle.count)
@@ -353,7 +364,7 @@ impl Emitter<'_, '_> {
             .local_helper("imre_affine_checked_prefix", AFFINE_CHECKED_PREFIX);
         self.output.local_helper(helper, definition);
         let prefix = self.instruction(format!(
-            "call {{i64,i64}} @{helper}(i64 {}, i64 {}, i64 {}, {extent}i64 {scale}, i64 {offset})",
+            "call {{i64,i64}} @{helper}(i64 {}, i64 {}, i64 {}, {extent}i64 {scale}, i64 {offset}, i64 {max_start})",
             at.operand, end.operand, total.operand
         ));
         let next = self.instruction(format!("extractvalue {{i64,i64}} {prefix}, 0"));
@@ -381,31 +392,31 @@ impl Emitter<'_, '_> {
 
 const AFFINE_FIXED_PREFIX: &str = r"
 ; Each block spans at most 1,023 iterations. The scalar body publishes the final ordinal.
-; Nonnegative i32 ordinals and coefficients keep each scalar expression small.
+; max_start leaves room for the whole block and keeps every scalar expression tagged.
 ; The chunk subtotal is computed in i128 before narrowing to a tagged integer.
 ; Keep the usual fixed extent constant when this module also emits shorter periods.
-define internal {i64,i64} @imre_affine_fixed_prefix(i64 %at, i64 %end, i64 %total, i64 %scale, i64 %offset) noinline nounwind {
-  %result = call {i64,i64} @imre_affine_checked_prefix(i64 %at, i64 %end, i64 %total, i64 1023, i64 %scale, i64 %offset)
+define internal {i64,i64} @imre_affine_fixed_prefix(i64 %at, i64 %end, i64 %total, i64 %scale, i64 %offset, i64 %max_start) noinline nounwind {
+  %result = call {i64,i64} @imre_affine_checked_prefix(i64 %at, i64 %end, i64 %total, i64 1023, i64 %scale, i64 %offset, i64 %max_start)
   ret {i64,i64} %result
 }
 ";
 
 const AFFINE_RANGE_PREFIX: &str = r"
-define internal {i64,i64} @imre_affine_range_prefix(i64 %at, i64 %end, i64 %total, i64 %count, i64 %scale, i64 %offset) noinline nounwind {
-  %result = call {i64,i64} @imre_affine_checked_prefix(i64 %at, i64 %end, i64 %total, i64 %count, i64 %scale, i64 %offset)
+define internal {i64,i64} @imre_affine_range_prefix(i64 %at, i64 %end, i64 %total, i64 %count, i64 %scale, i64 %offset, i64 %max_start) noinline nounwind {
+  %result = call {i64,i64} @imre_affine_checked_prefix(i64 %at, i64 %end, i64 %total, i64 %count, i64 %scale, i64 %offset, i64 %max_start)
   ret {i64,i64} %result
 }
 ";
 
 const AFFINE_CHECKED_PREFIX: &str = r"
-define internal {i64,i64} @imre_affine_checked_prefix(i64 %at, i64 %end, i64 %total, i64 %count, i64 %scale, i64 %offset) alwaysinline nounwind {
+define internal {i64,i64} @imre_affine_checked_prefix(i64 %at, i64 %end, i64 %total, i64 %count, i64 %scale, i64 %offset, i64 %max_start) alwaysinline nounwind {
   %tags0 = and i64 %at, %end
   %tags = and i64 %tags0, %total
   %small = trunc i64 %tags to i1
   %i = ashr i64 %at, 1
   %stop = ashr i64 %end, 1
   %sum = ashr i64 %total, 1
-  %bounded = icmp ule i64 %i, 2147482624
+  %bounded = icmp ule i64 %i, %max_start
   %last = add i64 %i, %count
   %within = icmp slt i64 %last, %stop
   %valid = and i1 %small, %bounded
@@ -431,7 +442,7 @@ chunks:
   %contribution = phi i128 [ %delta, %check_sum ], [ %next_delta, %poll ]
   %next = add i64 %ordinal, %count
   %in_range = icmp slt i64 %next, %stop
-  %in_bounds = icmp ule i64 %next, 2147483647
+  %in_bounds = icmp ule i64 %ordinal, %max_start
   %next_delta = add i128 %contribution, %difference
   %next_total = add i128 %subtotal, %next_delta
   %in_tag = icmp sle i128 %next_total, 4611686018427387903

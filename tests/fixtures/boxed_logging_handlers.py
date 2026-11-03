@@ -28,5 +28,17 @@ def current():
     listener = logging.handlers.QueueListener(records, stream)
     listener.handle(received)
     assert output.getvalue() == "hello\nhello\n"
+
+    class RedirectOnFlush(logging.StreamHandler):
+        def flush(self):
+            self.stream = None
+
+    redirected = RedirectOnFlush(output)
+    replacement = io.StringIO()
+    assert redirected.setStream(replacement) is output
+    assert redirected.stream is replacement
+    assert redirected.setStream(replacement) is None
+    redirected.close()
+
     handler.close()
     stream.close()

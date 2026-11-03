@@ -17,6 +17,7 @@ mod enums;
 mod ffi;
 mod finalizers;
 mod function_fields;
+mod gc_schedule;
 mod generator_protocol;
 mod import_meta;
 mod importlib;
@@ -2818,6 +2819,8 @@ impl Context {
                 "fsync",
                 #[cfg(target_os = "linux")]
                 "fdatasync",
+                #[cfg(target_os = "linux")]
+                "tcgetpgrp",
                 #[cfg(target_os = "linux")]
                 "ttyname",
                 "getegid",

@@ -10,6 +10,14 @@ def emit():
 def current():
     assert deprecated is warnings.deprecated and warn is warnings.warn
 
+    assert deprecated.__init__.__annotations__["message"] is str
+    try:
+        deprecated(int)
+    except TypeError as error:
+        assert str(error) == "Expected an object of type str for 'message', not 'type'"
+    else:
+        raise AssertionError("accepted a type as the deprecation message")
+
     @deprecated("use double instead")
     def twice(value):
         return value * 2

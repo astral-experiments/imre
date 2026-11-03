@@ -126,7 +126,7 @@ fn prepare(ctx: &mut Context, values: &[Id]) -> Result<Id> {
         let fd = ctx.call(fileno, Vec::new(), Vec::new())?;
         handles.inherit_stderr(&mut streams[2], ctx.index_integer(fd)?);
     }
-    let (prepared, fds) = BoxedPreparation::new(streams, handles, bufsize, pipesize)?;
+    let (prepared, fds) = BoxedPreparation::new(streams, handles, bufsize)?;
     if warn_buffering {
         for _ in 0..pipe_count {
             let warnings = ctx.module("warnings")?;
@@ -173,12 +173,7 @@ fn launch(ctx: &mut Context, values: &[Id]) -> Result<Id> {
         .launch
         .take()
         .ok_or_else(|| Error::new("RuntimeError", "subprocess pipes have already been used"))?;
-    let (streams, handles, bufsize, pipesize) = (
-        launch.streams,
-        launch.handles,
-        launch.bufsize,
-        launch.pipesize,
-    );
+    let (streams, handles, bufsize) = (launch.streams, launch.handles, launch.bufsize);
     let default_fds = matches!(ctx.heap.get(pass_fds), Value::Tuple(fds) if fds.is_empty());
     let minus_one = |id| matches!(ctx.heap.get(id), Value::Int(n) if n.as_small() == Some(-1));
     let default_group = process_group == NONE || minus_one(process_group);
@@ -355,13 +350,12 @@ fn launch(ctx: &mut Context, values: &[Id]) -> Result<Id> {
         direct,
         search_path,
         streams,
-        Some(handles),
+        handles,
         close_fds,
         restore_signals,
         directory,
         child_env,
         bufsize,
-        pipesize,
         new_session,
         group,
         umask,
@@ -483,16 +477,6 @@ pub(super) fn call(
     let reported = *reported;
     match (name, operands) {
         ("pid", []) => Ok(ctx.int(i64::from(child.pid()))),
-        ("pipe", &[index]) => {
-            let index = ctx.as_integer(index)?;
-            if !(0..3).contains(&index) {
-                return Err(Error::new("ValueError", "invalid pipe index"));
-            }
-            match child.pipe(index as usize) {
-                Some(file) => io::popen_pipe(ctx, file, index != 0),
-                None => Ok(NONE),
-            }
-        }
         // Python asks again only after its public status was cleared. A real
         // second wait would get ECHILD, which Popen reports as zero.
         ("poll", []) | ("wait", [_, _]) if reported => Ok(ctx.int(0)),

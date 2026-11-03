@@ -1,5 +1,6 @@
 import inspect
 import warnings
+from annotationlib import Format
 from functools import Placeholder, partial, partialmethod, update_wrapper
 from inspect import Parameter, Signature
 
@@ -10,6 +11,10 @@ def omitted(value=inspect._sentinel):
 
 def original(a, /, b: int = 3, *args, flag=False, **kwargs) -> str:
     return str(a)
+
+
+def annotated(value: "Element") -> "Element":
+    return value
 
 
 def with_options(a, b, *args, flag=False):
@@ -135,6 +140,25 @@ proxy.__annotations__ = {}
 assert str(inspect.signature(proxy)) == "()"
 del proxy.__defaults__
 assert str(inspect.signature(proxy)) == "(*args, **kwargs)"
+
+assert inspect.signature(annotated).parameters["value"].annotation == "Element"
+resolved = Signature.from_callable(
+    annotated, globals={"Element": str}, locals={"Element": int}, eval_str=True)
+assert resolved.parameters["value"].annotation is int
+assert resolved.return_annotation is int
+try:
+    inspect.signature(annotated, globals={}, locals={}, eval_str=True)
+except NameError:
+    pass
+else:
+    raise AssertionError("missing annotation name was silently accepted")
+try:
+    inspect.signature(annotated, eval_str=True, annotation_format=Format.STRING)
+except ValueError:
+    pass
+else:
+    raise AssertionError("string formatting with eval_str was silently accepted")
+
 
 target = CallableInstance()
 target.__call__ = lambda shadow: None

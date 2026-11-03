@@ -1,9 +1,9 @@
 //! Values shared by native functions loading Python modules through `sys.path`.
 
+use super::gc_schedule::{GcSchedule, GcSettings};
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
 use std::fmt;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Weak};
 
 use super::Context;
@@ -1459,6 +1459,29 @@ impl Value {
         }
     }
 
+    /// Whether allocating this boxed slot represents a Python object allocated with a GC header.
+    fn has_gc_header(&self, heap: &Heap) -> bool {
+        use crate::objects::HashState;
+        match self {
+            // A calendar subclass has its own instance slot. Its scalar payload stays untracked,
+            // including when a time or datetime retains a user-defined tzinfo.
+            Self::Calendar { .. } => false,
+            // The BytesIO instance owns its single GC header. Its byte buffer adds none.
+            Self::BytesIoStorage(_) => false,
+            Self::Instance { class, .. } => !matches!(
+                heap.get(*class),
+                Self::Native(name) if matches!(name.as_str(), "object" | super::stdlib::datetime::TZINFO)
+            ),
+            // OpenSSL hashes have no GC header. The fallback MD5 instance owns a separate boxed
+            // state, whereas a BLAKE2 or SHA-3 provider object is represented directly by its state.
+            Self::Hash(state) => !matches!(
+                state.lock().class_name(),
+                HashState::CLASS | HashState::XOF_CLASS | HashState::OPENSSL_CLASS | super::stdlib::hashlib::md5::CLASS
+            ),
+            _ => self.gc_object(),
+        }
+    }
+
     fn children(&self, visit: &mut MarkQueue<'_>) {
         match self {
             Self::Deque(ring) => visit.extend(&ring.items),
@@ -2133,8 +2156,11 @@ struct Slot {
     // Previous in collection order while occupied.
     gc_prev: Cell<usize>,
     untracked_tuple: Cell<bool>,
+    // GC-header allocations still contribute pressure when a tuple becomes untracked.
+    has_gc_header: bool,
     may_have_buffer_views: bool,
     finalization: Finalization,
+    generation: u8,
 }
 
 impl Slot {
@@ -2144,8 +2170,10 @@ impl Slot {
             gc_next: Cell::new(UNMARKED),
             gc_prev: Cell::new(UNMARKED),
             untracked_tuple: Cell::new(false),
+            has_gc_header: false,
             may_have_buffer_views: false,
             finalization: Finalization::None,
+            generation: 0,
         }
     }
 
@@ -2310,8 +2338,8 @@ pub(super) struct Heap {
     fault_generation: Cell<Option<u32>>,
     fault_workers: RefCell<Option<Weak<()>>>,
     next_collection: usize,
-    // Worker heaps share the interpreter’s automatic cyclic collection setting.
-    pub(super) automatic_gc: Arc<AtomicBool>,
+    pub(super) gc_settings: Arc<GcSettings>,
+    pub(super) gc_schedule: GcSchedule,
     weak: HashMap<Id, Vec<Id>>,
     // Callback rollback can borrow a handle without extending the object's lifetime.
     pub(super) borrowed_hooks: Vec<Id>,
@@ -2421,7 +2449,8 @@ impl Heap {
             fault_generation: Cell::new(None),
             fault_workers: RefCell::new(None),
             next_collection: 4096,
-            automatic_gc: Arc::new(AtomicBool::new(true)),
+            gc_settings: Arc::default(),
+            gc_schedule: GcSchedule::default(),
             weak: HashMap::new(),
             borrowed_hooks: Vec::new(),
             has_weak_values: false,
@@ -2686,13 +2715,23 @@ impl Heap {
         self.slots.try_reserve(1)
     }
 
+    pub(super) fn gc_thresholds(&self) -> [i32; 3] {
+        self.gc_settings.thresholds()
+    }
+
+    pub(super) fn set_gc_thresholds(&self, thresholds: &[i32]) {
+        self.gc_settings.set_thresholds(thresholds);
+    }
+
     fn alloc_slot(&mut self, value: Value) -> Id {
+        let has_gc_header = value.has_gc_header(self);
         let index = if self.free_head != END {
             let index = self.free_head;
             self.free_head = self.slots[index].gc_next.replace(UNMARKED);
             self.free_count -= 1;
             self.slots[index].value = Some(value);
             self.slots[index].may_have_buffer_views = false;
+            self.slots[index].generation = 0;
             index
         } else {
             if self.reserve_slot().is_err() {
@@ -2708,6 +2747,11 @@ impl Heap {
         };
         self.gc_order.push(index, &self.slots);
         self.slots[index].untracked_tuple.set(false);
+        self.slots[index].has_gc_header = has_gc_header;
+        if has_gc_header {
+            let collecting = self.full_collection_active();
+            self.gc_schedule.allocated(&self.gc_settings, collecting);
+        }
         self.slots[index].finalization = Finalization::None;
         let id = index as Id;
         self.keep(id);
@@ -3703,6 +3747,7 @@ impl Heap {
         true
     }
 
+    #[cfg(test)]
     pub fn statement(
         &mut self,
         globals: impl Iterator<Item = Id>,
@@ -3711,7 +3756,7 @@ impl Heap {
         caught: Id,
     ) -> Option<WeakCallbacks> {
         self.publish_statement(live, location, caught);
-        self.collect_if_due(globals, self.automatic_gc.load(Ordering::Relaxed))
+        self.collect_if_due(globals)
     }
 
     pub(super) fn publish_statement(&mut self, live: &[Id], location: Location, caught: Id) {
@@ -3748,24 +3793,18 @@ impl Heap {
 
     /// A discarded owner or the allocation threshold has requested a sweep.
     pub(super) fn collection_requested(&self) -> bool {
-        self.collect_next_statement || self.cycles_due()
+        self.collect_next_statement || self.watermark_due() || self.gc_schedule.requested()
     }
 
-    /// Collect when a discarded owner or the heap threshold requests a sweep.
+    /// Reclaim expression temporaries at the heap watermark even with cyclic GC disabled.
     pub(super) fn collect_if_due(
         &mut self,
         globals: impl Iterator<Item = Id>,
-        automatic_gc: bool,
     ) -> Option<WeakCallbacks> {
-        let cycles_due = self.cycles_due();
-        if !std::mem::take(&mut self.collect_next_statement) && !cycles_due {
-            return None;
-        }
-        if cycles_due && automatic_gc {
-            self.mark(globals);
-            self.sweep()
-        } else {
+        if std::mem::take(&mut self.collect_next_statement) || self.watermark_due() {
             self.collect(globals)
+        } else {
+            None
         }
     }
 
@@ -3793,7 +3832,7 @@ impl Heap {
         false
     }
 
-    pub(super) fn cycles_due(&self) -> bool {
+    fn watermark_due(&self) -> bool {
         self.slots.len() >= self.next_collection
             && self.free_head == END
             && !self.full_collection_active()
@@ -3881,7 +3920,13 @@ impl Heap {
     /// A child found after its position was passed moves to the end. In
     /// particular, a tuple reachable only through its parent can remain
     /// tracked for one more collection than the same tuple held in a local.
-    fn mark_full(&mut self, globals: impl Iterator<Item = Id>, passed: &mut Vec<usize>) {
+    fn mark_full(
+        &mut self,
+        globals: impl Iterator<Item = Id>,
+        passed: &mut Vec<usize>,
+        generation: u8,
+        newly_reachable: Option<&[usize]>,
+    ) {
         let mut pending = MarkQueue {
             slots: &self.slots,
             traces: &self.traces,
@@ -3905,7 +3950,9 @@ impl Heap {
                 next: END,
                 ordered: Some(&mut scan),
             });
-            if !slot.untracked_tuple.get()
+            if slot.generation <= generation
+                && newly_reachable.is_none_or(|cohort| cohort[id] != 0)
+                && !slot.untracked_tuple.get()
                 && let Value::Tuple(items) = self.get(id as Id)
             {
                 slot.untracked_tuple
@@ -3968,14 +4015,69 @@ impl Heap {
         first_finalizer
     }
 
+    /// Age participating slots before Python callbacks can allocate into a recycled slot.
+    fn promote_generation(&mut self, generation: u8) {
+        let next = (generation + 1).min(2);
+        for slot in &mut self.slots {
+            if slot.generation <= generation {
+                slot.generation = next;
+            }
+        }
+    }
+
     /// Clear weakrefs to the initial cyclic isolate before running Python callbacks.
-    pub(super) fn begin_full_collection(
+    pub(super) fn begin_collection(
         &mut self,
         globals: impl Iterator<Item = Id>,
+        generation: u8,
     ) -> Result<WeakCallbacks> {
         let mut cycles = CycleSet::new(self.slots.len())?;
-        self.mark_full(globals, &mut cycles.work);
+        self.gc_schedule.start_collection(generation);
+        self.mark_full(globals, &mut cycles.work, generation, None);
         self.identify_cycles(&mut cycles);
+        if generation < 2 {
+            // A cycle outside the collected generations can own younger objects. An
+            // unreachable acyclic owner would already have been released by refcounting.
+            let mut found_older = false;
+            for id in cycles.members() {
+                let index = id as usize;
+                let slot = &self.slots[index];
+                if slot.generation > generation && slot.gc_tracked(self) {
+                    self.traces[index].set(END);
+                    found_older = true;
+                }
+            }
+            if found_older {
+                // Younger tuples held only by these older objects can now be untracked.
+                // Tuples reached from ordinary roots were already considered once.
+                self.mark_full(
+                    std::iter::empty(),
+                    &mut cycles.work,
+                    generation,
+                    Some(&cycles.incoming),
+                );
+                for (count, trace) in cycles.incoming.iter_mut().zip(&self.traces) {
+                    if trace.get() != UNMARKED {
+                        *count = 0;
+                    }
+                }
+            }
+        }
+        if generation != 0 {
+            let survivors = self
+                .slots
+                .iter()
+                .zip(&self.traces)
+                .filter(|(slot, trace)| {
+                    trace.get() != UNMARKED
+                        && slot.generation <= generation
+                        && slot.has_gc_header
+                        && slot.gc_tracked(self)
+                })
+                .count();
+            self.gc_schedule.record_survivors(generation, survivors);
+        }
+        self.promote_generation(generation);
         let mut callbacks = self.clear_weak_targets(Some(&cycles.incoming), None);
         cycles.cyclic_callbacks = callbacks.len();
         self.mark(cycles.members());
@@ -4226,6 +4328,9 @@ impl Heap {
             if self.traces[id].replace(UNMARKED) == UNMARKED && slot.value.is_some() {
                 self.gc_order.remove(id, &self.slots);
                 let slot = &mut self.slots[id];
+                if slot.has_gc_header {
+                    self.gc_schedule.freed();
+                }
                 slot.value = None;
                 self.immutable_hashes.remove(&(id as Id));
                 slot.gc_next.set(self.free_head);
@@ -4273,6 +4378,24 @@ mod tests {
                     slot.gc_prev.get() == UNMARKED && slot.gc_next.get() == UNMARKED
                 })
             );
+        }
+    }
+
+    #[test]
+    fn hash_state_pressure_depends_on_the_python_allocation() {
+        use super::super::stdlib::hashlib::{digest::SharedHash, md5};
+        use crate::objects::HashState;
+        let heap = Heap::new();
+        for (algorithm, class, expected) in [
+            ("sha256", None, false),
+            ("sha256", Some(HashState::OPENSSL_CLASS), false),
+            ("md5", Some(md5::CLASS), false), // Its separate Python instance owns the header.
+            ("sha3_256", Some("_sha3.sha3_256"), true),
+        ] {
+            let provider = HashState::provider(algorithm)
+                .unwrap_or_else(|_| panic!("missing hash provider for {algorithm}"));
+            let hash = Value::Hash(SharedHash::new(provider.create(class, &[])));
+            assert_eq!(hash.has_gc_header(&heap), expected);
         }
     }
 
@@ -4507,6 +4630,23 @@ mod reachability_tests {
     use super::{Heap, Value};
 
     #[test]
+    fn recycled_slot_starts_in_the_young_generation() {
+        let mut heap = Heap::new();
+        let mark = heap.temporary_mark();
+        let original = heap.alloc(Value::List(Vec::new()));
+        heap.begin_collection(std::iter::empty(), 2).unwrap();
+        heap.finish_full_collection(std::iter::empty());
+        heap.end_full_collection();
+        assert_eq!(heap.slots[original as usize].generation, 2);
+
+        heap.release_temporaries_since(mark);
+        heap.collect(std::iter::empty());
+        let reused = heap.alloc(Value::List(Vec::new()));
+        assert_eq!(original, reused);
+        assert_eq!(heap.slots[reused as usize].generation, 0);
+    }
+
+    #[test]
     fn full_collection_rechecks_resurrected_roots_and_excludes_new_cycles() {
         let mut heap = Heap::new();
         let mark = heap.temporary_mark();
@@ -4525,7 +4665,7 @@ mod reachability_tests {
         heap.release_temporaries_since(mark);
 
         assert!(
-            heap.begin_full_collection(std::iter::empty())
+            heap.begin_collection(std::iter::empty(), 2)
                 .unwrap()
                 .is_empty()
         );
@@ -4545,7 +4685,7 @@ mod reachability_tests {
         for owner in [survivor, child, new_cycle] {
             assert!(heap.slots[owner as usize].value.is_some());
         }
-        heap.begin_full_collection(std::iter::empty()).unwrap();
+        heap.begin_collection(std::iter::empty(), 2).unwrap();
         assert_eq!(heap.finish_full_collection(std::iter::empty()).0, 3);
     }
 

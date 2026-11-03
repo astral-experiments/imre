@@ -168,17 +168,21 @@ impl Checker<'_> {
                 })
             });
         }
-        if op == Pipe2 {
-            let returns = self.types.tuple(vec![Type::Int; 2]);
-            return self.posix_positional(call, "pipe2", 1, returns, |checker, _, args| {
-                let flags = args.into_iter().next().expect("one bound pipe2 argument");
+        let indexed = match op {
+            Pipe2 => Some(("pipe2", self.types.tuple(vec![Type::Int; 2]))),
+            TcGetPgrp => Some(("tcgetpgrp", Type::Int)),
+            _ => None,
+        };
+        if let Some((name, returns)) = indexed {
+            return self.posix_positional(call, name, 1, returns, |checker, _, args| {
+                let value = args.into_iter().next().expect("one bound argument");
                 checker.graph.checked_overload(checker.module, call.range());
-                let flags = checker.index_word(flags, &call.func, false)?;
+                let index = checker.index_word(value, &call.func, false)?;
                 Ok(Expr {
                     ty: returns,
                     kind: ExprKind::Builtin(
-                        Builtin::Process(ProcessOperation::Fd(Pipe2)),
-                        vec![flags],
+                        Builtin::Process(ProcessOperation::Fd(op)),
+                        vec![index],
                     ),
                 })
             });
@@ -241,7 +245,7 @@ impl Checker<'_> {
             Pipe | Pipe2 | OpenPty => self.types.tuple(vec![Type::Int, Type::Int]),
             Isatty | GetBlocking | GetInheritable => Type::Bool,
             DeviceEncoding => self.types.optional(Type::Str),
-            PtsName => unreachable!("positional-only ptsname handled above"),
+            PtsName | TcGetPgrp => unreachable!("terminal query handled above"),
         };
         Ok(self.ordered_builtin(Builtin::Process(ProcessOperation::Fd(op)), returns, args))
     }

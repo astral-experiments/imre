@@ -94,7 +94,13 @@ pub(super) fn module_function(symbol: &str) -> Option<(&str, &str)> {
         }
         #[cfg(target_os = "linux")]
         "resource" if matches!(function, "getrlimit" | "setrlimit") => Some((module, function)),
-        "gc" if matches!(function, "enable" | "disable" | "isenabled") => Some((module, function)),
+        "gc" if matches!(
+            function,
+            "enable" | "disable" | "isenabled" | "get_threshold" | "set_threshold"
+        ) =>
+        {
+            Some((module, function))
+        }
         "zlib" if matches!(function, "adler32" | "crc32" | "compress" | "decompress") => {
             Some((module, function))
         }
@@ -2657,12 +2663,17 @@ impl Context {
                     {
                         return Ok(self.text("($module, /)"));
                     }
+                    "__text_signature__" if symbol == "gc.set_threshold" => return Ok(NONE),
                     "__doc__" if module == "gc" => {
                         let doc = match function {
                             "enable" => "Enable automatic garbage collection.",
                             "disable" => "Disable automatic garbage collection.",
                             "isenabled" => {
                                 "Returns true if automatic garbage collection is enabled."
+                            }
+                            "get_threshold" => "Return the current collection thresholds.",
+                            "set_threshold" => {
+                                "set_threshold(threshold0, [threshold1, [threshold2]])\nSet the collection thresholds (the collection frequency).\n\nSetting 'threshold0' to zero disables collection."
                             }
                             _ => unreachable!("registered GC control"),
                         };
@@ -2728,6 +2739,7 @@ impl Context {
                                 | "gc.enable"
                                 | "gc.disable"
                                 | "gc.isenabled"
+                                | "gc.get_threshold"
                                 | "_signal.sigpending"
                                 | "_thread.allocate"
                                 | "_thread.allocate_lock"

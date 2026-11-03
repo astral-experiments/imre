@@ -805,6 +805,13 @@ pub extern "C" fn imre_os_isatty(fd: usize) -> i32 {
     finish(c_int(fd).map(|fd| i32::from(isatty(fd))), 0)
 }
 
+/// Read the foreground process group associated with a terminal descriptor.
+#[cfg(target_os = "linux")]
+pub(crate) fn tcgetpgrp(fd: i32) -> Result<libc::pid_t> {
+    // SAFETY: tcgetpgrp borrows the descriptor and reports failure through errno.
+    checked(unsafe { libc::tcgetpgrp(fd) })
+}
+
 /// Resolve a terminal descriptor with Linux's reentrant, caller-buffer interface.
 #[cfg(target_os = "linux")]
 pub(crate) fn ttyname(fd: i32) -> Result<Vec<u8>> {
@@ -872,6 +879,18 @@ pub unsafe extern "C" fn imre_os_ptsname(
         super::text::try_owned_string(&name).map(StrOwner::into_raw)
     })();
     finish(result, std::ptr::null())
+}
+
+/// Return the foreground process group as a tagged integer.
+#[cfg(target_os = "linux")]
+#[unsafe(no_mangle)]
+pub extern "C" fn imre_os_tcgetpgrp(fd: usize) -> usize {
+    finish(
+        c_int(fd)
+            .and_then(tcgetpgrp)
+            .map(|group| Int::from_usize(group as usize).into_raw()),
+        0,
+    )
 }
 
 /// A terminal follows UTF-8 mode or the current character locale. Other fds have no encoding.

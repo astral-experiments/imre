@@ -480,7 +480,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("_codecs", "_imre_codec_functions") => ctx.builtin("_codecs._imre_codec_functions"),
         ("_codecs", "_imre_native_search") => ctx.builtin("encodings.search_function"),
         ("_io", "open_code") => ctx.builtin("io.open_code"),
-        ("math", "trunc" | "floor" | "ceil" | "modf" | "gcd" | "isnan" | "isqrt") => {
+        ("math", "trunc" | "floor" | "ceil" | "modf" | "copysign" | "gcd" | "isnan" | "isqrt") => {
             ctx.builtin(&format!("math.{name}"))
         }
         ("enum", "auto") => ctx.enum_auto_class()?,
@@ -503,7 +503,9 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("_locale", "LC_TIME") => ctx.int(libc::LC_TIME.into()),
         ("_locale", "LC_MESSAGES") => ctx.int(libc::LC_MESSAGES.into()),
         ("tempfile", "TemporaryFile") => ctx.builtin("tempfile.TemporaryFile"),
-        ("gc", "enable" | "disable" | "isenabled") => ctx.builtin(&format!("gc.{name}")),
+        ("gc", "enable" | "disable" | "isenabled" | "get_threshold" | "set_threshold") => {
+            ctx.builtin(&format!("gc.{name}"))
+        }
         ("unicodedata", "normalize" | "decomposition") => {
             ctx.builtin(&format!("unicodedata.{name}"))
         }
@@ -2491,7 +2493,10 @@ pub(super) fn call(
     if let Some(method) = name.strip_prefix("TextIOWrapper.") {
         return files::text_method(ctx, method, args, kwargs);
     }
-    if matches!(name, "gc.enable" | "gc.disable" | "gc.isenabled") {
+    if matches!(
+        name,
+        "gc.enable" | "gc.disable" | "gc.isenabled" | "gc.get_threshold"
+    ) {
         if !kwargs.is_empty() {
             return Err(Error::new(
                 "TypeError",
@@ -2504,7 +2509,11 @@ pub(super) fn call(
                 format!("{name}() takes no arguments ({} given)", args.len()),
             ));
         }
-        let enabled = &ctx.heap.automatic_gc;
+        if name == "gc.get_threshold" {
+            let values = ctx.heap.gc_thresholds().map(|n| ctx.int(i64::from(n)));
+            return Ok(ctx.alloc(Value::Tuple(values.into())));
+        }
+        let enabled = &ctx.heap.gc_settings.enabled;
         if name == "gc.isenabled" {
             return Ok(builtins::boolean(
                 enabled.load(std::sync::atomic::Ordering::Relaxed),
@@ -2513,8 +2522,30 @@ pub(super) fn call(
         enabled.store(name == "gc.enable", std::sync::atomic::Ordering::Relaxed);
         return Ok(NONE);
     }
+    if name == "gc.set_threshold" {
+        if !kwargs.is_empty() {
+            return Err(Error::new(
+                "TypeError",
+                "set_threshold() takes no keyword arguments",
+            ));
+        }
+        if !(1..=3).contains(&args.len()) {
+            return Err(Error::new(
+                "TypeError",
+                "gc.set_threshold requires 1 to 3 arguments",
+            ));
+        }
+        let mut values = [0; 3];
+        for (slot, &arg) in values.iter_mut().zip(args) {
+            *slot = ctx.index_c_int(arg)?;
+        }
+        ctx.heap.set_gc_thresholds(&values[..args.len()]);
+        return Ok(NONE);
+    }
     if name == "gc.collect" {
-        if !args.is_empty() || !kwargs.is_empty() {
+        let generation = if args.is_empty() && kwargs.is_empty() {
+            2
+        } else {
             let value = single_argument("collect", "generation", args, kwargs)?;
             let generation = ctx
                 .index_integer(value)?
@@ -2523,18 +2554,12 @@ pub(super) fn call(
                 .ok_or_else(|| {
                     Error::new("OverflowError", "Python int too large to convert to C int")
                 })?;
-            match generation {
-                2 => {}
-                0 | 1 => {
-                    return Err(Error::new(
-                        "NotImplementedError",
-                        "the native heap supports full collections only",
-                    ));
-                }
-                _ => return Err(Error::new("ValueError", "invalid generation")),
+            if !(0..=2).contains(&generation) {
+                return Err(Error::new("ValueError", "invalid generation"));
             }
-        }
-        let reclaimed = ctx.collect_full()?;
+            generation as u8
+        };
+        let reclaimed = ctx.collect_generation(generation)?;
         return Ok(ctx.int(reclaimed as i64));
     }
     if name == "marshal.loads" {
