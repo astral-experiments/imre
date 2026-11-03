@@ -171,7 +171,8 @@ fn layout(ctx: &mut Context, obj: Id) -> Result<Id> {
 fn shadowed_dict(ctx: &Context, class: Id) -> Option<Id> {
     ctx.find_in_mro(class, |entry| {
         let value = ctx.own_class_attr(entry, "__dict__")?;
-        if matches!(ctx.heap.get(value), Value::GetSetDescriptor { owner, name: "__dict__", .. }
+        if matches!(ctx.heap.get(value), Value::LayoutDescriptor(owner, "__dict__") if *owner == entry)
+            || matches!(ctx.heap.get(value), Value::GetSetDescriptor { owner, name: "__dict__", .. }
             if ctx.builtins.get(*owner) == Some(&entry))
         {
             return None;
@@ -201,6 +202,9 @@ fn class_member(ctx: &mut Context, class: Id, name: &str) -> Option<Id> {
         }
         // Some native wrapper and method descriptors are interned on first access.
         if let Value::Native(owner) = ctx.heap.get(entry) {
+            if owner == "object" && name == "__class__" {
+                return ctx.builtins.get("object.__class__").copied();
+            }
             let symbol = format!("{owner}.{name}");
             if crate::dynamic::wrapper_descriptor::BuiltinDescriptor::lookup(&symbol).is_some() {
                 return Some(ctx.builtin(&symbol));

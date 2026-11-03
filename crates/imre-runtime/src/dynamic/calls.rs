@@ -813,7 +813,7 @@ impl Context {
                 | Value::ReadOnlyMember(_, _)
                 | Value::SlotMember { .. }
                 | Value::GetSetDescriptor { .. }
-                | Value::WeakrefDescriptor(_)
+                | Value::LayoutDescriptor(..)
         )
     }
 
@@ -913,7 +913,7 @@ impl Context {
                     return super::namedtuple::read_field(self, *index, receiver);
                 }
                 Value::Property(property) => return property.read(self, receiver),
-                Value::WeakrefDescriptor(owner) => return self.weakref_list(*owner, receiver),
+                Value::LayoutDescriptor(owner, name) => return self.read_layout_descriptor(*owner, name, receiver),
                 Value::GetSetDescriptor { get, .. } => {
                     return self.call(*get, vec![receiver], Vec::new());
                 }
@@ -2442,13 +2442,17 @@ impl Context {
                 return Ok(self.builtin(&format!("member_descriptor.{name}")));
             }
             Value::TupleGetter { doc, .. } if name == "__doc__" => return Ok(doc.unwrap_or(NONE)),
-            Value::WeakrefDescriptor(owner) => match name {
+            Value::LayoutDescriptor(owner, field) => match name {
                 "__objclass__" => return Ok(owner),
-                "__name__" => return Ok(self.text("__weakref__")),
-                "__doc__" => return Ok(self.text("list of weak references to the object")),
+                "__name__" => return Ok(self.text(field)),
+                "__doc__" => return Ok(self.text(match field {
+                    "__dict__" => "dictionary for instance variables",
+                    "__class__" => "the object's class",
+                    _ => "list of weak references to the object",
+                })),
                 "__qualname__" => {
-                    let name = self.lookup_attr(owner, "__qualname__")?;
-                    return Ok(self.text(format!("{}.__weakref__", self.str_value(name)?)));
+                    let qualname = self.lookup_attr(owner, "__qualname__")?;
+                    return Ok(self.text(format!("{}.{field}", self.str_value(qualname)?)));
                 }
                 "__get__" | "__set__" | "__delete__" => {
                     let callable = self.builtin(&format!("weakref.descriptor.{name}"));
@@ -4574,7 +4578,7 @@ impl Context {
                     return Err(Error::new("AttributeError", "can't delete attribute"));
                 }
                 Value::Property(property) => return property.remove(self, obj),
-                Value::WeakrefDescriptor(owner) => return Err(self.readonly_weakref(owner)),
+                Value::LayoutDescriptor(owner, field) => return self.write_layout_descriptor(owner, field, obj, None),
                 Value::GetSetDescriptor { set: Some(set), .. } => {
                     self.call(set, vec![obj], Vec::new())?;
                     return Ok(());
@@ -4995,6 +4999,145 @@ impl Context {
             .unwrap_or(NONE))
     }
 
+    /// Introduce a getset where a source class first adds an ordinary instance dictionary.
+    pub(super) fn install_instance_dictionary_descriptor(&mut self, class: Id, scope: Id) {
+        let object = self.builtin("object");
+        if self.scope_name(scope, "__dict__").is_some()
+            || self.allocation_base(class) != Some(object)
+            || !self.class_instances_have_dict(class)
+        {
+            return;
+        }
+        let Value::Class { ancestors, .. } = self.heap.get(class) else { return };
+        if ancestors.iter().any(|&base| self.class_instances_have_dict(base)) {
+            return;
+        }
+        let descriptor = self.alloc(Value::LayoutDescriptor(class, "__dict__"));
+        self.bind(scope, "__dict__", descriptor);
+    }
+
+    fn dictionary_receiver_class(&mut self, owner: Id, receiver: Id) -> Result<Id> {
+        let class = self.exact_type(receiver)?;
+        if self.direct_subclass(class, owner) {
+            return Ok(class);
+        }
+        Err(Error::new(
+            "TypeError",
+            format!(
+                "descriptor '__dict__' for '{}' objects doesn't apply to a '{}' object",
+                self.class_name(owner),
+                self.type_name(receiver)
+            ),
+        ))
+    }
+
+    /// A mixed-in Python dictionary getset defers to the native storage base's own getset.
+    fn native_dictionary_getset(&self, class: Id) -> Option<(Id, Option<Id>)> {
+        let base = self.allocation_base(class)?;
+        let descriptor = self.own_class_attr(base, "__dict__")?;
+        match *self.heap.get(descriptor) {
+            Value::GetSetDescriptor { get, set, .. } => Some((get, set)),
+            _ => None,
+        }
+    }
+
+    pub(super) fn read_layout_descriptor(
+        &mut self,
+        owner: Id,
+        name: &str,
+        receiver: Id,
+    ) -> Result<Id> {
+        match name {
+            "__class__" => self.exact_type(receiver),
+            "__weakref__" => self.weakref_list(owner, receiver),
+            "__dict__" => {
+                let class = self.dictionary_receiver_class(owner, receiver)?;
+                if let Some((get, _)) = self.native_dictionary_getset(class) {
+                    return self.call(get, vec![receiver], Vec::new());
+                }
+                match *self.heap.get(receiver) {
+                    Value::Instance { .. } => Ok(self.instance_dictionary(receiver, class)),
+                    Value::Module { scope, .. } => self.module_globals(scope),
+                    Value::Class { scope, .. } => Ok(self.class_dictionary(scope)),
+                    Value::Raised(_) => Ok(self.exception_dictionary(receiver)),
+                    _ => Err(self.missing_attribute(receiver, name)),
+                }
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    pub(super) fn write_layout_descriptor(
+        &mut self,
+        owner: Id,
+        name: &str,
+        receiver: Id,
+        value: Option<Id>,
+    ) -> Result<()> {
+        match name {
+            "__dict__" => {
+                let class = self.dictionary_receiver_class(owner, receiver)?;
+                if let Some((_, set)) = self.native_dictionary_getset(class) {
+                    let set = set.ok_or_else(|| Error::new("AttributeError", "readonly attribute"))?;
+                    let mut args = vec![receiver];
+                    args.extend(value);
+                    return self.call(set, args, Vec::new()).map(|_| ());
+                }
+                match self.heap.get(receiver) {
+                    Value::Class { .. } => return Err(Error::new(
+                        "AttributeError",
+                        "attribute '__dict__' of 'type' objects is not writable",
+                    )),
+                    Value::Module { .. } => return Err(Error::new("AttributeError", "readonly attribute")),
+                    Value::Instance { .. } | Value::Raised(_) => {}
+                    _ => return Err(self.missing_attribute(receiver, name)),
+                }
+                if let Some(dictionary) = value
+                    && self.dict_storage(dictionary).is_none()
+                {
+                    return Err(Error::new(
+                        "TypeError",
+                        format!("__dict__ must be set to a dictionary, not a '{}'", self.type_name(dictionary)),
+                    ));
+                }
+                if let Value::Raised(error) = self.heap.get_mut(receiver) {
+                    let dictionary = value.ok_or_else(|| Error::new("TypeError", "cannot delete __dict__"))?;
+                    let previous = error.tracing().dictionary.replace(dictionary);
+                    if let Some(old) = previous && old != dictionary {
+                        self.heap.weak_edge_removed(old);
+                    }
+                } else {
+                    self.replace_instance_dictionary(receiver, class, value);
+                }
+                Ok(())
+            }
+            "__weakref__" => {
+                self.weakref_list(owner, receiver)?;
+                Err(self.readonly_weakref(owner))
+            }
+            "__class__" => {
+                let source_class = |class| {
+                    matches!(self.heap.get(class), Value::Class { scope, .. }
+                        if self.scope_data(*scope).class_cell.is_some())
+                };
+                if value.is_some_and(source_class)
+                    && let Value::Instance { class, .. } = *self.heap.get(receiver)
+                    && source_class(class)
+                {
+                    if value == Some(class) {
+                        return Ok(());
+                    }
+                    return Err(Error::new(
+                        "NotImplementedError",
+                        "mutable __class__ reassignment requires compatible instance layouts",
+                    ));
+                }
+                Err(self.immutable_class_assignment(value))
+            }
+            _ => unreachable!(),
+        }
+    }
+
     /// Lazily expose the dictionary that subsequent ordinary attribute operations use.
     pub(super) fn instance_dictionary(&mut self, obj: Id, class: Id) -> Id {
         if let Value::Instance {
@@ -5314,8 +5457,8 @@ impl Context {
             if let Value::Property(property) = *self.heap.get(descriptor) {
                 return property.write(self, obj, value);
             }
-            if let Value::WeakrefDescriptor(owner) = *self.heap.get(descriptor) {
-                return Err(self.readonly_weakref(owner));
+            if let Value::LayoutDescriptor(owner, field) = *self.heap.get(descriptor) {
+                return self.write_layout_descriptor(owner, field, obj, Some(value));
             }
             if let Value::GetSetDescriptor {
                 owner, name, set, ..
@@ -7458,6 +7601,7 @@ impl Context {
             unreachable!()
         };
         *metaclass = class_meta;
+        self.install_instance_dictionary_descriptor(class, scope);
         self.install_weakref_descriptor(class, scope);
         self.heap.replace_cell(cell, Some(class));
         let Value::Scope(class_scope) = self.heap.get_mut(scope) else {
