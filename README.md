@@ -151,10 +151,10 @@ CPython 3.14.5 discovers **1,217 test occurrences** in these six families on Lin
 | `contextlib` | — | 149 | Context managers, exception propagation, and cleanup order |
 | `inspect` | — | 362 | Callable signatures, argument binding, and decorator unwrapping |
 | `ssl` | — | 195 | SSL contexts, certificates, and loopback TLS connections |
-| `types` | 97 | 141 | The unchanged `test_types` and `test_dynamicclassattribute` suites contributed 86 and 11 paired passes on public revision `5296088f`. |
+| `types` | 111 | 141 | On public `ce052eab`, the intact `test_types` runs recorded 100 paired passes and exited 1. `test_dynamicclassattribute` recorded 11 paired passes and exited 0 at both native levels. Two stock skips remain in the denominator. |
 | `warnings` | 0 | 187 | Stock passed 181 and skipped six. Both ordinary native builds stopped at the import of `warnings.deprecated` before test registration. |
 | `weakref` | 160 | 183 | On one public revision, 116 weakref and 44 WeakSet originals passed on stock and at both native optimization levels. All six selected runs completed with exit 0. |
-| **Measured total (3 of 6 families)** | **257** | **511** | |
+| **Measured total (3 of 6 families)** | **271** | **511** | |
 
 ## Design
 
