@@ -516,7 +516,10 @@ fn worker_target(ctx: &Context, target: Id, args: Id, kwargs: Id) -> Result<(Ope
             _ => None,
         };
         if let Some(operation) = operation {
-            return Ok((operation, vec![target, args, kwargs]));
+            // The bound call owns its expanded arguments even if the caller clears the list.
+            let mut roots = vec![target, args, kwargs];
+            roots.extend_from_slice(pos);
+            return Ok((operation, roots));
         }
     }
     Err(Error::new(
