@@ -86,7 +86,10 @@ impl Callback {
         pos: &[Id],
         kwargs: Option<Id>,
     ) -> Result<Option<(Operation, Vec<Id>)>> {
-        Self::capture_checked(ctx, target, args, pos, kwargs, false)
+        // _thread.start_new_thread owns the original argument containers through the call.
+        let mut roots = vec![target, args];
+        roots.extend(kwargs);
+        Self::capture_checked(ctx, target, roots, pos, kwargs, false)
     }
 
     /// Thread.run cannot invoke its parent's excepthook, so only certified lock operations qualify.
@@ -102,13 +105,14 @@ impl Callback {
         if !matches!(ctx.heap.get(kwargs), Value::Dict(_)) {
             return Err(unsupported());
         }
-        Self::capture_checked(ctx, target, args, pos, Some(kwargs), true)
+        let roots = super::thread_worker::expanded_call_roots(ctx, target, args);
+        Self::capture_checked(ctx, target, roots, pos, Some(kwargs), true)
     }
 
     fn capture_checked(
         ctx: &Context,
         target: Id,
-        args: Id,
+        mut roots: Vec<Id>,
         pos: &[Id],
         kwargs: Option<Id>,
         high_level: bool,
@@ -159,8 +163,7 @@ impl Callback {
             };
             // The lookup is bound before startup returns. The worker owns the native
             // lock and the parent retains the original method and Python lock wrapper.
-            let mut roots = vec![target, args, operand];
-            roots.extend(kwargs);
+            roots.push(operand);
             return Ok(Some((
                 Operation::Acquire {
                     lock: Arc::clone(lock),
@@ -198,8 +201,7 @@ impl Callback {
                 Value::HandlerLock(lock) if !high_level => Argument::RLock(Arc::clone(lock)),
                 _ => return Ok(None),
             };
-            let mut roots = vec![target, args, id];
-            roots.extend(kwargs);
+            roots.push(id);
             let mut callback = Self::from_code(ctx, code, scope, entry, Vec::new())?;
             callback.receiver = Some((copy_label(name)?, receiver));
             return Ok(Some((Operation::Python(Box::new(callback)), roots)));
@@ -245,12 +247,13 @@ impl Callback {
                 }
                 // The prefix has been consumed when the parent resumes. Only the final
                 // receiver must outlive a subsequent replacement of its closure cell.
+                roots.push(id);
                 return Ok(Some((
                     Operation::Acquire {
                         lock: Arc::clone(lock),
                         release: Some(Arc::clone(release)),
                     },
-                    vec![target, args, kwargs, id],
+                    roots,
                 )));
             }
             return Ok(None);
@@ -300,8 +303,6 @@ impl Callback {
         values
             .try_reserve_exact(bound.len())
             .map_err(|_| Error::new("MemoryError", ""))?;
-        let mut roots = vec![target, args];
-        roots.extend(kwargs);
         for slot in bound {
             let id = slot.ok_or_else(unsupported)?;
             let value = match ctx.heap.get(id) {
