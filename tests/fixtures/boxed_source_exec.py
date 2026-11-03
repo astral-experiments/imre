@@ -197,7 +197,7 @@ class Case(Base):
 
 
 def source_generic_classes():
-    from typing import Generic, TypedDict, get_args, get_type_hints
+    from typing import Generic, ParamSpec, TypedDict, TypeVarTuple, Unpack, get_args, get_origin, get_type_hints
 
     for name, message in [
         ("__classdict__", "reserved name '__classdict__' cannot be used for type parameter"),
@@ -230,6 +230,22 @@ def source_generic_classes():
     assert box.__annotations__ == {"item": param} and seen == [param]
     exec(code, ns)
     assert ns["Box"].__type_params__[0] is not param
+
+    code = compile("""class Variadic[T, *Ts, **P]:
+    def parameters(self):
+        return T, Ts, P
+""", "source_variadic.py", "exec")
+    exec(code, ns)
+    variadic = ns["Variadic"]
+    item, pack, signature = variadic.__type_params__
+    assert type(pack) is TypeVarTuple and type(signature) is ParamSpec
+    assert variadic().parameters() == variadic.__parameters__ == (item, pack, signature)
+    base, = variadic.__orig_bases__
+    first, unpacked, last = get_args(base)
+    assert get_origin(base) is Generic and first is item and last is signature
+    assert get_origin(unpacked) is Unpack and get_args(unpacked) == (pack,)
+    exec(code, ns)
+    assert all(a is not b for a, b in zip(variadic.__type_params__, ns["Variadic"].__type_params__))
 
     exec("from __future__ import annotations\nclass Row[T](TypedDict):\n    item: T", ns)
     row = ns["Row"]
