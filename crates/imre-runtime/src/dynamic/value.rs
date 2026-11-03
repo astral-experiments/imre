@@ -1040,6 +1040,11 @@ pub(super) enum Value {
     Socket(crate::ObjectOwner),
     Deque(Box<crate::objects::DequeRing<Id>>),
     GenericAliasIterator(Option<Id>),
+    MemoryIterator {
+        view: Option<Id>,
+        index: usize,
+        length: usize,
+    },
     SequenceIterator {
         source: Option<Id>,
         index: i64,
@@ -1460,6 +1465,7 @@ impl Value {
             Self::BufferedRandom(..) => "_io.BufferedRandom",
             Self::GzipReader(_) | Self::GzipWriter(_) => "object",
             Self::GenericAliasIterator(_) => "generic_alias_iterator",
+            Self::MemoryIterator { .. } => "memory_iterator",
             Self::SequenceIterator { .. } => "iterator",
             Self::ReverseSequence { .. } => "reversed",
             Self::Deque(_) => super::deque::CLASS,
@@ -1649,7 +1655,8 @@ impl Value {
     fn children(&self, visit: &mut MarkQueue<'_>) {
         match self {
             Self::Deque(ring) => visit.extend(&ring.items),
-            Self::SequenceIterator { source, .. }
+            Self::MemoryIterator { view: source, .. }
+            | Self::SequenceIterator { source, .. }
             | Self::ReverseSequence { source, .. }
             | Self::GenericAliasIterator(source) => visit.extend(*source),
             Self::DequeIterator { deque, .. } => visit.push(*deque),

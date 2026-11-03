@@ -628,10 +628,15 @@ impl Context {
             Value::MemoryView {
                 owner,
                 anonymous,
-                layout,
+                ref layout,
                 lease,
                 ..
-            } => (Self::memoryview_owner(owner)?, anonymous, layout, lease),
+            } => (
+                Self::memoryview_owner(owner)?,
+                anonymous,
+                layout.clone(),
+                lease,
+            ),
             Value::BytesIoBuffer { .. } => {
                 let len = self.view_element_count(object)?;
                 self.invalidate_stream_snapshot(object);
@@ -798,6 +803,7 @@ impl Context {
                 | Value::TemplateIter { .. }
                 | Value::RangeIterator(_)
                 | Value::GenericAliasIterator(_)
+                | Value::MemoryIterator { .. }
                 | Value::SequenceIterator { .. }
                 | Value::ReverseSequence { .. }
                 | Value::DequeIterator { .. }
@@ -874,6 +880,7 @@ impl Context {
                 let unpacked = typing::unpack_parameter(self, id)?;
                 (self.alloc(Value::Tuple(vec![unpacked])), "tuple_iterator")
             }
+            Value::MemoryView { .. } => return self.memoryview_iterator(id),
             Value::Array(_) => (id, "array.arrayiterator"),
             Value::List(_) => (id, "list_iterator"),
             Value::Tuple(_) => (id, "tuple_iterator"),
@@ -968,6 +975,7 @@ impl Context {
             value,
             Value::TemplateIter { .. }
                 | Value::GenericAliasIterator(_)
+                | Value::MemoryIterator { .. }
                 | Value::SequenceIterator { .. }
                 | Value::ReverseSequence { .. }
                 | Value::DequeIterator { .. }
@@ -1307,6 +1315,14 @@ impl Context {
                 self.alloc(Value::GenericAlias(alias.unpacked_copy()))
             }));
         }
+        if let Value::MemoryIterator {
+            view,
+            index,
+            length,
+        } = *self.heap.get(id)
+        {
+            return self.next_memoryview_item(id, view, index, length);
+        }
         if let Value::SequenceIterator { source, index } = *self.heap.get(id) {
             return self.next_sequence_item(id, source, index);
         }
@@ -1579,6 +1595,8 @@ impl Context {
                 | Value::AsyncGeneratorOperation { .. }
                 | Value::TemplateIter { .. }
                 | Value::GenericAliasIterator(_)
+                | Value::MemoryView { .. }
+                | Value::MemoryIterator { .. }
                 | Value::SequenceIterator { .. }
                 | Value::ReverseSequence { .. }
                 | Value::DequeIterator { .. }

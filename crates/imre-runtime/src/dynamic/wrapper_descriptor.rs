@@ -124,6 +124,9 @@ impl BuiltinDescriptor {
                 Some(("list_iterator", attr, &["__iter__", "__next__"][..]))
             }
             Some(("generator", attr)) => Some(("generator", attr, &["__iter__", "__next__"][..])),
+            Some(("memory_iterator", attr)) => {
+                Some(("memory_iterator", attr, &["__iter__", "__next__"][..]))
+            }
             Some(("async_generator", attr)) => Some((
                 "async_generator",
                 attr,
@@ -417,6 +420,7 @@ impl BuiltinDescriptor {
                 matches!(ctx.heap.get(receiver), Value::DictIterator(iter) if iter.class_name() == owner)
             }
             "list_iterator"
+            | "memory_iterator"
             | "generator"
             | "async_generator"
             | "async_generator_asend"

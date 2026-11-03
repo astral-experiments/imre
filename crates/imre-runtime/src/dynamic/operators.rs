@@ -471,7 +471,7 @@ impl Context {
             Value::Str(s) => !s.is_empty(),
             Value::SurrogateStr(points) => !points.is_empty(),
             Value::Bytes(b) | Value::ByteArray(b) => !b.is_empty(),
-            Value::MemoryView { .. } => self.view_layout(id)?.len != 0,
+            Value::MemoryView { .. } => self.view_layout(id)?.first_len()? != 0,
             Value::List(v) | Value::Tuple(v) | Value::NamedTuple { values: v, .. } => !v.is_empty(),
             Value::Set { entries: v, .. }
             | Value::Dict(v)

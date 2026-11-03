@@ -3427,6 +3427,7 @@ for name in ("md4", "ripemd160"):
             "boxed_re_sub.py",
             "boxed_re_findall_empty.py",
             "boxed_memoryview_context.py",
+            "boxed_memoryview_shape.py",
             "boxed_re_scanner.py",
             "boxed_re_escape.py",
             "boxed_datetime.py",
