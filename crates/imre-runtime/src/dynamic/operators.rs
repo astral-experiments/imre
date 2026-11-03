@@ -4454,7 +4454,8 @@ impl Context {
             && let storage = self.scalar_value(a)
             && matches!(self.heap.get(storage), Value::ByteArray(_))
         {
-            if self.concat_buffer(a, b)?.is_empty() {
+            let additional = self.concat_buffer(a, b)?.len();
+            if additional == 0 {
                 return Ok(a);
             }
             // Reading the right-hand buffer exports it during the resize.
@@ -4462,12 +4463,22 @@ impl Context {
                 return Err(Self::exported_bytearray_error());
             }
             self.check_bytearray_resize(storage)?;
-            let bytes =
-                crate::objects::concat_bytes(self.bytes_like(a)?, self.native_buffer_bytes(b)?)?;
+            let Value::ByteArray(left) = self.heap.get_mut(storage) else {
+                unreachable!()
+            };
+            left.try_reserve(additional)
+                .map_err(|_| Error::new("MemoryError", "bytes allocation failed"))?;
+            // The resize check ruled out every view of the destination. Keep its
+            // allocation while borrowing the source buffer from the same heap.
+            let mut bytes = std::mem::take(left);
+            let appended = self
+                .native_buffer_bytes(b)
+                .map(|right| bytes.extend_from_slice(right));
             let Value::ByteArray(left) = self.heap.get_mut(storage) else {
                 unreachable!()
             };
             *left = bytes;
+            appended?;
             return Ok(a);
         }
         if inplace && op == "+" && matches!(self.heap.get(a), Value::Deque(_)) {
