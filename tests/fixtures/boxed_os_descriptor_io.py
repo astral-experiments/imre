@@ -44,6 +44,31 @@ def check_ttyname():
     expect_errno(ttyname, (slave,), errno.EBADF)
 
 
+def check_posix_pty():
+    from os import grantpt, posix_openpt, unlockpt
+
+    assert posix_openpt is posix.posix_openpt
+    assert grantpt is posix.grantpt and unlockpt is posix.unlockpt
+    flags = os.O_RDWR | os.O_NOCTTY
+    master = posix_openpt(Index(flags))
+    try:
+        assert not os.get_inheritable(master)
+        path = os.ptsname(master)
+        with open(master, "rb", closefd=False) as stream:
+            assert grantpt(stream) is None
+            expect_errno(os.open, (path, flags), errno.EIO)
+            assert unlockpt(stream) is None
+        slave = os.open(path, flags)
+        try:
+            assert os.ttyname(slave) == path
+            assert os.write(slave, b"pty") == 3
+            assert os.read(master, 3) == b"pty"
+        finally:
+            os.close(slave)
+    finally:
+        os.close(master)
+
+
 def check_tcgetpgrp():
     import subprocess
     from os import tcgetpgrp
@@ -312,6 +337,7 @@ def current():
         assert fdatasync is os.fdatasync and fdatasync is posix.fdatasync
         check_sync(fdatasync)
         check_ttyname()
+        check_posix_pty()
         check_tcgetpgrp()
         check_tmpfile()
         check_copy_file_range()
