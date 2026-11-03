@@ -68,6 +68,26 @@ def current():
     assert decompress(gzip + gzip, 47) == b"payload"
     assert decompress(compress(b"", 0)) == b""
 
+    # ZIP members use raw DEFLATE and may stop mid-stream at a read limit.
+    reader = zlib.decompressobj(-15)
+    packed = compress(data, wbits=-15) + b"next member"
+    assert reader.decompress(packed, max_length=7) == data[:7]
+    assert reader.unconsumed_tail and not reader.eof
+    snapshot = reader.copy()
+    assert snapshot.flush(1) == data[7:]
+    assert snapshot.eof and snapshot.unused_data == b"next member"
+    assert not reader.eof
+    assert reader.decompress(reader.unconsumed_tail) == data[7:]
+    assert reader.eof and reader.unused_data == b"next member"
+
+    # A partial stream can resume after flush. Trailing bytes accumulate at EOF.
+    reader = zlib.decompressobj()
+    assert reader.decompress(zstream[:-2]) == b"payload"
+    assert reader.flush() == b"" and not reader.eof
+    assert reader.decompress(zstream[-2:] + b"first") == b""
+    assert reader.eof and reader.decompress(b"second") == b""
+    assert reader.unused_data == b"firstsecond"
+
     data = bytearray(b"input")
     try:
         compress(data, Seed(data, True))

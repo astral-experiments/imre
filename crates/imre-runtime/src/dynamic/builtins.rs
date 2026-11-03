@@ -832,6 +832,9 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
             super::defaultdict::CLASS
         }
         Value::Dict(_) | Value::DefaultDict { .. } if DICT_METHODS.contains(&attr) => "dict",
+        Value::ZlibReader(_) if super::value::ZLIB_READER_METHODS.contains(&attr) => {
+            super::value::ZLIB_READER_TYPE
+        }
         Value::Poll(_) if matches!(attr, "register" | "modify" | "unregister" | "poll") => {
             "select.poll"
         }

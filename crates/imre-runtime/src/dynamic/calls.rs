@@ -14,6 +14,7 @@ fn nonconstructible_result_type(name: &str) -> bool {
             | HashState::XOF_CLASS
             | HashState::OPENSSL_CLASS
             | KEY_WRAPPER
+            | value::ZLIB_READER_TYPE
             | "anext_awaitable"
             | "_buffer_wrapper"
             | value::REGEX_PATTERN_TYPE
@@ -136,7 +137,12 @@ pub(super) fn module_function(symbol: &str) -> Option<(&str, &str)> {
             Some((module, function))
         }
         "lzma" if function == "decompress" => Some((module, function)),
-        "zlib" if matches!(function, "adler32" | "crc32" | "compress" | "decompress") => {
+        "zlib"
+            if matches!(
+                function,
+                "adler32" | "crc32" | "compress" | "decompress" | "decompressobj"
+            ) =>
+        {
             Some((module, function))
         }
         #[cfg(unix)]
@@ -1548,6 +1554,7 @@ impl Context {
                             | "datetime.timezone"
                             | stdlib::datetime::TZINFO
                             | "socket.socket"
+                            | value::ZLIB_READER_TYPE
                             | "struct.Struct"
                             | "hmac.HMAC"
                             | "collections.defaultdict"
@@ -1733,6 +1740,7 @@ impl Context {
             | ("complex", Value::Complex(_))
             | ("str", Value::Str(_) | Value::SurrogateStr(_))
             | ("bytes", Value::Bytes(_))
+            | (value::ZLIB_READER_TYPE, Value::ZlibReader(_))
             | ("struct.Struct", Value::Struct { .. })
             | ("hmac.HMAC", Value::Hmac(_))
             | ("socket.socket", Value::Socket(_))
@@ -3689,6 +3697,7 @@ impl Context {
                         | value::REGEX_PATTERN_TYPE
                         | value::REGEX_MATCH_TYPE
                         | value::REGEX_SCANNER_TYPE
+                        | value::ZLIB_READER_TYPE
                         | "_contextvars.Context"
                         | "_contextvars.ContextVar"
                         | "_contextvars.Token"
@@ -3709,7 +3718,7 @@ impl Context {
                 {
                     return Ok(value);
                 }
-                if class == LRU_CACHE_CLASS
+                if matches!(class.as_str(), LRU_CACHE_CLASS | value::ZLIB_READER_TYPE)
                     && let Some(member) = self.class_attr(obj, name)
                 {
                     return Ok(member);
@@ -4210,6 +4219,9 @@ impl Context {
                     && let Some(member) = self.own_class_attr(obj, name) =>
             {
                 return Ok(member);
+            }
+            Value::ZlibReader(_) if value::ZLIB_READER_FIELDS.contains(&name) => {
+                return stdlib::zlib::inflate_object(self, name, &[obj], &[]);
             }
             Value::Struct {
                 ref format,
@@ -4859,7 +4871,11 @@ impl Context {
     /// Subclasses keep their writable namespaces when the defining type is immutable.
     fn check_immutable_type_write(&self, obj: Id, attr: &str) -> Result<()> {
         if let Value::Native(class) = self.heap.get(obj)
-            && (super::deque::iterator_class(class).is_some() || class == value::REGEX_SCANNER_TYPE)
+            && (super::deque::iterator_class(class).is_some()
+                || matches!(
+                    class.as_str(),
+                    value::REGEX_SCANNER_TYPE | value::ZLIB_READER_TYPE
+                ))
         {
             return Err(Error::new(
                 "TypeError",
@@ -5333,6 +5349,12 @@ impl Context {
     }
 
     fn writable_attribute_member(&mut self, obj: Id, name: &str) -> Option<Id> {
+        if matches!(self.heap.get(obj), Value::ZlibReader(_))
+            && value::ZLIB_READER_FIELDS.contains(&name)
+        {
+            let owner = self.builtin(value::ZLIB_READER_TYPE);
+            return self.own_class_attr(owner, name);
+        }
         if name == "_finalizing" && matches!(self.heap.get(obj), Value::TextFile(_)) {
             let owner = self.builtin("_io.TextIOWrapper");
             return self.own_class_attr(owner, name);

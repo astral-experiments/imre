@@ -331,6 +331,7 @@ impl Context {
             | (stdlib::functools::LRU_CACHE_CLASS, Value::Cached { .. })
             | ("set", Value::Set { frozen: false, .. })
             | ("frozenset", Value::Set { frozen: true, .. })
+            | (value::ZLIB_READER_TYPE, Value::ZlibReader(_))
             | (value::REGEX_PATTERN_TYPE, Value::RegexPattern(_))
             | (value::REGEX_MATCH_TYPE, Value::RegexMatch(_))
             | (thread_local::CLASS, Value::ThreadLocal(_)) => true,
@@ -2427,6 +2428,19 @@ impl Context {
                 self.heap.code_name("__module__"),
                 self.heap.code_name("functools"),
             ));
+            let dictionary = self.dict(entries);
+            self.native_type_dicts.insert(value, dictionary);
+        }
+        if name == value::ZLIB_READER_TYPE {
+            let mut entries = Vec::new();
+            for &method in value::ZLIB_READER_METHODS {
+                let descriptor = self.builtin(&format!("{name}.{method}"));
+                entries.push((self.heap.code_name(method), descriptor));
+            }
+            for &field in value::ZLIB_READER_FIELDS {
+                let member = self.readonly_member(value::ZLIB_READER_TYPE, field);
+                entries.push((self.heap.code_name(field), member));
+            }
             let dictionary = self.dict(entries);
             self.native_type_dicts.insert(value, dictionary);
         }

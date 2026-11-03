@@ -111,6 +111,9 @@ impl BuiltinDescriptor {
             Some((owner, attr)) if let Some(class) = DictIterator::class(owner) => {
                 Some((class, attr, DictIterator::methods(class)))
             }
+            Some((value::ZLIB_READER_TYPE, attr)) => {
+                Some((value::ZLIB_READER_TYPE, attr, value::ZLIB_READER_METHODS))
+            }
             Some((value::REGEX_PATTERN_TYPE, attr)) => {
                 Some((value::REGEX_PATTERN_TYPE, attr, value::REGEX_COPY_METHODS))
             }
@@ -419,7 +422,8 @@ impl BuiltinDescriptor {
             owner if DictIterator::class(owner).is_some() => {
                 matches!(ctx.heap.get(receiver), Value::DictIterator(iter) if iter.class_name() == owner)
             }
-            "list_iterator"
+            value::ZLIB_READER_TYPE
+            | "list_iterator"
             | "memory_iterator"
             | "generator"
             | "async_generator"

@@ -620,7 +620,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("lzma", "FORMAT_AUTO") => ctx.int(0),
         ("lzma", "FORMAT_XZ") => ctx.int(1),
         ("lzma", "FORMAT_ALONE") => ctx.int(2),
-        ("zlib", "adler32" | "crc32" | "compress" | "decompress" | "error") => {
+        ("zlib", "adler32" | "crc32" | "compress" | "decompress" | "decompressobj" | "error") => {
             ctx.builtin(&format!("zlib.{name}"))
         }
         (
@@ -1745,6 +1745,12 @@ pub(super) fn call(
     }
     if name == "lzma.decompress" {
         return lzma::call(ctx, "decompress", args, kwargs);
+    }
+    if name == "zlib.decompressobj" {
+        return zlib::inflate_object(ctx, "decompressobj", args, kwargs);
+    }
+    if let Some(method) = name.strip_prefix("zlib.Decompress.") {
+        return zlib::inflate_object(ctx, method, args, kwargs);
     }
     if let Some(method @ ("compress" | "decompress")) = name.strip_prefix("zlib.") {
         return zlib::call(ctx, method, args, kwargs);

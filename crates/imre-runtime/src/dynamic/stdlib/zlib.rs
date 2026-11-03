@@ -2,7 +2,10 @@
 use super::{Context, Error, Id, Result, Value, builtins, os};
 use std::{ffi::CStr, mem::MaybeUninit};
 use zlib_rs::{DeflateConfig, DeflateFlush, InflateConfig, InflateFlush, ReturnCode};
-use zlib_rs::{c_api::z_stream, deflate, inflate};
+use zlib_rs::{c_api::z_stream, deflate, inflate as backend_inflate};
+
+mod inflate;
+pub(in crate::dynamic) use inflate::{InflateReader, inflate_object};
 
 fn buffer(ctx: &Context, data: Id) -> Result<&[u8]> {
     if let Value::Array(array) = ctx.heap.get(ctx.scalar_value(data)) {
@@ -194,7 +197,7 @@ impl Stream {
                 },
             ),
             Codec::Decompress { wbits } => {
-                inflate::init(&mut raw, InflateConfig { window_bits: wbits })
+                backend_inflate::init(&mut raw, InflateConfig { window_bits: wbits })
             }
         };
         match status {
@@ -233,12 +236,12 @@ impl Stream {
                     deflate::DeflateStream::from_stream_mut(&mut self.raw).unwrap(),
                     if finish { flush } else { DeflateFlush::NoFlush },
                 ),
-                Codec::Decompress { .. } => inflate::inflate(
-                    inflate::InflateStream::from_stream_mut(&mut self.raw).unwrap(),
-                    if finish {
-                        InflateFlush::Finish
-                    } else {
-                        InflateFlush::NoFlush
+                Codec::Decompress { .. } => backend_inflate::inflate(
+                    backend_inflate::InflateStream::from_stream_mut(&mut self.raw).unwrap(),
+                    match flush {
+                        DeflateFlush::Finish if finish => InflateFlush::Finish,
+                        DeflateFlush::SyncFlush => InflateFlush::SyncFlush,
+                        _ => InflateFlush::NoFlush,
                     },
                 ),
             }
@@ -303,7 +306,9 @@ impl Drop for Stream {
                     );
                 }
                 Codec::Decompress { .. } => {
-                    inflate::end(inflate::InflateStream::from_stream_mut(&mut self.raw).unwrap());
+                    backend_inflate::end(
+                        backend_inflate::InflateStream::from_stream_mut(&mut self.raw).unwrap(),
+                    );
                 }
             }
         }
