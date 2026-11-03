@@ -1722,6 +1722,77 @@ fn replace_points(ctx: &mut Context, receiver: Id, old: Id, new: Id, limit: usiz
     Ok(ctx.text_codepoints(result))
 }
 
+/// Replace nonoverlapping bytes, keeping both arguments exported during count conversion.
+fn binary_replace(
+    ctx: &mut Context,
+    receiver: Id,
+    old: Id,
+    new: Id,
+    count: Option<Id>,
+) -> Result<Id> {
+    for buffer in [old, new] {
+        ctx.check_buffer_exporter(buffer)?;
+        ctx.native_buffer_bytes(buffer)?;
+    }
+    let limit = ctx.with_buffer_export(old, |ctx| {
+        ctx.with_buffer_export(new, |ctx| {
+            let mark = ctx.heap.temporary_mark();
+            let result = split_limit(ctx, count);
+            // A temporary __index__ result can finalize before either export is released.
+            let collect = ctx.heap.discard_truth_operands(mark, ctx.modules);
+            if let Err(error) = &result {
+                for root in error.roots() {
+                    ctx.heap.keep(root);
+                }
+            }
+            if collect {
+                ctx.collect_unreachable();
+            }
+            result
+        })
+    })?;
+    // __index__ may change the contents of either operand or resize a separate receiver.
+    let source = ctx.bytes_like(receiver)?;
+    let old = ctx.native_buffer_bytes(old)?;
+    let new = ctx.native_buffer_bytes(new)?;
+    let matches = memchr::memmem::Finder::new(old);
+    let positions = || matches.find_iter(source).take(limit);
+    let count = if old.is_empty() && new.is_empty() {
+        0
+    } else {
+        positions().count()
+    };
+    let exact_bytes = matches!(ctx.heap.get(receiver), Value::Bytes(_));
+    if count == 0 && exact_bytes {
+        return Ok(receiver);
+    }
+    let retained = source.len() - count * old.len();
+    let size = new
+        .len()
+        .checked_mul(count)
+        .and_then(|extra| retained.checked_add(extra))
+        .filter(|&len| len <= isize::MAX as usize)
+        .ok_or_else(|| Error::new("OverflowError", "replace bytes is too long"))?;
+    let mut result = Vec::new();
+    result
+        .try_reserve_exact(size)
+        .map_err(|_| crate::Error::memory_error())?;
+    let mut copied = 0;
+    for start in positions().take(count) {
+        result.extend_from_slice(&source[copied..start]);
+        result.extend_from_slice(new);
+        copied = start + old.len();
+    }
+    result.extend_from_slice(&source[copied..]);
+    Ok(ctx.alloc(
+        if matches!(ctx.heap.get(ctx.scalar_value(receiver)), Value::Bytes(_)) {
+            Value::Bytes(result)
+        } else {
+            Value::ByteArray(result)
+        },
+    ))
+}
+
 /// Left-justify a binary sequence after converting the width, which may mutate either argument.
 fn binary_ljust(
     ctx: &mut Context,
@@ -1941,6 +2012,7 @@ pub(super) fn method(
                 "endswith"
                     | "ljust"
                     | "lstrip"
+                    | "replace"
                     | "rstrip"
                     | "split"
                     | "splitlines"
@@ -2542,6 +2614,32 @@ pub(super) fn method(
             }
         }
         return Ok(FALSE);
+    }
+    if name == "replace" && matches!(owner, "bytes" | "bytearray") {
+        if !kwargs.is_empty() {
+            return Err(type_error(format!(
+                "{owner}.replace() takes no keyword arguments"
+            )));
+        }
+        if args.len() < 2 {
+            return Err(type_error(format!(
+                "replace expected at least 2 arguments, got {}",
+                args.len()
+            )));
+        }
+        if args.len() > 3 {
+            return Err(type_error(format!(
+                "replace expected at most 3 arguments, got {}",
+                args.len()
+            )));
+        }
+        return binary_replace(
+            ctx,
+            original_receiver,
+            args[0],
+            args[1],
+            args.get(2).copied(),
+        );
     }
     if name == "replace" {
         let total = args.len() + kwargs.len();
