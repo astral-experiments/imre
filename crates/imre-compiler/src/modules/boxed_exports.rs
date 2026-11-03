@@ -612,7 +612,7 @@ pub(super) fn symbol(module: M, name: &str) -> Option<Binding> {
             "finalize",
             "ref"
         ),
-        M::Gzip => exports!("gzip", "GzipFile"),
+        M::Gzip => exports!("gzip", "GzipFile", "compress"),
         M::Zlib => exports!("zlib", "compress", "crc32", "decompress"),
         _ => return None,
     };
