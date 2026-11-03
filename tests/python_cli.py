@@ -1265,6 +1265,7 @@ def check_unittest_module_main(imre, root, run):
     discovered = run(imre, "-m", "unittest", "discover", "-v", "-s", package.name, "-t", ".",
                      "-p", "sample.py", "-k", "Passing.test_one")
     assert discovered.returncode == 0 and discovered.stdout == (passing + ".test_one\n").encode(), discovered
+    assert f"test_one ({passing}.test_one) ... ok".encode() in discovered.stderr.splitlines(), discovered
     assert b"Ran 1 test in " in discovered.stderr, discovered
 
 
