@@ -1363,6 +1363,9 @@ pub(super) fn call(
         let value = builtins::one_positional_arg(name, &args[1..], kwargs)?;
         return super::displayhook::default_hook(ctx, value);
     }
+    if name == "sys.excepthook" {
+        return super::excepthook::default_hook(ctx, &args[1..], kwargs);
+    }
     if name == "sys.unraisablehook" {
         return super::unraisable::default_hook(ctx, args, kwargs);
     }

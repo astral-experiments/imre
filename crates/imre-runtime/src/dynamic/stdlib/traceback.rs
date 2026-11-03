@@ -209,10 +209,15 @@ pub(in crate::dynamic) fn chain_link(error: &Error) -> Option<(Id, &'static str)
 
 /// Render an uncaught chain before shutdown releases its Python exception objects.
 pub(in crate::dynamic) fn report_chain(ctx: &mut Context, error: Error) {
+    let exception = ctx.raised_instance(error);
+    display(ctx, exception);
+}
+
+/// Write the Python exception to the live stderr, retaining the low-level fallback.
+pub(in crate::dynamic) fn display(ctx: &mut Context, exception: Id) {
     use std::io::Write;
 
     let mark = ctx.heap.temporary_mark();
-    let exception = ctx.raised_instance(error);
     ctx.heap.keep(exception);
     if print_uncaught(ctx, exception).is_err() {
         // stderr itself may be gone or unwritable. Keep the exception's arguments

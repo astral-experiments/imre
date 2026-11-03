@@ -2995,6 +2995,12 @@ impl Context {
                             {
                                 Some(stdlib::opcode::signature(name))
                             }
+                            "__text_signature__" if method == "sys.excepthook" => {
+                                Some("($module, exctype, value, traceback, /)")
+                            }
+                            "__doc__" if method == "sys.excepthook" => {
+                                Some("Handle an exception by displaying it with a traceback on sys.stderr.")
+                            }
                             "__text_signature__" if method == "sys.audit" => {
                                 Some("($module, event, /, *args)")
                             }
