@@ -4561,19 +4561,7 @@ impl Context {
                         }
                         SourcePattern::Class(expr) => {
                             let class = eval(self, expr)?;
-                            if !matches!(self.heap.get(class), Value::Class { .. })
-                                && !matches!(
-                                    self.builtin_type_name(class),
-                                    Some("type" | "typing._AnyMeta")
-                                )
-                            {
-                                return Err(Error::new(
-                                    "TypeError",
-                                    "called match pattern must be a class",
-                                ));
-                            }
-                            self.heap.get(subject).instance_class() == Some(class)
-                                || self.python_instance_check(subject, class)?
+                            self.class_pattern_matches(subject, class)?
                         }
                         SourcePattern::Wildcard => true,
                     };
