@@ -737,7 +737,6 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         | ("codecs", "register_error" | "lookup_error")
         | ("gc", "collect")
         | ("marshal", "loads")
-        | ("pickle", "dumps")
         | ("hashlib", "file_digest")
         | (
             "re",
@@ -2458,7 +2457,7 @@ pub(super) fn call(
     if name == "marshal.loads" {
         return marshal::loads(ctx, args, kwargs);
     }
-    if name == "pickle.dumps" {
+    if name == "_pickle.dumps" {
         return pickle::dumps(ctx, args, kwargs);
     }
     if name == "functools.partial" {
