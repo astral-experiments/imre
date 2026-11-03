@@ -6,6 +6,7 @@ use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::rc::Rc;
 
+use imre_ast::code_flags;
 use ruff_python_ast as ast;
 use ruff_text_size::Ranged;
 
@@ -33,6 +34,8 @@ pub(super) struct Program {
     pub(super) string_roots: Id,
     first_line: u32,
     kind: FunctionKind,
+    scope_flags: u32,
+    unlowered_yield: bool,
     interactive: bool,
     locals: indexmap::IndexSet<String>,
     directives: HashMap<String, (ScopeDirective, ruff_text_size::TextSize)>,
@@ -898,7 +901,7 @@ impl<'a> CompiledStrings<'a, '_> {
         Ok(())
     }
 
-    fn scan(&mut self) -> Result<(bool, Vec<ScopedExpression<'a>>)> {
+    fn scan(&mut self, unlowered_yield: &mut bool) -> Result<(bool, Vec<ScopedExpression<'a>>)> {
         use ast::visitor::Visitor;
         let mut functions = Vec::new();
         if !self.directives.is_empty() {
@@ -908,6 +911,8 @@ impl<'a> CompiledStrings<'a, '_> {
         while let Some((expr, bound)) = self.pending.pop() {
             self.bound = bound;
             match expr {
+                // A yield still present in an expression has no suspension instruction.
+                ast::Expr::Yield(_) | ast::Expr::YieldFrom(_) => *unlowered_yield = true,
                 ast::Expr::Name(name) => {
                     if !self
                         .bound
@@ -1173,6 +1178,7 @@ impl Program {
     ) -> Result<(Id, &'a BTreeSet<String>)> {
         use ast::visitor::Visitor;
         let class_parameters = self.class_parameter_header();
+        let nested_scope_flags = self.nested_scope_flags();
         let mut nested_reads = BTreeSet::new();
         let stringized = self.string_annotations();
         let class_locals = self.class_attributes.as_ref().map(|_| &self.locals);
@@ -1387,13 +1393,14 @@ impl Program {
                 | Instruction::Delegate => {}
             }
         }
-        let (class_cell, functions) = strings.scan()?;
+        let (class_cell, functions) = strings.scan(&mut self.unlowered_yield)?;
         self.class_cell |= class_cell;
         self.expression_functions
             .try_reserve(functions.len())
             .map_err(|_| Error::new("MemoryError", ""))?;
         let mut comprehension_sites = HashMap::new();
         for (site, (expr, bound)) in functions.into_iter().enumerate() {
+            let in_comprehension = bound.is_some();
             if let Some(names) = bound {
                 comprehension_sites.insert(expr.range(), names);
             }
@@ -1403,6 +1410,7 @@ impl Program {
                 "<genexpr>"
             };
             let mut child = Self::new(self.filename.clone(), name, self.has_named_bindings);
+            child.scope_flags = nested_scope_flags;
             child.strip_docstrings = self.strip_docstrings;
             child.source_lines = self.source_lines.clone();
             child.linked_body_line = self.linked_body_line;
@@ -1434,6 +1442,11 @@ impl Program {
                 ast::Expr::Generator(genexpr) => child.lower_genexpr(genexpr, line_at)?,
                 _ => unreachable!("anonymous function expression"),
             };
+            child.scope_flags |= code_flags::function_flags(
+                Some(&params),
+                in_comprehension,
+                !in_comprehension && self.class_attributes.is_some(),
+            );
             child
                 .locals
                 .extend(params.iter().map(|p| p.name().to_string()));
@@ -1708,7 +1721,20 @@ impl Program {
         child.source_lines = self.source_lines.clone();
         child.linked_body_line = self.linked_body_line;
         child.strip_docstrings = self.strip_docstrings;
+        child.scope_flags = self.nested_scope_flags();
         child
+    }
+
+    fn nested_scope_flags(&self) -> u32 {
+        let mut flags = self.scope_flags
+            & (code_flags::FUTURE_ANNOTATIONS
+                | code_flags::FUTURE_BARRY_AS_BDFL
+                | code_flags::NESTED);
+        // A class body keeps its enclosing function scope even when bound by a global declaration.
+        if self.name != "<module>" && self.class_attributes.is_none() {
+            flags |= code_flags::NESTED;
+        }
+        flags
     }
 
     fn new(filename: Rc<str>, name: &str, has_named_bindings: bool) -> Self {
@@ -1732,6 +1758,8 @@ impl Program {
             string_roots: NONE,
             first_line: 1,
             kind: FunctionKind::Plain,
+            scope_flags: 0,
+            unlowered_yield: false,
             interactive: false,
             locals: indexmap::IndexSet::new(),
             directives: HashMap::new(),
@@ -1973,6 +2001,9 @@ impl Program {
             if self.strip_docstrings {
                 body.remove(0);
             } else if function || self.class_attributes.is_some() {
+                if function {
+                    self.scope_flags |= code_flags::HAS_DOCSTRING;
+                }
                 self.doc = Some(doc.range());
             }
         }
@@ -2252,6 +2283,11 @@ impl Program {
                     if let Some(params) = &s.type_params {
                         child.validate_type_params(params, "function")?;
                     }
+                    child.scope_flags |= code_flags::function_flags(
+                        Some(&s.parameters),
+                        s.type_params.is_some(),
+                        self.class_attributes.is_some() && s.type_params.is_none(),
+                    );
                     let annotate = self.annotation_program(&mut s, &child, line)?;
                     if s.is_async {
                         child.kind = if imre_ast::code_flags::is_generator(&s.body) {
@@ -2296,6 +2332,10 @@ impl Program {
                     let spellings = child.private_names.get_or_insert_with(|| {
                         Rc::new(imre_ast::lower_in(&mut s.body, &child.name, false))
                     });
+                    // The implicit type-parameter function encloses the class body.
+                    if s.type_params.is_some() {
+                        child.scope_flags |= code_flags::NESTED;
+                    }
                     child.class_attributes = Some(imre_ast::class_attributes::static_attributes(
                         &s.body, spellings,
                     ));
@@ -3012,6 +3052,10 @@ impl Context {
             return Err(error);
         }
         let mut code = Program::new(Rc::from(filename), "<module>", source.contains(":="));
+        if let Value::Code(caller) = self.heap.get(self.heap.current_code()) {
+            code.scope_flags =
+                caller.flags & (code_flags::FUTURE_ANNOTATIONS | code_flags::FUTURE_BARRY_AS_BDFL);
+        }
         code.source_lines = lines.clone();
         code.strip_docstrings = self.config["optimize"].as_i64().unwrap_or(0) >= 2;
         code.interactive = interactive;
@@ -3037,11 +3081,13 @@ impl Context {
                     self.check_source_docstrings(&body, !interactive, &spellings)?;
                 }
                 code.method_imports = Rc::new(imre_ast::module_imports(&body));
-                let caller = self.heap.current_code();
-                let inherited = matches!(self.heap.get(caller), Value::Code(code) if
-            code.flags & imre_ast::code_flags::FUTURE_ANNOTATIONS != 0
-            || matches!(&code.body, Body::Source(p) if p.private_names.as_ref().is_some_and(|n| n.string_annotations)));
-                if inherited || imre_ast::future_annotations(&body) {
+                if imre_ast::future_import(&body, "barry_as_FLUFL") {
+                    code.scope_flags |= code_flags::FUTURE_BARRY_AS_BDFL;
+                }
+                if code.scope_flags & code_flags::FUTURE_ANNOTATIONS != 0
+                    || imre_ast::future_annotations(&body)
+                {
+                    code.scope_flags |= code_flags::FUTURE_ANNOTATIONS;
                     code.private_names = Some(Rc::new(imre_ast::lower_in(&mut body, "", true)));
                 }
                 code.lower_namespace(body, &lines, false)?;
@@ -3151,15 +3197,17 @@ impl Context {
             first_line: program.first_line,
             module_definition: !program.nested_global && program.name == program.qualname,
             coroutine: program.kind == FunctionKind::Coroutine,
-            flags: match program.kind {
-                FunctionKind::Generator | FunctionKind::GeneratorLambda => {
-                    imre_ast::code_flags::GENERATOR
-                }
-                FunctionKind::Coroutine => imre_ast::code_flags::COROUTINE,
-                FunctionKind::AsyncGenerator => imre_ast::code_flags::ASYNC_GENERATOR,
-                FunctionKind::Plain => 0,
-            },
-            flags_complete: false,
+            flags: program.scope_flags
+                | match program.kind {
+                    FunctionKind::Generator | FunctionKind::GeneratorLambda => {
+                        imre_ast::code_flags::GENERATOR
+                    }
+                    FunctionKind::Coroutine => imre_ast::code_flags::COROUTINE,
+                    FunctionKind::AsyncGenerator => imre_ast::code_flags::ASYNC_GENERATOR,
+                    FunctionKind::Plain => 0,
+                },
+            flags_complete: program.scope_flags & code_flags::OPTIMIZED != 0
+                && !program.unlowered_yield,
             body: Body::Source(program),
             parameters: parameters.unwrap_or(NONE),
             nested: Vec::new(),
@@ -3828,6 +3876,7 @@ impl Context {
         program.private_names = private_names;
         program.qualname = self.str_value(code.qualname)?.to_owned();
         program.first_line = code.first_line;
+        program.scope_flags = code.flags;
         program.kind = FunctionKind::prelinked(code);
         program.lower_namespace(std::mem::take(&mut def.body), &lines, true)?;
         if signature.generator_lambda {
