@@ -24,7 +24,7 @@ from urllib.parse import (
 __all__ = [
     "Request", "OpenerDirector", "BaseHandler", "DataHandler", "FileHandler", "FTPHandler", "UnknownHandler",
     "HTTPPasswordMgr", "HTTPPasswordMgrWithDefaultRealm", "HTTPPasswordMgrWithPriorAuth",
-    "AbstractBasicAuthHandler", "HTTPBasicAuthHandler",
+    "AbstractBasicAuthHandler", "HTTPBasicAuthHandler", "ProxyBasicAuthHandler",
     "AbstractDigestAuthHandler", "HTTPDigestAuthHandler",
     "ProxyHandler", "HTTPCookieProcessor", "HTTPHandler", "HTTPDefaultErrorHandler", "HTTPRedirectHandler", "HTTPErrorProcessor",
     "urlopen", "install_opener", "build_opener", "urlretrieve", "urlcleanup",
@@ -904,6 +904,21 @@ class HTTPBasicAuthHandler(AbstractBasicAuthHandler, BaseHandler):
         url = req.full_url
         response = self.http_error_auth_reqed('www-authenticate',
                                           url, req, headers)
+        return response
+
+
+class ProxyBasicAuthHandler(AbstractBasicAuthHandler, BaseHandler):
+
+    auth_header = 'Proxy-authorization'
+
+    def http_error_407(self, req, fp, code, msg, headers):
+        # http_error_auth_reqed requires that there is no userinfo component in
+        # authority.  Assume there isn't one, since urllib.request does not (and
+        # should not, RFC 3986 s. 3.2.1) support requests for URLs containing
+        # userinfo.
+        authority = req.host
+        response = self.http_error_auth_reqed('proxy-authenticate',
+                                          authority, req, headers)
         return response
 
 
