@@ -148,13 +148,13 @@ CPython 3.14.5 discovers **1,217 test occurrences** in these six families on Lin
 
 | Module | Paired passes | Upstream tests | Coverage |
 | --- | ---: | ---: | --- |
-| `contextlib` | 74 | 149 | 74 of 91 synchronous originals matched stock in selected ordinary O0/O3 runs across six public revisions. Some shared a process with another failing case. The intact native module stopped before registration. The 58 async originals await measurement. |
+| `contextlib` | 132 | 149 | All 58 originals in the unchanged async test module passed on stock and at native O0 and O3 on public `main`. Together with 74 synchronous originals, this gives 132 paired tests. Seventeen synchronous originals remain unpaired. |
 | `inspect` | 0 | 362 | Stock ran 362 originals, with 361 passes and one skip. On public revision `00755c8c`, native compilation stopped before discovery, and a compiled import stopped at `_pickle`. Separate replays passed 44 tests in renamed modules. |
 | `ssl` | 22 | 195 | Five MemoryBIO originals and 17 socket, context, and enumeration tests passed on stock and on the same public compiler at O0 and O3. Each run discovered all 195 originals. |
 | `types` | 111 | 141 | On public `ce052eab`, the intact `test_types` runs recorded 100 paired passes and exited 1. `test_dynamicclassattribute` recorded 11 paired passes and exited 0 at both native levels. Two stock skips remain in the denominator. |
 | `warnings` | 177 | 187 | The [parent ledger](benchmarks/cpython_stdlib/full/warnings/receipts/) records 158 in-process passes and 19 passes with native interpreter children at O0 and O3. Six parents skipped on stock. The other four passed on stock and skipped on Imre under CPython-only decorators. No warnings omissions. |
 | `weakref` | 169 | 183 | All 46 WeakSet originals and 123 weakref originals passed. The added finalizer test ran its real shutdown child on stock and at both native levels. |
-| **Measured total (6 of 6 families)** | **553** | **1,217** |  |
+| **Measured total (6 of 6 families)** | **611** | **1,217** |  |
 
 ## Design
 
