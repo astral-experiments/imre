@@ -102,9 +102,7 @@ fn frame_scope(ctx: &mut Context, frame: Id) -> Result<(Id, Id, bool)> {
 /// A class proxy exposes its captured slots, independently of the class namespace.
 pub(super) fn class_cells(ctx: &mut Context, scope: Id, code: Id) -> Option<Id> {
     let data = ctx.scope_data(scope);
-    if data.class_body.is_none() {
-        return None;
-    }
+    data.class_body.as_ref()?;
     let parent = data.parent?;
     #[derive(serde::Deserialize)]
     struct Bindings {
