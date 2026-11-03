@@ -19,7 +19,9 @@ pub(super) fn alias(
             let kind = crate::frontend::exception_kind(n.id.as_str())?;
             Some(ExceptionAlias::Builtin {
                 kind,
-                name: imre_ast::exceptions::Kind::try_from_raw(kind)?.name().into(),
+                name: imre_ast::exceptions::Kind::try_from_raw(kind)?
+                    .name()
+                    .into(),
             })
         }),
         _ => None,
@@ -90,8 +92,8 @@ fn builtin_mro(kind: u32) -> Vec<u32> {
         37 => 10,
         40 => 39, // UnboundLocalError derives from NameError.
         42 => 41,
-        56 => 55, // IndentationError derives from SyntaxError.
-        92 => 56, // TabError derives from IndentationError.
+        56 => 55,      // IndentationError derives from SyntaxError.
+        92 => 56,      // TabError derives from IndentationError.
         81..=91 => 80, // The builtin warning categories derive directly from Warning.
         _ => 1,
     };

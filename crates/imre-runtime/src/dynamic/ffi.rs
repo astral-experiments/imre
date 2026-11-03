@@ -900,7 +900,10 @@ pub(super) unsafe extern "C" fn imre_dyn_finish(ctx: *mut Context) -> i32 {
         // keep replaced streams alive throughout the main module's execution.
         ctx.heap.release_temporaries_since(mark);
         ctx.install_import_registry()?;
-        if ctx.config["warnoptions"].as_array().is_some_and(|options| !options.is_empty()) {
+        if ctx.config["warnoptions"]
+            .as_array()
+            .is_some_and(|options| !options.is_empty())
+        {
             let mark = ctx.heap.temporary_mark();
             if let Err(error) = ctx.module("warnings") {
                 eprintln!("'import warnings' failed; traceback:");

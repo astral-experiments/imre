@@ -13,7 +13,14 @@ pub(super) fn class(ctx: &mut Context) -> Result<Id> {
     ctx.bind(scope, "__module__", module);
     let name = ctx.text("SimpleNamespace");
     ctx.bind(scope, "__qualname__", name);
-    for slot in ["__init__", "__repr__", "__eq__", "__ne__", "__reduce__", "__replace__"] {
+    for slot in [
+        "__init__",
+        "__repr__",
+        "__eq__",
+        "__ne__",
+        "__reduce__",
+        "__replace__",
+    ] {
         let method = ctx.builtin(&format!("{CLASS}.{slot}"));
         ctx.bind(scope, slot, method);
     }
@@ -53,7 +60,9 @@ pub(super) fn check_class_write(ctx: &Context, obj: Id, name: &str) -> Result<()
 /// A namespace descriptor requires real namespace storage, including on a subclass.
 pub(super) fn instance_class(ctx: &Context, object: Id) -> Option<Id> {
     match *ctx.heap.get(object) {
-        Value::Instance { class, .. } if ctx.direct_subclass(class, ctx.classes[CLASS]) => Some(class),
+        Value::Instance { class, .. } if ctx.direct_subclass(class, ctx.classes[CLASS]) => {
+            Some(class)
+        }
         _ => None,
     }
 }
@@ -101,7 +110,10 @@ pub(super) fn method(
         if !rest.is_empty() {
             return Err(Error::new(
                 "TypeError",
-                format!("SimpleNamespace.__reduce__() takes no arguments ({} given)", rest.len()),
+                format!(
+                    "SimpleNamespace.__reduce__() takes no arguments ({} given)",
+                    rest.len()
+                ),
             ));
         }
         let args = ctx.heap.packed_tuple(Vec::new(), false);

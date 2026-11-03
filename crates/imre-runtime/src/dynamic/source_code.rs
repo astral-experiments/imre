@@ -4964,7 +4964,9 @@ impl Context {
             Instruction::ClassStart => {
                 self.enable_class_annotation_provider(scope);
                 // Only postponed annotations need a visible mapping from the start of the suite.
-                if !code.postponed_annotations && self.scope_data(scope).class_body_mapping().is_none() {
+                if !code.postponed_annotations
+                    && self.scope_data(scope).class_body_mapping().is_none()
+                {
                     let key = self.heap.code_name("__annotations__");
                     self.remove_binding(scope, "__annotations__", key)?;
                 }
@@ -5071,7 +5073,9 @@ impl Context {
                 }
                 bases = Some((self.alloc(Value::List(values)), keywords, *parameterized));
                 let declared = |kind| {
-                    child.directives.iter()
+                    child
+                        .directives
+                        .iter()
                         .filter_map(|(name, (directive, _))| (*directive == kind).then_some(name))
                         .collect::<BTreeSet<_>>()
                 };

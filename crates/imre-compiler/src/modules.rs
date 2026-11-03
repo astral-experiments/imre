@@ -1382,9 +1382,10 @@ impl IntrinsicModule {
             (Self::ImportlibBootstrapExternal, "SourceFileLoader") => {
                 Intrinsic::ObjectRuntimeExport("_frozen_importlib_external.SourceFileLoader")
             }
-            (Self::ImportlibMachinery | Self::ImportlibBootstrapExternal, "SourcelessFileLoader") => {
-                Intrinsic::ObjectRuntimeExport("_frozen_importlib_external.SourcelessFileLoader")
-            }
+            (
+                Self::ImportlibMachinery | Self::ImportlibBootstrapExternal,
+                "SourcelessFileLoader",
+            ) => Intrinsic::ObjectRuntimeExport("_frozen_importlib_external.SourcelessFileLoader"),
             (Self::ImportlibUtil, "find_spec") => {
                 Intrinsic::RegisteredImport("importlib.util.find_spec")
             }
@@ -3515,7 +3516,9 @@ impl<'a> Loader<'a> {
         let mut inputs = crate::SourceInputs::default();
         if let Some(site) = system_site {
             let canonical = fs.canonicalize(site).map_err(|e| e.to_string())?;
-            inputs.directories.push((site.to_owned(), canonical.clone()));
+            inputs
+                .directories
+                .push((site.to_owned(), canonical.clone()));
             let site = canonical;
             if !search_roots.contains(&site) {
                 search_roots.push(site);
@@ -4779,12 +4782,15 @@ impl<'a> Loader<'a> {
         if stdlib_top_level(first)
             && (IntrinsicModule::named(first).is_some()
                 || imre_ast::providers::provider(first).is_some()
-                || !self.search_roots.get(self.archive_roots).is_some_and(|site| {
-                    // A typeshed declaration alone does not supply an importable module.
-                    let path = site.join(first);
-                    self.fs.is_file(&path.with_extension("py"))
-                        || self.fs.is_file(&path.join("__init__.py"))
-                }))
+                || !self
+                    .search_roots
+                    .get(self.archive_roots)
+                    .is_some_and(|site| {
+                        // A typeshed declaration alone does not supply an importable module.
+                        let path = site.join(first);
+                        self.fs.is_file(&path.with_extension("py"))
+                            || self.fs.is_file(&path.join("__init__.py"))
+                    }))
         {
             return Err(format!(
                 "standard-library imports and shadowing are unsupported: {first:?}"

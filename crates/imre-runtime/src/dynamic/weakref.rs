@@ -239,7 +239,8 @@ impl Context {
             return;
         };
         if ancestors.iter().any(|&base| {
-            self.class_instances_support_weakref(base) || self.heap.get(base).is_weakrefable_native_base()
+            self.class_instances_support_weakref(base)
+                || self.heap.get(base).is_weakrefable_native_base()
         }) {
             return;
         }
@@ -409,7 +410,9 @@ pub(super) fn call(
             match (name, rest) {
                 ("__get__", [NONE] | [NONE, NONE]) => Err(error("__get__(None, None) is invalid")),
                 ("__get__", [NONE, _]) => Ok(descriptor),
-                ("__get__", [receiver] | [receiver, _]) => ctx.read_layout_descriptor(owner, field, *receiver),
+                ("__get__", [receiver] | [receiver, _]) => {
+                    ctx.read_layout_descriptor(owner, field, *receiver)
+                }
                 ("__set__", [receiver, value]) => {
                     ctx.write_layout_descriptor(owner, field, *receiver, Some(*value))?;
                     Ok(NONE)
@@ -494,9 +497,7 @@ pub(super) fn call(
             let Some((&owner, rest)) = args.split_first() else {
                 return Err(Error::new(
                     "TypeError",
-                    format!(
-                        "descriptor '{name}' of '{class}' object needs an argument"
-                    ),
+                    format!("descriptor '{name}' of '{class}' object needs an argument"),
                 ));
             };
             let Some(reference) = ctx

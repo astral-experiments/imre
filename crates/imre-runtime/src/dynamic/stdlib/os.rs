@@ -2,11 +2,11 @@
 pub(in crate::dynamic) mod device;
 #[cfg(target_os = "linux")]
 pub(in crate::dynamic) mod eventfd;
-#[cfg(target_os = "linux")]
-mod vectored;
 pub(in crate::dynamic) mod scandir;
 #[cfg(target_os = "linux")]
 mod spawn_child;
+#[cfg(target_os = "linux")]
+mod vectored;
 #[cfg(target_os = "linux")]
 pub(super) use spawn_child::fork_for_child_callbacks;
 #[cfg(target_os = "linux")]
@@ -1473,7 +1473,11 @@ pub(super) fn descriptor(
         }
         let fd = c_int(ctx, *fd)?;
         let offset = file_offset(ctx, *offset)?;
-        let flags = rest.first().map(|id| c_int(ctx, *id)).transpose()?.unwrap_or(0);
+        let flags = rest
+            .first()
+            .map(|id| c_int(ctx, *id))
+            .transpose()?
+            .unwrap_or(0);
         return vectored::transfer(ctx, fd, *buffers, name, Some((offset, flags)));
     }
     if matches!(name, "pread" | "pwrite") {
@@ -1492,7 +1496,9 @@ pub(super) fn descriptor(
         let bytes = native::read(fd, length, Some(offset), || ctx.dispatch_signals())?;
         return Ok(ctx.alloc(Value::Bytes(bytes)));
     }
-    if matches!(name, "read" | "readinto" | "write") || (cfg!(target_os = "linux") && matches!(name, "readv" | "writev")) {
+    if matches!(name, "read" | "readinto" | "write")
+        || (cfg!(target_os = "linux") && matches!(name, "readv" | "writev"))
+    {
         let [fd, data] = args else {
             return Err(Error::new(
                 "TypeError",

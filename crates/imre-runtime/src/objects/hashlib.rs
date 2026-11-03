@@ -478,7 +478,6 @@ pub(crate) fn hex_with_separator(bytes: &[u8], separator: Option<u8>, group: i32
     Ok(result)
 }
 
-
 fn hex(digest: &[u8]) -> Result<*const Str> {
     crate::checked_owned_str(hex_text(digest)?)
 }

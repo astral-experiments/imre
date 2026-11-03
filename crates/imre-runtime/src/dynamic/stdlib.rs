@@ -64,9 +64,9 @@ mod resource;
 mod select;
 #[cfg(unix)]
 pub(super) mod signal;
+mod socket;
 #[cfg(unix)]
 pub(super) mod ssl;
-mod socket;
 pub(super) mod structure;
 mod subprocess;
 mod system_size;
@@ -449,9 +449,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             "_frame_locals" | "_tb_position" | "clear_frames" | "format_exc" | "format_exception"
             | "print_exc" | "print_exception",
         ) => ctx.builtin(&format!("traceback.{name}")),
-        ("struct", "Struct") | ("functools", "partial") => {
-            ctx.builtin(&format!("{module}.{name}"))
-        }
+        ("struct", "Struct") | ("functools", "partial") => ctx.builtin(&format!("{module}.{name}")),
         ("types", "MappingProxyType") => ctx.builtin("mappingproxy"),
         ("types", "ModuleType") => ctx.builtin("module"),
         ("types", "SimpleNamespace") => super::namespace::class(ctx)?,
@@ -491,7 +489,10 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("types", "GenericAlias") => ctx.builtin("types.GenericAlias"),
         (
             "_typing",
-            "_get_alias_kind" | "_eval_type_expression" | "_validate_forward_ref" | "_install_generic_alias_iter",
+            "_get_alias_kind"
+            | "_eval_type_expression"
+            | "_validate_forward_ref"
+            | "_install_generic_alias_iter",
         ) => ctx.builtin(&format!("typing.{name}")),
         ("_typing", "_get_args") => ctx.builtin("typing.get_args"),
         ("_typing", "_get_origin") => ctx.builtin("typing.get_origin"),
@@ -744,8 +745,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         | ("enum", "_simple_enum")
         | (
             "functools",
-            "cache" | "cmp_to_key" | "lru_cache" | "_cache_wrapper" | "reduce"
-            | "update_wrapper",
+            "cache" | "cmp_to_key" | "lru_cache" | "_cache_wrapper" | "reduce" | "update_wrapper",
         )
         | ("_string", "formatter_parser" | "formatter_field_name_split")
         | (
@@ -1443,8 +1443,12 @@ pub(super) fn call(
         }
         return Ok(match name {
             #[cfg(target_os = "linux")]
-            "sys._get_cpu_count_config" => ctx.int(i64::from(crate::sys::cpu_count::configured().unwrap_or(-1))),
-            "sys.get_coroutine_origin_tracking_depth" => ctx.int(i64::from(ctx.threads.coroutine_origin_depth)),
+            "sys._get_cpu_count_config" => {
+                ctx.int(i64::from(crate::sys::cpu_count::configured().unwrap_or(-1)))
+            }
+            "sys.get_coroutine_origin_tracking_depth" => {
+                ctx.int(i64::from(ctx.threads.coroutine_origin_depth))
+            }
             "posix._create_environ" => os::environment(ctx),
             "posix.getcwd" | "posix.getcwdb" => os::getcwd(ctx, name == "posix.getcwdb")?,
             "sys.getfilesystemencoding" => ctx
@@ -1469,7 +1473,10 @@ pub(super) fn call(
                 } else {
                     crate::objects::os::getresuid()?
                 };
-                let values = ids.into_iter().map(|id| ctx.alloc(Value::Int(id))).collect();
+                let values = ids
+                    .into_iter()
+                    .map(|id| ctx.alloc(Value::Int(id)))
+                    .collect();
                 ctx.alloc(Value::Tuple(values))
             }
             "posix.getgroups" => {

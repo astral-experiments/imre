@@ -12,9 +12,27 @@ use crate::dynamic::value::IoOpenTypes;
 use crate::objects::{BoxedPipe, os};
 
 pub(super) const METHODS: &[&str] = &[
-    "__init__", "__repr__", "closed", "mode", "closefd", "_blksize", "close", "fileno", "read",
-    "readall", "readline", "readinto", "write", "seek", "tell", "truncate", "readable", "writable",
-    "seekable", "isatty", "_dealloc_warn",
+    "__init__",
+    "__repr__",
+    "closed",
+    "mode",
+    "closefd",
+    "_blksize",
+    "close",
+    "fileno",
+    "read",
+    "readall",
+    "readline",
+    "readinto",
+    "write",
+    "seek",
+    "tell",
+    "truncate",
+    "readable",
+    "writable",
+    "seekable",
+    "isatty",
+    "_dealloc_warn",
 ];
 
 pub(in crate::dynamic) struct RawFile {
@@ -327,7 +345,9 @@ fn open_types(ctx: &mut Context, fresh: Option<IoOpenTypes>) -> Result<IoOpenTyp
         ctx.module("_io")?;
     }
     let class = |name: &str| {
-        ctx.builtins.get(name).copied()
+        ctx.builtins
+            .get(name)
+            .copied()
             .ok_or_else(|| Error::new("ImportError", format!("missing private type {name}")))
     };
     Ok(IoOpenTypes {
@@ -1003,7 +1023,11 @@ pub(super) fn call(
                     let warning = ctx.builtin("Warning");
                     if ctx.raised_error_matches(&error, warning) {
                         super::super::super::unraisable::report(
-                            ctx, error, true, Some(receiver), "Exception ignored while finalizing file",
+                            ctx,
+                            error,
+                            true,
+                            Some(receiver),
+                            "Exception ignored while finalizing file",
                         );
                     }
                 }

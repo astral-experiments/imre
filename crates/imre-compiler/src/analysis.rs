@@ -756,8 +756,14 @@ impl Session {
         calls: FallbackCalls,
         runtime_provider: Option<usize>,
     ) -> Result<(), String> {
-        let all_calls = matches!(calls, FallbackCalls::All | FallbackCalls::DecoratorFactories);
-        self.set_fallback_rules(all_calls, matches!(calls, FallbackCalls::DecoratorFactories));
+        let all_calls = matches!(
+            calls,
+            FallbackCalls::All | FallbackCalls::DecoratorFactories
+        );
+        self.set_fallback_rules(
+            all_calls,
+            matches!(calls, FallbackCalls::DecoratorFactories),
+        );
         let provider = runtime_provider.map(|index| self.files[index]);
         self.errors(skipped, overloads, all_calls, provider)?;
         if let FallbackCalls::Entry(entry) = calls {

@@ -53,7 +53,9 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
         "reprlib" => Some(("reprlib.py", include_str!("../../stdlib/reprlib.py"))),
         "datetime" => Some((
             "datetime.py",
-            include_str!("../../../../benchmarks/cpython_stdlib/full/datetime/upstream/Lib/datetime.py"),
+            include_str!(
+                "../../../../benchmarks/cpython_stdlib/full/datetime/upstream/Lib/datetime.py"
+            ),
         )),
         "enum" => Some(("enum.py", include_str!("../../stdlib/enum.py"))),
         "json" => Some((

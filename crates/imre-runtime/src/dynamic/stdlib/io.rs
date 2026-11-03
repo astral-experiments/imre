@@ -469,7 +469,13 @@ pub(in super::super) fn install_native(ctx: &mut Context, module: Id, module_obj
         ctx.builtin("open")
     } else {
         let callable = ctx.alloc(Value::IoOpen {
-            types: IoOpenTypes { file, reader, writer, random, wrapper },
+            types: IoOpenTypes {
+                file,
+                reader,
+                writer,
+                random,
+                wrapper,
+            },
             unsupported,
         });
         ctx.alloc(Value::Method {
