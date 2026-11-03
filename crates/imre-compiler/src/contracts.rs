@@ -738,8 +738,7 @@ impl Builtin {
             | Self::Combinatorial(_)
             | Self::Islice
             | Self::Cycle => Contract::new(true, PreservesLists),
-            Self::BytesIter
-            | Self::DefaultListDict
+            Self::DefaultListDict
             | Self::DefaultFactorySet { .. }
             | Self::DequeMaxlen
             | Self::DequeIter { .. }
