@@ -87,7 +87,12 @@ impl Handle {
     fn join(&self, timeout: Option<Duration>) -> Result<()> {
         let running = self.running.lock().unwrap();
         let running = match timeout {
-            Some(limit) => self.exiting.wait_timeout_while(running, limit, |r| *r).unwrap().0,
+            Some(limit) => {
+                self.exiting
+                    .wait_timeout_while(running, limit, |r| *r)
+                    .unwrap()
+                    .0
+            }
             None => self.exiting.wait_while(running, |r| *r).unwrap(),
         };
         if *running {
@@ -407,75 +412,74 @@ fn launch(ctx: &Context, operation: Operation, detached_label: Option<String>) -
     let worker_active = Arc::clone(&active);
     let fault_workers =
         matches!(operation, Operation::Python(_)).then(|| ctx.heap.begin_fault_worker());
-    let handle =
-        Handle::spawn(move || {
-            // A failed bootstrap publishes no identity and contributes nothing to the live count.
-            let mut prefix = None;
-            let mut update = None;
-            let (python, acquire) = match operation {
-                Operation::Python(callback) => match callback.load() {
-                    Ok((mut worker, function, arguments)) => {
-                        worker
-                            .heap
-                            .observe_fault_workers(fault_workers.as_ref().expect("Python worker"));
-                        worker.threads.count = Arc::clone(&count);
-                        worker.threads.private_context = true;
-                        worker.threads.acquire_bound = operand_bound;
-                        (Some((worker, function, arguments)), None)
-                    }
-                    Err(error) => {
-                        let _ = ready.send(Err(error.to_string()));
-                        return Ok(());
-                    }
-                },
-                Operation::Empty => (None, None),
-                Operation::UpdateHash { hash, data } => {
-                    update = Some((hash, data));
-                    (None, None)
+    let handle = Handle::spawn(move || {
+        // A failed bootstrap publishes no identity and contributes nothing to the live count.
+        let mut prefix = None;
+        let mut update = None;
+        let (python, acquire) = match operation {
+            Operation::Python(callback) => match callback.load() {
+                Ok((mut worker, function, arguments)) => {
+                    worker
+                        .heap
+                        .observe_fault_workers(fault_workers.as_ref().expect("Python worker"));
+                    worker.threads.count = Arc::clone(&count);
+                    worker.threads.private_context = true;
+                    worker.threads.acquire_bound = operand_bound;
+                    (Some((worker, function, arguments)), None)
                 }
-                Operation::Acquire { lock, release } => {
-                    prefix = release;
-                    (None, Some(lock))
+                Err(error) => {
+                    let _ = ready.send(Err(error.to_string()));
+                    return Ok(());
                 }
-            };
-            let _running = Running::enter(count, worker_active);
-            // Consume the nonblocking prefix and bind the final receiver before the
-            // parent resumes and can rebind either closure cell.
-            if let Some(lock) = prefix
-                && let Err(error) = lock.release()
-            {
-                let _ = ready.send(Err(Error::from(error).to_string()));
-                return Ok(());
+            },
+            Operation::Empty => (None, None),
+            Operation::UpdateHash { hash, data } => {
+                update = Some((hash, data));
+                (None, None)
             }
-            #[cfg(any(target_os = "linux", target_os = "macos"))]
-            let native_id = Some(crate::objects::locks::native_thread_id());
-            #[cfg(not(any(target_os = "linux", target_os = "macos")))]
-            let native_id = None;
-            if ready.send(Ok((thread_ident(), native_id))).is_ok() {
-                if let Some((mut worker, function, arguments)) = python {
-                    if let Err(error) = worker.call(function, arguments, Vec::new()) {
-                        if let Some(label) = detached_label {
-                            if error.kind != "SystemExit" {
-                                let _ = writeln!(
-                                    crate::sys::stderr_writer(),
-                                    "Exception ignored in thread started by {label}:\n{error}"
-                                );
-                            }
-                        } else {
-                            return Err(error.to_string());
+            Operation::Acquire { lock, release } => {
+                prefix = release;
+                (None, Some(lock))
+            }
+        };
+        let _running = Running::enter(count, worker_active);
+        // Consume the nonblocking prefix and bind the final receiver before the
+        // parent resumes and can rebind either closure cell.
+        if let Some(lock) = prefix
+            && let Err(error) = lock.release()
+        {
+            let _ = ready.send(Err(Error::from(error).to_string()));
+            return Ok(());
+        }
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
+        let native_id = Some(crate::objects::locks::native_thread_id());
+        #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+        let native_id = None;
+        if ready.send(Ok((thread_ident(), native_id))).is_ok() {
+            if let Some((mut worker, function, arguments)) = python {
+                if let Err(error) = worker.call(function, arguments, Vec::new()) {
+                    if let Some(label) = detached_label {
+                        if error.kind != "SystemExit" {
+                            let _ = writeln!(
+                                crate::sys::stderr_writer(),
+                                "Exception ignored in thread started by {label}:\n{error}"
+                            );
                         }
+                    } else {
+                        return Err(error.to_string());
                     }
-                } else if let Some(lock) = acquire {
-                    lock.acquire(true, None);
-                } else if let Some((hash, data)) = update {
-                    hash.lock()
-                        .update(&data)
-                        .map_err(|error| error.to_string())?;
                 }
+            } else if let Some(lock) = acquire {
+                lock.acquire(true, None);
+            } else if let Some((hash, data)) = update {
+                hash.lock()
+                    .update(&data)
+                    .map_err(|error| error.to_string())?;
             }
-            Ok(())
-        })
-        .map_err(|_| Error::new("RuntimeError", "can't start new thread"))?;
+        }
+        Ok(())
+    })
+    .map_err(|_| Error::new("RuntimeError", "can't start new thread"))?;
     let (ident, native_id) = match started.recv() {
         Ok(Ok(identity)) => identity,
         failure => {
