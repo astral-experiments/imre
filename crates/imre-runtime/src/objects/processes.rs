@@ -33,7 +33,7 @@ mod pipe_size;
 mod popen;
 mod shell_output;
 pub(super) use asynchronous::AsyncProcess;
-pub(crate) use popen::{BoxedPipe, BoxedPopen};
+pub(crate) use popen::{BoxedPipe, BoxedPopen, BoxedPreparation};
 pub(super) use popen::{Popen, retain_live_owner};
 
 #[cfg(target_os = "linux")]
