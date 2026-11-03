@@ -3025,18 +3025,36 @@ impl Context {
                 }
                 _ => {}
             },
-            Value::AsyncGenerator { running, .. } if name == "ag_running" => {
-                return Ok(builtins::boolean(running));
-            }
-            Value::AsyncGenerator { frame, .. } if name == "ag_code" => {
-                if !self.audit_hooks.is_empty() {
-                    let attribute = self.text(name);
-                    stdlib::audit::event(self, "object.__getattr__", &[obj, attribute])?;
-                }
-                let Value::Generator { code, .. } = *self.heap.get(frame) else {
+            Value::AsyncGenerator { frame, running, .. } => {
+                let Value::Generator {
+                    code,
+                    offset,
+                    running: executing,
+                    ..
+                } = *self.heap.get(frame)
+                else {
                     unreachable!()
                 };
-                return Ok(code);
+                match name {
+                    "ag_running" => return Ok(builtins::boolean(running)),
+                    "ag_suspended" => {
+                        return Ok(builtins::boolean(
+                            !executing && offset.is_some_and(|ip| ip != 0),
+                        ));
+                    }
+                    "ag_code" | "ag_frame" => {
+                        if !self.audit_hooks.is_empty() {
+                            let attribute = self.text(name);
+                            stdlib::audit::event(self, "object.__getattr__", &[obj, attribute])?;
+                        }
+                        return if name == "ag_code" {
+                            Ok(code)
+                        } else {
+                            self.generator_frame(frame)
+                        };
+                    }
+                    _ => {}
+                }
             }
             Value::Coroutine { origin, .. } if name == "cr_origin" => return Ok(origin),
             Value::Native(ref class) if class == "coroutine" && name == "cr_origin" => {
