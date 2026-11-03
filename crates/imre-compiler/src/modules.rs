@@ -284,6 +284,7 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
                         // The runtime supplies the URL-safe codecs.
                         section("bytes_types =", "_urlsafe_encode_translation ="),
                         section("# Base32 encoding/decoding", "# RFC 3548, Base 16"),
+                        section("def b16decode(", "# Ascii85 encoding/decoding"),
                         include_str!("../stdlib/base85_encode.py"),
                         section("def a85decode(", "# The following code is originally taken"),
                         section("def b85decode(", "def main():"),
@@ -2138,6 +2139,7 @@ impl IntrinsicModule {
             (Self::Base64, "encodebytes") => Intrinsic::ScopedObjectExport("base64.encodebytes"),
             (Self::Base64, "b64encode") => Intrinsic::Base64Encode,
             (Self::Base64, "b64decode") => Intrinsic::Base64Decode,
+            (Self::Base64, "b16decode") => Intrinsic::ScopedObjectExport("base64.b16decode"),
             (Self::Base64, "b32encode") => Intrinsic::ScopedObjectExport("base64.b32encode"),
             (Self::Base64, "b32decode") => Intrinsic::ScopedObjectExport("base64.b32decode"),
             (Self::Base64, "b32hexencode") => Intrinsic::ScopedObjectExport("base64.b32hexencode"),
