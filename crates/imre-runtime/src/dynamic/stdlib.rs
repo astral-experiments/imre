@@ -375,7 +375,8 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         (
             "codecs" | "_codecs",
             "encode" | "decode" | "register" | "unregister" | "lookup" | "escape_decode"
-            | "utf_8_decode" | "utf_16_ex_decode",
+            | "utf_8_decode" | "utf_16_encode" | "utf_32_encode" | "utf_16_ex_decode"
+            | "utf_32_ex_decode",
         ) => ctx.builtin(&format!("codecs.{name}")),
         ("_codecs", "_imre_codec_functions") => ctx.builtin("_codecs._imre_codec_functions"),
         ("_codecs", "_imre_native_search") => ctx.builtin("encodings.search_function"),
@@ -2416,7 +2417,10 @@ pub(super) fn call(
             "encode" | "decode" => codecs::transform(ctx, function, args, kwargs),
             "escape_decode" => codecs::escape_decode(ctx, args, kwargs),
             "utf_8_decode" => codecs::utf8_decode(ctx, args, kwargs),
-            "utf_16_ex_decode" => codecs::utf16_extended(ctx, args, kwargs),
+            "utf_16_ex_decode" | "utf_32_ex_decode" => {
+                codecs::wide_extended(ctx, function, args, kwargs)
+            }
+            "utf_16_encode" | "utf_32_encode" => codecs::wide_encode(ctx, function, args, kwargs),
             "lookup" => codecs::lookup(ctx, args, kwargs),
             "register" | "unregister" => codecs::search_registry(ctx, function, args, kwargs),
             "register_error" | "lookup_error" => {

@@ -7,8 +7,8 @@ mod raw_unicode_escape;
 mod surrogate_utf8;
 mod utf16;
 mod wide_unicode;
-pub(super) use utf16::extended as utf16_extended;
 pub(super) use wide_unicode::decode_chunk as decode_wide_chunk;
+pub(super) use wide_unicode::{encode as wide_encode, extended as wide_extended};
 
 use super::{Context, Error, Id, NONE, Result, Value};
 use crate::objects::{Codec, CodecInfo, DecodeIssue, FixedUnicode, Object, StrEncoder, Utf16Order};
@@ -380,6 +380,16 @@ pub(super) fn native_search(ctx: &mut Context, args: &[Id], kwargs: &[(String, I
     if key.bytes().any(|c| c.is_ascii_uppercase()) {
         return Ok(NONE);
     }
+    if let Some((format, true)) = FixedUnicode::encoding(&key) {
+        let module = match format {
+            FixedUnicode::Utf16(_) => "encodings.utf_16",
+            _ => "encodings.utf_32",
+        };
+        let provider = ctx.module(module)?;
+        let package = ctx.module("encodings")?;
+        let entry = ctx.lookup_attr(package, "_wide_entry")?;
+        return ctx.call(entry, vec![arg, provider], Vec::new());
+    }
     match CodecInfo::lookup(&key).map_err(Error::from) {
         Ok(entry) => box_native_entry(ctx, entry),
         Err(error) if error.kind == "LookupError" => Ok(NONE),
@@ -428,7 +438,7 @@ pub(super) fn lookup_transform(
     let name = ctx.text(key.clone());
     let (heap, roots) = ctx.heap_and_roots();
     let name = heap.intern(name, roots);
-    let native_only = FixedUnicode::encoding(&key).is_some() || key == "raw_unicode_escape";
+    let native_only = FixedUnicode::by_key(&key).is_some() || key == "raw_unicode_escape";
     let default = native_only.then(|| ctx.builtin("encodings.search_function"));
     // A callback may change the live list. CPython snapshots only its length.
     for index in 0..count {
@@ -569,7 +579,7 @@ fn box_native_entry(ctx: &mut Context, entry: CodecInfo) -> Result<Id> {
     };
     let encoder = if matches!(
         codec,
-        Codec::Ascii | Codec::Latin1 | Codec::ShiftJis | Codec::Utf8 { signature: false }
+        Codec::Ascii | Codec::Latin1 | Codec::ShiftJis | Codec::Utf8 { .. }
     ) {
         factory(ctx, "IncrementalEncoder")?
     } else {
@@ -641,7 +651,10 @@ pub(in crate::dynamic) fn encode_text(
     }
     let errors = errors.to_owned();
     match encoder {
-        StrEncoder::Wide { format, signature } => encode_fixed(ctx, id, format, &errors, signature),
+        StrEncoder::Wide { format, signature } => {
+            let order = if signature { 0 } else { format.byte_order() };
+            encode_fixed(ctx, id, format, &errors, order)
+        }
         StrEncoder::Registered(Codec::Utf8 { signature }) => {
             ctx.encode_utf8_codepoints(id, signature, &errors)
         }
@@ -677,8 +690,10 @@ pub(super) fn encode_fixed(
     id: Id,
     encoder: FixedUnicode,
     errors: &str,
-    signature: bool,
+    order: i32,
 ) -> Result<Vec<u8>> {
+    let encoder = encoder.with_order(order);
+    let signature = order == 0;
     if let Ok(text) = ctx.str_value(id) {
         return Ok(StrEncoder::Wide {
             format: encoder,
@@ -691,7 +706,13 @@ pub(super) fn encode_fixed(
     if signature {
         encoder.append(&mut bytes, [0xfeff])?;
     }
-    let name = encoder.codec_name(signature);
+    // CPython names UTF-32 encode errors using only exact -1/+1 orders.
+    // Its surrogatepass handler uses that name to choose the replacement byte order.
+    let generic = match encoder {
+        FixedUnicode::Utf16(_) => signature,
+        FixedUnicode::Utf32Le | FixedUnicode::Utf32Be => !matches!(order, -1 | 1),
+    };
+    let name = encoder.codec_name(generic);
     for (i, &point) in points.iter().enumerate() {
         if char::from_u32(point).is_some() {
             encoder.append(&mut bytes, [point])?;
@@ -722,7 +743,14 @@ pub(super) fn encode_fixed(
             }
             "ignore" => (),
             "replace" => encoder.append(&mut bytes, [u32::from(b'?')])?,
-            "surrogatepass" => encoder.append(&mut bytes, [point])?,
+            "surrogatepass" => {
+                let format = if generic {
+                    encoder.with_order(0)
+                } else {
+                    encoder
+                };
+                format.append(&mut bytes, [point])?;
+            }
             "backslashreplace" | "namereplace" => encoder.append(
                 &mut bytes,
                 compact_str::format_compact!("\\u{point:04x}")
@@ -1153,6 +1181,19 @@ fn entry_error_policy(ctx: &Context, function: &str, errors: Option<Id>) -> Resu
     })
 }
 
+fn encoder_input_length(ctx: &Context, function: &str, input: Id) -> Result<usize> {
+    Ok(match ctx.heap.get(ctx.scalar_value(input)) {
+        Value::Str(text) => text.chars().count(),
+        Value::SurrogateStr(points) => points.len(),
+        _ => {
+            return Err(type_error(format!(
+                "{function}() argument 1 must be str, not {}",
+                ctx.type_name(input)
+            )));
+        }
+    })
+}
+
 /// Call the encoder stored on a built-in registry entry and report characters consumed.
 pub(in crate::dynamic) fn entry_encode(
     ctx: &mut Context,
@@ -1185,16 +1226,7 @@ pub(in crate::dynamic) fn entry_encode(
     } else {
         input
     };
-    let length = match ctx.heap.get(ctx.scalar_value(input)) {
-        Value::Str(text) => text.chars().count(),
-        Value::SurrogateStr(points) => points.len(),
-        _ => {
-            return Err(type_error(format!(
-                "{function}() argument 1 must be str, not {}",
-                ctx.type_name(input)
-            )));
-        }
-    };
+    let length = encoder_input_length(ctx, function, input)?;
     let encoding = ctx.text(codec.name());
     let policy = entry_error_policy(ctx, function, errors)?;
     let data = encode_text(ctx, input, Some(encoding), policy)?;

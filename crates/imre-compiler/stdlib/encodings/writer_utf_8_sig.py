@@ -7,6 +7,30 @@ def encode(input, errors='strict'):
             len(input))
 
 
+class IncrementalEncoder(codecs.IncrementalEncoder):
+    def __init__(self, errors='strict'):
+        codecs.IncrementalEncoder.__init__(self, errors)
+        self.first = 1
+
+    def encode(self, input, final=False):
+        if self.first:
+            self.first = 0
+            return codecs.BOM_UTF8 + \
+                   codecs.utf_8_encode(input, self.errors)[0]
+        else:
+            return codecs.utf_8_encode(input, self.errors)[0]
+
+    def reset(self):
+        codecs.IncrementalEncoder.reset(self)
+        self.first = 1
+
+    def getstate(self):
+        return self.first
+
+    def setstate(self, state):
+        self.first = state
+
+
 class StreamWriter(codecs.StreamWriter):
     def reset(self):
         codecs.StreamWriter.reset(self)

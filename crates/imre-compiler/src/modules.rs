@@ -338,6 +338,14 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
             "encodings/utf_8_sig.py",
             include_str!("../stdlib/encodings/writer_utf_8_sig.py"),
         )),
+        "encodings.utf_16" => Some((
+            "encodings/utf_16.py",
+            include_str!("../stdlib/encodings/utf_wide.py"),
+        )),
+        "encodings.utf_32" => Some((
+            "encodings/utf_32.py",
+            include_str!("../stdlib/encodings/utf_wide.py"),
+        )),
         "encodings.cp1251" => Some((
             "encodings/cp1251.py",
             include_str!("../stdlib/encodings/writer_charmap.py"),

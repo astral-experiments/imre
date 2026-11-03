@@ -2,6 +2,7 @@ import _codecs
 import codecs
 import encodings
 import io
+import sys
 
 
 def decode(value):
@@ -159,3 +160,52 @@ try:
 finally:
     retained.clear()
     codecs.unregister(live_codec)
+
+
+for name in ('utf-8-sig', 'utf-16', 'utf-32'):
+    info = codecs.lookup(name)
+    assert info.name == name
+    prefix = ''.encode(name)
+    assert info.encode('x') == ('x'.encode(name), 1)
+    encoder = info.incrementalencoder()
+    first = encoder.getstate()
+    assert encoder.encode('') == prefix
+    assert encoder.getstate() == 0
+    payload = encoder.encode('x', final=True)
+    assert prefix + payload == 'x'.encode(name)
+    encoder.reset()
+    assert encoder.getstate() == first
+    encoder.setstate(0)
+    assert encoder.encode('x') == payload
+    decoder = info.incrementaldecoder()
+    assert decoder.decode(prefix[:1]) == ''
+    partial = decoder.getstate()
+    decoder.reset()
+    decoder.setstate(partial)
+    assert decoder.decode(prefix[1:] + payload, final=True) == 'x'
+    assert info.decode(bytearray(prefix + payload)) == ('x', len(prefix + payload))
+
+
+wide_bytes = encodings.search_function(b'utf-16')
+assert wide_bytes is encodings.search_function(b'utf-16')
+assert wide_bytes is not encodings.search_function('utf-16')
+for length in range(1, 502):
+    encodings.search_function('utf' + '-' * length + '32')
+assert encodings.search_function(b'utf-16') is not wide_bytes
+
+
+for width, encode in ((2, codecs.utf_16_encode), (4, codecs.utf_32_encode)):
+    for order, endian in ((-2, 'little'), (2, 'big')):
+        # UTF-32 names noncanonical byte orders with its generic encoding.
+        name = 'utf-32' if width == 4 else ('utf-16-le' if order < 0 else 'utf-16-be')
+        text = 'A\ud800'
+        try:
+            encode(text, 'strict', order)
+        except UnicodeEncodeError as error:
+            assert error.object is text
+            assert error.args == (name, text, 1, 2, 'surrogates not allowed')
+        else:
+            raise AssertionError('strict encoder accepted an unpaired surrogate')
+        prefix = ord('A').to_bytes(width, endian)
+        replacement = (0xd800).to_bytes(width, sys.byteorder if width == 4 else endian)
+        assert encode(text, 'surrogatepass', order) == (prefix + replacement, 2)

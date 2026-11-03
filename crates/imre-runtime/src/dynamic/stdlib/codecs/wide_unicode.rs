@@ -1,8 +1,97 @@
 //! UTF-16 and UTF-32 decoding into Python code points.
-use super::{Context, DecodeIssue, Id, Result, resume_decode};
+use super::{Context, DecodeIssue, Id, Result, Value, resume_decode, type_error};
 use crate::objects::{FixedUnicode, Utf16Order};
 use FixedUnicode::{Utf16, Utf32Be, Utf32Le};
 use Utf16Order::{Big, Little};
+
+/// Both wide codec families use the signed byte-order argument from the CPython API.
+fn arguments(function: &str, args: &[Id], kwargs: &[(String, Id)], maximum: usize) -> Result<()> {
+    if !kwargs.is_empty() {
+        return Err(type_error(format!(
+            "_codecs.{function}() takes no keyword arguments"
+        )));
+    }
+    if args.is_empty() {
+        return Err(type_error(format!(
+            "{function} expected at least 1 argument, got 0"
+        )));
+    }
+    if args.len() > maximum {
+        return Err(type_error(format!(
+            "{function} expected at most {maximum} arguments, got {}",
+            args.len()
+        )));
+    }
+    Ok(())
+}
+
+fn order(ctx: &mut Context, arg: Option<&Id>) -> Result<i32> {
+    arg.map(|&id| super::super::os::c_int(ctx, id))
+        .transpose()
+        .map(Option::unwrap_or_default)
+}
+
+fn format(function: &str) -> FixedUnicode {
+    if function.starts_with("utf_16") {
+        Utf16(Little)
+    } else {
+        Utf32Le
+    }
+}
+
+fn policy(ctx: &mut Context, function: &str, arg: Option<Id>) -> Result<Option<Id>> {
+    if let Some(id) = arg
+        && matches!(ctx.heap.get(ctx.scalar_value(id)), Value::SurrogateStr(_))
+    {
+        ctx.encode_utf8_codepoints(id, false, "strict")?;
+    }
+    super::entry_error_policy(ctx, function, arg)
+}
+
+pub(in crate::dynamic::stdlib) fn encode(
+    ctx: &mut Context,
+    function: &str,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Id> {
+    arguments(function, args, kwargs, 3)?;
+    let input = args[0];
+    let length = super::encoder_input_length(ctx, function, input)?;
+    let errors = policy(ctx, function, args.get(1).copied())?;
+    let order = order(ctx, args.get(2))?;
+    let errors = super::error_name(ctx, errors)?.to_owned();
+    let bytes = super::encode_fixed(ctx, input, format(function), &errors, order)?;
+    let data = ctx.heap.bytes_from_data(bytes);
+    let consumed = ctx.alloc(Value::Int(crate::Int::from_usize(length)));
+    Ok(ctx.alloc(Value::Tuple(vec![data, consumed])))
+}
+
+pub(in crate::dynamic::stdlib) fn extended(
+    ctx: &mut Context,
+    function: &str,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Id> {
+    arguments(function, args, kwargs, 4)?;
+    let input = args[0];
+    ctx.check_buffer_exporter(input)?;
+    ctx.native_buffer_bytes(input)?;
+    ctx.with_buffer_export(input, |ctx| {
+        let errors = policy(ctx, function, args.get(1).copied())?;
+        let errors = super::error_name(ctx, errors)?.to_owned();
+        let order = order(ctx, args.get(2))?;
+        let final_chunk = args
+            .get(3)
+            .map(|&id| ctx.truth(id))
+            .transpose()?
+            .unwrap_or(false);
+        let (text, consumed, order) =
+            decode_chunk(ctx, input, &errors, format(function), order, final_chunk)?;
+        let consumed = ctx.alloc(Value::Int(crate::Int::from_usize(consumed)));
+        let order = ctx.int(i64::from(order));
+        Ok(ctx.alloc(Value::Tuple(vec![text, consumed, order])))
+    })
+}
 
 pub(super) fn decode(
     ctx: &mut Context,
@@ -28,7 +117,7 @@ pub(in crate::dynamic::stdlib) fn decode_chunk(
     if let Utf16(_) = format {
         return super::utf16::decode(ctx, input, errors, order, final_chunk);
     }
-    let data = ctx.bytes_like(input)?;
+    let data = ctx.native_buffer_bytes(input)?;
     let (order, start) = match (order, data.first_chunk::<4>()) {
         (0, Some([0xff, 0xfe, 0, 0])) => (-1, 4),
         (0, Some([0, 0, 0xfe, 0xff])) => (1, 4),

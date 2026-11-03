@@ -1216,6 +1216,8 @@ const RUNTIME_PROVIDERS: &[&str] = &[
     "encodings.latin_1",
     "encodings.utf_8",
     "encodings.utf_8_sig",
+    "encodings.utf_16",
+    "encodings.utf_32",
     "encodings.cp1251",
     "encodings.cp1252",
     "encodings.cp424",

@@ -105,6 +105,9 @@ pub(super) fn module_function(symbol: &str) -> Option<(&str, &str)> {
                     | "lookup"
                     | "escape_decode"
                     | "utf_16_ex_decode"
+                    | "utf_32_ex_decode"
+                    | "utf_16_encode"
+                    | "utf_32_encode"
             ) =>
         {
             Some(("_codecs", function))
