@@ -245,7 +245,7 @@ enum DefinitionKind {
         arguments: Option<Box<ast::Arguments>>,
         parameterized: bool,
     },
-    ClassParameters(Vec<ast::Identifier>),
+    ClassParameters(Box<ast::TypeParams>),
 }
 
 struct EagerComprehension<'a> {
@@ -1297,7 +1297,9 @@ impl Program {
                         Rc::get_mut(&mut definition.body).expect("newly lowered child code");
                     strings.heap.code_name(&definition.binding);
                     if let DefinitionKind::ClassParameters(params) = &definition.kind {
-                        child.locals.extend(params.iter().map(ToString::to_string));
+                        child
+                            .locals
+                            .extend(params.iter().map(|p| p.name().to_string()));
                     }
                     let (roots, reads) =
                         child.prepare_strings(strings.heap, strings.shared, spellings, line_at)?;
@@ -1306,7 +1308,9 @@ impl Program {
                             reads
                                 .iter()
                                 .filter(|name| {
-                                    !params.iter().any(|param| param.as_str() == name.as_str())
+                                    !params
+                                        .iter()
+                                        .any(|param| param.name().as_str() == name.as_str())
                                 })
                                 .cloned(),
                         );
@@ -1635,7 +1639,7 @@ impl Program {
                 if let DefinitionKind::ClassParameters(params) = &definition.kind {
                     child.resolve_directives(
                         &|name| {
-                            if params.iter().any(|p| p.as_str() == name) {
+                            if params.iter().any(|p| p.name().as_str() == name) {
                                 Some(EnclosingBinding::TypeParameter)
                             } else {
                                 bound(name)
@@ -2273,12 +2277,10 @@ impl Program {
                         annotate: None,
                     };
                     if let Some(params) = s.type_params {
-                        let mut parameters = Vec::new();
+                        let mut names = HashSet::new();
                         for param in &*params {
-                            let ast::TypeParam::TypeVar(var) = param else {
-                                return Err(unsupported("variadic class type parameters"));
-                            };
-                            match var.name.as_str() {
+                            let name = param.name();
+                            match name.as_str() {
                                 "__classdict__" => {
                                     return Err(Error::new(
                                         "SyntaxError",
@@ -2293,24 +2295,22 @@ impl Program {
                                 }
                                 _ => {}
                             }
-                            if var.bound.is_some() || var.default.is_some() {
+                            if param.default().is_some()
+                                || matches!(param, ast::TypeParam::TypeVar(var) if var.bound.is_some())
+                            {
                                 return Err(unsupported(
                                     "class type parameter bounds and defaults",
                                 ));
                             }
-                            if parameters
-                                .iter()
-                                .any(|p: &ast::Identifier| p.id == var.name.id)
-                            {
+                            if !names.insert(name.as_str()) {
                                 return Err(Error::new(
                                     "SyntaxError",
                                     format!(
                                         "duplicate type parameter '{}'",
-                                        definition.body.definition_spelling(&var.name)
+                                        definition.body.definition_spelling(name)
                                     ),
                                 ));
                             }
-                            parameters.push(var.name.clone());
                         }
                         // Bases and keywords run in the implicit type-parameter function.
                         // Decorators are evaluated and applied in the enclosing scope.
@@ -2332,7 +2332,7 @@ impl Program {
                             binding: s.name.to_string(),
                             decorators,
                             body: Rc::new(header),
-                            kind: DefinitionKind::ClassParameters(parameters),
+                            kind: DefinitionKind::ClassParameters(params),
                             annotate: None,
                         };
                     }
@@ -5186,11 +5186,14 @@ impl Context {
             let entries = params
                 .iter()
                 .map(|param| {
-                    let name = child.definition_spelling(param);
-                    (
-                        self.heap.code_name(param.as_str()),
-                        self.heap.code_name(name),
-                    )
+                    let binding = self.heap.code_name(param.name().as_str());
+                    let name = self.heap.code_name(child.definition_spelling(param.name()));
+                    let declaration = match param {
+                        ast::TypeParam::TypeVar(_) => name,
+                        ast::TypeParam::TypeVarTuple(_) => super::typing::declared_pack(self, name),
+                        ast::TypeParam::ParamSpec(_) => super::paramspec::declared(self, name),
+                    };
+                    (binding, declaration)
                 })
                 .collect();
             let names = self.dict(entries);
