@@ -172,7 +172,7 @@ def _signature_from_callable(obj, *, sigcls, follow_wrapper_chains=True,
             annotation_format=annotation_format)
         return _signature_get_partial(wrapped, obj)
     if isinstance(obj, types.FunctionType) or _signature_is_functionlike(obj):
-        return _signature_from_function(obj, sigcls, eval_str, annotation_format)
+        return _signature_from_function(obj, sigcls, globals, locals, eval_str, annotation_format)
     if isinstance(obj, type):
         method, drop_first = _constructor(obj, follow_wrapper_chains)
         if method is None:
@@ -186,16 +186,17 @@ def _signature_from_callable(obj, *, sigcls, follow_wrapper_chains=True,
     return _signature_bound_method(inner) if drop_first else inner
 
 
-def _signature_from_function(obj, sigcls, eval_str, annotation_format):
+def _signature_from_function(obj, sigcls, globals, locals, eval_str, annotation_format):
     is_duck = not isinstance(obj, types.FunctionType)
     if is_duck and not _signature_is_functionlike(obj):
         raise TypeError(f"{obj!r} is not a Python function")
     if getattr(obj, "__text_signature__", None):
         raise NotImplementedError("text signatures are not yet supported")
-    if eval_str or annotation_format != Format.VALUE:
-        raise NotImplementedError("native signatures currently support value annotations without string evaluation")
+    if not eval_str and annotation_format in (Format.FORWARDREF, Format.STRING):
+        raise NotImplementedError("native signatures currently support only value annotations")
     layout = _signature_layout(obj.__code__ if is_duck else obj)
-    annotations = get_annotations(obj) if is_duck else obj.__annotations__
+    annotations = get_annotations(
+        obj, globals=globals, locals=locals, eval_str=eval_str, format=annotation_format)
     defaults = obj.__defaults__
     keyword_defaults = obj.__kwdefaults__
     positional = [name for kind, name in layout if kind < _VAR_POSITIONAL]
