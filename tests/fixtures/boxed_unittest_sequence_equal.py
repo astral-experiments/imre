@@ -28,6 +28,23 @@ def current():
     with case.assertRaises(Failure) as caught:
         case.assertListEqual([1], [2], msg="changed list")
     print(str(caught.exception))
+    assert case.assertTupleEqual(tuple1=(1,), tuple2=(1,)) is None
+    with case.assertRaises(Failure) as caught:
+        case.assertTupleEqual([1], (1,))
+    assert str(caught.exception) == "First sequence is not a tuple: [1]"
+    with case.assertRaises(Failure) as caught:
+        case.assertTupleEqual((1,), (2,), msg="changed tuple")
+    print(str(caught.exception))
+
+    calls = []
+
+    class Routed(TestCase):
+        def assertSequenceEqual(self, first, second, msg, *, seq_type):
+            calls.append((first, second, msg, seq_type))
+            return "ignored"
+
+    assert Routed().assertTupleEqual((1,), (2,), "custom") is None
+    assert calls == [((1,), (2,), "custom", tuple)]
     compare = case.assertSequenceEqual
     assert compare([], ()) is None
     assert compare([1, 2], (1, 2)) is None
