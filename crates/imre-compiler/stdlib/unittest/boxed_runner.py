@@ -278,16 +278,19 @@ def _makeResult(self):
         return self.resultclass(self.stream, self.descriptions, self.verbosity)
 
 
-_textResultInit = TextTestResult.__init__
-
-
 def _boxedTextResultInit(self, stream=None, descriptions=True, verbosity=1, *, durations=None):
-    _textResultInit(self, stream, descriptions, verbosity)
+    super(TextTestResult, self).__init__(stream, descriptions, verbosity)
+    self.stream = stream if isinstance(stream, _WritelnDecorator) else _WritelnDecorator(stream)
+    self.descriptions = descriptions
+    self.verbose = verbosity
+    self._failureNames = []
+    self._errorNames = []
+    self.current_name = ""
+    self.name_pending = False
+    self.started = time.time()
     self.showAll = verbosity > 1
     self.dots = verbosity == 1
     self._newline = True
-    if isinstance(stream, _WritelnDecorator):
-        self.stream = stream
     self.durations = durations
 
 
