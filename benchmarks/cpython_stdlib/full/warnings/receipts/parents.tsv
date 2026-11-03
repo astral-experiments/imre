@@ -170,7 +170,7 @@ ordinal	id	occurrence	disposition	stock	O0	O3	stock_lines	O0_lines	O3_lines	rece
 169	test.test_warnings.PyWarningsDisplayTests.test_formatwarning	1	paired	PASS	PASS	PASS	174/706/707/708	174/706/707/708	174/706/707/708	dfe0f18e
 170	test.test_warnings.PyWarningsDisplayTests.test_formatwarning_override	1	paired	PASS	PASS	PASS	175/709/710/711	175/709/710/711	175/709/710/711	dfe0f18e
 171	test.test_warnings.PyWarningsDisplayTests.test_showwarning	1	paired	PASS	PASS	PASS	176/712/713/714	176/712/713/714	176/712/713/714	dfe0f18e
-172	test.test_warnings.PyWarningsDisplayTests.test_tracemalloc	1	native-child-nonpass	PASS	FAIL	FAIL	23/77/78/79	23/77/78/79	23/77/78/79	dfe0f18e-children
+172	test.test_warnings.PyWarningsDisplayTests.test_tracemalloc	1	paired	PASS	PASS	PASS	6/8/9/10	6/8/9/10	6/8/9/10	76aed745
 173	test.test_warnings._DeprecatedTest.test_RuntimeError	1	paired	PASS	PASS	PASS	178/718/725/726	178/718/725/726	178/718/725/726	dfe0f18e
 174	test.test_warnings._DeprecatedTest.test_warning	1	paired	PASS	PASS	PASS	179/727/732/733	179/727/732/733	179/727/732/733	dfe0f18e
 175	test.test_warnings._WarningsTests.test_default_action	1	paired	PASS	PASS	PASS	180/734/735/736	180/734/735/736	180/734/735/736	dfe0f18e
