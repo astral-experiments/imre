@@ -813,7 +813,7 @@ pub(crate) fn compile(
                 let bundled = bundled_module_source(&prefix);
                 if implicit_site.is_some()
                     && (bundled.is_some()
-                        || crate::modules::stdlib_top_level(&prefix)
+                        || imre_ast::providers::is_module(&prefix)
                         || prefix
                             .rsplit_once('.')
                             .is_some_and(|(parent, _)| before_site.contains(parent)))
@@ -957,15 +957,17 @@ pub(crate) fn compile(
             ));
         }
     }
-    if let Some(site) = site {
-        // Keeping the bundle in path order also preserves later explicit sys.path edits.
-        initial.extend([PathBuf::from(bundled_root), site.clone()]);
+    let stdlib = site.and_then(|site| site.parent());
+    if let (Some(stdlib), Some(site)) = (stdlib, site) {
+        // Represent the bundle with its absolute installation path, including under -I.
+        initial.extend([stdlib.to_owned(), site.clone()]);
     }
     let paths = serde_json::to_value(initial)
         .map_err(|e| format!("cannot represent startup search path: {e}"))?;
     let keep_docstrings = startup.is_none_or(|(flags, _)| flags.optimize < 2);
     let config = serde_json::json!({
         "bundled_root":bundled_root,
+        "stdlib_dir":stdlib,
         "module_docs":{"json": keep_docstrings.then_some(include_str!("../../stdlib/docstrings/json.txt"))},
         "python_version":crate::PYTHON_VERSION.to_string(),
         "implementation_version":env!("CARGO_PKG_VERSION"),

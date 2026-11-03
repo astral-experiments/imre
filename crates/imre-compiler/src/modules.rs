@@ -5639,7 +5639,15 @@ impl<'a> Loader<'a> {
 
     fn load_new_module(&mut self, name: &str) -> Result<ModuleId, String> {
         let first = name.split('.').next().unwrap_or("");
-        if stdlib_top_level(first) {
+        if stdlib_top_level(first)
+            && (imre_ast::providers::is_module(first)
+                || !self.search_roots.get(self.archive_roots).is_some_and(|site| {
+                    // A typeshed declaration alone does not supply an importable module.
+                    let path = site.join(first);
+                    self.fs.is_file(&path.with_extension("py"))
+                        || self.fs.is_file(&path.join("__init__.py"))
+                }))
+        {
             return Err(format!(
                 "standard-library imports and shadowing are unsupported: {first:?}"
             ));
@@ -5830,7 +5838,7 @@ pub(crate) fn errno_import(statement: &ast::Stmt) -> Option<&ast::StmtImportFrom
     .then_some(import)
 }
 
-pub(crate) fn stdlib_top_level(name: &str) -> bool {
+fn stdlib_top_level(name: &str) -> bool {
     let vendored = ty_vendored::file_system();
     INTRINSIC_MODULES.contains(&name)
         || vendored.is_file(format!("stdlib/{name}.pyi").as_str())
