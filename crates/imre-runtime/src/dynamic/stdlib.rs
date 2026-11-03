@@ -116,130 +116,17 @@ pub(super) fn jit_module(ctx: &mut Context) -> Result<Id> {
 }
 
 pub(super) fn is_module(name: &str) -> bool {
-    #[cfg(unix)]
-    if matches!(name, "_ssl" | "_imre_ssl") {
-        return ssl::provider::available();
+    use imre_ast::providers::{Provider, provider};
+    match provider(name) {
+        Some(Provider::Builtin) => true,
+        #[cfg(unix)]
+        Some(Provider::Ssl) => ssl::provider::available(),
+        Some(Provider::Hashlib) => hashlib::openssl::provider().is_some(),
+        None => false,
     }
-    if name == "_hashlib" {
-        return hashlib::openssl::provider().is_some();
-    }
-    matches!(
-        name,
-        "_blake2"
-            | "_md5"
-            | "_sha3"
-            | "_datetime"
-            | "_imre_itertools"
-            | "_imre_ordered_dict"
-            | "operator"
-            | "_operator"
-            | "_opcode"
-            | "atexit"
-            | "builtins"
-            | "errno"
-            | "faulthandler"
-            | "genericpath"
-            | "hmac"
-            | "urllib.parse"
-            | "re._constants"
-            | "io"
-            | "itertools"
-            | "json"
-            | "subprocess"
-            | "warnings"
-            | "_warnings"
-    ) || (cfg!(unix) && matches!(name, "_signal" | "_imre_signal"))
-        || (cfg!(any(target_os = "linux", target_os = "macos")) && matches!(name, "grp" | "pwd"))
-        || has_lazy_attributes(name)
 }
 
-/// These providers synthesize attributes on lookup. Their module dictionaries
-/// alone do not enumerate their exports.
-pub(super) fn has_lazy_attributes(name: &str) -> bool {
-    if cfg!(unix) && matches!(name, "zipimport" | "_imre_zipimport")
-        || cfg!(all(unix, not(target_os = "linux"))) && name == "_signal"
-        || cfg!(target_os = "linux") && matches!(name, "resource" | "fcntl")
-    {
-        return true;
-    }
-    matches!(
-        name,
-        "sys"
-            | "_imp"
-            | "_imre_thread"
-            | "threading"
-            | "_thread"
-            | "abc"
-            | "array"
-            | "_typing"
-            | "_collections"
-            | "codecs"
-            | "_codecs"
-            | "types"
-            | "_io"
-            | "_weakref"
-            | "locale"
-            | "_locale"
-            | "traceback"
-            | "sysconfig"
-            | "ast"
-            | "os"
-            | "posix"
-            | "posixpath"
-            | "_imre_posixpath"
-            | "_imre_metadata"
-            | "_imre_json"
-            | "_imre_linecache"
-            | "_imre_csv"
-            | "_imre_tokenize"
-            | "_imre_pkgutil"
-            | "fnmatch"
-            | "platform"
-            | "site"
-            | "select"
-            | "selectors"
-            | "struct"
-            | "base64"
-            | "binascii"
-            | "math"
-            | "unicodedata"
-            | "_json"
-            | "_imre_subprocess"
-            | "_imre_dataclasses"
-            | "gc"
-            | "marshal"
-            | "pickle"
-            | "zlib"
-            | "email"
-            | "email.utils"
-            | "tempfile"
-            | "_imre_tempfile"
-            | "time"
-            | "random"
-            | "secrets"
-            | "hashlib"
-            | "re"
-            | "importlib"
-            | "importlib.machinery"
-            | "importlib.util"
-            | "_frozen_importlib"
-            | "_frozen_importlib_external"
-            | "_imre_importlib"
-            | "functools"
-            | "_string"
-            | "inspect"
-            | "collections"
-            | "_collections_abc"
-            | "enum"
-            | "typing"
-            | "contextlib"
-            | "contextvars"
-            | "_contextvars"
-            | "socket"
-            | "_socket"
-            | "urllib"
-    )
-}
+pub(super) use imre_ast::providers::has_lazy_attributes;
 
 /// Populate errno in platform registration order so aliases and the reverse
 /// mapping share the same definitions as the ordinary compiler.

@@ -660,8 +660,14 @@ pub(crate) fn compile(
         initial.push(root);
     }
     initial.extend(options.extension_paths.iter().map(|p| cwd.join(p)));
+    let site = options
+        .system_site
+        .as_ref()
+        .filter(|p| !initial.contains(p));
     let mut roots = initial.clone();
     roots.extend(first.explicit_roots.iter().map(|p| cwd.join(p)));
+    let implicit_site = site.filter(|p| !roots.contains(p));
+    roots.extend(implicit_site.cloned());
     // Discover each search directory once even when it appears twice in sys.path.
     let mut seen_roots = HashSet::new();
     roots.retain(|root| seen_roots.insert(root.clone()));
@@ -692,6 +698,7 @@ pub(crate) fn compile(
     // Keep source hints on the winning regular package's path. The runtime finder
     // can still load a different child if a parent changes its __path__.
     let mut entry_sources: HashMap<String, Option<PathBuf>> = HashMap::new();
+    let mut before_site = HashSet::new();
     let mut frozen_imports = Imports::default();
     let mut work = VecDeque::from([("__main__".to_owned(), false, first)]);
     let mut uses_import_builtin = false;
@@ -803,7 +810,17 @@ pub(crate) fn compile(
                 if prefix == "_imp" && !frozen_imports.names.is_empty() {
                     work.push_back((String::new(), false, std::mem::take(&mut frozen_imports)));
                 }
-                if let Some((filename, source)) = bundled_module_source(&prefix) {
+                let bundled = bundled_module_source(&prefix);
+                if implicit_site.is_some()
+                    && (bundled.is_some()
+                        || imre_ast::providers::provider(&prefix).is_some()
+                        || prefix
+                            .rsplit_once('.')
+                            .is_some_and(|(parent, _)| before_site.contains(parent)))
+                {
+                    before_site.insert(prefix.clone());
+                }
+                if let Some((filename, source)) = bundled {
                     let path = Path::new(bundled_root).join(filename);
                     let package = path.ends_with("__init__.py");
                     let imports = imports_for_module(&path, &source)?;
@@ -818,6 +835,9 @@ pub(crate) fn compile(
                     continue;
                 }
                 for root in &roots {
+                    if implicit_site == Some(root) && before_site.contains(&prefix) {
+                        continue;
+                    }
                     if let Some((parent, _)) = prefix.rsplit_once('.')
                         && let Some(selected) = entry_sources.get(parent)
                         && selected.as_ref() != Some(root)
@@ -832,6 +852,9 @@ pub(crate) fn compile(
                                 imports_for_module(&member, source.trim_start_matches('\u{feff}'))
                             {
                                 work.push_back((prefix.clone(), package, imports));
+                            }
+                            if implicit_site.is_some() {
+                                before_site.insert(prefix.clone());
                             }
                             entry_sources.insert(prefix.clone(), package.then(|| root.clone()));
                             break;
@@ -862,6 +885,9 @@ pub(crate) fn compile(
                         }
                         continue;
                     };
+                    if implicit_site.is_some() && implicit_site != Some(root) {
+                        before_site.insert(prefix.clone());
+                    }
                     // A late command import can use the runtime's builtins and bundled
                     // providers. Leave project-source imports on their original route.
                     if ordered_only {
@@ -931,11 +957,19 @@ pub(crate) fn compile(
             ));
         }
     }
+    // The bundle lives in the launcher. This absolute, non-directory path can neither
+    // expose the working directory under -I nor collide with an explicit source root.
+    let bundle_entry = startup.filter(|_| site.is_some())
+        .map(|(_, executable)| Path::new(executable).join(bundled_root));
+    if let (Some(bundle), Some(site)) = (&bundle_entry, site) {
+        initial.extend([bundle.clone(), site.clone()]);
+    }
     let paths = serde_json::to_value(initial)
         .map_err(|e| format!("cannot represent startup search path: {e}"))?;
     let keep_docstrings = startup.is_none_or(|(flags, _)| flags.optimize < 2);
     let config = serde_json::json!({
         "bundled_root":bundled_root,
+        "bundle_entry":bundle_entry,
         "module_docs":{"json": keep_docstrings.then_some(include_str!("../../stdlib/docstrings/json.txt"))},
         "python_version":crate::PYTHON_VERSION.to_string(),
         "implementation_version":env!("CARGO_PKG_VERSION"),
