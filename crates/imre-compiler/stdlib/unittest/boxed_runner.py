@@ -274,7 +274,7 @@ class _StreamWrite:
 
 
 def _streamAttribute(self, name):
-    if name in ("stream", "__getstate__"):
+    if name in ("stream", "_memory", "__getstate__"):
         raise AttributeError(name)
     return getattr(self.stream, name)
 
