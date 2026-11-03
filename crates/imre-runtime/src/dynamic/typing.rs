@@ -1329,11 +1329,19 @@ pub(super) fn attribute(ctx: &mut Context, value: Id, name: &str) -> Option<Resu
                     .and_then(|method| ctx.bind_attribute(method, value, class)),
             );
         }
-        Value::Native(class) if class == "collections.abc._CallableGenericAlias"
-            && matches!(name, "__base__" | "__bases__" | "__mro__") =>
+        Value::Native(class)
+            if matches!(name, "__base__" | "__bases__" | "__mro__")
+                && (ParameterClass::lookup(class).is_some()
+                    || matches!(
+                        class.as_str(),
+                        "typing.Any"
+                            | "typing._AnyMeta"
+                            | "typing.TypeAliasType"
+                            | "collections.abc._CallableGenericAlias"
+                    )) =>
         {
             if name == "__base__" {
-                ctx.builtin("types.GenericAlias")
+                ctx.builtin(Context::native_base(class).unwrap_or("object"))
             } else {
                 ctx.builtin_hierarchy_tuple(value, name)
             }
@@ -2226,16 +2234,6 @@ pub(super) fn call(
         let module = ctx.heap.caller_module();
         return typevar(ctx, args, kwargs, module, false);
     }
-    if operation == "cast" {
-        let [typ, value] = super::builtins::bind("cast()", args, kwargs, ["typ", "val"])?;
-        if let (Some(_), Some(value)) = (typ, value) {
-            return Ok(value);
-        }
-        return Err(Error::new(
-            "TypeError",
-            "cast() requires a type and a value",
-        ));
-    }
     if matches!(
         operation,
         "_GenericAlias" | "_CallableGenericAlias" | "_ConcatenateGenericAlias"
@@ -2809,7 +2807,23 @@ impl Context {
                         return Ok(result);
                     }
                 }
-                Ok(self.instance_of(value, class))
+                if self.instance_of(value, class) {
+                    return Ok(true);
+                }
+                // Fixed native values cannot override their reported class.
+                let Some(actual) = self.heap.get(value).instance_class() else {
+                    return Ok(false);
+                };
+                if !self.is_type_object(class) {
+                    return Ok(false);
+                }
+                match self.lookup_attr(value, "__class__") {
+                    Ok(reported) => Ok(reported != actual
+                        && self.is_type_object(reported)
+                        && self.direct_subclass(reported, class)),
+                    Err(error) if self.is_attribute_error(&error) => Ok(false),
+                    Err(error) => Err(error),
+                }
             }
         }
     }

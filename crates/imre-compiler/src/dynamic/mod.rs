@@ -23,6 +23,7 @@ struct Imports {
     names: Vec<(u32, String)>,
     explicit_roots: Vec<PathBuf>,
     runtime_imports: bool,
+    private_names: imre_ast::Names,
     uses_import_builtin: bool,
     imports_logging: bool,
     sys_names: HashSet<String>,
@@ -290,6 +291,13 @@ impl<'a> Visitor<'a> for Imports {
                     }
                 }
             }
+            Stmt::FunctionDef(function)
+                if self.private_names.string_annotations
+                    && function_type_params(function, true, true, Some(&self.private_names))
+                        .is_some() =>
+            {
+                self.runtime_imports = true;
+            }
             Stmt::ClassDef(class)
                 if class.type_params.is_some()
                     || crate::classes::defines_pickle_reducer(class)
@@ -400,28 +408,44 @@ impl<'a> Visitor<'a> for Imports {
     }
 }
 
-/// A module-level synchronous function can close over unbounded TypeVars in a single body scope.
-pub(crate) fn function_type_params(function: &ast::StmtFunctionDef) -> Option<&ast::TypeParams> {
+/// A synchronous function with one body scope can capture its unbounded type parameters.
+pub(crate) fn function_type_params<'a>(
+    function: &'a ast::StmtFunctionDef,
+    string_annotations: bool,
+    nested: bool,
+    private_names: Option<&imre_ast::Names>,
+) -> Option<&'a ast::TypeParams> {
     use ast::AnyNodeRef::*;
     use ast::visitor::source_order::{SourceOrderVisitor, TraversalSignal};
 
     let params = function.type_params.as_deref()?;
     let mut names = HashSet::new();
     if function.is_async
+        || (nested && !string_annotations)
         || !params.iter().all(|p| {
-            matches!(p, ast::TypeParam::TypeVar(v)
-        if v.bound.is_none() && v.default.is_none()
-            && !matches!(v.name.as_str(), "__classdict__" | "__debug__")
-            && names.insert(v.name.as_str()))
+            let name = private_names.map_or(p.name().as_str(), |names| names.definition(p.name()));
+            p.default().is_none()
+                && match p {
+                    ast::TypeParam::TypeVar(v) => v.bound.is_none(),
+                    ast::TypeParam::TypeVarTuple(_) | ast::TypeParam::ParamSpec(_) => {
+                        string_annotations
+                    }
+                }
+                && !matches!(name, "__classdict__" | "__debug__")
+                && (!nested || !name.starts_with("__"))
+                && names.insert(p.name().as_str())
         })
     {
         return None;
     }
 
-    struct BodyScope(bool);
+    struct BodyScope {
+        nested: bool,
+        unsupported: bool,
+    }
     impl<'a> SourceOrderVisitor<'a> for BodyScope {
         fn enter_node(&mut self, node: ast::AnyNodeRef<'a>) -> TraversalSignal {
-            self.0 |= matches!(
+            self.unsupported |= matches!(
                 node,
                 StmtFunctionDef(_)
                     | StmtClassDef(_)
@@ -435,16 +459,22 @@ pub(crate) fn function_type_params(function: &ast::StmtFunctionDef) -> Option<&a
                     | ExprYield(_)
                     | ExprYieldFrom(_)
             );
-            if self.0 {
+            // Nested declarations with a class cell need a different capture path.
+            self.unsupported |= self.nested
+                && matches!(node, ExprName(n) if matches!(n.id.as_str(), "__class__" | "super"));
+            if self.unsupported {
                 TraversalSignal::Skip
             } else {
                 TraversalSignal::Traverse
             }
         }
     }
-    let mut body = BodyScope(false);
+    let mut body = BodyScope {
+        nested,
+        unsupported: false,
+    };
     body.visit_body(&function.body);
-    (!body.0).then_some(params)
+    (!body.unsupported).then_some(params)
 }
 
 fn imports(source: &str, kind: SourceKind) -> Result<Imports, String> {
@@ -454,9 +484,9 @@ fn imports(source: &str, kind: SourceKind) -> Result<Imports, String> {
     crate::analysis::check_indentation(&normalized, parsed.tokens())?;
     let mut imports = Imports::default();
     let mut body = parsed.into_syntax().body;
-    imre_ast::lower(&mut body);
+    imports.private_names = imre_ast::lower(&mut body);
     imports.runtime_imports = body.iter().any(|stmt| {
-        matches!(stmt, Stmt::FunctionDef(function) if function_type_params(function).is_some())
+        matches!(stmt, Stmt::FunctionDef(function) if function_type_params(function, imports.private_names.string_annotations, false, Some(&imports.private_names)).is_some())
     });
     imports.visit_body(&body);
     Ok(imports)

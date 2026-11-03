@@ -382,7 +382,12 @@ impl Function<'_, '_> {
                         DefinitionName::Binding(&v.name),
                         Some(&v.parameters),
                         v.returns.as_deref(),
-                        crate::dynamic::function_type_params(v).filter(|_| self.prefix.is_empty()),
+                        crate::dynamic::function_type_params(
+                            v,
+                            self.source.string_annotations,
+                            !self.prefix.is_empty(),
+                            Some(&self.source.private_names),
+                        ),
                         body,
                     );
                     if v.is_async && !generator {
@@ -684,7 +689,10 @@ impl Function<'_, '_> {
                 if type_params.is_some() || self.in_function {
                     flags |= NESTED;
                 }
-                if !self.prefix.is_empty() && !self.prefix.ends_with(".<locals>.") {
+                if type_params.is_none()
+                    && !self.prefix.is_empty()
+                    && !self.prefix.ends_with(".<locals>.")
+                {
                     flags |= METHOD;
                 }
                 if self.source.string_annotations {

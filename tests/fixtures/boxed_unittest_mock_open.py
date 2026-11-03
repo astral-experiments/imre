@@ -1,5 +1,5 @@
 from unittest import TestCase
-from unittest.mock import MagicMock, Mock, call, mock_open, seal
+from unittest.mock import InvalidSpecError, MagicMock, Mock, call, mock_open, seal
 
 check = TestCase()
 names = ["close", "assert_worker", "_private", "__enter__", "__exit__", "__iter__", "__next__"]
@@ -25,6 +25,58 @@ assert list(iter(handle)) == list(iter(handle)) == [1, 2]
 assert handle.__exit__.return_value is False
 assert handle.method_calls == [call.assert_worker(), call._private()]
 assert handle.mock_calls[:4] == [call.assert_worker(), call._private(), call.__enter__(), call.__exit__(None, None, None)]
+
+class Readable:
+    def read(self): pass
+
+
+class Reader(Readable):
+    def __iter__(self): return self
+    def __next__(self): raise StopIteration
+
+
+specified = MagicMock(Reader)
+assert specified.__class__ is Reader
+assert isinstance(specified, Reader) and isinstance(specified, Readable)
+assert not hasattr(specified, "__enter__") and not hasattr(specified, "write")
+specified.extra = 42
+specified.read(3)
+specified.read.assert_called_once_with(3)
+specified.__iter__ = lambda self: self
+specified.__next__.return_value = 7
+assert iter(specified) is specified and next(specified) == 7
+specified.__next__.assert_called_once_with()
+
+strict = Mock(spec_set=Reader)
+assert strict.__class__ is Reader
+strict.read = 3
+with check.assertRaises(AttributeError):
+    strict.write = 4
+assert handle.__class__ is type(handle)
+
+inner = Mock()
+inner.__class__ = type
+with check.assertRaises(InvalidSpecError):
+    Mock(spec=inner)
+with check.assertRaises(InvalidSpecError):
+    MagicMock(spec_set=inner)
+
+
+class ReportedMock:
+    @property
+    def __class__(self): return Mock
+
+
+reported = ReportedMock()
+specified.return_value = reported
+specified.reset_mock()
+assert specified.return_value is reported
+
+specified.__init__(["read"])
+assert specified.__class__ is type(specified)
+assert not hasattr(specified, "__iter__") and not hasattr(specified, "__next__")
+with check.assertRaises(TypeError):
+    iter(specified)
 
 plain = Mock(["__len__", "__custom__"])
 assert not hasattr(plain, "__len__")

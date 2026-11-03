@@ -14,7 +14,7 @@ struct RunSum<'a> {
 fn pure_term(
     module: Option<&Module>,
     value: &Expr,
-    row: usize,
+    row: &dyn Fn(&Expr) -> bool,
     accumulator: Option<usize>,
 ) -> bool {
     if value.ty != Type::Float {
@@ -23,9 +23,7 @@ fn pure_term(
     match &value.kind {
         ExprKind::Float(_) => true,
         ExprKind::Local(slot) => accumulator.is_some_and(|sum| *slot != sum),
-        ExprKind::Field(receiver, _) => {
-            matches!(receiver.kind, ExprKind::Local(slot) if slot == row)
-        }
+        ExprKind::Field(receiver, _) => row(receiver),
         ExprKind::Negate(inner) => pure_term(module, inner, row, accumulator),
         ExprKind::Binary(Binary::Add | Binary::Subtract | Binary::Multiply, left, right) => {
             pure_term(module, left, row, accumulator) && pure_term(module, right, row, accumulator)
@@ -35,8 +33,7 @@ fn pure_term(
             let f = &module.functions[*id];
             matches!((args.values.as_slice(), f.params.as_slice(), f.body.as_slice()),
                 ([arg], [receiver], [Statement::Return(result)])
-                if matches!(arg.kind, ExprKind::Local(slot) if slot == row)
-                    && pure_term(None, result, *receiver, None))
+                if row(arg) && (matches!(arg.kind, ExprKind::Local(_)) || structs::field_reader(f)) && pure_term(None, result, &|v| matches!(v.kind, ExprKind::Local(slot) if slot == *receiver), None))
         }
         _ => false,
     }
@@ -80,11 +77,156 @@ fn run_sum<'a>(module: &Module, test: &Expr, body: &'a [Statement]) -> Option<Ru
         && matches!(&bound.kind, ExprKind::Builtin(Builtin::Len, a) if matches!(a.as_slice(), [v] if local(v, list)))
         && matches!(&one.kind, ExprKind::Int(n) if n == "1")
         && local(old_sum, *sum) && old_sum.ty == Type::Float
-        && pure_term(Some(module), term, *row, Some(*sum)))
+        && pure_term(Some(module), term, &|v| local(v, *row), Some(*sum)))
     .then_some(RunSum { list, cursor: *cursor, row: *row, accumulator: *sum, term })
 }
 
+/// Match a projection from a single list at the current modular index.
+fn indexed_list(module: &Module, value: &Expr, index: usize) -> Option<usize> {
+    let (_, [receiver, subscript]) = structs::packed_get(value)? else {
+        return None;
+    };
+    let ExprKind::Local(list) = receiver.kind else {
+        return None;
+    };
+    (module.types.is_value_struct(value.ty)
+        && matches!(subscript.kind, ExprKind::Local(slot) if slot == index))
+    .then_some(list)
+}
+
 impl Emitter<'_, '_> {
+    /// A uniform list gives every in-bounds modular lookup the same projection.
+    /// Publish the final index and loop target of each bounded chunk before polling again.
+    pub(super) fn uniform_indexed_sum(
+        &mut self,
+        body: &[Statement],
+        target: usize,
+        cursor: usize,
+        args: &[Value],
+        exhausted: &str,
+    ) {
+        let [
+            Statement::Assign(index, subscript),
+            Statement::Assign(sum, update),
+        ] = body
+        else {
+            return;
+        };
+        let ExprKind::Binary(Binary::Add, old_sum, term) = &update.kind else {
+            return;
+        };
+        let ExprKind::Binary(Binary::Modulo, numerator, divisor) = &subscript.kind else {
+            return;
+        };
+        if self.locals[*sum] != Type::Float
+            || self.locals[*index] != Type::Int
+            || old_sum.ty != Type::Float
+            || !matches!(old_sum.kind, ExprKind::Local(slot) if slot == *sum)
+            || *index == target
+            || !self.module.source_frames.is_empty()
+        {
+            return;
+        }
+        let Some((scale, offset, limit)) = affine::bounded_ordinal(target, numerator) else {
+            return;
+        };
+        let mut list = None;
+        ir::walk_expressions(body, &mut |e| {
+            if list.is_none() {
+                list = indexed_list(self.module, e, *index);
+            }
+        });
+        let Some(list) = list else { return };
+        if !matches!(self.locals[list], Type::List(_)) {
+            return;
+        }
+        if !pure_term(
+            Some(self.module),
+            term,
+            &|e| indexed_list(self.module, e, *index) == Some(list),
+            Some(*sum),
+        ) {
+            return;
+        }
+        let modulus = match &divisor.kind {
+            ExprKind::Local(slot)
+                if self.locals[*slot] == Type::Int && *slot != target && *slot != *index =>
+            {
+                self.borrow_slot(*slot)
+            }
+            ExprKind::Int(n) => {
+                let Ok(n) = n.parse::<i32>() else { return };
+                small(i64::from(n))
+            }
+            _ => return,
+        };
+        let (start, stop, modulus) = (&args[0].operand, &args[1].operand, &modulus.operand);
+        let ordinary = self.label();
+        let condition = self.label();
+        let inspect = self.label();
+        let batch = self.label();
+        let mask = self.entry_alloca("i64");
+        self.output
+            .local_helper("imre_uniform_index_range", INDEX_RANGE_HELPER);
+        let eligible = self.instruction(format!(
+            "call i1 @imre_uniform_index_range(i64 {start}, i64 {stop}, i64 {modulus}, i64 {limit})"
+        ));
+        self.branch(&eligible, &inspect, &ordinary);
+        self.start(&inspect);
+        let receiver = self.borrow_slot(list);
+        let present = self.instruction(format!("icmp ne ptr {}, null", receiver.operand));
+        let bounds = self.label();
+        self.branch(&present, &bounds, &ordinary);
+        self.start(&bounds);
+        let length = self.list_length(&receiver);
+        let in_bounds = self.instruction(format!("icmp ule i64 {modulus}, {}", length.operand));
+        let data = self.instruction(format!(
+            "call ptr @imre_struct_read_view(ptr {}, ptr {mask})",
+            receiver.operand
+        ));
+        let direct = self.instruction(format!("icmp ne ptr {data}, null"));
+        let bits = self.instruction(format!("load i64, ptr {mask}"));
+        let uniform = self.instruction(format!("icmp eq i64 {bits}, 0"));
+        let repeated = self.instruction(format!("and i1 {direct}, {uniform}"));
+        let stride = self.instruction(format!("select i1 {repeated}, i64 2046, i64 2"));
+        self.branch(&in_bounds, &condition, &ordinary);
+        self.start(&condition);
+        // Relinquish the read-only proof before running any signal handler.
+        // The ordinary range header polls with the fully published prefix.
+        let tripped = self
+            .instruction("load atomic volatile i8, ptr @imre_signal_tripped monotonic, align 1");
+        let pending = self.instruction(format!("icmp ne i8 {tripped}, 0"));
+        let test = self.label();
+        self.branch(&pending, &ordinary, &test);
+        self.start(&test);
+        let at = self.borrow_slot(cursor);
+        let more = self.instruction(format!("icmp slt i64 {}, {stop}", at.operand));
+        self.branch(&more, &batch, exhausted);
+        self.start(&batch);
+        let left = self.instruction(format!("sub i64 {stop}, {}", at.operand));
+        let short = self.instruction(format!("icmp ult i64 {left}, {stride}"));
+        let span = self.instruction(format!("select i1 {short}, i64 {left}, i64 {stride}"));
+        let count = self.instruction(format!("lshr i64 {span}, 1"));
+        let end = self.instruction(format!("add i64 {}, {span}", at.operand));
+        let last = self.instruction(format!("sub i64 {end}, 2"));
+        let ordinal = |operand| Value {
+            ty: Type::Int,
+            operand,
+            small_integer: true,
+        };
+        let subscript = self.instruction(format!(
+            "call i64 @imre_bounded_modular_index(i64 {last}, i64 {scale}, i64 {offset}, i64 {modulus})"
+        ));
+        self.store(target, &ordinal(last));
+        self.store(*index, &ordinal(subscript));
+        let value = self.expr(term);
+        let old = self.borrow_slot(*sum);
+        self.add_repeated_term(*sum, &old, &value, &count);
+        self.store(cursor, &ordinal(end));
+        self.jump(&condition);
+        self.start(&ordinary);
+    }
+
     /// Advance over the current read-only run after copying its observable loop target.
     /// A dense or replaced receiver follows the ordinary traversal.
     pub(super) fn struct_run_loop(
@@ -183,21 +325,23 @@ impl Emitter<'_, '_> {
         let whole = self.instruction(format!("or i1 {exact}, {short}"));
         let count = self.instruction(format!("select i1 {whole}, i64 {count}, i64 65536"));
         let end = self.instruction(format!("add i64 {at}, {count}"));
+        self.add_repeated_term(plan.accumulator, &sum, &term, &count);
+        let shifted = self.instruction(format!("shl i64 {end}, 1"));
+        let tagged = self.instruction(format!("or i64 {shifted}, 1"));
+        self.line(format!("store i64 {tagged}, ptr %local{}", plan.cursor));
+        self.jump(&condition);
+        true
+    }
+
+    /// Apply the projected term in source order unless binary64 reassociation is exact.
+    fn add_repeated_term(&mut self, accumulator: usize, sum: &Value, term: &Value, count: &str) {
         self.output
             .local_helper("imre_repeat_fadd", STRUCT_RUN_HELPERS);
         let result = self.instruction(format!(
             "call double @imre_repeat_fadd(double {}, double {}, i64 {count})",
             sum.operand, term.operand
         ));
-        self.line(format!(
-            "store double {result}, ptr %local{}",
-            plan.accumulator
-        ));
-        let shifted = self.instruction(format!("shl i64 {end}, 1"));
-        let tagged = self.instruction(format!("or i64 {shifted}, 1"));
-        self.line(format!("store i64 {tagged}, ptr %local{}", plan.cursor));
-        self.jump(&condition);
-        true
+        self.line(format!("store double {result}, ptr %local{}", accumulator));
     }
 
     /// Evaluate one pure projection per dictionary entry. Keep the ordinary last
@@ -360,6 +504,39 @@ impl Emitter<'_, '_> {
     }
 }
 
+/// Guard signed tagged range endpoints and a positive modulus before any list access.
+const INDEX_RANGE_HELPER: &str = r#"
+define internal i1 @imre_uniform_index_range(i64 %start, i64 %stop, i64 %modulus, i64 %limit) alwaysinline nounwind {
+  %ends = and i64 %start, %stop
+  %tags = and i64 %ends, %modulus
+  %small = trunc i64 %tags to i1
+  %nonnegative = icmp sge i64 %start, 1
+  %positive = icmp sgt i64 %modulus, 1
+  %nonempty = icmp slt i64 %start, %stop
+  %end = lshr i64 %stop, 1
+  %last = sub i64 %end, 1
+  %bounded = icmp ule i64 %last, %limit
+  %domain = and i1 %positive, %nonnegative
+  %range = and i1 %nonempty, %bounded
+  %valid = and i1 %domain, %range
+  %result = and i1 %small, %valid
+  ret i1 %result
+}
+
+; The range proof covers both the multiply and the addition. Positive Python
+; modulo agrees with unsigned remainder throughout this nonnegative domain.
+define internal i64 @imre_bounded_modular_index(i64 %tag, i64 %scale, i64 %offset, i64 %modulus) alwaysinline nounwind {
+  %i = lshr i64 %tag, 1
+  %n = lshr i64 %modulus, 1
+  %product = mul nuw nsw i64 %i, %scale
+  %value = add nuw nsw i64 %product, %offset
+  %index = urem i64 %value, %n
+  %shifted = shl i64 %index, 1
+  %tagged = or i64 %shifted, 1
+  ret i64 %tagged
+}
+"#;
+
 const STRUCT_RUN_HELPERS: &str = r"
 ; The cursor holds a valid, nonempty span after a sparse row read. A dense
 ; span or a boxed single row retains the original one-element advance.
@@ -426,6 +603,31 @@ finish:
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn modular_index_batches_require_independent_pure_row_projections() {
+        let prelude = "from imre import struct\n@struct\nclass Row:\n    x: float\n";
+        let compile = |body: &str| {
+            let source = format!(
+                "{prelude}def f(rows: list[Row], n: int) -> float:\n    total = 0.0\n    for i in range(n):\n{body}    return total\nprint(f([Row(1.5)] * 4, 4))"
+            );
+            crate::compile(&source, &crate::CompileOptions::default()).unwrap()
+        };
+        let eligible = compile("        at = (7 * i + 1) % n\n        total += rows[at].x\n");
+        assert!(eligible.contains("call i1 @imre_uniform_index_range("));
+        for body in [
+            "        at = i % n\n        total += total * rows[at].x\n",
+            "        at = i % n\n        total += 1.0 / rows[at].x\n",
+            "        at = i % n\n        total += rows[i].x\n",
+            "        n = (i + 1) % n\n        total += rows[n].x\n",
+            "        at = i % n\n        rows[at] = Row(4.0)\n        total += rows[at].x\n",
+        ] {
+            assert!(
+                !compile(body).contains("call i1 @imre_uniform_index_range("),
+                "{body}"
+            );
+        }
+    }
+
     #[test]
     fn run_folds_require_a_pure_independent_float_term() {
         let source = r#"

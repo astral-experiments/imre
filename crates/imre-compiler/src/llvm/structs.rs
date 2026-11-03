@@ -3,7 +3,7 @@
 use super::*;
 
 /// ListGet also represents dictionary subscriptions; only a list carries rows.
-fn packed_get(item: &Expr) -> Option<(&Builtin, &[Expr])> {
+pub(super) fn packed_get(item: &Expr) -> Option<(&Builtin, &[Expr])> {
     if let ExprKind::Builtin(op @ (Builtin::SequenceGetInBounds | Builtin::ListGet), args) =
         &item.kind
         && matches!(args[0].ty, Type::List(_))

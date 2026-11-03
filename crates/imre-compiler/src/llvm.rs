@@ -2565,6 +2565,9 @@ impl Emitter<'_, '_> {
                     self.label()
                 };
                 self.uniform_append(body, &args, *target, *cursor, &exhausted);
+                if unit_step {
+                    self.uniform_indexed_sum(body, *target, *cursor, &args, &exhausted);
+                }
                 self.branch(&zero.operand, &fail, &condition);
                 self.start(&fail);
                 self.checked_line("call void @imre_range_step_zero()");
