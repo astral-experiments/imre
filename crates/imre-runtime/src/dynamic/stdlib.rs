@@ -733,6 +733,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             | "encoder_call",
         )
         | ("_imre_linecache", "source_lines")
+        | ("_imre_unittest", "format_exception")
         | ("_imre_metadata", "filenames" | "dedent" | "zip_names" | "zip_open" | "zip_read")
         | (
             "_imre_posixpath",
@@ -1116,6 +1117,15 @@ pub(super) fn call(
         }
         ctx.heap.clear_frame(frame)?;
         return Ok(NONE);
+    }
+    if name == "_imre_unittest.format_exception" {
+        let ([kind, value, tb, locals], []) = (args, kwargs) else {
+            return Err(Error::new(
+                "TypeError",
+                "_format_exception() expects four positional arguments",
+            ));
+        };
+        return traceback::format_result(ctx, *kind, *value, *tb, *locals);
     }
     if name == "traceback._frame_locals" {
         let frame = single_argument("_frame_locals", "frame", args, kwargs)?;

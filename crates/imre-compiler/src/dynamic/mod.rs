@@ -136,6 +136,7 @@ impl Imports {
                     | "tomllib._types"
                     | "traceback"
                     | "unittest.case"
+                    | "unittest.result"
                     | "string.templatelib"
                     | "runpy"
             )
@@ -190,10 +191,10 @@ fn boxed_hashlib_kdf(name: &str) -> bool {
     matches!(name, "pbkdf2_hmac" | "scrypt")
 }
 
-fn boxed_unittest_cleanup(name: &str) -> bool {
+fn boxed_unittest_export(name: &str) -> bool {
     matches!(
         name,
-        "case" | "addModuleCleanup" | "doModuleCleanups" | "enterModuleContext"
+        "case" | "result" | "addModuleCleanup" | "doModuleCleanups" | "enterModuleContext"
     )
 }
 
@@ -251,7 +252,7 @@ impl<'a> Visitor<'a> for Imports {
                     let suffix = a.name.as_str();
                     if imp.level == 0
                         && (name == "_operator"
-                            || name == "unittest" && boxed_unittest_cleanup(suffix)
+                            || name == "unittest" && boxed_unittest_export(suffix)
                             || name == "hashlib" && (boxed_hashlib_kdf(suffix) || suffix == "*")
                             || name == "weakref" && suffix == "finalize"
                             || boxed_signal_export(name, suffix))
@@ -383,7 +384,7 @@ impl<'a> Visitor<'a> for Imports {
                     .signal_names
                     .get(module.id.as_str())
                     .is_some_and(|name| boxed_signal_export(name, attr.attr.as_str()))
-                || (boxed_unittest_cleanup(attr.attr.as_str())
+                || (boxed_unittest_export(attr.attr.as_str())
                     && self.unittest_names.contains(module.id.as_str())))
         {
             self.runtime_imports = true;

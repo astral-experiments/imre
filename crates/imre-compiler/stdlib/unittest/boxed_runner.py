@@ -50,21 +50,6 @@ def _remove_unittest_tb_frames(self, tb):
         prev.tb_next = None
 
 
-def _exc_info_to_string(self, err, test):
-    import traceback
-    kind, value, tb = err
-    tb = self._clean_tracebacks(kind, value, tb, test)
-    message = "".join(traceback.format_exception(kind, value, tb))
-    if self.buffer:
-        output = sys.stdout.getvalue()
-        error = sys.stderr.getvalue()
-        if output:
-            message += _bufferedOutput(output, "Stdout")
-        if error:
-            message += _bufferedOutput(error, "Stderr")
-    return message
-
-
 def _addError(self, test, error):
     if getattr(self, "failfast", False):
         self.stop()
@@ -205,12 +190,6 @@ def _boxedResultInit(self, stream=None, descriptions=None, verbosity=None):
 
 
 # Adapted from CPython 3.14.5 Lib/unittest/result.py. See ../docstrings/LICENSE.
-def _bufferedOutput(output, label):
-    if not output.endswith("\n"):
-        output += "\n"
-    return "\n%s:\n%s" % (label, output)
-
-
 def _setupStdout(self):
     if self.buffer:
         if self._stderr_buffer is None:
@@ -227,9 +206,9 @@ def _restoreStdout(self):
             output = sys.stdout.getvalue()
             error = sys.stderr.getvalue()
             if output:
-                self._original_stdout.write(_bufferedOutput(output, "Stdout"))
+                self._original_stdout.write(result._bufferedOutput(output, "Stdout"))
             if error:
-                self._original_stderr.write(_bufferedOutput(error, "Stderr"))
+                self._original_stderr.write(result._bufferedOutput(error, "Stderr"))
         sys.stdout = self._original_stdout
         sys.stderr = self._original_stderr
         self._stdout_buffer.seek(0)
@@ -337,7 +316,7 @@ def _boxedTextResultInit(self, stream=None, descriptions=True, verbosity=1, *, d
     self.durations = durations
 
 
-from unittest import runner as _runnerModule
+from unittest import result, runner as _runnerModule
 
 
 # From CPython 3.14.5 Lib/unittest/{result,runner}.py. See ../docstrings/LICENSE.
@@ -443,7 +422,7 @@ TestResult.stopTest = stopTest
 TestResult._clean_tracebacks = _clean_tracebacks
 TestResult._is_relevant_tb_level = _is_relevant_tb_level
 TestResult._remove_unittest_tb_frames = _remove_unittest_tb_frames
-TestResult._exc_info_to_string = _exc_info_to_string
+TestResult._exc_info_to_string = result._exc_info_to_string
 TestResult.addExpectedFailure = _resultExpectedFailure
 TestResult.addSubTest = _resultSubTest
 TestResult.addError = _addError
