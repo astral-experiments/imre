@@ -748,6 +748,10 @@ pub(crate) fn compile(
             if uses_import_builtin && seen.contains("http") && !seen.contains("http.server") {
                 imports.names.push((0, "http.server".to_owned()));
             }
+            // Register the mock provider for imports from source-loaded modules.
+            if uses_import_builtin && seen.contains("unittest") && !seen.contains("unittest.mock") {
+                imports.add(0, "unittest.mock");
+            }
             if uses_import_builtin || seen.contains("importlib") {
                 for name in ["py_compile", "sysconfig"] {
                     if !seen.contains(name) {

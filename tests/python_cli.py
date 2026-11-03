@@ -2630,6 +2630,15 @@ def report(text):
         compare("-B", "-m", "http_files", "http.server", str(root),
                 extra={"IMRE_ENCODED_FLAGS": "--opt-level\x1f0"}, native_timeout=180)
 
+        compare(
+            "-B", "-c",
+            "import sys, unittest\n"
+            "assert 'unittest.mock' not in sys.modules\n"
+            "mock = __import__(sys.argv[1], fromlist=['Mock'])\n"
+            "print(mock is unittest.mock, mock.Mock(return_value=42)())",
+            "unittest.mock", extra={"IMRE_ENCODED_FLAGS": "--opt-level\x1f0"},
+        )
+
         compare("-B", "-c", "from typing import Protocol as P; print(P.__name__)")
         compare("-B", fixtures / "typing_protocol_import.py")
         compare(
