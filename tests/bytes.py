@@ -183,6 +183,16 @@ def main() -> None:
                     expected_files,
                 )
                 checks += 1
+        formatter = 'def version(n: int) -> bytes:\n    return b"TZif%d" % n\n'
+        invalid = 'def wrong() -> int:\n    return "bad"\n'
+        for definitions in ((formatter, invalid), (invalid, formatter)):
+            script = temporary / "format_contract.py"
+            script.write_text("\n".join((*definitions, "print(version(3))\n")))
+            result = run([compiler, "-B", str(script)], temporary)
+            assert result.returncode > 0 and not result.stdout, result
+            assert "expected int, got str; annotations are enforced contracts" in result.stderr, result
+            checks += 1
+
         rejected = {name: {"main.py": source} for name, source in REJECTED.items()}
         rejected.update(IMPORTED_REJECTIONS)
         for name, files in rejected.items():

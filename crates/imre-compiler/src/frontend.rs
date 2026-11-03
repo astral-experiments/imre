@@ -6160,6 +6160,15 @@ impl<'a> Checker<'a> {
         {
             return Ok(formatted);
         }
+        if op == ast::Operator::Mod && left.ty == Type::Bytes {
+            // The object runtime formats the bytes after the rest of the program type-checks.
+            let error = self.scoped_builtin_error("bytes percent formatting", node);
+            self.defer_object_error(&error);
+            return Ok(Expr {
+                ty: Type::Bytes,
+                kind: ExprKind::Builtin(Builtin::PercentFormat, vec![left, right]),
+            });
+        }
         if op == ast::Operator::Mod
             && left.ty == Type::Str
             && (matches!(right.ty, Type::Int | Type::Str)
