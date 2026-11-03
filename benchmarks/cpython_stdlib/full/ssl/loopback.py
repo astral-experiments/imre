@@ -29,6 +29,7 @@ def main():
         (True, False, fixture.SIGNING_CA, hostname, 0, None),
         (False, False, fixture.SIGNING_CA, hostname, 0, fixture.TLSVersion.TLSv1_2),
         (False, False, fixture.SIGNING_CA, hostname, 0, fixture.TLSVersion.TLSv1_3),
+        (False, True, fixture.SIGNING_CA, hostname, 0, None),
     )
     for https_defaults, chain, cafile, name, expected, version in cases:
         _, server_context, _ = fixture.testing_context(server_chain=chain)
@@ -39,7 +40,8 @@ def main():
             server_context.set_alpn_protocols(["http/1.1"])
         server = fixture.ThreadedEchoServer(context=server_context, chatty=False)
         with server:
-            argv = [*client, "127.0.0.1", str(server.port), cafile, name, str(expected)]
+            argv = [*client, "127.0.0.1", str(server.port), cafile, name, str(expected),
+                    fixture.SINGED_CERTFILE_ONLY, str(2 if chain else 1)]
             if https_defaults:
                 argv.append("https")
             if version is not None:

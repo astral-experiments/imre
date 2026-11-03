@@ -351,6 +351,11 @@ class SSLContext:
         _call(_imre_ssl.set_post_handshake_auth, self._ctx, enabled)
         self._post_handshake_auth = enabled
 
+    def cert_store_stats(self, /):
+        if not issubclass(type(self), SSLContext):
+            _imre_ssl.raise_context_receiver_error("cert_store_stats", self)
+        return _imre_ssl.cert_store_stats(self._ctx)
+
     def set_default_verify_paths(self):
         _call(_imre_ssl.default_verify_paths, self._ctx)
 
@@ -440,6 +445,14 @@ class SSLSocket:
     def server_hostname(self):
         return self._server_hostname
 
+    def get_verified_chain(self):
+        """Return the verified certificate chain as a list of DER-encoded certificates."""
+        return _call(_imre_ssl.get_verified_chain, self._session)
+
+    def get_unverified_chain(self):
+        """Return the certificate chain sent by the peer as a list of DER-encoded certificates."""
+        return _call(_imre_ssl.get_unverified_chain, self._session)
+
     def sendall(self, data, flags=0):
         if flags:
             raise ValueError("non-zero flags not allowed in calls to sendall() on SSLSocket")
@@ -488,3 +501,71 @@ def create_default_context(purpose=Purpose.SERVER_AUTH, *, cafile=None, capath=N
 
 
 _create_default_https_context = create_default_context
+
+
+def cert_time_to_seconds(cert_time):
+    """Return the time in seconds since the Epoch, given the timestring
+    representing the "notBefore" or "notAfter" date from a certificate
+    in ``"%b %d %H:%M:%S %Y %Z"`` strptime format (C locale).
+
+    "notBefore" or "notAfter" dates must use UTC (RFC 5280).
+
+    Month is one of: Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec
+    UTC should be specified as GMT (see ASN1_TIME_print())
+    """
+    from _strptime import _strptime
+    from calendar import timegm
+
+    months = (
+        "Jan","Feb","Mar","Apr","May","Jun",
+        "Jul","Aug","Sep","Oct","Nov","Dec"
+    )
+    time_format = ' %d %H:%M:%S %Y GMT' # NOTE: no month, fixed GMT
+    try:
+        month = cert_time[:3]
+        # Titlecasing a plain binary value cannot match a text month.
+        month_type = type(month)
+        if month_type is not bytes and month_type is not bytearray:
+            month = month.title()
+        month_number = months.index(month) + 1
+    except ValueError:
+        raise ValueError('time data %r does not match '
+                         'format "%%b%s"' % (cert_time, time_format))
+    else:
+        # found valid month
+        # _strptime_time wraps these same fields in struct_time.
+        tt = _strptime(cert_time[3:], time_format)[0]
+        # return an integer, the previous mktime()-based implementation
+        # returned a float (fractional seconds are always zero here).
+        return timegm((tt[0], month_number) + tt[2:6])
+
+
+PEM_HEADER = "-----BEGIN CERTIFICATE-----"
+PEM_FOOTER = "-----END CERTIFICATE-----"
+
+def DER_cert_to_PEM_cert(der_cert_bytes):
+    """Takes a certificate in binary DER format and returns the
+    PEM version of it as a string."""
+
+    import base64
+
+    f = str(base64.standard_b64encode(der_cert_bytes), 'ASCII', 'strict')
+    ss = [PEM_HEADER]
+    ss += [f[i:i+64] for i in range(0, len(f), 64)]
+    ss.append(PEM_FOOTER + '\n')
+    return '\n'.join(ss)
+
+def PEM_cert_to_DER_cert(pem_cert_string):
+    """Takes a certificate in ASCII PEM format and returns the
+    DER-encoded version of it as a byte sequence"""
+
+    import base64
+
+    if not pem_cert_string.startswith(PEM_HEADER):
+        raise ValueError("Invalid PEM encoding; must start with %s"
+                         % PEM_HEADER)
+    if not pem_cert_string.strip().endswith(PEM_FOOTER):
+        raise ValueError("Invalid PEM encoding; must end with %s"
+                         % PEM_FOOTER)
+    d = pem_cert_string.strip()[len(PEM_HEADER):-len(PEM_FOOTER)]
+    return base64.decodebytes(d.encode('ASCII', 'strict'))

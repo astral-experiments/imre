@@ -34,6 +34,8 @@ def main():
             with wrapped as peer:
                 assert mode == "serve" and raw.fileno() == -1
                 assert peer.server_side and peer.server_hostname is None and peer.context is ctx
+                assert peer.get_verified_chain() == []
+                assert peer.get_unverified_chain() == []
                 binding = peer.get_channel_binding()
                 assert isinstance(binding, bytes) and binding
                 print("BINDING", binding.hex(), flush=True)
