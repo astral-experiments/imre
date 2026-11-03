@@ -2413,6 +2413,9 @@ pub(super) fn call(
     if name == "_socket.getaddrinfo" {
         return socket::getaddrinfo(ctx, args, kwargs);
     }
+    if name == "_socket.inet_aton" {
+        return socket::inet_aton(ctx, args, kwargs);
+    }
     if name == "_socket.inet_pton" {
         return socket::inet_pton(ctx, args, kwargs);
     }

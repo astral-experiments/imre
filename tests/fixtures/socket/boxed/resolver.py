@@ -3,6 +3,15 @@ from _socket import getaddrinfo as raw_getaddrinfo, getservbyport as raw_getserv
 import socket
 from socket import AddressFamily, SocketKind, getaddrinfo, getservbyname
 
+assert socket.inet_aton is _socket.inet_aton
+assert socket.inet_aton("127.1") == b"\x7f\x00\x00\x01"
+try:
+    socket.inet_aton("1.2.3.256")
+except OSError as exc:
+    assert exc.args == ("illegal IP address string passed to inet_aton",)
+else:
+    raise AssertionError("inet_aton accepted an invalid IPv4 address")
+
 assert socket.inet_pton is _socket.inet_pton
 assert socket.inet_pton(socket.AF_INET, "192.0.2.1") == b"\xc0\x00\x02\x01"
 assert _socket.inet_pton(socket.AF_INET6, "::ffff:192.0.2.1") == b"\x00" * 10 + b"\xff\xff\xc0\x00\x02\x01"

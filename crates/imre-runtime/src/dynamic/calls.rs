@@ -61,7 +61,7 @@ pub(super) fn module_function(symbol: &str) -> Option<(&str, &str)> {
         "_socket"
             if matches!(
                 function,
-                "getdefaulttimeout" | "setdefaulttimeout" | "inet_pton"
+                "getdefaulttimeout" | "setdefaulttimeout" | "inet_aton" | "inet_pton"
             ) =>
         {
             Some((module, function))
@@ -2787,6 +2787,12 @@ impl Context {
                     }
                     "__text_signature__" if symbol == "posix.getrandom" => {
                         return Ok(self.text("($module, /, size, flags=0)"));
+                    }
+                    "__text_signature__" if symbol == "_socket.inet_aton" => {
+                        return Ok(self.text("($module, ip_addr, /)"));
+                    }
+                    "__doc__" if symbol == "_socket.inet_aton" => {
+                        return Ok(self.text("Convert an IP address in string format (123.45.67.89) to the 32-bit packed binary format used in low-level network functions."));
                     }
                     "__doc__" if symbol == "_socket.inet_pton" => {
                         return Ok(self.text("inet_pton(af, ip) -> packed IP address string\n\nConvert an IP address from string format to a packed string suitable\nfor use with low-level network functions."));

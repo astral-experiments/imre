@@ -69,7 +69,12 @@ pub(in super::super) fn install_lowlevel_socket(ctx: &mut Context, scope: Id) ->
         let value = ctx.builtin(&format!("socket.{name}"));
         ctx.bind(scope, name, value);
     }
-    for name in ["getdefaulttimeout", "setdefaulttimeout", "inet_pton"] {
+    for name in [
+        "getdefaulttimeout",
+        "setdefaulttimeout",
+        "inet_aton",
+        "inet_pton",
+    ] {
         let function = ctx.builtin(&format!("_socket.{name}"));
         ctx.bind(scope, name, function);
     }
@@ -102,6 +107,7 @@ pub(in super::super) fn import_socket_constants(ctx: &mut Context, scope: Id) ->
             "timeout",
             "getdefaulttimeout",
             "setdefaulttimeout",
+            "inet_aton",
             "inet_pton",
         ])
     {
@@ -612,7 +618,7 @@ pub(super) fn getaddrinfo(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)
 fn text_argument(
     ctx: &mut Context,
     name: &str,
-    index: usize,
+    index: Option<usize>,
     value: Id,
 ) -> Result<std::ffi::CString> {
     let storage = ctx.string_storage(value).ok_or_else(|| {
@@ -621,16 +627,39 @@ fn text_argument(
         } else {
             ctx.type_name(value)
         };
-        Error::new(
-            "TypeError",
-            format!("{name}() argument {index} must be str, not {ty}"),
-        )
+        let message = match index {
+            Some(index) => format!("{name}() argument {index} must be str, not {ty}"),
+            None => {
+                let ty = &ty[..ty.floor_char_boundary(50)];
+                format!("{name}() argument must be str, not {ty}")
+            }
+        };
+        Error::new("TypeError", message)
     })?;
     let text = match ctx.heap.get(storage) {
         Value::Str(text) => std::ffi::CString::new(text.as_bytes()),
         _ => std::ffi::CString::new(ctx.encode_utf8_codepoints(value, false, "strict")?),
     };
     text.map_err(|_| Error::new("ValueError", "embedded null character"))
+}
+
+/// Convert the host's IPv4 numbers-and-dots notation to four network-order bytes.
+pub(super) fn inet_aton(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    let arg = super::super::builtins::one_positional_arg("_socket.inet_aton", args, kwargs)?;
+    let text = text_argument(ctx, "inet_aton", None, arg)?;
+    unsafe extern "C" {
+        #[link_name = "inet_aton"]
+        fn c_inet_aton(cp: *const libc::c_char, inp: *mut libc::in_addr) -> libc::c_int;
+    }
+    let mut addr = libc::in_addr { s_addr: 0 };
+    // SAFETY: text is NUL-terminated and addr is a writable IPv4 address.
+    if unsafe { c_inet_aton(text.as_ptr(), &mut addr) } == 0 {
+        return Err(Error::new(
+            "OSError",
+            "illegal IP address string passed to inet_aton",
+        ));
+    }
+    Ok(ctx.alloc(Value::Bytes(addr.s_addr.to_ne_bytes().to_vec())))
 }
 
 /// Parse a numeric IPv4 or IPv6 address using the platform's inet_pton.
@@ -660,7 +689,7 @@ pub(super) fn inet_pton(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)])
         ));
     };
     let family = ctx.index_c_int(*family)?;
-    let address = text_argument(ctx, "inet_pton", 2, *address)?;
+    let address = text_argument(ctx, "inet_pton", Some(2), *address)?;
     let mut packed = [0u8; 16];
     // SAFETY: address is NUL-terminated and packed fits either supported address family.
     let status = unsafe { c_inet_pton(family, address.as_ptr(), packed.as_mut_ptr().cast()) };
@@ -709,14 +738,14 @@ fn lookup_service(
         Port(i32),
     }
     let query = if name == "getservbyname" {
-        Query::Name(text_argument(ctx, name, 1, args[0])?)
+        Query::Name(text_argument(ctx, name, Some(1), args[0])?)
     } else {
         Query::Port(ctx.index_c_int(args[0])?)
     };
     // Parse the optional protocol before checking the converted port's 16-bit range.
     let proto = args
         .get(1)
-        .map(|&v| text_argument(ctx, name, 2, v))
+        .map(|&v| text_argument(ctx, name, Some(2), v))
         .transpose()?;
     let audit_proto = proto
         .as_ref()
