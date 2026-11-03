@@ -622,6 +622,7 @@ fn collect_class(
     }
     let mut methods: Vec<ast::StmtFunctionDef> = Vec::new();
     let mut method_kinds = Vec::new();
+    let mut has_custom_dir = false;
     let mut initializer = None;
     for (ordinal, statement) in node.body.iter().enumerate() {
         // A type-only method declaration may have a separate runtime signature.
@@ -828,6 +829,20 @@ fn collect_class(
                         method,
                         "StrEnum methods cannot override member metadata or special behavior",
                     ));
+                }
+                if name == "__dir__" {
+                    // The object runtime binds the class's directory hook. Continue validating
+                    // the other class members before switching to that provider.
+                    let error =
+                        module.error(method, "custom __dir__ requires native class construction");
+                    graph
+                        .object_builtin_errors
+                        .borrow_mut()
+                        .insert(error.clone());
+                    graph.class_body_error.borrow_mut().get_or_insert(error);
+                    has_custom_dir = true;
+                    class_bindings.insert(name.to_owned());
+                    continue;
                 }
                 if name == "__del__" && graph.command_startup.is_some() {
                     let error = module.error(method, "class finalizers require the object runtime");
@@ -1348,6 +1363,8 @@ fn collect_class(
     let mut init_exposes_self = base_exposes_self;
     if let Some(initializer) = initializer
         && method_origins[initializer] == definition
+        // An object-backed class can create new instance fields in its initializer.
+        && !has_custom_dir
         // A proven forwarding exception constructor writes each field through its plan.
         && forwarder.is_none()
     {
