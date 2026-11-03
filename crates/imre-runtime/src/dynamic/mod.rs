@@ -3363,7 +3363,12 @@ impl Context {
                 self.bind(scope, "byteorder", byteorder);
                 let thread_info = stdlib::fixed_structseq::thread_info(self);
                 self.bind(scope, "thread_info", thread_info);
-                for name in ["get_coroutine_origin_tracking_depth", "set_coroutine_origin_tracking_depth"] {
+                for name in [
+                    #[cfg(target_os = "linux")]
+                    "_get_cpu_count_config",
+                    "get_coroutine_origin_tracking_depth",
+                    "set_coroutine_origin_tracking_depth",
+                ] {
                     let callable = self.builtin(&format!("sys.{name}"));
                     self.bind(scope, name, callable);
                 }

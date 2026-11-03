@@ -14,11 +14,14 @@ pub(super) fn initialize(selected: i32) {
     });
 }
 
+/// A positive PyConfig.cpu_count overrides both os CPU-count functions.
+pub(crate) fn configured() -> Option<i32> {
+    OVERRIDE.get().copied().filter(|&count| count > 0)
+}
+
 /// Query the online logical processors just as CPython does, independently of process affinity.
 pub(crate) fn online() -> Option<i32> {
-    if let Some(&n) = OVERRIDE.get()
-        && n > 0
-    {
+    if let Some(n) = configured() {
         return Some(n);
     }
     // SAFETY: sysconf takes only the standard name of the requested host limit.

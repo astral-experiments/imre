@@ -65,6 +65,20 @@ for _name in ("getegid", "getresgid", "getresuid"):
         globals()[_name] = getattr(_posix, _name)
 del _name, _posix
 
+# From CPython 3.14.5, Lib/os.py. See stdlib/docstrings/LICENSE.
+if "sched_getaffinity" in globals() and sys._get_cpu_count_config() < 0:
+    def process_cpu_count():
+        """
+        Get the number of CPUs of the current process.
+
+        Return the number of logical CPUs usable by the calling thread of the
+        current process. Return None if indeterminable.
+        """
+        return len(sched_getaffinity(0))
+elif "cpu_count" in globals():
+    process_cpu_count = cpu_count
+
+
 curdir = path.curdir
 pardir = path.pardir
 defpath = path.defpath
