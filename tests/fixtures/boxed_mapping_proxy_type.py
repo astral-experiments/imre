@@ -44,6 +44,24 @@ def current():
         pass
     else:
         raise AssertionError("accepted a dict as a proxy descriptor receiver")
+    class Registry(dict):
+        def __contains__(self, key):
+            if key == "unavailable":
+                raise ValueError(key)
+            return key == "virtual"
+
+        def __iter__(self):
+            raise AssertionError("should have used __contains__")
+
+    registry = MappingProxyType(MappingProxyType(Registry()))
+    assert "virtual" in registry and "missing" not in registry
+    assert MappingProxyType.__contains__(registry, "virtual") is True
+    try:
+        registry.__contains__("unavailable")
+    except ValueError as exc:
+        assert exc.args == ("unavailable",)
+    else:
+        raise AssertionError("dropped the membership hook exception")
     assert view.get("a") == 1
     copied = view.copy()
     copied.clear()
@@ -100,6 +118,37 @@ def current():
     assert view | {'a': 3} == {'a': 3, 'b': 2}
     assert {'a': 3} | view == values
     assert values == {'a': 1, 'b': 2}
+
+    reverse = MappingProxyType.__reversed__
+    assert type(reverse).__name__ == "method_descriptor" and reverse.__objclass__ is MappingProxyType
+    assert type(view.__reversed__).__name__ == "builtin_function_or_method"
+    assert list(reverse(view)) == ["b", "a"]
+    cursor = reversed(view)
+    assert type(cursor).__name__ == "dict_reversekeyiterator"
+    values["changed"] = 12
+    try:
+        next(cursor)
+    except RuntimeError:
+        pass
+    else:
+        raise AssertionError("reverse iterator ignored a size change")
+    del values["changed"]
+
+    class CustomReverse(dict):
+        def __reversed__(self):
+            raise ValueError("reverse hook")
+
+    custom = CustomReverse()
+    outer = MappingProxyType(MappingProxyType(custom))
+    try:
+        reversed(outer)
+    except ValueError as error:
+        assert str(error) == "reverse hook"
+    else:
+        raise AssertionError("dropped the reverse hook exception")
+    marker = object()
+    custom.__reversed__ = lambda: marker
+    assert reversed(outer) is marker
 
     class Left:
         def __or__(self, other):

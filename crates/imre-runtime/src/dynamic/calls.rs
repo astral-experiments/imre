@@ -1040,7 +1040,7 @@ impl Context {
             (Some(member), None) => self.bind_attribute(member, object, class),
             (None, None)
                 if matches!(name, "__getattribute__" | "__delattr__")
-                    || (name == "__str__"
+                    || (matches!(name, "__str__" | "__init__" | "__lt__")
                         && self.allocation_base(class) == Some(self.builtin("object"))) =>
             {
                 let method = self.builtin(&format!("object.{name}"));
@@ -2813,7 +2813,35 @@ impl Context {
             Value::Cell(contents) if name == "cell_contents" => {
                 return contents.ok_or_else(|| Error::new("ValueError", "Cell is empty"));
             }
-            Value::Generator { code, .. } if name == "gi_code" => return Ok(code),
+            Value::Generator {
+                name: simple,
+                qualname,
+                code,
+                running,
+                offset,
+                ..
+            } => match name {
+                "__name__" => return Ok(simple),
+                "__qualname__" => return Ok(qualname),
+                "gi_running" => return Ok(builtins::boolean(running)),
+                "gi_suspended" => {
+                    return Ok(builtins::boolean(
+                        !running && offset.is_some_and(|ip| ip != 0),
+                    ));
+                }
+                "gi_code" | "gi_frame" => {
+                    if !self.audit_hooks.is_empty() {
+                        let attribute = self.text(name);
+                        stdlib::audit::event(self, "object.__getattr__", &[obj, attribute])?;
+                    }
+                    return if name == "gi_code" {
+                        Ok(code)
+                    } else {
+                        self.generator_frame(obj)
+                    };
+                }
+                _ => {}
+            },
             Value::Coroutine { origin, .. } if name == "cr_origin" => return Ok(origin),
             Value::Native(ref class) if class == "coroutine" && name == "cr_origin" => {
                 return Ok(self.readonly_member("coroutine", "cr_origin"));
@@ -3469,14 +3497,18 @@ impl Context {
             }
             Value::Native(ref class)
                 if class == "mappingproxy"
-                    && (matches!(name, "__getitem__" | "__hash__" | "__repr__" | "__str__")
-                        || builtins::MAPPING_PROXY_METHODS.contains(&name)) =>
+                    && (matches!(
+                        name,
+                        "__contains__" | "__getitem__" | "__hash__" | "__repr__" | "__str__"
+                    ) || builtins::MAPPING_PROXY_METHODS.contains(&name)) =>
             {
                 return Ok(self.builtin(&format!("{class}.{name}")));
             }
             Value::MappingProxy(_)
-                if matches!(name, "__getitem__" | "__hash__" | "__repr__" | "__str__")
-                    || builtins::MAPPING_PROXY_METHODS.contains(&name) =>
+                if matches!(
+                    name,
+                    "__contains__" | "__getitem__" | "__hash__" | "__repr__" | "__str__"
+                ) || builtins::MAPPING_PROXY_METHODS.contains(&name) =>
             {
                 let descriptor = self.builtin(&format!("mappingproxy.{name}"));
                 let owner = self.builtin("mappingproxy");
@@ -4000,6 +4032,7 @@ impl Context {
                             | "__setattr__"
                             | "__delattr__"
                             | "__ne__"
+                            | "__lt__"
                             | "__init__"
                             | "__new__"
                     ) =>
@@ -4099,6 +4132,11 @@ impl Context {
                 }
                 if let Some(value) = self.class_attr(obj, name) {
                     return self.bind_attribute(value, NONE, obj);
+                }
+                if matches!(name, "__init__" | "__lt__")
+                    && self.allocation_base(obj) == Some(self.builtin("object"))
+                {
+                    return Ok(self.builtin(&format!("object.{name}")));
                 }
                 if name == "__init__" && self.has_base(obj, "type") {
                     return Ok(self.builtin("type.__init__"));
@@ -4429,6 +4467,11 @@ impl Context {
     /// Bypass the object's deletion hook, while honoring data descriptors on its class.
     pub(super) fn default_delete_attr(&mut self, obj: Id, name: &str) -> Result<()> {
         self.check_immutable_type_write(obj, name)?;
+        if matches!(name, "__name__" | "__qualname__")
+            && matches!(self.heap.get(obj), Value::Generator { .. })
+        {
+            return self.set_generator_name(obj, name, NONE);
+        }
         if let Some(result) = super::paramspec::update(self, obj, name, None) {
             return result;
         }
@@ -5071,6 +5114,11 @@ impl Context {
 
     pub(super) fn default_set_attr(&mut self, obj: Id, name: &str, value: Id) -> Result<()> {
         self.check_immutable_type_write(obj, name)?;
+        if matches!(name, "__name__" | "__qualname__")
+            && matches!(self.heap.get(obj), Value::Generator { .. })
+        {
+            return self.set_generator_name(obj, name, value);
+        }
         if let Some(result) = super::paramspec::update(self, obj, name, Some(value)) {
             return result;
         }

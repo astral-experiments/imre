@@ -563,11 +563,12 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("types", "ModuleType") => ctx.builtin("module"),
         ("types", "SimpleNamespace") => super::namespace::class(ctx)?,
         ("types", "TracebackType") => ctx.builtin("traceback"),
-        ("types", "coroutine") => ctx.builtin("types.coroutine"),
+        ("types", "_coroutine_flags" | "_mark_generator") => ctx.builtin(&format!("types.{name}")),
         ("types", "GeneratorType") => ctx.builtin("generator"),
         ("types", "CoroutineType") => ctx.builtin("coroutine"),
         ("types", "MethodType") => ctx.builtin("method"),
         ("types", "MemberDescriptorType") => ctx.builtin("member_descriptor"),
+        ("types", "WrapperDescriptorType") => ctx.builtin("wrapper_descriptor"),
         ("types", "MethodWrapperType") => ctx.builtin("method-wrapper"),
         ("types", "MethodDescriptorType") => ctx.builtin("method_descriptor"),
         ("types", "FrameType") => ctx.builtin("frame"),
@@ -2043,37 +2044,58 @@ pub(super) fn call(
     {
         return itertools::method(ctx, owner, method, args, kwargs);
     }
-    if name == "types.coroutine" {
-        let func = single_argument("coroutine", "func", args, kwargs)?;
-        if !ctx.callable(func) {
+    if name == "types._coroutine_flags" {
+        use imre_ast::code_flags::{COROUTINE, GENERATOR, ITERABLE_COROUTINE};
+        let code = single_argument("_coroutine_flags", "code", args, kwargs)?;
+        if let Value::Code(code) = ctx.heap.get(code) {
+            // Source functions track execution kind and the iterable-coroutine
+            // bit even when their full public co_flags value is unavailable.
+            let mut flags = code.flags & (COROUTINE | GENERATOR | ITERABLE_COROUTINE);
+            if code.coroutine {
+                flags |= COROUTINE;
+            }
+            return Ok(ctx.int(i64::from(flags)));
+        }
+        return ctx.lookup_attr(code, "co_flags");
+    }
+    if name == "types._mark_generator" {
+        let [func, code] = *args else {
             return Err(Error::new(
                 "TypeError",
-                "types.coroutine() expects a callable",
+                "_mark_generator expects a function and code",
+            ));
+        };
+        if !kwargs.is_empty() {
+            return Err(Error::new(
+                "TypeError",
+                "_mark_generator accepts no keyword arguments",
             ));
         }
-        if let Value::Function { code, .. } = *ctx.heap.get(func) {
-            let original = ctx.code_object(code);
-            use imre_ast::code_flags::{COROUTINE, GENERATOR, ITERABLE_COROUTINE};
-            if original.coroutine || original.flags & (COROUTINE | ITERABLE_COROUTINE) != 0 {
-                return Ok(func);
-            }
-            if original.flags & GENERATOR != 0 && !matches!(original.body, super::value::Body::Native(_))
-            {
-                // Other functions and existing generators retain their original code.
-                let mut marked = original.clone();
-                marked.flags |= ITERABLE_COROUTINE;
-                let marked = ctx.alloc(Value::Code(marked));
-                let Value::Function { code, .. } = ctx.heap.get_mut(func) else {
-                    unreachable!()
-                };
-                *code = marked;
-                return Ok(func);
-            }
+        let Value::Code(original) = ctx.heap.get(code) else {
+            return Err(Error::new(
+                "TypeError",
+                "_mark_generator expects a code object",
+            ));
+        };
+        if matches!(original.body, super::value::Body::Native(_)) {
+            return Err(Error::new(
+                "NotImplementedError",
+                "cannot mark this native generator function",
+            ));
         }
-        return Err(Error::new(
-            "NotImplementedError",
-            "native types.coroutine supports compiled generator and coroutine functions",
-        ));
+        let mut marked = original.clone();
+        marked.flags |= imre_ast::code_flags::ITERABLE_COROUTINE;
+        let marked = ctx.alloc(Value::Code(marked));
+        let func = ctx.weak_proxy_target(func)?;
+        if let Value::Function { code: current, .. } = ctx.heap.get_mut(func)
+            && *current == code
+        {
+            // Changing only a flag preserves this nested function's closure layout.
+            *current = marked;
+        } else {
+            ctx.set_attr(func, "__code__", marked)?;
+        }
+        return Ok(NONE);
     }
     if let Some(function) = name.strip_prefix("inspect.") {
         return inspect::call(ctx, function, args, kwargs);
@@ -2288,6 +2310,12 @@ pub(super) fn call(
     }
     if name == "collections.abc._CallableGenericAlias" {
         return super::typing::abc_callable_alias(ctx, args, kwargs);
+    }
+    if let Some(owner @ ("types.GenericAlias" | "generic_alias_iterator")) =
+        name.strip_suffix(".__reduce__")
+    {
+        let receiver = builtins::noargs_method_receiver(ctx, owner, "__reduce__", args, kwargs)?;
+        return super::typing::reduce_builtin_alias(ctx, receiver);
     }
     if name == "types.GenericAlias" {
         if !kwargs.is_empty() {
