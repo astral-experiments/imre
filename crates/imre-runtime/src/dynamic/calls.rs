@@ -5930,9 +5930,9 @@ impl Context {
         Ok(())
     }
 
-    /// Count a generated NamedTuple repr frame like a runtime-loaded Python call.
+    /// Include Python frames represented by native operations in the active call depth.
     pub(super) fn check_call_depth(&self, additional: usize) -> Result<()> {
-        if self.call_depth.max(self.heap.python_depth()) + additional
+        if self.call_depth.max(self.heap.python_depth()) + self.suspended_typing_frames + additional
             >= crate::sys::recursion_limit() as usize
         {
             return Err(Error::new(
