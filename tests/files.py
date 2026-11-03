@@ -1014,8 +1014,6 @@ def main() -> None:
                         *(["--runtime-imports"] if name in {"boxed_zipimport_resources", "named_text_update", "binary_update"} else []),
                     ],
                     temporary,
-                    # An ordinary runtime import includes the bundled modules in the optimized build.
-                    timeout=900 if name == "stream_gzip_module" and level == "3" else 60,
                 )
                 assert built.returncode == 0, (name, level, built.stderr.decode())
                 if name == "text_roundtrip":

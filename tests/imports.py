@@ -1,6 +1,7 @@
 """Check closed module graphs against CPython and exercise rejected import boundaries."""
 
 import argparse
+import gzip
 import os
 from pathlib import Path
 from zipfile import ZIP_DEFLATED, ZIP_STORED, ZipFile
@@ -1503,6 +1504,7 @@ def main() -> None:
                     assert denied.stderr.splitlines()[-1] == expected.stderr.splitlines()[-1]
                 checks += 1
 
+        (temporary / "members.gz").write_bytes(gzip.compress(b"first", mtime=0) + gzip.compress(b"second", mtime=0))
         late_import = temporary / "late_import.py"
         late_import.write_text("import importlib, sys\nimportlib.import_module(sys.argv[1]).run()\n")
         for level in args.opt_levels:
@@ -1526,6 +1528,10 @@ def main() -> None:
                 "        print(module.opmap['POP_TOP'])\n"
                 "    elif sys.argv[3] == 'current':\n"
                 "        module.current()\n"
+                "    elif sys.argv[3] == 'read':\n"
+                "        with module.open('members.gz', 'rb') as stream:\n"
+                "            print(stream.read())\n"
+                "        print(stream.closed)\n"
             )
             for module, operation, path, expected in [
                 ("opcode", "lookup", temporary, "31\n"), ("_opcode_metadata", "lookup", temporary, "31\n"),
@@ -1533,6 +1539,7 @@ def main() -> None:
                 ("main", "import", temporary / "codeop_module", ""),
                 ("main", "import", temporary / "codeop_named_helper", "16896\n"),
                 ("boxed_interactive_interpreter", "current", FIXTURES.parent, ""),
+                ("gzip", "read", temporary, "b'firstsecond'\nTrue\n"),
             ]:
                 result = run([str(executable), probe.stem, module, operation, str(path)], temporary)
                 require_success(result)
