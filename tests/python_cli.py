@@ -3077,6 +3077,7 @@ for name in ("md4", "ripemd160"):
             "boxed_code_objects.py",
             "boxed_inspect_getmembers.py",
             "boxed_inspect_getmodule.py",
+            "boxed_inspect_sourcelines.py",
             "boxed_inspect_stack.py",
             "boxed_inspect_unwrap.py",
             "boxed_inspect_isroutine.py",
