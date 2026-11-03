@@ -869,7 +869,7 @@ impl Context {
     }
 
     pub(super) fn bind_attribute(&mut self, value: Id, receiver: Id, owner: Id) -> Result<Id> {
-        if matches!(self.heap.get(value), Value::Native(name) if matches!(name.as_str(), "dict.fromkeys" | "set.__class_getitem__" | "frozenset.__class_getitem__" | "int.from_bytes" | "float.__getformat__" | "bytes.fromhex" | "bytearray.fromhex") || stdlib::datetime::clock_classmethod(name))
+        if matches!(self.heap.get(value), Value::Native(name) if matches!(name.as_str(), "dict.fromkeys" | "mappingproxy.__class_getitem__" | "set.__class_getitem__" | "frozenset.__class_getitem__" | "int.from_bytes" | "float.__getformat__" | "bytes.fromhex" | "bytearray.fromhex") || stdlib::datetime::clock_classmethod(name))
         {
             return Ok(self.bind_native_classmethod(value, owner));
         }
@@ -3068,6 +3068,12 @@ impl Context {
                                     "types and lengths of a and b--but not their values."
                                 ))
                             }
+                            "__doc__" if method == "mappingproxy.__class_getitem__" => {
+                                Some("See PEP 585")
+                            }
+                            "__text_signature__" if method == "mappingproxy.__class_getitem__" => {
+                                Some("($type, object, /)")
+                            }
                             "__text_signature__" if method == "sys._getframe" => {
                                 Some("($module, depth=0, /)")
                             }
@@ -3564,20 +3570,31 @@ impl Context {
                     _ => {}
                 }
             }
+            Value::MappingProxy(_) | Value::Native(_)
+                if matches!(name, "__doc__" | "__new__")
+                    && (matches!(self.heap.get(obj), Value::MappingProxy(_))
+                        || self.builtins.get("mappingproxy") == Some(&obj)) =>
+            {
+                return Ok(if name == "__doc__" {
+                    self.text("Read-only proxy of a mapping.")
+                } else {
+                    self.builtin("mappingproxy.__new__")
+                });
+            }
             Value::Native(ref class)
                 if class == "mappingproxy"
-                    && (matches!(
-                        name,
-                        "__contains__" | "__getitem__" | "__hash__" | "__repr__" | "__str__"
-                    ) || builtins::MAPPING_PROXY_METHODS.contains(&name)) =>
+                    && (builtins::MAPPING_PROXY_SLOTS.contains(&name)
+                        || builtins::MAPPING_PROXY_METHODS.contains(&name)) =>
             {
-                return Ok(self.builtin(&format!("{class}.{name}")));
+                let member = self.builtin(&format!("{class}.{name}"));
+                if name == "__class_getitem__" {
+                    return Ok(self.bind_native_classmethod(member, obj));
+                }
+                return Ok(member);
             }
             Value::MappingProxy(_)
-                if matches!(
-                    name,
-                    "__contains__" | "__getitem__" | "__hash__" | "__repr__" | "__str__"
-                ) || builtins::MAPPING_PROXY_METHODS.contains(&name) =>
+                if builtins::MAPPING_PROXY_SLOTS.contains(&name)
+                    || builtins::MAPPING_PROXY_METHODS.contains(&name) =>
             {
                 let descriptor = self.builtin(&format!("mappingproxy.{name}"));
                 let owner = self.builtin("mappingproxy");
@@ -3595,7 +3612,7 @@ impl Context {
             }
             Value::Native(ref symbol)
                 if let Some((owner, "__new__")) = symbol.rsplit_once('.')
-                    && (owner == super::namespace::CLASS
+                    && (matches!(owner, super::namespace::CLASS | "mappingproxy")
                         || stdlib::itertools::cursor_type(owner).is_some()
                         || super::deque::iterator_class(owner).is_some())
                     && matches!(name, "__doc__" | "__text_signature__") =>

@@ -215,8 +215,34 @@ pub(super) fn native_implementation(symbol: &str) -> &str {
     }
 }
 
-pub(super) const MAPPING_PROXY_METHODS: &[&str] =
-    &["keys", "values", "items", "get", "copy", "__reversed__"];
+pub(super) const MAPPING_PROXY_METHODS: &[&str] = &[
+    "keys",
+    "values",
+    "items",
+    "get",
+    "copy",
+    "__reversed__",
+    "__class_getitem__",
+];
+
+pub(super) const MAPPING_PROXY_SLOTS: &[&str] = &[
+    "__lt__",
+    "__le__",
+    "__eq__",
+    "__ne__",
+    "__gt__",
+    "__ge__",
+    "__contains__",
+    "__getitem__",
+    "__hash__",
+    "__iter__",
+    "__len__",
+    "__or__",
+    "__ior__",
+    "__repr__",
+    "__ror__",
+    "__str__",
+];
 
 /// Static constructors retain their declaring type as `__self__` even on instances.
 pub(super) fn constructor_owner(name: &str) -> Option<&str> {
@@ -225,6 +251,7 @@ pub(super) fn constructor_owner(name: &str) -> Option<&str> {
         owner,
         "object"
             | "dict"
+            | "mappingproxy"
             | "float"
             | "function"
             | "cell"
@@ -1314,6 +1341,9 @@ pub(super) fn call(
         ctx.add_exception_note(exception, note)?;
         return Ok(NONE);
     }
+    if name == "mappingproxy.__class_getitem__" {
+        return collections::method(ctx, name, args, kwargs);
+    }
     if let Some(method) = name.strip_prefix("mappingproxy.")
         && MAPPING_PROXY_METHODS.contains(&method)
     {
@@ -1413,9 +1443,20 @@ pub(super) fn call(
             | "object.__repr__"
             | "object.__str__"
             | "object.__ne__"
+            | "mappingproxy.__lt__"
+            | "mappingproxy.__le__"
+            | "mappingproxy.__eq__"
+            | "mappingproxy.__ne__"
+            | "mappingproxy.__gt__"
+            | "mappingproxy.__ge__"
             | "mappingproxy.__hash__"
             | "mappingproxy.__repr__"
             | "mappingproxy.__str__"
+            | "mappingproxy.__iter__"
+            | "mappingproxy.__len__"
+            | "mappingproxy.__or__"
+            | "mappingproxy.__ror__"
+            | "mappingproxy.__ior__"
             | "super.__repr__"
     ) {
         let (owner, method) = name.split_once('.').unwrap();
@@ -1437,17 +1478,40 @@ pub(super) fn call(
                 "wrapper {method}() takes no keyword arguments"
             )));
         }
-        if method == "__ne__" {
+        let comparison = super::operators::comparison_op(method);
+        if comparison.is_some() || matches!(method, "__or__" | "__ror__" | "__ior__") {
             let [other] = rest else {
                 return Err(type_error(format!(
                     "expected 1 argument, got {}",
                     rest.len()
                 )));
             };
-            return ctx.with_slot_depth(
-                "maximum recursion depth exceeded while calling a Python object",
-                |ctx| ctx.object_ne(receiver, *other),
-            );
+            if owner == "object" {
+                return ctx.with_slot_depth(
+                    "maximum recursion depth exceeded while calling a Python object",
+                    |ctx| ctx.object_ne(receiver, *other),
+                );
+            }
+            if method == "__ior__" {
+                return Err(type_error(
+                    "'|=' is not supported by mappingproxy; use '|' instead",
+                ));
+            }
+            let Value::MappingProxy(mapping) = *ctx.heap.get(receiver) else {
+                unreachable!("validated mapping proxy slot")
+            };
+            if let Some(op) = comparison {
+                return ctx.binary(op, mapping, *other);
+            }
+            let other = match *ctx.heap.get(*other) {
+                Value::MappingProxy(backing) => backing,
+                _ => *other,
+            };
+            return if method == "__ror__" {
+                ctx.binary("|", other, mapping)
+            } else {
+                ctx.binary("|", mapping, other)
+            };
         }
         if !rest.is_empty() {
             return Err(type_error(format!(
@@ -1456,6 +1520,12 @@ pub(super) fn call(
             )));
         }
         if owner == "mappingproxy" {
+            if method == "__iter__" {
+                return ctx.iterator(receiver);
+            }
+            if method == "__len__" {
+                return call(ctx, "len", &[receiver], &[]);
+            }
             if method == "__hash__" {
                 let hash = ctx.dictionary_hash(receiver)?;
                 return Ok(ctx.int(hash));
@@ -1918,7 +1988,7 @@ pub(super) fn call(
             }
             "map" | "filter" | "enumerate" => ctx.iterator_method(owner, method, args, kwargs),
             "property" => super::property::method(ctx, method, args, kwargs),
-            "function" | "cell" if method == "__new__" => {
+            "function" | "cell" | "mappingproxy" if method == "__new__" => {
                 let Some((&class, args)) = args.split_first() else {
                     return Err(type_error(format!(
                         "{owner}.__new__(): not enough arguments"

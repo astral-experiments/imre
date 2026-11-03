@@ -164,6 +164,59 @@ def current():
     mapping = UnionMapping()
     proxy = MappingProxyType(mapping)
     assert Left() | proxy == 'left'
+    names = set(dir(view)) - set(dir(object()))
+    assert names == set(dir(MappingProxyType)) - set(dir(object))
+    for slot in ("__len__", "__iter__", "__or__", "__ror__", "__ior__"):
+        descriptor = getattr(MappingProxyType, slot)
+        assert slot in names and descriptor.__objclass__ is MappingProxyType
+        assert type(descriptor).__name__ == "wrapper_descriptor"
+        assert getattr(view, slot).__self__ is view
+        try:
+            descriptor({})
+        except TypeError:
+            pass
+        else:
+            raise AssertionError("descriptor accepted a dict receiver")
+    assert MappingProxyType.__len__(view) == len(view) == 2
+    assert list(view.__iter__()) == list(view)
+    assert view.__new__ is MappingProxyType.__new__
+    assert view.__new__.__self__ is MappingProxyType
+    assert view.__new__.__text_signature__ == "($type, *args, **kwargs)"
+    assert MappingProxyType.__new__(MappingProxyType, mapping=values) == values
+    assert view.__doc__ == MappingProxyType.__doc__ == "Read-only proxy of a mapping."
+    assert view.__class_getitem__.__self__ is MappingProxyType
+    assert view.__class_getitem__(str) == MappingProxyType[str]
+    assert view.__class_getitem__.__text_signature__ == "($type, object, /)"
+    assert view.__class_getitem__.__doc__ == "See PEP 585"
+    assert view.__eq__(values) is True and view.__eq__(1) is False
+
+    class Compared(dict):
+        def __lt__(self, other):
+            return ("lt", other)
+
+        def __eq__(self, other):
+            return ("eq", other)
+
+    compared = MappingProxyType(Compared())
+    assert compared.__lt__(view)[1] is view
+    assert compared.__eq__(view)[1] is view
+    assert (view > compared)[1] is values
+    for right, operator in (({}, "<"), (view, ">")):
+        try:
+            view.__lt__(right)
+        except TypeError as exc:
+            assert str(exc) == f"'{operator}' not supported between instances of 'dict' and 'dict'"
+        else:
+            raise AssertionError("comparison accepted unordered dictionaries")
+    assert proxy.__or__(view) == ('left backing', values)
+    assert proxy.__ror__(view) == ('right backing', values)
+    assert proxy.__or__(MappingProxyType(view))[1] is view
+    try:
+        proxy |= values
+    except TypeError as exc:
+        assert str(exc) == "'|=' is not supported by mappingproxy; use '|' instead"
+    else:
+        raise AssertionError("mappingproxy allowed in-place union")
     assert proxy | view == ('left backing', values)
     assert {} | proxy == ('right backing', {})
     side, received = proxy | MappingProxyType(view)

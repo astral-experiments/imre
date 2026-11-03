@@ -4811,6 +4811,19 @@ impl Context {
     }
 }
 
+/// Return the comparison performed by a rich comparison slot.
+pub(super) fn comparison_op(slot: &str) -> Option<&'static str> {
+    Some(match slot {
+        "__lt__" => "<",
+        "__le__" => "<=",
+        "__eq__" => "==",
+        "__ne__" => "!=",
+        "__gt__" => ">",
+        "__ge__" => ">=",
+        _ => return None,
+    })
+}
+
 /// Special-method names for the two operands of a Python binary expression.
 fn binary_slots(op: &str) -> Option<(&'static str, &'static str, &'static str)> {
     Some(match op {
@@ -5166,6 +5179,25 @@ impl Context {
         {
             return deque::compare(self, op, a, b).map(|result| Some(builtins::boolean(result)));
         }
+        if matches!(op, "<" | "<=" | ">" | ">=")
+            && (matches!(self.heap.get(a), Value::MappingProxy(_))
+                || matches!(self.heap.get(b), Value::MappingProxy(_)))
+        {
+            return self
+                .with_proxy_operands(a, b, |ctx| {
+                    let left = ctx.mapping_proxy_target(a);
+                    let right = ctx.mapping_proxy_target(b);
+                    if b == right {
+                        return ctx.binary(op, left, b);
+                    }
+                    let (forward, reflected, _) = binary_slots(op).unwrap();
+                    if let Some(result) = ctx.operator_slot(left, forward, b)? {
+                        return Ok(result);
+                    }
+                    ctx.binary(comparison_op(reflected).unwrap(), right, left)
+                })
+                .map(Some);
+        }
         let (a, b) = if matches!(op, "==" | "!=") {
             let left = self.mapping_proxy_target(a);
             let right = self.mapping_proxy_target(b);
@@ -5352,6 +5384,9 @@ impl Context {
         if target != a {
             let right = self.weak_proxy_target(b)?;
             return self.with_proxy_operands(target, right, |ctx| ctx.inplace(op, target, right));
+        }
+        if op == "|" && matches!(self.heap.get(a), Value::MappingProxy(_)) {
+            return builtins::call(self, "mappingproxy.__ior__", &[a, b], &[]);
         }
         if let Some((_, _, slot)) = binary_slots(op)
             && let Some(result) = self.operator_slot(a, slot, b)?
