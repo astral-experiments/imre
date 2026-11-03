@@ -2260,6 +2260,9 @@ impl IntrinsicModule {
             (Self::UrllibRequest, "build_opener") => {
                 Intrinsic::ScopedObjectExport("urllib.request.build_opener")
             }
+            (Self::UrllibRequest, "_parse_proxy") => {
+                Intrinsic::ScopedObjectExport("urllib.request._parse_proxy")
+            }
             (Self::UrllibRequest, "install_opener") => {
                 Intrinsic::ScopedObjectExport("urllib.request.install_opener")
             }
