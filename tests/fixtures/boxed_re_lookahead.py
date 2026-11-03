@@ -34,6 +34,11 @@ def current():
         (r"a{1,2}+a", "aa", None), (r"a{1,2}a", "aa", ()),
         (r"(?>a?b){2}", "abb", ()), (r"(?:.(?!D))++C", "ABC", None),
         (br"(?>(a+))b", b"aab", (b"aa",)), (br".++", b"\xff\x80", ()),
+        (b"\xff++\xff", b"\xff\xff", None), (br"\377++\377", b"\xff\xff", None),
+        (br"[\x80-\xff]++\xff", b"\x80\xff", None),
+        (br"[\x80-\xff]++A", b"\x80\xffA", ()),
+        (br"(?i)\xff++a", b"\xffA", ()), (br"\xff++", b"\xc3\xbf", None),
+        (r"\xff++", "ÿ", ()),
         (r"[+?]++", "+?", ()), (r"\++a", "++a", ()), (r"\}+a", "}}a", ()),
         ("(?x:(?> a | ab ) c)", "abc", None),
     ):
