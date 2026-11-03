@@ -5,6 +5,7 @@ use crate::python_hash;
 
 pub(in crate::dynamic) const GROUP: &str = "grp.struct_group";
 pub(in crate::dynamic) const PASSWD: &str = "pwd.struct_passwd";
+pub(in crate::dynamic) const FLOAT_INFO: &str = "sys.float_info";
 pub(in crate::dynamic) const HASH_INFO: &str = "sys.hash_info";
 pub(in crate::dynamic) const THREAD_INFO: &str = "sys.thread_info";
 pub(in crate::dynamic) const SCHED_PARAM: &str = "posix.sched_param";
@@ -28,6 +29,7 @@ pub(in crate::dynamic) fn fixed_type(name: &str) -> Option<&'static str> {
     match name {
         GROUP if cfg!(any(target_os = "linux", target_os = "macos")) => Some(GROUP),
         PASSWD if cfg!(any(target_os = "linux", target_os = "macos")) => Some(PASSWD),
+        FLOAT_INFO => Some(FLOAT_INFO),
         HASH_INFO => Some(HASH_INFO),
         THREAD_INFO => Some(THREAD_INFO),
         ASYNCGEN_HOOKS => Some(ASYNCGEN_HOOKS),
@@ -50,6 +52,19 @@ pub(in crate::dynamic) fn fields(class: &str) -> &'static [&'static str] {
             "pw_gecos",
             "pw_dir",
             "pw_shell",
+        ],
+        FLOAT_INFO => &[
+            "max",
+            "max_exp",
+            "max_10_exp",
+            "min",
+            "min_exp",
+            "min_10_exp",
+            "dig",
+            "mant_dig",
+            "epsilon",
+            "radix",
+            "rounds",
         ],
         HASH_INFO => &HASH_FIELDS,
         THREAD_INFO => &["name", "lock", "version"],
@@ -97,6 +112,24 @@ pub(in crate::dynamic) fn thread_info(ctx: &mut Context) -> Id {
     let lock = crate::sys::thread_lock_backend().map_or(NONE, |value| ctx.text(value));
     let version = crate::sys::thread_version().map_or(NONE, |value| ctx.text(value));
     record(ctx, THREAD_INFO, vec![name, lock, version])
+}
+
+pub(in crate::dynamic) fn float_info(ctx: &mut Context) -> Id {
+    let values = vec![
+        ctx.alloc(Value::Float(f64::MAX)),
+        ctx.int(i64::from(f64::MAX_EXP)),
+        ctx.int(i64::from(f64::MAX_10_EXP)),
+        ctx.alloc(Value::Float(f64::MIN_POSITIVE)),
+        ctx.int(i64::from(f64::MIN_EXP)),
+        ctx.int(i64::from(f64::MIN_10_EXP)),
+        ctx.int(i64::from(f64::DIGITS)),
+        ctx.int(i64::from(f64::MANTISSA_DIGITS)),
+        ctx.alloc(Value::Float(f64::EPSILON)),
+        ctx.int(i64::from(f64::RADIX)),
+        // Imre starts in the default round-to-nearest mode (FLT_ROUNDS == 1).
+        ctx.int(1),
+    ];
+    record(ctx, FLOAT_INFO, values)
 }
 
 pub(super) fn current_hash_info(ctx: &mut Context) -> Id {
@@ -307,6 +340,11 @@ pub(in crate::dynamic) fn type_attribute(
         "__doc__" if class == UNRAISABLE_ARGS => {
             ctx.text("UnraisableHookArgs\n\nType used to pass arguments to sys.unraisablehook.")
         }
+        "__doc__" if class == FLOAT_INFO => ctx.text(concat!(
+            "sys.float_info\n\nA named tuple holding information about the float type. ",
+            "It contains low level\ninformation about the precision and internal representation. ",
+            "Please study\nyour system's :file:`float.h` for more information."
+        )),
         "__doc__" if class == THREAD_INFO => ctx.text(
             "sys.thread_info\n\nA named tuple holding information about the thread implementation.",
         ),

@@ -3659,6 +3659,8 @@ impl Context {
                     "big"
                 });
                 self.bind(scope, "byteorder", byteorder);
+                let float_info = stdlib::fixed_structseq::float_info(self);
+                self.bind(scope, "float_info", float_info);
                 let thread_info = stdlib::fixed_structseq::thread_info(self);
                 self.bind(scope, "thread_info", thread_info);
                 for name in [
