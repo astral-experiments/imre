@@ -23,6 +23,9 @@ class Comparison:
 def current():
     missing = ["/imre-missing-platform-option-control"]
     for launch, options, error, message in (
+        (subprocess.call, {"group": -1}, ValueError, "Group ID cannot be negative, got -1"),
+        (subprocess.Popen, {"group": []}, TypeError, "Group must be a string or an integer, not <class 'list'>"),
+        (subprocess.Popen, {"group": 2 ** 64}, OverflowError, "gid is greater than maximum"),
         (subprocess.call, {"extra_groups": [-1]},
          ValueError, "Group ID cannot be negative, got -1"),
         (subprocess.Popen, {"extra_groups": [2 ** 64]}, ValueError, "invalid group id"),
@@ -60,6 +63,20 @@ def current():
                           startupinfo=None, creationflags=ZeroFlags()) as child:
         assert child.communicate() == (b"ready", None)
         assert child.returncode == 47 and child.stdout.closed
+
+    gid = os.getgid()
+    report_gid = [sys.executable, "-c", "import os; print(os.getgid())"]
+    for requested in (gid, 65534 if gid != 65534 else 65533):
+        for close_fds in (False, True):
+            try:
+                output = subprocess.check_output(report_gid, group=requested, close_fds=close_fds)
+            except OSError as exc:
+                # A user namespace can reject an unmapped group with EINVAL.
+                assert requested != gid and exc.errno in (errno.EPERM, errno.EINVAL)
+                assert exc.filename is None
+            else:
+                assert int(output) == requested
+    assert os.getgid() == gid
 
     parent_groups = os.getgroups()
     report_groups = [sys.executable, "-c", "import os; print(os.getgroups())"]

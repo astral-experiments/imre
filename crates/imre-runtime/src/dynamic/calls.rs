@@ -2757,6 +2757,14 @@ impl Context {
                     "__doc__" if symbol == "posix.getegid" => {
                         return Ok(self.text("Return the current process's effective group id."));
                     }
+                    "__doc__" if symbol == "posix.setregid" => {
+                        return Ok(
+                            self.text("Set the current process's real and effective group ids.")
+                        );
+                    }
+                    "__text_signature__" if symbol == "posix.setregid" => {
+                        return Ok(self.text("($module, rgid, egid, /)"));
+                    }
                     "__doc__" if symbol == "posix.getresgid" => {
                         return Ok(self.text("Return a tuple of the current process's real, effective, and saved group ids."));
                     }

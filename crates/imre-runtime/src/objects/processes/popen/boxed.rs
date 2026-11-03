@@ -175,6 +175,7 @@ impl BoxedPopen {
         process_group: i32,
         umask: i32,
         keep: Vec<RawFd>,
+        gid: libc::gid_t,
         extra_groups: Option<Vec<libc::gid_t>>,
         preexec: Option<&mut dyn PreExec>,
     ) -> std::result::Result<Self, BoxedLaunchError> {
@@ -228,6 +229,7 @@ impl BoxedPopen {
             boxed_child: Some(ChildAttributes {
                 new_session: start_new_session,
                 group: process_group,
+                gid,
                 extra_groups,
                 mask: (umask >= 0).then_some(umask as libc::mode_t),
                 keep,
