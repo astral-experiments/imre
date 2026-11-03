@@ -1,5 +1,8 @@
 def current():
+    import _socket
     import socket
+
+    assert socket.timeout is _socket.timeout is TimeoutError
 
     reader, writer = socket.socketpair()
     with reader, writer, reader.makefile('rb') as stream:
@@ -13,7 +16,7 @@ def current():
         assert reader.gettimeout() == 0.025 and reader.getblocking()
         try:
             stream.readline()
-        except TimeoutError as error:
+        except socket.timeout as error:
             assert str(error) == 'timed out'
         else:
             raise AssertionError('silent socket did not time out')
