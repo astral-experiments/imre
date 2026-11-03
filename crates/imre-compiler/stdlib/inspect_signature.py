@@ -11,9 +11,7 @@ from collections import OrderedDict
 from keyword import iskeyword
 from inspect import (
     _native_data_descriptor,
-    _signature_identifier,
     _signature_layout,
-    _signature_mapping,
     _static_member,
 )
 

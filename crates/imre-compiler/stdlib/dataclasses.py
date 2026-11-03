@@ -1,11 +1,12 @@
 from _imre_dataclasses import (
-    field_identifier as _field_identifier, is_defaultdict as _is_defaultdict,
+    is_defaultdict as _is_defaultdict,
     loaded_module as _loaded_module,
-    make_type as _make_type, members as _members, metadata as _metadata,
+    make_type as _make_type, members as _members,
     native_iterator as _native_iterator, retarget_class_cell as _retarget_class_cell,
     slot_bases as _slot_bases,
     slotted_type as _slotted_type,
 )
+import types
 from types import FunctionType, GenericAlias, MemberDescriptorType
 
 __all__ = ["dataclass", "field", "Field", "fields", "is_dataclass", "make_dataclass", "asdict", "astuple", "replace",
@@ -52,7 +53,7 @@ class _FIELD_BASE:
 _FIELD = _FIELD_BASE('_FIELD')
 _FIELD_CLASSVAR = _FIELD_BASE('_FIELD_CLASSVAR')
 _FIELD_INITVAR = _FIELD_BASE('_FIELD_INITVAR')
-_EMPTY_METADATA = _metadata({})
+_EMPTY_METADATA = types.MappingProxyType({})
 
 
 def _recursive_repr(fn):
@@ -97,7 +98,7 @@ class Field:
         self.compare = compare
         self.metadata = (_EMPTY_METADATA
                          if metadata is None else
-                         _metadata(metadata))
+                         types.MappingProxyType(metadata))
         self.kw_only = kw_only
         self.doc = doc
         self._field_type = None
@@ -260,7 +261,7 @@ def _initializer(owner_class, data, positional, qualname, frozen, slots):
     body = []
     initvars = []
     for name, f in zip(spellings, data.values()):
-        if not _field_identifier(name) or iskeyword(name):
+        if not name.isidentifier() or iskeyword(name):
             raise SyntaxError(f'invalid field name {name!r}')
         symbol = symbols[name]
         if f.init:
@@ -605,7 +606,7 @@ def make_dataclass(cls_name, fields, *, bases=(), namespace=None, init=True,
         else:
             raise TypeError(f'Invalid field: {item!r}')
 
-        if not isinstance(name, str) or not _field_identifier(name):
+        if not isinstance(name, str) or not name.isidentifier():
             raise TypeError(f'Field names must be valid identifiers: {name!r}')
         if iskeyword(name):
             raise TypeError(f'Field names must not be keywords: {name!r}')

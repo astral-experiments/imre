@@ -150,12 +150,6 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
                     let frame_info = section("def getframeinfo(", "def getinnerframes(")
                         .replace("_get_code_position_from_tb(frame)", "_frame_position(frame)")
                         .replace("_get_code_position(frame.f_code, frame.f_lasti)", "_frame_position(frame)");
-                    let classes = section("_POSITIONAL_ONLY         = ", "class BufferFlags(")
-                        .replace("name.isidentifier()", "_signature_identifier(name)")
-                        .replace(
-                            "types.MappingProxyType(params)",
-                            "_signature_mapping(params)",
-                        );
                     [
                         include_str!("../../stdlib/inspect.py"),
                         include_str!("../../stdlib/inspect_signature.py"),
@@ -174,7 +168,7 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
                         section("def _signature_get_partial(", "def _signature_is_builtin("),
                         section("def _signature_is_functionlike(obj):", "def _signature_strip_non_python_syntax("),
                         section("class _void:", "class _ParameterKind("),
-                        &classes,
+                        section("_POSITIONAL_ONLY         = ", "class BufferFlags("),
                     ]
                     .join("\n")
                 }),
