@@ -76,15 +76,26 @@ impl Context {
     /// Recheck roots after each finalizer. An upstream owner may resurrect a descendant.
     pub(super) fn drain_acyclic_finalizers(&mut self) -> Result<bool> {
         let mut finalized = false;
+        let mut siblings = Vec::new();
         while self.heap.has_ordinary_finalizers() {
             let stdin = super::stdlib::io::rooted_input_chain(self);
             let (heap, roots) = self.heap_and_roots();
-            let Some(owner) = heap.acyclic_finalizer(roots, stdin.as_ref())? else {
+            let Some(owner) = heap.acyclic_finalizer(roots, stdin.as_ref(), &mut siblings)? else {
                 break;
             };
-            if !super::stdlib::io::deallocate_exact_pair(self, owner)? {
+            // Independent owners released by one boundary are finalized from that caller.
+            // A nested checkpoint inside __del__ may still finalize owners it actually drops.
+            let mark = self.heap.temporary_mark();
+            self.heap.reserve_temporaries(siblings.len())?;
+            for sibling in siblings.drain(..) {
+                self.heap.keep(sibling);
+            }
+            let result = super::stdlib::io::deallocate_exact_pair(self, owner);
+            if matches!(result, Ok(false)) {
                 self.dispatch_finalizer(owner);
             }
+            self.heap.release_temporaries_since(mark);
+            result?;
             finalized = true;
         }
         Ok(finalized)

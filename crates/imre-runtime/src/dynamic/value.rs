@@ -3536,6 +3536,7 @@ impl Heap {
         &self,
         roots: impl Iterator<Item = Id>,
         stdin: Option<&[Id; 3]>,
+        siblings: &mut Vec<Id>,
     ) -> Result<Option<Id>> {
         // These owners are reachable through the current sys.__stdin__ even in a mixed set.
         let mut remaining = self.ordinary_finalizers.len();
@@ -3601,7 +3602,23 @@ impl Heap {
         let next = if remaining == 0 {
             Ok(None)
         } else {
-            CycleSet::new(self.slots.len()).map(|mut cycles| self.identify_cycles(&mut cycles))
+            (|| {
+                let mut cycles = CycleSet::new(self.slots.len())?;
+                siblings
+                    .try_reserve(remaining - 1)
+                    .map_err(|_| Error::new("MemoryError", ""))?;
+                let mut first = None;
+                self.identify_cycles(&mut cycles, |owner| {
+                    if first.is_some() {
+                        siblings.push(owner);
+                    } else {
+                        first = Some(owner);
+                    }
+                    // Other pending finalizers still own their children while Python runs.
+                    true
+                });
+                Ok(first)
+            })()
         };
         while let Some(id) = pending.pop() {
             self.traces[id as usize].set(UNMARKED);
@@ -3830,7 +3847,7 @@ impl Heap {
                     .filter(|id| Some(*id) != releasing),
             ),
         );
-        self.identify_cycles(cycles);
+        self.identify_cycles(cycles, |_| false);
         // Peeling leaves both cycles and their unreachable descendants. Every
         // strong child of a member is therefore already live or itself a member.
         for id in cycles.members() {
@@ -3940,9 +3957,9 @@ impl Heap {
 
     /// A tracing sweep also releases ordinary expression temporaries. Exclude the
     /// dead objects that refcounting alone would release from the Python GC count.
-    /// The incoming counts must start at zero.
-    fn identify_cycles(&self, cycles: &mut CycleSet) -> Option<Id> {
-        let mut first_finalizer = None;
+    /// The incoming counts must start at zero. The acyclic dispatch pass stops at pending
+    /// owners so their children cannot become siblings. The GC and survivor passes peel all edges.
+    fn identify_cycles(&self, cycles: &mut CycleSet, mut retain_finalizer: impl FnMut(Id) -> bool) {
         let CycleSet {
             incoming,
             work: unowned,
@@ -3967,8 +3984,8 @@ impl Heap {
             }
         }
         while let Some(id) = unowned.pop() {
-            if first_finalizer.is_none() && self.slots[id].finalization == Finalization::Pending {
-                first_finalizer = Some(id as Id);
+            if self.slots[id].finalization == Finalization::Pending && retain_finalizer(id as Id) {
+                continue;
             }
             self.unreachable_children(self.slots[id].value.as_ref().unwrap(), |child| {
                 incoming[child] -= 1;
@@ -3977,7 +3994,6 @@ impl Heap {
                 }
             });
         }
-        first_finalizer
     }
 
     /// Age participating slots before Python callbacks can allocate into a recycled slot.
@@ -3998,7 +4014,7 @@ impl Heap {
     ) -> Result<WeakCallbacks> {
         let mut cycles = CycleSet::new(self.slots.len())?;
         self.mark_full(globals, &mut cycles.work, generation, None);
-        self.identify_cycles(&mut cycles);
+        self.identify_cycles(&mut cycles, |_| false);
         if generation < 2 {
             // A cycle outside the collected generations can own younger objects. An
             // unreachable acyclic owner would already have been released by refcounting.
@@ -4204,7 +4220,7 @@ impl Heap {
         });
         self.mark(globals.chain(outside));
         cycles.incoming.fill(0);
-        self.identify_cycles(&mut cycles);
+        self.identify_cycles(&mut cycles, |_| false);
         let count = cycles
             .members()
             .filter(|&id| self.slots[id as usize].gc_tracked(self))
@@ -4500,6 +4516,30 @@ mod tests {
     }
 
     #[test]
+    fn acyclic_siblings_exclude_children_and_cycle_members() {
+        let mut heap = Heap::new();
+        let mark = heap.temporary_mark();
+        let child = heap.alloc(Value::List(Vec::new()));
+        let parent = heap.alloc(Value::List(vec![child]));
+        let sibling = heap.alloc(Value::List(Vec::new()));
+        let cycle = heap.alloc(Value::List(Vec::new()));
+        *heap.get_mut(cycle) = Value::List(vec![cycle]);
+        for id in [child, parent, sibling, cycle] {
+            heap.register_finalizer(id);
+        }
+        heap.release_temporaries_since(mark);
+
+        let mut released = Vec::new();
+        let first = heap
+            .acyclic_finalizer(std::iter::empty(), None, &mut released)
+            .unwrap()
+            .unwrap();
+        released.push(first);
+        released.sort_unstable();
+        assert_eq!(released, vec![parent, sibling]);
+    }
+
+    #[test]
     fn mixed_input_owners_leave_unreachable_finalizers_eligible() {
         let mut heap = Heap::new();
         let mark = heap.temporary_mark();
@@ -4514,7 +4554,10 @@ mod tests {
 
         // Only one distinct pending owner is proven by this chain.
         let chain = [input, buffer, input];
-        let check = |roots| heap.acyclic_finalizer(roots, Some(&chain)).unwrap();
+        let check = |roots| {
+            heap.acyclic_finalizer(roots, Some(&chain), &mut Vec::new())
+                .unwrap()
+        };
         assert_eq!(check(vec![input].into_iter()), Some(dead));
         assert_eq!(check(vec![input, dead].into_iter()), None);
         assert_eq!(check(vec![input].into_iter()), Some(dead));
