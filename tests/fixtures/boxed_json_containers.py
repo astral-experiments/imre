@@ -201,4 +201,37 @@ def current():
     finally:
         json.encoder.encode_basestring_ascii = original_quote
 
+    import importlib
+    import sys
+    import weakref
+
+    # Use an independent module so deleting its binding can release the callable.
+    missing = object()
+    previous = sys.modules.pop("fnmatch", missing)
+    try:
+        module = importlib.import_module("fnmatch")
+        assert module is not previous
+        held = [module.filterfalse]
+        del module.filterfalse
+        def released(ref):
+            assert ref() is None
+            row[1] = "updated"
+
+        watched = weakref.ref(held[0], released)
+
+        def weak_replacement(value):
+            if value is row[0]:
+                return [held[0] if keep else held.pop()]
+            assert value is watched()
+            return "first"
+
+        for keep, second in [(True, "initial"), (False, "updated")]:
+            row[:] = [object(), "initial"]
+            assert json.dumps(row, default=weak_replacement) == '[["first"], "' + second + '"]'
+        assert watched() is None
+    finally:
+        sys.modules.pop("fnmatch", None)
+        if previous is not missing:
+            sys.modules["fnmatch"] = previous
+
     print("encoded container subclasses")

@@ -522,7 +522,7 @@ fn observe_release(ctx: &Context, result: Id) -> bool {
             return false;
         }
     }
-    ctx.heap.could_own_finalizer(result, true) && !plain_replacement(ctx, result, &mut 64)
+    ctx.heap.could_release_callback_result(result) && !plain_replacement(ctx, result, &mut 64)
 }
 
 impl Encoder {
