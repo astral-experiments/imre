@@ -63,13 +63,20 @@ impl Context {
         }
     }
 
+    /// Register an instance if its Python class currently defines a destructor.
+    pub(super) fn register_instance_finalizer(&mut self, id: Id, class: Option<Id>) {
+        if let Some(class) = class
+            && self.class_attr(class, "__del__").is_some()
+        {
+            self.heap.register_finalizer(id);
+        }
+    }
+
     /// A newly assigned class slot also applies to existing instances of subclasses.
     pub(super) fn register_class_finalizers(&mut self) {
         for index in 0..self.heap.slot_count() {
             let id = index as Id;
-            if self.heap.ordinary_instance(id) && self.slot(id, "__del__").is_some() {
-                self.heap.register_finalizer(id);
-            }
+            self.register_instance_finalizer(id, self.heap.finalizer_class(id));
         }
     }
 
