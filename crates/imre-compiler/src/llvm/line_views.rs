@@ -91,6 +91,7 @@ pub(super) fn select(f: &Function) -> Vec<bool> {
             key,
             value,
             ready,
+            ..
         } => {
             safe &= [Some(*iterator), Some(*key), *value, Some(*ready)]
                 .into_iter()
