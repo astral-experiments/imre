@@ -173,24 +173,15 @@ impl Sparse {
         if !self.iter(row.len()).all(|(_, old)| old == row) {
             return None;
         }
-        let mut bits = Vec::new();
-        let mut value = Vec::new();
-        if bits.try_reserve_exact(words).is_err() || value.try_reserve_exact(row.len()).is_err() {
-            return None;
-        }
-        bits.resize(words, 0);
-        value.extend_from_slice(row);
+        let mut binary = Binary::empty(row, words)?;
         for (i, _) in self.iter(row.len()) {
             let (block, bit) = position(i);
-            bits[block] |= bit;
+            binary.bits[block] |= bit;
         }
         let (block, bit) = position(at);
-        bits[block] |= bit;
-        Some(Binary {
-            row: value,
-            bits,
-            changed: self.len + 1,
-        })
+        binary.bits[block] |= bit;
+        binary.changed = self.len + 1;
+        Some(binary)
     }
 
     /// Resolve a logical block through a page key and a population count.
@@ -376,7 +367,27 @@ pub(super) struct Binary {
     changed: usize,
 }
 
+// Bound speculative tag initialization for large, virtually repeated lists. Larger
+// bitmaps still grow as ordinary stores establish the density of their overrides.
+const MAX_BATCH_GROWTH: usize = (1 << 20) / size_of::<u64>();
+
 impl Binary {
+    /// Reserve both dictionary storage and tags before replacing any live rows.
+    fn empty(row: &[usize], words: usize) -> Option<Self> {
+        let mut bits = Vec::new();
+        let mut value = Vec::new();
+        if bits.try_reserve_exact(words).is_err() || value.try_reserve_exact(row.len()).is_err() {
+            return None;
+        }
+        bits.resize(words, 0);
+        value.extend_from_slice(row);
+        Some(Self {
+            row: value,
+            bits,
+            changed: 0,
+        })
+    }
+
     fn contains(&self, at: usize) -> bool {
         let (block, bit) = position(at);
         self.bits.get(block).is_some_and(|word| word & bit != 0)
@@ -394,6 +405,52 @@ impl Binary {
         self.changed += usize::from(*word & bit == 0);
         *word |= bit;
         true
+    }
+
+    /// Set or clear successive modular positions and return the completed prefix.
+    /// Each poll leaves both the population count and the source index recoverable.
+    pub(super) fn set_modular(
+        &mut self,
+        mut at: usize,
+        step: usize,
+        n: usize,
+        count: usize,
+        set: bool,
+    ) -> (usize, usize) {
+        let words = n.div_ceil(64);
+        if set && words > self.bits.len() {
+            // Do not densify an otherwise short prefix just to batch its stores.
+            if words - self.bits.len() > MAX_BATCH_GROWTH
+                || words > self.bits.len().saturating_mul(2)
+                || self
+                    .bits
+                    .try_reserve_exact(words - self.bits.len())
+                    .is_err()
+            {
+                return (0, at);
+            }
+            self.bits.resize(words, 0);
+        }
+        let mut done = 0;
+        while done < count && !crate::signals::TRIPPED.load(std::sync::atomic::Ordering::Relaxed) {
+            let chunk = (count - done).min(1024);
+            for _ in 0..chunk {
+                at += step;
+                if at >= n {
+                    at -= n;
+                }
+                let (block, bit) = position(at);
+                if set {
+                    let word = &mut self.bits[block];
+                    self.changed += usize::from(*word & bit == 0);
+                    *word |= bit;
+                } else {
+                    self.remove(at);
+                }
+            }
+            done += chunk;
+        }
+        (done, at)
     }
 
     fn remove(&mut self, at: usize) {
@@ -502,6 +559,39 @@ impl Overrides {
         };
         *self = Self::Binary(binary);
         true
+    }
+
+    /// A first nondefault store establishes both dictionary payloads. Promote early
+    /// when the remaining progression visits enough distinct rows to pay for the bits.
+    pub(super) fn for_modular_writes(
+        &mut self,
+        at: usize,
+        row: &[usize],
+        base: &[usize],
+        n: usize,
+        step: usize,
+        count: usize,
+    ) -> Option<&mut Binary> {
+        if let Self::Sparse(sparse) = self {
+            use num_integer::Integer;
+            let words = n.div_ceil(BLOCK);
+            if sparse.len != 1
+                || row == base
+                || words > MAX_BATCH_GROWTH
+                || count < words
+                || n / n.gcd(&step) < words
+            {
+                return None;
+            }
+            // The scalar store immediately preceding this call wrote the only exception.
+            let mut binary = Binary::empty(row, words)?;
+            binary.insert(at);
+            *self = Self::Binary(binary);
+        }
+        let Self::Binary(binary) = self else {
+            unreachable!()
+        };
+        Some(binary)
     }
 
     pub(super) fn should_pack(&self, at: usize, len: usize, width: usize) -> bool {
@@ -617,6 +707,15 @@ mod page_tests {
         for (&at, value) in expected {
             assert_eq!(rows.get(at, 2), Some(value.as_slice()));
         }
+    }
+
+    #[test]
+    fn a_large_virtual_write_progression_stays_sparse() {
+        let mut edits = Overrides::default();
+        assert!(edits.put(11, &[7]).is_ok());
+        let n = (MAX_BATCH_GROWTH + 1) * BLOCK;
+        assert!(edits.for_modular_writes(11, &[7], &[3], n, 1, n).is_none());
+        assert_eq!(edits.get(11, 1), Some(&[7][..]));
     }
 
     #[test]
