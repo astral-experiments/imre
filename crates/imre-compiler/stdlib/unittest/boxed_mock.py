@@ -165,7 +165,7 @@ class InvalidSpecError(Exception):
 
 def _is_instance_mock(value):
     # A spec or proxy can report a different __class__.
-    return issubclass(type(value), Mock)
+    return issubclass(type(value), NonCallableMock)
 
 
 def _is_exception(value):
@@ -182,7 +182,7 @@ def _callable(value):
     return getattr(value, "__call__", callable(value) or None) is not None
 
 
-class Mock(_FixedMock):
+class NonCallableMock(_FixedMock):
     _mock_sealed = False
     _mock_methods = None
     _mock_strict = False
@@ -202,7 +202,8 @@ class Mock(_FixedMock):
             spec_class = methods
             methods = dir(methods)
         elif methods is not None and type(methods) not in (list, tuple):
-            raise NotImplementedError("mock specifications from objects are not supported")
+            spec_class = type(methods)
+            methods = dir(methods)
         object.__setattr__(self, "_spec_class", spec_class)
         owner = type(self)
         for magic in owner._mock_auto_magics:
@@ -317,6 +318,8 @@ class Mock(_FixedMock):
         if not hasattr(node, "_proxy"):
             # Each instance has a private subclass for its own protocol slots.
             factory = type(self).__mro__[1]
+            if not issubclass(factory, Mock):
+                factory = MagicMock if issubclass(factory, NonCallableMagicMock) else Mock
             proxy = factory()
             proxy._node = node
             proxy._nodes = self._nodes
@@ -331,6 +334,15 @@ class Mock(_FixedMock):
             raise AttributeError(f"Mock object has no attribute {name!r}")
         if name.startswith("_") and (methods is None or name in _mock_magics):
             raise AttributeError(name)
+        members = getattr(self._node, "_autospec_members", {})
+        if name in members:
+            value, target = members[name]
+            child = _make_autospec(value, self._mock_strict, False, target=target)
+            self._adopt(child, "." + name)
+            object.__setattr__(self, name, child)
+            if self._mock_sealed:
+                seal(child)
+            return child
         if self._mock_sealed and name not in self._node._children:
             if methods is None:
                 _check_child_name(name)
@@ -368,50 +380,6 @@ class Mock(_FixedMock):
         self._adopt(value, "()")
         child = super().return_value
         child._node._configured_return = value
-
-    def __call__(self, /, *args, **kwargs):
-        node = self._node
-        node.called = True
-        node.call_args = _new_call(args, kwargs)
-        node.call_args_list.append(node.call_args)
-        node.call_count = len(node.call_args_list)
-        self.mock_calls.append(_Call(("", args, kwargs)))
-
-        current = node
-        path = ""
-        separator = ""
-        method_suffix = ""
-        while hasattr(current, "_owner"):
-            suffix = current._suffix
-            name = suffix.removeprefix(".")
-            # mock_calls skips empty ancestor names and joins a leading "()"
-            # without a dot, even when it was reached as a literal attribute.
-            if name or current is node:
-                path = name + separator + path
-                separator = "" if name == "()" else "."
-            parent = current._owner
-            if suffix == "()" or getattr(current, "_magic", False):
-                method_suffix = None
-            if method_suffix is not None:
-                # Only real return-value edges stop method_calls propagation.
-                method_suffix = suffix + method_suffix
-                parent.method_calls.append(_Call((method_suffix[1:], args, kwargs)))
-            parent.mock_calls.append(_Call((path, args, kwargs)))
-            current = parent._node
-
-        effect = node.side_effect
-        if effect is not None:
-            if _is_exception(effect):
-                raise effect
-            if _callable(effect):
-                result = effect(*args, **kwargs)
-            else:
-                result = next(effect)
-                if _is_exception(result):
-                    raise result
-            if result is not DEFAULT:
-                return result
-        return self.return_value
 
     def reset_mock(self, visited=None, *, return_value=False, side_effect=False):
         if visited is None:
@@ -519,8 +487,148 @@ class _MagicSlot:
         return child
 
 
+class Mock(NonCallableMock):
+    def __call__(self, /, *args, **kwargs):
+        node = self._node
+        signature = getattr(node, "_spec_signature", None)
+        if signature is not None:
+            signature.bind(*args, **kwargs)
+        node.called = True
+        node.call_args = _new_call(args, kwargs)
+        node.call_args_list.append(node.call_args)
+        node.call_count = len(node.call_args_list)
+        self.mock_calls.append(_Call(("", args, kwargs)))
+
+        current = node
+        path = ""
+        separator = ""
+        method_suffix = ""
+        while hasattr(current, "_owner"):
+            suffix = current._suffix
+            name = suffix.removeprefix(".")
+            # mock_calls skips empty ancestor names and joins a leading "()"
+            # without a dot, even when it was reached as a literal attribute.
+            if name or current is node:
+                path = name + separator + path
+                separator = "" if name == "()" else "."
+            parent = current._owner
+            if suffix == "()" or getattr(current, "_magic", False):
+                method_suffix = None
+            if method_suffix is not None:
+                # Only real return-value edges stop method_calls propagation.
+                method_suffix = suffix + method_suffix
+                parent.method_calls.append(_Call((method_suffix[1:], args, kwargs)))
+            parent.mock_calls.append(_Call((path, args, kwargs)))
+            current = parent._node
+
+        effect = node.side_effect
+        if effect is not None:
+            if _is_exception(effect):
+                raise effect
+            if _callable(effect):
+                result = effect(*args, **kwargs)
+            else:
+                result = next(effect)
+                if _is_exception(result):
+                    raise result
+            if result is not DEFAULT:
+                return result
+        return self.return_value
+
+
 class MagicMock(Mock):
     _mock_auto_magics = ("__enter__", "__exit__", "__getitem__", "__iter__", "__next__")
+
+
+class NonCallableMagicMock(NonCallableMock):
+    _mock_auto_magics = MagicMock._mock_auto_magics
+
+
+def _autospec_target(spec, name, value):
+    from functools import partial
+    from inspect import getattr_static
+    from types import FunctionType
+
+    # Only ordinary functions read from a class still need a receiver.
+    if isinstance(value, FunctionType) and isinstance(spec, type):
+        if isinstance(getattr_static(spec, name), FunctionType):
+            return partial(value, None)
+    return value
+
+
+def _make_autospec(spec, strict, as_instance, name=None, target=None):
+    from functools import partial
+    from inspect import iscoroutinefunction, isdatadescriptor, signature
+    from types import FunctionType
+
+    if _is_instance_mock(spec):
+        raise InvalidSpecError("Cannot autospec a Mock object")
+    if type(spec) in (list, tuple):
+        spec = type(spec)
+    if isdatadescriptor(spec):
+        # A property viewed through its class has no known result type.
+        return MagicMock(name=name)
+    is_class = isinstance(spec, type)
+    if is_class:
+        if not as_instance:
+            target = partial(spec.__init__, None)
+        elif any("__call__" in base.__dict__ for base in spec.__mro__):
+            target = _autospec_target(spec, "__call__", spec.__call__)
+    elif target is None and callable(spec):
+        target = spec
+    if target is not None and iscoroutinefunction(target):
+        raise NotImplementedError("autospeccing async callables is not supported")
+    cls = MagicMock if target is not None else NonCallableMagicMock
+    mock = cls(spec_set=spec, name=name) if strict else cls(spec=spec, name=name)
+    if spec is not None:
+        # Capture the original attributes now; build their mocks on first access.
+        members = {}
+        for entry in mock._mock_methods:
+            if entry.startswith("__") and entry.endswith("__"):
+                continue
+            try:
+                value = getattr(spec, entry)
+            except AttributeError:
+                continue
+            target_method = None
+            if isinstance(value, FunctionType):
+                target_method = _autospec_target(spec, entry, value)
+            members[entry] = (value, target_method)
+        mock._node._autospec_members = members
+    if target is not None:
+        try:
+            sig = signature(target)
+        except ValueError:
+            # Some builtin callables do not expose a signature.
+            pass
+        else:
+            mock._node._spec_signature = sig
+            type(mock).__signature__ = sig
+    if is_class and not as_instance:
+        mock.return_value = _make_autospec(spec, strict, True)
+    elif isinstance(spec, (FunctionType, MethodType)):
+        # A spec method has a return value even if first read after seal().
+        mock.return_value = MagicMock()
+    return mock
+
+
+def create_autospec(spec, spec_set=False, instance=False, *, unsafe=False, **kwargs):
+    """Create a mock of a synchronous class, checking constructor and method calls."""
+    if _is_instance_mock(spec):
+        raise InvalidSpecError("Cannot autospec a Mock object")
+    if not isinstance(spec, type):
+        raise NotImplementedError("create_autospec currently supports class specs")
+    if not unsafe:
+        for typo in ("autospect", "auto_spec", "set_spec"):
+            if typo in kwargs:
+                raise RuntimeError(f"{typo!r} might be a typo; use unsafe=True if this is intended")
+    for option in ("wraps", "parent"):
+        if option in kwargs:
+            raise NotImplementedError(f"create_autospec does not support {option!r}")
+    mock = _make_autospec(spec, spec_set, instance, kwargs.pop("name", None))
+    if kwargs:
+        mock.configure_mock(**kwargs)
+    return mock
 
 
 def seal(mock):
