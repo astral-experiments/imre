@@ -50,9 +50,11 @@ def check_posix_pty():
     assert posix_openpt is posix.posix_openpt
     assert grantpt is posix.grantpt and unlockpt is posix.unlockpt
     flags = os.O_RDWR | os.O_NOCTTY
-    master = posix_openpt(Index(flags))
+    master = posix_openpt(Index(flags | os.O_NONBLOCK))
     try:
         assert not os.get_inheritable(master)
+        assert not os.get_blocking(master)
+        os.set_blocking(master, True)
         path = os.ptsname(master)
         with open(master, "rb", closefd=False) as stream:
             assert grantpt(stream) is None
@@ -61,6 +63,9 @@ def check_posix_pty():
         slave = os.open(path, flags)
         try:
             assert os.ttyname(slave) == path
+            # glibc validates that grantpt received a master. musl permits a no-op.
+            if "CS_GNU_LIBC_VERSION" in os.confstr_names:
+                expect_errno(grantpt, (slave,), errno.EINVAL)
             assert os.write(slave, b"pty") == 3
             assert os.read(master, 3) == b"pty"
         finally:
