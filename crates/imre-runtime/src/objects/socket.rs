@@ -1768,20 +1768,22 @@ pub extern "C" fn imre_socket_getblocking(s: &Object) -> bool {
     get_timeout(s) != Some(Duration::ZERO)
 }
 
+/// Duplicate the descriptor and copy the socket's timeout onto the new owner.
+pub(crate) fn dup(s: &Object) -> Result<crate::ObjectOwner> {
+    let (raw, family, kind, proto) = state(s, |s| (s.fd, s.family, s.kind, s.proto));
+    let timeout = get_timeout(s);
+    // SAFETY: the kernel validates even a closed fd; its copy is non-inheritable from creation.
+    let copy =
+        checked(unsafe { libc::fcntl(raw, libc::F_DUPFD_CLOEXEC, 0) }).map_err(errno_error)?;
+    let child = handle(copy, timeout.is_none(), family, kind, proto)?;
+    // socket.dup reapplies its source's blocking mode to the shared open file.
+    set_timeout(&child, timeout)?;
+    Ok(child)
+}
+
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_socket_dup(s: &Object) -> *const Object {
-    let result = (|| {
-        let (raw, family, kind, proto) = state(s, |s| (s.fd, s.family, s.kind, s.proto));
-        let timeout = get_timeout(s);
-        // SAFETY: the kernel validates even a closed fd; its copy is non-inheritable from creation.
-        let copy =
-            checked(unsafe { libc::fcntl(raw, libc::F_DUPFD_CLOEXEC, 0) }).map_err(errno_error)?;
-        let child = handle(copy, timeout.is_none(), family, kind, proto)?;
-        // socket.dup reapplies its source's blocking mode to the shared open file.
-        set_timeout(&child, timeout)?;
-        Ok(crate::ObjectOwner::into_raw(child))
-    })();
-    finish(result, ptr::null())
+    finish(dup(s).map(crate::ObjectOwner::into_raw), ptr::null())
 }
 
 #[unsafe(no_mangle)]
