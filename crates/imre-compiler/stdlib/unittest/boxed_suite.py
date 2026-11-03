@@ -33,50 +33,58 @@ def _boxedCheckFixtures(cls):
                 break
 
 
-def _runRegistered(result, test, name, stopTestRun=None):
-    result.startTest(test)
+def _caseRun(self, result=None):
+    stopTestRun = None
+    if result is None:
+        result = self.defaultTestResult()
+        startTestRun = getattr(result, "startTestRun", None)
+        stopTestRun = getattr(result, "stopTestRun", None)
+        if startTestRun is not None:
+            startTestRun()
+    result.startTest(self)
     try:
-        _runBoxedCase(result, test)
+        cls = type(self)
+        method = getattr(self, self._testMethodName)
+        if getattr(cls, "__unittest_skip__", False) or getattr(method, "__unittest_skip__", False):
+            reason = getattr(cls, "__unittest_skip_why__", "") or getattr(method, "__unittest_skip_why__", "")
+            case._addSkip(result, self, reason)
+            return result
+        expecting_failure = (getattr(self, "__unittest_expecting_failure__", False)
+                             or getattr(method, "__unittest_expecting_failure__", False))
+        outcome = case._Outcome(result)
+        start_time = case.time.perf_counter()
+        try:
+            self._outcome = outcome
+            with outcome.testPartExecutor(self):
+                self._callSetUp()
+            if outcome.success:
+                outcome.expecting_failure = expecting_failure
+                with outcome.testPartExecutor(self):
+                    self._callTestMethod(method)
+                outcome.expecting_failure = False
+                with outcome.testPartExecutor(self):
+                    self._callTearDown()
+            self.doCleanups()
+            self._addDuration(result, case.time.perf_counter() - start_time)
+            if outcome.success:
+                if not expecting_failure:
+                    result.addSuccess(self)
+                elif outcome.expectedFailure is None:
+                    self._addUnexpectedSuccess(result)
+                else:
+                    self._addExpectedFailure(result, outcome.expectedFailure)
+        finally:
+            outcome.expectedFailure = None
+            self._outcome = None
+        return result
     finally:
-        result.stopTest(test)
+        result.stopTest(self)
         if stopTestRun is not None:
             stopTestRun()
 
 
-def _runBoxedCase(result, test):
-    cls = type(test)
-    method = getattr(test, test._testMethodName)
-    if getattr(cls, "__unittest_skip__", False) or getattr(method, "__unittest_skip__", False):
-        reason = getattr(cls, "__unittest_skip_why__", "") or getattr(method, "__unittest_skip_why__", "")
-        case._addSkip(result, test, reason)
-        return
-    expecting_failure = (getattr(test, "__unittest_expecting_failure__", False)
-                         or getattr(method, "__unittest_expecting_failure__", False))
-    outcome = case._Outcome(result)
-    start_time = case.time.perf_counter()
-    try:
-        test._outcome = outcome
-        with outcome.testPartExecutor(test):
-            test._callSetUp()
-        if outcome.success:
-            outcome.expecting_failure = expecting_failure
-            with outcome.testPartExecutor(test):
-                test._callTestMethod(method)
-            outcome.expecting_failure = False
-            with outcome.testPartExecutor(test):
-                test._callTearDown()
-        test.doCleanups()
-        test._addDuration(result, case.time.perf_counter() - start_time)
-        if outcome.success:
-            if not expecting_failure:
-                result.addSuccess(test)
-            elif outcome.expectedFailure is None:
-                test._addUnexpectedSuccess(result)
-            else:
-                test._addExpectedFailure(result, outcome.expectedFailure)
-    finally:
-        outcome.expectedFailure = None
-        test._outcome = None
+def _runRegistered(result, test, name):
+    _caseRun(test, result)
 
 
 def _boxedSubTestEnter(self):
@@ -174,18 +182,6 @@ def _caseDebug(self):
     while cleanups:
         function, args, kwargs = cleanups.pop()
         self._callCleanup(function, *args, **kwargs)
-
-
-def _caseRun(self, result=None):
-    stopTestRun = None
-    if result is None:
-        result = self.defaultTestResult()
-        startTestRun = getattr(result, "startTestRun", None)
-        stopTestRun = getattr(result, "stopTestRun", None)
-        if startTestRun is not None:
-            startTestRun()
-    _runRegistered(result, self, "", stopTestRun)
-    return result
 
 
 def _callTest(self, *args, **kwargs):
