@@ -346,22 +346,6 @@ _SPECIAL_NAMES = frozenset({
 EXCLUDED_ATTRIBUTES = _TYPING_INTERNALS | _SPECIAL_NAMES | {'_MutableMapping__marker'}
 
 
-_protocol_annotation_names = None
-
-
-def _freeze_protocol_members(cls, declared_annotations):
-    global _protocol_annotation_names
-    provider = cls.__dict__.get('__annotate_func__')
-    if declared_annotations and provider is not None:
-        # Key the fallback by the original generated provider. A replacement
-        # must supply its own annotations and the cache must not retain classes.
-        if _protocol_annotation_names is None:
-            from weakref import WeakKeyDictionary
-            _protocol_annotation_names = WeakKeyDictionary()
-        _protocol_annotation_names[provider] = tuple(declared_annotations)
-    cls.__protocol_attrs__ = _get_protocol_attrs(cls)
-
-
 def _get_protocol_attrs(cls):
     """Collect protocol members from a protocol class objects.
 
@@ -402,18 +386,8 @@ def _protocol_annotations(base):
     try:
         return base.__annotations__
     except Exception:
-        # The class builder records executed annotation declarations even
-        # when a forward reference prevents evaluating their values.
-        provider = getattr(base, '__annotate__', None)
-        if provider is None:
-            return ()
-        else:
-            try:
-                return provider(3)  # annotationlib.Format.FORWARDREF
-            except NotImplementedError:
-                if _protocol_annotation_names is None or provider not in _protocol_annotation_names:
-                    raise
-                return _protocol_annotation_names[provider]
+        from annotationlib import Format, get_annotations
+        return get_annotations(base, format=Format.FORWARDREF)
 
 
 @classmethod
