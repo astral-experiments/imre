@@ -3495,6 +3495,8 @@ impl Context {
                 self.bind(scope, "_xoptions", xoptions);
                 if self.threads.system_module.is_none() {
                     self.bind(scope, "modules", self.modules);
+                    let version = stdlib::sys_version(self)?;
+                    self.bind(scope, "version", version);
                 }
                 let byteorder = self.text(if cfg!(target_endian = "little") {
                     "little"
