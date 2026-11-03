@@ -90,6 +90,8 @@ functions! {
     TLS_client_method() -> Handle;
     TLS_server_method() -> Handle;
     SSL_CTX_set_default_passwd_cb(Handle, PasswordCallback) -> ();
+    SSL_set_default_passwd_cb(Handle, PasswordCallback) -> ();
+    SSL_set_default_passwd_cb_userdata(Handle, Handle) -> ();
     SSL_use_certificate_chain_file(Handle, *const c_char) -> c_int;
     SSL_use_PrivateKey_file(Handle, *const c_char, c_int) -> c_int;
     SSL_check_private_key(Handle) -> c_int;
@@ -378,7 +380,7 @@ impl Api {
         Ok(())
     }
 
-    fn file_error(&self, operation: &str) -> Failure {
+    fn file_error(&self) -> Failure {
         // OpenSSL 3 records a failed file open as the first error and may
         // append BIO and X509 errors. Decode its original errno from err.h.
         const SYSTEM_FLAG: c_ulong = 1 << 31;
@@ -388,7 +390,8 @@ impl Api {
             let errno = (first & (SYSTEM_FLAG - 1)) as i32;
             return Failure::Io(std::io::Error::from_raw_os_error(errno));
         }
-        self.error(operation)
+        // SAFETY: keep the last provider reason for Python's SSLError.
+        self.trust_error(unsafe { (self.ERR_peek_last_error)() }, None)
     }
 
     fn reason_text(&self, code: c_ulong) -> Option<std::borrow::Cow<'_, str>> {
@@ -758,34 +761,101 @@ impl Context {
         };
     }
 
-    pub(crate) fn load_cert_chain(
-        &mut self,
+    /// Release the Python-visible context borrow before invoking any password callback.
+    pub(super) fn credentials(&self) -> Result<Credentials, Failure> {
+        self.api.clear();
+        // SAFETY: the new SSL holds its own reference to this context.
+        let handle = NonNull::new(unsafe { (self.api.SSL_new)(self.handle.as_ptr()) })
+            .ok_or_else(|| self.api.error("SSL_new"))?;
+        Ok(Credentials {
+            api: self.api,
+            handle,
+        })
+    }
+}
+
+/// A private SSL stages the key, certificate and chain until all three can be installed.
+pub(super) struct Credentials {
+    api: &'static Api,
+    handle: NonNull<c_void>,
+}
+
+impl Drop for Credentials {
+    fn drop(&mut self) {
+        // SAFETY: release the SSL_new reference and all staged credentials.
+        unsafe { (self.api.SSL_free)(self.handle.as_ptr()) };
+    }
+}
+
+struct Password<'a> {
+    fill: &'a mut dyn FnMut(&mut [u8]) -> Option<usize>,
+    panic: Option<Box<dyn std::any::Any + Send>>,
+}
+
+unsafe extern "C" fn copy_password(
+    buf: *mut c_char,
+    size: c_int,
+    _: c_int,
+    userdata: Handle,
+) -> c_int {
+    // SAFETY: OpenSSL provides a writable buffer. Initialize it before turning it
+    // into a Rust slice. The userdata is scoped to this private SSL's synchronous reads.
+    let (password, out) = unsafe {
+        let buf = buf.cast::<u8>();
+        buf.write_bytes(0, size as usize);
+        (
+            &mut *userdata.cast::<Password<'_>>(),
+            std::slice::from_raw_parts_mut(buf, size as usize),
+        )
+    };
+    if password.panic.is_some() {
+        return -1;
+    }
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| (password.fill)(out))) {
+        Ok(Some(n)) if n <= out.len() => n as c_int,
+        Ok(_) => -1,
+        Err(payload) => {
+            password.panic = Some(payload);
+            -1
+        }
+    }
+}
+
+impl Credentials {
+    pub(super) fn load_cert_chain(
+        self,
         certfile: &CStr,
         keyfile: &CStr,
+        fill: &mut dyn FnMut(&mut [u8]) -> Option<usize>,
     ) -> Result<(), Failure> {
+        let mut password = Password { fill, panic: None };
+        // SAFETY: only the staged SSL can invoke this callback. Caller reentry uses
+        // a different SSL and cannot replace or invalidate this stack-local userdata.
+        unsafe {
+            (self.api.SSL_set_default_passwd_cb)(self.handle.as_ptr(), copy_password);
+            (self.api.SSL_set_default_passwd_cb_userdata)(
+                self.handle.as_ptr(),
+                (&raw mut password).cast(),
+            );
+        }
         let api = self.api;
+        let result = self.install_credentials(certfile, keyfile);
+        drop(self);
+        // Capture any provider error before clearing the thread's queue, even
+        // when a Python callback supplies the exception that will be raised.
         api.clear();
-        // SAFETY: SSL_new inherits this context's policy and noninteractive password callback.
-        // Stage credentials on a separate SSL so parse errors leave the installed pair intact.
-        let tmp = NonNull::new(unsafe { (api.SSL_new)(self.handle.as_ptr()) })
-            .ok_or_else(|| api.error("SSL_new"))?;
-        let result = self.install_credentials(tmp, certfile, keyfile);
-        // SAFETY: SSL_CTX_use_cert_and_key retained its own references on success.
-        unsafe { (api.SSL_free)(tmp.as_ptr()) };
+        if let Some(payload) = password.panic {
+            std::panic::resume_unwind(payload);
+        }
         result
     }
 
-    fn install_credentials(
-        &mut self,
-        tmp: NonNull<c_void>,
-        certfile: &CStr,
-        keyfile: &CStr,
-    ) -> Result<(), Failure> {
+    fn install_credentials(&self, certfile: &CStr, keyfile: &CStr) -> Result<(), Failure> {
         let api = self.api;
-        let ssl = tmp.as_ptr();
+        let ssl = self.handle.as_ptr();
         // SAFETY: both paths are terminated; the temporary SSL lives throughout the call.
         if unsafe { (api.SSL_use_certificate_chain_file)(ssl, certfile.as_ptr()) } != 1 {
-            return Err(api.file_error("SSL_use_certificate_chain_file"));
+            return Err(api.file_error());
         }
         // SAFETY: record the selected certificate, without taking ownership. Loading a key
         // of another algorithm can silently switch to an older credential slot.
@@ -794,7 +864,7 @@ impl Context {
         const SSL_FILETYPE_PEM: c_int = 1;
         // SAFETY: OpenSSL retains the decoded key in the temporary SSL.
         if unsafe { (api.SSL_use_PrivateKey_file)(ssl, keyfile.as_ptr(), SSL_FILETYPE_PEM) } != 1 {
-            return Err(api.file_error("SSL_use_PrivateKey_file"));
+            return Err(api.file_error());
         }
         // SAFETY: borrow the live selection after loading the key. The earlier pointer is
         // used only for identity comparison. The certificate passed on below comes from here.
@@ -819,7 +889,7 @@ impl Context {
         // references independently of the temporary SSL that owns the borrowed arguments.
         if unsafe {
             (api.SSL_CTX_use_cert_and_key)(
-                self.handle.as_ptr(),
+                (api.SSL_get_SSL_CTX)(ssl),
                 selected,
                 (api.SSL_get_privatekey)(ssl),
                 chain,
@@ -831,7 +901,9 @@ impl Context {
         }
         Ok(())
     }
+}
 
+impl Context {
     pub(crate) fn set_ciphers(&mut self, ciphers: &CStr) -> Result<(), Failure> {
         self.api.clear();
         // SAFETY: the context is live and OpenSSL copies the supplied cipher list.
