@@ -174,6 +174,13 @@ REJECTED = {
             "with patch.object(Owner, 'value', replacement('wrong')):\n    pass\n"
         ),
     }, "expected int, got str"),
+    "handler_names_preserves_assignment": ({
+        "main.py": (
+            "from logging import getHandlerNames\ndef run() -> None:\n"
+            "    names = getHandlerNames()\n    print('handler' in names)\n"
+            "    value: int = 'wrong'\n    print(value)\nrun()\n"
+        ),
+    }, "expected int, got str"),
     "unused_queue_listener_preserves_assignment": ({
         "main.py": (
             "from logging.handlers import QueueListener\ndef run() -> None:\n"
