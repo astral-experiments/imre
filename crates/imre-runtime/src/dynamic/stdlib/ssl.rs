@@ -46,6 +46,8 @@ pub(in crate::dynamic) fn install(ctx: &mut Context, scope: Id) -> Result<()> {
         "channel_binding",
         "hostname_checks_common_name",
         "set_hostname_checks_common_name",
+        "get_verified_chain",
+        "get_unverified_chain",
         "sendall",
         "recv",
         "close",
@@ -335,6 +337,28 @@ pub(super) fn call(
                 .as_ref()
                 .and_then(|ssl| ssl.channel_binding());
             Ok(data.map_or(NONE, |bytes| ctx.alloc(Value::Bytes(bytes))))
+        }
+        ("get_verified_chain" | "get_unverified_chain", &[handle]) => {
+            let closed_chain = || {
+                Error::new(
+                    "AttributeError",
+                    format!("'NoneType' object has no attribute '{name}'"),
+                )
+            };
+            if handle == NONE {
+                return Err(closed_chain());
+            }
+            let certificates = session(ctx, handle)?
+                .borrow()
+                .as_ref()
+                .ok_or_else(closed_chain)?
+                .certificate_chain(name == "get_verified_chain")
+                .map_err(|e| provider_error(ctx, e))?;
+            let chain = certificates
+                .into_iter()
+                .map(|der| ctx.alloc(Value::Bytes(der)))
+                .collect();
+            Ok(ctx.alloc(Value::List(chain)))
         }
         ("sendall", &[handle, data]) => {
             let data = ctx.native_buffer_bytes(data)?;

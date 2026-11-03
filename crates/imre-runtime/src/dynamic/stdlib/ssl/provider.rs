@@ -112,6 +112,11 @@ functions! {
     SSL_connect(Handle) -> c_int;
     SSL_get_verify_result(Handle) -> c_long;
     SSL_get0_peer_certificate(Handle) -> Handle;
+    SSL_get0_verified_chain(Handle) -> Handle;
+    SSL_get_peer_cert_chain(Handle) -> Handle;
+    OPENSSL_sk_num(Handle) -> c_int;
+    OPENSSL_sk_value(Handle, c_int) -> Handle;
+    i2d_X509(Handle, *mut *mut u8) -> c_int;
     X509_verify_cert_error_string(c_long) -> *const c_char;
     SSL_read_ex(Handle, Handle, usize, *mut usize) -> c_int;
     SSL_write_ex(Handle, *const c_void, usize, *mut usize) -> c_int;
@@ -707,6 +712,57 @@ impl Session {
         // SAFETY: OpenSSL copies at most the supplied buffer length.
         unsafe { finished(ssl, bytes.as_mut_ptr().cast(), len) };
         Some(bytes)
+    }
+
+    pub(crate) fn certificate_chain(&self, verified: bool) -> Result<Vec<Vec<u8>>, Failure> {
+        let api = self.api;
+        api.clear();
+        // SAFETY: both stacks and their X509 entries are borrowed from this live SSL.
+        let chain = unsafe {
+            if verified {
+                (api.SSL_get0_verified_chain)(self.handle.as_ptr())
+            } else {
+                (api.SSL_get_peer_cert_chain)(self.handle.as_ptr())
+            }
+        };
+        if chain.is_null() {
+            return Ok(Vec::new());
+        }
+        // SAFETY: OpenSSL returned a live stack above.
+        let count = unsafe { (api.OPENSSL_sk_num)(chain) };
+        let mut certificates = Vec::new();
+        // OpenSSL omits the peer leaf from the wire stack on server-side connections.
+        if self.server && !verified {
+            // SAFETY: a non-null peer chain belongs to the current handshake.
+            let leaf = unsafe { (api.SSL_get0_peer_certificate)(self.handle.as_ptr()) };
+            certificates.push(self.encode_certificate(leaf)?);
+        }
+        for index in 0..count {
+            // SAFETY: this index is within the live stack returned above.
+            let certificate = unsafe { (api.OPENSSL_sk_value)(chain, index) };
+            certificates.push(self.encode_certificate(certificate)?);
+        }
+        Ok(certificates)
+    }
+
+    fn encode_certificate(&self, certificate: Handle) -> Result<Vec<u8>, Failure> {
+        let api = self.api;
+        if certificate.is_null() {
+            return Err(Failure::Other("missing certificate in TLS chain".into()));
+        }
+        // SAFETY: the X509 remains live through both calls. A null output queries its DER size.
+        let size = unsafe { (api.i2d_X509)(certificate, ptr::null_mut()) };
+        if size <= 0 {
+            return Err(api.error("i2d_X509"));
+        }
+        let mut der = vec![0u8; size as usize];
+        let mut cursor = der.as_mut_ptr();
+        // SAFETY: the unchanged certificate has exactly size encoded bytes. i2d_X509
+        // advances cursor, while der retains ownership of the original allocation.
+        if unsafe { (api.i2d_X509)(certificate, &mut cursor) } != size {
+            return Err(api.error("i2d_X509"));
+        }
+        Ok(der)
     }
 
     pub(crate) fn sendall(&mut self, mut bytes: &[u8]) -> Result<(), Failure> {

@@ -440,6 +440,14 @@ class SSLSocket:
     def server_hostname(self):
         return self._server_hostname
 
+    def get_verified_chain(self):
+        """Return the verified certificate chain as a list of DER-encoded certificates."""
+        return _call(_imre_ssl.get_verified_chain, self._session)
+
+    def get_unverified_chain(self):
+        """Return the certificate chain sent by the peer as a list of DER-encoded certificates."""
+        return _call(_imre_ssl.get_unverified_chain, self._session)
+
     def sendall(self, data, flags=0):
         if flags:
             raise ValueError("non-zero flags not allowed in calls to sendall() on SSLSocket")
@@ -488,3 +496,34 @@ def create_default_context(purpose=Purpose.SERVER_AUTH, *, cafile=None, capath=N
 
 
 _create_default_https_context = create_default_context
+
+
+PEM_HEADER = "-----BEGIN CERTIFICATE-----"
+PEM_FOOTER = "-----END CERTIFICATE-----"
+
+def DER_cert_to_PEM_cert(der_cert_bytes):
+    """Takes a certificate in binary DER format and returns the
+    PEM version of it as a string."""
+
+    import base64
+
+    f = str(base64.standard_b64encode(der_cert_bytes), 'ASCII', 'strict')
+    ss = [PEM_HEADER]
+    ss += [f[i:i+64] for i in range(0, len(f), 64)]
+    ss.append(PEM_FOOTER + '\n')
+    return '\n'.join(ss)
+
+def PEM_cert_to_DER_cert(pem_cert_string):
+    """Takes a certificate in ASCII PEM format and returns the
+    DER-encoded version of it as a byte sequence"""
+
+    import base64
+
+    if not pem_cert_string.startswith(PEM_HEADER):
+        raise ValueError("Invalid PEM encoding; must start with %s"
+                         % PEM_HEADER)
+    if not pem_cert_string.strip().endswith(PEM_FOOTER):
+        raise ValueError("Invalid PEM encoding; must end with %s"
+                         % PEM_FOOTER)
+    d = pem_cert_string.strip()[len(PEM_HEADER):-len(PEM_FOOTER)]
+    return base64.decodebytes(d.encode('ASCII', 'strict'))
