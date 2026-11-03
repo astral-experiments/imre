@@ -18,6 +18,11 @@ keys.discard("α")
 keys.add("x")
 print(sorted(selected(text, keys)))
 
+# Replace an ASCII key without changing the set size between scans.
+keys.discard("a")
+keys.add("b")
+print(sorted(selected("abx", keys)))
+
 # Exercise a large table, including independent Unicode keys and long strings.
 for index in range(64):
     keys.add(str(index))
