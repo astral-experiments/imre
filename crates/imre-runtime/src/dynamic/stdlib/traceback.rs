@@ -9,7 +9,7 @@ use super::{Context, Error, Id, NONE, Result, Value, argument, option};
 
 struct FrameLine<'a> {
     file: &'a str,
-    command_source: Option<&'a str>,
+    embedded_source: Option<&'a str>,
     name: &'a str,
     line: i64,
     span: Option<[u32; 3]>,
@@ -37,8 +37,8 @@ impl FrameLine<'_> {
         let Some(raw) = usize::try_from(self.line)
             .ok()
             .and_then(|line| line.checked_sub(1))
-            .and_then(|i| match self.command_source {
-                Some(command) => crate::objects::line_field(command, i),
+            .and_then(|i| match self.embedded_source {
+                Some(text) => crate::objects::line_field(text, i),
                 None => source?.lines().nth(i),
             })
         else {
@@ -428,17 +428,27 @@ pub(in crate::dynamic) fn format_frames(
         };
         let code = ctx.code_object(code);
         let file = ctx.str_value(code.filename)?;
-        // Dynamic exec/compile can use the same filename as the boxed -c entry.
-        // Only the native definitions emitted from that entry share its source.
-        let command_source =
-            if file == "<string>" && matches!(code.body, crate::dynamic::value::Body::Native(_)) {
-                ctx.config["command_source"].as_str()
-            } else {
-                None
-            };
+        // Only native code has the original embedded source at this position.
+        let embedded_source = if !matches!(code.body, crate::dynamic::value::Body::Native(_)) {
+            None
+        } else if file == "<string>" {
+            ctx.config["command_source"].as_str()
+        } else if ctx.config["bundled_root"]
+            .as_str()
+            .is_some_and(|root| std::path::Path::new(file).starts_with(root))
+        {
+            ctx.sources
+                .values()
+                .flatten()
+                .find(|module| module.path == std::path::Path::new(file))
+                .and_then(|module| module.bundled_text)
+                .map(|text| std::str::from_utf8(text).expect("compiler-emitted Python is UTF-8"))
+        } else {
+            None
+        };
         stack.push(FrameLine {
             file,
-            command_source,
+            embedded_source,
             name: ctx.str_value(code.name)?,
             line: lineno,
             span,
@@ -467,7 +477,7 @@ pub(in crate::dynamic) fn format_frames(
                 })
                 .count();
             for frame in &stack[i..i + same.min(3)] {
-                let source = frame.command_source.or_else(|| {
+                let source = frame.embedded_source.or_else(|| {
                     sources
                         .entry(frame.file)
                         .or_insert_with(|| std::fs::read_to_string(frame.file).ok())
