@@ -30,6 +30,26 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
                 }),
             ))
         }
+        "http.server" => {
+            const UPSTREAM: &str = include_str!(
+                "../../../../benchmarks/cpython_stdlib/full/http/upstream/Lib/http/server.py"
+            );
+            static SOURCE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+            Some(("http/server.py", SOURCE.get_or_init(|| {
+                let start = UPSTREAM.find("class SimpleHTTPRequestHandler(").unwrap();
+                let (handler, _) = UPSTREAM[start..]
+                    .split_once("# Utilities for CGIHTTPRequestHandler")
+                    .unwrap();
+                // The existing server's _escape implements html.escape with quote=False.
+                let handler = handler
+                    .replace("html.escape(displaypath, quote=False)", "_escape(displaypath)")
+                    .replace("html.escape(displayname, quote=False)", "_escape(displayname)");
+                format!(
+                    "{}\nimport datetime\nimport email.utils\nimport io\nimport mimetypes\nimport os\nimport posixpath\nimport shutil\nimport urllib.parse\n\n{handler}",
+                    include_str!("../../stdlib/http/server.py")
+                )
+            })))
+        }
         "reprlib" => Some(("reprlib.py", include_str!("../../stdlib/reprlib.py"))),
         "datetime" => Some((
             "datetime.py",
