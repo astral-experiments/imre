@@ -1151,7 +1151,7 @@ pub(super) enum Value {
         dictionary: Id,
     },
     Property(super::property::Property),
-    WeakrefDescriptor(Id),
+    LayoutDescriptor(Id, &'static str),
     GetSetDescriptor {
         get: Id,
         set: Option<Id>,
@@ -1425,7 +1425,7 @@ impl Value {
             },
             Self::StaticMethod { .. } => "staticmethod",
             Self::Property(_) => "property",
-            Self::GetSetDescriptor { .. } | Self::WeakrefDescriptor(_) => "getset_descriptor",
+            Self::GetSetDescriptor { .. } | Self::LayoutDescriptor(..) => "getset_descriptor",
             Self::Traceback { .. } => "traceback",
             Self::PythonFrame { .. } => "frame",
             _ => return None,
@@ -1893,7 +1893,7 @@ impl Value {
             } => visit.extend([*callable, *dictionary]),
             Self::Property(property) => property.children(visit),
             Self::Weak(wr) => visit.push(wr.callback),
-            Self::WeakrefDescriptor(owner) => visit.push(*owner),
+            Self::LayoutDescriptor(owner, _) => visit.push(*owner),
             Self::GetSetDescriptor { get, set, .. } => {
                 visit.push(*get);
                 visit.extend(*set);

@@ -2868,9 +2868,9 @@ impl Context {
             {
                 format!("<attribute '{name}' of '{owner}' objects>")
             }
-            Value::WeakrefDescriptor(owner) => format!(
-                "<attribute '__weakref__' of '{}' objects>",
-                self.weakref_descriptor_owner(*owner)
+            Value::LayoutDescriptor(owner, name) => format!(
+                "<attribute '{name}' of '{}' objects>",
+                self.class_name(*owner)
             ),
             Value::Class { scope, .. } => {
                 format!("<class '{}'>", self.qualified_class_name(id, *scope))
