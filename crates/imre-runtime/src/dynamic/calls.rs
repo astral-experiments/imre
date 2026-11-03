@@ -7366,6 +7366,62 @@ impl Context {
         Ok(Some(winner))
     }
 
+    /// Run __prepare__ before executing the class body, retaining the returned dictionary.
+    fn prepare_class_dictionary(
+        &mut self,
+        meta: Id,
+        name: Id,
+        bases: Id,
+        keywords: &[(String, Id)],
+    ) -> Result<Id> {
+        let hook = match self.lookup_attr(meta, "__prepare__") {
+            Ok(hook) => hook,
+            Err(error) if self.is_attribute_error(&error) => return Ok(self.dict(Vec::new())),
+            Err(error) => return Err(error),
+        };
+        let namespace = self.call(hook, vec![name, bases], keywords.to_vec())?;
+        if matches!(self.heap.get(namespace), Value::Dict(_)) {
+            return Ok(namespace);
+        }
+        if self.has_mapping_subscription(namespace)
+            || matches!(
+                self.heap.get(namespace),
+                Value::GenericAlias(_) | Value::Union(_)
+            )
+            || matches!(self.heap.get(namespace), Value::Weak(reference)
+                if reference.kind != weakref::Kind::Reference)
+            || self.enum_values(namespace).is_some()
+        {
+            return Err(Error::new(
+                "NotImplementedError",
+                "class bodies with a prepared mapping other than an exact dict are unsupported",
+            ));
+        }
+        let owner = if self.is_type_object(meta) {
+            self.class_name(meta)
+        } else {
+            "<metaclass>"
+        };
+        Err(Error::new(
+            "TypeError",
+            format!(
+                "{owner}.__prepare__() must return a mapping, not {}",
+                self.type_name(namespace)
+            ),
+        ))
+    }
+
+    /// A prepared dictionary may contain keys whose equality raises during an implicit STORE_NAME.
+    pub(super) fn store_class_metadata(&mut self, scope: Id, name: &str, value: Id) -> Result<()> {
+        let frame = self.scope_data(scope);
+        if frame.class_body_mapping().is_some() && frame.enum_namespace.is_none() {
+            self.bind_source_name(scope, name, value)
+        } else {
+            self.bind(scope, name, value);
+            Ok(())
+        }
+    }
+
     pub(super) fn class(
         &mut self,
         bases: Id,
@@ -7400,26 +7456,22 @@ impl Context {
                 "boxed enum metaclass options are unsupported",
             ));
         }
-        let class_meta = self.select_class_metaclass(
-            &bases,
-            explicit_metaclass,
-            typed_dict_meta,
-            enum_namespace.is_some(),
-        )?;
-        // A class statement still needs a scope backed by its prepared mapping.
-        // type.__new__ already received the namespace its caller prepared.
-        if let Some(meta) = class_meta
-            && Some(meta) != typed_dict_meta
-            && self.builtins.get("abc.ABCMeta") != Some(&meta)
-            && self
-                .class_attr(meta, "__prepare__")
-                .is_some_and(|hook| Some(&hook) != self.builtins.get("type.__prepare__"))
-        {
-            return Err(Error::new(
-                "NotImplementedError",
-                "custom metaclass construction is unsupported",
-            ));
-        }
+        let factory = explicit_metaclass.filter(|&meta| {
+            !self.is_type_object(meta)
+                && typed_dict_meta.is_none()
+                && enum_namespace.is_none()
+                && !bases.iter().any(|&base| self.is_bundled_abc(base))
+        });
+        let class_meta = if factory.is_some() {
+            factory
+        } else {
+            self.select_class_metaclass(
+                &bases,
+                explicit_metaclass,
+                typed_dict_meta,
+                enum_namespace.is_some(),
+            )?
+        };
         let Value::Function {
             scope: parent,
             code,
@@ -7428,9 +7480,33 @@ impl Context {
         else {
             return Err(Error::new("TypeError", "invalid class body"));
         };
-        let name = self.str_value(self.code_object(code).name)?.to_owned();
+        let class_name = self.code_object(code).name;
+        let name = self.str_value(class_name)?.to_owned();
+        let prepares = class_meta.filter(|&meta| {
+            factory.is_some()
+                || (Some(meta) != typed_dict_meta
+                    && self.builtins.get("abc.ABCMeta") != Some(&meta)
+                    && self
+                        .class_attr(meta, "__prepare__")
+                        .is_some_and(|hook| Some(&hook) != self.builtins.get("type.__prepare__")))
+        });
+        let prepared = if let Some(meta) = prepares {
+            if self.is_abc_metaclass(meta) {
+                return Err(Error::new(
+                    "NotImplementedError",
+                    "custom ABC metaclass namespace preparation is unsupported",
+                ));
+            }
+            let bases = self.alloc(Value::Tuple(copy_ids(&bases)?));
+            let mapping = self.prepare_class_dictionary(meta, class_name, bases, &keywords)?;
+            Some((bases, mapping))
+        } else {
+            None
+        };
         #[derive(serde::Deserialize)]
         struct ClassBindings {
+            #[serde(default)]
+            class_globals: std::collections::HashSet<String>,
             #[serde(default)]
             scope_nonlocals: std::collections::HashSet<String>,
             #[serde(default)]
@@ -7455,34 +7531,55 @@ impl Context {
         body_scope.closure.nonlocals = bindings.scope_nonlocals;
         body_scope.enum_namespace = enum_namespace;
         body_scope.class_cell = Some(cell);
+        if let Some((_, mapping)) = prepared {
+            body_scope.globals = bindings.class_globals;
+            body_scope.namespace = Some(mapping);
+            body_scope
+                .class_namespace
+                .get_or_insert_with(Default::default)
+                .dictionary = Some(mapping);
+        }
         let mut globals = parent;
         while let Some(outer) = self.scope_data(globals).parent {
             globals = outer;
         }
-        let module_name = if let Some(exec_globals) = self.scope_data(globals).exec_globals {
+        let module_name = if self.binding_scope(scope, "__name__") != scope {
+            self.lookup(scope, "__name__")?
+        } else if let Some(name) = self.lookup_scope_name(scope, "__name__")? {
+            name
+        } else if let Some(exec_globals) = self.scope_data(globals).exec_globals {
             self.source_global(exec_globals, "__name__")?
         } else {
             self.scope_name(globals, "__name__")
                 .unwrap_or_else(|| self.text("builtins"))
         };
-        self.bind(scope, "__module__", module_name);
+        self.store_class_metadata(scope, "__module__", module_name)?;
         if let Ok(qualname) = self.lookup_attr(body, "__qualname__") {
-            self.bind(scope, "__qualname__", qualname);
+            self.store_class_metadata(scope, "__qualname__", qualname)?;
         }
         if bindings.static_attributes.is_some() {
             let first = self.int(i64::from(self.code_object(code).first_line));
-            self.bind(scope, "__firstlineno__", first);
+            self.store_class_metadata(scope, "__firstlineno__", first)?;
         }
         if parameterized {
             let params = self
                 .scope_name(parent, ".type_params")
                 .expect("class parameter scope");
-            self.bind(scope, "__type_params__", params);
+            self.store_class_metadata(scope, "__type_params__", params)?;
         }
         let annotations = if bindings.postponed_annotations || typed_dict_meta.is_some() {
-            let fields = self.dict(Vec::new());
-            self.bind_local(scope, "__annotations__", fields);
-            fields
+            if let Some(fields) = self.lookup_scope_name(scope, "__annotations__")? {
+                fields
+            } else {
+                let fields = self.dict(Vec::new());
+                if let Some((_, mapping)) = prepared {
+                    let key = self.heap.code_name("__annotations__");
+                    self.put_item(mapping, key, fields)?;
+                } else {
+                    self.bind_local(scope, "__annotations__", fields);
+                }
+                fields
+            }
         } else {
             NONE
         };
@@ -7504,32 +7601,32 @@ impl Context {
         if let Some(names) = bindings.static_attributes {
             let names = names.iter().map(|name| self.heap.code_name(name)).collect();
             let attrs = self.alloc(Value::Tuple(names));
-            self.bind(scope, "__static_attributes__", attrs);
+            self.store_class_metadata(scope, "__static_attributes__", attrs)?;
         }
         if let Some(meta) = class_meta
             && Some(meta) != typed_dict_meta
             && self.builtins.get("abc.ABCMeta") != Some(&meta)
-            && (self.class_attr(meta, "__new__").is_some()
+            && (prepared.is_some()
+                || self.class_attr(meta, "__new__").is_some()
                 || self.class_attr(meta, "__init__").is_some())
         {
             let namespace = self.active_class_namespace(scope);
             if bindings.needs_dict_cell {
                 let dict_cell = self.class_annotation_dict_cell(scope);
-                let key = self.text("__classdictcell__");
-                self.put_item(namespace, key, dict_cell)?;
+                self.store_class_metadata(scope, "__classdictcell__", dict_cell)?;
             }
             if bindings.needs_class_cell {
-                let key = self.text("__classcell__");
-                self.put_item(namespace, key, cell)?;
+                self.store_class_metadata(scope, "__classcell__", cell)?;
             }
             if let Some(original) = original {
                 let key = self.text("__orig_bases__");
                 self.put_item(namespace, key, original)?;
             }
-            let class_name = self.text(&name);
-            let bases = self.alloc(Value::Tuple(bases));
+            let bases = prepared
+                .map(|(tuple, _)| tuple)
+                .unwrap_or_else(|| self.alloc(Value::Tuple(bases)));
             let class = self.call(meta, vec![class_name, bases, namespace], keywords)?;
-            if bindings.needs_class_cell && matches!(self.heap.get(class), Value::Class { .. }) {
+            if bindings.needs_class_cell && self.is_type_object(class) {
                 match self.heap.get(cell) {
                     Value::Cell(Some(contents)) if *contents == class => {}
                     Value::Cell(None) => {

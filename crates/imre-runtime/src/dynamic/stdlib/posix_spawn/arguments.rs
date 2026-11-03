@@ -30,7 +30,7 @@ pub(super) fn arguments(
             format!("{name}: argv must not be empty"),
         ));
     }
-    if env != NONE && !is_mapping(ctx, env) {
+    if env != NONE && !ctx.has_mapping_subscription(env) {
         return Err(Error::new(
             "TypeError",
             format!("{name}: environment must be a mapping object or None"),
@@ -58,27 +58,6 @@ pub(super) fn arguments(
         Some(entries)
     };
     Ok((argv, env))
-}
-
-/// PyMapping_Check tests the subscript slot even for sequences with no keys method.
-fn is_mapping(ctx: &Context, env: Id) -> bool {
-    ctx.slot(env, "__getitem__").is_some()
-        || ctx.dict_storage(env).is_some()
-        || ctx.builtin_slot_accepts(env, "tuple")
-        || matches!(
-            ctx.heap.get(ctx.scalar_value(env)),
-            Value::List(_)
-                | Value::Str(_)
-                | Value::SurrogateStr(_)
-                | Value::Bytes(_)
-                | Value::ByteArray(_)
-                | Value::MemoryView { .. }
-                | Value::Range(_)
-                | Value::Array(_)
-                | Value::MappingProxy(_)
-                | Value::Context(_)
-                | Value::RegexMatch(_)
-        )
 }
 
 /// Keep an exact list returned by a mapping live. Other iterables are snapshotted before

@@ -4877,14 +4877,14 @@ impl Context {
             Instruction::ClassStart => {
                 self.enable_class_annotation_provider(scope);
                 // Only postponed annotations need a visible mapping from the start of the suite.
-                if !code.postponed_annotations {
+                if !code.postponed_annotations && self.scope_data(scope).class_body_mapping().is_none() {
                     let key = self.heap.code_name("__annotations__");
                     self.remove_binding(scope, "__annotations__", key)?;
                 }
                 let first = self.int(i64::from(code.first_line));
-                self.bind(scope, "__firstlineno__", first);
+                self.store_class_metadata(scope, "__firstlineno__", first)?;
                 if let Some(doc) = code.doc {
-                    self.bind(scope, "__doc__", code.literals[&doc]);
+                    self.store_class_metadata(scope, "__doc__", code.literals[&doc])?;
                 }
             }
             Instruction::ClassEnd => {
@@ -4983,7 +4983,14 @@ impl Context {
                     values.push(self.lookup(defining_scope, ".generic_base")?);
                 }
                 bases = Some((self.alloc(Value::List(values)), keywords, *parameterized));
+                let declared = |kind| {
+                    child.directives.iter()
+                        .filter_map(|(name, (directive, _))| (*directive == kind).then_some(name))
+                        .collect::<BTreeSet<_>>()
+                };
                 serde_json::json!({
+                    "class_globals": declared(ScopeDirective::Global),
+                    "scope_nonlocals": declared(ScopeDirective::Nonlocal),
                     "needs_class_cell": child.needs_class_cell,
                     "needs_dict_cell": child.needs_dict_cell,
                     "postponed_annotations": child.postponed_annotations,

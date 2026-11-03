@@ -121,8 +121,125 @@ def metaclass_preparation():
     assert len(events) == 3
 
 
+def prepared_class_statements():
+    events = []
+    namespace = {"__name__": "prepared.module", "seed": 7}
+
+    class Factory:
+        def __prepare__(self, name, bases, *, marker):
+            events.append(("prepare", name, bases, marker))
+            return namespace
+
+        def __call__(self, name, bases, ns, *, marker):
+            assert ns is namespace and ns["value"] == 8
+            assert events[0][1] is name and events[0][2] is bases
+            events.append(("new", marker))
+            return marker
+
+    class Alias:
+        def __hash__(self):
+            return hash("deletable")
+        def __eq__(self, other):
+            return other == "deletable"
+
+    namespace[Alias()] = 1
+    marker = object()
+    class Result(object, metaclass=Factory(), marker=marker):
+        assert deletable == 1
+        del deletable
+        assert locals() is namespace and __module__ == __name__ == "prepared.module"
+        value = seed + 1
+
+    assert Result is marker and events[1] == ("new", marker)
+
+    class Meta(type):
+        @classmethod
+        def __prepare__(meta, name, bases):
+            return {"seed": 9}
+
+    class Product(metaclass=Meta):
+        value = seed
+        def owner(self):
+            return __class__
+
+    assert type(Product) is Meta and Product().owner() is Product and Product.value == 9
+
+    prepared = {"__name__": "local", "x": "prepared"}
+    x = "outer"
+    class ScopeMeta(type):
+        @classmethod
+        def __prepare__(meta, name, bases):
+            return prepared
+
+    # Synthetic metadata STOREs honor the same symbol table as the class suite.
+    module = globals()
+    missing = object()
+    old = {key: module.get(key, missing) for key in ("__module__", "__static_attributes__")}
+    try:
+        class Scoped(metaclass=ScopeMeta):
+            global __name__, __module__, __static_attributes__
+            nonlocal x
+            read = x
+            x = "updated"
+        assert Scoped.read == "prepared" and x == "updated"
+        assert module["__module__"] == module["__name__"] and module["__static_attributes__"] == ()
+        assert "__module__" not in prepared and "__static_attributes__" not in prepared
+    finally:
+        for key, previous in old.items():
+            if previous is missing:
+                module.pop(key, None)
+            else:
+                module[key] = previous
+
+    annotations = {"seed": "retained"}
+    prepared.clear()
+    prepared.update(__name__="prepared", __annotations__=annotations)
+    env = {"__name__": "source.module", "ScopeMeta": ScopeMeta}
+    exec("class FromSource(metaclass=ScopeMeta):\n"
+         "    'source docstring'\n"
+         "    global __name__, __module__\n"
+         "    recorded = locals()\n", env)
+    source = env["FromSource"]
+    assert source.recorded is prepared and prepared["__doc__"] == "source docstring"
+    assert source.__annotations__ is annotations and "__module__" not in prepared
+    assert env["__module__"] == env["__name__"]
+
+    def returning_int(name, bases, namespace):
+        return int
+
+    try:
+        class MissingCell(metaclass=returning_int):
+            def owner(self):
+                return __class__
+    except RuntimeError as caught:
+        assert "__class__ not set" in str(caught)
+    else:
+        raise AssertionError("accepted a type without its required class cell")
+
+    error = RuntimeError("key collision")
+    class Key:
+        def __hash__(self):
+            return hash("__module__")
+        def __eq__(self, other):
+            raise error
+
+    class Failing(type):
+        @classmethod
+        def __prepare__(meta, name, bases):
+            return {Key(): 1}
+
+    try:
+        class Failed(metaclass=Failing):
+            raise AssertionError("ran a class body after a namespace error")
+    except RuntimeError as caught:
+        assert caught is error
+    else:
+        raise AssertionError("lost prepared dictionary exception")
+
+
 def current():
     metaclass_preparation()
+    prepared_class_statements()
     helpers()
 
     class First:

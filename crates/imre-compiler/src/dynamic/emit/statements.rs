@@ -839,6 +839,9 @@ impl Function<'_, '_> {
                 let mut bindings = ClosureNames::default();
                 bindings.visit_body(stmts);
                 class_metadata::capture(&mut bindings, stmts, self.source.string_annotations);
+                if !bindings.globals.is_empty() {
+                    signature["class_globals"] = json!(bindings.globals);
+                }
                 closure_names.nonlocals = bindings.nonlocals;
                 // Methods and nested classes can still capture the enclosing frame.
                 closure_names.incomplete = true;
