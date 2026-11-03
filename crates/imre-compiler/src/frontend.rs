@@ -2685,7 +2685,7 @@ impl<'a> Checker<'a> {
         if receiver.ty == Type::CodecInfo
             && matches!(
                 attribute.attr.as_str(),
-                "_is_text_encoding" | "incrementaldecoder"
+                "_is_text_encoding" | "incrementaldecoder" | "incrementalencoder"
             )
         {
             return Err(self.object_builtin_error(attribute.attr.as_str(), attribute));
@@ -4938,7 +4938,7 @@ impl<'a> Checker<'a> {
                         if receiver.ty == Type::CodecInfo
                             && matches!(
                                 attr.attr.as_str(),
-                                "_is_text_encoding" | "incrementaldecoder"
+                                "_is_text_encoding" | "incrementaldecoder" | "incrementalencoder"
                             )
                         {
                             return Err(self.object_builtin_error(attr.attr.as_str(), attr));

@@ -128,6 +128,23 @@ def check_boms():
         assert getattr(codecs, name) is mark
 
 
+def check_utf8_incremental_encoder():
+    from encodings.utf_8 import IncrementalEncoder
+
+    factory = codecs.getincrementalencoder("u8")
+    assert factory is codecs.lookup("UTF-8").incrementalencoder is IncrementalEncoder
+    encoder = factory()
+    assert encoder.encode("Aé") == b"A\xc3\xa9"
+    assert encoder.getstate() == 0
+    encoder.setstate(0)
+    assert encoder.encode("€", final=True) == b"\xe2\x82\xac"
+    assert encoder.reset() is None
+    assert encoder.getstate() == 0
+    encoder.errors = "replace"
+    assert encoder.encode("\ud800", final=True) == b"?"
+    assert factory("ignore").encode("\ud800Z") == b"Z"
+
+
 def check_incremental_decoder_factory():
     from encodings.utf_8 import IncrementalDecoder
 
@@ -198,6 +215,7 @@ def check_incremental_decoder_factory():
 
 
 def current():
+    check_utf8_incremental_encoder()
     check_incremental_decoder_factory()
     check_text_encoding_flag()
     check_escape_decode()

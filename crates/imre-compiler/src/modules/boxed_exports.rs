@@ -146,9 +146,11 @@ pub(super) fn symbol(module: M, name: &str) -> Option<Binding> {
             "Codec",
             "CodecInfo",
             "IncrementalDecoder",
+            "IncrementalEncoder",
             "StreamWriter",
             "escape_decode",
             "getincrementaldecoder",
+            "getincrementalencoder",
             "utf_16_ex_decode"
         ),
         M::Collections => exports!("collections", "UserDict", "UserList", "UserString"),
