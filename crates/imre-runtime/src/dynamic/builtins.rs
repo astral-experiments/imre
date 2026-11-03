@@ -2049,18 +2049,22 @@ pub(super) fn call(
                     }
                     return Ok(child);
                 }
-                let Value::MemoryView { owner, .. } = ctx.heap.get_mut(args[0]) else {
+                let Value::MemoryView { owner, .. } = *ctx.heap.get(args[0]) else {
                     return Err(type_error("expected memoryview"));
                 };
                 if method == "__enter__" {
-                    Context::memoryview_owner(*owner)?;
+                    Context::memoryview_owner(owner)?;
                     return Ok(args[0]);
                 }
-                let exports = ctx
+                let mut exports = ctx
                     .buffer_exports
                     .iter()
                     .filter(|&&view| view == args[0])
                     .count();
+                if ctx.heap.may_have_buffer_views(args[0]) {
+                    let (heap, roots) = ctx.heap_and_roots();
+                    exports += heap.live_buffer_export_count(args[0], roots)?;
+                }
                 if exports != 0 {
                     let unit = if exports == 1 { "buffer" } else { "buffers" };
                     return Err(Error::new(
@@ -2068,7 +2072,20 @@ pub(super) fn call(
                         format!("memoryview has {exports} exported {unit}"),
                     ));
                 }
-                *owner = None;
+                let Value::MemoryView { owner, lease, .. } = ctx.heap.get_mut(args[0]) else {
+                    unreachable!()
+                };
+                let owner = owner.take();
+                let lease = lease.take();
+                if let Some(owner) = owner {
+                    ctx.heap.weak_edge_removed(owner);
+                }
+                if let Some(lease) = lease
+                    && let Value::PythonBufferLease { exporter, view, .. } = *ctx.heap.get(lease)
+                {
+                    ctx.heap.weak_edge_removed(exporter);
+                    ctx.heap.weak_edge_removed(view);
+                }
                 Ok(NONE)
             }
             "slice" => super::slice::method(ctx, method, args, kwargs),

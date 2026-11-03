@@ -946,9 +946,16 @@ pub(super) enum Value {
         stream: Id,
         storage: Id,
     },
-    /// A contiguous view retains its original exporter until release.
+    /// An opaque Python buffer acquisition shared by the views derived from it.
+    PythonBufferLease {
+        exporter: Id,
+        view: Id,
+        wrapper: Id,
+    },
+    BufferWrapper,
     MemoryView {
         owner: Option<Id>,
+        lease: Option<Id>,
         // An ownerless C buffer has private backing storage but exposes obj as None.
         anonymous: bool,
         layout: Option<super::memoryview::ViewLayout>,
@@ -1378,6 +1385,7 @@ impl Value {
             Self::Bytes(_) => "bytes",
             Self::BytesIoStorage(_) => "_imre_bytesio_storage",
             Self::BytesIoBuffer { .. } => "_io._BytesIOBuffer",
+            Self::BufferWrapper => "_buffer_wrapper",
             Self::RawReadWindow(_) => "_imre_raw_read_window",
             Self::MemoryView { .. } => "memoryview",
             Self::ByteArray(_) => "bytearray",
@@ -1520,6 +1528,7 @@ impl Value {
             | Self::Native(_)
             | Self::Scope(_)
             | Self::LoopIterator { .. }
+            | Self::PythonBufferLease { .. }
             | Self::ProcessPreparation(_)
             | Self::ProcessHandle { .. }
             | Self::Yielded(_) => false,
@@ -1642,10 +1651,18 @@ impl Value {
             }
             Self::Yielded(item) => visit.push(*item),
             Self::Slice(parts) => visit.extend(parts),
-            Self::BytesIoStorage(_) => {}
+            Self::BytesIoStorage(_) | Self::BufferWrapper => {}
             Self::BytesIoBuffer { stream, storage } => visit.extend([*stream, *storage]),
             Self::RawReadWindow(window) => visit.push(window.backing),
-            Self::MemoryView { owner, .. } => visit.extend(owner),
+            Self::PythonBufferLease {
+                exporter,
+                view,
+                wrapper,
+            } => visit.extend([*exporter, *view, *wrapper]),
+            Self::MemoryView { owner, lease, .. } => {
+                visit.extend(owner);
+                visit.extend(lease);
+            }
             Self::Template {
                 strings,
                 interpolations,
@@ -3740,24 +3757,39 @@ impl Heap {
 
     /// A view can be unreachable before the next sweep. Check its actual lifetime
     /// before resizing a previously exported buffer, without running Python callbacks.
-    pub(super) fn has_live_buffer_view(
+    pub(super) fn live_buffer_export_count(
         &mut self,
         storage: Id,
         roots: impl Iterator<Item = Id>,
-    ) -> Result<bool> {
+    ) -> Result<usize> {
+        if !self.may_have_buffer_views(storage) {
+            return Ok(0);
+        }
         let mut cycles = CycleSet::new(self.slots.len())?;
         self.mark_reference_survivors(roots, &mut cycles, None);
-        let live = self.slots.iter().enumerate().any(|(id, slot)| {
-            self.traces[id].get() != UNMARKED
-                && matches!(slot.value, Some(Value::MemoryView { owner: Some(owner), .. })
-                    if owner == storage || matches!(self.get(owner),
-                        Value::Instance { scalar: Some(payload), .. } if *payload == storage)
-                        || matches!(self.get(owner), Value::BytesIoBuffer {storage: backing, ..} if *backing == storage))
-        });
+        let exports = |slot: &Slot| match slot.value {
+            Some(Value::MemoryView {
+                owner: Some(owner), ..
+            }) => {
+                owner == storage
+                    || matches!(self.get(owner),
+                    Value::Instance { scalar: Some(backing), .. } | Value::BytesIoBuffer { storage: backing, .. }
+                        if *backing == storage)
+            }
+            // Derived views share one acquisition of the returned memoryview.
+            Some(Value::PythonBufferLease { view, .. }) => view == storage,
+            _ => false,
+        };
+        let live = self
+            .slots
+            .iter()
+            .zip(&self.traces)
+            .filter(|(slot, trace)| trace.get() != UNMARKED && exports(slot))
+            .count();
         for trace in &self.traces {
             trace.set(UNMARKED);
         }
-        self.slots[storage as usize].may_have_buffer_views = live;
+        self.slots[storage as usize].may_have_buffer_views = live != 0;
         Ok(live)
     }
 
