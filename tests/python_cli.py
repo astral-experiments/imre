@@ -3382,6 +3382,7 @@ for name in ("md4", "ripemd160"):
             "boxed_bytes_join.py",
             "boxed_bytes_fromhex.py",
             "boxed_bytes_hex.py",
+            "boxed_bytes_lower.py",
             "boxed_binary_endswith.py",
             "boxed_struct.py",
             "boxed_pickle_writer.py",
