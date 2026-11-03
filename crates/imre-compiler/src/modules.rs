@@ -1584,6 +1584,9 @@ impl IntrinsicModule {
             (Self::Traceback, "print_exception") => {
                 Intrinsic::TracebackFormatter("traceback.print_exception")
             }
+            (Self::Sys, "_get_cpu_count_config") if cfg!(target_os = "linux") => {
+                Intrinsic::ObjectRuntimeExport("sys._get_cpu_count_config")
+            }
             (Self::Sys, "_getframemodulename") => Intrinsic::SysGetFrameModuleName,
             (Self::Sys, "getrecursionlimit") => Intrinsic::SysGetRecursionLimit,
             (Self::Sys, "setrecursionlimit") => Intrinsic::SysSetRecursionLimit,
@@ -2125,6 +2128,9 @@ impl IntrinsicModule {
             (Self::Os, "P_WAIT") if cfg!(target_os = "linux") => Intrinsic::IntConstant(0),
             (Self::Os, "P_NOWAIT" | "P_NOWAITO") if cfg!(target_os = "linux") => {
                 Intrinsic::IntConstant(1)
+            }
+            (Self::Os, "process_cpu_count") if cfg!(target_os = "linux") => {
+                Intrinsic::ObjectRuntimeExport("os.process_cpu_count")
             }
             (Self::Os, "walk") if cfg!(unix) => Intrinsic::ObjectRuntimeExport("os.walk"),
             (Self::Os, "fwalk") if cfg!(unix) => Intrinsic::ObjectRuntimeExport("os.fwalk"),

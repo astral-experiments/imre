@@ -44,7 +44,7 @@ pub(super) fn module_function(symbol: &str) -> Option<(&str, &str)> {
         "operator" if stdlib::operator::Operation::named(function).is_some() => {
             Some(("_operator", function))
         }
-        "sys" if matches!(function, "get_coroutine_origin_tracking_depth" | "set_coroutine_origin_tracking_depth") => Some((module, function)),
+        "sys" if matches!(function, "_get_cpu_count_config" | "get_coroutine_origin_tracking_depth" | "set_coroutine_origin_tracking_depth") => Some((module, function)),
         "_typing" if function == "_idfunc" => Some((module, function)),
         "encodings" if function == "search_function" => Some((module, function)),
         "posix"
@@ -2507,6 +2507,9 @@ impl Context {
                     "__text_signature__" if symbol == "sys.set_coroutine_origin_tracking_depth" => {
                         return Ok(self.text("($module, /, depth)"));
                     }
+                    "__doc__" if symbol == "sys._get_cpu_count_config" => {
+                        return Ok(self.text("Private function for getting PyConfig.cpu_count"));
+                    }
                     "__doc__" if symbol == "sys.get_coroutine_origin_tracking_depth" => {
                         return Ok(self.text("Check status of origin tracking for coroutine objects in this thread."));
                     }
@@ -2768,6 +2771,7 @@ impl Context {
                                 | "_thread.allocate"
                                 | "_thread.allocate_lock"
                                 | "_thread._count"
+                                | "sys._get_cpu_count_config"
                                 | "sys.get_coroutine_origin_tracking_depth"
                         ) =>
                     {
