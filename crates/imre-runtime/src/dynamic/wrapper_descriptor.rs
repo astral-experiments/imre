@@ -104,6 +104,21 @@ impl BuiltinDescriptor {
                 Some((defaultdict::CLASS, attr, defaultdict::METHODS))
             }
             Some(("generator", attr)) => Some(("generator", attr, &["__iter__", "__next__"][..])),
+            Some(("async_generator", attr)) => Some((
+                "async_generator",
+                attr,
+                &["__aiter__", "__anext__", "asend", "athrow", "aclose"][..],
+            )),
+            Some(("async_generator_asend", attr)) => Some((
+                "async_generator_asend",
+                attr,
+                generator_protocol::ANEXT_METHODS,
+            )),
+            Some(("async_generator_athrow", attr)) => Some((
+                "async_generator_athrow",
+                attr,
+                generator_protocol::ANEXT_METHODS,
+            )),
             Some(("anext_awaitable", attr)) => {
                 Some(("anext_awaitable", attr, generator_protocol::ANEXT_METHODS))
             }
@@ -349,6 +364,9 @@ impl BuiltinDescriptor {
                 matches!(ctx.heap.get(receiver), Value::DictIterator(iter) if iter.class_name() == owner)
             }
             "generator" => matches!(ctx.heap.get(receiver), Value::Generator { .. }),
+            "async_generator" | "async_generator_asend" | "async_generator_athrow" => {
+                ctx.heap.get(receiver).intrinsic_type_name() == Some(self.owner)
+            }
             "anext_awaitable" => matches!(ctx.heap.get(receiver), Value::ANextAwaitable { .. }),
             owner if typing::ParameterClass::lookup(owner).is_some() => {
                 ctx.builtin_type_name(receiver) == Some(owner)
