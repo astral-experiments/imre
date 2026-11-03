@@ -94,6 +94,26 @@ REJECTED = {
             "print(urlopen('data:,hello').read(), typed('wrong'))\n"
         ),
     }, "invalid-argument-type"),
+    "optional_from_keeps_typed_call_check": ({
+        "main.py": (
+            "try:\n    from os.path import basename as leaf\nexcept ImportError:\n    leaf = None\n"
+            "import sys\ndef typed(n: int) -> int: return n\nprint(typed('wrong'))\n"
+        ),
+    }, "invalid-argument-type"),
+    "optional_from_rejects_stdlib_shadow": ({
+        "main.py": (
+            "try:\n    from concurrent.futures import Future\nexcept ImportError:\n    Future = None\n"
+            "import sys\n"
+        ),
+        "concurrent/__init__.py": "",
+        "concurrent/futures.py": "Future = 42\n",
+    }, "standard-library shadowing"),
+    "optional_from_unmatched_fallback": ({
+        "main.py": (
+            "try:\n    from os.path import basename\nexcept ImportError:\n    other = None\n"
+            "import sys\n"
+        ),
+    }, "imports must precede executable module statements"),
     "optional_presence_keeps_later_call_check": ({
         "main.py": (
             "try:\n    import sys as available\nexcept ImportError:\n    available = None\n"
@@ -660,6 +680,20 @@ ACCEPTED = {
             "print(parent.provider is not None)\n"
         ),
         "main.py": "from helper import value\nprint(value())\n",
+    },
+    "optional_stdlib_from_in_dependency": {
+        "main.py": "from pkg.consumer import witness\nprint(witness.checked)\n",
+        "pkg/__init__.py": "",
+        "pkg/consumer.py": (
+            "try:\n    from os.path import basename as leaf\nexcept ImportError:\n    leaf = None\n"
+            "try:\n    from os.path import nonexistent_name\nexcept ImportError:\n    nonexistent_name = None\n"
+            "from . import witness\n"
+        ),
+        "pkg/witness.py": (
+            "from importlib import import_module\n"
+            "consumer = import_module('pkg.consumer')\n"
+            "checked = (consumer.leaf('a/b'), consumer.nonexistent_name is None)\n"
+        ),
     },
     "optional_import_error_alternatives": {
         "main.py": "from pkg.adapter import chosen, available, recovered\nprint(chosen, available, recovered)\n",
