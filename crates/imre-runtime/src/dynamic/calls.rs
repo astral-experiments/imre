@@ -879,8 +879,6 @@ impl Context {
                 | Value::AttrGetter(_)
                 | Value::ItemGetter(_)
                 | Value::StaticMethod { .. }
-                | Value::CacheParameters { .. }
-                | Value::CacheDecorator { .. }
                 | Value::KeyWrapper { .. }
                 | Value::Cached { .. }
                 | Value::Partial { .. }
@@ -7144,26 +7142,6 @@ impl Context {
             }
             Value::AttrGetter(paths) => self.apply_attrgetter(&paths, &args, &kwargs),
             Value::ItemGetter(keys) => self.apply_itemgetter(keys, &args, &kwargs),
-            Value::CacheDecorator { maxsize, typed } => {
-                let function = stdlib::single_argument(
-                    "lru_cache.<locals>.decorating_function",
-                    "user_function",
-                    &args,
-                    &kwargs,
-                )?;
-                stdlib::functools::wrap_cache(self, function, maxsize, typed)
-            }
-            Value::CacheParameters { maxsize, typed } => {
-                if !args.is_empty() || !kwargs.is_empty() {
-                    return Err(Error::new(
-                        "TypeError",
-                        "cache_parameters() takes no arguments",
-                    ));
-                }
-                let size_key = self.text("maxsize");
-                let typed_key = self.text("typed");
-                Ok(self.dict(vec![(size_key, maxsize), (typed_key, typed)]))
-            }
             Value::Cached {
                 function,
                 table,

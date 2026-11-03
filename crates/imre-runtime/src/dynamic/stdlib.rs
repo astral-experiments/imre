@@ -666,8 +666,6 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         }
         ("sys", "flags") => flags::current(ctx),
         ("functools", "_CacheInfo") => functools::cache_info_type(ctx)?,
-        ("functools", "WRAPPER_ASSIGNMENTS") => tuple_text(ctx, functools::ASSIGNED),
-        ("functools", "WRAPPER_UPDATES") => tuple_text(ctx, functools::UPDATED),
         ("os" | "posix", "getcwd" | "getcwdb" | "strerror") if cfg!(unix) => {
             ctx.builtin(&format!("posix.{name}"))
         }
@@ -787,10 +785,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         )
         | ("typing", "IO" | "Generator" | "Iterator")
         | ("enum", "_simple_enum")
-        | (
-            "functools",
-            "cache" | "cmp_to_key" | "lru_cache" | "_cache_wrapper" | "reduce" | "update_wrapper",
-        )
+        | ("functools", "cmp_to_key" | "_cache_wrapper" | "reduce")
         | ("_string", "formatter_parser" | "formatter_field_name_split")
         | (
             "inspect",
@@ -2768,10 +2763,7 @@ pub(super) fn call(
             }));
         }
         "functools.reduce" => return functools::reduce(ctx, args, kwargs),
-        "functools.cache" => return functools::cache(ctx, args, kwargs),
-        "functools.lru_cache" => return functools::lru_cache(ctx, args, kwargs),
         "functools._cache_wrapper" => (3, &[]),
-        "functools.update_wrapper" => (4, &["wrapper", "wrapped", "assigned", "updated"]),
         "sysconfig.get_path" => (4, &["name", "scheme", "vars", "expand"]),
         "sysconfig.get_paths" => (3, &["scheme", "vars", "expand"]),
         "_json.scanstring" => return json::scanstring(ctx, args, kwargs),
@@ -3023,7 +3015,6 @@ pub(super) fn call(
             argument(args, 1)?,
             argument(args, 2)?,
         )?,
-        "functools.update_wrapper" => functools::update_wrapper(ctx, args, kwargs)?,
         "functools._cache_wrapper" => functools::make_cache(
             ctx,
             argument(args, 0)?,
