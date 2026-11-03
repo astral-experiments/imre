@@ -4030,11 +4030,15 @@ impl Heap {
     }
 
     /// Check the current frame binding and native edges from a text wrapper to its raw file.
-    fn frame_keeps_stream_finalizers(&self, stdin: Option<&[Id; 3]>, writers: &[Id]) -> bool {
+    fn frame_keeps_stream_finalizers<'a>(
+        &self,
+        stdin: Option<&[Id; 3]>,
+        owners: impl Iterator<Item = &'a Id> + Clone,
+    ) -> bool {
         self.ordinary_finalizers.iter().any(|&owner| {
             !stdin.is_some_and(|input| input.contains(&owner))
                 && super::stdlib::io::text_descriptor_chain(self, owner).is_some_and(|chain| {
-                    self.ordinary_finalizers.iter().chain(writers).all(|id| {
+                    owners.clone().all(|id| {
                         chain.contains(id) || stdin.is_some_and(|input| input.contains(id))
                     }) && (self.bound_in_active_frame(owner)
                         || self.frames.iter().any(|frame| {
@@ -4066,7 +4070,9 @@ impl Heap {
         if remaining == 0 {
             return Ok(None);
         }
-        if remaining <= 3 && self.frame_keeps_stream_finalizers(stdin, &[]) {
+        if remaining <= 3
+            && self.frame_keeps_stream_finalizers(stdin, self.ordinary_finalizers.iter())
+        {
             return Ok(None);
         }
         // A suspended caller keeps earlier operands live across a nested call.
@@ -4089,6 +4095,24 @@ impl Heap {
             && self.frame_keeps_instance_owner(owner)
         {
             return Ok(None);
+        }
+        // A frame-owned stream can coexist with other independently rooted objects.
+        // A failed bounded search leaves the normal reachability check in charge.
+        if (2..=6).contains(&remaining) {
+            let unproven: smallvec::SmallVec<[Id; 6]> = self
+                .ordinary_finalizers
+                .iter()
+                .copied()
+                .filter(|id| {
+                    !stdin.is_some_and(|chain| chain.contains(id))
+                        && !self.frame_keeps_instance_owner(*id)
+                })
+                .collect();
+            if unproven.is_empty()
+                || unproven.len() <= 3 && self.frame_keeps_stream_finalizers(stdin, unproven.iter())
+            {
+                return Ok(None);
+            }
         }
         // If the roots keep every pending finalizer alive, no finalizer can run.
         // Keep the visited links until the search ends so resetting a partial
@@ -4198,7 +4222,10 @@ impl Heap {
             .iter()
             .chain(&self.ordinary_finalizers)
             .all(|owner| input.contains(owner))
-            || self.frame_keeps_stream_finalizers(Some(input), &self.file_writers)
+            || self.frame_keeps_stream_finalizers(
+                Some(input),
+                self.ordinary_finalizers.iter().chain(&self.file_writers),
+            )
     }
 
     /// A single interpreter-owned weak reference and its registered module both survive.
