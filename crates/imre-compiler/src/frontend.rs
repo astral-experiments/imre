@@ -1175,7 +1175,7 @@ fn lower_graph(
     if let Some(cache) = cache {
         cache.finish(&types);
     }
-    Ok((
+    let lowered = (
         ir::Module {
             command_flags: graph
                 .command_startup
@@ -1192,7 +1192,48 @@ fn lower_graph(
             entry,
         },
         owners,
-    ))
+    );
+    if needs_object_string_order(&lowered.0) {
+        let error = format!(
+            "{}: Imre: ordering strings from chr() with possible surrogate values requires native Python object operations",
+            graph.modules[graph.entry].path.display()
+        );
+        graph.needs_object_runtime.set(true);
+        graph
+            .object_builtin_errors
+            .borrow_mut()
+            .insert(error.clone());
+        return Err(error);
+    }
+    Ok(lowered)
+}
+
+/// Native text is UTF-8. Use object comparisons when a call to `chr` could
+/// construct a lone surrogate.
+fn needs_object_string_order(module: &ir::Module) -> bool {
+    let mut orders_strings = false;
+    let mut code_points = Vec::new();
+    for function in module.functions.iter().chain([&module.entry]) {
+        ir::walk_expressions(&function.body, &mut |expr| match &expr.kind {
+            ExprKind::Builtin(Builtin::Chr, args) => code_points.push(&args[0]),
+            ExprKind::Compare(values, operators) => {
+                orders_strings |= values.iter().zip(operators).any(|(value, op)| {
+                    matches!(value.ty, Type::Str | Type::StrLiteral(_))
+                        && !matches!(op, Compare::Equal | Compare::NotEqual)
+                });
+            }
+            _ => {}
+        });
+    }
+    if !orders_strings || code_points.is_empty() {
+        return false;
+    }
+    let ranges = crate::ranges::analyze(module);
+    code_points.into_iter().any(|value| {
+        ranges
+            .integer(value)
+            .is_none_or(|range| range.min <= 0xdfff && range.max >= 0xd800)
+    })
 }
 
 #[derive(Clone)]
@@ -7527,7 +7568,10 @@ impl<'a> Checker<'a> {
                     if !numeric && !records && !paths && !tuples && !variable_tuple && !dates {
                         self.expect(ty, right, expression)?;
                     }
+                    let strings = matches!(ty, Type::Str | Type::StrLiteral(_))
+                        && matches!(right, Type::Str | Type::StrLiteral(_));
                     let ordered = numeric
+                        || strings
                         || matches!(
                             ty,
                             Type::Bytes
