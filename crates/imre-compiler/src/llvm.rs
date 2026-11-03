@@ -3807,8 +3807,50 @@ impl Emitter<'_, '_> {
         }
     }
 
+    /// Compare the first UTF-8 byte with an ASCII literal without owning the indexed character.
+    fn indexed_ascii_comparison(&mut self, left: &Expr, right: &Expr, op: Compare) -> Option<Value> {
+        let predicate = match op {
+            Compare::Equal => "eq",
+            Compare::NotEqual => "ne",
+            _ => return None,
+        };
+        let (args, literal) = match (&left.kind, &right.kind) {
+            (ExprKind::Builtin(Builtin::StringGet, args), ExprKind::Str(literal))
+            | (ExprKind::Str(literal), ExprKind::Builtin(Builtin::StringGet, args)) => {
+                (args, literal)
+            }
+            _ => return None,
+        };
+        let [byte] = literal.as_bytes() else {
+            return None;
+        };
+        let source = self.operand(&args[0]);
+        let index = self.operand(&args[1]);
+        let buffer = self.entry_alloca("[4 x i8]");
+        let part = self.entry_alloca("{ ptr, i64 }");
+        let status = self.instruction(format!(
+            "call i32 @imre_str_get_part(ptr {}, i64 {}, ptr {buffer}, ptr {part})",
+            source.value.operand, index.value.operand
+        ));
+        let failed = self.instruction(format!("icmp eq i32 {status}, 0"));
+        self.check_failed(&failed);
+        self.release_operand(&source);
+        self.release_operand(&index);
+        let first = self.instruction(format!("load i8, ptr {buffer}"));
+        Some(Value {
+            ty: Type::Bool,
+            operand: self.instruction(format!("icmp {predicate} i8 {first}, {byte}")),
+            small_integer: false,
+        })
+    }
+
     /// Keeps a chain's middle operand rooted until its final comparison completes.
     fn comparisons(&mut self, values: &[Expr], ops: &[Compare]) -> Value {
+        if let ([left, right], [op]) = (values, ops)
+            && let Some(result) = self.indexed_ascii_comparison(left, right, *op)
+        {
+            return result;
+        }
         if let ([left, right], [op]) = (values, ops)
             && let Some(result) = self.integer_region_comparison(left, right, *op)
         {
