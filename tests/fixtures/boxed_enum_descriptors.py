@@ -74,6 +74,29 @@ def current():
     assert IntEnum.__str__ is IntFlag.__str__ is int.__repr__
     assert (repr(Status.OK), str(Status.OK)) == ("status", "1")
     assert (repr(Bits(3)), str(Bits(3))) == ("bits", "3")
+    assert Bits.__bool__ is int.__bool__
+    assert not (Bits.READ & Bits.WRITE) and bool(Bits.READ | Bits.WRITE)
+    Bits.READ._value_ = 0
+    assert bool(Bits.READ) and int(Bits.READ) == 1
+
+    class Plain(Enum):
+        ZERO = 0
+
+    class Empty:
+        def __len__(self):
+            return 0
+
+    class Number(int):
+        def __len__(self):
+            raise AssertionError("int.__bool__ must precede __len__")
+
+    class Override(Number):
+        def __bool__(self):
+            return True
+
+    assert Plain.ZERO and not Empty()
+    assert not Number(0) and Number(-1) and Number(1 << 100)
+    assert Override(0) and not int.__bool__(Override(0))
 
     Status.__str__ = lambda self: self.name
     assert str(Status.OK) == "OK" and repr(Status.OK) == "status"

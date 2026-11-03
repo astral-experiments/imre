@@ -1495,6 +1495,7 @@ pub(super) fn builtin_slot(
         "__repr__"
             | "__str__"
             | "__index__"
+            | "__bool__"
             | "__abs__"
             | "__int__"
             | "__float__"
@@ -1531,6 +1532,9 @@ pub(super) fn builtin_slot(
                 _ => unreachable!("validated collection receiver"),
             };
             return Ok(ctx.int(length as i64));
+        }
+        if method == "__bool__" {
+            return Ok(boolean(ctx.truth(storage)?));
         }
         if method == "__abs__" {
             return super::absolute_value(ctx, object);

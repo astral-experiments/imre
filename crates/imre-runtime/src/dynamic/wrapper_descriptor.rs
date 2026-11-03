@@ -608,10 +608,11 @@ impl BuiltinDescriptor {
             "__text_signature__" if self.name == "__contains__" => ctx.text("($self, key, /)"),
             "__doc__" if self.name == "__neg__" => ctx.text("-self"),
             "__doc__" if self.name == "__pos__" => ctx.text("+self"),
+            "__doc__" if self.name == "__bool__" => ctx.text("True if self else False"),
             "__doc__" if self.name == "__int__" => ctx.text("int(self)"),
             "__doc__" if self.name == "__float__" => ctx.text("float(self)"),
             "__doc__" if self.name == "__abs__" => ctx.text("abs(self)"),
-            "__text_signature__" if matches!(self.name, "__neg__" | "__pos__" | "__abs__" | "__int__" | "__float__") => {
+            "__text_signature__" if matches!(self.name, "__neg__" | "__pos__" | "__abs__" | "__bool__" | "__int__" | "__float__") => {
                 ctx.text("($self, /)")
             }
             "__doc__" if self.name == "__index__" => ctx.text(
