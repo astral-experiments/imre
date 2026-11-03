@@ -139,6 +139,8 @@ pub(crate) struct Context {
     // Container ancestors visible to a reentrant Python __repr__.
     repr_ancestors: Vec<Id>,
     repr_sequence_words: Option<usize>,
+    // Python alias frames represented by a renderer suspended in a tuple argument callback.
+    suspended_typing_frames: usize,
     token_missing: Id,
     native_code_objects: HashMap<usize, Id>,
     source_builtins: Option<Id>,

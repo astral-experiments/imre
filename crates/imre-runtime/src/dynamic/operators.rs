@@ -129,12 +129,14 @@ enum FormatLookup {
     Repr,
     Str,
     MethodName,
+    TypingTuple(usize),
 }
 
 enum FormatPart {
     Value(Id, bool),
     Cursor(Id),
     CursorEnd,
+    TypingArgument(Id),
     TypeArgument(Id, bool),
     TypeList(Id, usize, usize),
     TypeEnd(Id, &'static str, bool),
@@ -172,6 +174,7 @@ impl FormatPart {
         match self {
             Self::Value(id, _)
             | Self::Cursor(id)
+            | Self::TypingArgument(id)
             | Self::TypeArgument(id, _)
             | Self::TypeList(id, _, _)
             | Self::TypeEnd(id, _, _)
@@ -1484,7 +1487,7 @@ impl Context {
     ) -> Result<Option<String>> {
         let calendar_repr = matches!(lookup, FormatLookup::Repr)
             && super::stdlib::datetime::render::python_repr(self, id);
-        if !matches!(lookup, FormatLookup::MethodName)
+        if matches!(lookup, FormatLookup::Repr | FormatLookup::Str)
             && !calendar_repr
             && self.format_slot(id, "__repr__").is_none()
             && (matches!(lookup, FormatLookup::Repr) || self.format_slot(id, "__str__").is_none())
@@ -1510,6 +1513,12 @@ impl Context {
             FormatLookup::Repr => self.repr_override(id),
             FormatLookup::Str => builtins::call(self, "str", &[id], &[]).map(Some),
             FormatLookup::MethodName => self.bound_method_name(id),
+            FormatLookup::TypingTuple(frames) => {
+                self.suspended_typing_frames += frames;
+                let result = typing::typing_alias_helper(self, "_type_repr", vec![id]);
+                self.suspended_typing_frames -= frames;
+                result.map(Some)
+            }
         };
         self.repr_sequence_words = previous;
         let result = converted.and_then(|value| {
@@ -1829,6 +1838,41 @@ impl Context {
                     }
                     append_rendered_text(&mut output, end)?;
                 }
+                Part::TypingArgument(id) => {
+                    if !matches!(ctx.heap.get(id), Value::Tuple(_))
+                        && !ctx
+                            .builtins
+                            .get("tuple")
+                            .is_some_and(|&ty| ctx.instance_of(id, ty))
+                    {
+                        push_frame(&mut work, Part::TypeArgument(id, false))?;
+                        continue;
+                    }
+                    if let Some(text) = element_repr(
+                        &mut ctx,
+                        id,
+                        // Of this alias's three modeled frames, only __repr__ is suspended.
+                        // The callback enters _type_repr and its callees as real Python frames.
+                        FormatLookup::TypingTuple(typing_frames - 2),
+                        &mut work,
+                        &active,
+                        remaining_sequence_words,
+                    )? {
+                        append_rendered_text(&mut output, &text)?;
+                    } else if let Some(items) = ctx.tuple_items(id)? {
+                        // Internal diagnostics render stored tuple elements without calling Python.
+                        append_rendered_text(&mut output, "[")?;
+                        push_frame(&mut work, Part::Text("]"))?;
+                        for (i, item) in items.into_iter().enumerate().rev() {
+                            push_frame(&mut work, Part::TypingArgument(item))?;
+                            if i != 0 {
+                                push_frame(&mut work, Part::Text(", "))?;
+                            }
+                        }
+                    } else {
+                        push_frame(&mut work, Part::TypeArgument(id, false))?;
+                    }
+                }
                 Part::TypeArgument(id, direct_list) => {
                     if direct_list && let Value::List(items) = ctx.heap.get(id) {
                         append_rendered_text(&mut output, "[")?;
@@ -2127,10 +2171,11 @@ impl Context {
                                 work.push(Part::Text("()"));
                             }
                             for (index, &arg) in args.iter().enumerate().rev() {
-                                work.push(Part::TypeArgument(
-                                    arg,
-                                    alias.kind == AliasKind::Builtin,
-                                ));
+                                work.push(if python {
+                                    Part::TypingArgument(arg)
+                                } else {
+                                    Part::TypeArgument(arg, alias.kind == AliasKind::Builtin)
+                                });
                                 if callable && index + 1 == args.len() {
                                     work.push(Part::Text("], "));
                                 } else if index != 0 {

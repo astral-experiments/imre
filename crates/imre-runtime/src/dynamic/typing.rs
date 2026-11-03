@@ -689,7 +689,7 @@ fn callable_alias(ctx: &mut Context, kind: AliasKind, origin: Id, args: Vec<Id>)
     alias(ctx, kind, origin, actual)
 }
 
-fn typing_alias_helper(ctx: &mut Context, name: &str, args: Vec<Id>) -> Result<Id> {
+pub(super) fn typing_alias_helper(ctx: &mut Context, name: &str, args: Vec<Id>) -> Result<Id> {
     let method = ctx.module_value("typing", name).ok_or_else(|| {
         Error::new(
             "AttributeError",

@@ -1,3 +1,4 @@
+import sys
 from sys import path
 from types import GenericAlias
 import typing as t
@@ -209,6 +210,43 @@ else:
 assert not ran
 
 import collections.abc as cabc
+
+
+class Callback(t.Generic[rendered_spec, K]):
+    pass
+
+
+callback = Callback[[int, list[str]], bool]
+assert callback.__args__ == ((int, list[str]), bool)
+assert repr(callback) == f"{__name__}.Callback[[int, list[str]], bool]"
+assert repr(Callback[[], bool]) == f"{__name__}.Callback[[], bool]"
+assert repr(t.Literal[((int, (str, bool)),)]) == "typing.Literal[[int, [str, bool]]]"
+
+
+class ArgumentTuple(tuple):
+    def __iter__(self):
+        return iter((float,))
+
+
+assert repr(t.Literal[(ArgumentTuple((int,)),)]) == "typing.Literal[[float]]"
+assert repr(list[((int, str),)]) == "list[(<class 'int'>, <class 'str'>)]"
+assert repr(cabc.Callable[..., ()]) == "collections.abc.Callable[..., ()]"
+
+nested = int
+for _ in range(18):
+    nested = t.Literal[((nested,),)]
+saved_limit = sys.getrecursionlimit()
+try:
+    sys.setrecursionlimit(80)
+    try:
+        repr(nested)
+    except RecursionError:
+        pass
+    else:
+        raise AssertionError("tuple arguments lost their enclosing alias frames")
+    assert repr(callback) == f"{__name__}.Callback[[int, list[str]], bool]"
+finally:
+    sys.setrecursionlimit(saved_limit)
 
 
 class PlainCallable(t.Callable):
