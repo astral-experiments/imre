@@ -5711,11 +5711,17 @@ impl Emitter<'_, '_> {
                 Type::Float,
                 &[&args[0].value, &args[1].value],
             ),
-            Builtin::ModularPower => self.call(
-                "imre_int_modpow",
-                Type::Int,
-                &[&args[0].value, &args[1].value, &args[2].value],
-            ),
+            Builtin::ModularPower => {
+                self.output
+                    .local_helper("imre_tagged_modpow", include_str!("llvm/tagged_modpow.ll"));
+                self.call_with_effect(
+                    "imre_tagged_modpow",
+                    Type::Int,
+                    &[&args[0].value, &args[1].value, &args[2].value],
+                    true,
+                    false,
+                )
+            }
             Builtin::SysArgv => self.call("imre_sys_argv", returns, &[]),
             Builtin::OptionalStrConcat => {
                 let left = self.word(&args[0].value);
