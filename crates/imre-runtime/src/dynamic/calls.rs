@@ -31,6 +31,7 @@ pub(super) enum MappingOperation {
 #[derive(Default)]
 struct InstanceLayout {
     dictionary: bool,
+    materialize_dictionary_on_write: bool,
     declared_slot: bool,
     active_slot: bool,
 }
@@ -5032,12 +5033,15 @@ impl Context {
         };
         let mut shadowed = false;
         for &base in std::iter::once(&class).chain(ancestors) {
+            let base = self.heap.get(base);
             let Value::Class {
                 scope, name: owner, ..
-            } = self.heap.get(base)
+            } = base
             else {
                 continue;
             };
+            // StringIO's pickle state distinguishes a missing dictionary from an emptied one.
+            layout.materialize_dictionary_on_write |= base.io_kind() == Some("StringIO");
             let frame = self.scope_data(*scope);
             shadowed |= self.namespace_binding(frame, name).is_some();
             let Some(slots) = frame
@@ -5972,8 +5976,10 @@ impl Context {
             }
             if !layout.active_slot {
                 let storage = namespace.or_else(|| {
-                    (layout.declared_slot || self.has_namedtuple_field(class, name))
-                        .then(|| self.instance_dictionary(obj, class))
+                    (layout.materialize_dictionary_on_write
+                        || layout.declared_slot
+                        || self.has_namedtuple_field(class, name))
+                    .then(|| self.instance_dictionary(obj, class))
                 });
                 if let Some(storage) = storage {
                     return self.update_dictionary_field(obj, storage, name, Some(value));

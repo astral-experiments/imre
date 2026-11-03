@@ -450,7 +450,10 @@ pub(in super::super) fn install_native(ctx: &mut Context, module: Id, module_obj
         "StringIO",
         text,
         &[
+            "__new__",
             "__init__",
+            "__getstate__",
+            "__setstate__",
             "write",
             "getvalue",
             "read",
@@ -574,7 +577,13 @@ fn class(
             name,
             unsupported,
         });
-        let attr = if matches!(
+        let attr = if name == "__new__" {
+            ctx.alloc(Value::Method {
+                callable: method,
+                receiver: owner,
+                explicit: false,
+            })
+        } else if matches!(
             name,
             "closed" | "encoding" | "errors" | "line_buffering" | "newlines"
         ) || descriptor_owner == "_io.FileIO"
@@ -674,11 +683,11 @@ fn argument_count(owner: &str, name: &str, n: usize) -> Result<()> {
         }
         "seek" if n == 0 => "seek expected at least 1 argument, got 0".into(),
         "seek" if n > 2 => format!("seek expected at most 2 arguments, got {n}"),
-        "write" | "readinto" | "writelines" if n != 1 => {
+        "write" | "readinto" | "writelines" | "__setstate__" if n != 1 => {
             format!("{owner}.{name}() takes exactly one argument ({n} given)")
         }
         "read" | "read1" | "readline" | "readlines" | "peek" | "writelines" | "seek" | "write"
-        | "readinto" | "truncate" | "__exit__" => {
+        | "readinto" | "truncate" | "__exit__" | "__setstate__" => {
             return Ok(());
         }
         _ if n != 0 => format!("{owner}.{name}() takes no arguments ({n} given)"),
@@ -881,6 +890,18 @@ pub(in super::super) fn call(
         };
         return Err(Error::new("TypeError", message));
     };
+    if owner_kind == Some("StringIO") && name == "__new__" {
+        let Some(&class) = rest.first() else {
+            return Err(Error::new(
+                "TypeError",
+                "_io.StringIO.__new__(): not enough arguments",
+            ));
+        };
+        if !ctx.direct_subclass(class, owner) {
+            return Err(ctx.invalid_new_subtype("_io.StringIO", class));
+        }
+        return Ok(ctx.instance(class, None));
+    }
     let receiver_class = match ctx.heap.get(receiver) {
         Value::Instance { class, .. } => Some(*class),
         value => value
@@ -1268,6 +1289,98 @@ fn string_io_file(ctx: &Context, receiver: Id) -> Result<&crate::objects::TextFi
     }
 }
 
+fn string_io_getstate(ctx: &mut Context, receiver: Id) -> Result<Id> {
+    let file = string_io_file(ctx, receiver)?;
+    let value = file.memory_value()?;
+    let newline = file.memory_newline()?;
+    let position = file.memory_position()?;
+    let value = ctx.alloc(value.into());
+    let newline = newline.map_or(NONE, |s| ctx.text(s));
+    let position = ctx.int(position as i64);
+    let dict = if let Value::Instance {
+        namespace: Some(dict),
+        ..
+    } = *ctx.heap.get(receiver)
+    {
+        let storage = ctx.dict_storage(dict).expect("instance dictionary");
+        super::builtins::copy_dict(ctx, dict, storage)?
+    } else {
+        NONE
+    };
+    Ok(ctx.alloc(Value::Tuple(vec![value, newline, position, dict])))
+}
+
+fn string_io_setstate(ctx: &mut Context, receiver: Id, state: Id) -> Result<Id> {
+    if string_io_file(ctx, receiver).is_ok_and(|file| file.closed()) {
+        return Err(Error::new("ValueError", "I/O operation on closed file"));
+    }
+    let items = ctx.tuple_items(state)?;
+    let Some(&[value, newline, position, dict, ..]) = items.as_deref() else {
+        return Err(Error::new(
+            "TypeError",
+            format!(
+                "{}.__setstate__ argument should be 4-tuple, got {}",
+                ctx.type_name(receiver),
+                ctx.type_name(state),
+            ),
+        ));
+    };
+    string_io_init(ctx, receiver, &[value, newline], &[])?;
+    let file = string_io_file(ctx, receiver)?;
+    // Initialization sets the decoder history. The saved text has already been translated.
+    match ctx.heap.get(ctx.scalar_value(value)) {
+        Value::Str(text) => file.replace_memory_value(text)?,
+        Value::SurrogateStr(points) => file.replace_memory_points(points)?,
+        _ => debug_assert_eq!(value, NONE),
+    }
+    let position = ctx
+        .as_int(position)
+        .map_err(|_| {
+            Error::new(
+                "TypeError",
+                format!(
+                    "third item of state must be an integer, got {}",
+                    ctx.type_name(position),
+                ),
+            )
+        })?
+        .to_i64()
+        .ok_or_else(|| {
+            Error::new(
+                "OverflowError",
+                "Python int too large to convert to C ssize_t",
+            )
+        })?;
+    if position < 0 {
+        return Err(Error::new(
+            "ValueError",
+            "position value cannot be negative",
+        ));
+    }
+    file.seek_memory(position, 0)?;
+    if dict != NONE {
+        if ctx.dict_storage(dict).is_none() {
+            return Err(Error::new(
+                "TypeError",
+                format!(
+                    "fourth item of state should be a dict, got a {}",
+                    ctx.type_name(dict),
+                ),
+            ));
+        }
+        let Value::Instance { namespace, .. } = ctx.heap.get_mut(receiver) else {
+            unreachable!("StringIO methods have an instance receiver");
+        };
+        if let Some(existing) = *namespace {
+            let storage = ctx.dict_storage(existing).expect("instance dictionary");
+            super::builtins::update_dict(ctx, storage, Some(dict), &[])?;
+        } else {
+            *namespace = Some(dict);
+        }
+    }
+    Ok(NONE)
+}
+
 fn string_io_method(
     ctx: &mut Context,
     receiver: Id,
@@ -1282,6 +1395,12 @@ fn string_io_method(
         ));
     }
     argument_count("StringIO", name, args.len())?;
+    if name == "__getstate__" {
+        return string_io_getstate(ctx, receiver);
+    }
+    if name == "__setstate__" {
+        return string_io_setstate(ctx, receiver, args[0]);
+    }
     if name == "__exit__" {
         let close = ctx.lookup_attr(receiver, "close")?;
         return ctx.call(close, Vec::new(), Vec::new());

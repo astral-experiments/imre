@@ -208,6 +208,19 @@ impl FileState {
         self.text_memory()?.write_points(points.iter().copied())
     }
 
+    /// Restore already-translated code points without changing decoder history or position.
+    pub(in crate::objects) fn replace_string_io_points(
+        &mut self,
+        points: impl Iterator<Item = u32> + Clone,
+    ) -> Result<()> {
+        let data = &mut self.text_memory()?.data;
+        data.try_reserve(points.clone().count().saturating_sub(data.len()))
+            .map_err(|_| Error::allocation())?;
+        data.clear();
+        data.extend(points);
+        Ok(())
+    }
+
     pub(in crate::objects) fn string_io_points(&mut self) -> Result<MemoryText> {
         TextMemory::snapshot(&self.text_memory()?.data)
     }
@@ -270,6 +283,16 @@ impl FileState {
         };
         m.data.truncate(n);
         Ok(n)
+    }
+
+    pub(in crate::objects) fn string_io_newline(&mut self) -> Result<Option<&'static str>> {
+        Ok(match self.text_memory()?.newline {
+            Newline::Universal => None,
+            Newline::Preserve => Some(""),
+            Newline::Lf => Some("\n"),
+            Newline::Cr => Some("\r"),
+            Newline::CrLf => Some("\r\n"),
+        })
     }
 
     pub(in crate::objects) fn string_io_newlines(&mut self) -> Result<u8> {
