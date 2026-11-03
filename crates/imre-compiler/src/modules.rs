@@ -255,6 +255,12 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
             "encodings/__init__.py",
             include_str!("../stdlib/encodings/__init__.py"),
         )),
+        "encodings.aliases" => Some((
+            "encodings/aliases.py",
+            include_str!(
+                "../../../benchmarks/cpython_stdlib/full/linecache/upstream/Lib/encodings/aliases.py"
+            ),
+        )),
         "encodings.ascii" => Some((
             "encodings/ascii.py",
             include_str!("../stdlib/encodings/writer_ascii.py"),
