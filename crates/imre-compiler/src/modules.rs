@@ -2485,6 +2485,8 @@ pub(crate) fn boxed_mock_export(name: &str) -> bool {
             | "MagicMock"
             | "NonCallableMock"
             | "NonCallableMagicMock"
+            | "PropertyMock"
+            | "_callable"
             | "create_autospec"
             | "InvalidSpecError"
             | "mock_open"
