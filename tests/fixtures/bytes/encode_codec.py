@@ -15,3 +15,6 @@ if bom == b'\xff\xfe':
 else:
     assert bom == b'\xfe\xff'
     assert '😀'.encode('utf-32') == b'\x00\x00\xfe\xff\x00\x01\xf6\x00'
+
+assert '表ｱ〜'.encode('shift_jis') == b'\x95\\\xb1\x81\x60'
+assert '¥‾'.encode('sjis') == b'\\~'

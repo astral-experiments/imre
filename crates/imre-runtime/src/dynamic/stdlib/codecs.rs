@@ -531,7 +531,7 @@ fn box_native_entry(ctx: &mut Context, entry: CodecInfo) -> Result<Id> {
         Codec::Latin1 => "latin_1",
         Codec::Utf8 { signature: false } => "utf_8",
         Codec::Utf8 { signature: true } => "utf_8_sig",
-        Codec::CodePage(_) => codec.name(),
+        Codec::CodePage(_) | Codec::ShiftJis => codec.name(),
     };
     let module = ctx.module(&format!("encodings.{suffix}"))?;
     // Keep the pending constructor arguments across Python-visible module lookups.
@@ -543,7 +543,7 @@ fn box_native_entry(ctx: &mut Context, entry: CodecInfo) -> Result<Id> {
     let writer = ctx.lookup_attr(module, "StreamWriter")?;
     ctx.heap.keep(writer);
     let (encode, decode) = match codec {
-        Codec::CodePage(_) => {
+        Codec::CodePage(_) | Codec::ShiftJis => {
             // getregentry creates fresh bound Codec methods for each alias entry.
             let class = ctx.lookup_attr(module, "Codec")?;
             let encoder = ctx.call(class, Vec::new(), Vec::new())?;
@@ -568,7 +568,7 @@ fn box_native_entry(ctx: &mut Context, entry: CodecInfo) -> Result<Id> {
     };
     let encoder = if matches!(
         codec,
-        Codec::Ascii | Codec::Latin1 | Codec::Utf8 { signature: false }
+        Codec::Ascii | Codec::Latin1 | Codec::ShiftJis | Codec::Utf8 { signature: false }
     ) {
         factory(ctx, "IncrementalEncoder")?
     } else {
@@ -642,7 +642,7 @@ pub(in crate::dynamic) fn encode_text(
                 "strict" | "surrogateescape" | "surrogatepass"
             ) =>
         {
-            ctx.encode_single_byte_codepoints(id, codec, errors == "surrogateescape")
+            ctx.encode_legacy_codepoints(id, codec, errors == "surrogateescape")
         }
         StrEncoder::Registered(codec)
             if matches!(
@@ -755,6 +755,12 @@ pub(in crate::dynamic) fn decode_bytes(
     errors: Option<Id>,
 ) -> Result<Id> {
     let name = error_name(ctx, errors)?;
+    if matches!(codec, Codec::ShiftJis) {
+        let name = name.to_owned();
+        return ctx.with_buffer_export(input, |ctx| {
+            decode_shift_jis(ctx, input, &name, true).map(|(text, _)| text)
+        });
+    }
     if matches!(codec, Codec::Ascii) && name == "surrogateescape" {
         let bytes = ctx.bytes_like(input)?;
         if !bytes.is_ascii() {
@@ -871,16 +877,68 @@ fn stateful_utf8(
         "ignore" | "replace" | "surrogateescape" => Ok(ctx.builtin(handler_builtin(name).unwrap())),
         _ => handler(ctx, name),
     };
-    let result = resume_decode_with(ctx, resolve, points, error, |points, data, position| {
-        text.clear();
-        let issue = prefix(&mut text, data, position)?;
-        points
-            .try_reserve(text.len())
-            .map_err(|_| crate::Error::allocation())?;
-        points.extend(text.chars().map(u32::from));
-        Ok(issue)
-    })?;
+    let result = resume_decode_with(
+        ctx,
+        resolve,
+        points,
+        error,
+        None,
+        |points, data, position| {
+            text.clear();
+            let issue = prefix(&mut text, data, position)?;
+            points
+                .try_reserve(text.len())
+                .map_err(|_| crate::Error::allocation())?;
+            points.extend(text.chars().map(u32::from));
+            Ok(issue)
+        },
+    )?;
     Ok((result, consumed))
+}
+
+/// Decode a Shift JIS chunk, retaining an unpaired lead byte until the final call.
+fn decode_shift_jis(
+    ctx: &mut Context,
+    input: Id,
+    name: &str,
+    final_input: bool,
+) -> Result<(Id, usize)> {
+    let data = ctx.native_buffer_bytes(input)?;
+    let size = data.len();
+    let mut text = String::new();
+    let (mut consumed, issue) =
+        crate::objects::shift_jis::decode_prefix(&mut text, data, 0, final_input)?;
+    let Some(issue) = issue else {
+        return Ok((ctx.text(text), consumed));
+    };
+    let error = issue.error(data);
+    if name == "strict" {
+        return Err(ctx.decode_error(error));
+    }
+    let points = text.chars().map(u32::from).collect();
+    let resolve = |ctx: &mut Context| match name {
+        "ignore" | "replace" => Ok(ctx.builtin(handler_builtin(name).unwrap())),
+        _ => handler(ctx, name),
+    };
+    let result = resume_decode_with(
+        ctx,
+        resolve,
+        points,
+        error,
+        Some(input),
+        |points, data, position| {
+            text.clear();
+            let (offset, issue) =
+                crate::objects::shift_jis::decode_prefix(&mut text, data, position, final_input)?;
+            consumed = offset;
+            points
+                .try_reserve(text.len())
+                .map_err(|_| crate::Error::allocation())?;
+            points.extend(text.chars().map(u32::from));
+            Ok(issue)
+        },
+    )?;
+    Ok((result, if final_input { size } else { consumed }))
 }
 
 /// Resume from the position and possibly changed byte object supplied by the handler.
@@ -891,7 +949,7 @@ fn resume_decode(
     error: crate::Error,
     prefix: impl FnMut(&mut Vec<u32>, &[u8], usize) -> Result<Option<DecodeIssue>>,
 ) -> Result<Id> {
-    resume_decode_with(ctx, |ctx| handler(ctx, name), points, error, prefix)
+    resume_decode_with(ctx, |ctx| handler(ctx, name), points, error, None, prefix)
 }
 
 fn resume_decode_with(
@@ -899,6 +957,7 @@ fn resume_decode_with(
     resolve: impl FnOnce(&mut Context) -> Result<Id>,
     mut points: Vec<u32>,
     error: crate::Error,
+    original: Option<Id>,
     mut prefix: impl FnMut(&mut Vec<u32>, &[u8], usize) -> Result<Option<DecodeIssue>>,
 ) -> Result<Id> {
     let raised = ctx.decode_error(error);
@@ -932,11 +991,17 @@ fn resume_decode_with(
                     "Python int too large to convert to C ssize_t",
                 )
             })?;
-        let input = ctx.lookup_attr(exception, "object")?;
-        let Value::Bytes(data) = ctx.heap.get(ctx.scalar_value(input)) else {
-            return Err(type_error(
-                "UnicodeError 'object' attribute must be a bytes",
-            ));
+        let data = if let Some(input) = original {
+            // The multibyte codec resumes in its original buffer if a handler rebinds exc.object.
+            ctx.native_buffer_bytes(input)?
+        } else {
+            let input = ctx.lookup_attr(exception, "object")?;
+            let Value::Bytes(data) = ctx.heap.get(ctx.scalar_value(input)) else {
+                return Err(type_error(
+                    "UnicodeError 'object' attribute must be a bytes",
+                ));
+            };
+            data
         };
         let length = data.len() as isize;
         let position = if position < 0 {
@@ -1091,6 +1156,7 @@ pub(in crate::dynamic) fn entry_encode(
         Codec::Ascii => "ascii_encode",
         Codec::Utf8 { .. } => "utf_8_encode",
         Codec::CodePage(_) => "charmap_encode",
+        Codec::ShiftJis => "encode",
     };
     let (input, errors) = if matches!(codec, Codec::Utf8 { signature: true } | Codec::CodePage(_)) {
         let wrapper = if matches!(codec, Codec::CodePage(_)) {
@@ -1099,8 +1165,16 @@ pub(in crate::dynamic) fn entry_encode(
             "encode"
         };
         python_codec_args(wrapper, matches!(codec, Codec::CodePage(_)), args, kwargs)?
+    } else if matches!(codec, Codec::ShiftJis) {
+        python_codec_args("encode", false, args, kwargs)?
     } else {
         positional_codec_args(function, args, kwargs)?
+    };
+    // The multibyte codec converts non-string inputs with str(input).
+    let input = if matches!(codec, Codec::ShiftJis) && ctx.string_storage(input).is_none() {
+        crate::dynamic::builtins::call(ctx, "str", &[input], &[])?
+    } else {
+        input
     };
     let length = match ctx.heap.get(ctx.scalar_value(input)) {
         Value::Str(text) => text.chars().count(),
@@ -1131,7 +1205,23 @@ pub(in crate::dynamic) fn decode(
         Codec::Ascii => "ascii_decode",
         Codec::Utf8 { .. } => "utf_8_decode",
         Codec::CodePage(_) => "charmap_decode",
+        Codec::ShiftJis => "decode",
     };
+    if matches!(codec, Codec::ShiftJis) {
+        // The module's incremental decoder passes final as a third argument.
+        let (arguments, final_input) = match args {
+            [_, _, final_input] => (&args[..2], ctx.truth(*final_input)?),
+            _ => (args, true),
+        };
+        let (input, errors) = python_codec_args("decode", false, arguments, kwargs)?;
+        let policy = entry_error_policy(ctx, function, errors)?;
+        let name = error_name(ctx, policy)?.to_owned();
+        return ctx.with_buffer_export(input, |ctx| {
+            let (text, size) = decode_shift_jis(ctx, input, &name, final_input)?;
+            let consumed = ctx.alloc(Value::Int(crate::Int::from_usize(size)));
+            Ok(ctx.alloc(Value::Tuple(vec![text, consumed])))
+        });
+    }
     let (input, errors) = match codec {
         Codec::Latin1 | Codec::Ascii => positional_codec_args(function, args, kwargs)?,
         _ => {

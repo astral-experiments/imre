@@ -10,9 +10,10 @@ pub(super) enum Handler {
 pub(super) fn registered(ctx: &Context, codec: Codec, name: &str) -> Option<Handler> {
     let callback = *ctx.codec_entries.handlers.get(name)?;
     // The C encoders implement these named policies inline, bypassing the registry.
-    if matches!(name, "replace" | "ignore" | "xmlcharrefreplace")
+    if matches!(name, "replace" | "ignore")
+        || name == "xmlcharrefreplace" && !matches!(codec, Codec::ShiftJis)
         || name == "strict" && !matches!(codec, Codec::Utf8 { .. })
-        || name == "backslashreplace" && !matches!(codec, Codec::CodePage(_))
+        || name == "backslashreplace" && !matches!(codec, Codec::CodePage(_) | Codec::ShiftJis)
         || name == "surrogatepass" && matches!(codec, Codec::Utf8 { .. })
     {
         return None;
@@ -52,9 +53,9 @@ fn point(codec: Codec, code: u32, output: Option<&mut Vec<u8>>) -> Result<bool> 
     let mut scratch = [0; 4];
     let bytes: &[u8] = if matches!(codec, Codec::Utf8 { .. }) {
         ch.encode_utf8(&mut scratch).as_bytes()
-    } else if let Some(byte) = codec.encode_byte(ch) {
-        scratch[0] = byte;
-        &scratch[..1]
+    } else if let Some((unit, len)) = codec.encode_unit(ch) {
+        scratch[..len].copy_from_slice(&unit[..len]);
+        &scratch[..len]
     } else {
         return Ok(false);
     };
@@ -79,7 +80,7 @@ pub(super) fn encode(
     let (encoding, reason) = if matches!(codec, Codec::Utf8 { .. }) {
         ("utf-8", "surrogates not allowed")
     } else {
-        codec.single_byte_error()
+        codec.encoding_error_reason()
     };
     let mark = ctx.heap.temporary_mark();
     ctx.heap.reserve_temporaries(3)?;
@@ -96,10 +97,13 @@ pub(super) fn encode(
                 continue;
             }
             let mut end = pos + 1;
-            while end < source.len() && !point(codec, source[end], None)? {
+            while !matches!(codec, Codec::ShiftJis)
+                && end < source.len()
+                && !point(codec, source[end], None)?
+            {
                 end += 1;
             }
-            if escape_prefix && !matches!(codec, Codec::CodePage(_)) {
+            if escape_prefix && !matches!(codec, Codec::CodePage(_) | Codec::ShiftJis) {
                 while pos < end && (0xdc80..=0xdcff).contains(&source[pos]) {
                     append(&mut output, &[source[pos] as u8])?;
                     pos += 1;

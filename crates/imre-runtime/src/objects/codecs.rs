@@ -1,4 +1,5 @@
 //! Native text codecs shared by the registry and text files.
+pub(crate) mod shift_jis;
 pub(super) mod writer;
 
 use super::bytes::{DecodeIssue, ascii_decode_error, owned_input};
@@ -36,7 +37,7 @@ static CP1251: LazyLock<CodePage> = LazyLock::new(|| CodePage::new(4, "cp1251"))
 static CP424: LazyLock<CodePage> = LazyLock::new(|| CodePage::new(5, "cp424"));
 static CP437: LazyLock<CodePage> = LazyLock::new(|| CodePage::new(6, "cp437"));
 
-const CODEC_NAMES: [&str; 7] = [
+const CODEC_NAMES: [&str; 8] = [
     "ascii",
     "iso8859-1",
     "utf-8",
@@ -44,6 +45,7 @@ const CODEC_NAMES: [&str; 7] = [
     "cp1251",
     "cp424",
     "cp437",
+    "shift_jis",
 ];
 
 thread_local! {
@@ -488,6 +490,7 @@ pub(crate) enum Codec {
     Latin1,
     Ascii,
     CodePage(&'static CodePage),
+    ShiftJis,
 }
 
 impl Codec {
@@ -498,6 +501,7 @@ impl Codec {
             Self::Utf8 { signature: false } => 2,
             Self::Utf8 { signature: true } => 3,
             Self::CodePage(page) => page.index,
+            Self::ShiftJis => 7,
         }
     }
 
@@ -528,6 +532,9 @@ impl Codec {
                 Ok(Self::Utf8 { signature: false })
             }
             "utf_8_sig" => Ok(Self::Utf8 { signature: true }),
+            "shift_jis" | "shiftjis" | "s_jis" | "sjis" | "csshiftjis" | "x_mac_japanese" => {
+                Ok(Self::ShiftJis)
+            }
             "cp1251" | "1251" | "windows_1251" => Ok(Self::CodePage(&CP1251)),
             "cp424" | "424" | "csibm424" | "ebcdic_cp_he" | "ibm424" => Ok(Self::CodePage(&CP424)),
             "cp437" | "437" | "cspc8codepage437" | "ibm437" => Ok(Self::CodePage(&CP437)),
@@ -580,12 +587,16 @@ impl Codec {
             points.extend(super::interpreter_stdlib::fsdecode(data));
             return Ok(points);
         }
+        if matches!(self, Self::ShiftJis) {
+            shift_jis::decode_filesystem(data, &mut points);
+            return Ok(points);
+        }
         for (index, &byte) in data.iter().enumerate() {
             let ch = match self {
                 Self::Ascii => byte.is_ascii().then(|| char::from(byte)),
                 Self::Latin1 => Some(char::from(byte)),
                 Self::CodePage(page) => page.decode.decode(byte),
-                Self::Utf8 { .. } => unreachable!(),
+                Self::Utf8 { .. } | Self::ShiftJis => unreachable!(),
             };
             points.push(match ch {
                 Some(ch) => u32::from(ch),
@@ -641,6 +652,10 @@ impl Codec {
                 }
                 Ok(text)
             }
+            Self::ShiftJis => {
+                shift_jis::decode_chunk(&mut text, data, errors, true)?;
+                Ok(text)
+            }
             Self::Utf8 { signature } => {
                 let data = if signature {
                     data.strip_prefix(b"\xef\xbb\xbf").unwrap_or(data)
@@ -659,21 +674,30 @@ impl Codec {
         }
     }
 
+    /// Encodings other than UTF-8 write one or two bytes for a representable scalar.
+    pub(crate) fn encode_unit(self, ch: char) -> Option<([u8; 2], usize)> {
+        if matches!(self, Self::ShiftJis) {
+            return shift_jis::encode_char(ch);
+        }
+        self.encode_byte(ch).map(|byte| ([byte, 0], 1))
+    }
+
     pub(crate) fn encode_byte(self, ch: char) -> Option<u8> {
         match self {
             Self::Ascii => ch.is_ascii().then_some(ch as u8),
             Self::Latin1 => u8::try_from(u32::from(ch)).ok(),
             Self::CodePage(page) => page.encode.get(&ch).copied(),
-            Self::Utf8 { .. } => unreachable!("UTF-8 is a multibyte encoding"),
+            Self::Utf8 { .. } | Self::ShiftJis => unreachable!("expected a single-byte encoding"),
         }
     }
 
-    pub(crate) fn single_byte_error(self) -> (&'static str, &'static str) {
+    pub(crate) fn encoding_error_reason(self) -> (&'static str, &'static str) {
         match self {
             Self::Ascii => ("ascii", "ordinal not in range(128)"),
             Self::Latin1 => ("latin-1", "ordinal not in range(256)"),
             Self::CodePage(_) => ("charmap", "character maps to <undefined>"),
-            Self::Utf8 { .. } => unreachable!("UTF-8 is a multibyte encoding"),
+            Self::ShiftJis => ("shift_jis", "illegal multibyte sequence"),
+            Self::Utf8 { .. } => unreachable!("UTF-8 encodes every Unicode scalar"),
         }
     }
 
@@ -694,16 +718,16 @@ impl Codec {
                 out.extend_from_slice(text.as_bytes());
                 return Ok(Cow::Owned(out));
             }
-            _ => self.single_byte_error(),
+            _ => self.encoding_error_reason(),
         };
         let mut out = Vec::new();
         out.try_reserve_exact(text.len())
             .map_err(|_| Error::allocation())?;
         let mut chars = text.chars().enumerate().peekable();
         while let Some((start, ch)) = chars.next() {
-            if let Some(byte) = self.encode_byte(ch) {
-                out.try_reserve(1).map_err(|_| Error::allocation())?;
-                out.push(byte);
+            if let Some((unit, size)) = self.encode_unit(ch) {
+                out.try_reserve(size).map_err(|_| Error::allocation())?;
+                out.extend_from_slice(&unit[..size]);
                 continue;
             }
             let replacement = match errors.unwrap_or("strict") {
@@ -717,9 +741,12 @@ impl Codec {
                 ),
                 "strict" | "surrogatepass" | "surrogateescape" => {
                     let mut end = start;
-                    while let Some((i, _)) = chars.next_if(|(_, c)| self.encode_byte(*c).is_none())
-                    {
-                        end = i;
+                    if !matches!(self, Self::ShiftJis) {
+                        while let Some((i, _)) =
+                            chars.next_if(|(_, c)| self.encode_byte(*c).is_none())
+                        {
+                            end = i;
+                        }
                     }
                     return Err(encoding_error(
                         codec,
@@ -735,7 +762,7 @@ impl Codec {
             out.try_reserve(replacement.len())
                 .map_err(|_| Error::allocation())?;
             for c in replacement.chars() {
-                let Some(byte) = self.encode_byte(c) else {
+                let Some((unit, size)) = self.encode_unit(c) else {
                     return Err(encoding_error(
                         codec,
                         reason,
@@ -745,7 +772,7 @@ impl Codec {
                         ch,
                     ));
                 };
-                out.push(byte);
+                out.extend_from_slice(&unit[..size]);
             }
         }
         Ok(Cow::Owned(out))
