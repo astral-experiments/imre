@@ -3449,6 +3449,7 @@ impl Context {
                 let devnull = self.text("/dev/null");
                 self.bind(scope, "devnull", devnull);
             }
+            "random" if source.is_none() => stdlib::random::instance::install(self, scope)?,
             "math" if source.is_none() => {
                 let pi = self.alloc(Value::Float(std::f64::consts::PI));
                 self.bind(scope, "pi", pi);

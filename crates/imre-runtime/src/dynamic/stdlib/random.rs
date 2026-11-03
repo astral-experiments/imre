@@ -1,3 +1,5 @@
+pub(in crate::dynamic) mod instance;
+
 use num_bigint::Sign;
 
 use super::super::range::Range;
@@ -54,6 +56,103 @@ fn arguments<const N: usize>(
         ));
     }
     Ok(values)
+}
+
+/// CPython's version-1 string seed folds Unicode code points (Latin-1 for bytes).
+fn legacy_seed(points: impl ExactSizeIterator<Item = u32>) -> objects::Generator {
+    let length = points.len() as u64;
+    let mut points = points.peekable();
+    let initial = u64::from(points.peek().copied().unwrap_or(0)) << 7;
+    let hash = points.fold(initial, |h, point| {
+        h.wrapping_mul(1_000_003) ^ u64::from(point)
+    });
+    objects::Generator::from_integer(&Int::new((hash ^ length).into()))
+}
+
+/// Construct independent MT state from the seed formats accepted by Random.seed().
+pub(in crate::dynamic) fn seeded(
+    ctx: &mut Context,
+    seed: Id,
+    version: Option<Id>,
+) -> Result<objects::Generator> {
+    let scalar = ctx.scalar_value(seed);
+    let version = if let Some(version) = version {
+        let one = ctx.int(1);
+        let two = ctx.int(2);
+        if ctx.checked_equal(version, one)? {
+            1
+        } else if ctx.checked_equal(version, two)? {
+            2
+        } else {
+            0
+        }
+    } else {
+        2
+    };
+    Ok(match ctx.heap.get(scalar) {
+        Value::None => objects::Generator::from_entropy(),
+        Value::Bool(_) | Value::Int(_) => objects::Generator::from_integer(&ctx.as_int(seed)?),
+        Value::Bytes(bytes) if version == 1 => legacy_seed(bytes.iter().copied().map(u32::from)),
+        Value::Str(_) | Value::SurrogateStr(_) if version == 1 => {
+            legacy_seed(ctx.string_codepoints(scalar)?.iter().copied())
+        }
+        Value::Bytes(bytes) | Value::ByteArray(bytes) if version == 2 => {
+            objects::Generator::from_seed_bytes(bytes)
+        }
+        Value::Str(_) | Value::SurrogateStr(_) if version == 2 => {
+            let bytes = super::codecs::encode_text(ctx, scalar, None, None)?;
+            objects::Generator::from_seed_bytes(&bytes)
+        }
+        Value::Float(_)
+        | Value::Str(_)
+        | Value::SurrogateStr(_)
+        | Value::Bytes(_)
+        | Value::ByteArray(_) => {
+            // _random casts an object's signed hash to size_t before splitting the key into words.
+            let hash = ctx.dictionary_hash(seed)? as usize;
+            objects::Generator::from_integer(&Int::new(hash.into()))
+        }
+        _ => {
+            return Err(Error::new(
+                "TypeError",
+                "The only supported seed types are:\nNone, int, float, str, bytes, and bytearray.",
+            ));
+        }
+    })
+}
+
+pub(super) fn bit_count(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Int> {
+    let arg = builtins::one_positional_arg("Random.getrandbits", args, kwargs)?;
+    ctx.index_integer(arg)
+}
+
+pub(super) fn random_args(args: &[Id], kwargs: &[(String, Id)]) -> Result<()> {
+    if !kwargs.is_empty() {
+        return Err(Error::new(
+            "TypeError",
+            "Random.random() takes no keyword arguments",
+        ));
+    }
+    if !args.is_empty() {
+        return Err(Error::new(
+            "TypeError",
+            format!("Random.random() takes no arguments ({} given)", args.len()),
+        ));
+    }
+    Ok(())
+}
+
+pub(super) fn seed(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    let [seed, version] = arguments(
+        "Random.seed",
+        ["a", "version"],
+        2,
+        "from 1 to 3",
+        args,
+        kwargs,
+    )?;
+    objects::seed_shared(seeded(ctx, seed.unwrap_or(NONE), version)?);
+    Ok(NONE)
 }
 
 pub(super) fn randint(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {

@@ -2277,6 +2277,7 @@ impl IntrinsicModule {
             }
             (Self::Random, "shuffle") => Intrinsic::Random(crate::ir::RandomOperation::Shuffle),
             (Self::Random, "randbytes") => Intrinsic::ScopedObjectExport("random.randbytes"),
+            (Self::Random, "Random") => Intrinsic::ScopedObjectExport("random.Random"),
             (Self::Random, "choices") => Intrinsic::ObjectRuntimeExport("random.choices"),
             (Self::Random, "choice") => Intrinsic::RandomChoice { secure: false },
             (Self::Secrets, "choice") => Intrinsic::RandomChoice { secure: true },

@@ -940,7 +940,10 @@ impl Context {
             .heap_type()
             .expect("native heap type method");
         if self.heap.get(receiver).instance_class() == Some(owner)
-            || (declaring == value::SSL_ERROR_TYPE && self.instance_of(receiver, owner))
+            || (matches!(
+                declaring,
+                value::SSL_ERROR_TYPE | stdlib::random::instance::CLASS
+            ) && self.instance_of(receiver, owner))
         {
             return Ok(());
         }
@@ -4953,7 +4956,9 @@ impl Context {
         self.check_template_write(obj, name)?;
         super::namespace::check_class_write(self, obj, name)?;
         stdlib::io::check_class_write(self, obj, name)?;
-        if let Some(class) = self.heap.get(obj).heap_type() {
+        if let Some(class) = self.heap.get(obj).heap_type()
+            && class != stdlib::random::instance::CLASS
+        {
             return Err(Error::new(
                 "TypeError",
                 format!("cannot set '{name}' attribute of immutable type '{class}'"),
@@ -5919,7 +5924,9 @@ impl Context {
         self.check_template_write(obj, name)?;
         super::namespace::check_class_write(self, obj, name)?;
         stdlib::io::check_class_write(self, obj, name)?;
-        if let Some(class) = self.heap.get(obj).heap_type() {
+        if let Some(class) = self.heap.get(obj).heap_type()
+            && class != stdlib::random::instance::CLASS
+        {
             return Err(Error::new(
                 "TypeError",
                 format!("cannot set '{name}' attribute of immutable type '{class}'"),
@@ -7027,6 +7034,9 @@ impl Context {
                 #[cfg(unix)]
                 if self.heap.get(owner).heap_type() == Some(stdlib::ssl::provider::bio::CLASS) {
                     return stdlib::ssl::provider::bio::call(self, owner, name, &args, &kwargs);
+                }
+                if self.heap.get(owner).heap_type() == Some(stdlib::random::instance::CLASS) {
+                    return stdlib::random::instance::call(self, owner, name, &args, &kwargs);
                 }
                 if self.heap.get(owner).heap_type() == Some(stdlib::datetime::isocalendar::CLASS) {
                     stdlib::datetime::isocalendar::call(self, owner, name, &args, &kwargs)
