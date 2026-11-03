@@ -869,7 +869,7 @@ impl Emitter<'_, '_> {
             format!("{operation}_int_nonzero")
         } else if ty == Type::Int {
             format!("{operation}_int")
-        } else if matches!(family, "str" | "object" | "record")
+        } else if matches!(family, "str" | "object" | "record" | "list")
             && (operation == "release" || value.ty != ty)
         {
             format!("{family}_{operation}_if_present")
@@ -10342,7 +10342,7 @@ declare { i64, i1 } @llvm.smul.with.overflow.i64(i64, i64)
 /// After mem2reg, a cleared or never-filled slot needs no runtime call at all.
 fn nullable_pointer_helpers() -> String {
     let mut output = String::new();
-    for family in ["str", "object", "record"] {
+    for family in ["str", "object", "record", "list"] {
         for operation in ["release", "retain"] {
             writeln!(
                 output,
@@ -11464,6 +11464,7 @@ def handler(a: defaultdict[str, list[int]], b: defaultdict[str, list[int]]) -> l
             ("int | None", Some("@retain_int(")),
             ("float | None", Some("@imre_float_box_retain(")),
             ("list[int]", Some("@imre_list_retain(")),
+            ("list[int] | None", Some("@list_retain_if_present(")),
             ("tuple[int]", Some("@imre_record_retain(")),
             ("bool | None", None),
             ("float", None),
