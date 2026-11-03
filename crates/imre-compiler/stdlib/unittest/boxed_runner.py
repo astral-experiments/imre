@@ -1,11 +1,11 @@
 # Fixed-layout TestResult specializes its error representation. Boxed results
 # receive the real exception tuple through the public overridable callbacks.
-def _boxedResultDetail(error):
+def _exc_info_to_string(self, err, test):
     import traceback
-    kind, value, tb = error
+    kind, value, tb = err
     # Only trim leading frames in the bundled unittest implementation. A user
     # calling addError directly can supply a traceback with no framework frame.
-    internal = (_boxedResultDetail.__code__.co_filename, case.__file__)
+    internal = (_exc_info_to_string.__code__.co_filename, case.__file__)
     while tb is not None and tb.tb_frame.f_code.co_filename in internal:
         tb = tb.tb_next
     return "".join(traceback.format_exception(kind, value, tb))
@@ -14,17 +14,17 @@ def _boxedResultDetail(error):
 def _addError(self, test, error):
     if getattr(self, "failfast", False):
         self.stop()
-    self.errors.append((test, _boxedResultDetail(error)))
+    self.errors.append((test, self._exc_info_to_string(error, test)))
 
 
 def _addFailure(self, test, error):
     if getattr(self, "failfast", False):
         self.stop()
-    self.failures.append((test, _boxedResultDetail(error)))
+    self.failures.append((test, self._exc_info_to_string(error, test)))
 
 
 def _resultExpectedFailure(self, test, error):
-    self.expectedFailures.append((test, _boxedResultDetail(error)))
+    self.expectedFailures.append((test, self._exc_info_to_string(error, test)))
 
 
 def _resultSubTest(self, test, subtest, error):
@@ -32,7 +32,7 @@ def _resultSubTest(self, test, subtest, error):
         if getattr(self, "failfast", False):
             self.stop()
         problems = self.failures if issubclass(error[0], test.failureException) else self.errors
-        problems.append((subtest, _boxedResultDetail(error)))
+        problems.append((subtest, self._exc_info_to_string(error, test)))
 
 
 # Adapted from CPython 3.14.5 Lib/unittest/runner.py. See ../docstrings/LICENSE.
@@ -330,6 +330,7 @@ _WritelnDecorator.__getattr__ = _streamAttribute
 _WritelnDecorator.write = _StreamWrite()
 TestResult.addDuration = addDuration
 TestResult.__init__ = _boxedResultInit
+TestResult._exc_info_to_string = _exc_info_to_string
 TestResult.addExpectedFailure = _resultExpectedFailure
 TestResult.addSubTest = _resultSubTest
 TestResult.addError = _addError
