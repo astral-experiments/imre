@@ -23,6 +23,7 @@ const CONSTANTS: &[(&str, i32)] = &[
 
 // socket.py imports these constants once, so deletion must not fall back to a native value.
 const IMPORTED_CONSTANTS: &[(&str, i32)] = &[
+    ("AI_NUMERICHOST", libc::AI_NUMERICHOST),
     ("AI_NUMERICSERV", libc::AI_NUMERICSERV),
     ("EAI_SERVICE", libc::EAI_SERVICE),
     ("EAI_NODATA", libc::EAI_NODATA),

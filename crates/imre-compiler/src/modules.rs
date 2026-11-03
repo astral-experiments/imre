@@ -1931,6 +1931,7 @@ impl IntrinsicModule {
                 "has_ipv6" => "_socket.has_ipv6",
                 "SocketType" => "_socket.SocketType",
                 "getaddrinfo" => "_socket.getaddrinfo",
+                "AI_NUMERICHOST" => "_socket.AI_NUMERICHOST",
                 "AI_NUMERICSERV" => "_socket.AI_NUMERICSERV",
                 "EAI_SERVICE" => "_socket.EAI_SERVICE",
                 "EAI_NODATA" => "_socket.EAI_NODATA",
@@ -1993,6 +1994,9 @@ impl IntrinsicModule {
             }
             (Self::Socket, "SocketKind") => Intrinsic::ObjectRuntimeExport("socket.SocketKind"),
             (Self::Socket, "getaddrinfo") => Intrinsic::ObjectRuntimeExport("socket.getaddrinfo"),
+            (Self::Socket, "AI_NUMERICHOST") => {
+                Intrinsic::ObjectRuntimeExport("socket.AI_NUMERICHOST")
+            }
             (Self::Socket, "AI_NUMERICSERV") => {
                 Intrinsic::ObjectRuntimeExport("socket.AI_NUMERICSERV")
             }
