@@ -283,6 +283,7 @@ fn launch(ctx: &mut Context, values: &[Id]) -> Result<Id> {
         process_group,
         umask,
         pass_fds,
+        gid,
         gids,
         preexec_fn,
         slot,
@@ -311,6 +312,7 @@ fn launch(ctx: &mut Context, values: &[Id]) -> Result<Id> {
     let probe = executable != NONE
         || start_new_session != FALSE
         || !default_group
+        || gid != NONE
         || gids != NONE
         || preexec_fn != NONE
         || !default_umask
@@ -394,7 +396,7 @@ fn launch(ctx: &mut Context, values: &[Id]) -> Result<Id> {
         let inherited = ctx.int(-1);
         direct = Some(ctx.checked_equal(process_group, inherited)?);
     }
-    if direct == Some(true) && gids != NONE {
+    if direct == Some(true) && (gid != NONE || gids != NONE) {
         direct = Some(false);
     }
     if direct == Some(true) && !default_umask {
@@ -476,7 +478,7 @@ fn launch(ctx: &mut Context, values: &[Id]) -> Result<Id> {
         && ctx.heap.gc_settings.enabled.swap(false, Ordering::Relaxed))
     .then(|| ReenableGc(ctx.heap.gc_settings.clone()));
     // Fork-only child settings must be validated after the executable candidates and argv.
-    let has_child_settings = gids != NONE || preexec_fn != NONE;
+    let has_child_settings = gid != NONE || gids != NONE || preexec_fn != NONE;
     if has_child_settings
         && (program_bytes.contains(&0)
             || search_path.as_ref().is_some_and(|path| path.contains(&0)))
@@ -507,6 +509,11 @@ fn launch(ctx: &mut Context, values: &[Id]) -> Result<Id> {
     }
     let directory = (cwd != NONE).then(|| path(ctx, cwd, false)).transpose()?;
     let groups = extra_group_ids(ctx, gids)?;
+    let gid = if gid == NONE {
+        libc::gid_t::MAX
+    } else {
+        os::owner_id(ctx, gid, true)? as libc::gid_t
+    };
     if preexec_fn != NONE && !matches!(ctx.heap.get(slot), Value::ProcessHandle { child: None, .. })
     {
         return Err(Error::new(
@@ -536,6 +543,7 @@ fn launch(ctx: &mut Context, values: &[Id]) -> Result<Id> {
         group,
         umask,
         keep,
+        gid,
         groups,
         (preexec_fn != NONE).then_some(&mut guest as &mut dyn crate::objects::PreExec),
     );

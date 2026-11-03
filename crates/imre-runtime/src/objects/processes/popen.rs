@@ -552,6 +552,7 @@ unsafe fn spawn(config: &LaunchConfig, mut extras: LaunchExtras<'_, '_>) -> Resu
             new_session,
             group,
             mask: (mask >= 0).then_some(mask as libc::mode_t),
+            gid: libc::gid_t::MAX,
             extra_groups: None,
             keep,
         })

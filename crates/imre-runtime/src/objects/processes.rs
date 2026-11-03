@@ -570,6 +570,7 @@ impl PathSearch {
 struct ChildAttributes {
     new_session: bool,
     group: libc::pid_t,
+    gid: libc::gid_t,
     extra_groups: Option<Vec<libc::gid_t>>,
     mask: Option<libc::mode_t>,
     keep: Vec<RawFd>,
@@ -580,6 +581,7 @@ impl Default for ChildAttributes {
         Self {
             new_session: false,
             group: -1,
+            gid: libc::gid_t::MAX,
             extra_groups: None,
             mask: None,
             keep: Vec::new(),
@@ -696,6 +698,13 @@ impl Launch {
             if unsafe { libc::setgroups(groups.len() as _, ids) } < 0 {
                 return Err(io::Error::last_os_error());
             }
+        }
+        // CPython treats (gid_t)-1 as inherited even if it came from a positive integer.
+        if attributes.gid != libc::gid_t::MAX
+            // SAFETY: only the forked child changes its real and effective group IDs.
+            && unsafe { libc::setregid(attributes.gid, attributes.gid) } < 0
+        {
+            return Err(io::Error::last_os_error());
         }
         Ok(())
     }

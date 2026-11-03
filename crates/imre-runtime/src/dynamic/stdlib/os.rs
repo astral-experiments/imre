@@ -533,7 +533,7 @@ pub(in crate::dynamic) mod xattr;
 
 /// POSIX functions exported as the same builtins by both os and posix.
 pub(super) fn is_descriptor_function(name: &str) -> bool {
-    if matches!(name, "getpgid" | "setpgid") {
+    if matches!(name, "getpgid" | "setpgid" | "setregid") {
         return cfg!(unix);
     }
     if name == "_exit" {
@@ -1111,20 +1111,26 @@ pub(super) fn descriptor(
         return Ok(ctx.int(i64::from(group)));
     }
     #[cfg(unix)]
-    if name == "setpgid" {
+    if matches!(name, "setpgid" | "setregid") {
         if !kwargs.is_empty() {
             return Err(Error::new(
                 "TypeError",
-                "posix.setpgid() takes no keyword arguments",
+                format!("posix.{name}() takes no keyword arguments"),
             ));
         }
-        let [pid, group] = args else {
+        let [first, second] = args else {
             return Err(Error::new(
                 "TypeError",
-                format!("setpgid expected 2 arguments, got {}", args.len()),
+                format!("{name} expected 2 arguments, got {}", args.len()),
             ));
         };
-        native::setpgid(c_int(ctx, *pid)?, c_int(ctx, *group)?)?;
+        if name == "setpgid" {
+            native::setpgid(c_int(ctx, *first)?, c_int(ctx, *second)?)?;
+        } else {
+            let real = chown::owner_id(ctx, *first, true)? as libc::gid_t;
+            let effective = chown::owner_id(ctx, *second, true)? as libc::gid_t;
+            native::setregid(real, effective)?;
+        }
         return Ok(NONE);
     }
     if name == "open" {

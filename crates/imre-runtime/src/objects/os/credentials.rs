@@ -101,11 +101,15 @@ pub(crate) fn getgroups() -> Result<Vec<Int>> {
 
 macro_rules! setter {
     ($name:ident, $sys:ident, $id:ty, $($arg:ident),+) => {
+        pub(crate) fn $sys($($arg: $id),+) -> Result<()> {
+            // SAFETY: the kernel accepts integer IDs and checks the caller's privileges.
+            checked(unsafe { libc::$sys($($arg),+) }).map(|_| ())
+        }
+
         #[unsafe(no_mangle)]
         pub extern "C" fn $name($($arg: usize),+) {
-            // SAFETY: the converter returns tagged, range-checked uid_t/gid_t
-            // values. The kernel enforces the caller's actual privileges.
-            finish(checked(unsafe { libc::$sys($(($arg >> 1) as $id),+) }).map(|_| ()), ());
+            // The typed converter supplies tagged, range-checked uid_t/gid_t values.
+            finish($sys($(($arg >> 1) as $id),+), ());
         }
     };
 }

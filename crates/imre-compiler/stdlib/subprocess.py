@@ -184,6 +184,23 @@ def _exec_search_path(env):
     return b":".join(fsencode(part) for part in path.split(":"))
 
 
+def _get_group_id(group):
+    import os
+    if not hasattr(os, "setregid"):
+        raise ValueError("The 'group' parameter is not supported on the current platform")
+    if isinstance(group, str):
+        try:
+            import grp
+        except ImportError:
+            raise ValueError("The group parameter cannot be a string on systems without the grp module")
+        group = grp.getgrnam(group).gr_gid
+    elif not isinstance(group, int):
+        raise TypeError(f"Group must be a string or an integer, not {type(group)}")
+    if group < 0:
+        raise ValueError(f"Group ID cannot be negative, got {group}")
+    return group
+
+
 def _get_extra_group_ids(extra_groups):
     if isinstance(extra_groups, str):
         raise ValueError("Groups must be a list, not a string")
@@ -216,7 +233,7 @@ class Popen:
     def __init__(self, args, bufsize=-1, executable=None, stdin=None, stdout=None,
                  stderr=None, preexec_fn=None, *, close_fds=True, shell=False, cwd=None, env=None, restore_signals=True, pass_fds=(),
                  universal_newlines=None, encoding=None, errors=None, text=None, start_new_session=False,
-                 umask=-1, pipesize=-1, process_group=None, startupinfo=None, creationflags=0, extra_groups=None):
+                 umask=-1, pipesize=-1, process_group=None, startupinfo=None, creationflags=0, group=None, extra_groups=None):
         if bufsize is None:
             bufsize = -1
         if not isinstance(bufsize, int):
@@ -255,6 +272,7 @@ class Popen:
         self.pipesize = pipesize
         self._sigint_wait_secs = 0.25
         self.stdin = self.stdout = self.stderr = None
+        gid = None if group is None else _get_group_id(group)
         gids = None if extra_groups is None else _get_extra_group_ids(extra_groups)
         prepared, fds = _process.prepare(stdin, stdout, stderr, bufsize, pipesize)
         failed = True
@@ -276,7 +294,7 @@ class Popen:
             self._replacement_output = None
             self._execute_child(args, executable, preexec_fn, close_fds, pass_fds, cwd, env,
                                 startupinfo, creationflags, shell, *fds, restore_signals,
-                                None, gids, None, umask, start_new_session,
+                                gid, gids, None, umask, start_new_session,
                                 -1 if process_group is None else process_group)
             failed = False
         except BaseException:
@@ -296,7 +314,7 @@ class Popen:
                        start_new_session, process_group):
         if (p2cread, p2cwrite, c2pread, c2pwrite, errread, errwrite) != self._pipe_fds:
             raise NotImplementedError("replacing prepared subprocess descriptors is unsupported")
-        if gid is not None or uid is not None:
+        if uid is not None:
             raise NotImplementedError("unsupported subprocess child settings")
         slot = None
         if preexec_fn is not None:
@@ -304,7 +322,7 @@ class Popen:
             slot = self._handle = _process.reserve_handle()
         handle = _process.launch(self._prepared, args, executable, close_fds, restore_signals,
                                  cwd, env, shell, start_new_session, process_group, umask, pass_fds,
-                                 gids, preexec_fn, slot, self)
+                                 gid, gids, preexec_fn, slot, self)
         if slot is None:
             self._handle = handle
             self._child_created = True
