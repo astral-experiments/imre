@@ -329,7 +329,7 @@ impl Digest {
         unsafe { (self.provider.size)(self.md.as_ptr()) }
     }
 
-    pub(crate) fn pbkdf2(
+    pub(in crate::dynamic) fn pbkdf2(
         &self,
         password: &[u8],
         salt: &[u8],
