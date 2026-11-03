@@ -2324,6 +2324,24 @@ os.unlink(path)""")
         )
         compare("-I", "-c", scoped_import, "match", extra={"IMREFLAGS": "--bogus"})
         compare("-I", "-c", scoped_import, "inverse", extra={"IMREFLAGS": "--bogus"})
+        pipe_flags = (
+            "import sys\nout = sys.stdout\nerr = sys.stderr\n"
+            "print(out.isatty(), out.write_through, out.line_buffering)\n"
+            "print(err.isatty(), err.write_through, err.line_buffering)\n"
+        )
+        compare("-c", pipe_flags)
+        compare("-uc", pipe_flags)
+        invalid = "def wrong() -> int:\n    return 'bad'\n"
+        stream_report = (
+            "def report():\n    out = sys.stdout\n"
+            "    print(out.isatty(), out.write_through, out.line_buffering)\n"
+        )
+        print_report = "def report():\n    print(1, True)\n"
+        for definitions in (invalid + stream_report, stream_report + invalid, print_report + invalid):
+            rejected = run(imre, "-c", "import sys\n" + definitions + "report()\n")
+            assert rejected.returncode == 1 and not rejected.stdout, rejected
+            assert b"annotations are enforced contracts" in rejected.stderr, rejected.stderr
+
         stream_flags = (
             "import sys\n"
             "for f in (sys.stdin, sys.stdout, sys.stderr):\n"
