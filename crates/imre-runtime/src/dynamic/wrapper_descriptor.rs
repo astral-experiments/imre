@@ -166,7 +166,9 @@ impl BuiltinDescriptor {
             Some(("frozenset", attr)) if attr != "__class_getitem__" => {
                 Some(("frozenset", attr, builtins::set_methods("frozenset")))
             }
-            Some(("list", attr)) => Some(("list", attr, builtins::LIST_METHODS)),
+            Some(("list", attr)) if attr != "__new__" => {
+                Some(("list", attr, builtins::LIST_METHODS))
+            }
             Some(("range", attr)) => Some(("range", attr, range::METHODS)),
             Some((stdlib::fixed_structseq::SCHED_PARAM, attr)) => Some((
                 stdlib::fixed_structseq::SCHED_PARAM,
