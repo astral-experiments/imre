@@ -384,6 +384,11 @@ class SSLContext:
         _call(_imre_ssl.set_post_handshake_auth, self._ctx, enabled)
         self._post_handshake_auth = enabled
 
+    def session_stats(self, /):
+        if not issubclass(type(self), __class__):
+            _imre_ssl.raise_context_receiver_error("session_stats", self)
+        return _imre_ssl.session_stats(__class__._ctx.__get__(self))
+
     def cert_store_stats(self, /):
         if not issubclass(type(self), SSLContext):
             _imre_ssl.raise_context_receiver_error("cert_store_stats", self)

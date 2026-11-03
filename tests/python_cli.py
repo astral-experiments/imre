@@ -2762,6 +2762,8 @@ def report(text):
             except OSError:
                 pass
             else:
+                stats = fixtures / "ssl_session_stats.py"
+                compare("-IB", stats, native_args=("run", stats, "--quiet"), native_timeout=600)
                 ciphers = fixtures / "ssl_context_ciphers.py"
                 compare("-IB", ciphers, native_args=("run", ciphers, "--quiet"), native_timeout=600)
                 bio = fixtures / "ssl_memory_bio.py"

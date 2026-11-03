@@ -468,6 +468,31 @@ impl Context {
         Ok(())
     }
 
+    pub(super) fn session_stats(&self) -> [(&'static str, i64); 11] {
+        // SSL_CTX_sess_* are macros over SSL_CTX_ctrl. CPython exposes these
+        // SSL_CTRL_SESS_* counters in this order, omitting CB_HIT (28).
+        [
+            ("number", 20),
+            ("connect", 21),
+            ("connect_good", 22),
+            ("connect_renegotiate", 23),
+            ("accept", 24),
+            ("accept_good", 25),
+            ("accept_renegotiate", 26),
+            ("hits", 27),
+            ("misses", 29),
+            ("timeouts", 30),
+            ("cache_full", 31),
+        ]
+        .map(|(name, command)| {
+            // SAFETY: these read-only commands take no pointer or integer argument.
+            let count = unsafe {
+                (self.api.SSL_CTX_ctrl)(self.handle.as_ptr(), command, 0, ptr::null_mut())
+            };
+            (name, count as i64)
+        })
+    }
+
     pub(super) fn cert_store_stats(&self) -> Option<[c_int; 3]> {
         let api = self.api;
         let mut certificates = Vec::new();
