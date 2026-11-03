@@ -43,6 +43,27 @@ pub(super) fn call(
     };
     let mut obj = super::single_argument(name, param, args, kwargs)?;
     match name {
+        "_abstract_flags" => {
+            let target = ctx.weak_proxy_target(obj)?;
+            let abstract_class = match *ctx.heap.get(target) {
+                Value::Class {
+                    scope, metaclass, ..
+                } => {
+                    // The default type descriptor takes precedence over a class-body __flags__.
+                    if metaclass.is_some_and(|meta| {
+                        ctx.class_attr(meta, "__flags__").is_some()
+                            || ctx.class_attr(meta, "__getattribute__").is_some()
+                    }) {
+                        return ctx.lookup_attr(obj, "__flags__");
+                    }
+                    ctx.scope_data(scope).is_abstract
+                }
+                _ if ctx.is_type_object(target) => false,
+                // isinstance(obj, type) can also succeed through a reported __class__.
+                _ => return ctx.lookup_attr(obj, "__flags__"),
+            };
+            return Ok(ctx.int(if abstract_class { 1 << 20 } else { 0 }));
+        }
         "_native_data_descriptor" => {
             return Ok(if ctx.native_data_descriptor(obj) {
                 TRUE

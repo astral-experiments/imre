@@ -1502,6 +1502,7 @@ impl IntrinsicModule {
             (Self::Inspect, "isdatadescriptor") => {
                 Intrinsic::ScopedObjectExport("inspect.isdatadescriptor")
             }
+            (Self::Inspect, "isabstract") => Intrinsic::ScopedObjectExport("inspect.isabstract"),
             (Self::Inspect, "isasyncgen") => Intrinsic::ScopedObjectExport("inspect.isasyncgen"),
             (Self::Inspect, "isasyncgenfunction") => {
                 Intrinsic::ScopedObjectExport("inspect.isasyncgenfunction")
