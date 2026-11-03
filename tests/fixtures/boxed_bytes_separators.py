@@ -40,3 +40,27 @@ def current():
             cookie.rsplit(*args, **kwargs)
         except TypeError as error:
             print(str(error))
+
+    for binary in (bytes, bytearray):
+        data = binary(b"aaba")
+        source = bytearray(b"a")
+        replacement = bytearray(b"X")
+
+        class Limit:
+            def __index__(self):
+                for operand in (source, replacement):
+                    try:
+                        operand.append(0)
+                    except BufferError:
+                        pass
+                    else:
+                        raise AssertionError("the operand must remain exported")
+                source[0] = ord("b")
+                replacement[0] = ord("Y")
+                return 1
+
+        assert data.replace(source, replacement, Limit()) == b"aaYa"
+        source.append(0)
+        replacement.append(0)
+        print(data.replace(b"", b":", 2), data.replace(b"aa", b""))
+        print(data.replace(b"absent", b"x") is data)

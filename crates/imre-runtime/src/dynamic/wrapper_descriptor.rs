@@ -616,6 +616,10 @@ impl BuiltinDescriptor {
                     ("__reduce__", _) if stdlib::os::stat::layout(self.owner).is_some() => "($self, /)",
                     ("count", "__doc__") if self.owner == "tuple" => "Return number of occurrences of value.",
                     ("count", _) if self.owner == "tuple" => "($self, value, /)",
+                    ("replace", "__doc__") if matches!(self.owner, "bytes" | "bytearray") => {
+                        "Return a copy with all occurrences of substring old replaced by new.\n\n  count\n    Maximum number of occurrences to replace.\n    -1 (the default value) means replace all occurrences.\n\nIf the optional argument count is given, only the first count occurrences are\nreplaced."
+                    }
+                    ("replace", _) if matches!(self.owner, "bytes" | "bytearray") => "($self, old, new, count=-1, /)",
                     ("count", "__doc__") if self.owner == "bytes" => {
                         "Return the number of non-overlapping occurrences of subsection 'sub' in bytes B[start:end].\n\n  start\n    Optional start position. Default: start of the bytes.\n  end\n    Optional stop position. Default: end of the bytes."
                     }
