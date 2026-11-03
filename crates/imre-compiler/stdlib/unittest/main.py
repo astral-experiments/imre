@@ -29,6 +29,10 @@ def _convert_name(name):
     return name
 
 
+def _convert_select_pattern(pattern):
+    return pattern if "*" in pattern else "*" + pattern + "*"
+
+
 def _main_option(arg):
     # argparse recognizes a known option before treating strings with spaces as names.
     if arg[:2] in ("-k", "-v", "-q", "-f"):
@@ -77,7 +81,7 @@ def _parse_main_args(argv, options):
                 if pattern is None or _main_option(pattern):
                     print("argument -k: expected one argument", file=sys.stderr)
                     sys.exit(2)
-            patterns.append(pattern if "*" in pattern else "*" + pattern + "*")
+            patterns.append(_convert_select_pattern(pattern))
             break
     if extras:
         print("unrecognized arguments: " + " ".join(extras), file=sys.stderr)
@@ -136,6 +140,11 @@ class TestProgram(object):
         self.runTests()
 
     def parseArgs(self, argv):
+        if self.module is None and len(argv) > 1 and argv[1].lower() == "discover":
+            self._discovery_parser = self._make_discovery_parser()
+            self._do_discovery(argv[2:])
+            return
+
         options = _MainRunner()
         options.verbose = self.verbosity
         options.tb_locals = getattr(self, "tb_locals", False)
@@ -152,6 +161,11 @@ class TestProgram(object):
         self.failfast = options.failfast
         if self.testNamePatterns is None or patterns:
             self.testNamePatterns = patterns
+        if self.module is None and not self.tests:
+            self._discovery_parser = self._make_discovery_parser()
+            self._do_discovery([])
+            return
+
         if self.tests:
             self.testNames = [_convert_name(name) for name in self.tests]
         elif isinstance(self.defaultTest, str):
@@ -161,11 +175,41 @@ class TestProgram(object):
         else:
             self.testNames = None
 
-        if self.module is None and not self.tests:
-            self.start, self.pattern, self.top = ".", "test*.py", None
-            self.createTests(from_discovery=True, Loader=None)
-        else:
-            self.createTests()
+        self.createTests()
+
+    def _make_discovery_parser(self):
+        import argparse
+
+        parser = argparse.ArgumentParser(prog="%s discover" % self.progName)
+        parser.add_argument("-v", "--verbose", dest="verbosity", action="store_const", const=2)
+        parser.add_argument("-q", "--quiet", dest="verbosity", action="store_const", const=0)
+        parser.add_argument("--locals", dest="tb_locals", action="store_true")
+        parser.add_argument("--durations", type=int)
+        for short, long, attr in (("-f", "--failfast", "failfast"),
+                                  ("-c", "--catch", "catchbreak"),
+                                  ("-b", "--buffer", "buffer")):
+            if getattr(self, attr) is None:
+                parser.add_argument(short, long, dest=attr, action="store_true")
+                setattr(self, attr, False)
+        if self.testNamePatterns is None:
+            parser.add_argument("-k", dest="testNamePatterns", action="append",
+                                type=_convert_select_pattern)
+            self.testNamePatterns = []
+
+        parser.add_argument("-s", "--start-directory", dest="start")
+        parser.add_argument("-p", "--pattern", dest="pattern")
+        parser.add_argument("-t", "--top-level-directory", dest="top")
+        for attr in ("start", "pattern", "top"):
+            parser.add_argument(attr, nargs="?", default=argparse.SUPPRESS, help=argparse.SUPPRESS)
+        return parser
+
+    def _do_discovery(self, argv, Loader=None):
+        self.start, self.pattern, self.top = ".", "test*.py", None
+        if argv is not None:
+            if self._discovery_parser is None:
+                self._discovery_parser = self._make_discovery_parser()
+            self._discovery_parser.parse_args(argv, self)
+        self.createTests(from_discovery=True, Loader=Loader)
 
     def createTests(self, from_discovery=False, Loader=None):
         if self.testNamePatterns:

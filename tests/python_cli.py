@@ -1261,6 +1261,12 @@ def check_unittest_module_main(imre, root, run):
     assert with_locals.returncode == 1 and b"FAILED (failures=1, errors=1)" in with_locals.stderr, with_locals
     assert local_line in with_locals.stderr.splitlines(), with_locals
 
+    (package / "other.py").write_text("raise AssertionError('outside discovery pattern')\n")
+    discovered = run(imre, "-m", "unittest", "discover", "-v", "-s", package.name, "-t", ".",
+                     "-p", "sample.py", "-k", "Passing.test_one")
+    assert discovered.returncode == 0 and discovered.stdout == (passing + ".test_one\n").encode(), discovered
+    assert b"Ran 1 test in " in discovered.stderr, discovered
+
 
 def check_unittest_file_discovery(imre, root, run):
     entry = root / "discover_after_build.py"
