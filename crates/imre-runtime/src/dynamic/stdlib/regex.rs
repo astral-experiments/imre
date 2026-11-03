@@ -478,7 +478,7 @@ fn raw_pattern(pattern: &str, ascii: bool, flags: i64) -> Option<(String, bool, 
         pattern.contains("(?") && pattern.contains('u') && (ascii || pattern.contains('-'));
     let mut boundaries = Vec::new();
     let mut prefer_translation = false;
-    let mut possessive = false;
+    let mut prefer_backtracking = false;
     let mut result = String::with_capacity(pattern.len());
     let mut chars = pattern.chars().peekable();
     let mut in_class = false;
@@ -498,7 +498,7 @@ fn raw_pattern(pattern: &str, ascii: bool, flags: i64) -> Option<(String, bool, 
             }
             // The regular backend reads a possessive modifier as another repetition.
             // Ask the Python tokenizer to bind it to its operand.
-            possessive |= !in_class && matches!(c, '*' | '+' | '?') && chars.peek() == Some(&'+');
+            prefer_backtracking |= !in_class && matches!(c, '*' | '+' | '?') && chars.peek() == Some(&'+');
             if c == '{' && !in_class {
                 if !imre_regex::starts_counted_repeat(chars.clone()) {
                     prefer_translation = true;
@@ -506,7 +506,7 @@ fn raw_pattern(pattern: &str, ascii: bool, flags: i64) -> Option<(String, bool, 
                     let mut suffix = chars
                         .clone()
                         .skip_while(|c| c.is_ascii_digit() || *c == ',');
-                    possessive |= suffix.next() == Some('}') && suffix.next() == Some('+');
+                    prefer_backtracking |= suffix.next() == Some('}') && suffix.next() == Some('+');
                     if chars.peek() == Some(&',') {
                         // Python treats an omitted lower bound as zero, including in {,}.
                         result.push_str("{0");
@@ -514,9 +514,13 @@ fn raw_pattern(pattern: &str, ascii: bool, flags: i64) -> Option<(String, bool, 
                     }
                 }
             }
-            if c == '$' && !in_class && flags & MULTILINE == 0 && chars.peek().is_none() {
-                result.push_str(imre_regex::FINAL_NEWLINE_ANCHOR);
-                continue;
+            if c == '$' && !in_class && flags & MULTILINE == 0 {
+                if chars.peek().is_none() {
+                    result.push_str(imre_regex::FINAL_NEWLINE_ANCHOR);
+                    continue;
+                }
+                // Inside a pattern, the final newline must remain available to the suffix.
+                prefer_backtracking = true;
             }
             if c == '[' && !in_class {
                 in_class = true;
@@ -581,7 +585,7 @@ fn raw_pattern(pattern: &str, ascii: bool, flags: i64) -> Option<(String, bool, 
     if check_unicode && !raw_unicode_compatible(&result, ascii, &boundaries) {
         return None;
     }
-    Some((result, prefer_translation, possessive))
+    Some((result, prefer_translation, prefer_backtracking))
 }
 
 /// Report offsets in the user's spelling before byte escaping, case folding or verbose translation.
@@ -1144,7 +1148,7 @@ fn prepare(
         None => raw_pattern(&source, ascii, flags),
     };
     let prepared =
-        if let Some((raw, prefer_translation, possessive)) = raw {
+        if let Some((raw, prefer_translation, prefer_backtracking)) = raw {
             let original = || {
                 if let Some((msg, _)) = imre_regex::repeat_diagnostic(&source, flags & VERBOSE != 0) {
                     return Err(msg.to_owned());
@@ -1156,7 +1160,7 @@ fn prepare(
                     build(raw)
                 }
             };
-            let committed = possessive.then(|| backtrack(String::new()).ok()).flatten();
+            let committed = prefer_backtracking.then(|| backtrack(String::new()).ok()).flatten();
             match committed {
                 Some((source, Matcher::Lookahead(matcher))) if matcher.total_close_order() => {
                     Ok((source, Matcher::Lookahead(matcher)))
