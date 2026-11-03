@@ -370,9 +370,10 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("_codecs", "_imre_codec_functions") => ctx.builtin("_codecs._imre_codec_functions"),
         ("_codecs", "_imre_native_search") => ctx.builtin("encodings.search_function"),
         ("_io", "open_code") => ctx.builtin("io.open_code"),
-        ("math", "trunc" | "floor" | "ceil" | "modf" | "copysign" | "gcd" | "isnan" | "isqrt") => {
-            ctx.builtin(&format!("math.{name}"))
-        }
+        (
+            "math",
+            "trunc" | "floor" | "ceil" | "modf" | "copysign" | "gcd" | "isinf" | "isnan" | "isqrt",
+        ) => ctx.builtin(&format!("math.{name}")),
         ("enum", "auto") => ctx.enum_auto_class()?,
         ("enum", "Enum" | "Flag" | "IntEnum" | "IntFlag" | "StrEnum") => {
             ctx.builtin("enum.Enum.__copy__");
