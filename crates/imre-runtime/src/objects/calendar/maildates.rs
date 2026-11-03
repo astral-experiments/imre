@@ -205,8 +205,8 @@ pub(super) fn format_datetime(dt: &Object, usegmt: bool) -> Result<Str, Error> {
             offset.map_or_else(|| "-0000".to_owned(), |us| offset_text(us).replace(':', ""))
         };
         Ok(formatted(
-            date_fields(*local, 0),
-            (local.div_euclid(DAY) % 7) as usize,
+            local.fields(0),
+            (local.ordinal() - 1).rem_euclid(7) as usize,
             &zone,
         ))
     })

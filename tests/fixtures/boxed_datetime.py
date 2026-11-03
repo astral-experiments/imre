@@ -915,6 +915,32 @@ def test_calendar_reduction():
             if isinstance(value, (time, dt)):
                 assert restored.fold == (protocol >= 4)
         assert value.__reduce__() == value.__reduce_ex__(2)
+
+    state = b"\x07\xd1\x01\x20"  # January 32 in a packed date
+    packed_day = date(state)
+    february = date(2001, 2, 1)
+    assert packed_day.isoformat() == "2001-01-32"
+    assert packed_day.__reduce__() == (date, (state,))
+    assert packed_day < february and packed_day - february == timedelta()
+    assert packed_day.toordinal() == february.toordinal()
+    assert date(bytes([7, 209, 12, 60])).isocalendar()[:2] == (2002, 1)
+
+    invalid = b"\x31\x39\x03\x35\x2d\x30\x33\x2d\x32\x35"
+    obj = Moment(invalid)
+    assert (obj.year, obj.month, obj.day, obj.hour, obj.microsecond) == (12601, 3, 53, 45, 2961973)
+    assert type(obj) is Moment and obj.__reduce_ex__(4) == (Moment, (invalid,))
+    assert obj.isoformat() == "12601-03-53T45:48:51.2961973"
+    assert repr(obj) == "Moment(12601, 3, 53, 45, 48, 51, 2961973)"
+    folded = Moment(invalid[:2] + b"\x83" + invalid[3:], UTC)
+    assert folded.fold == 1 and folded.__reduce__() == (Moment, (invalid, UTC))
+    for checked in (obj.date, obj.time, obj.replace, lambda: hash(folded)):
+        try:
+            checked()
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("checked operation accepted invalid pickle components")
+
     assert date(b"\x07\xd0\x02\x1d".decode("latin1")) == date(2000, 2, 29)
     assert timedelta(microseconds=-1).__reduce_ex__(3) == (timedelta, (-1, 86399, 999999))
 
