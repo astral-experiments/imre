@@ -34,7 +34,7 @@ mod popen;
 mod preexec;
 mod shell_output;
 pub(super) use asynchronous::AsyncProcess;
-pub(crate) use popen::{BoxedPipe, BoxedPopen, BoxedPreparation, PreExec};
+pub(crate) use popen::{BoxedPipe, BoxedPopen, BoxedPreparation, ForkExec, PreExec};
 pub(super) use popen::{Popen, retain_live_owner};
 
 #[cfg(target_os = "linux")]
@@ -572,6 +572,7 @@ struct ChildAttributes {
     group: libc::pid_t,
     gid: libc::gid_t,
     extra_groups: Option<Vec<libc::gid_t>>,
+    uid: libc::uid_t,
     mask: Option<libc::mode_t>,
     keep: Vec<RawFd>,
 }
@@ -583,6 +584,7 @@ impl Default for ChildAttributes {
             group: -1,
             gid: libc::gid_t::MAX,
             extra_groups: None,
+            uid: libc::uid_t::MAX,
             mask: None,
             keep: Vec::new(),
         }
@@ -699,38 +701,34 @@ impl Launch {
                 return Err(io::Error::last_os_error());
             }
         }
-        // CPython treats (gid_t)-1 as inherited even if it came from a positive integer.
+        // CPython treats a native ID of -1 as inherited even if it came from a positive integer.
         if attributes.gid != libc::gid_t::MAX
             // SAFETY: only the forked child changes its real and effective group IDs.
             && unsafe { libc::setregid(attributes.gid, attributes.gid) } < 0
         {
             return Err(io::Error::last_os_error());
         }
+        if attributes.uid != libc::uid_t::MAX
+            // SAFETY: only the forked child changes its real and effective user IDs.
+            && unsafe { libc::setreuid(attributes.uid, attributes.uid) } < 0
+        {
+            return Err(io::Error::last_os_error());
+        }
         Ok(())
     }
 
-    /// Performs CPython's direct exec search, never libc execvp's shell fallback.
-    /// Returning an error lets Command report errno through its private pipe.
+    /// Finish descriptor setup and exec without allocating in the forked child.
     ///
     /// # Safety
-    /// Call only from Command::pre_exec after stdio and cwd setup. Every referenced
-    /// buffer was allocated in the parent; only async-signal-safe libc operations
-    /// and allocation-free OS-error construction are allowed until exec or _exit.
-    unsafe fn exec_child(
-        &mut self,
-        close_fds: bool,
-        attributes: &ChildAttributes,
-        inherited_pipe: Option<&libc::sigaction>,
-    ) -> io::Result<()> {
-        // SAFETY: the caller runs this routine only in Command's pre_exec child.
-        unsafe { Self::configure_child(attributes, inherited_pipe.is_none(), inherited_pipe)? };
+    /// Call only in the child after configuring stdio, cwd, signals and credentials.
+    unsafe fn exec_child(&mut self, close_fds: bool, keep: &[RawFd]) -> io::Result<()> {
         if close_fds {
             // SAFETY: the forked child owns its descriptor table.
             unsafe { self.descriptors.apply()? };
         }
         // A false-valued pass_fds iterable on the fork path can still yield descriptors.
         // SAFETY: this runs only after fork. No allocator or callback is used.
-        unsafe { pass_fds::inherit(&attributes.keep)? };
+        unsafe { pass_fds::inherit(keep)? };
         // SAFETY: all child settings have been applied.
         Err(unsafe { self.exec_image() })
     }
@@ -904,11 +902,12 @@ impl Launch {
                 if stderr == 5 && libc::dup2(libc::STDOUT_FILENO, libc::STDERR_FILENO) < 0 {
                     return Err(io::Error::last_os_error());
                 }
-                self.exec_child(
-                    streams & (1 << 17) == 0,
+                Self::configure_child(
                     &attributes,
+                    inherited_pipe.is_none(),
                     inherited_pipe.as_ref(),
-                )
+                )?;
+                self.exec_child(streams & (1 << 17) == 0, &attributes.keep)
             })
         };
         command.spawn()

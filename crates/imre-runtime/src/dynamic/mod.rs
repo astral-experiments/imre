@@ -2954,6 +2954,7 @@ impl Context {
                 "ttyname",
                 "getegid",
                 "setregid",
+                "setreuid",
                 #[cfg(target_os = "linux")]
                 "getresgid",
                 #[cfg(target_os = "linux")]

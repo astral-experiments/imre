@@ -177,7 +177,8 @@ impl BoxedPopen {
         keep: Vec<RawFd>,
         gid: libc::gid_t,
         extra_groups: Option<Vec<libc::gid_t>>,
-        preexec: Option<&mut dyn PreExec>,
+        uid: libc::uid_t,
+        fork_exec: Option<ForkExec<'_>>,
     ) -> std::result::Result<Self, BoxedLaunchError> {
         let mut words = Words::new(8);
         words
@@ -220,7 +221,7 @@ impl BoxedPopen {
         }
         let mut site = None;
         let mut extras = LaunchExtras {
-            preexec,
+            fork_exec,
             prepared: Some(handles),
             failure_site: Some(&mut site),
             direct,
@@ -231,6 +232,7 @@ impl BoxedPopen {
                 group: process_group,
                 gid,
                 extra_groups,
+                uid,
                 mask: (umask >= 0).then_some(umask as libc::mode_t),
                 keep,
             }),

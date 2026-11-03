@@ -533,7 +533,7 @@ pub(in crate::dynamic) mod xattr;
 
 /// POSIX functions exported as the same builtins by both os and posix.
 pub(super) fn is_descriptor_function(name: &str) -> bool {
-    if matches!(name, "getpgid" | "setpgid" | "setregid") {
+    if matches!(name, "getpgid" | "setpgid" | "setregid" | "setreuid") {
         return cfg!(unix);
     }
     if name == "_exit" {
@@ -1111,7 +1111,7 @@ pub(super) fn descriptor(
         return Ok(ctx.int(i64::from(group)));
     }
     #[cfg(unix)]
-    if matches!(name, "setpgid" | "setregid") {
+    if matches!(name, "setpgid" | "setregid" | "setreuid") {
         if !kwargs.is_empty() {
             return Err(Error::new(
                 "TypeError",
@@ -1127,9 +1127,14 @@ pub(super) fn descriptor(
         if name == "setpgid" {
             native::setpgid(c_int(ctx, *first)?, c_int(ctx, *second)?)?;
         } else {
-            let real = chown::owner_id(ctx, *first, true)? as libc::gid_t;
-            let effective = chown::owner_id(ctx, *second, true)? as libc::gid_t;
-            native::setregid(real, effective)?;
+            let is_group = name == "setregid";
+            let real = chown::owner_id(ctx, *first, is_group)?;
+            let effective = chown::owner_id(ctx, *second, is_group)?;
+            if is_group {
+                native::setregid(real as libc::gid_t, effective as libc::gid_t)?;
+            } else {
+                native::setreuid(real as libc::uid_t, effective as libc::uid_t)?;
+            }
         }
         return Ok(NONE);
     }

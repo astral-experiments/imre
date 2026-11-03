@@ -128,7 +128,7 @@ pub(super) unsafe fn spawn(
     streams: u32,
     mut redirects: popen::Redirects<'_>,
     allow_spawn: bool,
-    preexec: Option<popen::CallbackLaunch<'_>>,
+    fork_launch: Option<popen::ForkLaunch<'_>>,
     child_attributes: impl FnOnce(bool) -> Result<ChildAttributes>,
 ) -> Result<popen::LaunchedChild> {
     let modes = [12, 0, 4].map(|shift| (streams >> shift) & 15);
@@ -142,7 +142,7 @@ pub(super) unsafe fn spawn(
     // SAFETY: the original command and configuration are still rooted.
     unsafe { validate_command_shape(cmd, config) }
         .map_err(|e| popen::error_after_handles(pending, false, e))?;
-    let direct = preexec.is_none()
+    let direct = fork_launch.is_none()
         && redirects.direct.unwrap_or_else(|| {
             allow_spawn
                 && uses_posix_spawn(
@@ -204,7 +204,7 @@ pub(super) unsafe fn spawn(
         return Err(popen::error_after_handles(pending, false, c_int_overflow()));
     }
     let failure_site = redirects.failure_site.take();
-    let result = if let Some(hook) = preexec {
+    let result = if let Some(fork_launch) = fork_launch {
         if modes[0] == 5
             || redirects
                 .prepared
@@ -217,7 +217,7 @@ pub(super) unsafe fn spawn(
                 launch,
                 cwd.as_deref(),
                 streams,
-                hook,
+                fork_launch,
                 redirects.prepared.take(),
                 &attributes,
             ) {

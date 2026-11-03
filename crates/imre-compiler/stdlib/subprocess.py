@@ -221,6 +221,23 @@ def _get_extra_group_ids(extra_groups):
     return gids
 
 
+def _get_user_id(user):
+    import os
+    if not hasattr(os, "setreuid"):
+        raise ValueError("The 'user' parameter is not supported on the current platform")
+    if isinstance(user, str):
+        try:
+            import pwd
+        except ImportError:
+            raise ValueError("The user parameter cannot be a string on systems without the pwd module")
+        user = pwd.getpwnam(user).pw_uid
+    elif not isinstance(user, int):
+        raise TypeError("User must be a string or an integer")
+    if user < 0:
+        raise ValueError(f"User ID cannot be negative, got {user}")
+    return user
+
+
 def _fork_fds(pass_fds):
     return sorted(map(int, set(pass_fds)))
 
@@ -233,7 +250,7 @@ class Popen:
     def __init__(self, args, bufsize=-1, executable=None, stdin=None, stdout=None,
                  stderr=None, preexec_fn=None, *, close_fds=True, shell=False, cwd=None, env=None, restore_signals=True, pass_fds=(),
                  universal_newlines=None, encoding=None, errors=None, text=None, start_new_session=False,
-                 umask=-1, pipesize=-1, process_group=None, startupinfo=None, creationflags=0, group=None, extra_groups=None):
+                 umask=-1, pipesize=-1, process_group=None, startupinfo=None, creationflags=0, group=None, extra_groups=None, user=None):
         if bufsize is None:
             bufsize = -1
         if not isinstance(bufsize, int):
@@ -274,6 +291,7 @@ class Popen:
         self.stdin = self.stdout = self.stderr = None
         gid = None if group is None else _get_group_id(group)
         gids = None if extra_groups is None else _get_extra_group_ids(extra_groups)
+        uid = None if user is None else _get_user_id(user)
         prepared, fds = _process.prepare(stdin, stdout, stderr, bufsize, pipesize)
         failed = True
         try:
@@ -294,7 +312,7 @@ class Popen:
             self._replacement_output = None
             self._execute_child(args, executable, preexec_fn, close_fds, pass_fds, cwd, env,
                                 startupinfo, creationflags, shell, *fds, restore_signals,
-                                gid, gids, None, umask, start_new_session,
+                                gid, gids, uid, umask, start_new_session,
                                 -1 if process_group is None else process_group)
             failed = False
         except BaseException:
@@ -314,15 +332,13 @@ class Popen:
                        start_new_session, process_group):
         if (p2cread, p2cwrite, c2pread, c2pwrite, errread, errwrite) != self._pipe_fds:
             raise NotImplementedError("replacing prepared subprocess descriptors is unsupported")
-        if uid is not None:
-            raise NotImplementedError("unsupported subprocess child settings")
         slot = None
-        if preexec_fn is not None:
-            # A parent signal can run before the launch call returns to Python.
+        if preexec_fn is not None or gid is not None or gids is not None or uid is not None:
+            # Child setup can fail after fork. Keep its real pid and wait status.
             slot = self._handle = _process.reserve_handle()
         handle = _process.launch(self._prepared, args, executable, close_fds, restore_signals,
                                  cwd, env, shell, start_new_session, process_group, umask, pass_fds,
-                                 gid, gids, preexec_fn, slot, self)
+                                 gid, gids, uid, preexec_fn, slot, self)
         if slot is None:
             self._handle = handle
             self._child_created = True
