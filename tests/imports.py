@@ -94,6 +94,23 @@ REJECTED = {
             "print(urlopen('data:,hello').read(), typed('wrong'))\n"
         ),
     }, "invalid-argument-type"),
+    "optional_probe_with_additional_binding": ({
+        "main.py": "from probe import other\n",
+        "probe.py": (
+            "try:\n    import sys\n    result = (other := sys.maxsize)\n"
+            "except (ImportError, AttributeError):\n    result = 0\n"
+            "import os\n"
+        ),
+    }, "imports must precede executable module statements"),
+    "optional_probe_checks_typed_calls": ({
+        "main.py": "from probe import users\nprint(users)\n",
+        "probe.py": (
+            "def take(value: int) -> int: return value\n"
+            "try:\n    import pwd\n    users = [take('wrong') for u in pwd.getpwall()]\n"
+            "except (ImportError, AttributeError):\n    users = []\n"
+            "import sys\n"
+        ),
+    }, "invalid-argument-type"),
     "optional_from_keeps_typed_call_check": ({
         "main.py": (
             "try:\n    from os.path import basename as leaf\nexcept ImportError:\n    leaf = None\n"
@@ -707,6 +724,23 @@ ACCEPTED = {
             "print(parent.provider is not None)\n"
         ),
         "main.py": "from helper import value\nprint(value())\n",
+    },
+    "optional_stdlib_probe_in_dependency": {
+        "main.py": "from pkg.probe import witness\nprint(witness.checked)\n",
+        "pkg/__init__.py": "",
+        "pkg/probe.py": (
+            "import sys\n"
+            "try:\n    import pwd as accounts\n    users = [u.pw_uid for u in accounts.getpwall()]\n"
+            "except (ImportError, AttributeError):\n    users = []\n"
+            "try:\n    import math as numbers\n    from math import pi, missing_value\n"
+            "except ImportError:\n    numbers = None\n    pi = missing_value = sys.maxsize\n"
+            "from . import witness\n"
+        ),
+        "pkg/witness.py": (
+            "from importlib import import_module\n"
+            "probe = import_module('pkg.probe')\n"
+            "checked = (isinstance(probe.users, list), probe.numbers is None, probe.pi == probe.missing_value)\n"
+        ),
     },
     "optional_stdlib_from_in_dependency": {
         "main.py": "from pkg.consumer import witness\nprint(witness.checked)\n",
@@ -1442,8 +1476,9 @@ def main() -> None:
                     command.append("--sanitize")
                 # Optimizing these bundled-module integration cases can take several minutes.
                 slow_optimized = name in {
-                    "email_address_parsers", "filesystem_resources", "fractions_indirect", "platform_iot_indirect",
-                    "record_warnings", "warn_named_helper", "zip_source_spec",
+                    "email_address_parsers", "filesystem_resources", "fractions_indirect",
+                    "optional_stdlib_probe_in_dependency", "platform_iot_indirect", "record_warnings",
+                    "warn_named_helper", "zip_source_spec",
                 }
                 timeout = 300 if slow_optimized and level > 0 else build_timeout
                 require_success(run(command, temporary, timeout=timeout))
