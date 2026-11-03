@@ -188,8 +188,7 @@ pub(super) fn resolve(
             definition,
             node,
             [base, mixin].map(|parent| parent.map(|id| (id, classes[id].as_ref().unwrap()))),
-            exceptions.layouts.contains(&definition),
-            &exceptions.ids,
+            exceptions,
             &mut decorators,
         );
         if !decorators.has_runtime_method
