@@ -4780,18 +4780,8 @@ impl Context {
                                 }
                                 Some(if odd { x } else { 0.0 })
                             } else if x < 0.0 && y.fract() != 0.0 {
-                                let magnitude = (-x).powf(y);
-                                if magnitude.is_infinite() {
-                                    return Err(Error::new(
-                                        "OverflowError",
-                                        "complex exponentiation",
-                                    ));
-                                }
-                                let phase = std::f64::consts::PI * y;
-                                return Ok(self.alloc(Value::Complex(super::complex::Complex {
-                                    real: magnitude * phase.cos(),
-                                    imag: magnitude * phase.sin(),
-                                })));
+                                let base = super::complex::Complex::from(x);
+                                return Ok(self.alloc(Value::Complex(base.power(y.into())?)));
                             } else {
                                 let magnitude = x.abs().powf(y);
                                 if magnitude.is_infinite() {
@@ -4998,7 +4988,7 @@ impl Context {
         let method = if matches!(
             (name, self.heap.get(obj)),
             (
-                "__mul__" | "__rmul__" | "__truediv__" | "__rtruediv__",
+                "__mul__" | "__rmul__" | "__truediv__" | "__rtruediv__" | "__pow__" | "__rpow__",
                 Value::Complex(_)
             ) | ("__lt__" | "__le__" | "__gt__" | "__ge__", Value::Deque(_))
                 | ("__xor__" | "__rxor__", Value::Set { .. })
@@ -5173,7 +5163,12 @@ impl Context {
     }
 
     /// Compare the attributes on the two classes after applying descriptor binding.
-    fn reflected_slot_overridden(&mut self, left: Id, right: Id, name: &str) -> Result<bool> {
+    pub(super) fn reflected_slot_overridden(
+        &mut self,
+        left: Id,
+        right: Id,
+        name: &str,
+    ) -> Result<bool> {
         let right = match self.lookup_attr(right, name) {
             Ok(slot) => slot,
             Err(error) if self.is_attribute_error(&error) => return Ok(false),
@@ -5398,11 +5393,11 @@ impl Context {
                 .into_iter()
                 .any(|id| matches!(self.heap.get(self.scalar_value(id)), Value::Set { .. }));
         let dict_union = op == "|" && [a, b].into_iter().any(|id| self.dict_storage(id).is_some());
-        if set_xor || dict_union || matches!(op, "*" | "/") {
+        if set_xor || dict_union || matches!(op, "*" | "/" | "**") {
             for (value, class) in [(a, &mut ac), (b, &mut bc)] {
                 if matches!(
                     (op, self.heap.get(value)),
-                    ("*" | "/", Value::Complex(_))
+                    ("*" | "/" | "**", Value::Complex(_))
                         | ("^", Value::Set { .. })
                         | ("|", Value::Dict(_) | Value::DefaultDict { .. })
                 ) {
@@ -5461,7 +5456,7 @@ impl Context {
             ));
         }
         let reflected_first = if let (Some(ac), Some(bc)) = (ac, bc) {
-            let complex_pair = matches!(op, "*" | "/")
+            let complex_pair = matches!(op, "*" | "/" | "**")
                 && [a, b]
                     .into_iter()
                     .all(|id| matches!(self.heap.get(self.scalar_value(id)), Value::Complex(_)));

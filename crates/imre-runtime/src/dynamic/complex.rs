@@ -10,12 +10,20 @@ pub(super) const METHODS: &[&str] = &[
     "__rmul__",
     "__truediv__",
     "__rtruediv__",
+    "__pow__",
+    "__rpow__",
 ];
 
 #[derive(Clone, Copy, PartialEq)]
 pub(super) struct Complex {
     pub real: f64,
     pub imag: f64,
+}
+
+impl From<f64> for Complex {
+    fn from(real: f64) -> Self {
+        Self { real, imag: 0.0 }
+    }
 }
 
 impl Complex {
@@ -189,6 +197,58 @@ impl Complex {
         Ok(result)
     }
 
+    /// Small integer powers use repeated squaring. Other exponents use the principal argument.
+    pub(super) fn power(self, exponent: Self) -> Result<Self> {
+        let domain_error =
+            || Error::new("ZeroDivisionError", "zero to a negative or complex power");
+        let result = if exponent.imag == 0.0
+            && exponent.real.trunc() == exponent.real
+            && exponent.real.abs() <= 100.0
+        {
+            let mut n = exponent.real.abs() as u32;
+            let mut factor = self;
+            let mut result = Self::from(1.0);
+            while n != 0 {
+                if n & 1 != 0 {
+                    result = result.product(factor);
+                }
+                n >>= 1;
+                factor = factor.product(factor);
+            }
+            if exponent.real < 0.0 {
+                Self::quotient(1.0, Some(0.0), result).map_err(|_| domain_error())?
+            } else {
+                result
+            }
+        } else if self.real == 0.0 && self.imag == 0.0 {
+            if exponent.imag != 0.0 || exponent.real < 0.0 {
+                return Err(domain_error());
+            }
+            Self::from(0.0)
+        } else {
+            let radius = self.real.hypot(self.imag);
+            let argument = self.imag.atan2(self.real);
+            let mut length = radius.powf(exponent.real);
+            let mut phase = argument * exponent.real;
+            if exponent.imag != 0.0 {
+                length *= (-argument * exponent.imag).exp();
+                phase += exponent.imag * radius.ln();
+            }
+            // CPython propagates libm's domain error for sin or cos of an infinite phase.
+            if phase.is_infinite() {
+                return Err(domain_error());
+            }
+            Self {
+                real: length * phase.cos(),
+                imag: length * phase.sin(),
+            }
+        };
+        if result.is_infinite() {
+            return Err(Error::new("OverflowError", "complex exponentiation"));
+        }
+        Ok(result)
+    }
+
     pub(super) fn repr(self) -> String {
         let imag = crate::floats::render(self.imag);
         let imag = imag.strip_suffix(".0").unwrap_or(&imag);
@@ -344,6 +404,32 @@ impl Context {
             }
             _ => false,
         }
+    }
+
+    /// Convert the two numeric operands before rejecting a non-None modulus.
+    pub(super) fn complex_power(
+        &mut self,
+        base: Id,
+        exponent: Id,
+        modulus: Option<Id>,
+    ) -> Result<Option<Id>> {
+        let number = |id| {
+            let value = self.scalar_value(id);
+            match self.heap.get(value) {
+                Value::Complex(z) => Ok(Some(*z)),
+                _ => self.real_component(value).map(|n| n.map(Complex::from)),
+            }
+        };
+        let Some(base) = number(base)? else {
+            return Ok(None);
+        };
+        let Some(exponent) = number(exponent)? else {
+            return Ok(None);
+        };
+        if modulus.is_some_and(|value| value != super::value::NONE) {
+            return Err(Error::new("ValueError", "complex modulo"));
+        }
+        Ok(Some(self.alloc(Value::Complex(base.power(exponent)?))))
     }
 
     /// Keep real operands real during complex arithmetic, preserving signed zeros and infinities.
