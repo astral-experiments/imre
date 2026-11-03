@@ -1388,6 +1388,25 @@ def main():
             assert expected.returncode == actual.returncode == 0, (expected.stderr, actual.stderr)
             assert actual.stdout == expected.stdout and actual.stderr == expected.stderr == b""
 
+        async_scope = root / "async_scope.py"
+        for imports, factory in (
+            ("from contextlib import nullcontext", "nullcontext"),
+            ("from contextlib import nullcontext as scope", "scope"),
+            ("import contextlib as ctx", "ctx.nullcontext"),
+        ):
+            async_scope.write_text(
+                f"{imports}\n"
+                "async def value() -> int:\n"
+                f"    async with {factory}(enter_result=23) as entered:\n"
+                "        return entered\n"
+                "try:\n"
+                "    value().send(None)\n"
+                "except StopIteration as finished:\n"
+                "    print(finished.value)\n"
+            )
+            actual = run(imre, "run", async_scope, "--quiet")
+            assert (actual.returncode, actual.stdout, actual.stderr) == (0, b"23\n", b""), actual.stderr
+
         exit_stack_import = root / "stack.py"
         exit_stack_import.write_text("from contextlib import ExitStack\n"
                                      "s = ExitStack()\nprint(isinstance(s, ExitStack))\n"
