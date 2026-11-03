@@ -315,7 +315,7 @@ impl Context {
             let winner = self.select_class_metaclass(
                 &bases,
                 Some(explicit_meta.unwrap_or(type_class)),
-                None,
+                self.module_value("typing", "_TypedDictMeta"),
                 false,
             )?;
             if bases
