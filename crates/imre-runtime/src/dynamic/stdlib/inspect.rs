@@ -73,6 +73,27 @@ pub(super) fn call(
                 .ok_or_else(|| super::Error::new("TypeError", "expected a parameter dictionary"))?;
             return Ok(ctx.alloc(Value::MappingProxy(storage)));
         }
+        "_frame_position" => match *ctx.heap.get(obj) {
+            Value::Traceback { .. } => return Ok(super::traceback::tb_position(ctx, obj)),
+            Value::PythonFrame { lineno, .. } => {
+                let fields = match ctx.frame_position(obj) {
+                    Some(range) => range.map(|v| ctx.int(i64::from(v))),
+                    None => [
+                        ctx.int(i64::from(lineno)),
+                        super::NONE,
+                        super::NONE,
+                        super::NONE,
+                    ],
+                };
+                return Ok(ctx.alloc(Value::Tuple(fields.to_vec())));
+            }
+            _ => {
+                return Err(super::Error::new(
+                    "TypeError",
+                    "expected a frame or traceback",
+                ));
+            }
+        },
         "_signature_layout" => return layout(ctx, obj),
         _ => {}
     }
