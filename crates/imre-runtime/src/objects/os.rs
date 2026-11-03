@@ -771,6 +771,18 @@ pub(crate) fn openpty() -> Result<[i32; 2]> {
     Ok(pair.map(OwnedFd::into_raw_fd))
 }
 
+/// Open a non-inheritable PTY master.
+#[cfg(target_os = "linux")]
+pub(crate) fn posix_openpt(flags: i32) -> Result<i32> {
+    use std::os::fd::{AsRawFd, FromRawFd, IntoRawFd, OwnedFd};
+    // SAFETY: posix_openpt takes integer flags and transfers a new descriptor on success.
+    let fd = checked(unsafe { libc::posix_openpt(flags | libc::O_CLOEXEC) })?;
+    // SAFETY: checked success gives us sole ownership of the open master.
+    let fd = unsafe { OwnedFd::from_raw_fd(fd) };
+    INHERITABLE.update(fd.as_raw_fd(), false)?;
+    Ok(fd.into_raw_fd())
+}
+
 /// Return both descriptors after establishing the requested flags on each end.
 pub(crate) fn pipe(flags: libc::c_int) -> Result<[i32; 2]> {
     let mut fds = [-1; 2];

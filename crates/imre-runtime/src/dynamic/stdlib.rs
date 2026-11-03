@@ -1704,7 +1704,9 @@ pub(super) fn call(
         return os::stat::construct(ctx, layout, args, kwargs);
     }
     #[cfg(target_os = "linux")]
-    if let Some(op @ ("pipe2" | "ptsname")) = name.strip_prefix("posix.") {
+    if let Some(op @ ("pipe2" | "posix_openpt" | "grantpt" | "unlockpt" | "ptsname")) =
+        name.strip_prefix("posix.")
+    {
         return os::descriptor(ctx, op, args, kwargs);
     }
     #[cfg(target_os = "linux")]

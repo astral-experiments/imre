@@ -2945,6 +2945,9 @@ impl Context {
                     "get_terminal_size",
                     "lockf",
                     "posix_fadvise",
+                    "posix_openpt",
+                    "grantpt",
+                    "unlockpt",
                     "ptsname",
                     "preadv",
                     "pwritev",
@@ -3058,6 +3061,9 @@ impl Context {
                     }
                     for attr in [
                         "get_terminal_size",
+                        "posix_openpt",
+                        "grantpt",
+                        "unlockpt",
                         "ptsname",
                         "preadv",
                         "pwritev",

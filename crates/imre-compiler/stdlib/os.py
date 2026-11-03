@@ -30,7 +30,8 @@ if sys.platform == "linux":
     from posix import RWF_APPEND, RWF_DSYNC, RWF_HIPRI, RWF_NOWAIT, RWF_SYNC, preadv, pwritev
     from posix import SPLICE_F_MORE, SPLICE_F_MOVE, SPLICE_F_NONBLOCK, splice
     import posix as _posix
-    from posix import O_NOCTTY, get_terminal_size, pipe2, ptsname, readv, tcgetpgrp, ttyname, writev
+    from posix import O_NOCTTY, grantpt, posix_openpt, ptsname, unlockpt
+    from posix import get_terminal_size, pipe2, readv, tcgetpgrp, ttyname, writev
     for _name in vars(_posix):
         if _name.startswith(("RTLD_", "POSIX_SPAWN_", "SCHED_")) or _name in (
             "sched_getscheduler", "sched_param",
