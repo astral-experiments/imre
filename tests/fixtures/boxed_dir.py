@@ -183,7 +183,26 @@ def set_directories():
             raise AssertionError("accepted a receiver of the opposite set type")
 
 
+def callable_directories():
+    class Owner:
+        def method(self):
+            pass
+
+    fn = Owner.method
+    bound = Owner().method
+    fn.marker = 1
+    for value in (fn, bound):
+        assert dir(value) == sorted([*dir(type(value)), "marker"])
+    assert {"__code__", "__annotate__", "__name__"} <= set(dir(fn))
+    assert {"__self__", "__func__"} <= set(dir(bound))
+    assert "__name__" not in dir(bound)
+    del fn.marker
+    assert "marker" not in dir(bound)
+    assert "bit_length" in dir(0) and dir(0) == dir(int)
+
+
 def current():
+    callable_directories()
     weak_proxy_directory()
     import _io
     tuple_directories()

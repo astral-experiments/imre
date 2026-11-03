@@ -102,6 +102,10 @@ fn object_names(ctx: &mut Context, object: Id) -> Result<Id> {
         {
             ctx.builtin("builtin_function_or_method")
         }
+        Value::Function { .. } => return namespace_directory(ctx, object, true),
+        Value::Method { .. } if ctx.builtin_type_name(object) == Some("method") => {
+            return namespace_directory(ctx, object, true);
+        }
         value if value.is_weak_proxy() => return namespace_directory(ctx, object, true),
         Value::Class { .. } if ctx.has_base(object, "tuple") => {
             return namespace_directory(ctx, object, false);
@@ -117,6 +121,7 @@ fn object_names(ctx: &mut Context, object: Id) -> Result<Id> {
         | Value::DequeIterator { .. }
         | Value::Union(_)
         | Value::Dict(_)
+        | Value::Int(_)
         | Value::MappingProxy(_)
         | Value::Tuple(_)
         | Value::List(_)
@@ -236,7 +241,7 @@ fn contributes_dict_descriptor(ctx: &mut Context, class: Id, mapping: Id) -> Res
 
 /// Merge each reported namespace before reading its bases, as in object.__dir__.
 fn merge_class_names(ctx: &mut Context, class: Id, dictionary: Id) -> Result<()> {
-    if matches!(ctx.heap.get(class), Value::Native(name) if name != "object" && super::is_builtin_type(name))
+    if matches!(ctx.heap.get(class), Value::Native(name) if name != "object" && (super::is_builtin_type(name) || matches!(name.as_str(), "function" | "method")))
     {
         let mut names = BTreeSet::new();
         class_names(ctx, class, &mut names)?;
@@ -431,6 +436,8 @@ fn class_names(ctx: &Context, class: Id, names: &mut BTreeSet<String>) -> Result
             if matches!(
                 name.as_str(),
                 "builtin_function_or_method"
+                    | "function"
+                    | "method"
                     | "dict"
                     | "list"
                     | "str"
@@ -441,6 +448,27 @@ fn class_names(ctx: &Context, class: Id, names: &mut BTreeSet<String>) -> Result
         {
             class_names(ctx, ctx.builtins["object"], names)?;
             let (methods, slots): (&[&str], &[&str]) = match name.as_str() {
+                "function" => (
+                    &[],
+                    &[
+                        "__annotate__",
+                        "__annotations__",
+                        "__builtins__",
+                        "__call__",
+                        "__closure__",
+                        "__code__",
+                        "__defaults__",
+                        "__dict__",
+                        "__get__",
+                        "__globals__",
+                        "__kwdefaults__",
+                        "__module__",
+                        "__name__",
+                        "__qualname__",
+                        "__type_params__",
+                    ],
+                ),
+                "method" => (&[], &["__call__", "__func__", "__get__", "__self__"]),
                 "builtin_function_or_method" => (
                     &[],
                     &[
