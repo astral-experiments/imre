@@ -805,6 +805,30 @@ pub extern "C" fn imre_os_isatty(fd: usize) -> i32 {
     finish(c_int(fd).map(|fd| i32::from(isatty(fd))), 0)
 }
 
+/// Resolve a terminal descriptor with Linux's reentrant, caller-buffer interface.
+#[cfg(target_os = "linux")]
+pub(crate) fn ttyname(fd: i32) -> Result<Vec<u8>> {
+    // SAFETY: this sysconf selector takes no pointers.
+    let size = unsafe { libc::sysconf(libc::_SC_TTY_NAME_MAX) };
+    if size == -1 {
+        return Err(errno_error(io::Error::last_os_error()));
+    }
+    let mut bytes = Vec::<u8>::new();
+    bytes
+        .try_reserve_exact(size as usize)
+        .map_err(|_| Error::memory_error())?;
+    bytes.resize(size as usize, 0);
+    // SAFETY: libc checks the borrowed fd and writes at most the supplied buffer length.
+    let status = unsafe { libc::ttyname_r(fd, bytes.as_mut_ptr().cast(), bytes.len()) };
+    if status != 0 {
+        return Err(errno_error(io::Error::from_raw_os_error(status)));
+    }
+    // SAFETY: ttyname_r NUL-terminates the returned device name on success.
+    let name = unsafe { CStr::from_ptr(bytes.as_ptr().cast()) };
+    bytes.truncate(name.to_bytes().len());
+    Ok(bytes)
+}
+
 /// Return the raw slave pathname supplied by the Linux PTY interface.
 #[cfg(target_os = "linux")]
 pub(crate) fn ptsname(fd: i32) -> io::Result<Vec<u8>> {

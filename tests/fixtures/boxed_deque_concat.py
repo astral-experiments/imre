@@ -60,6 +60,17 @@ def current():
     else:
         raise AssertionError("accepted a non-deque copy result")
 
+    long_allocator = type("A" * 199 + "é", (Allocator,), {})
+    result_type = type("B" * 198 + "é!", (), {})
+    long_named = long_allocator()
+    long_named.append(result_type())
+    try:
+        long_named + left
+    except TypeError as exc:
+        assert str(exc) == "A" * 199 + "() must return a deque, not " + "B" * 198 + "é"
+    else:
+        raise AssertionError("accepted a non-deque copy result")
+
     class Mask:
         @property
         def __class__(self):

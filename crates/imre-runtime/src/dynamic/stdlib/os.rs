@@ -57,6 +57,8 @@ pub(in crate::dynamic) fn install_capabilities(
                 "chown",
                 "listdir",
                 "scandir",
+                #[cfg(target_os = "linux")]
+                "pathconf",
                 "stat",
                 #[cfg(target_os = "linux")]
                 "statvfs",
@@ -508,7 +510,10 @@ pub(super) fn is_descriptor_function(name: &str) -> bool {
     if name == "_exit" {
         return cfg!(unix);
     }
-    if matches!(name, "device_encoding" | "fchdir" | "pread" | "pwrite" | "readinto") {
+    if matches!(
+        name,
+        "device_encoding" | "fchdir" | "fsync" | "pread" | "pwrite" | "readinto"
+    ) {
         return cfg!(unix);
     }
     matches!(
@@ -558,12 +563,14 @@ pub(super) fn is_descriptor_function(name: &str) -> bool {
                 name,
                 "copy_file_range"
                     | "get_terminal_size"
+                    | "ttyname"
                     | "preadv"
                     | "pwritev"
                     | "readv"
                     | "writev"
                     | "splice"
                     | "lockf"
+                    | "fdatasync"
                     | "mknod"
                     | "posix_fadvise"
                     | "posix_fallocate"
@@ -1001,17 +1008,26 @@ pub(super) fn descriptor(
     if name == "utime" {
         return utime::call(ctx, args, kwargs);
     }
-    if name == "fchdir" {
+    let fd_call: Option<unsafe extern "C" fn(i32) -> i32> = match name {
+        "fchdir" => Some(libc::fchdir),
+        "fsync" => Some(libc::fsync),
+        #[cfg(target_os = "linux")]
+        "fdatasync" => Some(libc::fdatasync),
+        _ => None,
+    };
+    if let Some(call) = fd_call {
         let [Some(fd)] = builtins::bind_builtin_arguments(name, args, kwargs, ["fd"], 1)? else {
-            unreachable!("fchdir requires a descriptor");
+            unreachable!("a descriptor is required");
         };
         stat::warn_bool_fd(ctx, fd)?;
         let fd = super::select::fd(ctx, fd)?;
-        let audit_fd = ctx.int(i64::from(fd));
-        super::audit::event(ctx, "os.chdir", &[audit_fd])?;
+        if name == "fchdir" {
+            let audit_fd = ctx.int(i64::from(fd));
+            super::audit::event(ctx, "os.chdir", &[audit_fd])?;
+        }
         loop {
-            // SAFETY: fchdir borrows the descriptor and checks it in the kernel.
-            if unsafe { libc::fchdir(fd) } == 0 {
+            // SAFETY: these calls borrow the descriptor and validate it in the kernel.
+            if unsafe { call(fd) } == 0 {
                 return Ok(NONE);
             }
             let error = std::io::Error::last_os_error();
@@ -1263,19 +1279,23 @@ pub(super) fn descriptor(
         ));
     }
     #[cfg(target_os = "linux")]
-    if name == "ptsname" {
+    if matches!(name, "ptsname" | "ttyname") {
         let [fd] = args else {
             return Err(Error::new(
                 "TypeError",
                 format!(
-                    "posix.ptsname() takes exactly one argument ({} given)",
+                    "posix.{name}() takes exactly one argument ({} given)",
                     args.len()
                 ),
             ));
         };
-        stat::warn_bool_fd(ctx, *fd)?;
-        let fd = super::select::fd(ctx, *fd)?;
-        let bytes = native::ptsname(fd).map_err(super::os_error)?;
+        let bytes = if name == "ttyname" {
+            native::ttyname(c_int(ctx, *fd)?)?
+        } else {
+            stat::warn_bool_fd(ctx, *fd)?;
+            let fd = super::select::fd(ctx, *fd)?;
+            native::ptsname(fd).map_err(super::os_error)?
+        };
         let codec = crate::objects::Codec::lookup(crate::sys::filesystem_encoding()?.as_str())?;
         return Ok(ctx.text_codepoints(codec.decode_filesystem(&bytes)?));
     }

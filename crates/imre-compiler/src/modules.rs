@@ -28,8 +28,6 @@ mod type_aliases;
 
 pub(crate) type ModuleId = usize;
 
-const KEYWORD_SOURCE: &str = include_str!("../stdlib/keyword.py");
-
 /// Mode constants and operations from the target's POSIX stat provider.
 fn stat_mode_source() -> Option<&'static str> {
     macro_rules! modes {
@@ -152,7 +150,10 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
                 include_str!("../stdlib/csv/sniffer.py"),
             ),
         )),
-        "copy" => Some(("copy.py", include_str!("../stdlib/copy.py"))),
+        "copy" => Some((
+            "copy.py",
+            include_str!("../../../benchmarks/cpython_stdlib/full/copy/upstream/Lib/copy.py"),
+        )),
         "copyreg" => Some(("copyreg.py", include_str!("../stdlib/copyreg.py"))),
         "dis" => Some(("dis.py", include_str!("../stdlib/dis.py"))),
         "opcode" => Some(("opcode.py", include_str!("../stdlib/opcode.py"))),
@@ -269,7 +270,10 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
             include_str!("../stdlib/encodings/writer_charmap.py"),
         )),
         "codeop" => Some(("codeop.py", include_str!("../stdlib/codeop.py"))),
-        "keyword" => Some(("keyword.py", KEYWORD_SOURCE)),
+        "keyword" => Some((
+            "keyword.py",
+            include_str!("../../../benchmarks/cpython_stdlib/full/keyword/upstream/Lib/keyword.py"),
+        )),
         "token" => Some(("token.py", include_str!("../stdlib/token.py"))),
         "tokenize" => Some((
             "tokenize.py",
@@ -314,7 +318,12 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
                 "\n",
                 include_str!("../stdlib/contextlib_nullcontext.py"),
                 "\n",
+                "class _BaseExitStack:\n",
+                include_str!("../stdlib/contextlib_exitstack_base.inc"),
+                "\n",
                 include_str!("../stdlib/contextlib_exitstack.py"),
+                "\n",
+                include_str!("../stdlib/contextlib_async_exitstack.py"),
                 "\n",
                 include_str!("../stdlib/contextlib_redirect.py"),
                 "\n",
@@ -578,6 +587,7 @@ pub(crate) enum IntrinsicModule {
     Posix,
     OsPath,
     GenericPath,
+    NtPath,
     PosixPath,
     Urllib,
     UrllibParse,
@@ -1112,6 +1122,7 @@ impl IntrinsicModule {
             "posix" if cfg!(unix) => Some(Self::Posix),
             "os.path" => Some(Self::OsPath),
             "genericpath" => Some(Self::GenericPath),
+            "ntpath" => Some(Self::NtPath),
             "posixpath" => Some(Self::PosixPath),
             "email" => Some(Self::Email),
             "email._header_value_parser" => Some(Self::EmailHeaderValueParser),
@@ -1183,6 +1194,10 @@ impl IntrinsicModule {
     }
 
     pub(crate) fn symbol(self, name: &str) -> Option<Binding> {
+        // The bundled ntpath binds platform-dependent names during module initialization.
+        if self == Self::NtPath {
+            return Some(Binding::ConditionalValue);
+        }
         if self == Self::DatetimeNative {
             return Self::Datetime.symbol(name);
         }
@@ -1300,6 +1315,9 @@ impl IntrinsicModule {
             (Self::Ast, "iter_fields") => Intrinsic::ObjectRuntimeExport("ast.iter_fields"),
             (Self::Ast, "NodeVisitor") => Intrinsic::ObjectRuntimeExport("ast.NodeVisitor"),
             (Self::Ast, "NodeTransformer") => Intrinsic::ObjectRuntimeExport("ast.NodeTransformer"),
+            (Self::Ast, "Import") => Intrinsic::ObjectRuntimeExport("ast.Import"),
+            (Self::Ast, "ImportFrom") => Intrinsic::ObjectRuntimeExport("ast.ImportFrom"),
+            (Self::Ast, "alias") => Intrinsic::ObjectRuntimeExport("ast.alias"),
             (Self::Ast, "TemplateStr") => Intrinsic::ObjectRuntimeExport("ast.TemplateStr"),
             (Self::Ast, "Interpolation") => Intrinsic::ObjectRuntimeExport("ast.Interpolation"),
             (Self::Ast, "literal_eval") => Intrinsic::ObjectRuntimeExport("ast.literal_eval"),
@@ -1479,6 +1497,9 @@ impl IntrinsicModule {
             }
             (Self::ImportlibResourcesAbc, "Traversable") => {
                 Intrinsic::ObjectRuntimeExport("importlib.resources.abc.Traversable")
+            }
+            (Self::ImportlibReaders | Self::ImportlibResourceReaders, "FileReader") => {
+                Intrinsic::ObjectRuntimeExport("importlib.resources.readers.FileReader")
             }
             (Self::ImportlibReaders | Self::ImportlibResourceReaders, "ZipReader") => {
                 Intrinsic::ObjectRuntimeExport("importlib.resources.readers.ZipReader")
@@ -1707,6 +1728,9 @@ impl IntrinsicModule {
             (Self::Inspect, "markcoroutinefunction") => Intrinsic::InspectCoroutine { mark: true },
             (Self::Inspect, "_sentinel") => Intrinsic::InspectSentinel,
             (Self::Contextlib, "contextmanager") => Intrinsic::ContextManager,
+            (Self::Contextlib, "ContextDecorator") => {
+                Intrinsic::ObjectRuntimeExport("contextlib.ContextDecorator")
+            }
             (Self::Contextlib, "redirect_stdout") => {
                 Intrinsic::ObjectRuntimeExport("contextlib.redirect_stdout")
             }
@@ -1714,12 +1738,20 @@ impl IntrinsicModule {
                 Intrinsic::ObjectRuntimeExport("contextlib.redirect_stderr")
             }
             (Self::Contextlib, "suppress") => Intrinsic::ObjectRuntimeExport("contextlib.suppress"),
+            (Self::Contextlib, "AsyncExitStack") => {
+                Intrinsic::ObjectRuntimeExport("contextlib.AsyncExitStack")
+            }
             (Self::Contextlib, "AbstractAsyncContextManager") => {
                 Intrinsic::ObjectRuntimeExport("contextlib.AbstractAsyncContextManager")
             }
+            (Self::Contextlib, "aclosing") => Intrinsic::ObjectRuntimeExport("contextlib.aclosing"),
             (Self::Contextlib, "closing") => Intrinsic::ObjectRuntimeExport("contextlib.closing"),
             (Self::Contextlib, "nullcontext") => Intrinsic::NullContext,
             (Self::Warnings, "warn") => Intrinsic::ObjectRuntimeExport("warnings.warn"),
+            (Self::Warnings, "warn_explicit") => {
+                Intrinsic::ObjectRuntimeExport("warnings.warn_explicit")
+            }
+            (Self::Warnings, "deprecated") => Intrinsic::ObjectRuntimeExport("warnings.deprecated"),
             (Self::Warnings, "simplefilter") => Intrinsic::WarningFilter { simple: true },
             (Self::Warnings, "filterwarnings") => Intrinsic::WarningFilter { simple: false },
             (Self::Warnings, "catch_warnings") => Intrinsic::CatchWarnings,
@@ -2003,6 +2035,12 @@ impl IntrinsicModule {
             (Self::Sys, "exit") => Intrinsic::SysExit,
             (Self::Sys, "__displayhook__") => Intrinsic::SysDisplayHook,
             (Self::LoggingHandlers, "TimedRotatingFileHandler") => Intrinsic::TimedFileHandler,
+            (Self::LoggingHandlers, "QueueHandler") => {
+                Intrinsic::ScopedObjectExport("logging.handlers.QueueHandler")
+            }
+            (Self::LoggingHandlers, "QueueListener") => {
+                Intrinsic::ScopedObjectExport("logging.handlers.QueueListener")
+            }
             (Self::Datetime, "time") => Intrinsic::ClockTime,
             (Self::Datetime, "date") => Intrinsic::Calendar(crate::ir::CalendarType::Date),
             (Self::Datetime, "datetime") => Intrinsic::Calendar(crate::ir::CalendarType::DateTime),
@@ -2175,6 +2213,7 @@ impl IntrinsicModule {
             (Self::Typing | Self::CollectionsAbc, "Iterator") => Intrinsic::Iterator,
             (Self::Io, "UnsupportedOperation") => Intrinsic::UnsupportedOperation,
             (Self::Gzip, "open") => Intrinsic::GzipOpen,
+            (Self::Types, "GenericAlias") => Intrinsic::ScopedObjectExport("types.GenericAlias"),
             (Self::Types, "DynamicClassAttribute") => {
                 Intrinsic::ObjectRuntimeExport("types.DynamicClassAttribute")
             }
@@ -2858,6 +2897,9 @@ impl IntrinsicModule {
             (Self::PosixPath, "normcase") => Intrinsic::PosixNormcase,
             (Self::Os, "devnull") => Intrinsic::StringConstant("/dev/null"),
             (Self::Os | Self::OsPath | Self::PosixPath, "extsep") => Intrinsic::StringConstant("."),
+            (Self::Os | Self::OsPath | Self::PosixPath, "pardir") => {
+                Intrinsic::StringConstant("..")
+            }
             (Self::GenericPath | Self::PosixPath, "commonprefix") => {
                 Intrinsic::ObjectRuntimeExport("genericpath.commonprefix")
             }
@@ -4584,7 +4626,7 @@ impl<'a> Loader<'a> {
                     }
                 }
                 ast::Stmt::Try(guard)
-                    if id == 0
+                    if (id == 0 || self.partial_source(id))
                         && !executable
                         && self.modules[id].entry_globals.is_empty()
                         && let Some((module, name)) =
@@ -5197,6 +5239,7 @@ impl<'a> Loader<'a> {
             self.needs_object_imports |= matches!(
                 module,
                 IntrinsicModule::Ast
+                    | IntrinsicModule::NtPath
                     | IntrinsicModule::Blake2
                     | IntrinsicModule::OperatorNative
                     | IntrinsicModule::Sha3
@@ -5262,7 +5305,11 @@ impl<'a> Loader<'a> {
             .then_some((
                 CONTEXTLIB_EXIT_STACK,
                 concat!(
+                    // The typed layout uses one inheritance chain for the two stack bases.
                     "from contextlib import AbstractContextManager\n",
+                    "class _BaseExitStack(AbstractContextManager):\n",
+                    include_str!("../stdlib/contextlib_exitstack_base.inc"),
+                    "\n",
                     include_str!("../stdlib/contextlib_exitstack.py")
                 ),
             )),
@@ -5434,7 +5481,6 @@ impl<'a> Loader<'a> {
                     include_str!("../stdlib/doctest_typed.py"),
                 ),
             )),
-            "keyword" => Some(("keyword.py", KEYWORD_SOURCE)),
             "pkgutil" => Some(("pkgutil.py", include_str!("../stdlib/pkgutil.py"))),
             "zipimport" if cfg!(unix) => Some((
                 "zipimport.py",
@@ -5724,7 +5770,7 @@ fn stdlib_top_level(name: &str) -> bool {
         || vendored.is_file(format!("stdlib/{name}/__init__.pyi").as_str())
 }
 
-/// An optional module import may occur between ordinary imports in the entry prefix.
+/// A source module can probe a standard library module before its next import.
 fn optional_stdlib_import<'a>(
     modules: &[SourceModule],
     module: ModuleId,

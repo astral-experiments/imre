@@ -820,14 +820,32 @@ pub(super) unsafe extern "C" fn imre_dyn_register(
     file: *const c_char,
     code: Code,
 ) {
-    // SAFETY: all inputs come from generated module definitions in the same binary.
+    // SAFETY: earlier native code supplies the same static names and initializer, without text.
+    unsafe { imre_dyn_register_source(ctx, name, file, std::ptr::null(), 0, code) }
+}
+
+/// Register a compiled initializer and the exact Python text of a bundled provider.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_register_source(
+    ctx: *mut Context,
+    name: *const c_char,
+    file: *const c_char,
+    text: *const u8,
+    len: u64,
+    code: Code,
+) {
+    // SAFETY: module names and filenames are static compiler-emitted strings.
     let (ctx, name, file) = unsafe { (&mut *ctx, cstr(name), cstr(file)) };
+    // SAFETY: non-null text points to a static source constant with exactly len bytes.
+    let bundled_text =
+        (!text.is_null()).then(|| unsafe { std::slice::from_raw_parts(text, len as usize) });
     ctx.sources
         .entry(name.to_owned())
         .or_default()
         .push(SourceModule {
             path: file.into(),
             code,
+            bundled_text,
         });
 }
 
@@ -910,6 +928,17 @@ pub(super) unsafe extern "C" fn imre_dyn_finish(ctx: *mut Context) -> i32 {
     // Exit callbacks run before Python enters its finalization phase.
     ctx.finalizing
         .store(true, std::sync::atomic::Ordering::Release);
+    ctx.heap.discarded_shutdown_write = Some(false);
+    ctx.heap.release_temporaries_since(mark);
+    if let Err(error) = ctx.release_main_at_shutdown() {
+        super::unraisable::report(
+            &mut ctx,
+            error,
+            false,
+            None,
+            "Exception ignored during main module cleanup",
+        );
+    }
     if let Err(error) = ctx.finalize_shutdown_resources() {
         super::unraisable::report(
             &mut ctx,
@@ -921,7 +950,7 @@ pub(super) unsafe extern "C" fn imre_dyn_finish(ctx: *mut Context) -> i32 {
     }
     stdlib::io::prepare_writer_shutdown(&ctx);
     crate::fault_handler::disable();
-    if status == 0 && stdlib::io::has_pending_callback_write(&ctx) {
+    if status == 0 && ctx.heap.has_pending_callback_write() {
         use std::io::Write;
 
         let _ = writeln!(
@@ -1564,6 +1593,16 @@ pub(super) unsafe extern "C" fn imre_dyn_assignment_target(
     if ctx.heap.assignment_target(live, replaced == TRUE) {
         ctx.collect_unreachable();
     }
+}
+
+/// Move the executing frame to an implicit call site without releasing statement temporaries.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_set_statement_line(ctx: *mut Context, line: u32) {
+    // SAFETY: the generated caller owns the context and has entered a statement.
+    let ctx = unsafe { &mut *ctx };
+    ctx.heap.set_statement_line(line);
+    ctx.heap
+        .replace_expression(value::ExpressionPosition::Statement);
 }
 
 #[unsafe(no_mangle)]

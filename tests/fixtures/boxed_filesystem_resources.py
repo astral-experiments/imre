@@ -1,5 +1,8 @@
 from io import BytesIO
 from importlib import resources
+from importlib.readers import FileReader
+from importlib.resources.readers import FileReader as ResourcesFileReader
+from pathlib import Path
 from importlib.resources import contents, is_resource, open_binary, open_text
 import warnings
 from importlib.resources.abc import ResourceReader, Traversable, TraversableResources, TraversalError
@@ -41,7 +44,13 @@ class LegacyReader:
         return BytesIO(b'caf\xc3\xa9\n')
 
 
+loader_reader = data.__spec__.loader.get_resource_reader(data.__name__)
+assert type(loader_reader) is FileReader is ResourcesFileReader
+assert isinstance(loader_reader, TraversableResources)
 root = resources.files(data)
+assert root == Path(data.__file__).parent
+with resources.as_file(root) as local:
+    assert local is root
 assert isinstance(root, Traversable)
 assert not isinstance(object(), Traversable)
 assert Traversable.joinpath(root, 'nested/message.txt').read_bytes() == b'hello\n'

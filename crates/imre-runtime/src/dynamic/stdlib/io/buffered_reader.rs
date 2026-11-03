@@ -217,6 +217,11 @@ fn append(out: &mut Vec<u8>, bytes: &[u8]) -> Result<()> {
 }
 
 impl Reader {
+    pub(super) fn pending_update(&self) -> Option<Id> {
+        self.update.as_ref()?.dirty.get()?;
+        self.raw.get()
+    }
+
     fn get(ctx: &Context, receiver: Id) -> Result<Rc<Self>> {
         match ctx.heap.get(receiver) {
             Value::Instance {
@@ -620,12 +625,6 @@ impl Reader {
             Ok(ctx.int(pos))
         })
     }
-}
-
-pub(super) fn pending_update(ctx: &Context, receiver: Id) -> Option<Id> {
-    let reader = Reader::get(ctx, receiver).ok()?;
-    reader.update.as_ref()?.dirty.get()?;
-    reader.raw.get()
 }
 
 pub(super) fn initialized_raw(ctx: &Context, receiver: Id) -> Option<Id> {

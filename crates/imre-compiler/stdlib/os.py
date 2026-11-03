@@ -11,7 +11,7 @@ from _collections_abc import _check_methods
 from _collections_abc import Mapping as _Mapping, MutableMapping as _MutableMapping
 from posix import _create_environ, abort, access, environ as _environ, fspath, getcwd, getcwdb, getpgid, getppid, kill, listdir, mkdir, putenv, read, scandir, setpgid, terminal_size, unsetenv, waitpid, write, WNOHANG
 from types import GenericAlias
-from posix import O_NONBLOCK, O_RDONLY, chdir, close, closerange, fchdir, open, rmdir, stat, truncate
+from posix import O_NONBLOCK, O_RDONLY, chdir, close, closerange, fchdir, fsync, open, rmdir, stat, truncate
 
 try:
     from posix import getpgrp
@@ -24,15 +24,19 @@ except ImportError:
     pass
 
 if sys.platform == "linux":
+    from posix import fdatasync
     from posix import F_LOCK, F_TEST, F_TLOCK, F_ULOCK, lockf
     from posix import MFD_CLOEXEC, memfd_create
     from posix import RWF_APPEND, RWF_DSYNC, RWF_HIPRI, RWF_NOWAIT, RWF_SYNC, preadv, pwritev
     from posix import SPLICE_F_MORE, SPLICE_F_MOVE, SPLICE_F_NONBLOCK, splice
     import posix as _posix
-    from posix import O_NOCTTY, get_terminal_size, pipe2, ptsname, readv, writev
+    from posix import O_NOCTTY, get_terminal_size, pipe2, ptsname, readv, ttyname, writev
     for _name in vars(_posix):
-        if _name.startswith("RTLD_") or _name.startswith("POSIX_SPAWN_") or _name in (
+        if _name.startswith(("RTLD_", "POSIX_SPAWN_", "SCHED_")) or _name in (
+            "sched_getscheduler", "sched_param",
             "posix_spawn", "posix_spawnp", "sched_get_priority_min", "sched_get_priority_max", "sched_yield",
+            "sched_getaffinity", "sched_setaffinity", "sched_rr_get_interval",
+            "sched_getparam", "sched_setparam", "sched_setscheduler",
         ):
             globals()[_name] = getattr(_posix, _name)
     del _name, _posix
@@ -41,14 +45,14 @@ if sys.platform == "linux":
         POSIX_FADV_DONTNEED, POSIX_FADV_NOREUSE, POSIX_FADV_NORMAL, POSIX_FADV_RANDOM,
         POSIX_FADV_SEQUENTIAL, POSIX_FADV_WILLNEED, posix_fadvise, posix_fallocate,
     )
-    from posix import (
-        sched_getscheduler, sched_param, SCHED_BATCH, SCHED_DEADLINE, SCHED_FIFO, SCHED_IDLE,
-        SCHED_NORMAL, SCHED_OTHER, SCHED_RESET_ON_FORK, SCHED_RR,
-    )
     from posix import major, makedev, minor, mknod
     from posix import EFD_CLOEXEC, EFD_NONBLOCK, EFD_SEMAPHORE, eventfd, eventfd_read, eventfd_write
 
 if sys.platform == "linux":
+    try:
+        from posix import getgrouplist
+    except ImportError:
+        pass
     from posix import (
         XATTR_CREATE, XATTR_REPLACE, XATTR_SIZE_MAX, getxattr, listxattr, removexattr, setxattr,
     )
@@ -61,6 +65,7 @@ for _name in ("getegid", "getresgid", "getresuid"):
 del _name, _posix
 
 curdir = path.curdir
+pardir = path.pardir
 defpath = path.defpath
 extsep = path.extsep
 

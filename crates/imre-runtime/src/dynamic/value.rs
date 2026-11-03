@@ -827,6 +827,7 @@ pub(super) struct ExecGlobals {
 #[derive(Clone)]
 pub(super) struct BoxedTextFile {
     pub(super) file: crate::objects::TextFile,
+    pub(super) finalizing: bool,
     pub(super) line_buffering: bool,
     pub(super) buffer: Option<Id>,
 }
@@ -1002,6 +1003,10 @@ pub(super) enum Value {
         origin: Id,
     },
     CoroutineWrapper(Id),
+    ANextAwaitable {
+        wrapped: Id,
+        default: Id,
+    },
     Generator {
         owner: FrameOwner,
         frame: Option<Id>,
@@ -1203,6 +1208,7 @@ pub(super) enum Value {
         name: &'static str,
         unsupported: Id,
     },
+    ProcessPreparation(std::rc::Rc<std::cell::RefCell<crate::objects::BoxedPreparation>>),
     ProcessHandle {
         child: crate::objects::BoxedPopen,
         reported: bool,
@@ -1311,6 +1317,7 @@ impl Value {
             Self::ByteArray(_) => "bytearray",
             Self::File(_) | Self::TextFile(_) => return self.native_io_class_name(),
             Self::ProcessHandle { .. } => "_imre_subprocess.Handle",
+            Self::ProcessPreparation(_) => "_imre_subprocess.Prepared",
             Self::BufferedRandom(..) => "_io.BufferedRandom",
             Self::GenericAliasIterator(_) => "generic_alias_iterator",
             Self::SequenceIterator { .. } => "iterator",
@@ -1349,6 +1356,7 @@ impl Value {
             Self::Generator { .. } => "generator",
             Self::Coroutine { .. } => "coroutine",
             Self::CoroutineWrapper(_) => "coroutine_wrapper",
+            Self::ANextAwaitable { .. } => "anext_awaitable",
             Self::NoDefault => "NoDefaultType",
             Self::TypeAlias { .. } => "typing.TypeAliasType",
             Self::Class { .. } => "type",
@@ -1443,6 +1451,7 @@ impl Value {
             | Self::Native(_)
             | Self::Scope(_)
             | Self::LoopIterator { .. }
+            | Self::ProcessPreparation(_)
             | Self::ProcessHandle { .. }
             | Self::Yielded(_) => false,
             Self::Tuple(items) => !items.is_empty(),
@@ -1607,6 +1616,7 @@ impl Value {
             Self::Cell(value) => visit.extend(value),
             Self::Coroutine { frame, origin } => visit.extend([*frame, *origin]),
             Self::CoroutineWrapper(coroutine) => visit.push(*coroutine),
+            Self::ANextAwaitable { wrapped, default } => visit.extend([*wrapped, *default]),
             Self::Function {
                 closure,
                 scope,
@@ -1883,6 +1893,7 @@ impl Value {
             | Self::NoDefault
             | Self::PartialPlaceholder
             | Self::TokenMissing
+            | Self::ProcessPreparation(_)
             | Self::ProcessHandle { .. } => {}
             #[cfg(unix)]
             Self::TlsContext(_) | Self::TlsSession(_) => {}
@@ -2311,6 +2322,8 @@ pub(super) struct Heap {
     file_writers: Vec<Id>,
     // Weak registrations. The slot remembers prior finalization across resurrection.
     ordinary_finalizers: Vec<Id>,
+    // During shutdown, remember if a sweep discarded unflushed Python-backed output.
+    pub(super) discarded_shutdown_write: Option<bool>,
     // Non-owning positions of a frame, its bound-method operand, and a receiver field.
     caller_finalizer_field: Option<(usize, usize, usize)>,
 }
@@ -2415,12 +2428,49 @@ impl Heap {
             collect_next_statement: false,
             file_writers: Vec::new(),
             ordinary_finalizers: Vec::new(),
+            discarded_shutdown_write: None,
             caller_finalizer_field: None,
         };
         for id in 0..heap.slots.len() {
             heap.gc_order.push(id, &heap.slots);
         }
         heap
+    }
+
+    /// The builtin mapping payload is independent of a subclass instance's attributes.
+    pub(super) fn dict_storage(&self, value: Id) -> Option<Id> {
+        match self.get(value) {
+            Value::Dict(_) | Value::DefaultDict { .. } => Some(value),
+            Value::Instance { dictionary, .. } => *dictionary,
+            _ => None,
+        }
+    }
+
+    pub(super) fn dict_entries(&self, value: Id) -> Option<&[(Id, Id)]> {
+        match self.get(self.dict_storage(value)?) {
+            Value::Dict(entries) | Value::DefaultDict { entries, .. } => Some(entries),
+            _ => unreachable!("dictionary payload"),
+        }
+    }
+
+    pub(super) fn dict_named_item(&self, dict: Id, name: &str) -> Option<Id> {
+        self.dict_entries(dict)?.iter().find_map(|&(key, value)| {
+            matches!(self.get(key), Value::Str(k) if k == name).then_some(value)
+        })
+    }
+
+    /// Look up native backing fields on either side of ordinary dictionary materialization.
+    pub(super) fn raw_instance_field(&self, obj: Id, name: &str) -> Option<Id> {
+        let Value::Instance {
+            fields, namespace, ..
+        } = self.get(obj)
+        else {
+            return None;
+        };
+        fields
+            .get(name)
+            .copied()
+            .or_else(|| self.dict_named_item((*namespace)?, name))
     }
 
     pub fn weak_references(&self, target: Id) -> &[Id] {
@@ -2991,13 +3041,23 @@ impl Heap {
 
     /// A scalar and a container of scalars cannot hold an output file.
     pub(super) fn could_own_finalizer(&self, id: Id, skip_bound: bool) -> bool {
-        if self.finalizer_free_scalar(id) || (skip_bound && self.bound_in_active_frame(id)) {
+        self.could_release(id, skip_bound, |id| self.finalizer_free_scalar(id))
+    }
+
+    /// Dropping a callback result can also clear a weak reference to a native callable.
+    pub(super) fn could_release_callback_result(&self, id: Id) -> bool {
+        self.could_release(id, true, |id| match self.get(id) {
+            Value::Native(_) => self.weak_references(id).is_empty(),
+            _ => self.finalizer_free_scalar(id),
+        })
+    }
+
+    fn could_release(&self, id: Id, skip_bound: bool, inert: impl Fn(Id) -> bool) -> bool {
+        if inert(id) || (skip_bound && self.bound_in_active_frame(id)) {
             return false;
         }
         match self.get(id) {
-            Value::List(values) | Value::Tuple(values) => {
-                values.iter().any(|&item| !self.finalizer_free_scalar(item))
-            }
+            Value::List(values) | Value::Tuple(values) => values.iter().any(|&item| !inert(item)),
             Value::Dict(entries) => !entries.is_empty(),
             _ => true,
         }
@@ -3666,7 +3726,7 @@ impl Heap {
         self.set_statement_line(line);
     }
 
-    /// A match statement can execute separate pattern and guard expressions in one step.
+    /// Update the current source line without crossing a statement boundary.
     pub(super) fn set_statement_line(&mut self, line: u32) {
         let frame = self.frames.last_mut().unwrap();
         frame
@@ -4109,7 +4169,29 @@ impl Heap {
         self.full_collection = None;
     }
 
+    pub(super) fn has_pending_callback_write(&self) -> bool {
+        self.discarded_shutdown_write == Some(true)
+            || self
+                .slots
+                .iter()
+                .filter_map(|slot| slot.value.as_ref())
+                .any(|value| super::stdlib::io::pending_callback_write(self, value))
+    }
+
     fn sweep(&mut self) -> Option<WeakCallbacks> {
+        // Finalizers have had their chance to flush or resurrect the writer. Check its
+        // actual buffer before recycling any slot, including its raw stream or class.
+        if self.discarded_shutdown_write == Some(false)
+            && self.slots.iter().zip(&self.traces).any(|(slot, mark)| {
+                mark.get() == UNMARKED
+                    && slot
+                        .value
+                        .as_ref()
+                        .is_some_and(|value| super::stdlib::io::pending_callback_write(self, value))
+            })
+        {
+            self.discarded_shutdown_write = Some(true);
+        }
         for id in &mut self.borrowed_hooks {
             if self.traces[*id as usize].get() == UNMARKED {
                 *id = NONE;

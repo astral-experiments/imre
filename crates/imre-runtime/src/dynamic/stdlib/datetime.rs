@@ -308,18 +308,7 @@ fn calendar(ctx: &Context, obj: Id, class: &str) -> Option<Calendar> {
     }
 }
 
-pub(in crate::dynamic) fn type_name(ctx: &Context, value: Id) -> std::borrow::Cow<'_, str> {
-    if let Value::Calendar { value, .. } = ctx.heap.get(value) {
-        return format!("datetime.{}", value.class()).into();
-    }
-    ctx.heap
-        .get(value)
-        .instance_class()
-        .map(|class| ctx.class_name(class))
-        .or_else(|| ctx.builtin_type_name(value))
-        .unwrap_or_else(|| ctx.type_name(value))
-        .into()
-}
+pub(in crate::dynamic) use super::diagnostic_type_name as type_name;
 
 /// Return a fixed zone's stored offset or name after validating its datetime argument.
 fn fixed_zone_method(

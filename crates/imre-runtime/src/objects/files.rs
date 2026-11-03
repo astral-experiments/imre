@@ -23,6 +23,7 @@ mod text_memory;
 pub(crate) use seekable::Memory;
 pub(super) use seekable::disk_offset;
 
+pub(super) use buffered::decode_text_lines;
 pub(crate) use buffered::peek_bytes;
 use buffered::{Input, Output};
 

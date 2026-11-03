@@ -1,5 +1,6 @@
 //! Apply public dictionary and INI configuration to live native logger objects.
 
+use super::super::codecs::CodecInfo;
 use super::super::exceptions::{Result, push_string_repr, string_repr, write_string_repr};
 use super::super::json::readonly::document::Value;
 use super::{Error, Int, Kind, LOGGERS, Object, Str, finish, levels, object, state};
@@ -523,42 +524,9 @@ fn file_config(path: &str, disable: bool, encoding: Option<&Str>) -> Result<()> 
             Error::string_key(Str::from("formatters"))
         }
     })?;
-    let encoding = encoding
-        .map(|s| s.to_ascii_lowercase())
-        .unwrap_or_else(|| "utf-8".into());
-    let source = match encoding.as_str() {
-        "utf-8" | "utf8" | "utf_8" => String::from_utf8(bytes).map_err(|err| {
-            let reason = err.utf8_error();
-            super::super::bytes::decode_owned_error(
-                crate::BytesOwner::new(err.into_bytes()),
-                reason,
-            )
-        })?,
-        "latin-1" | "latin1" | "iso-8859-1" => {
-            let capacity = bytes.len() + bytes.iter().filter(|b| !b.is_ascii()).count();
-            let mut text = String::new();
-            text.try_reserve_exact(capacity)
-                .map_err(|_| Error::allocation())?;
-            text.extend(bytes.into_iter().map(char::from));
-            text
-        }
-        _ => return Err(unsupported(&format!("file encoding {encoding}"))),
-    };
-    let source = if source.contains('\r') {
-        let mut bytes = source.into_bytes();
-        let mut previous_cr = false;
-        bytes.retain_mut(|byte| {
-            let skip = previous_cr && *byte == b'\n';
-            previous_cr = *byte == b'\r';
-            if previous_cr {
-                *byte = b'\n';
-            }
-            !skip
-        });
-        String::from_utf8(bytes).expect("normalizing ASCII line endings preserves UTF-8")
-    } else {
-        source
-    };
+    let encoding = crate::sys::file_encoding(encoding.map(Str::as_str));
+    let codec = CodecInfo::lookup(&encoding)?.codec();
+    let source = super::super::files::decode_text_lines(&bytes, codec)?;
     let sections = ini(&source, path)?;
     let section = |name: &str| {
         sections

@@ -68,6 +68,38 @@ impl Checker<'_> {
         if crate::classes::defines_pickle_reducer(node) {
             return Err(self.object_runtime_export("pickle reducers", node));
         }
+        if let Some(base) = node
+            .arguments
+            .iter()
+            .flat_map(|args| &args.args)
+            .find(|base| {
+                self.graph
+                    .session
+                    .is_collections_storage_base(self.module, base)
+            })
+        {
+            return Err(self.scoped_builtin_error("collections storage subclasses", base));
+        }
+        if let Some(base) = node
+            .arguments
+            .iter()
+            .flat_map(|args| &args.args)
+            .find(|base| {
+                matches!(
+                    self.resolve(base),
+                    Some(crate::modules::Binding::Intrinsic(
+                        Intrinsic::ObjectRuntimeExport("contextlib.ContextDecorator")
+                    ))
+                ) && self.graph.session.is_stdlib_class(
+                    self.module,
+                    base,
+                    "contextlib",
+                    "ContextDecorator",
+                )
+            })
+        {
+            return Err(self.object_runtime_export("contextlib.ContextDecorator", base));
+        }
         if node.type_params.is_some() {
             self.graph.needs_object_runtime.set(true);
             return Err(error(

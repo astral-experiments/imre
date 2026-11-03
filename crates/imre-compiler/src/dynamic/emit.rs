@@ -46,8 +46,9 @@ pub(crate) fn emit(
         ..Output::default()
     };
     let config = output.data(config.as_bytes());
+    // Entry-only registration must not change fingerprints of unrelated packed providers.
     let mut main = format!(
-        "define i32 @main(i32 %argc, ptr %argv) {{\nentry:\n  %ctx = call ptr @imre_dyn_new(i32 %argc, ptr %argv, ptr {config})\n"
+        "declare void @imre_dyn_register_source(ptr, ptr, ptr, ptr, i64, ptr)\n\ndefine i32 @main(i32 %argc, ptr %argv) {{\nentry:\n  %ctx = call ptr @imre_dyn_new(i32 %argc, ptr %argv, ptr {config})\n"
     );
     let mut declarations = HashSet::new();
     for (unit, (name, path, source)) in modules.iter().enumerate() {
@@ -69,9 +70,15 @@ pub(crate) fn emit(
         } else {
             output.module(unit, name, path, source, &file, bundled)?
         };
+        // Retain the text of virtual providers alongside the installed initializer.
+        let (text, len) = if bundled {
+            (output.data(source.as_bytes()), source.len())
+        } else {
+            ("null".to_owned(), 0)
+        };
         writeln!(
             main,
-            "  call void @imre_dyn_register(ptr %ctx, ptr {module_name}, ptr {file}, ptr {code})"
+            "  call void @imre_dyn_register_source(ptr %ctx, ptr {module_name}, ptr {file}, ptr {text}, i64 {len}, ptr {code})"
         )
         .unwrap();
     }
@@ -286,6 +293,7 @@ enum StringConstant {
 #[derive(Default)]
 struct Output {
     keep_docstrings: bool,
+    declared_statement_line: bool,
     string_constant_slots: HashMap<(usize, StringConstant), usize>,
     strings: HashMap<Vec<u8>, u32>,
     interned_identifiers: BTreeSet<String>,
@@ -509,6 +517,7 @@ struct Function<'a, 'p> {
 #[derive(Clone)]
 enum Cleanup {
     With {
+        line: usize,
         exit: String,
         caught: String,
     },
@@ -781,6 +790,16 @@ mod tests {
     use super::*;
 
     #[test]
+    fn declare_exit_line_only_for_compiled_with() {
+        let path = Path::new("<imre stdlib>/example.py");
+        let declare = "declare void @imre_dyn_set_statement_line";
+        for (source, expected) in [("value = 1", 0), ("with a, b:\n    pass", 1)] {
+            let (_, ir) = provider("example", path, source, true).unwrap().unwrap();
+            assert_eq!(ir.matches(declare).count(), expected);
+        }
+    }
+
+    #[test]
     fn provider_substitution() {
         let root = Path::new("<imre stdlib>");
         let path = root.join("example.py");
@@ -814,7 +833,7 @@ mod tests {
             let declared = format!("declare i64 @{symbol}(ptr, i64)");
             assert_eq!(ir.lines().filter(|line| *line == declared).count(), 1);
             ir.lines()
-                .filter(|line| line.contains("call void @imre_dyn_register("))
+                .filter(|line| line.contains("call void @imre_dyn_register_source("))
                 .map(|line| line.ends_with(&format!("@{symbol})")))
                 .collect::<Vec<_>>()
         };

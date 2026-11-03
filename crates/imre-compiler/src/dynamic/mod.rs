@@ -111,6 +111,7 @@ impl Imports {
                 "_imp"
                     | "_hashlib"
                     | "ssl"
+                    | "_ssl"
                     | "atexit"
                     | "faulthandler"
                     | "code"
@@ -703,9 +704,16 @@ pub(crate) fn compile(
             if uses_import_builtin && !seen.contains("pprint") {
                 imports.names.push((0, "pprint".to_owned()));
             }
-            // Preserve sysconfig's getters when a runtime-computed import selects the module.
-            if (uses_import_builtin || seen.contains("importlib")) && !seen.contains("sysconfig") {
-                imports.names.push((0, "sysconfig".to_owned()));
+            // A runtime-selected HTTP child needs its server and transitive providers.
+            if uses_import_builtin && seen.contains("http") && !seen.contains("http.server") {
+                imports.names.push((0, "http.server".to_owned()));
+            }
+            if uses_import_builtin || seen.contains("importlib") {
+                for name in ["py_compile", "sysconfig"] {
+                    if !seen.contains(name) {
+                        imports.names.push((0, name.to_owned()));
+                    }
+                }
             }
             // The native time.strptime classmethod imports its Python parser on first use.
             if seen.contains("_datetime") && !seen.contains("_strptime") {

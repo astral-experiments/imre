@@ -27,6 +27,33 @@ def expect_errno(operation, args, number):
         raise AssertionError("descriptor operation unexpectedly succeeded")
 
 
+def check_ttyname():
+    from os import ttyname
+
+    assert ttyname is posix.ttyname and ttyname is os.ttyname
+    master, slave = os.openpty()
+    try:
+        path = ttyname(Index(slave))
+        assert path == os.ptsname(master)
+        assert os.path.samestat(os.stat(path), os.fstat(slave))
+        with tempfile.TemporaryFile() as file:
+            expect_errno(ttyname, (file.fileno(),), errno.ENOTTY)
+    finally:
+        os.close(slave)
+        os.close(master)
+    expect_errno(ttyname, (slave,), errno.EBADF)
+
+
+def check_sync(sync):
+    with tempfile.TemporaryFile() as file:
+        fd = file.fileno()
+        os.write(fd, b"abc")
+        os.lseek(fd, 1, os.SEEK_SET)
+        assert sync(fd=file) is None
+        assert os.read(fd, 2) == b"bc"
+    expect_errno(sync, (fd,), errno.EBADF)
+
+
 def check_fchdir():
     from os import fchdir
 
@@ -250,8 +277,17 @@ def check_splice():
 
 
 def current():
+    from os import fsync
+
+    assert fsync is os.fsync and fsync is posix.fsync
+    check_sync(fsync)
     check_fchdir()
     if sys.platform == "linux":
+        from os import fdatasync
+
+        assert fdatasync is os.fdatasync and fdatasync is posix.fdatasync
+        check_sync(fdatasync)
+        check_ttyname()
         check_tmpfile()
         check_copy_file_range()
         check_sendfile()

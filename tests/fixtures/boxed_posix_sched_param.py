@@ -7,6 +7,36 @@ import weakref
 
 
 def current():
+    current_param = os.sched_getparam(0)
+    policy = os.sched_getscheduler(0)
+    assert type(current_param) is os.sched_param
+    assert current_param == posix.sched_getparam(os.getpid())
+    for name in ("sched_getparam", "sched_setparam", "sched_setscheduler"):
+        assert getattr(os, name) is vars(posix)[name]
+
+    class PriorityIndex:
+        def __index__(self):
+            return current_param.sched_priority
+
+    same_param = os.sched_param(PriorityIndex())
+    # Reapply the existing policy and priority only. Some sandboxes deny either setter.
+    for setter, args in ((os.sched_setscheduler, (0, policy, same_param)),
+                         (os.sched_setparam, (0, same_param))):
+        try:
+            assert setter(*args) is None
+        except PermissionError:
+            pass
+    assert os.sched_getscheduler(0) == policy and os.sched_getparam(0) == current_param
+
+    for value, error in ((None, TypeError), (os.sched_param(None), TypeError),
+                         (os.sched_param(1 << 40), OverflowError),
+                         (os.sched_param(-(1 << 90)), OverflowError)):
+        try:
+            os.sched_setparam(0, value)
+        except error:
+            pass
+        else:
+            raise AssertionError("accepted invalid scheduling parameters")
     cls = posix.sched_param
     assert cls is os.sched_param and cls is posix.__dict__["sched_param"]
     assert type(cls) is type and (cls.__module__, cls.__name__) == ("posix", "sched_param")

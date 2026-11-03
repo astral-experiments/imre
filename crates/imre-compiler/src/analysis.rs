@@ -414,6 +414,17 @@ impl Session {
         Ok(copy)
     }
 
+    /// Whether this definition needs Python argument binding in a suspended generator frame.
+    pub(crate) fn is_untyped_generator_local(
+        &self,
+        module: usize,
+        function: &ruff_python_ast::StmtFunctionDef,
+    ) -> bool {
+        let index =
+            ty_python_core::semantic_index(&self.db, self.db.program_file(self.files[module]));
+        untyped_generator_local(index, function).is_some()
+    }
+
     /// Fold a local import only while that statement is the sole binding reaching this read.
     pub(crate) fn has_import_binding(
         &self,
@@ -527,6 +538,48 @@ impl Session {
                         .definition(&self.db, &env)
                         .as_ref()
                         == Some(&definition)
+                })
+        })
+    }
+
+    /// Check the class definition at the use site, including aliases and local shadowing.
+    pub(crate) fn is_stdlib_class(
+        &self,
+        module: usize,
+        expr: &Expr,
+        owner: &str,
+        name: &str,
+    ) -> bool {
+        use ty_python_semantic::types::{Type, TypeDefinition};
+        self.hint_reads.set(self.hint_reads.get() + 1);
+        let model = SemanticModel::new(&self.db, self.db.program_file(self.files[module]));
+        let Some(ty @ Type::ClassLiteral(_)) = expr.inferred_type(&model) else {
+            return false;
+        };
+        matches!(ty.definition(&self.db, &model.program_environment()),
+            Some(TypeDefinition::StaticClass(class))
+                if class.name(&self.db).as_deref() == Some(name)
+                    && class.file(&self.db).path(&self.db).is_vendored_path()
+                    && model.resolve_module(Some(owner), 0).and_then(|m| m.file(&self.db))
+                        == Some(class.file(&self.db)))
+    }
+
+    /// Identify exact OrderedDict and deque class objects even when imported under another name.
+    pub(crate) fn is_collections_storage_base(&self, module: usize, base: &Expr) -> bool {
+        use ty_python_semantic::types::{KnownClass, ProgramEnvironment, Type as Ty};
+        self.hint_reads.set(self.hint_reads.get() + 1);
+        let file = self.db.program_file(self.files[module]);
+        let model = SemanticModel::new(&self.db, file);
+        let Some(owner @ Ty::ClassLiteral(_)) = base.inferred_type(&model) else {
+            return false;
+        };
+        let env = ProgramEnvironment::from_file(file);
+        owner.definition(&self.db, &env).is_some_and(|definition| {
+            [KnownClass::OrderedDict, KnownClass::Deque]
+                .into_iter()
+                .any(|class| {
+                    let canonical = class.to_instance(&self.db, &env);
+                    canonical.definition(&self.db, &env).as_ref() == Some(&definition)
                 })
         })
     }
@@ -1014,6 +1067,21 @@ fn runtime_argument(
     let Some(callee) = call.func.inferred_type(&model) else {
         return false;
     };
+    if rule == "too-many-positional-arguments"
+        && call.arguments.args.iter().any(|arg| arg.range() == range)
+        && matches!(callee, Type::FunctionLiteral(_))
+        && let Some(ty_python_semantic::types::TypeDefinition::Function(definition)) =
+            callee.definition(db, &model.program_environment())
+        && definition.file(db) == file.file(db)
+        && let ty_python_core::definition::DefinitionKind::Function(function) = definition.kind(db)
+    {
+        let index = ty_python_core::semantic_index(db, file);
+        if let Some(scope) = untyped_generator_local(index, function.node(&parsed))
+            && index.try_expression_scope_id(call.func.as_ref()) == Some(scope)
+        {
+            return true;
+        }
+    }
     let uses_runtime_provider = |ty: Type<'_>| {
         ty.definition(db, &model.program_environment())
             .and_then(|definition| definition.definition())
@@ -1053,6 +1121,26 @@ fn resolves_to_stdlib_function(
             .resolve_module(Some(owner), 0)
             .and_then(|m| m.file(db))
             == Some(def.file(db))
+}
+
+/// An unannotated local function in a generator binds its arguments when iteration reaches the call.
+fn untyped_generator_local(
+    index: &ty_python_core::SemanticIndex,
+    function: &ruff_python_ast::StmtFunctionDef,
+) -> Option<ty_python_core::FileScopeId> {
+    if !function.decorator_list.is_empty()
+        || function.type_params.is_some()
+        || function.returns.is_some()
+        || function.parameters.iter().any(|p| p.annotation().is_some())
+    {
+        return None;
+    }
+    let local =
+        index.try_node_scope(ty_python_core::scope::NodeWithScopeRef::Function(function))?;
+    index
+        .scope(local)
+        .parent()
+        .filter(|scope| scope.is_generator_function(index))
 }
 
 /// A context manager wraps a suspended generator. Its preserved annotation

@@ -36,10 +36,38 @@ def orphan():
     return ref(local), proxy(local)
 
 
+def proxy_index():
+    import gc
+    import operator
+
+    expected = 10**30 + 1
+
+    class Indexed:
+        def __index__(self):
+            owners.clear()
+            gc.collect()
+            assert observed() is self
+            return expected
+
+    owners = [Indexed()]
+    observed = ref(owners[0])
+    handle = proxy(owners[0])
+    assert operator.index(handle) is expected
+    gc.collect()
+    assert observed() is None
+    try:
+        operator.index(handle)
+    except ReferenceError:
+        pass
+    else:
+        raise AssertionError("dead proxy supplied an index")
+
+
 def current():
     proxy_length()
     iterate_proxy()
     saved_bound_method()
+    proxy_index()
     observed = []
 
     def first(wr):
@@ -275,6 +303,29 @@ def current():
             repeated *= Count()
             print(repeated)
         print(watched() is None)
+
+    wrapped_proxy_methods()
+
+
+def wrapped_proxy_methods():
+    class Target:
+        def __bytes__(self):
+            return b"class"
+
+        def __reversed__(self):
+            return iter("class")
+
+    owner = Target()
+    observer = proxy(owner)
+    owner.__bytes__ = lambda: b"instance"
+    owner.__reversed__ = lambda: iter("instance")
+    assert bytes(observer) == b"instance"
+    assert ProxyType.__bytes__(observer) == b"instance"
+    assert type(ProxyType.__bytes__).__name__ == "method_descriptor"
+    assert not hasattr(CallableProxyType, "__bytes__")
+    assert "".join(reversed(observer)) == "instance"
+    assert bytes(owner) == b"class"
+    assert "".join(reversed(owner)) == "class"
 
 
 def saved_bound_method():

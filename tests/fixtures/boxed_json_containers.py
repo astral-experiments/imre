@@ -18,6 +18,29 @@ def current():
     assert json.dumps(Array([1, 2]), default=reject) == "[1, 2]"
     assert json.dumps([Values((9,))]) == "[[4, 3]]"
     assert json.dumps(Record(key=0), sort_keys=True) == '{"a": 1, "b": 2}'
+    class BadList(list):
+        def __iter__(self):
+            raise TypeError("iterator unavailable")
+
+    from functools import partial
+
+    class BadItems(dict):
+        def items(self):
+            return self["bad"]
+
+    for value, expected in (
+        (BadList([1]), "_iterencode_list needs a sequence"),
+        (BadItems(bad=None), "BadItems.items() returned a non-iterable (type NoneType)"),
+        (BadItems(bad=partial(int)), "BadItems.items() returned a non-iterable (type functools.partial)"),
+    ):
+        try:
+            json.dumps([value])
+        except TypeError as error:
+            assert error.args == (expected,)
+            assert error.__notes__ == ["when serializing list item 0"]
+        else:
+            raise AssertionError("expected a container iterator")
+
     class Shrinking(list):
         def __iter__(self):
             if self:
@@ -129,5 +152,86 @@ def current():
         expected = ["when serializing dict item " + key, "when serializing list item 0"]
         assert notes == ["existing"] + expected
         assert calls == (expected if streaming else [])
+
+    # The default result loses the encoder's reference before the next item.
+    row = [object(), "initial"]
+    retained = []
+    class Replacement(str):
+        def __del__(self):
+            row[1] = "updated"
+
+    def replacement(obj=None):
+        result = Replacement("first")
+        if keep:
+            retained.append(result)
+        return result
+
+    for keep, second in [(False, "updated"), (True, "initial")]:
+        row[1] = "initial"
+        assert json.dumps(row, default=replacement) == '["first", "' + second + '"]'
+        retained.clear()
+        assert row[1] == "updated"
+
+    class ProjectedList(list):
+        def __iter__(self):
+            return iter([replacement()])
+
+    class ProjectedDict(dict):
+        def items(self):
+            return [("k", replacement())]
+
+    for value, encoded in [(ProjectedList([0]), '["first"]'),
+                           (ProjectedDict(k=0), '{"k": "first"}')]:
+        row[0] = value
+        for keep, second in [(False, "updated"), (True, "initial")]:
+            row[1] = "initial"
+            assert json.dumps(row) == '[' + encoded + ', "' + second + '"]'
+            retained.clear()
+            assert row[1] == "updated"
+
+    original_quote = json.encoder.encode_basestring_ascii
+    def quote(value):
+        text = original_quote(value)
+        return Replacement(text) if value == "first" else text
+
+    try:
+        json.encoder.encode_basestring_ascii = quote
+        row[:] = ["first", "initial"]
+        assert json.dumps(row) == '["first", "updated"]'
+    finally:
+        json.encoder.encode_basestring_ascii = original_quote
+
+    import importlib
+    import sys
+    import weakref
+
+    # Use an independent module so deleting its binding can release the callable.
+    missing = object()
+    previous = sys.modules.pop("fnmatch", missing)
+    try:
+        module = importlib.import_module("fnmatch")
+        assert module is not previous
+        held = [module.filterfalse]
+        del module.filterfalse
+        def released(ref):
+            assert ref() is None
+            row[1] = "updated"
+
+        watched = weakref.ref(held[0], released)
+
+        def weak_replacement(value):
+            if value is row[0]:
+                return [held[0] if keep else held.pop()]
+            assert value is watched()
+            return "first"
+
+        for keep, second in [(True, "initial"), (False, "updated")]:
+            row[:] = [object(), "initial"]
+            assert json.dumps(row, default=weak_replacement) == '[["first"], "' + second + '"]'
+        assert watched() is None
+    finally:
+        sys.modules.pop("fnmatch", None)
+        if previous is not missing:
+            sys.modules["fnmatch"] = previous
 
     print("encoded container subclasses")

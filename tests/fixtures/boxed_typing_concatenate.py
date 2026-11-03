@@ -1,4 +1,6 @@
 from collections import abc
+import operator
+import pickle
 import typing
 
 
@@ -92,3 +94,10 @@ prefixed = typing.Callable[typing.Concatenate[int, P], bytes]
 reconstruct, arguments = prefixed.__reduce__()
 assert arguments == (typing.Callable, (typing.Concatenate[int, P], bytes))
 assert reconstruct(*arguments) == prefixed
+
+for expression in (prefix, typing.Unpack[Ts], pack_first):
+    assert type(expression).__reduce__ is typing._GenericAlias.__reduce__
+    rebuild, args = expression.__reduce__()
+    assert rebuild is operator.getitem
+    assert rebuild(*args) == expression
+    assert pickle.loads(pickle.dumps(expression)) == expression

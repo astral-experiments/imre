@@ -391,6 +391,7 @@ fn emit_program(
         borrowed_locals: Vec::new(),
         struct_locals: Vec::new(),
         rooted_locals: Vec::new(),
+        affine_literal_lengths: Vec::new(),
         length_roots: Vec::new(),
         length_snapshots: Vec::new(),
         expression_rebound: Vec::new(),
@@ -614,6 +615,7 @@ struct Emitter<'a, 'module> {
     borrowed_locals: Vec<bool>,
     struct_locals: Vec<bool>,
     rooted_locals: Vec<bool>,
+    affine_literal_lengths: Vec<(usize, i32)>,
     length_roots: Vec<Option<usize>>,
     length_snapshots: Vec<Option<LengthSnapshot>>,
     expression_rebound: Vec<bool>,
@@ -1772,11 +1774,15 @@ impl Emitter<'_, '_> {
         self.length_snapshots = vec![None; self.locals.len()];
         self.small_locals = self.ranges.small_locals(function);
         self.expression_rebound = function.expression_rebound();
-        let rebound = borrows::written(function);
+        let mut writes = vec![0u8; function.locals.len()];
+        crate::ir::walk_writes(&function.body, |slot, _| {
+            writes[slot] = writes[slot].saturating_add(1);
+        });
+        self.affine_literal_lengths = affine::literal_lengths(function, &writes);
         self.borrowed_params = vec![false; self.locals.len()];
         for &slot in &function.params {
             self.borrowed_params[slot] =
-                !rebound[slot] && !self.resource_types.contains(&function.locals[slot]);
+                writes[slot] == 0 && !self.resource_types.contains(&function.locals[slot]);
         }
         let mut cleanup_slots: Vec<_> = (0..self.locals.len())
             .filter(|&slot| {
@@ -9286,7 +9292,6 @@ declare i64 @imre_struct_cycle_prefix(ptr, i64, i64)
 declare ptr @imre_struct_read_view(ptr, ptr) nounwind
 declare i64 @imre_struct_binary_prefix(ptr, ptr) nounwind
 declare double @imre_struct_binary_ordered(ptr, i64, i64, double, double, double) nounwind
-declare void @imre_struct_seek_span(ptr, i64, ptr) nounwind
 declare ptr @imre_struct_row(ptr, i64) nounwind
 declare ptr @imre_struct_row_checked(ptr, i64)
 declare i32 @imre_struct_append(ptr, ptr, ptr)
@@ -9326,135 +9331,6 @@ deferred:
   %resolved = call i32 @imre_seq_resolve_header(ptr %sequence)
   ret i32 %resolved
 }
-; Fields match the runtime's repr(C) ReadSpan. Unsigned subtraction rejects
-; a seek backwards before the cached start as well as advances past its end.
-define internal ptr @imre_struct_cursor_row(ptr %list, i64 %at, ptr %span, i64 %width) alwaysinline nounwind {
-entry:
-  %lenptr = getelementptr inbounds {i64,i64,i64,ptr}, ptr %span, i32 0, i32 1
-  %maskptr = getelementptr inbounds {i64,i64,i64,ptr}, ptr %span, i32 0, i32 2
-  %dataptr = getelementptr inbounds {i64,i64,i64,ptr}, ptr %span, i32 0, i32 3
-  %lo = load i64, ptr %span
-  %len = load i64, ptr %lenptr
-  %delta = sub i64 %at, %lo
-  %hit = icmp ult i64 %delta, %len
-  br i1 %hit, label %read, label %seek
-seek:
-  call void @imre_struct_seek_span(ptr %list, i64 %at, ptr %span)
-  br label %read
-read:
-  %start = load i64, ptr %span
-  %mask = load i64, ptr %maskptr
-  %data = load ptr, ptr %dataptr
-  %relative = sub i64 %at, %start
-  %index = and i64 %relative, %mask
-  %offset = mul i64 %index, %width
-  %row = getelementptr inbounds i64, ptr %data, i64 %offset
-  ret ptr %row
-}
-
-; The cursor holds a valid, nonempty span after a sparse row read. A dense
-; span or a boxed single row retains the original one-element advance.
-define internal i64 @imre_struct_uniform_end(ptr %span, i64 %next) alwaysinline nounwind {
-  %lp = getelementptr inbounds {i64,i64,i64,ptr}, ptr %span, i32 0, i32 1
-  %mp = getelementptr inbounds {i64,i64,i64,ptr}, ptr %span, i32 0, i32 2
-  %start = load i64, ptr %span
-  %len = load i64, ptr %lp
-  %mask = load i64, ptr %mp
-  %end = add i64 %start, %len
-  %repeat = icmp eq i64 %mask, 0
-  %selected = select i1 %repeat, i64 %end, i64 %next
-  ret i64 %selected
-}
-
-; Skip 1,023 additions, leaving the last iteration in the ordinary loop body.
-; Nonnegative i32 ordinals and coefficients keep each scalar expression small.
-; The chunk subtotal is computed in i128 before narrowing to a tagged integer.
-define internal {i64,i64} @imre_affine_range_prefix(i64 %at, i64 %end, i64 %total, i32 %scale, i32 %offset) noinline nounwind memory(none) {
-  %tags0 = and i64 %at, %end
-  %tags = and i64 %tags0, %total
-  %small = trunc i64 %tags to i1
-  %i = ashr i64 %at, 1
-  %stop = ashr i64 %end, 1
-  %sum = ashr i64 %total, 1
-  %bounded = icmp ule i64 %i, 2147482624
-  %last = add i64 %i, 1023
-  %within = icmp slt i64 %last, %stop
-  %valid = and i1 %small, %bounded
-  %chunk = and i1 %valid, %within
-  br i1 %chunk, label %check_sum, label %fallback
-check_sum:
-  %a = zext i32 %scale to i128
-  %b = zext i32 %offset to i128
-  %x = zext i64 %i to i128
-  %base = mul i128 %x, 1023
-  %ordinals = add i128 %base, 522753
-  %linear = mul i128 %a, %ordinals
-  %constant = mul i128 %b, 1023
-  %delta = add i128 %linear, %constant
-  %initial = sext i64 %sum to i128
-  %partial = add i128 %initial, %delta
-  %fits = icmp sle i128 %partial, 4611686018427387903
-  br i1 %fits, label %success, label %fallback
-success:
-  %new_at = add i64 %at, 2046
-  %n = trunc i128 %partial to i64
-  %shift = shl i64 %n, 1
-  %new_total = or i64 %shift, 1
-  %r0 = insertvalue {i64,i64} zeroinitializer, i64 %new_at, 0
-  %r = insertvalue {i64,i64} %r0, i64 %new_total, 1
-  ret {i64,i64} %r
-fallback:
-  ret {i64,i64} zeroinitializer
-}
-
-; Bound the absolute value of every partial sum for an integral projection.
-; The strict comparison also rejects a rounded-up or rounded-down boundary.
-define internal i1 @imre_exact_fadd_bound(double %sum, double %term, i64 %count) alwaysinline nounwind {
-  %n = uitofp i64 %count to double
-  %ni = icmp ule i64 %count, 9007199254740992
-  %t = call double @llvm.trunc.f64(double %term)
-  %s = call double @llvm.trunc.f64(double %sum)
-  %ti = fcmp oeq double %term, %t
-  %si = fcmp oeq double %sum, %s
-  %a = call double @llvm.fabs.f64(double %sum)
-  %b = call double @llvm.fabs.f64(double %term)
-  %delta = fmul double %b, %n
-  %limit = fadd double %a, %delta
-  %bounded = fcmp olt double %limit, 9007199254740992.0
-  %integral = and i1 %ti, %si
-  %fits = and i1 %ni, %bounded
-  %exact = and i1 %integral, %fits
-  ret i1 %exact
-}
-
-; Reassociation is exact only if the integral term, count and every partial
-; sum fit in binary64's consecutive integer range. Otherwise preserve each add.
-define internal double @imre_repeat_fadd(double %sum, double %term, i64 %count) alwaysinline nounwind {
-entry:
-  %single = icmp eq i64 %count, 1
-  br i1 %single, label %one, label %bounds
-one:
-  %single_sum = fadd double %sum, %term
-  ret double %single_sum
-bounds:
-  %exact = call i1 @imre_exact_fadd_bound(double %sum, double %term, i64 %count)
-  br i1 %exact, label %bulk, label %ordered
-bulk:
-  %n = uitofp i64 %count to double
-  %product = fmul double %term, %n
-  %result = fadd double %sum, %product
-  ret double %result
-ordered:
-  %left = phi i64 [%count, %bounds], [%remaining, %ordered]
-  %acc = phi double [%sum, %bounds], [%added, %ordered]
-  %added = fadd double %acc, %term
-  %remaining = sub i64 %left, 1
-  %done = icmp eq i64 %remaining, 0
-  br i1 %done, label %finish, label %ordered
-finish:
-  ret double %added
-}
-
 define internal i64 @imre_seq_len_fast(ptr %sequence) alwaysinline nounwind {
   %length = call i32 @sequence_header(ptr %sequence)
   %short = icmp ult i32 %length, -2

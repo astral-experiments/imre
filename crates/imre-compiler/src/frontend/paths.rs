@@ -786,9 +786,19 @@ impl Checker<'_> {
         })
     }
 
-    /// Bind the default binary update mode and an optional temporary directory.
+    /// Keep mode and dir on the typed path. The bundled function binds the
+    /// buffering argument and opens the corresponding raw or buffered stream.
     pub(super) fn temporary_file(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
-        calls::reject_unpacking(call, self.source)?;
+        if call.arguments.args.len() > 1
+            || call.arguments.args.iter().any(ast::Expr::is_starred_expr)
+            || call
+                .arguments
+                .keywords
+                .iter()
+                .any(|keyword| matches!(keyword.arg.as_deref(), None | Some("buffering")))
+        {
+            return Err(self.scoped_builtin_error("tempfile.TemporaryFile", call));
+        }
         let directory = self.types.optional(Type::Str);
         let mut params = [
             parameter("mode", Type::Str, Some(unpacking::string("w+b"))),

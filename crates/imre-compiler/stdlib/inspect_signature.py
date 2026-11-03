@@ -6,7 +6,7 @@ import itertools
 import os
 import re
 import types
-from annotationlib import Format, ForwardRef
+from annotationlib import Format, ForwardRef, get_annotations
 from collections import OrderedDict
 from keyword import iskeyword
 from inspect import (
@@ -65,7 +65,7 @@ def formatannotation(annotation, base_module=None, *, quote_annotation_strings=T
     return repr(annotation)
 
 
-def _constructor(obj):
+def _constructor(obj, follow_wrapper_chains):
     # Inspect binds a metaclass's __call__ descriptor to the metaclass itself.
     meta = type(obj)
     for base in getattr(meta, "__mro__", ()):
@@ -93,7 +93,12 @@ def _constructor(obj):
             if name not in seen and name in namespace:
                 seen.add(name)
                 method = obj.__new__ if name == "__new__" else namespace[name]
-                if method is default:
+                # A decorator can wrap the object default without defining a constructor.
+                original = method
+                if follow_wrapper_chains:
+                    original = unwrap(method, stop=lambda f: hasattr(f, "__signature__")
+                                      or isbuiltin(f) or ismethoddescriptor(f))
+                if original is default:
                     continue
                 uses_object_defaults = False
                 if method is None:
@@ -145,44 +150,68 @@ def _signature_from_callable(obj, *, sigcls, follow_wrapper_chains=True,
         if not isinstance(explicit, Signature):
             raise TypeError(f"unexpected object {explicit!r} in __signature__ attribute")
         return explicit
+    partialmethod = getattr(obj, "__partialmethod__", None)
+    if isinstance(partialmethod, functools.partialmethod):
+        wrapped = _signature_from_callable(
+            partialmethod.func, sigcls=sigcls, follow_wrapper_chains=follow_wrapper_chains,
+            globals=globals, locals=locals, eval_str=eval_str,
+            annotation_format=annotation_format)
+        # Reserve the receiver while binding the partial arguments, then restore it
+        # in the signature of the unbound method.
+        sig = _signature_get_partial(wrapped, partialmethod, (None,))
+        receiver = tuple(wrapped.parameters.values())[0]
+        if receiver.kind is Parameter.VAR_POSITIONAL:
+            return sig
+        if partialmethod.args.count(functools.Placeholder):
+            receiver = receiver.replace(kind=Parameter.POSITIONAL_ONLY)
+        return sig.replace(parameters=(receiver,) + tuple(sig.parameters.values()))
     if isinstance(obj, functools.partial):
         wrapped = _signature_from_callable(
             obj.func, sigcls=sigcls, follow_wrapper_chains=follow_wrapper_chains,
             globals=globals, locals=locals, eval_str=eval_str,
             annotation_format=annotation_format)
         return _signature_get_partial(wrapped, obj)
-    if not isinstance(obj, types.FunctionType):
-        if isinstance(obj, type):
-            method, drop_first = _constructor(obj)
-            if method is None:
-                return sigcls()
-        else:
-            method, drop_first = _instance_call(obj)
-        inner = _signature_from_callable(
-            method, sigcls=sigcls, follow_wrapper_chains=follow_wrapper_chains,
-            globals=globals, locals=locals, eval_str=eval_str,
-            annotation_format=annotation_format)
-        return _signature_bound_method(inner) if drop_first else inner
+    if isinstance(obj, types.FunctionType) or _signature_is_functionlike(obj):
+        return _signature_from_function(obj, sigcls, eval_str, annotation_format)
+    if isinstance(obj, type):
+        method, drop_first = _constructor(obj, follow_wrapper_chains)
+        if method is None:
+            return sigcls()
+    else:
+        method, drop_first = _instance_call(obj)
+    inner = _signature_from_callable(
+        method, sigcls=sigcls, follow_wrapper_chains=follow_wrapper_chains,
+        globals=globals, locals=locals, eval_str=eval_str,
+        annotation_format=annotation_format)
+    return _signature_bound_method(inner) if drop_first else inner
+
+
+def _signature_from_function(obj, sigcls, eval_str, annotation_format):
+    is_duck = not isinstance(obj, types.FunctionType)
+    if is_duck and not _signature_is_functionlike(obj):
+        raise TypeError(f"{obj!r} is not a Python function")
     if getattr(obj, "__text_signature__", None):
         raise NotImplementedError("text signatures are not yet supported")
     if eval_str or annotation_format != Format.VALUE:
         raise NotImplementedError("native signatures currently support value annotations without string evaluation")
-    layout = _signature_layout(obj)
-    annotations = obj.__annotations__
-    defaults = obj.__defaults__ or ()
-    keyword_defaults = obj.__kwdefaults__ or {}
+    layout = _signature_layout(obj.__code__ if is_duck else obj)
+    annotations = get_annotations(obj) if is_duck else obj.__annotations__
+    defaults = obj.__defaults__
+    keyword_defaults = obj.__kwdefaults__
     positional = [name for kind, name in layout if kind < _VAR_POSITIONAL]
     # CPython slices the names first; a replaced __defaults__ may be longer
     # than the argument list, in which case the slice uses a negative start.
-    default_names = positional[len(positional) - len(defaults):]
-    positional_defaults = dict(zip(default_names, defaults))
+    default_count = len(defaults) if defaults else 0
+    default_names = positional[len(positional) - default_count:]
+    default_indices = {name: index for index, name in enumerate(default_names)}
     parameters = []
     for kind, name in layout:
-        if kind == _KEYWORD_ONLY:
+        default = _empty
+        if kind == _KEYWORD_ONLY and keyword_defaults is not None:
             default = keyword_defaults.get(name, _empty)
-        else:
-            default = positional_defaults.get(name, _empty)
+        elif name in default_indices:
+            default = defaults[default_indices[name]]
         parameters.append(sigcls._parameter_cls(name, kind, default=default,
                                                 annotation=annotations.get(name, _empty)))
     return sigcls(parameters, return_annotation=annotations.get("return", _empty),
-                  __validate_parameters__=False)
+                  __validate_parameters__=is_duck)

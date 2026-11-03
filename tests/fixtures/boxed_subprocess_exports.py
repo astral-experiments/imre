@@ -1,11 +1,20 @@
 import subprocess as _subprocess
 from subprocess import *
+from types import GenericAlias
 from subprocess import _args_from_interpreter_flags, _optim_args_from_interpreter_flags
 
 
 class ShellPath:
     def __fspath__(self):
         raise AssertionError("shell should reject the path before calling __fspath__")
+
+
+class QuotedArgument(str):
+    def __contains__(self, item):
+        return item == " "
+
+    def __iter__(self):
+        return iter("alternate\\")
 
 
 def interpreter_flags():
@@ -16,10 +25,25 @@ def interpreter_flags():
 
 def current():
     interpreter_flags()
+    for origin, item in ((Popen, bytes), (CompletedProcess, str)):
+        alias = origin[item]
+        assert type(alias) is GenericAlias
+        assert alias.__origin__ is origin
+        assert alias.__args__ == (item,)
     print(_subprocess.__all__)
     for name in _subprocess.__all__:
         assert globals()[name] is getattr(_subprocess, name)
     assert "list2cmdline" not in globals() and "STARTUPINFO" not in globals()
+    from pathlib import PurePath
+    from subprocess import list2cmdline
+    words = ("", PurePath("two words"), b"\xff", 'a\\"', "b\t\\", QuotedArgument("plain"))
+    print(ascii(list2cmdline(seq=iter(words))))
+    try:
+        list2cmdline([1])
+    except TypeError as exc:
+        print(str(exc))
+    else:
+        raise AssertionError("accepted an integer command argument")
     assert check_output(["/bin/cat"], input=b"abc") == b"abc"
     assert check_output(["/bin/cat"], input=None, text=True) == ""
     assert getstatusoutput("printf 'out\\n\\n' >&2; exit 7") == (7, "out\n")

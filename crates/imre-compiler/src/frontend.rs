@@ -2628,12 +2628,21 @@ impl<'a> Checker<'a> {
             _ if operation => "set binary operator",
             "__iand__" | "__ior__" | "__isub__" | "__ixor__" => "set in-place operator",
             "union" => "set.union",
+            "symmetric_difference" => "set.symmetric_difference",
             "difference_update" => "set.difference_update",
+            "intersection_update" => "set.intersection_update",
             "symmetric_difference_update" => "set.symmetric_difference_update",
+            "add" if self.unshadowed_builtin(&attribute.value, "set") => "set.add",
+            "copy" => "set.copy",
+            "issuperset" => "set.issuperset",
+            "__iter__" => "set.__iter__",
+            "__len__" => "set.__len__",
+            "__class_getitem__" => "set.__class_getitem__",
             "clear" => "set.clear",
             "pop" => "set.pop",
             "remove" => "set.remove",
             "update" => "set.update",
+            "isdisjoint" => "set.isdisjoint",
             "issubset" => "set.issubset",
             _ => return None,
         };
@@ -2642,14 +2651,21 @@ impl<'a> Checker<'a> {
         {
             return Some(name);
         }
-        if (operation || matches!(attribute.attr.as_str(), "issubset" | "union"))
-            && (receiver == Some(Type::FrozenStrings)
-                || self.unshadowed_builtin(&attribute.value, "frozenset"))
+        if receiver == Some(Type::FrozenStrings)
+            || self.unshadowed_builtin(&attribute.value, "frozenset")
         {
             return Some(match attribute.attr.as_str() {
+                _ if operation => name,
+                "__class_getitem__" => "frozenset.__class_getitem__",
+                "__iter__" => "frozenset.__iter__",
+                "__len__" => "frozenset.__len__",
+                "copy" => "frozenset.copy",
+                "isdisjoint" => "frozenset.isdisjoint",
                 "issubset" => "frozenset.issubset",
+                "issuperset" => "frozenset.issuperset",
+                "symmetric_difference" => "frozenset.symmetric_difference",
                 "union" => "frozenset.union",
-                _ => name,
+                _ => return None,
             });
         }
         None
@@ -6518,6 +6534,9 @@ impl<'a> Checker<'a> {
                 Intrinsic::CodecGetWriter => {
                     return Err(self.object_builtin_error("codecs.getwriter", expression));
                 }
+                Intrinsic::Popen | Intrinsic::CompletedProcess if cfg!(unix) => {
+                    return Err(self.scoped_builtin_error("subprocess process class", expression));
+                }
                 Intrinsic::SplitResult { .. } => {
                     return Err(self.scoped_builtin_error("urllib.parse result class", expression));
                 }
@@ -7842,7 +7861,17 @@ impl<'a> Checker<'a> {
                         self.scoped_builtin_error("urllib.parse result counterpart", attribute)
                     );
                 }
-                if let Some((_, declaration)) = self.namedtuple_factory(&attribute.value) {
+                if let Some((origin, declaration)) = self.namedtuple_factory(&attribute.value) {
+                    if matches!(origin, crate::types::TupleOrigin::Declaration(_))
+                        && declaration
+                            .fields
+                            .iter()
+                            .any(|field| field == attribute.attr.as_str())
+                    {
+                        return Err(
+                            self.scoped_builtin_error("namedtuple field descriptor", attribute)
+                        );
+                    }
                     return self.namedtuple_class_attribute(attribute, &declaration);
                 }
                 if let Some(method) = ir::StrDescriptor::named(attribute.attr.as_str())
@@ -9052,8 +9081,12 @@ impl<'a> Checker<'a> {
         if let Some(copy) = self.dataclass_copy(call)? {
             return Ok(copy);
         }
-        if self.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::Partial)) {
-            return self.partial(call);
+        match self.resolve(&call.func) {
+            Some(Binding::Intrinsic(Intrinsic::Partial)) => return self.partial(call),
+            Some(Binding::Intrinsic(Intrinsic::FileConfig)) if calls::has_unpacking(call) => {
+                return self.logging_file_config(call);
+            }
+            _ => {}
         }
         if calls::starred(call) {
             match self.resolve(&call.func) {
@@ -11107,6 +11140,13 @@ impl<'a> Checker<'a> {
                     }],
                 ),
             });
+        }
+        if cfg!(unix)
+            && let [value] = args.as_slice()
+            && matches!(value.ty, Type::Popen(..) | Type::ActivePopen)
+            && self.unshadowed_builtin(&call.func, "repr")
+        {
+            return Err(self.scoped_builtin_error("subprocess.Popen repr", call));
         }
         if name.id == "repr"
             && args.len() == 1

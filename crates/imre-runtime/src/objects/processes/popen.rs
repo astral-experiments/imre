@@ -8,7 +8,7 @@ use std::cell::RefCell;
 
 mod active;
 mod boxed;
-pub(crate) use boxed::{BoxedPipe, BoxedPopen};
+pub(crate) use boxed::{BoxedPipe, BoxedPopen, BoxedPreparation};
 mod communicate;
 mod control;
 mod poll;
@@ -34,7 +34,19 @@ pub(super) struct ChildPipes {
 pub(crate) struct PreparedHandles {
     child: ChildPipes,
     parents: [Option<OwnedFd>; 3],
+    pipes: Pipes,
     child_fds: [RawFd; 3],
+}
+
+impl PreparedHandles {
+    fn wrap_parents(&mut self, text: bool, bufsize: i32) -> Result<()> {
+        for (index, parent) in self.parents.iter_mut().enumerate() {
+            if let Some(fd) = parent.take() {
+                self.pipes[index] = Some(FileState::pipe(fd.into(), index != 0, text, bufsize)?);
+            }
+        }
+        Ok(())
+    }
 }
 
 impl ChildPipes {
@@ -78,6 +90,7 @@ impl ChildPipes {
         Ok(PreparedHandles {
             child,
             parents,
+            pipes: Default::default(),
             child_fds,
         })
     }
@@ -441,11 +454,7 @@ unsafe fn spawn(config: &LaunchConfig, mut extras: LaunchExtras<'_>) -> Result<P
             _ => -1,
         };
     }
-    let PreparedHandles {
-        child: prepared,
-        parents,
-        ..
-    } = match extras.prepared.take() {
+    let mut handles = match extras.prepared.take() {
         Some(handles) => handles,
         None => ChildPipes::open(&modes, descriptors, pipe_capacity).map_err(errno_error)?,
     };
@@ -513,12 +522,12 @@ unsafe fn spawn(config: &LaunchConfig, mut extras: LaunchExtras<'_>) -> Result<P
         })
     };
     let text = streams & (1 << 16) != 0;
-    let mut pipes: Pipes = [None, None, None];
-    for (i, parent) in parents.into_iter().enumerate() {
-        if let Some(fd) = parent {
-            pipes[i] = Some(FileState::pipe(fd.into(), i != 0, text, bufsize)?);
-        }
-    }
+    handles.wrap_parents(text, bufsize)?;
+    let PreparedHandles {
+        child: prepared,
+        pipes,
+        ..
+    } = handles;
     let redirects = Redirects {
         fds: descriptors,
         oversized,

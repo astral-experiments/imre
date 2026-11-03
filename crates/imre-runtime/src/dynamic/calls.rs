@@ -13,6 +13,7 @@ fn nonconstructible_result_type(name: &str) -> bool {
             | HashState::XOF_CLASS
             | HashState::OPENSSL_CLASS
             | KEY_WRAPPER
+            | "anext_awaitable"
             | value::REGEX_PATTERN_TYPE
             | value::REGEX_MATCH_TYPE
             | value::REGEX_SCANNER_TYPE
@@ -305,7 +306,10 @@ impl Context {
                 "__init_subclass__" => self.builtins.get("object.__init_subclass__").copied(),
                 _ => None,
             },
-            Value::Native(owner) if builtins::set_operators(owner).contains(&name) => {
+            Value::Native(owner)
+                if builtins::set_methods(owner).contains(&name)
+                    || builtins::set_operators(owner).contains(&name) =>
+            {
                 self.builtins.get(&format!("{owner}.{name}")).copied()
             }
             Value::Native(kind) if kind == "collections.defaultdict" => {
@@ -365,6 +369,7 @@ impl Context {
                         | "property"
                         | "module"
                         | super::thread_local::CLASS
+                        | weakref::PROXY_TYPE
                         | weakref::REFERENCE_TYPE
                 ) || (kind == super::deque::CLASS && super::deque::owns(name))
                     || stdlib::datetime::members(kind)
@@ -372,10 +377,7 @@ impl Context {
                     || (kind == stdlib::fixed_structseq::SCHED_PARAM
                         && matches!(name, "__reduce__" | "__replace__"))
                     || (kind == "function" && name == "__call__")
-                    || (kind == "builtin_function_or_method" && name == "__reduce__")
-                    || (kind == "set" && name == "update")
-                    || (matches!(name, "__repr__" | "__reduce__" | "difference" | "intersection" | "issubset" | "union")
-                        && matches!(kind.as_str(), "set" | "frozenset")) =>
+                    || (matches!(kind.as_str(), "builtin_function_or_method" | "method") && name == "__reduce__") =>
             {
                 self.builtins.get(&format!("{kind}.{name}")).copied()
             }
@@ -747,8 +749,21 @@ impl Context {
     }
 
     pub(super) fn bound_slot(&mut self, object: Id, name: &str) -> Result<Option<Id>> {
-        let Some(class) = self.heap.get(object).instance_class() else {
-            return Ok(None);
+        if name == "__repr__"
+            && matches!(self.heap.get(object), Value::Weak(wr) if wr.kind == weakref::Kind::Reference)
+        {
+            return self.lookup_attr(object, name).map(Some);
+        }
+        let class = match self.heap.get(object) {
+            Value::Weak(wr)
+                if wr.kind == weakref::Kind::Proxy && weakref::PROXY_METHODS.contains(&name) =>
+            {
+                self.builtin(weakref::PROXY_TYPE)
+            }
+            value => match value.instance_class() {
+                Some(class) => class,
+                None => return Ok(None),
+            },
         };
         self.class_attr(class, name)
             .map(|slot| self.bind_attribute(slot, object, class))
@@ -841,7 +856,7 @@ impl Context {
     }
 
     pub(super) fn bind_attribute(&mut self, value: Id, receiver: Id, owner: Id) -> Result<Id> {
-        if matches!(self.heap.get(value), Value::Native(name) if matches!(name.as_str(), "dict.fromkeys" | "int.from_bytes" | "float.__getformat__" | "bytes.fromhex" | "bytearray.fromhex") || stdlib::datetime::clock_classmethod(name))
+        if matches!(self.heap.get(value), Value::Native(name) if matches!(name.as_str(), "dict.fromkeys" | "set.__class_getitem__" | "frozenset.__class_getitem__" | "int.from_bytes" | "float.__getformat__" | "bytes.fromhex" | "bytearray.fromhex") || stdlib::datetime::clock_classmethod(name))
         {
             return Ok(self.bind_native_classmethod(value, owner));
         }
@@ -2163,18 +2178,22 @@ impl Context {
         if let Some(value) = self.os_attribute(obj, name)? {
             return Ok(value);
         }
-        match *self.heap.get(obj) {
-            Value::Method { .. } | Value::Native(_)
-                if matches!(name, "__reduce__" | "__reduce_ex__")
-                    && (self.builtin_type_name(obj) == Some("builtin_function_or_method")
-                        || matches!(self.heap.get(obj), Value::Native(class) if class == "builtin_function_or_method")) =>
-            {
-                let class = self.builtin("builtin_function_or_method");
-                if let Some(member) = self.class_attr(class, name) {
-                    let receiver = if obj == class { NONE } else { obj };
-                    return self.bind_attribute(member, receiver, class);
+        if matches!(name, "__reduce__" | "__reduce_ex__") {
+            let class = match self.heap.get(obj) {
+                Value::Native(kind) if matches!(kind.as_str(), "method" | "builtin_function_or_method") => Some(obj),
+                Value::Method { .. } | Value::Native(_)
+                    if matches!(self.builtin_type_name(obj), Some("method" | "builtin_function_or_method")) =>
+                {
+                    Some(self.exact_type(obj)?)
                 }
+                _ => None,
+            };
+            if let Some(class) = class && let Some(member) = self.class_attr(class, name) {
+                let receiver = if obj == class { NONE } else { obj };
+                return self.bind_attribute(member, receiver, class);
             }
+        }
+        match *self.heap.get(obj) {
             Value::Complex(z) if matches!(name, "real" | "imag") => {
                 return Ok(self.alloc(Value::Float(if name == "real" { z.real } else { z.imag })));
             }
@@ -2464,6 +2483,12 @@ impl Context {
                     "__text_signature__" if symbol == "_typing._idfunc" => {
                         return Ok(self.text("($module, x, /)"));
                     }
+                    "__doc__" if symbol == "posix.getgrouplist" => {
+                        return Ok(self.text("Returns a list of groups to which a user belongs.\n\n  user\n    username to lookup\n  group\n    base group id of the user"));
+                    }
+                    "__text_signature__" if symbol == "posix.getgrouplist" => {
+                        return Ok(self.text("($module, user, group, /)"));
+                    }
                     "__doc__" if symbol == "_typing._idfunc" => return Ok(NONE),
                     "__name__" | "__qualname__" => return Ok(self.text(function.to_owned())),
                     "__module__" => return Ok(self.text(module.to_owned())),
@@ -2531,6 +2556,36 @@ impl Context {
                     }
                     "__text_signature__" if symbol == "posix.sched_yield" => {
                         return Ok(self.text("($module, /)"));
+                    }
+                    "__doc__" if symbol == "posix.sched_getaffinity" => {
+                        return Ok(self.text("Return the affinity of the process identified by pid (or the current process if zero).\n\nThe affinity is returned as a set of CPU identifiers."));
+                    }
+                    "__doc__" if symbol == "posix.sched_setaffinity" => {
+                        return Ok(self.text("Set the CPU affinity of the process identified by pid to mask.\n\nmask should be an iterable of integers identifying CPUs."));
+                    }
+                    "__doc__" if symbol == "posix.sched_rr_get_interval" => {
+                        return Ok(self.text("Return the round-robin quantum for the process identified by pid, in seconds.\n\nValue returned is a float."));
+                    }
+                    "__doc__" if symbol == "posix.sched_getparam" => {
+                        return Ok(self.text("Returns scheduling parameters for the process identified by pid.\n\nIf pid is 0, returns parameters for the calling process.\nReturn value is an instance of sched_param."));
+                    }
+                    "__doc__" if symbol == "posix.sched_setparam" => {
+                        return Ok(self.text("Set scheduling parameters for the process identified by pid.\n\nIf pid is 0, sets parameters for the calling process.\nparam should be an instance of sched_param."));
+                    }
+                    "__doc__" if symbol == "posix.sched_setscheduler" => {
+                        return Ok(self.text("Set the scheduling policy for the process identified by pid.\n\nIf pid is 0, the calling process is changed.\nparam is an instance of sched_param."));
+                    }
+                    "__text_signature__" if matches!(symbol.as_str(), "posix.sched_getaffinity" | "posix.sched_rr_get_interval" | "posix.sched_getparam") => {
+                        return Ok(self.text("($module, pid, /)"));
+                    }
+                    "__text_signature__" if symbol == "posix.sched_setaffinity" => {
+                        return Ok(self.text("($module, pid, mask, /)"));
+                    }
+                    "__text_signature__" if symbol == "posix.sched_setparam" => {
+                        return Ok(self.text("($module, pid, param, /)"));
+                    }
+                    "__text_signature__" if symbol == "posix.sched_setscheduler" => {
+                        return Ok(self.text("($module, pid, policy, param, /)"));
                     }
                     "__doc__" if symbol == "posix.sched_getscheduler" => {
                         return Ok(self.text(concat!(
@@ -3567,6 +3622,9 @@ impl Context {
             {
                 return Ok(self.text(encoding.as_str()));
             }
+            Value::TextFile(ref file) if name == "_finalizing" => {
+                return Ok(builtins::boolean(file.finalizing));
+            }
             Value::TextFile(_) if name == "write_through" => return Ok(FALSE),
             Value::TextFile(ref file) if name == "line_buffering" => {
                 return Ok(if file.line_buffering { TRUE } else { FALSE });
@@ -3777,15 +3835,19 @@ impl Context {
                 return self.bind_attribute(callable, obj, class);
             }
             Value::Native(ref class)
-                if class == weakref::REFERENCE_TYPE
-                    && weakref::REFERENCE_METHODS.contains(&name) =>
+                if (class == weakref::REFERENCE_TYPE
+                    && weakref::REFERENCE_METHODS.contains(&name))
+                    || (class == weakref::PROXY_TYPE && weakref::PROXY_METHODS.contains(&name)) =>
             {
-                return Ok(self.builtin(&format!("{}.{name}", weakref::REFERENCE_TYPE)));
+                return Ok(self.builtin(&format!("{class}.{name}")));
             }
-            Value::Native(ref method)
-                if method == weakref::REFERENCE_HASH && name == "__qualname__" =>
+            Value::Native(ref builtin)
+                if name == "__qualname__"
+                    && let Some(qualified) = builtin.strip_prefix("weakref.")
+                    && (builtin == weakref::REFERENCE_HASH
+                        || self.builtin_type_name(obj) == Some("type")) =>
             {
-                return Ok(self.text("ReferenceType.__hash__"));
+                return Ok(self.text(qualified.to_owned()));
             }
             Value::Native(ref builtin)
                 if name == "__module__"
@@ -3912,35 +3974,26 @@ impl Context {
                 let method = self.builtin("dict.fromkeys");
                 return Ok(self.bind_native_classmethod(method, owner));
             }
-            Value::Native(ref owner) if builtins::set_operators(owner).contains(&name) => {
-                return Ok(self.builtin(&format!("{owner}.{name}")));
+            Value::Set { frozen, .. } if name == "__class_getitem__" => {
+                let owner = if frozen { "frozenset" } else { "set" };
+                let member = self.builtin(&format!("{owner}.{name}"));
+                let class = self.builtin(owner);
+                return Ok(self.bind_native_classmethod(member, class));
             }
-            Value::Native(ref class) if class == "set" && name == "copy" => {
-                return Ok(self.builtin("set.copy"));
-            }
-            Value::Native(ref class)
-                if class == "set"
-                    && matches!(
-                        name,
-                        "clear"
-                            | "discard"
-                            | "pop"
-                            | "remove"
-                            | "difference_update"
-                            | "symmetric_difference_update"
-                            | "update"
-                    ) =>
+            Value::Native(ref owner)
+                if builtins::set_methods(owner).contains(&name)
+                    || builtins::set_operators(owner).contains(&name) =>
             {
-                return Ok(self.builtin(&format!("set.{name}")));
+                let member = self.builtin(&format!("{owner}.{name}"));
+                if name == "__class_getitem__" {
+                    return Ok(self.bind_native_classmethod(member, obj));
+                }
+                return Ok(member);
             }
             Value::Native(ref class)
                 if matches!(class.as_str(), "dict" | "list" | "tuple")
                     || (class == "function" && name == "__call__")
                     || builtins::is_enum_base(class)
-                    || (matches!(
-                        name,
-                        "__repr__" | "difference" | "intersection" | "issubset" | "union"
-                    ) && matches!(class.as_str(), "set" | "frozenset"))
                     || (builtins::is_exception(class)
                         && matches!(
                             name,
@@ -4766,6 +4819,10 @@ impl Context {
     }
 
     fn writable_attribute_member(&mut self, obj: Id, name: &str) -> Option<Id> {
+        if name == "_finalizing" && matches!(self.heap.get(obj), Value::TextFile(_)) {
+            let owner = self.builtin("_io.TextIOWrapper");
+            return self.own_class_attr(owner, name);
+        }
         if name == "cr_origin" && matches!(self.heap.get(obj), Value::Coroutine { .. }) {
             return Some(self.readonly_member("coroutine", "cr_origin"));
         }
@@ -4848,18 +4905,8 @@ impl Context {
         ordinary
     }
 
-    /// Look up native backing fields on either side of ordinary dictionary materialization.
     pub(super) fn raw_instance_field(&self, obj: Id, name: &str) -> Option<Id> {
-        let Value::Instance {
-            fields, namespace, ..
-        } = self.heap.get(obj)
-        else {
-            return None;
-        };
-        fields
-            .get(name)
-            .copied()
-            .or_else(|| self.dict_named_item(self.dict_storage((*namespace)?)?, name))
+        self.heap.raw_instance_field(obj, name)
     }
 
     /// Return the live instance dictionary for default object state, bypassing attribute hooks.
@@ -4938,12 +4985,31 @@ impl Context {
         }
     }
 
+    /// Reject changes through an immutable instance's object.__class__ descriptor.
+    pub(super) fn immutable_class_assignment(&self, value: Option<Id>) -> Error {
+        let message = match value {
+            None => "can't delete __class__ attribute".to_owned(),
+            Some(value) if !self.is_type_object(value) => {
+                format!(
+                    "__class__ must be set to a class, not '{}' object",
+                    self.type_name(value)
+                )
+            }
+            Some(_) => {
+                "__class__ assignment only supported for mutable types or ModuleType subclasses"
+                    .to_owned()
+            }
+        };
+        Error::new("TypeError", message)
+    }
+
     /// A slot-only instance can retain fields declared by any of its Python bases.
     fn check_instance_field(&mut self, obj: Id, name: &str) -> Result<()> {
         let Value::Instance { class, .. } = *self.heap.get(obj) else {
             return Ok(());
         };
-        if !matches!(self.heap.get(class), Value::Class { .. }) {
+        let exact_tzinfo = self.builtins.get(stdlib::datetime::TZINFO) == Some(&class);
+        if !exact_tzinfo && !matches!(self.heap.get(class), Value::Class { .. }) {
             return Ok(());
         }
         let layout = self.instance_layout(class, name);
@@ -4953,7 +5019,10 @@ impl Context {
         let attribute = self.text(name);
         let quoted = self.repr(attribute);
         let kind = self.type_name(obj);
-        let message = if self.class_attr(class, name).is_some() {
+        // Exact native tzinfo has no stored MRO for object methods.
+        let inherited =
+            exact_tzinfo && (name == "__doc__" || crate::objects::OBJECT_METHODS.contains(&name));
+        let message = if self.class_attr(class, name).is_some() || inherited {
             format!("'{kind}' object attribute {quoted} is read-only")
         } else {
             format!(
@@ -5342,6 +5411,12 @@ impl Context {
             && self.replace_defaultdict_factory(obj, value)
         {
             return Ok(());
+        }
+        if name == "__class__"
+            && let Value::Instance { class, .. } = self.heap.get(obj)
+            && self.builtins.get(stdlib::datetime::TZINFO) == Some(class)
+        {
+            return Err(self.immutable_class_assignment(Some(value)));
         }
         self.check_instance_field(obj, name)?;
         if let Value::Partial { dictionary, .. } = *self.heap.get(obj)
@@ -6022,6 +6097,10 @@ impl Context {
             {
                 stdlib::pickle::object_reduce(self, &name["object.".len()..], &args, &kwargs)
             }
+            Value::Native(name) if nonconstructible_result_type(&name) => Err(Error::new(
+                "TypeError",
+                format!("cannot create '{name}' instances"),
+            )),
             Value::Native(name)
                 if builtins::is_builtin(&name)
                     || builtins::constructor_owner(&name)
@@ -6029,6 +6108,7 @@ impl Context {
                     || matches!(
                         name.as_str(),
                         "builtin_function_or_method.__reduce__"
+                            | "method.__reduce__"
                             | "type.__init__"
                             | "BaseException.__init__"
                             | "BaseException.add_note"
@@ -6058,6 +6138,7 @@ impl Context {
                                 | "generator"
                                 | "coroutine"
                                 | "coroutine_wrapper"
+                                | "anext_awaitable"
                                 | "dict"
                                 | "list"
                                 | "map"
@@ -6087,10 +6168,6 @@ impl Context {
             {
                 builtins::call(self, &name, &args, &kwargs)
             }
-            Value::Native(name) if nonconstructible_result_type(&name) => Err(Error::new(
-                "TypeError",
-                format!("cannot create '{name}' instances"),
-            )),
             Value::Native(name) => stdlib::call(self, &name, &args, &kwargs)
                 .map_err(|error| stdlib::io::qualify_error(self, error, None)),
             Value::StaticMethod { callable, .. } => self.call(callable, args, kwargs),

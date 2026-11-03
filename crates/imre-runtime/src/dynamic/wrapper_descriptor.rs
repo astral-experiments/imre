@@ -59,6 +59,9 @@ impl BuiltinDescriptor {
             });
         }
         let slots = match symbol.rsplit_once('.') {
+            Some((weakref::PROXY_TYPE, attr)) => {
+                Some((weakref::PROXY_TYPE, attr, weakref::PROXY_METHODS))
+            }
             Some((stdlib::os::scandir::ENTRY, attr)) => Some((
                 stdlib::os::scandir::ENTRY,
                 attr,
@@ -101,6 +104,9 @@ impl BuiltinDescriptor {
                 Some((defaultdict::CLASS, attr, defaultdict::METHODS))
             }
             Some(("generator", attr)) => Some(("generator", attr, &["__iter__", "__next__"][..])),
+            Some(("anext_awaitable", attr)) => {
+                Some(("anext_awaitable", attr, generator_protocol::ANEXT_METHODS))
+            }
             Some(("mappingproxy", attr)) => {
                 Some(("mappingproxy", attr, builtins::MAPPING_PROXY_METHODS))
             }
@@ -121,29 +127,12 @@ impl BuiltinDescriptor {
                 Some(("member_descriptor", attr, super::namedtuple::MEMBER_SLOTS))
             }
             Some(("frame", attr)) => Some(("frame", attr, &["clear"][..])),
-            Some(("set", attr)) => Some((
-                "set",
-                attr,
-                &[
-                    "__reduce__",
-                    "difference",
-                    "intersection",
-                    "issubset",
-                    "union",
-                    "update",
-                ][..],
-            )),
-            Some(("frozenset", attr)) => Some((
-                "frozenset",
-                attr,
-                &[
-                    "__reduce__",
-                    "difference",
-                    "intersection",
-                    "issubset",
-                    "union",
-                ][..],
-            )),
+            Some(("set", attr)) if attr != "__class_getitem__" => {
+                Some(("set", attr, builtins::set_methods("set")))
+            }
+            Some(("frozenset", attr)) if attr != "__class_getitem__" => {
+                Some(("frozenset", attr, builtins::set_methods("frozenset")))
+            }
             Some(("list", attr)) => Some(("list", attr, builtins::LIST_METHODS)),
             Some(("range", attr)) => Some(("range", attr, range::METHODS)),
             Some((stdlib::fixed_structseq::SCHED_PARAM, attr)) => Some((
@@ -178,6 +167,7 @@ impl BuiltinDescriptor {
                 method: !name.starts_with("__")
                     || (deque::iterator_class(owner).is_some() && name == "__length_hint__")
                     || (owner == "list" && name == "__getitem__")
+                    || (matches!(owner, "set" | "frozenset") && name == "__contains__")
                     || (owner == defaultdict::CLASS && name == "__missing__")
                     || matches!(
                         name,
@@ -216,6 +206,7 @@ impl BuiltinDescriptor {
             "frozenset.__sizeof__" => ("frozenset", "__sizeof__"),
             "object.__getstate__" => ("object", "__getstate__"),
             "object.__reduce__" => ("object", "__reduce__"),
+            "method.__reduce__" => ("method", "__reduce__"),
             "builtin_function_or_method.__reduce__" => ("builtin_function_or_method", "__reduce__"),
             "object.__reduce_ex__" => ("object", "__reduce_ex__"),
             "int.__add__" => ("int", "__add__"),
@@ -267,8 +258,6 @@ impl BuiltinDescriptor {
             "mappingproxy.__str__" => ("mappingproxy", "__str__"),
             "mappingproxy.__contains__" => ("mappingproxy", "__contains__"),
             "tuple.__repr__" => ("tuple", "__repr__"),
-            "set.__repr__" => ("set", "__repr__"),
-            "frozenset.__repr__" => ("frozenset", "__repr__"),
             "types.SimpleNamespace.__init__" => (super::namespace::CLASS, "__init__"),
             "types.SimpleNamespace.__repr__" => (super::namespace::CLASS, "__repr__"),
             "types.SimpleNamespace.__eq__" => (super::namespace::CLASS, "__eq__"),
@@ -360,6 +349,7 @@ impl BuiltinDescriptor {
                 matches!(ctx.heap.get(receiver), Value::DictIterator(iter) if iter.class_name() == owner)
             }
             "generator" => matches!(ctx.heap.get(receiver), Value::Generator { .. }),
+            "anext_awaitable" => matches!(ctx.heap.get(receiver), Value::ANextAwaitable { .. }),
             owner if typing::ParameterClass::lookup(owner).is_some() => {
                 ctx.builtin_type_name(receiver) == Some(owner)
             }
@@ -426,6 +416,8 @@ impl BuiltinDescriptor {
         receiver: Option<Id>,
     ) -> Option<Id> {
         Some(match name {
+            "__doc__" if self.owner == weakref::PROXY_TYPE => NONE,
+            "__text_signature__" if self.owner == weakref::PROXY_TYPE => ctx.text("($self, /)"),
             "__doc__" | "__text_signature__" if self.owner == deque::CLASS => {
                 let member = deque::member(self.name)?;
                 ctx.text(if name == "__doc__" { member.doc } else { member.signature })
@@ -478,7 +470,7 @@ impl BuiltinDescriptor {
                     match ctx.heap.get(receiver) {
                         _ if self.owner == "type" => ctx.class_qualname(receiver),
                         _ if matches!(self.owner, value::REGEX_PATTERN_TYPE | value::REGEX_MATCH_TYPE) => self.owner.rsplit('.').next()?,
-                        _ if self.owner == "builtin_function_or_method" => self.owner,
+                        _ if matches!(self.owner, "builtin_function_or_method" | "method") => self.owner,
                         Value::Deque(_) if self.owner == deque::CLASS => "deque",
                         Value::DefaultDict { .. } if self.owner == defaultdict::CLASS => "defaultdict",
                         Value::NamedTuple { class: Some(owner), .. } if let Some(layout) = stdlib::os::stat::layout(owner) => layout.name(),
@@ -601,10 +593,14 @@ impl BuiltinDescriptor {
             )),
             "__doc__" | "__text_signature__" if self.method => {
                 let value = match (self.name, name) {
+                    ("intersection_update", "__doc__") if self.owner == "set" => {
+                        "Update the set, keeping only elements found in it and all others."
+                    }
+                    ("intersection_update", _) if self.owner == "set" => "($self, /, *others)",
                     ("utctimetuple", "__doc__") if self.owner == "datetime.datetime" => "Return UTC time tuple, compatible with time.localtime().",
                     ("utctimetuple", _) if self.owner == "datetime.datetime" => "($self, /)",
-                    ("__reduce__", "__doc__") if matches!(self.owner, "builtin_function_or_method" | "types.GenericAlias" | "generic_alias_iterator") => return Some(NONE),
-                    ("__reduce__", _) if matches!(self.owner, "builtin_function_or_method" | "types.GenericAlias" | "generic_alias_iterator") => "($self, /)",
+                    ("__reduce__", "__doc__") if matches!(self.owner, "builtin_function_or_method" | "method" | "types.GenericAlias" | "generic_alias_iterator") => return Some(NONE),
+                    ("__reduce__", _) if matches!(self.owner, "builtin_function_or_method" | "method" | "types.GenericAlias" | "generic_alias_iterator") => "($self, /)",
                     ("__reduce__", "__doc__") if self.owner == stdlib::datetime::TZINFO => "-> (cls, state)",
                     ("__reduce__", _) if self.owner == stdlib::datetime::TZINFO => "($self, /)",
                     ("tzname", "__doc__") if self.owner == "datetime.timezone" => "If name is specified when timezone is created, returns the name.  Otherwise returns offset as 'UTC(+|-)HH:MM'.",

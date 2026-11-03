@@ -41,6 +41,38 @@ class GrowingFields(ast.AST):
         return None
 
 
+def check_import_nodes():
+    import sys
+    from ast import Import, ImportFrom, alias
+
+    assert (Import, ImportFrom, alias) == (ast.Import, ast.ImportFrom, ast.alias)
+
+    plain, relative_future, relative, star = ast.parse(
+        "import _imre_ast_fixture_missing.é as local, π\n"
+        "from .__future__ import example\n"
+        "from .. import (\n    first as other,\n    last,\n)\n"
+        "from pkg import *"
+    ).body
+    assert "_imre_ast_fixture_missing" not in sys.modules
+    assert type(plain) is ast.Import and isinstance(plain, ast.stmt)
+    assert plain._fields == ("names",) and plain.end_col_offset == 48
+    first, second = plain.names
+    assert type(first) is ast.alias and isinstance(first, ast.AST)
+    assert first._fields == ("name", "asname") and list(ast.walk(plain)) == [plain, first, second]
+    assert (first.name, first.asname, first.col_offset, first.end_col_offset) == (
+        "_imre_ast_fixture_missing.é", "local", 7, 44
+    )
+    assert (second.name, second.asname, second.col_offset, second.end_col_offset) == ("π", None, 46, 48)
+    assert type(relative) is ast.ImportFrom and isinstance(relative, ast.stmt)
+    assert relative._fields == ("module", "names", "level")
+    assert (relative.module, relative.level, relative.lineno, relative.end_lineno) == (None, 2, 3, 6)
+    assert [(item.name, item.asname, item.lineno) for item in relative.names] == [
+        ("first", "other", 4), ("last", None, 5)
+    ]
+    assert (relative_future.module, relative_future.level) == ("__future__", 1)
+    assert (star.module, star.level, star.names[0].name) == ("pkg", 0, "*")
+
+
 def check_comparison_nodes():
     source = "(\n  é == b != c < d <= e > f >= g\n  is h is not i in j not in k\n)"
     node = ast.parse(source, mode="eval").body
@@ -117,6 +149,7 @@ def check_template_nodes():
 
 
 def current():
+    check_import_nodes()
     check_comparison_nodes()
     check_template_nodes()
     decorated_source = (

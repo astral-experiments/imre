@@ -244,6 +244,7 @@ pub(super) struct Registry {
     pub(super) callable_factory: Option<Id>,
     pub(super) abc_callable_reducer: Option<Id>,
     no_default: Option<Id>,
+    no_default_doc: Option<Id>,
     overloads: HashMap<(String, String), Vec<(u32, Id)>>,
 }
 
@@ -255,9 +256,12 @@ impl Registry {
             .chain(self.callable_factory.iter())
             .chain(self.abc_callable_reducer.iter())
             .chain(self.no_default.iter())
+            .chain(self.no_default_doc.iter())
             .chain(self.overloads.values().flatten().map(|(_, value)| value))
     }
 }
+
+const NO_DEFAULT_DOC: &str = "The type of the NoDefault singleton.";
 
 pub(super) fn no_default(ctx: &mut Context) -> Id {
     if let Some(value) = ctx.typing.no_default {
@@ -265,6 +269,7 @@ pub(super) fn no_default(ctx: &mut Context) -> Id {
     }
     let value = ctx.alloc(Value::NoDefault);
     ctx.typing.no_default = Some(value);
+    ctx.typing.no_default_doc = Some(ctx.text(NO_DEFAULT_DOC));
     value
 }
 
@@ -781,6 +786,7 @@ pub(super) fn subscribe(ctx: &mut Context, target: Id, index: Id) -> Option<Resu
                     | "list"
                     | "tuple"
                     | "set"
+                    | "frozenset"
                     | "type"
                     | super::value::REGEX_PATTERN_TYPE
                     | super::value::REGEX_MATCH_TYPE
@@ -1358,6 +1364,10 @@ pub(super) fn attribute(ctx: &mut Context, value: Id, name: &str) -> Option<Resu
             })
         }
         Value::Native(class) if class == "typing._ConcatenateGenericAlias" => match name {
+            "__reduce__" => {
+                let base = ctx.builtin("typing._GenericAlias");
+                return Some(ctx.lookup_attr(base, name));
+            }
             "__base__" => ctx.builtin("typing._GenericAlias"),
             "__bases__" => {
                 let parent = ctx.builtin("typing._GenericAlias");
@@ -1426,13 +1436,7 @@ pub(super) fn attribute(ctx: &mut Context, value: Id, name: &str) -> Option<Resu
         }
         Value::GenericAlias(alias)
             if name == "__reduce__"
-                && matches!(
-                    alias.kind,
-                    AliasKind::Builtin
-                        | AliasKind::Generic
-                        | AliasKind::Callable
-                        | AliasKind::AbcCallable
-                ) =>
+                && (alias.kind.is_typing_alias() || alias.is_builtin_alias()) =>
         {
             let class = ctx.builtin(alias.kind.class());
             return Some(
@@ -1440,6 +1444,7 @@ pub(super) fn attribute(ctx: &mut Context, value: Id, name: &str) -> Option<Resu
                     .and_then(|reducer| ctx.bind_attribute(reducer, value, class)),
             );
         }
+        Value::NoDefault if name == "__doc__" => ctx.typing.no_default_doc?,
         Value::NoDefault if name == "__reduce__" => {
             let callable = ctx.builtin("typing.NoDefault.__reduce__");
             ctx.alloc(Value::Method {
@@ -1447,6 +1452,9 @@ pub(super) fn attribute(ctx: &mut Context, value: Id, name: &str) -> Option<Resu
                 receiver: value,
                 explicit: false,
             })
+        }
+        Value::Native(class) if class == "NoDefaultType" && name == "__doc__" => {
+            ctx.text(NO_DEFAULT_DOC)
         }
         Value::Native(class) if class == "NoDefaultType" && name == "__module__" => {
             ctx.text("builtins")

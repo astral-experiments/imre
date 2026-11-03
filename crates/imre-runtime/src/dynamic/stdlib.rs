@@ -116,7 +116,7 @@ pub(super) fn jit_module(ctx: &mut Context) -> Result<Id> {
 
 pub(super) fn is_module(name: &str) -> bool {
     #[cfg(unix)]
-    if name == "_imre_ssl" {
+    if matches!(name, "_ssl" | "_imre_ssl") {
         return ssl::provider::available();
     }
     if name == "_hashlib" {
@@ -263,6 +263,26 @@ fn argument(args: &[Id], index: usize) -> Result<Id> {
     args.get(index)
         .copied()
         .ok_or_else(|| Error::new("TypeError", "missing required argument"))
+}
+
+/// Name the actual type for C diagnostics without consulting Python attribute hooks.
+pub(in crate::dynamic) fn diagnostic_type_name(
+    ctx: &Context,
+    value: Id,
+) -> std::borrow::Cow<'_, str> {
+    if matches!(ctx.heap.get(value), Value::Struct { .. }) {
+        return "_struct.Struct".into();
+    }
+    if let Value::Calendar { value, .. } = ctx.heap.get(value) {
+        return format!("datetime.{}", value.class()).into();
+    }
+    ctx.heap
+        .get(value)
+        .instance_class()
+        .map(|class| ctx.class_name(class))
+        .or_else(|| ctx.builtin_type_name(value))
+        .unwrap_or_else(|| ctx.type_name(value))
+        .into()
 }
 
 /// PyArg formats at most 50 bytes of tp_name before decoding the entire diagnostic as UTF-8.
@@ -497,6 +517,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             "_imre_importlib",
             "find_spec"
             | "native_spec_info"
+            | "native_source"
             | "create_native_module"
             | "exec_native_module"
             | "warn_import"
@@ -722,7 +743,6 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("functools", "_CacheInfo") => functools::cache_info_type(ctx)?,
         ("functools", "WRAPPER_ASSIGNMENTS") => tuple_text(ctx, functools::ASSIGNED),
         ("functools", "WRAPPER_UPDATES") => tuple_text(ctx, functools::UPDATED),
-        ("posixpath", "dirname") => ctx.builtin("os.path.dirname"),
         ("os" | "posix", "getcwd" | "getcwdb" | "strerror") if cfg!(unix) => {
             ctx.builtin(&format!("posix.{name}"))
         }
@@ -1801,6 +1821,10 @@ pub(super) fn call(
         return os::descriptor(ctx, op, args, kwargs);
     }
     #[cfg(target_os = "linux")]
+    if matches!(name, "posix.pathconf" | "posix.fpathconf") {
+        return os::sysconf::pathconf(ctx, name, args, kwargs);
+    }
+    #[cfg(target_os = "linux")]
     if name == "posix.sysconf" {
         return os::sysconf::call(ctx, args, kwargs);
     }
@@ -1813,6 +1837,19 @@ pub(super) fn call(
     #[cfg(target_os = "linux")]
     if name == "posix.sched_yield" {
         return os::scheduler::yield_cpu(args, kwargs);
+    }
+    #[cfg(target_os = "linux")]
+    match name {
+        "posix.sched_getaffinity" => return os::scheduler::affinity::get(ctx, args, kwargs),
+        "posix.sched_setaffinity" => return os::scheduler::affinity::set(ctx, args, kwargs),
+        "posix.sched_rr_get_interval" => return os::scheduler::rr_interval(ctx, args, kwargs),
+        _ => {}
+    }
+    #[cfg(target_os = "linux")]
+    if let Some(op @ ("sched_getparam" | "sched_setparam" | "sched_setscheduler")) =
+        name.strip_prefix("posix.")
+    {
+        return os::scheduler::parameters::call(ctx, op, args, kwargs);
     }
     #[cfg(target_os = "linux")]
     if name == "posix.sched_getscheduler" {
@@ -1829,6 +1866,10 @@ pub(super) fn call(
     #[cfg(target_os = "linux")]
     if let Some(op @ ("posix_spawn" | "posix_spawnp")) = name.strip_prefix("posix.") {
         return posix_spawn::call(ctx, op, args, kwargs);
+    }
+    #[cfg(target_os = "linux")]
+    if name == "posix.getgrouplist" {
+        return grp::getgrouplist(ctx, args, kwargs);
     }
     if name == "posix.strerror" {
         if !kwargs.is_empty() {
@@ -2106,6 +2147,10 @@ pub(super) fn call(
                     frozen,
                 )?;
                 return Ok(NONE);
+            }
+            ("native_source", [name, bundled], []) => {
+                let name = ctx.str_value(*name)?.to_owned();
+                return ctx.native_source(&name, *bundled == TRUE);
             }
             ("native_spec_info", [name, path, bundled], []) => {
                 let name = ctx.str_value(*name)?.to_owned();
@@ -2407,6 +2452,10 @@ pub(super) fn call(
         return hmac::compare(ctx, name, args, kwargs);
     }
     #[cfg(unix)]
+    if let Some(function) = name.strip_prefix("_ssl.") {
+        return ssl::provider::objects::call(ctx, function, args, kwargs);
+    }
+    #[cfg(unix)]
     if let Some(function) = name.strip_prefix("_imre_ssl.") {
         return ssl::call(ctx, function, args, kwargs);
     }
@@ -2646,7 +2695,6 @@ pub(super) fn call(
         "sys.exit"
         | "sysconfig.get_preferred_scheme"
         | "os.confstr"
-        | "os.path.dirname"
         | "struct.calcsize"
         | "_string.formatter_parser"
         | "_string.formatter_field_name_split"
@@ -2923,10 +2971,6 @@ pub(super) fn call(
                 }
             }
             return Err(ctx.exception("SystemExit", args));
-        }
-        "os.path.dirname" => {
-            let path = ctx.str_value(argument(args, 0)?)?;
-            return Ok(ctx.text(posixpath::dirname(path).to_owned()));
         }
         "file.__enter__" | "file.__exit__" => {
             let receiver = argument(args, 0)?;

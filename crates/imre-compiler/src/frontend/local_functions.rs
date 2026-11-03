@@ -382,6 +382,13 @@ impl Checker<'_> {
                 .iter_non_variadic_params()
                 .any(|p| p.annotation().is_none())
         {
+            if self
+                .graph
+                .session
+                .is_untyped_generator_local(self.module, definition)
+            {
+                return Err(self.scoped_builtin_error("a generator-local function", definition));
+            }
             return Err(error(
                 self.source,
                 definition,

@@ -62,6 +62,7 @@ pub(super) fn exception_ancestors(
         ImportError,
         NameError,
         RuntimeError,
+        IndentationError,
         SyntaxError,
         Warning,
         Exception,
@@ -114,6 +115,7 @@ const FUNCTIONS: &[&str] = &[
     "eval",
     "iter",
     "next",
+    "anext",
 ];
 
 const TYPES: &[&str] = &[
@@ -323,6 +325,7 @@ pub(super) fn is_final_iterator_type(name: &str) -> bool {
         "iterator"
             | "generator"
             | "coroutine_wrapper"
+            | "anext_awaitable"
             | "list_iterator"
             | "list_reverseiterator"
             | "tuple_iterator"
@@ -403,6 +406,54 @@ pub(super) fn real_methods(owner: &str) -> &'static [&'static str] {
             "__trunc__",
         ],
         "float" => &["__abs__", "__float__", "__int__", "__round__", "__trunc__"],
+        _ => &[],
+    }
+}
+
+/// Set methods shared by registration, attribute lookup, and directory enumeration.
+pub(super) fn set_methods(owner: &str) -> &'static [&'static str] {
+    match owner {
+        "set" => &[
+            "__class_getitem__",
+            "__contains__",
+            "__iter__",
+            "__len__",
+            "__reduce__",
+            "__repr__",
+            "add",
+            "clear",
+            "copy",
+            "difference",
+            "difference_update",
+            "discard",
+            "intersection",
+            "intersection_update",
+            "isdisjoint",
+            "issubset",
+            "issuperset",
+            "pop",
+            "remove",
+            "symmetric_difference",
+            "symmetric_difference_update",
+            "union",
+            "update",
+        ],
+        "frozenset" => &[
+            "__class_getitem__",
+            "__contains__",
+            "__iter__",
+            "__len__",
+            "__reduce__",
+            "__repr__",
+            "copy",
+            "difference",
+            "intersection",
+            "isdisjoint",
+            "issubset",
+            "issuperset",
+            "symmetric_difference",
+            "union",
+        ],
         _ => &[],
     }
 }
@@ -603,6 +654,11 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         {
             "coroutine_wrapper"
         }
+        Value::ANextAwaitable { .. }
+            if super::generator_protocol::coroutine_method("anext_awaitable", attr) =>
+        {
+            "anext_awaitable"
+        }
         Value::MemoryView { .. } if MEMORYVIEW_METHODS.contains(&attr) => "memoryview",
         Value::Bytes(_) if BYTES_METHODS.contains(&attr) => "bytes",
         Value::Complex(_) if attr == "__complex__" => "complex",
@@ -678,47 +734,12 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
             "tuple"
         }
         Value::Tuple(_) if matches!(attr, "__getitem__" | "__repr__") => "tuple",
-        Value::Set { frozen: false, .. } if SET_OPERATORS.contains(&attr) => "set",
-        Value::Set { frozen: true, .. } if FROZENSET_OPERATORS.contains(&attr) => "frozenset",
-        Value::Set { frozen: false, .. }
-            if matches!(
-                attr,
-                "add"
-                    | "clear"
-                    | "copy"
-                    | "discard"
-                    | "difference"
-                    | "intersection"
-                    | "pop"
-                    | "remove"
-                    | "union"
-                    | "difference_update"
-                    | "symmetric_difference_update"
-                    | "update"
-                    | "issuperset"
-                    | "issubset"
-                    | "__contains__"
-                    | "__reduce__"
-                    | "__repr__"
-            ) =>
-        {
-            "set"
-        }
-        Value::Set { frozen: true, .. }
-            if matches!(
-                attr,
-                "copy"
-                    | "difference"
-                    | "intersection"
-                    | "union"
-                    | "issuperset"
-                    | "issubset"
-                    | "__contains__"
-                    | "__reduce__"
-                    | "__repr__"
-            ) =>
-        {
-            "frozenset"
+        Value::Set { frozen, .. } => {
+            let owner = if *frozen { "frozenset" } else { "set" };
+            if !(set_methods(owner).contains(&attr) || set_operators(owner).contains(&attr)) {
+                return None;
+            }
+            owner
         }
         Value::DefaultDict { .. } if super::defaultdict::METHODS.contains(&attr) => {
             super::defaultdict::CLASS
@@ -1192,8 +1213,13 @@ fn reduce_builtin_method(ctx: &mut Context, method: Id) -> Result<Id> {
     else {
         return Ok(ctx.text(name));
     };
-    let getattr = frame_builtin(ctx, "getattr")?;
     let name = ctx.text(name);
+    bound_method_reduction(ctx, receiver, name)
+}
+
+/// Rebuild a bound method by looking up its name on the restored receiver.
+fn bound_method_reduction(ctx: &mut Context, receiver: Id, name: Id) -> Result<Id> {
+    let getattr = frame_builtin(ctx, "getattr")?;
     let args = ctx.alloc(Value::Tuple(vec![receiver, name]));
     Ok(ctx.alloc(Value::Tuple(vec![getattr, args])))
 }
@@ -1238,6 +1264,14 @@ pub(super) fn call(
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
+    if name == "method.__reduce__" {
+        let method = noargs_method_receiver(ctx, "method", "__reduce__", args, kwargs)?;
+        let Value::Method { callable, receiver, .. } = *ctx.heap.get(method) else {
+            unreachable!("validated Python method")
+        };
+        let name = ctx.lookup_attr(callable, "__name__")?;
+        return bound_method_reduction(ctx, receiver, name);
+    }
     if name == "builtin_function_or_method.__reduce__" {
         let method = noargs_method_receiver(
             ctx, "builtin_function_or_method", "__reduce__", args, kwargs,
@@ -1540,6 +1574,16 @@ pub(super) fn call(
                     1 | 3 => Ok(NONE),
                     _ => Err(type_error("type.__init__() takes 1 or 3 arguments")),
                 }
+            }
+            "anext_awaitable" => {
+                positional(name, kwargs)?;
+                let (min, max) = match method {
+                    "send" => (2, 2),
+                    "throw" => (1, usize::MAX),
+                    _ => (1, 1),
+                };
+                arity(name, args, min, max)?;
+                ctx.call_anext_method(method, args)
             }
             "coroutine" | "coroutine_wrapper" => {
                 positional(name, kwargs)?;
@@ -2075,7 +2119,7 @@ pub(super) fn call(
             };
             Ok(ctx.int(i64::from(code)))
         }
-        "iter" | "next" => {
+        "iter" | "next" | "anext" => {
             if !kwargs.is_empty() {
                 return Err(type_error(format!("{name}() takes no keyword arguments")));
             }
@@ -2083,6 +2127,19 @@ pub(super) fn call(
                 [] => Err(type_error(format!(
                     "{name} expected at least 1 argument, got 0"
                 ))),
+                [iterator, ..] if name == "anext" && args.len() <= 2 => {
+                    let Some(method) = ctx.bound_slot(*iterator, "__anext__")? else {
+                        return Err(type_error(format!(
+                            "'{:.200}' object is not an async iterator",
+                            ctx.type_name(*iterator)
+                        )));
+                    };
+                    let wrapped = ctx.call(method, Vec::new(), Vec::new())?;
+                    match args.get(1) {
+                        Some(&default) => Ok(ctx.alloc(Value::ANextAwaitable { wrapped, default })),
+                        None => Ok(wrapped),
+                    }
+                }
                 [iterable] if name == "iter" => ctx.iterator(*iterable),
                 [iterator] => ctx
                     .next_result(*iterator)?
@@ -2452,7 +2509,7 @@ pub(super) fn call(
             exceptions::initialize_import(&mut error, args, kwargs)?;
             Ok(ctx.alloc(Value::Raised(error)))
         }
-        name @ ("SyntaxError" | "IndentationError") => {
+        name @ ("SyntaxError" | "IndentationError" | "TabError") => {
             positional(name, kwargs)?;
             let mut fields = ctx.syntax_fields(args);
             if let [_, info] = args {

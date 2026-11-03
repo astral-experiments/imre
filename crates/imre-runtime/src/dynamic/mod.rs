@@ -72,6 +72,7 @@ use value::{
 struct SourceModule {
     path: PathBuf,
     code: Code,
+    bundled_text: Option<&'static [u8]>,
 }
 
 enum IteratorSlice<'a> {
@@ -232,13 +233,8 @@ impl Context {
     fn int(&mut self, value: i64) -> Id {
         self.alloc(Value::Int(crate::Int::from(value)))
     }
-    /// The builtin mapping payload is independent of a subclass instance's attributes.
     fn dict_storage(&self, value: Id) -> Option<Id> {
-        match self.heap.get(value) {
-            Value::Dict(_) | Value::DefaultDict { .. } => Some(value),
-            Value::Instance { dictionary, .. } => *dictionary,
-            _ => None,
-        }
+        self.heap.dict_storage(value)
     }
 
     /// The native elements inherited by a Python-defined list or tuple subclass.
@@ -267,8 +263,9 @@ impl Context {
     /// Slot descriptors require the native layout even when a proxy passes isinstance.
     fn builtin_slot_accepts(&self, object: Id, owner: &str) -> bool {
         match (owner, self.heap.get(self.scalar_value(object))) {
-            ("builtin_function_or_method", _) => {
-                self.builtin_type_name(object) == Some("builtin_function_or_method")
+            (weakref::PROXY_TYPE, Value::Weak(wr)) => wr.kind == weakref::Kind::Proxy,
+            ("builtin_function_or_method" | "method", _) => {
+                self.builtin_type_name(object) == Some(owner)
             }
             ("list", Value::List(_)) | ("tuple", Value::Tuple(_) | Value::NamedTuple { .. }) => {
                 true
@@ -298,10 +295,7 @@ impl Context {
     }
 
     fn dict_entries(&self, value: Id) -> Option<&[(Id, Id)]> {
-        match self.heap.get(self.dict_storage(value)?) {
-            Value::Dict(entries) | Value::DefaultDict { entries, .. } => Some(entries),
-            _ => unreachable!("dictionary payload"),
-        }
+        self.heap.dict_entries(value)
     }
 
     fn dict(&mut self, entries: Vec<(Id, Id)>) -> Id {
@@ -672,6 +666,7 @@ impl Context {
                 | Value::FormatIterator { .. }
                 | Value::Generator { .. }
                 | Value::CoroutineWrapper(_)
+                | Value::ANextAwaitable { .. }
                 | Value::BufferedRandom(..)
                 | Value::File(_)
                 | Value::TextFile(_)
@@ -834,6 +829,7 @@ impl Context {
                 | Value::Zip { .. }
                 | Value::Generator { .. }
                 | Value::CoroutineWrapper(_)
+                | Value::ANextAwaitable { .. }
                 | Value::BufferedRandom(..)
                 | Value::File(_)
                 | Value::TextFile(_)
@@ -1137,6 +1133,9 @@ impl Context {
             }
             return self.with_weak_target(target, |ctx| ctx.next_item(target));
         }
+        if matches!(self.heap.get(id), Value::ANextAwaitable { .. }) {
+            return self.call_anext_method("__next__", &[id]).map(Some);
+        }
         if matches!(self.heap.get(id), Value::CoroutineWrapper(_)) {
             return self
                 .call_coroutine_method("coroutine_wrapper", "__next__", &[id])
@@ -1422,6 +1421,7 @@ impl Context {
             self.heap.get(id),
             Value::AstWalk { .. }
                 | Value::Template { .. }
+                | Value::ANextAwaitable { .. }
                 | Value::TemplateIter { .. }
                 | Value::GenericAliasIterator(_)
                 | Value::SequenceIterator { .. }
@@ -2197,7 +2197,7 @@ impl Context {
             ],
             "dict" => builtins::DICT_METHODS,
             "function" => &["__call__"],
-            "builtin_function_or_method" => &["__reduce__"],
+            "builtin_function_or_method" | "method" => &["__reduce__"],
             defaultdict::CLASS => {
                 self.builtin("dict");
                 defaultdict::METHODS
@@ -2205,23 +2205,7 @@ impl Context {
             "list" => builtins::LIST_METHODS,
             "method_descriptor" | "wrapper_descriptor" => &["__get__"],
             "tuple" => &["__repr__", "__getitem__", "__len__", "count", "index"],
-            "set" => &[
-                "__repr__",
-                "__reduce__",
-                "difference",
-                "intersection",
-                "issubset",
-                "union",
-                "update",
-            ],
-            "frozenset" => &[
-                "__repr__",
-                "__reduce__",
-                "difference",
-                "intersection",
-                "issubset",
-                "union",
-            ],
+            "set" | "frozenset" => builtins::set_methods(name),
             "bytearray" => {
                 self.builtin("bytearray.fromhex");
                 builtins::BYTEARRAY_METHODS
@@ -2271,6 +2255,7 @@ impl Context {
             }
             thread_local::CLASS => &["__new__", "__getattribute__", "__setattr__", "__delattr__"],
             stdlib::fixed_structseq::SCHED_PARAM => &["__new__", "__reduce__", "__replace__"],
+            weakref::PROXY_TYPE => weakref::PROXY_METHODS,
             weakref::REFERENCE_TYPE => weakref::REFERENCE_METHODS,
             _ => &[],
         };
@@ -2827,6 +2812,11 @@ impl Context {
                 self.bind(scope, attr, value);
             }
             for attr in [
+                "fsync",
+                #[cfg(target_os = "linux")]
+                "fdatasync",
+                #[cfg(target_os = "linux")]
+                "ttyname",
                 "getegid",
                 #[cfg(target_os = "linux")]
                 "getresgid",
@@ -2943,6 +2933,8 @@ impl Context {
                     let function = self.builtin(&format!("posix.{name}"));
                     self.bind(scope, name, function);
                 }
+                let getgrouplist = self.builtin("posix.getgrouplist");
+                self.bind(scope, "getgrouplist", getgrouplist);
                 for (attr, flag) in [
                     ("SPLICE_F_MOVE", libc::SPLICE_F_MOVE),
                     ("SPLICE_F_NONBLOCK", libc::SPLICE_F_NONBLOCK),
@@ -3031,7 +3023,11 @@ impl Context {
                 #[cfg(target_os = "linux")]
                 if source.is_none() {
                     let posix = self.module("posix")?;
-                    for attr in stdlib::os::scheduler::PRIORITY_AND_YIELD {
+                    for attr in stdlib::os::scheduler::SCHEDULER_EXPORTS
+                        .into_iter()
+                        .chain(["sched_getscheduler", "sched_param"])
+                        .chain(stdlib::os::scheduler::POLICIES.map(|(name, _)| name))
+                    {
                         match self.lookup_attr(posix, attr) {
                             Ok(value) => self.bind(scope, attr, value),
                             Err(error) if self.is_attribute_error(&error) => continue,
@@ -3063,6 +3059,19 @@ impl Context {
                         "XATTR_REPLACE",
                         "XATTR_SIZE_MAX",
                     ] {
+                        let value = self.lookup_attr(posix, attr)?;
+                        self.bind(scope, attr, value);
+                    }
+                    match self.lookup_attr(posix, "getgrouplist") {
+                        Ok(value) => self.bind(scope, "getgrouplist", value),
+                        Err(error) if self.is_attribute_error(&error) => (),
+                        Err(error) => return Err(error),
+                    }
+                }
+                #[cfg(target_os = "linux")]
+                {
+                    let posix = self.module("posix")?;
+                    for attr in ["fpathconf", "pathconf", "pathconf_names"] {
                         let value = self.lookup_attr(posix, attr)?;
                         self.bind(scope, attr, value);
                     }
@@ -3098,6 +3107,8 @@ impl Context {
                 let pi = self.alloc(Value::Float(std::f64::consts::PI));
                 self.bind(scope, "pi", pi);
             }
+            #[cfg(unix)]
+            "_ssl" if source.is_none() => stdlib::ssl::provider::objects::install(self, scope)?,
             #[cfg(unix)]
             "_imre_ssl" if source.is_none() => stdlib::ssl::install(self, scope)?,
             "_hashlib" if source.is_none() => {

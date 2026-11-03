@@ -298,3 +298,32 @@ def check_clear():
 
 
 check_clear()
+
+
+class FailingExit:
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        print("exit caller", sys._getframe(1).f_lineno)
+        raise ValueError()
+
+
+def exit_locations(mode):
+    try:
+        with (
+            FailingExit(),
+            FailingExit(),
+        ):
+            if mode == "return":
+                return
+            if mode == "raise":
+                raise KeyError()
+    except ValueError as exc:
+        while exc is not None:
+            print(type(exc).__name__, exc.__traceback__.tb_lineno)
+            exc = exc.__context__
+
+
+for mode in ("normal", "return", "raise"):
+    exit_locations(mode)

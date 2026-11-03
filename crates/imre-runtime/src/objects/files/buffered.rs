@@ -294,6 +294,8 @@ impl Read for ReadBuffer {
     }
 }
 
+const TEXT_CHUNK_SIZE: usize = 8192;
+
 pub(super) struct Input {
     raw: ReadBuffer,
     text: TextBuffer,
@@ -311,7 +313,7 @@ impl Input {
         // BufferedReader reads 128 KiB ahead, exposing errors in that chunk.
         Self {
             raw: ReadBuffer::File(BufReader::with_capacity(
-                if binary { 128 * 1024 } else { 8192 },
+                if binary { 128 * 1024 } else { TEXT_CHUNK_SIZE },
                 source.take(u64::MAX),
             )),
             text: TextBuffer::default(),
@@ -320,7 +322,11 @@ impl Input {
     }
 
     pub(super) fn pipe(file: File, binary: bool, capacity: usize) -> Result<Self> {
-        let window = if binary { capacity.max(1) } else { 8192 };
+        let window = if binary {
+            capacity.max(1)
+        } else {
+            TEXT_CHUNK_SIZE
+        };
         Ok(Self {
             raw: ReadBuffer::Pipe {
                 source: Source::Plain(file).take(u64::MAX),
@@ -572,6 +578,40 @@ impl Input {
             self.text.line_scratch = line;
             Ok(result)
         }
+    }
+}
+
+/// Decode the same windows as a TextIOWrapper being iterated by line. Strict
+/// exceptions retain the bytes and offsets from the failing decoder call.
+pub(in crate::objects) fn decode_text_lines(bytes: &[u8], codec: Codec) -> Result<String> {
+    let mut text = String::new();
+    let mut chunks = bytes.chunks(TEXT_CHUNK_SIZE);
+    if let Codec::Utf8 { signature } = codec {
+        let mut decoder = TextBuffer::default();
+        let mut first = chunks.next().unwrap_or_default();
+        if signature {
+            let bom = b"\xef\xbb\xbf";
+            if bom.starts_with(first) {
+                // The signature decoder consumes even an incomplete BOM at EOF.
+                return Ok(text);
+            }
+            first = first.strip_prefix(bom).unwrap_or(first);
+        }
+        for chunk in std::iter::once(first).chain(chunks).chain([&[][..]]) {
+            decoder.decode(chunk)?;
+            text.try_reserve(decoder.decoded.len())
+                .map_err(|_| Error::allocation())?;
+            text.push_str(&decoder.decoded);
+        }
+        Ok(text)
+    } else {
+        for chunk in chunks {
+            let decoded = codec.decode(chunk, None)?;
+            text.try_reserve(decoded.len())
+                .map_err(|_| Error::allocation())?;
+            text.push_str(&decoded);
+        }
+        Ok(super::super::codecs::universal_newlines(text))
     }
 }
 

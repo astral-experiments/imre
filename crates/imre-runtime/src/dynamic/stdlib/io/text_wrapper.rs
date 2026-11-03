@@ -4,7 +4,7 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use super::super::codecs;
-use super::{Context, Error, Id, MemoryStream, NONE, Result, Value};
+use super::{Context, Error, Id, MemoryStream, NONE, Result, TRUE, Value};
 use crate::dynamic::builtins::boolean;
 use crate::objects::{Codec, DecodeIssue, FixedUnicode};
 
@@ -833,6 +833,24 @@ pub(super) fn call(
             let closed = ctx.lookup_attr(buffer, "closed")?;
             if ctx.truth(closed)? || w.buffer.get().is_none() {
                 return Ok(NONE);
+            }
+            if let Value::Instance {
+                class,
+                member_values: Some(members),
+                ..
+            } = ctx.heap.get(receiver)
+                && let Some(base) = ctx.find_in_mro(*class, |base| {
+                    (ctx.heap.get(base).io_kind() == Some("TextIOWrapper")).then_some(base)
+                })
+                && let Some(member) = ctx.own_class_attr(base, "_finalizing")
+                && members.get(&member) == Some(&TRUE)
+            {
+                // A warning hook can raise or replace the buffer before flush and close.
+                let mark = ctx.heap.temporary_mark();
+                let _ = Wrapper::invoke_buffer(ctx, receiver, "_dealloc_warn", vec![receiver]);
+                if ctx.heap.discard_truth_operands(mark, ctx.modules) {
+                    ctx.collect_unreachable();
+                }
             }
             let flushed = invoke(ctx, receiver, "flush", vec![]);
             if let Err(error) = &flushed {

@@ -717,12 +717,20 @@ impl Checker<'_> {
             None
         } else {
             let binding = self.graph.resolve(self.module, expression);
-            if let Some(Binding::Definition(definition)) = binding
-                && (self.classes.declarations.ids.contains_key(&definition)
-                    || self.types.namedtuple(definition).is_some())
-            {
-                // Static dispatch and constant folding can erase the class name from the IR.
-                self.class_reads.borrow_mut().insert(definition);
+            if let Some(Binding::Definition(definition)) = binding {
+                let namedtuple = self.types.namedtuple(definition).is_some();
+                if namedtuple
+                    && root.as_name_expr().is_some_and(|name| {
+                        self.names.contains_key(name.id.as_str())
+                            || self.comprehension_targets.contains(name.id.as_str())
+                    })
+                {
+                    return None;
+                }
+                if namedtuple || self.classes.declarations.ids.contains_key(&definition) {
+                    // Static dispatch and constant folding can erase the class name from the IR.
+                    self.class_reads.borrow_mut().insert(definition);
+                }
             }
             binding
         }
