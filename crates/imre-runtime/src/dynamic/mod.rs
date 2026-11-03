@@ -446,7 +446,17 @@ impl Context {
         let view = self.acquire_python_buffer(object, method, flags)?;
         // A failed export of the returned view does not call the provider's release hook.
         self.view_bytes(view)?;
-        let result = self.with_buffer_export(view, |ctx| consume(ctx, view));
+        self.with_python_buffer_export(object, view, |ctx| consume(ctx, view))
+    }
+
+    /// Run the consumer of a successfully acquired Python export, then release it.
+    fn with_python_buffer_export<T>(
+        &mut self,
+        object: Id,
+        view: Id,
+        consume: impl FnOnce(&mut Self) -> Result<T>,
+    ) -> Result<T> {
+        let result = self.with_buffer_export(view, consume);
         if let Err(error) = &result {
             for id in error.roots() {
                 self.heap.keep(id);

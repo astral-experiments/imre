@@ -398,6 +398,7 @@ pub(super) fn symbol(module: M, name: &str) -> Option<Binding> {
             "calcsize",
             "error",
             "pack",
+            "pack_into",
             "unpack",
             "unpack_from"
         ),

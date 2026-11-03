@@ -85,6 +85,48 @@ impl Context {
         self.contiguous_byte_span(object, true)
     }
 
+    /// Acquire a contiguous writable buffer and retain its view and storage across Python calls.
+    pub(super) fn with_writable_byte_span<T>(
+        &mut self,
+        object: Id,
+        consume: impl FnOnce(&mut Self, Id, Range<usize>) -> Result<T>,
+    ) -> Result<T> {
+        // PyArg_Parse("w*") replaces any acquisition failure with this TypeError.
+        let invalid = |ctx: &Self| {
+            let kind = if object == super::NONE {
+                "None"
+            } else {
+                ctx.type_name(object)
+            };
+            let kind = &kind[..kind.floor_char_boundary(50)];
+            Error::new(
+                "TypeError",
+                format!("argument must be read-write bytes-like object, not {kind}"),
+            )
+        };
+        let method = self
+            .python_buffer_method(object, true)
+            .map_err(|_| invalid(self))?;
+        let view = match method {
+            Some(method) => self
+                .acquire_python_buffer(object, method, 1)
+                .map_err(|_| invalid(self))?,
+            None => object,
+        };
+        let (storage, range) = self
+            .writable_byte_span(view)
+            .ok()
+            .flatten()
+            .ok_or_else(|| invalid(self))?;
+        let write =
+            |ctx: &mut Self| ctx.with_buffer_export(storage, |ctx| consume(ctx, storage, range));
+        if method.is_some() {
+            self.with_python_buffer_export(object, view, write)
+        } else {
+            self.with_buffer_export(view, write)
+        }
+    }
+
     /// Return the backing and byte range of an exported contiguous buffer.
     pub(super) fn contiguous_byte_span(
         &self,

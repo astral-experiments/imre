@@ -752,7 +752,7 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         {
             "bytearray"
         }
-        Value::Struct { .. } if matches!(attr, "pack" | "unpack" | "unpack_from") => {
+        Value::Struct { .. } if matches!(attr, "pack" | "pack_into" | "unpack" | "unpack_from") => {
             "struct.Struct"
         }
         Value::ZlibDecompressor { .. } if matches!(attr, "decompress" | "flush") => {
