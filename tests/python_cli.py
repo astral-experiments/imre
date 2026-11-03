@@ -3321,6 +3321,7 @@ for name in ("md4", "ripemd160"):
             "boxed_bytecache.py",
             "boxed_fnmatch.py",
             "boxed_unittest_cleanup.py",
+            "boxed_unittest_result_format.py",
             "boxed_unittest_result_registry.py",
             "boxed_unittest_get_description.py",
             "boxed_unittest_default_result.py",
