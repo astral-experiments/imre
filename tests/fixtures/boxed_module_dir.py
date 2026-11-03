@@ -18,4 +18,7 @@ del dir
 
 
 def current():
-    pass
+    import ast
+
+    assert "AST" in directory(ast)
+    assert directory(ast) == sorted(vars(ast))
