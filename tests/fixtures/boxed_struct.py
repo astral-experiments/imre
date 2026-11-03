@@ -214,6 +214,29 @@ def current():
             else:
                 raise AssertionError("signed int overflow accepted")
 
+    sample = struct.Struct(">f")
+    assert sample.pack(Double()) == b"\x3f\xc0\x00\x00"
+    assert struct.unpack_from("<f", b"x\x00\x00\xc0\x3f", 1) == (1.5,)
+    assert struct.pack("!f", float("-inf")) == b"\xff\x80\x00\x00"
+    assert struct.calcsize("@B0f") == struct.calcsize("@Bf") - 4
+    assert struct.calcsize("=Bf") == 5
+    signaling_nan = b"\x7f\xa0\x00\x01"
+    assert sample.pack(sample.unpack(signaling_nan)[0]) == signaling_nan
+    try:
+        sample.pack(1e100)
+    except OverflowError as error:
+        assert str(error) == "float too large to pack with f format"
+    else:
+        raise AssertionError("finite float overflow accepted")
+
+    for integer in (1 << 128, -(1 << 128)):
+        try:
+            sample.pack(integer)
+        except struct.error as error:
+            assert str(error) == "int too large to convert"
+        else:
+            raise AssertionError("integer overflow accepted")
+
     assert struct.calcsize("@B0d") == struct.calcsize("@Bd") - 8
     assert struct.calcsize("=Bd") == 9
     assert struct.pack("<i", Field(-3)) == b"\xfd\xff\xff\xff"

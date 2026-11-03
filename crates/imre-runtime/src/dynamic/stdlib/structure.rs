@@ -226,10 +226,10 @@ pub(super) fn pack(ctx: &mut Context, layout: &StructFormat, args: &[Id]) -> Res
             let length = target.len().min(bytes.len());
             target[..length].copy_from_slice(&bytes[..length]);
         } else {
-            let word = if code == b'd' {
-                double_field(ctx, id)?.to_bits()
-            } else {
-                integer_field(ctx, id, code, target.len(), layout.little_endian)?
+            let word = match code {
+                b'f' => u64::from(single_bits(ctx, id)?),
+                b'd' => float_value(ctx, id)?.to_bits(),
+                _ => integer_field(ctx, id, code, target.len(), layout.little_endian)?,
             };
             layout.write_integer(target, word);
         }
@@ -237,7 +237,31 @@ pub(super) fn pack(ctx: &mut Context, layout: &StructFormat, args: &[Id]) -> Res
     Ok(ctx.alloc(Value::Bytes(output)))
 }
 
-fn double_field(ctx: &mut Context, id: Id) -> Result<f64> {
+fn single_bits(ctx: &mut Context, id: Id) -> Result<u32> {
+    let value = float_value(ctx, id)?;
+    if value.is_nan() {
+        // Preserve sign and the high 23 significand bits, including the quiet bit.
+        // A payload that disappears in binary32 becomes a quiet NaN, never infinity.
+        let bits = value.to_bits();
+        let sign = (bits >> 32) as u32 & 0x8000_0000;
+        let fraction = (bits >> 29) as u32 & 0x007f_ffff;
+        let fraction = if fraction == 0 { 1 << 22 } else { fraction };
+        return Ok(sign | f32::INFINITY.to_bits() | fraction);
+    }
+    let single = value as f32;
+    if single.is_infinite() && value.is_finite() {
+        if matches!(ctx.heap.get(ctx.scalar_value(id)), Value::Int(_)) {
+            return Err(format_error(ctx, "int too large to convert"));
+        }
+        return Err(Error::new(
+            "OverflowError",
+            "float too large to pack with f format",
+        ));
+    }
+    Ok(single.to_bits())
+}
+
+fn float_value(ctx: &mut Context, id: Id) -> Result<f64> {
     // PyFloat_AsDouble reads float subclasses directly, bypassing their __float__.
     if let Value::Float(value) = *ctx.heap.get(ctx.scalar_value(id)) {
         return Ok(value);
