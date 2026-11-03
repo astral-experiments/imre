@@ -29,7 +29,7 @@ def current():
             raise AttributeError("descriptor called")
 
     class Parent:
-        failing = Descriptor()
+        __delattr__ = Descriptor()
 
     class Child(Parent): ...
 
