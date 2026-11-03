@@ -22,6 +22,34 @@ class Sink:
         self.chunks.append(chunk)
 
 
+def check_global_reduction():
+    import sys
+    import types
+
+    class Token:
+        __module__ = None
+
+        def __reduce__(self):
+            return "holder.token"
+
+        def __eq__(self, other):
+            return isinstance(other, Token)
+
+    first = types.ModuleType("pickle_shadow")
+    second = types.ModuleType("pickle_target")
+    sys.modules[first.__name__] = first
+    sys.modules[second.__name__] = second
+    try:
+        first.holder = types.SimpleNamespace(token=Token())
+        second.holder = types.SimpleNamespace(token=Token())
+        token = second.holder.token
+        for protocol in range(6):
+            assert pickle.loads(pickle.dumps(token, protocol)) is token
+    finally:
+        del sys.modules[first.__name__]
+        del sys.modules[second.__name__]
+
+
 def current():
     assert pickle.bytes_types == (bytes, bytearray)
     for name in ("Pickler", "Unpickler", "dump", "load", "dumps", "loads", "HIGHEST_PROTOCOL", "STOP"):
@@ -75,6 +103,7 @@ def current():
     out.writer = pickle._Pickler(out, 5)
     out.writer.dump([1, 2])
     assert out.nested
+    check_global_reduction()
     print("pickle writer")
 
 
