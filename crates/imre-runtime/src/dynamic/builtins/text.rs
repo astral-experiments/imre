@@ -682,8 +682,16 @@ pub(super) fn builtin_format(
             ctx.type_name(value)
         )));
     }
-    if ctx.string_storage(value).is_some() && spec == "s" {
-        return Ok(value);
+    if let Some(storage) = ctx.string_storage(value)
+        && let Some(width) = crate::objects::format_index(spec.strip_suffix('s').unwrap_or(spec))?
+    {
+        if width == 0 {
+            // An unpadded empty str subclass formats to its base string.
+            return Ok(if ctx.truth(storage)? { value } else { storage });
+        }
+        let fill = if spec.starts_with('0') { '0' } else { ' ' };
+        let padded = justify_string(ctx, storage, width, u32::from(fill), "ljust")?;
+        return Ok(if padded == storage { value } else { padded });
     }
     if let Some(field) = FixedFloatSpec::parse(spec)? {
         let number = float_operand(ctx, value)?
@@ -1924,6 +1932,16 @@ fn justify(
     } else {
         u32::from(' ')
     };
+    justify_string(ctx, receiver, width, fill, name)
+}
+
+fn justify_string(
+    ctx: &mut Context,
+    receiver: Id,
+    width: usize,
+    fill: u32,
+    name: &str,
+) -> Result<Id> {
     let storage = ctx.string_storage(receiver).unwrap();
     let source = ctx.heap.get(storage);
     let len = match source {
