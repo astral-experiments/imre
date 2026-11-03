@@ -521,7 +521,7 @@ _TLS_ERRORS = {
 
 def _tls_result(result, hostname):
     if isinstance(result, tuple):
-        # Certificate errors carry a numeric verification code, record errors a reason name.
+        # Certificate errors carry a numeric verification code; protocol errors carry a reason name.
         reason, message = result
         if isinstance(reason, int):
             _raise_verify_error(hostname, reason, message)
@@ -532,7 +532,8 @@ def _tls_result(result, hostname):
     else:
         return result
     if library:
-        message = f"[{library}: {reason}] {message}"
+        prefix = f"{library}: {reason}" if reason else library
+        message = f"[{prefix}] {message}"
     error = kind(code, message)
     error.library = library
     error.reason = reason if library else None
@@ -649,8 +650,7 @@ class SSLSocket:
             error.reason = reason
             error.library = None
             raise error
-        if isinstance(result, tuple):
-            _raise_verify_error(server_hostname, *result)
+        result = _tls_result(result, server_hostname)
         try:
             peer._io_refs = 0
             peer._closed = False

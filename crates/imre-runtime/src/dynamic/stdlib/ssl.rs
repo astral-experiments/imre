@@ -165,8 +165,8 @@ fn bio_failure(ctx: &mut Context, error: provider::bio::BioFailure) -> Result<Id
         BioFailure::UnexpectedEof => "UNEXPECTED_EOF_WHILE_READING",
         BioFailure::ProtocolIsShutdown => "PROTOCOL_IS_SHUTDOWN",
         BioFailure::ShutdownInInit => "SHUTDOWN_WHILE_IN_INIT",
-        BioFailure::RecordError { reason, message } => {
-            let reason = ctx.text(reason);
+        BioFailure::ProtocolError { reason, message } => {
+            let reason = reason.map_or(NONE, |s| ctx.text(s));
             let message = ctx.text(message);
             return Ok(ctx.alloc(Value::Tuple(vec![reason, message])));
         }
@@ -845,10 +845,7 @@ pub(super) fn call(
                 Ok(session) => {
                     Ok(ctx.alloc(Value::TlsSession(Rc::new(RefCell::new(Some(session))))))
                 }
-                Err(provider::Failure::Verify { code, message }) => {
-                    Ok(verify_failure(ctx, code, message))
-                }
-                Err(e) => Err(provider_error(ctx, e)),
+                Err(error) => bio_failure(ctx, error),
             }
         }
         ("release_session", &[handle]) => match ctx.heap.get(handle) {
