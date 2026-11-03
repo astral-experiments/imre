@@ -909,6 +909,33 @@ pub unsafe extern "C" fn imre_str_affix(value: *const Str, affix: *const Str, re
     })
 }
 
+/// Tests a string boundary against a set of one-byte UTF-8 affixes.
+///
+/// # Safety
+/// The caller keeps the immutable string rooted throughout the call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_str_affix_ascii(
+    value: *const Str,
+    lower: u64,
+    upper: u64,
+    reverse: u32,
+) -> u32 {
+    // SAFETY: the caller roots this immutable string.
+    let bytes = unsafe { &*value }.as_bytes();
+    let edge = if reverse == 0 {
+        bytes.first()
+    } else {
+        bytes.last()
+    };
+    let Some(&byte) = edge else { return 0 };
+    let mask = match byte {
+        0..=63 => lower,
+        64..=127 => upper,
+        _ => return 0,
+    };
+    u32::from(mask & (1_u64 << (byte % 64)) != 0)
+}
+
 /// Negative search bounds count from the end. Keep positive bounds unclamped so
 /// an empty needle still fails to match when the start exceeds the string length.
 fn search_offset(start: Option<&Int>, length: impl FnOnce() -> usize) -> Option<usize> {

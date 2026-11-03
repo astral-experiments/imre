@@ -4,6 +4,62 @@ use super::*;
 use crate::ir::{TextOperation, TextPredicate};
 
 impl Emitter<'_, '_> {
+    /// Tests alternatives on one local string by inspecting its first or last byte once.
+    pub(super) fn ascii_affix_alternatives(&mut self, values: &[Expr]) -> Option<Value> {
+        /// A one-byte UTF-8 literal is ASCII, so it fits in one of two masks.
+        fn alternative(expr: &Expr) -> Option<(&Expr, usize, bool, u8)> {
+            let ExprKind::Builtin(Builtin::Text(op), args) = &expr.kind else {
+                return None;
+            };
+            let reverse = match op {
+                TextOperation::StartsWith => false,
+                TextOperation::EndsWith => true,
+                _ => return None,
+            };
+            let [source, affix] = args.as_slice() else {
+                return None;
+            };
+            let ExprKind::Local(slot) = source.kind else {
+                return None;
+            };
+            let ExprKind::Str(text) = &affix.kind else {
+                return None;
+            };
+            let &[byte] = text.as_bytes() else {
+                return None;
+            };
+            Some((source, slot, reverse, byte))
+        }
+        let [first, _, ..] = values else { return None };
+        let (source, slot, reverse, _) = alternative(first)?;
+        // Short file lines already compare literals directly against their inline data.
+        if self.line_slots[slot] {
+            return None;
+        }
+        let mut masks = [0_u64; 2];
+        for expr in values {
+            let (_, other_slot, other_reverse, byte) = alternative(expr)?;
+            if slot != other_slot || reverse != other_reverse {
+                return None;
+            }
+            masks[usize::from(byte / 64)] |= 1_u64 << (byte % 64);
+        }
+        let source = self.operand(source);
+        let result = self.instruction(format!(
+            "call i32 @imre_str_affix_ascii(ptr {}, i64 {}, i64 {}, i32 {})",
+            source.value.operand,
+            masks[0],
+            masks[1],
+            u8::from(reverse)
+        ));
+        self.release_operand(&source);
+        Some(Value {
+            ty: Type::Bool,
+            operand: self.instruction(format!("icmp ne i32 {result}, 0")),
+            small_integer: false,
+        })
+    }
+
     /// Elides a temporary split sequence only when its selected field is known.
     /// Ordinary argument evaluation and rooting still precede separator checks.
     pub(super) fn rsplit_last(&mut self, builtin: &Builtin, expressions: &[Expr]) -> Option<Value> {

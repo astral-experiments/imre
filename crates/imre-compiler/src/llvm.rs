@@ -4185,6 +4185,9 @@ impl Emitter<'_, '_> {
     }
 
     fn boolean(&mut self, and: bool, values: &[Expr]) -> Value {
+        if !and && let Some(value) = self.ascii_affix_alternatives(values) {
+            return value;
+        }
         let end = self.label();
         let mut incoming = Vec::new();
         for (i, expression) in values.iter().enumerate() {
@@ -9927,6 +9930,7 @@ declare ptr @imre_str_lower(ptr)
 declare ptr @imre_str_upper(ptr)
 declare ptr @imre_str_capitalize(ptr)
 declare i32 @imre_str_affix(ptr, ptr, i32)
+declare i32 @imre_str_affix_ascii(ptr, i64, i64, i32)
 declare i64 @imre_str_find(ptr, ptr, i64)
 declare void @imre_str_partition(ptr, ptr, ptr)
 declare ptr @imre_str_translate(ptr, ptr)
@@ -10901,6 +10905,21 @@ print(show("x"))
             .unwrap()
             .0
             .to_owned()
+    }
+
+    #[test]
+    fn ascii_affix_tuples_inspect_one_boundary() {
+        let body =
+            function_body("def check(s: str) -> bool:\n    return s.endswith((' ', '.', '@'))\n");
+        assert_eq!(body.matches("@imre_str_affix_ascii(").count(), 1);
+        assert!(!body.contains("@imre_str_affix("));
+
+        for tuple in ["('x', 'é')", "('x', 'ab')", "('x', '')", "('x', s)"] {
+            let body = function_body(&format!(
+                "def check(s: str) -> bool:\n    return s.startswith({tuple})\n"
+            ));
+            assert!(!body.contains("@imre_str_affix_ascii("), "{body}");
+        }
     }
 
     #[test]
