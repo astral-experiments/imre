@@ -78,6 +78,7 @@ Two POSIX callback tests inspect CPython’s private `subprocess._fork_exec` sel
 | --- | --- | --- | --- |
 | [`test.test_subprocess.POSIXProcessTestCase.test_preexec_exception`](https://github.com/python/cpython/blob/5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/test_subprocess.py#L2428-L2442) | 1 | The callback raises a `ValueError`. The test accepts a `SubprocessError` in the parent, then requires `subprocess._fork_exec` to be truthy. Imre propagates the accepted error through its own process implementation. | `Popen` raised `SubprocessError` after the callback failed. The child exited 255 before running the target program, and the parent reaped it. |
 | [`test.test_subprocess.POSIXProcessTestCase.test_surrogates_error_message`](https://github.com/python/cpython/blob/5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/test_subprocess.py#L2914-L2931) | 1 | The callback raises a `ValueError` containing `U+DCFF`. The test checks that `subprocess._fork_exec` exists before it compares the generic `SubprocessError` message. The private helper identifies which CPython implementation produced the error. | `subprocess.call` raised `SubprocessError` with the exact message Exception occurred in preexec_fn. The child exited 255 before executing the target, and the parent restored its file descriptors. |
+| [`test.test_subprocess.POSIXProcessTestCase.test_exception_errpipe_bad_data`](https://github.com/python/cpython/blob/5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/test_subprocess.py#L2131-L2151) | 1 | The test replaces subprocess._fork_exec, injects four malformed bytes into CPython’s private error pipe, returns a synthetic process ID and patches waitpid. Its assertion checks how CPython formats those private protocol bytes. Imre reports launch errors through its own process implementation. | Launching a missing executable raised FileNotFoundError with ENOENT and the original path on pinned stock and public O0/O3. The result was the same with empty child stderr and with the four injected bytes on stderr. Each real child was reaped. |
 
 ### `tempfile`
 
@@ -93,6 +94,14 @@ Stock passed both originals. The ordinary and boxed native runs reported the ups
 | Original CPython test | Occurrence | Decision and reason | Related paired original |
 | --- | ---: | --- | --- |
 | `test.test_threading.ThreadTests.test_main_thread_during_shutdown` | 1 | The test requires a module-global cycle to run its destructor when the interpreter exits. Python permits that object to remain unfinalized. Imre ran the destructor after explicit collection, and a separate shutdown callback observed the same main-thread identity and enumeration as CPython. [Source](https://github.com/python/cpython/blob/5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/test_threading.py#L856-L883) · [Finalizer guarantee](https://github.com/python/cpython/blob/5607950ef232dad16d75c0cf53101d9649d89115/Doc/reference/datamodel.rst#L2030-L2031) | `test.test_threading.ThreadingExceptionTests.test_joining_current_thread` |
+
+### `typing`
+
+Pinned CPython passed the lazy-import test. Public Imre at O0 and O3 took its upstream CPython-only skip.
+
+| Original test | Occurrence | Reason for omission | Public behavior checked |
+| --- | --- | --- | --- |
+| [`test.test_typing.InternalsTests.test_lazy_import`](https://github.com/python/cpython/blob/5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/test_typing.py#L6405-L6413) | 1 | The upstream CPython-only test checks whether importing typing also imports warnings, inspect, re, contextlib and annotationlib. The timing of those imports is a CPython startup optimization. Imre uses its own module loader. | The unchanged generic pickle parent and all 12 subtests passed on stock and public O0/O3. The generic type-erasure parent also passed at all three settings. |
 
 ### `weakref`
 

@@ -130,14 +130,14 @@ in the denominator. The [omission decisions](docs/stdlib-omissions.md) explain e
 | `re` | 147 | 165 | 7 | Seven CPython compiler and bytecode checks have explicit omissions. The 147 paired originals include focused and complete runs. |
 | `shutil` | 154 | 223 | 0 | Stock and public native O0/O3 each discovered all 223 originals and ran the same 49 additional tests. All three owners exited 0 with identical parent callbacks and four successful subtests. |
 | `socket` | 61 | 746 | 0 | Earlier and focused cases total 61. Four native modes pass 14/19 resolver originals, including the new service database lookup. The 746-case discovery run executed no test bodies. |
-| `subprocess` | 295 | 353 | 2 | The POSIX pre-exec shutdown and process-group originals passed. The native shutdown children ran at their requested optimization levels, and each process-group child reported its own PID as the group ID. |
+| `subprocess` | 295 | 353 | 3 | The POSIX pre-exec shutdown and process-group originals passed. The native shutdown children ran at their requested optimization levels, and each process-group child reported its own PID as the group ID. |
 | `tempfile` | 108 | 118 | 2 | All 118 originals finished in ordinary and boxed O0/O3. Each native run passed 108 and skipped 10. Stock passed 112 and skipped six. Two extra native skips are documented omissions. The other two require working os.fork and os.spawnl. |
 | `textwrap` | 68 | 68 | 0 | Complete suite on `main`, all 68 passed. |
 | `threading` | 83 | 228 | 1 | All 228 original registrations ran in ordinary and boxed builds at both levels. Each passed 83, skipped 32 and reported failures on 113 IDs. The bound worker callback still blocks 58 Bunch fixture cases. |
-| `typing` | 703 | 712 | 0 | The complete pinned module’s generic pickle original passed on stock and public native O0 and O3, including all 12 subtests. |
+| `typing` | 703 | 712 | 1 | The complete pinned module’s generic pickle original passed on stock and public native O0 and O3, including all 12 subtests. |
 | `unittest` | 378 | 1,090 | 0 | The full upstream assertion module passed 35 of 35 on every engine. Three parents were new to the ledger. |
 | `urllib` | 173 | 178 | 0 | Both unchanged upstream scripts completed on public `main` at O0 and O3 with ordinary and runtime imports. All 178 tests matched stock in order, including 173 successful parents, three with only child outcomes, and two Windows skips. |
-| **Total** | **9,177** | **13,328** | **30** | **4 complete suites match stock on `main`** |
+| **Total** | **9,177** | **13,328** | **32** | **4 complete suites match stock on `main`** |
 
 See the [standard library coverage report](docs/stdlib.md) for the Linux test
 results and import coverage recorded in this repository.
