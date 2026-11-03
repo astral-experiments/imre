@@ -82,6 +82,24 @@ for method in (client.Codec.encode, client.Codec.decode):
     method.return_value = "encoded"
     assert method("data") == "encoded"
 
+for name in ("encode", "decode"):
+    descriptor = Client.Codec.__dict__[name]
+    descriptor.label = name
+    assert ("__call__" in dir(descriptor)) == isinstance(descriptor, staticmethod)
+    method = create_autospec(descriptor, spec_set=True)
+    method.label = "updated"
+    with check.assertRaises(AttributeError):
+        method.__code__ = None
+    assert method.__class__ is type(descriptor)
+    assert signature(method) == signature(getattr(Client.Codec, name))
+    with check.assertRaises(TypeError):
+        method()
+    with check.assertRaises(TypeError):
+        method(None, "data")
+    method.assert_not_called()
+    method("data")
+    method.assert_called_once_with(value="data")
+
 seal(client)
 assert client.extra == 1 and client.Codec.encode("more") == "encoded"
 with check.assertRaises(AttributeError):
