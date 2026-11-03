@@ -216,6 +216,11 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
             "urllib/request.py",
             include_str!("../../stdlib/urllib/request.py"),
         )),
+        // CPython 3.14.5 Lib/urllib/robotparser.py. See licenses/CPython.txt.
+        "urllib.robotparser" => Some((
+            "urllib/robotparser.py",
+            include_str!("../../stdlib/urllib/robotparser.py"),
+        )),
         "urllib.response" => Some((
             "urllib/response.py",
             include_str!("../../stdlib/urllib/response.py"),

@@ -619,6 +619,7 @@ pub(crate) enum IntrinsicModule {
     Urllib,
     UrllibParse,
     UrllibRequest,
+    UrllibRobotParser,
     UrllibError,
     Email,
     EmailFeedParser,
@@ -1177,6 +1178,7 @@ impl IntrinsicModule {
             "urllib" => Some(Self::Urllib),
             "urllib.parse" => Some(Self::UrllibParse),
             "urllib.request" => Some(Self::UrllibRequest),
+            "urllib.robotparser" => Some(Self::UrllibRobotParser),
             "urllib.error" => Some(Self::UrllibError),
             "importlib" => Some(Self::Importlib),
             "importlib.abc" => Some(Self::ImportlibAbc),
@@ -1317,6 +1319,7 @@ impl IntrinsicModule {
             let child = match name {
                 "parse" => Self::UrllibParse,
                 "request" => Self::UrllibRequest,
+                "robotparser" => Self::UrllibRobotParser,
                 "error" => Self::UrllibError,
                 _ => return None,
             };
@@ -2291,6 +2294,9 @@ impl IntrinsicModule {
             (Self::PosixPath, "splitext") => Intrinsic::PosixPath(PosixPathOperation::Splitext),
             (Self::PosixPath, "normpath") => Intrinsic::PosixPath(PosixPathOperation::Normpath),
             (Self::PosixPath, "abspath") => Intrinsic::PosixPath(PosixPathOperation::Abspath),
+            (Self::UrllibRobotParser, "RobotFileParser") => {
+                Intrinsic::ScopedObjectExport("urllib.robotparser.RobotFileParser")
+            }
             (Self::UrllibRequest, "OpenerDirector") => {
                 Intrinsic::ScopedObjectExport("urllib.request.OpenerDirector")
             }

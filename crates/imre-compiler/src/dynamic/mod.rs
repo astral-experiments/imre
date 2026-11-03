@@ -25,6 +25,7 @@ struct Imports {
     runtime_imports: bool,
     private_names: imre_ast::Names,
     uses_import_builtin: bool,
+    uses_exec: bool,
     imports_logging: bool,
     sys_names: HashSet<String>,
     operator_names: HashSet<String>,
@@ -331,6 +332,9 @@ impl<'a> Visitor<'a> for Imports {
             if name.id == "__import__" {
                 self.uses_import_builtin = true;
                 self.add(0, "importlib");
+            }
+            if name.id == "exec" {
+                self.uses_exec = true;
             }
             if self.boxed_mock_names.contains(name.id.as_str()) {
                 self.runtime_imports = true;
@@ -738,6 +742,7 @@ pub(crate) fn compile(
     let mut frozen_imports = Imports::default();
     let mut work = VecDeque::from([("__main__".to_owned(), false, first)]);
     let mut uses_import_builtin = false;
+    let mut uses_exec = false;
     let mut bundled_only = false;
     loop {
         let (owner, package, imports) = if let Some(next) = work.pop_front() {
@@ -752,6 +757,13 @@ pub(crate) fn compile(
             // A runtime-selected HTTP child needs its server and transitive providers.
             if uses_import_builtin && seen.contains("http") && !seen.contains("http.server") {
                 imports.names.push((0, "http.server".to_owned()));
+            }
+            // Computed imports can select a urllib child without naming it in source.
+            if (uses_exec || uses_import_builtin || seen.contains("importlib"))
+                && seen.contains("urllib")
+                && !seen.contains("urllib.robotparser")
+            {
+                imports.add(0, "urllib.robotparser");
             }
             // Register the mock provider for imports from source-loaded modules.
             if uses_import_builtin && seen.contains("unittest") && !seen.contains("unittest.mock") {
@@ -799,6 +811,7 @@ pub(crate) fn compile(
         {
             return Ok(None);
         }
+        uses_exec |= imports.uses_exec;
         let mut names = imports.names;
         if owner == "importlib" {
             // Filesystem modules can import the loader protocols through either public module.
