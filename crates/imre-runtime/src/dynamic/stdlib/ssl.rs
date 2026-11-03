@@ -289,6 +289,89 @@ fn cert_path(ctx: &mut Context, path: Id, arg: &str) -> Result<CString> {
     super::os::c_path(ctx, path, "embedded null byte")
 }
 
+fn password_bytes(ctx: &mut Context, value: Id, type_error: &str) -> Result<Vec<u8>> {
+    let value = ctx.scalar_value(value);
+    let data = match ctx.heap.get(value) {
+        Value::Str(text) => text.as_bytes(),
+        Value::SurrogateStr(_) => return ctx.encode_utf8_codepoints(value, false, "strict"),
+        Value::Bytes(bytes) | Value::ByteArray(bytes) => bytes.as_slice(),
+        _ => return Err(Error::new("TypeError", type_error)),
+    };
+    if data.len() > i32::MAX as usize {
+        return Err(password_too_long(i32::MAX as usize));
+    }
+    let mut bytes = Vec::new();
+    bytes
+        .try_reserve_exact(data.len())
+        .map_err(|_| Error::new("MemoryError", "unable to allocate password buffer"))?;
+    bytes.extend_from_slice(data);
+    Ok(bytes)
+}
+
+fn password_too_long(limit: usize) -> Error {
+    Error::new(
+        "ValueError",
+        format!("password cannot be longer than {limit} bytes"),
+    )
+}
+
+fn load_cert_chain(
+    ctx: &mut Context,
+    handle: Id,
+    certfile: Id,
+    keyfile: Id,
+    password: Id,
+) -> Result<Id> {
+    let certfile = cert_path(ctx, certfile, "certfile")?;
+    let keyfile = (keyfile != NONE)
+        .then(|| cert_path(ctx, keyfile, "keyfile"))
+        .transpose()?;
+    let callable = ctx.callable(password);
+    let mut bytes = if password != NONE && !callable {
+        password_bytes(ctx, password, "password should be a string or callable")?
+    } else {
+        Vec::new()
+    };
+
+    // Stage on a separate SSL. No borrow of the live context may survive a Python callback.
+    let credentials = context(ctx, handle)?
+        .borrow()
+        .credentials()
+        .map_err(|e| provider_error(ctx, e))?;
+    let mut callback_error = None;
+    let result = credentials.load_cert_chain(
+        &certfile,
+        keyfile.as_deref().unwrap_or(&certfile),
+        &mut |out| {
+            if password == NONE || callback_error.is_some() {
+                return None;
+            }
+            if callable {
+                let result = ctx.call(password, vec![], vec![]).and_then(|value| {
+                    password_bytes(ctx, value, "password callback must return a string")
+                });
+                match result {
+                    Ok(value) => bytes = value,
+                    Err(error) => {
+                        callback_error = Some(error);
+                        return None;
+                    }
+                }
+            }
+            if bytes.len() > out.len() {
+                callback_error = Some(password_too_long(out.len()));
+                return None;
+            }
+            out[..bytes.len()].copy_from_slice(&bytes);
+            Some(bytes.len())
+        },
+    );
+    if let Some(error) = callback_error {
+        return Err(error);
+    }
+    trust_result(ctx, result)
+}
+
 fn ca_data(ctx: &Context, input: Id) -> Result<provider::CaData<'_>> {
     let invalid = || {
         Error::new(
@@ -322,6 +405,28 @@ fn ca_data(ctx: &Context, input: Id) -> Result<provider::CaData<'_>> {
     } else {
         provider::CaData::Der(bytes)
     })
+}
+
+fn trust_result(
+    ctx: &mut Context,
+    result: std::result::Result<(), provider::Failure>,
+) -> Result<Id> {
+    match result {
+        Ok(()) => Ok(NONE),
+        Err(provider::Failure::Trust {
+            code,
+            message,
+            library,
+            reason,
+        }) => {
+            let code = ctx.int(code);
+            let message = ctx.text(message);
+            let library = library.map_or(NONE, |s| ctx.text(s));
+            let reason = reason.map_or(NONE, |s| ctx.text(s));
+            Ok(ctx.alloc(Value::Tuple(vec![code, message, library, reason])))
+        }
+        Err(e) => Err(provider_error(ctx, e)),
+    }
 }
 
 fn closed() -> Error {
@@ -553,18 +658,8 @@ pub(super) fn call(
             context.set_post_handshake_auth(enabled);
             Ok(NONE)
         }
-        ("load_cert_chain", &[handle, certfile, keyfile]) => {
-            let certfile = cert_path(ctx, certfile, "certfile")?;
-            let keyfile = if keyfile == NONE {
-                None
-            } else {
-                Some(cert_path(ctx, keyfile, "keyfile")?)
-            };
-            context(ctx, handle)?
-                .borrow_mut()
-                .load_cert_chain(&certfile, keyfile.as_deref().unwrap_or(&certfile))
-                .map_err(|e| provider_error(ctx, e))?;
-            Ok(NONE)
+        ("load_cert_chain", &[handle, certfile, keyfile, password]) => {
+            load_cert_chain(ctx, handle, certfile, keyfile, password)
         }
         ("load_verify_locations", &[handle, cafile, capath, cadata]) => {
             if (cafile, capath, cadata) == (NONE, NONE, NONE) {
@@ -585,22 +680,7 @@ pub(super) fn call(
                 capath.as_deref(),
                 cadata,
             );
-            match result {
-                Ok(()) => Ok(NONE),
-                Err(provider::Failure::Trust {
-                    code,
-                    message,
-                    library,
-                    reason,
-                }) => {
-                    let code = ctx.int(code);
-                    let message = ctx.text(message);
-                    let library = library.map_or(NONE, |s| ctx.text(s));
-                    let reason = reason.map_or(NONE, |s| ctx.text(s));
-                    Ok(ctx.alloc(Value::Tuple(vec![code, message, library, reason])))
-                }
-                Err(e) => Err(provider_error(ctx, e)),
-            }
+            trust_result(ctx, result)
         }
         ("get_ciphers", &[handle]) => provider::ciphers::get(ctx, handle),
         ("set_ciphers", &[handle, text]) => {

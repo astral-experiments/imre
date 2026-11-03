@@ -225,6 +225,15 @@ def _call(function, *args):
         raise SSLError(SSL_ERROR_SSL, str(exc)) from None
 
 
+def _check_context_result(result):
+    if result is not None:
+        code, message, library, reason = result
+        error = SSLError(code, message)
+        error.library = library
+        error.reason = reason
+        raise error
+
+
 def _check_role(protocol, server_side):
     if server_side and protocol == PROTOCOL_TLS_CLIENT:
         raise SSLError(0, "Cannot create a server socket with a PROTOCOL_TLS_CLIENT context")
@@ -454,21 +463,18 @@ class SSLContext:
         _call(_imre_ssl.set_ciphers, self._ctx, cipherlist)
 
     def load_cert_chain(self, certfile, keyfile=None, password=None):
-        if password is not None:
-            raise NotImplementedError("load_cert_chain supports unencrypted private keys")
-        _call(_imre_ssl.load_cert_chain, self._ctx, certfile, keyfile)
+        if not issubclass(type(self), __class__):
+            _imre_ssl.raise_context_receiver_error("load_cert_chain", self)
+        result = _call(_imre_ssl.load_cert_chain, __class__._ctx.__get__(self),
+                       certfile, keyfile, password)
+        _check_context_result(result)
 
     def load_verify_locations(self, /, cafile=None, capath=None, cadata=None):
         if not issubclass(type(self), __class__):
             _imre_ssl.raise_context_receiver_error("load_verify_locations", self)
         result = _call(_imre_ssl.load_verify_locations, __class__._ctx.__get__(self),
                        cafile, capath, cadata)
-        if result is not None:
-            code, message, library, reason = result
-            error = SSLError(code, message)
-            error.library = library
-            error.reason = reason
-            raise error
+        _check_context_result(result)
 
     def wrap_bio(self, incoming, outgoing, server_side=False, server_hostname=None, session=None):
         if server_hostname is not None:

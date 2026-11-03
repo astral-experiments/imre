@@ -2992,6 +2992,11 @@ def report(text):
                     "-IB", object_io, certdata,
                     native_args=("run", object_io, "--quiet", "--", certdata), native_timeout=600,
                 )
+                cert_chain = fixtures / "ssl_cert_chain.py"
+                compare(
+                    "-IB", cert_chain, certdata,
+                    native_args=("run", cert_chain, "--quiet", "--", certdata), native_timeout=600,
+                )
                 unwrap = fixtures / "ssl_object_unwrap.py"
                 compare(
                     "-IB", unwrap, certdata,
