@@ -183,7 +183,7 @@ def _main_option(arg):
             and not re.match(r"-\.?\d", arg))
 
 
-def main():
+def main(module="__main__"):
     runner = _MainRunner()
     names = []
     patterns = []
@@ -226,9 +226,12 @@ def main():
         sys.exit(2)
     if patterns:
         defaultTestLoader.testNamePatterns = patterns
-    module = __import__("__main__")
+    if isinstance(module, str):
+        module = __import__(module, fromlist=["__name__"])
     if names:
         suite = defaultTestLoader.loadTestsFromNames([_convert_name(name) for name in names], module)
+    elif module is None:
+        suite = defaultTestLoader.discover(".")
     else:
         suite = defaultTestLoader.loadTestsFromModule(module)
     result = TextTestRunner(verbosity=runner.verbose, failfast=runner.failfast).run(suite)

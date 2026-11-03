@@ -4972,22 +4972,28 @@ fn optional_stdlib_import<'a>(
     module: ModuleId,
     guard: &'a ast::StmtTry,
 ) -> Option<(&'a str, &'a str)> {
-    let [ast::Stmt::Import(import)] = guard.body.as_slice() else {
-        return None;
+    let module_name = match guard.body.as_slice() {
+        [ast::Stmt::Import(import)] => {
+            let [alias] = import.names.as_slice() else {
+                return None;
+            };
+            if alias.name.contains('.') {
+                return None;
+            }
+            alias.name.as_str()
+        }
+        [ast::Stmt::ImportFrom(import)] if import.level == 0 => import.module.as_ref()?.as_str(),
+        _ => return None,
     };
-    let [alias] = import.names.as_slice() else {
-        return None;
-    };
+    let name = single_import_binding(&guard.body)?;
     let [fallback] = import_error_fallback(modules, module, guard)? else {
         return None;
     };
-    let name = alias.asname.as_ref().unwrap_or(&alias.name).as_str();
-    (!alias.name.contains('.')
-        && stdlib_top_level(alias.name.as_str())
+    (stdlib_top_level(module_name.split('.').next()?)
         && matches!(fallback, ast::Stmt::Assign(_))
         && value_name(fallback) == Some(name)
         && matches!(module_value(fallback), Some(ast::Expr::NoneLiteral(_))))
-    .then_some((alias.name.as_str(), name))
+    .then_some((module_name, name))
 }
 
 fn import_error_fallback<'a>(
