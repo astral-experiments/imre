@@ -1486,5 +1486,29 @@ def proxy_bypass_environment(host, proxies=None):
     return False
 
 
+def _proxy_bypass_winreg_override(host, override):
+    """Return True if the host should bypass the proxy server.
+
+    The proxy override list is obtained from the Windows
+    Internet settings proxy override registry value.
+
+    An example of a proxy override value is:
+    "www.example.com;*.example.net; 192.168.0.1"
+    """
+    from fnmatch import fnmatch
+
+    host, _ = _splitport(host)
+    proxy_override = override.split(';')
+    for test in proxy_override:
+        test = test.strip()
+        # "<local>" should bypass the proxy server for all intranet addresses
+        if test == '<local>':
+            if '.' not in host:
+                return True
+        elif fnmatch(host, test):
+            return True
+    return False
+
+
 getproxies = getproxies_environment
 proxy_bypass = proxy_bypass_environment
