@@ -167,6 +167,7 @@ pub(super) fn call(
         "monotonic" => "time.monotonic",
         "monotonic_ns" => "time.monotonic_ns",
         "perf_counter" => "time.perf_counter",
+        "perf_counter_ns" => "time.perf_counter_ns",
         "mktime" => "time.mktime",
         "tzset" => "time.tzset",
         _ => name,
@@ -178,6 +179,33 @@ pub(super) fn call(
         ));
     }
     match name {
+        #[cfg(target_os = "linux")]
+        "clock_gettime" | "clock_gettime_ns" => {
+            let [clock] = args else {
+                return Err(Error::new(
+                    "TypeError",
+                    format!("{name}() takes exactly one argument ({} given)", args.len()),
+                ));
+            };
+            let clock = os::c_int(ctx, *clock).map_err(|_| {
+                Error::new(
+                    "TypeError",
+                    format!("clk_id should be integer, not {}", ctx.type_name(*clock)),
+                )
+            })?;
+            let stamp =
+                crate::objects::time::clock_stamp(clock).map_err(crate::objects::errno_error)?;
+            if name == "clock_gettime_ns" {
+                Ok(ctx.int(crate::objects::time::timestamp_ns(
+                    stamp.tv_sec,
+                    stamp.tv_nsec,
+                )?))
+            } else {
+                Ok(ctx.alloc(Value::Float(
+                    stamp.tv_sec as f64 + stamp.tv_nsec as f64 * 1e-9,
+                )))
+            }
+        }
         "get_clock_info" => {
             let [name] = args else {
                 return Err(Error::new(
@@ -270,7 +298,7 @@ pub(super) fn call(
             })?;
             Ok(ctx.int(nanos))
         }
-        "monotonic_ns" if args.is_empty() => {
+        "monotonic_ns" | "perf_counter_ns" if args.is_empty() => {
             Ok(ctx.int(crate::objects::time::monotonic_time_ns()?))
         }
         "monotonic" | "perf_counter" if args.is_empty() => {
@@ -291,12 +319,11 @@ pub(super) fn call(
             install_timezone(ctx, scope)?;
             Ok(NONE)
         }
-        "time" | "time_ns" | "monotonic" | "monotonic_ns" | "perf_counter" | "tzset" => {
-            Err(Error::new(
-                "TypeError",
-                format!("{function}() takes no arguments ({} given)", args.len()),
-            ))
-        }
+        "time" | "time_ns" | "monotonic" | "monotonic_ns" | "perf_counter" | "perf_counter_ns"
+        | "tzset" => Err(Error::new(
+            "TypeError",
+            format!("{function}() takes no arguments ({} given)", args.len()),
+        )),
         "mktime" => match args {
             [value] => {
                 let stamp = tuple_time(ctx, *value, name)?.timestamp()?;

@@ -53,6 +53,10 @@ if sys.platform == "linux":
         POSIX_FADV_SEQUENTIAL, POSIX_FADV_WILLNEED, posix_fadvise, posix_fallocate,
     )
     from posix import major, makedev, minor, mknod
+    from posix import (
+        TFD_CLOEXEC, TFD_NONBLOCK, TFD_TIMER_ABSTIME, TFD_TIMER_CANCEL_ON_SET,
+        timerfd_create, timerfd_gettime, timerfd_gettime_ns, timerfd_settime, timerfd_settime_ns,
+    )
     from posix import EFD_CLOEXEC, EFD_NONBLOCK, EFD_SEMAPHORE, eventfd, eventfd_read, eventfd_write
 
 if sys.platform == "linux":

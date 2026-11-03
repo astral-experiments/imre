@@ -2933,11 +2933,30 @@ impl Context {
     ) -> Result<()> {
         #[cfg(target_os = "linux")]
         if source.is_none() && matches!(name, "os" | "posix") {
-            for name in ["major", "minor", "makedev", "mknod"] {
+            stdlib::os::eventfd::initialize(self, scope);
+            for name in [
+                "major",
+                "minor",
+                "makedev",
+                "mknod",
+                "timerfd_create",
+                "timerfd_gettime",
+                "timerfd_gettime_ns",
+                "timerfd_settime",
+                "timerfd_settime_ns",
+            ] {
                 let function = self.builtin(&format!("posix.{name}"));
                 self.bind(scope, name, function);
             }
-            stdlib::os::eventfd::initialize(self, scope);
+            for (name, flag) in [
+                ("TFD_CLOEXEC", libc::TFD_CLOEXEC),
+                ("TFD_NONBLOCK", libc::TFD_NONBLOCK),
+                ("TFD_TIMER_ABSTIME", libc::TFD_TIMER_ABSTIME),
+                ("TFD_TIMER_CANCEL_ON_SET", libc::TFD_TIMER_CANCEL_ON_SET),
+            ] {
+                let value = self.int(i64::from(flag));
+                self.bind(scope, name, value);
+            }
             if stdlib::os::fork_available() {
                 for attr in ["fork", "register_at_fork"] {
                     let function = self.builtin(&format!("posix.{attr}"));

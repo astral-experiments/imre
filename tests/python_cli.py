@@ -3330,6 +3330,7 @@ for name in ("md4", "ripemd160"):
             "boxed_binary_bytes_paths.py",
             "boxed_buffered_readlines.py",
             "boxed_os_eventfd.py",
+            "boxed_os_timerfd.py",
             "boxed_os_descriptor_io.py",
             "boxed_os_ftruncate.py",
             "boxed_os_lockf.py",
