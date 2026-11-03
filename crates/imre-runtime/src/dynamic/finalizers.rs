@@ -95,8 +95,10 @@ impl Context {
             Value::Scandir(scan) => Some(std::rc::Rc::clone(scan)),
             _ => None,
         };
+        let async_generator = matches!(self.heap.get(owner), Value::AsyncGenerator { .. });
         let generator = matches!(self.heap.get(owner), Value::Generator { .. });
-        let found = scan.is_some() || generator || self.slot(owner, "__del__").is_some();
+        let found =
+            scan.is_some() || generator || async_generator || self.slot(owner, "__del__").is_some();
         self.heap.take_finalizer(owner, found);
         super::stdlib::io::note_writer_finalizer(self, owner);
         if !found {
@@ -114,6 +116,10 @@ impl Context {
         }
         if let Some(scan) = scan {
             super::stdlib::os::scandir::finalize(self, owner, &scan);
+        } else if async_generator {
+            if let Err(error) = self.finalize_async_generator(owner) {
+                eprintln!("Exception ignored while finalizing asynchronous generator: {error}");
+            }
         } else if generator {
             if let Err(error) = self.generator_close(owner) {
                 eprintln!("Exception ignored while calling __del__: {error}");

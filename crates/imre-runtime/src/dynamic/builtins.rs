@@ -277,6 +277,7 @@ pub(super) fn is_static_gc_type(name: &str) -> bool {
                 | "ellipsis"
                 | "code"
                 | "coroutine"
+                | "async_generator"
                 | "cell"
                 | "function"
                 | "module"
@@ -326,6 +327,8 @@ pub(super) fn is_final_iterator_type(name: &str) -> bool {
             | "generator"
             | "coroutine_wrapper"
             | "anext_awaitable"
+            | "async_generator_asend"
+            | "async_generator_athrow"
             | "list_iterator"
             | "list_reverseiterator"
             | "tuple_iterator"
@@ -650,6 +653,14 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         }
         Value::ClassMethod { .. } if attr == "__get__" => "classmethod",
         Value::StaticMethod { .. } if attr == "__get__" => "staticmethod",
+        Value::AsyncGenerator { .. } if super::async_generator::method("async_generator", attr) => {
+            "async_generator"
+        }
+        Value::AsyncGeneratorOperation { kind, .. }
+            if super::async_generator::method(kind.type_name(), attr) =>
+        {
+            kind.type_name()
+        }
         Value::Generator { .. } if super::generator_protocol::generator_method(attr) => "generator",
         Value::Coroutine { .. }
             if super::generator_protocol::coroutine_method("coroutine", attr) =>
@@ -1580,6 +1591,29 @@ pub(super) fn call(
                     }
                     1 | 3 => Ok(NONE),
                     _ => Err(type_error("type.__init__() takes 1 or 3 arguments")),
+                }
+            }
+            "async_generator" | "async_generator_asend" | "async_generator_athrow"
+                if super::async_generator::method(owner, method) =>
+            {
+                positional(name, kwargs)?;
+                let (min, max) = match method {
+                    "send" | "asend" => (2, 2),
+                    "throw" => (2, 4),
+                    "athrow" => (1, usize::MAX),
+                    _ => (1, 1),
+                };
+                arity(name, args, min, max)?;
+                if ctx.heap.get(args[0]).intrinsic_type_name() != Some(owner) {
+                    return Err(type_error(format!(
+                        "descriptor '{method}' requires a '{owner}' object but received a '{}'",
+                        ctx.type_name(args[0])
+                    )));
+                }
+                if owner == "async_generator" {
+                    ctx.call_async_generator(args[0], method, &args[1..])
+                } else {
+                    ctx.call_async_generator_op(args[0], method, &args[1..])
                 }
             }
             "anext_awaitable" => {

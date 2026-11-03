@@ -3,6 +3,7 @@
 
 mod abstract_class;
 mod array;
+mod async_generator;
 mod atexit;
 mod builtins;
 mod calls;
@@ -676,6 +677,7 @@ impl Context {
                 | Value::Generator { .. }
                 | Value::CoroutineWrapper(_)
                 | Value::ANextAwaitable { .. }
+                | Value::AsyncGeneratorOperation { .. }
                 | Value::BufferedRandom(..)
                 | Value::File(_)
                 | Value::TextFile(_)
@@ -843,6 +845,7 @@ impl Context {
                 | Value::Generator { .. }
                 | Value::CoroutineWrapper(_)
                 | Value::ANextAwaitable { .. }
+                | Value::AsyncGeneratorOperation { .. }
                 | Value::BufferedRandom(..)
                 | Value::File(_)
                 | Value::TextFile(_)
@@ -1146,6 +1149,9 @@ impl Context {
             }
             return self.with_weak_target(target, |ctx| ctx.next_item(target));
         }
+        if matches!(self.heap.get(id), Value::AsyncGeneratorOperation { .. }) {
+            return self.call_async_generator_op(id, "__next__", &[]).map(Some);
+        }
         if matches!(self.heap.get(id), Value::ANextAwaitable { .. }) {
             return self.call_anext_method("__next__", &[id]).map(Some);
         }
@@ -1435,6 +1441,7 @@ impl Context {
             Value::AstWalk { .. }
                 | Value::Template { .. }
                 | Value::ANextAwaitable { .. }
+                | Value::AsyncGeneratorOperation { .. }
                 | Value::TemplateIter { .. }
                 | Value::GenericAliasIterator(_)
                 | Value::SequenceIterator { .. }

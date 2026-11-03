@@ -296,6 +296,7 @@ impl Context {
             | Value::Class { .. }
             | Value::Function { .. }
             | Value::Generator { .. }
+            | Value::AsyncGenerator { .. }
             | Value::Module { .. }
             | Value::Method { .. }
             | Value::Code(_)
