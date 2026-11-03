@@ -1459,6 +1459,16 @@ impl IntrinsicModule {
             (Self::Inspect, "isdatadescriptor") => {
                 Intrinsic::ScopedObjectExport("inspect.isdatadescriptor")
             }
+            (Self::Inspect, "isasyncgen") => Intrinsic::ScopedObjectExport("inspect.isasyncgen"),
+            (Self::Inspect, "isasyncgenfunction") => {
+                Intrinsic::ScopedObjectExport("inspect.isasyncgenfunction")
+            }
+            (Self::Inspect, "iscoroutine") => Intrinsic::ScopedObjectExport("inspect.iscoroutine"),
+            (Self::Inspect, "isgenerator") => Intrinsic::ScopedObjectExport("inspect.isgenerator"),
+            (Self::Inspect, "isgeneratorfunction") => {
+                Intrinsic::ScopedObjectExport("inspect.isgeneratorfunction")
+            }
+            (Self::Inspect, "ispackage") => Intrinsic::ScopedObjectExport("inspect.ispackage"),
             (Self::Inspect, "isawaitable") => Intrinsic::ScopedObjectExport("inspect.isawaitable"),
             (Self::Inspect, "getattr_static") => Intrinsic::InspectGetattrStatic,
             (Self::Inspect, "ismethoddescriptor") => Intrinsic::InspectIsMethodDescriptor,

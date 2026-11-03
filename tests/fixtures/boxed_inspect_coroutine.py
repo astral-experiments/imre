@@ -1,4 +1,6 @@
+import collections
 import inspect
+import types
 from functools import partial, partialmethod, update_wrapper
 from inspect import CO_ASYNC_GENERATOR, CO_COROUTINE, CO_GENERATOR
 from inspect import cleandoc, isawaitable, iscoroutinefunction, markcoroutinefunction
@@ -111,3 +113,20 @@ assert isawaitable(step)
 step.close()
 closer.close()
 coro.close()
+
+
+class Streams:
+    def items(self):
+        yield 1
+
+    deferred = partialmethod(items)
+
+
+assert inspect.isgeneratorfunction(Streams.deferred)
+assert inspect.isgeneratorfunction(Streams().deferred)
+assert inspect.isasyncgenfunction(partial(async_generator))
+assert not inspect.isgeneratorfunction(async_generator)
+assert inspect.isgenerator(Streams().items())
+assert inspect.isasyncgen(agen) and type(agen) is types.AsyncGeneratorType
+assert inspect.iscoroutine(coro) and not inspect.isgenerator(coro)
+assert inspect.ispackage(collections) and not inspect.ispackage(types)

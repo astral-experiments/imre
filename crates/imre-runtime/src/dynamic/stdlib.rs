@@ -455,6 +455,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("types", "SimpleNamespace") => super::namespace::class(ctx)?,
         ("types", "TracebackType") => ctx.builtin("traceback"),
         ("types", "_coroutine_flags" | "_mark_generator") => ctx.builtin(&format!("types.{name}")),
+        ("types", "AsyncGeneratorType") => ctx.builtin("async_generator"),
         ("types", "GeneratorType") => ctx.builtin("generator"),
         ("types", "CoroutineType") => ctx.builtin("coroutine"),
         ("types", "MethodType") => ctx.builtin("method"),
