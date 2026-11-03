@@ -147,36 +147,41 @@ impl<F: Read + Write + Seek> Random<F> {
     }
 
     pub(crate) fn seek(&mut self, at: SeekFrom) -> io::Result<u64> {
-        let current = self.tell()?;
-        let target = match at {
-            SeekFrom::Start(n) => Some(n),
-            SeekFrom::Current(n) => Some(
-                current
-                    .checked_add_signed(n)
-                    .ok_or_else(|| io::Error::from_raw_os_error(libc::EINVAL))?,
-            ),
-            SeekFrom::End(_) => None,
-        };
-        // A move within read-ahead leaves the kernel offset and any pending writes alone.
-        if self.pos < self.read_end
-            && let Some(target) = target
-        {
-            let offset = self.pos as i128 + i128::from(target) - i128::from(current);
-            if (0..=self.read_end as i128).contains(&offset) {
-                self.pos = offset as usize;
-                return Ok(target);
+        // A move within read-ahead leaves the descriptor and pending writes alone.
+        if self.pos < self.read_end {
+            let raw = self.file.stream_position()?;
+            let start = i128::from(raw) - self.raw_pos as i128;
+            let pos = match at {
+                SeekFrom::Start(n) => Some(i128::from(n) - start),
+                SeekFrom::Current(n) => Some(self.pos as i128 + i128::from(n)),
+                SeekFrom::End(_) => None,
+            };
+            if let Some(pos) = pos.filter(|pos| (0..=self.read_end as i128).contains(pos)) {
+                self.pos = pos as usize;
+                return Ok(raw.saturating_add_signed(self.pos as i64 - self.raw_pos as i64));
             }
         }
-        self.seek_raw(|raw| raw.seek(target.map_or(at, SeekFrom::Start)))
+        self.seek_raw(|raw, adjustment| {
+            let at = match at {
+                SeekFrom::Current(n) => SeekFrom::Current(
+                    n.checked_add(adjustment)
+                        .ok_or_else(|| io::Error::from_raw_os_error(libc::EINVAL))?,
+                ),
+                other => other,
+            };
+            raw.seek(at)
+        })
     }
 
     /// A failed raw seek leaves unread bytes available at the logical cursor.
     pub(crate) fn seek_raw(
         &mut self,
-        seek: impl FnOnce(&mut F) -> io::Result<u64>,
+        seek: impl FnOnce(&mut F, i64) -> io::Result<u64>,
     ) -> io::Result<u64> {
         self.write_back()?;
-        let position = seek(&mut self.file)?;
+        // Appending may have moved the descriptor while writing the dirty bytes.
+        let adjustment = self.pos as i64 - self.raw_pos as i64;
+        let position = seek(&mut self.file, adjustment)?;
         self.reset();
         Ok(position)
     }
