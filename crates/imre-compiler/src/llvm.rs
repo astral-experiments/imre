@@ -1763,13 +1763,17 @@ impl Emitter<'_, '_> {
         self.entry_allocas.clear();
         self.mapping_words = 0;
         self.locals = function.locals.clone();
-        byte_outputs::select(function, &mut self.locals);
         self.borrowed_locals = borrows.locals.clone();
+        self.rooted_locals = borrows.rooted.clone();
+        // The sole owner stays live while extend() evaluates and uses its receiver.
+        for (capture, owner) in byte_outputs::select(function, &mut self.locals) {
+            self.borrowed_locals[capture] = true;
+            self.rooted_locals[owner] = true;
+        }
         self.struct_locals = structs::snapshot_locals(self.module, function);
         for (slot, &snapshot) in self.struct_locals.iter().enumerate() {
             self.borrowed_locals[slot] |= snapshot;
         }
-        self.rooted_locals = borrows.rooted.clone();
         self.length_roots = borrows.length_roots.clone();
         self.length_snapshots = vec![None; self.locals.len()];
         self.small_locals = self.ranges.small_locals(function);
@@ -11200,6 +11204,7 @@ def total(text: str) -> int:
             .expect("private byte append");
         assert!(instructions.next().unwrap().contains("icmp eq i32"));
         assert!(eligible.contains("call ptr @imre_byte_output_finish("));
+        assert!(!eligible.contains("call void @imre_object_retain("));
         assert!(!eligible.contains("call ptr @imre_bytes_list("));
 
         for observer in [
