@@ -94,8 +94,21 @@ fn indexed_list(module: &Module, value: &Expr, index: usize) -> Option<usize> {
     .then_some(list)
 }
 
+/// Carry the established modular bounds into each row projection in this pure expression.
+fn mark_indexed_reads_in_bounds(module: &Module, term: &mut Expr, list: usize, index: usize) {
+    if indexed_list(module, term, index) == Some(list)
+        && let ExprKind::Builtin(op, _) = &mut term.kind
+    {
+        *op = Builtin::SequenceGetInBounds;
+    } else {
+        ir::children_mut(term, |child| {
+            mark_indexed_reads_in_bounds(module, child, list, index)
+        });
+    }
+}
+
 impl Emitter<'_, '_> {
-    /// A uniform list gives every in-bounds modular lookup the same projection.
+    /// Fold in-bounds modular lookups across runs of the same immutable row.
     /// Publish the final index and loop target of each bounded chunk before polling again.
     pub(super) fn uniform_indexed_sum(
         &mut self,
@@ -165,7 +178,7 @@ impl Emitter<'_, '_> {
         let condition = self.label();
         let inspect = self.label();
         let batch = self.label();
-        let mask = self.entry_alloca("i64");
+        let runs = self.entry_alloca("{ i64, [8 x i64] }");
         self.output
             .local_helper("imre_uniform_index_range", INDEX_RANGE_HELPER);
         let eligible = self.instruction(format!(
@@ -180,16 +193,16 @@ impl Emitter<'_, '_> {
         self.start(&bounds);
         let length = self.list_length(&receiver);
         let in_bounds = self.instruction(format!("icmp ule i64 {modulus}, {}", length.operand));
-        let data = self.instruction(format!(
-            "call ptr @imre_struct_read_view(ptr {}, ptr {mask})",
+        let prepare = self.label();
+        self.branch(&in_bounds, &prepare, &ordinary);
+        self.start(&prepare);
+        self.output
+            .local_helper("imre_struct_modular_runs", include_str!("modular_rows.ll"));
+        let count = self.instruction(format!(
+            "call i64 @imre_struct_modular_runs(ptr {}, i64 {modulus}, i64 {scale}, i64 {offset}, ptr {runs})",
             receiver.operand
         ));
-        let direct = self.instruction(format!("icmp ne ptr {data}, null"));
-        let bits = self.instruction(format!("load i64, ptr {mask}"));
-        let uniform = self.instruction(format!("icmp eq i64 {bits}, 0"));
-        let repeated = self.instruction(format!("and i1 {direct}, {uniform}"));
-        let stride = self.instruction(format!("select i1 {repeated}, i64 2046, i64 2"));
-        self.branch(&in_bounds, &condition, &ordinary);
+        self.jump(&condition);
         self.start(&condition);
         // Relinquish the read-only proof before running any signal handler.
         // The ordinary range header polls with the fully published prefix.
@@ -204,8 +217,10 @@ impl Emitter<'_, '_> {
         self.branch(&more, &batch, exhausted);
         self.start(&batch);
         let left = self.instruction(format!("sub i64 {stop}, {}", at.operand));
-        let short = self.instruction(format!("icmp ult i64 {left}, {stride}"));
-        let span = self.instruction(format!("select i1 {short}, i64 {left}, i64 {stride}"));
+        let span = self.instruction(format!(
+            "call i64 @imre_modular_batch_width(i64 {}, i64 {left}, i64 {count}, ptr {runs})",
+            at.operand
+        ));
         let count = self.instruction(format!("lshr i64 {span}, 1"));
         let end = self.instruction(format!("add i64 {}, {span}", at.operand));
         let last = self.instruction(format!("sub i64 {end}, 2"));
@@ -219,7 +234,9 @@ impl Emitter<'_, '_> {
         ));
         self.store(target, &ordinal(last));
         self.store(*index, &ordinal(subscript));
-        let value = self.expr(term);
+        let mut projection = term.as_ref().clone();
+        mark_indexed_reads_in_bounds(self.module, &mut projection, list, *index);
+        let value = self.expr(&projection);
         let old = self.borrow_slot(*sum);
         self.add_repeated_term(*sum, &old, &value, &count);
         self.store(cursor, &ordinal(end));
@@ -521,6 +538,26 @@ define internal i1 @imre_uniform_index_range(i64 %start, i64 %stop, i64 %modulus
   %valid = and i1 %domain, %range
   %result = and i1 %small, %valid
   ret i1 %result
+}
+
+; The limit and distance are logical iteration counts. Cursor increments use tagged units.
+define internal i64 @imre_modular_batch_width(i64 %cursor, i64 %left, i64 %count, ptr %runs) alwaysinline nounwind {
+  %sparse = icmp sgt i64 %count, 0
+  br i1 %sparse, label %exceptions, label %fixed
+fixed:
+  %uniform = icmp eq i64 %count, 0
+  %constant = select i1 %uniform, i64 2046, i64 2
+  br label %limit
+exceptions:
+  %ordinal = lshr i64 %cursor, 1
+  %distance = call i64 @imre_struct_modular_span(ptr %runs, i64 %count, i64 %ordinal, i64 1023)
+  %width = shl i64 %distance, 1
+  br label %limit
+limit:
+  %cap = phi i64 [ %constant, %fixed ], [ %width, %exceptions ]
+  %short = icmp ult i64 %left, %cap
+  %span = select i1 %short, i64 %left, i64 %cap
+  ret i64 %span
 }
 
 ; The range proof covers both the multiply and the addition. Positive Python
