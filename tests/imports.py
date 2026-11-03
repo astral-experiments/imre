@@ -517,6 +517,10 @@ REJECTED = {
             "def typed(value: int) -> int: return value\ntyped('wrong')\n"
         ),
     }, "invalid-argument-type"),
+    "invalid_call_after_imported_initializer": ({
+        "feature.py": "def require(enabled: bool):\n    if not enabled: raise RuntimeError('unavailable')\n",
+        "main.py": "import feature\nfeature.require(True)\ndef typed(value: int) -> int: return value\ntyped('bad')\n",
+    }, "expected int, got str"),
     "definition_after_execution": ({"main.py": "print(1)\n" + HELPER}, "definitions must precede"),
     "missing_namespace_child": ({"main.py": "import package.missing\n", "package/child.py": HELPER}, "cannot resolve first-party module"),
     "namespace_preserves_annotation": ({
@@ -706,6 +710,16 @@ ACCEPTED = {
             "from unittest.mock import patch\nclass Owner:\n    value = 1\n"
             "patcher = patch.object\nwith patcher(Owner, 'value', 2):\n    assert Owner.value == 2\n"
             "assert Owner.value == 1\n"
+        ),
+    },
+    "ordered_entry_class": {
+        "feature.py": "def initialize(): print('initialize')\n",
+        "main.py": (
+            "import feature\nfeature.initialize()\n"
+            "if hasattr(feature, 'initialize'):\n    class Available: pass\n"
+            "if hasattr(feature, 'missing'):\n    class Missing: pass\n"
+            "class Last: pass\nprint(Available.__name__, Last.__name__)\n"
+            "try: Missing()\nexcept NameError: print('absent')\n"
         ),
     },
     "entry_module_attribute_guard": {

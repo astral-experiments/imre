@@ -2607,11 +2607,14 @@ pub(crate) fn boxed_mock_export(name: &str) -> bool {
 }
 
 impl SourceModule {
-    /// An entry capability guard runs before its subsequent declarations and calls.
+    /// Entry guards and standalone initializer calls precede the remaining declarations.
     pub(crate) fn has_entry_guard(&self) -> bool {
-        self.entry_globals
-            .iter()
-            .any(|&index| matches!(self.parsed.syntax().body[index], ast::Stmt::If(_)))
+        self.entry_globals.iter().any(|&index| {
+            matches!(
+                self.parsed.syntax().body[index],
+                ast::Stmt::If(_) | ast::Stmt::Expr(_)
+            )
+        })
     }
 
     fn local_value(&self, id: ModuleId, statement: &ast::Stmt) -> Option<DefinitionId> {
@@ -4338,10 +4341,27 @@ impl<'a> Loader<'a> {
                                 module_value(statement),
                                 Some(ast::Expr::Call(call)) if resolve_binding(&self.modules, id, &call.func) == Some(Binding::Intrinsic(Intrinsic::RegexCompile))
                             ));
-                    if entry_global && module_attribute_guard(&self.modules, id, statement) {
-                        // Run the guard in the initializer before subsequent declarations.
-                        self.modules[id].entry_globals.push(index);
-                        continue;
+                    if entry_global {
+                        if let ast::Stmt::If(guard) = statement
+                            && guard.elif_else_clauses.is_empty()
+                            && let [ast::Stmt::ClassDef(class)] = guard.body.as_slice()
+                        {
+                            self.bind(
+                                id,
+                                class.name.as_str(),
+                                Binding::ConditionalValue,
+                                statement,
+                            )?;
+                            self.needs_object_imports = true;
+                            self.modules[id].entry_globals.push(index);
+                            continue;
+                        }
+                        if module_attribute_guard(&self.modules, id, statement)
+                            || imported_function_call(&self.modules, id, statement)
+                        {
+                            self.modules[id].entry_globals.push(index);
+                            continue;
+                        }
                     }
                     self.scan_value_writes(id, statement)?;
                     if let Some(name) = value_name(statement) {
@@ -5498,6 +5518,21 @@ fn single_import_binding(body: &[ast::Stmt]) -> Option<&str> {
     // An unaliased dotted import binds only the first component.
     let name = alias.name.as_str().split('.').next()?;
     (name != "*").then_some(name)
+}
+
+/// Resolve a standalone call before adding subsequent definitions to the entry namespace.
+fn imported_function_call(modules: &[SourceModule], id: ModuleId, statement: &ast::Stmt) -> bool {
+    let ast::Stmt::Expr(expr) = statement else {
+        return false;
+    };
+    let Some(call) = expr.value.as_call_expr() else {
+        return false;
+    };
+    let Some(Binding::Definition(def)) = resolve_binding(modules, id, &call.func) else {
+        return false;
+    };
+    def.module != id
+        && modules[def.module].parsed.syntax().body[def.statement].is_function_def_stmt()
 }
 
 /// Recognize a module attribute test whose only branch raises.
