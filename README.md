@@ -104,7 +104,7 @@ with Rust-competitive performance.
 
 ## Standard library test results
 
-As of November 3, 2026, Imre has a paired pass for **8,702 of 13,328 tests (65.3%)** in the original 25 standard library module families.
+As of November 3, 2026, Imre has a paired pass for **8,703 of 13,328 tests (65.3%)** in the original 25 standard library module families.
 A **paired pass** means that CPython 3.14.5 passed the original test and Imre passed it at both
 `-O0` and `-O3`. The total combines focused and intact suite runs across revisions, including
 development branches. Each original test occurrence counts once. Skipped and omitted tests remain
@@ -112,7 +112,7 @@ in the denominator. The [omission decisions](docs/stdlib-omissions.md) explain e
 
 | Module | Paired passes | Upstream tests | Omitted | How the tests ran |
 | --- | ---: | ---: | ---: | --- |
-| `argparse` | 1,886 | 1,893 | 6 | Thirty-six more originals completed on stock and native O0/O3. Six bytecode-only launch cases are omitted. The remaining source-backed case exercises `pygettext`. |
+| `argparse` | 1,887 | 1,893 | 6 | All 1,887 eligible originals have paired passes across public revisions. The translations test ran the real pygettext child and produced all 32 expected messages. Six explicitly documented compiled-entry omissions remain in the 1,893-test denominator. A complete run on one revision is tracked separately. |
 | `collections` | 640 | 659 | 8 | [ChainMap lookup and Counter copying](benchmarks/cpython_stdlib/full/collections/receipts/2026-11-02/chainmap-counter/) passed on stock and boxed native O0/O3, including all six Counter pickle subtests. Earlier focused and intact runs contribute to the total. |
 | `csv` | 122 | 128 | 0 | Complete suite on `main`, 122 passed and six matched upstream skips. |
 | `dataclasses` | 247 | 276 | 0 | The latest intact public run passed 206, and the retained intact run passed 207. Thirteen more TestDocString originals pass on a sealed development tree after all 276 register. Their public replay needs annotationlib.get_annotations for #3578. |
@@ -137,7 +137,7 @@ in the denominator. The [omission decisions](docs/stdlib-omissions.md) explain e
 | `typing` | 688 | 712 | 0 | 688 originals passed across class, doctest and selected runs. The latest ParamSpec alias test and its 14 subtests passed on stock and ordinary public native O0/O3. Other tests still fail in some full classes. |
 | `unittest` | 275 | 1,090 | 0 | The intact package passed 160 cases. On public #3601, the unchanged test_assertions and test_case files ran all 150 originals with runtime imports. Their 109 paired passes added 81 distinct cases. Another 34 original mock methods passed in focused runs. |
 | `urllib` | 173 | 178 | 0 | Both unchanged upstream scripts completed on public `main` at O0 and O3 with ordinary and runtime imports. All 178 tests matched stock in order, including 173 successful parents, three with only child outcomes, and two Windows skips. |
-| **Total** | **8,702** | **13,328** | **27** | **4 complete suites match stock on `main`** |
+| **Total** | **8,703** | **13,328** | **27** | **4 complete suites match stock on `main`** |
 
 See the [standard library coverage report](docs/stdlib.md) for the Linux test
 results and import coverage recorded in this repository.
