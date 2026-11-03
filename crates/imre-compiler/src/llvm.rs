@@ -282,7 +282,7 @@ enum Cleanup {
         previous: Value,
         name: Option<usize>,
     },
-    Completion(Value),
+    Owned(Value),
 }
 
 enum Completion {
@@ -1655,7 +1655,7 @@ impl Emitter<'_, '_> {
                 }
                 Cleanup::Slots(slots) => self.clear_slots(&slots),
                 Cleanup::Active { previous, name } => self.restore_active(&previous, name),
-                Cleanup::Completion(value) => self.release(&value),
+                Cleanup::Owned(value) => self.release(&value),
                 Cleanup::Finally { body, loops } => {
                     // A finalbody can itself contain transfers and protected
                     // regions. Bound copied cleanup IR across one outer try.
@@ -1672,7 +1672,7 @@ impl Emitter<'_, '_> {
                             self.call("imre_exception_swap_active", Type::Exception, &[&error]);
                         self.forget(&error);
                         self.forget(&previous);
-                        self.cleanups.push(Cleanup::Completion(error.clone()));
+                        self.cleanups.push(Cleanup::Owned(error.clone()));
                         self.cleanups.push(Cleanup::Active {
                             previous: previous.clone(),
                             name: None,
@@ -1680,7 +1680,7 @@ impl Emitter<'_, '_> {
                         Some((error, previous))
                     } else {
                         if let Completion::Return(value) = &completion {
-                            self.cleanups.push(Cleanup::Completion(value.clone()));
+                            self.cleanups.push(Cleanup::Owned(value.clone()));
                         }
                         None
                     };
@@ -1761,6 +1761,10 @@ impl Emitter<'_, '_> {
             self.cleanup_bytes = 0;
         }
         self.try_nesting += 1;
+        // A handler can recover and resume the expression that owned these operands.
+        let enclosing_depth = self.cleanups.len();
+        self.cleanups
+            .extend(self.temporaries.drain(..).map(Cleanup::Owned));
         let depth = self.cleanups.len();
         let end = self.label();
         if !finalbody.is_empty() {
@@ -1842,6 +1846,15 @@ impl Emitter<'_, '_> {
             self.route(Completion::Error);
         }
         self.cleanups.truncate(depth);
+        self.temporaries
+            .extend(
+                self.cleanups
+                    .drain(enclosing_depth..)
+                    .map(|cleanup| match cleanup {
+                        Cleanup::Owned(value) => value,
+                        _ => unreachable!(),
+                    }),
+            );
         self.start(&end);
         self.try_nesting -= 1;
     }
