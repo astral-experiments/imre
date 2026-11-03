@@ -566,7 +566,10 @@ fn box_native_entry(ctx: &mut Context, entry: CodecInfo) -> Result<Id> {
         Value::Module { scope, .. } => ctx.lookup(scope, name),
         _ => ctx.lookup_attr(module, name),
     };
-    let encoder = if matches!(codec, Codec::Utf8 { signature: false }) {
+    let encoder = if matches!(
+        codec,
+        Codec::Ascii | Codec::Latin1 | Codec::Utf8 { signature: false }
+    ) {
         factory(ctx, "IncrementalEncoder")?
     } else {
         NONE
