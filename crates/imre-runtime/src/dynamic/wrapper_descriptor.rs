@@ -83,6 +83,11 @@ impl BuiltinDescriptor {
             Some(("frozenset", attr)) if builtins::set_operators("frozenset").contains(&attr) => {
                 Some(("frozenset", attr, builtins::set_operators("frozenset")))
             }
+            Some((stdlib::functools::LRU_CACHE_CLASS, attr)) => Some((
+                stdlib::functools::LRU_CACHE_CLASS,
+                attr,
+                stdlib::functools::COPY_METHODS,
+            )),
             Some(("functools.KeyWrapper", attr)) => Some((
                 "functools.KeyWrapper",
                 attr,
@@ -469,6 +474,8 @@ impl BuiltinDescriptor {
         receiver: Option<Id>,
     ) -> Option<Id> {
         Some(match name {
+            "__text_signature__" if self.owner == stdlib::functools::LRU_CACHE_CLASS && self.name == "__reduce__" => ctx.text("($self, /)"),
+            "__doc__" | "__text_signature__" if self.owner == stdlib::functools::LRU_CACHE_CLASS => NONE,
             "__doc__" if self.owner == weakref::PROXY_TYPE && self.name != "__repr__" => NONE,
             "__text_signature__" if self.owner == weakref::PROXY_TYPE => ctx.text("($self, /)"),
             "__doc__" | "__text_signature__" if self.owner == deque::CLASS => {

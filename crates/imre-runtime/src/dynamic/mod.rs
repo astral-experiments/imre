@@ -324,6 +324,7 @@ impl Context {
             | ("bytes", Value::Bytes(_))
             | ("bytearray", Value::ByteArray(_))
             | ("array.array", Value::Array(_))
+            | (stdlib::functools::LRU_CACHE_CLASS, Value::Cached { .. })
             | ("set", Value::Set { frozen: false, .. })
             | ("frozenset", Value::Set { frozen: true, .. })
             | (value::REGEX_PATTERN_TYPE, Value::RegexPattern(_))
@@ -2280,6 +2281,19 @@ impl Context {
                 let field = self.readonly_member("super", name);
                 entries.push((self.heap.code_name(name), field));
             }
+            let dictionary = self.dict(entries);
+            self.native_type_dicts.insert(value, dictionary);
+        }
+        if name == stdlib::functools::LRU_CACHE_CLASS {
+            let mut entries = Vec::new();
+            for &member in stdlib::functools::COPY_METHODS {
+                let method = self.builtin(&format!("{name}.{member}"));
+                entries.push((self.heap.code_name(member), method));
+            }
+            entries.push((
+                self.heap.code_name("__module__"),
+                self.heap.code_name("functools"),
+            ));
             let dictionary = self.dict(entries);
             self.native_type_dicts.insert(value, dictionary);
         }

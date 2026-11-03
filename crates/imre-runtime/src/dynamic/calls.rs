@@ -1,5 +1,6 @@
 use crate::objects::HashState;
 
+use super::stdlib::functools::LRU_CACHE_CLASS;
 use super::wrapper_descriptor::BuiltinDescriptor;
 use super::*;
 
@@ -1373,7 +1374,7 @@ impl Context {
             Value::Module { .. } => self.type_name(obj),
             Value::DefaultDict { .. } => "collections.defaultdict",
             Value::Partial { .. } => "functools.partial",
-            Value::Cached { .. } => "functools._lru_cache_wrapper",
+            Value::Cached { .. } => LRU_CACHE_CLASS,
             Value::KeyWrapper { .. } => KEY_WRAPPER,
             Value::BytesIoBuffer { .. } => "_io._BytesIOBuffer",
             Value::PartialPlaceholder => "functools._PlaceholderType",
@@ -1451,7 +1452,7 @@ impl Context {
                             | "mappingproxy"
                             | KEY_WRAPPER
                             | "functools._PlaceholderType"
-                            | "functools._lru_cache_wrapper"
+                            | LRU_CACHE_CLASS
                             | "functools.partial"
                             | HashState::CLASS
                             | HashState::XOF_CLASS
@@ -1665,7 +1666,7 @@ impl Context {
             | ("_contextvars.ContextVar", Value::ContextVar { .. })
             | ("_contextvars.Context", Value::Context(_))
             | ("functools.partial", Value::Partial { .. })
-            | ("functools._lru_cache_wrapper", Value::Cached { .. })
+            | (LRU_CACHE_CLASS, Value::Cached { .. })
             | ("_contextvars.Token", Value::ContextToken { .. })
             | ("operator.attrgetter", Value::AttrGetter(_))
             | (super::namedtuple::GETTER, Value::TupleGetter { .. })
@@ -2394,6 +2395,10 @@ impl Context {
                 }
                 if let Some(value) = self.dictionary_field(Some(dictionary), name)? {
                     return Ok(value);
+                }
+                let class = self.builtin(LRU_CACHE_CLASS);
+                if let Some(member) = self.class_attr(class, name) {
+                    return self.bind_attribute(member, obj, class);
                 }
                 if matches!(name, "cache_clear" | "cache_info") {
                     let callable = self.builtin(&format!("functools._lru_cache_wrapper.{name}"));
@@ -3539,7 +3544,7 @@ impl Context {
                         | "_contextvars.ContextVar"
                         | "_contextvars.Token"
                         | KEY_WRAPPER
-                        | "functools._lru_cache_wrapper"
+                        | LRU_CACHE_CLASS
                         | HashState::CLASS
                         | HashState::XOF_CLASS
                         | super::namedtuple::GETTER
@@ -3554,6 +3559,11 @@ impl Context {
                     && let Some(value) = self.own_class_attr(obj, name)
                 {
                     return Ok(value);
+                }
+                if class == LRU_CACHE_CLASS
+                    && let Some(member) = self.class_attr(obj, name)
+                {
+                    return Ok(member);
                 }
                 if class == "array.array" && super::array::has_method(name) {
                     return Ok(self.builtin(&format!("array.array.{name}")));
