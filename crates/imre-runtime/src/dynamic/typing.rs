@@ -316,6 +316,10 @@ pub(super) fn named_class(ctx: &mut Context, module: &str, name: &str) -> Id {
     };
     let module = ctx.text(module);
     ctx.bind(scope, "__module__", module);
+    if key == "typing.Generic" {
+        let hook = ctx.builtin("typing.Generic.__init_subclass__");
+        ctx.bind(scope, "__init_subclass__", hook);
+    }
     let class = ctx
         .allocate_class(name.to_owned(), scope, bases)
         .expect("native typing classes have a single base");
@@ -917,22 +921,13 @@ pub(super) fn subscribe(ctx: &mut Context, target: Id, index: Id) -> Option<Resu
                         format!("Parameters to {name}[...] must all be unique"),
                     ));
                 }
+            } else if let Some(specialize) = ctx.module_value("typing", "_variadic_class_getitem") {
+                let constructor = ctx.builtin("typing._GenericAlias");
+                return ctx.call(specialize, vec![target, index, constructor], Vec::new());
             } else {
+                // The typing module specializes its IO classes before installing its helper.
                 let params = ctx.lookup_attr(target, "__parameters__")?;
-                let parameters = ctx.items(params)?;
-                if parameters.iter().any(|&id| match ctx.heap.get(id) {
-                    Value::ParamSpec(_) | Value::TypeVarTuple { .. } => true,
-                    Value::TypeVar(var) => !matches!(ctx.heap.get(var.default), Value::NoDefault),
-                    _ => false,
-                }) {
-                    let constructor = ctx.builtin("typing._GenericAlias");
-                    return typing_alias_helper(
-                        ctx,
-                        "_variadic_class_getitem",
-                        vec![target, index, constructor],
-                    );
-                }
-                let required = parameters.len();
+                let required = ctx.items(params)?.len();
                 if args.len() != required {
                     let which = if args.len() < required { "few" } else { "many" };
                     return Err(Error::new(
@@ -1122,38 +1117,43 @@ fn alias_bases(ctx: &mut Context, id: Id, bases: Id) -> Result<Id> {
     Ok(ctx.alloc(Value::Tuple(result)))
 }
 
-pub(super) fn class_parameters(
-    ctx: &mut Context,
-    scope: Id,
-    original: Option<Id>,
-    bases: &[Id],
-) -> Result<()> {
-    let Some(&generic) = ctx.classes.get("typing.Generic") else {
-        return Ok(());
+fn generic_init_subclass(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    let generic = named_class(ctx, "typing", "Generic");
+    let Some((&cls, args)) = args.split_first() else {
+        return Err(Error::new(
+            "TypeError",
+            "descriptor '__init_subclass__' of 'typing.Generic' object needs an argument",
+        ));
     };
-    if !bases.iter().any(|&base| ctx.subclass(base, generic)) {
-        return Ok(());
-    }
-    let raw = match original {
-        Some(tuple) => ctx.items(tuple)?,
-        None => bases.to_vec(),
-    };
-    bind_generic_parameters(ctx, scope, generic, &raw)
-}
+    super::stdlib::datetime::validate_classmethod_receiver(
+        ctx,
+        "typing.Generic",
+        "__init_subclass__",
+        cls,
+    )?;
+    let next = ctx.super_attribute(generic, cls, cls, "__init_subclass__")?;
+    ctx.call(next, args.to_vec(), kwargs.to_vec())?;
 
-pub(super) fn bind_generic_parameters(
-    ctx: &mut Context,
-    scope: Id,
-    generic: Id,
-    raw: &[Id],
-) -> Result<()> {
+    if ctx.own_class_attr(cls, "__orig_bases__").is_none() {
+        let bases = ctx.lookup_attr(cls, "__bases__")?;
+        if ctx.items(bases)?.contains(&generic)
+            && ctx.class_name(cls) != "Protocol"
+            && Some(ctx.exact_type(cls)?) != ctx.module_value("typing", "_TypedDictMeta")
+        {
+            return Err(Error::new("TypeError", "Cannot inherit from plain Generic"));
+        }
+        let empty = ctx.heap.packed_tuple(Vec::new(), false);
+        ctx.set_attr(cls, "__parameters__", empty)?;
+        return Ok(NONE);
+    }
+    let bases = ctx.lookup_attr(cls, "__orig_bases__")?;
+    let raw = ctx.items(bases)?;
     if raw.contains(&generic) {
         return Err(Error::new("TypeError", "Cannot inherit from plain Generic"));
     }
-    let bases = ctx.alloc(Value::Tuple(raw.to_vec()));
     let parameters = collect_type_parameters(ctx, bases, true)?;
     let mut explicit = None;
-    for &id in raw {
+    for id in raw {
         if let Value::GenericAlias(a) = ctx.heap.get(id)
             && a.origin == generic
             && explicit.replace(a.parameters).is_some()
@@ -1187,8 +1187,8 @@ pub(super) fn bind_generic_parameters(
     } else {
         parameters
     };
-    ctx.bind(scope, "__parameters__", params);
-    Ok(())
+    ctx.set_attr(cls, "__parameters__", params)?;
+    Ok(NONE)
 }
 
 /// Members physically stored on a TypeVar and returned unbound by class lookup.
@@ -2149,6 +2149,9 @@ pub(super) fn call(
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
+    if operation == "Generic.__init_subclass__" {
+        return generic_init_subclass(ctx, args, kwargs);
+    }
     if matches!(
         operation,
         "TypeVar.__reduce__"

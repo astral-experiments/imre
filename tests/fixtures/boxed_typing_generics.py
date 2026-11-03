@@ -39,6 +39,12 @@ def local_alias_names():
     class C(t.Generic[K]):
         pass
 
+    class N(int):
+        pass
+
+    assert N.from_bytes.__qualname__ == N.__qualname__ + ".from_bytes"
+    assert C.__init_subclass__.__qualname__ == C.__qualname__ + ".__init_subclass__"
+
     alias = C[int]
     assert repr(alias) == f"{__name__}.local_alias_names.<locals>.C[int]"
     assert alias.__module__ == __name__ and "__module__" in dir(alias)
@@ -64,6 +70,33 @@ def local_alias_names():
 
 
 local_alias_names()
+
+
+class GenericHook:
+    def __init_subclass__(cls, *, initialize):
+        assert "__parameters__" not in vars(cls)
+        if initialize:
+            super().__init_subclass__()
+
+
+class Initialized(GenericHook, t.Generic[K], initialize=True):
+    pass
+
+
+class Uninitialized[U](GenericHook, initialize=False):
+    pass
+
+
+assert Initialized.__parameters__ == (K,) and t.get_origin(Initialized[int]) is Initialized
+try:
+    Uninitialized[int]
+except AttributeError as error:
+    assert error.__notes__ == [
+        "Note: this exception may have been caused by 'GenericHook.__init_subclass__' "
+        "(or the '__init_subclass__' method on a superclass) not calling 'super().__init_subclass__()'"
+    ]
+else:
+    raise AssertionError("subscribed a class whose hook skipped Generic initialization")
 
 
 class Slotted(t.Generic[T]):

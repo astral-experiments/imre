@@ -4,8 +4,11 @@ import typing
 def current():
     T = typing.TypeVar("T")
 
+    class C(typing.Generic[T]):
+        pass
+
     def aliases():
-        return typing.List[int], typing.Generic[T], typing.Callable[[str], int]
+        return typing.List[int], typing.Generic[T], typing.Callable[[str], int], C[int]
 
     before = aliases()
     for first, repeated in zip(before, aliases()):

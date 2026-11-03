@@ -451,10 +451,6 @@ impl Context {
             self.bind_local(scope, "__qualname__", name);
         }
         self.enable_class_annotation_provider(scope);
-        if metaclass.is_some() {
-            let original = self.scope_name(scope, "__orig_bases__");
-            super::typing::class_parameters(self, scope, original, &bases)?;
-        }
         let ancestors = self.linearized_bases(&bases, false)?;
         let class =
             self.allocate_prepared_class(name_text, scope, bases, ancestors, layout, slots)?;

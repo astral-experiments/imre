@@ -904,7 +904,7 @@ impl Context {
         {
             return Ok(self.bind_native_classmethod(value, owner));
         }
-        if matches!(self.heap.get(value), Value::Native(name) if matches!(name.as_str(), "object.__init_subclass__" | "object.__subclasshook__"))
+        if matches!(self.heap.get(value), Value::Native(name) if matches!(name.as_str(), "object.__init_subclass__" | "object.__subclasshook__" | "typing.Generic.__init_subclass__"))
         {
             return Ok(self.alloc(Value::Method {
                 callable: value,
@@ -7968,7 +7968,7 @@ impl Context {
             bases.push(dict);
             let parents = self.alloc(Value::Tuple(parents));
             let (fields, annotate) = self.prepare_typeddict_namespace(scope, annotations)?;
-            Some((parents, fields, annotate, generic, total))
+            Some((parents, fields, annotate, total))
         } else {
             None
         };
@@ -7977,7 +7977,6 @@ impl Context {
         }
         if typed_dict_meta.is_none() {
             self.enable_class_annotation_provider(scope);
-            super::typing::class_parameters(self, scope, original, &bases)?;
         }
         if bases.iter().any(|&base| self.is_abc_metaclass(base))
             && let Some(new) = self.namespace_binding(self.scope_data(scope), "__new__")
@@ -8085,16 +8084,7 @@ impl Context {
         if self.is_protocol_declaration(class) {
             self.call_typing_helper("_freeze_protocol_members", vec![class, annotations])?;
         }
-        if let Some((parents, fields, annotate, generic, total)) = typed_dict_fields {
-            if let Some(generic) = generic {
-                // Generic.__init_subclass__ reads the declared bases after __set_name__.
-                let raw = self
-                    .scope_name(scope, "__orig_bases__")
-                    .map(|tuple| self.items(tuple))
-                    .transpose()?
-                    .unwrap_or_default();
-                super::typing::bind_generic_parameters(self, scope, generic, &raw)?;
-            }
+        if let Some((parents, fields, annotate, total)) = typed_dict_fields {
             let configure = self
                 .module_value("typing", "_configure_typeddict")
                 .ok_or_else(|| Error::new("RuntimeError", "missing TypedDict initializer"))?;
