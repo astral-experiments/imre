@@ -4738,6 +4738,9 @@ impl Context {
 
     /// Bypass the object's deletion hook, while honoring data descriptors on its class.
     pub(super) fn default_delete_attr(&mut self, obj: Id, name: &str) -> Result<()> {
+        if name == "tb_next" && matches!(self.heap.get(obj), Value::Traceback { .. }) {
+            return Err(Error::new("TypeError", "can't delete tb_next attribute"));
+        }
         self.check_immutable_type_write(obj, name)?;
         if let Some(result) = self.update_alias_name(obj, name, None) {
             return result;
@@ -4827,6 +4830,9 @@ impl Context {
         }
         if exception_member.is_some() {
             return self.update_exception_field(obj, name, None);
+        }
+        if name == "__cause__" && matches!(self.heap.get(obj), Value::Raised(_)) {
+            return Err(Error::new("TypeError", "__cause__ may not be deleted"));
         }
         if self.update_key_wrapper_field(obj, name, None)?
             || self.update_os_field(obj, name, None)?
@@ -5635,6 +5641,9 @@ impl Context {
     }
 
     pub(super) fn default_set_attr(&mut self, obj: Id, name: &str, value: Id) -> Result<()> {
+        if name == "tb_next" && matches!(self.heap.get(obj), Value::Traceback { .. }) {
+            return self.set_traceback_next(obj, value);
+        }
         self.check_immutable_type_write(obj, name)?;
         if let Some(result) = self.update_alias_name(obj, name, Some(value)) {
             return result;
@@ -5833,6 +5842,9 @@ impl Context {
         }
         if exception_member.is_some() {
             return self.update_exception_field(obj, name, Some(value));
+        }
+        if name == "__cause__" && matches!(self.heap.get(obj), Value::Raised(_)) {
+            return self.set_exception_cause(obj, value);
         }
         if self.update_key_wrapper_field(obj, name, Some(value))?
             || self.update_os_field(obj, name, Some(value))?

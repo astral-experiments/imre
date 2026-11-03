@@ -75,7 +75,8 @@ pub(super) struct Location {
 
 #[derive(Clone, Debug, Default)]
 pub(super) struct Trace {
-    pub frames: Vec<(Location, Id)>,
+    // Pending activations precede the already exposed, mutable Python traceback.
+    pending_frames: Vec<(Location, Id)>,
     pub instance: Option<Id>,
     pub cause: Option<Id>,
     pub import_message: Option<Id>,
@@ -85,7 +86,7 @@ pub(super) struct Trace {
     pub name_error_name: Option<Id>,
     pub dictionary: Option<Id>,
     stop_value: Id,
-    cached: Option<(usize, Id)>,
+    head: Id,
 }
 
 #[derive(Debug)]
@@ -211,7 +212,7 @@ impl Error {
             .chain(self.os_args.iter().flat_map(|args| args.roots()))
             .chain(self.trace.iter().flat_map(|trace| {
                 trace
-                    .frames
+                    .pending_frames
                     .iter()
                     .map(|&(_, frame)| frame)
                     .chain((trace.stop_value != NONE).then_some(trace.stop_value))
@@ -227,7 +228,7 @@ impl Error {
                     .chain(trace.import_names.into_iter().flatten())
                     .chain(trace.name_error_name)
                     .chain(trace.dictionary)
-                    .chain(trace.cached.map(|(_, head)| head))
+                    .chain((trace.head != NONE).then_some(trace.head))
             }))
     }
 
@@ -241,8 +242,8 @@ impl Error {
 
     pub(super) fn clear_traceback(&mut self) {
         if let Some(trace) = self.trace.as_mut() {
-            trace.frames.clear();
-            trace.cached = None;
+            trace.pending_frames.clear();
+            trace.head = NONE;
         }
     }
 
@@ -458,15 +459,17 @@ impl Context {
                 if error.context == NONE
                     && active != NONE
                     && error.trace.as_ref().is_none_or(|trace| {
-                        trace.frames.is_empty() && trace.instance != Some(active)
+                        trace.head == NONE
+                            && trace.pending_frames.is_empty()
+                            && trace.instance != Some(active)
                     })
                 {
                     error.context = active;
                 }
                 if let Some(trace) = error.try_tracing()
-                    && trace.frames.try_reserve(1).is_ok()
+                    && trace.pending_frames.try_reserve(1).is_ok()
                 {
-                    trace.frames.push((loc, frame));
+                    trace.pending_frames.push((loc, frame));
                     return;
                 }
                 Error::new("MemoryError", "")
@@ -478,17 +481,15 @@ impl Context {
 
     /// Preserve identity of an observed traceback head and reuse its tail on a later raise.
     pub(super) fn exception_traceback(&mut self, exception: Id) -> Result<Id> {
-        let Value::Raised(error) = self.heap.get(exception) else {
+        let Value::Raised(error) = self.heap.get_mut(exception) else {
             return Err(Error::new("TypeError", "expected exception"));
         };
-        let Some(trace) = &error.trace else {
+        let Some(trace) = error.trace.as_mut() else {
             return Ok(NONE);
         };
-        let (count, mut head) = trace.cached.unwrap_or((0, NONE));
-        let length = trace.frames.len();
-        if length != count {
-            let missing = trace.frames[count..].to_vec();
-            for (at, frame) in missing {
+        let mut head = trace.head;
+        if !trace.pending_frames.is_empty() {
+            for (at, frame) in std::mem::take(&mut trace.pending_frames) {
                 head = self.alloc(Value::Traceback {
                     frame,
                     next: head,
@@ -499,64 +500,75 @@ impl Context {
             let Value::Raised(error) = self.heap.get_mut(exception) else {
                 unreachable!()
             };
-            error.tracing().cached = Some((length, head));
+            error.tracing().head = head;
         }
         Ok(head)
     }
 
+    /// Store an explicit cause, including None, using the same state as raise-from.
+    pub(super) fn set_exception_cause(&mut self, exception: Id, cause: Id) -> Result<()> {
+        if cause != NONE && !matches!(self.heap.get(cause), Value::Raised(_)) {
+            return Err(Error::new(
+                "TypeError",
+                "exception cause must be None or derive from BaseException",
+            ));
+        }
+        let Value::Raised(error) = self.heap.get_mut(exception) else {
+            unreachable!("cause assignment requires an exception instance")
+        };
+        if let Some(old) = error.tracing().cause.replace(cause)
+            && old != NONE
+            && old != cause
+        {
+            self.heap.collect_next_statement = true;
+        }
+        Ok(())
+    }
+
     /// Adopt the exact Python traceback chain and replace any previously retained frames.
     pub(super) fn set_traceback(&mut self, exception: Id, tb: Id) -> Result<()> {
-        let Value::Raised(error) = self.heap.get_mut(exception) else {
+        if !matches!(self.heap.get(exception), Value::Raised(_)) {
             return Err(Error::new("TypeError", "expected a BaseException instance"));
-        };
-        if tb == NONE {
-            error.clear_traceback();
-            self.heap.collect_next_statement = true;
-            return Ok(());
         }
-        let mut frames = Vec::new();
-        let mut node = tb;
-        while node != NONE {
-            let Value::Traceback {
-                frame,
-                next,
-                lineno,
-                span,
-            } = *self.heap.get(node)
-            else {
-                return Err(Error::new(
-                    "TypeError",
-                    "__traceback__ must be a traceback or None",
-                ));
-            };
-            let Value::PythonFrame { code, .. } = *self.heap.get(frame) else {
-                unreachable!("traceback retains a frame")
-            };
-            let Value::Code(code) = self.heap.get(code) else {
-                unreachable!("frame retains its code object")
-            };
-            let file = self.str_value(code.filename)?.to_owned().into();
-            frames
-                .try_reserve(1)
-                .map_err(|_| Error::new("MemoryError", ""))?;
-            frames.push((
-                Location {
-                    file,
-                    line: lineno as u32,
-                    span,
-                },
-                frame,
+        if tb != NONE && !matches!(self.heap.get(tb), Value::Traceback { .. }) {
+            return Err(Error::new(
+                "TypeError",
+                "__traceback__ must be a traceback or None",
             ));
-            node = next;
         }
-        frames.reverse();
         let Value::Raised(error) = self.heap.get_mut(exception) else {
             unreachable!()
         };
-        let trace = error.tracing();
-        trace.cached = Some((frames.len(), tb));
-        trace.frames = frames;
+        error.clear_traceback();
+        if tb != NONE {
+            error.tracing().head = tb;
+        }
         self.heap.collect_next_statement = true;
+        Ok(())
+    }
+
+    /// Link traceback nodes without introducing a cycle in their shared tail.
+    pub(super) fn set_traceback_next(&mut self, tb: Id, next: Id) -> Result<()> {
+        let mut node = next;
+        while node != NONE {
+            if node == tb {
+                return Err(Error::new("ValueError", "traceback loop detected"));
+            }
+            let Value::Traceback { next, .. } = self.heap.get(node) else {
+                return Err(Error::new(
+                    "TypeError",
+                    format!("expected traceback object, got '{}'", self.type_name(node)),
+                ));
+            };
+            node = *next;
+        }
+        let Value::Traceback { next: link, .. } = self.heap.get_mut(tb) else {
+            unreachable!("traceback instance")
+        };
+        let previous = std::mem::replace(link, next);
+        if previous != NONE && previous != next {
+            self.heap.collect_next_statement = true;
+        }
         Ok(())
     }
 
@@ -740,14 +752,41 @@ impl From<crate::Error> for Error {
     }
 }
 
-impl fmt::Display for Error {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl Error {
+    /// Format a native fallback diagnostic using the current Python traceback links.
+    pub(super) fn report<'a>(&'a self, heap: &'a Heap) -> impl fmt::Display + 'a {
+        fmt::from_fn(move |f| self.fmt_trace(f, Some(heap)))
+    }
+
+    fn fmt_trace(&self, f: &mut fmt::Formatter<'_>, heap: Option<&Heap>) -> fmt::Result {
         if let Some(trace) = &self.trace
-            && !trace.frames.is_empty()
+            && (!trace.pending_frames.is_empty() || (heap.is_some() && trace.head != NONE))
         {
             writeln!(f, "Traceback (most recent call last):")?;
-            for (loc, _) in trace.frames.iter().rev() {
+            for (loc, _) in trace.pending_frames.iter().rev() {
                 writeln!(f, "  File {:?}, line {}", loc.file, loc.line)?;
+            }
+            if let Some(heap) = heap {
+                let mut current = trace.head;
+                while let Value::Traceback {
+                    frame,
+                    lineno,
+                    next,
+                    ..
+                } = heap.get(current)
+                {
+                    let Value::PythonFrame { code, .. } = heap.get(*frame) else {
+                        unreachable!()
+                    };
+                    let Value::Code(code) = heap.get(*code) else {
+                        unreachable!()
+                    };
+                    let Value::Str(file) = heap.get(code.filename) else {
+                        unreachable!()
+                    };
+                    writeln!(f, "  File {file:?}, line {lineno}")?;
+                    current = *next;
+                }
             }
         }
         if self.message.is_empty() {
@@ -755,6 +794,12 @@ impl fmt::Display for Error {
         } else {
             write!(f, "{}: {}", self.kind, self.message)
         }
+    }
+}
+
+impl fmt::Display for Error {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.fmt_trace(f, None)
     }
 }
 

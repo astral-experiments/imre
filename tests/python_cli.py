@@ -2163,6 +2163,7 @@ def main():
         compare("-IB", Path(__file__).with_name("fixtures") / "boxed_update_wrapper.py")
         compare("-IB", Path(__file__).with_name("fixtures") / "boxed_tracebacks.py")
         compare("-IB", Path(__file__).with_name("fixtures") / "inspect_trace.py")
+        compare("-IB", Path(__file__).with_name("fixtures") / "boxed_traceback_links.py")
         compare("-IB", Path(__file__).with_name("fixtures") / "boxed_print_traceback.py")
         compare("-IB", "-c", "import operator as op\nprint(op.attrgetter('upper')('method')())")
 

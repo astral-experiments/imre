@@ -1,22 +1,53 @@
 # Fixed-layout TestResult specializes its error representation. Boxed results
 # receive the real exception tuple through the public overridable callbacks.
-def _exc_info_to_string(self, err, test):
-    import traceback
-    kind, value, tb = err
-    # Only trim leading frames in the bundled unittest implementation. A user
-    # calling addError directly can supply a traceback with no framework frame.
-    internal = (_exc_info_to_string.__code__.co_filename, case.__file__)
-    while tb is not None and tb.tb_frame.f_code.co_filename in internal:
+# Traceback filtering from CPython 3.14.5 Lib/unittest/result.py. See ../docstrings/LICENSE.
+def _clean_tracebacks(self, exctype, value, tb, test):
+    ret = None
+    first = True
+    excs = [(exctype, value, tb)]
+    seen = {id(value)}  # Detect loops in chained exceptions.
+    while excs:
+        (exctype, value, tb) = excs.pop()
+        # Skip test runner traceback levels
+        while tb and self._is_relevant_tb_level(tb):
+            tb = tb.tb_next
+
+        # Skip assert*() traceback levels
+        if exctype is test.failureException:
+            self._remove_unittest_tb_frames(tb)
+
+        if first:
+            ret = tb
+            first = False
+        else:
+            value.__traceback__ = tb
+
+        if value is not None:
+            for c in (value.__cause__, value.__context__):
+                if c is not None and id(c) not in seen:
+                    excs.append((type(c), c, c.__traceback__))
+                    seen.add(id(c))
+    return ret
+
+
+def _is_relevant_tb_level(self, tb):
+    return '__unittest' in tb.tb_frame.f_globals
+
+
+def _remove_unittest_tb_frames(self, tb):
+    '''Truncates usercode tb at the first unittest frame.
+
+    If the first frame of the traceback is in user code,
+    the prefix up to the first unittest frame is returned.
+    If the first frame is already in the unittest module,
+    the traceback is not modified.
+    '''
+    prev = None
+    while tb and not self._is_relevant_tb_level(tb):
+        prev = tb
         tb = tb.tb_next
-    message = "".join(traceback.format_exception(kind, value, tb))
-    if self.buffer:
-        output = sys.stdout.getvalue()
-        error = sys.stderr.getvalue()
-        if output:
-            message += _bufferedOutput(output, "Stdout")
-        if error:
-            message += _bufferedOutput(error, "Stderr")
-    return message
+    if prev is not None:
+        prev.tb_next = None
 
 
 def _addError(self, test, error):
@@ -159,12 +190,6 @@ def _boxedResultInit(self, stream=None, descriptions=None, verbosity=None):
 
 
 # Adapted from CPython 3.14.5 Lib/unittest/result.py. See ../docstrings/LICENSE.
-def _bufferedOutput(output, label):
-    if not output.endswith("\n"):
-        output += "\n"
-    return "\n%s:\n%s" % (label, output)
-
-
 def _setupStdout(self):
     if self.buffer:
         if self._stderr_buffer is None:
@@ -181,9 +206,9 @@ def _restoreStdout(self):
             output = sys.stdout.getvalue()
             error = sys.stderr.getvalue()
             if output:
-                self._original_stdout.write(_bufferedOutput(output, "Stdout"))
+                self._original_stdout.write(result._bufferedOutput(output, "Stdout"))
             if error:
-                self._original_stderr.write(_bufferedOutput(error, "Stderr"))
+                self._original_stderr.write(result._bufferedOutput(error, "Stderr"))
         sys.stdout = self._original_stdout
         sys.stderr = self._original_stderr
         self._stdout_buffer.seek(0)
@@ -294,7 +319,7 @@ def _boxedTextResultInit(self, stream=None, descriptions=True, verbosity=1, *, d
     self.durations = durations
 
 
-from unittest import runner as _runnerModule
+from unittest import result, runner as _runnerModule
 
 
 # From CPython 3.14.5 Lib/unittest/{result,runner}.py. See ../docstrings/LICENSE.
@@ -397,7 +422,10 @@ TestResult._setupStdout = _setupStdout
 TestResult._restoreStdout = _restoreStdout
 TestResult.startTest = startTest
 TestResult.stopTest = stopTest
-TestResult._exc_info_to_string = _exc_info_to_string
+TestResult._clean_tracebacks = _clean_tracebacks
+TestResult._is_relevant_tb_level = _is_relevant_tb_level
+TestResult._remove_unittest_tb_frames = _remove_unittest_tb_frames
+TestResult._exc_info_to_string = result._exc_info_to_string
 TestResult.addExpectedFailure = _resultExpectedFailure
 TestResult.addSubTest = _resultSubTest
 TestResult.addError = _addError
