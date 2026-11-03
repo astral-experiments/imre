@@ -14,6 +14,11 @@ class StreamWriter(Codec,codecs.StreamWriter):
     pass
 
 
+class IncrementalEncoder(codecs.IncrementalEncoder):
+    def encode(self, input, final=False):
+        return codecs.ascii_encode(input, self.errors)[0]
+
+
 class IncrementalDecoder(codecs.IncrementalDecoder):
     def decode(self, input, final=False):
         return codecs.ascii_decode(input, self.errors)[0]
