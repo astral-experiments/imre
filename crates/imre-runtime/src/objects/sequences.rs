@@ -407,7 +407,7 @@ pub(super) struct StringIterator {
 
 impl StringIterator {
     /// The cursor starts at a UTF-8 boundary and advances by a whole scalar.
-    #[inline]
+    #[inline(always)]
     fn next_character(&mut self) -> Option<char> {
         let text = self.owner.as_str();
         if self.reverse {
@@ -447,58 +447,46 @@ impl StringIterator {
     }
 }
 
-/// Pull one character from a compiler-owned forward or reverse string cursor.
-/// Exhaustion leaves the output untouched and cannot raise a Python exception.
+/// Returns an owned character string, or zero when the cursor is exhausted.
 ///
 /// # Safety
-/// The cursor is a live native string iterator and `out` is one writable word.
-/// On success the caller owns the string written there.
+/// The caller roots an exact native string cursor and adopts every nonzero result.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn imre_str_iter_next(cursor: *const Object, out: *mut usize) -> u32 {
-    // SAFETY: the caller supplies a live cursor and writable output word.
+pub unsafe extern "C" fn imre_str_iter_next_owned(cursor: *const Object) -> usize {
+    // SAFETY: the caller roots this exact cursor throughout its nonreentrant pull.
     unsafe {
-        string_iter_next(cursor, out, |iter| {
+        string_iter_next(cursor, |iter| {
             Some(StrOwner::into_raw(iter.next_string()?) as usize)
         })
     }
 }
 
-/// Pull a Unicode scalar as a tagged small integer without creating a string.
+/// Returns a tagged Unicode scalar, or zero when the cursor is exhausted.
 ///
 /// # Safety
-/// The cursor is a live native string iterator and `out` is one writable word.
-/// Exhaustion preserves the caller's previous output.
+/// The caller roots an exact native string cursor throughout this nonreentrant pull.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn imre_str_iter_next_ord(cursor: *const Object, out: *mut usize) -> u32 {
-    // SAFETY: the caller supplies a live cursor and writable output word.
+pub unsafe extern "C" fn imre_str_iter_next_codepoint(cursor: *const Object) -> usize {
+    // SAFETY: the caller roots this exact cursor. Even NUL has a nonzero tagged word.
     unsafe {
-        string_iter_next(cursor, out, |iter| {
-            let ch = iter.next_character()?;
-            Some(Int::small(i64::from(ch as u32)).unwrap().into_raw())
+        string_iter_next(cursor, |iter| {
+            Int::small(i64::from(iter.next_character()? as u32)).map(Int::into_raw)
         })
     }
 }
 
 unsafe fn string_iter_next(
     cursor: *const Object,
-    out: *mut usize,
     pull: impl FnOnce(&mut StringIterator) -> Option<usize>,
-) -> u32 {
-    // SAFETY: the cursor is exclusively borrowed for this non-reentrant step.
-    let next = unsafe {
+) -> usize {
+    // SAFETY: the caller roots the cursor; neither pull can reenter its storage.
+    unsafe {
         object(cursor).0.with_mut(|storage| {
             let Storage::StringIterator(iter) = storage else {
                 unreachable!("exact string iterator")
             };
-            pull(iter)
+            pull(iter).unwrap_or(0)
         })
-    };
-    if let Some(word) = next {
-        // SAFETY: the caller supplies the writable output and assumes ownership.
-        unsafe { out.write(word) };
-        1
-    } else {
-        0
     }
 }
 
@@ -1091,27 +1079,20 @@ mod tests {
     }
 
     #[test]
-    fn specialized_string_pulls_share_position_and_preserve_exhausted_outputs() {
+    fn specialized_string_pulls_share_position_and_distinguish_nul_from_exhaustion() {
         let source = StrOwner::new(Str::new("a🙂\0"));
-        // SAFETY: the cursor acquires the source. Each owned word is adopted
-        // exactly once and both exhausted calls leave a writable sentinel.
+        // SAFETY: the cursor acquires the source. The owned string is adopted once.
         unsafe {
             let cursor =
                 crate::ObjectOwner::from_raw(imre_str_reverse_iter(StrOwner::as_ptr(&source)));
             let ptr = crate::ObjectOwner::as_ptr(&cursor);
             drop(source);
-            let mut word = 17;
-            assert_eq!(imre_str_iter_next_ord(ptr, &mut word), 1);
-            assert_eq!(Int(word).as_small(), Some(0));
-            assert_eq!(imre_str_iter_next(ptr, &mut word), 1);
-            let emoji = StrOwner::from_raw(word as *const Str);
+            assert_eq!(Int(imre_str_iter_next_codepoint(ptr)).as_small(), Some(0));
+            let emoji = StrOwner::from_raw(imre_str_iter_next_owned(ptr) as *const Str);
             assert_eq!(emoji.as_str(), "🙂");
-            assert_eq!(imre_str_iter_next_ord(ptr, &mut word), 1);
-            assert_eq!(Int(word).as_small(), Some(97));
-            word = 17;
-            assert_eq!(imre_str_iter_next_ord(ptr, &mut word), 0);
-            assert_eq!(imre_str_iter_next(ptr, &mut word), 0);
-            assert_eq!(word, 17);
+            assert_eq!(Int(imre_str_iter_next_codepoint(ptr)).as_small(), Some(97));
+            assert_eq!(imre_str_iter_next_codepoint(ptr), 0);
+            assert_eq!(imre_str_iter_next_owned(ptr), 0);
         }
     }
 

@@ -200,12 +200,12 @@ mod tests {
             );
             let llvm = compile(&source, &CompileOptions::default()).unwrap();
             assert_eq!(
-                llvm.contains("call i32 @imre_str_iter_next_ord("),
+                llvm.contains("call i64 @imre_str_iter_next_codepoint("),
                 scalar,
                 "{source}"
             );
             assert_eq!(
-                llvm.contains("call i32 @imre_str_iter_next("),
+                llvm.contains("call i64 @imre_str_iter_next_owned("),
                 !scalar,
                 "{source}"
             );
