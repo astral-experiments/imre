@@ -5,6 +5,8 @@ import io as _io
 import _imre_ssl
 import _ssl
 import os
+import warnings as _warnings
+from operator import index as _index
 from _ssl import MemoryBIO
 from _ssl import OPENSSL_VERSION, OPENSSL_VERSION_INFO, OPENSSL_VERSION_NUMBER
 from _ssl import SSLError, nid2obj as _nid2obj, txt2obj as _txt2obj
@@ -275,38 +277,50 @@ class SSLContext:
 
     __slots__ = ("_ctx", "_post_handshake_auth")
 
-    def __init__(self, protocol):
+    def __init__(self, protocol=None):
+        if protocol is None:
+            _warnings.warn("ssl.SSLContext() without protocol argument is deprecated.",
+                           DeprecationWarning, stacklevel=2)
+            protocol = PROTOCOL_TLS
+        protocol = _index(protocol)
         if protocol == PROTOCOL_TLS_CLIENT:
             self._ctx = _call(_imre_ssl.context)
         elif protocol == PROTOCOL_TLS_SERVER:
             self._ctx = _call(_imre_ssl.server_context)
+        elif protocol == PROTOCOL_TLS:
+            _warnings.warn("ssl.PROTOCOL_TLS is deprecated", DeprecationWarning, stacklevel=2)
+            self._ctx = _call(_imre_ssl.generic_context)
+        elif protocol in _PROTOCOL_NAMES:
+            raise NotImplementedError("fixed-version SSL contexts are not supported")
+        elif not -(1 << 31) <= protocol < (1 << 31):
+            raise OverflowError("Python int too large to convert to C int")
         else:
-            raise NotImplementedError("only PROTOCOL_TLS_CLIENT and PROTOCOL_TLS_SERVER are supported")
+            raise ValueError("invalid or unsupported protocol version %i" % protocol)
         self._post_handshake_auth = False
 
     @property
     def protocol(self):
-        return PROTOCOL_TLS_SERVER if _imre_ssl.is_server(self._ctx) else PROTOCOL_TLS_CLIENT
+        return _SSLMethod(_imre_ssl.protocol(__class__._ctx.__get__(self)))
 
     @property
     def check_hostname(self):
-        return self.protocol == PROTOCOL_TLS_CLIENT
+        return _imre_ssl.check_hostname(__class__._ctx.__get__(self))
 
     @check_hostname.setter
     def check_hostname(self, enabled):
-        if bool(enabled) != self.check_hostname:
-            raise NotImplementedError("hostname checks are required in client mode and disabled in server mode")
+        if not issubclass(type(self), __class__):
+            _imre_ssl.raise_context_receiver_error("check_hostname", self)
+        _imre_ssl.check_hostname(__class__._ctx.__get__(self), enabled)
 
     @property
     def verify_mode(self):
-        return CERT_REQUIRED if self.check_hostname else CERT_NONE
+        return VerifyMode(_imre_ssl.verify_mode(__class__._ctx.__get__(self)))
 
     @verify_mode.setter
     def verify_mode(self, mode):
-        if mode == CERT_NONE and self.check_hostname:
-            raise ValueError("Cannot set verify_mode to CERT_NONE when check_hostname is enabled.")
-        if mode != self.verify_mode:
-            raise NotImplementedError("only CERT_REQUIRED for clients and CERT_NONE for servers are supported")
+        if not issubclass(type(self), __class__):
+            _imre_ssl.raise_context_receiver_error("verify_mode", self)
+        _imre_ssl.verify_mode(__class__._ctx.__get__(self), mode)
 
     @property
     def options(self):
@@ -427,20 +441,20 @@ class SSLContext:
             raise ValueError("session can only be specified in client mode")
         if self.check_hostname and not server_hostname:
             raise ValueError("check_hostname requires server_hostname")
-        if bool(server_side) != (self.protocol == PROTOCOL_TLS_SERVER):
-            if server_side:
-                raise SSLError(0, "Cannot create a server socket with a PROTOCOL_TLS_CLIENT context")
+        if server_side and self.protocol == PROTOCOL_TLS_CLIENT:
+            raise SSLError(0, "Cannot create a server socket with a PROTOCOL_TLS_CLIENT context")
+        if not server_side and self.protocol == PROTOCOL_TLS_SERVER:
             raise SSLError(0, "Cannot create a client socket with a PROTOCOL_TLS_SERVER context")
         if not do_handshake_on_connect or not suppress_ragged_eofs or session is not None:
             raise NotImplementedError("only a blocking handshake with default session and EOF handling is supported")
-        if not server_side:
+        if not server_side and server_hostname is not None:
             if isinstance(server_hostname, bytes):
                 server_hostname = server_hostname.decode("ascii")
             if not isinstance(server_hostname, str):
                 raise TypeError("server_hostname must be a string")
             if not server_hostname.isascii():
                 raise NotImplementedError("encode internationalized hostnames to IDNA before wrapping the socket")
-        result = _call(_imre_ssl.wrap, self._ctx, sock, server_hostname)
+        result = _call(_imre_ssl.wrap, self._ctx, sock, server_hostname, bool(server_side))
         if result is None:
             reason = "Closed before TLS handshake with data in recv buffer."
             error = SSLError(_errno.ENOTCONN, reason)

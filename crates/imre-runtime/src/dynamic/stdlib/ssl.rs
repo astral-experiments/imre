@@ -29,7 +29,10 @@ pub(in crate::dynamic) fn install(ctx: &mut Context, scope: Id) -> Result<()> {
     for name in [
         "context",
         "server_context",
-        "is_server",
+        "generic_context",
+        "protocol",
+        "verify_mode",
+        "check_hostname",
         "security_level",
         "minimum_version",
         "maximum_version",
@@ -176,14 +179,42 @@ pub(super) fn call(
         ));
     }
     match (name, args) {
-        ("context" | "server_context", []) => {
-            let handle = provider::Context::new(name == "server_context")
-                .map_err(|e| provider_error(ctx, e))?;
+        ("context" | "server_context" | "generic_context", []) => {
+            let protocol = match name {
+                "context" => provider::Protocol::Client,
+                "server_context" => provider::Protocol::Server,
+                _ => provider::Protocol::Tls,
+            };
+            let handle = provider::Context::new(protocol).map_err(|e| provider_error(ctx, e))?;
             Ok(ctx.alloc(Value::TlsContext(Rc::new(RefCell::new(handle)))))
         }
-        ("is_server", &[handle]) => Ok(super::builtins::boolean(
-            context(ctx, handle)?.borrow().is_server(),
+        ("protocol", &[handle]) => {
+            let protocol = context(ctx, handle)?.borrow().protocol;
+            Ok(ctx.int(protocol as i64))
+        }
+        ("verify_mode", &[handle]) => {
+            let mode = context(ctx, handle)?
+                .borrow()
+                .verify_mode()
+                .map_err(|e| provider_error(ctx, e))?;
+            Ok(ctx.int(mode))
+        }
+        ("verify_mode", &[handle, value]) => {
+            let mode = ctx.index_c_int(value)?;
+            context(ctx, handle)?
+                .borrow_mut()
+                .set_verify_mode(mode)
+                .map_err(|s| Error::new("ValueError", s))?;
+            Ok(NONE)
+        }
+        ("check_hostname", &[handle]) => Ok(super::builtins::boolean(
+            context(ctx, handle)?.borrow().check_hostname,
         )),
+        ("check_hostname", &[handle, value]) => {
+            let check = ctx.truth(value)?;
+            context(ctx, handle)?.borrow_mut().set_check_hostname(check);
+            Ok(NONE)
+        }
         ("minimum_version" | "maximum_version", [handle]) => {
             let n = context(ctx, *handle)?
                 .borrow()
@@ -308,7 +339,7 @@ pub(super) fn call(
                 return Err(Error::new("TypeError", "expected ALPN wire bytes"));
             };
             let mut context = context(ctx, handle)?.borrow_mut();
-            if context.is_server() && !protocols.is_empty() {
+            if context.protocol != provider::Protocol::Client && !protocols.is_empty() {
                 return Err(Error::new(
                     "NotImplementedError",
                     "server ALPN selection is unsupported",
@@ -327,7 +358,7 @@ pub(super) fn call(
                 ));
             };
             let mut context = context(ctx, handle)?.borrow_mut();
-            if context.is_server() && enabled {
+            if context.protocol != provider::Protocol::Client && enabled {
                 return Err(Error::new(
                     "NotImplementedError",
                     "server post-handshake client authentication is unsupported",
@@ -395,17 +426,33 @@ pub(super) fn call(
                 .map_err(|e| provider_error(ctx, e))?;
             Ok(NONE)
         }
-        ("wrap", &[handle, socket, hostname]) => {
+        ("wrap", &[handle, socket, hostname, side]) => {
+            let server = ctx.truth(side)?;
             let handle = context(ctx, handle)?;
-            let host = if handle.borrow().is_server() {
-                if hostname != NONE {
+            let protocol = handle.borrow().protocol;
+            if (server && protocol == provider::Protocol::Client)
+                || (!server && protocol == provider::Protocol::Server)
+            {
+                return Err(Error::new(
+                    "ValueError",
+                    "TLS role is incompatible with the context protocol",
+                ));
+            }
+            let host = if hostname == NONE {
+                if handle.borrow().check_hostname {
+                    return Err(Error::new(
+                        "ValueError",
+                        "check_hostname requires server_hostname",
+                    ));
+                }
+                None
+            } else {
+                if server {
                     return Err(Error::new(
                         "ValueError",
                         "server_hostname can only be specified in client mode",
                     ));
                 }
-                None
-            } else {
                 let host = ctx.str_value(hostname)?;
                 if host.is_empty() || host.starts_with('.') || host.contains('\0') {
                     return Err(Error::new("ValueError", "invalid server_hostname"));
@@ -421,7 +468,7 @@ pub(super) fn call(
             let Value::Socket(socket) = ctx.heap.get(socket) else {
                 return Err(Error::new("TypeError", "expected a socket"));
             };
-            let (transport, connected) = socket::take_tls_stream(socket, host.is_none())?;
+            let (transport, connected) = socket::take_tls_stream(socket, server)?;
             if !connected {
                 // Leave the transferred fd owned on every error. The public wrapper turns
                 // queued pre-handshake data into the corresponding structured SSLError.
@@ -431,7 +478,7 @@ pub(super) fn call(
                 return Ok(ctx.alloc(Value::TlsListener(transport)));
             }
             // Provider calls cannot invoke Python. Release the handle borrow before VM allocation.
-            let result = provider::Session::wrap(&handle.borrow(), transport, host);
+            let result = provider::Session::wrap(&handle.borrow(), transport, host, server);
             match result {
                 Ok(session) => {
                     Ok(ctx.alloc(Value::TlsSession(Rc::new(RefCell::new(Some(session))))))

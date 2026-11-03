@@ -2749,6 +2749,8 @@ def report(text):
                 compare("-IB", ciphers, native_args=("run", ciphers, "--quiet"), native_timeout=600)
                 bio = fixtures / "ssl_memory_bio.py"
                 compare("-IB", bio, native_args=("run", bio, "--quiet"), native_timeout=600)
+                hostname = fixtures / "ssl_check_hostname.py"
+                compare("-IB", hostname, native_args=("run", hostname, "--quiet"), native_timeout=600)
                 flags = fixtures / "ssl_verify_flags.py"
                 compare("-IB", flags, native_args=("run", flags, "--quiet"), native_timeout=600)
                 certdata = fixtures.parents[1] / "benchmarks/cpython_stdlib/full/shared/upstream/Lib/test/certdata"
