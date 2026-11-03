@@ -1809,14 +1809,19 @@ impl Context {
 
     /// Keep the returned value and earlier operands while dropping the completed call's temporaries.
     pub(super) fn finish_call_operands(&mut self, mark: usize, result: Id) {
-        if self.heap.discard_operands(mark, result, self.modules) {
-            if !self.heap.has_weak_values
-                && !self.heap.full_collection_active()
-                && let Some(input) = super::stdlib::io::rooted_input_chain(self)
-                && self.heap.finalizers_kept_by(&input)
-            {
-                return;
-            }
+        let finalizers = self.heap.tracked_finalizer_count();
+        if finalizers == 0 {
+            return;
+        }
+        // The input wrapper, buffer, and raw descriptor can account for at most three owners.
+        if finalizers <= 3
+            && !self.heap.has_weak_values
+            && !self.heap.full_collection_active()
+            && let Some(input) = super::stdlib::io::rooted_input_chain(self)
+            && self.heap.finalizers_kept_by(&input)
+        {
+            self.heap.keep_call_result(mark, result);
+        } else if self.heap.discard_operands(mark, result, self.modules) {
             self.collect_unreachable();
         }
     }
