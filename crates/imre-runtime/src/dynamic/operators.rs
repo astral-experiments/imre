@@ -129,6 +129,7 @@ enum FormatLookup {
     Repr,
     Str,
     MethodName,
+    DictViewList,
     TypingTuple(usize),
 }
 
@@ -1484,7 +1485,7 @@ impl Context {
         work: &mut [FormatPart],
         ancestors: &[Id],
         sequence_words: Option<usize>,
-    ) -> Result<Option<String>> {
+    ) -> Result<Option<Id>> {
         let calendar_repr = matches!(lookup, FormatLookup::Repr)
             && super::stdlib::datetime::render::python_repr(self, id);
         if matches!(lookup, FormatLookup::Repr | FormatLookup::Str)
@@ -1513,6 +1514,7 @@ impl Context {
             FormatLookup::Repr => self.repr_override(id),
             FormatLookup::Str => builtins::call(self, "str", &[id], &[]).map(Some),
             FormatLookup::MethodName => self.bound_method_name(id),
+            FormatLookup::DictViewList => builtins::call(self, "list", &[id], &[]).map(Some),
             FormatLookup::TypingTuple(frames) => {
                 self.suspended_typing_frames += frames;
                 let result = typing::typing_alias_helper(self, "_type_repr", vec![id]);
@@ -1521,18 +1523,9 @@ impl Context {
             }
         };
         self.repr_sequence_words = previous;
-        let result = converted.and_then(|value| {
-            value
-                .map(|s| {
-                    let mut text = String::new();
-                    append_rendered_text(&mut text, self.str_value(s)?)?;
-                    Ok(text)
-                })
-                .transpose()
-        });
         self.repr_ancestors.truncate(depth);
         self.heap.release_temporaries_since(mark);
-        result
+        converted
     }
 
     /// Write exception headers and queue their arguments on the same container worklist.
@@ -1679,7 +1672,7 @@ impl Context {
             &mut [FormatPart],
             &[Id],
             Option<usize>,
-        ) -> Result<Option<String>>,
+        ) -> Result<Option<Id>>,
     ) -> Result<String> {
         use FormatPart as Part;
         let mut output = String::new();
@@ -1858,7 +1851,7 @@ impl Context {
                         &active,
                         remaining_sequence_words,
                     )? {
-                        append_rendered_text(&mut output, &text)?;
+                        append_rendered_text(&mut output, ctx.str_value(text)?)?;
                     } else if let Some(items) = ctx.tuple_items(id)? {
                         // Internal diagnostics render stored tuple elements without calling Python.
                         append_rendered_text(&mut output, "[")?;
@@ -2032,7 +2025,7 @@ impl Context {
                         &active,
                         remaining_sequence_words,
                     )? {
-                        append_rendered_text(&mut output, &text)?;
+                        append_rendered_text(&mut output, ctx.str_value(text)?)?;
                     } else if let Some(storage) = ctx.string_storage(id) {
                         append_rendered_text(&mut output, ctx.str_value(storage)?)?;
                     } else {
@@ -2061,7 +2054,7 @@ impl Context {
                             remaining_sequence_words,
                         )?
                     {
-                        append_rendered_text(&mut output, &text)?;
+                        append_rendered_text(&mut output, ctx.str_value(text)?)?;
                         continue;
                     }
                     let (storage, with_factory) = native_storage.unwrap_or((id, true));
@@ -2105,7 +2098,10 @@ impl Context {
                                     &active,
                                     remaining_sequence_words,
                                 )?;
-                                append_rendered_text(&mut output, name.as_deref().unwrap_or("?"))?;
+                                append_rendered_text(
+                                    &mut output,
+                                    name.map(|id| ctx.str_value(id)).transpose()?.unwrap_or("?"),
+                                )?;
                             }
                             append_rendered_text(&mut output, " of ")?;
                             continue;
@@ -2303,6 +2299,28 @@ impl Context {
                                 push_frame(&mut work, Part::Text(", "))?;
                             }
                             push_frame(&mut work, Part::Value(*value, true))?;
+                            continue;
+                        }
+                        Value::DictView { .. } if checked => {
+                            if !enter_ancestor(&mut ancestors, id)? {
+                                append_rendered_text(&mut output, "...")?;
+                                continue;
+                            }
+                            push_frame(&mut active, id)?;
+                            append_rendered_text(&mut output, ctx.type_name(id))?;
+                            append_rendered_text(&mut output, "(")?;
+                            push_frame(&mut work, Part::Leave(id, ")"))?;
+                            // Snapshot the view before an element's repr can mutate its dictionary.
+                            let list = element_repr(
+                                &mut ctx,
+                                id,
+                                FormatLookup::DictViewList,
+                                &mut work,
+                                &active,
+                                remaining_sequence_words,
+                            )?
+                            .expect("checked dictionary view snapshot");
+                            push_frame(&mut work, Part::Value(list, true))?;
                             continue;
                         }
                         Value::MappingProxy(mapping) => {

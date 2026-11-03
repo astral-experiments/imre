@@ -209,8 +209,8 @@ impl Output {
             _ => file.to_owned(),
         };
         let location = SourceMap {
-            // CPython's warnings provider validates its public arguments in Python.
-            python_annotations: bundled && name == "_py_warnings",
+            // These CPython providers validate their public arguments in Python.
+            python_annotations: bundled && matches!(name, "_py_warnings" | "tomllib._parser"),
             module_start,
             docs,
             unit,

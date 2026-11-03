@@ -130,6 +130,10 @@ impl Imports {
                     | "site"
                     | "importlib.abc"
                     | "importlib.machinery"
+                    | "tomllib"
+                    | "tomllib._parser"
+                    | "tomllib._re"
+                    | "tomllib._types"
                     | "traceback"
                     | "unittest.case"
                     | "string.templatelib"
@@ -575,6 +579,7 @@ pub(crate) fn compile(
             "importlib",
             "runpy",
             "json",
+            "tomllib",
             "opcode",
             "operator",
             "struct",
@@ -1074,6 +1079,7 @@ const RUNTIME_PROVIDERS: &[&str] = &[
     "codeop",
     "copyreg",
     "datetime",
+    "decimal",
     "encodings",
     "encodings.ascii",
     "encodings.latin_1",
@@ -1103,6 +1109,10 @@ const RUNTIME_PROVIDERS: &[&str] = &[
     "string.templatelib",
     "subprocess",
     "token",
+    "tomllib",
+    "tomllib._parser",
+    "tomllib._re",
+    "tomllib._types",
     "tracemalloc",
     "types",
     "warnings",
