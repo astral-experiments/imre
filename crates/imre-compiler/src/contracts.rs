@@ -216,6 +216,7 @@ impl Builtin {
                     | PathOperation::Drive
                     | PathOperation::Root
                     | PathOperation::Anchor
+                    | PathOperation::Parts
                     | PathOperation::Name
                     | PathOperation::Stem
                     | PathOperation::Suffix
@@ -1296,6 +1297,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_path_name"
                 | "imre_path_stem"
                 | "imre_path_suffix"
+                | "imre_path_parts"
                 | "imre_path_suffixes"
                 | "imre_path_resolve"
                 | "imre_tempdir_new"
