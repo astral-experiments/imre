@@ -97,7 +97,7 @@ impl Emitter<'_, '_> {
     /// Collapse a counted loop whose only effect is appending the same
     /// immutable struct. The runtime guard keeps ordinary list behavior for
     /// nonempty storage and arbitrary-precision range stops.
-    pub(super) fn uniform_struct_append(
+    pub(super) fn uniform_append(
         &mut self,
         body: &[Statement],
         range: &[Value],
@@ -107,36 +107,58 @@ impl Emitter<'_, '_> {
     ) {
         let [
             Statement::Expr(Expr {
-                kind: ExprKind::Builtin(Builtin::Append, args),
+                kind: ExprKind::Builtin(op, args),
                 ..
             }),
         ] = body
         else {
             return;
         };
-        let [receiver, item] = args.as_slice() else {
-            return;
-        };
-        let (ExprKind::Local(list), ExprKind::Local(row)) = (&receiver.kind, &item.kind) else {
-            return;
-        };
-        if !self.module.types.is_value_struct(item.ty)
-            || self.struct_locals[*row]
-            || range[0].operand != small(0).operand
-            || range[2].operand != small(1).operand
-        {
+        if range[0].operand != small(0).operand || range[2].operand != small(1).operand {
             return;
         }
-        let list = self.borrow_slot(*list);
-        let row = self.borrow_slot(*row);
-        let layout = self
-            .output
-            .global_ref(format!("layout_{}", record_name(item.ty)));
         let stop = &range[1].operand;
-        let did_fill = self.instruction(format!(
-            "call i1 @imre_struct_try_fill_empty(ptr {}, ptr @{layout}, ptr {}, i64 {stop})",
-            list.operand, row.operand
-        ));
+        let did_fill = match (op, args.as_slice()) {
+            (
+                Builtin::PairTable(ir::PairTableOp::AddRow),
+                [
+                    Expr {
+                        kind: ExprKind::Local(slot),
+                        ..
+                    },
+                ],
+            ) => {
+                let list = self.borrow_slot(*slot);
+                self.instruction(format!(
+                    "call i1 @imre_pair_table_try_add_rows(ptr {}, i64 {stop})",
+                    list.operand
+                ))
+            }
+            (
+                Builtin::Append,
+                [
+                    Expr {
+                        kind: ExprKind::Local(list),
+                        ..
+                    },
+                    item,
+                ],
+            ) => {
+                let ExprKind::Local(row) = item.kind else {
+                    return;
+                };
+                if !self.module.types.is_value_struct(item.ty) || self.struct_locals[row] {
+                    return;
+                }
+                let list = self.borrow_slot(*list);
+                let row = self.borrow_slot(row);
+                let layout = self
+                    .output
+                    .global_ref(format!("layout_{}", record_name(item.ty)));
+                self.instruction(format!("call i1 @imre_struct_try_fill_empty(ptr {}, ptr @{layout}, ptr {}, i64 {stop})", list.operand, row.operand))
+            }
+            _ => return,
+        };
         let (filled, fallback) = (self.label(), self.label());
         self.branch(&did_fill, &filled, &fallback);
         self.start(&filled);

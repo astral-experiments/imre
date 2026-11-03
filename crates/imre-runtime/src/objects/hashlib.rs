@@ -406,10 +406,14 @@ fn handle(state: DigestState) -> Result<*const Object> {
 /// # Safety
 /// The caller roots the exact str and bytes until the constructor returns.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn imre_hash_new(name: *const Str, data: *const Bytes) -> *const Object {
+pub unsafe extern "C" fn imre_hash_new(
+    name: *const Str,
+    data: *const Bytes,
+    used_for_security: bool,
+) -> *const Object {
     // SAFETY: both operands remain owned for this operation.
     let (name, data) = unsafe { (&*name, &*data) };
-    let result = DigestState::public(name, data).and_then(handle);
+    let result = DigestState::public(name, data, used_for_security).and_then(handle);
     finish(result, ptr::null())
 }
 

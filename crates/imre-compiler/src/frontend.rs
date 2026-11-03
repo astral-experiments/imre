@@ -3872,8 +3872,12 @@ impl<'a> Checker<'a> {
     }
 
     /// Checks an iterable in its current lexical scope, before target binding.
-    fn iteration_input(&mut self, expression: &ast::Expr) -> Result<Iteration, String> {
-        if let Some(input) = self.pipeline_input(expression, None)? {
+    fn iteration_input(
+        &mut self,
+        expression: &ast::Expr,
+        split_needle: Option<&str>,
+    ) -> Result<Iteration, String> {
+        if let Some(input) = self.pipeline_input(expression, None, split_needle)? {
             return Ok(input);
         }
         if let ast::Expr::Call(call) = expression
@@ -3927,7 +3931,7 @@ impl<'a> Checker<'a> {
         } else if let Some(input) = self.unpacked_list_enumeration(loop_)? {
             input
         } else {
-            self.iteration_input(&loop_.iter)?
+            self.iteration_input(&loop_.iter, self.split_guard(loop_))?
         };
         input = self.fuse_splitlines(input);
         if let Iteration::Container {
@@ -11814,6 +11818,20 @@ mod tests {
             &crate::CompileOptions::default(),
         )
         .unwrap();
+    }
+
+    #[test]
+    fn literal_membership_filters_only_the_guarded_split() {
+        let llvm = crate::compile(
+            include_str!("../../../tests/fixtures/iterator_pipelines/split_matches.py"),
+            &crate::CompileOptions::default(),
+        )
+        .unwrap();
+        assert_eq!(
+            llvm.matches("call ptr @imre_str_matching_split_iter(")
+                .count(),
+            1
+        );
     }
 
     #[test]

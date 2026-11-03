@@ -516,7 +516,7 @@ impl Checker<'_> {
                 "assignment expressions are forbidden in comprehension iterables",
             ));
         }
-        let input = self.iteration_input(&display.clauses[0].iter)?;
+        let input = self.iteration_input(&display.clauses[0].iter, None)?;
         if matches!(input, Iteration::Prepared(_))
             || !narrowing::expression_assignments(expression).is_empty()
             || pipelines::is_pipeline_expression(self, &display.clauses[0].iter)
@@ -890,7 +890,7 @@ impl Checker<'_> {
         let clause = &display.clauses[index];
         let input = match first {
             Some(input) => input,
-            None => self.iteration_input(&clause.iter)?,
+            None => self.iteration_input(&clause.iter, None)?,
         };
         for name in display.repeated_writes(index) {
             if let Some(slot) = self.names.get(&name) {

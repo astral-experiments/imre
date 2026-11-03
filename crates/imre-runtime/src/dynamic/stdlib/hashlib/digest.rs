@@ -79,7 +79,11 @@ impl State {
     }
 
     /// Select the same public provider as hashlib.new for a typed string and bytes.
-    pub(crate) fn public(name: &str, data: &[u8]) -> exceptions::Result<Self> {
+    pub(crate) fn public(
+        name: &str,
+        data: &[u8],
+        used_for_security: bool,
+    ) -> exceptions::Result<Self> {
         let provider = HashState::provider(name)?;
         if provider.name != "md5" {
             return Ok(Self::Portable(
@@ -88,11 +92,18 @@ impl State {
         }
         if let Some(ssl) = openssl::provider() {
             match ssl
-                .digest("md5")
+                .digest_with_security("md5", used_for_security)
                 .and_then(|digest| Self::openssl("md5", &digest, data))
             {
                 Ok(state) => return Ok(state),
-                Err(error) if error.kind == "MemoryError" => return Err(native_error(error)),
+                Err(error)
+                    if !matches!(
+                        error.kind.as_ref(),
+                        super::UNSUPPORTED_DIGEST | "ValueError"
+                    ) =>
+                {
+                    return Err(native_error(error));
+                }
                 Err(_) if !matches!(name, "md5" | "MD5") => {
                     return Err(exceptions::Error::new(
                         exceptions::Kind::ValueError,

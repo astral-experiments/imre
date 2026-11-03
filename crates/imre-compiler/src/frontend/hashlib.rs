@@ -56,8 +56,8 @@ impl Checker<'_> {
                 .args
                 .first()
                 .or_else(|| call.arguments.find_keyword("name").map(|kw| &kw.value));
-            // Explicit MD5 construction and a caller-supplied security policy use
-            // the imported module. A dynamic name with default policy has a typed provider.
+            // Keep object dispatch available for mutable provider modules and buffer
+            // types the typed constructor cannot lower.
             if name.is_some_and(|expr| match expr {
                 ast::Expr::StringLiteral(lit) => {
                     let name = lit.value.to_str();
@@ -65,19 +65,9 @@ impl Checker<'_> {
                         || name.eq_ignore_ascii_case("ssl3-md5")
                         || name == "1.2.840.113549.2.5"
                 }
-                _ => {
-                    // If another operation requires boxed execution, retain the public
-                    // hashlib module that a dynamically selected provider can need.
-                    self.graph.needs_object_runtime.set(true);
-                    call.arguments.find_keyword("usedforsecurity").is_some()
-                }
+                _ => true,
             }) {
                 self.graph.needs_object_runtime.set(true);
-                return Err(self.classified_error(
-                    FailureKind::ObjectOperation,
-                    call,
-                    "runtime digest selection requires native object dispatch",
-                ));
             }
         }
         if matches!(

@@ -12,19 +12,24 @@ An experimental ahead-of-time compiler for typed Python, written in Rust.
 ## Benchmarks
 
 <p align="center">
-  <img src="benchmarks/results/runtime-suite.svg" width="100%" alt="Rust has the lowest median time on all six workloads. CPython takes 1.7 to 12.2 times as long as Imre. Each workload has its own time scale.">
+  <img src="benchmarks/results/applications.svg" width="100%" alt="Median elapsed milliseconds for Imre, Rust and CPython on the uv download catalog, a Ruff source search, wheel verification, New York road routing, graph loading and the ty conformance report.">
 </p>
 
-Imre and CPython 3.14.5 run the same Python programs. The Rust versions use
-the same inputs and produce the same outputs. Each bar shows the median time
-for 12 fresh processes pinned to one AMD EPYC Milan CPU.
+Each CLI runs on one AMD EPYC Milan vCPU with warm filesystem caches. Imre and
+CPython run the same Python. The catalog includes uv’s original implementation
+as a second CPython reference. Road routing includes reading the graph and
+finding all four distances.
+[Workloads, raw samples and reproduction steps](benchmarks/applications/README.md)
 
 <p align="center">
-  <img src="benchmarks/results/frozen-flask.svg" width="100%" alt="Median mixed HTTP throughput in requests per second. Frozen Flask on Imre handles 7,802, Node.js 2,266, Bun 7,733 and Rust/Hyper 8,138.">
+  <img src="benchmarks/results/frozen-flask.svg" width="100%" alt="Median verified requests per second for frozen Flask on Imre, stock Flask on CPython and Rust/Hyper at eight concurrent clients.">
 </p>
 
-The frozen Flask app compiles its routes and Jinja template ahead of time.
-Node.js, Bun and Rust/Hyper implement the same routes directly.
+The Flask benchmark issues health checks, escaped HTML greetings and JSON sums
+over loopback. Each bar is the median of 70 rounds at eight concurrent clients.
+Frozen Flask on Imre 0.1.5 compiles its routes and Jinja template
+ahead of time. Stock Flask on CPython uses Werkzeug. Rust/Hyper
+implements the same routes directly. [HTTP workload and results](benchmarks/applications/README.md#flask)
 
 ## Hello, world!
 

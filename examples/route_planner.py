@@ -139,4 +139,5 @@ def main() -> None:
         print(statistics[1])
 
 
-main()
+if __name__ == "__main__":
+    main()

@@ -185,8 +185,8 @@ def main():
     if args.runtime_imports and not args.compiler:
         parser.error("--runtime-imports requires --compiler and --runtime")
     paired = args.wsgi_pair or args.hosted_launcher
-    if not paired and not all((args.node, args.bun, args.rust)):
-        parser.error("the cross-language comparison requires --node, --bun and --rust")
+    if not paired and not args.rust:
+        parser.error("the cross-language comparison requires --rust")
     if args.first_round < 1 or args.rounds < 0:
         parser.error("first round must be positive and rounds nonnegative")
     if any(n < args.concurrency or n % 9 for n in (args.warmup, args.requests)):
@@ -230,8 +230,10 @@ def main():
         report["markupsafe_extension"] = expected["speedups"]
         commands = {"cpython": [sys.executable, "-ESB", site / "serve.py"]}
         if not paired:
-            commands.update(node=[args.node.resolve(), HERE / "control.mjs"],
-                            bun=[args.bun.resolve(), HERE / "control.mjs"], rust=[args.rust.resolve()])
+            commands["rust"] = [args.rust.resolve()]
+            for name, binary in (("node", args.node), ("bun", args.bun)):
+                if binary:
+                    commands[name] = [binary.resolve(), HERE / "control.mjs"]
         if args.wsgi_pair:
             wheel = args.wheelhouse / WAITRESS
             if gate.digest(wheel) != WAITRESS_HASH:
