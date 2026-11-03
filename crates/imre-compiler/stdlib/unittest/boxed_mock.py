@@ -191,15 +191,20 @@ class Mock(_FixedMock):
 
     def __init__(self, spec=None, *, spec_set=None, name=None, side_effect=None, return_value=_unset_return, **attrs):
         methods = spec_set if spec_set is not None else spec
+        spec_class = None
         if isinstance(methods, type):
-            object.__setattr__(self, "_spec_class", methods)
+            spec_class = methods
             methods = dir(methods)
         elif methods is not None and type(methods) not in (list, tuple):
             raise NotImplementedError("mock specifications from objects are not supported")
+        object.__setattr__(self, "_spec_class", spec_class)
         owner = type(self)
         for magic in owner._mock_auto_magics:
             if methods is None or magic in methods:
-                setattr(owner, magic, _MagicSlot(magic, self))
+                if magic not in owner.__dict__:
+                    setattr(owner, magic, _MagicSlot(magic, self))
+            elif magic in owner.__dict__:
+                delattr(self, magic)
         object.__setattr__(self, "_mock_methods", methods)
         object.__setattr__(self, "_mock_strict", spec_set is not None)
         super().__init__(name=name)

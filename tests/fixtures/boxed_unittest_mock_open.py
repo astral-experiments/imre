@@ -65,6 +65,12 @@ specified.return_value = reported
 specified.reset_mock()
 assert specified.return_value is reported
 
+specified.__init__(["read"])
+assert specified.__class__ is type(specified)
+assert not hasattr(specified, "__iter__") and not hasattr(specified, "__next__")
+with check.assertRaises(TypeError):
+    iter(specified)
+
 plain = Mock(["__len__", "__custom__"])
 assert not hasattr(plain, "__len__")
 plain.__custom__(1)
