@@ -91,6 +91,7 @@ pub(super) fn launch(
     source: &Path,
     args: impl Iterator<Item = OsString>,
     python: Option<&imre_compiler::CommandFlags>,
+    boxed_imports: bool,
 ) -> io::Result<ExitStatus> {
     let (mut control, peer) = UnixStream::pair()?;
     let fd = peer.as_raw_fd();
@@ -110,6 +111,17 @@ pub(super) fn launch(
     };
     let executable = directory.path().join(&name);
     std::fs::rename(output, &executable)?;
+    if python.is_none() && boxed_imports {
+        // Native run shares its image with build, which resolves installed sources
+        // beside the program. Make the launcher's archive visible at that location.
+        let archive = std::env::current_exe()?.with_file_name("imre-stdlib.zip");
+        let target = directory.path().join("imre-stdlib.zip");
+        if archive.is_file() {
+            std::os::unix::fs::symlink(archive, target)?;
+        } else {
+            std::fs::write(target, super::STDLIB_ARCHIVE)?;
+        }
+    }
 
     let mut program = Command::new(executable);
     program.arg0(source).args(args);

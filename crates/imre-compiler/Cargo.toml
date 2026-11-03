@@ -38,6 +38,9 @@ regex.workspace = true
 tempfile = "=3.23.0"
 zip = { version = "8", default-features = false, features = ["deflate-flate2-zlib-rs"] }
 
+[build-dependencies]
+zip = { version = "8", default-features = false }
+
 [target.'cfg(unix)'.dependencies]
 libc = "=0.2.190"
 object = { version = "=0.39.1", default-features = false, features = ["read_core", "std", "archive", "elf", "macho"] }

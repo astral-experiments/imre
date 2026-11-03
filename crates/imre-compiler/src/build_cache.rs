@@ -200,6 +200,51 @@ fn atomic_write(path: &Path, bytes: &[u8]) -> io::Result<()> {
     Ok(())
 }
 
+/// Locate the compiler's source resource independently of Cargo and executable caches.
+#[cfg(unix)]
+pub(super) fn stdlib_archive_path() -> Result<PathBuf, String> {
+    // SAFETY: geteuid takes no arguments and has no failure mode.
+    let uid = unsafe { libc::geteuid() };
+    let digest = blake3::hash(super::STDLIB_ARCHIVE).to_hex();
+    Ok(std::path::absolute(env::temp_dir())
+        .map_err(|e| e.to_string())?
+        .join(format!("imre-stdlib-{uid}-{digest}"))
+        .join("imre-stdlib.zip"))
+}
+
+/// Publish the exact embedded bytes into a private directory; races publish identical data.
+#[cfg(unix)]
+pub(super) fn prepare_stdlib_archive(path: &Path) -> io::Result<()> {
+    use std::os::unix::fs::{DirBuilderExt, MetadataExt};
+    let parent = path
+        .parent()
+        .expect("stdlib archive has a parent directory");
+    match fs::DirBuilder::new().mode(0o700).create(parent) {
+        Ok(()) => {}
+        Err(err) if err.kind() == io::ErrorKind::AlreadyExists => {}
+        Err(err) => return Err(err),
+    }
+    let metadata = parent.symlink_metadata()?;
+    // SAFETY: geteuid takes no arguments and has no failure mode.
+    if !metadata.is_dir()
+        || metadata.mode() & 0o077 != 0
+        || metadata.uid() != unsafe { libc::geteuid() }
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "unsafe stdlib resource directory",
+        ));
+    }
+    if path
+        .symlink_metadata()
+        .is_ok_and(|m| m.is_file() && m.len() == super::STDLIB_ARCHIVE.len() as u64)
+        && fs::read(path)? == super::STDLIB_ARCHIVE
+    {
+        return Ok(());
+    }
+    atomic_write(path, super::STDLIB_ARCHIVE)
+}
+
 /// An action index points to a verified object. Publishing the bytes first
 /// lets parallel builds safely finish the same action in either order.
 struct ObjectEntry {
@@ -435,6 +480,7 @@ impl Cache {
                 options.runtime_imports,
                 &options.extension_paths,
                 &options.system_site,
+                &options.stdlib_fallback,
             ),
             env::current_dir().ok()?.join(entry).into_os_string(),
             module_root,
