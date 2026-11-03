@@ -1318,12 +1318,10 @@ impl IntrinsicModule {
             (Self::Ast, "iter_fields") => Intrinsic::ObjectRuntimeExport("ast.iter_fields"),
             (Self::Ast, "NodeVisitor") => Intrinsic::ObjectRuntimeExport("ast.NodeVisitor"),
             (Self::Ast, "NodeTransformer") => Intrinsic::ObjectRuntimeExport("ast.NodeTransformer"),
-            (Self::Ast, "Import") => Intrinsic::ObjectRuntimeExport("ast.Import"),
-            (Self::Ast, "ImportFrom") => Intrinsic::ObjectRuntimeExport("ast.ImportFrom"),
-            (Self::Ast, "alias") => Intrinsic::ObjectRuntimeExport("ast.alias"),
-            (Self::Ast, "TemplateStr") => Intrinsic::ObjectRuntimeExport("ast.TemplateStr"),
-            (Self::Ast, "Interpolation") => Intrinsic::ObjectRuntimeExport("ast.Interpolation"),
             (Self::Ast, "literal_eval") => Intrinsic::ObjectRuntimeExport("ast.literal_eval"),
+            (Self::Ast, name) => {
+                Intrinsic::ObjectRuntimeExport(imre_ast::python_nodes::find(name)?.qualified_name)
+            }
             (Self::Gc, "collect") => Intrinsic::ObjectRuntimeExport("gc.collect"),
             (Self::Gc, "disable") => Intrinsic::ObjectRuntimeExport("gc.disable"),
             (Self::Gc, "enable") => Intrinsic::ObjectRuntimeExport("gc.enable"),
