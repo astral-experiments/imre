@@ -386,31 +386,72 @@ impl Context {
         })
     }
 
-    /// Find the Python acquisition slot, keeping native base descriptors in MRO order.
-    fn python_buffer_method(&self, object: Id) -> Result<Option<Id>> {
+    /// A native buffer descriptor in the MRO takes precedence over a later Python definition.
+    fn buffer_slot(&self, object: Id, name: &str) -> Option<Option<Id>> {
         let Value::Instance { class, .. } = self.heap.get(object) else {
+            return None;
+        };
+        self.find_in_mro(*class, |base| match self.heap.get(base) {
+            Value::Class { .. } => self.own_class_attr(base, name).map(Some),
+            Value::Native(base)
+                if matches!(base.as_str(), "array.array" | "bytearray")
+                    || (base == "bytes" && name == "__buffer__") =>
+            {
+                Some(None)
+            }
+            _ => None,
+        })
+    }
+
+    fn python_buffer_method(&self, object: Id, scoped: bool) -> Result<Option<Id>> {
+        let Some(method) = self.buffer_slot(object, "__buffer__") else {
             return Ok(None);
         };
-        let slot = |name| {
-            self.find_in_mro(*class, |base| match self.heap.get(base) {
-                Value::Class { .. } => self.own_class_attr(base, name).map(Some),
-                Value::Native(base)
-                    if matches!(base.as_str(), "array.array" | "bytearray")
-                        || (base == "bytes" && name == "__buffer__") =>
-                {
-                    Some(None)
-                }
-                _ => None,
-            })
-        };
-        let Some(method) = slot("__buffer__") else {
-            return Ok(None);
-        };
-        // A Python release hook must run even when the last derived view dies in GC.
-        if slot("__release_buffer__").flatten().is_some() {
+        // A long-lived view needs a Python release hook even if its last reference dies in GC.
+        if (!scoped || method.is_none())
+            && self
+                .buffer_slot(object, "__release_buffer__")
+                .flatten()
+                .is_some()
+        {
             return Err(Self::unsupported_buffer_hooks());
         }
         Ok(method)
+    }
+
+    fn call_buffer_hook(&mut self, object: Id, method: Id, arg: Id) -> Result<Id> {
+        let class = self.exact_type(object)?;
+        let method = self.bind_attribute(method, object, class)?;
+        self.call(method, vec![arg], vec![])
+    }
+
+    fn acquire_python_buffer(&mut self, object: Id, method: Id, flags: i64) -> Result<Id> {
+        let flags = self.int(flags);
+        let view = self.call_buffer_hook(object, method, flags)?;
+        if !matches!(self.heap.get(view), Value::MemoryView { .. }) {
+            return Err(Error::new(
+                "TypeError",
+                "__buffer__ returned non-memoryview object",
+            ));
+        }
+        Ok(view)
+    }
+
+    /// Release a synchronous Python export after its consumer has dropped the view's export.
+    fn release_python_buffer(&mut self, object: Id, view: Id) {
+        if matches!(self.heap.get(view), Value::MemoryView { owner: Some(owner), lease: None, .. } if *owner == object)
+        {
+            return;
+        }
+        if let Some(method) = self.buffer_slot(object, "__release_buffer__").flatten()
+            && let Err(error) = self.call_buffer_hook(object, method, view)
+        {
+            let message = format!(
+                "Exception ignored in __release_buffer__ of {}",
+                self.type_name(object)
+            );
+            unraisable::report(self, error, false, None, &message);
+        }
     }
 
     fn unsupported_buffer_hooks() -> Error {
@@ -421,7 +462,7 @@ impl Context {
     }
 
     fn check_buffer_exporter(&self, object: Id) -> Result<()> {
-        if self.python_buffer_method(object)?.is_some() {
+        if self.python_buffer_method(object, false)?.is_some() {
             return Err(Self::unsupported_buffer_hooks());
         }
         Ok(())
@@ -532,18 +573,9 @@ impl Context {
     }
 
     fn new_memoryview(&mut self, object: Id) -> Result<Id> {
-        if let Some(method) = self.python_buffer_method(object)? {
-            let class = self.exact_type(object)?;
-            let method = self.bind_attribute(method, object, class)?;
+        if let Some(method) = self.python_buffer_method(object, false)? {
             // PyMemoryView_FromObject requests PyBUF_FULL_RO, including shape and strides.
-            let flags = self.int(0x11c);
-            let view = self.call(method, vec![flags], vec![])?;
-            if !matches!(self.heap.get(view), Value::MemoryView { .. }) {
-                return Err(Error::new(
-                    "TypeError",
-                    "__buffer__ returned non-memoryview object",
-                ));
-            }
+            let view = self.acquire_python_buffer(object, method, 0x11c)?;
             let outer = self.new_memoryview(view)?;
             let wrapper = self.alloc(Value::BufferWrapper);
             let export = self.alloc(Value::PythonBufferLease {
