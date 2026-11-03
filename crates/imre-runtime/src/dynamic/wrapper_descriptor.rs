@@ -257,6 +257,7 @@ impl BuiltinDescriptor {
             "object.__reduce_ex__" => ("object", "__reduce_ex__"),
             "int.__add__" => ("int", "__add__"),
             "int.__index__" => ("int", "__index__"),
+            "float.fromhex" => ("float", "fromhex"),
             "int.from_bytes" => ("int", "from_bytes"),
             "bool.__repr__" => ("bool", "__repr__"),
             "int.__repr__" => ("int", "__repr__"),
@@ -349,6 +350,7 @@ impl BuiltinDescriptor {
                     | "count"
                     | "index"
                     | "join"
+                    | "fromhex"
                     | "from_bytes"
                     | "fromkeys"
                     | "isascii"
@@ -374,6 +376,7 @@ impl BuiltinDescriptor {
             (self.owner, self.name),
             ("object", "__subclasshook__" | "__init_subclass__")
                 | ("int", "from_bytes")
+                | ("float", "fromhex")
                 | ("dict", "fromkeys")
                 | ("typing.Generic", "__init_subclass__")
         ) {
@@ -812,6 +815,8 @@ impl BuiltinDescriptor {
                     ("join", _) => "($self, iterable, /)",
                     ("from_bytes", "__doc__") => "Return the integer represented by the given array of bytes.\n\n  bytes\n    Holds the array of bytes to convert.  The argument must either\n    support the buffer protocol or be an iterable object producing bytes.\n    Bytes and bytearray are examples of built-in objects that support the\n    buffer protocol.\n  byteorder\n    The byte order used to represent the integer.  If byteorder is 'big',\n    the most significant byte is at the beginning of the byte array.  If\n    byteorder is 'little', the most significant byte is at the end of the\n    byte array.  To request the native byte order of the host system, use\n    sys.byteorder as the byte order value.  Default is to use 'big'.\n  signed\n    Indicates whether two's complement is used to represent the integer.",
                     ("from_bytes", _) => "($type, /, bytes, byteorder='big', *, signed=False)",
+                    ("fromhex", "__doc__") => "Create a floating-point number from a hexadecimal string.\n\n>>> float.fromhex('0x1.ffffp10')\n2047.984375\n>>> float.fromhex('-0x1p-1074')\n-5e-324",
+                    ("fromhex", _) => "($type, string, /)",
                     ("fromkeys", "__doc__") => "Create a new dictionary with keys from iterable and values set to value.",
                     ("fromkeys", _) => "($type, iterable, value=None, /)",
                     ("append", "__doc__") => "Append object to the end of the list.",

@@ -2514,6 +2514,7 @@ impl Context {
             "float" => &[
                 "__format__",
                 "__getformat__",
+                "fromhex",
                 "as_integer_ratio",
                 "__repr__",
             ],

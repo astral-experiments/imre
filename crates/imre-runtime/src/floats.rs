@@ -3,6 +3,9 @@
 //! `Rc<f64>`. A nullable pointer preserves every bit pattern without reserving a
 //! NaN payload or conflating signed zero with absence.
 
+mod fromhex;
+pub(crate) use fromhex::parse_hex;
+
 use crate::StrOwner;
 use std::borrow::Cow;
 use std::cmp::Ordering;

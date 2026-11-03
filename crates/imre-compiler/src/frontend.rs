@@ -2689,9 +2689,19 @@ impl<'a> Checker<'a> {
         None
     }
 
-    fn boxed_float_component(&self, attribute: &ast::ExprAttribute, receiver: Type) -> bool {
-        matches!(attribute.attr.as_str(), "real" | "imag")
-            && (receiver == Type::Float || self.unshadowed_builtin(&attribute.value, "float"))
+    fn boxed_float_attribute(
+        &self,
+        attribute: &ast::ExprAttribute,
+        receiver: Type,
+    ) -> Option<&'static str> {
+        if receiver != Type::Float && !self.unshadowed_builtin(&attribute.value, "float") {
+            return None;
+        }
+        match attribute.attr.as_str() {
+            "real" | "imag" => Some("float components"),
+            "fromhex" => Some("float.fromhex"),
+            _ => None,
+        }
     }
 
     fn field_value(
@@ -2713,8 +2723,8 @@ impl<'a> Checker<'a> {
         if matches!(receiver.ty, Type::Coroutine(_)) && attribute.attr.as_str() == "cr_origin" {
             return Err(self.object_builtin_error("coroutine.cr_origin", attribute));
         }
-        if self.boxed_float_component(attribute, receiver.ty) {
-            return Err(self.scoped_builtin_error("float components", attribute));
+        if let Some(name) = self.boxed_float_attribute(attribute, receiver.ty) {
+            return Err(self.scoped_builtin_error(name, attribute));
         }
         if receiver.ty == Type::BinaryIO && matches!(attribute.attr.as_str(), "name" | "mode") {
             return Err(self.object_builtin_error("binary file metadata", attribute));
@@ -4965,8 +4975,8 @@ impl<'a> Checker<'a> {
                     }
                     if let ast::Expr::Attribute(attr) = target {
                         let receiver = self.expr(&attr.value)?;
-                        if self.boxed_float_component(attr, receiver.ty) {
-                            return Err(self.scoped_builtin_error("float components", attr));
+                        if let Some(name) = self.boxed_float_attribute(attr, receiver.ty) {
+                            return Err(self.scoped_builtin_error(name, attr));
                         }
                         if matches!(receiver.ty, Type::Coroutine(_))
                             && attr.attr.as_str() == "cr_origin"
@@ -8772,6 +8782,12 @@ impl<'a> Checker<'a> {
                 || self.unshadowed_builtin(&method.value, "bytearray"))
         {
             return Err(self.object_builtin_error("fromhex", call));
+        }
+        if let ast::Expr::Attribute(method) = &*call.func
+            && method.attr.as_str() == "fromhex"
+            && self.unshadowed_builtin(&method.value, "float")
+        {
+            return Err(self.scoped_builtin_error("float.fromhex", call));
         }
         if receiver.is_none()
             && let ast::Expr::Attribute(method) = call.func.as_ref()

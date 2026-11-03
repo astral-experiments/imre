@@ -405,6 +405,13 @@ REJECTED = {
             "typed('wrong')\n"
         ),
     }, "expected int, got str"),
+    "float_fromhex_preserves_uncalled_argument_check": ({
+        "main.py": (
+            "def typed(n: int) -> int: return n\n"
+            "def helper() -> float: return float.fromhex('0x1p0')\n"
+            "def unused() -> int: return typed('wrong')\n"
+        ),
+    }, "invalid-argument-type"),
     "namedtuple_descriptor_preserves_typed_call": ({
         "main.py": (
             "from collections import namedtuple\n"

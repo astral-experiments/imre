@@ -1865,6 +1865,7 @@ pub(super) fn call(
                 text::builtin_format(ctx, owner, args[0], Some(args[1]))
             }
             "module" => ctx.module_method(method, args, kwargs),
+            "float" if method == "fromhex" => float::fromhex(ctx, args, kwargs),
             "float" if method == "__getformat__" => float::getformat(ctx, args, kwargs),
             "int" | "float" if matches!(method, "__abs__" | "__int__" | "__float__") => {
                 collections::builtin_slot(ctx, name, args, kwargs)
