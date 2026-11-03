@@ -346,15 +346,13 @@ pub unsafe extern "C" fn imre_zip_import_index(path: *const Str) -> *const Objec
     opened(Archive::index_import(unsafe { &*path }.as_str()))
 }
 
-// ZipInfo._decodeExtra uses stacklevel=2, its caller in _RealGetContents.
 fn warn_empty_unicode_path() -> Result<()> {
     super::warnings::internal_warning(
         Kind::UserWarning,
         "zipfile",
-        "zipfile/__init__.py",
-        1592,
+        file!(),
+        line!() as isize,
         "Empty unicode path extra field (0x7075)",
-        Some("x._decodeExtra(orig_filename_crc)"),
     )
 }
 

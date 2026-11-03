@@ -105,6 +105,10 @@ impl Session {
         let intrinsic = SystemPathBuf::from(root).join("imre");
         for (name, stub) in [
             (
+                "imre/_zipimport",
+                "from zipfile import ZipFile as _ZipFile\ndef open_index(path: str) -> _ZipFile: ...\n",
+            ),
+            (
                 "_imre_mock",
                 "def mark_call_list(values: list, /) -> bool: ...\ndef is_call_list(values: list, /) -> bool: ...\n",
             ),

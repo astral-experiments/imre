@@ -370,7 +370,7 @@ pub(crate) fn runtime_warning(
     line: isize,
     message: &str,
 ) -> crate::Result<()> {
-    internal_warning(Kind::RuntimeWarning, module, filename, line, message, None)
+    internal_warning(Kind::RuntimeWarning, module, filename, line, message)
 }
 
 /// A checked non-finalizer warning issued from an internal standard-library frame.
@@ -380,24 +380,16 @@ pub(super) fn deprecation(
     line: isize,
     message: &str,
 ) -> crate::Result<()> {
-    internal_warning(
-        Kind::DeprecationWarning,
-        module,
-        filename,
-        line,
-        message,
-        None,
-    )
+    internal_warning(Kind::DeprecationWarning, module, filename, line, message)
 }
 
-/// Apply warning filters at a standard-library call site before displaying its source.
+/// Apply the module and line filters at the warning site before displaying it.
 pub(super) fn internal_warning(
     kind: Kind,
     module: &str,
     filename: &str,
     line: isize,
     message: &str,
-    source_line: Option<&str>,
 ) -> crate::Result<()> {
     let category = category_number(kind.name()).expect("expected a warning category");
     match filtered(category, module, line, || message.into())
@@ -405,11 +397,7 @@ pub(super) fn internal_warning(
     {
         Some((Action::Error, message)) => Err(Error::new(kind, message)),
         Some((_, message)) => {
-            let mut text = format!("{filename}:{line}: {}: {message}", kind.name());
-            if let Some(source) = source_line {
-                text.push_str("\n  ");
-                text.push_str(source);
-            }
+            let text = format!("{filename}:{line}: {}: {message}", kind.name());
             let _ = crate::sys::write_stderr(&text, true);
             Ok(())
         }

@@ -53,6 +53,8 @@ ACCEPTED = {
 
         warnings.simplefilter("error", UserWarning)
         assert zipimporter("empty-path.zip").get_data("original") == b"payload"
+        warnings.simplefilter("ignore", UserWarning)
+        warnings.filterwarnings("error", category=UserWarning, module="^zipfile$")
         try:
             ZipFile("empty-path.zip").close()
         except UserWarning as exc:
@@ -703,6 +705,7 @@ REJECTED = {
     "unsupported_newline": 'open("input.txt", "r", encoding="utf-8", newline="other")',
     "read_size": 'with open("input.txt", "r", encoding="utf-8") as stream:\n    stream.read(1)',
     "readline_size": 'with open("input.txt", "r", encoding="utf-8") as stream:\n    stream.readline(2)',
+    "private_zip_index": 'from imre._zipimport import open_index\nopen_index("archive.zip")',
     "zipimport_code": 'import zipimport\nzipimport.zipimporter("archive.zip").get_code("module")',
     "gzip_write": 'import gzip\ngzip.open("output.gz", "wb")',
     "gzip_text_codec": 'import gzip\ngzip.open("input.gz", "rt", encoding="latin1")',

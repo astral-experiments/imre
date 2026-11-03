@@ -978,6 +978,7 @@ pub(crate) enum Intrinsic {
         guaranteed: bool,
     },
     ZipFile,
+    ZipImportIndex,
     ZipInfo,
     BytesIo,
     StringIo,
@@ -2707,6 +2708,9 @@ impl SourceModule {
             )));
         }
         let binding = *self.bindings.get(name)?;
+        if binding == Binding::Intrinsic(Intrinsic::ZipImportIndex) {
+            return None;
+        }
         (self.archive.is_none() || matches!(binding, Binding::Definition(_))).then_some(binding)
     }
 
@@ -4548,6 +4552,24 @@ impl<'a> Loader<'a> {
                         self.modules[id].error(import, "wildcard imports require runtime binding")
                     });
                     return Ok(());
+                }
+                if import.level == 0
+                    && name == "imre._zipimport"
+                    && let [alias] = import.names.as_slice()
+                    && alias.name.as_str() == "open_index"
+                {
+                    if !self.modules[id].is_bundled("zipimport") {
+                        return Err(
+                            "the private zipimport directory opener is not importable".into()
+                        );
+                    }
+                    let local = alias.asname.as_ref().unwrap_or(&alias.name);
+                    return self.bind(
+                        id,
+                        local.as_str(),
+                        Binding::Intrinsic(Intrinsic::ZipImportIndex),
+                        alias,
+                    );
                 }
                 if import.level == 0 && name == "imre._logging" {
                     if !self.modules[id].is_bundled(LOGGING_CLASSES) {

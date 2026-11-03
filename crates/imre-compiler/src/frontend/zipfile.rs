@@ -29,14 +29,7 @@ impl Checker<'_> {
         let (op, value) = if matches!(value.ty, Type::BinaryIO | Type::BytesIO) {
             (Builtin::ZipOpenFile, value)
         } else {
-            // The bundled zipimporter uses a ZipFile as its directory index.
-            // Indexing an import does not issue ZipFile's Unicode Path warning.
-            let open = if self.graph.modules[self.module].is_bundled("zipimport") {
-                Builtin::ZipImportIndex
-            } else {
-                Builtin::ZipOpen
-            };
-            (open, self.path_text(value, file)?)
+            (Builtin::ZipOpen, self.path_text(value, file)?)
         };
         Ok(Expr {
             ty: Type::ZipFile,
