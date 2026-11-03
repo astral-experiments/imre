@@ -8,6 +8,12 @@ mod display;
 pub(in crate::dynamic) mod explicit;
 pub(in crate::dynamic) mod warn;
 
+pub(in crate::dynamic) struct WarningLocation {
+    pub(in crate::dynamic) filename: Id,
+    pub(in crate::dynamic) lineno: i32,
+    pub(in crate::dynamic) line: Option<Id>,
+}
+
 pub(in crate::dynamic) struct State {
     pub(in crate::dynamic) filters: Id,
     pub(in crate::dynamic) once_registry: Id,

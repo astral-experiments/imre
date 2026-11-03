@@ -37,6 +37,8 @@ impl Item {
             if ptr.is_null() {
                 return Ok(String::new());
             }
+            // SAFETY: a non-null value for a string item is NUL-terminated and the
+            // locale lock keeps its storage valid while it is read.
             let first = unsafe { CStr::from_ptr(ptr) };
             let multiple = matches!(self.value, libc::ALT_DIGITS | libc::ERA);
             if first.is_empty()
@@ -65,6 +67,8 @@ impl Item {
                         bytes.push(b';');
                     }
                     bytes.extend_from_slice(part.to_bytes());
+                    // SAFETY: part spans this entry through its NUL, so the new pointer
+                    // stays within the glibc list or one byte past its last entry.
                     cursor = unsafe { cursor.add(part.to_bytes_with_nul().len()) };
                 }
                 CString::new(bytes).unwrap()
@@ -74,6 +78,8 @@ impl Item {
             // SAFETY: querying the category while locked returns a borrowed C string.
             let name = unsafe { libc::setlocale(self.category, std::ptr::null()) };
             if !name.is_null() {
+                // SAFETY: setlocale returned a non-null, NUL-terminated name. The locale
+                // lock protects it until with_ctype_locale copies its bytes.
                 let name = unsafe { CStr::from_ptr(name) };
                 if let Some(result) =
                     with_ctype_locale(OsStr::from_bytes(name.to_bytes()), || decode_locale(&raw))
