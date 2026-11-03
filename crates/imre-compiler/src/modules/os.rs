@@ -217,6 +217,31 @@ pub(super) fn symbol(name: &str) -> Option<Intrinsic> {
         "minor" if cfg!(target_os = "linux") => Intrinsic::ObjectRuntimeExport("posix.minor"),
         "makedev" if cfg!(target_os = "linux") => Intrinsic::ObjectRuntimeExport("posix.makedev"),
         #[cfg(target_os = "linux")]
+        "TFD_CLOEXEC" => Intrinsic::IntConstant(i64::from(libc::TFD_CLOEXEC)),
+        #[cfg(target_os = "linux")]
+        "TFD_NONBLOCK" => Intrinsic::IntConstant(i64::from(libc::TFD_NONBLOCK)),
+        #[cfg(target_os = "linux")]
+        "TFD_TIMER_ABSTIME" => Intrinsic::IntConstant(i64::from(libc::TFD_TIMER_ABSTIME)),
+        #[cfg(target_os = "linux")]
+        "TFD_TIMER_CANCEL_ON_SET" => {
+            Intrinsic::IntConstant(i64::from(libc::TFD_TIMER_CANCEL_ON_SET))
+        }
+        "timerfd_create" if cfg!(target_os = "linux") => {
+            Intrinsic::ObjectRuntimeExport("posix.timerfd_create")
+        }
+        "timerfd_gettime" if cfg!(target_os = "linux") => {
+            Intrinsic::ObjectRuntimeExport("posix.timerfd_gettime")
+        }
+        "timerfd_gettime_ns" if cfg!(target_os = "linux") => {
+            Intrinsic::ObjectRuntimeExport("posix.timerfd_gettime_ns")
+        }
+        "timerfd_settime" if cfg!(target_os = "linux") => {
+            Intrinsic::ObjectRuntimeExport("posix.timerfd_settime")
+        }
+        "timerfd_settime_ns" if cfg!(target_os = "linux") => {
+            Intrinsic::ObjectRuntimeExport("posix.timerfd_settime_ns")
+        }
+        #[cfg(target_os = "linux")]
         "EFD_CLOEXEC" => Intrinsic::IntConstant(i64::from(libc::EFD_CLOEXEC)),
         #[cfg(target_os = "linux")]
         "EFD_NONBLOCK" => Intrinsic::IntConstant(i64::from(libc::EFD_NONBLOCK)),

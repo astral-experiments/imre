@@ -1537,6 +1537,16 @@ impl IntrinsicModule {
             (Self::Warnings, "resetwarnings") => Intrinsic::WarningReset,
             (Self::Warnings, "formatwarning") => Intrinsic::WarningDisplay { show: false },
             (Self::Warnings, "showwarning") => Intrinsic::WarningDisplay { show: true },
+            #[cfg(target_os = "linux")]
+            (Self::Time, "CLOCK_REALTIME") => {
+                Intrinsic::IntConstant(i64::from(libc::CLOCK_REALTIME))
+            }
+            #[cfg(target_os = "linux")]
+            (Self::Time, "clock_gettime") => Intrinsic::ObjectRuntimeExport("time.clock_gettime"),
+            #[cfg(target_os = "linux")]
+            (Self::Time, "clock_gettime_ns") => {
+                Intrinsic::ObjectRuntimeExport("time.clock_gettime_ns")
+            }
             (Self::Time, "sleep") => Intrinsic::TimeSleep,
             (Self::Time, "time") => Intrinsic::WallTime,
             (Self::Signal | Self::SignalNative, "signal") if cfg!(unix) => {
