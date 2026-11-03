@@ -122,6 +122,7 @@ async def forward(awaitable):
         old.close()
 
     awaited_call_arguments()
+    awaited_binary_operands()
 
 
 def awaited_call_arguments():
@@ -203,3 +204,32 @@ async def outer():
         assert done.value is receiver
     else:
         raise AssertionError("outer await did not return")
+
+
+def awaited_binary_operands():
+    calls = []
+
+    def right():
+        calls.append('right')
+        return Pause()
+
+    class Reflected:
+        def __rsub__(self, left):
+            calls.append('subtract')
+            return left
+
+    async def difference():
+        return (await Pause() - 1) - await right()
+
+    coro = difference()
+    assert coro.send(None) == 'paused'
+    assert calls == []
+    assert coro.send(42) == 'paused'
+    assert calls == ['right']
+    try:
+        coro.send(Reflected())
+    except StopIteration as done:
+        assert done.value == 41
+    else:
+        raise AssertionError("awaited difference did not return")
+    assert calls == ['right', 'subtract']

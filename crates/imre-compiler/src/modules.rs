@@ -2307,6 +2307,7 @@ pub(crate) fn boxed_mock_export(name: &str) -> bool {
             | "DEFAULT"
             | "ANY"
             | "MagicMock"
+            | "InvalidSpecError"
             | "mock_open"
             | "seal"
             | "call"
