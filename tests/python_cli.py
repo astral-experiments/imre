@@ -2136,6 +2136,7 @@ def main():
         compare("-IB", "-c", "from operator import __getitem__; print(__getitem__((11,), 0))")
         compare("-IB", Path(__file__).with_name("fixtures") / "boxed_update_wrapper.py")
         compare("-IB", Path(__file__).with_name("fixtures") / "boxed_tracebacks.py")
+        compare("-IB", Path(__file__).with_name("fixtures") / "inspect_trace.py")
         compare("-IB", Path(__file__).with_name("fixtures") / "boxed_print_traceback.py")
         compare("-IB", "-c", "import operator as op\nprint(op.attrgetter('upper')('method')())")
 
@@ -3033,6 +3034,8 @@ for name in ("md4", "ripemd160"):
                 )
 
         compare("-IB", fixtures / "boxed_unittest_named_loader.py")
+        async_case = fixtures / "unittest_isolated_asyncio.py"
+        compare("-IB", async_case, native_args=("run", async_case, "--quiet"), native_timeout=600)
         compare("-IB", fixtures / "boxed_unittest_patch.py")
         call_args = fixtures / "unittest_mock_call_args.py"
         compare("-IB", call_args, native_args=("run", call_args, "--quiet"))

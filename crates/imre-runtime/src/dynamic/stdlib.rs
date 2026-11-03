@@ -374,7 +374,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             ctx.builtin(&format!("math.{name}"))
         }
         ("enum", "auto") => ctx.enum_auto_class()?,
-        ("enum", "Enum" | "IntEnum" | "IntFlag" | "StrEnum") => {
+        ("enum", "Enum" | "Flag" | "IntEnum" | "IntFlag" | "StrEnum") => {
             ctx.builtin("enum.Enum.__copy__");
             ctx.builtin("enum.Enum.__deepcopy__");
             ctx.builtin("enum.Enum.__reduce_ex__");
@@ -457,6 +457,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("types", "SimpleNamespace") => super::namespace::class(ctx)?,
         ("types", "TracebackType") => ctx.builtin("traceback"),
         ("types", "_coroutine_flags" | "_mark_generator") => ctx.builtin(&format!("types.{name}")),
+        ("types", "AsyncGeneratorType") => ctx.builtin("async_generator"),
         ("types", "GeneratorType") => ctx.builtin("generator"),
         ("types", "CoroutineType") => ctx.builtin("coroutine"),
         ("types", "MethodType") => ctx.builtin("method"),

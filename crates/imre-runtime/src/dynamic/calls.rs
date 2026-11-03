@@ -282,6 +282,7 @@ impl Context {
                     };
                     return scalar
                         .into_iter()
+                        .chain((kind == "enum.IntFlag").then_some("enum.Flag"))
                         .chain((kind != "enum.Enum").then_some("enum.Enum"))
                         .chain(["object"])
                         .filter_map(|name| self.builtins.get(name))
@@ -309,10 +310,16 @@ impl Context {
             return Some(value);
         }
         match self.heap.get(class) {
-            Value::Native(kind) if name == "__sizeof__" => self.builtins.get(object_size::descriptor(kind)?).copied(),
+            Value::Native(kind) if name == "__sizeof__" => {
+                self.builtins.get(object_size::descriptor(kind)?).copied()
+            }
             // The native generic alias inherits the same subclass hook as source special forms.
-            Value::Native(kind) if kind == "typing._GenericAlias" && name == "__init_subclass__" => {
-                self.classes.get("typing._Final").and_then(|&base| self.own_class_attr(base, name))
+            Value::Native(kind)
+                if kind == "typing._GenericAlias" && name == "__init_subclass__" =>
+            {
+                self.classes
+                    .get("typing._Final")
+                    .and_then(|&base| self.own_class_attr(base, name))
             }
             Value::Native(kind) if kind == "type" && name == "__prepare__" => {
                 self.builtins.get("type.__prepare__").copied()
@@ -345,11 +352,7 @@ impl Context {
                 self.builtins.get(&format!("{owner}.{name}")).copied()
             }
             Value::Native(_) if let Some(&scope) = self.enum_scopes.get(&class) => {
-                self.namespace_binding(self.scope_data(scope), name).or_else(|| {
-                    if name == "_numeric_repr_" && matches!(self.heap.get(class), Value::Native(kind) if kind == "enum.IntFlag") {
-                        self.builtins.get("repr").copied()
-                    } else { None }
-                })
+                self.namespace_binding(self.scope_data(scope), name)
             }
             Value::Native(kind)
                 if name == "__hash__"
@@ -400,7 +403,8 @@ impl Context {
                     || (kind == stdlib::fixed_structseq::SCHED_PARAM
                         && matches!(name, "__reduce__" | "__replace__"))
                     || (kind == "function" && name == "__call__")
-                    || (matches!(kind.as_str(), "builtin_function_or_method" | "method") && name == "__reduce__") =>
+                    || (matches!(kind.as_str(), "builtin_function_or_method" | "method")
+                        && name == "__reduce__") =>
             {
                 self.builtins.get(&format!("{kind}.{name}")).copied()
             }
@@ -1221,7 +1225,9 @@ impl Context {
             }
             return matches!(
                 (child.as_str(), parent.as_str()),
-                ("enum.IntEnum" | "enum.IntFlag", "int" | "enum.Enum")
+                ("enum.Flag", "enum.Enum")
+                    | ("enum.IntFlag", "enum.Flag")
+                    | ("enum.IntEnum" | "enum.IntFlag", "int" | "enum.Enum")
                     | ("enum.StrEnum", "str" | "enum.Enum")
             );
         }
@@ -6602,6 +6608,9 @@ impl Context {
                 if matches!(name.as_str(), "object.__reduce__" | "object.__reduce_ex__") =>
             {
                 stdlib::pickle::object_reduce(self, &name["object.".len()..], &args, &kwargs)
+            }
+            Value::Native(name) if builtins::is_enum_base(&name) => {
+                self.functional_enum(callable, args, kwargs)
             }
             Value::Native(name) if nonconstructible_result_type(&name) => Err(Error::new(
                 "TypeError",

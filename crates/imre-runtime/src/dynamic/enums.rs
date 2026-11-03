@@ -5,6 +5,7 @@ use super::*;
 pub(super) mod auto;
 mod bases;
 mod display;
+mod factory;
 mod float;
 
 impl Context {
@@ -67,7 +68,7 @@ impl Context {
         } else if let Some(member) = self.member_for_value(values, *value) {
             return Ok(member);
         }
-        if self.has_base(class, "enum.IntFlag")
+        if self.has_base(class, "enum.Flag")
             && let Ok(bits) = self.as_int(*value)
         {
             return self.flag_combination(class, bits);
@@ -113,17 +114,31 @@ impl Context {
             if canonical != key {
                 continue;
             }
-            let bit = self.as_int(value)?.big().into_owned();
+            let Ok(bits) = self.as_int(value) else {
+                continue;
+            };
+            let bit = bits.big().into_owned();
             mask |= &bit;
             if bit.is_positive() && (&bit & (&bit - 1u8)).is_zero() {
                 singles.push((member, bit));
             }
         }
+        let strict = !self.has_base(class, "enum.IntFlag");
         let mut value = bits.big().into_owned();
+        let limit = BigInt::one() << mask.bits();
+        let all_bits = &limit - 1u8;
+        if strict
+            && (value < -&limit || value > all_bits || !(&value & (&all_bits ^ &mask)).is_zero())
+        {
+            let name = self.class_qualname(class);
+            return Err(Error::new(
+                "ValueError",
+                format!("{value} is not a valid {name}"),
+            ));
+        }
         let mut negative_alias = None;
         if value.is_negative() {
-            let limit = BigInt::one() << mask.bits();
-            let skipped = (&limit - 1u8) ^ &mask;
+            let skipped = &all_bits ^ &mask;
             if value >= -&limit && (&value & skipped).is_zero() {
                 negative_alias = Some(self.alloc(Value::Int(bits)));
                 value += limit;
@@ -133,7 +148,11 @@ impl Context {
         }
 
         let key = self.alloc(Value::Int(crate::Int::new(value.clone())));
-        let member = self.new_immutable_scalar("int", class, &[key], &[])?;
+        let member = if !self.has_base(class, "int") {
+            self.instance(class, None)
+        } else {
+            self.new_immutable_scalar("int", class, &[key], &[])?
+        };
         self.default_set_attr(member, "_value_", key)?;
         let mut members = Vec::new();
         let mut combined = BigInt::zero();
@@ -183,6 +202,11 @@ impl Context {
             let unknown = value ^ combined;
             if unknown.is_zero() {
                 prefix
+            } else if strict {
+                return Err(Error::new(
+                    "ValueError",
+                    format!("{}: no members with value {unknown}", self.repr(class)),
+                ));
             } else {
                 let formatter = self.lookup_attr(class, "_numeric_repr_")?;
                 let unknown = self.alloc(Value::Int(crate::Int::new(unknown)));
@@ -303,6 +327,12 @@ impl Context {
         if let Some(data_type) = base.filter(|&base| self.has_base(base, "float")) {
             return self.populate_float_enum(class, scope, data_type, names, values, declarations);
         }
+        let flag = self.has_base(class, "enum.Flag");
+        let mut flag_mask = num_bigint::BigInt::default();
+        let mut singles_mask = num_bigint::BigInt::default();
+        let mut previous_single = num_bigint::BigInt::default();
+        let mut definition_order = false;
+        let mut single_count = 0;
         let new = self.class_attr(class, "__new__");
         for (name, raw) in declarations {
             if !classified && (name.starts_with('_') || self.is_enum_descriptor(raw)?) {
@@ -334,8 +364,34 @@ impl Context {
                     member
                 }
             };
+            if flag && canonical == member {
+                use num_traits::{Signed, Zero};
+                let order = self.int(single_count);
+                self.default_set_attr(member, "_sort_order_", order)?;
+                if let Ok(bits) = self.as_int(value) {
+                    let bit = bits.big();
+                    flag_mask |= bit.as_ref();
+                    if bit.is_positive() && (bit.as_ref() & (bit.as_ref() - 1u8)).is_zero() {
+                        singles_mask |= bit.as_ref();
+                        definition_order |= bit.as_ref() < &previous_single;
+                        previous_single = bit.into_owned();
+                        single_count += 1;
+                    }
+                }
+            }
             self.put_item(names, key, canonical)?;
             self.bind(scope, &name, canonical);
+        }
+        if flag {
+            let full = self.alloc(Value::Int(crate::Int::new(flag_mask)));
+            self.bind(scope, "_flag_mask_", full);
+            self.bind(
+                scope,
+                "_flag_definition_order",
+                if definition_order { TRUE } else { FALSE },
+            );
+            let mask = self.alloc(Value::Int(crate::Int::new(singles_mask)));
+            self.bind(scope, "_singles_mask_", mask);
         }
         Ok(())
     }

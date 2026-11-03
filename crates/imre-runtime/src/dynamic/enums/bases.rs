@@ -11,6 +11,7 @@ impl Context {
         self.bind(scope, "_member_map_", members);
 
         let (member_type, display, string) = match kind {
+            "enum.Flag" => ("object", "enum.Flag.__repr__", "enum.Enum.__str__"),
             "enum.IntFlag" => ("int", "enum.Flag.__repr__", "int.__repr__"),
             "enum.IntEnum" => ("int", "enum.Enum.__repr__", "int.__repr__"),
             "enum.StrEnum" => ("str", "enum.Enum.__repr__", "str.__str__"),
@@ -43,8 +44,10 @@ impl Context {
             self.builtin("enum.Enum");
         }
         if kind == "enum.IntFlag" {
-            // Flag supplies this default. IntFlag can shadow it like any Python subclass.
-            self.builtin("repr");
+            self.builtin("enum.Flag");
+        } else if kind == "enum.Flag" {
+            let repr = self.builtin("repr");
+            self.bind(scope, "_numeric_repr_", repr);
         }
     }
 

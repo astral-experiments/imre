@@ -21,16 +21,6 @@ def _boxedCheckFixtures(cls):
         for name in ("addClassCleanup", "enterClassContext", "doClassCleanups"):
             if getattr(cls, name, None) is not None:
                 raise NotImplementedError("native unittest does not yet support class cleanup hooks: " + name)
-        return
-    for name in ("run", "__call__"):
-        for owner in cls.__mro__:
-            if owner is object:
-                break
-            if name in owner.__dict__:
-                if owner is not TestCase:
-                    raise NotImplementedError("native unittest does not yet support custom result hooks: "
-                                              + owner.__qualname__ + "." + name)
-                break
 
 
 def _caseRun(self, result=None):

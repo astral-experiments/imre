@@ -158,23 +158,25 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
                     .replace("iter(lines).__next__", "functools.partial(next, iter(lines))")
                     .replace("    Parameter = cls._parameter_cls", "    import ast\n    Parameter = cls._parameter_cls");
                     // Imre records native source positions without CPython bytecode offsets.
-                    let frame_info = section("def getframeinfo(", "def getinnerframes(")
+                    let frame_info = section(
+                        "def getframeinfo(",
+                        "# ------------------------------------------------ static version of getattr",
+                    )
                         .replace("_get_code_position_from_tb(frame)", "_frame_position(frame)")
                         .replace("_get_code_position(frame.f_code, frame.f_lasti)", "_frame_position(frame)");
                     [
                         include_str!("../../stdlib/inspect.py"),
                         include_str!("../../stdlib/inspect_signature.py"),
                         "import collections.abc\nimport dis\nimport functools\nimport importlib.machinery\nimport linecache\nimport os\nimport sys\nfrom collections import namedtuple\nfrom inspect import _frame_position",
-                        section("def ismodule(object):", "def ispackage(object):"),
+                        section("def ismodule(object):", "def ismethoddescriptor(object):"),
                         &descriptors,
-                        section("def isfunction(object):", "def _has_code_flag("),
-                        section("def isawaitable(object):", "def isabstract(object):"),
+                        section("def isfunction(object):", "# A marker for markcoroutinefunction"),
+                        section("def isasyncgenfunction(obj):", "def isabstract(object):"),
                         section("def _getmembers(", "Attribute = namedtuple("),
                         section("def getfile(object):", "class ClassFoundException("),
                         section("def findsource(object):", "def getcomments(object):"),
                         section("_Traceback = namedtuple(", "def _get_code_position_from_tb("),
                         &frame_info,
-                        section("def currentframe():", "def trace(context=1):"),
                         section("def getmro(cls):", "def indentsize(line):"),
                         section("def formatannotation(", "def formatannotationrelativeto("),
                         section("FullArgSpec = namedtuple(", "ArgInfo = namedtuple("),

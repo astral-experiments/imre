@@ -56,9 +56,15 @@ impl Context {
                     name if let Some(parent) = Self::native_base(name) => {
                         lineage.push(self.builtin(parent));
                     }
-                    "enum.IntEnum" | "enum.IntFlag" | "enum.StrEnum" => {
-                        let scalar = if name == "enum.StrEnum" { "str" } else { "int" };
-                        lineage.push(self.builtin(scalar));
+                    "enum.Flag" | "enum.IntEnum" | "enum.IntFlag" | "enum.StrEnum" => {
+                        let kind = name.clone();
+                        if kind != "enum.Flag" {
+                            let scalar = if kind == "enum.StrEnum" { "str" } else { "int" };
+                            lineage.push(self.builtin(scalar));
+                        }
+                        if kind == "enum.IntFlag" {
+                            lineage.push(self.builtin("enum.Flag"));
+                        }
                         lineage.push(self.builtin("enum.Enum"));
                     }
                     _ => {}

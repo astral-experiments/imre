@@ -9459,6 +9459,17 @@ impl<'a> Checker<'a> {
             Some(Binding::Intrinsic(Intrinsic::TracebackFormatter(name))) => {
                 return Err(self.object_export_error(name, call));
             }
+            Some(Binding::Intrinsic(
+                Intrinsic::StandardEnum | Intrinsic::IntEnum | Intrinsic::StrEnum,
+            )) if call.arguments.args.len() >= 2
+                || call
+                    .arguments
+                    .keywords
+                    .iter()
+                    .any(|kw| kw.arg.as_deref() == Some("names")) =>
+            {
+                return Err(self.scoped_builtin_error("enum.Enum", call));
+            }
             Some(Binding::Intrinsic(Intrinsic::BuiltinsHex)) => {
                 return Err(self.scoped_builtin_error("builtins.hex", call));
             }

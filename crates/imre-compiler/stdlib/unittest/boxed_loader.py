@@ -250,3 +250,18 @@ TestCase._addUnexpectedSuccess = case._addUnexpectedSuccess
 
 from unittest import loader, signals, util
 from unittest.signals import registerResult, removeResult
+
+
+# Lazy import of IsolatedAsyncioTestCase from .async_case
+# It imports asyncio, which is relatively heavy, but most tests
+# do not need it.
+
+def __dir__():
+    return globals().keys() | {'IsolatedAsyncioTestCase'}
+
+def __getattr__(name):
+    if name == 'IsolatedAsyncioTestCase':
+        global IsolatedAsyncioTestCase
+        from .async_case import IsolatedAsyncioTestCase
+        return IsolatedAsyncioTestCase
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

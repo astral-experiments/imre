@@ -68,6 +68,11 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
             "unittest/util.py",
             include_str!("../stdlib/unittest/util.py"),
         )),
+        // CPython 3.14.5 Lib/unittest/async_case.py. See licenses/CPython.txt.
+        "unittest.async_case" => Some((
+            "unittest/async_case.py",
+            include_str!("../stdlib/unittest/async_case.py"),
+        )),
         "unittest.case" => Some((
             "unittest/case.py",
             include_str!("../stdlib/unittest/boxed_case.py"),
@@ -1023,6 +1028,16 @@ pub(crate) enum Intrinsic {
 
 impl Intrinsic {
     pub(crate) const REGEX_DEBUG: Self = Self::ScopedObjectExport("re.DEBUG");
+    pub(crate) fn scoped_class_base(self) -> Option<&'static str> {
+        match self {
+            Self::SOCKETSERVER_CLASS => Some("socketserver base class"),
+            Self::ScopedObjectExport(name @ ("enum.Flag" | "unittest.IsolatedAsyncioTestCase")) => {
+                Some(name)
+            }
+            _ => None,
+        }
+    }
+
     pub(crate) const SOCKETSERVER_CLASS: Self = Self::ScopedObjectExport("socketserver classes");
     pub(crate) const PICKLER: Self = Self::ObjectRuntimeExport("pickle.Pickler");
     pub(crate) const IO_BASE: Self = Self::ObjectRuntimeExport("io.IOBase");
@@ -1444,6 +1459,10 @@ impl IntrinsicModule {
                 "cache" => crate::ir::LinecacheOperation::Cache,
                 _ => return None,
             }),
+            (Self::Inspect, "trace") => Intrinsic::ScopedObjectExport("inspect.trace"),
+            (Self::Inspect, "getinnerframes") => {
+                Intrinsic::ScopedObjectExport("inspect.getinnerframes")
+            }
             (Self::Inspect, "getmembers") => Intrinsic::ScopedObjectExport("inspect.getmembers"),
             (Self::Inspect, "getmembers_static") => {
                 Intrinsic::ScopedObjectExport("inspect.getmembers_static")
@@ -1451,6 +1470,16 @@ impl IntrinsicModule {
             (Self::Inspect, "isdatadescriptor") => {
                 Intrinsic::ScopedObjectExport("inspect.isdatadescriptor")
             }
+            (Self::Inspect, "isasyncgen") => Intrinsic::ScopedObjectExport("inspect.isasyncgen"),
+            (Self::Inspect, "isasyncgenfunction") => {
+                Intrinsic::ScopedObjectExport("inspect.isasyncgenfunction")
+            }
+            (Self::Inspect, "iscoroutine") => Intrinsic::ScopedObjectExport("inspect.iscoroutine"),
+            (Self::Inspect, "isgenerator") => Intrinsic::ScopedObjectExport("inspect.isgenerator"),
+            (Self::Inspect, "isgeneratorfunction") => {
+                Intrinsic::ScopedObjectExport("inspect.isgeneratorfunction")
+            }
+            (Self::Inspect, "ispackage") => Intrinsic::ScopedObjectExport("inspect.ispackage"),
             (Self::Inspect, "isawaitable") => Intrinsic::ScopedObjectExport("inspect.isawaitable"),
             (Self::Inspect, "getattr_static") => Intrinsic::InspectGetattrStatic,
             (Self::Inspect, "ismethoddescriptor") => Intrinsic::InspectIsMethodDescriptor,
@@ -1563,6 +1592,7 @@ impl IntrinsicModule {
             (Self::Tomli, "loads") => Intrinsic::TomliLoads,
             (Self::Tomli, "load") => Intrinsic::TomliLoad,
             (Self::TomliW, "dump") => Intrinsic::TomliDump,
+            (Self::Enum, "Flag") => Intrinsic::ScopedObjectExport("enum.Flag"),
             (Self::Enum, "Enum") => Intrinsic::StandardEnum,
             (Self::Dataclasses, "is_dataclass") => Intrinsic::IsDataclass,
             (Self::Subprocess, "__all__") if cfg!(unix) => {
@@ -2445,6 +2475,11 @@ impl SourceModule {
             return Some(Binding::Intrinsic(Intrinsic::SOCKETSERVER_CLASS));
         }
         if self.is_bundled("unittest") {
+            if name == "IsolatedAsyncioTestCase" {
+                return Some(Binding::Intrinsic(Intrinsic::ScopedObjectExport(
+                    "unittest.IsolatedAsyncioTestCase",
+                )));
+            }
             let export = match name {
                 "registerResult" => Some("unittest.registerResult"),
                 "removeResult" => Some("unittest.removeResult"),
