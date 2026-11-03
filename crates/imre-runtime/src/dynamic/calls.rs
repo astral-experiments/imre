@@ -8292,7 +8292,8 @@ impl Context {
         }
         self.init_abstract_class(class, scope)?;
         if self.is_protocol_declaration(class) {
-            self.call_typing_helper("_freeze_protocol_members", vec![class, annotations])?;
+            let members = self.call_typing_helper("_get_protocol_attrs", vec![class])?;
+            self.set_attr(class, "__protocol_attrs__", members)?;
         }
         if let Some((parents, fields, annotate, total)) = typed_dict_fields {
             let configure = self
