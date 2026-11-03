@@ -293,6 +293,10 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
                 include_str!("../../stdlib/unittest/boxed_runner.py"),
             ),
         )),
+        "unittest.__main__" => Some((
+            "unittest/__main__.py",
+            include_str!("../../stdlib/unittest/__main__.py"),
+        )),
         "unittest.mock" => Some((
             "unittest/mock.py",
             concat!(

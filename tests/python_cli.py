@@ -1210,6 +1210,32 @@ def check_unittest_main_names(imre, root, run):
     assert b"Ran 1 test" in missing.stderr and b"FAILED (errors=1)" in missing.stderr, missing
 
 
+def check_unittest_module_main(imre, root, run):
+    package = root / "cli_test_package"
+    package.mkdir()
+    (package / "__init__.py").touch()
+    (package / "sample.py").write_text(
+        "import unittest\n"
+        "import os, sys\n"
+        "class Passing(unittest.TestCase):\n"
+        "    def test_one(self):\n"
+        "        self.assertEqual(sys.argv[0], os.path.basename(sys.executable) + ' -m unittest')\n"
+        "        print(self.id())\n"
+        "class Failing(unittest.TestCase):\n"
+        "    def test_one(self): self.fail('deliberate failure')\n"
+    )
+    passing = "cli_test_package.sample.Passing"
+    ok = run(imre, "-m", "unittest", "-v", passing, passing + ".test_one")
+    assert ok.returncode == 0 and ok.stdout == (passing + ".test_one\n").encode() * 2, ok
+    assert ok.stderr.count(f"test_one ({passing}.test_one) ... ok".encode()) == 2, ok
+    failing = "cli_test_package.sample.Failing.test_one"
+    errors = run(imre, "-m", "unittest", "-v", failing, passing + ".test_missing")
+    assert errors.returncode == 1 and b"Ran 2 tests" in errors.stderr, errors
+    assert f"FAIL: test_one ({failing})".encode() in errors.stderr, errors
+    assert b"ERROR: test_missing (unittest.loader._FailedTest.test_missing)" in errors.stderr, errors
+    assert b"FAILED (failures=1, errors=1)" in errors.stderr, errors
+
+
 def check_unittest_file_discovery(imre, root, run):
     entry = root / "discover_after_build.py"
     entry.write_text(
@@ -3445,6 +3471,7 @@ else:
 """)
             check_boxed_unittest_main_reporting(imre, root, run)
             check_unittest_main_names(imre, root, run)
+            check_unittest_module_main(imre, root, run)
             check_unittest_file_discovery(imre, root, run)
             plugin.write_bytes((fixtures / "boxed_subprocess_fileio.py").read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")
