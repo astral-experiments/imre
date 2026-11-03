@@ -33,6 +33,7 @@ pub(in crate::dynamic) fn install(ctx: &mut Context, scope: Id) -> Result<()> {
         "protocol",
         "verify_mode",
         "check_hostname",
+        "num_tickets",
         "security_level",
         "minimum_version",
         "maximum_version",
@@ -430,6 +431,22 @@ pub(super) fn call(
             context(ctx, handle)?
                 .borrow_mut()
                 .change_options(old & !next, set);
+            Ok(NONE)
+        }
+        ("num_tickets", &[handle]) => {
+            let count = context(ctx, handle)?.borrow().num_tickets();
+            Ok(ctx.alloc(Value::Int(crate::Int::new(count.into()))))
+        }
+        ("num_tickets", &[handle, value]) => {
+            let count = std::ffi::c_long::try_from(ctx.index_c_long(value)?).map_err(|_| {
+                Error::new("OverflowError", "Python int too large to convert to C long")
+            })?;
+            let count = usize::try_from(count)
+                .map_err(|_| Error::new("ValueError", "value must be non-negative"))?;
+            context(ctx, handle)?
+                .borrow_mut()
+                .set_num_tickets(count)
+                .map_err(|message| Error::new("ValueError", message))?;
             Ok(NONE)
         }
         ("security_level", &[handle]) => {

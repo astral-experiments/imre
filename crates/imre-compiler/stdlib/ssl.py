@@ -388,6 +388,19 @@ class SSLContext:
         _call(_imre_ssl.set_hostname_checks_common_name, self._ctx, enabled)
 
     @property
+    def num_tickets(self):
+        """Control the number of TLSv1.3 session tickets."""
+        if not issubclass(type(self), __class__):
+            _imre_ssl.raise_context_receiver_error("num_tickets", self)
+        return _imre_ssl.num_tickets(__class__._ctx.__get__(self))
+
+    @num_tickets.setter
+    def num_tickets(self, value):
+        if not issubclass(type(self), __class__):
+            _imre_ssl.raise_context_receiver_error("num_tickets", self)
+        _imre_ssl.num_tickets(__class__._ctx.__get__(self), value)
+
+    @property
     def security_level(self):
         return _call(_imre_ssl.security_level, self._ctx)
 
