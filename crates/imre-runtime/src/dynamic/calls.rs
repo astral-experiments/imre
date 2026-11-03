@@ -299,6 +299,9 @@ impl Context {
             Value::Native(kind) if kind == "typing._GenericAlias" && name == "__init_subclass__" => {
                 self.classes.get("typing._Final").and_then(|&base| self.own_class_attr(base, name))
             }
+            Value::Native(kind) if kind == "type" && name == "__prepare__" => {
+                self.builtins.get("type.__prepare__").copied()
+            }
             Value::Native(kind) if kind == "type" && name == "mro" => {
                 self.builtins.get("type.mro").copied()
             }
@@ -869,7 +872,7 @@ impl Context {
     }
 
     pub(super) fn bind_attribute(&mut self, value: Id, receiver: Id, owner: Id) -> Result<Id> {
-        if matches!(self.heap.get(value), Value::Native(name) if matches!(name.as_str(), "dict.fromkeys" | "mappingproxy.__class_getitem__" | "set.__class_getitem__" | "frozenset.__class_getitem__" | "int.from_bytes" | "float.__getformat__" | "bytes.fromhex" | "bytearray.fromhex") || stdlib::datetime::clock_classmethod(name))
+        if matches!(self.heap.get(value), Value::Native(name) if matches!(name.as_str(), "type.__prepare__" | "dict.fromkeys" | "mappingproxy.__class_getitem__" | "set.__class_getitem__" | "frozenset.__class_getitem__" | "int.from_bytes" | "float.__getformat__" | "bytes.fromhex" | "bytearray.fromhex") || stdlib::datetime::clock_classmethod(name))
         {
             return Ok(self.bind_native_classmethod(value, owner));
         }
@@ -4330,6 +4333,16 @@ impl Context {
     }
 
     fn builtin_attribute(&mut self, obj: Id, name: &str) -> Result<Id> {
+        if name == "__prepare__" && self.is_type_object(obj) {
+            let type_class = self.builtin("type");
+            let owner = if self.direct_subclass(obj, type_class) {
+                obj
+            } else {
+                self.exact_type(obj)?
+            };
+            let prepare = self.builtin("type.__prepare__");
+            return Ok(self.bind_native_classmethod(prepare, owner));
+        }
         if name == "mro" && self.is_type_object(obj) {
             let owner = self.builtin("type");
             let descriptor = self.builtin("type.mro");
@@ -6298,6 +6311,7 @@ impl Context {
                 self.iterator_method(owner, slot, &args, &kwargs)
             }
             Value::Native(name) if name == "type.__new__" => self.type_new(&args, &kwargs),
+            Value::Native(name) if name == "type.__prepare__" => Ok(self.dict(Vec::new())),
             Value::Native(name) if name == "type.mro" => self.type_mro(&args, &kwargs),
             Value::Native(ref name)
                 if let Some((owner, "__new__")) = name.rsplit_once('.')
@@ -7334,11 +7348,9 @@ impl Context {
                 "custom TypedDict metaclass construction is unsupported",
             ));
         }
-        // Metaclasses can define __new__ while inheriting namespace preparation and MRO.
         if !is_abc
             && Some(winner) != typed_dict_meta
-            && (self.class_attr(winner, "__prepare__").is_some()
-                || (self.is_abc_metaclass(winner) && self.class_attr(winner, "__init__").is_some())
+            && ((self.is_abc_metaclass(winner) && self.class_attr(winner, "__init__").is_some())
                 || self
                     .class_attr(winner, "mro")
                     .is_some_and(|method| Some(&method) != self.builtins.get("type.mro"))
@@ -7394,6 +7406,20 @@ impl Context {
             typed_dict_meta,
             enum_namespace.is_some(),
         )?;
+        // A class statement still needs a scope backed by its prepared mapping.
+        // type.__new__ already received the namespace its caller prepared.
+        if let Some(meta) = class_meta
+            && Some(meta) != typed_dict_meta
+            && self.builtins.get("abc.ABCMeta") != Some(&meta)
+            && self
+                .class_attr(meta, "__prepare__")
+                .is_some_and(|hook| Some(&hook) != self.builtins.get("type.__prepare__"))
+        {
+            return Err(Error::new(
+                "NotImplementedError",
+                "custom metaclass construction is unsupported",
+            ));
+        }
         let Value::Function {
             scope: parent,
             code,

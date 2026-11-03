@@ -485,7 +485,7 @@ impl Context {
                 if let Value::Native(kind) = self.heap.get(class)
                     && !matches!(
                         name,
-                        "__init_subclass__" | "__getstate__" | "__reduce_ex__" | "mro"
+                        "__init_subclass__" | "__getstate__" | "__reduce_ex__" | "__prepare__" | "mro"
                     )
                     && !(exception_method && builtins::is_exception(kind))
                 {

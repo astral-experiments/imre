@@ -63,7 +63,66 @@ def helpers():
     assert events == [("prepare", "Failed", (), {"flag": 7})]
 
 
+def metaclass_preparation():
+    # The native type slot must take precedence even on the first lookup.
+    class Later:
+        @classmethod
+        def __prepare__(cls, name, bases):
+            raise AssertionError("looked past type in metaclass MRO")
+
+    class Ordered(type, Later): pass
+
+    assert types.prepare_class("Probe", (), {"metaclass": Ordered}) == (Ordered, {}, {})
+
+    class Plain: pass
+    class Default(type): pass
+    class Child(metaclass=Default): pass
+
+    assert type(Child) is Default
+    assert Plain.__prepare__.__self__ is type
+    assert Default.__prepare__.__self__ is Default
+    assert Child.__prepare__.__self__ is Default
+    assert super(Default, Default).__prepare__.__self__ is Default
+    assert not hasattr(super(Plain, Plain), "__prepare__")
+    first = type.__prepare__()
+    assert first == {} and type.__prepare__("N", (), None, extra=True) is not first
+
+    events = []
+
+    class Meta(type):
+        @classmethod
+        def __prepare__(mcls, name, bases, **kw):
+            ns = super().__prepare__(name, bases, **kw)
+            events.append(("prepare", ns))
+            return ns
+
+        def __new__(mcls, name, bases, ns, **kw):
+            events.append(("new", ns))
+            return super().__new__(mcls, name, bases, ns)
+
+    def body(ns):
+        events.append(("body", ns))
+        ns["answer"] = 42
+
+    created = types.new_class("Created", (), {"metaclass": Meta, "tag": True}, body)
+    assert type(created) is Meta and created.answer == 42
+    assert [name for name, ns in events] == ["prepare", "body", "new"]
+    assert events[0][1] is events[1][1] is events[2][1]
+
+    class Disabled(type):
+        __prepare__ = None
+
+    try:
+        types.new_class("Invalid", (), {"metaclass": Disabled}, body)
+    except TypeError:
+        pass
+    else:
+        raise AssertionError("called body after a non-callable preparation hook")
+    assert len(events) == 3
+
+
 def current():
+    metaclass_preparation()
     helpers()
 
     class First:

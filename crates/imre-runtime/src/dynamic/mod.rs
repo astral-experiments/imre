@@ -2204,7 +2204,7 @@ impl Context {
             self.builtin(symbol);
         }
         let methods = match name {
-            "type" => &["mro"][..],
+            "type" => &["mro", "__prepare__"][..],
             "object" => &[
                 "__hash__",
                 "__ne__",
