@@ -55,6 +55,80 @@ class _WriteBuffer(io.RawIOBase):
         self.fileobj.write(_imre_gzip.flush_writer(self.encoder, mode))
 
 
+class _PathReader:
+    def __init__(self, name):
+        self.handle = _imre_gzip.open(name)
+
+    def read(self, size):
+        return _imre_gzip.read(self.handle, size)
+
+    def read1(self, size):
+        return _imre_gzip.read1(self.handle, size)
+
+    def readline(self, size):
+        return _imre_gzip.readline(self.handle, size)
+
+    def tell(self):
+        return _imre_gzip.tell(self.handle)
+
+    def fileno(self):
+        return _imre_gzip.fileno(self.handle)
+
+    def close(self):
+        _imre_gzip.close(self.handle)
+
+
+class _BorrowedRaw(io.RawIOBase):
+    def __init__(self, fileobj):
+        self.fileobj = fileobj
+        self.decoder = _imre_gzip.decoder()
+        self._size = None
+
+    def readable(self):
+        return True
+
+    def _read(self, size):
+        data = _imre_gzip.raw_read(self.decoder, self.fileobj, size)
+        if size and not data:
+            self._size = self.tell()
+        return data
+
+    def readinto(self, buf):
+        data = self._read(len(buf))
+        buf[:len(data)] = data
+        return len(data)
+
+    def tell(self):
+        return _imre_gzip.raw_tell(self.decoder)
+
+    def seekable(self):
+        # Forward seeks only need read(); a rewind uses the source's seek().
+        return True
+
+    def seek(self, offset, whence=io.SEEK_SET):
+        if whence == io.SEEK_CUR:
+            offset += self.tell()
+        elif whence == io.SEEK_END:
+            if self._size is None:
+                while self._read(io.DEFAULT_BUFFER_SIZE):
+                    pass
+            offset += self._size
+        elif whence != io.SEEK_SET:
+            raise ValueError(f"Invalid value for whence: {whence}")
+
+        position = self.tell()
+        if offset < position:
+            self.fileobj.seek(0)
+            self.decoder = _imre_gzip.decoder()
+            position = 0
+        while position < offset:
+            data = self._read(min(io.DEFAULT_BUFFER_SIZE, offset - position))
+            if not data:
+                break
+            position += len(data)
+        return position
+
+
 class GzipFile(io.BufferedIOBase):
     """A binary file object for gzip-compressed data."""
 
@@ -63,24 +137,30 @@ class GzipFile(io.BufferedIOBase):
     _reader = None
     _writer = None
     myfileobj = None
+    _borrowed_reader = False
 
     def __init__(self, filename=None, mode=None, compresslevel=9, fileobj=None, mtime=None):
         if mode is None and fileobj is not None:
             mode = getattr(fileobj, "mode", "rb")
-            if mode.startswith(("w", "a", "x")):
+            if mode.startswith("r"):
+                mode = "rb"
+            elif mode.startswith(("w", "a", "x")):
                 import warnings
                 warnings.warn(
                     "GzipFile was opened for writing, but this will change in future Python releases.  "
                     "Specify the mode argument for opening it for writing.",
                     FutureWarning, 2,
                 )
-        if mode in ("w", "wb", "a", "ab", "x", "xb"):
-            if filename is None and fileobj is not None:
-                name = getattr(fileobj, "name", "")
-                if not isinstance(name, (str, bytes)):
-                    name = ""
-            else:
-                name = os.fspath(filename)
+        writing = mode in ("w", "wb", "a", "ab", "x", "xb")
+        if not writing and mode not in (None, "r", "rb"):
+            raise ValueError(f"Invalid mode: {mode!r}")
+        if filename is None and fileobj is not None:
+            name = getattr(fileobj, "name", "")
+            if not isinstance(name, (str, bytes)):
+                name = ""
+        else:
+            name = os.fspath(filename)
+        if writing:
             owned = fileobj is None
             if owned:
                 fileobj = io.open(name, mode[0] + "b")
@@ -100,16 +180,16 @@ class GzipFile(io.BufferedIOBase):
             self.myfileobj = fileobj if owned else None
             self._writer = buffer
             return
-        if mode not in (None, "r", "rb"):
-            raise ValueError(f"Invalid mode: {mode!r}")
-        if fileobj is not None:
-            raise io.UnsupportedOperation("gzip reading from a file object is not supported")
-        path = os.fspath(filename)
-        reader = _imre_gzip.open(path)
+        if fileobj is None:
+            reader = _PathReader(name)
+        else:
+            reader = io.BufferedReader(_BorrowedRaw(fileobj))
         if not self.closed:
             self.close()
         self.mode = READ
-        self.name = path
+        self._borrowed_reader = fileobj is not None
+        self.name = name
+        self.fileobj = fileobj
         self._reader = reader
 
     @property
@@ -139,29 +219,31 @@ class GzipFile(io.BufferedIOBase):
         return self._writer.write(data)
 
     def read(self, size=-1):
-        return _imre_gzip.read(self._open_reader(), -1 if size is None else size)
+        return self._open_reader().read(-1 if size is None else size)
 
     def read1(self, size=-1):
         reader = self._open_reader()
-        return _imre_gzip.read1(reader, io.DEFAULT_BUFFER_SIZE if size < 0 else size)
+        return reader.read1(io.DEFAULT_BUFFER_SIZE if size < 0 else size)
 
     def readline(self, size=-1):
-        return _imre_gzip.readline(self._open_reader(), size)
+        return self._open_reader().readline(size)
 
     def seekable(self):
-        if self.mode == WRITE:
+        if self.mode == WRITE or self._borrowed_reader:
             return True
         return super().seekable()
 
     def tell(self):
         self._check_open()
         if self.mode == READ:
-            return _imre_gzip.tell(self._reader)
+            return self._reader.tell()
         self._writer.flush()
         return self._writer.raw.size
 
     def seek(self, offset, whence=io.SEEK_SET):
         if self.mode != WRITE:
+            if self._borrowed_reader:
+                return self._open_reader().seek(offset, whence)
             return super().seek(offset, whence)
         position = self.tell()
         if whence == io.SEEK_CUR:
@@ -180,9 +262,9 @@ class GzipFile(io.BufferedIOBase):
         return self._writer.raw.size
 
     def fileno(self):
-        if self.mode == WRITE:
+        if self.mode == WRITE or self._borrowed_reader:
             return self.fileobj.fileno()
-        return _imre_gzip.fileno(self._open_reader())
+        return self._open_reader().fileno()
 
     def flush(self, zlib_mode=_Z_SYNC_FLUSH):
         self._check_open()
@@ -214,7 +296,8 @@ class GzipFile(io.BufferedIOBase):
         reader = self._reader
         if reader is not None:
             self._reader = None
-            _imre_gzip.close(reader)
+            self.fileobj = None
+            reader.close()
 
 
 def open(filename, mode="rb", compresslevel=9, encoding=None, errors=None, newline=None):

@@ -1350,6 +1350,7 @@ pub(super) enum Value {
     File(crate::shared::Shared<super::stdlib::BinaryFile>),
     TextFile(BoxedTextFile),
     GzipReader(crate::Shared<std::cell::RefCell<crate::objects::FileState>>),
+    GzipDecoder(crate::Shared<std::cell::RefCell<Option<crate::objects::GzipDecoder>>>),
     GzipWriter(crate::Shared<std::cell::RefCell<Option<super::stdlib::zlib::Stream>>>),
     RegexScanner {
         pattern: Id,
@@ -1463,7 +1464,7 @@ impl Value {
             Self::ProcessHandle { .. } => "_imre_subprocess.Handle",
             Self::ProcessPreparation(_) => "_imre_subprocess.Prepared",
             Self::BufferedRandom(..) => "_io.BufferedRandom",
-            Self::GzipReader(_) | Self::GzipWriter(_) => "object",
+            Self::GzipReader(_) | Self::GzipWriter(_) | Self::GzipDecoder(_) => "object",
             Self::GenericAliasIterator(_) => "generic_alias_iterator",
             Self::MemoryIterator { .. } => "memory_iterator",
             Self::SequenceIterator { .. } => "iterator",
@@ -2128,6 +2129,7 @@ impl Value {
             | Self::TokenMissing
             | Self::ProcessPreparation(_)
             | Self::GzipReader(_)
+            | Self::GzipDecoder(_)
             | Self::GzipWriter(_)
             | Self::ProcessHandle { .. } => {}
             #[cfg(unix)]
