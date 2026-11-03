@@ -131,11 +131,6 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
                 include_str!("../stdlib/importlib/metadata_entrypoints.py"),
             ),
         )),
-        // CPython 3.14.5 Lib/queue.py with condition variables backed by native locks.
-        "_imre_queue_sync" => Some((
-            "_imre_queue_sync.py",
-            include_str!("../stdlib/_imre_queue_sync.py"),
-        )),
         "queue" => Some(("queue.py", include_str!("../stdlib/queue.py"))),
         "csv" => Some((
             "csv.py",
