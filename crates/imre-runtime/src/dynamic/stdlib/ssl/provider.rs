@@ -6,7 +6,7 @@ use std::sync::OnceLock;
 use crate::objects::socket;
 
 pub(in crate::dynamic) mod bio;
-mod certificate;
+pub(super) mod certificate;
 pub(super) mod ciphers;
 pub(in crate::dynamic) mod objects;
 mod trust;
@@ -447,6 +447,31 @@ pub(crate) struct Context {
     pub(super) check_hostname: bool,
 }
 
+/// References retained under the OpenSSL store lock, in provider order.
+struct StoreSnapshot {
+    api: &'static Api,
+    certificates: Vec<Handle>,
+    crls: c_int,
+}
+
+impl StoreSnapshot {
+    fn authorities(&self) -> impl Iterator<Item = Handle> + '_ {
+        self.certificates.iter().copied().filter(|&cert| {
+            // SAFETY: this snapshot owns an X509 reference for every entry.
+            unsafe { (self.api.X509_check_ca)(cert) != 0 }
+        })
+    }
+}
+
+impl Drop for StoreSnapshot {
+    fn drop(&mut self) {
+        for &cert in &self.certificates {
+            // SAFETY: release our reference, including on partial snapshot or decode failure.
+            unsafe { (self.api.X509_free)(cert) };
+        }
+    }
+}
+
 impl Context {
     pub(super) fn new(protocol: Protocol) -> Result<Self, Failure> {
         let api = api().ok_or_else(|| Failure::Other("OpenSSL 3 TLS is unavailable".into()))?;
@@ -645,8 +670,21 @@ impl Context {
     }
 
     pub(super) fn cert_store_stats(&self) -> Option<[c_int; 3]> {
+        let snapshot = self.store_snapshot()?;
+        Some([
+            snapshot.certificates.len() as c_int,
+            snapshot.crls,
+            snapshot.authorities().count() as c_int,
+        ])
+    }
+
+    fn store_snapshot(&self) -> Option<StoreSnapshot> {
         let api = self.api;
-        let mut certificates = Vec::new();
+        let mut snapshot = StoreSnapshot {
+            api,
+            certificates: Vec::new(),
+            crls: 0,
+        };
         // SAFETY: the context owns this store. Retain each X509 while holding the store
         // lock so we can classify it after unlocking. This works on OpenSSL 3.0–3.2
         // as well, which do not export X509_STORE_get1_objects.
@@ -655,13 +693,13 @@ impl Context {
             if store.is_null() || (api.X509_STORE_lock)(store) != 1 {
                 return None;
             }
-            let snapshot = (|| {
+            let captured = (|| {
                 let objects = (api.X509_STORE_get0_objects)(store);
                 let count = (api.OPENSSL_sk_num)(objects);
-                certificates
+                snapshot
+                    .certificates
                     .try_reserve_exact(usize::try_from(count).ok()?)
                     .ok()?;
-                let mut crls = 0;
                 for index in 0..count {
                     let object = NonNull::new((api.OPENSSL_sk_value)(objects, index))?;
                     match (api.X509_OBJECT_get_type)(object.as_ptr()) {
@@ -671,29 +709,18 @@ impl Context {
                             if cert.is_null() || (api.X509_up_ref)(cert) != 1 {
                                 return None;
                             }
-                            certificates.push(cert);
+                            snapshot.certificates.push(cert);
                         }
-                        2 => crls += 1, // X509_LU_CRL
+                        2 => snapshot.crls += 1, // X509_LU_CRL
                         _ => (),
                     }
                 }
-                Some(crls)
+                Some(())
             })();
-            let crls = if (api.X509_STORE_unlock)(store) == 1 {
-                snapshot
-            } else {
-                None
-            };
-            let x509 = certificates.len() as c_int;
-            let mut ca = 0;
-            // Release every acquired reference, including those retained before a failure.
-            for cert in certificates {
-                if crls.is_some() && (api.X509_check_ca)(cert) != 0 {
-                    ca += 1;
-                }
-                (api.X509_free)(cert);
+            if (api.X509_STORE_unlock)(store) != 1 {
+                return None;
             }
-            crls.map(|crls| [x509, crls, ca])
+            captured.map(|()| snapshot)
         }
     }
 

@@ -39,6 +39,7 @@ pub(in crate::dynamic) fn install(ctx: &mut Context, scope: Id) -> Result<()> {
         "options",
         "verify_flags",
         "cert_store_stats",
+        "get_ca_certs",
         "session_stats",
         "raise_context_receiver_error",
         "default_verify_paths",
@@ -488,6 +489,10 @@ pub(super) fn call(
                 .map(|(name, count)| (ctx.text(name), ctx.int(count)))
                 .collect();
             Ok(ctx.dict(entries))
+        }
+        ("get_ca_certs", &[handle, binary]) => {
+            let binary = ctx.truth(binary)?;
+            provider::certificate::ca_certs(ctx, handle, binary)
         }
         ("cert_store_stats", &[handle]) => {
             let counts = context(ctx, handle)?
