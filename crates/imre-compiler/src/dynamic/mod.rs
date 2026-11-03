@@ -485,7 +485,11 @@ pub(crate) fn function_type_params<'a>(
     (!body.unsupported).then_some(params)
 }
 
-fn imports(source: &str, kind: SourceKind) -> Result<Imports, String> {
+fn scan_imports(
+    source: &str,
+    kind: SourceKind,
+    getter: Option<&mut Imports>,
+) -> Result<Imports, String> {
     let normalized = crate::normalize_source(source, kind)?;
     crate::analysis::check_source_complexity(&normalized).map_err(str::to_owned)?;
     let parsed = ruff_python_parser::parse_module(&normalized).map_err(|e| e.to_string())?;
@@ -496,7 +500,27 @@ fn imports(source: &str, kind: SourceKind) -> Result<Imports, String> {
     imports.runtime_imports = body.iter().any(|stmt| {
         matches!(stmt, Stmt::FunctionDef(function) if function_type_params(function, imports.private_names.string_annotations, false, Some(&imports.private_names)).is_some())
     });
+    let mut getter_body = Vec::new();
+    if getter.is_some() {
+        for stmt in &mut body {
+            if let Stmt::FunctionDef(function) = stmt
+                && function.name.as_str() == "__getattr__"
+            {
+                getter_body.extend(std::mem::take(&mut function.body));
+            }
+        }
+    }
     imports.visit_body(&body);
+    if let Some(getter) = getter
+        && !getter_body.is_empty()
+    {
+        // sys.path and pkgutil.get_data can add source hints through module aliases.
+        getter.sys_names = std::mem::take(&mut imports.sys_names);
+        getter.pkgutil_names = std::mem::take(&mut imports.pkgutil_names);
+        getter.get_data_names = std::mem::take(&mut imports.get_data_names);
+        getter.machinery_names.clone_from(&imports.machinery_names);
+        getter.visit_body(&getter_body);
+    }
     Ok(imports)
 }
 
@@ -606,13 +630,14 @@ pub(crate) fn compile(
     if !object_hint && !provider_hint && !ordered_command {
         return Ok(None);
     }
-    let Ok(mut first) = imports(
+    let Ok(mut first) = scan_imports(
         &src,
         if command.is_some() {
             SourceKind::Command
         } else {
             SourceKind::File
         },
+        None,
     ) else {
         return Ok(None);
     };
@@ -744,10 +769,18 @@ pub(crate) fn compile(
     let mut uses_import_builtin = false;
     let mut uses_exec = false;
     let mut bundled_only = false;
+    let mut getters = VecDeque::new();
+    let mut through_getter = false;
     loop {
         let (owner, package, imports) = if let Some(next) = work.pop_front() {
             next
+        } else if let Some(next) = getters.pop_front() {
+            // Keep project shadows for a bundled module's lazy attributes. The
+            // ordinary graph has already checked any modules the user imported.
+            through_getter = true;
+            next
         } else {
+            through_getter = false;
             // Collect late imports and their bundled dependencies after the explicit
             // file graph, without parsing unrelated modules in project directories.
             let mut imports = Imports::default();
@@ -799,6 +832,7 @@ pub(crate) fn compile(
             && !options.runtime_imports
             && !registered_imports.called
             && (!provider_script || owner == "__main__")
+            && !through_getter
             && imports.needs_typed_machinery()
             && !matches!(operation, Some(ObjectOperation::TracedEntry))
             // Enforce the checked-file machinery contract on the original graph.
@@ -877,7 +911,12 @@ pub(crate) fn compile(
                 if let Some((filename, source)) = bundled {
                     let path = Path::new(bundled_root).join(filename);
                     let package = path.ends_with("__init__.py");
-                    let imports = imports_for_module(&path, &source)?;
+                    let mut getter = Imports::default();
+                    let imports = scan_imports(&source, SourceKind::File, Some(&mut getter))
+                        .map_err(|e| format!("{}: {e}", path.display()))?;
+                    if !getter.names.is_empty() || getter.uses_exec {
+                        getters.push_back((prefix.clone(), package, getter));
+                    }
                     sources.push((prefix.clone(), path, source.into_owned()));
                     work.push_back((prefix.clone(), package, imports));
                 }
@@ -1158,5 +1197,5 @@ fn bundled_module_source(name: &str) -> Option<(&'static str, std::borrow::Cow<'
 }
 
 fn imports_for_module(path: &Path, src: &str) -> Result<Imports, String> {
-    imports(src, SourceKind::File).map_err(|e| format!("{}: {e}", path.display()))
+    scan_imports(src, SourceKind::File, None).map_err(|e| format!("{}: {e}", path.display()))
 }
