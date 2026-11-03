@@ -39,6 +39,7 @@ pub(in crate::dynamic) fn install(ctx: &mut Context, scope: Id) -> Result<()> {
         "options",
         "verify_flags",
         "cert_store_stats",
+        "session_stats",
         "raise_context_receiver_error",
         "default_verify_paths",
         "default_verify_flags",
@@ -307,6 +308,14 @@ pub(super) fn call(
                     "descriptor '{method}' for '_ssl._SSLContext' objects doesn't apply to a '{kind}' object"
                 ),
             ))
+        }
+        ("session_stats", &[handle]) => {
+            let counts = context(ctx, handle)?.borrow().session_stats();
+            let entries = counts
+                .into_iter()
+                .map(|(name, count)| (ctx.text(name), ctx.int(count)))
+                .collect();
+            Ok(ctx.dict(entries))
         }
         ("cert_store_stats", &[handle]) => {
             let counts = context(ctx, handle)?
