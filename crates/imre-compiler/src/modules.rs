@@ -1746,6 +1746,12 @@ impl IntrinsicModule {
             (Self::Locale | Self::LocaleNative, "getencoding") => {
                 Intrinsic::SysEncoding(SysEncoding::Locale)
             }
+            (Self::LocaleNative, "localeconv") => {
+                Intrinsic::ObjectRuntimeExport("_locale.localeconv")
+            }
+            (Self::Locale | Self::LocaleNative, "CHAR_MAX") => {
+                Intrinsic::ObjectRuntimeExport("_locale.CHAR_MAX")
+            }
             (Self::LocaleNative, "setlocale") => {
                 Intrinsic::ObjectRuntimeExport("_locale.setlocale")
             }

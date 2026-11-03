@@ -1,10 +1,11 @@
-"""Locale categories and process locale selection."""
+"""Locale categories, process locale selection, and number formatting."""
 
 import sys
+from functools import wraps as _wraps
 
 from _locale import (
-    Error, LC_ALL, LC_COLLATE, LC_CTYPE, LC_MESSAGES, LC_MONETARY, LC_NUMERIC,
-    LC_TIME, getencoding, setlocale as _setlocale,
+    CHAR_MAX, Error, LC_ALL, LC_COLLATE, LC_CTYPE, LC_MESSAGES, LC_MONETARY, LC_NUMERIC,
+    LC_TIME, getencoding, localeconv as _localeconv, setlocale as _setlocale,
 )
 from _imre_gettext_locale import normalize
 
@@ -113,3 +114,164 @@ def getpreferredencoding(do_setlocale=True):
         return getencoding()
     finally:
         setlocale(LC_CTYPE, old_loc)
+
+
+# Number formatting from CPython 3.14.5 Lib/locale.py (PSF-2.0).
+# With this dict, you can override some items of localeconv's return value.
+# This is useful for testing purposes.
+_override_localeconv = {}
+
+@_wraps(_localeconv)
+def localeconv():
+    d = _localeconv()
+    if _override_localeconv:
+        d.update(_override_localeconv)
+    return d
+
+
+### Number formatting APIs
+
+# Author: Martin von Loewis
+# improved by Georg Brandl
+
+# Iterate over grouping intervals
+def _grouping_intervals(grouping):
+    last_interval = None
+    for interval in grouping:
+        # if grouping is -1, we are done
+        if interval == CHAR_MAX:
+            return
+        # 0: re-use last group ad infinitum
+        if interval == 0:
+            if last_interval is None:
+                raise ValueError("invalid grouping")
+            while True:
+                yield last_interval
+        yield interval
+        last_interval = interval
+
+#perform the grouping from right to left
+def _group(s, monetary=False):
+    conv = localeconv()
+    thousands_sep = conv[monetary and 'mon_thousands_sep' or 'thousands_sep']
+    grouping = conv[monetary and 'mon_grouping' or 'grouping']
+    if not grouping:
+        return (s, 0)
+    if s[-1] == ' ':
+        stripped = s.rstrip()
+        right_spaces = s[len(stripped):]
+        s = stripped
+    else:
+        right_spaces = ''
+    left_spaces = ''
+    groups = []
+    for interval in _grouping_intervals(grouping):
+        if not s or s[-1] not in "0123456789":
+            # only non-digit characters remain (sign, spaces)
+            left_spaces = s
+            s = ''
+            break
+        groups.append(s[-interval:])
+        s = s[:-interval]
+    if s:
+        groups.append(s)
+    groups.reverse()
+    return (
+        left_spaces + thousands_sep.join(groups) + right_spaces,
+        len(thousands_sep) * (len(groups) - 1)
+    )
+
+# Strip a given amount of excess padding from the given string
+def _strip_padding(s, amount):
+    lpos = 0
+    while amount and s[lpos] == ' ':
+        lpos += 1
+        amount -= 1
+    rpos = len(s) - 1
+    while amount and s[rpos] == ' ':
+        rpos -= 1
+        amount -= 1
+    return s[lpos:rpos+1]
+
+_percent_re = None
+
+def _format(percent, value, grouping=False, monetary=False, *additional):
+    if additional:
+        formatted = percent % ((value,) + additional)
+    else:
+        formatted = percent % value
+    if percent[-1] in 'eEfFgGdiu':
+        formatted = _localize(formatted, grouping, monetary)
+    return formatted
+
+# Transform formatted as locale number according to the locale settings
+def _localize(formatted, grouping=False, monetary=False):
+    # floats and decimal ints need special action!
+    if '.' in formatted:
+        seps = 0
+        parts = formatted.split('.')
+        if grouping:
+            parts[0], seps = _group(parts[0], monetary=monetary)
+        decimal_point = localeconv()[monetary and 'mon_decimal_point'
+                                              or 'decimal_point']
+        formatted = decimal_point.join(parts)
+        if seps:
+            formatted = _strip_padding(formatted, seps)
+    else:
+        seps = 0
+        if grouping:
+            formatted, seps = _group(formatted, monetary=monetary)
+        if seps:
+            formatted = _strip_padding(formatted, seps)
+    return formatted
+
+def format_string(f, val, grouping=False, monetary=False):
+    """Formats a string in the same way that the % formatting would use,
+    but takes the current locale into account.
+
+    Grouping is applied if the third parameter is true.
+    Conversion uses monetary thousands separator and grouping strings if
+    forth parameter monetary is true."""
+    from _collections_abc import Mapping
+
+    global _percent_re
+    if _percent_re is None:
+        import re
+
+        _percent_re = re.compile(r'%(?:\((?P<key>.*?)\))?(?P<modifiers'
+                                 r'>[-#0-9 +*.hlL]*?)[eEfFgGdiouxXcrs%]')
+
+    percents = list(_percent_re.finditer(f))
+    new_f = _percent_re.sub('%s', f)
+
+    if isinstance(val, Mapping):
+        new_val = []
+        for perc in percents:
+            if perc.group()[-1]=='%':
+                new_val.append('%')
+            else:
+                new_val.append(_format(perc.group(), val, grouping, monetary))
+    else:
+        if not isinstance(val, tuple):
+            val = (val,)
+        new_val = []
+        i = 0
+        for perc in percents:
+            if perc.group()[-1]=='%':
+                new_val.append('%')
+            else:
+                starcount = perc.group('modifiers').count('*')
+                new_val.append(_format(perc.group(),
+                                      val[i],
+                                      grouping,
+                                      monetary,
+                                      *val[i+1:i+1+starcount]))
+                i += (1 + starcount)
+    val = tuple(new_val)
+
+    return new_f % val
+
+
+def localize(string, grouping=False, monetary=False):
+    """Parses a string as locale number according to the locale settings."""
+    return _localize(string, grouping, monetary)

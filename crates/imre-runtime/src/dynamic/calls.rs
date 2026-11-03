@@ -3296,6 +3296,12 @@ impl Context {
                             return Ok(self.text(text));
                         }
                         let value = match name {
+                            "__doc__" if method == "_locale.localeconv" => {
+                                Some("Returns numeric and monetary locale-specific parameters.")
+                            }
+                            "__text_signature__" if method == "_locale.localeconv" => {
+                                Some("($module, /)")
+                            }
                             "__doc__" if method == "posix.sysconf" => {
                                 Some("Return an integer-valued system configuration variable.")
                             }
