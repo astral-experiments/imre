@@ -1,0 +1,17 @@
+id	occurrence	profile	mode	backend	registered	ran	callback	exit	witness	assertion
+test.test_annotationlib.TestForwardRefClass.test_evaluate_forwardref_format	1	stock-full	pass	cpython	1	1	ok	0	-	-
+test.test_annotationlib.TestForwardRefClass.test_evaluate_forwardref_format	1	stock-full	wrong	cpython	1	1	FAIL	1	OBSERVED a + b {'a': 1, 'b': 2} 3 | WRONG_ACTUAL 4	AssertionError: 4 != 3
+test.test_annotationlib.TestForwardRefClass.test_evaluate_forwardref_format	1	stock-projection	pass	cpython	1	1	ok	0	-	-
+test.test_annotationlib.TestForwardRefClass.test_evaluate_forwardref_format	1	stock-projection	wrong	cpython	1	1	FAIL	1	OBSERVED a + b {'a': 1, 'b': 2} 3 | WRONG_ACTUAL 4	AssertionError: 4 != 3
+test.test_annotationlib.TestForwardRefClass.test_evaluate_forwardref_format	1	ordinary-O0	pass	imre	1	1	ok	0	-	-
+test.test_annotationlib.TestForwardRefClass.test_evaluate_forwardref_format	1	ordinary-O0	wrong	imre	1	1	FAIL	1	OBSERVED a + b {'a': 1, 'b': 2} 3 | WRONG_ACTUAL 4	AssertionError: 4 != 3
+test.test_annotationlib.TestForwardRefClass.test_evaluate_forwardref_format	1	ordinary-O3	pass	imre	1	1	ok	0	-	-
+test.test_annotationlib.TestForwardRefClass.test_evaluate_forwardref_format	1	ordinary-O3	wrong	imre	1	1	FAIL	1	OBSERVED a + b {'a': 1, 'b': 2} 3 | WRONG_ACTUAL 4	AssertionError: 4 != 3
+test.test_typing.NoTypeCheckTests.test_no_type_check_forward_ref_as_string	1	stock-full	pass	cpython	1	1	ok	0	-	-
+test.test_typing.NoTypeCheckTests.test_no_type_check_forward_ref_as_string	1	stock-full	wrong	cpython	1	1	FAIL	1	OBSERVED F ClassVar[int] | WRONG_ACTUAL F ClassVar[str]	AssertionError: {'foo': typing.ClassVar[str]} != {'foo': typing.ClassVar[int]}
+test.test_typing.NoTypeCheckTests.test_no_type_check_forward_ref_as_string	1	stock-projection	pass	cpython	1	1	ok	0	-	-
+test.test_typing.NoTypeCheckTests.test_no_type_check_forward_ref_as_string	1	stock-projection	wrong	cpython	1	1	FAIL	1	OBSERVED F ClassVar[int] | WRONG_ACTUAL F ClassVar[str]	AssertionError: {'foo': typing.ClassVar[str]} != {'foo': typing.ClassVar[int]}
+test.test_typing.NoTypeCheckTests.test_no_type_check_forward_ref_as_string	1	ordinary-O0	pass	imre	1	1	ok	0	-	-
+test.test_typing.NoTypeCheckTests.test_no_type_check_forward_ref_as_string	1	ordinary-O0	wrong	imre	1	1	FAIL	1	OBSERVED F ClassVar[int] | WRONG_ACTUAL F ClassVar[str]	AssertionError: {'foo': typing.ClassVar[str]} != {'foo': typing.ClassVar[int]}
+test.test_typing.NoTypeCheckTests.test_no_type_check_forward_ref_as_string	1	ordinary-O3	pass	imre	1	1	ok	0	-	-
+test.test_typing.NoTypeCheckTests.test_no_type_check_forward_ref_as_string	1	ordinary-O3	wrong	imre	1	1	FAIL	1	OBSERVED F ClassVar[int] | WRONG_ACTUAL F ClassVar[str]	AssertionError: {'foo': typing.ClassVar[str]} != {'foo': typing.ClassVar[int]}
