@@ -184,7 +184,92 @@ def reported_instance_checks():
         raise AssertionError("isinstance suppressed the reported class error")
 
 
+def class_reassignment():
+    import gc
+    import weakref
+
+    class Owner:
+        pass
+
+    class Reader:
+        def read(self):
+            return self.left, self.right
+
+    class Upgraded(Reader, Owner):
+        pass
+
+    class Slotted:
+        __slots__ = ("left",)
+
+    class InheritedSlot(Slotted):
+        pass
+
+    prepared = Upgraded()
+    prepared.right, prepared.left = 3, 4
+    for materialize in (False, True):
+        owner = Owner()
+        owner.left, owner.right = 1, 2
+        namespace = owner.__dict__ if materialize else None
+        ref = weakref.ref(owner)
+        owner.__class__ = Upgraded
+        assert type(owner) is owner.__class__ is Upgraded and ref() is owner
+        assert owner.read() == (1, 2) and prepared.read() == (4, 3)
+        if materialize:
+            assert owner.__dict__ is namespace
+        assert owner.__dict__ == {"left": 1, "right": 2}
+
+        for invalid in (17, int, Slotted, InheritedSlot):
+            try:
+                owner.__class__ = invalid
+            except TypeError:
+                pass
+            else:
+                raise AssertionError("accepted an incompatible class")
+            assert type(owner) is Upgraded and owner.read() == (1, 2)
+
+        object.__dict__["__class__"].__set__(owner, Owner)
+        assert type(owner) is Owner and ref() is owner and not hasattr(owner, "read")
+
+    class Managed:
+        @property
+        def __class__(self):
+            return self.reported
+
+        @__class__.setter
+        def __class__(self, value):
+            self.reported = value
+
+    managed = Managed()
+    managed.__class__ = Upgraded
+    assert type(managed) is Managed and managed.__class__ is Upgraded
+
+    class ClassSlot:
+        __slots__ = ("__class__",)
+
+    slotted = ClassSlot()
+    slotted.__class__ = 42
+    assert type(slotted) is ClassSlot and slotted.__class__ == 42
+
+    finalized = []
+
+    class Notifying(Owner):
+        def __del__(self):
+            finalized.append(self.label)
+
+    def release(initial, replacement, label):
+        obj = initial()
+        obj.label = label
+        obj.__class__ = replacement
+        return weakref.ref(obj)
+
+    added = release(Owner, Notifying, "added")
+    removed = release(Notifying, Owner, "removed")
+    gc.collect()
+    assert added() is None and removed() is None and finalized == ["added"]
+
+
 def current():
+    class_reassignment()
     ordinary_slot_members()
     class_patterns()
     reported_instance_checks()
