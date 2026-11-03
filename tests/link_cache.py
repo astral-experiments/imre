@@ -1,6 +1,7 @@
 """Exercise Linux linker options against the shared native executable and object caches."""
 
 import argparse
+import ast
 import os
 from pathlib import Path
 import re
@@ -27,6 +28,22 @@ def runtime_functions(path):
     ))
 
 
+def check_compiler_search_path(compiler, root, tool_path):
+    source = "import os, sys; assert sys.executable == sys.argv[1]; print(os.environ.copy())"
+    command = [compiler, "-c", source, compiler]
+    for env in ({}, {"PATH": tool_path}):
+        child = subprocess.run(command, cwd=root, env=env, capture_output=True, check=True)
+        observed = ast.literal_eval(child.stdout.decode())
+        observed.pop("LC_CTYPE", None)  # Python may coerce the locale at startup.
+        assert observed == env, observed
+
+    empty_bin = root / "empty-bin"
+    empty_bin.mkdir()
+    child = subprocess.run(command, cwd=root, env={"PATH": str(empty_bin)}, capture_output=True)
+    assert child.returncode == 1 and not child.stdout, child
+    assert b"Could not run clang-18 or clang" in child.stderr and b"--clang" in child.stderr, child
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--compiler", required=True, type=Path)
@@ -35,6 +52,7 @@ def main():
         parser.error("run with assertions enabled")
     with tempfile.TemporaryDirectory(prefix="imre-link-cache-") as td:
         root = Path(td)
+        check_compiler_search_path(compiler, root, os.environ["PATH"])
         environment = dict(os.environ, IMRE_CACHE_DIR=str(root / "cache"), IMRE_CACHE_TRACE="1")
         for key in ("IMREFLAGS", "IMRE_ENCODED_FLAGS"):
             environment.pop(key, None)

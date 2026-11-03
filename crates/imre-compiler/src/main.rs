@@ -541,6 +541,18 @@ fn run() -> Result<ExitCode, String> {
         .arg("-o")
         .arg(staged_output.as_ref().unwrap_or(&output));
     let invoke = |driver: &mut Command| {
+        // An unbundled Clang also needs to find its linker when PATH is absent.
+        #[cfg(target_os = "linux")]
+        if bundled.is_none() && std::env::var_os("PATH").is_none() {
+            let path = option_env!("IMRE_DEFAULT_TOOL_PATH").unwrap_or("/bin:/usr/bin");
+            if std::env::split_paths(OsStr::new(path)).any(|dir| !dir.is_absolute()) {
+                return Err(std::io::Error::new(
+                    ErrorKind::InvalidInput,
+                    "IMRE_DEFAULT_TOOL_PATH must contain only absolute directories",
+                ));
+            }
+            driver.env("PATH", path);
+        }
         if link.verbose {
             eprintln!("{driver:?}");
         }
