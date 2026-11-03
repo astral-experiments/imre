@@ -24,6 +24,13 @@ def current():
     sys.version = original
     assert platform.python_version() == original.split()[0]
 
+    if os.name != "nt":
+        assert platform.win32_ver() == ("", "", "", "")
+        assert platform.win32_ver("fallback", "10.0.22000", "SP", "type") == (
+            "11", "10.0.22000", "SP", "type"
+        )
+
+    linux_platform = None
     confstr = getattr(os, "confstr", None)
     executable = sys.executable
     try:
@@ -34,12 +41,22 @@ def current():
                 reported = None
             if reported:
                 assert platform.libc_ver() == tuple(reported.split(maxsplit=1))
+                if sys.platform == "linux":
+                    platform.invalidate_caches()
+                    host = os.uname()
+                    linux_platform = platform.platform()
+                    assert linux_platform.startswith(f"Linux-{host.release}-{host.machine}")
+                    assert linux_platform.endswith("-with-" + "".join(platform.libc_ver()))
 
         def alternate(name):
             assert name == "CS_GNU_LIBC_VERSION"
             return "other   1.2 build"
 
         os.confstr = alternate
+        if linux_platform is not None:
+            assert platform.platform() == linux_platform
+            platform.invalidate_caches()
+            assert platform.platform().endswith("-with-other1.2_build")
         assert platform.libc_ver(lib="fallback", version="0") == ("other", "1.2 build")
 
         def unavailable(name):
@@ -54,6 +71,8 @@ def current():
             del os.confstr
         else:
             os.confstr = confstr
+        if linux_platform is not None:
+            platform.invalidate_caches()
 
     missing = object()
     saved = sys.modules.get("winreg", missing)
