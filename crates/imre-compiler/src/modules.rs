@@ -1428,6 +1428,10 @@ impl IntrinsicModule {
                 "cache" => crate::ir::LinecacheOperation::Cache,
                 _ => return None,
             }),
+            (Self::Inspect, "getmembers") => Intrinsic::ScopedObjectExport("inspect.getmembers"),
+            (Self::Inspect, "getmembers_static") => {
+                Intrinsic::ScopedObjectExport("inspect.getmembers_static")
+            }
             (Self::Inspect, "isdatadescriptor") => {
                 Intrinsic::ScopedObjectExport("inspect.isdatadescriptor")
             }
