@@ -1,4 +1,4 @@
-use super::{Codec, Context, Cookie, Error, Id, NATIVE_ORDER, Result, StreamCodec};
+use super::{Codec, Context, Cookie, Error, Id, NATIVE_ORDER, Result, StreamCodec, Value};
 use std::rc::Rc;
 
 #[derive(Clone)]
@@ -10,6 +10,8 @@ pub(super) struct Snapshot {
 /// Keep incomplete encoding sequences and CRLF pairs across arbitrary binary read boundaries.
 pub(super) struct Reader {
     text: String,
+    // Each surrogate occupies one U+FFFD in text. Offsets distinguish it from a real U+FFFD.
+    surrogates: Vec<(usize, u32)>,
     cursor: usize,
     chunk_start: usize,
     // CPython distinguishes no decoded chunk from an empty chunk at sized-read EOF.
@@ -34,6 +36,7 @@ impl Reader {
     pub(super) fn at(beginning: bool) -> Self {
         Self {
             text: String::new(),
+            surrogates: Vec::new(),
             cursor: 0,
             chunk_start: 0,
             decoded_chunk_nonempty: None,
@@ -77,6 +80,7 @@ impl Reader {
 
     pub(super) fn discard(&mut self) {
         self.text.clear();
+        self.surrogates.clear();
         self.cursor = 0;
         self.chunk_start = 0;
         self.decoded_chunk_nonempty = None;
@@ -303,56 +307,99 @@ impl Reader {
         Ok((codec, raw))
     }
 
+    fn push_translated(&mut self, c: char, translate: bool) {
+        if self.cr {
+            self.cr = false;
+            if c == '\n' {
+                self.seen |= 4;
+                if !translate {
+                    self.text.push('\r');
+                }
+                self.text.push('\n');
+                return;
+            }
+            self.seen |= 1;
+            self.text.push(if translate { '\n' } else { '\r' });
+        }
+        if c == '\r' {
+            self.cr = true;
+        } else {
+            if c == '\n' {
+                self.seen |= 2;
+            }
+            self.text.push(c);
+        }
+    }
+
     pub(super) fn append(
         &mut self,
-        decoded: &str,
+        decoded: &Value,
         newline: Option<&str>,
         end: bool,
     ) -> Result<usize> {
-        if self.cursor != 0 {
-            self.text.drain(..self.cursor);
-            self.cursor = 0;
-        }
-        self.chunk_start = self.text.len();
-        let length = decoded
-            .len()
+        let (bytes, marks) = match decoded {
+            Value::Str(s) => (s.len(), 0),
+            Value::SurrogateStr(points) => {
+                let mut bytes = 0;
+                let mut marks = 0;
+                for &point in points {
+                    let c = char::from_u32(point);
+                    marks += usize::from(c.is_none());
+                    bytes += c.unwrap_or(char::REPLACEMENT_CHARACTER).len_utf8();
+                }
+                (bytes, marks)
+            }
+            _ => unreachable!("validated decoded text"),
+        };
+        let bytes = bytes
             .checked_add(usize::from(self.cr))
             .ok_or_else(crate::Error::allocation)?;
         self.text
-            .try_reserve(length)
+            .try_reserve(bytes.saturating_sub(self.cursor))
             .map_err(|_| crate::Error::allocation())?;
-        if matches!(newline, None | Some("")) {
-            let translate = newline.is_none();
-            for c in decoded.chars() {
-                if self.cr {
-                    self.cr = false;
-                    if c == '\n' {
-                        self.seen |= 4;
-                        if !translate {
-                            self.text.push('\r');
-                        }
-                        self.text.push('\n');
-                        continue;
-                    }
-                    self.seen |= 1;
-                    self.text.push(if translate { '\n' } else { '\r' });
-                }
-                if c == '\r' {
-                    self.cr = true;
-                } else {
-                    if c == '\n' {
-                        self.seen |= 2;
-                    }
-                    self.text.push(c);
+        let consumed = self.surrogates.partition_point(|&(at, _)| at < self.cursor);
+        self.surrogates
+            .try_reserve(marks.saturating_sub(consumed))
+            .map_err(|_| crate::Error::allocation())?;
+        if self.cursor != 0 {
+            self.text.drain(..self.cursor);
+            self.surrogates.drain(..consumed);
+            for (at, _) in &mut self.surrogates {
+                *at -= self.cursor;
+            }
+            self.cursor = 0;
+        }
+        self.chunk_start = self.text.len();
+        let universal = matches!(newline, None | Some(""));
+        let translate = newline.is_none();
+        match decoded {
+            Value::Str(s) if !universal => self.text.push_str(s),
+            Value::Str(s) => {
+                for c in s.chars() {
+                    self.push_translated(c, translate);
                 }
             }
-            if end && self.cr {
-                self.seen |= 1;
-                self.text.push(if translate { '\n' } else { '\r' });
-                self.cr = false;
+            Value::SurrogateStr(points) => {
+                for &point in points {
+                    let scalar = char::from_u32(point);
+                    let c = scalar.unwrap_or(char::REPLACEMENT_CHARACTER);
+                    if universal {
+                        self.push_translated(c, translate);
+                    } else {
+                        self.text.push(c);
+                    }
+                    if scalar.is_none() {
+                        self.surrogates
+                            .push((self.text.len() - c.len_utf8(), point));
+                    }
+                }
             }
-        } else {
-            self.text.push_str(decoded);
+            _ => unreachable!("validated decoded text"),
+        }
+        if universal && end && self.cr {
+            self.seen |= 1;
+            self.text.push(if translate { '\n' } else { '\r' });
+            self.cr = false;
         }
         Ok(self.text[self.chunk_start..].chars().count())
     }
@@ -362,7 +409,7 @@ impl Reader {
         line: bool,
         newline: Option<&str>,
         end: bool,
-    ) -> Result<Option<String>> {
+    ) -> Result<Option<Value>> {
         let text = &self.text[self.cursor..];
         let boundary = if line {
             match newline {
@@ -389,10 +436,29 @@ impl Reader {
             return Ok(None);
         }
         let n = counted.unwrap_or(line_end);
-        let mut part = String::new();
-        part.try_reserve_exact(n)
-            .map_err(|_| crate::Error::allocation())?;
-        part.push_str(&text[..n]);
+        let text = &text[..n];
+        let first = self.surrogates.partition_point(|&(at, _)| at < self.cursor);
+        let last = self
+            .surrogates
+            .partition_point(|&(at, _)| at < self.cursor + n);
+        let part = if first == last {
+            let mut part = String::new();
+            part.try_reserve_exact(n)
+                .map_err(|_| crate::Error::allocation())?;
+            part.push_str(text);
+            Value::Str(part)
+        } else {
+            let mut points = Vec::new();
+            points
+                .try_reserve_exact(text.chars().count())
+                .map_err(|_| crate::Error::allocation())?;
+            let mut marks = self.surrogates[first..last].iter().copied().peekable();
+            for (offset, c) in text.char_indices() {
+                let point = marks.next_if(|&(at, _)| at == self.cursor + offset);
+                points.push(point.map_or(u32::from(c), |(_, point)| point));
+            }
+            Value::SurrogateStr(points)
+        };
         self.cursor += n;
         Ok(Some(part))
     }

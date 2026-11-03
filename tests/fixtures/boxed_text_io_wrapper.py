@@ -75,7 +75,39 @@ def check_repr():
         text.field = None
 
 
+def check_surrogate_reads():
+    data = b"\xef\xbf\xbd\xff\r\xfe\r\nX\x80"
+    for newline in (None, "", "\n", "\r", "\r\n"):
+        with io.TextIOWrapper(io.BytesIO(data), encoding="utf-8", errors="surrogateescape", newline=newline) as text:
+            expected = "\ufffd\udcff\r\udcfe\r\nX\udc80"
+            if newline is None:
+                expected = "\ufffd\udcff\n\udcfe\nX\udc80"
+            assert text.read() == expected
+            assert text.read() == ""
+
+    with io.TextIOWrapper(io.BytesIO(data), encoding="utf-8", errors="surrogateescape") as text:
+        text._CHUNK_SIZE = 2
+        assert text.read(1) == "\ufffd"
+        cookie = text.tell()
+        assert text.readline() == "\udcff\n"
+        assert next(text) == "\udcfe\n"
+        assert text.read() == "X\udc80"
+        text.seek(cookie)
+        assert text.read(3) == "\udcff\n\udcfe"
+        assert text.read() == "\nX\udc80"
+
+    class Pipe(io.BytesIO):
+        def seekable(self):
+            return False
+
+    with io.TextIOWrapper(Pipe(b"A\xffB"), encoding="utf-8", errors="surrogateescape") as text:
+        assert text.read(1) == "A"
+        text.write("!")
+        assert text.read() == "\udcffB"
+
+
 def current():
+    check_surrogate_reads()
     check_repr()
     assert original_type is type(sys.stdout) is io.TextIOWrapper is _io.TextIOWrapper
     assert sys.stdout.truncate.__self__ is sys.stdout
