@@ -8,6 +8,12 @@ def current():
     assert re.fullmatch(r"\\x1", r"\x1")
     assert re.fullmatch(r"(?x)\x61 # \xZ", "a")
 
+    text = "\udcffA"
+    assert re.search(r"[\101]", text).span() == (1, 2)
+    assert re.match(r"[\101]", text) is None
+    assert re.match(r"[^\101]", text).span() == (0, 1)
+    assert re.search(r"\377", "\udcff\xff").span() == (1, 2)
+
     eof = "bad escape (end of pattern)"
     for pattern, message, pos, line, column in (
         (r"\x{41}", r"incomplete escape \x", 0, 1, 1),
