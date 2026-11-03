@@ -101,7 +101,11 @@ pub(crate) fn find(text: &StrOwner, needle: &str, start: usize) -> Option<usize>
             }),
         };
         let byte = cursor.seek(text, start)?;
-        let offset = text[byte..].find(needle)?;
+        let remainder = &text[byte..];
+        let offset = match needle.as_bytes() {
+            [ascii] => remainder.find(char::from(*ascii)),
+            _ => remainder.find(needle),
+        }?;
         cursor.byte += offset;
         cursor.scalar += if cursor.length == Some(text.len()) {
             offset
