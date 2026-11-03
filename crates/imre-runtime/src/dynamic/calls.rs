@@ -14,6 +14,7 @@ fn nonconstructible_result_type(name: &str) -> bool {
             | HashState::XOF_CLASS
             | HashState::OPENSSL_CLASS
             | KEY_WRAPPER
+            | value::ZLIB_DECOMPRESS_TYPE
             | "anext_awaitable"
             | "_buffer_wrapper"
             | value::REGEX_PATTERN_TYPE
@@ -136,7 +137,12 @@ pub(super) fn module_function(symbol: &str) -> Option<(&str, &str)> {
             Some((module, function))
         }
         "lzma" if function == "decompress" => Some((module, function)),
-        "zlib" if matches!(function, "adler32" | "crc32" | "compress" | "decompress") => {
+        "zlib"
+            if matches!(
+                function,
+                "adler32" | "crc32" | "compress" | "decompress" | "decompressobj"
+            ) =>
+        {
             Some((module, function))
         }
         #[cfg(unix)]
@@ -1549,6 +1555,7 @@ impl Context {
                             | stdlib::datetime::TZINFO
                             | "socket.socket"
                             | "struct.Struct"
+                            | value::ZLIB_DECOMPRESS_TYPE
                             | "hmac.HMAC"
                             | "collections.defaultdict"
                             | "_contextvars.Context"
@@ -1733,6 +1740,7 @@ impl Context {
             | ("complex", Value::Complex(_))
             | ("str", Value::Str(_) | Value::SurrogateStr(_))
             | ("bytes", Value::Bytes(_))
+            | (value::ZLIB_DECOMPRESS_TYPE, Value::ZlibDecompressor { .. })
             | ("struct.Struct", Value::Struct { .. })
             | ("hmac.HMAC", Value::Hmac(_))
             | ("socket.socket", Value::Socket(_))
@@ -4219,6 +4227,11 @@ impl Context {
                 "size" => return Ok(self.int(layout.size as i64)),
                 _ => {}
             },
+            Value::ZlibDecompressor { .. }
+                if matches!(name, "eof" | "unused_data" | "unconsumed_tail") =>
+            {
+                return stdlib::zlib::decompressor(self, name, &[obj], &[]);
+            }
             Value::Hash(ref hash) => {
                 let owner = hash.lock().class_name();
                 match name {

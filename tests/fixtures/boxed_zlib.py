@@ -61,6 +61,18 @@ def current():
     for encode, decode in [(8, 0), (15, 47), (-9, -15), (31, 47)]:
         packed = compress(memoryview(data), level=9, wbits=encode)
         assert decompress(packed + b"trailing", wbits=decode, bufsize=1) == data
+    for wbits in (-15, 15):
+        packed = compress(data, wbits=wbits)
+        stream = zlib.decompressobj(wbits)
+        assert stream.decompress(packed[:1]) == b""
+        assert stream.decompress(packed[1:] + b"tail", max_length=17) == data[:17]
+        assert not stream.eof and stream.unconsumed_tail
+        assert stream.decompress(stream.unconsumed_tail) == data[17:]
+        assert stream.eof and stream.unused_data == b"tail"
+        assert stream.decompress(b"!") == b""
+        assert stream.unused_data == b"tail!"
+        assert stream.flush() == b""
+
     # Interoperate with zlib and gzip streams emitted by reference zlib.
     zstream = bytes.fromhex("789c2b48acccc94f4c01000bdd02eb")
     gzip = bytes.fromhex("1f8b08000000000000032b48acccc94f4c0100156a2c4207000000")
