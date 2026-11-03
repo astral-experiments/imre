@@ -17,6 +17,21 @@ IMPORT = "from helper import f\nprint(f(2))\n"
 
 
 REJECTED = {
+    "unused_float_info_preserves_typed_call": ({
+        "main.py": (
+            "from sys import float_info\n"
+            "def typed(n: int) -> int: return n\n"
+            "typed('wrong')\n"
+        ),
+    }, "expected int, got str"),
+    "float_info_field_preserves_typed_call": ({
+        "main.py": (
+            "from sys import float_info\n"
+            "def typed(n: int) -> int: return n\n"
+            "print(float_info.mant_dig)\n"
+            "typed('wrong')\n"
+        ),
+    }, "expected int, got str"),
     "generator_local_keeps_typed_call": ({
         "helper.py": (
             "def values():\n"
