@@ -2568,11 +2568,15 @@ def report(text):
             "    print(type(result).__name__, result, result is x)\n"
         )
         compare("-IB", "-c", decimal_import + "import decimal_subclass")
-        (helpers / "decimal_comparison.py").write_text(
-            "from decimal import Decimal\nprint(Decimal('1.00') == Decimal(1))\n"
-        )
-        unsupported = run(imre, "-IB", "-c", decimal_import + "import decimal_comparison")
-        assert unsupported.returncode and b"native Decimal numeric comparisons are unsupported" in unsupported.stderr
+        comparisons = Path(__file__).with_name("fixtures") / "text" / "decimal_comparison.py"
+        (helpers / "decimal_comparison.py").write_bytes(comparisons.read_bytes())
+        compare("-IB", "-c", decimal_import + "import decimal_comparison")
+        for expression in ("Decimal('1.00') < Decimal(1)", "Decimal('1.00') == 1"):
+            (helpers / "decimal_boundary.py").write_text(
+                f"from decimal import Decimal\nprint({expression})\n"
+            )
+            unsupported = run(imre, "-IB", "-c", decimal_import + "import decimal_boundary")
+            assert unsupported.returncode and b"native Decimal numeric comparisons are unsupported" in unsupported.stderr
 
         (helpers / "decimal.py").write_text("class Decimal:\n    def __init__(self, value): self.value = value\n")
         compare("-IB", "-c", decimal_import + "from decimal import Decimal\nprint(Decimal(False).value is False)")
@@ -3081,6 +3085,7 @@ for name in ("md4", "ripemd160"):
             "boxed_inspect_unwrap.py",
             "boxed_inspect_isroutine.py",
             "boxed_numeric_repr.py",
+            "boxed_decimal_hash.py",
             "boxed_recursive_repr.py",
             "boxed_bound_method_repr.py",
             "boxed_simple_namespace.py",

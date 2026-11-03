@@ -7178,10 +7178,17 @@ impl<'a> Checker<'a> {
                 if values.iter().any(|v| matches!(v.ty, Type::WeakProxy(_))) {
                     return self.weak_proxy_comparison(values, &compare.ops, expression);
                 }
-                if values
-                    .iter()
-                    .any(|value| matches!(value.ty, Type::Class(id) if self.decimal_class(id)))
-                {
+                let decimal =
+                    |value: &Expr| matches!(value.ty, Type::Class(id) if self.decimal_class(id));
+                if values.iter().any(decimal) {
+                    if values.iter().all(decimal)
+                        && compare
+                            .ops
+                            .iter()
+                            .all(|op| matches!(op, ast::CmpOp::Eq | ast::CmpOp::NotEq))
+                    {
+                        return Err(self.object_builtin_error("Decimal equality", expression));
+                    }
                     return Err(error(
                         self.source,
                         expression,

@@ -5379,6 +5379,10 @@ impl Context {
         if matches!(op, "==" | "!=" | "<" | "<=" | ">" | ">=")
             && let Some(&decimal) = self.classes.get("decimal.Decimal")
             && (ac == Some(decimal) || bc == Some(decimal))
+            && !(matches!(op, "==" | "!=")
+                && [ac, bc]
+                    .into_iter()
+                    .all(|class| class.is_some_and(|class| self.direct_subclass(class, decimal))))
         {
             return Err(Error::new(
                 "NotImplementedError",
