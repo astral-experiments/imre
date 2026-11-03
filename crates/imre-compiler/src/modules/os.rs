@@ -98,6 +98,9 @@ pub(super) fn symbol(name: &str) -> Option<Intrinsic> {
         "memfd_create" if cfg!(target_os = "linux") => {
             Intrinsic::ObjectRuntimeExport("posix.memfd_create")
         }
+        "pidfd_open" if cfg!(target_os = "linux") => {
+            Intrinsic::ObjectRuntimeExport("posix.pidfd_open")
+        }
         "posix_spawn" if cfg!(target_os = "linux") => {
             Intrinsic::ObjectRuntimeExport("posix.posix_spawn")
         }
