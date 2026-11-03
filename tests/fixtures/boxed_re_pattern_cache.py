@@ -1,8 +1,10 @@
 import copy
+import gc
 import io
 from contextlib import redirect_stdout
 import pickle
 import re
+import weakref
 
 
 class Text(str):
@@ -39,6 +41,9 @@ def debug_compile(source, flags=0):
 
 def current():
     first = re.compile(b'abc')
+    reference = weakref.ref(first)
+    assert reference() is first
+    assert weakref.proxy(first).findall(b'abcabc') == [b'abc', b'abc']
     assert re.compile(b'abc') is first
     assert re.search(b'abc', b'abc').re is first
     re.purge()
@@ -46,6 +51,9 @@ def current():
     assert first is not second and first == second
     assert hash(first) == hash(second)
     assert {first: 42}[second] == 42
+    del first
+    gc.collect()
+    assert reference() is None
     assert second != re.compile('abc')
     assert second != re.compile(b'abc', re.I)
     literal = re.compile('abc')
