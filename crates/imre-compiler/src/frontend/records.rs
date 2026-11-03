@@ -1026,6 +1026,7 @@ impl Checker<'_> {
                 | "assertEndsWith"
                 | "assertNotEndsWith"
                 | "assertSequenceEqual"
+                | "assertTupleEqual"
         ) && self.unittest_case(class)
         {
             return self.object_runtime_export(name, node);

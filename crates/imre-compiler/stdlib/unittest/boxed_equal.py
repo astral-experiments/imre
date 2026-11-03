@@ -42,6 +42,22 @@ def assertEqual(self, first, second, msg=None):
     assertion_func(first, second, msg=msg)
 
 
+def assertDictEqual(self, d1, d2, msg=None):
+    self.assertIsInstance(d1, dict, 'First argument is not a dictionary')
+    self.assertIsInstance(d2, dict, 'Second argument is not a dictionary')
+
+    if d1 != d2:
+        import pprint
+        from unittest.util import _common_shorten_repr
+
+        standardMsg = '%s != %s' % _common_shorten_repr(d1, d2)
+        diff = ('\n' + '\n'.join(difflib.ndiff(
+                       pprint.pformat(d1).splitlines(),
+                       pprint.pformat(d2).splitlines())))
+        standardMsg = self._truncateMessage(standardMsg, diff)
+        self.fail(self._formatMessage(msg, standardMsg))
+
+
 def assertSetEqual(self, set1, set2, msg=None):
     """A set-specific equality assertion.
 
@@ -213,6 +229,8 @@ TestCase._getAssertEqualityFunc = _getAssertEqualityFunc
 TestCase._baseAssertEqual = _baseAssertEqual
 TestCase.assertMultiLineEqual = assertMultiLineEqual
 TestCase.assertEqual = assertEqual
+assertDictEqual.__qualname__ = "TestCase.assertDictEqual"
+TestCase.assertDictEqual = assertDictEqual
 assertSetEqual.__qualname__ = "TestCase.assertSetEqual"
 TestCase.assertSetEqual = assertSetEqual
 TestCase.assertNotEqual = assertNotEqual
@@ -348,8 +366,21 @@ def assertListEqual(self, list1, list2, msg=None):
     self.assertSequenceEqual(list1, list2, msg, seq_type=list)
 
 
+def assertTupleEqual(self, tuple1, tuple2, msg=None):
+    """A tuple-specific equality assertion.
+
+    Args:
+        tuple1: The first tuple to compare.
+        tuple2: The second tuple to compare.
+        msg: Optional message to use on failure instead of a list of
+                differences.
+    """
+    self.assertSequenceEqual(tuple1, tuple2, msg, seq_type=tuple)
+
+
 TestCase.assertSequenceEqual = assertSequenceEqual
 TestCase.assertListEqual = assertListEqual
+TestCase.assertTupleEqual = assertTupleEqual
 
 
 # Multiset comparison and diagnostics follow CPython 3.14.5 unittest.util and unittest.case.

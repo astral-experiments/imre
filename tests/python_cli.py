@@ -1994,6 +1994,8 @@ def main():
             "case.assertSequenceEqual([1, 2], (1, 2))\n"
             "try: case.assertSequenceEqual([1, 2], [1])\nexcept AssertionError as exc: print(str(exc))",
             "case.addTypeEqualityFunc(int, 'assertLess')\ncase.assertEqual(1, 2)",
+            "case.assertTupleEqual((1,), (1,))\n"
+            "try: case.assertTupleEqual((1,), [1])\nexcept AssertionError as exc: print(str(exc))",
             "Case.assertNotIsInstance(case, 1, str)",
             "check = case.assertIsInstance\ncheck(1, int)",
             "check = Case.assertNotIsInstance\ncheck(case, 1, str)",
@@ -3276,6 +3278,7 @@ for name in ("md4", "ripemd160"):
             "boxed_module_dir.py",
             "boxed_unittest_assert_almost_equal.py",
             "boxed_unittest_assert_count_equal.py",
+            "boxed_unittest_assert_dict_equal.py",
             "boxed_unittest_assert_set_equal.py",
             "boxed_unittest_membership.py",
             "boxed_unittest_endswith.py",
