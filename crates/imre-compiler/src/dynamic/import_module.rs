@@ -593,6 +593,7 @@ fn stdlib_package_source(name: &str) -> Option<(&'static str, &'static str)> {
 #[derive(Default)]
 pub(crate) struct RegisteredImports {
     pub(super) called: bool,
+    pub(super) computed: bool,
     pub(super) targets: Vec<String>,
 }
 
@@ -618,6 +619,8 @@ pub(crate) fn registered_imports(graph: &SourceGraph) -> RegisteredImports {
                 self.imports.called = true;
                 if let Some(name) = target(call) {
                     self.imports.targets.push(name);
+                } else if !self.graph.modules[self.module].bundled {
+                    self.imports.computed = true;
                 }
             }
             visitor::walk_expr(self, expr);

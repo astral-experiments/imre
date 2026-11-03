@@ -173,7 +173,7 @@ pub(super) fn pack(ctx: &mut Context, layout: &StructFormat, args: &[Id]) -> Res
             let word = if code == b'd' {
                 double_field(ctx, id)?.to_bits()
             } else {
-                integer_field(ctx, id, code, target.len())?
+                integer_field(ctx, id, code, target.len(), layout.little_endian)?
             };
             layout.write_integer(target, word);
         }
@@ -195,18 +195,27 @@ fn double_field(ctx: &mut Context, id: Id) -> Result<f64> {
     Ok(value)
 }
 
-fn integer_field(ctx: &mut Context, id: Id, code: u8, width: usize) -> Result<u64> {
+fn integer_field(
+    ctx: &mut Context,
+    id: Id,
+    code: u8,
+    width: usize,
+    little_endian: bool,
+) -> Result<u64> {
     let value = ctx.index_value(id).and_then(|value| {
         value.ok_or_else(|| format_error(ctx, "required argument is not an integer"))
     });
-    if matches!(code, b'b' | b'i' | b'l') {
+    if matches!(code, b'b' | b'i' | b'l' | b'q') {
         let max = i64::MAX >> ((8 - width) * 8);
         let min = !max;
         let number = match value {
             Ok(value) => value.to_i64(),
             Err(error) => {
                 let overflow = ctx.builtin("OverflowError");
-                if !ctx.raised_error_matches(&error, overflow) {
+                // CPython's non-native-endian q packer propagates __index__ errors.
+                if (code == b'q' && little_endian != cfg!(target_endian = "little"))
+                    || !ctx.raised_error_matches(&error, overflow)
+                {
                     return Err(error);
                 }
                 None

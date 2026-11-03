@@ -8624,6 +8624,14 @@ impl<'a> Checker<'a> {
     }
 
     fn call(&mut self, mut call: &ast::ExprCall) -> Result<Expr, String> {
+        if self.unshadowed_builtin(&call.func, "__import__")
+            && call
+                .arguments
+                .find_argument_value("name", 0)
+                .is_some_and(|name| !matches!(name, ast::Expr::StringLiteral(_)))
+        {
+            return Err(self.scoped_builtin_error("__import__", call));
+        }
         if let Some(method) = self.graph.boxed_pattern_method(self.module, &call.func) {
             return Err(self.scoped_builtin_error(method, call));
         }

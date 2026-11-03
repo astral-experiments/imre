@@ -304,17 +304,9 @@ fn object_fallback<T>(
     boxed: impl FnOnce(Compilation) -> T,
 ) -> Result<T, String> {
     if options.module_entry.is_some() {
-        return dynamic::compile(
-            path,
-            module_root,
-            options,
-            true,
-            None,
-            Default::default(),
-            || Ok(()),
-        )?
-        .map(boxed)
-        .ok_or_else(|| "could not compile the module entry".to_owned());
+        return dynamic::compile(path, module_root, options, true, None, None, || Ok(()))?
+            .map(boxed)
+            .ok_or_else(|| "could not compile the module entry".to_owned());
     }
     let tracing = options
         .python_startup()
@@ -349,7 +341,7 @@ fn object_fallback<T>(
         if traced_typed_entry {
             Some(dynamic::ObjectOperation::TracedEntry)
         } else if g.class_layout_error.borrow().as_ref() == Some(&error) {
-            Some(dynamic::ObjectOperation::ClassLayout(g))
+            Some(dynamic::ObjectOperation::ClassLayout)
         } else {
             g.object_builtin_errors
                 .borrow()
@@ -362,11 +354,6 @@ fn object_fallback<T>(
         || graph
             .as_ref()
             .is_some_and(|g| g.needs_object_runtime.get() || g.traceback_objects);
-    let registered_imports = graph
-        .as_ref()
-        .filter(|_| runtime_imports)
-        .map(dynamic::registered_imports)
-        .unwrap_or_default();
     let check_returns = || {
         if checked_file && let Some(graph) = &graph {
             let (skipped, overloads) = graph.diagnostic_scopes();
@@ -411,7 +398,7 @@ fn object_fallback<T>(
         runtime_imports,
         operation
             .or(ordered_command_import.then_some(dynamic::ObjectOperation::OrderedCommandImport)),
-        registered_imports,
+        graph.as_ref(),
         check_returns,
     )? {
         Some(compilation) => Ok(boxed(compilation)),
