@@ -119,6 +119,10 @@ fn main() {
         println!("cargo:rerun-if-changed=native/pathconf-names.txt");
         add_configuration_queries(&mut c);
     }
+    c.push_str(
+        "#include <limits.h>\n#ifndef NGROUPS_MAX\n#define NGROUPS_MAX 64\n#endif\n\
+         size_t imre_platform_max_groups(void) { return NGROUPS_MAX; }\n",
+    );
     let path = out_dir.join("platform.c");
     std::fs::write(&path, c).unwrap();
     println!("cargo:rerun-if-changed=native/ssl_capabilities.c");
