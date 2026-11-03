@@ -1,5 +1,5 @@
 from unittest import TestCase
-from unittest.mock import MagicMock, Mock, call, mock_open, seal
+from unittest.mock import InvalidSpecError, MagicMock, Mock, call, mock_open, seal
 
 check = TestCase()
 names = ["close", "assert_worker", "_private", "__enter__", "__exit__", "__iter__", "__next__"]
@@ -53,6 +53,13 @@ strict.read = 3
 with check.assertRaises(AttributeError):
     strict.write = 4
 assert handle.__class__ is type(handle)
+
+inner = Mock()
+inner.__class__ = type
+with check.assertRaises(InvalidSpecError):
+    Mock(spec=inner)
+with check.assertRaises(InvalidSpecError):
+    MagicMock(spec_set=inner)
 
 
 class ReportedMock:

@@ -159,6 +159,10 @@ _FixedMock = Mock
 _unset_return = object()
 
 
+class InvalidSpecError(Exception):
+    """Indicates that an invalid value was used as a mock spec."""
+
+
 def _is_instance_mock(value):
     # A spec or proxy can report a different __class__.
     return issubclass(type(value), Mock)
@@ -191,8 +195,10 @@ class Mock(_FixedMock):
 
     def __init__(self, spec=None, *, spec_set=None, name=None, side_effect=None, return_value=_unset_return, **attrs):
         methods = spec_set if spec_set is not None else spec
+        if _is_instance_mock(methods):
+            raise InvalidSpecError(f"Cannot spec a Mock object. [object={methods!r}]")
         spec_class = None
-        if isinstance(methods, type):
+        if issubclass(type(methods), type):
             spec_class = methods
             methods = dir(methods)
         elif methods is not None and type(methods) not in (list, tuple):
