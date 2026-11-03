@@ -3,6 +3,10 @@ import builtins
 import codecs
 import copyreg
 import pickle
+from typing import ParamSpec
+
+
+Params = ParamSpec("Params")
 
 
 def rebuild(protocol):
@@ -104,6 +108,23 @@ class MethodReceiver:
     @classmethod
     def factory(cls):
         return cls()
+
+
+def check_paramspec_markers(protocol):
+    other = ParamSpec("Other")
+    for marker, wrong_kind in ((Params.args, Params.kwargs), (Params.kwargs, Params.args)):
+        cls = type(marker)
+        assert copyreg.dispatch_table[cls](marker) == (cls, (Params,))
+        for dumps, loads in ((pickle.dumps, pickle.loads), (pickle._dumps, pickle._loads)):
+            restored = loads(dumps(marker, protocol))
+            assert type(restored) is cls and restored.__origin__ is Params
+            assert restored == marker and restored != wrong_kind and restored != cls(other)
+            try:
+                dumps(cls(other), protocol)
+            except pickle.PicklingError:
+                pass
+            else:
+                raise AssertionError("pickled an unbound ParamSpec origin")
 
 
 def check_method_descriptors():
@@ -549,6 +570,7 @@ def produce():
     check_method_descriptors()
     assert _codecs.encode is codecs.encode and codecs.encode.__module__ == "_codecs"
     for protocol in range(pickle.HIGHEST_PROTOCOL + 1):
+        check_paramspec_markers(protocol)
         check_global_names(protocol)
         check_registered_reducer(protocol)
         check_reduction_state(protocol)
