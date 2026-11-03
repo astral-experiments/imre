@@ -106,6 +106,20 @@ def run():
                 data = bytearray(4)
                 assert peer.recv_into(data, 2) == 2
                 assert bytes(data) == b"X\xff\x00\x00"
+    sock, peer = socket.socketpair()
+    with sock, peer, sock.makefile("rwb", 0) as raw:
+        assert isinstance(raw, socket.SocketIO) and isinstance(raw, io.RawIOBase)
+        fd = sock.fileno()
+        sock.close()
+        assert raw.name == raw.fileno() == fd
+        assert raw.write(memoryview(b"sent")) == 4 and peer.recv(4) == b"sent"
+        peer.sendall(b"abc")
+        peer.shutdown(socket.SHUT_WR)
+        data = bytearray(b"-----")
+        assert raw.readinto(memoryview(data)[1:4]) == 3 and data == b"-abc-"
+        assert raw.read() == b""
+        raw.close()
+        assert raw.closed and raw.name == -1 and sock.fileno() == -1
     print("socket buffered input and close orders passed")
 
 

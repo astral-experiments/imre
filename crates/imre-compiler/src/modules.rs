@@ -2137,6 +2137,7 @@ impl IntrinsicModule {
             (Self::Socket, "SOCK_SEQPACKET") => {
                 Intrinsic::ObjectRuntimeExport("socket.SOCK_SEQPACKET")
             }
+            (Self::Socket, "SocketIO") => Intrinsic::ScopedObjectExport("socket.SocketIO"),
             (Self::Socket, "socketpair") => Intrinsic::ObjectRuntimeExport("socket.socketpair"),
             (Self::Socket, "close") => Intrinsic::ObjectRuntimeExport("socket.close"),
             (Self::Socket, "inet_aton") => Intrinsic::ObjectRuntimeExport("socket.inet_aton"),

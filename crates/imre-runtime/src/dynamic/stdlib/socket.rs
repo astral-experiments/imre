@@ -1148,20 +1148,42 @@ pub(super) fn call(
         };
         let binary = text.contains('b');
         let write = text.contains('w');
+        let read = text.contains('r') || !write;
         let buffering = match option(args, 1, kwargs, "buffering")? {
             None | Some(NONE) => -1,
             Some(value) => integer(ctx, value)?,
         };
-        if !binary && buffering == 0 {
-            return Err(Error::new(
-                "ValueError",
-                "unbuffered streams must be binary",
-            ));
+        if buffering == 0 {
+            let roots = ctx.heap.temporary_mark();
+            let module = ctx.module("socket")?;
+            let Value::Module { scope, .. } = *ctx.heap.get(module) else {
+                return Err(Error::new("TypeError", "socket must be a module"));
+            };
+            let factory = ctx.lookup(scope, "SocketIO")?;
+            let raw_mode = ctx.text(if write && read {
+                "rw"
+            } else if write {
+                "w"
+            } else {
+                "r"
+            });
+            let raw = ctx.call(factory, vec![*receiver, raw_mode], Vec::new())?;
+            native::retain_socketio(&s);
+            if !binary {
+                // The live factory may have retained the raw stream outside this call.
+                ctx.heap.release_temporaries_since(roots);
+                ctx.collect_unreachable();
+                return Err(Error::new(
+                    "ValueError",
+                    "unbuffered streams must be binary",
+                ));
+            }
+            return Ok(raw);
         }
-        if write || buffering >= 0 {
+        if write || buffering > 0 {
             return Err(Error::new(
                 "NotImplementedError",
-                "socket.makefile supports default buffered readers",
+                "socket.makefile supports raw binary streams and default buffered readers",
             ));
         }
         let wrapper = if binary {
@@ -1205,6 +1227,7 @@ pub(super) fn call(
     match method {
         "__enter__" => return Ok(*receiver),
         "__exit__" | "close" => native::close(&s)?,
+        "_decref_socketios" => native::release_socketio(&s).map_err(super::os_error)?,
         "detach" => return Ok(ctx.int(i64::from(native::detach(&s)))),
         "fileno" | "listen" | "accept" | "getsockname" | "getpeername" => {
             return endpoint_method(ctx, method, &s, args);
@@ -1257,12 +1280,13 @@ pub(super) fn call(
             let n = usize::try_from(n)
                 .map_err(|_| Error::new("ValueError", "negative buffersize in recv_into"))?;
             let flags = int_option(ctx, args, kwargs, 2, "flags", 0)?;
-            let Value::ByteArray(bytes) = ctx.heap.get_mut(buf) else {
+            let Some((storage, range)) = ctx.writable_byte_span(buf)? else {
                 return Err(Error::new(
                     "TypeError",
                     "recv_into() requires a writable bytes-like object",
                 ));
             };
+            let bytes = &mut ctx.writable_storage_bytes(storage)?[range];
             let n = if n == 0 { bytes.len() } else { n };
             let target = bytes
                 .get_mut(..n)
@@ -1327,9 +1351,8 @@ pub(super) fn call(
         }
         "send" | "sendall" => {
             let data = argument(args, 0)?;
-            let (Value::Bytes(bytes) | Value::ByteArray(bytes)) = ctx.heap.get(data) else {
-                return Err(Error::new("TypeError", "a bytes-like object is required"));
-            };
+            ctx.check_buffer_exporter(data)?;
+            let bytes = ctx.native_buffer_bytes(data)?;
             let flags = int_option(ctx, args, kwargs, 1, "flags", 0)?;
             if method == "send" {
                 return Ok(ctx.int(native::send(&s, bytes, flags)? as i64));
