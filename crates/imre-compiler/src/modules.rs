@@ -1983,6 +1983,7 @@ impl IntrinsicModule {
             (Self::Hashlib, "shake_128") => Intrinsic::NamedHash("shake_128"),
             (Self::Hashlib, "shake_256") => Intrinsic::NamedHash("shake_256"),
             (Self::Base64, "urlsafe_b64encode") => Intrinsic::UrlsafeB64encode,
+            (Self::Base64, "encodebytes") => Intrinsic::ScopedObjectExport("base64.encodebytes"),
             (Self::Base64, "b64encode") => Intrinsic::Base64Encode,
             (Self::Base64, "b64decode") => Intrinsic::Base64Decode,
             (Self::Binascii, "unhexlify") => Intrinsic::BinasciiUnhexlify("binascii.unhexlify"),
