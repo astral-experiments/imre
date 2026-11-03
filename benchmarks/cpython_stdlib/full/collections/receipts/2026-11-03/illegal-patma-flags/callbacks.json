@@ -1,0 +1,104 @@
+{
+  "id": "test.test_collections.TestCollectionABCs.test_illegal_patma_flags",
+  "occurrence": 1,
+  "cpython": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "source": "Lib/test/test_collections.py:2030-2033",
+  "original": {
+    "imre": "bcfbd85c6f1851b18cc7dd16ac97e078e6906739",
+    "stock_python_sha256": "1d6937cc20733bbc198953b53345467a4f0ddd809784b917bd76dbc7d116a545",
+    "measured": {
+      "stock": {
+        "outcome": "PASS",
+        "child_exit": 0,
+        "stdout": "MODULE\ttest.test_collections\t/workspace/scratch/collections-followup/stage/test/test_collections.py\nREGISTER\ttest.test_collections.TestCollectionABCs.test_illegal_patma_flags\t1\nREGISTERED_COUNT\t1\nSTART\ttest.test_collections.TestCollectionABCs.test_illegal_patma_flags\t1\t''\nPASS\ttest.test_collections.TestCollectionABCs.test_illegal_patma_flags\t1\t''\nSTOP\ttest.test_collections.TestCollectionABCs.test_illegal_patma_flags\t1\t''\nRUNNER_COUNT\t1\n",
+        "stderr": "test_illegal_patma_flags (test.test_collections.TestCollectionABCs.test_illegal_patma_flags) ... ok\n\n----------------------------------------------------------------------\nRan 1 test in 0.000s\n\nOK\n"
+      },
+      "boxed_O0": {
+        "outcome": "ERROR",
+        "child_exit": 1,
+        "stdout": "MODULE\ttest.test_collections\t/workspace/scratch/collections-followup/stage/test/test_collections.py\nREGISTER\ttest.test_collections.TestCollectionABCs.test_illegal_patma_flags\t1\nREGISTERED_COUNT\t1\nSTART\ttest.test_collections.TestCollectionABCs.test_illegal_patma_flags\t1\t''\nERROR\ttest.test_collections.TestCollectionABCs.test_illegal_patma_flags\t1\t\"type object 'Sequence' has no attribute '__flags__'\"\nSTOP\ttest.test_collections.TestCollectionABCs.test_illegal_patma_flags\t1\t''\nRUNNER_COUNT\t1\n",
+        "stderr": "test_illegal_patma_flags (test.test_collections.TestCollectionABCs.test_illegal_patma_flags) ... ERROR\n\n======================================================================\nERROR: test_illegal_patma_flags (test.test_collections.TestCollectionABCs.test_illegal_patma_flags)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"/workspace/scratch/collections-followup/stage/test/test_collections.py\", line 2032, in test_illegal_patma_flags\n    class Both(Collection):\n  File \"/workspace/scratch/collections-followup/stage/test/test_collections.py\", line 2033, in Both\n    __abc_tpflags__ = (Sequence.__flags__ | Mapping.__flags__)\nAttributeError: type object 'Sequence' has no attribute '__flags__'\n\n----------------------------------------------------------------------\nRan 1 test in 0.205s\n\nFAILED (errors=1)\n"
+      },
+      "boxed_O3": {
+        "outcome": "ERROR",
+        "child_exit": 1,
+        "stdout": "MODULE\ttest.test_collections\t/workspace/scratch/collections-followup/stage/test/test_collections.py\nREGISTER\ttest.test_collections.TestCollectionABCs.test_illegal_patma_flags\t1\nREGISTERED_COUNT\t1\nSTART\ttest.test_collections.TestCollectionABCs.test_illegal_patma_flags\t1\t''\nERROR\ttest.test_collections.TestCollectionABCs.test_illegal_patma_flags\t1\t\"type object 'Sequence' has no attribute '__flags__'\"\nSTOP\ttest.test_collections.TestCollectionABCs.test_illegal_patma_flags\t1\t''\nRUNNER_COUNT\t1\n",
+        "stderr": "test_illegal_patma_flags (test.test_collections.TestCollectionABCs.test_illegal_patma_flags) ... ERROR\n\n======================================================================\nERROR: test_illegal_patma_flags (test.test_collections.TestCollectionABCs.test_illegal_patma_flags)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"/workspace/scratch/collections-followup/stage/test/test_collections.py\", line 2032, in test_illegal_patma_flags\n    class Both(Collection):\n  File \"/workspace/scratch/collections-followup/stage/test/test_collections.py\", line 2033, in Both\n    __abc_tpflags__ = (Sequence.__flags__ | Mapping.__flags__)\nAttributeError: type object 'Sequence' has no attribute '__flags__'\n\n----------------------------------------------------------------------\nRan 1 test in 0.249s\n\nFAILED (errors=1)\n"
+      }
+    }
+  },
+  "public_pattern_witnesses": {
+    "imre": "2805868c3c34ac26eddf025b40e450d1cf2cff6d",
+    "cpython": "5607950ef232dad16d75c0cf53101d9649d89115",
+    "parents": [
+      {
+        "id": "test.test_patma.TestInheritance.test_late_registration_mapping",
+        "occurrence": 1,
+        "callbacks": [
+          "REGISTER\ttest.test_patma.TestInheritance.test_late_registration_mapping\t1",
+          "REGISTERED_COUNT\t1",
+          "START\ttest.test_patma.TestInheritance.test_late_registration_mapping\t1\t''",
+          "PASS\ttest.test_patma.TestInheritance.test_late_registration_mapping\t1\t''",
+          "STOP\ttest.test_patma.TestInheritance.test_late_registration_mapping\t1\t''",
+          "RUNNER_COUNT\t1"
+        ],
+        "exit": {
+          "stock": 0,
+          "ordinary_O0": 0,
+          "ordinary_O3": 0
+        }
+      },
+      {
+        "id": "test.test_patma.TestInheritance.test_late_registration_sequence",
+        "occurrence": 1,
+        "callbacks": [
+          "REGISTER\ttest.test_patma.TestInheritance.test_late_registration_sequence\t1",
+          "REGISTERED_COUNT\t1",
+          "START\ttest.test_patma.TestInheritance.test_late_registration_sequence\t1\t''",
+          "PASS\ttest.test_patma.TestInheritance.test_late_registration_sequence\t1\t''",
+          "STOP\ttest.test_patma.TestInheritance.test_late_registration_sequence\t1\t''",
+          "RUNNER_COUNT\t1"
+        ],
+        "exit": {
+          "stock": 0,
+          "ordinary_O0": 0,
+          "ordinary_O3": 0
+        }
+      },
+      {
+        "id": "test.test_patma.TestInheritance.test_multiple_inheritance_mapping",
+        "occurrence": 1,
+        "callbacks": [
+          "REGISTER\ttest.test_patma.TestInheritance.test_multiple_inheritance_mapping\t1",
+          "REGISTERED_COUNT\t1",
+          "START\ttest.test_patma.TestInheritance.test_multiple_inheritance_mapping\t1\t''",
+          "PASS\ttest.test_patma.TestInheritance.test_multiple_inheritance_mapping\t1\t''",
+          "STOP\ttest.test_patma.TestInheritance.test_multiple_inheritance_mapping\t1\t''",
+          "RUNNER_COUNT\t1"
+        ],
+        "exit": {
+          "stock": 0,
+          "ordinary_O0": 0,
+          "ordinary_O3": 0
+        }
+      },
+      {
+        "id": "test.test_patma.TestInheritance.test_multiple_inheritance_sequence",
+        "occurrence": 1,
+        "callbacks": [
+          "REGISTER\ttest.test_patma.TestInheritance.test_multiple_inheritance_sequence\t1",
+          "REGISTERED_COUNT\t1",
+          "START\ttest.test_patma.TestInheritance.test_multiple_inheritance_sequence\t1\t''",
+          "PASS\ttest.test_patma.TestInheritance.test_multiple_inheritance_sequence\t1\t''",
+          "STOP\ttest.test_patma.TestInheritance.test_multiple_inheritance_sequence\t1\t''",
+          "RUNNER_COUNT\t1"
+        ],
+        "exit": {
+          "stock": 0,
+          "ordinary_O0": 0,
+          "ordinary_O3": 0
+        }
+      }
+    ]
+  }
+}

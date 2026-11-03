@@ -113,7 +113,7 @@ in the denominator. The [omission decisions](docs/stdlib-omissions.md) explain e
 | Module | Paired passes | Upstream tests | Omitted | How the tests ran |
 | --- | ---: | ---: | ---: | --- |
 | `argparse` | 1,887 | 1,893 | 6 | All 1,887 eligible originals have paired passes across public revisions. The translations test ran the real pygettext child and produced all 32 expected messages. Six explicitly documented compiled-entry omissions remain in the 1,893-test denominator. A complete run on one revision is tracked separately. |
-| `collections` | 640 | 659 | 8 | [ChainMap lookup and Counter copying](benchmarks/cpython_stdlib/full/collections/receipts/2026-11-02/chainmap-counter/) passed on stock and boxed native O0/O3, including all six Counter pickle subtests. Earlier focused and intact runs contribute to the total. |
+| `collections` | 640 | 659 | 9 | [ChainMap lookup and Counter copying](benchmarks/cpython_stdlib/full/collections/receipts/2026-11-02/chainmap-counter/) passed on stock and boxed native O0/O3, including all six Counter pickle subtests. Earlier focused and intact runs contribute to the total. |
 | `csv` | 122 | 128 | 0 | Complete suite on `main`, 122 passed and six matched upstream skips. |
 | `dataclasses` | 250 | 276 | 0 | The handwritten initializer retained its original argument annotation. All three wrong-annotation controls failed the upstream assertion. |
 | `datetime` | 995 | 1,098 | 0 | Three complete upstream classes passed all nine originals for time folds, gaps and system transitions across the Iran and ZoneInfo fixtures. |
@@ -137,7 +137,7 @@ in the denominator. The [omission decisions](docs/stdlib-omissions.md) explain e
 | `typing` | 699 | 712 | 0 | The original GenericTests.test_weakref_all passed on public Imre with the complete upstream module and normal suite teardown. |
 | `unittest` | 275 | 1,090 | 0 | The intact package passed 160 cases. On public #3601, the unchanged test_assertions and test_case files ran all 150 originals with runtime imports. Their 109 paired passes added 81 distinct cases. Another 34 original mock methods passed in focused runs. |
 | `urllib` | 173 | 178 | 0 | Both unchanged upstream scripts completed on public `main` at O0 and O3 with ordinary and runtime imports. All 178 tests matched stock in order, including 173 successful parents, three with only child outcomes, and two Windows skips. |
-| **Total** | **8,865** | **13,328** | **27** | **4 complete suites match stock on `main`** |
+| **Total** | **8,865** | **13,328** | **28** | **4 complete suites match stock on `main`** |
 
 See the [standard library coverage report](docs/stdlib.md) for the Linux test
 results and import coverage recorded in this repository.
