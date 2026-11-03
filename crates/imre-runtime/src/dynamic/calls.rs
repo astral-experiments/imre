@@ -3000,7 +3000,12 @@ impl Context {
                             "__doc__" if method == "posix.sysconf" => {
                                 Some("Return an integer-valued system configuration variable.")
                             }
-                            "__text_signature__" if method == "posix.sysconf" => {
+                            "__doc__" if method == "posix.confstr" => {
+                                Some("Return a string-valued system configuration variable.")
+                            }
+                            "__text_signature__"
+                                if matches!(method.as_str(), "posix.sysconf" | "posix.confstr") =>
+                            {
                                 Some("($module, name, /)")
                             }
                             "__qualname__" if module_bound => method.rsplit('.').next(),
