@@ -957,7 +957,7 @@ impl Emitter<'_, '_> {
         self.temporaries = temporaries;
     }
 
-    /// Borrows direct locals only when no expression can replace their slot.
+    /// Borrows pooled literals and direct locals whose slots cannot be replaced.
     /// Earlier operands of a call or operator must survive a later `:=` write.
     /// Stable caller roots also protect projections in edge-preserving functions.
     fn operand(&mut self, expression: &Expr) -> Operand {
@@ -972,6 +972,11 @@ impl Emitter<'_, '_> {
         {
             let mut value = self.borrow_slot(*slot);
             value.small_integer |= self.ranges.integer(expression).is_some();
+            Operand {
+                value,
+                ownership: Ownership::Borrowed,
+            }
+        } else if let Some(value) = self.borrow_literal_operand(expression) {
             Operand {
                 value,
                 ownership: Ownership::Borrowed,
@@ -10895,6 +10900,31 @@ print(show("x"))
             .unwrap()
             .0
             .to_owned()
+    }
+
+    #[test]
+    fn transient_literal_operands_borrow_the_pool_root() {
+        for (source, operation, retain) in [
+            (
+                "def tail(text: str) -> bool:\n    return text.endswith('!')\n",
+                "@imre_str_affix(",
+                "@imre_str_retain(",
+            ),
+            (
+                "def trimmed(text: str) -> str:\n    return text.strip(' .')\n",
+                "@imre_str_strip(",
+                "@imre_str_retain(",
+            ),
+            (
+                "def matches(blob: bytes) -> bool:\n    return blob == b'start'\n",
+                "@imre_bytes_literal_once(",
+                "@imre_bytes_retain(",
+            ),
+        ] {
+            let body = function_body(source);
+            assert!(body.contains(operation), "{body}");
+            assert!(!body.contains(retain), "{body}");
+        }
     }
 
     #[test]
