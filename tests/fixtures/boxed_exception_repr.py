@@ -10,6 +10,17 @@ class MissingKey(KeyError):
 
 
 def current():
+    for child, parent in ((FloatingPointError, ArithmeticError), (TabError, IndentationError)):
+        assert issubclass(child, parent) and not issubclass(parent, child)
+        try:
+            raise child("example")
+        except parent as error:
+            assert type(error) is child and error.args == ("example",)
+
+    error = TabError("mixed indentation", ("source.py", 3, 1, "line"))
+    assert isinstance(error, SyntaxError) and not isinstance(error, ArithmeticError)
+    assert (error.msg, error.filename, error.lineno) == ("mixed indentation", "source.py", 3)
+
     class Returned(str):
         pass
 

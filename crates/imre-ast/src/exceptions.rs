@@ -57,10 +57,12 @@ exception_kinds! {
         EOFError = 11,
         SyntaxError = 55,
         IndentationError = 56,
+        TabError = 92,
         UnicodeError = 17,
         UnicodeDecodeError = 18,
         UnicodeEncodeError = 38,
         ArithmeticError = 2,
+        FloatingPointError = 93,
         OverflowError = 4,
         ZeroDivisionError = 3,
         LookupError = 5,
@@ -170,7 +172,11 @@ impl Kind {
             Self::BaseException => true,
             Self::Warning => WARNING_CATEGORIES.contains(&self),
             Self::NameError => matches!(self, Self::NameError | Self::UnboundLocalError),
-            Self::SyntaxError => matches!(self, Self::SyntaxError | Self::IndentationError),
+            Self::SyntaxError => matches!(
+                self,
+                Self::SyntaxError | Self::IndentationError | Self::TabError
+            ),
+            Self::IndentationError => matches!(self, Self::IndentationError | Self::TabError),
             Self::Exception => !matches!(
                 self,
                 Self::BaseException
@@ -181,7 +187,10 @@ impl Kind {
             ),
             Self::ArithmeticError => matches!(
                 self,
-                Self::ArithmeticError | Self::ZeroDivisionError | Self::OverflowError
+                Self::ArithmeticError
+                    | Self::FloatingPointError
+                    | Self::ZeroDivisionError
+                    | Self::OverflowError
             ),
             Self::LookupError => {
                 matches!(self, Self::LookupError | Self::IndexError | Self::KeyError)
