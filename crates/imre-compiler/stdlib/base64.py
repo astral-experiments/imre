@@ -1,4 +1,4 @@
-# The two public functions are from CPython 3.14.5 Lib/base64.py.
+# The public functions are from CPython 3.14.5 Lib/base64.py.
 import binascii
 
 
@@ -52,3 +52,33 @@ def b64decode(s, altchars=None, validate=False):
         assert len(altchars) == 2, repr(altchars)
         s = s.translate(bytes.maketrans(altchars, b'+/'))
     return binascii.a2b_base64(s, strict_mode=validate)
+
+
+def standard_b64encode(s):
+    """Encode bytes-like object s using the standard Base64 alphabet.
+
+    The result is returned as a bytes object.
+    """
+    return b64encode(s)
+
+
+def _input_type_check(s):
+    try:
+        m = memoryview(s)
+    except TypeError as err:
+        msg = "expected bytes-like object, not %s" % s.__class__.__name__
+        raise TypeError(msg) from err
+    if m.format not in ('c', 'b', 'B'):
+        msg = ("expected single byte elements, not %r from %s" %
+                                          (m.format, s.__class__.__name__))
+        raise TypeError(msg)
+    if m.ndim != 1:
+        msg = ("expected 1-D data, not %d-D data from %s" %
+                                          (m.ndim, s.__class__.__name__))
+        raise TypeError(msg)
+
+
+def decodebytes(s):
+    """Decode a bytestring of base-64 data into a bytes object."""
+    _input_type_check(s)
+    return binascii.a2b_base64(s)

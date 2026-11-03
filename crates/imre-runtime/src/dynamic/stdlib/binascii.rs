@@ -3,7 +3,7 @@ use super::{Context, Error, Id, Result, Value};
 
 fn input(ctx: &Context, value: Id, decode: bool) -> Result<&[u8]> {
     if !decode {
-        return ctx.bytes_like(value);
+        return ctx.native_buffer_bytes(value);
     }
     if let Some(storage) = ctx.string_storage(value) {
         // Surrogate-containing strings are Unicode inputs, even though they have no UTF-8 view.
@@ -15,7 +15,7 @@ fn input(ctx: &Context, value: Id, decode: bool) -> Result<&[u8]> {
             )),
         };
     }
-    ctx.bytes_like(value).map_err(|_| {
+    ctx.native_buffer_bytes(value).map_err(|_| {
         let name = ctx.type_name(value);
         let name = &name[..name.floor_char_boundary(100)];
         Error::new(
