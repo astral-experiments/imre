@@ -1015,20 +1015,23 @@ pub(super) fn method(
         ctx.delete_item(receiver, *key)?;
         return Ok(NONE);
     }
-    if (set_method.is_some() || matches!(name, "dict.pop" | "dict.popitem")) && !kwargs.is_empty() {
+    if (set_method.is_some() || matches!(name, "dict.pop" | "dict.popitem" | "dict.__reversed__"))
+        && !kwargs.is_empty()
+    {
         return Err(type_error(format!("{name}() takes no keyword arguments")));
     }
     if !matches!(name, "dict.update" | "dict.__init__") {
         positional(name, kwargs)?;
     }
+    if matches!(name, "dict.popitem" | "dict.__reversed__") && !args.is_empty() {
+        return Err(type_error(format!(
+            "{name}() takes no arguments ({} given)",
+            args.len()
+        )));
+    }
     match name {
+        "dict.__reversed__" => Ok(ctx.dict_iterator(object, DictViewKind::Keys, false, true)),
         "dict.popitem" => {
-            if !args.is_empty() {
-                return Err(type_error(format!(
-                    "dict.popitem() takes no arguments ({} given)",
-                    args.len()
-                )));
-            }
             let Some(last) = ctx.stored_entries(receiver).len().checked_sub(1) else {
                 let message = ctx.text("popitem(): dictionary is empty");
                 return Err(ctx.lookup_error("KeyError", message));
@@ -1448,7 +1451,7 @@ pub(super) fn builtin_slot(
     }
     let storage = ctx.scalar_value(object);
     let set_op = set_operator(method);
-    if matches!(method, "__add__" | "__iadd__") || set_op.is_some() {
+    if matches!(method, "__add__" | "__iadd__" | "__contains__") || set_op.is_some() {
         if !kwargs.is_empty() {
             return Err(type_error(format!(
                 "wrapper {method}() takes no keyword arguments"
@@ -1460,6 +1463,9 @@ pub(super) fn builtin_slot(
                 rest.len()
             )));
         };
+        if method == "__contains__" {
+            return Ok(boolean(ctx.contains(*value, object)?));
+        }
         if owner == "int" {
             return integer::add(ctx, storage, *value);
         }

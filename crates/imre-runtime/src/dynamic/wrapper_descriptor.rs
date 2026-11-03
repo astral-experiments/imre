@@ -146,6 +146,12 @@ impl BuiltinDescriptor {
             Some((namespace::CLASS, attr)) => {
                 Some((namespace::CLASS, attr, &["__reduce__", "__replace__"][..]))
             }
+            Some(("types.GenericAlias", attr)) => {
+                Some(("types.GenericAlias", attr, &["__reduce__"][..]))
+            }
+            Some(("generic_alias_iterator", attr)) => {
+                Some(("generic_alias_iterator", attr, &["__reduce__"][..]))
+            }
             Some(("typing.TypeAliasType", attr)) => {
                 Some(("typing.TypeAliasType", attr, &["__reduce__"][..]))
             }
@@ -227,6 +233,8 @@ impl BuiltinDescriptor {
             "str.istitle" => ("str", "istitle"),
             "float.__format__" => ("float", "__format__"),
             "collections._tuplegetter.__repr__" => (super::namedtuple::GETTER, "__repr__"),
+            "object.__init__" => ("object", "__init__"),
+            "object.__lt__" => ("object", "__lt__"),
             "object.__hash__" => ("object", "__hash__"),
             "object.__ne__" => ("object", "__ne__"),
             "object.__repr__" => ("object", "__repr__"),
@@ -243,10 +251,12 @@ impl BuiltinDescriptor {
             "dict.__ior__" => ("dict", "__ior__"),
             "dict.__eq__" => ("dict", "__eq__"),
             "dict.__repr__" => ("dict", "__repr__"),
+            "dict.__reversed__" => ("dict", "__reversed__"),
             "mappingproxy.__getitem__" => ("mappingproxy", "__getitem__"),
             "mappingproxy.__hash__" => ("mappingproxy", "__hash__"),
             "mappingproxy.__repr__" => ("mappingproxy", "__repr__"),
             "mappingproxy.__str__" => ("mappingproxy", "__str__"),
+            "mappingproxy.__contains__" => ("mappingproxy", "__contains__"),
             "tuple.__repr__" => ("tuple", "__repr__"),
             "types.SimpleNamespace.__init__" => (super::namespace::CLASS, "__init__"),
             "types.SimpleNamespace.__repr__" => (super::namespace::CLASS, "__repr__"),
@@ -273,6 +283,7 @@ impl BuiltinDescriptor {
                     | "__getstate__"
                     | "__reduce__"
                     | "__reduce_ex__"
+                    | "__reversed__"
                     | "count"
                     | "index"
                     | "isascii"
@@ -488,6 +499,14 @@ impl BuiltinDescriptor {
                     "($self, /)"
                 })
             }
+            "__doc__" if self.name == "__lt__" => ctx.text("Return self<value."),
+            "__text_signature__" if self.name == "__lt__" => ctx.text("($self, value, /)"),
+            "__doc__" if self.owner == "object" && self.name == "__init__" => {
+                ctx.text("Initialize self.  See help(type(self)) for accurate signature.")
+            }
+            "__text_signature__" if self.owner == "object" && self.name == "__init__" => {
+                ctx.text("($self, /, *args, **kwargs)")
+            }
             "__doc__" if self.name == "__getattribute__" => ctx.text("Return getattr(self, name)."),
             "__text_signature__" if self.name == "__getattribute__" => ctx.text("($self, name, /)"),
             "__doc__" if self.owner == "itertools.repeat" && self.name == "__length_hint__" => {
@@ -496,7 +515,12 @@ impl BuiltinDescriptor {
             "__text_signature__" if self.owner == "itertools.repeat" && self.name == "__length_hint__" => {
                 ctx.text("($self, /)")
             }
+            "__doc__" if self.owner == "dict" && self.name == "__reversed__" => {
+                ctx.text("Return a reverse iterator over the dict keys.")
+            }
+            "__text_signature__" if self.owner == "dict" && self.name == "__reversed__" => ctx.text("($self, /)"),
             "__doc__" if self.owner == "mappingproxy" && self.method => ctx.text(match self.name {
+                "__reversed__" => "D.__reversed__() -> reverse iterator",
                 "keys" => "D.keys() -> a set-like object providing a view on D's keys",
                 "values" => "D.values() -> an object providing a view on D's values",
                 "items" => "D.items() -> a set-like object providing a view on D's items",
@@ -575,8 +599,8 @@ impl BuiltinDescriptor {
                     ("intersection_update", _) if self.owner == "set" => "($self, /, *others)",
                     ("utctimetuple", "__doc__") if self.owner == "datetime.datetime" => "Return UTC time tuple, compatible with time.localtime().",
                     ("utctimetuple", _) if self.owner == "datetime.datetime" => "($self, /)",
-                    ("__reduce__", "__doc__") if matches!(self.owner, "builtin_function_or_method" | "method") => return Some(NONE),
-                    ("__reduce__", _) if matches!(self.owner, "builtin_function_or_method" | "method") => "($self, /)",
+                    ("__reduce__", "__doc__") if matches!(self.owner, "builtin_function_or_method" | "method" | "types.GenericAlias" | "generic_alias_iterator") => return Some(NONE),
+                    ("__reduce__", _) if matches!(self.owner, "builtin_function_or_method" | "method" | "types.GenericAlias" | "generic_alias_iterator") => "($self, /)",
                     ("__reduce__", "__doc__") if self.owner == stdlib::datetime::TZINFO => "-> (cls, state)",
                     ("__reduce__", _) if self.owner == stdlib::datetime::TZINFO => "($self, /)",
                     ("tzname", "__doc__") if self.owner == "datetime.timezone" => "If name is specified when timezone is created, returns the name.  Otherwise returns offset as 'UTC(+|-)HH:MM'.",

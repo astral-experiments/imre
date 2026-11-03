@@ -274,7 +274,9 @@ impl Context {
             (_, Value::DictView { .. }) => {
                 Self::dict_view_owner(self.type_name(object)) == Some(owner)
             }
-            ("bool", Value::Bool(_))
+            ("types.GenericAlias", Value::GenericAlias(alias)) => alias.is_builtin_alias(),
+            ("generic_alias_iterator", Value::GenericAliasIterator(_))
+            | ("bool", Value::Bool(_))
             | ("int", Value::Int(_) | Value::Bool(_))
             | ("float", Value::Float(_))
             | ("mappingproxy", Value::MappingProxy(_))

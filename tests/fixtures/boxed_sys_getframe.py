@@ -19,14 +19,42 @@ def current():
     def resume(generator):
         return next(generator)
 
+    fresh = suspended()
+    fresh_frame = fresh.gi_frame
+    fresh_frame.clear()
+    assert fresh.gi_frame is None and fresh_frame.f_code is fresh.gi_code
+    assert next(fresh, None) is None
+
     generator = suspended()
-    saved, first_caller = next(generator)
+    assert generator.__name__ is suspended.__name__
+    assert generator.__qualname__ is suspended.__qualname__
+    generator.__name__ = "renamed"
+    assert suspended.__name__ == "suspended"
+    try:
+        del generator.__qualname__
+    except TypeError:
+        pass
+    else:
+        raise AssertionError("deleting the generator's qualified name succeeded")
+    saved = generator.gi_frame
+    assert saved.f_code is generator.gi_code and saved.f_lineno == saved.f_code.co_firstlineno
+    assert saved.f_back is None and not generator.gi_running and not generator.gi_suspended
+    active, first_caller = next(generator)
+    assert active is saved and saved.f_lineno == saved.f_code.co_firstlineno + 2
+    assert generator.gi_suspended and not generator.gi_running
+    try:
+        saved.clear()
+    except RuntimeError as error:
+        assert str(error) == "cannot clear a suspended frame"
+    else:
+        raise AssertionError("cleared a suspended generator")
     assert first_caller is frame and saved.f_back is None
     same, second_caller = resume(generator)
     assert same is saved and saved.f_back is None
     assert second_caller.f_code is resume.__code__ and second_caller.f_back is frame
     generator.close()
-    assert saved.f_back is None
+    assert generator.gi_frame is None and not generator.gi_suspended and not generator.gi_running
+    assert generator.__name__ == "renamed" and saved.f_back is None
     saved.clear()
     assert saved.f_globals is globals()
     assert sys._getframe.__text_signature__ == '($module, depth=0, /)'
