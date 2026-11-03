@@ -26,6 +26,14 @@ REJECTED = {
         ),
         "main.py": "from helper import values, typed\nprint(next(values()))\ntyped('wrong')\n",
     }, "invalid-argument-type"),
+    "docfile_suite_preserves_typed_call": ({
+        "main.py": (
+            "from doctest import DocFileSuite\n"
+            "def typed(n: int) -> int: return n\n"
+            "DocFileSuite()\n"
+            "typed('wrong')\n"
+        ),
+    }, "expected int, got str"),
     "unittest_method_skip_preserves_typed_call": ({
         "main.py": (
             "import unittest\n"

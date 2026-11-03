@@ -1345,12 +1345,15 @@ impl Context {
     fn builtin_numeric_member(&mut self, obj: Id, name: &str) -> Option<Id> {
         let kind = match self.heap.get(obj) {
             Value::Native(kind) => kind.as_str(),
-            Value::Int(_) | Value::Bool(_) => "int",
+            Value::Int(_) => "int",
+            Value::Bool(_) => "bool",
             Value::Float(_) => "float",
             _ => return None,
         };
         let owner = match (kind, name) {
-            ("int" | "bool", "numerator" | "denominator") => self.builtin("int"),
+            ("int", "__doc__") | ("int" | "bool", "numerator" | "denominator") => {
+                self.builtin("int")
+            }
             ("float", "real" | "imag") => self.builtin("float"),
             _ => return None,
         };
@@ -2139,7 +2142,9 @@ impl Context {
         }
         let builtin_member = match name {
             "mapping" => self.dict_view_mapping_member(obj),
-            "numerator" | "denominator" | "real" | "imag" => self.builtin_numeric_member(obj, name),
+            "numerator" | "denominator" | "real" | "imag" | "__doc__" => {
+                self.builtin_numeric_member(obj, name)
+            }
             _ => None,
         };
         if let Some(descriptor) = builtin_member {

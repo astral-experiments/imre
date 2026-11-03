@@ -2697,6 +2697,17 @@ impl SourceModule {
                 "platform.win32_is_iot",
             )));
         }
+        if self.is_bundled("doctest") {
+            let export = match name {
+                "DocFileCase" => Some("doctest.DocFileCase"),
+                "DocFileTest" => Some("doctest.DocFileTest"),
+                "DocFileSuite" => Some("doctest.DocFileSuite"),
+                _ => None,
+            };
+            if let Some(export) = export {
+                return Some(Binding::Intrinsic(Intrinsic::ScopedObjectExport(export)));
+            }
+        }
         if self.is_bundled("socketserver")
             && matches!(
                 name,

@@ -108,7 +108,32 @@ def _flags(source: str, name: str, lineno: int, options: dict[int, bool]) -> Non
             pos = -1 if rest < 0 else pos + 1 + rest
 
 
+class DocTest:
+    name: str
+    docstring: str
+    examples: list[Example]
+    globs: dict[str, object]
+    filename: str | None
+    lineno: int | None
+
+    def __init__(self, name: str, docstring: str, examples: list[Example]) -> None:
+        self.name = name
+        self.docstring = docstring
+        self.examples = examples
+        self.globs = {}
+        self.filename = None
+        self.lineno = None
+
+
 class DocTestParser:
+    def get_doctest(self, string: str, globs: dict[str, object], name: str,
+                    filename: str | None, lineno: int | None) -> DocTest:
+        test = DocTest(name, string, self.get_examples(string, name))
+        test.globs = globs.copy()
+        test.filename = filename
+        test.lineno = lineno
+        return test
+
     def get_examples(self, string: str, name: str = "<string>") -> list[Example]:
         lines = [_expand_tabs(line) for line in string.split("\n")]
         examples: list[Example] = []
@@ -190,17 +215,6 @@ class OutputChecker:
         return want == got
 
 
-class DocTest:
-    name: str
-    docstring: str
-    examples: list[Example]
-
-    def __init__(self, name: str, docstring: str, examples: list[Example]) -> None:
-        self.name = name
-        self.docstring = docstring
-        self.examples = examples
-
-
 class DocTestFailure(Exception):
     pass
 
@@ -209,36 +223,54 @@ class UnexpectedException(Exception):
     pass
 
 
-def _optionflags(example: Example) -> int:
-    flags = 0
+def _optionflags(example: Example, flags: int = 0) -> int:
     for flag in example.options:
         if example.options[flag]:
             flags |= flag
+        else:
+            flags &= ~flag
     return flags
 
 
 def _check_example(test: DocTest, example: Example, got: str, error: str,
                    failures: list[str], debug: bool) -> None:
-    checker = OutputChecker()
-    flags = _optionflags(example)
+    _check_output(f"{test.name}, line {example.lineno + 1}", example, got, error,
+                  failures, debug, OutputChecker(), _optionflags(example))
+
+
+def _strip_exception_details(message: str) -> str:
+    return message.partition("\n")[0].partition(":")[0].split(".")[-1]
+
+
+def _check_output(location: str, example: Example, got: str, error: str,
+                  failures: list[str], debug: bool, checker: OutputChecker, flags: int,
+                  quiet: bool = False) -> bool:
     want = example.want
     if error:
         expected = example.exc_msg
         if expected is not None:
             if checker.check_output(expected, error, flags):
-                return
-            if flags & 32 and expected.partition(":")[0].strip() == error.partition(":")[0].strip():
-                return
+                return True
+            if flags & 32 and checker.check_output(
+                _strip_exception_details(expected), _strip_exception_details(error), flags
+            ):
+                return True
         got = error
     elif checker.check_output(want, got, flags):
-        return
-    message = (f"{test.name}, line {example.lineno + 1}\nFailed example:\n{example.source}"
-               f"Expected:\n{want}Got:\n{got}")
+        return True
+    if quiet:
+        return False
+    message = f"{location}\nFailed example:\n{example.source}"
+    if error and example.exc_msg is None:
+        message += "Exception raised:\n" + error
+    else:
+        message += f"Expected:\n{want}Got:\n{got}"
     if debug:
         if error and example.exc_msg is None:
             raise UnexpectedException(message)
         raise DocTestFailure(message)
     failures.append(message)
+    return False
 
 
 def _exception_line(error: Exception) -> str:

@@ -3717,6 +3717,7 @@ for name in ("md4", "ripemd160"):
             "boxed_with_control.py",
             "boxed_short_circuit.py",
             "boxed_doctest_suite.py",
+            "boxed_doctest_files.py",
             "boxed_slice.py",
             "boxed_binascii.py",
             "boxed_zlib.py",
