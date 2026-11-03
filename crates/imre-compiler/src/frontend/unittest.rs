@@ -333,10 +333,11 @@ impl Checker<'_> {
             return Some((kind, name.into(), format!("{origin}.{name}")));
         }
         let name = value.as_name_expr()?.id.as_str();
+        let canonical = imre_ast::exceptions::Kind::try_from_raw(kind)?.name();
         (self.resolve(value).is_none()
             && !self.names.contains_key(name)
             && exception_kind(name) == Some(kind))
-        .then(|| (kind, name.to_owned(), name.to_owned()))
+        .then(|| (kind, canonical.to_owned(), canonical.to_owned()))
     }
 
     /// Tuple entries use their class repr, including singleton commas and nested tuples.

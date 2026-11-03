@@ -16,7 +16,11 @@ def check_aliases():
         assert type(error) is FileNotFoundError and error.filename == "sample"
     assert IOError.__name__ == "OSError"
     for protocol in range(pickle.HIGHEST_PROTOCOL + 1):
-        assert pickle.loads(pickle.dumps(IOError, protocol)) is OSError
+        if protocol < 3:
+            data = pickle.dumps(IOError, protocol, fix_imports=False)
+        else:
+            data = pickle.dumps(IOError, protocol)
+        assert pickle.loads(data) is OSError
 
 
 def current():
