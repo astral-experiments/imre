@@ -374,15 +374,16 @@ impl Emitter<'_, '_> {
         self.branch(&skip, &fast, &resume);
         self.start(&fast);
         let partial = self.instruction(format!("extractvalue {{i64,i64}} {prefix}, 1"));
-        for (slot, operand) in [(cursor, next), (sum, partial)] {
+        // The cursor stays tagged. Replacing the accumulator may release a boxed integer.
+        for (slot, operand, tagged) in [(cursor, next, true), (sum, partial, false)] {
             self.store_with_previous_small(
                 slot,
                 &Value {
                     ty: Type::Int,
                     operand,
-                    small_integer: true,
+                    small_integer: tagged,
                 },
-                true,
+                tagged,
             );
         }
         self.jump(&resume);
@@ -410,12 +411,14 @@ define internal {i64,i64} @imre_affine_range_prefix(i64 %at, i64 %end, i64 %tota
 
 const AFFINE_CHECKED_PREFIX: &str = r"
 define internal {i64,i64} @imre_affine_checked_prefix(i64 %at, i64 %end, i64 %total, i64 %count, i64 %scale, i64 %offset, i64 %max_start) alwaysinline nounwind {
-  %tags0 = and i64 %at, %end
-  %tags = and i64 %tags0, %total
+  %tags = and i64 %at, %end
   %small = trunc i64 %tags to i1
+  %tagged = trunc i64 %total to i1
   %i = ashr i64 %at, 1
   %stop = ashr i64 %end, 1
-  %sum = ashr i64 %total, 1
+  ; For a boxed accumulator, reduce a tagged delta and add it once on exit.
+  %unboxed = ashr i64 %total, 1
+  %sum = select i1 %tagged, i64 %unboxed, i64 0
   %bounded = icmp ule i64 %i, %max_start
   %last = add i64 %i, %count
   %within = icmp slt i64 %last, %stop
@@ -460,8 +463,14 @@ success:
   %n = trunc i128 %subtotal to i64
   %shift = shl i64 %n, 1
   %new_total = or i64 %shift, 1
+  br i1 %tagged, label %finish, label %boxed
+boxed:
+  %combined = call i64 @imre_int_binary(i64 %total, i64 %new_total, i32 0)
+  br label %finish
+finish:
+  %result = phi i64 [ %new_total, %success ], [ %combined, %boxed ]
   %r0 = insertvalue {i64,i64} zeroinitializer, i64 %new_at, 0
-  %r = insertvalue {i64,i64} %r0, i64 %new_total, 1
+  %r = insertvalue {i64,i64} %r0, i64 %result, 1
   ret {i64,i64} %r
 fallback:
   ret {i64,i64} zeroinitializer
