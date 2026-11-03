@@ -12,28 +12,24 @@ An experimental ahead-of-time compiler for typed Python, written in Rust.
 ## Benchmarks
 
 <p align="center">
-  <img src="benchmarks/results/applications.svg" width="100%" alt="Median elapsed milliseconds for Imre, Bun, Rust and CPython on the uv download catalog, a Ruff source search, wheel verification, New York road routing, graph loading and the ty conformance report.">
+  <img src="benchmarks/results/applications.svg" width="100%" alt="Median elapsed milliseconds for Imre, Rust and CPython on the uv download catalog, a Ruff source search, wheel verification, New York road routing, graph loading and the ty conformance report.">
 </p>
 
-Each CLI starts a fresh process on one AMD EPYC Milan vCPU with warm filesystem
-caches. Imre and CPython run the same Python. The catalog also shows uv’s
-original CPython implementation. The source search prints every matching line
-number, wheel verification checks every member listed in RECORD, and the route
-timing includes loading the graph. Each implementation must reproduce the
-reference output. In a separate 24-round check, the unchanged Python program
-loaded the New York graph and found four routes in 111 ms on Imre at `cb3dd64e`.
-Rust took 132 ms.
+Each CLI runs on one AMD EPYC Milan vCPU with warm filesystem caches. Imre and
+CPython run the same Python. The catalog includes uv’s original implementation
+as a second CPython reference. Road routing includes reading the graph and
+finding all four distances.
 [Workloads, raw samples and reproduction steps](benchmarks/applications/README.md)
 
 <p align="center">
-  <img src="benchmarks/results/frozen-flask.svg" width="100%" alt="Median verified requests per second for frozen Flask on Imre, stock Flask on CPython, Bun, Node.js and Rust/Hyper at eight concurrent clients.">
+  <img src="benchmarks/results/frozen-flask.svg" width="100%" alt="Median verified requests per second for frozen Flask on Imre, stock Flask on CPython and Rust/Hyper at eight concurrent clients.">
 </p>
 
 The Flask benchmark issues health checks, escaped HTML greetings and JSON sums
-over loopback. Each bar is the median of ten rounds at eight concurrent clients.
+over loopback. Each bar is the median of 70 rounds at eight concurrent clients.
 Frozen Flask on Imre 0.1.5 compiles its routes and Jinja template
-ahead of time. Stock Flask on CPython uses Werkzeug. Bun, Node.js and Rust/Hyper
-implement the same routes directly. [HTTP benchmark and controls](benchmarks/flask/comparison/README.md)
+ahead of time. Stock Flask on CPython uses Werkzeug. Rust/Hyper
+implements the same routes directly. [HTTP workload and results](benchmarks/applications/README.md#flask)
 
 ## Hello, world!
 

@@ -218,23 +218,27 @@ def frozen_flask_panel(report, path):
     concurrency = settings["concurrency"]
     first, rounds = settings["first_round"], settings["rounds"]
     expected_rounds = list(range(first, first + rounds))
+    runs = [report, *report.get("additional_runs", ())]
     medians = {}
     for engine in engines:
-        trials = [
-            row
-            for row in report["trials"]
-            if row["server"] == engine
-            and row["profile"] == "mixed"
-            and row["concurrency"] == concurrency
-        ]
-        if sorted(row["round"] for row in trials) != expected_rounds:
-            raise ValueError(f"Incomplete mixed HTTP trials for {engine}")
-        medians[engine] = statistics.median(row["RPS"] for row in trials)
+        rates = []
+        for run in runs:
+            trials = [
+                row
+                for row in run["trials"]
+                if row["server"] == engine
+                and row["profile"] == "mixed"
+                and row["concurrency"] == concurrency
+            ]
+            if sorted(row["round"] for row in trials) != expected_rounds:
+                raise ValueError(f"Incomplete mixed HTTP trials for {engine}")
+            rates.extend(row["RPS"] for row in trials)
+        medians[engine] = statistics.median(rates)
 
     fig, ax = benchmark_card(
         408 + 29 * (len(engines) - 4),
         "Frozen Flask throughput",
-        f"{rounds} rounds · {concurrency} clients",
+        f"{rounds * len(runs)} rounds · {concurrency} clients",
     )
     label(
         ax,

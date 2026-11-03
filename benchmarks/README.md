@@ -1,6 +1,6 @@
 # Benchmarks
 
-The [application benchmarks](applications/README.md) compare Imre, Bun, Rust and CPython on developer tools and road routing. The [Flask benchmark](flask/comparison/README.md) compares HTTP throughput and validates every response. Both publish the raw samples behind the project README charts.
+The [application benchmarks](applications/README.md) compare Imre, Rust and CPython on developer tools and road routing. The [Flask benchmark](applications/README.md#flask) compares HTTP throughput and validates every response. Both publish the raw samples behind the project README charts.
 
 The [original runtime suite](runtime-suite.md) retains the inventory, Base45, Luhn, telemetry and conformance workloads for compiler diagnostics.
 
