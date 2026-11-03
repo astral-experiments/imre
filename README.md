@@ -152,9 +152,9 @@ CPython 3.14.5 discovers **1,217 test occurrences** in these six families on Lin
 | `inspect` | — | 362 | Callable signatures, argument binding, and decorator unwrapping |
 | `ssl` | — | 195 | SSL contexts, certificates, and loopback TLS connections |
 | `types` | 111 | 141 | On public `ce052eab`, the intact `test_types` runs recorded 100 paired passes and exited 1. `test_dynamicclassattribute` recorded 11 paired passes and exited 0 at both native levels. Two stock skips remain in the denominator. |
-| `warnings` | 174 | 187 | The [parent ledger](benchmarks/cpython_stdlib/full/warnings/receipts/) records 158 in-process passes and 16 passes with native interpreter children at O0 and O3. Three child-dependent originals still fail. Six parents skipped on stock and four skipped only on Imre. |
+| `warnings` | 176 | 187 | The [parent ledger](benchmarks/cpython_stdlib/full/warnings/receipts/) records 158 in-process passes and 18 passes with native interpreter children at O0 and O3. The allocation-traceback parent remains unpaired. Six parents skipped on stock and four skipped only on Imre. |
 | `weakref` | 168 | 183 | Selected stock and native O0/O3 runs passed 122 of 137 weakref originals. The intact 46-test WeakSet suite passed on all three. The separate intact native weakref suite still exits 1. |
-| **Measured total (4 of 6 families)** | **527** | **660** | |
+| **Measured total (4 of 6 families)** | **529** | **660** | |
 
 ## Design
 

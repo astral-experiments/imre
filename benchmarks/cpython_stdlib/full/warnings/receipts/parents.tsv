@@ -94,8 +94,8 @@ ordinal	id	occurrence	disposition	stock	O0	O3	stock_lines	O0_lines	O3_lines	rece
 93	test.test_warnings.DeprecatedTests.test_only_strings_allowed	1	paired	PASS	PASS	PASS	7/13/14/15	7/13/14/15	7/13/14/15	7e46a592
 94	test.test_warnings.DeprecatedTests.test_property	1	paired	PASS	PASS	PASS	99/481/482/483	99/481/482/483	99/481/482/483	dfe0f18e
 95	test.test_warnings.DeprecatedTests.test_turn_off_warnings	1	paired	PASS	PASS	PASS	100/484/485/486	100/484/485/486	100/484/485/486	dfe0f18e
-96	test.test_warnings.FinalizationTest.test_finalization	1	native-child-nonpass	PASS	FAIL	FAIL	13/47/48/49	13/47/48/49	13/47/48/49	dfe0f18e-children
-97	test.test_warnings.FinalizationTest.test_late_resource_warning	1	native-child-nonpass	PASS	FAIL	FAIL	14/50/51/52	14/50/51/52	14/50/51/52	dfe0f18e-children
+96	test.test_warnings.FinalizationTest.test_finalization	1	paired	PASS	PASS	PASS	6/9/10/11	6/9/10/11	6/9/10/11	061b0196
+97	test.test_warnings.FinalizationTest.test_late_resource_warning	1	paired	PASS	PASS	PASS	7/12/13/14	7/12/13/14	7/12/13/14	061b0196
 98	test.test_warnings.LocksTest.test_release_lock_no_lock	1	native-skip	PASS	SKIP	SKIP	103/493/494/495	103/493/494/495	103/493/494/495	dfe0f18e
 99	test.test_warnings.PyAsyncTests.test_async_context	1	stock-skip	SKIP	SKIP	SKIP	104/496/497/498	104/496/497/498	104/496/497/498	dfe0f18e
 100	test.test_warnings.PyAsyncTests.test_async_task_inherit	1	stock-skip	SKIP	SKIP	SKIP	105/499/500/501	105/499/500/501	105/499/500/501	dfe0f18e
