@@ -62,6 +62,7 @@ pub(super) fn exception_ancestors(
         ImportError,
         NameError,
         RuntimeError,
+        IndentationError,
         SyntaxError,
         Warning,
         Exception,
@@ -2450,7 +2451,7 @@ pub(super) fn call(
             exceptions::initialize_import(&mut error, args, kwargs)?;
             Ok(ctx.alloc(Value::Raised(error)))
         }
-        name @ ("SyntaxError" | "IndentationError") => {
+        name @ ("SyntaxError" | "IndentationError" | "TabError") => {
             positional(name, kwargs)?;
             let mut fields = ctx.syntax_fields(args);
             if let [_, info] = args {

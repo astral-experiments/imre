@@ -81,7 +81,7 @@ fn builtin_mro(kind: u32) -> Vec<u32> {
     let parent = match kind {
         0 => return vec![0],
         1 | 32 | 59 | 61 => 0,
-        3 | 4 => 2,
+        3 | 4 | 93 => 2, // ArithmeticError subclasses.
         6 | 7 => 5,
         17 => 8,
         18 => 17,
@@ -90,6 +90,8 @@ fn builtin_mro(kind: u32) -> Vec<u32> {
         37 => 10,
         40 => 39, // UnboundLocalError derives from NameError.
         42 => 41,
+        56 => 55, // IndentationError derives from SyntaxError.
+        92 => 56, // TabError derives from IndentationError.
         81..=91 => 80, // The builtin warning categories derive directly from Warning.
         _ => 1,
     };
