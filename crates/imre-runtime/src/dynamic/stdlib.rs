@@ -510,6 +510,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         (
             "_typing",
             "_clear_alias_caches"
+            | "_no_type_check_member"
             | "_get_alias_kind"
             | "_eval_type_expression"
             | "_validate_forward_ref"
