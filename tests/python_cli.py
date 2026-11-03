@@ -3164,6 +3164,7 @@ for name in ("md4", "ripemd160"):
             "boxed_gc_collect.py",
             "boxed_gc_controls.py",
             "boxed_gc_finalizers.py",
+            "boxed_gc_sibling_finalizers.py",
             "boxed_weakref_subclass.py",
             "boxed_proxy_truth.py",
             "boxed_setattr.py",
