@@ -2,7 +2,6 @@
 
 import threading
 import types
-from _imre_queue_sync import Condition as _Condition, Semaphore as _Semaphore
 from collections import deque
 from heapq import heappush, heappop
 from time import monotonic as time
@@ -53,19 +52,18 @@ class Queue:
         # is shared between the three conditions, so acquiring and
         # releasing the conditions also acquires and releases mutex.
         self.mutex = threading.Lock()
-        condition = getattr(threading, 'Condition', _Condition)
 
         # Notify not_empty whenever an item is added to the queue; a
         # thread waiting to get is notified then.
-        self.not_empty = condition(self.mutex)
+        self.not_empty = threading.Condition(self.mutex)
 
         # Notify not_full whenever an item is removed from the queue;
         # a thread waiting to put is notified then.
-        self.not_full = condition(self.mutex)
+        self.not_full = threading.Condition(self.mutex)
 
         # Notify all_tasks_done whenever the number of unfinished tasks
         # drops to zero; thread waiting to join() is notified to resume
-        self.all_tasks_done = condition(self.mutex)
+        self.all_tasks_done = threading.Condition(self.mutex)
         self.unfinished_tasks = 0
 
         # Queue shutdown state
@@ -326,7 +324,7 @@ class _PySimpleQueue:
 
     def __init__(self):
         self._queue = deque()
-        self._count = getattr(threading, 'Semaphore', _Semaphore)(0)
+        self._count = threading.Semaphore(0)
 
     def put(self, item, block=True, timeout=None):
         '''Put the item on the queue.
