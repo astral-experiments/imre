@@ -8,19 +8,29 @@ def _exc_info_to_string(self, err, test):
     internal = (_exc_info_to_string.__code__.co_filename, case.__file__)
     while tb is not None and tb.tb_frame.f_code.co_filename in internal:
         tb = tb.tb_next
-    return "".join(traceback.format_exception(kind, value, tb))
+    message = "".join(traceback.format_exception(kind, value, tb))
+    if self.buffer:
+        output = sys.stdout.getvalue()
+        error = sys.stderr.getvalue()
+        if output:
+            message += _bufferedOutput(output, "Stdout")
+        if error:
+            message += _bufferedOutput(error, "Stderr")
+    return message
 
 
 def _addError(self, test, error):
     if getattr(self, "failfast", False):
         self.stop()
     self.errors.append((test, self._exc_info_to_string(error, test)))
+    self._mirrorOutput = True
 
 
 def _addFailure(self, test, error):
     if getattr(self, "failfast", False):
         self.stop()
     self.failures.append((test, self._exc_info_to_string(error, test)))
+    self._mirrorOutput = True
 
 
 def _resultExpectedFailure(self, test, error):
@@ -33,6 +43,7 @@ def _resultSubTest(self, test, subtest, error):
             self.stop()
         problems = self.failures if issubclass(error[0], test.failureException) else self.errors
         problems.append((subtest, self._exc_info_to_string(error, test)))
+        self._mirrorOutput = True
 
 
 # Adapted from CPython 3.14.5 Lib/unittest/runner.py. See ../docstrings/LICENSE.
@@ -140,6 +151,56 @@ def _boxedResultInit(self, stream=None, descriptions=None, verbosity=None):
     self.collectedDurations = []
     self.buffer = False
     self.tb_locals = False
+    self._stdout_buffer = None
+    self._stderr_buffer = None
+    self._original_stdout = sys.stdout
+    self._original_stderr = sys.stderr
+    self._mirrorOutput = False
+
+
+# Adapted from CPython 3.14.5 Lib/unittest/result.py. See ../docstrings/LICENSE.
+def _bufferedOutput(output, label):
+    if not output.endswith("\n"):
+        output += "\n"
+    return "\n%s:\n%s" % (label, output)
+
+
+def _setupStdout(self):
+    if self.buffer:
+        if self._stderr_buffer is None:
+            import io
+            self._stderr_buffer = io.StringIO()
+            self._stdout_buffer = io.StringIO()
+        sys.stdout = self._stdout_buffer
+        sys.stderr = self._stderr_buffer
+
+
+def _restoreStdout(self):
+    if self.buffer:
+        if self._mirrorOutput:
+            output = sys.stdout.getvalue()
+            error = sys.stderr.getvalue()
+            if output:
+                self._original_stdout.write(_bufferedOutput(output, "Stdout"))
+            if error:
+                self._original_stderr.write(_bufferedOutput(error, "Stderr"))
+        sys.stdout = self._original_stdout
+        sys.stderr = self._original_stderr
+        self._stdout_buffer.seek(0)
+        self._stdout_buffer.truncate()
+        self._stderr_buffer.seek(0)
+        self._stderr_buffer.truncate()
+
+
+def startTest(self, test):
+    self.testsRun += 1
+    self._mirrorOutput = False
+    self._setupStdout()
+
+
+def stopTest(self, test):
+    self._restoreStdout()
+    self._mirrorOutput = False
 
 
 def _wasSuccessful(self):
@@ -196,9 +257,8 @@ def _streamAttribute(self, name):
 def _boxedRunnerInit(self, stream=None, descriptions=True, verbosity=1, failfast=False,
                      buffer=False, resultclass=None, warnings=None, *, tb_locals=False,
                      durations=None):
-    if buffer or tb_locals:
-        raise NotImplementedError("native TextTestRunner does not yet support output buffering "
-                                  "or local variables in tracebacks")
+    if tb_locals:
+        raise NotImplementedError("native TextTestRunner does not yet support local variables in tracebacks")
     self.stream = _WritelnDecorator(sys.stderr if stream is None else stream)
     self.descriptions = descriptions
     self.verbosity = verbosity
@@ -330,6 +390,10 @@ _WritelnDecorator.__getattr__ = _streamAttribute
 _WritelnDecorator.write = _StreamWrite()
 TestResult.addDuration = addDuration
 TestResult.__init__ = _boxedResultInit
+TestResult._setupStdout = _setupStdout
+TestResult._restoreStdout = _restoreStdout
+TestResult.startTest = startTest
+TestResult.stopTest = stopTest
 TestResult._exc_info_to_string = _exc_info_to_string
 TestResult.addExpectedFailure = _resultExpectedFailure
 TestResult.addSubTest = _resultSubTest
