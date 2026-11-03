@@ -47,5 +47,13 @@ def main() -> None:
     measure(rows, len(rows), 31, 31 + len(rows) - 1, -11.0)
     measure(rows, len(rows), 23, 23 + 3 * len(rows) - 17, 5.0)
 
+    # A negative inverse stride maps the scattered set bits into each partial period.
+    thin = [Reading(-11.0, False)] * 65535
+    for j in range(1024):
+        thin[(6931 * j + 32768) % len(thin)] = other
+    thin[-1] = other
+    measure(thin, len(thin), 701, 701 + 32768, -13.0)
+    measure(thin, len(thin), 123, 123 + len(thin) + 32768, 5.0)
+
 
 main()

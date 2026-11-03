@@ -1,6 +1,6 @@
 ; Visit the flat bitmap in modular index order. The dictionary view has at least
 ; one allocated word, and omitted trailing words represent default rows.
-define internal { double, i64 } @imre_bitmap_indexed_sum(ptr %view, i64 %start, i64 %stop, i64 %modulus, i64 %tagged_length, i64 %prefix_ones, i64 %scale, i64 %offset, double %initial, double %zero, double %one) nounwind {
+define internal { double, i64 } @imre_bitmap_indexed_sum(ptr %view, i64 %start, i64 %stop, i64 %modulus, i64 %tagged_length, i64 %prefix_ones, i64 %scale, i64 %offset, double %initial, double %zero, double %one) noinline nounwind {
 entry:
   %n = lshr i64 %modulus, 1
   %step = urem i64 %scale, %n
@@ -69,7 +69,7 @@ define internal i1 @imre_bitmap_tag(ptr %bits, i64 %words, i64 %pos) alwaysinlin
 ; A coprime modular step permutes the whole list in each complete period.
 ; A long partial period can subtract the omitted tags from one complete period.
 ; Both folds require an exact sum for every possible prefix.
-; Outline the proof so the indexed scan stays small enough to inline.
+; Keep one-time orbit planning separate from the ordered traversal.
 define internal { double, i64 } @imre_bitmap_permutation_prefix(ptr %view, i64 %start, i64 %stop, i64 %n, i64 %first, i64 %step, i64 %prefix_ones, double %initial, double %zero, double %one) noinline nounwind {
 entry:
   %distance = sub i64 %stop, %start
@@ -80,7 +80,18 @@ entry:
   %threshold = sub i64 %n, %third
   %enough = icmp uge i64 %remaining, %threshold
   %full_view = icmp sge i64 %first, 0
-  %candidate = and i1 %full_view, %enough
+  ; A set bit costs one inverse modular lookup. Compare the scan and lookup
+  ; costs to the number of probes on either side of the partial period.
+  %rounded = add i64 %n, 63
+  %word_count = lshr i64 %rounded, 6
+  %max_ones = add i64 %prefix_ones, 1
+  %lookups = shl i64 %max_ones, 4
+  %budget = add i64 %word_count, %lookups
+  %narrow = icmp ule i64 %n, 4294967296
+  %room = icmp uge i64 %remaining, %budget
+  %sparse = and i1 %narrow, %room
+  %worthwhile = or i1 %enough, %sparse
+  %candidate = and i1 %full_view, %worthwhile
   br i1 %candidate, label %orbit, label %miss
 orbit:
   %proof = call { i64, i64 } @imre_modular_bezout(i64 %step, i64 %n)
@@ -91,7 +102,12 @@ orbit:
   %partial = sub i64 %remaining, %whole
   %omitted = sub i64 %n, %partial
   %shorter = icmp uge i64 %partial, %threshold
-  %visits = select i1 %shorter, i64 %remaining, i64 %whole
+  %long_prefix = icmp uge i64 %partial, %budget
+  %long_suffix = icmp uge i64 %omitted, %budget
+  %both = and i1 %long_prefix, %long_suffix
+  %invert = and i1 %narrow, %both
+  %fold_partial = or i1 %shorter, %invert
+  %visits = select i1 %fold_partial, i64 %remaining, i64 %whole
   %exact_zero = call i1 @imre_exact_fadd_bound(double %initial, double %zero, i64 %visits)
   %exact_one = call i1 @imre_exact_fadd_bound(double %initial, double %one, i64 %visits)
   %exact = and i1 %exact_zero, %exact_one
@@ -112,16 +128,28 @@ reduce:
   %extra = zext i1 %last_tag to i64
   %per_period = add i64 %prefix_ones, %extra
   %full_ones = mul i64 %periods, %per_period
+  br i1 %invert, label %selected, label %direct
+selected:
+  %inverse = extractvalue { i64, i64 } %proof, 1
+  %fits = icmp ult i64 %words, %word_count
+  %stored = select i1 %fits, i64 %words, i64 %word_count
+  %hits = call i64 @imre_bitmap_selected_ones(ptr %bits, i64 %stored, i64 %n, i64 %first, i64 %inverse, i64 %partial)
+  br label %partial_count
+direct:
   br i1 %shorter, label %complement, label %counts
 complement:
   ; Walk backwards from the start of the next period to count the omitted rows.
   %absent = call i64 @imre_bitmap_omitted_ones(ptr %bits, i64 %words, i64 %n, i64 %first, i64 %step, i64 %omitted)
-  %interrupted = icmp slt i64 %absent, 0
-  %partial_ones = sub i64 %per_period, %absent
+  br label %partial_count
+partial_count:
+  %speculative = phi i64 [ %absent, %complement ], [ %hits, %selected ]
+  %complement_ones = sub i64 %per_period, %speculative
+  %partial_ones = select i1 %invert, i64 %speculative, i64 %complement_ones
+  %interrupted = icmp slt i64 %speculative, 0
   %included = add i64 %full_ones, %partial_ones
   br i1 %interrupted, label %miss, label %counts
 counts:
-  %ones = phi i64 [ %full_ones, %reduce ], [ %included, %complement ]
+  %ones = phi i64 [ %full_ones, %direct ], [ %included, %partial_count ]
   %zeros = sub i64 %visits, %ones
   %nf_zero = uitofp i64 %zeros to double
   %nf_one = uitofp i64 %ones to double
@@ -175,3 +203,54 @@ interrupt:
 exit:
   ret i64 %added
 }
+
+; Multiplying a set bit's offset by the inverse stride gives its unique ordinal
+; in the permutation. Both factors fit in 32 bits on this path.
+define internal i64 @imre_bitmap_selected_ones(ptr %bits, i64 %words, i64 %n, i64 %first, i64 %inverse, i64 %partial) nounwind {
+entry:
+  %negative = icmp slt i64 %inverse, 0
+  %positive = add i64 %inverse, %n
+  %inv = select i1 %negative, i64 %positive, i64 %inverse
+  br label %word
+word:
+  %index = phi i64 [ 0, %entry ], [ %next, %advance ]
+  %count = phi i64 [ 0, %entry ], [ %subtotal, %advance ]
+  %signal = load atomic volatile i8, ptr @imre_signal_tripped monotonic, align 1
+  %pending = icmp ne i8 %signal, 0
+  br i1 %pending, label %interrupt, label %read
+read:
+  %ptr = getelementptr inbounds i64, ptr %bits, i64 %index
+  %tags = load i64, ptr %ptr
+  %base = shl i64 %index, 6
+  br label %test
+test:
+  %mask = phi i64 [ %tags, %read ], [ %rest, %visit ]
+  %subtotal = phi i64 [ %count, %read ], [ %added, %visit ]
+  %empty = icmp eq i64 %mask, 0
+  br i1 %empty, label %advance, label %visit
+visit:
+  %bit = call i64 @llvm.cttz.i64(i64 %mask, i1 true)
+  %physical = or i64 %base, %bit
+  %delta = sub i64 %physical, %first
+  %wrap = icmp ult i64 %physical, %first
+  %wrapped = add i64 %delta, %n
+  %offset = select i1 %wrap, i64 %wrapped, i64 %delta
+  %product = mul i64 %offset, %inv
+  %ordinal = urem i64 %product, %n
+  %hit = icmp ult i64 %ordinal, %partial
+  %one = zext i1 %hit to i64
+  %added = add i64 %subtotal, %one
+  %low = sub i64 %mask, 1
+  %rest = and i64 %mask, %low
+  br label %test
+advance:
+  %next = add i64 %index, 1
+  %done = icmp eq i64 %next, %words
+  br i1 %done, label %exit, label %word
+interrupt:
+  ret i64 -1
+exit:
+  ret i64 %subtotal
+}
+
+declare i64 @llvm.cttz.i64(i64, i1 immarg)
