@@ -2475,12 +2475,13 @@ pub(super) fn method(
         return ctx.heap.fresh_string(mapped);
     }
     if let Some(predicate) = predicate {
-        if matches!(name, "isascii" | "isalpha" | "isdigit" | "isidentifier")
-            && matches!(
-                ctx.heap.get(ctx.scalar_value(receiver)),
-                Value::SurrogateStr(_)
-            )
-        {
+        if matches!(
+            name,
+            "isalnum" | "isascii" | "isalpha" | "isdigit" | "isidentifier"
+        ) && matches!(
+            ctx.heap.get(ctx.scalar_value(receiver)),
+            Value::SurrogateStr(_)
+        ) {
             // This representation always contains at least one non-ASCII surrogate.
             return Ok(boolean(false));
         }
