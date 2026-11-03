@@ -248,3 +248,16 @@ assert str(inspect.signature(partial(with_options, Placeholder, 2))) == "(a, /, 
 assert str(inspect.signature(PartialMethods.with_hole)) == "(receiver, value, /)"
 assert str(inspect.signature(PartialMethods().with_hole)) == "(value, /)"
 assert str(inspect.signature(PartialMethods.variadic)) == "(*args)"
+
+
+bound = object.__init__.__get__
+raw = type(object.__init__).__get__
+assert bound.__text_signature__ == raw.__text_signature__ == "($self, instance, owner=None, /)"
+assert str(Signature.from_callable(raw)) == "(self, instance, owner=None, /)"
+sig = inspect.signature(bound)
+assert str(sig) == "(instance, owner=None, /)"
+assert sig.parameters["owner"].default is None
+assert sig.parameters["instance"].kind is Parameter.POSITIONAL_ONLY
+
+assert str(inspect.signature(object.__init__)) == "(self, /, *args, **kwargs)"
+assert str(inspect.signature(object().__init__)) == "(*args, **kwargs)"

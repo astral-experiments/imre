@@ -146,6 +146,15 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
                         "or hasattr(tp, \"__delete__\")",
                         "or hasattr(tp, \"__delete__\") or _native_data_descriptor(object)",
                     );
+                    // Load the parser dependencies on first signature inspection. The boxed
+                    // list iterator exposes next() but has no Python-visible __next__ method.
+                    let text_signatures = section(
+                        "def _signature_strip_non_python_syntax(",
+                        "def _signature_from_builtin(",
+                    )
+                    .replace("    if not signature:", "    import token\n    import tokenize\n    if not signature:")
+                    .replace("iter(lines).__next__", "functools.partial(next, iter(lines))")
+                    .replace("    Parameter = cls._parameter_cls", "    import ast\n    Parameter = cls._parameter_cls");
                     // Imre records native source positions without CPython bytecode offsets.
                     let frame_info = section("def getframeinfo(", "def getinnerframes(")
                         .replace("_get_code_position_from_tb(frame)", "_frame_position(frame)")
@@ -168,6 +177,7 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
                         section("def formatannotation(", "def formatannotationrelativeto("),
                         section("def _signature_get_partial(", "def _signature_is_builtin("),
                         section("def _signature_is_functionlike(obj):", "def _signature_strip_non_python_syntax("),
+                        &text_signatures,
                         section("class _void:", "class BufferFlags("),
                     ]
                     .join("\n")
