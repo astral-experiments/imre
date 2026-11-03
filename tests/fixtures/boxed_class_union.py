@@ -58,7 +58,9 @@ def current():
     for owner in (GenericAlias, type(iterator)):
         assert owner.__reduce__.__doc__ is None
         assert owner.__reduce__.__text_signature__ == "($self, /)"
-    assert iterator.__reduce__() == (iter, (alias,))
+    assert GenericAlias.__reduce_ex__ is type(iterator).__reduce_ex__ is object.__reduce_ex__
+    assert alias.__reduce_ex__(0) == alias.__reduce__()
+    assert iterator.__reduce_ex__(5) == iterator.__reduce__() == (iter, (alias,))
     starred = next(iterator)
     assert iterator.__reduce__() == (iter, ((),))
     factory, (fresh,) = starred.__reduce__()

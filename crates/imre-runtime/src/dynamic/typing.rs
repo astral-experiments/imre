@@ -1381,6 +1381,17 @@ pub(super) fn attribute(ctx: &mut Context, value: Id, name: &str) -> Option<Resu
             ctx.text("Callable")
         }
         Value::Native(class)
+            if name == "__reduce_ex__"
+                && matches!(
+                    class.as_str(),
+                    "types.GenericAlias"
+                        | "generic_alias_iterator"
+                        | "collections.abc._CallableGenericAlias"
+                ) =>
+        {
+            ctx.builtin("object.__reduce_ex__")
+        }
+        Value::Native(class)
             if name == "__reduce__"
                 && matches!(class.as_str(), "typing.Callable" | "typing._CallableType") =>
         {
@@ -1421,10 +1432,12 @@ pub(super) fn attribute(ctx: &mut Context, value: Id, name: &str) -> Option<Resu
         {
             ctx.builtin(&format!("{class}.__reduce__"))
         }
-        Value::GenericAliasIterator(_) if name == "__reduce__" => {
+        Value::GenericAliasIterator(_) if matches!(name, "__reduce__" | "__reduce_ex__") => {
             let class = ctx.builtin("generic_alias_iterator");
-            let reducer = ctx.builtin("generic_alias_iterator.__reduce__");
-            return Some(ctx.bind_attribute(reducer, value, class));
+            return Some(
+                ctx.lookup_attr(class, name)
+                    .and_then(|reducer| ctx.bind_attribute(reducer, value, class)),
+            );
         }
         Value::Native(class)
             if name == "__reduce__" && class == "collections.abc._CallableGenericAlias" =>
@@ -1435,8 +1448,8 @@ pub(super) fn attribute(ctx: &mut Context, value: Id, name: &str) -> Option<Resu
             ctx.module_value("typing", "_reduce_callable_alias")?
         }
         Value::GenericAlias(alias)
-            if name == "__reduce__"
-                && (alias.kind.is_typing_alias() || alias.is_builtin_alias()) =>
+            if (alias.is_builtin_alias() && matches!(name, "__reduce__" | "__reduce_ex__"))
+                || (alias.kind.is_typing_alias() && name == "__reduce__") =>
         {
             let class = ctx.builtin(alias.kind.class());
             return Some(
