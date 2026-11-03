@@ -46,6 +46,16 @@ def current():
         raise AssertionError("accepted an integer command argument")
     assert check_output(["/bin/cat"], input=b"abc") == b"abc"
     assert check_output(["/bin/cat"], input=None, text=True) == ""
+
+    cmd = ["/bin/sh", "-c", "printf out; printf err >&2; exit 7"]
+    try:
+        check_output(cmd, stderr=PIPE)
+    except CalledProcessError as exc:
+        assert exc.args == (7, cmd)
+        assert (exc.output, exc.stderr) == (b"out", b"err")
+    else:
+        raise AssertionError("check_output accepted exit status 7")
+
     assert getstatusoutput("printf 'out\\n\\n' >&2; exit 7") == (7, "out\n")
     assert getoutput("printf x") == "x"
 

@@ -764,5 +764,5 @@ def run(*popenargs, input=None, capture_output=False, timeout=None, check=False,
             raise
         code = process.poll()
         if check and code:
-            raise CalledProcessError(code, process.args, stdout, stderr)
+            raise CalledProcessError(code, process.args, output=stdout, stderr=stderr)
     return CompletedProcess(process.args, code, stdout, stderr)
