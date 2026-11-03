@@ -301,6 +301,7 @@ pub(super) struct Input {
     raw: ReadBuffer,
     text: TextBuffer,
     unbuffered: bool,
+    pub(super) read_size_hint: usize,
 }
 
 impl Input {
@@ -318,6 +319,7 @@ impl Input {
                 source.take(u64::MAX),
             )),
             text: TextBuffer::default(),
+            read_size_hint: 0,
             unbuffered: false,
         }
     }
@@ -336,6 +338,7 @@ impl Input {
                 window,
             },
             text: TextBuffer::default(),
+            read_size_hint: 0,
             unbuffered: binary && capacity == 0,
         })
     }
@@ -520,7 +523,17 @@ impl Input {
 
     pub(super) fn read_text(&mut self) -> Result<Str> {
         let mut bytes = self.text.carry.to_vec();
-        self.raw.read_to_end(&mut bytes).map_err(errno_error)?;
+        // The file can grow or shrink after open. Its size only guides allocation.
+        let hint = std::mem::take(&mut self.read_size_hint);
+        let _ = bytes.try_reserve_exact(hint);
+        match &mut self.raw {
+            ReadBuffer::File(file) => file.read_to_end(&mut bytes),
+            pipe => pipe.read_to_end(&mut bytes),
+        }
+        .map_err(errno_error)?;
+        if bytes.len() < hint / 2 {
+            bytes.shrink_to_fit();
+        }
         let remaining = decode_text(bytes, self.text.preserve_newlines)?;
         self.text.carry.clear();
         let prefix = &self.text.decoded[self.text.pos..];

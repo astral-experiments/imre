@@ -75,6 +75,7 @@ pub(crate) use logging::record::{
     brace_float_field, brace_integer_field, percent_float_field, percent_integer_field,
 };
 mod mappings;
+mod matching_fields;
 mod module_specs;
 mod namespaces;
 pub(crate) mod os;
@@ -218,6 +219,7 @@ enum Storage {
     Repeat(Repeat<OwnedWord>),
     IteratorAdapter(Rc<itertools::Adapter>),
     LineIterator(LineIterator),
+    MatchingFields(matching_fields::MatchingFields),
     BytesIterator(bytes::BytesIterator),
     ByteOutput(bytes::ByteOutput),
     TupleBuffer(Vec<OwnedWord>),

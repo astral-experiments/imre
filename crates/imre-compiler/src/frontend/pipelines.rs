@@ -3,8 +3,40 @@
 //! Python's lazy evaluation and mutation checks without escaping iterator values.
 
 use super::*;
+use crate::ir::TextOperation;
 
 mod groupby;
+
+/// A nonempty needle without the one-byte delimiter cannot cross a field boundary.
+fn split_filter_source<'a>(source: &'a Iteration, needle: &str) -> Option<(&'a Expr, u8)> {
+    let Iteration::Container {
+        iterable,
+        items: false,
+        start: None,
+    } = source
+    else {
+        return None;
+    };
+    let ExprKind::Builtin(Builtin::Text(TextOperation::Split(false)), args) = &iterable.kind else {
+        return None;
+    };
+    let [text, separator, limit] = args.as_slice() else {
+        return None;
+    };
+    let ExprKind::Present(separator) = &separator.kind else {
+        return None;
+    };
+    let ExprKind::Str(separator) = &separator.kind else {
+        return None;
+    };
+    let [byte] = *separator.as_bytes() else {
+        return None;
+    };
+    (!needle.is_empty()
+        && !needle.as_bytes().contains(&byte)
+        && matches!(&limit.kind, ExprKind::Int(n) if n == "-1"))
+    .then_some((text, byte))
+}
 
 /// `evaluate` evaluates an iterable expression; `acquire` obtains its iterator.
 /// Constructor expressions fold their own acquisition into `evaluate`. Every
@@ -295,11 +327,86 @@ impl Checker<'_> {
             && self.resolve(receiver) == Some(Binding::Intrinsic(Intrinsic::Chain))
     }
 
+    /// Only the literal membership test runs for a skipped field.
+    pub(super) fn split_guard<'a>(&self, loop_: &'a ast::StmtFor) -> Option<&'a str> {
+        let Some([ast::Expr::Name(index), ast::Expr::Name(field)]) =
+            pattern_elements(&loop_.target)
+        else {
+            return None;
+        };
+        let [ast::Stmt::If(guard)] = loop_.body.as_slice() else {
+            return None;
+        };
+        let ast::Expr::Compare(test) = &*guard.test else {
+            return None;
+        };
+        let [ast::Expr::StringLiteral(needle), ast::Expr::Name(subject)] = test.operands.as_ref()
+        else {
+            return None;
+        };
+        (index.id != field.id
+            && self
+                .names
+                .get(index.id.as_str())
+                .is_none_or(|&slot| self.local(slot).ty == Type::Int)
+            && self
+                .names
+                .get(field.id.as_str())
+                .is_none_or(|&slot| self.local(slot).ty == Type::Str)
+            && guard.elif_else_clauses.is_empty()
+            && test.ops.as_ref() == [ast::CmpOp::In]
+            && subject.id == field.id
+            && {
+                let writes = narrowing::assigned_names(&guard.body);
+                !writes.contains(index.id.as_str()) && !writes.contains(field.id.as_str())
+            })
+        .then(|| needle.value.to_str())
+    }
+
+    fn matching_fields(&mut self, cursor: Expr) -> Prepared {
+        let iterator = self.hidden(Type::Iterator);
+        let index = self.hidden(Type::Int);
+        let field = self.hidden(Type::Str);
+        let ready = self.hidden(Type::Bool);
+        let pair = self.types.tuple(vec![Type::Int, Type::Str]);
+        let value = self.hidden(pair);
+        Prepared {
+            evaluate: vec![Statement::Assign(iterator, cursor)],
+            acquire: Vec::new(),
+            next: vec![
+                Statement::IterNext {
+                    iterator,
+                    key: index,
+                    value: Some(field),
+                    ready,
+                },
+                Statement::If(
+                    self.local(ready),
+                    vec![Statement::Assign(
+                        value,
+                        Expr {
+                            ty: pair,
+                            kind: ExprKind::Tuple(vec![self.local(index), self.local(field)]),
+                        },
+                    )],
+                    Vec::new(),
+                ),
+            ],
+            value,
+            ready,
+            elementless: false,
+            eager_list: None,
+            writes: HashSet::new(),
+            clear: vec![iterator, index, field, ready, value],
+        }
+    }
+
     /// Recognizes only sealed constructor syntax at a direct consumer boundary.
     pub(super) fn pipeline_input(
         &mut self,
         expression: &ast::Expr,
         element: Option<Type>,
+        split_needle: Option<&str>,
     ) -> Result<Option<Iteration>, String> {
         if let Some(input) = self.enum_iteration(expression) {
             return Ok(Some(input));
@@ -543,6 +650,23 @@ impl Checker<'_> {
                     _ => None,
                 });
                 let source = self.expansion_input(&call.arguments.args[0], element)?;
+                if let Some(needle) = split_needle
+                    && let Some((text, separator)) = split_filter_source(&source, needle)
+                {
+                    let start = if let Some(expr) = call.arguments.args.get(1) {
+                        self.expr_expected(expr, Type::Int)?
+                    } else {
+                        Expr::integer(0)
+                    };
+                    let cursor = Expr {
+                        ty: Type::Iterator,
+                        kind: ExprKind::Builtin(
+                            Builtin::MatchingSplitIter(separator),
+                            vec![text.clone(), unpacking::string(needle), start],
+                        ),
+                    };
+                    return Ok(Some(Iteration::Prepared(self.matching_fields(cursor))));
+                }
                 let source = self.fuse_splitlines(source);
                 let mut input = self.prepare_iteration(source, call, false)?;
                 self.hint_empty_iteration(&input, element);
@@ -835,34 +959,11 @@ impl Checker<'_> {
         else {
             return input;
         };
-        let iterator = self.hidden(Type::Iterator);
-        let value = self.hidden(Type::Str);
-        let ready = self.hidden(Type::Bool);
-        Iteration::Prepared(Prepared {
-            evaluate: vec![Statement::Assign(
-                iterator,
-                Expr {
-                    ty: Type::Iterator,
-                    kind: ExprKind::Builtin(Builtin::SplitLinesIter, args),
-                },
-            )],
-            acquire: Vec::new(),
-            next: vec![
-                Statement::Clear(value),
-                Statement::IterNext {
-                    iterator,
-                    key: value,
-                    value: None,
-                    ready,
-                },
-            ],
-            value,
-            ready,
-            elementless: false,
-            eager_list: None,
-            writes: HashSet::new(),
-            clear: vec![iterator, value, ready],
-        })
+        let cursor = Expr {
+            ty: Type::Iterator,
+            kind: ExprKind::Builtin(Builtin::SplitLinesIter, args),
+        };
+        Iteration::Prepared(self.prepare_cursor(cursor, Type::Str))
     }
 
     pub(super) fn prepare_cursor(&mut self, cursor: Expr, element: Type) -> Prepared {

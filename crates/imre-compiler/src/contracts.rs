@@ -772,6 +772,7 @@ impl Builtin {
             | Self::DequeClear
             | Self::DequeReverse
             | Self::SetIter
+            | Self::MatchingSplitIter(_)
             | Self::SplitLinesIter
             | Self::StringIter
             | Self::StringReverseIter
@@ -909,6 +910,9 @@ impl Builtin {
                     && signature(&[Type::Str], Type::Int)
             }
             Self::SplitIntField(_) => signature(&[Type::Str], Type::Int),
+            Self::MatchingSplitIter(_) => {
+                signature(&[Type::Str, Type::Str, Type::Int], Type::Iterator)
+            }
             Self::SplitLinesIter => signature(&[Type::Str], Type::Iterator),
             Self::FunctionWrappedSet => {
                 matches!(result, Type::Callable(_)) && signature(&[result, result], result)

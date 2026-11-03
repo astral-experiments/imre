@@ -513,7 +513,7 @@ fn decode_text(bytes: Vec<u8>, preserve_newlines: bool) -> Result<Str> {
             Err(_) => Error::memory_error(),
         }
     })?;
-    if preserve_newlines || !text.contains('\r') {
+    if preserve_newlines || memchr::memchr(b'\r', text.as_bytes()).is_none() {
         return Ok(Str::from(text));
     }
     let mut normalized = Str::with_capacity(text.len());
@@ -797,6 +797,9 @@ fn open_state_with_capacity(
         0 if gzip => Stream::UnreadGzip { file, capacity },
         0 | 4 => {
             let mut input = Input::new(file, gzip, binary, capacity);
+            if !binary && !gzip && metadata.is_file() {
+                input.read_size_hint = metadata.len().min(1024 * 1024) as usize;
+            }
             if mode == 4 {
                 input.preserve_newlines();
             }
