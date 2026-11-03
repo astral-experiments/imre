@@ -778,6 +778,10 @@ fn collect_class(
                     continue;
                 }
                 if method.type_params.is_some() {
+                    let postponed = imre_ast::future_annotations(&module.parsed.syntax().body);
+                    if crate::dynamic::function_type_params(method, postponed, true, None).is_some() {
+                        graph.needs_object_runtime.set(true);
+                    }
                     return Err(module.error(method, "method type parameters are unsupported"));
                 }
                 let name = method.name.as_str();
