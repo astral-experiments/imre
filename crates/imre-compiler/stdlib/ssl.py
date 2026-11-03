@@ -421,6 +421,11 @@ class SSLContext:
             _imre_ssl.raise_context_receiver_error("cert_store_stats", self)
         return _imre_ssl.cert_store_stats(self._ctx)
 
+    def get_ca_certs(self, /, binary_form=False):
+        if not issubclass(type(self), __class__):
+            _imre_ssl.raise_context_receiver_error("get_ca_certs", self)
+        return _call(_imre_ssl.get_ca_certs, __class__._ctx.__get__(self), binary_form)
+
     def set_default_verify_paths(self):
         _call(_imre_ssl.default_verify_paths, self._ctx)
 
