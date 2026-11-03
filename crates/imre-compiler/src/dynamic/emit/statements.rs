@@ -287,8 +287,11 @@ impl Function<'_, '_> {
                         if chained && index + 1 == v.targets.len() {
                             self.live.pop();
                         }
-                        let owned =
-                            chained || matches!(target, ast::Expr::List(_) | ast::Expr::Tuple(_));
+                        let owned = chained
+                            || matches!(
+                                target,
+                                ast::Expr::Name(_) | ast::Expr::List(_) | ast::Expr::Tuple(_)
+                            );
                         self.assign_target(target, &value, owned);
                     }
                 }
@@ -313,7 +316,11 @@ impl Function<'_, '_> {
                 ast::Stmt::AnnAssign(v) => {
                     if let Some(value) = &v.value {
                         let value = self.expr(value);
-                        self.assign(&v.target, &value);
+                        self.assign_target(
+                            &v.target,
+                            &value,
+                            matches!(&*v.target, ast::Expr::Name(_)),
+                        );
                     } else if self.source.string_annotations {
                         match &*v.target {
                             ast::Expr::Attribute(attr) => {

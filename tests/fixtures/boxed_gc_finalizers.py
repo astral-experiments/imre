@@ -121,7 +121,34 @@ def check_unraisable():
         sys.unraisablehook = before
 
 
+def check_replacement_line():
+    observed = []
+
+    class Resource:
+        def __del__(self):
+            frame = sys._getframe(1)
+            observed.append((frame.f_code.co_name, frame.f_lineno))
+
+    def release(annotated):
+        handle = Resource()
+        alias = handle
+        handle = None
+        assert len(observed) == len(expected)
+        if annotated:
+            expected.append(sys._getframe().f_lineno + 1)
+            alias: object = None
+        else:
+            expected.append(sys._getframe().f_lineno + 1)
+            alias = None
+
+    expected = []
+    release(False)
+    release(True)
+    assert observed == [("release", line) for line in expected], observed
+
+
 def current():
+    check_replacement_line()
     check_unraisable()
     # Keep another pending finalizer reachable while cyclic and acyclic owners die.
     held = [Owner()]
