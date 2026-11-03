@@ -41,6 +41,7 @@ pub(in crate::dynamic) fn install(ctx: &mut Context, scope: Id) -> Result<()> {
         "default_verify_flags",
         "set_alpn_protocols",
         "set_post_handshake_auth",
+        "get_ciphers",
         "set_ciphers",
         "load_verify_locations",
         "load_cert_chain",
@@ -176,6 +177,37 @@ pub(super) fn call(
             let flags = context(ctx, handle)?.borrow().verify_flags();
             Ok(ctx.alloc(Value::Int(crate::Int::new(flags.into()))))
         }
+        ("verify_flags", &[handle, value]) => {
+            use std::ffi::c_ulong;
+            let Some(integer) = ctx.index_value(value)? else {
+                let kind = if value == NONE {
+                    "None".into()
+                } else if let Some(name) = ctx
+                    .heap
+                    .get(value)
+                    .instance_class()
+                    .and_then(|class| ctx.heap.get(class).heap_type())
+                {
+                    name.into()
+                } else {
+                    super::diagnostic_type_name(ctx, value)
+                };
+                let mut message = b"argument must be int, not ".to_vec();
+                message.extend_from_slice(&kind.as_bytes()[..kind.len().min(50)]);
+                let message = crate::objects::Codec::Utf8 { signature: false }
+                    .decode(&message, None)
+                    .map_err(|error| ctx.decode_error(error))?;
+                return Err(Error::new("TypeError", message));
+            };
+            // CPython's "k" converter keeps the low bits of an unsigned long.
+            let masked = integer.big().as_ref() & num_bigint::BigInt::from(c_ulong::MAX);
+            let flags = c_ulong::try_from(masked).expect("masked to unsigned long");
+            context(ctx, handle)?
+                .borrow_mut()
+                .set_verify_flags(flags)
+                .map_err(|e| provider_error(ctx, e))?;
+            Ok(NONE)
+        }
         ("raise_context_receiver_error", &[method, receiver]) => {
             let method = ctx.str_value(method)?;
             let kind = super::diagnostic_type_name(ctx, receiver);
@@ -268,6 +300,7 @@ pub(super) fn call(
                 .map_err(|e| provider_error(ctx, e))?;
             Ok(NONE)
         }
+        ("get_ciphers", &[handle]) => provider::ciphers::get(ctx, handle),
         ("set_ciphers", &[handle, text]) => {
             let ciphers = CString::new(ctx.str_value(text)?)
                 .map_err(|_| Error::new("ValueError", "embedded null byte in cipher list"))?;

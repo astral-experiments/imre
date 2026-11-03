@@ -2718,8 +2718,12 @@ def report(text):
             except OSError:
                 pass
             else:
+                ciphers = fixtures / "ssl_context_ciphers.py"
+                compare("-IB", ciphers, native_args=("run", ciphers, "--quiet"), native_timeout=600)
                 bio = fixtures / "ssl_memory_bio.py"
                 compare("-IB", bio, native_args=("run", bio, "--quiet"), native_timeout=600)
+                flags = fixtures / "ssl_verify_flags.py"
+                compare("-IB", flags, native_args=("run", flags, "--quiet"), native_timeout=600)
         queue_exports = fixtures / "logging_queue_exports.py"
         compare("-IB", queue_exports, native_args=("run", queue_exports, "--quiet"), native_timeout=600)
         thread_hook_exports = root / "thread_hook_exports.py"

@@ -5,6 +5,7 @@ use std::ptr::{self, NonNull};
 use std::sync::OnceLock;
 
 pub(in crate::dynamic) mod bio;
+pub(super) mod ciphers;
 pub(in crate::dynamic) mod objects;
 pub(in crate::dynamic) mod versions;
 
@@ -111,6 +112,7 @@ functions! {
     X509_check_ca(Handle) -> c_int;
     SSL_CTX_get0_param(Handle) -> Handle;
     X509_VERIFY_PARAM_set_flags(Handle, c_ulong) -> c_int;
+    X509_VERIFY_PARAM_clear_flags(Handle, c_ulong) -> c_int;
     X509_VERIFY_PARAM_get_flags(Handle) -> c_ulong;
     SSL_CTX_set_alpn_protos(Handle, *const u8, c_uint) -> c_int;
     SSL_CTX_set_post_handshake_auth(Handle, c_int) -> ();
@@ -143,6 +145,17 @@ functions! {
     X509_verify_cert_error_string(c_long) -> *const c_char;
     SSL_read_ex(Handle, Handle, usize, *mut usize) -> c_int;
     SSL_write_ex(Handle, *const c_void, usize, *mut usize) -> c_int;
+    SSL_get_ciphers(Handle) -> Handle;
+    SSL_CIPHER_get_id(Handle) -> u32;
+    SSL_CIPHER_get_name(Handle) -> *const c_char;
+    SSL_CIPHER_get_version(Handle) -> *const c_char;
+    SSL_CIPHER_description(Handle, *mut c_char, c_int) -> *mut c_char;
+    SSL_CIPHER_get_bits(Handle, *mut c_int) -> c_int;
+    SSL_CIPHER_is_aead(Handle) -> c_int;
+    SSL_CIPHER_get_cipher_nid(Handle) -> c_int;
+    SSL_CIPHER_get_digest_nid(Handle) -> c_int;
+    SSL_CIPHER_get_kx_nid(Handle) -> c_int;
+    SSL_CIPHER_get_auth_nid(Handle) -> c_int;
     SSL_get_error(Handle, c_int) -> c_int;
     ERR_clear_error() -> ();
     ERR_peek_error() -> c_ulong;
@@ -336,13 +349,36 @@ impl Context {
         }
     }
 
-    pub(crate) fn verify_flags(&self) -> u64 {
+    pub(crate) fn verify_flags(&self) -> c_ulong {
         // SAFETY: the borrowed parameters remain valid throughout the query.
         unsafe {
             (self.api.X509_VERIFY_PARAM_get_flags)((self.api.SSL_CTX_get0_param)(
                 self.handle.as_ptr(),
-            )) as u64
+            ))
         }
+    }
+
+    pub(super) fn set_verify_flags(&mut self, flags: c_ulong) -> Result<(), Failure> {
+        let old = self.verify_flags();
+        let clear = old & !flags;
+        if clear != 0 {
+            self.api.clear();
+            // SAFETY: the verification parameters are borrowed from this live SSL_CTX.
+            if unsafe {
+                (self.api.X509_VERIFY_PARAM_clear_flags)(
+                    (self.api.SSL_CTX_get0_param)(self.handle.as_ptr()),
+                    clear,
+                )
+            } != 1
+            {
+                return Err(self.api.error("X509_VERIFY_PARAM_clear_flags"));
+            }
+        }
+        let set = flags & !old;
+        if set != 0 {
+            self.add_verify_flags(set)?;
+        }
+        Ok(())
     }
 
     pub(super) fn cert_store_stats(&self) -> Option<[c_int; 3]> {
