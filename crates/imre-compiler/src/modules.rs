@@ -2652,10 +2652,20 @@ impl SourceModule {
 
     /// A type-only import in a native stub does not add a member to the C module.
     fn export(&self, name: &str) -> Option<Binding> {
-        if self.is_bundled("uuid") && name == "uuid4" {
-            return Some(Binding::Intrinsic(Intrinsic::ScopedObjectExport(
-                "uuid.uuid4",
-            )));
+        if self.is_bundled("uuid") {
+            let export = match name {
+                "uuid3" => Some("uuid.uuid3"),
+                "uuid4" => Some("uuid.uuid4"),
+                "uuid5" => Some("uuid.uuid5"),
+                "NAMESPACE_DNS" => Some("uuid.NAMESPACE_DNS"),
+                "NAMESPACE_URL" => Some("uuid.NAMESPACE_URL"),
+                "NAMESPACE_OID" => Some("uuid.NAMESPACE_OID"),
+                "NAMESPACE_X500" => Some("uuid.NAMESPACE_X500"),
+                _ => None,
+            };
+            if let Some(export) = export {
+                return Some(Binding::Intrinsic(Intrinsic::ScopedObjectExport(export)));
+            }
         }
         if self.is_bundled("platform") && name == "win32_is_iot" {
             return Some(Binding::Intrinsic(Intrinsic::ScopedObjectExport(

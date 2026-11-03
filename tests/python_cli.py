@@ -2741,6 +2741,16 @@ def report(text):
             compare("-B", token_limit, extra=digit_env)
             compare("-B", token_limit, extra=digit_env, native_args=("run", token_limit, "--runtime-imports", "--quiet"))
 
+        compare(
+            "-B", "-c",
+            "import uuid\n"
+            "from uuid import NAMESPACE_DNS, uuid3\n"
+            "print(uuid3(NAMESPACE_DNS, 'python.org'))\n"
+            "space = uuid.UUID(int=42)\n"
+            "print(uuid.uuid5(space, 'café'), uuid.uuid5(space, b'\\xff'))\n",
+            extra={"IMREFLAGS": "--opt-level 0"},
+            native_timeout=300,
+        )
         (helpers / "uuid").mkdir()
         uuid_import = f"import sys\nsys.path.insert(0, {str(helpers)!r})\nimport uuid\n"
         compare("-IB", "-c", uuid_import + "print(hasattr(uuid, '__path__'), str(uuid.UUID(int=0)))")
