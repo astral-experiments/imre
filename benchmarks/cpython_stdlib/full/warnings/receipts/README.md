@@ -8,6 +8,8 @@ The Linux inventory contains 187 original parents. The [intact run](dfe0f18e/) o
 | `DeprecatedTests.test_only_strings_allowed` | Preserve the Python argument validation in `warnings.deprecated`. |
 | `PyWarnTests.test_stacklevel_import` | Skip internal import frames when locating the warning caller. |
 
-The [current ledger](parents.tsv) contains 158 paired parents, six stock skips, four additional native skips and 19 parents awaiting verified native children. The warnings omission count is zero.
+On `dfe0f18e`, the 19 original parents that launch interpreter children ran again with Imre as `sys.executable`. Thirteen passed on stock and both native levels. For each passing parent, the process-group records identify its native child drivers and the Clang processes that compiled their Python workloads at O0 or O3. The six other parents failed in both native runs. [Child audit and raw records](dfe0f18e-children/)
 
-The `receipt` column identifies the run used for each row. The last three `*_lines` columns give one-based registration, start, outcome and stop line numbers. For the selected run, use the `stdout` array for the corresponding mode in [the raw process records](7e46a592/raw.json). Run `python3 -I -B verify.py` in this directory to verify the cumulative count against both sets of callbacks.
+The [current ledger](parents.tsv) contains 171 paired parents, six stock skips, four additional native skips and six native child failures. All four additional skips come from CPython-only decorators in the original source. The warnings omission count is zero. [Decorator and callback records](cpython-only-gates.json)
+
+The `receipt` column identifies the run used for each row. The last three `*_lines` columns give one-based registration, start, outcome and stop line numbers. For an in-process selected run, use the `stdout` array in the [process records](7e46a592/raw.json). For a child run, use the corresponding `selected_children.stdout` stream in the child archive. Run `python3 -I -B verify.py` in this directory to reproduce the cumulative count.

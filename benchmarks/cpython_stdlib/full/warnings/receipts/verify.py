@@ -3,6 +3,9 @@ import ast
 import csv
 import hashlib
 import json
+import runpy
+import tarfile
+import tempfile
 import subprocess
 import sys
 from pathlib import Path
@@ -21,6 +24,28 @@ def rows(path):
         return list(csv.DictReader(stream, delimiter="\t"))
 
 
+def native_children():
+    from_archive = ROOT / "dfe0f18e-children"
+    validate = runpy.run_path(str(from_archive / "audit.py"))["validate_group"]
+    with tempfile.TemporaryDirectory() as scratch:
+        for archive in (BASE / "raw.tar.gz", from_archive / "raw.tar.gz"):
+            with tarfile.open(archive) as raw:
+                raw.extractall(scratch, filter="data")
+        return validate(scratch, "public-dfe0f18e", "selected_children",
+                        "dfe0f18ebecfc5b302a5747f79079d48b9eb86eb")
+
+
+def child_row(previous, result):
+    row = dict(previous, receipt="dfe0f18e-children")
+    row["disposition"] = "paired" if result["paired"] else "native-child-nonpass"
+    for mode in ("stock", "O0", "O3"):
+        record = result[mode]
+        row[mode] = record["result"]
+        labels = ("REGISTER", "START", record["result"], "STOP")
+        row[mode + "_lines"] = "/".join(str(record["lines"][name]) for name in labels)
+    return row
+
+
 def main():
     original = subprocess.check_output([sys.executable, "-I", "-B", BASE / "verify.py"])
     assert original == (BASE / "parents.tsv").read_bytes()
@@ -28,9 +53,13 @@ def main():
     current = rows(ROOT / "parents.tsv")
     assert len(current) == len(baseline) == 187
     selected = []
+    children = native_children()
+    assert set(children) == {r["id"] for r in baseline if r["disposition"] == "requires-native-child"}
     for prior, row in zip(baseline, current):
         assert all(row[k] == prior[k] for k in ("ordinal", "id", "occurrence"))
-        if row["receipt"] == "dfe0f18e":
+        if prior["id"] in children:
+            assert row == child_row(prior, children[prior["id"]])
+        elif row["receipt"] == "dfe0f18e":
             assert all(row[k] == value for k, value in prior.items())
         else:
             assert row["receipt"] == "7e46a592"
