@@ -282,7 +282,7 @@ enum Cleanup {
         previous: Value,
         name: Option<usize>,
     },
-    Completion(Value),
+    Owner(Value),
 }
 
 enum Completion {
@@ -1655,7 +1655,7 @@ impl Emitter<'_, '_> {
                 }
                 Cleanup::Slots(slots) => self.clear_slots(&slots),
                 Cleanup::Active { previous, name } => self.restore_active(&previous, name),
-                Cleanup::Completion(value) => self.release(&value),
+                Cleanup::Owner(value) => self.release(&value),
                 Cleanup::Finally { body, loops } => {
                     // A finalbody can itself contain transfers and protected
                     // regions. Bound copied cleanup IR across one outer try.
@@ -1672,7 +1672,7 @@ impl Emitter<'_, '_> {
                             self.call("imre_exception_swap_active", Type::Exception, &[&error]);
                         self.forget(&error);
                         self.forget(&previous);
-                        self.cleanups.push(Cleanup::Completion(error.clone()));
+                        self.cleanups.push(Cleanup::Owner(error.clone()));
                         self.cleanups.push(Cleanup::Active {
                             previous: previous.clone(),
                             name: None,
@@ -1680,7 +1680,7 @@ impl Emitter<'_, '_> {
                         Some((error, previous))
                     } else {
                         if let Completion::Return(value) = &completion {
-                            self.cleanups.push(Cleanup::Completion(value.clone()));
+                            self.cleanups.push(Cleanup::Owner(value.clone()));
                         }
                         None
                     };
@@ -1761,6 +1761,12 @@ impl Emitter<'_, '_> {
             self.cleanup_bytes = 0;
         }
         self.try_nesting += 1;
+        // A try inside an expression can handle an error and resume evaluation.
+        // Release the enclosing operands only if control leaves that expression.
+        let outer_depth = self.cleanups.len();
+        let outer_temporaries = std::mem::take(&mut self.temporaries);
+        self.cleanups
+            .extend(outer_temporaries.iter().cloned().map(Cleanup::Owner));
         let depth = self.cleanups.len();
         let end = self.label();
         if !finalbody.is_empty() {
@@ -1841,7 +1847,8 @@ impl Emitter<'_, '_> {
             self.start(&dispatch);
             self.route(Completion::Error);
         }
-        self.cleanups.truncate(depth);
+        self.cleanups.truncate(outer_depth);
+        self.temporaries = outer_temporaries;
         self.start(&end);
         self.try_nesting -= 1;
     }
