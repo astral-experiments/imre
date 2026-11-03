@@ -85,16 +85,18 @@ unsafe fn append_bytes<const N: usize>(output: *const Object, words: [usize; N])
                 // A fused pair can still commit its first Python append in a spare slot.
                 count.min(output.bytes.capacity() - output.bytes.len())
             };
-            for (index, word) in words.into_iter().enumerate() {
-                if index == writable {
-                    super::exceptions::sequence_allocation_failed();
-                    return 0;
-                }
-                // Canonical 0..=255 are exactly the odd words in 1..=511.
-                // Invalid Ints have no observable destructor. Record the error
-                // without raising: a later producer exception must still win.
-                output.invalid |= word & !0x1fe != 1;
-                output.bytes.push((word >> 1) as u8);
+            output
+                .bytes
+                .extend(words.into_iter().take(writable).map(|word| {
+                    // Canonical 0..=255 are exactly the odd words in 1..=511.
+                    // Invalid Ints have no observable destructor. Record the error
+                    // without raising: a later producer exception must still win.
+                    output.invalid |= word & !0x1fe != 1;
+                    (word >> 1) as u8
+                }));
+            if writable < N {
+                super::exceptions::sequence_allocation_failed();
+                return 0;
             }
             1
         })
