@@ -1135,6 +1135,9 @@ impl Context {
             let result = self.call(check, vec![child], Vec::new())?;
             return self.truth(result);
         }
+        if typing::alias_payload(self, parent).is_some() {
+            return Err(typing::AliasKind::Builtin.class_check_error("issubclass"));
+        }
         let is_class = |id| {
             matches!(self.builtin_type_name(id), Some("type" | "typing._AnyMeta"))
                 || matches!(self.heap.get(id), Value::Native(name) if super::builtins::is_builtin_type(name))
@@ -2118,6 +2121,9 @@ impl Context {
         } = self.heap.get(obj)
         {
             let (class, inline, namespace) = (*class, fields.get(name).copied(), *namespace);
+            if let Some(value) = typing::subclass_alias_attribute(self, obj, class, name) {
+                return value;
+            }
             if matches!(name, "name" | "value") {
                 if self.float_enum_names(class).is_some() {
                     let attr = self.class_attr(class, name);

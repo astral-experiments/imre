@@ -106,7 +106,7 @@ fn accepts(ctx: &Context, id: Id) -> bool {
     id == NONE
         || ctx.builtin_type_name(id) == Some("type")
         || matches!(
-            ctx.heap.get(id),
+            ctx.heap.get(ctx.scalar_value(id)),
             Value::GenericAlias(_) | Value::TypeAlias { .. } | Value::TypeVar(_) | Value::Union(_)
         )
         || matches!(ctx.heap.get(id), Value::Native(n) if matches!(n.as_str(), "typing.Any" | "typing.Callable"))
@@ -127,6 +127,7 @@ pub(super) fn make(ctx: &mut Context, inputs: &[Id]) -> Result<Id> {
             ctx.heap.keep(reference);
             reference
         } else if matches!(ctx.heap.get(input), Value::Instance { .. })
+            && typing::alias_payload(ctx, input).is_none()
             && let Some(typing) = ctx.dict_named_item(ctx.modules, "typing")
             && let Value::Module { scope, .. } = *ctx.heap.get(typing)
             && let Some(check) = ctx.scope_name(scope, "_type_check")
@@ -195,20 +196,34 @@ pub(super) fn make(ctx: &mut Context, inputs: &[Id]) -> Result<Id> {
     }
 }
 
+/// These operands resolve inherited union slots alongside Python overrides in operator_slot.
+pub(super) fn subclass_slot_pair(ctx: &Context, left: Id, right: Id) -> bool {
+    typing::alias_payload(ctx, right).is_some()
+        && (ctx.is_type_object(left) || typing::alias_payload(ctx, left).is_some())
+}
+
 pub(super) fn binary(ctx: &mut Context, left: Id, right: Id) -> Option<Result<Id>> {
-    if matches!(ctx.heap.get(left), Value::Union(_) | Value::TypeVar(_))
-        || matches!(ctx.heap.get(right), Value::Union(_) | Value::TypeVar(_))
-        || (accepts(ctx, left) && accepts(ctx, right) && (left != NONE || right != NONE))
+    let slots_exhausted = subclass_slot_pair(ctx, left, right);
+    if !slots_exhausted
+        && (matches!(ctx.heap.get(left), Value::Union(_) | Value::TypeVar(_))
+            || matches!(ctx.heap.get(right), Value::Union(_) | Value::TypeVar(_))
+            || (accepts(ctx, left) && accepts(ctx, right) && (left != NONE || right != NONE)))
     {
         return Some(make(ctx, &[left, right]));
     }
-    if [left, right].into_iter().any(|id| {
-        ctx.builtin_type_name(id) == Some("type")
-            || matches!(ctx.heap.get(id), Value::TypeAlias { .. })
-    }) {
+    if slots_exhausted
+        || [left, right].into_iter().any(|id| {
+            ctx.builtin_type_name(id) == Some("type")
+                || matches!(ctx.heap.get(id), Value::TypeAlias { .. })
+        })
+    {
         let type_name = |value| {
-            ctx.builtin_type_name(value)
-                .unwrap_or_else(|| ctx.type_name(value))
+            if slots_exhausted {
+                ctx.type_name(value)
+            } else {
+                ctx.builtin_type_name(value)
+                    .unwrap_or_else(|| ctx.type_name(value))
+            }
         };
         return Some(Err(Error::new(
             "TypeError",

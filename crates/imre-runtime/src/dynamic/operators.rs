@@ -682,7 +682,10 @@ impl Context {
                     break 'current left.checked_equal(right, self)?;
                 }
                 if matches!(
-                    (self.heap.get(a), self.heap.get(b)),
+                    (
+                        self.heap.get(self.scalar_value(a)),
+                        self.heap.get(self.scalar_value(b))
+                    ),
                     (Value::GenericAlias(_), Value::GenericAlias(_))
                 ) {
                     let Some(parts) = super::typing::checked_alias_parts(self, a, b)? else {
@@ -3012,7 +3015,8 @@ impl Context {
                 .ok_or_else(|| Error::new("TypeError", "enum member names must be a dictionary"))?;
             return self.get_item(names, key);
         }
-        if let Some(value) = super::typing::subscribe(self, obj, key) {
+        let alias = super::typing::alias_payload(self, obj).unwrap_or(obj);
+        if let Some(value) = super::typing::subscribe(self, alias, key) {
             return value;
         }
         if matches!(self.heap.get(obj), Value::MappingProxy(_)) {
@@ -4958,6 +4962,16 @@ impl Context {
             self.bound_slot(obj, name)?
         };
         let Some(method) = method else {
+            let union = match name {
+                "__or__" => Some([obj, other]),
+                "__ror__" => Some([other, obj]),
+                _ => None,
+            };
+            if let Some([left, right]) = union
+                && super::union::subclass_slot_pair(self, left, right)
+            {
+                return super::union::make(self, &[left, right]).map(Some);
+            }
             // Overriding one multiplication method installs a numeric slot for both directions.
             if let Some(peer) = match name {
                 "__mul__" => Some("__rmul__"),
