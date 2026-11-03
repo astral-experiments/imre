@@ -4695,6 +4695,9 @@ impl Context {
 
     /// Bypass the object's deletion hook, while honoring data descriptors on its class.
     pub(super) fn default_delete_attr(&mut self, obj: Id, name: &str) -> Result<()> {
+        if name == "tb_next" && matches!(self.heap.get(obj), Value::Traceback { .. }) {
+            return Err(Error::new("TypeError", "can't delete tb_next attribute"));
+        }
         self.check_immutable_type_write(obj, name)?;
         if let Some(result) = self.update_alias_name(obj, name, None) {
             return result;
@@ -5592,6 +5595,9 @@ impl Context {
     }
 
     pub(super) fn default_set_attr(&mut self, obj: Id, name: &str, value: Id) -> Result<()> {
+        if name == "tb_next" && matches!(self.heap.get(obj), Value::Traceback { .. }) {
+            return self.set_traceback_next(obj, value);
+        }
         self.check_immutable_type_write(obj, name)?;
         if let Some(result) = self.update_alias_name(obj, name, Some(value)) {
             return result;

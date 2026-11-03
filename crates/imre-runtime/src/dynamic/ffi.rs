@@ -967,7 +967,7 @@ pub(super) unsafe extern "C" fn imre_dyn_finish(ctx: *mut Context) -> i32 {
             if current.args.is_some() {
                 error.message = ctx.exception_message(current);
             }
-            eprintln!("{error}");
+            eprintln!("{}", error.report(&ctx.heap));
             1
         }
     };

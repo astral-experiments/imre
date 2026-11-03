@@ -237,7 +237,11 @@ impl Context {
             },
         };
         error.message = result;
-        eprintln!("{error}");
+        let error = traced.as_ref().unwrap_or_else(|| match self.heap.get(id) {
+            Value::Raised(error) => error,
+            _ => unreachable!(),
+        });
+        eprintln!("{}", error.report(&self.heap));
     }
 
     /// Test the stored OSError errno without invoking a Python attribute hook.
