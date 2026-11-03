@@ -1,5 +1,6 @@
 """TLS contexts and blocking, connected sockets using system OpenSSL."""
 
+import io as _io
 import _imre_ssl
 import _ssl
 from _ssl import OPENSSL_VERSION, OPENSSL_VERSION_INFO, OPENSSL_VERSION_NUMBER
@@ -422,6 +423,8 @@ class SSLContext:
             error.reason = "CERTIFICATE_VERIFY_FAILED"
             raise error
         peer = object.__new__(SSLSocket)
+        peer._io_refs = 0
+        peer._closed = False
         peer._session = result
         peer._context = self
         peer._server_hostname = server_hostname
@@ -432,7 +435,7 @@ class SSLContext:
 class SSLSocket:
     """Encrypted I/O on a socket returned by SSLContext.wrap_socket()."""
 
-    __slots__ = ("_session", "_context", "_server_hostname", "server_side")
+    __slots__ = ("_session", "_context", "_server_hostname", "server_side", "_io_refs", "_closed")
 
     def __init__(self, *args, **kwargs):
         raise TypeError("SSLSocket does not have a public constructor. Instances are returned by SSLContext.wrap_socket().")
@@ -470,8 +473,26 @@ class SSLSocket:
             return None
         return _call(_imre_ssl.channel_binding, self._session, cb_type)
 
+    def makefile(self, mode="r", buffering=None, *, encoding=None, errors=None, newline=None):
+        """Open a binary reader on this blocking TLS connection."""
+        if not set(mode) <= {"r", "w", "b"}:
+            raise ValueError("invalid mode %r (only r, w, b allowed)" % (mode,))
+        if "b" not in mode or "w" in mode:
+            raise NotImplementedError("SSLSocket.makefile supports binary readers")
+        if buffering is None or buffering < 0:
+            buffering = _io.DEFAULT_BUFFER_SIZE
+        raw = _SSLReader(self)
+        if buffering == 0:
+            return raw
+        try:
+            return _io.BufferedReader(raw, buffering)
+        except BaseException:
+            raw.close()
+            raise
+
     def close(self):
-        if self._session is not None:
+        self._closed = True
+        if not self._io_refs and self._session is not None:
             _call(_imre_ssl.close, self._session)
             self._session = None
 
@@ -480,6 +501,40 @@ class SSLSocket:
 
     def __exit__(self, exc_type, exc, traceback):
         self.close()
+
+
+class _SSLReader(_io.RawIOBase):
+    """Retain the TLS connection until this stream closes."""
+
+    mode = "rb"
+
+    def __init__(self, sock):
+        super().__init__()
+        self._sock = sock
+        sock._io_refs += 1
+
+    def readable(self):
+        if self.closed:
+            raise ValueError("I/O operation on closed file.")
+        return True
+
+    def readinto(self, buffer, /):
+        self.readable()
+        view = memoryview(buffer).cast("B")
+        if view.readonly:
+            raise TypeError("readinto() argument must be a writable buffer")
+        data = self._sock.recv(len(view))
+        view[:len(data)] = data
+        return len(data)
+
+    def close(self):
+        if not self.closed:
+            super().close()
+            sock = self._sock
+            self._sock = None
+            sock._io_refs -= 1
+            if sock._closed and not sock._io_refs:
+                sock.close()
 
 
 def create_default_context(purpose=Purpose.SERVER_AUTH, *, cafile=None, capath=None, cadata=None):

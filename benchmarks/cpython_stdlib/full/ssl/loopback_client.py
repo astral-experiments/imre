@@ -68,7 +68,19 @@ def main():
                 assert chunk
                 response += chunk
             assert response.strip() == repr(binding).encode("ascii")
-            peer.sendall(b"over\n")
+            with peer.makefile("rb") as reader:
+                with peer.makefile("rb", buffering=0) as raw_reader:
+                    peer.sendall(b"X\n")
+                    buf = bytearray(b"??")
+                    assert raw_reader.readinto(memoryview(buf)[1:]) == 1
+                    assert buf == b"?x" and raw_reader.read(1) == b"\n"
+                peer.sendall(b"LAST LINE\n")
+                peer.close()
+                assert reader.read(2) == b"la"
+                assert reader.readline() == b"st line\n"
+                peer.sendall(b"over\n")
+                assert reader.read() == b""
+            assert reader.closed
             print("VERIFIED_ECHO", hostname)
         peer.close()
         assert peer.get_channel_binding() is None
