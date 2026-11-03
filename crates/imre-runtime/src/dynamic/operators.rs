@@ -2183,7 +2183,7 @@ impl Context {
                                 }
                             }
                             work.push(Part::Text(if callable { "[[" } else { "[" }));
-                            if let Some(name) = alias.name {
+                            if let Some(name) = alias.name.filter(|_| alias.naming_fields.is_none()) {
                                 work.push(Part::Value(name, false));
                                 work.push(Part::Text("typing."));
                             } else {

@@ -171,6 +171,8 @@ pub(super) struct Alias {
     pub kind: AliasKind,
     pub name: Option<Id>,
     pub instantiable: bool,
+    /// Local name overrides and the creation-time module of an unnamed generic alias.
+    pub naming_fields: Option<Id>,
     pub unpacked: bool,
 }
 
@@ -442,6 +444,7 @@ fn allocate_alias(
         name,
         instantiable,
         unpacked: false,
+        naming_fields: None,
     }))
 }
 
@@ -1640,6 +1643,19 @@ pub(super) fn attribute(ctx: &mut Context, value: Id, name: &str) -> Option<Resu
             "__name__" | "__qualname__" | "__module__" if a.kind == AliasKind::Unpack => {
                 return Some(ctx.lookup_attr(a.origin, name));
             }
+            "__module__" | "__name__" | "__qualname__" if let Some(fields) = a.naming_fields => {
+                if let Some(local) = ctx.dict_named_item(fields, name) {
+                    local
+                } else if name == "__module__" {
+                    let class = ctx.builtin(a.kind.class());
+                    return Some(ctx.lookup_attr(class, name));
+                } else {
+                    let origin = a.origin;
+                    return Some(ctx.with_slot_depth("maximum recursion depth exceeded", |ctx| {
+                        ctx.lookup_attr(origin, "__name__")
+                    }));
+                }
+            }
             "__name__" | "__qualname__" | "_name" if let Some(label) = a.name => label,
             "__module__" if a.name.is_some() => ctx.text("typing"),
             "__name__" | "__qualname__" if a.kind == AliasKind::Concatenate => {
@@ -2256,15 +2272,20 @@ pub(super) fn call(
             .iter()
             .any(|key| ctx.classes.get(*key) == Some(&origin));
         let parameters = collect_type_parameters(ctx, args, enforce_order)?;
-        return Ok(allocate_alias(
-            ctx,
-            kind,
-            origin,
-            args,
-            parameters,
-            name,
-            instantiable,
-        ));
+        let naming_fields = if kind == AliasKind::Generic
+            && name.is_none_or(|name| ctx.str_value(name).is_ok_and(str::is_empty))
+        {
+            let module = ctx.lookup_attr(origin, "__module__")?;
+            let key = ctx.text("__module__");
+            Some(ctx.dict(vec![(key, module)]))
+        } else {
+            None
+        };
+        let result = allocate_alias(ctx, kind, origin, args, parameters, name, instantiable);
+        if let Value::GenericAlias(alias) = ctx.heap.get_mut(result) {
+            alias.naming_fields = naming_fields;
+        }
+        return Ok(result);
     }
     if operation == "TypeAliasType" {
         let [name, value, params] = super::builtins::bind_method_arguments(

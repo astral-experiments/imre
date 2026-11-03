@@ -33,6 +33,37 @@ class Accessor(t.Generic[T]):
     pass
 
 
+def local_alias_names():
+    class C(t.Generic[K]):
+        pass
+
+    alias = C[int]
+    assert repr(alias) == f"{__name__}.local_alias_names.<locals>.C[int]"
+    assert alias.__module__ == __name__ and "__module__" in dir(alias)
+    assert alias.__name__ == alias.__qualname__ == "C"
+    C.__name__ = "Moved"
+    C.__module__ = "other"
+    assert alias.__module__ == __name__ and C[str].__module__ == "other"
+    assert C[int] is alias and alias.__origin__ is C and alias.__args__ == (int,)
+    assert alias.__name__ == alias.__qualname__ == "Moved"
+    marker = object()
+    for name in ("__module__", "__name__", "__qualname__"):
+        setattr(alias, name, marker)
+        assert getattr(alias, name) is marker and name in dir(alias)
+        delattr(alias, name)
+        assert getattr(alias, name) == ("typing" if name == "__module__" else "Moved")
+        try:
+            delattr(alias, name)
+        except AttributeError:
+            pass
+        else:
+            raise AssertionError("deleted an absent alias field")
+    assert C.__module__ == "other" and C[str].__name__ == "Moved"
+
+
+local_alias_names()
+
+
 class Slotted(t.Generic[T]):
     __slots__ = ("value",)
 
