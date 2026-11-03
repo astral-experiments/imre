@@ -4,6 +4,9 @@ use crate::dynamic::{
     value::{CACHE_CAPACITY, Error, FALSE, Id, NONE, Result, Value},
 };
 
+pub(in crate::dynamic) const LRU_CACHE_CLASS: &str = "functools._lru_cache_wrapper";
+pub(in crate::dynamic) const COPY_METHODS: &[&str] = &["__reduce__", "__copy__", "__deepcopy__"];
+
 /// Argument Clinic accepts either one positional argument or its named equivalent.
 pub(in crate::dynamic) fn key_argument(
     name: &str,

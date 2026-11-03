@@ -2138,6 +2138,21 @@ def main():
             "print(textwrap.wrap('one two three', width=5), textwrap.shorten('one two three', 9))",
         )
 
+        compare(
+            "-IB", "-c",
+            "from copy import copy, deepcopy\n"
+            "from functools import lru_cache\n"
+            "class C:\n"
+            "    @lru_cache()\n"
+            "    def f(self): pass\n"
+            "wrapped = C.f\n"
+            "assert copy(wrapped) is deepcopy(wrapped) is wrapped\n"
+            "assert wrapped.__reduce__() == 'C.f'\n"
+            "for owner in (type(wrapped), wrapped):\n"
+            "    assert owner.__reduce__.__text_signature__ == '($self, /)'\n"
+            "    assert owner.__copy__.__text_signature__ is owner.__deepcopy__.__text_signature__ is None\n",
+            native_timeout=300,
+        )
         getters = Path(__file__).with_name("fixtures") / "typed_attrgetter"
         compare("-IB", getters / "fields.py")
         compare("-B", getters / "main.py")
