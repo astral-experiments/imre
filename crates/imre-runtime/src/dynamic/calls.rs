@@ -2973,6 +2973,17 @@ impl Context {
                 _ => {
                     if let Value::Native(method) = self.heap.get(callable) {
                         let module_bound = matches!(self.heap.get(receiver), Value::Module { .. });
+                        if matches!(name, "__doc__" | "__text_signature__")
+                            && let Some((signature, doc)) = method
+                                .strip_prefix("_warnings.")
+                                .and_then(stdlib::warnings_accel::method_metadata)
+                        {
+                            return Ok(if name == "__doc__" {
+                                doc.map_or(NONE, |text| self.text(text))
+                            } else {
+                                self.text(signature)
+                            });
+                        }
                         let value = match name {
                             "__doc__" if method == "posix.sysconf" => {
                                 Some("Return an integer-valued system configuration variable.")

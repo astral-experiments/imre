@@ -988,6 +988,7 @@ const RUNTIME_PROVIDERS: &[&str] = &[
     "_frozen_importlib",
     "_frozen_importlib_external",
     "_opcode_metadata",
+    "_py_warnings",
     "_tokenize",
     "abc",
     "annotationlib",
@@ -1025,6 +1026,7 @@ const RUNTIME_PROVIDERS: &[&str] = &[
     "subprocess",
     "token",
     "types",
+    "warnings",
     "zipimport",
 ];
 
