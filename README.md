@@ -245,6 +245,13 @@ Imre defaults to native optimization level 3. Set `IMRE_DEFAULT_NATIVE_OPT_LEVEL
 to 0, 1, 2, or 3 when building the compiler to choose a different default.
 The compiled-in default also applies to isolated Python invocations (`-I`).
 
+On Linux, a source build uses `/bin:/usr/bin` to find Clang and its linker
+when the calling environment omits `PATH`. To install against tools elsewhere,
+set `IMRE_DEFAULT_TOOL_PATH` when building Imre, either in the build environment
+or in Cargo's `[env]` configuration. Use colon-separated absolute directories
+containing Clang and the linker. An explicit runtime `PATH` takes precedence.
+This search path applies only to the compiler subprocess.
+
 ## Getting started
 
 Given `totals.py`:
