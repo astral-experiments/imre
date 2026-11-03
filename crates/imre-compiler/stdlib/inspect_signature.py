@@ -159,9 +159,10 @@ def _signature_from_callable(obj, *, sigcls, follow_wrapper_chains=True,
     if text_signature:
         return _signature_fromstr(sigcls, obj, text_signature)
     method, drop_first = _bind_signature_method(call, obj)
-    # Native call wrappers have no Python parameter layout to recurse into.
+    # Recurse into a Python function or a bound builtin with its own signature.
     function = method.__func__ if isinstance(method, types.MethodType) else method
-    if not isinstance(function, types.FunctionType) and callable(method):
+    if (callable(method) and not isinstance(function, types.FunctionType)
+            and type(method) is not types.BuiltinFunctionType):
         raise ValueError(f"callable {obj!r} is not supported by signature")
     return signature_of_method(method, drop_first)
 
