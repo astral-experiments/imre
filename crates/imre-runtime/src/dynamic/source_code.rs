@@ -3121,6 +3121,9 @@ impl Context {
             let value = self.builtin(name);
             self.bind(scope, name, value);
         }
+        let os_error = self.builtin("OSError");
+        self.bind(scope, "EnvironmentError", os_error);
+        self.bind(scope, "IOError", os_error);
         let dict = self.module_globals(scope)?;
         // Reimporting an evicted module leaves existing frames' builtins intact.
         self.source_builtins.get_or_insert(dict);

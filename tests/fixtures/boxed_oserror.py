@@ -1,7 +1,26 @@
 """Check OSError's argument tuple and independent operating-system fields."""
 
 
+def check_aliases():
+    import builtins
+    import errno
+    import pickle
+
+    assert builtins.EnvironmentError is EnvironmentError is OSError
+    assert builtins.IOError is IOError is OSError
+    assert issubclass(FileNotFoundError, EnvironmentError)
+    assert not issubclass(ValueError, IOError)
+    try:
+        raise EnvironmentError(errno.ENOENT, "missing", "sample")
+    except IOError as error:
+        assert type(error) is FileNotFoundError and error.filename == "sample"
+    assert IOError.__name__ == "OSError"
+    for protocol in range(pickle.HIGHEST_PROTOCOL + 1):
+        assert pickle.loads(pickle.dumps(IOError, protocol)) is OSError
+
+
 def current():
+    check_aliases()
     import errno
     from _weakref import ref
 
