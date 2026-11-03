@@ -6012,6 +6012,9 @@ impl Context {
                 {
                     return self.update_class_annotation_attr(scope, name, Some(value));
                 }
+                if name == "__bases__" {
+                    return self.assign_class_bases(obj, value);
+                }
                 self.bind(scope, name, value);
                 if name == "__del__" {
                     self.register_class_finalizers();

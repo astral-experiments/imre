@@ -137,11 +137,20 @@ impl Context {
 
     /// Merge the base lineages in C3 order so cooperative methods visit each base once.
     pub(super) fn linearized_bases(&mut self, bases: &[Id], published: bool) -> Result<Vec<Id>> {
+        self.linearize_with(bases, |ctx, base| ctx.base_lineage(base, published))
+    }
+
+    /// Merge either the live base lineages or a proposed hierarchy before it is published.
+    pub(super) fn linearize_with(
+        &mut self,
+        bases: &[Id],
+        mut lineage: impl FnMut(&mut Self, Id) -> Vec<Id>,
+    ) -> Result<Vec<Id>> {
         if bases.is_empty() {
             return Ok(vec![self.builtin("object")]);
         }
         if let [base] = bases {
-            return Ok(self.base_lineage(*base, published));
+            return Ok(lineage(self, *base));
         }
         for (index, base) in bases.iter().enumerate() {
             if bases[..index].contains(base) {
@@ -151,10 +160,7 @@ impl Context {
                 ));
             }
         }
-        let lineages: Vec<_> = bases
-            .iter()
-            .map(|&base| self.base_lineage(base, published))
-            .collect();
+        let lineages: Vec<_> = bases.iter().map(|&base| lineage(self, base)).collect();
         let mut paths: Vec<&[Id]> = lineages.iter().map(Vec::as_slice).collect();
         paths.push(bases);
         let mut order = Vec::new();
