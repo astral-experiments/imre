@@ -507,6 +507,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             | "_get_alias_kind"
             | "_eval_type_expression"
             | "_validate_forward_ref"
+            | "_install_any_namespace"
             | "_install_generic_alias_iter",
         ) => ctx.builtin(&format!("typing.{name}")),
         ("_typing", "_get_args") => ctx.builtin("typing.get_args"),

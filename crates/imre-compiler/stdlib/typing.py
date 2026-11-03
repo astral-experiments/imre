@@ -25,6 +25,26 @@ from typing import Any, Callable, Generic, Protocol, TypeVar, Union
 from typing import ParamSpec, ParamSpecArgs, ParamSpecKwargs, TypeVarTuple
 
 
+@_typing_runtime._install_any_namespace
+class Any:
+    """Special type indicating an unconstrained type.
+
+    - Any is compatible with every type.
+    - Any assumed to have all methods.
+    - All values assumed to be instances of Any.
+
+    Note that all the above statements are true from the point of view of
+    static type checkers. At runtime, Any should not be used with instance
+    checks.
+    """
+
+    @staticmethod
+    def __new__(cls, *args, **kwargs):
+        if cls is Any:
+            raise TypeError("Any cannot be instantiated")
+        return super().__new__(cls)
+
+
 # Please keep __all__ alphabetized within each category.
 __all__ = [
     # Super-special typing primitives.
