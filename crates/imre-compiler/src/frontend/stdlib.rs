@@ -635,7 +635,7 @@ impl Checker<'_> {
                         "positional str.format requires exact str or int",
                     ));
                 }
-                args.push(unpacking::string(&format!("arg{index}")));
+                args.push(unpacking::string(format!("arg{index}")));
                 args.push(Self::string_value(value));
             }
         }
