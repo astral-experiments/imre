@@ -473,6 +473,12 @@ REJECTED = {
         "_operator.py": HELPER,
     }, 'shadowing is unsupported: "_operator"'),
     "py_compile_shadow": ({"main.py": "import py_compile\n", "py_compile.py": HELPER}, 'shadowing is unsupported: "py_compile"'),
+    "fractions_shadow": ({
+        "main.py": "import fractions\n", "fractions.py": HELPER,
+    }, 'shadowing is unsupported: "fractions"'),
+    "fractions_dependency_shadow": ({
+        "main.py": "import fractions\n", "numbers.py": HELPER,
+    }, 'shadowing is unsupported: "numbers"'),
     "ntpath_shadow": ({
         "main.py": "from helper import parts\nprint(parts())\n",
         "helper.py": "import ntpath\ndef parts(): return ntpath.splitdrive('C:/a')\n",
@@ -657,6 +663,16 @@ ACCEPTED = {
             "print(available is after.sys, missing is None)\n"
         ),
         "after.py": "import sys\nprint('after')\n",
+    },
+    "fractions_indirect": {
+        "main.py": "from helper import total\nprint(total())\n",
+        "helper.py": (
+            "import fractions\n"
+            "from numbers import Rational\n"
+            "def total():\n"
+            "    value = fractions.Fraction(6, -8) + fractions.Fraction(1, 4)\n"
+            "    return isinstance(value, Rational), value.numerator, value.denominator\n"
+        ),
     },
     "ntpath_indirect": {
         "main.py": "from helper import paths\nprint(paths())\n",
@@ -1415,7 +1431,8 @@ def main() -> None:
                     command.append("--sanitize")
                 # Optimizing these bundled-module integration cases can take several minutes.
                 slow_optimized = name in {
-                    "email_address_parsers", "filesystem_resources", "record_warnings", "warn_named_helper", "zip_source_spec",
+                    "email_address_parsers", "filesystem_resources", "fractions_indirect", "record_warnings",
+                    "warn_named_helper", "zip_source_spec",
                 }
                 timeout = 300 if slow_optimized and level > 0 else build_timeout
                 require_success(run(command, temporary, timeout=timeout))

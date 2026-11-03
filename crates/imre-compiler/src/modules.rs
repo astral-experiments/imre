@@ -85,6 +85,9 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
         // CPython 3.14.5 Lib/_strptime.py and its calendar dependency. See licenses/CPython.txt.
         "_strptime" => Some(("_strptime.py", include_str!("../stdlib/_strptime.py"))),
         "calendar" => Some(("calendar.py", include_str!("../stdlib/calendar.py"))),
+        // CPython 3.14.5 Lib/fractions.py and its numeric ABCs. See licenses/CPython.txt.
+        "fractions" => Some(("fractions.py", include_str!("../stdlib/fractions.py"))),
+        "numbers" => Some(("numbers.py", include_str!("../stdlib/numbers.py"))),
         "_compat_pickle" => Some((
             "_compat_pickle.py",
             include_str!("../stdlib/_compat_pickle.py"),
@@ -4714,7 +4717,7 @@ impl<'a> Loader<'a> {
         if let Some((filename, source)) = bundled {
             self.reject_stdlib_shadow(name)?;
             // token initializes its public tables from the live module globals.
-            self.needs_object_imports |= matches!(name, "token" | "http.client");
+            self.needs_object_imports |= matches!(name, "token" | "http.client" | "fractions");
             let pkgutil_source;
             let source = if name == "pkgutil" {
                 let paths = self.filesystem_search_path()?;
