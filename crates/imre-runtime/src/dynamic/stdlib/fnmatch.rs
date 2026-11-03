@@ -1,6 +1,10 @@
+use std::borrow::Cow;
+
 use super::{Context, Error, Id, Result, Value};
 use crate::dynamic::builtins::boolean;
-use crate::objects::fnmatch::{byte_spelling, compile, mixed_message, translate, translated_parts};
+use crate::objects::fnmatch::{
+    byte_spelling, compile, matches_once, mixed_message, translate, translated_parts,
+};
 
 /// Bind the required positional-or-keyword parameters of a Python fnmatch function.
 fn arguments<const N: usize>(
@@ -59,10 +63,10 @@ fn arguments<const N: usize>(
     Ok(values.map(Option::unwrap))
 }
 
-fn pattern(ctx: &Context, pat: Id) -> Result<(impl Fn(&str) -> bool + use<>, bool)> {
+fn pattern(ctx: &Context, pat: Id) -> Result<(Cow<'_, str>, bool)> {
     match ctx.heap.get(ctx.scalar_value(pat)) {
-        Value::Str(_) | Value::SurrogateStr(_) => Ok((compile(ctx.str_value(pat)?), false)),
-        Value::Bytes(value) => Ok((compile(&byte_spelling(value)?), true)),
+        Value::Str(_) | Value::SurrogateStr(_) => Ok((Cow::Borrowed(ctx.str_value(pat)?), false)),
+        Value::Bytes(value) => Ok((byte_spelling(value)?, true)),
         Value::ByteArray(_)
         | Value::List(_)
         | Value::Dict(_)
@@ -110,13 +114,16 @@ pub(super) fn call(
                 name = super::posixpath::fspath(ctx, name)?;
                 pat = super::posixpath::fspath(ctx, pat)?;
             }
-            let (matcher, bytes) = pattern(ctx, pat)?;
-            Ok(boolean(matches(ctx, name, bytes, &matcher)?))
+            let (pat, bytes) = pattern(ctx, pat)?;
+            Ok(boolean(matches(ctx, name, bytes, &|name| {
+                matches_once(name, &pat)
+            })?))
         }
         "filter" | "filterfalse" => {
             let [names, pat] = arguments(op, ["names", "pat"], args, kwargs)?;
             let pat = super::posixpath::fspath(ctx, pat)?;
-            let (matcher, bytes) = pattern(ctx, pat)?;
+            let (pat, bytes) = pattern(ctx, pat)?;
+            let matcher = compile(&pat);
             let iter = ctx.iterator(names)?;
             let result = ctx.alloc(Value::List(Vec::new()));
             while let Some(name) = ctx.next_item(iter)? {

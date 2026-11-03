@@ -1199,8 +1199,13 @@ unsafe fn pull_path(iterator: *const Object) -> Result<*const Object> {
     }
 }
 
-pub(super) enum Pattern {
-    Literal(Str),
+pub(super) enum Pattern<Text = Str> {
+    Literal(Text),
+    /// Literal spans on each side of a single run of stars.
+    Affixes {
+        prefix: Text,
+        suffix: Text,
+    },
     Wildcard(Vec<Token>),
 }
 
@@ -1233,73 +1238,104 @@ impl Pattern {
     }
 
     pub(super) fn component(pattern: &str) -> Self {
-        if !pattern.contains(['*', '?', '[']) {
-            return Self::Literal(Str::from(pattern));
-        }
-        let chars: Vec<_> = pattern.chars().collect();
-        let mut tokens = Vec::new();
-        let mut index = 0;
-        while index < chars.len() {
-            let character = chars[index];
-            index += 1;
-            match character {
-                '*' if matches!(tokens.last(), Some(Token::Star)) => {}
-                '*' => tokens.push(Token::Star),
-                '?' => tokens.push(Token::Any),
-                '[' => {
-                    let start = index;
-                    let Some(end) = class_end(&chars, index) else {
-                        tokens.push(Token::Literal('['));
-                        continue;
-                    };
-                    debug_assert!(end > start);
-                    tokens.push(character_class(&chars[start..end]));
-                    index = end + 1;
-                }
-                character => tokens.push(Token::Literal(character)),
+        Self::from_component(pattern)
+    }
+}
+
+impl<Text: AsRef<str>> Pattern<Text> {
+    /// Borrow literal spans for an immediate match or own them for a reusable pattern.
+    pub(super) fn from_component<'a>(pattern: &'a str) -> Self
+    where
+        Text: From<&'a str>,
+    {
+        let Some(first) = pattern.find(['*', '?', '[']) else {
+            return Self::Literal(Text::from(pattern));
+        };
+        let (prefix, tail) = pattern.split_at(first);
+        if tail.starts_with('*') {
+            let suffix = tail.trim_start_matches('*');
+            if !suffix.contains(['*', '?', '[']) {
+                return Self::Affixes {
+                    prefix: Text::from(prefix),
+                    suffix: Text::from(suffix),
+                };
             }
         }
-        Self::Wildcard(tokens)
+        Self::Wildcard(wildcard_tokens(pattern))
     }
 
-    /// Greedy star matching remembers the most recent star and advances its
-    /// Unicode-scalar boundary on mismatch, avoiding recursive backtracking.
+    /// Match one path component against its literal spans or wildcard tokens.
     pub(super) fn matches(&self, name: &str) -> bool {
-        let tokens = match self {
-            Self::Literal(text) => return text == name,
-            Self::Wildcard(tokens) => tokens,
-        };
-        let (mut token, mut at) = (0, 0);
-        let mut star = None;
-        while at < name.len() {
-            if matches!(tokens.get(token), Some(Token::Star)) {
-                star = Some((token, at));
-                token += 1;
-                continue;
-            }
-            let character = name[at..].chars().next().unwrap();
-            if tokens
-                .get(token)
-                .is_some_and(|token| token.matches(character))
-            {
-                token += 1;
-                at += character.len_utf8();
-                continue;
-            }
-            if let Some((previous, consumed)) = star {
-                let next = consumed + name[consumed..].chars().next().unwrap().len_utf8();
-                star = Some((previous, next));
-                token = previous + 1;
-                at = next;
-            } else {
-                return false;
-            }
+        match self {
+            Self::Literal(text) => text.as_ref() == name,
+            Self::Affixes { prefix, suffix } => name
+                .strip_prefix(prefix.as_ref())
+                .is_some_and(|rest| rest.ends_with(suffix.as_ref())),
+            Self::Wildcard(tokens) => wildcard_matches(tokens, name),
         }
-        while matches!(tokens.get(token), Some(Token::Star)) {
-            token += 1;
-        }
-        token == tokens.len()
     }
+}
+
+/// Tokenize a component that needs wildcard or character-class matching.
+fn wildcard_tokens(pattern: &str) -> Vec<Token> {
+    let chars: Vec<_> = pattern.chars().collect();
+    let mut tokens = Vec::new();
+    let mut index = 0;
+    while index < chars.len() {
+        let character = chars[index];
+        index += 1;
+        match character {
+            '*' if matches!(tokens.last(), Some(Token::Star)) => {}
+            '*' => tokens.push(Token::Star),
+            '?' => tokens.push(Token::Any),
+            '[' => {
+                let start = index;
+                let Some(end) = class_end(&chars, index) else {
+                    tokens.push(Token::Literal('['));
+                    continue;
+                };
+                debug_assert!(end > start);
+                tokens.push(character_class(&chars[start..end]));
+                index = end + 1;
+            }
+            character => tokens.push(Token::Literal(character)),
+        }
+    }
+    tokens
+}
+
+/// Match Unicode scalars, retrying from the most recent star on a mismatch.
+fn wildcard_matches(tokens: &[Token], name: &str) -> bool {
+    let (mut token, mut at) = (0, 0);
+    let mut star = None;
+    while at < name.len() {
+        if matches!(tokens.get(token), Some(Token::Star)) {
+            star = Some((token, at));
+            token += 1;
+            continue;
+        }
+        let character = name[at..].chars().next().unwrap();
+        if tokens
+            .get(token)
+            .is_some_and(|token| token.matches(character))
+        {
+            token += 1;
+            at += character.len_utf8();
+            continue;
+        }
+        if let Some((previous, consumed)) = star {
+            let next = consumed + name[consumed..].chars().next().unwrap().len_utf8();
+            star = Some((previous, next));
+            token = previous + 1;
+            at = next;
+        } else {
+            return false;
+        }
+    }
+    while matches!(tokens.get(token), Some(Token::Star)) {
+        token += 1;
+    }
+    token == tokens.len()
 }
 
 pub(super) fn class_end(chars: &[char], start: usize) -> Option<usize> {
@@ -1312,32 +1348,23 @@ pub(super) fn class_end(chars: &[char], start: usize) -> Option<usize> {
 /// Preserve literal hyphens separately from range separators: `[b-a!]`, for
 /// example, becomes a negated empty class and therefore matches any character.
 pub(super) fn class_characters(chars: &[char]) -> Vec<(char, bool)> {
-    let mut chunks = Vec::<Vec<char>>::new();
-    let mut start = 0;
-    let mut search = 1 + usize::from(chars.first() == Some(&'!'));
-    while let Some(index) = (search..chars.len()).find(|&index| chars[index] == '-') {
-        chunks.push(chars[start..index].to_vec());
-        start = index + 1;
-        search = index + 3;
-    }
-    if start < chars.len() {
-        chunks.push(chars[start..].to_vec());
-    } else if let Some(last) = chunks.last_mut() {
-        last.push('-');
-    }
-    for index in (1..chunks.len()).rev() {
-        if chunks[index - 1].last().unwrap() > chunks[index].first().unwrap() {
-            let removed = chunks.remove(index);
-            chunks[index - 1].pop();
-            chunks[index - 1].extend(removed.into_iter().skip(1));
+    let mut characters = Vec::with_capacity(chars.len());
+    let mut index = 0;
+    let mut next_range = 1 + usize::from(chars.first() == Some(&'!'));
+    while index < chars.len() {
+        let character = chars[index];
+        let range = character == '-' && index >= next_range && index + 1 < chars.len();
+        if range {
+            // Range endpoints cannot also start or end a neighboring range.
+            next_range = index + 3;
+            if chars[index - 1] > chars[index + 1] {
+                characters.pop();
+                index += 2;
+                continue;
+            }
         }
-    }
-    let mut characters = Vec::new();
-    for (index, chunk) in chunks.into_iter().enumerate() {
-        if index != 0 {
-            characters.push(('-', true));
-        }
-        characters.extend(chunk.into_iter().map(|character| (character, false)));
+        characters.push((character, range));
+        index += 1;
     }
     characters
 }
@@ -1881,6 +1908,9 @@ mod tests {
         for (spelling, yes, no) in [
             ("literal.β", "literal.β", "other.β"),
             ("*.json", ".hidden.json", "plain.txt"),
+            ("ab*bc", "abbc", "abc"),
+            ("β*δ", "β/δ", "β"),
+            ("δ*", "δ", "β"),
             ("?.json", "🦀.json", "aa.json"),
             ("[a-c]?", "bβ", "dβ"),
             ("[!a-c]", "β", "b"),
