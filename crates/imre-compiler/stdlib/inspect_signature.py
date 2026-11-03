@@ -163,8 +163,6 @@ def _signature_from_function(obj, sigcls, globals, locals, eval_str, annotation_
     text_signature = getattr(obj, "__text_signature__", None)
     if text_signature:
         return _signature_fromstr(sigcls, obj, text_signature, skip_bound_arg=skip_bound_arg)
-    if not eval_str and annotation_format in (Format.FORWARDREF, Format.STRING):
-        raise NotImplementedError("native signatures currently support only value annotations")
     layout = _signature_layout(obj.__code__ if is_duck else obj)
     annotations = get_annotations(
         obj, globals=globals, locals=locals, eval_str=eval_str, format=annotation_format)

@@ -18,6 +18,10 @@ def annotated(value: "Element") -> "Element":
     return value
 
 
+def deferred(value: MissingAnnotation) -> int:
+    pass
+
+
 def with_options(a, b, *args, flag=False):
     return a, b, args, flag
 
@@ -145,6 +149,13 @@ proxy.__annotations__ = {}
 assert str(inspect.signature(proxy)) == "()"
 del proxy.__defaults__
 assert str(inspect.signature(proxy)) == "(*args, **kwargs)"
+
+string_sig = inspect.signature(deferred, annotation_format=Format.STRING)
+assert string_sig.parameters["value"].annotation == "MissingAnnotation"
+assert string_sig.return_annotation == "int"
+forward_sig = Signature.from_callable(deferred, annotation_format=Format.FORWARDREF)
+assert forward_sig.parameters["value"].annotation.__forward_arg__ == "MissingAnnotation"
+assert forward_sig.return_annotation is int
 
 assert inspect.signature(annotated).parameters["value"].annotation == "Element"
 resolved = Signature.from_callable(
