@@ -560,9 +560,58 @@ mod utime;
 #[cfg(target_os = "linux")]
 pub(in crate::dynamic) mod xattr;
 
+fn is_sequence(ctx: &Context, id: Id) -> bool {
+    // PySequence_Check excludes dict subclasses even if they override __getitem__.
+    ctx.dict_storage(id).is_none()
+        && (matches!(
+            ctx.heap.get(ctx.scalar_value(id)),
+            Value::List(_)
+                | Value::Tuple(_)
+                | Value::NamedTuple { .. }
+                | Value::Range(_)
+                | Value::Deque(_)
+                | Value::Str(_)
+                | Value::SurrogateStr(_)
+                | Value::Bytes(_)
+                | Value::ByteArray(_)
+                | Value::Array(_)
+                | Value::MemoryView { .. }
+        ) || ctx.slot(id, "__getitem__").is_some())
+}
+
+#[cfg(unix)]
+fn setgroups(ctx: &mut Context, groups: Id) -> Result<Id> {
+    if !is_sequence(ctx, groups) {
+        return Err(Error::new(
+            "TypeError",
+            "setgroups argument must be a sequence",
+        ));
+    }
+    let count = ctx.sequence_len(groups)?;
+    if count > native::max_groups() {
+        return Err(Error::new("ValueError", "too many groups"));
+    }
+    let mut ids = Vec::new();
+    ids.try_reserve_exact(count)
+        .map_err(|_| Error::new("MemoryError", ""))?;
+    for i in 0..count {
+        let key = ctx.int(i as i64);
+        let value = ctx.get_item(groups, key)?;
+        if !ctx.builtin_slot_accepts(value, "int") && ctx.slot(value, "__index__").is_none() {
+            return Err(Error::new("TypeError", "groups must be integers"));
+        }
+        ids.push(chown::owner_id(ctx, value, true)? as libc::gid_t);
+    }
+    native::setgroups(&ids)?;
+    Ok(NONE)
+}
+
 /// POSIX functions exported as the same builtins by both os and posix.
 pub(super) fn is_descriptor_function(name: &str) -> bool {
-    if matches!(name, "getpgid" | "setpgid" | "setregid" | "setreuid") {
+    if matches!(
+        name,
+        "getpgid" | "setpgid" | "setgroups" | "setregid" | "setreuid"
+    ) {
         return cfg!(unix);
     }
     if name == "_exit" {
@@ -1130,6 +1179,11 @@ pub(super) fn descriptor(
         let fd = builtins::one_positional_arg("posix.tcgetpgrp", args, kwargs)?;
         let group = native::tcgetpgrp(c_int(ctx, fd)?)?;
         return Ok(ctx.int(i64::from(group)));
+    }
+    #[cfg(unix)]
+    if name == "setgroups" {
+        let groups = builtins::one_positional_arg("posix.setgroups", args, kwargs)?;
+        return setgroups(ctx, groups);
     }
     #[cfg(unix)]
     if name == "getpgid" {

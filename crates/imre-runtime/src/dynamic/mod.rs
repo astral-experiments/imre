@@ -3000,6 +3000,7 @@ impl Context {
                 #[cfg(target_os = "linux")]
                 "ttyname",
                 "getegid",
+                "setgroups",
                 "setregid",
                 "setreuid",
                 #[cfg(target_os = "linux")]

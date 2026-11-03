@@ -1,6 +1,6 @@
 //! Linux scatter reads and gather writes over exported buffers.
 
-use super::{Context, Error, Id, Result, Value};
+use super::{Context, Error, Id, Result, Value, is_sequence};
 use std::{
     collections::{HashMap, TryReserveError, hash_map::Entry},
     ops::Range,
@@ -8,25 +8,6 @@ use std::{
 
 fn no_memory(_: TryReserveError) -> Error {
     Error::new("MemoryError", "")
-}
-
-fn is_sequence(ctx: &Context, id: Id) -> bool {
-    // PySequence_Check excludes dict subclasses even if they override __getitem__.
-    ctx.dict_storage(id).is_none()
-        && (matches!(
-            ctx.heap.get(ctx.scalar_value(id)),
-            Value::List(_)
-                | Value::Tuple(_)
-                | Value::NamedTuple { .. }
-                | Value::Range(_)
-                | Value::Deque(_)
-                | Value::Str(_)
-                | Value::SurrogateStr(_)
-                | Value::Bytes(_)
-                | Value::ByteArray(_)
-                | Value::Array(_)
-                | Value::MemoryView { .. }
-        ) || ctx.slot(id, "__getitem__").is_some())
 }
 
 fn buffer_span(ctx: &Context, id: Id, writable: bool) -> Result<(Id, Range<usize>)> {
