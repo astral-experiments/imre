@@ -3331,10 +3331,7 @@ impl Heap {
         if !saw_arguments || !would_truncate {
             return false;
         }
-        self.release_temporaries_since(mark);
-        if result != NONE {
-            self.keep(result);
-        }
+        self.keep_call_result(mark, result);
         true
     }
 
@@ -3392,10 +3389,7 @@ impl Heap {
         if !could_own_finalizer {
             return false;
         }
-        self.release_temporaries_since(mark);
-        if result != NONE {
-            self.keep(result);
-        }
+        self.keep_call_result(mark, result);
         self.file_writers
             .iter()
             .chain(&self.ordinary_finalizers)
@@ -3423,6 +3417,14 @@ impl Heap {
         let finalizer_release = self.discard_operands(mark, NONE, modules);
         self.release_temporaries_since(mark);
         weak_release || finalizer_release
+    }
+
+    /// Drop a completed call's temporary roots while preserving its returned value.
+    pub(super) fn keep_call_result(&mut self, mark: usize, result: Id) {
+        self.release_temporaries_since(mark);
+        if result != NONE {
+            self.keep(result);
+        }
     }
 
     pub fn release_temporaries_since(&mut self, mark: usize) {
@@ -4007,6 +4009,11 @@ impl Heap {
 
     pub(super) fn tracks_finalizers(&self) -> bool {
         !self.file_writers.is_empty() || self.has_ordinary_finalizers()
+    }
+
+    /// Count the registrations a root set must cover to avoid a finalizer sweep.
+    pub(super) fn tracked_finalizer_count(&self) -> usize {
+        self.file_writers.len() + self.ordinary_finalizers.len()
     }
 
     /// Recheck unbound writers after control flow discards temporary roots.
