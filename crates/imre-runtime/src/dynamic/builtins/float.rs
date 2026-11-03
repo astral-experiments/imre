@@ -69,6 +69,26 @@ fn native_format<const N: usize>(bytes: [u8; N], mut ieee_big: [u8; N]) -> &'sta
     }
 }
 
+/// Read a complex component without invoking a float subclass's conversion hooks.
+pub(super) fn component(
+    ctx: &mut Context,
+    field: &str,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Id> {
+    let receiver = noargs_method_receiver(ctx, "float", field, args, kwargs)?;
+    let storage = ctx.scalar_value(receiver);
+    let Value::Float(value) = *ctx.heap.get(storage) else {
+        unreachable!("validated float receiver")
+    };
+    match field {
+        "real" if receiver == storage => Ok(receiver),
+        "real" => Ok(ctx.alloc(Value::Float(value))),
+        "imag" => Ok(ctx.alloc(Value::Float(0.0))),
+        _ => unreachable!("registered float component"),
+    }
+}
+
 /// Return the reduced integer ratio of the receiver's stored binary64 value.
 pub(super) fn as_integer_ratio(
     ctx: &mut Context,

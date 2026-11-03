@@ -2674,6 +2674,11 @@ impl<'a> Checker<'a> {
         None
     }
 
+    fn boxed_float_component(&self, attribute: &ast::ExprAttribute, receiver: Type) -> bool {
+        matches!(attribute.attr.as_str(), "real" | "imag")
+            && (receiver == Type::Float || self.unshadowed_builtin(&attribute.value, "float"))
+    }
+
     fn field_value(
         &self,
         attribute: &ast::ExprAttribute,
@@ -2692,6 +2697,9 @@ impl<'a> Checker<'a> {
         }
         if matches!(receiver.ty, Type::Coroutine(_)) && attribute.attr.as_str() == "cr_origin" {
             return Err(self.object_builtin_error("coroutine.cr_origin", attribute));
+        }
+        if self.boxed_float_component(attribute, receiver.ty) {
+            return Err(self.scoped_builtin_error("float components", attribute));
         }
         if receiver.ty == Type::BinaryIO && matches!(attribute.attr.as_str(), "name" | "mode") {
             return Err(self.object_builtin_error("binary file metadata", attribute));
@@ -4930,6 +4938,9 @@ impl<'a> Checker<'a> {
                     }
                     if let ast::Expr::Attribute(attr) = target {
                         let receiver = self.expr(&attr.value)?;
+                        if self.boxed_float_component(attr, receiver.ty) {
+                            return Err(self.scoped_builtin_error("float components", attr));
+                        }
                         if matches!(receiver.ty, Type::Coroutine(_))
                             && attr.attr.as_str() == "cr_origin"
                         {

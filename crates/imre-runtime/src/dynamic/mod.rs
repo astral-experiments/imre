@@ -2249,6 +2249,41 @@ impl Context {
         true
     }
 
+    /// Register a builtin number's read-only fields and expose the declaring descriptors.
+    fn install_numeric_dictionary(
+        &mut self,
+        class: Id,
+        owner: &'static str,
+        methods: &[&str],
+        fields: [&'static str; 2],
+    ) {
+        for field in fields {
+            let get = self.builtin(&format!("_{owner}_getset.{field}"));
+            let descriptor = self.alloc(Value::GetSetDescriptor {
+                owner,
+                name: field,
+                get,
+                set: None,
+            });
+            self.builtins.insert(format!("{owner}.{field}"), descriptor);
+        }
+        let members = methods
+            .iter()
+            .chain(builtins::real_methods(owner))
+            .copied()
+            .chain(["__new__"])
+            .chain((owner == "int").then_some("__sizeof__"))
+            .chain(fields);
+        let entries = members
+            .map(|member| {
+                let key = self.heap.code_name(member);
+                (key, self.builtin(&format!("{owner}.{member}")))
+            })
+            .collect();
+        let dictionary = self.dict(entries);
+        self.native_type_dicts.insert(class, dictionary);
+    }
+
     fn builtin(&mut self, name: &str) -> Id {
         if let Some(&value) = self.builtins.get(name) {
             return value;
@@ -2358,27 +2393,15 @@ impl Context {
             "property" => property::METHODS,
             "memoryview" => builtins::MEMORYVIEW_METHODS,
             "bool" => &["__repr__"],
-            "int" => {
-                for field in ["numerator", "denominator"] {
-                    let get = self.builtin(&format!("_int_getset.{field}"));
-                    let descriptor = self.alloc(Value::GetSetDescriptor {
-                        owner: "int",
-                        name: field,
-                        get,
-                        set: None,
-                    });
-                    self.builtins.insert(format!("int.{field}"), descriptor);
-                }
-                &[
-                    "__add__",
-                    "__index__",
-                    "bit_length",
-                    "from_bytes",
-                    "to_bytes",
-                    "__format__",
-                    "__repr__",
-                ]
-            }
+            "int" => &[
+                "__add__",
+                "__index__",
+                "bit_length",
+                "from_bytes",
+                "to_bytes",
+                "__format__",
+                "__repr__",
+            ],
             "float" => &[
                 "__format__",
                 "__getformat__",
@@ -2412,21 +2435,12 @@ impl Context {
         {
             self.builtin(&format!("{name}.{method}"));
         }
-        if name == "int" {
-            // A type dictionary exposes the declaring descriptors before binding.
-            let members = methods
-                .iter()
-                .chain(builtins::real_methods(name))
-                .copied()
-                .chain(["__new__", "__sizeof__", "numerator", "denominator"]);
-            let entries = members
-                .map(|member| {
-                    let key = self.heap.code_name(member);
-                    (key, self.builtin(&format!("int.{member}")))
-                })
-                .collect();
-            let dictionary = self.dict(entries);
-            self.native_type_dicts.insert(value, dictionary);
+        match name {
+            "int" => {
+                self.install_numeric_dictionary(value, "int", methods, ["numerator", "denominator"])
+            }
+            "float" => self.install_numeric_dictionary(value, "float", methods, ["real", "imag"]),
+            _ => {}
         }
         value
     }
