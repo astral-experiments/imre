@@ -1809,6 +1809,15 @@ impl Context {
         self.call(callable, vec![key], Vec::new())
     }
 
+    /// Read an optional attribute, preserving exceptions raised by user lookup hooks.
+    pub(super) fn optional_attr(&mut self, obj: Id, name: &str) -> Result<Option<Id>> {
+        match self.lookup_attr(obj, name) {
+            Ok(value) => Ok(Some(value)),
+            Err(error) if self.is_attribute_error(&error) => Ok(None),
+            Err(error) => Err(error),
+        }
+    }
+
     pub(super) fn lookup_attr(&mut self, obj: Id, name: &str) -> Result<Id> {
         self.lookup_named_attr(obj, name, None)
     }
@@ -2056,7 +2065,9 @@ impl Context {
         if let Value::Union(union) = *self.heap.get(obj) {
             match name {
                 "__args__" => return Ok(union.args),
-                "__parameters__" => return Ok(union.parameters),
+                "__parameters__" => {
+                    return super::typing::builtin_parameters(self, obj, union.args, union.parameters);
+                }
                 "__class__" | "__origin__" => return Ok(super::union::class(self)),
                 "__module__" => return Ok(self.text("typing")),
                 "__name__" | "__qualname__" => return Ok(self.text("Union")),

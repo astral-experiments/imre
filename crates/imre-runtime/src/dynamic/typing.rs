@@ -1,6 +1,6 @@
 //! Runtime type parameters and class-base aliases used by imported Python modules.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use super::{Context, Error, FALSE, Id, NONE, Result, TRUE, Value};
 
@@ -186,6 +186,7 @@ impl Alias {
         Self {
             kind: AliasKind::Builtin,
             unpacked: true,
+            parameters: NONE,
             name: None,
             ..self.clone()
         }
@@ -324,47 +325,96 @@ pub(super) fn named_class(ctx: &mut Context, module: &str, name: &str) -> Id {
     class
 }
 
-pub(super) fn variables(ctx: &Context, args: &[Id]) -> Vec<Id> {
-    let mut vars = Vec::new();
-    for &arg in args {
-        let members = match ctx.heap.get(arg) {
-            Value::TypeVar(_) | Value::ParamSpec(_) | Value::TypeVarTuple { .. } => {
-                std::slice::from_ref(&arg)
+/// Match _Py_make_parameters without invoking tuple-subclass iteration for metadata.
+fn collect_builtin_parameters(
+    ctx: &mut Context,
+    args: Vec<Id>,
+    parameters: &mut Vec<Id>,
+) -> Result<()> {
+    // A lookup can clear a source list and collect its remaining elements.
+    ctx.heap.reserve_temporaries(args.len())?;
+    for &arg in &args {
+        ctx.heap.keep(arg);
+    }
+    for arg in args {
+        if ctx.is_type_object(arg) {
+            continue;
+        }
+        let mark = ctx.heap.temporary_mark();
+        let start = parameters.len();
+        let members = if matches!(
+            ctx.heap.get(arg),
+            Value::TypeVar(_) | Value::TypeVarTuple { .. } | Value::ParamSpec(_)
+        ) || ctx.optional_attr(arg, "__typing_subst__")?.is_some()
+        {
+            vec![arg]
+        } else if let Some(metadata) = ctx.optional_attr(arg, "__parameters__")? {
+            ctx.tuple_items(metadata)?.unwrap_or_default()
+        } else {
+            let items = if ctx.list_storage(arg).is_some() {
+                Some(ctx.items(arg)?)
+            } else {
+                ctx.tuple_items(arg)?
+            };
+            if let Some(items) = items {
+                ctx.with_slot_depth("maximum recursion depth exceeded", |ctx| {
+                    collect_builtin_parameters(ctx, items, parameters)
+                })?;
             }
-            Value::GenericAlias(Alias { parameters, .. })
-            | Value::TypeAlias {
-                definition: AliasDefinition::Lazy { parameters, .. },
-                ..
-            }
-            | Value::Union(super::union::Union { parameters, .. }) => {
-                // Like _Py_make_parameters, ignore non-tuple metadata supplied by Python.
-                match ctx.heap.get(ctx.scalar_value(*parameters)) {
-                    Value::Tuple(members) | Value::NamedTuple { values: members, .. } => {
-                        members.as_slice()
-                    }
-                    _ => continue,
-                }
-            }
-            Value::Instance { class, .. }
-                if ctx.module_value("typing", "_AnnotatedAlias") == Some(*class) =>
-            {
-                match ctx
-                    .raw_instance_field(arg, "__parameters__")
-                    .map(|id| ctx.heap.get(id))
-                {
-                    Some(Value::Tuple(members)) => members.as_slice(),
-                    _ => continue,
-                }
-            }
-            _ => continue,
+            Vec::new()
         };
-        for &param in members {
-            if !vars.contains(&param) {
-                vars.push(param);
+        for member in members {
+            if !parameters.contains(&member) {
+                parameters.push(member);
+            }
+        }
+        // Drop temporary descriptor results while keeping all newly discovered parameters.
+        ctx.heap.release_temporaries_since(mark);
+        ctx.heap.reserve_temporaries(parameters.len() - start)?;
+        for &member in &parameters[start..] {
+            ctx.heap.keep(member);
+        }
+    }
+    Ok(())
+}
+
+/// Collect a snapshot, retaining only the tuple or exception across the native traversal.
+fn native_parameters(ctx: &mut Context, args: Id, owner: Id) -> Result<Id> {
+    let mark = ctx.heap.temporary_mark();
+    ctx.heap.keep(owner);
+    let result = ctx.with_slot_depth("maximum recursion depth exceeded", |ctx| {
+        let items = ctx
+            .tuple_items(args)?
+            .expect("generic alias arguments are a tuple");
+        let mut parameters = Vec::new();
+        collect_builtin_parameters(ctx, items, &mut parameters)?;
+        Ok(ctx.alloc(Value::Tuple(parameters)))
+    });
+    ctx.heap.release_temporaries_since(mark);
+    match &result {
+        Ok(parameters) => ctx.heap.keep(*parameters),
+        Err(error) => {
+            for root in error.roots() {
+                ctx.heap.keep(root);
             }
         }
     }
-    vars
+    result
+}
+
+/// Store the outer lookup's result even if a descriptor reentered this same alias.
+pub(super) fn builtin_parameters(ctx: &mut Context, owner: Id, args: Id, cached: Id) -> Result<Id> {
+    if cached != NONE {
+        return Ok(cached);
+    }
+    let result = native_parameters(ctx, args, owner);
+    let cached = result.as_ref().copied().unwrap_or(NONE);
+    match ctx.heap.get_mut(owner) {
+        Value::GenericAlias(alias) => alias.parameters = cached,
+        Value::Union(union) => union.parameters = cached,
+        _ => unreachable!(),
+    }
+    result
 }
 
 /// CPython's typing aliases and Generic subclasses share the source typing collector.
@@ -380,15 +430,7 @@ fn collect_type_parameters(ctx: &mut Context, args: Id, enforce_order: bool) -> 
         );
     }
     // Native bootstrap can create aliases before loading the source typing module.
-    Ok(native_parameters(ctx, args))
-}
-
-fn native_parameters(ctx: &mut Context, args: Id) -> Id {
-    let Value::Tuple(items) = ctx.heap.get(args) else {
-        unreachable!()
-    };
-    let parameters = variables(ctx, items);
-    ctx.alloc(Value::Tuple(parameters))
+    native_parameters(ctx, args, args)
 }
 
 /// Typing retries the constructor without caching when building or comparing its key raises TypeError.
@@ -404,7 +446,11 @@ fn alias(ctx: &mut Context, kind: AliasKind, origin: Id, args: Vec<Id>) -> Resul
             (1, make_alias, vec![constructor, origin, args])
         }
         _ => {
-            let parameters = native_parameters(ctx, args);
+            let parameters = if kind == AliasKind::AbcCallable {
+                NONE
+            } else {
+                native_parameters(ctx, args, args)?
+            };
             return Ok(allocate_alias(
                 ctx, kind, origin, args, parameters, None, true,
             ));
@@ -551,7 +597,7 @@ fn literal_alias(ctx: &mut Context, origin: Id, parameters: Id) -> Result<Id> {
         Err(error) => return Err(error),
     };
     let args = ctx.alloc(Value::Tuple(flat));
-    let variables = native_parameters(ctx, args);
+    let variables = collect_type_parameters(ctx, args, false)?;
     Ok(allocate_alias(
         ctx,
         AliasKind::Literal(members),
@@ -570,13 +616,12 @@ pub(super) fn builtin_alias(ctx: &mut Context, origin: Id, args: Id) -> Id {
     } else {
         ctx.alloc(Value::Tuple(vec![args]))
     };
-    let parameters = native_parameters(ctx, args);
     allocate_alias(
         ctx,
         AliasKind::Builtin,
         origin,
         args,
-        parameters,
+        NONE,
         None,
         true,
     )
@@ -644,13 +689,12 @@ pub(super) fn abc_callable_alias(
         && !matches!(ctx.heap.get(args[0]), Value::List(_) | Value::Tuple(_))
         && is_param_expr(ctx, args[0])
     {
-        let parameters = native_parameters(ctx, pair);
         return Ok(allocate_alias(
             ctx,
             AliasKind::AbcCallable,
             origin,
             pair,
-            parameters,
+            NONE,
             None,
             true,
         ));
@@ -855,7 +899,14 @@ pub(super) fn subscribe(ctx: &mut Context, target: Id, index: Id) -> Option<Resu
                         ),
                     ));
                 }
-                if variables(ctx, &args).len() != args.len() {
+                let mut seen = HashSet::new();
+                if !args.iter().all(|&arg| {
+                    let param = match ctx.heap.get(arg) {
+                        Value::GenericAlias(alias) => unpack_arg(ctx, alias).unwrap_or(arg),
+                        _ => arg,
+                    };
+                    seen.insert(param)
+                }) {
                     return Err(Error::new(
                         "TypeError",
                         format!("Parameters to {name}[...] must all be unique"),
@@ -1318,6 +1369,9 @@ pub(super) fn attribute(ctx: &mut Context, value: Id, name: &str) -> Option<Resu
         }
         Value::Native(class) if name == "__iter__" && class == "typing._CallableGenericAlias" => {
             NONE
+        }
+        Value::GenericAlias(alias) if name == "__parameters__" && alias.is_builtin_alias() => {
+            return Some(builtin_parameters(ctx, value, alias.args, alias.parameters));
         }
         Value::GenericAlias(alias) if name == "__iter__" && alias.kind == AliasKind::Callable => {
             NONE
