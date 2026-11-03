@@ -116,6 +116,7 @@ pub fn has_lazy_attributes(name: &str) -> bool {
             | "gc"
             | "marshal"
             | "pickle"
+            | "lzma"
             | "zlib"
             | "email.utils"
             | "tempfile"

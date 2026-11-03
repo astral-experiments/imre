@@ -597,6 +597,14 @@ pub(super) fn symbol(module: M, name: &str) -> Option<Binding> {
             "finalize",
             "ref"
         ),
+        M::Lzma => exports!(
+            "lzma",
+            "FORMAT_ALONE",
+            "FORMAT_AUTO",
+            "FORMAT_XZ",
+            "LZMAError",
+            "decompress"
+        ),
         M::Zlib => exports!("zlib", "compress", "crc32", "decompress"),
         _ => return None,
     };
