@@ -688,9 +688,70 @@ fn normalize_source(source: &str, kind: SourceKind) -> Result<Cow<'_, str>, Stri
     Ok(source)
 }
 
-/// Recognizes Python's first-two-line encoding cookie while restricting it to UTF-8.
-fn check_encoding(source: &str) -> Result<(), String> {
-    let source = source.strip_prefix('\u{feff}').unwrap_or(source);
+/// Diagnose a malformed on-disk script after the file itself was read successfully.
+fn script_decode_error(path: &Path, error: std::string::FromUtf8Error) -> String {
+    let bytes = error.as_bytes();
+    let invalid = error.utf8_error();
+    let offset = invalid.valid_up_to();
+    let byte = bytes[offset];
+    // CR, LF and CRLF each terminate one physical line.
+    let endings = bytes.iter().enumerate().filter_map(|(i, &c)| {
+        (c == b'\n' || (c == b'\r' && bytes.get(i + 1) != Some(&b'\n'))).then_some(i)
+    });
+    let header_end = endings.clone().nth(1).unwrap_or(bytes.len());
+    let mut line = 1;
+    let mut start = 0;
+    for end in endings.take_while(|&end| end < offset) {
+        line += 1;
+        start = end + 1;
+    }
+    let source = String::from_utf8_lossy(&bytes[..header_end])
+        .replace("\r\n", "\n")
+        .replace('\r', "\n");
+    let path = path.display();
+    let declared = match check_encoding(&source) {
+        Ok(declared) => declared,
+        Err(message) => return format!("{path}: {message}"),
+    };
+    let message = if declared {
+        let bom = usize::from(start == 0 && bytes.starts_with(b"\xEF\xBB\xBF")) * 3;
+        let mut position = offset - start - bom;
+        if line == 2 {
+            // While looking for a second-line cookie the tokenizer retains line one.
+            let header = source.strip_prefix('\u{feff}').unwrap_or(&source);
+            let first = header.lines().next().unwrap_or_default();
+            let first_token = first.trim_start_matches([' ', '\t', '\x0c']);
+            if (first_token.is_empty() || first_token.starts_with('#'))
+                && check_encoding(first) == Ok(false)
+            {
+                position += first.len() + 1;
+            }
+        }
+        let length = invalid.error_len().unwrap_or(bytes.len() - offset);
+        // The tokenizer reads a final physical line with an implicit newline.
+        let reason = if (0xc2..=0xf4).contains(&byte) {
+            "invalid continuation byte"
+        } else {
+            "invalid start byte"
+        };
+        let span = if length == 1 {
+            format!("byte 0x{byte:02x} in position {position}")
+        } else {
+            format!("bytes in position {position}-{}", position + length - 1)
+        };
+        format!("(unicode error) 'utf-8' codec can't decode {span}: {reason}")
+    } else {
+        format!(
+            "Non-UTF-8 code starting with '\\x{byte:02x}' in file {path} on line {line}, but no encoding declared; see https://peps.python.org/pep-0263/ for details"
+        )
+    };
+    format!("  File \"{path}\", line {line}\nSyntaxError: {message}")
+}
+
+/// Validate the first two lines and report whether a UTF-8 cookie or BOM was present.
+fn check_encoding(source: &str) -> Result<bool, String> {
+    let stripped = source.strip_prefix('\u{feff}');
+    let source = stripped.unwrap_or(source);
     for line in source.lines().take(2) {
         let line = line.trim_start_matches([' ', '\t', '\x0c']);
         if !line.starts_with('#') {
@@ -716,7 +777,7 @@ fn check_encoding(source: &str) -> Result<(), String> {
                 encoding.to_ascii_lowercase().as_str(),
                 "utf-8" | "utf_8" | "utf8"
             ) {
-                Ok(())
+                Ok(true)
             } else {
                 Err(format!(
                     "unsupported source encoding {encoding:?}; use utf-8"
@@ -724,7 +785,7 @@ fn check_encoding(source: &str) -> Result<(), String> {
             };
         }
     }
-    Ok(())
+    Ok(stripped.is_some())
 }
 
 #[cfg(test)]

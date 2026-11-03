@@ -3220,7 +3220,7 @@ impl SourceGraph {
             return Err(error.into());
         }
         let source = String::from_utf8(bytes)
-            .map_err(|_| format!("{}: stream did not contain valid UTF-8", path.display()))?;
+            .map_err(|error| crate::script_decode_error(&filename, error))?;
         let root = entry
             .parent()
             .ok_or("script has no parent directory")?

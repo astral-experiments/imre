@@ -1627,6 +1627,21 @@ def main():
             for prefix in ("", "sub/"):
                 app.writestr(prefix + "__main__.py", (entry / "__main__.py").read_text())
                 app.writestr(prefix + "sibling.py", f"marker = {prefix!r}\n")
+        malformed = root / "malformed.py"
+        for source, line, diagnostic in (
+            (b"# header\r\n\r\ns='\xff'\n", 3, b"Non-UTF-8 code starting with '\\xff'"),
+            (b"# comment\r# coding: utf-8\rs='\xe9x'\r", 3,
+             b"(unicode error) 'utf-8' codec can't decode byte 0xe9 in position 3"),
+            (b"# ok\r\n# coding: utf-8 \xff\n", 2,
+             b"(unicode error) 'utf-8' codec can't decode byte 0xff in position 21"),
+        ):
+            malformed.write_bytes(source)
+            for exe in (sys.executable, imre):
+                failed = run(exe, "-B", malformed)
+                assert (failed.returncode, failed.stdout) == (1, b""), failed
+                assert f'File "{malformed}", line {line}'.encode() in failed.stderr, failed
+                assert b"SyntaxError: " + diagnostic in failed.stderr, failed
+
         # A .pyc operand is never Python source, even when its bytes form a valid script.
         bytecode = root / "not_source.pyc"
         bytecode.write_text("print('executed as source')\n")
