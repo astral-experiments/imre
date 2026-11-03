@@ -434,6 +434,7 @@ impl Cache {
                 options.python_startup(),
                 options.runtime_imports,
                 &options.extension_paths,
+                &options.system_site,
             ),
             env::current_dir().ok()?.join(entry).into_os_string(),
             module_root,

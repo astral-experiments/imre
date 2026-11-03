@@ -6,6 +6,7 @@ import importlib.util
 import json
 import os
 import platform
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -73,6 +74,39 @@ def check_command_stdin(imre, run):
         actual = run(imre, "-B", "-c", command, stdin=data)
         assert reference.returncode == actual.returncode == 0, (reference.stderr, actual.stderr)
         assert actual.stdout == reference.stdout and actual.stderr == reference.stderr == b""
+
+
+def check_installed_site(imre, root, run):
+    # A real relocated launcher keeps this test independent of the developer's installation.
+    prefix = root / "prefix"
+    install = prefix / "bin"
+    install.mkdir(parents=True)
+    launcher = Path(shutil.copy2(imre, install / "imre"))
+    for name in ("libimre_runtime.a", "imre-toolchain"):
+        companion = imre.with_name(name)
+        if companion.exists():
+            (install / name).symlink_to(companion, target_is_directory=companion.is_dir())
+    metadata = run(launcher, "-IB", "-c",
+                   "import sys, site, sysconfig; p = sysconfig.get_path('purelib'); "
+                   "assert site.getsitepackages() == [p]; print(p); print(p in sys.path)",
+                   timeout=300)
+    assert metadata.returncode == 0, metadata.stderr
+    directory, present = metadata.stdout.decode().splitlines()
+    site = Path(directory)
+    assert site.is_relative_to(prefix) and present == "False"
+    package = site / "installed_example"
+    package.mkdir(parents=True)
+    init = package / "__init__.py"
+    init.write_text("def value(): return 17\n")
+    script = root / "read_installed.py"
+    script.write_text("from installed_example import value; print(value())\n")
+    (package / "__main__.py").write_bytes(script.read_bytes())
+    for args in (("-B", "-c", script.read_text()), ("-IB", script), ("-IB", "-m", package.name)):
+        result = run(launcher, *args, timeout=300)
+        assert (result.returncode, result.stdout, result.stderr) == (0, b"17\n", b""), result
+    init.write_text("def value(): return 23\n")
+    result = run(launcher, "-B", "-c", script.read_text(), timeout=300)
+    assert (result.returncode, result.stdout, result.stderr) == (0, b"23\n", b""), result
 
 
 def check_sysconfig_build(imre, root, run):
@@ -1220,6 +1254,7 @@ def main():
             )
 
         if sys.platform == "darwin" or sys.platform.startswith("linux"):
+            check_installed_site(imre, root, run)
             check_faulthandler(imre, root, env)
             check_python_process_identity(imre, root, env)
         if sys.platform.startswith("linux"):

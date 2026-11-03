@@ -3814,7 +3814,7 @@ impl SourceGraph {
     }
 
     pub(crate) fn single_with_mode(source: &str, reachable_only: bool) -> Result<Self, String> {
-        let mut loader = Loader::new(PathBuf::from("/"), &[], FileSystem::default())?;
+        let mut loader = Loader::new(PathBuf::from("/"), &[], None, FileSystem::default())?;
         loader.allow_imports = false;
         loader.reachable_only = reachable_only;
         let filename = PathBuf::from("/input.py");
@@ -3837,7 +3837,12 @@ impl SourceGraph {
         ordered_command_import: &mut bool,
     ) -> Result<Self, String> {
         let root = std::env::current_dir().map_err(|e| e.to_string())?;
-        let mut loader = Loader::new(root.clone(), &options.extension_paths, fs)?;
+        let mut loader = Loader::new(
+            root.clone(),
+            &options.extension_paths,
+            options.system_site.as_deref(),
+            fs,
+        )?;
         loader.skip_current_root = command.flags.safe_path;
         loader.reachable_only = options.reachable_only || options.entry_profile.is_some();
         let filename = root.join("<string>.py");
@@ -3898,7 +3903,12 @@ impl SourceGraph {
             .parent()
             .ok_or("script has no parent directory")?
             .to_path_buf();
-        let mut loader = Loader::new(root, &options.extension_paths, fs)?;
+        let mut loader = Loader::new(
+            root,
+            &options.extension_paths,
+            options.system_site.as_deref(),
+            fs,
+        )?;
         loader.skip_current_root = flags.safe_path;
         let reachable = options.reachable_only || options.entry_profile.is_some();
         loader.reachable_only = reachable;
@@ -3983,7 +3993,7 @@ impl SourceGraph {
         let source = fs
             .read_to_string(&entry)
             .map_err(|error| format!("{}: {error}", entry.display()))?;
-        let mut loader = Loader::new(root, extension_paths, fs)?;
+        let mut loader = Loader::new(root, extension_paths, None, fs)?;
         loader.reachable_only = reachable_only;
         if inferred {
             loader.inputs.missing.push(loader.root.join("__init__.py"));
@@ -4323,7 +4333,8 @@ struct Loader<'a> {
     wildcard_import: Option<String>,
     inputs: crate::SourceInputs,
     root: PathBuf,
-    extension_roots: Vec<PathBuf>,
+    search_roots: Vec<PathBuf>,
+    archive_roots: usize,
     session: Session,
     modules: Vec<SourceModule>,
     by_name: HashMap<String, ModuleId>,
@@ -4345,9 +4356,10 @@ impl<'a> Loader<'a> {
     fn new(
         root: PathBuf,
         extension_paths: &[PathBuf],
+        system_site: Option<&Path>,
         mut fs: FileSystem<'a>,
     ) -> Result<Self, String> {
-        let mut extension_roots = Vec::new();
+        let mut search_roots = Vec::new();
         for path in extension_paths {
             let directory = fs
                 .canonicalize(path)
@@ -4358,15 +4370,26 @@ impl<'a> Loader<'a> {
                     path.display()
                 ));
             }
-            if !extension_roots.contains(&directory) {
-                extension_roots.push(directory);
+            if !search_roots.contains(&directory) {
+                search_roots.push(directory);
+            }
+        }
+        let archive_roots = search_roots.len();
+        let mut inputs = crate::SourceInputs::default();
+        if let Some(site) = system_site {
+            let canonical = fs.canonicalize(site).map_err(|e| e.to_string())?;
+            inputs.directories.push((site.to_owned(), canonical.clone()));
+            let site = canonical;
+            if !search_roots.contains(&site) {
+                search_roots.push(site);
             }
         }
         Ok(Self {
             fs,
-            session: Session::new(&root, &extension_roots)?,
-            extension_roots,
-            inputs: crate::SourceInputs::default(),
+            archive_roots,
+            session: Session::new(&root, &search_roots)?,
+            search_roots,
+            inputs,
             checked_builtin_imports: Vec::new(),
             needs_object_imports: false,
             wildcard_import: None,
@@ -5471,7 +5494,7 @@ impl<'a> Loader<'a> {
     fn filesystem_search_path(&self) -> Result<String, String> {
         let roots = std::iter::once(&self.root)
             .skip(usize::from(self.skip_current_root))
-            .chain(&self.extension_roots)
+            .chain(&self.search_roots)
             .collect::<Vec<_>>();
         serde_json::to_string(&roots).map_err(|e| e.to_string())
     }
@@ -5643,7 +5666,7 @@ impl<'a> Loader<'a> {
         // A regular package owns its subtree. A namespace searches its portions in path order.
         let relative = name.replace('.', "/");
         let parent_roots = parent.map(|(id, _)| &self.modules[id].search_roots);
-        let roots = std::iter::once(&self.root).chain(&self.extension_roots);
+        let roots = std::iter::once(&self.root).chain(&self.search_roots);
         let mut resolved = None;
         let mut portions = Vec::new();
         for (root_index, root) in roots.enumerate() {
@@ -5662,7 +5685,7 @@ impl<'a> Loader<'a> {
             } else {
                 self.inputs.missing.push(package);
                 let archive = base.with_extension(crate::NATIVE_ARCHIVE_EXTENSION);
-                let installed = self.extension_roots.contains(root);
+                let installed = self.search_roots[..self.archive_roots].contains(root);
                 if installed && self.fs.is_file(&archive) {
                     if !self.fs.is_file(&stub) {
                         return Err(format!(
@@ -5807,7 +5830,7 @@ pub(crate) fn errno_import(statement: &ast::Stmt) -> Option<&ast::StmtImportFrom
     .then_some(import)
 }
 
-fn stdlib_top_level(name: &str) -> bool {
+pub(crate) fn stdlib_top_level(name: &str) -> bool {
     let vendored = ty_vendored::file_system();
     INTRINSIC_MODULES.contains(&name)
         || vendored.is_file(format!("stdlib/{name}.pyi").as_str())
