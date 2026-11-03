@@ -69,6 +69,14 @@ REJECTED = {
             "class Both(Left, Right): pass\n"
         ),
     }, "multiple independent base classes"),
+    "math_lcm_preserves_typed_call": ({
+        "main.py": (
+            "from math import lcm\n"
+            "def typed(n: int) -> int: return n\n"
+            "print(lcm(6, 10))\n"
+            "typed('wrong')\n"
+        ),
+    }, "invalid-argument-type"),
     "custom_dir_preserves_typed_call": ({
         "main.py": (
             "class Subject:\n"

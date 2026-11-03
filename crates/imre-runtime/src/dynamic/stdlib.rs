@@ -383,7 +383,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         (
             "math",
             "trunc" | "floor" | "ceil" | "modf" | "copysign" | "cos" | "gcd" | "isinf" | "isnan"
-            | "isqrt" | "log",
+            | "isqrt" | "lcm" | "log",
         ) => ctx.builtin(&format!("math.{name}")),
         ("enum", "auto") => ctx.enum_auto_class()?,
         ("enum", "Enum" | "Flag" | "IntEnum" | "IntFlag" | "StrEnum") => {
