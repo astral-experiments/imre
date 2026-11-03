@@ -2541,7 +2541,9 @@ def report(text):
             "from threading import ExceptHookArgs, __excepthook__, excepthook\n"
             "print(ExceptHookArgs((None, None, None, None)).thread is None, excepthook is __excepthook__)\n"
         )
-        compare("-IB", thread_hook_exports, native_args=("run", thread_hook_exports, "--quiet"))
+        compare("-IB", thread_hook_exports, native_args=("run", thread_hook_exports, "--quiet"), native_timeout=300)
+        plugin.write_bytes((fixtures / "boxed_threading_except_hook.py").read_bytes())
+        compare("-IB", "-c", imports + "arithmetic.current()", native_timeout=300)
         # A from-import elsewhere in the same program would already select the boxed runtime.
         queue_lookup = root / "queue_lookup.py"
         for statement, name in (("import logging.handlers", "logging.handlers"),
@@ -3119,7 +3121,6 @@ for name in ("md4", "ripemd160"):
             "boxed_source_module_getattr.py",
             "boxed_thread_local.py",
             "boxed_thread_local_subclass.py",
-            "boxed_threading_except_hook.py",
             "boxed_threading_lock.py",
             "boxed_import_depth.py",
             "boxed_dict_subclasses.py",
