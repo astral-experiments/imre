@@ -2459,6 +2459,25 @@ def report(text):
         )
         bad_config = run(imre, "check", config_call)
         assert bad_config.returncode != 0 and b"expected int" in bad_config.stderr, bad_config.stderr
+        config_call = root / "dict_config_call.py"
+        config_call.write_text(
+            "import logging\nfrom logging.config import dictConfig\n"
+            "dictConfig({'version': 1, 'incremental': False, 'handlers': {'out': {'class': 'logging.StreamHandler', "
+            "'stream': 'ext://sys.stdout'}}, 'root': {'level': 'INFO', 'handlers': ['out']}})\n"
+            "logging.info('configured handler')\n"
+            "dictConfig({'version': 1, 'root': {'handlers': []}})\n"
+            "assert logging.getHandlerByName('out') is None\n"
+        )
+        compare("-IB", config_call, native_args=("run", config_call, "--quiet"), native_timeout=600)
+        config_call.write_text(
+            "from logging.config import dictConfig\n"
+            "def configure() -> None:\n"
+            "    result = dictConfig({'version': 1, 'handlers': {'out': {'class': 'logging.NullHandler'}}})\n"
+            "    assert result is None\n"
+            "    level: int = 'wrong'\n    print(level)\nconfigure()\n"
+        )
+        bad_config = run(imre, "check", config_call)
+        assert bad_config.returncode != 0 and b"expected int" in bad_config.stderr, bad_config.stderr
         io_registration = fixtures / "io_abc_registration.py"
         compare("-IB", io_registration, native_args=("run", io_registration, "--quiet"))
         override_fixture = fixtures / "boxed_typing_override.py"
