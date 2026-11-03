@@ -1746,12 +1746,17 @@ impl IntrinsicModule {
             (Self::Locale | Self::LocaleNative, "getencoding") => {
                 Intrinsic::SysEncoding(SysEncoding::Locale)
             }
-            (Self::LocaleNative, "localeconv") => {
-                Intrinsic::ObjectRuntimeExport("_locale.localeconv")
-            }
             (Self::Locale | Self::LocaleNative, "CHAR_MAX") => {
-                Intrinsic::ObjectRuntimeExport("_locale.CHAR_MAX")
+                Intrinsic::IntConstant(i64::from(std::ffi::c_char::MAX))
             }
+            (Self::LocaleNative, "localeconv") => {
+                Intrinsic::ScopedObjectExport("_locale.localeconv")
+            }
+            (Self::Locale, "localeconv") => Intrinsic::ScopedObjectExport("locale.localeconv"),
+            (Self::Locale, "format_string") => {
+                Intrinsic::ScopedObjectExport("locale.format_string")
+            }
+            (Self::Locale, "localize") => Intrinsic::ScopedObjectExport("locale.localize"),
             (Self::LocaleNative, "setlocale") => {
                 Intrinsic::ObjectRuntimeExport("_locale.setlocale")
             }
