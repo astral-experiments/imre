@@ -2915,6 +2915,8 @@ impl Context {
                 "getgid",
                 "getgroups",
                 "getpgrp",
+                "times",
+                "times_result",
             ] {
                 let value = match posix {
                     Some(posix) => match self.lookup_attr(posix, attr) {

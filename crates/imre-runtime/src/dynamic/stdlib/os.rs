@@ -200,7 +200,7 @@ pub(super) fn memfd_create(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id
 }
 
 pub(super) fn is_process_function(name: &str) -> bool {
-    cfg!(unix) && matches!(name, "execv" | "WIFSTOPPED")
+    cfg!(unix) && matches!(name, "execv" | "times" | "WIFSTOPPED")
 }
 
 /// Spawn directly for plain arguments, or let the child run the captured Python callable.
@@ -1380,11 +1380,19 @@ pub(super) fn descriptor(
         return posix_file_call(ctx, || unsafe { libc::posix_fallocate(fd, offset, length) });
     }
     #[cfg(unix)]
-    if matches!(name, "getpgrp" | "getppid") {
+    if matches!(name, "getpgrp" | "getppid" | "times") {
         if !args.is_empty() {
             return Err(Error::new(
                 "TypeError",
                 format!("posix.{name}() takes no arguments ({} given)", args.len()),
+            ));
+        }
+        if name == "times" {
+            let values = native::times()?.map(|seconds| ctx.alloc(Value::Float(seconds)));
+            return Ok(super::fixed_structseq::record(
+                ctx,
+                super::fixed_structseq::TIMES_RESULT,
+                values.into(),
             ));
         }
         // SAFETY: both calls read identifiers for the current process and take no pointers.

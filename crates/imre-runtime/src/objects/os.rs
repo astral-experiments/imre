@@ -22,6 +22,50 @@ pub(super) mod stat_result;
 pub(crate) use links::{link_at, readlink_at, symlink_at};
 pub(crate) use stat_result::float_seconds;
 
+/// Sample the POSIX process and waited-for child CPU clocks, in seconds.
+#[cfg(unix)]
+pub(crate) fn times() -> Result<[f64; 5]> {
+    // SAFETY: _SC_CLK_TCK is a parameterless sysconf query.
+    let ticks = unsafe { libc::sysconf(libc::_SC_CLK_TCK) };
+    if ticks < 1 {
+        return Err(Error::new(
+            Kind::RuntimeError,
+            "cannot read ticks_per_second",
+        ));
+    }
+    let mut process = std::mem::MaybeUninit::<libc::tms>::uninit();
+    // SAFETY: times writes a tms on success. Clear this thread's errno before
+    // sampling because an elapsed clock_t can wrap to the error sentinel.
+    let elapsed = unsafe {
+        #[cfg(target_os = "linux")]
+        {
+            *libc::__errno_location() = 0;
+        }
+        #[cfg(target_vendor = "apple")]
+        {
+            *libc::__error() = 0;
+        }
+        #[cfg(target_os = "android")]
+        {
+            *libc::__errno() = 0;
+        }
+        libc::times(process.as_mut_ptr())
+    };
+    if elapsed == !0 {
+        return Err(errno_error(io::Error::last_os_error()));
+    }
+    // SAFETY: times initialized the four counters.
+    let process = unsafe { process.assume_init() };
+    Ok([
+        process.tms_utime,
+        process.tms_stime,
+        process.tms_cutime,
+        process.tms_cstime,
+        elapsed,
+    ]
+    .map(|count| count as f64 / ticks as f64))
+}
+
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_os_getpid() -> usize {
     Int::from_usize(std::process::id() as usize).into_raw()

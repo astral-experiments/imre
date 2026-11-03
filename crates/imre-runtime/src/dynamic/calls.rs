@@ -66,6 +66,7 @@ pub(super) fn module_function(symbol: &str) -> Option<(&str, &str)> {
                     stdlib::os::scandir::ENTRY
                         | stdlib::os::scandir::ITER
                         | stdlib::fixed_structseq::SCHED_PARAM
+                        | stdlib::fixed_structseq::TIMES_RESULT
                 ) =>
         {
             Some((module, function))
@@ -2789,6 +2790,14 @@ impl Context {
                     "__doc__" if symbol == "posix.abort" => {
                         return Ok(self.text("Abort the interpreter immediately.\n\nThis function 'dumps core' or otherwise fails in the hardest way possible\non the hosting operating system.  This function never returns."));
                     }
+                    "__doc__" if symbol == "posix.times" => {
+                        return Ok(self.text(concat!(
+                            "Return a collection containing process timing information.\n\n",
+                            "The object returned behaves like a named tuple with these fields:\n",
+                            "  (utime, stime, cutime, cstime, elapsed_time)\n",
+                            "All fields are floating-point numbers."
+                        )));
+                    }
                     "__doc__" if symbol == "posix.getpgrp" => {
                         return Ok(self.text("Return the current process group id."));
                     }
@@ -2843,6 +2852,7 @@ impl Context {
                                 | "posix.cpu_count"
                                 | "posix.getppid"
                                 | "posix.getpgrp"
+                                | "posix.times"
                                 | "gc.enable"
                                 | "gc.disable"
                                 | "gc.isenabled"

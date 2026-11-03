@@ -5,7 +5,7 @@ from posix import device_encoding, openpty
 import posixpath as path
 import stat as st
 from posix import chown, fchown, geteuid, getgid, getgroups, getuid, lchown
-from posix import _exit
+from posix import _exit, times, times_result
 from posix import pread, pwrite, readinto
 from _collections_abc import _check_methods
 from _collections_abc import Mapping as _Mapping, MutableMapping as _MutableMapping
