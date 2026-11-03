@@ -2059,6 +2059,21 @@ def main():
             )
             compare("-B", array_import, native_args=("run", array_import, "--runtime-imports", "--quiet"))
 
+        zoneinfo_entry = root / "zoneinfo_entry.py"
+        (root / "zoneinfo_helper.py").write_text("import zoneinfo as provider\n")
+        for statement in (
+            "from zoneinfo_helper import provider",
+            "import sys\nprovider = __import__(sys.argv[1])",
+        ):
+            zoneinfo_entry.write_text(
+                statement + "\nprint(provider.ZoneInfo.__name__, provider.TZPATH)\n"
+                "provider.reset_tzpath([])\nprint(provider.TZPATH)\n"
+            )
+            compare(
+                "-B", zoneinfo_entry, "zoneinfo", extra={"PYTHONTZPATH": str(root)},
+                native_args=("run", zoneinfo_entry, "--quiet", "--", "zoneinfo"),
+            )
+
         hash_args = ["", b"", "latin1é", b"latin1\xe9", "Āfoo", "😀abc", bytes(range(32))]
         hash_calls = "\n".join(f"print(hash({value!r}))" for value in hash_args)
         for seed in ("0", "1", "4294967295"):

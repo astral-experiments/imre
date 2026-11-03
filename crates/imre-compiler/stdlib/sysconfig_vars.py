@@ -25,6 +25,8 @@ def get_config_vars(*args):
             'py_version_short': _PY_VERSION_SHORT,
             'implementation': 'Imre',
             'implementation_lower': 'imre',
+            'TZPATH': ('/usr/share/zoneinfo:/usr/lib/zoneinfo:/usr/share/lib/zoneinfo:/etc/zoneinfo'
+                       if os.name == 'posix' else ''),
             'Py_GIL_DISABLED': 0,
             'Py_DEBUG': 0,
             'EXT_SUFFIX': _imp.extension_suffixes()[0],

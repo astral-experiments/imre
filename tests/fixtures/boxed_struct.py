@@ -159,6 +159,28 @@ def current():
     fields = (1, 2, 3, -1, 17, -19, 23, 29, 31)
     assert bcm.unpack(bcm.pack(*fields)) == fields
 
+    signed_limits = (-(1 << 63), -2717650800, (1 << 63) - 1)
+    for prefix in ("", "@", "=", "<", ">", "!"):
+        layout = struct.Struct(prefix + "3q")
+        assert layout.size == 24
+        data = layout.pack(*(Field(value) for value in signed_limits))
+        assert struct.unpack(layout.format, bytearray(data)) == signed_limits
+        assert layout.unpack(data) == signed_limits
+        for value in (signed_limits[0] - 1, signed_limits[-1] + 1):
+            try:
+                struct.pack(prefix + "q", value)
+            except struct.error as error:
+                assert str(error) == "'q' format requires %d <= number <= %d" % (signed_limits[0], signed_limits[-1])
+            else:
+                raise AssertionError("signed long long overflow accepted")
+        try:
+            struct.pack(prefix + "q", OverflowingIndex())
+        except (HookOverflow, struct.error) as error:
+            native_order = struct.pack(prefix + "q", 1) == struct.pack("@q", 1)
+            assert type(error) is (struct.error if native_order else HookOverflow)
+        else:
+            raise AssertionError("failing index accepted")
+
     class Double:
         def __float__(self):
             return 1.5

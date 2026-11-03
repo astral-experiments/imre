@@ -18,7 +18,7 @@ pub(crate) enum UnpackedField {
 }
 
 pub(crate) struct StructFormat {
-    little_endian: bool,
+    pub(crate) little_endian: bool,
     pub(crate) size: usize,
     pub(crate) item_count: usize,
     fields: Vec<Field>,
@@ -76,7 +76,7 @@ impl StructFormat {
                 b'H' => (2, align_of::<u16>()),
                 b'i' | b'I' => (4, align_of::<u32>()),
                 b'd' => (8, align_of::<f64>()),
-                b'Q' => (8, align_of::<u64>()),
+                b'q' | b'Q' => (8, align_of::<u64>()),
                 b'x' => (1, 1),
                 b'P' if prefix == b'@' => (size_of::<usize>(), align_of::<usize>()),
                 _ => return Err("bad char in struct format".into()),
@@ -153,7 +153,7 @@ impl StructFormat {
                 u64::from_be_bytes(word)
             };
             result.push(match code {
-                b'b' | b'i' | b'l' => {
+                b'b' | b'i' | b'l' | b'q' => {
                     // Move the field's sign bit into bit 63 before the arithmetic shift.
                     let shift = (8 - field.len()) * 8;
                     UnpackedField::Signed(((value << shift) as i64) >> shift)
@@ -195,6 +195,18 @@ mod tests {
         assert_eq!(struct_calcsize("<HHIIIIIHHH").unwrap(), 30);
         assert_eq!(struct_calcsize(">HHIQQQIHHH").unwrap(), 42);
         assert_eq!(struct_calcsize("<IIQQQQQQ").unwrap(), 56);
+    }
+
+    #[test]
+    fn signed_long_long_transitions() {
+        use UnpackedField::Signed;
+        let values = [i64::MIN, -2_717_650_800, 0, i64::MAX];
+        let big: Vec<_> = values.into_iter().flat_map(i64::to_be_bytes).collect();
+        let little: Vec<_> = values.into_iter().flat_map(i64::to_le_bytes).collect();
+        assert_eq!(struct_unpack(">4q", &big).unwrap(), values.map(Signed));
+        assert_eq!(struct_unpack("<4q", &little).unwrap(), values.map(Signed));
+        assert_eq!(struct_calcsize("@B0q"), struct_calcsize("@B0Q"));
+        assert_eq!(struct_calcsize("!Bq"), Ok(9));
     }
 
     #[test]

@@ -25,6 +25,7 @@ struct Imports {
     runtime_imports: bool,
     private_names: imre_ast::Names,
     uses_import_builtin: bool,
+    computed_import: bool,
     imports_logging: bool,
     sys_names: HashSet<String>,
     operator_names: HashSet<String>,
@@ -134,6 +135,10 @@ impl Imports {
                     | "tomllib._parser"
                     | "tomllib._re"
                     | "tomllib._types"
+                    | "zoneinfo"
+                    | "zoneinfo._common"
+                    | "zoneinfo._tzpath"
+                    | "zoneinfo._zoneinfo"
                     | "traceback"
                     | "unittest.case"
                     | "string.templatelib"
@@ -325,11 +330,25 @@ impl<'a> Visitor<'a> for Imports {
         visitor::walk_stmt(self, s);
     }
     fn visit_expr(&mut self, e: &'a Expr) {
+        // A literal __import__ call cannot select a different provider at execution.
+        if let Expr::Call(call) = e
+            && matches!(&*call.func, Expr::Name(name) if name.id == "__import__")
+            && let Some(Expr::StringLiteral(name)) = call.arguments.find_argument_value("name", 0)
+        {
+            self.uses_import_builtin = true;
+            self.add(0, "importlib");
+            if name.value.to_str().split('.').next() == Some("zoneinfo") {
+                self.add(0, name.value.to_str());
+            }
+            self.visit_arguments(&call.arguments);
+            return;
+        }
         if let Expr::Name(name) = e
             && name.ctx == ast::ExprContext::Load
         {
             if name.id == "__import__" {
                 self.uses_import_builtin = true;
+                self.computed_import = true;
                 self.add(0, "importlib");
             }
             if self.boxed_mock_names.contains(name.id.as_str()) {
@@ -580,6 +599,7 @@ pub(crate) fn compile(
             "runpy",
             "json",
             "tomllib",
+            "zoneinfo",
             "opcode",
             "operator",
             "struct",
@@ -738,6 +758,7 @@ pub(crate) fn compile(
     let mut frozen_imports = Imports::default();
     let mut work = VecDeque::from([("__main__".to_owned(), false, first)]);
     let mut uses_import_builtin = false;
+    let mut computed_import = registered_imports.computed;
     let mut bundled_only = false;
     loop {
         let (owner, package, imports) = if let Some(next) = work.pop_front() {
@@ -748,6 +769,9 @@ pub(crate) fn compile(
             let mut imports = Imports::default();
             if uses_import_builtin && !seen.contains("pprint") {
                 imports.names.push((0, "pprint".to_owned()));
+            }
+            if computed_import && !seen.contains("zoneinfo") {
+                imports.names.push((0, "zoneinfo".to_owned()));
             }
             // A runtime-selected HTTP child needs its server and transitive providers.
             if uses_import_builtin && seen.contains("http") && !seen.contains("http.server") {
@@ -799,6 +823,7 @@ pub(crate) fn compile(
         {
             return Ok(None);
         }
+        computed_import |= imports.computed_import;
         let mut names = imports.names;
         if owner == "importlib" {
             // Filesystem modules can import the loader protocols through either public module.
@@ -864,7 +889,9 @@ pub(crate) fn compile(
                 if let Some((filename, source)) = bundled {
                     let path = Path::new(bundled_root).join(filename);
                     let package = path.ends_with("__init__.py");
-                    let imports = imports_for_module(&path, &source)?;
+                    let mut imports = imports_for_module(&path, &source)?;
+                    // Internal imports in bundled modules do not select arbitrary application providers.
+                    imports.computed_import = false;
                     sources.push((prefix.clone(), path, source.into_owned()));
                     work.push_back((prefix.clone(), package, imports));
                 }

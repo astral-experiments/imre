@@ -90,6 +90,23 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
         // CPython 3.14.5 Lib/_strptime.py and its calendar dependency. See licenses/CPython.txt.
         "_strptime" => Some(("_strptime.py", include_str!("../stdlib/_strptime.py"))),
         "calendar" => Some(("calendar.py", include_str!("../stdlib/calendar.py"))),
+        // CPython 3.14.5 Lib/zoneinfo. See licenses/CPython.txt.
+        "zoneinfo" => Some((
+            "zoneinfo/__init__.py",
+            include_str!("../stdlib/zoneinfo/__init__.py"),
+        )),
+        "zoneinfo._common" => Some((
+            "zoneinfo/_common.py",
+            include_str!("../stdlib/zoneinfo/_common.py"),
+        )),
+        "zoneinfo._tzpath" => Some((
+            "zoneinfo/_tzpath.py",
+            include_str!("../stdlib/zoneinfo/_tzpath.py"),
+        )),
+        "zoneinfo._zoneinfo" => Some((
+            "zoneinfo/_zoneinfo.py",
+            include_str!("../stdlib/zoneinfo/_zoneinfo.py"),
+        )),
         // CPython 3.14.5 Lib/fractions.py and its numeric ABCs. See licenses/CPython.txt.
         "fractions" => Some(("fractions.py", include_str!("../stdlib/fractions.py"))),
         "numbers" => Some(("numbers.py", include_str!("../stdlib/numbers.py"))),
@@ -4876,7 +4893,8 @@ impl<'a> Loader<'a> {
         if let Some((filename, source)) = bundled {
             self.reject_stdlib_shadow(name)?;
             // token initializes its public tables from the live module globals.
-            self.needs_object_imports |= matches!(name, "token" | "http.client" | "fractions");
+            self.needs_object_imports |=
+                matches!(name, "token" | "http.client" | "fractions" | "zoneinfo");
             let pkgutil_source;
             let source = if name == "pkgutil" {
                 let paths = self.filesystem_search_path()?;
