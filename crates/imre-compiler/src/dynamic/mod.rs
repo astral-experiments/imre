@@ -162,6 +162,8 @@ fn boxed_sys_export(name: &str) -> bool {
             | "implementation"
             | "exit"
             | "exc_info"
+            | "excepthook"
+            | "__excepthook__"
             | "exception"
     )
 }
@@ -988,6 +990,7 @@ const RUNTIME_PROVIDERS: &[&str] = &[
     "_frozen_importlib",
     "_frozen_importlib_external",
     "_opcode_metadata",
+    "_py_warnings",
     "_tokenize",
     "abc",
     "annotationlib",
@@ -1025,6 +1028,7 @@ const RUNTIME_PROVIDERS: &[&str] = &[
     "subprocess",
     "token",
     "types",
+    "warnings",
     "zipimport",
 ];
 

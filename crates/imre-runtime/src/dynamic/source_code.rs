@@ -3121,6 +3121,9 @@ impl Context {
             let value = self.builtin(name);
             self.bind(scope, name, value);
         }
+        let os_error = self.builtin("OSError");
+        self.bind(scope, "EnvironmentError", os_error);
+        self.bind(scope, "IOError", os_error);
         let dict = self.module_globals(scope)?;
         // Reimporting an evicted module leaves existing frames' builtins intact.
         self.source_builtins.get_or_insert(dict);
@@ -3446,16 +3449,7 @@ impl Context {
             Body::Native(_) => unreachable!("source function"),
         };
         if kind != FunctionKind::Plain {
-            let frame = self.alloc(Value::Generator {
-                owner,
-                frame: None,
-                code,
-                scope,
-                iterators: Vec::new(),
-                protected: Vec::new(),
-                offset: Some(0),
-                running: false,
-            });
+            let frame = self.new_generator(code, scope, owner);
             Ok(if kind == FunctionKind::Coroutine {
                 let origin = self.coroutine_origin();
                 self.alloc(Value::Coroutine { frame, origin })

@@ -38,7 +38,6 @@ pub(super) use file_io::{
 };
 pub(in crate::dynamic) use file_io::{open, popen_pipe};
 mod text_wrapper;
-pub(super) use text_wrapper::text_options;
 
 #[derive(Clone, Copy)]
 pub(in crate::dynamic) enum NativeClass {

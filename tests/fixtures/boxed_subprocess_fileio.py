@@ -2,6 +2,7 @@ import errno
 import io
 import os
 import subprocess
+import sys
 from pathlib import Path
 from subprocess import Popen
 
@@ -131,3 +132,89 @@ def current():
                 assert status.returncode == 0
                 print(cwd, key, "accepted")
     print("subprocess FileIO verified")
+
+    class HookError(Exception):
+        pass
+
+    endpoints = []
+
+    class Refuse(Popen):
+        def _execute_child(self, *args):
+            fds = args[10:16]
+            assert (self.stdin.fileno(), self.stdout.fileno(), self.stderr.fileno()) == (
+                fds[1], fds[2], fds[4])
+            assert len(set(fds)) == 6
+            for fd in fds:
+                os.fstat(fd)
+            endpoints.extend(fds)
+            raise HookError
+
+    pipe = subprocess.PIPE
+    try:
+        Refuse(["/bin/true"], stdin=pipe, stdout=pipe, stderr=pipe)
+    except HookError:
+        pass
+    else:
+        raise AssertionError("launch ignored the overriding method")
+    for fd in endpoints:
+        try:
+            os.fstat(fd)
+        except OSError as exc:
+            assert exc.errno == errno.EBADF
+        else:
+            raise AssertionError("constructor left an open endpoint")
+
+    class Forward(Popen):
+        def _execute_child(self, *args):
+            super()._execute_child(*args)
+            assert self.pid > 0
+
+    with Forward(["/bin/cat"], stdin=pipe, stdout=pipe, stderr=pipe) as child:
+        assert child.communicate(b"forwarded") == (b"forwarded", b"")
+        assert child.returncode == 0
+
+    reader, writer = os.pipe()
+    try:
+        with Forward(["/bin/echo", "borrowed"], stdout=writer, stderr=subprocess.STDOUT) as child:
+            assert child.wait() == 0
+        os.write(writer, b"open")
+        assert os.read(reader, 64) == b"borrowed\nopen"
+    finally:
+        os.close(reader)
+        os.close(writer)
+
+    retained = []
+
+    class AfterLaunch(Popen):
+        def _execute_child(self, *args):
+            assert args[-1] == -1
+            super()._execute_child(*args)
+            retained.append(self)
+            raise HookError
+
+    try:
+        AfterLaunch(["/bin/sh", "-c", "exit 23"], stdin=pipe, stdout=pipe, stderr=pipe)
+    except HookError:
+        pass
+    else:
+        raise AssertionError("overriding exception lost after launch")
+    child, = retained
+    assert child.stdin.closed and child.stdout.closed and child.stderr.closed
+    assert child.wait() == 23
+
+    reader, writer = os.pipe()
+    saved_stdout = sys.__stdout__
+    try:
+        class StdoutFD:
+            def fileno(self):
+                return writer
+
+        sys.__stdout__ = StdoutFD()
+        with Forward(["/bin/sh", "-c", "printf err >&2"], stderr=subprocess.STDOUT) as child:
+            assert child.wait() == 0
+        os.write(writer, b"end")
+        assert os.read(reader, 6) == b"errend"
+    finally:
+        sys.__stdout__ = saved_stdout
+        os.close(reader)
+        os.close(writer)

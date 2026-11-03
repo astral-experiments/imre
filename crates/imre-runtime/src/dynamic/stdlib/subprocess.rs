@@ -1,11 +1,13 @@
 //! Bind binary subprocess operations to the same child and files as typed Popen.
 use super::{Context, Error, FALSE, Id, NONE, Result, Value, builtins, io, os, posixpath};
-use crate::objects::BoxedPopen;
+use crate::objects::{BoxedPopen, BoxedPreparation};
 
 pub(super) fn function(name: &str) -> bool {
     matches!(
         name,
-        "launch"
+        "prepare"
+            | "release"
+            | "launch"
             | "pid"
             | "pipe"
             | "poll"
@@ -100,21 +102,57 @@ fn environment(ctx: &mut Context, mapping: Id, fork: bool) -> Result<Option<Envi
     Ok(Some(entries))
 }
 
+fn prepare(ctx: &mut Context, values: &[Id]) -> Result<Id> {
+    let &[stdin, stdout, stderr, bufsize, pipesize] = values else {
+        return Err(Error::new(
+            "TypeError",
+            "invalid Popen preparation operands",
+        ));
+    };
+    let mut streams = [
+        redirect(ctx, stdin, 0)?,
+        redirect(ctx, stdout, 1)?,
+        redirect(ctx, stderr, 2)?,
+    ];
+    let pipe_count = streams.iter().filter(|(mode, _)| *mode == 1).count();
+    let bufsize = ctx.as_int(bufsize)?;
+    let pipesize = ctx.as_int(pipesize)?;
+    let warn_buffering = pipe_count != 0 && bufsize.as_small() == Some(1);
+    let mut handles = BoxedPopen::prepare_handles(&streams, &pipesize)?;
+    if streams[1].0 == 0 && streams[2].0 == 5 {
+        let sys = ctx.module("sys")?;
+        let stdout = ctx.lookup_attr(sys, "__stdout__")?;
+        let fileno = ctx.lookup_attr(stdout, "fileno")?;
+        let fd = ctx.call(fileno, Vec::new(), Vec::new())?;
+        handles.inherit_stderr(&mut streams[2], ctx.index_integer(fd)?);
+    }
+    let (prepared, fds) = BoxedPreparation::new(streams, handles, bufsize, pipesize)?;
+    if warn_buffering {
+        for _ in 0..pipe_count {
+            let warnings = ctx.module("warnings")?;
+            let warn = ctx.lookup_attr(warnings, "warn")?;
+            let message = ctx.text("line buffering (buffering=1) isn't supported in binary mode, the default buffer size will be used");
+            let category = ctx.builtin("RuntimeWarning");
+            ctx.call(warn, vec![message, category], Vec::new())?;
+        }
+    }
+    let fds = fds.map(|fd| ctx.alloc(Value::Int(fd)));
+    let fds = ctx.alloc(Value::Tuple(fds.into()));
+    let owner = ctx.alloc(Value::ProcessPreparation(std::rc::Rc::new(
+        std::cell::RefCell::new(prepared),
+    )));
+    Ok(ctx.alloc(Value::Tuple(vec![owner, fds])))
+}
+
 fn launch(ctx: &mut Context, values: &[Id]) -> Result<Id> {
     let &[
+        owner,
         args,
         executable,
-        stdin,
-        stdout,
-        stderr,
         close_fds,
         restore_signals,
         cwd,
         env,
-        bufsize,
-        pipesize,
-        encoding,
-        errors,
         shell,
         start_new_session,
         process_group,
@@ -124,41 +162,34 @@ fn launch(ctx: &mut Context, values: &[Id]) -> Result<Id> {
     else {
         return Err(Error::new("TypeError", "invalid Popen launch operands"));
     };
-    let streams = [
-        redirect(ctx, stdin, 0)?,
-        redirect(ctx, stdout, 1)?,
-        redirect(ctx, stderr, 2)?,
-    ];
-    if (encoding != NONE || errors != NONE) && streams.iter().any(|(mode, _)| *mode == 1) {
-        // CPython opens text wrappers before the child can execute.
-        io::text_options(ctx, encoding, errors, NONE)?;
-    }
-    let pipesize = ctx.as_int(pipesize)?;
-    // Child settings can run Python during both spawn selection and fork conversion.
+    let Value::ProcessPreparation(prepared) = ctx.heap.get(owner) else {
+        return Err(Error::new(
+            "TypeError",
+            "expected prepared subprocess pipes",
+        ));
+    };
+    let launch = prepared
+        .borrow_mut()
+        .launch
+        .take()
+        .ok_or_else(|| Error::new("RuntimeError", "subprocess pipes have already been used"))?;
+    let (streams, handles, bufsize, pipesize) = (
+        launch.streams,
+        launch.handles,
+        launch.bufsize,
+        launch.pipesize,
+    );
     let default_fds = matches!(ctx.heap.get(pass_fds), Value::Tuple(fds) if fds.is_empty());
     let minus_one = |id| matches!(ctx.heap.get(id), Value::Int(n) if n.as_small() == Some(-1));
     let default_group = process_group == NONE || minus_one(process_group);
     let default_umask = minus_one(umask);
-    let pipe_count = streams.iter().filter(|(mode, _)| *mode == 1).count();
-    let pipe_options = pipe_count != 0 && ctx.as_int(bufsize)?.as_small() != Some(-1);
-    let handles = (executable != NONE
+    // Retain the existing conversion order on the native default-argument path.
+    let probe = executable != NONE
         || start_new_session != FALSE
         || !default_group
         || !default_umask
         || !default_fds
-        || pipe_options)
-        .then(|| BoxedPopen::prepare_handles(&streams, &pipesize))
-        .transpose()?;
-    // Popen opens the parent pipe wrappers before _execute_child examines child settings.
-    if pipe_options && os::c_int(ctx, bufsize)? == 1 {
-        for _ in 0..pipe_count {
-            let warnings = ctx.module("warnings")?;
-            let warn = ctx.lookup_attr(warnings, "warn")?;
-            let message = ctx.text("line buffering (buffering=1) isn't supported in binary mode, the default buffer size will be used");
-            let category = ctx.builtin("RuntimeWarning");
-            ctx.call(warn, vec![message, category], Vec::new())?;
-        }
-    }
+        || (streams.iter().any(|(mode, _)| *mode == 1) && bufsize.as_small() != Some(-1));
     let shell = ctx.truth(shell)?;
     let spelling = matches!(
         ctx.heap.get(ctx.scalar_value(args)),
@@ -206,7 +237,7 @@ fn launch(ctx: &mut Context, values: &[Id]) -> Result<Id> {
         executable
     };
     // CPython's dirname probe can call __fspath__ before the actual executable conversion.
-    let probed_directory = if handles.is_some() && BoxedPopen::probes_executable() {
+    let probed_directory = if probe && BoxedPopen::probes_executable() {
         let probe = posixpath::fspath(ctx, program)?;
         match ctx.heap.get(ctx.scalar_value(probe)) {
             Value::Str(s) => s.contains('/'),
@@ -217,7 +248,7 @@ fn launch(ctx: &mut Context, values: &[Id]) -> Result<Id> {
     } else {
         false
     };
-    let mut direct = match handles.as_ref() {
+    let mut direct = match probe.then_some(&handles) {
         Some(handles) if probed_directory => {
             let close_fds = ctx.truth(close_fds)?;
             // CPython tests pass_fds before cwd, redirected handles and session settings.
@@ -305,7 +336,7 @@ fn launch(ctx: &mut Context, values: &[Id]) -> Result<Id> {
         }
     }
     // On the prepared path, argv[0] is converted independently of the executable.
-    let (alternate, arguments) = if handles.is_some() {
+    let (alternate, arguments) = if probe {
         (Some(program_bytes), items.as_slice())
     } else {
         argv.push(program_bytes);
@@ -324,12 +355,12 @@ fn launch(ctx: &mut Context, values: &[Id]) -> Result<Id> {
         direct,
         search_path,
         streams,
-        handles,
+        Some(handles),
         close_fds,
         restore_signals,
         directory,
         child_env,
-        ctx.as_int(bufsize)?,
+        bufsize,
         pipesize,
         new_session,
         group,
@@ -407,6 +438,9 @@ pub(super) fn call(
             "native process operations accept positional operands",
         ));
     }
+    if name == "prepare" {
+        return prepare(ctx, args);
+    }
     if name == "launch" {
         return launch(ctx, args);
     }
@@ -417,6 +451,31 @@ pub(super) fn call(
     let Some((&handle, operands)) = args.split_first() else {
         return Err(Error::new("TypeError", "missing native process handle"));
     };
+    if let Value::ProcessPreparation(prepared) = ctx.heap.get(handle) {
+        let prepared = prepared.clone();
+        return match (name, operands) {
+            ("release", &[failed]) => {
+                let failed = ctx.truth(failed)?;
+                prepared.borrow_mut().release(failed);
+                Ok(NONE)
+            }
+            ("pipe", &[index]) => {
+                let index = ctx.as_integer(index)?;
+                if !(0..3).contains(&index) {
+                    return Err(Error::new("ValueError", "invalid pipe index"));
+                }
+                let file = prepared.borrow().pipe(index as usize);
+                match file {
+                    Some(file) => io::popen_pipe(ctx, file, index != 0),
+                    None => Ok(NONE),
+                }
+            }
+            _ => Err(Error::new(
+                "TypeError",
+                "invalid operation on prepared pipes",
+            )),
+        };
+    }
     let Value::ProcessHandle { child, reported } = ctx.heap.get(handle) else {
         return Err(Error::new("TypeError", "expected a native process handle"));
     };

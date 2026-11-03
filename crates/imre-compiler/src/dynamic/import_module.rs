@@ -8,7 +8,6 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
     }
     match name {
         "types" => {
-            // Class construction helpers and DynamicClassAttribute only need builtins.
             const UPSTREAM: &str = include_str!(
                 "../../../../benchmarks/cpython_stdlib/full/types/upstream/Lib/types.py"
             );
@@ -21,11 +20,12 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
                         .split_once("def get_original_bases(")
                         .unwrap();
                     let descriptor = UPSTREAM.find("class DynamicClassAttribute:").unwrap();
-                    let end = UPSTREAM.find("class _GeneratorWrapper:").unwrap();
+                    let coroutine = UPSTREAM.find("def coroutine(func):").unwrap();
                     format!(
-                        "{helpers}{}\n{}",
+                        "{helpers}{}\n{}\n{}",
                         include_str!("../../stdlib/types_original_bases.py"),
-                        &UPSTREAM[descriptor..end]
+                        &UPSTREAM[descriptor..coroutine],
+                        include_str!("../../stdlib/types_coroutine.py"),
                     )
                 }),
             ))

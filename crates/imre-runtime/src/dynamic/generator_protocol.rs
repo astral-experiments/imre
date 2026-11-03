@@ -25,6 +25,50 @@ pub(super) fn coroutine_method(owner: &str, name: &str) -> bool {
 }
 
 impl Context {
+    pub(super) fn new_generator(&mut self, code: Id, scope: Id, owner: FrameOwner) -> Id {
+        let definition = self.code_object(code);
+        let (name, qualname) = match owner {
+            FrameOwner::Function(function) => {
+                let Value::Function { fields, .. } = self.heap.get(function) else {
+                    unreachable!("generator function owner")
+                };
+                (fields.name, fields.qualname)
+            }
+            _ => (definition.name, definition.qualname),
+        };
+        self.alloc(Value::Generator {
+            owner,
+            frame: None,
+            name,
+            qualname,
+            lineno: definition.first_line,
+            code,
+            scope,
+            iterators: Vec::new(),
+            protected: Vec::new(),
+            offset: Some(0),
+            running: false,
+        })
+    }
+
+    pub(super) fn set_generator_name(&mut self, obj: Id, field: &str, value: Id) -> Result<()> {
+        if !matches!(self.heap.get(self.scalar_value(value)), Value::Str(_)) {
+            return Err(Error::new(
+                "TypeError",
+                format!("{field} must be set to a string object"),
+            ));
+        }
+        let Value::Generator { name, qualname, .. } = self.heap.get_mut(obj) else {
+            unreachable!("generator name receiver")
+        };
+        if field == "__name__" {
+            *name = value;
+        } else {
+            *qualname = value;
+        }
+        Ok(())
+    }
+
     /// A coroutine is awaitable but does not implement the iterator protocol itself.
     pub(super) fn await_iterator(
         &mut self,
@@ -265,27 +309,6 @@ impl Context {
         }
     }
 
-    /// Discard a never-entered frame or a compiled comprehension with no exception handlers.
-    fn discard_generator_frame(&mut self, id: Id) {
-        let Value::Generator {
-            offset,
-            owner,
-            frame,
-            scope,
-            iterators,
-            ..
-        } = self.heap.get_mut(id)
-        else {
-            unreachable!("checked generator");
-        };
-        *offset = None;
-        *owner = FrameOwner::Module(NONE);
-        *frame = None;
-        *scope = NONE;
-        iterators.clear();
-        self.heap.disarm_generator_finalizer(id);
-    }
-
     pub(super) fn generator_throw(&mut self, id: Id, args: &[Id]) -> Result<Id> {
         let mut error = self.generator_exception(args)?;
         let Value::Generator {
@@ -331,11 +354,11 @@ impl Context {
             self.heap.publish_statement(&[], location, NONE);
             self.record_exception_frame(&mut error, None);
             self.heap.leave(NONE, false);
-            self.discard_generator_frame(id);
+            self.heap.discard_generator_frame(id);
             return Err(error);
         }
         if matches!(self.code_object(code).body, Body::Native(_)) {
-            self.discard_generator_frame(id);
+            self.heap.discard_generator_frame(id);
             return Err(self.frame_error(error, code));
         }
         self.resume_source_input(
@@ -373,7 +396,7 @@ impl Context {
             return Ok(NONE);
         }
         if offset == Some(0) || matches!(self.code_object(code).body, Body::Native(_)) {
-            self.discard_generator_frame(id);
+            self.heap.discard_generator_frame(id);
             return Ok(NONE);
         }
         let exit = self.exception("GeneratorExit", &[]);

@@ -148,6 +148,20 @@ pub unsafe extern "C" fn imre_posix_join(
     }
 }
 
+/// Split a POSIX spelling without discarding a trailing dot or decoding byte paths.
+pub(crate) fn split(spelling: &[u8]) -> (&[u8], &[u8]) {
+    let cut = spelling
+        .iter()
+        .rposition(|&b| b == b'/')
+        .map_or(0, |i| i + 1);
+    // A directory made entirely of slashes retains them all.
+    let end = spelling[..cut]
+        .iter()
+        .rposition(|&b| b != b'/')
+        .map_or(cut, |i| i + 1);
+    (&spelling[..end], &spelling[cut..])
+}
+
 /// # Safety
 /// Root an exact str or bytes handle of the indicated tag. The result owns its spelling.
 #[unsafe(no_mangle)]
@@ -155,19 +169,11 @@ pub unsafe extern "C" fn imre_posix_component(path: *const (), bytes: u32, head:
     // SAFETY: the caller roots the argument with its exact string or bytes tag.
     let path = unsafe { Spelling::borrow(path, bytes) };
     let spelling = path.bytes();
-    let cut = spelling
-        .iter()
-        .rposition(|&b| b == b'/')
-        .map_or(0, |i| i + 1);
+    let (directory, basename) = split(spelling);
     let range = if head == 0 {
-        cut..spelling.len()
+        spelling.len() - basename.len()..spelling.len()
     } else {
-        // A directory made entirely of slashes retains them all.
-        let end = spelling[..cut]
-            .iter()
-            .rposition(|&b| b != b'/')
-            .map_or(cut, |i| i + 1);
-        0..end
+        0..directory.len()
     };
     match path.slice(range) {
         Some(result) => result.into_raw(),

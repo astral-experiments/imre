@@ -106,6 +106,25 @@ class MethodReceiver:
         return cls()
 
 
+def check_method_descriptors():
+    for kind in (staticmethod, classmethod):
+        wrapper = kind(MethodReceiver.read)
+        assert kind.__reduce__ is object.__reduce__
+        assert kind.__reduce_ex__ is object.__reduce_ex__
+        for dumps in (pickle.dumps, pickle._dumps):
+            for protocol in range(6):
+                try:
+                    dumps(wrapper, protocol)
+                except TypeError as error:
+                    assert str(error) == f"cannot pickle '{kind.__name__}' object"
+                else:
+                    raise AssertionError("pickled a method descriptor")
+
+        wrapper.__reduce_ex__ = lambda protocol: (int, (protocol,))
+        for dumps in (pickle.dumps, pickle._dumps):
+            assert pickle.loads(dumps(wrapper, 4)) == 4
+
+
 def check_python_method_reduction():
     receiver = MethodReceiver()
     method = receiver.read
@@ -527,6 +546,7 @@ def produce():
     check_object_reducer()
     check_builtin_method_reduction()
     check_python_method_reduction()
+    check_method_descriptors()
     assert _codecs.encode is codecs.encode and codecs.encode.__module__ == "_codecs"
     for protocol in range(pickle.HIGHEST_PROTOCOL + 1):
         check_global_names(protocol)

@@ -370,6 +370,47 @@ impl Context {
         Ok(Some((location, previous)))
     }
 
+    /// Reuse the activation's Python frame even when first observed between resumptions.
+    pub(super) fn generator_frame(&mut self, id: Id) -> Result<Id> {
+        let Value::Generator {
+            frame,
+            scope,
+            code,
+            lineno,
+            ..
+        } = *self.heap.get(id)
+        else {
+            unreachable!("generator frame owner")
+        };
+        if let Some(frame) = frame {
+            return Ok(frame);
+        }
+        if scope == NONE {
+            return Ok(NONE);
+        }
+        if let Some(index) =
+            self.heap.frames.iter().rposition(
+                |frame| matches!(frame.owner, FrameOwner::Generator(owner) if owner == id),
+            )
+            && let Some((_, frame)) = self.materialize_frame(index)?
+        {
+            return Ok(frame);
+        }
+        let globals = self.module_globals(scope)?;
+        let object = self.alloc(Value::PythonFrame {
+            scope,
+            code,
+            globals,
+            back: None,
+            lineno,
+        });
+        let Value::Generator { frame, .. } = self.heap.get_mut(id) else {
+            unreachable!()
+        };
+        *frame = Some(object);
+        Ok(object)
+    }
+
     /// A suspended or finished generator has no resumer; an active one may have a new caller.
     pub(super) fn generator_frame_back(&mut self, object: Id) -> Result<Id> {
         let Some(index) = self
@@ -969,6 +1010,9 @@ pub(super) enum Value {
     Generator {
         owner: FrameOwner,
         frame: Option<Id>,
+        name: Id,
+        qualname: Id,
+        lineno: u32,
         code: Id,
         scope: Id,
         iterators: Vec<Id>,
@@ -1164,6 +1208,7 @@ pub(super) enum Value {
         name: &'static str,
         unsupported: Id,
     },
+    ProcessPreparation(std::rc::Rc<std::cell::RefCell<crate::objects::BoxedPreparation>>),
     ProcessHandle {
         child: crate::objects::BoxedPopen,
         reported: bool,
@@ -1272,6 +1317,7 @@ impl Value {
             Self::ByteArray(_) => "bytearray",
             Self::File(_) | Self::TextFile(_) => return self.native_io_class_name(),
             Self::ProcessHandle { .. } => "_imre_subprocess.Handle",
+            Self::ProcessPreparation(_) => "_imre_subprocess.Prepared",
             Self::BufferedRandom(..) => "_io.BufferedRandom",
             Self::GenericAliasIterator(_) => "generic_alias_iterator",
             Self::SequenceIterator { .. } => "iterator",
@@ -1405,6 +1451,7 @@ impl Value {
             | Self::Native(_)
             | Self::Scope(_)
             | Self::LoopIterator { .. }
+            | Self::ProcessPreparation(_)
             | Self::ProcessHandle { .. }
             | Self::Yielded(_) => false,
             Self::Tuple(items) => !items.is_empty(),
@@ -1602,13 +1649,15 @@ impl Value {
             Self::Generator {
                 owner,
                 frame,
+                name,
+                qualname,
                 code,
                 scope,
                 iterators,
                 protected,
                 ..
             } => {
-                visit.extend([*code, *scope, owner.root()]);
+                visit.extend([*code, *scope, *name, *qualname, owner.root()]);
                 visit.extend(*frame);
                 visit.extend(iterators);
                 visit.extend(
@@ -1844,6 +1893,7 @@ impl Value {
             | Self::NoDefault
             | Self::PartialPlaceholder
             | Self::TokenMissing
+            | Self::ProcessPreparation(_)
             | Self::ProcessHandle { .. } => {}
             #[cfg(unix)]
             Self::TlsContext(_) | Self::TlsSession(_) => {}
@@ -2810,6 +2860,12 @@ impl Heap {
     /// Release the activation and report whether a returning function may have dropped a writer.
     pub fn leave(&mut self, value: Id, returning: bool) -> bool {
         let frame = self.frames.pop().expect("returning native activation");
+        if let FrameOwner::Generator(id) = frame.owner
+            && let Some(location) = &frame.location
+            && let Value::Generator { lineno, .. } = self.get_mut(id)
+        {
+            *lineno = location.line;
+        }
         let depth = self.python_depth();
         if depth == 0 {
             // Explicit dumps can publish a snapshot even while disabled.
@@ -3099,6 +3155,27 @@ impl Heap {
         std::mem::replace(&mut self.frames.last_mut().unwrap().active, exception)
     }
 
+    /// Discard a never-entered frame or a compiled comprehension with no exception handlers.
+    pub(super) fn discard_generator_frame(&mut self, id: Id) {
+        let Value::Generator {
+            offset,
+            owner,
+            frame,
+            scope,
+            iterators,
+            ..
+        } = self.get_mut(id)
+        else {
+            unreachable!("checked generator");
+        };
+        *offset = None;
+        *owner = FrameOwner::Module(NONE);
+        *frame = None;
+        *scope = NONE;
+        iterators.clear();
+        self.disarm_generator_finalizer(id);
+    }
+
     /// Drop the frame's ownership of completed locals without changing captured closure cells.
     pub(super) fn clear_frame(&mut self, value: Id) -> Result<()> {
         let Value::PythonFrame { scope, .. } = *self.get(value) else {
@@ -3113,11 +3190,25 @@ impl Heap {
                 "cannot clear an executing frame",
             ));
         }
-        if self.slots.iter().any(|slot| {
-            matches!(&slot.value,
-            Some(Value::Generator { scope: owner, offset: Some(_), .. }) if *owner == scope)
-        }) {
-            return Err(Error::new("RuntimeError", "cannot clear a suspended frame"));
+        if let Some((id, offset)) = self
+            .slots
+            .iter()
+            .enumerate()
+            .find_map(|(id, slot)| match &slot.value {
+                Some(Value::Generator {
+                    frame: Some(frame),
+                    offset: Some(offset),
+                    ..
+                }) if *frame == value => Some((id as Id, *offset)),
+                _ => None,
+            })
+        {
+            if offset != 0 {
+                return Err(Error::new("RuntimeError", "cannot clear a suspended frame"));
+            }
+            // The surviving Python frame keeps its locals after closing the unstarted generator.
+            self.discard_generator_frame(id);
+            return Ok(());
         }
         let Value::PythonFrame { scope, .. } = self.get_mut(value) else {
             unreachable!()
@@ -3229,18 +3320,18 @@ impl Heap {
         self.frames.last().unwrap().scope
     }
 
+    /// Iterate over live Python warning locations, starting at the innermost caller.
+    pub(super) fn warning_frames(&self) -> impl Iterator<Item = (&Location, Id)> {
+        self.frames.iter().rev().filter_map(|frame| {
+            frame.location.as_ref().map(|location| (location, frame.scope))
+        })
+    }
+
     /// Python stack levels start at one and exclude the native root frame.
     pub fn warning_frame(&self, level: i32) -> Option<(Location, Id)> {
-        self.frames
-            .iter()
-            .rev()
-            .filter_map(|frame| {
-                frame
-                    .location
-                    .clone()
-                    .map(|location| (location, frame.scope))
-            })
+        self.warning_frames()
             .nth((level.max(1) - 1) as usize)
+            .map(|(location, scope)| (location.clone(), scope))
     }
 
     pub(super) fn replace_expression(

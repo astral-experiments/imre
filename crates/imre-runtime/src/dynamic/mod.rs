@@ -12,6 +12,7 @@ mod defaultdict;
 mod deque;
 mod dictionary;
 mod displayhook;
+mod excepthook;
 mod enums;
 mod ffi;
 mod finalizers;
@@ -142,6 +143,7 @@ pub(crate) struct Context {
     zip_directories: HashMap<String, crate::objects::ZipArchive>,
     zip_path_importers: Id,
     codec_entries: stdlib::codecs::Registry,
+    warning_state: Option<stdlib::warnings_accel::State>,
     frozen_override: i32,
     // The interpreter keeps its original dictionary even when Python reassigns sys.modules.
     modules: Id,
@@ -274,7 +276,9 @@ impl Context {
             (_, Value::DictView { .. }) => {
                 Self::dict_view_owner(self.type_name(object)) == Some(owner)
             }
-            ("bool", Value::Bool(_))
+            ("types.GenericAlias", Value::GenericAlias(alias)) => alias.is_builtin_alias(),
+            ("generic_alias_iterator", Value::GenericAliasIterator(_))
+            | ("bool", Value::Bool(_))
             | ("int", Value::Int(_) | Value::Bool(_))
             | ("float", Value::Float(_))
             | ("mappingproxy", Value::MappingProxy(_))
@@ -283,6 +287,7 @@ impl Context {
             | ("str", Value::Str(_) | Value::SurrogateStr(_))
             | ("bytes", Value::Bytes(_))
             | ("bytearray", Value::ByteArray(_))
+            | ("array.array", Value::Array(_))
             | ("set", Value::Set { frozen: false, .. })
             | ("frozenset", Value::Set { frozen: true, .. })
             | (value::REGEX_PATTERN_TYPE, Value::RegexPattern(_))
@@ -3258,7 +3263,9 @@ impl Context {
                 }
             }
             "_locale" => stdlib::locale::install(self, module, scope)?,
+            "_warnings" => stdlib::warnings_accel::install(self, module, scope)?,
             "time" => stdlib::time::install_timezone(self, scope)?,
+            "struct" => stdlib::structure::install(self, scope)?,
             "pickle" => stdlib::pickle::install(self, scope)?,
             "urllib.parse" => stdlib::urllib::initialize(self, scope),
             "_io" => stdlib::io::install_native(self, scope, module),
@@ -3306,6 +3313,7 @@ impl Context {
                     "_getframe",
                     "_getframemodulename",
                     "displayhook",
+                    "excepthook",
                     "unraisablehook",
                     "get_int_max_str_digits",
                     "set_int_max_str_digits",
@@ -3319,6 +3327,8 @@ impl Context {
                     self.bind(scope, name, function);
                     if name == "displayhook" {
                         self.bind(scope, "__displayhook__", function);
+                    } else if name == "excepthook" {
+                        self.bind(scope, "__excepthook__", function);
                     } else if name == "unraisablehook" {
                         self.bind(scope, "__unraisablehook__", function);
                         if self.threads.system_module.is_none() {

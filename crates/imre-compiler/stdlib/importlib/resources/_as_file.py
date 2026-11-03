@@ -1,6 +1,7 @@
 """Expose a Traversable as a local pathlib.Path for the duration of a context."""
 
 import os
+import sys
 import tempfile
 from _imre_tempfile import cleanup_directory
 from contextlib import contextmanager
@@ -49,6 +50,7 @@ def _temp_directory(source, Path):
     try:
         yield _copy_entry(source, Path(directory))
     finally:
+        sys.audit("shutil.rmtree", directory, None)
         cleanup_directory(directory)
 
 

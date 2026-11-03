@@ -67,12 +67,13 @@ pub(super) mod signal;
 #[cfg(unix)]
 pub(super) mod ssl;
 mod socket;
-mod structure;
+pub(super) mod structure;
 mod subprocess;
 mod system_size;
 pub(super) mod traceback;
 pub(super) mod urllib;
 mod warnings;
+pub(super) mod warnings_accel;
 mod zipimport;
 mod zlib;
 
@@ -146,6 +147,7 @@ pub(super) fn is_module(name: &str) -> bool {
             | "json"
             | "subprocess"
             | "warnings"
+            | "_warnings"
     ) || (cfg!(unix) && matches!(name, "_signal" | "_imre_signal"))
         || (cfg!(any(target_os = "linux", target_os = "macos")) && matches!(name, "grp" | "pwd"))
         || has_lazy_attributes(name)
@@ -563,11 +565,12 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("types", "ModuleType") => ctx.builtin("module"),
         ("types", "SimpleNamespace") => super::namespace::class(ctx)?,
         ("types", "TracebackType") => ctx.builtin("traceback"),
-        ("types", "coroutine") => ctx.builtin("types.coroutine"),
+        ("types", "_coroutine_flags" | "_mark_generator") => ctx.builtin(&format!("types.{name}")),
         ("types", "GeneratorType") => ctx.builtin("generator"),
         ("types", "CoroutineType") => ctx.builtin("coroutine"),
         ("types", "MethodType") => ctx.builtin("method"),
         ("types", "MemberDescriptorType") => ctx.builtin("member_descriptor"),
+        ("types", "WrapperDescriptorType") => ctx.builtin("wrapper_descriptor"),
         ("types", "MethodWrapperType") => ctx.builtin("method-wrapper"),
         ("types", "MethodDescriptorType") => ctx.builtin("method_descriptor"),
         ("types", "FrameType") => ctx.builtin("frame"),
@@ -833,7 +836,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         )
         | ("_imre_zipimport", "exists" | "isfile" | "index" | "read" | "contains" | "invalidate")
         | ("platform", "system" | "node" | "release" | "version" | "machine" | "mac_ver")
-        | ("struct", "Struct" | "calcsize" | "pack" | "unpack" | "error")
+        | ("struct", "Struct" | "calcsize" | "pack" | "unpack")
         | ("base64", "urlsafe_b64encode" | "urlsafe_b64decode")
         | ("random", "random" | "choice" | "choices" | "shuffle")
         | ("codecs", "register_error" | "lookup_error")
@@ -1051,6 +1054,9 @@ pub(super) fn call(
     #[cfg(all(target_os = "linux", target_env = "gnu"))]
     if name == "_locale.nl_langinfo" {
         return locale::nl_langinfo(ctx, args, kwargs);
+    }
+    if let Some(method) = name.strip_prefix("_warnings.") {
+        return warnings_accel::call(ctx, method, args, kwargs);
     }
     if name == "_locale.setlocale" {
         return locale::setlocale(ctx, args, kwargs);
@@ -1362,6 +1368,9 @@ pub(super) fn call(
     if name == "sys.displayhook" {
         let value = builtins::one_positional_arg(name, &args[1..], kwargs)?;
         return super::displayhook::default_hook(ctx, value);
+    }
+    if name == "sys.excepthook" {
+        return super::excepthook::default_hook(ctx, &args[1..], kwargs);
     }
     if name == "sys.unraisablehook" {
         return super::unraisable::default_hook(ctx, args, kwargs);
@@ -2043,37 +2052,58 @@ pub(super) fn call(
     {
         return itertools::method(ctx, owner, method, args, kwargs);
     }
-    if name == "types.coroutine" {
-        let func = single_argument("coroutine", "func", args, kwargs)?;
-        if !ctx.callable(func) {
+    if name == "types._coroutine_flags" {
+        use imre_ast::code_flags::{COROUTINE, GENERATOR, ITERABLE_COROUTINE};
+        let code = single_argument("_coroutine_flags", "code", args, kwargs)?;
+        if let Value::Code(code) = ctx.heap.get(code) {
+            // Source functions track execution kind and the iterable-coroutine
+            // bit even when their full public co_flags value is unavailable.
+            let mut flags = code.flags & (COROUTINE | GENERATOR | ITERABLE_COROUTINE);
+            if code.coroutine {
+                flags |= COROUTINE;
+            }
+            return Ok(ctx.int(i64::from(flags)));
+        }
+        return ctx.lookup_attr(code, "co_flags");
+    }
+    if name == "types._mark_generator" {
+        let [func, code] = *args else {
             return Err(Error::new(
                 "TypeError",
-                "types.coroutine() expects a callable",
+                "_mark_generator expects a function and code",
+            ));
+        };
+        if !kwargs.is_empty() {
+            return Err(Error::new(
+                "TypeError",
+                "_mark_generator accepts no keyword arguments",
             ));
         }
-        if let Value::Function { code, .. } = *ctx.heap.get(func) {
-            let original = ctx.code_object(code);
-            use imre_ast::code_flags::{COROUTINE, GENERATOR, ITERABLE_COROUTINE};
-            if original.coroutine || original.flags & (COROUTINE | ITERABLE_COROUTINE) != 0 {
-                return Ok(func);
-            }
-            if original.flags & GENERATOR != 0 && !matches!(original.body, super::value::Body::Native(_))
-            {
-                // Other functions and existing generators retain their original code.
-                let mut marked = original.clone();
-                marked.flags |= ITERABLE_COROUTINE;
-                let marked = ctx.alloc(Value::Code(marked));
-                let Value::Function { code, .. } = ctx.heap.get_mut(func) else {
-                    unreachable!()
-                };
-                *code = marked;
-                return Ok(func);
-            }
+        let Value::Code(original) = ctx.heap.get(code) else {
+            return Err(Error::new(
+                "TypeError",
+                "_mark_generator expects a code object",
+            ));
+        };
+        if matches!(original.body, super::value::Body::Native(_)) {
+            return Err(Error::new(
+                "NotImplementedError",
+                "cannot mark this native generator function",
+            ));
         }
-        return Err(Error::new(
-            "NotImplementedError",
-            "native types.coroutine supports compiled generator and coroutine functions",
-        ));
+        let mut marked = original.clone();
+        marked.flags |= imre_ast::code_flags::ITERABLE_COROUTINE;
+        let marked = ctx.alloc(Value::Code(marked));
+        let func = ctx.weak_proxy_target(func)?;
+        if let Value::Function { code: current, .. } = ctx.heap.get_mut(func)
+            && *current == code
+        {
+            // Changing only a flag preserves this nested function's closure layout.
+            *current = marked;
+        } else {
+            ctx.set_attr(func, "__code__", marked)?;
+        }
+        return Ok(NONE);
     }
     if let Some(function) = name.strip_prefix("inspect.") {
         return inspect::call(ctx, function, args, kwargs);
@@ -2288,6 +2318,12 @@ pub(super) fn call(
     }
     if name == "collections.abc._CallableGenericAlias" {
         return super::typing::abc_callable_alias(ctx, args, kwargs);
+    }
+    if let Some(owner @ ("types.GenericAlias" | "generic_alias_iterator")) =
+        name.strip_suffix(".__reduce__")
+    {
+        let receiver = builtins::noargs_method_receiver(ctx, owner, "__reduce__", args, kwargs)?;
+        return super::typing::reduce_builtin_alias(ctx, receiver);
     }
     if name == "types.GenericAlias" {
         if !kwargs.is_empty() {

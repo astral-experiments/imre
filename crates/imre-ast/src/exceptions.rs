@@ -140,6 +140,7 @@ exception_kinds! {
 /// Resolves an unqualified exception name accepted by the checked frontend.
 pub fn builtin_id(name: &str) -> Option<u32> {
     let kind = match name {
+        "EnvironmentError" | "IOError" => Kind::OSError,
         "ExceptionGroup" => Kind::ExceptionGroup,
         _ => match boxed_builtin_kind(name)? {
             Kind::ChildProcessError | Kind::ProcessLookupError => return None,

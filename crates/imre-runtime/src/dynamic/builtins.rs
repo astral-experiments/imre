@@ -215,7 +215,8 @@ pub(super) fn native_implementation(symbol: &str) -> &str {
     }
 }
 
-pub(super) const MAPPING_PROXY_METHODS: &[&str] = &["keys", "values", "items", "get", "copy"];
+pub(super) const MAPPING_PROXY_METHODS: &[&str] =
+    &["keys", "values", "items", "get", "copy", "__reversed__"];
 
 /// Static constructors retain their declaring type as `__self__` even on instances.
 pub(super) fn constructor_owner(name: &str) -> Option<&str> {
@@ -353,6 +354,7 @@ pub(super) fn is_enum_base(name: &str) -> bool {
 }
 
 pub(super) const DICT_METHODS: &[&str] = &[
+    "__reversed__",
     "__or__",
     "__ror__",
     "__ior__",
@@ -392,10 +394,18 @@ const SET_OPERATORS: &[&str] = &[
     "__iand__", "__ior__", "__isub__", "__ixor__",
 ];
 
-/// Methods shared by the two native real number classes.
+/// Methods for the two native real number classes.
 pub(super) fn real_methods(owner: &str) -> &'static [&'static str] {
     match owner {
-        "int" | "float" => &["__abs__", "__float__", "__int__", "__round__", "__trunc__"],
+        "int" => &[
+            "__abs__",
+            "__float__",
+            "__int__",
+            "__lt__",
+            "__round__",
+            "__trunc__",
+        ],
+        "float" => &["__abs__", "__float__", "__int__", "__round__", "__trunc__"],
         _ => &[],
     }
 }
@@ -631,6 +641,11 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
             ..
         } if attr == "__reduce__" => owner,
         Value::Property(_) if super::property::METHODS.contains(&attr) => "property",
+        Value::ClassMethod { .. } | Value::StaticMethod { .. }
+            if matches!(attr, "__reduce__" | "__reduce_ex__") =>
+        {
+            "object"
+        }
         Value::ClassMethod { .. } if attr == "__get__" => "classmethod",
         Value::StaticMethod { .. } if attr == "__get__" => "staticmethod",
         Value::Generator { .. } if super::generator_protocol::generator_method(attr) => "generator",
@@ -1160,6 +1175,25 @@ pub(super) fn noargs_method_receiver(
     Ok(receiver)
 }
 
+/// Look up a reconstruction callable in the current frame's builtins, as PyEval_GetBuiltin does.
+pub(super) fn frame_builtin(ctx: &mut Context, name: &str) -> Result<Id> {
+    let scope = ctx.heap.current_scope();
+    let builtins = if scope != NONE
+        && let Some(globals) = ctx.scope_data(ctx.root_scope(scope)).exec_globals
+    {
+        globals.builtins
+    } else {
+        ctx.default_source_builtins()?
+    };
+    ctx.load_exec_name(builtins, name).map_err(|error| {
+        if ctx.is_builtin_error(&error, "KeyError") {
+            Error::new("AttributeError", name)
+        } else {
+            error
+        }
+    })
+}
+
 /// Reduce a builtin using its stored receiver and name, without consulting receiver attributes.
 fn reduce_builtin_method(ctx: &mut Context, method: Id) -> Result<Id> {
     let (callable, receiver) = match *ctx.heap.get(method) {
@@ -1190,21 +1224,7 @@ fn reduce_builtin_method(ctx: &mut Context, method: Id) -> Result<Id> {
 
 /// Rebuild a bound method by looking up its name on the restored receiver.
 fn bound_method_reduction(ctx: &mut Context, receiver: Id, name: Id) -> Result<Id> {
-    let scope = ctx.heap.current_scope();
-    let builtins = if scope != NONE
-        && let Some(globals) = ctx.scope_data(ctx.root_scope(scope)).exec_globals
-    {
-        globals.builtins
-    } else {
-        ctx.default_source_builtins()?
-    };
-    let getattr = ctx.load_exec_name(builtins, "getattr").map_err(|error| {
-        if ctx.is_builtin_error(&error, "KeyError") {
-            Error::new("AttributeError", "getattr")
-        } else {
-            error
-        }
-    })?;
+    let getattr = frame_builtin(ctx, "getattr")?;
     let args = ctx.alloc(Value::Tuple(vec![receiver, name]));
     Ok(ctx.alloc(Value::Tuple(vec![getattr, args])))
 }
@@ -1315,6 +1335,11 @@ pub(super) fn call(
                     rest.len()
                 )));
             }
+        };
+        let mapping = if method == "__reversed__" {
+            ctx.mapping_proxy_target(mapping)
+        } else {
+            mapping
         };
         let bound = ctx.lookup_attr(mapping, method)?;
         return ctx.call(bound, forwarded, Vec::new());
@@ -1472,14 +1497,20 @@ pub(super) fn call(
         }
         if args.len() != 1 || !kwargs.is_empty() {
             if let Some(&receiver) = args.first() {
-                let tuple = ctx.builtin("tuple");
-                if ctx.instance_of(receiver, tuple) {
-                    let class = ctx.exact_type(receiver)?;
-                    if ctx
-                        .class_attr(class, "__init__")
-                        .is_none_or(|init| Some(&init) == ctx.builtins.get("object.__init__"))
+                let class = ctx.exact_type(receiver)?;
+                let init = ctx.class_attr(class, "__init__");
+                if init.is_none_or(|init| Some(&init) == ctx.builtins.get("object.__init__")) {
+                    let new =
+                        ctx.class_attr(class, "__new__")
+                            .map(|slot| match *ctx.heap.get(slot) {
+                                Value::StaticMethod { callable, .. } => callable,
+                                _ => slot,
+                            });
+                    let tuple = ctx.builtin("tuple");
+                    if ctx.instance_of(receiver, tuple)
+                        || new.is_some_and(|new| Some(&new) != ctx.builtins.get("object.__new__"))
                     {
-                        // Tuple subtypes consume their constructor arguments in __new__.
+                        // The allocator consumed the arguments; the inherited initializer does nothing.
                         return Ok(NONE);
                     }
                 }
@@ -1495,6 +1526,32 @@ pub(super) fn call(
         && !is_exception(name)
     {
         return match owner {
+            "object" | "int" if method == "__lt__" => {
+                let Some((&receiver, rest)) = args.split_first() else {
+                    return Err(type_error(format!(
+                        "descriptor '__lt__' of '{owner}' object needs an argument"
+                    )));
+                };
+                if owner == "int" && !ctx.builtin_slot_accepts(receiver, "int") {
+                    return Err(type_error(format!(
+                        "descriptor '__lt__' requires a 'int' object but received a '{}'",
+                        ctx.type_name(receiver)
+                    )));
+                }
+                positional(name, kwargs)?;
+                let [other] = rest else {
+                    return Err(type_error(format!(
+                        "expected 1 argument, got {}",
+                        rest.len()
+                    )));
+                };
+                if owner == "object" || !ctx.builtin_slot_accepts(*other, "int") {
+                    return Ok(NOT_IMPLEMENTED);
+                }
+                Ok(boolean(
+                    ctx.as_int(receiver)?.cmp(&ctx.as_int(*other)?).is_lt(),
+                ))
+            }
             "super" if method == "__new__" => ctx.super_new(args, kwargs),
             "super" if method == "__init__" => ctx.super_init(args, kwargs),
             "int" | "float" | "str" | "bytes" if method == "__new__" => {
@@ -1690,6 +1747,9 @@ pub(super) fn call(
                 collections::builtin_slot(ctx, name, args, kwargs)
             }
             "str" if method == "__str__" => collections::builtin_slot(ctx, name, args, kwargs),
+            "mappingproxy" if method == "__contains__" => {
+                collections::builtin_slot(ctx, name, args, kwargs)
+            }
             "bool" | "int" | "float" | "str" | "bytes" | "bytearray" if method == "__repr__" => {
                 collections::builtin_slot(ctx, name, args, kwargs)
             }
@@ -2121,6 +2181,9 @@ pub(super) fn call(
             positional(name, kwargs)?;
             arity(name, args, 1, 1)?;
             let object = args[0];
+            if matches!(ctx.heap.get(object), Value::MappingProxy(_)) {
+                return call(ctx, "mappingproxy.__reversed__", args, kwargs);
+            }
             if let Value::Range(range) = ctx.heap.get(object) {
                 return Ok(ctx.alloc(Value::RangeIterator(range.iter(true))));
             }
