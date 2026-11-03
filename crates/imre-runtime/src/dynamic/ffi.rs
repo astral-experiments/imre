@@ -1656,7 +1656,7 @@ pub(super) unsafe extern "C" fn imre_dyn_assignment_target(
 ) {
     // SAFETY: the caller owns the context and its live handle array.
     let (ctx, live) = unsafe { (&mut *ctx, live_handles(live, len)) };
-    if ctx.heap.assignment_target(live, replaced == TRUE) {
+    if ctx.heap.assignment_target(live, replaced == TRUE) && !ctx.can_skip_finalizer_sweep() {
         ctx.collect_unreachable();
     }
 }
@@ -1818,24 +1818,27 @@ impl Context {
 
     /// Publish the surviving roots before the next operand can observe a discarded writer.
     pub(super) fn discard_truth(&mut self, mark: usize) {
-        if self.heap.discard_truth_operands(mark, self.modules) {
+        if self.heap.discard_truth_operands(mark, self.modules) && !self.can_skip_finalizer_sweep()
+        {
             self.collect_unreachable();
         }
     }
 
-    /// Keep the returned value and earlier operands while dropping the completed call's temporaries.
-    pub(super) fn finish_call_operands(&mut self, mark: usize, result: Id) {
-        let finalizers = self.heap.tracked_finalizer_count();
-        if finalizers == 0 {
-            return;
-        }
-        // The input wrapper, buffer, and raw descriptor can account for at most three owners.
-        if finalizers <= 3
+    /// A rooted standard input chain keeps its finalizers alive across operand releases.
+    fn can_skip_finalizer_sweep(&self) -> bool {
+        self.heap.tracked_finalizer_count() <= 3
             && !self.heap.has_weak_values
             && !self.heap.full_collection_active()
-            && let Some(input) = super::stdlib::io::rooted_input_chain(self)
-            && self.heap.finalizers_kept_by(&input)
-        {
+            && super::stdlib::io::rooted_input_chain(self)
+                .is_some_and(|input| self.heap.finalizers_kept_by(&input))
+    }
+
+    /// Keep the returned value and earlier operands while dropping the completed call's temporaries.
+    pub(super) fn finish_call_operands(&mut self, mark: usize, result: Id) {
+        if !self.heap.tracks_finalizers() {
+            return;
+        }
+        if self.can_skip_finalizer_sweep() {
             self.heap.keep_call_result(mark, result);
         } else if self.heap.discard_operands(mark, result, self.modules) {
             self.collect_unreachable();
