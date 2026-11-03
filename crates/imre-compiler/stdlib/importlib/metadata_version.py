@@ -6,27 +6,6 @@ def _normalize(name: str) -> str:
     return _normalize_separators(name).lower()
 
 
-def _first_header(text: str, name: str) -> str | None:
-    lines = text.split('\n')
-    prefix = name.lower() + ':'
-    for i, line in enumerate(lines):
-        if not line:
-            break
-        if line.startswith(' ') or line.startswith('\t'):
-            continue
-        if re.search(r'^[!-9;-~]+:', line) is None:
-            break
-        if line[:len(prefix)].lower() == prefix:
-            value = line[len(prefix):]
-            for following in lines[i + 1:]:
-                if not (following.startswith(' ') or following.startswith('\t')):
-                    break
-                value += '\n' + following
-            value = value.lstrip(' \t\r\n')
-            return dedent(' ' * 8 + value) if '\n' in value else value
-    return None
-
-
 def _archive_children(members: list[str]) -> list[str]:
     directories: dict[str, bool] = {}
     for member in members:
