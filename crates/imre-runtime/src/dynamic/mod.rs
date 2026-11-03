@@ -5,6 +5,8 @@ mod abstract_class;
 mod allocation_traces;
 mod array;
 mod async_generator;
+#[cfg(target_os = "linux")]
+mod at_fork;
 mod atexit;
 mod builtins;
 mod calls;
@@ -131,6 +133,7 @@ pub(crate) struct Context {
     sys_path: Id,
     default_encoding: Id,
     audit_hooks: Vec<Id>,
+    fork_hooks: [Vec<Id>; 3],
     // The fatal handler borrows its descriptor while Python retains the destination.
     fault_file: Option<Id>,
     exit_callbacks: Vec<Id>,
@@ -2896,6 +2899,12 @@ impl Context {
                 self.bind(scope, name, function);
             }
             stdlib::os::eventfd::initialize(self, scope);
+            if stdlib::os::fork_available() {
+                for attr in ["fork", "register_at_fork"] {
+                    let function = self.builtin(&format!("posix.{attr}"));
+                    self.bind(scope, attr, function);
+                }
+            }
         }
         if name == "_thread" && source.is_none() {
             let rlock = self.builtin(thread_rlock::CLASS);

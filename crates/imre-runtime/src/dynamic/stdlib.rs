@@ -669,6 +669,10 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("os" | "posix", "fspath") => ctx.builtin("posix.fspath"),
         #[cfg(target_os = "linux")]
         ("posix", "_spawn_exec") => ctx.builtin("posix._spawn_exec"),
+        #[cfg(target_os = "linux")]
+        ("os" | "posix", name @ ("fork" | "register_at_fork")) if os::fork_available() => {
+            ctx.builtin(&format!("posix.{name}"))
+        }
         ("os" | "posix", name)
             if os::is_descriptor_function(name) || os::is_process_function(name) =>
         {
@@ -1740,6 +1744,14 @@ pub(super) fn call(
     #[cfg(target_os = "linux")]
     if name == "posix.execve" {
         return os::execve::call(ctx, args, kwargs);
+    }
+    #[cfg(target_os = "linux")]
+    if name == "posix.fork" {
+        return os::fork(ctx, args, kwargs);
+    }
+    #[cfg(target_os = "linux")]
+    if name == "posix.register_at_fork" {
+        return super::at_fork::register(ctx, args, kwargs);
     }
     #[cfg(target_os = "linux")]
     if name == "posix._spawn_exec" {
