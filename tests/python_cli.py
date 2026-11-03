@@ -1922,7 +1922,6 @@ def main():
         compare("-IB", Path(__file__).with_name("fixtures") / "boxed_update_wrapper.py")
         compare("-IB", Path(__file__).with_name("fixtures") / "boxed_tracebacks.py")
         compare("-IB", Path(__file__).with_name("fixtures") / "boxed_print_traceback.py")
-        compare("-IB", Path(__file__).with_name("fixtures") / "boxed_sys_excepthook.py")
         compare("-IB", "-c", "import operator as op\nprint(op.attrgetter('upper')('method')())")
 
         args_code = (
@@ -2782,6 +2781,7 @@ for name in ("md4", "ripemd160"):
             "boxed_sys_getsizeof.py",
             "boxed_sys_audit.py",
             "boxed_sys_asyncgen_hooks.py",
+            "boxed_sys_excepthook.py",
             "boxed_sys_audit_recursion.py",
             "boxed_sys_recursion_limit.py",
             "boxed_sys_intern.py",
