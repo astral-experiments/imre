@@ -605,7 +605,11 @@ fn syntax_diagnostic(ctx: &Context, source: Id, flags: i64) -> Option<(String, u
         _ => Cow::Borrowed(ctx.str_value(source).ok()?),
     };
     let bytes = matches!(ctx.heap.get(ctx.scalar_value(source)), Value::Bytes(_));
-    let normalized = match escapes::normalize(&text, bytes, flags, true) {
+    let points = match ctx.heap.get(ctx.scalar_value(source)) {
+        Value::SurrogateStr(points) => Some(points.as_slice()),
+        _ => None,
+    };
+    let normalized = match escapes::normalize(&text, bytes, flags, true, points) {
         Ok(normalized) => normalized,
         Err(error) => return Some(error),
     };
@@ -617,15 +621,7 @@ fn syntax_diagnostic(ctx: &Context, source: Id, flags: i64) -> Option<(String, u
         .ignore_whitespace(flags & VERBOSE != 0)
         .build()
         .parse(text);
-    if let Some((message, at)) = group_names::diagnostic(
-        text,
-        bytes,
-        match ctx.heap.get(ctx.scalar_value(source)) {
-            Value::SurrogateStr(points) => Some(points),
-            _ => None,
-        },
-        &parsed,
-    ) {
+    if let Some((message, at)) = group_names::diagnostic(text, bytes, points, position, &parsed) {
         return Some((message, position(at)));
     }
     if let Some((msg, at)) = imre_regex::repeat_diagnostic(text, flags & VERBOSE != 0) {
@@ -1115,7 +1111,7 @@ fn prepare(
             .expect("text pattern")
             .to_owned()
     };
-    let source = match escapes::normalize(&source, bytes, flags, false) {
+    let source = match escapes::normalize(&source, bytes, flags, false, None) {
         Ok(Some(names)) => names.text,
         Ok(None) => source,
         Err((message, _)) => return Err(message),

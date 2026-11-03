@@ -11,6 +11,7 @@ pub(super) fn diagnostic(
     text: &str,
     bytes: bool,
     points: Option<&[u32]>,
+    original_position: impl Fn(usize) -> usize,
     parsed: &Result<Ast, Error>,
 ) -> Option<(String, usize)> {
     if !text.contains("(?P") {
@@ -78,15 +79,10 @@ pub(super) fn diagnostic(
             if valid(name, bytes) {
                 return None;
             }
-            let message = if let Some(points) = points {
-                let quoted = crate::dynamic::operators::surrogate_repr(
-                    &points[position..position + name.chars().count()],
-                );
-                format!("bad character in group name {quoted}")
-            } else {
-                bad_name(name, bytes)
-            };
-            return Some((message, position));
+            return Some((
+                bad_source_name(name, bytes, points, original_position(position)),
+                position,
+            ));
         }
     }
     let message = if text.len() == start {
@@ -95,6 +91,21 @@ pub(super) fn diagnostic(
         format!("missing {end}, unterminated name")
     };
     Some((message, position))
+}
+
+pub(super) fn bad_source_name(
+    name: &str,
+    bytes: bool,
+    points: Option<&[u32]>,
+    at: usize,
+) -> String {
+    if let Some(points) = points {
+        let quoted =
+            crate::dynamic::operators::surrogate_repr(&points[at..at + name.chars().count()]);
+        format!("bad character in group name {quoted}")
+    } else {
+        bad_name(name, bytes)
+    }
 }
 
 /// A bytes pattern reports its Latin-1 spelling through Python's ASCII representation.

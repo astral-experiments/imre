@@ -20,6 +20,7 @@ pub(super) fn normalize(
     bytes: bool,
     flags: i64,
     diagnose_syntax: bool,
+    points: Option<&[u32]>,
 ) -> std::result::Result<Option<Spelling>, (String, usize)> {
     if !text.as_bytes().windows(2).any(|pair| match pair {
         [b'\\', b'N' | b'x' | b'u' | b'U' | b'0'..=b'9'] => true,
@@ -42,6 +43,13 @@ pub(super) fn normalize(
         let at = skip + start;
         return Err(match error {
             imre_regex::EscapeError::Syntax(message, offset) => (message, at + offset),
+            imre_regex::EscapeError::UnknownGroup(name) => {
+                let repr = crate::objects::exceptions::string_repr(&name);
+                (format!("unknown group name {repr}"), at)
+            }
+            imre_regex::EscapeError::InvalidGroupName(name) => {
+                (group_names::bad_source_name(&name, bytes, points, at), at)
+            }
             imre_regex::EscapeError::Undefined(name) => {
                 let repr = crate::objects::exceptions::string_repr(&name);
                 (format!("undefined character name {repr}"), at)
