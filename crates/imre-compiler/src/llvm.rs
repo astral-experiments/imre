@@ -7798,6 +7798,17 @@ impl Emitter<'_, '_> {
                     small_integer: false,
                 }
             }
+            Builtin::FilterCharacterSet(below) => {
+                let operand = self.checked_instruction(format!(
+                    "call ptr @imre_filter_character_set(ptr {}, ptr {}, i32 {below})",
+                    args[0].value.operand, args[1].value.operand
+                ));
+                Value {
+                    ty: returns,
+                    operand,
+                    small_integer: false,
+                }
+            }
             Builtin::StringListFilter(strip) => {
                 let second =
                     self.instruction(format!("inttoptr i64 {} to ptr", args[2].value.operand));
@@ -9550,6 +9561,7 @@ declare ptr @imre_splitlines_joined_tail(ptr, ptr)
 declare ptr @imre_str_splitlines_iter(ptr)
 declare ptr @imre_ndiff_deferred(ptr, ptr)
 declare ptr @imre_str_list_copy(ptr)
+declare ptr @imre_filter_character_set(ptr, ptr, i32)
 declare ptr @imre_str_list_filter(ptr, ptr, ptr, ptr, i32)
 declare ptr @imre_str_list_sorted_suffix(ptr, i32)
 declare i32 @imre_str_list_nonempty(ptr)

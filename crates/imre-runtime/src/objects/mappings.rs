@@ -2977,6 +2977,54 @@ pub unsafe extern "C" fn imre_set_len(value: *const Object) -> usize {
     // SAFETY: only the copied length escapes storage.
     Int::from_usize(unsafe { object(value).0.with(|s| s.set().tables.len()) }).into_raw()
 }
+/// Collect matching Unicode characters in encounter order, acquiring only selected keys.
+///
+/// # Safety
+/// Both inputs are rooted native owners. The set contains exact strings. A null
+/// result signals an allocation failure and leaves an exception pending.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_filter_character_set(
+    text: *const Str,
+    allowed: *const Object,
+    below: u32,
+) -> *const Object {
+    // SAFETY: both immutable inputs remain live, and string operations cannot call Python.
+    let result = unsafe {
+        let text = &*text;
+        object(allowed).0.with(|storage| {
+            let Tables::Str(keys) = &storage.set().tables else {
+                unreachable!("string set expected")
+            };
+            // Limit setup even when a set contains a large number of deleted entries.
+            let ascii = (keys.entries.len() <= 32).then(|| {
+                let mut mask = 0u128;
+                for entry in keys.entries.iter().flatten() {
+                    if let [c] = entry.key.as_bytes() {
+                        mask |= 1u128 << c;
+                    }
+                }
+                mask
+            });
+            let selected = text.chars().filter_map(|c| {
+                let mut buffer = [0; 4];
+                let key = c.encode_utf8(&mut buffer);
+                let present = u32::from(c) < below
+                    || match ascii {
+                        Some(mask) if c.is_ascii() => mask & (1u128 << u32::from(c)) != 0,
+                        _ => keys.position(HASHER.hash_one(&*key), &*key).is_some(),
+                    };
+                present.then(|| {
+                    super::text::try_owned_string(key).map(|key| {
+                        OwnedWord::from_owned(StrOwner::into_raw(key) as usize, WordKind::new(3))
+                    })
+                })
+            });
+            Set::string_set(selected, false)
+        })
+    };
+    crate::finish(result.map(crate::ObjectOwner::into_raw), std::ptr::null())
+}
+
 /// # Safety
 /// Root both the set and its exact-kind scalar key.
 #[unsafe(no_mangle)]

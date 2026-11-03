@@ -406,6 +406,11 @@ impl Checker<'_> {
         expression: &ast::Expr,
         expected: Option<Type>,
     ) -> Result<Expr, String> {
+        if let ast::Expr::SetComp(set) = expression
+            && let Some(filtered) = self.character_set_filter(set, expected)?
+        {
+            return Ok(filtered);
+        }
         if let ast::Expr::ListComp(list) = expression
             && let Some(filtered) = self.string_list_filter(
                 &list.generators,

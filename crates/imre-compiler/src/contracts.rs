@@ -60,7 +60,7 @@ impl Builtin {
                 args.first().is_some_and(|e| matches!(e.ty, Type::List(_))),
                 PreservesLists,
             ),
-            Self::StringListNonempty | Self::StringListContains | Self::StringListFilter(_) => {
+            Self::StringListNonempty | Self::StringListContains | Self::StringListFilter(_) | Self::FilterCharacterSet(_) => {
                 Contract::new(true, PreservesLists)
             }
             Self::Random(crate::ir::RandomOperation::Shuffle) => Contract::new(true, Unknown),
