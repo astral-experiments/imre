@@ -131,71 +131,13 @@ impl Context {
         };
         let name = self.class_name(old).to_owned();
         let module = self.scope_data(original).module.clone();
-        let provider_annotations = self.has_class_annotation_provider(original);
-        self.dataclass_from_namespace(
-            name,
-            ancestors.into_iter().take(1).collect(),
-            namespace,
-            &module,
-            true,
-            provider_annotations,
-        )
-    }
-
-    pub(super) fn make_dataclass_type(
-        &mut self,
-        name: String,
-        bases: Vec<Id>,
-        namespace: Id,
-    ) -> Result<Id> {
-        let object = self.builtin("object");
-        for &base in &bases {
-            if base == object {
-                continue;
-            }
-            let ordinary = match self.heap.get(base) {
-                Value::Class {
-                    scope,
-                    metaclass: None,
-                    ancestors,
-                    ..
-                } if ancestors.as_slice() == [object] => {
-                    let frame = self.scope_data(*scope);
-                    frame.class_cell.is_some()
-                        && frame
-                            .class_namespace
-                            .as_ref()
-                            .is_some_and(|layout| layout.slot_names.is_none())
-                }
-                _ => false,
-            };
-            if !ordinary {
-                return Err(Error::new(
-                    "NotImplementedError",
-                    "boxed make_dataclass requires plain unslotted object-root bases",
-                ));
-            }
-        }
-        self.dataclass_from_namespace(name, bases, namespace, "types", false, true)
-    }
-
-    /// Build a plain dataclass type, initializing descriptors before inherited subclass hooks.
-    fn dataclass_from_namespace(
-        &mut self,
-        name: String,
-        bases: Vec<Id>,
-        namespace: Id,
-        module: &str,
-        member_slots: bool,
-        provider_annotations: bool,
-    ) -> Result<Id> {
         let layout = super::value::ClassNamespace {
-            member_slots,
-            provider_annotations,
+            member_slots: true,
+            provider_annotations: self.has_class_annotation_provider(original),
             ..Default::default()
         };
         let cell = self.alloc(Value::Cell(None));
-        let scope = self.namespace_scope(module, layout, cell);
+        let scope = self.namespace_scope(&module, layout, cell);
         let entries = self
             .dict_entries(namespace)
             .ok_or_else(|| Error::new("TypeError", "expected a class namespace dictionary"))?
@@ -204,6 +146,7 @@ impl Context {
             let key = self.str_value(key)?.to_owned();
             self.bind_local(scope, &key, value);
         }
+        let bases = ancestors.into_iter().take(1).collect();
         let class = self.allocate_class(name, scope, bases)?;
         self.finish_namespace_class(class, scope, cell, None, Vec::new())
     }
