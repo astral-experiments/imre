@@ -1925,6 +1925,7 @@ pub(crate) enum PathOperation {
     Drive,
     Root,
     Anchor,
+    Parts,
     CountPart,
     AsPosix,
     Join,

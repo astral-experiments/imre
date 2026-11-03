@@ -7,7 +7,9 @@ use std::hash::{Hash, Hasher};
 
 use super::{Error, Kind, Object, Result, Storage, StorageCell, Str, object};
 use crate::objects::exceptions::string_repr;
+use crate::objects::records::tuples::tuple_from_words;
 use crate::objects::text::{lowercase, lowercase_chars};
+use crate::objects::words::{OwnedWord, WordKind};
 
 pub(in crate::objects) struct PurePath {
     pub(super) windows: bool,
@@ -426,6 +428,22 @@ impl PurePath {
 
     pub(super) fn basename(&self) -> &str {
         self.tail.last().map_or("", |s| s.as_str())
+    }
+
+    pub(super) fn parts(&self) -> Result<OwnedWord> {
+        // The parsed spelling begins with the original drive and root, including a UNC share.
+        let anchor = &self.text[..self.drive.len() + self.root.len()];
+        let anchor = (!anchor.is_empty()).then_some(anchor);
+        let mut fields = Vec::new();
+        fields
+            .try_reserve_exact(self.tail.len() + usize::from(anchor.is_some()))
+            .map_err(|_| Error::allocation())?;
+        for part in anchor.into_iter().chain(self.tail.iter().map(Str::as_str)) {
+            let value = StrOwner::into_raw(super::try_owned_string(part)?) as usize;
+            // SAFETY: the field takes the newly allocated string's single owned reference.
+            fields.push(unsafe { OwnedWord::from_owned(value, WordKind::new(3)) });
+        }
+        tuple_from_words(fields.into_iter())
     }
 
     pub(super) fn count_part(&self, part: &str) -> usize {
