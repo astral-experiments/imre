@@ -128,10 +128,12 @@ def _signature_from_callable(obj, *, sigcls, follow_wrapper_chains=True,
         return _signature_from_function(
             obj, sigcls, globals, locals, eval_str, annotation_format, skip_bound_arg=skip_bound_arg)
     kind = type(obj)
-    if kind is types.WrapperDescriptorType or kind is types.MethodWrapperType:
+    if (kind is types.BuiltinFunctionType or kind is types.WrapperDescriptorType
+            or kind is types.MethodWrapperType):
         text_signature = getattr(obj, "__text_signature__", None)
-        if text_signature:
-            return _signature_fromstr(sigcls, obj, text_signature, skip_bound_arg=skip_bound_arg)
+        if not text_signature:
+            raise ValueError(f"no signature found for builtin {obj!r}")
+        return _signature_fromstr(sigcls, obj, text_signature, skip_bound_arg=skip_bound_arg)
     if isinstance(obj, type):
         method, drop_first = _constructor(obj, follow_wrapper_chains)
         if method is None:

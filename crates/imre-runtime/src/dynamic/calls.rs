@@ -3880,26 +3880,21 @@ impl Context {
                     .ok_or_else(|| Error::new("ImportError", "native _io module is unavailable"));
             }
             Value::Native(ref symbol)
-                if let Some((owner, "__new__")) = symbol.rsplit_once('.')
-                    && (matches!(owner, super::namespace::CLASS | "mappingproxy")
-                        || stdlib::itertools::cursor_type(owner).is_some()
-                        || super::deque::iterator_class(owner).is_some())
-                    && matches!(name, "__doc__" | "__text_signature__") =>
-            {
-                return Ok(self.text(match name {
-                    "__doc__" => {
-                        "Create and return a new object.  See help(type) for accurate signature."
-                    }
-                    _ => "($type, *args, **kwargs)",
-                }));
-            }
-            Value::Native(ref symbol)
                 if matches!(
                     name,
-                    "__self__" | "__name__" | "__qualname__" | "__module__"
+                    "__doc__"
+                        | "__text_signature__"
+                        | "__self__"
+                        | "__name__"
+                        | "__qualname__"
+                        | "__module__"
                 ) && let Some(owner) = builtins::constructor_owner(symbol) =>
             {
                 return Ok(match name {
+                    "__doc__" => self.text(
+                        "Create and return a new object.  See help(type) for accurate signature.",
+                    ),
+                    "__text_signature__" => self.text("($type, *args, **kwargs)"),
                     "__self__" => match self.builtins.get(owner) {
                         Some(&class) => class,
                         None => {
