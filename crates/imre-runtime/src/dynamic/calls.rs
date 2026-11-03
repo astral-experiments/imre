@@ -960,7 +960,10 @@ impl Context {
             stdlib::datetime::validate_classmethod_receiver(self, "dict", "fromkeys", owner)?;
             return Ok(self.bind_native_classmethod(value, owner));
         }
-        if matches!(self.heap.get(value), Value::Native(name) if matches!(name.as_str(), "type.__prepare__" | "mappingproxy.__class_getitem__" | "set.__class_getitem__" | "frozenset.__class_getitem__" | "int.from_bytes" | "float.__getformat__" | "bytes.fromhex" | "bytearray.fromhex") || stdlib::datetime::clock_classmethod(name))
+        if matches!(self.heap.get(value), Value::Native(name) if name == "float.fromhex") {
+            stdlib::datetime::validate_classmethod_receiver(self, "float", "fromhex", owner)?;
+        }
+        if matches!(self.heap.get(value), Value::Native(name) if matches!(name.as_str(), "type.__prepare__" | "mappingproxy.__class_getitem__" | "set.__class_getitem__" | "frozenset.__class_getitem__" | "int.from_bytes" | "float.fromhex" | "float.__getformat__" | "bytes.fromhex" | "bytearray.fromhex") || stdlib::datetime::clock_classmethod(name))
         {
             return Ok(self.bind_native_classmethod(value, owner));
         }
@@ -4135,13 +4138,15 @@ impl Context {
                 let method = self.builtin("int.from_bytes");
                 return Ok(self.bind_native_classmethod(method, obj));
             }
-            Value::Float(_) if name == "__getformat__" => {
+            Value::Float(_) if matches!(name, "__getformat__" | "fromhex") => {
                 let owner = self.builtin("float");
-                let method = self.builtin("float.__getformat__");
+                let method = self.builtin(&format!("float.{name}"));
                 return Ok(self.bind_native_classmethod(method, owner));
             }
-            Value::Native(ref class) if class == "float" && name == "__getformat__" => {
-                let method = self.builtin("float.__getformat__");
+            Value::Native(ref class)
+                if class == "float" && matches!(name, "__getformat__" | "fromhex") =>
+            {
+                let method = self.builtin(&format!("float.{name}"));
                 return Ok(self.bind_native_classmethod(method, obj));
             }
             Value::Native(ref class) if class == stdlib::flags::TYPE => {
@@ -7018,6 +7023,7 @@ impl Context {
                             | "SystemExit.__init__"
                             | "float.__format__"
                             | "float.__getformat__"
+                            | "float.fromhex"
                             | "bool.__repr__"
                             | "float.__repr__"
                             | "float.as_integer_ratio"

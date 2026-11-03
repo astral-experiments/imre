@@ -1,6 +1,31 @@
 use super::*;
 use crate::dynamic::complex::Complex;
 
+/// Parse the string payload, then let a float subclass construct its result.
+pub(super) fn fromhex(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    let (&class, args) = args
+        .split_first()
+        .ok_or_else(|| type_error("descriptor 'fromhex' of 'float' object needs an argument"))?;
+    super::super::stdlib::datetime::validate_classmethod_receiver(ctx, "float", "fromhex", class)?;
+    let name = format!("{}.fromhex", ctx.class_qualname(class));
+    let argument = one_positional_arg(&name, args, kwargs)?;
+    let storage = ctx.scalar_value(argument);
+    let number = match ctx.heap.get(storage) {
+        Value::Str(text) => crate::floats::parse_hex(text)?,
+        Value::SurrogateStr(_) => {
+            ctx.encode_utf8_codepoints(storage, false, "strict")?;
+            return Err(type_error("expected a Unicode string"));
+        }
+        _ => return Err(type_error("bad argument type for built-in operation")),
+    };
+    let result = ctx.alloc(Value::Float(number));
+    if matches!(ctx.heap.get(class), Value::Native(name) if name == "float") {
+        Ok(result)
+    } else {
+        ctx.call(class, vec![result], Vec::new())
+    }
+}
+
 /// Report the representation of the native floating-point type named by Python.
 pub(super) fn getformat(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
     let Some((&owner, args)) = args.split_first() else {
