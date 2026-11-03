@@ -18,6 +18,9 @@ def check_generations():
     child = Node()
     old.child = child
     child.parent = old
+    # This initially tracked younger tuple survives through an older object.
+    # Its atomic contents let the minor collection untrack it.
+    old.owned = tuple(iter([137, 178]))
     refs = [ref(old), ref(middle), ref(young), ref(child)]
     del old, middle, young, child
     assert gc.collect(0) == 1

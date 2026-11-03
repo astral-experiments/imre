@@ -3799,6 +3799,7 @@ impl Heap {
         globals: impl Iterator<Item = Id>,
         passed: &mut Vec<usize>,
         generation: u8,
+        newly_reachable: Option<&[usize]>,
     ) {
         let mut pending = MarkQueue {
             slots: &self.slots,
@@ -3824,6 +3825,7 @@ impl Heap {
                 ordered: Some(&mut scan),
             });
             if slot.generation <= generation
+                && newly_reachable.is_none_or(|cohort| cohort[id] != 0)
                 && !slot.untracked_tuple.get()
                 && let Value::Tuple(items) = self.get(id as Id)
             {
@@ -3904,19 +3906,33 @@ impl Heap {
         generation: u8,
     ) -> Result<WeakCallbacks> {
         let mut cycles = CycleSet::new(self.slots.len())?;
-        self.mark_full(globals, &mut cycles.work, generation);
+        self.mark_full(globals, &mut cycles.work, generation, None);
         self.identify_cycles(&mut cycles);
         if generation < 2 {
             // A cycle outside the collected generations can own younger objects. An
             // unreachable acyclic owner would already have been released by refcounting.
-            let older = cycles.members().filter(|&id| {
-                let slot = &self.slots[id as usize];
-                slot.generation > generation && slot.gc_tracked(self)
-            });
-            self.mark(older);
-            for (count, trace) in cycles.incoming.iter_mut().zip(&self.traces) {
-                if trace.get() != UNMARKED {
-                    *count = 0;
+            let mut found_older = false;
+            for id in cycles.members() {
+                let index = id as usize;
+                let slot = &self.slots[index];
+                if slot.generation > generation && slot.gc_tracked(self) {
+                    self.traces[index].set(END);
+                    found_older = true;
+                }
+            }
+            if found_older {
+                // Younger tuples held only by these older objects can now be untracked.
+                // Tuples reached from ordinary roots were already considered once.
+                self.mark_full(
+                    std::iter::empty(),
+                    &mut cycles.work,
+                    generation,
+                    Some(&cycles.incoming),
+                );
+                for (count, trace) in cycles.incoming.iter_mut().zip(&self.traces) {
+                    if trace.get() != UNMARKED {
+                        *count = 0;
+                    }
                 }
             }
         }
