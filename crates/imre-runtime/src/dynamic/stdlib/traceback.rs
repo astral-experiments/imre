@@ -209,12 +209,17 @@ pub(in crate::dynamic) fn chain_link(error: &Error) -> Option<(Id, &'static str)
 
 /// Render an uncaught chain before shutdown releases its Python exception objects.
 pub(in crate::dynamic) fn report_chain(ctx: &mut Context, error: Error) {
-    use std::io::Write;
-
     let mark = ctx.heap.temporary_mark();
     let exception = ctx.raised_instance(error);
     ctx.heap.keep(exception);
-    if print_uncaught(ctx, exception).is_err() {
+    display_uncaught(ctx, exception, NONE);
+    ctx.heap.release_temporaries_since(mark);
+}
+
+pub(super) fn display_uncaught(ctx: &mut Context, exception: Id, tb: Id) {
+    use std::io::Write;
+
+    if print_uncaught(ctx, exception, tb).is_err() {
         // stderr itself may be gone or unwritable. Keep the exception's arguments
         // visible on fd 2 without calling its Python string hook a second time.
         let mut stderr = std::io::stderr().lock();
@@ -222,10 +227,9 @@ pub(in crate::dynamic) fn report_chain(ctx: &mut Context, error: Error) {
         let _ = writeln!(stderr, "object repr     : {}", ctx.repr(exception));
         let _ = writeln!(stderr, "lost sys.stderr");
     }
-    ctx.heap.release_temporaries_since(mark);
 }
 
-fn print_uncaught(ctx: &mut Context, exception: Id) -> Result<Id> {
+fn print_uncaught(ctx: &mut Context, exception: Id, tb: Id) -> Result<Id> {
     let file = ctx
         .sys_binding("stderr")?
         .ok_or_else(|| Error::new_static("RuntimeError", "lost sys.stderr"))?;
@@ -233,6 +237,21 @@ fn print_uncaught(ctx: &mut Context, exception: Id) -> Result<Id> {
         return Ok(NONE);
     }
     ctx.heap.keep(file);
+    if matches!(ctx.heap.get(exception), Value::Raised(_)) {
+        // PyErr_Display attaches a supplied traceback only to an exception without one.
+        if matches!(ctx.heap.get(tb), Value::Traceback { .. })
+            && ctx.exception_traceback(exception)? == NONE
+        {
+            ctx.set_traceback(exception, tb)?;
+        }
+    } else if exception != NONE {
+        let message = ctx.text(format!(
+            "TypeError: print_exception(): Exception expected for value, {} found\n",
+            ctx.type_name(exception)
+        ));
+        let write = ctx.lookup_attr(file, "write")?;
+        return ctx.call(write, vec![message], Vec::new());
+    }
     // The interpreter selects the innermost frames for a positive limit.
     let limit = ctx
         .sys_binding("tracebacklimit")?

@@ -1363,6 +1363,25 @@ pub(super) fn call(
         let value = builtins::one_positional_arg(name, &args[1..], kwargs)?;
         return super::displayhook::default_hook(ctx, value);
     }
+    if name == "sys.excepthook" {
+        if !kwargs.is_empty() {
+            return Err(Error::new_static(
+                "TypeError",
+                "sys.excepthook() takes no keyword arguments",
+            ));
+        }
+        let [_, _, value, tb] = args else {
+            return Err(Error::new(
+                "TypeError",
+                format!(
+                    "excepthook expected 3 arguments, got {}",
+                    args.len().saturating_sub(1)
+                ),
+            ));
+        };
+        traceback::display_uncaught(ctx, *value, *tb);
+        return Ok(NONE);
+    }
     if name == "sys.unraisablehook" {
         return super::unraisable::default_hook(ctx, args, kwargs);
     }

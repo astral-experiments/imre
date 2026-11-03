@@ -3307,6 +3307,7 @@ impl Context {
                     "_getframe",
                     "_getframemodulename",
                     "displayhook",
+                    "excepthook",
                     "unraisablehook",
                     "get_int_max_str_digits",
                     "set_int_max_str_digits",
@@ -3320,6 +3321,8 @@ impl Context {
                     self.bind(scope, name, function);
                     if name == "displayhook" {
                         self.bind(scope, "__displayhook__", function);
+                    } else if name == "excepthook" {
+                        self.bind(scope, "__excepthook__", function);
                     } else if name == "unraisablehook" {
                         self.bind(scope, "__unraisablehook__", function);
                         if self.threads.system_module.is_none() {
