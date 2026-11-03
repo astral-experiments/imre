@@ -351,6 +351,9 @@ class SSLContext:
         _call(_imre_ssl.set_post_handshake_auth, self._ctx, enabled)
         self._post_handshake_auth = enabled
 
+    def cert_store_stats(self, /):
+        return _imre_ssl.cert_store_stats(self._ctx)
+
     def set_default_verify_paths(self):
         _call(_imre_ssl.default_verify_paths, self._ctx)
 

@@ -86,6 +86,15 @@ functions! {
     SSL_CTX_set_cipher_list(Handle, *const c_char) -> c_int;
     SSL_CTX_get_security_level(Handle) -> c_int;
     SSL_CTX_set_default_verify_paths(Handle) -> c_int;
+    SSL_CTX_get_cert_store(Handle) -> Handle;
+    X509_STORE_lock(Handle) -> c_int;
+    X509_STORE_unlock(Handle) -> c_int;
+    X509_STORE_get0_objects(Handle) -> Handle;
+    X509_OBJECT_get_type(Handle) -> c_int;
+    X509_OBJECT_get0_X509(Handle) -> Handle;
+    X509_up_ref(Handle) -> c_int;
+    X509_free(Handle) -> ();
+    X509_check_ca(Handle) -> c_int;
     SSL_CTX_get0_param(Handle) -> Handle;
     X509_VERIFY_PARAM_set_flags(Handle, c_ulong) -> c_int;
     X509_VERIFY_PARAM_get_flags(Handle) -> c_ulong;
@@ -319,6 +328,59 @@ impl Context {
             (self.api.X509_VERIFY_PARAM_get_flags)((self.api.SSL_CTX_get0_param)(
                 self.handle.as_ptr(),
             )) as u64
+        }
+    }
+
+    pub(super) fn cert_store_stats(&self) -> Option<[c_int; 3]> {
+        let api = self.api;
+        let mut certificates = Vec::new();
+        // SAFETY: the context owns this store. Retain each X509 while holding the store
+        // lock so we can classify it after unlocking. This works on OpenSSL 3.0–3.2
+        // as well, which do not export X509_STORE_get1_objects.
+        unsafe {
+            let store = (api.SSL_CTX_get_cert_store)(self.handle.as_ptr());
+            if store.is_null() || (api.X509_STORE_lock)(store) != 1 {
+                return None;
+            }
+            let snapshot = (|| {
+                let objects = (api.X509_STORE_get0_objects)(store);
+                let count = (api.OPENSSL_sk_num)(objects);
+                certificates
+                    .try_reserve_exact(usize::try_from(count).ok()?)
+                    .ok()?;
+                let mut crls = 0;
+                for index in 0..count {
+                    let object = NonNull::new((api.OPENSSL_sk_value)(objects, index))?;
+                    match (api.X509_OBJECT_get_type)(object.as_ptr()) {
+                        1 => {
+                            // X509_LU_X509
+                            let cert = (api.X509_OBJECT_get0_X509)(object.as_ptr());
+                            if cert.is_null() || (api.X509_up_ref)(cert) != 1 {
+                                return None;
+                            }
+                            certificates.push(cert);
+                        }
+                        2 => crls += 1, // X509_LU_CRL
+                        _ => (),
+                    }
+                }
+                Some(crls)
+            })();
+            let crls = if (api.X509_STORE_unlock)(store) == 1 {
+                snapshot
+            } else {
+                None
+            };
+            let x509 = certificates.len() as c_int;
+            let mut ca = 0;
+            // Release every acquired reference, including those retained before a failure.
+            for cert in certificates {
+                if crls.is_some() && (api.X509_check_ca)(cert) != 0 {
+                    ca += 1;
+                }
+                (api.X509_free)(cert);
+            }
+            crls.map(|crls| [x509, crls, ca])
         }
     }
 

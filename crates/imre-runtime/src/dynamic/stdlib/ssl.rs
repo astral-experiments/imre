@@ -35,6 +35,7 @@ pub(in crate::dynamic) fn install(ctx: &mut Context, scope: Id) -> Result<()> {
         "maximum_version",
         "options",
         "verify_flags",
+        "cert_store_stats",
         "default_verify_paths",
         "default_verify_flags",
         "set_alpn_protocols",
@@ -173,6 +174,18 @@ pub(super) fn call(
         ("verify_flags", &[handle]) => {
             let flags = context(ctx, handle)?.borrow().verify_flags();
             Ok(ctx.alloc(Value::Int(crate::Int::new(flags.into()))))
+        }
+        ("cert_store_stats", &[handle]) => {
+            let counts = context(ctx, handle)?
+                .borrow()
+                .cert_store_stats()
+                .ok_or_else(|| Error::new("MemoryError", "failed to query cert store"))?;
+            let entries = ["x509", "crl", "x509_ca"]
+                .into_iter()
+                .zip(counts)
+                .map(|(key, count)| (ctx.text(key), ctx.int(i64::from(count))))
+                .collect();
+            Ok(ctx.dict(entries))
         }
         ("default_verify_paths", &[handle]) => {
             context(ctx, handle)?
