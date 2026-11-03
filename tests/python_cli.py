@@ -1315,6 +1315,19 @@ def main():
 
         check_command_stdin(imre, run)
 
+        # The Python CLI reports each unclosed file once during interpreter cleanup.
+        resource = root / "resource_warning.py"
+        resource.write_text(
+            "with open(__file__, 'rb') as closed: closed.read(1)\n"
+            "f = open(__file__, 'r+b')\n"
+        )
+        for args in (("-Wd", "-c", f"f = open({str(resource)!r})"), ("-Wd", resource)):
+            expected = run(sys.executable, *args)
+            actual = run(imre, *args, timeout=300)
+            assert expected.returncode == actual.returncode == 0
+            assert expected.stderr.startswith(b"<sys>:0: ResourceWarning: unclosed file ")
+            assert actual.stderr == expected.stderr, (expected.stderr, actual.stderr)
+
         # The binary buffer must work from an ordinary -c command on its own.
         for stream in ("stdout", "stderr"):
             command = (
