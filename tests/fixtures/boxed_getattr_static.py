@@ -1,5 +1,19 @@
+import sys
 from inspect import getattr_static
 from types import SimpleNamespace
+
+
+version = vars(sys)["version"]
+assert getattr_static(sys, "version") is version is sys.version
+replacement = object()
+try:
+    sys.version = replacement
+    assert getattr_static(sys, "version") is replacement
+    del sys.version
+    assert not hasattr(sys, "version")
+    assert getattr_static(sys, "version", None) is None
+finally:
+    sys.version = version
 
 
 class ReadOnly:

@@ -323,6 +323,14 @@ fn compiler_version(ctx: &Context) -> String {
         .to_owned()
 }
 
+pub(super) fn sys_version(ctx: &mut Context) -> Result<Id> {
+    Ok(ctx.text(format!(
+        "{} (Imre {})",
+        full_version(ctx)?,
+        compiler_version(ctx)
+    )))
+}
+
 fn path_text(ctx: &mut Context, path: &Path) -> Result<Id> {
     path.to_str()
         .map(|value| ctx.text(value))
@@ -611,11 +619,6 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         } else {
             std::env::consts::OS
         }),
-        ("sys", "version") => ctx.text(format!(
-            "{} (Imre {})",
-            full_version(ctx)?,
-            compiler_version(ctx)
-        )),
         ("sys", "hash_info") => fixed_structseq::current_hash_info(ctx),
         ("sys", "version_info") => version_info(ctx, &full_version(ctx)?)?,
         ("sys", "implementation") => {
