@@ -81,6 +81,7 @@ def current():
     subtype = Text(low)
     assert _imp.is_frozen(low) is False and _imp.is_frozen(subtype) is False
     assert type(subtype) is Text and isinstance(subtype, str)
+    assert not low.isalnum() and not Text("A1" + low).isalnum()
     scalar = Text("🙂")
     source = Text(low + low + low + scalar)
     assert source.count(Text(low + low)) == 1
