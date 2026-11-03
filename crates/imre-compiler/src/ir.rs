@@ -540,66 +540,6 @@ pub(crate) enum JsonDefault {
     EmptyList,
 }
 
-impl Module {
-    pub(crate) fn changes_stdout(&self) -> bool {
-        let mut used = false;
-        for function in self.functions.iter().chain([&self.entry]) {
-            walk_expressions(&function.body, &mut |e| {
-                used |= matches!(
-                    e.kind,
-                    ExprKind::Builtin(Builtin::SysStdoutSet | Builtin::SysStdoutDelete, _)
-                );
-            });
-        }
-        used
-    }
-    /// Release the rooted namespace bindings at shutdown if this program uses them.
-    pub(crate) fn uses_builtins_last(&self) -> bool {
-        let mut used = false;
-        for function in self.functions.iter().chain([&self.entry]) {
-            walk_expressions(&function.body, &mut |value| {
-                used |= matches!(
-                    value.kind,
-                    ExprKind::Builtin(
-                        Builtin::BuiltinsSetLast
-                            | Builtin::SysDisplayHook
-                            | Builtin::BuiltinsLen
-                            | Builtin::BuiltinsSetLen,
-                        _
-                    )
-                );
-            });
-        }
-        used
-    }
-
-    /// Capture arguments, the original invocation, and source search paths only
-    /// for modules that use them; a bare import needs no runtime state.
-    pub(crate) fn startup_usage(&self) -> (bool, bool, bool, bool) {
-        let mut linecache = false;
-        let mut cache_paths = false;
-        let mut argv = false;
-        let mut original = false;
-        for function in self.functions.iter().chain([&self.entry]) {
-            walk_expressions(&function.body, &mut |value| match &value.kind {
-                ExprKind::Builtin(Builtin::SysArgv, _) => argv = true,
-                ExprKind::Builtin(Builtin::SysOrigArgv, _) => original = true,
-                ExprKind::Builtin(Builtin::Linecache(..), _) => linecache = true,
-                ExprKind::Builtin(Builtin::CachePath(_) | Builtin::ModuleCacheFromOrigin, _) => {
-                    cache_paths = true
-                }
-                ExprKind::Builtin(Builtin::WarningFormat { .. }, args)
-                    if args[5].ty != Type::Str =>
-                {
-                    linecache = true
-                }
-                _ => {}
-            });
-        }
-        (argv || original, original, linecache, cache_paths)
-    }
-}
-
 #[derive(Clone)]
 pub(crate) struct Function {
     pub params: Vec<usize>,
