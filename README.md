@@ -109,7 +109,7 @@ with Rust-competitive performance.
 
 ## Standard library test results
 
-As of November 3, 2026, Imre has a paired pass for **11,019 of 16,156 tests (68.2%)** across the 43 standard library module families tracked below.
+As of November 3, 2026, Imre has a paired pass for **11,019 of 16,159 tests (68.2%)** across the 43 standard library module families tracked below.
 The first table covers the original 25 families and the second covers 18 additional families.
 A **paired pass** means that CPython 3.14.5 passed the original test and Imre passed it at both
 `-O0` and `-O3`. The total combines focused and intact suite runs across revisions, including
@@ -126,7 +126,7 @@ in the denominator. The [omission decisions](docs/stdlib-omissions.md) explain e
 | `fnmatch` | 24 | 24 | 0 | Complete suite on `main`, all 24 passed. |
 | `functools` | 143 | 329 | 0 | On public PR #4972, the ordinary test_functools module ran the same 325 parents on all three builds. CPython passed 325. Both native builds passed 143, errored on 55, failed six and skipped 121. One errored parent raised nine subtest errors. Fifty passes are new to the family ledger. |
 | `hashlib` | 77 | 82 | 0 | The cumulative resource-enabled inventory includes 77 distinct pairs. Under the default stock resource policy, intact ordinary O0 and O3 each record 67 passes, one threaded-hashing error and 14 skips. The real builtin MD5 factory is verified at both native levels. |
-| `importlib` | 329 | 1,346 | 0 | Seventy-eight more resource tests passed across eight module runs. Sixty-five needed the pinned `zipfile` on the runtime path, and 13 also needed it during compilation. Two originals in `test_files` still errored on Imre. |
+| `importlib` | 329 | 1,345 | 0 | Seventy-eight more resource tests passed across eight module runs. Sixty-five needed the pinned `zipfile` on the runtime path, and 13 also needed it during compilation. Two originals in `test_files` still errored on Imre. The Linux roster contains 1,345 original tests. The Windows registry module requires winreg and skips during Linux discovery. |
 | `io` | 706 | 1,038 | 2 | The complete 182-test memoryio module passed 177 parents at O0 and O3. Both native builds skipped five. All five additional passes come from the buffer-export changes in PR #4981. |
 | `itertools` | 112 | 138 | 0 | Selected runs account for 112 original passes. Public 90955053 resolved the typing.Iterable import. The unchanged 137-case primary now reaches a module-level type alias in _pyrepl/types.py and stops before discovery at both native levels. A separate GIL companion supplies the 138th registration. |
 | `json` | 214 | 216 | 0 | All 34 unmodified CLI originals passed, with 32 child subtests and 64 tool subprocesses per lane. The O0/O3 children ran native code. Two help cases matched the upstream usage-prefix assertion while their full stdout differed from stock. |
@@ -143,14 +143,14 @@ in the denominator. The [omission decisions](docs/stdlib-omissions.md) explain e
 | `typing` | 710 | 712 | 1 | All three ordinary module runs registered 712 parents, including the same 11 doctests with 43 examples. Stock passed 712. Each native run passed 706, errored on four and skipped two. Six named successes are new to the accumulated ledger. |
 | `unittest` | 587 | 1,090 | 0 | The 15 original command-line tests produced 14 passes on stock and 12 at each native optimization level. All 12 paired passes are new to the family ledger. |
 | `urllib` | 173 | 178 | 0 | Both unchanged upstream scripts completed on public `main` at O0 and O3 with ordinary and runtime imports. All 178 tests matched stock in order, including 173 successful parents, three with only child outcomes, and two Windows skips. |
-| **Total** | **9,599** | **13,328** | **32** | **4 complete suites match stock on `main`** |
+| **Total** | **9,599** | **13,327** | **32** | **4 complete suites match stock on `main`** |
 
 See the [standard library coverage report](docs/stdlib.md) for the Linux test
 results and import coverage recorded in this repository.
 
 ### Additional module families
 
-CPython 3.14.5 discovers **2,828 test occurrences** across these 18 families on Linux. They use the same pairing rule and have a separate total.
+CPython 3.14.5 discovers **2,832 test occurrences** across these 18 families on Linux. They use the same pairing rule and have a separate total.
 
 | Module | Paired passes | Upstream tests | Coverage |
 | --- | ---: | ---: | --- |
@@ -170,9 +170,9 @@ CPython 3.14.5 discovers **2,828 test occurrences** across these 18 families on 
 | `uuid` | 0 | 120 | Stock ran 120 parents, with 49 successes and 71 skips. Native discovery stopped before any original parent passed at the public baseline. |
 | `warnings` | 181 | 187 | The intact default suite paired 177/187. Four additional async originals passed with `-X context_aware_warnings=1` on pinned stock and public O0 and O3. Each flag-enabled run registered all 187 originals and completed teardown. |
 | `weakref` | 169 | 183 | All 46 WeakSet originals and 123 weakref originals passed. Seven [CPython-specific tests](docs/stdlib-omissions.md#weakref) have individual omission decisions. Seven other originals remain unpaired. |
-| `zipfile` | 1 | 379 | Stock discovered 379 original parents. The public ZIP path stream change passes the unchanged TestPath.test_read_does_not_close on stock, O0 and O3. |
+| `zipfile` | 1 | 383 | Pinned CPython registers 383 original tests with the optional complexity-test dependencies installed. One original stream test has a public paired pass. |
 | `zoneinfo` | 23 | 261 | The full stock package ran 261 parents, with 233 passes and 28 skips. Both native package runs reached and passed all 23 original properties. A module-level skip prevented discovery of the other originals. |
-| **Measured total (18 of 18 families)** | **1,420** | **2,828** |  |
+| **Measured total (18 of 18 families)** | **1,420** | **2,832** |  |
 
 ## Design
 
