@@ -3426,6 +3426,7 @@ impl Context {
                 | Value::SurrogateStr(_)
                 | Value::Bytes(_)
                 | Value::ByteArray(_)
+                | Value::Array(_)
                 | Value::List(_)
                 | Value::Tuple(_)
                 | Value::NamedTuple { .. }
@@ -3452,6 +3453,7 @@ impl Context {
                 _ => text.chars().count(),
             },
             Value::SurrogateStr(points) => points.len(),
+            Value::Array(array) => array.len(),
             Value::Bytes(data) | Value::ByteArray(data) => data.len(),
             Value::List(items) | Value::Tuple(items) | Value::NamedTuple { values: items, .. } => {
                 items.len()
@@ -3493,6 +3495,7 @@ impl Context {
             }
             Value::Bytes(data) => Value::Bytes(sliced_values(data, positions, count)?),
             Value::ByteArray(data) => Value::ByteArray(sliced_values(data, positions, count)?),
+            Value::Array(array) => Value::Array(array.sliced(positions, count)?),
             Value::List(items) => Value::List(sliced_values(items, positions, count)?),
             Value::Tuple(items) | Value::NamedTuple { values: items, .. } => {
                 Value::Tuple(sliced_values(items, positions, count)?)

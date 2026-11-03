@@ -215,6 +215,27 @@ impl Array {
         self.bytes.len() / self.format.width()
     }
 
+    /// Copy selected elements in their native representation, preserving the typecode.
+    pub(super) fn sliced(
+        &self,
+        positions: impl Iterator<Item = usize>,
+        count: usize,
+    ) -> Result<Self> {
+        let width = self.format.width();
+        let mut bytes = Vec::new();
+        bytes
+            .try_reserve_exact(count * width)
+            .map_err(|_| Error::new("MemoryError", ""))?;
+        for index in positions {
+            let start = index * width;
+            bytes.extend_from_slice(&self.bytes[start..start + width]);
+        }
+        Ok(Self {
+            format: self.format,
+            bytes: Rc::new(bytes),
+        })
+    }
+
     pub(super) fn at(&self, index: usize) -> Result<Value> {
         let width = self.format.width();
         let element = &self.bytes[width * index..width * (index + 1)];

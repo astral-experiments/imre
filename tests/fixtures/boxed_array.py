@@ -9,6 +9,12 @@ def current():
         assert type(iter(a)) is type(iter(array(code)))
         b = array(code, a.tobytes())
         assert b.tolist() == list(a) and a[-1] == list(a)[-1]
+        part = a[::-2]
+        assert type(part) is array and part.typecode == code
+        assert part.tobytes() == array(code, list(a)[::-2]).tobytes()
+        part[0] = a[0]
+        assert a.tobytes() == b.tobytes()
+        assert len(a[:0]) == 0
         print(a.typecode, a.itemsize, len(a), a.tobytes(), list(a))
         it = iter(a)
         assert next(it) == a[0]
