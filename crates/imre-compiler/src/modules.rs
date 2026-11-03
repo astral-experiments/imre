@@ -2230,6 +2230,12 @@ impl IntrinsicModule {
             (Self::UrllibRequest, "HTTPPasswordMgr") => {
                 Intrinsic::ScopedObjectExport("urllib.request.HTTPPasswordMgr")
             }
+            (Self::UrllibRequest, "HTTPPasswordMgrWithDefaultRealm") => {
+                Intrinsic::ScopedObjectExport("urllib.request.HTTPPasswordMgrWithDefaultRealm")
+            }
+            (Self::UrllibRequest, "HTTPPasswordMgrWithPriorAuth") => {
+                Intrinsic::ScopedObjectExport("urllib.request.HTTPPasswordMgrWithPriorAuth")
+            }
             (Self::UrllibRequest, "AbstractBasicAuthHandler") => {
                 Intrinsic::ScopedObjectExport("urllib.request.AbstractBasicAuthHandler")
             }

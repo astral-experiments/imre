@@ -21,7 +21,8 @@ from urllib.parse import (
 
 __all__ = [
     "Request", "OpenerDirector", "BaseHandler", "DataHandler", "FileHandler", "FTPHandler", "UnknownHandler",
-    "HTTPPasswordMgr", "AbstractBasicAuthHandler", "HTTPBasicAuthHandler",
+    "HTTPPasswordMgr", "HTTPPasswordMgrWithDefaultRealm", "HTTPPasswordMgrWithPriorAuth",
+    "AbstractBasicAuthHandler", "HTTPBasicAuthHandler",
     "ProxyHandler", "HTTPHandler", "HTTPDefaultErrorHandler", "HTTPRedirectHandler", "HTTPErrorProcessor",
     "urlopen", "install_opener", "build_opener", "urlretrieve", "urlcleanup",
     "pathname2url", "url2pathname", "getproxies",
@@ -719,6 +720,47 @@ class HTTPPasswordMgr:
         if prefix[-1:] != '/':
             prefix += '/'
         return test[1].startswith(prefix)
+
+
+class HTTPPasswordMgrWithDefaultRealm(HTTPPasswordMgr):
+
+    def find_user_password(self, realm, authuri):
+        user, password = HTTPPasswordMgr.find_user_password(self, realm,
+                                                            authuri)
+        if user is not None:
+            return user, password
+        return HTTPPasswordMgr.find_user_password(self, None, authuri)
+
+
+class HTTPPasswordMgrWithPriorAuth(HTTPPasswordMgrWithDefaultRealm):
+
+    def __init__(self):
+        self.authenticated = {}
+        super().__init__()
+
+    def add_password(self, realm, uri, user, passwd, is_authenticated=False):
+        self.update_authenticated(uri, is_authenticated)
+        # Add a default for prior auth requests
+        if realm is not None:
+            super().add_password(None, uri, user, passwd)
+        super().add_password(realm, uri, user, passwd)
+
+    def update_authenticated(self, uri, is_authenticated=False):
+        # uri could be a single URI or a sequence
+        if isinstance(uri, str):
+            uri = [uri]
+
+        for default_port in True, False:
+            for u in uri:
+                reduced_uri = self.reduce_uri(u, default_port)
+                self.authenticated[reduced_uri] = is_authenticated
+
+    def is_authenticated(self, authuri):
+        for default_port in True, False:
+            reduced_authuri = self.reduce_uri(authuri, default_port)
+            for uri in self.authenticated:
+                if self.is_suburi(uri, reduced_authuri):
+                    return self.authenticated[uri]
 
 
 class AbstractBasicAuthHandler:
