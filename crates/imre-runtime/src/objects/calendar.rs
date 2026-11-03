@@ -623,9 +623,29 @@ pub unsafe extern "C" fn imre_calendar_date(
     day: usize,
 ) -> *const Object {
     rc_result((|| {
-        let ord = checked_ordinal(c_component(year)?, c_component(month)?, c_component(day)?)?;
-        try_owner(Value::DateOnly(Civil::from_ordinal(ord)))
+        date_only(c_component(year)?, c_component(month)?, c_component(day)?)
     })())
+}
+
+fn date_only(year: i32, month: i32, day: i32) -> Result<crate::ObjectOwner, Error> {
+    let ordinal = checked_ordinal(year, month, day)?;
+    try_owner(Value::DateOnly(Civil::from_ordinal(ordinal)))
+}
+
+/// Return a plain date using the datetime's local calendar fields.
+///
+/// # Safety
+/// The receiver must be a rooted datetime.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_calendar_date_part(dt: *const Object) -> *const Object {
+    // SAFETY: the typed caller retains the datetime for this call.
+    rc_result(with(unsafe { object(dt) }, |value| {
+        let Value::Date { local, .. } = value else {
+            unreachable!()
+        };
+        let [year, month, day] = local.ymd();
+        date_only(year, month, day)
+    }))
 }
 
 /// # Safety

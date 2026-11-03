@@ -104,6 +104,7 @@ impl Builtin {
                 matches!(
                     op,
                     crate::ir::CalendarOp::Date
+                        | crate::ir::CalendarOp::DatePart
                         | crate::ir::CalendarOp::DateTime
                         | crate::ir::CalendarOp::Combine
                         | crate::ir::CalendarOp::Replace { .. }

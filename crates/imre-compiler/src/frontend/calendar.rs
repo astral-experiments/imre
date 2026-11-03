@@ -486,6 +486,7 @@ impl Checker<'_> {
             ));
         }
         let (operation, ty) = match (kind, name) {
+            (C::DateTime, "date") => (Op::DatePart, Type::Calendar(C::Date)),
             (C::Date | C::DateTime, "isoformat") => (Op::Text { iso: true }, Type::Str),
             (C::DateTime, "utcoffset") => {
                 (Op::Offset, self.types.optional(Type::Calendar(C::Delta)))

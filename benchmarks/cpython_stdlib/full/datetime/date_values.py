@@ -41,6 +41,10 @@ def widen(value: datetime | None) -> date | None:
     return value
 
 
+def civil_day(instant: datetime) -> date:
+    return instant.date()
+
+
 def trace(label: str, n: int) -> int:
     print(label)
     return n
@@ -103,3 +107,9 @@ try:
     print(date(1, 1, 1) + timedelta(microseconds=-1))
 except OverflowError as exc:
     print(str(exc))
+
+# The local date and the UTC date can differ across midnight.
+arrival = datetime(2024, 3, 1, 0, 5, tzinfo=timezone(timedelta(hours=5, minutes=30)))
+assert civil_day(arrival) == date(2024, 3, 1)
+assert civil_day(arrival.astimezone(timezone.utc)) == date(2024, 2, 29)
+assert civil_day(datetime(1, 1, 1)) == date(1, 1, 1)
