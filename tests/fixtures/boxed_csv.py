@@ -9,13 +9,13 @@ def current():
     csv.register_dialect("pipes", Pipes)
     try:
         Pipes.delimiter = ";"
-        fmt = csv.get_dialect("pipes")
+        fmt = csv.get_dialect(name="pipes")
         print(fmt.delimiter, fmt.doublequote, fmt.quoting)
         lines = iter(['a|"b\n', 'c"|d', 'x||y'])
         rows = csv.reader(lines, fmt)
         print(next(rows), rows.line_num, list(rows), rows.line_num)
     finally:
-        csv.unregister_dialect("pipes")
+        csv.unregister_dialect(name="pipes")
 
     print(list(csv.reader(['"2",3,,'], quoting=csv.QUOTE_STRINGS)))
     print(list(csv.reader(['"a"'], quotechar=None)))

@@ -121,14 +121,14 @@ def list_dialects():
     return list(_registry)
 
 
-def get_dialect(name, /):
+def get_dialect(name):
     try:
         return _registry[name]
     except KeyError:
         raise Error("unknown dialect") from None
 
 
-def unregister_dialect(name, /):
+def unregister_dialect(name):
     try:
         del _registry[name]
     except KeyError:
