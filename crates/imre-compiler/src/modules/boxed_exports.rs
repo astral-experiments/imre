@@ -320,6 +320,7 @@ pub(super) fn symbol(module: M, name: &str) -> Option<Binding> {
             "getfullargspec",
             "getmodule",
             "getmodulename",
+            "getsourcelines",
             "isbuiltin",
             "ismethodwrapper",
             "isroutine",

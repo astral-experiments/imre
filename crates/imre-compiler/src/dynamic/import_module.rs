@@ -157,6 +157,14 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
                     .replace("    if not signature:", "    import token\n    import tokenize\n    if not signature:")
                     .replace("iter(lines).__next__", "functools.partial(next, iter(lines))")
                     .replace("    Parameter = cls._parameter_cls", "    import ast\n    Parameter = cls._parameter_cls");
+                    // BlockFinder and getblock share tokenize. Delay its import until the
+                    // first scan so importing inspect alone does not initialize the tokenizer.
+                    let source_blocks = section("class EndOfBlock(", "def getsource(object):")
+                        .replace(
+                            "        self.indent = 0",
+                            "        global tokenize\n        if 'tokenize' not in globals():\n            import tokenize\n        self.indent = 0",
+                        )
+                        .replace("iter(lines).__next__", "functools.partial(next, iter(lines))");
                     // Imre records native source positions without CPython bytecode offsets.
                     let frame_info = section(
                         "def getframeinfo(",
@@ -175,6 +183,7 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
                         section("def _getmembers(", "Attribute = namedtuple("),
                         section("def getfile(object):", "class ClassFoundException("),
                         section("def findsource(object):", "def getcomments(object):"),
+                        &source_blocks,
                         section("_Traceback = namedtuple(", "def _get_code_position_from_tb("),
                         &frame_info,
                         section("def getmro(cls):", "def indentsize(line):"),
