@@ -9,6 +9,7 @@ from . import _MainRunner, loader, runner
 
 __unittest = True
 _NO_TESTS_EXITCODE = 5
+_LONG_OPTIONS = ("--verbose", "--quiet", "--failfast", "--locals")
 
 
 def _convert_name(name):
@@ -32,7 +33,7 @@ def _main_option(arg):
     # argparse recognizes a known option before treating strings with spaces as names.
     if arg[:2] in ("-k", "-v", "-q", "-f"):
         return True
-    if "=" in arg and arg.partition("=")[0] in ("--verbose", "--quiet", "--failfast"):
+    if "=" in arg and arg.partition("=")[0] in _LONG_OPTIONS:
         return True
     return (arg.startswith("-") and arg != "-" and " " not in arg
             and not re.match(r"-\.?\d", arg))
@@ -58,8 +59,11 @@ def _parse_main_args(argv, options):
         # The positional `tests` argument is a single group. Options may precede or follow it.
         names_finished = bool(names)
         if arg.startswith("--"):
-            options._setOption(next((flag for flag in ("--verbose", "--quiet", "--failfast")
-                                    if flag.startswith(arg)), arg))
+            flag = next((flag for flag in _LONG_OPTIONS if flag.startswith(arg)), arg)
+            if flag == "--locals":
+                options.tb_locals = True
+            else:
+                options._setOption(flag)
             continue
         for i, flag in enumerate(arg[1:], 2):
             if flag != "k":
@@ -134,18 +138,20 @@ class TestProgram(object):
     def parseArgs(self, argv):
         options = _MainRunner()
         options.verbose = self.verbosity
+        options.tb_locals = getattr(self, "tb_locals", False)
         options.failfast = False if self.failfast is None else self.failfast
         if self.buffer is None:
             self.buffer = False
         if self.catchbreak is None:
             self.catchbreak = False
+        if not hasattr(self, "durations"):
+            self.durations = None
         self.tests, patterns = _parse_main_args(argv, options)
+        self.tb_locals = options.tb_locals
         self.verbosity = options.verbose
         self.failfast = options.failfast
         if self.testNamePatterns is None or patterns:
             self.testNamePatterns = patterns
-        if self.testNamePatterns:
-            self.testLoader.testNamePatterns = self.testNamePatterns
         if self.tests:
             self.testNames = [_convert_name(name) for name in self.tests]
         elif isinstance(self.defaultTest, str):
@@ -156,7 +162,17 @@ class TestProgram(object):
             self.testNames = None
 
         if self.module is None and not self.tests:
-            self.test = self.testLoader.discover(".")
+            self.start, self.pattern, self.top = ".", "test*.py", None
+            self.createTests(from_discovery=True, Loader=None)
+        else:
+            self.createTests()
+
+    def createTests(self, from_discovery=False, Loader=None):
+        if self.testNamePatterns:
+            self.testLoader.testNamePatterns = self.testNamePatterns
+        if from_discovery:
+            test_loader = self.testLoader if Loader is None else Loader()
+            self.test = test_loader.discover(self.start, self.pattern, self.top)
         elif self.testNames is None:
             self.test = self.testLoader.loadTestsFromModule(self.module)
         else:

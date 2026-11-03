@@ -1241,7 +1241,9 @@ def check_unittest_module_main(imre, root, run):
         "        self.assertRaises(ZeroDivisionError, Fraction, '1/0')\n"
         "        print(self.id())\n"
         "class Failing(unittest.TestCase):\n"
-        "    def test_one(self): self.fail('deliberate failure')\n"
+        "    def test_one(self):\n"
+        "        failure_reason = 'deliberate failure'\n"
+        "        self.fail(failure_reason)\n"
     )
     passing = "cli_test_package.sample.Passing"
     ok = run(imre, "-m", "unittest", "-v", passing, passing + ".test_one")
@@ -1253,6 +1255,11 @@ def check_unittest_module_main(imre, root, run):
     assert f"FAIL: test_one ({failing})".encode() in errors.stderr, errors
     assert b"ERROR: test_missing (unittest.loader._FailedTest.test_missing)" in errors.stderr, errors
     assert b"FAILED (failures=1, errors=1)" in errors.stderr, errors
+    local_line = b"    failure_reason = 'deliberate failure'"
+    assert local_line not in errors.stderr.splitlines(), errors
+    with_locals = run(imre, "-m", "unittest", "--locals", "-v", failing, passing + ".test_missing")
+    assert with_locals.returncode == 1 and b"FAILED (failures=1, errors=1)" in with_locals.stderr, with_locals
+    assert local_line in with_locals.stderr.splitlines(), with_locals
 
 
 def check_unittest_file_discovery(imre, root, run):
