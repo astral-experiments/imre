@@ -59,6 +59,11 @@ impl BuiltinDescriptor {
             });
         }
         let slots = match symbol.rsplit_once('.') {
+            Some((weakref::CALLABLE_PROXY_TYPE, attr)) => Some((
+                weakref::CALLABLE_PROXY_TYPE,
+                attr,
+                weakref::CALLABLE_PROXY_METHODS,
+            )),
             Some((weakref::PROXY_TYPE, attr)) => {
                 Some((weakref::PROXY_TYPE, attr, weakref::PROXY_METHODS))
             }
@@ -416,7 +421,7 @@ impl BuiltinDescriptor {
         receiver: Option<Id>,
     ) -> Option<Id> {
         Some(match name {
-            "__doc__" if self.owner == weakref::PROXY_TYPE => NONE,
+            "__doc__" if self.owner == weakref::PROXY_TYPE && self.name != "__repr__" => NONE,
             "__text_signature__" if self.owner == weakref::PROXY_TYPE => ctx.text("($self, /)"),
             "__doc__" | "__text_signature__" if self.owner == deque::CLASS => {
                 let member = deque::member(self.name)?;
