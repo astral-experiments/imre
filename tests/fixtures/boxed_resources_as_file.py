@@ -28,6 +28,35 @@ class Resource:
         return self.content
 
 
+def check_directory_cleanup_veto(tree):
+    blocked = None
+    events = []
+    denial = PermissionError('keep the resource directory')
+
+    def veto(event, args):
+        if event == 'shutil.rmtree' and args[0] == blocked:
+            events.append(args)
+            assert os.path.isdir(blocked)
+            raise denial
+
+    sys.addaudithook(veto)
+    try:
+        try:
+            with as_file(tree) as copy:
+                blocked = str(copy.parent)
+        except PermissionError as exc:
+            assert exc is denial
+        else:
+            raise AssertionError('resource cleanup bypassed the audit veto')
+        assert events == [(blocked, None)]
+        assert (copy / 'sub' / 'message.txt').read_bytes() == b'directory payload\n'
+    finally:
+        directory = blocked
+        blocked = None
+        if directory is not None and os.path.isdir(directory):
+            shutil.rmtree(directory)
+
+
 target = resources.files(data) / 'message.txt'
 with resources.as_file(target) as local:
     assert isinstance(local, Path)
@@ -75,6 +104,8 @@ try:
         assert (root / 'sub' / leaf.name).read_bytes() == b'directory payload\n'
         assert (root / 'empty').is_dir()
     assert not root.parent.exists()
+
+    check_directory_cleanup_veto(tree)
 
     original_mode = external.stat().st_mode
     try:
