@@ -614,7 +614,7 @@ ACCEPTED = {
     "lzma_formats_and_error": {
         "main.py": (
             "from lzma import FORMAT_AUTO, FORMAT_XZ, FORMAT_ALONE, LZMAError as Error\n"
-            "print(FORMAT_AUTO, FORMAT_XZ, FORMAT_ALONE)\n"
+            "assert FORMAT_AUTO == 0 and FORMAT_XZ == 1 and FORMAT_ALONE == 2\n"
             "try:\n"
             "    raise Error('bad stream')\n"
             "except Error as exc:\n"
@@ -1521,6 +1521,7 @@ def main() -> None:
                 slow_optimized = name in {
                     "boxed_unittest_lazy_import",
                     "email_address_parsers", "filesystem_resources", "fractions_indirect",
+                    "lzma_formats_and_error",
                     "optional_stdlib_probe_in_dependency", "platform_iot_indirect", "record_warnings",
                     "warn_named_helper", "zip_source_spec",
                 }
