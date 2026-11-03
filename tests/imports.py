@@ -1586,7 +1586,7 @@ def main() -> None:
                 "            stream.flush()\n"
                 "    elif sys.argv[3] == 'read':\n"
                 "        with module.open('members.gz', 'rb') as stream:\n"
-                "            print(stream.read1(65536), stream.read())\n"
+                "            print(stream.read1(65536), stream.read(1), stream.tell(), stream.read())\n"
                 "        print(stream.closed)\n"
                 "        class Reader(module.GzipFile):\n"
                 "            def read(self, *args):\n"
@@ -1607,7 +1607,7 @@ def main() -> None:
                 ("main", "import", temporary / "codeop_named_helper", "16896\n"),
                 ("boxed_interactive_interpreter", "current", FIXTURES.parent, ""),
                 ("gzip", "write", temporary, "7\n"),
-                ("gzip", "read", temporary, "b'first' b'second'\nTrue\nb'' b'fir' b'stsecond' b''\n"),
+                ("gzip", "read", temporary, "b'first' b's' 6 b'econd'\nTrue\nb'' b'fir' b'stsecond' b''\n"),
             ]:
                 result = run([str(executable), probe.stem, module, operation, str(path)], temporary)
                 require_success(result)

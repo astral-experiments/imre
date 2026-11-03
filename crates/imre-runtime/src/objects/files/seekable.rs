@@ -332,6 +332,13 @@ impl FileState {
     /// Reports the logical position without flushing pending writes or consuming input.
     pub(crate) fn tell(&mut self) -> Result<u64> {
         self.check_member("tell on closed file.")?;
+        if self.kind == FileKind::GzipBinaryRead {
+            return match self.stream()? {
+                Stream::UnreadGzip { .. } => Ok(0),
+                Stream::Read(input) => input.binary_position(),
+                _ => unreachable!("gzip reader stream"),
+            };
+        }
         if matches!(self.kind, FileKind::BinaryRead | FileKind::BinaryRandom) && self.closed() {
             return Err(Error::new(Kind::ValueError, "I/O operation on closed file"));
         }

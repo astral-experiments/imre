@@ -354,6 +354,15 @@ impl Input {
         self.text.preserve_newlines = true;
     }
 
+    /// Exclude read-ahead from the file or decompressor's position.
+    pub(super) fn binary_position(&mut self) -> Result<u64> {
+        let position = match self.raw.get_mut().get_mut() {
+            Source::Plain(file) => file.stream_position().map_err(super::errno_error)?,
+            Source::Gzip(reader) => reader.position,
+        };
+        Ok(position - self.raw.buffer().len() as u64)
+    }
+
     /// Seek a plain BufferedReader at its logical position, discarding read-ahead
     /// only after a successful move.
     pub(super) fn seek(&mut self, mut at: SeekFrom) -> Result<u64> {
@@ -363,10 +372,7 @@ impl Input {
         };
         if let SeekFrom::Current(delta) = at {
             if delta == 0 {
-                return file
-                    .stream_position()
-                    .map(|pos| pos - buffered as u64)
-                    .map_err(super::errno_error);
+                return self.binary_position();
             }
             let pos = i128::from(file.stream_position().map_err(super::errno_error)?)
                 - buffered as i128
