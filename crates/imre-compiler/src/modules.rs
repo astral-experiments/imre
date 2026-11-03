@@ -239,6 +239,16 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
         "decimal" => Some(("decimal.py", include_str!("../stdlib/decimal.py"))),
         // CPython 3.14.5 Lib/py_compile.py. See stdlib/docstrings/LICENSE.
         "py_compile" => Some(("py_compile.py", include_str!("../stdlib/py_compile.py"))),
+        "pyexpat" => Some(("pyexpat.py", include_str!("../stdlib/pyexpat.py"))),
+        "xml" => Some(("xml/__init__.py", include_str!("../stdlib/xml/__init__.py"))),
+        "xml.parsers" => Some((
+            "xml/parsers/__init__.py",
+            include_str!("../stdlib/xml/parsers/__init__.py"),
+        )),
+        "xml.parsers.expat" => Some((
+            "xml/parsers/expat.py",
+            include_str!("../stdlib/xml/parsers/expat.py"),
+        )),
         // CPython 3.14.5 Lib/pprint.py. See stdlib/docstrings/LICENSE.
         "pprint" => Some(("pprint.py", include_str!("../stdlib/pprint.py"))),
         "difflib" => Some((
@@ -4792,7 +4802,10 @@ impl<'a> Loader<'a> {
                             ));
                         }
                         binding
-                    } else if self.modules[target].is_bundled("zoneinfo") {
+                    } else if self.modules[target].is_bundled("zoneinfo")
+                        || self.modules[target].is_bundled("pyexpat")
+                        || self.modules[target].is_bundled("xml.parsers.expat")
+                    {
                         Binding::ConditionalValue
                     } else if self.modules[target].is_package {
                         let child_name = format!("{name}.{}", alias.name);
@@ -5123,6 +5136,11 @@ impl<'a> Loader<'a> {
                     include_str!("../stdlib/doctest_typed.py"),
                 ),
             )),
+            // The parser type and the public expat exports are initialized by the object runtime.
+            "pyexpat" | "xml.parsers.expat" => {
+                self.needs_object_imports = true;
+                bundled_runtime_source(name).map(|(path, _)| (path, ""))
+            }
             "pkgutil" => Some(("pkgutil.py", include_str!("../stdlib/pkgutil.py"))),
             "zipimport" if cfg!(unix) => Some((
                 "zipimport.py",
