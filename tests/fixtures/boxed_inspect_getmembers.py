@@ -1,4 +1,4 @@
-from inspect import getmembers, getmembers_static
+from inspect import Attribute, classify_class_attrs, getmembers, getmembers_static
 
 
 class Members:
@@ -33,6 +33,28 @@ def current():
         assert exc.args == ("predicate failed",)
     else:
         raise AssertionError("predicate exception was swallowed")
+    classify_inherited()
+
+
+def classify_inherited():
+    reads = []
+
+    class Parent(Members):
+        @property
+        def unavailable(self):
+            reads.append(self)
+            raise AttributeError("unavailable")
+
+    class Child(Parent):
+        pass
+
+    attrs = {row.name: row for row in classify_class_attrs(Child)}
+    for name, kind, owner in (("unavailable", "property", Parent), ("method", "method", Members)):
+        row = attrs[name]
+        assert type(row) is Attribute
+        assert row.kind == kind and row.defining_class is owner
+        assert row.object is owner.__dict__[name]
+    assert not reads
 
 
 if __name__ == "__main__":
