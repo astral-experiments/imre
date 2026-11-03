@@ -558,12 +558,13 @@ impl RangeTransfer {
 
 /// Copy through the kernel, borrowing both descriptors and any explicit input offset.
 #[cfg(target_os = "linux")]
-pub(crate) fn sendfile(
+pub(crate) fn sendfile<E: From<Error>>(
     out_fd: i32,
     in_fd: i32,
     mut offset: Option<libc::off_t>,
     count: isize,
-) -> Result<usize> {
+    dispatch: impl FnMut() -> std::result::Result<(), E>,
+) -> std::result::Result<usize, E> {
     crate::initialize_io();
     let offset = offset
         .as_mut()
@@ -572,7 +573,7 @@ pub(crate) fn sendfile(
     // The kernel validates the raw descriptors and receives the count as size_t.
     transfer(
         || transferred(unsafe { libc::sendfile(out_fd, in_fd, offset, count as usize) }),
-        || Ok(()),
+        dispatch,
     )
 }
 

@@ -1179,7 +1179,8 @@ pub(super) fn descriptor(
         } else {
             Some(file_offset(ctx, offset)?)
         };
-        return Ok(ctx.int(native::sendfile(out_fd, in_fd, offset, count)? as i64));
+        let sent = native::sendfile(out_fd, in_fd, offset, count, || ctx.dispatch_signals())?;
+        return Ok(ctx.int(sent as i64));
     }
     if name == "dup2" {
         let [Some(fd), Some(fd2), inheritable] = builtins::bind_builtin_arguments(
