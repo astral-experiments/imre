@@ -312,13 +312,14 @@ def _initializer(owner_class, data, positional, qualname, frozen, slots):
 
     names = tuple(f.name for f in data.values() if f.init)
     def annotate(format, /):
-        if format != 1:
+        from annotationlib import Format, get_annotations
+        if format not in (Format.VALUE, Format.FORWARDREF, Format.STRING):
             raise NotImplementedError(format)
         annotations = {}
         for base in reversed(owner_class().__mro__):
-            annotations.update(getattr(base, "__annotations__", {}))
+            annotations.update(get_annotations(base, format=format))
         result = {name: annotations[name] for name in names if name in annotations}
-        result["return"] = None
+        result["return"] = "None" if format == Format.STRING else None
         return result
     annotate.__generated_by_dataclasses__ = True
     annotate.__qualname__ = qualname + ".__annotate__"
@@ -370,7 +371,8 @@ def _decorate(cls, params):
         raise TypeError('cannot inherit frozen dataclass from a non-frozen one')
     if not params.frozen and True in frozen_bases:
         raise TypeError('cannot inherit non-frozen dataclass from a frozen one')
-    annotations = cls.__annotations__
+    from annotationlib import Format, get_annotations
+    annotations = get_annotations(cls, format=Format.FORWARDREF)
     kw_only = params.kw_only
     seen_kw_only = False
     for name, annotation in annotations.items():
