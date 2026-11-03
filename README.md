@@ -104,7 +104,7 @@ with Rust-competitive performance.
 
 ## Standard library test results
 
-As of November 3, 2026, Imre has a paired pass for **8,828 of 13,328 tests (66.2%)** in the original 25 standard library module families.
+As of November 3, 2026, Imre has a paired pass for **8,831 of 13,328 tests (66.3%)** in the original 25 standard library module families.
 A **paired pass** means that CPython 3.14.5 passed the original test and Imre passed it at both
 `-O0` and `-O3`. The total combines focused and intact suite runs across revisions, including
 development branches. Each original test occurrence counts once. Skipped and omitted tests remain
@@ -134,10 +134,10 @@ in the denominator. The [omission decisions](docs/stdlib-omissions.md) explain e
 | `tempfile` | 108 | 118 | 2 | All 118 originals finished in ordinary and boxed O0/O3. Each native run passed 108 and skipped 10. Stock passed 112 and skipped six. Two extra native skips are documented omissions. The other two require working os.fork and os.spawnl. |
 | `textwrap` | 68 | 68 | 0 | Complete suite on `main`, all 68 passed. |
 | `threading` | 83 | 228 | 1 | All 228 original registrations ran in ordinary and boxed builds at both levels. Each passed 83, skipped 32 and reported failures on 113 IDs. The bound worker callback still blocks 58 Bunch fixture cases. |
-| `typing` | 690 | 712 | 0 | The generic representation and equality tests each passed on stock and public native O0/O3 through the standard unittest loader. Each run imported the unchanged, full test_typing module. |
+| `typing` | 693 | 712 | 0 | Three new generic-alias substitution tests passed in their complete four-test class. All 506 class, test, and subtest callbacks matched stock at both native optimization levels. |
 | `unittest` | 275 | 1,090 | 0 | The intact package passed 160 cases. On public #3601, the unchanged test_assertions and test_case files ran all 150 originals with runtime imports. Their 109 paired passes added 81 distinct cases. Another 34 original mock methods passed in focused runs. |
 | `urllib` | 173 | 178 | 0 | Both unchanged upstream scripts completed on public `main` at O0 and O3 with ordinary and runtime imports. All 178 tests matched stock in order, including 173 successful parents, three with only child outcomes, and two Windows skips. |
-| **Total** | **8,828** | **13,328** | **27** | **4 complete suites match stock on `main`** |
+| **Total** | **8,831** | **13,328** | **27** | **4 complete suites match stock on `main`** |
 
 See the [standard library coverage report](docs/stdlib.md) for the Linux test
 results and import coverage recorded in this repository.
@@ -150,11 +150,11 @@ CPython 3.14.5 discovers **1,217 test occurrences** in these six families on Lin
 | --- | ---: | ---: | --- |
 | `contextlib` | 148 | 149 | All 58 async originals and 90 of 91 synchronous originals have paired passes. The module entry point passed nine of the ten `TestSuppress` cases on public Imre. The remaining case exercises exception groups. |
 | `inspect` | 0 | 362 | Stock ran 362 originals, with 361 passes and one skip. On public revision `00755c8c`, native compilation stopped before discovery, and a compiled import stopped at `_pickle`. Separate replays passed 44 tests in renamed modules. |
-| `ssl` | 22 | 195 | Five MemoryBIO originals and 17 socket, context, and enumeration tests passed on stock and on the same public compiler at O0 and O3. Each run discovered all 195 originals. |
-| `types` | 118 | 141 | 118 of 141 originals passed on pinned stock and public native O0/O3. Seven new tests cover mapping-proxy methods, numeric operations and coroutine wrappers. All eleven originals in the coroutine class passed together. |
+| `ssl` | 30 | 195 | Eight more originals passed for certificate conversion and time, default trust paths and stores, cipher enumeration, and verification flags. Creating a default context with combined trust inputs still fails. |
+| `types` | 119 | 141 | The original descriptor `__get__` signature test passed on stock and both native levels. The family has 119 paired passes across 141 registrations. |
 | `warnings` | 177 | 187 | The [intact suite](benchmarks/cpython_stdlib/full/warnings/receipts/76aed745/intact/verify.py) finished all 187 originals. Stock passed 181 and skipped six. Native O0 and O3 each passed 177, shared the six stock skips, and skipped four CPython-only tests. All 18 subtests passed. No warnings omissions. |
 | `weakref` | 169 | 183 | All 46 WeakSet originals and 123 weakref originals passed. The added finalizer test ran its real shutdown child on stock and at both native levels. |
-| **Measured total (6 of 6 families)** | **634** | **1,217** |  |
+| **Measured total (6 of 6 families)** | **643** | **1,217** |  |
 
 ## Design
 
