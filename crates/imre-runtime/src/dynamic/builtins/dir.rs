@@ -188,19 +188,10 @@ fn object_names(ctx: &mut Context, object: Id) -> Result<Id> {
     Ok(dictionary)
 }
 
-/// Look up an optional directory input without treating other hook exceptions as absence.
-fn optional_attr(ctx: &mut Context, object: Id, name: &str) -> Result<Option<Id>> {
-    match ctx.lookup_attr(object, name) {
-        Ok(value) => Ok(Some(value)),
-        Err(error) if ctx.is_attribute_error(&error) => Ok(None),
-        Err(error) => Err(error),
-    }
-}
-
 /// Copy the instance dictionary before a reported __class__ can mutate it.
 pub(super) fn namespace_directory(ctx: &mut Context, object: Id, instance: bool) -> Result<Id> {
     let dictionary = if instance
-        && let Some(source) = optional_attr(ctx, object, "__dict__")?
+        && let Some(source) = ctx.optional_attr(object, "__dict__")?
         && let Some(storage) = ctx.dict_storage(source)
     {
         ctx.heap.keep(source);
@@ -210,7 +201,7 @@ pub(super) fn namespace_directory(ctx: &mut Context, object: Id, instance: bool)
     };
     ctx.heap.keep(dictionary);
     let class = if instance {
-        optional_attr(ctx, object, "__class__")?
+        ctx.optional_attr(object, "__class__")?
     } else {
         Some(object)
     };
@@ -255,7 +246,7 @@ fn merge_class_names(ctx: &mut Context, class: Id, dictionary: Id) -> Result<()>
     ctx.with_slot_depth("maximum recursion depth exceeded", |ctx| {
         let mark = ctx.heap.temporary_mark();
         ctx.heap.keep(class);
-        if let Some(namespace) = optional_attr(ctx, class, "__dict__")? {
+        if let Some(namespace) = ctx.optional_attr(class, "__dict__")? {
             ctx.heap.keep(namespace);
             let merged = ctx.for_each_mapping_item(
                 namespace,
@@ -276,7 +267,7 @@ fn merge_class_names(ctx: &mut Context, class: Id, dictionary: Id) -> Result<()>
                 ctx.put_item(dictionary, key, NONE)?;
             }
         }
-        if let Some(bases) = optional_attr(ctx, class, "__bases__")? {
+        if let Some(bases) = ctx.optional_attr(class, "__bases__")? {
             ctx.heap.keep(bases);
             if let Some(kind @ ("dict" | "collections.defaultdict" | "mappingproxy")) =
                 ctx.builtin_type_name(bases)

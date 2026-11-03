@@ -184,14 +184,12 @@ pub(super) fn make(ctx: &mut Context, inputs: &[Id]) -> Result<Id> {
         [single] => Ok(*single),
         _ => {
             let unhashable = (!unhashable.is_empty()).then(|| ctx.alloc(Value::Tuple(unhashable)));
-            let parameters = typing::variables(ctx, &args);
-            let parameters = ctx.alloc(Value::Tuple(parameters));
             let args = ctx.alloc(Value::Tuple(args));
             Ok(ctx.alloc(Value::Union(Union {
                 args,
                 members,
                 unhashable,
-                parameters,
+                parameters: NONE,
             })))
         }
     }
@@ -226,7 +224,11 @@ pub(super) fn binary(ctx: &mut Context, left: Id, right: Id) -> Option<Result<Id
 
 pub(super) fn subscribe(ctx: &mut Context, target: Id, index: Id) -> Option<Result<Id>> {
     if let Value::Union(union) = *ctx.heap.get(target) {
-        if tuple_items(ctx, union.parameters).is_empty() {
+        let parameters = match typing::builtin_parameters(ctx, target, union.args, union.parameters) {
+            Ok(parameters) => parameters,
+            Err(error) => return Some(Err(error)),
+        };
+        if tuple_items(ctx, parameters).is_empty() {
             return Some(ctx.checked_format(target, true).and_then(|name| {
                 Err(Error::new(
                     "TypeError",

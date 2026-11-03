@@ -24,6 +24,28 @@ def current():
     assert collect(((P, T), (T, P))) == (P, T)
     assert collect((P, T), enforce_default_ordering=False) == (P, T)
     assert typing.List[Foreign()].__parameters__ == (T,)
+
+    calls = []
+
+    class Dynamic:
+        @property
+        def __parameters__(self):
+            calls.append(None)
+            if len(calls) == 1:
+                raise ValueError("retry")
+            return (P, T, P)
+
+    alias = list[Dynamic()]
+    assert calls == [] and list[Dynamic].__parameters__ == ()
+    try:
+        alias.__parameters__
+    except ValueError as error:
+        assert str(error) == "retry"
+    else:
+        raise AssertionError("lost the parameter lookup error")
+    assert typing.Literal[alias].__parameters__ == (P, T)
+    assert alias.__parameters__ == (P, T)
+    assert list[alias].__parameters__ == (P, T) and len(calls) == 2
     assert typing.Generic[T, P].__parameters__ == (T, P)
     assert typing.Generic[typing.Unpack[Ts], T].__parameters__ == (Ts, T)
     assert typing.Callable[P, T].__parameters__ == (P, T)
