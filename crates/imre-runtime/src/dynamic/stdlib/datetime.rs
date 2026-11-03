@@ -1370,14 +1370,18 @@ fn calendar_class_args<'a>(
     Ok((class, args))
 }
 
-/// Validate the class before a calendar classmethod is bound or called directly.
+/// Validate the class before a native classmethod is bound or called directly.
 pub(in crate::dynamic) fn validate_classmethod_receiver(
     ctx: &mut Context,
     owner: &'static str,
     method: &str,
     class: Id,
 ) -> Result<()> {
-    let base = ctx.builtin(owner);
+    let base = ctx
+        .classes
+        .get(owner)
+        .copied()
+        .unwrap_or_else(|| ctx.builtin(owner));
     let is_type = ctx.is_type_object(class);
     if is_type && ctx.direct_subclass(class, base) {
         return Ok(());

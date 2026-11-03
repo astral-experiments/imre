@@ -272,6 +272,7 @@ impl BuiltinDescriptor {
             "object.__dir__" => ("object", "__dir__"),
             "object.__subclasshook__" => ("object", "__subclasshook__"),
             "object.__init_subclass__" => ("object", "__init_subclass__"),
+            "typing.Generic.__init_subclass__" => ("typing.Generic", "__init_subclass__"),
             "classmethod_descriptor.__get__" => ("classmethod_descriptor", "__get__"),
             "object.__hash__" => ("object", "__hash__"),
             "object.__ne__" => ("object", "__ne__"),
@@ -345,7 +346,9 @@ impl BuiltinDescriptor {
     pub(super) fn class(self) -> &'static str {
         if matches!(
             (self.owner, self.name),
-            ("object", "__subclasshook__" | "__init_subclass__") | ("int", "from_bytes")
+            ("object", "__subclasshook__" | "__init_subclass__")
+                | ("int", "from_bytes")
+                | ("typing.Generic", "__init_subclass__")
         ) {
             "classmethod_descriptor"
         } else if self.method {
@@ -512,6 +515,8 @@ impl BuiltinDescriptor {
                     ctx.text(format!("Return self{op}value."))
                 }
             }
+            "__doc__" if self.owner == "typing.Generic" => ctx.text("Function to initialize subclasses."),
+            "__text_signature__" if self.owner == "typing.Generic" => NONE,
             "__name__" => ctx.text(self.name),
             "__qualname__" => {
                 let owner = if self.method
@@ -534,6 +539,9 @@ impl BuiltinDescriptor {
                     self.owner.rsplit('.').next()?
                 };
                 ctx.text(format!("{owner}.{}", self.name))
+            }
+            "__objclass__" if receiver.is_none() && self.owner == "typing.Generic" => {
+                typing::named_class(ctx, "typing", "Generic")
             }
             "__objclass__" if receiver.is_none() || !self.method => ctx.builtin(self.owner),
             "__module__" if receiver.is_some() && self.method => NONE,

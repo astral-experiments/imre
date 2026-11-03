@@ -2403,7 +2403,18 @@ def _variadic_class_getitem_uncached(cls, args, constructor):
     if not isinstance(args, tuple):
         args = (args,)
     args = tuple(_type_convert(arg) for arg in args)
-    parameters = cls.__parameters__
+    try:
+        parameters = cls.__parameters__
+    except AttributeError as exc:
+        init_subclass = getattr(cls, '__init_subclass__', None)
+        if init_subclass not in {None, Generic.__init_subclass__}:
+            exc.add_note(
+                f"Note: this exception may have been caused by "
+                f"{init_subclass.__qualname__!r} (or the "
+                f"'__init_subclass__' method on a superclass) not "
+                f"calling 'super().__init_subclass__()'"
+            )
+        raise
     for param in parameters:
         prepare = getattr(param, "__typing_prepare_subst__", None)
         if prepare is not None:
