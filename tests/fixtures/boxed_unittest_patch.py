@@ -204,7 +204,41 @@ with patch.object(Service, "resource", AlreadyMocked()):
 
 with patch.object(Service, "resource", spec_set=True, new_callable=dict, label="service") as options:
     assert options == {"spec_set": Owner, "label": "service"}
+with patch.object(Service, "resource", spec=Owner, spec_set=1, new_callable=dict) as options:
+    assert options == {"spec": Owner, "spec_set": 1}
 assert Service.resource is Owner
+
+
+class CallableResource:
+    def __call__(self, code):
+        pass
+
+
+labels = []
+
+
+class LabeledMock(Mock):
+    def __init__(self, *, label, **kwargs):
+        labels.append(label)
+        kwargs.setdefault("name", "named-instance")
+        super().__init__(**kwargs)
+
+
+Service.resource = CallableResource
+with patch.object(Service, "resource", spec=True, new_callable=LabeledMock, label="resource") as factory:
+    instance = factory()
+    instance.return_value = "done"
+    assert instance(7) == "done"
+    assert factory.mock_calls == [call(), call()(7)]
+assert labels == ["resource", "resource"]
+assert Service.resource is CallableResource
+Service.resource = Owner
+
+named = Mock(name="independent")
+parent = Mock(return_value=named)
+assert parent() is named
+named(3)
+assert parent.mock_calls == [call()]
 
 manual = patch.object(Service, "resource", spec_set=True)
 with manual as factory:

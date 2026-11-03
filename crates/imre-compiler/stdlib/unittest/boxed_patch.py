@@ -128,8 +128,10 @@ class _patch:
                     factory = NonCallableMagicMock
 
         options = {}
-        if effective_spec is not None:
-            options['spec' if spec_set is None else 'spec_set'] = effective_spec
+        if spec is not None:
+            options['spec'] = spec
+        if spec_set is not None:
+            options['spec_set'] = spec_set
         if isinstance(factory, type) and issubclass(factory, NonCallableMock):
             options['name'] = self.attribute
         options.update(self.mock_kwargs)
@@ -139,7 +141,7 @@ class _patch:
             if not is_names and not _instance_callable(effective_spec):
                 factory = NonCallableMagicMock
             options.pop('name')
-            replacement.return_value = factory(**options)
+            replacement.return_value = factory(_new_parent=replacement, _new_name='()', **options)
         return replacement
 
     def __enter__(self):
