@@ -1,3 +1,6 @@
+from contextlib import redirect_stderr
+from importlib.machinery import ModuleSpec
+
 import _warnings
 import sys
 import warnings
@@ -57,3 +60,38 @@ def current():
             assert error is message
         else:
             raise AssertionError("error filter did not raise the supplied warning")
+
+    check_fallback_writer()
+
+
+def check_fallback_writer():
+    class Loader:
+        def get_source(self, name):
+            return "  from_loader\n"
+
+    class Writer:
+        def __init__(self, fail):
+            self.calls = []
+            self.fail = fail
+
+        def write(self, text):
+            self.calls.append(text)
+            if self.fail and text == "  from_loader":
+                raise OSError("cannot write source")
+
+    spec = ModuleSpec("example", Loader())
+    module_globals = {"__name__": spec.name, "__spec__": spec}
+    fields = ["<example>", ":1: ", "UserWarning", ": ", "message", "\n", "  from_loader"]
+    with warnings.catch_warnings():
+        warnings.simplefilter("always", UserWarning)
+        hook = warnings._showwarnmsg
+        try:
+            del warnings._showwarnmsg
+            for fail in (False, True):
+                writer = Writer(fail)
+                with redirect_stderr(writer):
+                    assert warnings.warn_explicit("message", UserWarning, "<example>", 1,
+                                                  module_globals=module_globals) is None
+                assert writer.calls == (fields if fail else fields + ["\n"])
+        finally:
+            warnings._showwarnmsg = hook

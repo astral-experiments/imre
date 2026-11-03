@@ -144,6 +144,38 @@ fn prepare(ctx: &mut Context, values: &[Id]) -> Result<Id> {
     Ok(ctx.alloc(Value::Tuple(vec![owner, fds])))
 }
 
+fn extra_group_ids(ctx: &mut Context, gids: Id) -> Result<Option<Vec<libc::gid_t>>> {
+    if gids == NONE {
+        return Ok(None);
+    }
+    if !ctx.builtin_slot_accepts(gids, "list") {
+        return Err(Error::new("TypeError", "setgroups argument must be a list"));
+    }
+    let count = ctx.sequence_len(gids)?;
+    unsafe extern "C" {
+        fn imre_platform_max_groups() -> usize;
+    }
+    // SAFETY: this function returns the limit from the target's C headers.
+    if count > unsafe { imre_platform_max_groups() } {
+        return Err(Error::new("ValueError", "too many extra_groups"));
+    }
+    let mut groups = Vec::new();
+    groups
+        .try_reserve_exact(count)
+        .map_err(|_| Error::new("MemoryError", ""))?;
+    for i in 0..count {
+        let index = ctx.int(i as i64);
+        let value = ctx.get_item(gids, index)?;
+        if !ctx.builtin_slot_accepts(value, "int") {
+            return Err(Error::new("TypeError", "extra_groups must be integers"));
+        }
+        let gid = os::owner_id(ctx, value, true)
+            .map_err(|_| Error::new("ValueError", "invalid group id"))?;
+        groups.push(gid as libc::gid_t);
+    }
+    Ok(Some(groups))
+}
+
 fn launch(ctx: &mut Context, values: &[Id]) -> Result<Id> {
     let &[
         owner,
@@ -158,6 +190,7 @@ fn launch(ctx: &mut Context, values: &[Id]) -> Result<Id> {
         process_group,
         umask,
         pass_fds,
+        gids,
     ] = values
     else {
         return Err(Error::new("TypeError", "invalid Popen launch operands"));
@@ -182,6 +215,7 @@ fn launch(ctx: &mut Context, values: &[Id]) -> Result<Id> {
     let probe = executable != NONE
         || start_new_session != FALSE
         || !default_group
+        || gids != NONE
         || !default_umask
         || !default_fds
         || (streams.iter().any(|(mode, _)| *mode == 1) && bufsize.as_small() != Some(-1));
@@ -263,6 +297,9 @@ fn launch(ctx: &mut Context, values: &[Id]) -> Result<Id> {
         let inherited = ctx.int(-1);
         direct = Some(ctx.checked_equal(process_group, inherited)?);
     }
+    if direct == Some(true) && gids != NONE {
+        direct = Some(false);
+    }
     if direct == Some(true) && !default_umask {
         let zero = ctx.int(0);
         let negative = ctx.binary("<", umask, zero)?;
@@ -330,6 +367,13 @@ fn launch(ctx: &mut Context, values: &[Id]) -> Result<Id> {
             BoxedPopen::push_pass_fd(&mut keep, &ctx.as_int(fd)?)?;
         }
     }
+    // A supplementary-group launch must validate executable candidates before argv and gids.
+    if gids != NONE
+        && (program_bytes.contains(&0)
+            || search_path.as_ref().is_some_and(|path| path.contains(&0)))
+    {
+        return Err(Error::new("ValueError", "embedded null byte"));
+    }
     // On the prepared path, argv[0] is converted independently of the executable.
     let (alternate, arguments) = if probe {
         (Some(program_bytes), items.as_slice())
@@ -342,8 +386,18 @@ fn launch(ctx: &mut Context, values: &[Id]) -> Result<Id> {
     }
     if direct == Some(true) {
         child_env = environment(ctx, env, false)?;
+    } else if gids != NONE
+        && child_env.as_ref().is_some_and(|entries| {
+            entries
+                .iter()
+                .any(|(key, value)| key.contains(&0) || value.contains(&0))
+        })
+    {
+        // The fork environment was encoded earlier but is checked after argv, before cwd.
+        return Err(Error::new("ValueError", "embedded null byte"));
     }
     let directory = (cwd != NONE).then(|| path(ctx, cwd, false)).transpose()?;
+    let groups = extra_group_ids(ctx, gids)?;
     let child = BoxedPopen::launch(
         argv,
         alternate,
@@ -360,6 +414,7 @@ fn launch(ctx: &mut Context, values: &[Id]) -> Result<Id> {
         group,
         umask,
         keep,
+        groups,
     );
     match child {
         Ok(child) => Ok(ctx.alloc(Value::ProcessHandle {

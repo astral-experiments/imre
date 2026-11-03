@@ -127,7 +127,7 @@ fn fallback(
         write(ctx, file, field)?;
     }
     if let Some(line) = line {
-        let _ = write(ctx, file, line);
+        write(ctx, file, line)?;
         write(ctx, file, newline)?;
     } else if let Some(line) = file_line(ctx, filename, lineno) {
         let indent = ctx.text("  ");

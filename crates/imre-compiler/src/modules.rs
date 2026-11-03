@@ -328,7 +328,9 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
                 "\n",
                 include_str!("../stdlib/contextlib_contextmanager.py"),
                 "\n",
-                include_str!("../stdlib/contextlib_suppress.py")
+                include_str!("../stdlib/contextlib_suppress.py"),
+                "\n",
+                include_str!("../stdlib/contextlib_exports.py")
             ),
         )),
         "_imre_socketserver_poll" => Some((
@@ -1316,12 +1318,10 @@ impl IntrinsicModule {
             (Self::Ast, "iter_fields") => Intrinsic::ObjectRuntimeExport("ast.iter_fields"),
             (Self::Ast, "NodeVisitor") => Intrinsic::ObjectRuntimeExport("ast.NodeVisitor"),
             (Self::Ast, "NodeTransformer") => Intrinsic::ObjectRuntimeExport("ast.NodeTransformer"),
-            (Self::Ast, "Import") => Intrinsic::ObjectRuntimeExport("ast.Import"),
-            (Self::Ast, "ImportFrom") => Intrinsic::ObjectRuntimeExport("ast.ImportFrom"),
-            (Self::Ast, "alias") => Intrinsic::ObjectRuntimeExport("ast.alias"),
-            (Self::Ast, "TemplateStr") => Intrinsic::ObjectRuntimeExport("ast.TemplateStr"),
-            (Self::Ast, "Interpolation") => Intrinsic::ObjectRuntimeExport("ast.Interpolation"),
             (Self::Ast, "literal_eval") => Intrinsic::ObjectRuntimeExport("ast.literal_eval"),
+            (Self::Ast, name) => {
+                Intrinsic::ObjectRuntimeExport(imre_ast::python_nodes::find(name)?.qualified_name)
+            }
             (Self::Gc, "collect") => Intrinsic::ObjectRuntimeExport("gc.collect"),
             (Self::Gc, "disable") => Intrinsic::ObjectRuntimeExport("gc.disable"),
             (Self::Gc, "enable") => Intrinsic::ObjectRuntimeExport("gc.enable"),
@@ -1731,6 +1731,7 @@ impl IntrinsicModule {
             (Self::Inspect, "iscoroutinefunction") => Intrinsic::InspectCoroutine { mark: false },
             (Self::Inspect, "markcoroutinefunction") => Intrinsic::InspectCoroutine { mark: true },
             (Self::Inspect, "_sentinel") => Intrinsic::InspectSentinel,
+            (Self::Contextlib, "__all__") => Intrinsic::ObjectRuntimeExport("contextlib.__all__"),
             (Self::Contextlib, "contextmanager") => Intrinsic::ContextManager,
             (Self::Contextlib, "asynccontextmanager") => {
                 Intrinsic::ObjectRuntimeExport("contextlib.asynccontextmanager")
@@ -2736,6 +2737,7 @@ impl IntrinsicModule {
             (Self::Operator, "itemgetter") => Intrinsic::ObjectRuntimeExport("operator.itemgetter"),
             (Self::Operator, "length_hint") => Intrinsic::LengthHint,
             (Self::Math, "copysign") => Intrinsic::ObjectRuntimeExport("math.copysign"),
+            (Self::Math, "isnan") => Intrinsic::ObjectRuntimeExport("math.isnan"),
             (Self::Math, "isqrt") => Intrinsic::ObjectRuntimeExport("math.isqrt"),
             (Self::Math, "prod") => Intrinsic::MathProd,
             (Self::Copy, "copy") => Intrinsic::ShallowCopy,

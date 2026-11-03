@@ -1307,6 +1307,25 @@ def main():
         assert text_close.returncode == 0, text_close.stderr
         assert (text_close.stdout, text_close.stderr) == (expected.stdout, expected.stderr)
 
+        command = (
+            "import warnings\n"
+            "def warn():\n"
+            "    label = 'moved'; warnings.warn(label, DeprecationWarning)\n"
+            "warn()\n"
+        )
+        dynamic = (
+            "import sys; sys.path.append('.')\n"
+            "namespace = {}\n"
+            "exec(\"def unrelated():\\n    raise ValueError('dynamic')\", namespace)\n"
+            "namespace['unrelated']()\n"
+        )
+        form_feed = "import warnings\n# ignored\fmiddle\nwarnings.warn('failed')"
+        for source in (command, dynamic, form_feed):
+            expected = run(sys.executable, "-Werror", "-c", source)
+            actual = run(imre, "-Werror", "-c", source)
+            assert expected.returncode == actual.returncode == 1
+            assert actual.stderr == expected.stderr, (expected.stderr, actual.stderr)
+
         chained = root / "chained.py"
         chained.write_text(
             "import sys\n"
@@ -1647,6 +1666,15 @@ def main():
             "print(date.__module__, datetime.__qualname__, timedelta.__module__)\n"
         )
         compare("-IB", names, native_args=("run", names, "--quiet"))
+
+        namespace = root / "datetime_class_namespace.py"
+        for source in (
+            "from datetime import date\nprint(date.__dict__['min'] is date.min)",
+            "from datetime import time as T\nprint(vars(T)['max'] is T.max)",
+            "import datetime as dt\ncls = dt.timedelta\nprint(vars(cls)['resolution'] is cls.resolution)",
+        ):
+            namespace.write_text(source + "\n")
+            compare("-IB", namespace, native_args=("run", namespace, "--quiet"))
 
         date_isoformat = root / "date_isoformat.py"
         for body in (
@@ -2765,12 +2793,18 @@ for name in ("md4", "ripemd160"):
                 native_args=("run", open_fixture, *import_flags, "--quiet"),
                 native_timeout=300,
             )
+        compare(
+            "-B", "-c",
+            "from ast import BinOp, ClassDef\nimport ast\n"
+            "assert BinOp is ast.BinOp and ClassDef is ast.ClassDef\n",
+        )
         for name in ("boxed_unittest_mock_any.py", "boxed_unittest_mock_side_effect.py", "boxed_unittest_mock_call.py"):
             fixture = fixtures / name
             compare("-IB", fixture, native_args=("run", fixture, "--quiet"))
             compare("-IB", fixture, native_args=("run", fixture, "--runtime-imports", "--quiet"))
         for fixture in (
             "boxed_ast.py",
+            "boxed_ast_compound.py",
             "boxed_ast_encoded_source.py",
             "boxed_ast_visitors.py",
             "boxed_ast_literal_eval.py",

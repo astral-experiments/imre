@@ -500,7 +500,8 @@ fn from_bytes(ctx: &mut Context, receiver: Id, input: Id) -> Result<Id> {
             ));
         }
         if let Some((source, range)) = ctx.contiguous_byte_span(input, false)?
-            && let Some((source, Value::Array(target))) = ctx.heap.source_and_target(source, receiver)
+            && let Some((source, Value::Array(target))) =
+                ctx.heap.source_and_target(source, receiver)
         {
             let data = match source {
                 Value::Bytes(data) | Value::ByteArray(data) => data.as_slice(),

@@ -378,8 +378,6 @@ impl Context {
                         | weakref::PROXY_TYPE
                         | weakref::REFERENCE_TYPE
                 ) || (kind == super::deque::CLASS && super::deque::owns(name))
-                    || stdlib::datetime::members(kind)
-                    .is_some_and(|members| members.owns(name))
                     || (kind == stdlib::fixed_structseq::SCHED_PARAM
                         && matches!(name, "__reduce__" | "__replace__"))
                     || (kind == "function" && name == "__call__")

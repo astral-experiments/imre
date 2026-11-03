@@ -164,6 +164,8 @@ def test_tzinfo_instance_layout():
 
 
 def test_class_constants():
+    from types import MappingProxyType
+
     for cls, smallest, largest, step in (
         (date, date(1, 1, 1), date(9999, 12, 31), timedelta(days=1)),
         (dt, dt(1, 1, 1), dt(9999, 12, 31, 23, 59, 59, 999999), timedelta(microseconds=1)),
@@ -174,12 +176,18 @@ def test_class_constants():
         assert (cls.min, cls.max, cls.resolution) == (smallest, largest, step)
         assert smallest.min is cls.min and largest.max is cls.max
         assert smallest.resolution is cls.resolution
+        namespace = vars(cls)
+        assert type(namespace) is MappingProxyType
+        assert namespace["min"] is cls.min and namespace["max"] is cls.max
+        assert namespace["resolution"] is cls.resolution
     limit = timedelta(hours=23, minutes=59)
     for edge, offset in [(timezone.min, -limit), (timezone.max, limit)]:
         assert type(edge) is timezone and edge == timezone(offset)
         assert edge.min is timezone.min and edge.max is timezone.max and edge.utc is UTC
     assert UTC.utc is UTC is timezone.utc
+    assert "resolution" not in vars(timezone) and "min" not in vars(tzinfo)
     for constant in ("min", "max", "utc"):
+        assert vars(timezone)[constant] is getattr(timezone, constant)
         try:
             setattr(timezone, constant, None)
         except TypeError:
@@ -197,6 +205,21 @@ def test_class_constants():
 
     class Child(time):
         min = "override"
+    assert Child.__dict__["min"] == "override" and "max" not in vars(Child)
+    assert vars(time)["min"] is time.min
+    assert vars(date)["year"] is date.year and "year" not in vars(dt)
+    assert "year" in dir(dt) and "year" in dir(dt(2000, 1, 1))
+    assert vars(timedelta)["days"] is timedelta.days
+    assert vars(tzinfo)["tzname"] is tzinfo.tzname
+    assert "fromordinal" not in vars(dt)
+    descriptor = date.__dict__["fromordinal"]
+    assert type(descriptor.__get__(None, dt)(1)) is dt
+    try:
+        vars(date)["min"] = None
+    except TypeError:
+        pass
+    else:
+        raise AssertionError("modified the native type dictionary")
     obj = Child()
     assert obj.min == Child.min == "override"
     assert obj.max is Child.max is time.max

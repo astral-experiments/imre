@@ -548,6 +548,7 @@ impl PathSearch {
 struct ChildAttributes {
     new_session: bool,
     group: libc::pid_t,
+    extra_groups: Option<Vec<libc::gid_t>>,
     mask: Option<libc::mode_t>,
     keep: Vec<RawFd>,
 }
@@ -557,6 +558,7 @@ impl Default for ChildAttributes {
         Self {
             new_session: false,
             group: -1,
+            extra_groups: None,
             mask: None,
             keep: Vec::new(),
         }
@@ -663,6 +665,18 @@ impl Launch {
             && unsafe { libc::setpgid(0, attributes.group) } < 0
         {
             return Err(io::Error::last_os_error());
+        }
+        if let Some(groups) = &attributes.extra_groups {
+            let ids = if groups.is_empty() {
+                std::ptr::null()
+            } else {
+                groups.as_ptr()
+            };
+            // SAFETY: this runs in the forked child. The parent validated the count
+            // and allocated the gid_t array; a zero count explicitly clears groups.
+            if unsafe { libc::setgroups(groups.len() as _, ids) } < 0 {
+                return Err(io::Error::last_os_error());
+            }
         }
         if close_fds {
             // SAFETY: the forked child owns its descriptor table.
