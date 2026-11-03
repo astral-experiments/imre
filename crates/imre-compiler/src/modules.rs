@@ -2239,6 +2239,7 @@ impl IntrinsicModule {
             (Self::Operator, "attrgetter") => Intrinsic::AttrGetter,
             (Self::Operator, "itemgetter") => Intrinsic::ObjectRuntimeExport("operator.itemgetter"),
             (Self::Operator, "length_hint") => Intrinsic::LengthHint,
+            (Self::Math, "lcm") => Intrinsic::ScopedObjectExport("math.lcm"),
             (Self::Math, "prod") => Intrinsic::MathProd,
             (Self::Copy, "copy") => Intrinsic::ShallowCopy,
             (Self::Copy, "deepcopy") => Intrinsic::DeepCopy,

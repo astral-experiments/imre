@@ -2,7 +2,7 @@
 
 use num_bigint::BigInt;
 use num_integer::Integer;
-use num_traits::{One, ToPrimitive};
+use num_traits::{One, ToPrimitive, Zero};
 
 use super::{Context, Error, Id, Result, Value};
 use crate::dynamic::builtins;
@@ -20,15 +20,22 @@ pub(super) fn call(
             format!("math.{operation}() takes no keyword arguments"),
         ));
     }
-    if operation == "gcd" {
-        let mut gcd = BigInt::default();
+    if matches!(operation, "gcd" | "lcm") {
+        let mut result = if operation == "gcd" {
+            BigInt::ZERO
+        } else {
+            BigInt::one()
+        };
         for &arg in args {
+            // Later arguments still run __index__ after GCD reaches one or LCM reaches zero.
             let integer = ctx.index_integer(arg)?;
-            if !gcd.is_one() {
-                gcd = gcd.gcd(&integer.big());
+            match operation {
+                "gcd" if !result.is_one() => result = result.gcd(&integer.big()),
+                "lcm" if !result.is_zero() => result = result.lcm(&integer.big()),
+                _ => {}
             }
         }
-        return Ok(ctx.alloc(Value::Int(crate::Int::new(gcd))));
+        return Ok(ctx.alloc(Value::Int(crate::Int::new(result))));
     }
     if operation == "copysign" {
         let &[x, y] = args else {
