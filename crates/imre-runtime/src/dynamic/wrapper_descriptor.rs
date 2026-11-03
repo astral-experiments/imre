@@ -166,7 +166,7 @@ impl BuiltinDescriptor {
                 &["__reduce__", "__replace__"][..],
             )),
             Some((class, attr)) if let Some(layout) = stdlib::os::stat::layout(class) => {
-                Some((layout.class, attr, &["__reduce__"][..]))
+                Some((layout.class, attr, layout.methods()))
             }
             Some((namespace::CLASS, attr)) => {
                 Some((namespace::CLASS, attr, &["__reduce__", "__replace__"][..]))
@@ -686,6 +686,8 @@ impl BuiltinDescriptor {
                     ("__getstate__" | "__reduce__" | "__reduce_ex__", "__doc__") if self.owner == "object" => "Helper for pickle.",
                     ("__getstate__" | "__reduce__", _) if self.owner == "object" => "($self, /)",
                     ("__reduce_ex__", _) if self.owner == "object" => "($self, protocol, /)",
+                    ("__replace__", "__doc__") if self.owner == stdlib::os::stat::CLASS => "Return a copy of the structure with new values for the specified fields.",
+                    ("__replace__", _) if self.owner == stdlib::os::stat::CLASS => "($self, /, **changes)",
                     ("__reduce__", "__doc__") if stdlib::os::stat::layout(self.owner).is_some() => return Some(NONE),
                     ("__reduce__", _) if stdlib::os::stat::layout(self.owner).is_some() => "($self, /)",
                     ("count", "__doc__") if self.owner == "tuple" => "Return number of occurrences of value.",

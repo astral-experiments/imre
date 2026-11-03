@@ -686,10 +686,12 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         }
         Value::ItemGetter(_) if attr == "__reduce__" => "operator.itemgetter",
         Value::NamedTuple {
-            class:
-                Some(owner @ (super::stdlib::os::stat::CLASS | super::stdlib::os::stat::VFS_CLASS)),
-            ..
-        } if attr == "__reduce__" => owner,
+            class: Some(owner), ..
+        } if let Some(layout) = super::stdlib::os::stat::layout(owner)
+            && layout.methods().contains(&attr) =>
+        {
+            owner
+        }
         Value::Property(_) if super::property::METHODS.contains(&attr) => "property",
         Value::ClassMethod { .. } | Value::StaticMethod { .. }
             if matches!(attr, "__reduce__" | "__reduce_ex__") =>

@@ -73,6 +73,14 @@ impl Layout {
         self.class.trim_start_matches("os.")
     }
 
+    pub(in crate::dynamic) fn methods(&self) -> &'static [&'static str] {
+        if self.class == CLASS {
+            &["__reduce__", "__replace__"]
+        } else {
+            &["__reduce__"]
+        }
+    }
+
     pub(in crate::dynamic) fn match_fields(&self) -> &'static [&'static str] {
         &self.fields[..self.fields.len() - self.unnamed]
     }
@@ -179,10 +187,11 @@ pub(in crate::dynamic::stdlib) fn construct(
     Ok(wrap(ctx, layout, values, extras))
 }
 
-/// Rebuild the struct sequence from its visible tuple and all stored named-only fields.
-pub(in crate::dynamic::stdlib) fn reduce(
+/// Call a struct sequence method on an instance of its declaring class.
+pub(in crate::dynamic::stdlib) fn method(
     ctx: &mut Context,
     layout: &Layout,
+    method: &str,
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
@@ -191,7 +200,7 @@ pub(in crate::dynamic::stdlib) fn reduce(
         return Err(Error::new(
             "TypeError",
             format!(
-                "unbound method {}.__reduce__() needs an argument",
+                "unbound method {}.{method}() needs an argument",
                 layout.name()
             ),
         ));
@@ -207,12 +216,25 @@ pub(in crate::dynamic::stdlib) fn reduce(
             return Err(Error::new(
                 "TypeError",
                 format!(
-                    "descriptor '__reduce__' for '{class}' objects doesn't apply to a '{}' object",
+                    "descriptor '{method}' for '{class}' objects doesn't apply to a '{}' object",
                     ctx.type_name(receiver)
                 ),
             ));
         }
     };
+    if method == "__replace__" {
+        if !rest.is_empty() {
+            return Err(Error::new(
+                "TypeError",
+                "__replace__() takes no positional arguments",
+            ));
+        }
+        // The integer timestamp slots in os.stat_result have no names for replacement.
+        return Err(Error::new(
+            "TypeError",
+            "__replace__() is not supported for os.stat_result because it has unnamed field(s)",
+        ));
+    }
     if !kwargs.is_empty() {
         return Err(Error::new(
             "TypeError",

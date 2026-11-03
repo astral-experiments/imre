@@ -3306,7 +3306,9 @@ impl Context {
             }
             Value::Native(ref class) if let Some(layout) = stdlib::os::stat::layout(class) => {
                 match name {
-                    "__reduce__" => return Ok(self.builtin(&format!("{class}.__reduce__"))),
+                    method if layout.methods().contains(&method) => {
+                        return Ok(self.builtin(&format!("{class}.{method}")));
+                    }
                     field if let Some(id) = stdlib::os::stat::member(self, layout, field) => {
                         return Ok(id);
                     }
