@@ -2496,7 +2496,7 @@ pub(super) fn call(
             super::method_decorator::static_method(ctx, *callable)
         }
         "property" => super::property::construct(ctx, args, kwargs),
-        "open" => super::stdlib::io::open(ctx, args, kwargs),
+        "open" => super::stdlib::io::open(ctx, args, kwargs, None),
         "__import__" => {
             let [module, globals, _, fromlist, level] = bind(
                 name,
