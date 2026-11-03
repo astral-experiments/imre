@@ -18,6 +18,8 @@ def _invalid() -> str:
 
 
 def _digits(text: str) -> str:
+    if type(text) is str and text.isascii() and text.isdigit():
+        return text
     digits: list[str] = []
     for char in text:
         try:
