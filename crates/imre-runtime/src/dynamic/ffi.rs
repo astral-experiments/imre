@@ -1826,11 +1826,17 @@ impl Context {
         }
     }
 
-    /// A rooted standard input chain keeps its finalizers alive across operand releases.
+    /// Skip the sweep only while surviving roots keep every finalizer and weak edge alive.
     fn can_skip_finalizer_sweep(&self) -> bool {
-        self.heap.tracked_finalizer_count() <= 3
-            && !self.heap.has_weak_values
+        use super::stdlib::datetime::isocalendar::MODULE_REF;
+        // Each text stream has at most three owners: the wrapper, buffer and raw file.
+        self.heap.tracked_finalizer_count() <= 6
             && !self.heap.full_collection_active()
+            && (!self.heap.has_weak_values
+                || self.heap.weak_module_kept_by(
+                    self.modules,
+                    self.builtins.get(MODULE_REF).copied().unwrap_or(NONE),
+                ))
             && super::stdlib::io::rooted_input_chain(self)
                 .is_some_and(|input| self.heap.finalizers_kept_by(&input))
     }

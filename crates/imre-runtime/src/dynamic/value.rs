@@ -3900,6 +3900,24 @@ impl Heap {
         })
     }
 
+    /// Check the current frame binding and native edges from a text wrapper to its raw file.
+    fn frame_keeps_stream_finalizers(&self, stdin: Option<&[Id; 3]>, writers: &[Id]) -> bool {
+        self.ordinary_finalizers.iter().any(|&owner| {
+            !stdin.is_some_and(|input| input.contains(&owner))
+                && super::stdlib::io::text_descriptor_chain(self, owner).is_some_and(|chain| {
+                    self.ordinary_finalizers.iter().chain(writers).all(|id| {
+                        chain.contains(id) || stdin.is_some_and(|input| input.contains(id))
+                    }) && (self.bound_in_active_frame(owner)
+                        || self.frames.iter().any(|frame| {
+                            // Materialized scopes can retain additional native local names.
+                            matches!(self.get(frame.scope), Value::Scope(scope)
+                                    if scope.namespace.is_some()
+                                        && scope.names.values().any(|&bound| bound == owner))
+                        }))
+                })
+        })
+    }
+
     pub(super) fn acyclic_finalizer(
         &self,
         roots: impl Iterator<Item = Id>,
@@ -3919,24 +3937,7 @@ impl Heap {
         if remaining == 0 {
             return Ok(None);
         }
-        // Closing a bound text stream can leave its wrapper, buffer and raw file alive.
-        // Re-read both native edges and the frame binding before ruling out finalization.
-        if remaining <= 3
-            && self.ordinary_finalizers.iter().any(|&owner| {
-                !stdin.is_some_and(|input| input.contains(&owner))
-                    && super::stdlib::io::text_descriptor_chain(self, owner).is_some_and(|chain| {
-                        self.ordinary_finalizers.iter().all(|id| {
-                            chain.contains(id) || stdin.is_some_and(|input| input.contains(id))
-                        }) && (self.bound_in_active_frame(owner)
-                            || self.frames.iter().any(|frame| {
-                                // Materialized scopes can retain additional native local names.
-                                matches!(self.get(frame.scope), Value::Scope(scope)
-                                    if scope.namespace.is_some()
-                                        && scope.names.values().any(|&bound| bound == owner))
-                            }))
-                    })
-            })
-        {
+        if remaining <= 3 && self.frame_keeps_stream_finalizers(stdin, &[]) {
             return Ok(None);
         }
         // A suspended caller keeps earlier operands live across a nested call.
@@ -4062,13 +4063,30 @@ impl Heap {
             .any(|&id| id != retained && !self.bound_in_active_frame(id))
     }
 
-    /// Return whether a buffered file could need collecting at a target boundary.
-    /// A strong path to every tracked owner makes an operand-release sweep unnecessary.
-    pub(super) fn finalizers_kept_by(&self, roots: &[Id]) -> bool {
+    /// A global input stream and a frame-owned stream can keep all registered owners alive.
+    pub(super) fn finalizers_kept_by(&self, input: &[Id; 3]) -> bool {
         self.file_writers
             .iter()
             .chain(&self.ordinary_finalizers)
-            .all(|owner| roots.contains(owner))
+            .all(|owner| input.contains(owner))
+            || self.frame_keeps_stream_finalizers(Some(input), &self.file_writers)
+    }
+
+    /// A single interpreter-owned weak reference and its registered module both survive.
+    /// A user-owned reference can itself disappear even while its target stays alive.
+    pub(super) fn weak_module_kept_by(&self, modules: Id, reference: Id) -> bool {
+        if self.weak.len() != 1 {
+            return self.weak.is_empty();
+        }
+        let Value::Weak(weak) = self.get(reference) else {
+            return false;
+        };
+        weak.target.is_some_and(|target| {
+            self.weak_references(target) == [reference]
+                && self
+                    .dict_entries(modules)
+                    .is_some_and(|entries| entries.iter().any(|&(_, module)| module == target))
+        })
     }
 
     pub(super) fn tracks_finalizers(&self) -> bool {
