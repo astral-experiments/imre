@@ -19,13 +19,13 @@ unsafe extern "C" {
     fn imre_ssl_protocol_mask(runtime_version: c_ulong) -> c_int;
 }
 
-fn capabilities(version: u64) -> Option<u32> {
+fn capabilities(version: c_ulong) -> Option<u32> {
     // SAFETY: the shim reads only its build-time OpenSSL header constants. A
     // missing header or a runtime/header version mismatch returns -1.
-    u32::try_from(unsafe { imre_ssl_protocol_mask(version as c_ulong) }).ok()
+    u32::try_from(unsafe { imre_ssl_protocol_mask(version) }).ok()
 }
 
-pub(super) fn install(ctx: &mut Vm, scope: Id, runtime_version: u64) {
+pub(super) fn install(ctx: &mut Vm, scope: Id, runtime_version: c_ulong) {
     let capabilities = capabilities(runtime_version);
     let min = ctx.int(i64::from(MINIMUM));
     let max = ctx.int(i64::from(MAXIMUM));
@@ -74,7 +74,7 @@ impl Context {
                 // OpenSSL has no "highest minimum" or "lowest maximum" API.
                 // Use the available versions, just as CPython does from its headers.
                 // SAFETY: OpenSSL_version_num queries the loaded library.
-                let number = unsafe { (self.api.OpenSSL_version_num)() } as u64;
+                let number = unsafe { (self.api.OpenSSL_version_num)() };
                 let mask = capabilities(number)
                     .filter(|mask| *mask != 0)
                     .ok_or_else(|| {

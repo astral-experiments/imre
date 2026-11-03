@@ -138,14 +138,15 @@ pub(in crate::dynamic) fn install(ctx: &mut Context, module: Id, scope: Id) -> R
     install_ssl_error(ctx, module, scope)?;
     super::bio::install(ctx, module, scope)?;
     // SAFETY: both functions read constants from the process-lifetime loaded provider.
-    let (version, number) = unsafe {
+    let (version, runtime_version) = unsafe {
         (
             CStr::from_ptr((api.OpenSSL_version)(0)),
-            (api.OpenSSL_version_num)() as i64,
+            (api.OpenSSL_version_num)(),
         )
     };
     let version = ctx.text(version.to_string_lossy().into_owned());
     ctx.bind(scope, "OPENSSL_VERSION", version);
+    let number = runtime_version as i64;
     let number_value = ctx.int(number);
     ctx.bind(scope, "OPENSSL_VERSION_NUMBER", number_value);
     // CPython keeps the historical major/minor/fix/patch/status bit layout for OpenSSL 3.
@@ -188,15 +189,19 @@ pub(in crate::dynamic) fn install(ctx: &mut Context, module: Id, scope: Id) -> R
     let flag = ctx.int(i64::from(super::HOSTFLAG_NEVER_CHECK_SUBJECT));
     ctx.bind(scope, "HOSTFLAG_NEVER_CHECK_SUBJECT", flag);
     let mut count = 0;
-    // SAFETY: the header shim returns a nonempty static table with count entries.
-    let options = unsafe { imre_ssl_options(number as std::ffi::c_ulong, &mut count) };
-    for option in unsafe { std::slice::from_raw_parts(options, count) } {
+    // SAFETY: the header shim writes count and returns a static array of that many
+    // initialized entries, including a nonempty fallback on a version mismatch.
+    let options = unsafe {
+        let table = imre_ssl_options(runtime_version, &mut count);
+        std::slice::from_raw_parts(table, count)
+    };
+    for option in options {
         // SAFETY: each name is an ASCII string literal owned by the static table.
         let name = unsafe { CStr::from_ptr(option.name) }.to_str().unwrap();
         let value = ctx.alloc(Value::Int(crate::Int::new(option.value.into())));
         ctx.bind(scope, name, value);
     }
-    super::versions::install(ctx, scope, number as u64);
+    super::versions::install(ctx, scope, runtime_version);
     Ok(())
 }
 

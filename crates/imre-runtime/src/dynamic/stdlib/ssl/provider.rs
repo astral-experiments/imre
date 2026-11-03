@@ -358,8 +358,10 @@ impl Api {
         if code != 0 {
             // SAFETY: OpenSSL documents this as a static string for every result code.
             let msg = unsafe { CStr::from_ptr((self.X509_verify_cert_error_string)(code)) };
+            #[allow(clippy::useless_conversion, reason = "OpenSSL returns a C long")]
+            let code = i64::from(code);
             return Err(Failure::Verify {
-                code: code as i64,
+                code,
                 message: msg.to_string_lossy().into_owned(),
             });
         }
@@ -440,12 +442,12 @@ impl Context {
     pub(super) fn new(protocol: Protocol) -> Result<Self, Failure> {
         let api = api().ok_or_else(|| Failure::Other("OpenSSL 3 TLS is unavailable".into()))?;
         api.clear();
-        // SAFETY: the selected method is a process-lifetime constant in this provider.
         let method = match protocol {
             Protocol::Tls => api.TLS_method,
             Protocol::Client => api.TLS_client_method,
             Protocol::Server => api.TLS_server_method,
         };
+        // SAFETY: each selector returns a process-lifetime SSL_METHOD from this same provider.
         let handle = NonNull::new(unsafe { (api.SSL_CTX_new)(method()) })
             .ok_or_else(|| api.error("SSL_CTX_new"))?;
         let mut ctx = Self {
