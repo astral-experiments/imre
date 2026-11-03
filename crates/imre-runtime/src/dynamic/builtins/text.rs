@@ -2440,7 +2440,7 @@ pub(super) fn method(
         "islower" => Some(|text| crate::objects::python_islower(text.chars())),
         "isspace" => Some(crate::objects::python_isspace),
         "istitle" => Some(|text| crate::objects::python_istitle(text.chars())),
-        "isupper" => Some(crate::objects::python_isupper),
+        "isupper" => Some(|text| crate::objects::python_isupper(text.chars())),
         _ => None,
     };
     let mapping = match name {
@@ -2477,7 +2477,7 @@ pub(super) fn method(
     if let Some(predicate) = predicate {
         if matches!(
             name,
-            "isalnum" | "isascii" | "isalpha" | "isdigit" | "isidentifier"
+            "isalnum" | "isascii" | "isalpha" | "isdigit" | "isidentifier" | "isspace"
         ) && matches!(
             ctx.heap.get(ctx.scalar_value(receiver)),
             Value::SurrogateStr(_)
@@ -2485,13 +2485,16 @@ pub(super) fn method(
             // This representation always contains at least one non-ASCII surrogate.
             return Ok(boolean(false));
         }
-        if name == "islower"
+        if matches!(name, "islower" | "isupper")
             && let Value::SurrogateStr(points) = ctx.heap.get(ctx.scalar_value(receiver))
         {
             // Unpaired surrogates are uncased, so only scalar values contribute.
-            return Ok(boolean(crate::objects::python_islower(
-                points.iter().copied().filter_map(char::from_u32),
-            )));
+            let chars = points.iter().copied().filter_map(char::from_u32);
+            return Ok(boolean(if name == "islower" {
+                crate::objects::python_islower(chars)
+            } else {
+                crate::objects::python_isupper(chars)
+            }));
         }
         if name == "istitle"
             && let Value::SurrogateStr(points) = ctx.heap.get(ctx.scalar_value(receiver))
