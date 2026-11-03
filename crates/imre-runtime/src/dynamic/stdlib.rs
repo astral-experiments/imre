@@ -489,7 +489,8 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("types", "GenericAlias") => ctx.builtin("types.GenericAlias"),
         (
             "_typing",
-            "_get_alias_kind"
+            "_clear_alias_caches"
+            | "_get_alias_kind"
             | "_eval_type_expression"
             | "_validate_forward_ref"
             | "_install_generic_alias_iter",

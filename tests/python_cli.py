@@ -3140,6 +3140,7 @@ for name in ("md4", "ripemd160"):
             "boxed_typing_typevar_members.py",
             "boxed_typing_parameter_collector.py",
             "boxed_typing_alias_namespaces.py",
+            "boxed_typing_cache_cleanup.py",
             "boxed_abc_callable_alias.py",
             "boxed_typing_variadic.py",
             "boxed_typing_tuple.py",

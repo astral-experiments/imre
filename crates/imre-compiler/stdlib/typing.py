@@ -1498,6 +1498,15 @@ class _Final:
             raise TypeError("Cannot subclass special typing classes")
 
 
+_cleanups = [_typing_runtime._clear_alias_caches]
+
+
+def _typing_cache(func):
+    cached = lru_cache(func)
+    _cleanups.append(cached.cache_clear)
+    return cached
+
+
 class _NotIterable:
     __module__ = __name__
     __slots__ = ()
@@ -1542,7 +1551,7 @@ class _SpecialForm(_Final, _NotIterable, _root=True):
     def __subclasscheck__(self, cls):
         raise TypeError(f"{repr(self)} cannot be used with issubclass()")
 
-    @lru_cache
+    @_typing_cache
     def _cached_getitem(self, parameters):
         return self._getitem(self, parameters)
 
@@ -2135,7 +2144,7 @@ class _SpecialGenericAlias(_NotIterable):
             raise TypeError(f"Too {count} arguments for {self}; actual {len(args)}, expected {expected}")
         return self.copy_with(args)
 
-    @lru_cache
+    @_typing_cache
     def _cached_getitem(self, params):
         return self._getitem(params)
 
@@ -2429,7 +2438,7 @@ def _variadic_class_getitem_uncached(cls, args, constructor):
     return constructor(cls, flattened)
 
 
-_cached_variadic_class_getitem = lru_cache(_variadic_class_getitem_uncached)
+_cached_variadic_class_getitem = _typing_cache(_variadic_class_getitem_uncached)
 
 
 def _variadic_class_getitem(cls, args, constructor):
@@ -2501,7 +2510,7 @@ def _specialize_generic_alias_uncached(alias, args):
     return constructor(alias.__origin__, args, name=alias._name, inst=alias._inst)
 
 
-_cached_generic_specialization = lru_cache(_specialize_generic_alias_uncached)
+_cached_generic_specialization = _typing_cache(_specialize_generic_alias_uncached)
 
 
 def _specialize_generic_alias(alias, args):
@@ -2515,7 +2524,7 @@ def _specialize_generic_alias(alias, args):
 class _TypedCacheSpecialForm(_SpecialForm, _root=True):
     __module__ = __name__
 
-    @lru_cache
+    @_typing_cache
     def _typed_getitem(self, parameters, types):
         # As in _tp_cache(typed=True), only the immediate argument types are keys.
         return self._getitem(self, *parameters)
