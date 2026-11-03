@@ -149,6 +149,7 @@ impl Checker<'_> {
                 self.types.optional(handler),
                 vec![parameter("name", Type::Str, None)],
             ),
+            Intrinsic::HandlerNames => (Log::HandlerNames, Type::FrozenStrings, vec![]),
             Intrinsic::FileEncodingUsesUtf8 => (Log::FileEncodingUsesUtf8, Type::Bool, vec![]),
             Intrinsic::PrintActiveException => (Log::PrintActiveException, Type::None, vec![]),
             _ => unreachable!(),

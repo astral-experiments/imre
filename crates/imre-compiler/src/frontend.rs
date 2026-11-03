@@ -9589,6 +9589,7 @@ impl<'a> Checker<'a> {
             Some(Binding::Intrinsic(
                 op @ (Intrinsic::HandlerRename
                 | Intrinsic::HandlerLookup
+                | Intrinsic::HandlerNames
                 | Intrinsic::FileEncodingUsesUtf8
                 | Intrinsic::HandlerFallback
                 | Intrinsic::PrintActiveException),

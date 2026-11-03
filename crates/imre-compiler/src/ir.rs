@@ -2108,6 +2108,7 @@ pub(crate) enum LogOperation {
     LockExit,
     LockReset,
     HandlerLookup,
+    HandlerNames,
     FileEncodingUsesUtf8,
     PrintActiveException,
     New,
