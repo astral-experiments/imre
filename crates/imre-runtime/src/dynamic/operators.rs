@@ -330,10 +330,7 @@ impl Context {
         let number = self.as_int(result).map_err(|_| {
             Error::new(
                 "TypeError",
-                format!(
-                    "{slot} returned non-int (type {})",
-                    self.type_name(result)
-                ),
+                format!("{slot} returned non-int (type {})", self.type_name(result)),
             )
         })?;
         if !matches!(self.heap.get(result), Value::Int(_)) {
@@ -2183,7 +2180,8 @@ impl Context {
                                 }
                             }
                             work.push(Part::Text(if callable { "[[" } else { "[" }));
-                            if let Some(name) = alias.name.filter(|_| alias.naming_fields.is_none()) {
+                            if let Some(name) = alias.name.filter(|_| alias.naming_fields.is_none())
+                            {
                                 work.push(Part::Value(name, false));
                                 work.push(Part::Text("typing."));
                             } else {

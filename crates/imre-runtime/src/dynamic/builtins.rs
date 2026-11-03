@@ -412,8 +412,24 @@ pub(super) const DICT_METHODS: &[&str] = &[
 ];
 
 pub(super) const LIST_METHODS: &[&str] = &[
-    "__add__", "__getitem__", "__iadd__", "__init__", "__iter__", "__len__", "__repr__", "append", "clear",
-    "copy", "count", "extend", "index", "insert", "pop", "remove", "reverse", "sort",
+    "__add__",
+    "__getitem__",
+    "__iadd__",
+    "__init__",
+    "__iter__",
+    "__len__",
+    "__repr__",
+    "append",
+    "clear",
+    "copy",
+    "count",
+    "extend",
+    "index",
+    "insert",
+    "pop",
+    "remove",
+    "reverse",
+    "sort",
 ];
 
 const FROZENSET_OPERATORS: &[&str] = &[
@@ -1313,7 +1329,10 @@ pub(super) fn call(
 ) -> Result<Id> {
     if name == "method.__reduce__" {
         let method = noargs_method_receiver(ctx, "method", "__reduce__", args, kwargs)?;
-        let Value::Method { callable, receiver, .. } = *ctx.heap.get(method) else {
+        let Value::Method {
+            callable, receiver, ..
+        } = *ctx.heap.get(method)
+        else {
             unreachable!("validated Python method")
         };
         let name = ctx.lookup_attr(callable, "__name__")?;
@@ -1321,7 +1340,11 @@ pub(super) fn call(
     }
     if name == "builtin_function_or_method.__reduce__" {
         let method = noargs_method_receiver(
-            ctx, "builtin_function_or_method", "__reduce__", args, kwargs,
+            ctx,
+            "builtin_function_or_method",
+            "__reduce__",
+            args,
+            kwargs,
         )?;
         return reduce_builtin_method(ctx, method);
     }
@@ -1495,7 +1518,11 @@ pub(super) fn call(
             };
             if owner == "object" {
                 if method != "__ne__" {
-                    return Ok(if method == "__eq__" && receiver == *other { TRUE } else { NOT_IMPLEMENTED });
+                    return Ok(if method == "__eq__" && receiver == *other {
+                        TRUE
+                    } else {
+                        NOT_IMPLEMENTED
+                    });
                 }
                 return ctx.with_slot_depth(
                     "maximum recursion depth exceeded while calling a Python object",
@@ -1563,22 +1590,34 @@ pub(super) fn call(
     }
     if name == "object.__dir__" {
         let [receiver, rest @ ..] = args else {
-            return Err(type_error("unbound method object.__dir__() needs an argument"));
+            return Err(type_error(
+                "unbound method object.__dir__() needs an argument",
+            ));
         };
         if !kwargs.is_empty() {
             return Err(type_error("object.__dir__() takes no keyword arguments"));
         }
         if !rest.is_empty() {
-            return Err(type_error(format!("object.__dir__() takes no arguments ({} given)", rest.len())));
+            return Err(type_error(format!(
+                "object.__dir__() takes no arguments ({} given)",
+                rest.len()
+            )));
         }
         let directory = dir::namespace_directory(ctx, *receiver, true)?;
-        let keys = ctx.dict_entries(directory).unwrap().iter().map(|&(key, _)| key).collect();
+        let keys = ctx
+            .dict_entries(directory)
+            .unwrap()
+            .iter()
+            .map(|&(key, _)| key)
+            .collect();
         return Ok(ctx.alloc(Value::List(keys)));
     }
     if matches!(name, "object.__init_subclass__" | "object.__subclasshook__") {
         let method = name.strip_prefix("object.").unwrap();
         let [class, rest @ ..] = args else {
-            return Err(type_error(format!("descriptor '{method}' of 'object' object needs an argument")));
+            return Err(type_error(format!(
+                "descriptor '{method}' of 'object' object needs an argument"
+            )));
         };
         super::stdlib::datetime::validate_classmethod_receiver(ctx, "object", method, *class)?;
         if !kwargs.is_empty() {
@@ -1592,14 +1631,19 @@ pub(super) fn call(
         }
         if method == "__subclasshook__" {
             if rest.len() != 1 {
-                return Err(type_error(format!("{}.{method}() takes exactly one argument ({} given)", ctx.class_name(*class), rest.len())));
+                return Err(type_error(format!(
+                    "{}.{method}() takes exactly one argument ({} given)",
+                    ctx.class_name(*class),
+                    rest.len()
+                )));
             }
             return Ok(NOT_IMPLEMENTED);
         }
         if !rest.is_empty() {
             return Err(type_error(format!(
                 "{}.__init_subclass__() takes no arguments ({} given)",
-                ctx.class_name(*class), rest.len()
+                ctx.class_name(*class),
+                rest.len()
             )));
         }
         return Ok(NONE);

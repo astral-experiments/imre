@@ -499,7 +499,8 @@ fn raw_pattern(pattern: &str, ascii: bool, flags: i64) -> Option<(String, bool, 
             }
             // The regular backend reads a possessive modifier as another repetition.
             // Ask the Python tokenizer to bind it to its operand.
-            prefer_backtracking |= !in_class && matches!(c, '*' | '+' | '?') && chars.peek() == Some(&'+');
+            prefer_backtracking |=
+                !in_class && matches!(c, '*' | '+' | '?') && chars.peek() == Some(&'+');
             if c == '{' && !in_class {
                 if !imre_regex::starts_counted_repeat(chars.clone()) {
                     prefer_translation = true;
@@ -949,7 +950,9 @@ fn compile_uncached(ctx: &mut Context, id: Id, flags: Option<Id>) -> Result<Id> 
         Err(message) => {
             let may_reference = spelling.windows(3).any(|w| w == b"(?(")
                 || spelling.windows(4).any(|w| w == b"(?P=")
-                || spelling.windows(2).any(|w| w[0] == b'\\' && matches!(w[1], b'1'..=b'9'));
+                || spelling
+                    .windows(2)
+                    .any(|w| w[0] == b'\\' && matches!(w[1], b'1'..=b'9'));
             if may_reference
                 && let Some((msg, offset)) = imre_regex::group_reference_diagnostic(
                     &flags::original_spelling(spelling, bytes),
@@ -963,7 +966,9 @@ fn compile_uncached(ctx: &mut Context, id: Id, flags: Option<Id>) -> Result<Id> 
                 )
             {
                 let original = pattern_spelling(ctx, id, &projections)?;
-                let start = flags::original_spelling(&original[..parsed.skip], bytes).chars().count();
+                let start = flags::original_spelling(&original[..parsed.skip], bytes)
+                    .chars()
+                    .count();
                 return Err(pattern_error_at(ctx, id, msg, Some(start + offset)));
             }
             return Err(pattern_error(ctx, id, flags, message));
@@ -983,12 +988,7 @@ fn compile_uncached(ctx: &mut Context, id: Id, flags: Option<Id>) -> Result<Id> 
         }
     }
     if let Some(bad) = parsed.deferred {
-        return Err(pattern_error_at(
-            ctx,
-            id,
-            bad.error.0,
-            Some(bad.error.1),
-        ));
+        return Err(pattern_error_at(ctx, id, bad.error.0, Some(bad.error.1)));
     }
     let mut pattern = if let Some((plain, _)) = projections {
         // A surrogate inside a leading comment has a different byte width in the
@@ -1143,48 +1143,49 @@ fn prepare(
         Some(pattern) => raw_pattern(pattern, ascii, flags & !VERBOSE),
         None => raw_pattern(&source, ascii, flags),
     };
-    let prepared =
-        if let Some((raw, prefer_translation, prefer_backtracking)) = raw {
-            let original = || {
-                if let Some((msg, _)) = imre_regex::repeat_diagnostic(&source, flags & VERBOSE != 0) {
-                    return Err(msg.to_owned());
-                }
-                let raw = imre_regex::preserve_zero_repeat_groups(raw)?;
-                if flags & IGNORECASE != 0 && !bytes {
-                    build(imre_regex::expand_case(&raw, ascii)?)
-                } else {
-                    build(raw)
-                }
-            };
-            let committed = prefer_backtracking.then(|| backtrack(String::new()).ok()).flatten();
-            match committed {
-                Some((source, Matcher::Lookahead(matcher))) if matcher.total_close_order() => {
-                    Ok((source, Matcher::Lookahead(matcher)))
-                }
-                fallback => {
-                    // Preserve the regular matcher's winning close trace when a repeated
-                    // capture has no fixed syntax order. The committed VM can still
-                    // handle such a pattern when the regular engine cannot compile it.
-                    let regular = if prefer_translation || inline_verbose {
-                        translate(&source)
-                            .and_then(build)
-                            .or_else(|err| {
-                                if fallback.is_some() {
-                                    Err(err)
-                                } else {
-                                    backtrack(err)
-                                }
-                            })
-                            .or_else(|_| original())
-                    } else {
-                        original()
-                    };
-                    regular.or_else(|err| fallback.ok_or(err))
-                }
+    let prepared = if let Some((raw, prefer_translation, prefer_backtracking)) = raw {
+        let original = || {
+            if let Some((msg, _)) = imre_regex::repeat_diagnostic(&source, flags & VERBOSE != 0) {
+                return Err(msg.to_owned());
             }
-        } else {
-            translate(&source).and_then(build)
+            let raw = imre_regex::preserve_zero_repeat_groups(raw)?;
+            if flags & IGNORECASE != 0 && !bytes {
+                build(imre_regex::expand_case(&raw, ascii)?)
+            } else {
+                build(raw)
+            }
         };
+        let committed = prefer_backtracking
+            .then(|| backtrack(String::new()).ok())
+            .flatten();
+        match committed {
+            Some((source, Matcher::Lookahead(matcher))) if matcher.total_close_order() => {
+                Ok((source, Matcher::Lookahead(matcher)))
+            }
+            fallback => {
+                // Preserve the regular matcher's winning close trace when a repeated
+                // capture has no fixed syntax order. The committed VM can still
+                // handle such a pattern when the regular engine cannot compile it.
+                let regular = if prefer_translation || inline_verbose {
+                    translate(&source)
+                        .and_then(build)
+                        .or_else(|err| {
+                            if fallback.is_some() {
+                                Err(err)
+                            } else {
+                                backtrack(err)
+                            }
+                        })
+                        .or_else(|_| original())
+                } else {
+                    original()
+                };
+                regular.or_else(|err| fallback.ok_or(err))
+            }
+        }
+    } else {
+        translate(&source).and_then(build)
+    };
     let prepared = match prepared {
         Err(original)
             if !bytes

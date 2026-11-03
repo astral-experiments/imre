@@ -1037,7 +1037,11 @@ pub(super) fn call(
             if let Some(name) = name
                 && ctx.string_storage(name).is_none()
             {
-                let kind = if name == NONE { "None" } else { ctx.type_name(name) };
+                let kind = if name == NONE {
+                    "None"
+                } else {
+                    ctx.type_name(name)
+                };
                 return Err(Error::new(
                     "TypeError",
                     format!("timezone() argument 2 must be str, not {kind}"),
@@ -1209,7 +1213,11 @@ pub(super) fn call(
                     let Value::Calendar { tzname, .. } = *ctx.heap.get(args[0]) else {
                         unreachable!()
                     };
-                    if tzname == NONE { ctx.text(value.text()) } else { tzname }
+                    if tzname == NONE {
+                        ctx.text(value.text())
+                    } else {
+                        tzname
+                    }
                 }
                 "__str__" => {
                     if class != "timedelta" {

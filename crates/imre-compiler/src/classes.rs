@@ -93,7 +93,9 @@ pub(crate) struct Class {
 
 impl Class {
     pub(crate) fn has_literal_hook(&self, name: &str) -> bool {
-        self.init_hooks.get(name).is_some_and(|hook| hook.writes.is_empty())
+        self.init_hooks
+            .get(name)
+            .is_some_and(|hook| hook.writes.is_empty())
     }
 
     /// The ABI slot stays in the root layout when a subclass adds Python fields.
@@ -214,12 +216,15 @@ impl Classes {
                     }
                     // A runtime server subclass also uses its mixins as Python classes.
                     // Select its provider before inferring fixed layouts for those mixins.
-                    if let Some(base) = node.arguments.iter().flat_map(|args| &args.args).find(
-                        |base| {
-                            graph.resolve(module_id, base)
-                                == Some(Binding::Intrinsic(Intrinsic::SOCKETSERVER_CLASS))
-                        },
-                    ) {
+                    if let Some(base) =
+                        node.arguments
+                            .iter()
+                            .flat_map(|args| &args.args)
+                            .find(|base| {
+                                graph.resolve(module_id, base)
+                                    == Some(Binding::Intrinsic(Intrinsic::SOCKETSERVER_CLASS))
+                            })
+                    {
                         let error =
                             module.error(base, "socketserver base class requires object lowering");
                         return Err(graph.require_object_class_layout(error));
@@ -422,7 +427,10 @@ fn identity_skip_decorator(graph: &SourceGraph, module: usize, decorator: &ast::
             value
         }
         ast::Expr::Call(probe)
-            if probe.func.as_name_expr().is_some_and(|name| name.id == "hasattr")
+            if probe
+                .func
+                .as_name_expr()
+                .is_some_and(|name| name.id == "hasattr")
                 && graph.resolve(module, &probe.func).is_none()
                 && probe.arguments.keywords.is_empty()
                 && let [object @ ast::Expr::Name(_), ast::Expr::StringLiteral(name)] =
@@ -775,7 +783,8 @@ fn collect_class(
                 }
                 if method.type_params.is_some() {
                     let postponed = imre_ast::future_annotations(&module.parsed.syntax().body);
-                    if crate::dynamic::function_type_params(method, postponed, true, None).is_some() {
+                    if crate::dynamic::function_type_params(method, postponed, true, None).is_some()
+                    {
                         graph.needs_object_runtime.set(true);
                     }
                     return Err(module.error(method, "method type parameters are unsupported"));

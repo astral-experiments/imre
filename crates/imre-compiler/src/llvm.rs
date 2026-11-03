@@ -3808,7 +3808,12 @@ impl Emitter<'_, '_> {
     }
 
     /// Compare the first UTF-8 byte with an ASCII literal without owning the indexed character.
-    fn indexed_ascii_comparison(&mut self, left: &Expr, right: &Expr, op: Compare) -> Option<Value> {
+    fn indexed_ascii_comparison(
+        &mut self,
+        left: &Expr,
+        right: &Expr,
+        op: Compare,
+    ) -> Option<Value> {
         let predicate = match op {
             Compare::Equal => "eq",
             Compare::NotEqual => "ne",

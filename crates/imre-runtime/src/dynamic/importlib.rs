@@ -106,7 +106,11 @@ impl Context {
         self.heap.release_temporaries_since(mark);
         self.heap.keep(run);
         let name = self.text(name);
-        let alter_argv = if self.config["path_entry"].as_bool() == Some(true) { FALSE } else { TRUE };
+        let alter_argv = if self.config["path_entry"].as_bool() == Some(true) {
+            FALSE
+        } else {
+            TRUE
+        };
         self.call(run, vec![name, alter_argv], Vec::new())
     }
 

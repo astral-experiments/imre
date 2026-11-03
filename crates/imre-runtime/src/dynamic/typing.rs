@@ -223,7 +223,12 @@ pub(super) fn forwards_to_origin(name: &str) -> bool {
 }
 
 /// Resolve ordinary attributes of parameterized typing generics on their origin.
-pub(super) fn generic_attr_target(ctx: &Context, mut obj: Id, name: &str, writing: bool) -> Result<Id> {
+pub(super) fn generic_attr_target(
+    ctx: &Context,
+    mut obj: Id,
+    name: &str,
+    writing: bool,
+) -> Result<Id> {
     let mut depth = 0;
     while let Value::GenericAlias(alias) = ctx.heap.get(obj)
         && alias.kind == AliasKind::Generic
@@ -439,9 +444,10 @@ fn alias(ctx: &mut Context, kind: AliasKind, origin: Id, args: Vec<Id>) -> Resul
     let (index, make_alias, arguments) = match kind {
         AliasKind::Generic => (0, ctx.builtin("typing._GenericAlias"), vec![origin, args]),
         AliasKind::Callable => {
-            let make_alias = ctx.typing.callable_factory.ok_or_else(|| {
-                Error::new("RuntimeError", "typing.Callable is not initialized")
-            })?;
+            let make_alias = ctx
+                .typing
+                .callable_factory
+                .ok_or_else(|| Error::new("RuntimeError", "typing.Callable is not initialized"))?;
             let constructor = ctx.builtin("typing._CallableGenericAlias");
             (1, make_alias, vec![constructor, origin, args])
         }
@@ -616,15 +622,7 @@ pub(super) fn builtin_alias(ctx: &mut Context, origin: Id, args: Id) -> Id {
     } else {
         ctx.alloc(Value::Tuple(vec![args]))
     };
-    allocate_alias(
-        ctx,
-        AliasKind::Builtin,
-        origin,
-        args,
-        NONE,
-        None,
-        true,
-    )
+    allocate_alias(ctx, AliasKind::Builtin, origin, args, NONE, None, true)
 }
 
 /// Rebuild PEP 585 aliases and their one-shot unpacking iterators through public constructors.
@@ -1362,7 +1360,8 @@ pub(super) fn attribute(ctx: &mut Context, value: Id, name: &str) -> Option<Resu
     }
     let attr = match ctx.heap.get(value) {
         Value::Native(class)
-            if name == "__iter__" && Context::native_base(class) == Some("typing._GenericAlias") =>
+            if name == "__iter__"
+                && Context::native_base(class) == Some("typing._GenericAlias") =>
         {
             let base = ctx.builtin("typing._GenericAlias");
             ctx.own_class_attr(base, name)?
@@ -1463,7 +1462,11 @@ pub(super) fn attribute(ctx: &mut Context, value: Id, name: &str) -> Option<Resu
         {
             let parent = *ctx.classes.get("typing._SpecialGenericAlias")?;
             let reducer = ctx.class_attr(parent, name)?;
-            let receiver = if class == "typing.Callable" { value } else { NONE };
+            let receiver = if class == "typing.Callable" {
+                value
+            } else {
+                NONE
+            };
             let owner = ctx.builtin("typing._CallableType");
             return Some(ctx.bind_attribute(reducer, receiver, owner));
         }
@@ -1713,9 +1716,11 @@ pub(super) fn attribute(ctx: &mut Context, value: Id, name: &str) -> Option<Resu
                     return Some(ctx.lookup_attr(class, name));
                 } else {
                     let origin = a.origin;
-                    return Some(ctx.with_slot_depth("maximum recursion depth exceeded", |ctx| {
-                        ctx.lookup_attr(origin, "__name__")
-                    }));
+                    return Some(
+                        ctx.with_slot_depth("maximum recursion depth exceeded", |ctx| {
+                            ctx.lookup_attr(origin, "__name__")
+                        }),
+                    );
                 }
             }
             "__name__" | "__qualname__" | "_name" if let Some(label) = a.name => label,
@@ -2539,7 +2544,10 @@ pub(super) fn call(
         )),
         ("_finish_field_ref", [value]) => finish_field_ref(ctx, *value),
         ("_check_annotation_syntax", [text]) => {
-            if matches!(ctx.heap.get(ctx.scalar_value(*text)), Value::SurrogateStr(_)) {
+            if matches!(
+                ctx.heap.get(ctx.scalar_value(*text)),
+                Value::SurrogateStr(_)
+            ) {
                 ctx.encode_utf8_codepoints(*text, false, "strict")?;
             }
             parse_annotation_expression(ctx.str_value(*text)?)?;

@@ -584,7 +584,10 @@ pub(super) fn call(
                 ));
             }
             check_start(ctx)?;
-            if args.get(2).is_some_and(|&has_context| has_context != super::FALSE) {
+            if args
+                .get(2)
+                .is_some_and(|&has_context| has_context != super::FALSE)
+            {
                 return Err(Error::new(
                     "NotImplementedError",
                     "native workers cannot enter a Python context",

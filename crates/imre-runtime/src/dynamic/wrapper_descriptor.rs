@@ -394,7 +394,9 @@ impl BuiltinDescriptor {
             }
             "typing.TypeAliasType" => matches!(ctx.heap.get(receiver), Value::TypeAlias { .. }),
             "typing.Union" => matches!(ctx.heap.get(receiver), Value::Union(_)),
-            super::namedtuple::GETTER => matches!(ctx.heap.get(receiver), Value::TupleGetter { .. }),
+            super::namedtuple::GETTER => {
+                matches!(ctx.heap.get(receiver), Value::TupleGetter { .. })
+            }
             "object" => true,
             "type" => ctx.is_type_object(receiver),
             "function" => matches!(ctx.heap.get(receiver), Value::Function { .. }),
@@ -424,7 +426,9 @@ impl BuiltinDescriptor {
             }
             "dict" => ctx.dict_storage(receiver).is_some(),
             "mappingproxy" => matches!(ctx.heap.get(receiver), Value::MappingProxy(_)),
-            deque::ITERATOR | deque::REVERSE_ITERATOR => ctx.heap.get(receiver).intrinsic_type_name() == Some(self.owner),
+            deque::ITERATOR | deque::REVERSE_ITERATOR => {
+                ctx.heap.get(receiver).intrinsic_type_name() == Some(self.owner)
+            }
             deque::CLASS => matches!(ctx.heap.get(ctx.scalar_value(receiver)), Value::Deque(_)),
             "collections.defaultdict" => ctx.defaultdict_factory(receiver).is_some(),
             _ => ctx.builtin_slot_accepts(receiver, self.owner),

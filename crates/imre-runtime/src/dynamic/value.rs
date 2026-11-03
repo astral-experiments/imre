@@ -1365,7 +1365,8 @@ impl Value {
             Self::Filter { .. } => "filter",
             Self::Hash(state) => state.lock().class_name(),
             Self::HeapTypeMethod {
-                name: "__repr__" | "__str__", ..
+                name: "__repr__" | "__str__",
+                ..
             } => "wrapper_descriptor",
             Self::HeapTypeMethod { .. } => "method_descriptor",
             Self::Zip { .. } => "zip",
@@ -1540,7 +1541,10 @@ impl Value {
             // state, whereas a BLAKE2 or SHA-3 provider object is represented directly by its state.
             Self::Hash(state) => !matches!(
                 state.lock().class_name(),
-                HashState::CLASS | HashState::XOF_CLASS | HashState::OPENSSL_CLASS | super::stdlib::hashlib::md5::CLASS
+                HashState::CLASS
+                    | HashState::XOF_CLASS
+                    | HashState::OPENSSL_CLASS
+                    | super::stdlib::hashlib::md5::CLASS
             ),
             _ => self.gc_object(),
         }
@@ -1825,9 +1829,13 @@ impl Value {
                     }
                 }
             }
-            Self::TypeVar(var) => {
-                visit.extend([var.name, var.module, var.bound, var.constraints, var.default])
-            }
+            Self::TypeVar(var) => visit.extend([
+                var.name,
+                var.module,
+                var.bound,
+                var.constraints,
+                var.default,
+            ]),
             Self::GenericAlias(alias) => {
                 visit.extend([alias.origin, alias.args, alias.parameters]);
                 visit.extend(alias.name);
@@ -1956,7 +1964,12 @@ impl Value {
                 visit.extend(*back);
             }
             Self::IoOpen { types, unsupported } => visit.extend([
-                types.file, types.reader, types.writer, types.random, types.wrapper, *unsupported,
+                types.file,
+                types.reader,
+                types.writer,
+                types.random,
+                types.wrapper,
+                *unsupported,
             ]),
             Self::IoMethod {
                 owner, unsupported, ..
@@ -3634,7 +3647,10 @@ impl Heap {
     /// Iterate over live Python warning locations, starting at the innermost caller.
     pub(super) fn warning_frames(&self) -> impl Iterator<Item = (&Location, Id)> {
         self.frames.iter().rev().filter_map(|frame| {
-            frame.location.as_ref().map(|location| (location, frame.scope))
+            frame
+                .location
+                .as_ref()
+                .map(|location| (location, frame.scope))
         })
     }
 

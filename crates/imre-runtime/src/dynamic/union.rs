@@ -224,7 +224,8 @@ pub(super) fn binary(ctx: &mut Context, left: Id, right: Id) -> Option<Result<Id
 
 pub(super) fn subscribe(ctx: &mut Context, target: Id, index: Id) -> Option<Result<Id>> {
     if let Value::Union(union) = *ctx.heap.get(target) {
-        let parameters = match typing::builtin_parameters(ctx, target, union.args, union.parameters) {
+        let parameters = match typing::builtin_parameters(ctx, target, union.args, union.parameters)
+        {
             Ok(parameters) => parameters,
             Err(error) => return Some(Err(error)),
         };

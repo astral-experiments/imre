@@ -991,7 +991,8 @@ pub(crate) fn compile(
     }
     // The bundle lives in the launcher. This absolute, non-directory path can neither
     // expose the working directory under -I nor collide with an explicit source root.
-    let bundle_entry = startup.filter(|_| site.is_some())
+    let bundle_entry = startup
+        .filter(|_| site.is_some())
         .map(|(_, executable)| Path::new(executable).join(bundled_root));
     if let (Some(bundle), Some(site)) = (&bundle_entry, site) {
         initial.extend([bundle.clone(), site.clone()]);

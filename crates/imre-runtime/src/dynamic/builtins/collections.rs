@@ -1162,11 +1162,12 @@ pub(super) fn method(
                 return Ok(boolean(ctx.stored_entries(receiver).is_empty()));
             }
             if matches!(ctx.heap.get(other), Value::Set { .. }) {
-                let (source, probe) = if ctx.stored_entries(other).len() > ctx.stored_entries(receiver).len() {
-                    (receiver, other)
-                } else {
-                    (other, receiver)
-                };
+                let (source, probe) =
+                    if ctx.stored_entries(other).len() > ctx.stored_entries(receiver).len() {
+                        (receiver, other)
+                    } else {
+                        (other, receiver)
+                    };
                 return ctx.set_members_match(source, probe, false);
             }
             let iterator = ctx.iterator(other)?;

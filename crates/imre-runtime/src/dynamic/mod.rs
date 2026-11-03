@@ -15,8 +15,8 @@ mod defaultdict;
 mod deque;
 mod dictionary;
 mod displayhook;
-mod excepthook;
 mod enums;
+mod excepthook;
 mod ffi;
 mod finalizers;
 mod function_fields;
@@ -1786,11 +1786,15 @@ impl Context {
             return Some(self.builtin(&format!("object.{name}")));
         }
         if name == "__doc__" {
-            let doc = self.builtins.get("object.__doc__").copied().unwrap_or_else(|| {
-                let doc = self.text(Self::OBJECT_DOC);
-                self.builtins.insert("object.__doc__".to_owned(), doc);
-                doc
-            });
+            let doc = self
+                .builtins
+                .get("object.__doc__")
+                .copied()
+                .unwrap_or_else(|| {
+                    let doc = self.text(Self::OBJECT_DOC);
+                    self.builtins.insert("object.__doc__".to_owned(), doc);
+                    doc
+                });
             return Some(doc);
         }
         None
@@ -1801,7 +1805,11 @@ impl Context {
             dict
         } else {
             let mut entries = Vec::new();
-            for name in crate::objects::OBJECT_METHODS.iter().copied().chain(["__class__", "__doc__"]) {
+            for name in crate::objects::OBJECT_METHODS
+                .iter()
+                .copied()
+                .chain(["__class__", "__doc__"])
+            {
                 let value = self.raw_object_member(name).unwrap();
                 entries.push((self.heap.code_name(name), value));
             }
@@ -2213,7 +2221,13 @@ impl Context {
         }
         if name == "super" {
             let mut entries = Vec::new();
-            for name in ["__new__", "__repr__", "__getattribute__", "__init__", "__get__"] {
+            for name in [
+                "__new__",
+                "__repr__",
+                "__getattribute__",
+                "__init__",
+                "__get__",
+            ] {
                 let method = self.builtin(&format!("super.{name}"));
                 entries.push((self.heap.code_name(name), method));
             }
@@ -2881,11 +2895,22 @@ impl Context {
         }
         #[cfg(unix)]
         if source.is_none() && matches!(name, "os" | "posix") {
-            let posix = if name == "os" { Some(self.module("posix")?) } else { None };
+            let posix = if name == "os" {
+                Some(self.module("posix")?)
+            } else {
+                None
+            };
             #[cfg(target_os = "linux")]
             stdlib::posix_spawn::initialize(self, scope, posix)?;
             for attr in [
-                "fchdir", "chown", "fchown", "lchown", "getuid", "geteuid", "getgid", "getgroups",
+                "fchdir",
+                "chown",
+                "fchown",
+                "lchown",
+                "getuid",
+                "geteuid",
+                "getgid",
+                "getgroups",
                 "getpgrp",
             ] {
                 let value = match posix {
@@ -3209,7 +3234,9 @@ impl Context {
                 self.bind(scope, "pi", pi);
             }
             #[cfg(unix)]
-            "_ssl" if source.is_none() => stdlib::ssl::provider::objects::install(self, module, scope)?,
+            "_ssl" if source.is_none() => {
+                stdlib::ssl::provider::objects::install(self, module, scope)?
+            }
             #[cfg(unix)]
             "_imre_ssl" if source.is_none() => stdlib::ssl::install(self, scope)?,
             "_hashlib" if source.is_none() => {
@@ -3218,9 +3245,9 @@ impl Context {
             "hmac"
                 if source.is_none()
                     || source.as_ref().is_some_and(|(path, _, _)| {
-                        self.config["bundled_root"].as_str().is_some_and(|root| {
-                            path == &std::path::Path::new(root).join("hmac.py")
-                        })
+                        self.config["bundled_root"]
+                            .as_str()
+                            .is_some_and(|root| path == &std::path::Path::new(root).join("hmac.py"))
                     }) =>
             {
                 let provider = match self.find_module("_hashlib") {

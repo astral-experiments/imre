@@ -53,7 +53,9 @@ fn generic_alias_names(ctx: &mut Context, origin: Id) -> Result<Id> {
             let Value::List(items) = ctx.heap.get_mut(names) else {
                 unreachable!("dir() returns a list")
             };
-            items.try_reserve(1).map_err(|_| crate::Error::memory_error())?;
+            items
+                .try_reserve(1)
+                .map_err(|_| crate::Error::memory_error())?;
             items.push(field);
         }
     }
@@ -234,7 +236,8 @@ fn contributes_dict_descriptor(ctx: &mut Context, class: Id, mapping: Id) -> Res
 
 /// Merge each reported namespace before reading its bases, as in object.__dir__.
 fn merge_class_names(ctx: &mut Context, class: Id, dictionary: Id) -> Result<()> {
-    if matches!(ctx.heap.get(class), Value::Native(name) if name != "object" && super::is_builtin_type(name)) {
+    if matches!(ctx.heap.get(class), Value::Native(name) if name != "object" && super::is_builtin_type(name))
+    {
         let mut names = BTreeSet::new();
         class_names(ctx, class, &mut names)?;
         for name in names {
@@ -321,7 +324,11 @@ pub(in crate::dynamic) fn typing_alias_dir(ctx: &mut Context, alias: &Alias) -> 
         }
     }
     if let Some(fields) = alias.naming_fields {
-        for (key, _) in ctx.dict_entries(fields).expect("alias naming fields").to_vec() {
+        for (key, _) in ctx
+            .dict_entries(fields)
+            .expect("alias naming fields")
+            .to_vec()
+        {
             ctx.put_item(names, key, NONE)?;
         }
     }

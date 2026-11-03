@@ -8127,7 +8127,9 @@ impl<'a> Checker<'a> {
                 if matches!(attribute.attr.as_str(), "keys" | "values" | "items")
                     && self.types.mapping(receiver.ty).is_some()
                 {
-                    return Err(self.scoped_builtin_error("bound dictionary view method", attribute));
+                    return Err(
+                        self.scoped_builtin_error("bound dictionary view method", attribute)
+                    );
                 }
                 if let Some(element) = self.types.deque_element(receiver.ty) {
                     return self.deque_attribute(attribute, receiver, element);
@@ -9115,7 +9117,9 @@ impl<'a> Checker<'a> {
         }
         match self.resolve(&call.func) {
             Some(Binding::Intrinsic(Intrinsic::Partial)) => return self.partial(call),
-            Some(Binding::Intrinsic(Intrinsic::LoggingShutdown)) => return self.logging_shutdown(call),
+            Some(Binding::Intrinsic(Intrinsic::LoggingShutdown)) => {
+                return self.logging_shutdown(call);
+            }
             Some(Binding::Intrinsic(Intrinsic::FileConfig)) if calls::has_unpacking(call) => {
                 return self.logging_file_config(call);
             }
@@ -9489,10 +9493,12 @@ impl<'a> Checker<'a> {
             }
             Some(Binding::Intrinsic(Intrinsic::ObjectRuntimeExport("posix.getpid")))
                 if call.arguments.is_empty()
-                    && self
-                        .graph
-                        .session
-                        .is_stdlib_function(self.module, &call.func, "os", "getpid") =>
+                    && self.graph.session.is_stdlib_function(
+                        self.module,
+                        &call.func,
+                        "os",
+                        "getpid",
+                    ) =>
             {
                 return Ok(Expr {
                     ty: Type::Int,
