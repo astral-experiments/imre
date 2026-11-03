@@ -43,3 +43,39 @@ def current():
     assert isinstance(trace, inspect.Traceback)
     assert trace.code_context[trace.index].strip() == "1 / 0"
     assert trace.positions.lineno == trace.lineno
+
+    resumed_call_position()
+
+
+def resumed_call_position():
+    class Pause:
+        def __await__(self):
+            return (yield "paused")
+
+    class Receiver:
+        def capture(self, before, value):
+            caller = inspect.currentframe().f_back
+            assert caller is before
+            return inspect.getframeinfo(caller, context=0).positions, value
+
+    # Exercise the source interpreter's saved method call across an actual suspension.
+    scope = {"inspect": inspect}
+    exec("""\
+async def run(receiver, pause):
+    reçu = receiver.capture(
+        inspect.currentframe(), await pause,
+    )
+    return reçu
+""", scope)
+    coro = scope["run"](Receiver(), Pause())
+    assert coro.send(None) == "paused"
+    token = object()
+    try:
+        coro.send(token)
+    except StopIteration as done:
+        positions, received = done.value
+    else:
+        raise AssertionError("resumed call did not finish")
+
+    assert received is token
+    assert positions == (2, 4, len("    reçu = ".encode()), len("    )"))
