@@ -84,17 +84,6 @@ def _bind_signature_method(method, owner):
     return method, False
 
 
-def _instance_call(obj):
-    method = getattr_static(type(obj), "__call__", None)
-    if method is not None and not getattr(obj, "__text_signature__", None):
-        bound, drop_first = _bind_signature_method(method, obj)
-        # Native call wrappers have no Python parameter layout to recurse into.
-        function = bound.__func__ if isinstance(bound, types.MethodType) else bound
-        if isinstance(function, types.FunctionType) or not callable(bound):
-            return bound, drop_first
-    raise ValueError(f"callable {obj!r} is not supported by signature")
-
-
 def _signature_from_callable(obj, *, sigcls, follow_wrapper_chains=True,
                              skip_bound_arg=True, globals=None, locals=None,
                              eval_str=False, annotation_format=Format.VALUE):
@@ -148,7 +137,17 @@ def _signature_from_callable(obj, *, sigcls, follow_wrapper_chains=True,
         if method is None:
             return sigcls()
     else:
-        method, drop_first = _instance_call(obj)
+        call = getattr_static(type(obj), "__call__", None)
+        if call is None:
+            raise ValueError(f"callable {obj!r} is not supported by signature")
+        text_signature = getattr(obj, "__text_signature__", None)
+        if text_signature:
+            return _signature_fromstr(sigcls, obj, text_signature)
+        method, drop_first = _bind_signature_method(call, obj)
+        # Native call wrappers have no Python parameter layout to recurse into.
+        function = method.__func__ if isinstance(method, types.MethodType) else method
+        if not isinstance(function, types.FunctionType) and callable(method):
+            raise ValueError(f"callable {obj!r} is not supported by signature")
     inner = _signature_from_callable(
         method, sigcls=sigcls, follow_wrapper_chains=follow_wrapper_chains,
         skip_bound_arg=skip_bound_arg, globals=globals, locals=locals,

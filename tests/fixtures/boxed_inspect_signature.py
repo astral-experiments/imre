@@ -168,6 +168,10 @@ else:
 target = CallableInstance()
 target.__call__ = lambda shadow: None
 assert str(inspect.signature(target)) == "(item, /, *, count=1)"
+target.__text_signature__ = "(value, /, *, width=80)"
+assert str(inspect.signature(target)) == "(value, /, *, width=80)"
+target.__text_signature__ = ""
+assert str(inspect.signature(target)) == "(item, /, *, count=1)"
 assert str(inspect.signature(StaticCall())) == "(first, second)"
 assert str(inspect.signature(ClassCall())) == "(item)"
 
