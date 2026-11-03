@@ -192,6 +192,8 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
                         section("_Traceback = namedtuple(", "def _get_code_position_from_tb("),
                         &frame_info,
                         section("def getmro(cls):", "def indentsize(line):"),
+                        section("GEN_CREATED = ", "def getgeneratorlocals("),
+                        section("CORO_CREATED = ", "def getcoroutinelocals("),
                         section("def formatannotation(", "def formatannotationrelativeto("),
                         section("FullArgSpec = namedtuple(", "ArgInfo = namedtuple("),
                         section("def _signature_get_partial(", "def _signature_is_builtin("),
