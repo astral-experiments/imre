@@ -4,6 +4,7 @@ use crate::dynamic::{
     value::{CACHE_CAPACITY, Error, FALSE, Id, NONE, Result, Value},
 };
 
+pub(in crate::dynamic) const PARTIAL_CLASS: &str = "functools.partial";
 pub(in crate::dynamic) const LRU_CACHE_CLASS: &str = "functools._lru_cache_wrapper";
 pub(in crate::dynamic) const COPY_METHODS: &[&str] = &["__reduce__", "__copy__", "__deepcopy__"];
 

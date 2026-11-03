@@ -1378,6 +1378,12 @@ impl Context {
         if owner == "datetime.timedelta" {
             return stdlib::datetime::read_field(self, owner, field, receiver);
         }
+        if owner == stdlib::functools::PARTIAL_CLASS {
+            let storage = self.scalar_value(receiver);
+            if matches!(self.heap.get(storage), Value::Partial { .. }) {
+                return self.lookup_attr(storage, field);
+            }
+        }
         let ty = self.exact_type(receiver)?;
         if ty == self.builtin(owner) {
             self.lookup_attr(receiver, field)
@@ -3965,6 +3971,10 @@ impl Context {
                     if let Some(value) = self.dictionary_field(dictionary, name)? {
                         return Ok(value);
                     }
+                    let class = self.builtin(stdlib::functools::PARTIAL_CLASS);
+                    if let Some(member) = self.own_class_attr(class, name) {
+                        return self.bind_attribute(member, obj, class);
+                    }
                 }
             },
             Value::Native(ref class) if class == "socket.socket" && name == "__name__" => {
@@ -4376,8 +4386,10 @@ impl Context {
                 return Ok(member);
             }
             Value::Native(ref class)
-                if matches!(class.as_str(), "dict" | "list" | "tuple")
-                    || (class == "function" && name == "__call__")
+                if matches!(
+                    class.as_str(),
+                    "dict" | "list" | "tuple" | stdlib::functools::PARTIAL_CLASS
+                ) || (class == "function" && name == "__call__")
                     || builtins::is_enum_base(class)
                     || (builtins::is_exception(class)
                         && matches!(
@@ -5184,6 +5196,11 @@ impl Context {
             else {
                 layout.dictionary =
                     layout.dictionary || self.native_owns_layout_descriptor(owner_id, "__dict__");
+                if matches!(base, Value::Native(kind) if kind == stdlib::functools::PARTIAL_CLASS) {
+                    // Nested partials can flatten only while the inner object's dict is absent.
+                    layout.dictionary = true;
+                    layout.materialize_dictionary_on_write = true;
+                }
                 continue;
             };
             // In-memory I/O pickle state distinguishes a missing dictionary from an emptied one.

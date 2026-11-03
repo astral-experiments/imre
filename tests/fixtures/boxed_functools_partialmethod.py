@@ -7,6 +7,42 @@ def current():
     def record(*args, **keywords):
         return args, keywords
 
+    class Binding(functools.partial):
+        pass
+
+    bound = Binding(record, placeholder, 4, value=5)
+    assert type(bound) is Binding and isinstance(bound, functools.partial)
+    assert bound.func is record and bound.args == (placeholder, 4)
+    assert bound.keywords == {"value": 5}
+    assert bound(3, value=6) == ((3, 4), {"value": 6})
+    bound.label = "bound"
+    assert bound.__dict__ == {"label": "bound"}
+    for attr in ("func", "args", "keywords"):
+        try:
+            setattr(bound, attr, None)
+        except AttributeError:
+            pass
+        else:
+            raise AssertionError(attr)
+
+    class Custom(Binding):
+        def __new__(cls, value):
+            return super().__new__(cls, record, value)
+
+        def __call__(self):
+            return self.args[0]
+
+    custom = Custom(9)
+    assert type(custom) is Custom and custom() == 9
+
+    for slot in ("__dict__", "__weakref__"):
+        try:
+            type("DuplicateSlot", (functools.partial,), {"__slots__": (slot,)})
+        except TypeError as exc:
+            assert slot in str(exc)
+        else:
+            raise AssertionError(slot)
+
     class Callable:
         def __call__(self, *args, **keywords):
             return args, keywords
