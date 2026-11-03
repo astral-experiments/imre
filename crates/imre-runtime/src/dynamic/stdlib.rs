@@ -428,12 +428,10 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         )
         | (
             "_imre_dataclasses",
-            "field_identifier"
-            | "make_type"
+            "make_type"
             | "is_defaultdict"
             | "loaded_module"
             | "members"
-            | "metadata"
             | "native_iterator"
             | "slot_bases"
             | "slotted_type"
@@ -758,8 +756,6 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             | "markcoroutinefunction"
             | "_native_data_descriptor"
             | "_static_member"
-            | "_signature_identifier"
-            | "_signature_mapping"
             | "_signature_layout",
         )
         | (
@@ -2121,9 +2117,6 @@ pub(super) fn call(
     }
     if let Some(method) = name.strip_prefix("_imre_dataclasses.") {
         match (method, args, kwargs) {
-            ("field_identifier", [_], []) => {
-                return inspect::call(ctx, "_signature_identifier", args, kwargs);
-            }
             ("make_type", [name, bases, members], []) => {
                 let name = ctx.str_value(*name)?.to_owned();
                 if name.contains('\0') {
@@ -2189,7 +2182,6 @@ pub(super) fn call(
                     return Ok(ctx.dict(members));
                 }
             }
-            ("metadata", [mapping], []) => return ctx.mapping_proxy(*mapping),
             _ => {}
         }
         return Err(Error::new(
