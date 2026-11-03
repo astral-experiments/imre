@@ -88,8 +88,17 @@ async def broken(error):
     else:
         raise AssertionError("async for did not evaluate its operand")
     gen = scope["called"](lambda left, right: (left, right))
-    operation = gen.__anext__()
-    assert operation.send(None) == "suspended"
+    assert type(gen).__aiter__(gen) is gen
+    for method, args in ((type(gen).__anext__, ()), (type(gen).asend, (gen,)),
+                         (type(gen).aclose, (None,))):
+        try:
+            method(*args)
+        except TypeError:
+            pass
+        else:
+            raise AssertionError("invalid async-generator descriptor arguments accepted")
+    operation = type(gen).__anext__(gen)
+    assert type(operation).send(operation, None) == "suspended"
     assert finish(operation, "arrived") == ("left", "arrived")
     assert finish(gen.aclose()) is None
 
