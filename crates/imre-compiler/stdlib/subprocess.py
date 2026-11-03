@@ -233,15 +233,15 @@ class Popen:
         self.returncode = None
         self.pipesize = pipesize
         self._sigint_wait_secs = 0.25
-        self._handle = _process.launch(args, executable, stdin, stdout, stderr, close_fds,
-                                       restore_signals, cwd, env, bufsize, pipesize,
-                                       encoding if self.text_mode else None,
-                                       errors if self.text_mode else None, shell, start_new_session,
-                                       process_group, umask, pass_fds)
+        self.stdin = self.stdout = self.stderr = None
+        prepared, fds = _process.prepare(stdin, stdout, stderr, bufsize, pipesize)
+        failed = True
         try:
-            self.stdin = _process.pipe(self._handle, 0)
-            self.stdout = _process.pipe(self._handle, 1)
-            self.stderr = _process.pipe(self._handle, 2)
+            self._prepared = prepared
+            self._pipe_fds = fds
+            self.stdin = _process.pipe(prepared, 0)
+            self.stdout = _process.pipe(prepared, 1)
+            self.stderr = _process.pipe(prepared, 2)
             if self.text_mode:
                 if self.stdin is not None:
                     self.stdin = io.TextIOWrapper(self.stdin, encoding=self.encoding, errors=errors,
@@ -252,10 +252,32 @@ class Popen:
                     self.stderr = io.TextIOWrapper(self.stderr, encoding=self.encoding, errors=errors)
             self._stdin_ref = None if self.stdin is None else _ref(self.stdin)
             self._replacement_output = None
+            self._execute_child(args, executable, None, close_fds, pass_fds, cwd, env,
+                                startupinfo, creationflags, shell, *fds, restore_signals,
+                                None, None, None, umask, start_new_session,
+                                -1 if process_group is None else process_group)
+            failed = False
         except BaseException:
-            self.kill()
-            _process.close_wait(self._handle)
+            for pipe in (self.stdin, self.stdout, self.stderr):
+                if pipe is not None:
+                    try:
+                        pipe.close()
+                    except OSError:
+                        pass
             raise
+        finally:
+            _process.release(prepared, failed)
+
+    def _execute_child(self, args, executable, preexec_fn, close_fds, pass_fds, cwd, env,
+                       startupinfo, creationflags, shell, p2cread, p2cwrite, c2pread, c2pwrite,
+                       errread, errwrite, restore_signals, gid, gids, uid, umask,
+                       start_new_session, process_group):
+        if (p2cread, p2cwrite, c2pread, c2pwrite, errread, errwrite) != self._pipe_fds:
+            raise NotImplementedError("replacing prepared subprocess descriptors is unsupported")
+        if (preexec_fn is not None or gid is not None or gids is not None or uid is not None):
+            raise NotImplementedError("unsupported subprocess child settings")
+        self._handle = _process.launch(self._prepared, args, executable, close_fds, restore_signals,
+                                       cwd, env, shell, start_new_session, process_group, umask, pass_fds)
 
     def __repr__(self):
         result = f"<{self.__class__.__name__}: returncode: {self.returncode} args: {self.args!r}>"
