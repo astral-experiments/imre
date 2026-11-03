@@ -79,7 +79,7 @@ pub(super) mod urllib;
 mod warnings;
 pub(super) mod warnings_accel;
 mod zipimport;
-mod zlib;
+pub(super) mod zlib;
 
 /// Format a type for CPython diagnostics, including a non-default module and its qualname.
 pub(super) fn qualified_type(ctx: &mut Context, class: Id) -> Result<Id> {
@@ -395,9 +395,11 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             "_imre_tempfile",
             "abspath" | "mkdir" | "cleanup_directory" | "random_name" | "finalize_at_shutdown",
         ) => ctx.builtin(&format!("{module}.{name}")),
-        ("_imre_gzip", "open" | "read" | "read1" | "readline" | "fileno" | "close") => {
-            ctx.builtin(&format!("{module}.{name}"))
-        }
+        (
+            "_imre_gzip",
+            "open" | "read" | "read1" | "readline" | "fileno" | "close" | "writer" | "compress"
+            | "flush_writer",
+        ) => ctx.builtin(&format!("{module}.{name}")),
         ("_imre_gzip", "BadGzipFile") => ctx.builtin("gzip.BadGzipFile"),
         ("_locale", "getencoding") => ctx.builtin("_locale.getencoding"),
         ("_locale", "LC_ALL") => ctx.int(libc::LC_ALL.into()),

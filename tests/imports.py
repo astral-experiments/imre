@@ -1579,6 +1579,11 @@ def main() -> None:
                 "        print(module.opmap['POP_TOP'])\n"
                 "    elif sys.argv[3] == 'current':\n"
                 "        module.current()\n"
+                "    elif sys.argv[3] == 'write':\n"
+                "        with module.open('written.gz', 'wb') as stream:\n"
+                "            print(stream.write(b'payload'))\n"
+                "            assert stream.seekable() and stream.tell() == 7\n"
+                "            stream.flush()\n"
                 "    elif sys.argv[3] == 'read':\n"
                 "        with module.open('members.gz', 'rb') as stream:\n"
                 "            print(stream.read1(65536), stream.read())\n"
@@ -1601,12 +1606,15 @@ def main() -> None:
                 ("main", "import", temporary / "codeop_module", ""),
                 ("main", "import", temporary / "codeop_named_helper", "16896\n"),
                 ("boxed_interactive_interpreter", "current", FIXTURES.parent, ""),
+                ("gzip", "write", temporary, "7\n"),
                 ("gzip", "read", temporary, "b'first' b'second'\nTrue\nb'' b'fir' b'stsecond' b''\n"),
             ]:
                 result = run([str(executable), probe.stem, module, operation, str(path)], temporary)
                 require_success(result)
                 assert result.stdout == expected, (module, level, result.stdout)
                 checks += 1
+
+            assert gzip.decompress((temporary / "written.gz").read_bytes()) == b"payload"
 
             absent = "no_such_console_guard_module"
             result = run([str(executable), probe.stem, absent, "flags", str(temporary)], temporary)
