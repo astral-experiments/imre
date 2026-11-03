@@ -2733,6 +2733,7 @@ impl IntrinsicModule {
             (Self::Operator, "itemgetter") => Intrinsic::ObjectRuntimeExport("operator.itemgetter"),
             (Self::Operator, "length_hint") => Intrinsic::LengthHint,
             (Self::Math, "copysign") => Intrinsic::ObjectRuntimeExport("math.copysign"),
+            (Self::Math, "isnan") => Intrinsic::ObjectRuntimeExport("math.isnan"),
             (Self::Math, "isqrt") => Intrinsic::ObjectRuntimeExport("math.isqrt"),
             (Self::Math, "prod") => Intrinsic::MathProd,
             (Self::Copy, "copy") => Intrinsic::ShallowCopy,
