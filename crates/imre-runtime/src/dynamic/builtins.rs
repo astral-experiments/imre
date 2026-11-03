@@ -553,6 +553,7 @@ pub(super) const BYTEARRAY_METHODS: &[&str] = &[
     "splitlines",
     "startswith",
     "strip",
+    "upper",
 ];
 
 pub(super) const BYTES_METHODS: &[&str] = &[
@@ -578,6 +579,7 @@ pub(super) const BYTES_METHODS: &[&str] = &[
     "startswith",
     "strip",
     "translate",
+    "upper",
 ];
 
 pub(super) const STR_METHODS: &[&str] = &[
@@ -1939,16 +1941,24 @@ pub(super) fn call(
             "bool" | "int" | "float" | "str" | "bytes" | "bytearray" if method == "__repr__" => {
                 collections::builtin_slot(ctx, name, args, kwargs)
             }
-            "bytes" if method == "lower" => {
+            _ if matches!(name, "bytes.lower" | "bytes.upper" | "bytearray.upper") => {
                 let receiver = noargs_method_receiver(ctx, owner, method, args, kwargs)?;
                 let storage = ctx.scalar_value(receiver);
                 let bytes = ctx.bytes_like(storage)?;
-                if bytes.is_empty() {
+                if owner == "bytes" && bytes.is_empty() {
                     return Ok(storage);
                 }
                 let mut result = super::copy_ids(bytes)?;
-                result.make_ascii_lowercase();
-                Ok(ctx.alloc(Value::Bytes(result)))
+                if method == "lower" {
+                    result.make_ascii_lowercase();
+                } else {
+                    result.make_ascii_uppercase();
+                }
+                Ok(ctx.alloc(if owner == "bytes" {
+                    Value::Bytes(result)
+                } else {
+                    Value::ByteArray(result)
+                }))
             }
             "bytes" | "bytearray" if method == "hex" => text::bytes_hex(ctx, owner, args, kwargs),
             "bytes" | "bytearray" if method == "fromhex" => text::fromhex(ctx, name, args, kwargs),

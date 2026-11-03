@@ -745,6 +745,10 @@ impl BuiltinDescriptor {
                         "Pad a numeric string with zeros on the left, to fill a field of the given width.\n\nThe string is never truncated."
                     }
                     ("zfill", _) => "($self, width, /)",
+                    ("upper", "__doc__") if matches!(self.owner, "bytes" | "bytearray") => {
+                        "B.upper() -> copy of B\n\nReturn a copy of B with all ASCII characters converted to uppercase."
+                    }
+                    ("upper", _) if matches!(self.owner, "bytes" | "bytearray") => return Some(NONE),
                     ("lower", "__doc__") if self.owner == "bytes" => {
                         "B.lower() -> copy of B\n\nReturn a copy of B with all ASCII characters converted to lowercase."
                     }
