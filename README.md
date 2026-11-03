@@ -104,7 +104,7 @@ with Rust-competitive performance.
 
 ## Standard library test results
 
-As of November 3, 2026, Imre has a paired pass for **9,115 of 13,328 tests (68.4%)** in the original 25 standard library module families.
+As of November 3, 2026, Imre has a paired pass for **9,121 of 13,328 tests (68.4%)** in the original 25 standard library module families.
 A **paired pass** means that CPython 3.14.5 passed the original test and Imre passed it at both
 `-O0` and `-O3`. The total combines focused and intact suite runs across revisions, including
 development branches. Each original test occurrence counts once. Skipped and omitted tests remain
@@ -121,7 +121,7 @@ in the denominator. The [omission decisions](docs/stdlib-omissions.md) explain e
 | `functools` | 91 | 329 | 0 | The intact 325-case primary module passed 89 in all four modes. Two more original cases passed in separate runs. |
 | `hashlib` | 77 | 82 | 0 | The cumulative resource-enabled inventory includes 77 distinct pairs. Under the default stock resource policy, intact ordinary O0 and O3 each record 67 passes, one threaded-hashing error and 14 skips. The real builtin MD5 factory is verified at both native levels. |
 | `importlib` | 329 | 1,346 | 0 | Seventy-eight more resource tests passed across eight module runs. Sixty-five needed the pinned `zipfile` on the runtime path, and 13 also needed it during compilation. Two originals in `test_files` still errored on Imre. |
-| `io` | 573 | 1,038 | 2 | All 34 test_univnewlines originals passed on stock and public native O0/O3. Four buffered-file and close/flush originals also passed. Every owner completed teardown. |
+| `io` | 579 | 1,038 | 2 | Six more C and Python stream originals passed on stock and public native O0/O3. They cover append position, readline and with-open cleanup. All 34 universal-newline originals also pass. |
 | `itertools` | 112 | 138 | 0 | Selected runs account for 112 original passes. Public 90955053 resolved the typing.Iterable import. The unchanged 137-case primary now reaches a module-level type alias in _pyrepl/types.py and stops before discovery at both native levels. A separate GIL companion supplies the 138th registration. |
 | `json` | 214 | 216 | 0 | All 34 unmodified CLI originals passed, with 32 child subtests and 64 tool subprocesses per lane. The O0/O3 children ran native code. Two help cases matched the upstream usage-prefix assertion while their full stdout differed from stock. |
 | `logging` | 232 | 272 | 0 | Seven more originals passed from the full upstream logging test file in separate stock and native processes. They cover task names, formatter precision, shutdown and recursion. |
@@ -137,7 +137,7 @@ in the denominator. The [omission decisions](docs/stdlib-omissions.md) explain e
 | `typing` | 701 | 712 | 0 | The unchanged async-generator ABC original passed on public #4804 at O0 and O3 and matched the pinned stock result. |
 | `unittest` | 341 | 1,090 | 0 | The complete 57-test test_result file contributed 33 previously unlisted paired passes on public native O0 and O3. |
 | `urllib` | 173 | 178 | 0 | Both unchanged upstream scripts completed on public `main` at O0 and O3 with ordinary and runtime imports. All 178 tests matched stock in order, including 173 successful parents, three with only child outcomes, and two Windows skips. |
-| **Total** | **9,115** | **13,328** | **30** | **4 complete suites match stock on `main`** |
+| **Total** | **9,121** | **13,328** | **30** | **4 complete suites match stock on `main`** |
 
 See the [standard library coverage report](docs/stdlib.md) for the Linux test
 results and import coverage recorded in this repository.
