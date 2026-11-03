@@ -406,12 +406,17 @@ class SSLContext:
             raise NotImplementedError("load_cert_chain supports unencrypted private keys")
         _call(_imre_ssl.load_cert_chain, self._ctx, certfile, keyfile)
 
-    def load_verify_locations(self, cafile=None, capath=None, cadata=None):
-        if capath is not None or cadata is not None:
-            raise NotImplementedError("only cafile is supported")
-        if cafile is None:
-            raise TypeError("cafile, capath and cadata cannot be all omitted")
-        _call(_imre_ssl.load_verify_locations, self._ctx, cafile)
+    def load_verify_locations(self, /, cafile=None, capath=None, cadata=None):
+        if not issubclass(type(self), __class__):
+            _imre_ssl.raise_context_receiver_error("load_verify_locations", self)
+        result = _call(_imre_ssl.load_verify_locations, __class__._ctx.__get__(self),
+                       cafile, capath, cadata)
+        if result is not None:
+            code, message, library, reason = result
+            error = SSLError(code, message)
+            error.library = library
+            error.reason = reason
+            raise error
 
     def wrap_socket(self, sock, server_side=False, do_handshake_on_connect=True,
                     suppress_ragged_eofs=True, server_hostname=None, session=None):
