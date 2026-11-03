@@ -90,6 +90,13 @@ enum FunctionKind {
     Generator,
     GeneratorLambda,
     Coroutine,
+    AsyncGenerator,
+}
+
+impl FunctionKind {
+    fn is_async(self) -> bool {
+        matches!(self, Self::Coroutine | Self::AsyncGenerator)
+    }
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -151,6 +158,7 @@ enum Instruction {
         end: usize,
     },
     Iter(ast::Expr),
+    UnsupportedAsyncIter(Option<ast::Expr>),
     Await(Option<ast::Expr>),
     SaveCallOperand(Option<ast::Expr>),
     SaveCallMethod(ast::ExprAttribute),
@@ -1140,7 +1148,8 @@ impl Program {
                         }
                     }
                 }
-                Instruction::AsyncWithMethods(Some(context)) => strings.visit_expr(context),
+                Instruction::AsyncWithMethods(Some(context))
+                | Instruction::UnsupportedAsyncIter(Some(context)) => strings.visit_expr(context),
                 Instruction::EnterAsyncWith {
                     target: Some(target),
                     ..
@@ -1288,6 +1297,7 @@ impl Program {
                 | Instruction::Break(_)
                 | Instruction::EnterFinally { .. }
                 | Instruction::AsyncWithMethods(None)
+                | Instruction::UnsupportedAsyncIter(None)
                 | Instruction::EnterAsyncWith { target: None, .. }
                 | Instruction::ExitWith
                 | Instruction::CallAsyncExit
@@ -1731,7 +1741,7 @@ impl Program {
             ast::Expr::Yield(_) | ast::Expr::YieldFrom(_) if !function => {
                 return Err(Error::new("SyntaxError", "'yield' outside function"));
             }
-            ast::Expr::Await(a) if self.kind == FunctionKind::Coroutine => {
+            ast::Expr::Await(a) if self.kind.is_async() => {
                 let value = match *a.value {
                     ast::Expr::Call(call) if Self::has_awaited_call_arguments(&call) => {
                         self.lower_awaited_call(call, line);
@@ -1744,8 +1754,7 @@ impl Program {
                 return Ok(None);
             }
             ast::Expr::Call(call)
-                if self.kind == FunctionKind::Coroutine
-                    && Self::has_awaited_call_arguments(&call) =>
+                if self.kind.is_async() && Self::has_awaited_call_arguments(&call) =>
             {
                 self.lower_awaited_call(call, line);
                 return Ok(None);
@@ -1757,7 +1766,9 @@ impl Program {
             }
             value => return Ok(Some(value)),
         };
-        self.kind = FunctionKind::Generator;
+        if self.kind != FunctionKind::AsyncGenerator {
+            self.kind = FunctionKind::Generator;
+        }
         self.instructions.push((line, op));
         Ok(None)
     }
@@ -2104,10 +2115,11 @@ impl Program {
                     let mut child = self.definition_body(&s.name, &s.decorator_list, line, lines);
                     let annotate = self.annotation_program(&mut s, &child, line)?;
                     if s.is_async {
-                        if imre_ast::code_flags::is_generator(&s.body) {
-                            return Err(unsupported("async generator function"));
-                        }
-                        child.kind = FunctionKind::Coroutine;
+                        child.kind = if imre_ast::code_flags::is_generator(&s.body) {
+                            FunctionKind::AsyncGenerator
+                        } else {
+                            FunctionKind::Coroutine
+                        };
                     }
                     child.lower_namespace(s.body, lines, true)?;
                     for param in s.parameters.iter() {
@@ -2249,13 +2261,24 @@ impl Program {
                 }
                 Stmt::For(_) | Stmt::While(_) => {
                     let (body, orelse, guard) = match stmt {
-                        Stmt::For(s) if !s.is_async => {
+                        Stmt::For(s) => {
                             self.declare_target(&s.target)?;
-                            self.instructions.push((line, Instruction::Iter(*s.iter)));
+                            let iter = if !s.is_async {
+                                Instruction::Iter(*s.iter)
+                            } else if self.kind.is_async() {
+                                let iterable = self.lower_suspension(*s.iter, line, function)?;
+                                Instruction::UnsupportedAsyncIter(iterable)
+                            } else {
+                                return Err(Error::new(
+                                    "SyntaxError",
+                                    "'async for' outside async function",
+                                ));
+                            };
+                            self.instructions.push((line, iter));
                             (s.body, s.orelse, Instruction::Next(Some(*s.target), 0))
                         }
                         Stmt::While(s) => (s.body, s.orelse, Instruction::Unless(*s.test, 0)),
-                        _ => return Err(unsupported("async for")),
+                        _ => unreachable!("loop statement"),
                     };
                     let head = self.instructions.len();
                     let mut current = LoopJumps {
@@ -2283,7 +2306,7 @@ impl Program {
                     continue;
                 }
                 Stmt::With(s) => {
-                    if s.is_async && self.kind != FunctionKind::Coroutine {
+                    if s.is_async && !self.kind.is_async() {
                         return Err(Error::new(
                             "SyntaxError",
                             "'async with' outside async function",
@@ -3013,6 +3036,7 @@ impl Context {
                     imre_ast::code_flags::GENERATOR
                 }
                 FunctionKind::Coroutine => imre_ast::code_flags::COROUTINE,
+                FunctionKind::AsyncGenerator => imre_ast::code_flags::ASYNC_GENERATOR,
                 FunctionKind::Plain => 0,
             },
             flags_complete: false,
@@ -3562,6 +3586,8 @@ impl Context {
             Ok(if kind == FunctionKind::Coroutine {
                 let origin = self.coroutine_origin();
                 self.alloc(Value::Coroutine { frame, origin })
+            } else if kind == FunctionKind::AsyncGenerator {
+                self.async_generator(frame)
             } else {
                 frame
             })
@@ -3757,6 +3783,28 @@ impl Context {
         }
     }
 
+    fn source_frame_error(&mut self, error: Error, code: Id) -> Error {
+        match &self.code_object(code).body {
+            // Unlike generator defs and genexprs, generator lambdas have no StopIteration handler.
+            Body::Source(program) if program.kind == FunctionKind::GeneratorLambda => error,
+            Body::Source(program) if program.kind == FunctionKind::AsyncGenerator => {
+                let message = if self.is_builtin_error(&error, "StopAsyncIteration") {
+                    "async generator raised StopAsyncIteration"
+                } else if self.is_builtin_error(&error, "StopIteration") {
+                    "async generator raised StopIteration"
+                } else {
+                    return error;
+                };
+                let cause = self.raised_instance(error);
+                let mut converted = Error::new("RuntimeError", message);
+                converted.tracing().cause = Some(cause);
+                converted.context = cause;
+                converted
+            }
+            _ => self.frame_error(error, code),
+        }
+    }
+
     /// Resume one frame, retaining its running state while a delegated child executes.
     fn resume_source_frame(
         &mut self,
@@ -3818,15 +3866,10 @@ impl Context {
                     && cursor.thrown.is_none();
                 self.run_source(code, frame_scope, FrameOwner::Generator(id), cursor)
             })
-            .map_err(|error| {
-                // CPython emits the StopIteration handler for generator defs and genexprs,
-                // but a lambda that yields lets the original exception escape.
-                if matches!(&self.code_object(code).body, Body::Source(p) if p.kind == FunctionKind::GeneratorLambda) {
-                    error
-                } else {
-                    self.frame_error(error, code)
-                }
-            });
+            .map_err(|error| self.source_frame_error(error, code));
+        // The public async-generator object owns its first-iteration/finalization hooks.
+        let async_generator =
+            self.code_object(code).flags & imre_ast::code_flags::ASYNC_GENERATOR != 0;
         let suspended_at_delegate = matches!(&result, Ok(Step::Yield(_, ip))
             if matches!(&self.code_object(code).body, Body::Source(program)
                 if matches!(program.instructions.get(*ip), Some((_, Instruction::Delegate)))));
@@ -3853,7 +3896,7 @@ impl Context {
                 *offset = Some(ip);
                 *iterators = active;
                 *protected = blocks;
-                if needs_finalizer {
+                if needs_finalizer && !async_generator {
                     self.heap.register_finalizer(id);
                 }
                 return Ok(step);
@@ -4002,6 +4045,7 @@ impl Context {
                             | Instruction::Await(None)
                             | Instruction::SaveCallOperand(None)
                             | Instruction::AsyncWithMethods(None)
+                            | Instruction::UnsupportedAsyncIter(None)
                             | Instruction::CallAsyncEnter
                             | Instruction::AwaitWithResult(_)
                             | Instruction::EnterAsyncWith { .. }
@@ -4641,6 +4685,13 @@ impl Context {
             | Instruction::EndFinally
             | Instruction::Jump(_)
             | Instruction::Break(_) => unreachable!("source control instruction"),
+            Instruction::UnsupportedAsyncIter(iterable) => {
+                // An awaited operand has already finished. Evaluate any other operand here.
+                if let Some(iterable) = iterable {
+                    eval(self, iterable)?;
+                }
+                return Err(unsupported("async for"));
+            }
             Instruction::Iter(e) => {
                 let value = eval(self, e)?;
                 iterators.push(self.iterator(value)?);
@@ -4741,7 +4792,14 @@ impl Context {
                     .transpose()?
                     .unwrap_or(NONE);
                 return Ok(Some(if matches!(op, Instruction::Yield(_)) {
-                    Step::Yield(v, *ip)
+                    // An await suspends through Delegate. Only a value explicitly yielded by
+                    // the async generator completes its pending __anext__ or asend operation.
+                    let item = if code.kind == FunctionKind::AsyncGenerator {
+                        self.wrap_async_generator_yield(v)
+                    } else {
+                        v
+                    };
+                    Step::Yield(item, *ip)
                 } else {
                     Step::Return(v)
                 }));

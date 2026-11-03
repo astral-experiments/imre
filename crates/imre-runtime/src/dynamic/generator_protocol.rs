@@ -91,8 +91,10 @@ impl Context {
         if matches!(self.heap.get(awaitable), Value::Coroutine { .. }) {
             return Ok(self.alloc(Value::CoroutineWrapper(awaitable)));
         }
-        if matches!(self.heap.get(awaitable), Value::ANextAwaitable { .. })
-            || self.is_generator_coroutine(awaitable)
+        if matches!(
+            self.heap.get(awaitable),
+            Value::ANextAwaitable { .. } | Value::AsyncGeneratorOperation { .. }
+        ) || self.is_generator_coroutine(awaitable)
         {
             return Ok(awaitable);
         }

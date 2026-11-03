@@ -754,6 +754,11 @@ impl Context {
     }
 
     pub(super) fn bound_slot(&mut self, object: Id, name: &str) -> Result<Option<Id>> {
+        if matches!(self.heap.get(object), Value::AsyncGenerator { .. })
+            && matches!(name, "__aiter__" | "__anext__")
+        {
+            return self.lookup_attr(object, name).map(Some);
+        }
         if name == "__repr__"
             && matches!(self.heap.get(object), Value::Weak(wr) if wr.kind == weakref::Kind::Reference)
         {
@@ -2759,7 +2764,8 @@ impl Context {
                 }
             }
             Value::Native(ref class)
-                if super::generator_protocol::coroutine_method(class, name) =>
+                if super::generator_protocol::coroutine_method(class, name)
+                    || super::async_generator::method(class, name) =>
             {
                 return Ok(self.builtin(&format!("{class}.{name}")));
             }
@@ -2859,6 +2865,19 @@ impl Context {
                 }
                 _ => {}
             },
+            Value::AsyncGenerator { running, .. } if name == "ag_running" => {
+                return Ok(builtins::boolean(running));
+            }
+            Value::AsyncGenerator { frame, .. } if name == "ag_code" => {
+                if !self.audit_hooks.is_empty() {
+                    let attribute = self.text(name);
+                    stdlib::audit::event(self, "object.__getattr__", &[obj, attribute])?;
+                }
+                let Value::Generator { code, .. } = *self.heap.get(frame) else {
+                    unreachable!()
+                };
+                return Ok(code);
+            }
             Value::Coroutine { origin, .. } if name == "cr_origin" => return Ok(origin),
             Value::Native(ref class) if class == "coroutine" && name == "cr_origin" => {
                 return Ok(self.readonly_member("coroutine", "cr_origin"));
@@ -6195,6 +6214,9 @@ impl Context {
                                 | "coroutine"
                                 | "coroutine_wrapper"
                                 | "anext_awaitable"
+                                | "async_generator"
+                                | "async_generator_asend"
+                                | "async_generator_athrow"
                                 | "dict"
                                 | "list"
                                 | "map"

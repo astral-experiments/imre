@@ -1030,6 +1030,18 @@ pub(super) enum Value {
         origin: Id,
     },
     CoroutineWrapper(Id),
+    AsyncGenerator {
+        frame: Id,
+        running: bool,
+        closed: bool,
+        finalizer: Option<Id>,
+    },
+    AsyncGeneratorOperation {
+        generator: Id,
+        kind: super::async_generator::Operation,
+        state: super::async_generator::State,
+    },
+    AsyncGeneratorYield(Id),
     ANextAwaitable {
         wrapped: Id,
         default: Id,
@@ -1387,6 +1399,9 @@ impl Value {
             Self::Generator { .. } => "generator",
             Self::Coroutine { .. } => "coroutine",
             Self::CoroutineWrapper(_) => "coroutine_wrapper",
+            Self::AsyncGenerator { .. } => "async_generator",
+            Self::AsyncGeneratorOperation { kind, .. } => kind.type_name(),
+            Self::AsyncGeneratorYield(_) => "async_generator_wrapped_value",
             Self::ANextAwaitable { .. } => "anext_awaitable",
             Self::NoDefault => "NoDefaultType",
             Self::TypeAlias { .. } => "typing.TypeAliasType",
@@ -1686,6 +1701,21 @@ impl Value {
             Self::Cell(value) => visit.extend(value),
             Self::Coroutine { frame, origin } => visit.extend([*frame, *origin]),
             Self::CoroutineWrapper(coroutine) => visit.push(*coroutine),
+            Self::AsyncGenerator {
+                frame, finalizer, ..
+            } => {
+                visit.push(*frame);
+                visit.extend(finalizer);
+            }
+            Self::AsyncGeneratorOperation {
+                generator, kind, ..
+            } => {
+                visit.push(*generator);
+                if let Some(argument) = kind.argument() {
+                    visit.push(argument);
+                }
+            }
+            Self::AsyncGeneratorYield(item) => visit.push(*item),
             Self::ANextAwaitable { wrapped, default } => visit.extend([*wrapped, *default]),
             Self::Function {
                 closure,
