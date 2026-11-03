@@ -1323,7 +1323,9 @@ impl IntrinsicModule {
             (Self::Gc, "collect") => Intrinsic::ObjectRuntimeExport("gc.collect"),
             (Self::Gc, "disable") => Intrinsic::ObjectRuntimeExport("gc.disable"),
             (Self::Gc, "enable") => Intrinsic::ObjectRuntimeExport("gc.enable"),
+            (Self::Gc, "get_threshold") => Intrinsic::ObjectRuntimeExport("gc.get_threshold"),
             (Self::Gc, "isenabled") => Intrinsic::ObjectRuntimeExport("gc.isenabled"),
+            (Self::Gc, "set_threshold") => Intrinsic::ObjectRuntimeExport("gc.set_threshold"),
             (Self::Marshal, "loads") => Intrinsic::ObjectRuntimeExport("marshal.loads"),
             (Self::Codecs, "utf_16_ex_decode") => {
                 Intrinsic::ObjectRuntimeExport("codecs.utf_16_ex_decode")
