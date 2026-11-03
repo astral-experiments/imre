@@ -6,7 +6,6 @@ use std::os::fd::IntoRawFd;
 pub(super) enum PreExecError {
     Fork(Error),
     Io(io::Error),
-    Raised,
 }
 
 impl From<io::Error> for PreExecError {
@@ -45,7 +44,7 @@ pub(super) fn spawn(
             }
         }
     }
-    let (mut read, write) = io::pipe()?;
+    let (read, write) = io::pipe()?;
     let write: OwnedFd = write.into();
     let write = if write.as_raw_fd() < 3 {
         // SAFETY: the live writer is duplicated into a descriptor unaffected by stdio setup.
@@ -135,37 +134,8 @@ pub(super) fn spawn(
     // A callback can wait for EOF from a redirected pipe before it returns.
     // Release our copies of all child endpoints before waiting for exec.
     drop(child_pipes);
-    let mut bytes = [0u8; 4];
-    let mut filled = 0;
-    let failure = loop {
-        match read.read(&mut bytes[filled..]) {
-            Ok(0) if filled == 0 => return Ok(pid),
-            Ok(0) => break io::Error::from_raw_os_error(libc::EIO).into(),
-            Ok(n) => {
-                filled += n;
-                if filled == bytes.len() {
-                    let code = i32::from_ne_bytes(bytes);
-                    break if code == 0 {
-                        PreExecError::Raised
-                    } else {
-                        io::Error::from_raw_os_error(code).into()
-                    };
-                }
-            }
-            Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
-            Err(e) => break e.into(),
-        }
-    };
-    // The constructor will raise and no Popen control can own this failed child.
-    loop {
-        // SAFETY: this guarded fork returned the positive child pid to this parent.
-        if unsafe { libc::waitpid(pid, std::ptr::null_mut(), 0) } >= 0
-            || io::Error::last_os_error().kind() != io::ErrorKind::Interrupted
-        {
-            break;
-        }
-    }
-    Err(failure)
+    callback.parent_reader(read);
+    Ok(pid)
 }
 
 /// Install all streams from the original fd table, including swaps of 0, 1 and 2.

@@ -1,7 +1,9 @@
 //! Bind binary subprocess operations to the same child and files as typed Popen.
-use super::{Context, Error, FALSE, Id, NONE, Result, Value, builtins, io, os, posixpath};
+use super::{Context, Error, FALSE, Id, NONE, Result, TRUE, Value, builtins, io, os, posixpath};
 use crate::dynamic::gc_schedule::GcSettings;
 use crate::objects::{BoxedPopen, BoxedPreparation};
+use std::io::{PipeReader, Read};
+use std::os::fd::AsRawFd;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
@@ -11,6 +13,8 @@ pub(super) fn function(name: &str) -> bool {
         "prepare"
             | "release"
             | "launch"
+            | "reserve_handle"
+            | "started"
             | "pid"
             | "pipe"
             | "poll"
@@ -192,6 +196,7 @@ struct GuestPreExec<'a> {
     ctx: &'a mut Context,
     callback: Id,
     reenable_gc: Option<ReenableGc>,
+    reader: Option<PipeReader>,
 }
 
 impl crate::objects::PreExec for GuestPreExec<'_> {
@@ -213,8 +218,54 @@ impl crate::objects::PreExec for GuestPreExec<'_> {
         }
     }
 
+    fn parent_reader(&mut self, reader: PipeReader) {
+        self.reader = Some(reader);
+    }
+
     fn invoke(&mut self) -> bool {
         self.ctx.call(self.callback, Vec::new(), Vec::new()).is_ok()
+    }
+}
+
+/// Read the guarded child's four-byte error record or close-on-exec EOF. A handler
+/// may need to release the child before exec, including when its signal arrived just
+/// before poll. Bound that window without imposing a deadline on the callback.
+fn read_exec_error(ctx: &mut Context, mut reader: PipeReader) -> Result<Option<i32>> {
+    let mut fd = libc::pollfd {
+        fd: reader.as_raw_fd(),
+        events: libc::POLLIN,
+        revents: 0,
+    };
+    let mut bytes = [0; 4];
+    let mut filled = 0;
+    loop {
+        ctx.dispatch_signals()?;
+        // SAFETY: poll writes only to this live pollfd. The reader is owned by this call.
+        match unsafe { libc::poll(&mut fd, 1, 50) } {
+            -1 => {
+                let error = std::io::Error::last_os_error();
+                if error.kind() != std::io::ErrorKind::Interrupted {
+                    return Err(super::os_error(error));
+                }
+            }
+            0 => {}
+            _ => match reader.read(&mut bytes[filled..]) {
+                Ok(0) if filled == 0 => return Ok(None),
+                Ok(0) => {
+                    return Err(super::os_error(std::io::Error::from_raw_os_error(
+                        libc::EIO,
+                    )));
+                }
+                Ok(n) => {
+                    filled += n;
+                    if filled == bytes.len() {
+                        return Ok(Some(i32::from_ne_bytes(bytes)));
+                    }
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {}
+                Err(error) => return Err(super::os_error(error)),
+            },
+        }
     }
 }
 
@@ -234,6 +285,8 @@ fn launch(ctx: &mut Context, values: &[Id]) -> Result<Id> {
         pass_fds,
         gids,
         preexec_fn,
+        slot,
+        public_owner,
     ] = values
     else {
         return Err(Error::new("TypeError", "invalid Popen launch operands"));
@@ -454,10 +507,18 @@ fn launch(ctx: &mut Context, values: &[Id]) -> Result<Id> {
     }
     let directory = (cwd != NONE).then(|| path(ctx, cwd, false)).transpose()?;
     let groups = extra_group_ids(ctx, gids)?;
+    if preexec_fn != NONE && !matches!(ctx.heap.get(slot), Value::ProcessHandle { child: None, .. })
+    {
+        return Err(Error::new(
+            "TypeError",
+            "expected an unused subprocess handle",
+        ));
+    }
     let mut guest = GuestPreExec {
         ctx,
         callback: preexec_fn,
         reenable_gc,
+        reader: None,
     };
     let child = BoxedPopen::launch(
         argv,
@@ -478,31 +539,63 @@ fn launch(ctx: &mut Context, values: &[Id]) -> Result<Id> {
         groups,
         (preexec_fn != NONE).then_some(&mut guest as &mut dyn crate::objects::PreExec),
     );
+    let reader = guest.reader.take();
     drop(guest);
-    match child {
-        Ok(child) => Ok(ctx.alloc(Value::ProcessHandle {
-            child,
-            reported: false,
-        })),
-        Err(failure) => {
-            let mut error: Error = failure.error.into();
-            if error.kind == "SubprocessError" {
-                let module = ctx.module("subprocess")?;
-                error.class = ctx.lookup_attr(module, "SubprocessError")?;
+    let failure = match (child, reader) {
+        (Ok(child), Some(reader)) => {
+            // No Python call or safepoint between the guarded fork and binding its
+            // sole control. A handler can now operate on the actual partial Popen.
+            let Value::ProcessHandle {
+                child: reserved, ..
+            } = ctx.heap.get_mut(slot)
+            else {
+                unreachable!("validated reserved subprocess handle")
+            };
+            *reserved = Some(child.clone());
+            ctx.set_attr(public_owner, "_child_created", TRUE)?;
+            let Some(code) = read_exec_error(ctx, reader)? else {
+                return Ok(slot);
+            };
+            // A child error requires a reap. A parent handler exception above instead
+            // unwinds the constructor immediately, leaving normal Popen ownership.
+            if let Some(status) = child.wait_failed_exec(|| ctx.dispatch_signals())?
+                && matches!(
+                    ctx.heap.get(slot),
+                    Value::ProcessHandle {
+                        reported: false,
+                        ..
+                    }
+                )
+            {
+                let status = report_status(ctx, slot, Some(status));
+                ctx.set_attr(public_owner, "returncode", status)?;
             }
-            match failure.directory {
-                Some(true) => Err(ctx.with_errno_filename(error, cwd)?),
-                Some(false) => {
-                    let filename = if failure.direct {
-                        resolved_program
-                    } else {
-                        program
-                    };
-                    Err(ctx.with_errno_filename(error, filename)?)
-                }
-                None => Err(error),
-            }
+            BoxedPopen::preexec_error(code)
         }
+        (Ok(child), None) => {
+            return Ok(ctx.alloc(Value::ProcessHandle {
+                child: Some(child),
+                reported: false,
+            }));
+        }
+        (Err(failure), _) => failure,
+    };
+    let mut error: Error = failure.error.into();
+    if error.kind == "SubprocessError" {
+        let module = ctx.module("subprocess")?;
+        error.class = ctx.lookup_attr(module, "SubprocessError")?;
+    }
+    match failure.directory {
+        Some(true) => Err(ctx.with_errno_filename(error, cwd)?),
+        Some(false) => {
+            let filename = if failure.direct {
+                resolved_program
+            } else {
+                program
+            };
+            Err(ctx.with_errno_filename(error, filename)?)
+        }
+        None => Err(error),
     }
 }
 
@@ -554,6 +647,12 @@ pub(super) fn call(
             "native process operations accept positional operands",
         ));
     }
+    if let ("reserve_handle", []) = (name, args) {
+        return Ok(ctx.alloc(Value::ProcessHandle {
+            child: None,
+            reported: false,
+        }));
+    }
     if name == "prepare" {
         return prepare(ctx, args);
     }
@@ -595,7 +694,12 @@ pub(super) fn call(
     let Value::ProcessHandle { child, reported } = ctx.heap.get(handle) else {
         return Err(Error::new("TypeError", "expected a native process handle"));
     };
-    let child = child.clone();
+    if let ("started", []) = (name, operands) {
+        return Ok(if child.is_some() { TRUE } else { FALSE });
+    }
+    let Some(child) = child.clone() else {
+        return Err(Error::new("TypeError", "expected a native process handle"));
+    };
     let reported = *reported;
     match (name, operands) {
         ("pid", []) => Ok(ctx.int(i64::from(child.pid()))),

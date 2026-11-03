@@ -266,6 +266,19 @@ impl BoxedPopen {
         ))
     }
 
+    /// Decode the fixed-size error record written by the guarded child before _exit(255).
+    pub(crate) fn preexec_error(code: i32) -> BoxedLaunchError {
+        if code == 0 {
+            return Error::new(Kind::SubprocessError, "Exception occurred in preexec_fn.").into();
+        }
+        let (site, error) = launch_error::decode(io::Error::from_raw_os_error(code));
+        BoxedLaunchError {
+            error: errno_error(error),
+            directory: site.map(|site| matches!(site, launch_error::Site::Directory)),
+            direct: false,
+        }
+    }
+
     pub(crate) fn pid(&self) -> i32 {
         self.0.borrow().control.pid
     }
@@ -283,6 +296,21 @@ impl BoxedPopen {
         Ok(control
             .wait_with(seconds.map(Deadline::Float).as_ref(), check)?
             .map(ReturnCode::kernel))
+    }
+
+    /// Only an observed child status updates returncode when the constructor raises.
+    /// A signal handler may already have consumed the status through os.waitpid.
+    pub(crate) fn wait_failed_exec<E: From<Error>>(
+        &self,
+        check: impl FnMut() -> std::result::Result<(), E>,
+    ) -> std::result::Result<Option<i32>, E> {
+        let control = self.0.borrow().control.clone();
+        Ok(control
+            .wait_with(None, check)?
+            .and_then(|status| match status {
+                ReturnCode::NoChild => None,
+                observed => Some(observed.kernel()),
+            }))
     }
 
     pub(crate) fn signal(&self, number: i32) -> Result<()> {

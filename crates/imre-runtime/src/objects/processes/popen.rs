@@ -28,6 +28,8 @@ pub(crate) trait PreExec {
     fn fork(&mut self) -> Result<libc::pid_t>;
     /// Run the callback in the child. False reports a Python exception to the parent.
     fn invoke(&mut self) -> bool;
+    /// Transfer the guarded child's error reader to its parent-side boxed launch.
+    fn parent_reader(&mut self, reader: io::PipeReader);
 }
 
 pub(super) struct CallbackLaunch<'a> {

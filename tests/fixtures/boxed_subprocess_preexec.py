@@ -1,4 +1,6 @@
 import os
+import select
+import signal
 import subprocess
 
 
@@ -54,3 +56,47 @@ def current():
     finally:
         os.close(reader)
         os.close(writer)
+
+    # A signal during startup may interrupt the constructor while its child is alive.
+    retained = []
+
+    class Retained(subprocess.Popen):
+        def __init__(self, *args, **kwargs):
+            retained.append(self)
+            super().__init__(*args, **kwargs)
+
+    reader, writer = os.pipe()
+    owner = os.getpid()
+    interrupted = RuntimeError("interrupted during child setup")
+
+    def hold_child():
+        os.close(writer)
+        os.kill(owner, signal.SIGUSR1)
+        if not select.select([reader], [], [], 5)[0] or os.read(reader, 1) != b"x":
+            os._exit(90)
+
+    def interrupt(signum, frame):
+        assert retained[0].pid > 0
+        assert retained[0].poll() is None
+        raise interrupted
+
+    old_handler = signal.signal(signal.SIGUSR1, interrupt)
+    try:
+        try:
+            Retained(["/bin/sh", "-c", "exit 23"], preexec_fn=hold_child)
+        except RuntimeError as exc:
+            assert exc is interrupted
+        else:
+            raise AssertionError("handler did not interrupt the constructor")
+        os.write(writer, b"x")
+        assert retained[0].wait(timeout=5) == 23
+        try:
+            os.waitpid(retained[0].pid, os.WNOHANG)
+        except ChildProcessError:
+            pass
+        else:
+            raise AssertionError("Popen.wait did not reap the child")
+    finally:
+        signal.signal(signal.SIGUSR1, old_handler)
+        os.close(writer)
+        os.close(reader)

@@ -223,12 +223,6 @@ pub(super) unsafe fn spawn(
             ) {
                 Ok(pid) => Ok(popen::LaunchedChild::Forked(pid)),
                 Err(preexec::PreExecError::Fork(error)) => return Err(error),
-                Err(preexec::PreExecError::Raised) => {
-                    return Err(Error::new(
-                        Kind::SubprocessError,
-                        "Exception occurred in preexec_fn.",
-                    ));
-                }
                 Err(preexec::PreExecError::Io(error)) => Err(error),
             }
         }
