@@ -78,7 +78,31 @@ enum Scalar {
     Cleared,
 }
 
-impl Reduction<'_> {
+/// Return the affine coefficients and the largest ordinal that keeps every intermediate tagged.
+pub(super) fn bounded_ordinal(target: usize, expression: &Expr) -> Option<(i32, i32, i64)> {
+    let mut proof = Reduction::new(target, &[]);
+    let affine = proof.expression(expression)?;
+    Some((affine.scale, affine.offset, proof.max_ordinal))
+}
+
+impl<'a> Reduction<'a> {
+    /// Start a proof with the induction variable and any known literal lengths.
+    fn new(target: usize, lengths: &'a [(usize, i32)]) -> Self {
+        Self {
+            target,
+            lengths,
+            values: Vec::new(),
+            scope_budget: 32,
+            max_ordinal: MAX_SMALL,
+            sum: None,
+            increment: Affine::default(),
+            cycle: Cycle {
+                period: 1,
+                count: 0,
+            },
+        }
+    }
+
     /// A move or cleanup shadows earlier facts, including a literal's initial length.
     fn local(&self, slot: usize) -> Option<Scalar> {
         self.values
@@ -311,19 +335,7 @@ impl Emitter<'_, '_> {
         if body.len() > 32 {
             return;
         }
-        let mut plan = Reduction {
-            target,
-            lengths: &self.affine_literal_lengths,
-            values: Vec::new(),
-            scope_budget: 32,
-            max_ordinal: MAX_SMALL,
-            sum: None,
-            increment: Affine::default(),
-            cycle: Cycle {
-                period: 1,
-                count: 0,
-            },
-        };
+        let mut plan = Reduction::new(target, &self.affine_literal_lengths);
         if !body
             .iter()
             .all(|s| plan.statement(s, &self.locals).is_some())
