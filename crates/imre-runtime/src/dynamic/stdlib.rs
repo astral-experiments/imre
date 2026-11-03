@@ -788,6 +788,8 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("os" | "posix", "abort" | "getpid" | "urandom") if cfg!(unix) => {
             ctx.builtin(&format!("posix.{name}"))
         }
+        #[cfg(not(target_os = "linux"))]
+        ("os", "confstr") => ctx.builtin("os.confstr"),
         ("os", "name") => ctx.text("posix"),
         ("posixpath", "sep") => ctx.text("/"),
         ("posixpath", "altsep") => NONE,
@@ -817,7 +819,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             | "get_preferred_scheme",
         )
         | ("site", "getsitepackages")
-        | ("os", "confstr" | "uname")
+        | ("os", "uname")
         | ("_imre_pkgutil", "filenames" | "isdir" | "find_module" | "find_spec")
         | ("_imre_csv", "read_row")
         | ("_imre_tokenize", "scan")
@@ -1835,8 +1837,8 @@ pub(super) fn call(
         return os::sysconf::pathconf(ctx, name, args, kwargs);
     }
     #[cfg(target_os = "linux")]
-    if name == "posix.sysconf" {
-        return os::sysconf::call(ctx, args, kwargs);
+    if matches!(name, "posix.confstr" | "posix.sysconf") {
+        return os::sysconf::call(ctx, name, args, kwargs);
     }
     #[cfg(target_os = "linux")]
     if let Some(op @ ("sched_get_priority_min" | "sched_get_priority_max")) =
