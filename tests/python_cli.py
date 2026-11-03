@@ -1993,6 +1993,7 @@ def main():
             "try: check('abc', ('ab', 'c'))\nexcept AssertionError as exc: print(str(exc))",
             "case.assertSequenceEqual([1, 2], (1, 2))\n"
             "try: case.assertSequenceEqual([1, 2], [1])\nexcept AssertionError as exc: print(str(exc))",
+            "case.addTypeEqualityFunc(int, 'assertLess')\ncase.assertEqual(1, 2)",
             "Case.assertNotIsInstance(case, 1, str)",
             "check = case.assertIsInstance\ncheck(1, int)",
             "check = Case.assertNotIsInstance\ncheck(case, 1, str)",
