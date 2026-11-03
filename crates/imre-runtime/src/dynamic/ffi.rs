@@ -1735,7 +1735,7 @@ impl Context {
             .load(std::sync::atomic::Ordering::Relaxed);
         if self.heap.has_ordinary_finalizers() {
             if automatic_gc && self.heap.cycles_due() {
-                let _ = self.collect_full();
+                let _ = self.collect_generation(2);
                 return;
             }
             if !self.heap.caller_keeps_only_finalizer() && self.heap.has_unbound_finalizer(NONE) {
@@ -1790,14 +1790,14 @@ impl Context {
     }
 
     /// Resolve weakrefs before callbacks, then recheck the original cyclic isolate.
-    pub(super) fn collect_full(&mut self) -> Result<usize> {
+    pub(super) fn collect_generation(&mut self, generation: u8) -> Result<usize> {
         if self.heap.full_collection_active() {
             return Ok(0);
         }
         self.drain_acyclic_finalizers()?;
         let mark = self.heap.temporary_mark();
         let (heap, roots) = self.heap_and_roots();
-        let callbacks = heap.begin_full_collection(roots)?;
+        let callbacks = heap.begin_collection(roots, generation)?;
         let mut released = 0;
         if !callbacks.is_empty() {
             self.run_weak_callbacks(callbacks.iter().copied());
@@ -1816,6 +1816,10 @@ impl Context {
         let (count, callbacks) = heap.finish_full_collection(roots);
         if let Some(callbacks) = callbacks {
             self.run_weak_callbacks(callbacks);
+        }
+        if generation < 2 && count != 0 {
+            // Clearing young cycles can release the last owner of an older acyclic value.
+            self.collect_unreachable();
         }
         self.heap.end_full_collection();
         Ok(count + released)
