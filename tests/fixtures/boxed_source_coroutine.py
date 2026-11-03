@@ -1,5 +1,6 @@
 import types
 import weakref
+from inspect import getcoroutinelocals
 
 
 class Pause:
@@ -103,7 +104,10 @@ async def forward(awaitable):
     else:
         raise AssertionError("factory result lost gi_code exception")
 
-    relay = forward(fresh)
+    relay = forward(old)
+    relay_locals = getcoroutinelocals(relay)
+    assert relay_locals["awaitable"] is old
+    relay_locals["awaitable"] = fresh
     assert relay.send(None) is token
     result = object()
     try:
@@ -112,6 +116,8 @@ async def forward(awaitable):
         assert done.value is result
     else:
         raise AssertionError("decorated generator did not return")
+    assert getcoroutinelocals(relay) == {}
+    assert relay_locals["awaitable"] is fresh
     try:
         forward(old).send(None)
     except TypeError:
