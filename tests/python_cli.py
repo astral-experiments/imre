@@ -2534,6 +2534,8 @@ def report(text):
         compare("-IB", pair_fixture, native_args=("run", pair_fixture, "--quiet"))
         writer_fixture = fixtures / "io_buffered_writer_type.py"
         compare("-IB", writer_fixture, native_args=("run", writer_fixture, "--quiet"))
+        syslog = fixtures / "logging_syslog_datagram.py"
+        compare("-IB", syslog, native_args=("run", syslog, "--quiet"), native_timeout=600)
         queue_exports = fixtures / "logging_queue_exports.py"
         compare("-IB", queue_exports, native_args=("run", queue_exports, "--quiet"), native_timeout=600)
         # A from-import elsewhere in the same program would already select the boxed runtime.
