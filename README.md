@@ -153,8 +153,8 @@ CPython 3.14.5 discovers **1,217 test occurrences** in these six families on Lin
 | `ssl` | — | 195 | SSL contexts, certificates, and loopback TLS connections |
 | `types` | 97 | 141 | The unchanged `test_types` and `test_dynamicclassattribute` suites contributed 86 and 11 paired passes on public revision `5296088f`. |
 | `warnings` | 0 | 187 | Stock passed 181 and skipped six. Both ordinary native builds stopped at the import of `warnings.deprecated` before test registration. |
-| `weakref` | — | 183 | Reference callbacks, weak containers, and finalizers |
-| **Measured total (2 of 6 families)** | **97** | **328** | |
+| `weakref` | 160 | 183 | On one public revision, 116 weakref and 44 WeakSet originals passed on stock and at both native optimization levels. All six selected runs completed with exit 0. |
+| **Measured total (3 of 6 families)** | **257** | **511** | |
 
 ## Design
 
