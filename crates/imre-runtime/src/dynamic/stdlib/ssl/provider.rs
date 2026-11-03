@@ -189,6 +189,8 @@ functions! {
     ASN1_TIME_print(Handle, Handle) -> c_int;
     BIO_gets(Handle, *mut c_char, c_int) -> c_int;
     X509_verify_cert_error_string(c_long) -> *const c_char;
+    SSL_get_shutdown(Handle) -> c_int;
+    SSL_pending(Handle) -> c_int;
     SSL_read_ex(Handle, Handle, usize, *mut usize) -> c_int;
     SSL_write_ex(Handle, *const c_void, usize, *mut usize) -> c_int;
     SSL_get_ciphers(Handle) -> Handle;
@@ -387,16 +389,23 @@ impl Api {
         self.error(operation)
     }
 
+    fn reason_text(&self, code: c_ulong) -> Option<std::borrow::Cow<'_, str>> {
+        // SAFETY: the loaded library owns the optional static reason string.
+        let reason = unsafe { (self.ERR_reason_error_string)(code) };
+        NonNull::new(reason.cast_mut()).map(|p| {
+            // SAFETY: a non-null result points to the provider's static, NUL-terminated string.
+            unsafe { CStr::from_ptr(p.as_ptr()) }.to_string_lossy()
+        })
+    }
+
     fn error(&self, operation: &str) -> Failure {
-        // SAFETY: OpenSSL returns a static NUL-terminated reason, or null.
-        let reason = unsafe { (self.ERR_reason_error_string)((self.ERR_peek_last_error)()) };
-        if reason.is_null() {
-            Failure::Other(operation.to_owned())
-        } else {
-            // SAFETY: reason is the non-null library string checked above.
-            let detail = unsafe { CStr::from_ptr(reason) }.to_string_lossy();
-            Failure::Other(format!("{operation}: {detail}"))
-        }
+        // SAFETY: inspect the calling thread's error queue.
+        let code = unsafe { (self.ERR_peek_last_error)() };
+        let message = self.reason_text(code).map_or_else(
+            || operation.to_owned(),
+            |detail| format!("{operation}: {detail}"),
+        );
+        Failure::Other(message)
     }
 }
 
@@ -848,7 +857,7 @@ impl Drop for Context {
 pub(crate) struct Session {
     api: &'static Api,
     handle: NonNull<c_void>,
-    pub(super) socket: crate::ObjectOwner,
+    socket: Option<crate::ObjectOwner>,
     server: bool,
 }
 
@@ -857,9 +866,19 @@ enum Operation<'a> {
     Connect,
     Read(&'a mut [u8]),
     Write(&'a [u8]),
+    Shutdown,
 }
 
 impl Session {
+    pub(super) fn socket(&self) -> &crate::ObjectOwner {
+        self.socket.as_ref().expect("live TLS transport")
+    }
+
+    /// Free the non-closing TLS BIO and transfer its original socket back to the caller.
+    pub(super) fn into_socket(mut self) -> crate::ObjectOwner {
+        self.socket.take().expect("live TLS transport")
+    }
+
     pub(crate) fn wrap(
         ctx: &Context,
         socket: crate::ObjectOwner,
@@ -874,7 +893,7 @@ impl Session {
         let session = Self {
             api,
             handle,
-            socket,
+            socket: Some(socket),
             server,
         };
         if let Some(host) = host {
@@ -882,23 +901,31 @@ impl Session {
         }
         // SAFETY: SSL_set_fd creates a non-closing socket BIO. The owned descriptor
         // remains valid for the full lifetime of this SSL object.
-        if unsafe { (api.SSL_set_fd)(handle.as_ptr(), socket::fd(&session.socket)) } != 1 {
+        if unsafe { (api.SSL_set_fd)(handle.as_ptr(), socket::fd(session.socket())) } != 1 {
             return Err(api.error("SSL_set_fd"));
         }
-        let handshake = session.blocking_io(if server {
-            Operation::Accept
-        } else {
-            Operation::Connect
-        });
+        let handshake = session.blocking_io(
+            if server {
+                Operation::Accept
+            } else {
+                Operation::Connect
+            },
+            |api, _, label| api.error(label),
+        );
         api.verify_peer(handle.as_ptr(), !server && handshake.is_ok())?;
         handshake?;
         Ok(session)
     }
 
     /// Retry a blocking socket BIO operation with the same buffer and length.
-    fn blocking_io(&self, mut operation: Operation<'_>) -> Result<usize, Failure> {
+    fn blocking_io<E: From<Failure>>(
+        &self,
+        mut operation: Operation<'_>,
+        failure: impl FnOnce(&Api, i32, &str) -> E,
+    ) -> Result<usize, E> {
         let api = self.api;
         let ssl = self.handle.as_ptr();
+        let mut sent_shutdown = false;
         loop {
             api.clear();
             let mut n = 0;
@@ -907,6 +934,7 @@ impl Session {
             // output counter outlive each attempt.
             let (rc, label) = unsafe {
                 match &mut operation {
+                    Operation::Shutdown => ((api.SSL_shutdown)(ssl), "SSL_shutdown"),
                     Operation::Accept => ((api.SSL_accept)(ssl), "SSL_accept"),
                     Operation::Connect => ((api.SSL_connect)(ssl), "SSL_connect"),
                     Operation::Read(buf) => (
@@ -922,6 +950,17 @@ impl Session {
             if rc == 1 {
                 return Ok(n);
             }
+            if rc == 0 && matches!(operation, Operation::Shutdown) {
+                // Retry for the peer's close_notify without consuming subsequent
+                // cleartext. CPython accepts a second zero from SSL_shutdown.
+                if sent_shutdown {
+                    return Ok(0);
+                }
+                sent_shutdown = true;
+                // SAFETY: read-ahead is a setting on this live SSL.
+                unsafe { (api.SSL_set_read_ahead)(ssl, 0) };
+                continue;
+            }
             // Snapshot errno before any other OpenSSL call can change it.
             let os_error = std::io::Error::last_os_error();
             // SAFETY: classify this exact return value immediately on the same thread.
@@ -933,25 +972,14 @@ impl Session {
                     } else {
                         libc::POLLOUT
                     };
-                    socket::wait_blocking(socket::fd(&self.socket), events).map_err(Failure::Io)?;
+                    socket::wait_blocking(socket::fd(self.socket()), events)
+                        .map_err(Failure::Io)?;
                 }
                 SSL_ERROR_SYSCALL if os_error.kind() == std::io::ErrorKind::Interrupted => continue,
                 SSL_ERROR_SYSCALL if os_error.raw_os_error() != Some(0) => {
-                    return Err(Failure::Io(os_error));
+                    return Err(Failure::Io(os_error).into());
                 }
-                _ => {
-                    if matches!(operation, Operation::Read(_)) {
-                        // SAFETY: peek at the error from this operation before clearing the queue.
-                        let detail = unsafe { (api.ERR_peek_last_error)() };
-                        // Our public wrapper accepts only suppress_ragged_eofs=True.
-                        if kind == SSL_ERROR_ZERO_RETURN
-                            || (kind == SSL_ERROR_SSL && detail == UNEXPECTED_EOF)
-                        {
-                            return Ok(0);
-                        }
-                    }
-                    return Err(api.error(label));
-                }
+                _ => return Err(failure(api, kind, label)),
             }
         }
     }
@@ -1010,7 +1038,7 @@ impl Session {
     }
 
     pub(crate) fn send(&mut self, bytes: &[u8]) -> Result<usize, Failure> {
-        let n = self.blocking_io(Operation::Write(bytes))?;
+        let n = self.blocking_io(Operation::Write(bytes), |api, _, label| api.error(label))?;
         if (n == 0 && !bytes.is_empty()) || n > bytes.len() {
             return Err(Failure::Other("invalid SSL_write byte count".into()));
         }
@@ -1025,14 +1053,22 @@ impl Session {
         Ok(())
     }
 
-    pub(crate) fn recv(&mut self, size: usize) -> Result<Vec<u8>, Failure> {
-        // A TLS application-data read returns at most one plaintext record.
-        let mut bytes = vec![0; size.min(16 * 1024)];
-        if !bytes.is_empty() {
-            let n = self.blocking_io(Operation::Read(&mut bytes))?;
-            bytes.truncate(n);
+    pub(in crate::dynamic) fn read(&mut self, out: &mut [u8]) -> Result<usize, bio::BioFailure> {
+        if out.is_empty() {
+            return Ok(0);
         }
-        Ok(bytes)
+        let result = self.blocking_io(Operation::Read(out), Api::ssl_failure_kind);
+        self.api.finish_read(self.handle, result)
+    }
+
+    pub(in crate::dynamic) fn pending(&self) -> Result<usize, bio::BioFailure> {
+        self.api.ssl_pending(self.handle)
+    }
+
+    /// Exchange close notifications while the session still owns the socket.
+    pub(in crate::dynamic) fn shutdown(&mut self) -> Result<(), bio::BioFailure> {
+        self.blocking_io(Operation::Shutdown, Api::ssl_failure_kind)?;
+        Ok(())
     }
 }
 
@@ -1041,6 +1077,8 @@ impl Drop for Session {
         // SAFETY: free the SSL and its non-closing BIO while the socket is still valid.
         unsafe { (self.api.SSL_free)(self.handle.as_ptr()) };
         // An endpoint operation may still hold a reference across a Python callback.
-        let _ = socket::close(&self.socket);
+        if let Some(socket) = &self.socket {
+            let _ = socket::close(socket);
+        }
     }
 }
