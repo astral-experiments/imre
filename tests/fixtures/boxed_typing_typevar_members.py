@@ -1,4 +1,5 @@
 import sys
+from collections.abc import Callable as ABCCallable
 from inspect import getattr_static
 from types import MappingProxyType, ModuleType
 from typing import Any, Callable, List, TypeVar, Unpack
@@ -16,6 +17,8 @@ def current():
         else:
             raise AssertionError("invalid TypeVar reducer call")
     assert issubclass(type(Any), type)
+    assert Callable.__qualname__ == Callable.__name__ == "Callable"
+    assert Callable.__origin__ is Callable[[int], str].__origin__ is ABCCallable
     assert type(Callable).__reduce__ is type(List).__reduce__
     assert Callable.__reduce__() == "Callable"
 

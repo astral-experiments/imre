@@ -1377,8 +1377,13 @@ pub(super) fn attribute(ctx: &mut Context, value: Id, name: &str) -> Option<Resu
             "__module__" => ctx.text("typing"),
             _ => return None,
         },
-        Value::Native(class) if class == "typing.Callable" && name == "_name" => {
+        Value::Native(class)
+            if class == "typing.Callable" && matches!(name, "_name" | "__qualname__") =>
+        {
             ctx.text("Callable")
+        }
+        Value::Native(class) if class == "typing.Callable" && name == "__origin__" => {
+            return Some(super::mapping_abc::class(ctx, "Callable"));
         }
         Value::Native(class)
             if name == "__reduce__"
