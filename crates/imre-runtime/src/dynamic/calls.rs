@@ -135,6 +135,7 @@ pub(super) fn module_function(symbol: &str) -> Option<(&str, &str)> {
         {
             Some((module, function))
         }
+        "lzma" if function == "decompress" => Some((module, function)),
         "zlib" if matches!(function, "adler32" | "crc32" | "compress" | "decompress") => {
             Some((module, function))
         }
@@ -4322,6 +4323,7 @@ impl Context {
                     "gzip.BadGzipFile"
                         | "binascii.Error"
                         | "binascii.Incomplete"
+                        | "_lzma.LZMAError"
                         | "socket.gaierror"
                         | "socket.herror"
                         | "zlib.error"

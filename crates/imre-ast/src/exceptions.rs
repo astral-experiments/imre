@@ -134,6 +134,7 @@ exception_kinds! {
         BinasciiIncomplete = 70 => "binascii.Incomplete",
         PackageNotFoundError = 71 => "PackageNotFoundError",
         HError = 72 => "socket.herror",
+        LzmaError = 94 => "LZMAError",
     }
 }
 

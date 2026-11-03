@@ -477,6 +477,21 @@ REJECTED = {
         "main.py": "from helper import bad, render\nprint(render())\nprint(bad())\n",
         "helper.py": "import traceback as tb\ndef render():\n    return tb.format_exc()\ndef bad() -> int:\n    return 'wrong'\n",
     }, "invalid-return-type"),
+    "unused_lzma_exports_preserve_typed_call": ({
+        "main.py": (
+            "from lzma import decompress, LZMAError, FORMAT_AUTO, FORMAT_XZ, FORMAT_ALONE\n"
+            "def typed(n: int) -> int: return n\n"
+            "typed('wrong')\n"
+        ),
+    }, "expected int, got str"),
+    "lzma_decompress_preserves_typed_call": ({
+        "main.py": (
+            "from lzma import decompress\n"
+            "def typed(n: int) -> int: return n\n"
+            "decompress(b']\\x00\\x00\\x80\\x00\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\x00\\x83\\xff\\xfb\\xff\\xff\\xc0\\x00\\x00\\x00')\n"
+            "typed('wrong')\n"
+        ),
+    }, "expected int, got str"),
     "unused_unsupported": ({"main.py": IMPORT, "helper.py": HELPER + 'def unused() -> int:\n    return eval("1")\n'}, "unsupported"),
     "inactive_guard": ({"main.py": IMPORT, "helper.py": HELPER + 'if __name__ == "__main__":\n    eval("1")\n'}, "unsupported"),
     "wrong_imported_argument": ({"main.py": 'from helper import f\nprint(f("wrong"))\n', "helper.py": HELPER}, "int"),
@@ -628,6 +643,16 @@ ACCEPTED = {
     "nested_operator_compare_digest": {
         "main.py": "from consumer import equal\nprint(equal(b'ab', b'ab'), equal(b'ab', b'ac'))\n",
         "consumer.py": "from _operator import _compare_digest as equal\n",
+    },
+    "lzma_formats_and_error": {
+        "main.py": (
+            "from lzma import FORMAT_AUTO, FORMAT_XZ, FORMAT_ALONE, LZMAError as Error\n"
+            "assert FORMAT_AUTO == 0 and FORMAT_XZ == 1 and FORMAT_ALONE == 2\n"
+            "try:\n"
+            "    raise Error('bad stream')\n"
+            "except Error as exc:\n"
+            "    print(str(exc))\n"
+        ),
     },
     "urllib_request_and_error": {
         "main.py": (
@@ -1539,6 +1564,7 @@ def main() -> None:
                 slow_optimized = name in {
                     "boxed_unittest_lazy_import",
                     "email_address_parsers", "filesystem_resources", "fractions_indirect",
+                    "lzma_formats_and_error",
                     "optional_stdlib_probe_in_dependency", "platform_iot_indirect", "record_warnings",
                     "warn_named_helper", "zip_source_spec",
                 }

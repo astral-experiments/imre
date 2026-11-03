@@ -44,6 +44,7 @@ pub(super) use files::{BinaryFile, ReadSource};
 pub(super) use socket::{import_socket_constants, install_lowlevel_socket};
 pub(super) mod io;
 mod json;
+mod lzma;
 mod marshal;
 mod math;
 mod metadata;
@@ -614,6 +615,11 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             let items = options.into_iter().map(|option| ctx.text(option)).collect();
             ctx.alloc(Value::List(items))
         }
+        ("lzma", "decompress") => ctx.builtin("lzma.decompress"),
+        ("lzma", "LZMAError") => ctx.builtin("_lzma.LZMAError"),
+        ("lzma", "FORMAT_AUTO") => ctx.int(0),
+        ("lzma", "FORMAT_XZ") => ctx.int(1),
+        ("lzma", "FORMAT_ALONE") => ctx.int(2),
         ("zlib", "adler32" | "crc32" | "compress" | "decompress" | "error") => {
             ctx.builtin(&format!("zlib.{name}"))
         }
@@ -1732,6 +1738,9 @@ pub(super) fn call(
     }
     if let Some(method) = name.strip_prefix("binascii.") {
         return binascii::call(ctx, method, args, kwargs);
+    }
+    if name == "lzma.decompress" {
+        return lzma::call(ctx, "decompress", args, kwargs);
     }
     if let Some(method @ ("compress" | "decompress")) = name.strip_prefix("zlib.") {
         return zlib::call(ctx, method, args, kwargs);

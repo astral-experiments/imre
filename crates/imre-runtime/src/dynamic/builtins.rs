@@ -30,6 +30,7 @@ pub(super) fn exception_kind(name: &str) -> Option<crate::objects::exceptions::K
         "UnsupportedOperation" => Some(Kind::UnsupportedOperation),
         "socket.gaierror" => Some(Kind::GaiError),
         "socket.herror" => Some(Kind::HError),
+        "_lzma.LZMAError" => Some(Kind::LzmaError),
         "zlib.error" => Some(Kind::ZlibError),
         "gzip.BadGzipFile" => Some(Kind::BadGzipFile),
         "binascii.Error" => Some(Kind::BinasciiError),
@@ -186,6 +187,7 @@ pub(super) fn exception_new_owner(name: &str) -> &str {
         | "StopIteration"
         | "StopAsyncIteration"
         | "binascii.Incomplete"
+        | "_lzma.LZMAError"
         | "zlib.error" => "Exception",
         "binascii.Error" => "ValueError",
         name if exception_subclass(name, "OSError") == Some(true) => "OSError",

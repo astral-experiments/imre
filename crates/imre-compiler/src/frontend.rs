@@ -5738,7 +5738,8 @@ impl<'a> Checker<'a> {
                         if let Some(Binding::Intrinsic(Intrinsic::ScopedObjectExport(
                             name @ ("_pickle.PickleError"
                             | "_pickle.PicklingError"
-                            | "_pickle.UnpicklingError"),
+                            | "_pickle.UnpicklingError"
+                            | "lzma.LZMAError"),
                         ))) = self.resolve(target)
                         {
                             return Err(self.scoped_builtin_error(name, target));
