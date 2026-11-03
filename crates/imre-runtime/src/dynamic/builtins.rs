@@ -12,6 +12,7 @@ mod float;
 mod round;
 pub(super) use float::from_numeric;
 mod integer;
+mod power;
 mod print;
 mod text;
 mod translation;
@@ -1047,23 +1048,7 @@ fn power(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> 
     let Some(modulus) = modulus.filter(|&id| id != NONE) else {
         return ctx.binary("**", base, exp);
     };
-    let (Ok(x), Ok(y), Ok(m)) = (ctx.as_int(base), ctx.as_int(exp), ctx.as_int(modulus)) else {
-        if [base, exp, modulus]
-            .into_iter()
-            .any(|id| matches!(ctx.heap.get(ctx.scalar_value(id)), Value::Float(_)))
-        {
-            return Err(type_error(
-                "pow() 3rd argument not allowed unless all arguments are integers",
-            ));
-        }
-        return Err(type_error(format!(
-            "unsupported operand type(s) for ** or pow(): '{}', '{}', '{}'",
-            ctx.type_name(base),
-            ctx.type_name(exp),
-            ctx.type_name(modulus)
-        )));
-    };
-    Ok(ctx.alloc(Value::Int(crate::integer_power::modular_power(&x, &y, &m)?)))
+    power::ternary(ctx, base, exp, modulus)
 }
 
 pub(super) fn boolean(value: bool) -> Id {
@@ -1468,6 +1453,8 @@ pub(super) fn call(
         "complex.__rmul__" => Some(("*", true)),
         "complex.__truediv__" => Some(("/", false)),
         "complex.__rtruediv__" => Some(("/", true)),
+        "complex.__pow__" => Some(("**", false)),
+        "complex.__rpow__" => Some(("**", true)),
         _ => None,
     };
     if matches!(
@@ -1516,6 +1503,26 @@ pub(super) fn call(
             return Err(type_error(format!(
                 "wrapper {method}() takes no keyword arguments"
             )));
+        }
+        if let Some(("**", reflected)) = complex_op {
+            let (other, modulus) = match *rest {
+                [other] => (other, None),
+                [other, third] => (other, Some(third)),
+                _ => {
+                    return Err(type_error(format!(
+                        "expected 1 or 2 arguments, got {}",
+                        rest.len()
+                    )));
+                }
+            };
+            let (base, exponent) = if reflected {
+                (other, receiver)
+            } else {
+                (receiver, other)
+            };
+            return Ok(ctx
+                .complex_power(base, exponent, modulus)?
+                .unwrap_or(NOT_IMPLEMENTED));
         }
         let comparison = super::operators::comparison_op(method);
         if complex_op.is_some()

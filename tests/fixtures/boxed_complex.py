@@ -60,6 +60,40 @@ def current():
     else:
         raise AssertionError("ignored a declined complex division")
 
+    class PowerChild(complex):
+        def __rpow__(self, other):
+            return ("reflected", other)
+
+    class ModularChild(PowerChild):
+        def __rpow__(self, other, modulus):
+            if modulus == 7:
+                return NotImplemented
+            return other, modulus
+
+    assert saved ** PowerChild(2) == ("reflected", saved)
+    assert pow(saved, ModularChild(2), 3) == (saved, 3)
+    assert pow(0.1, 1 + 0j) == 0.1 + 0j
+    assert complex.__rpow__(2 + 0j, 3, None) == 9 + 0j
+    assert complex.__pow__(saved, object(), 2) is NotImplemented
+    assert 1j ** -3 == 1j
+    assert (complex(-1, -0.0) ** 0.5).imag == -1.0
+    assert (complex(-1, 0.0) ** 0.5).imag == 1.0
+    assert pow(complex(float("nan"), 1), 0) == 1 + 0j
+    for operands, error, message in (
+        ((0j, 1j), ZeroDivisionError, "zero to a negative or complex power"),
+        ((1e200 + 1j, 5), OverflowError, "complex exponentiation"),
+        ((1j, 2, 3), ValueError, "complex modulo"),
+        ((2, 3, Child(1j)), ValueError, "complex modulo"),
+        ((2, 3, PowerChild(1j)), TypeError, "unsupported operand type(s) for ** or pow(): 'int', 'int', 'PowerChild'"),
+        ((saved, ModularChild(2), 7), ValueError, "complex modulo"),
+    ):
+        try:
+            pow(*operands)
+        except error as exc:
+            assert str(exc) == message
+        else:
+            raise AssertionError(operands)
+
     namespace = {}
     exec(compile("z = 2 + 1j; scaled = 2.5e1J", "<complex>", "exec"), namespace)
     assert namespace["z"] == complex(2, 1)
