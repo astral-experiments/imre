@@ -32,7 +32,7 @@ mod charmaps;
 mod codecs;
 pub(crate) use codecs::{
     Codec, CodecInfo, FixedUnicode, StrEncoder, Utf16Order, decoding_error,
-    normalize as normalize_codec, unknown_handler, utf8_prefix,
+    normalize as normalize_codec, shift_jis, unknown_handler, utf8_prefix,
 };
 mod contexts;
 mod contextvars;

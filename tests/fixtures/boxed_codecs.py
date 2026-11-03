@@ -25,6 +25,56 @@ def check_text_encoding_flag():
         raise AssertionError("deleted the inherited flag")
 
 
+def check_shift_jis():
+    entry = codecs.lookup("sjis")
+    assert entry.name == "shift_jis"
+    text = "これは古い日本語です。\n"
+    wire = bytes.fromhex("82b182ea82cd8cc382a293fa967b8cea82c582b781420a")
+    assert text.encode("shift-jis") == wire
+    assert wire.decode("csshiftjis") == text
+    assert entry.encode("¥‾ｱ〜") == (b"\\~\xb1\x81\x60", 4)
+    assert entry.decode(b"\\~\xb1\x81\x60") == ("\\~ｱ〜", 5)
+    for data, reason in ((b"A\x81", "incomplete multibyte sequence"),
+                         (b"A\x87@", "illegal multibyte sequence")):
+        try:
+            data.decode("shift_jis")
+        except UnicodeDecodeError as error:
+            assert (error.encoding, error.object, error.start, error.end, error.reason) == (
+                "shift_jis", data, 1, 2, reason)
+        else:
+            raise AssertionError(data)
+    assert b"A\x87@".decode("shift_jis", "replace") == "A\ufffd@"
+    try:
+        "x①①".encode("shift_jis")
+    except UnicodeEncodeError as error:
+        assert (error.encoding, error.object, error.start, error.end, error.reason) == (
+            "shift_jis", "x①①", 1, 2, "illegal multibyte sequence")
+    else:
+        raise AssertionError("accepted a CP932 extension")
+
+    source = "A☃xB"
+    errors = []
+
+    def replace_snowman(error):
+        errors.append(error)
+        return replacement, error.end
+
+    codecs.register_error("test.sjis_replace", replace_snowman)
+    replacement = "Q日"
+    assert source.encode("shift_jis", "test.sjis_replace") == b"AQ\x93\xfaxB"
+    replacement = "Q😀"
+    try:
+        source.encode("shift_jis", "test.sjis_replace")
+    except UnicodeEncodeError as error:
+        assert error.object is replacement
+        assert (error.encoding, error.start, error.end, error.reason) == (
+            "shift_jis", 1, 2, "illegal multibyte sequence")
+    else:
+        raise AssertionError("accepted an unencodable replacement")
+    assert len(errors) == 2
+    assert all(error.object is source and (error.start, error.end) == (1, 2) for error in errors)
+
+
 def check_raw_unicode_escape():
     source = "\0\n\\u1234\x1aÿĀ€\ud800\udfff😀"
     encoded = b"\0\n\\u1234\x1a\xff" + br"\u0100\u20ac\ud800\udfff\U0001f600"
@@ -236,6 +286,7 @@ def current():
     check_escape_decode()
     fixed_endian_encoders()
     utf16_extended_decoder()
+    check_shift_jis()
     check_raw_unicode_escape()
     check_boms()
     decoder = codecs.IncrementalDecoder(errors="replace")

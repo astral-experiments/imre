@@ -45,21 +45,34 @@ impl Input {
         };
         self.eof = count == 0;
         let data = &bytes[..prefix + count];
-        let ready = if !self.eof && matches!(settings.codec, Codec::Utf8 { .. }) {
-            complete_prefix(data)
-        } else {
-            data.len()
-        };
         self.text.clear();
         self.offset = 0;
-        if ready != 0 {
-            let codec = match settings.codec {
-                Codec::Utf8 { signature: true } if self.started => Codec::Utf8 { signature: false },
-                codec => codec,
+        let ready = if matches!(settings.codec, Codec::ShiftJis) {
+            crate::objects::shift_jis::decode_chunk(
+                &mut self.text,
+                data,
+                Some(&settings.errors),
+                self.eof,
+            )
+            .inspect_err(|_| self.text.clear())?
+        } else {
+            let ready = if !self.eof && matches!(settings.codec, Codec::Utf8 { .. }) {
+                complete_prefix(data)
+            } else {
+                data.len()
             };
-            self.started = true;
-            self.text = codec.decode(&data[..ready], Some(&settings.errors))?;
-        }
+            if ready != 0 {
+                let codec = match settings.codec {
+                    Codec::Utf8 { signature: true } if self.started => {
+                        Codec::Utf8 { signature: false }
+                    }
+                    codec => codec,
+                };
+                self.started = true;
+                self.text = codec.decode(&data[..ready], Some(&settings.errors))?;
+            }
+            ready
+        };
         // A failed incremental decode preserves the previously buffered prefix,
         // without accepting any suffix from the raw read that just failed.
         self.pending.clear();

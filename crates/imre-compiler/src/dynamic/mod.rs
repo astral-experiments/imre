@@ -1194,6 +1194,7 @@ const RUNTIME_PROVIDERS: &[&str] = &[
     "encodings.cp1251",
     "encodings.cp424",
     "encodings.cp437",
+    "encodings.shift_jis",
     "enum",
     "fractions",
     "functools",
