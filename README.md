@@ -104,7 +104,7 @@ with Rust-competitive performance.
 
 ## Standard library test results
 
-As of November 3, 2026, Imre has a paired pass for **9,213 of 13,328 tests (69.1%)** in the original 25 standard library module families.
+As of November 3, 2026, Imre has a paired pass for **9,244 of 13,328 tests (69.4%)** in the original 25 standard library module families.
 A **paired pass** means that CPython 3.14.5 passed the original test and Imre passed it at both
 `-O0` and `-O3`. The total combines focused and intact suite runs across revisions, including
 development branches. Each original test occurrence counts once. Skipped and omitted tests remain
@@ -118,7 +118,7 @@ in the denominator. The [omission decisions](docs/stdlib-omissions.md) explain e
 | `dataclasses` | 259 | 276 | 0 | Four deferred-annotation originals passed with the packaged dataclasses and annotationlib modules. Each native run registered all 276 tests and completed teardown. |
 | `datetime` | 1,043 | 1,098 | 0 | Four unchanged Fast date and datetime constructor parents passed public #4751 at O0 and O3. Stock passed the matching four in its six-parent group. |
 | `fnmatch` | 24 | 24 | 0 | Complete suite on `main`, all 24 passed. |
-| `functools` | 92 | 329 | 0 | The selected LRU weakrefability parent passed on public #4851 with Imre’s native wrapper. The ordinary dotted unittest command on #4855 still stops while loading the module. |
+| `functools` | 93 | 329 | 0 | The intact TestCachePy and TestLRUPy classes ran all 32 original parents through a class driver. Stock and both native levels passed the same 25, including one new parent for LRU hashing. |
 | `hashlib` | 77 | 82 | 0 | The cumulative resource-enabled inventory includes 77 distinct pairs. Under the default stock resource policy, intact ordinary O0 and O3 each record 67 passes, one threaded-hashing error and 14 skips. The real builtin MD5 factory is verified at both native levels. |
 | `importlib` | 329 | 1,346 | 0 | Seventy-eight more resource tests passed across eight module runs. Sixty-five needed the pinned `zipfile` on the runtime path, and 13 also needed it during compilation. Two originals in `test_files` still errored on Imre. |
 | `io` | 595 | 1,038 | 2 | Selected public O0/O3 runs cover file openers, descriptor ownership and closed streams. Three more BufferedRandom tests passed, covering garbage collection and repr. |
@@ -135,9 +135,9 @@ in the denominator. The [omission decisions](docs/stdlib-omissions.md) explain e
 | `textwrap` | 68 | 68 | 0 | Complete suite on `main`, all 68 passed. |
 | `threading` | 83 | 228 | 1 | All 228 original registrations ran in ordinary and boxed builds at both levels. Each passed 83, skipped 32 and reported failures on 113 IDs. The bound worker callback still blocks 58 Bunch fixture cases. |
 | `typing` | 704 | 712 | 1 | The upstream generic subclass-initialization parent and both subtests passed through the public #4855 CLI at O0 and O3 with the same events as stock. |
-| `unittest` | 390 | 1,090 | 0 | The assertWarns and assertWarnsRegex context tests now pass on stock and public O0/O3 with the exact warning file and line. All 81 loader tests also passed. |
+| `unittest` | 420 | 1,090 | 0 | The original TestCleanUp class passed all six tests, and testmock.testwith passed all 27 through ordinary unittest on public Imre at O0 and O3. Together they add 30 paired parents. |
 | `urllib` | 173 | 178 | 0 | Both unchanged upstream scripts completed on public `main` at O0 and O3 with ordinary and runtime imports. All 178 tests matched stock in order, including 173 successful parents, three with only child outcomes, and two Windows skips. |
-| **Total** | **9,213** | **13,328** | **32** | **4 complete suites match stock on `main`** |
+| **Total** | **9,244** | **13,328** | **32** | **4 complete suites match stock on `main`** |
 
 See the [standard library coverage report](docs/stdlib.md) for the Linux test
 results and import coverage recorded in this repository.
@@ -150,14 +150,14 @@ CPython 3.14.5 discovers **1,405 test occurrences** across these 9 families on L
 | --- | ---: | ---: | --- |
 | `base64` | 2 | 41 | All 41 parents ran through ordinary unittest. Stock passed all 41. Public Imre passed the error hierarchy and invalid-padding parents at O0 and O3. One native skip remains in the denominator. |
 | `contextlib` | 148 | 149 | All 58 async originals and 90 of 91 synchronous originals have paired passes. The module entry point passed nine of the ten `TestSuppress` cases on public Imre. The remaining case exercises exception groups. |
-| `inspect` | 95 | 362 | All 362 parents ran on stock. Both native whole-module runs timed out after 30 minutes. Nineteen completed class groups covered 283 parents, with 95 passing on stock and public O0/O3. The two incomplete groups held 79 parents. |
+| `inspect` | 138 | 362 | Smaller groups completed 71 of the 79 parents held from the preceding public replay. Stock and both native levels passed the same 43 additional parents. Three O3 groups containing eight originals timed out. |
 | `ssl` | 36 | 195 | The genuine session statistics original passed against public #4833 after registration of all 195 default-resource SSL cases. |
 | `tokenize` | 49 | 130 | The ordinary unittest entry point ran all 130 original parents on stock and public Imre. Stock passed all 130. O0 and O3 passed the same 49 parents. Errors from individual subtests do not add parent registrations. |
 | `tomllib` | 17 | 17 | All 17 originals passed on stock and public O0/O3 through both the package entry point and the three explicit upstream test modules. |
 | `types` | 131 | 141 | The method descriptor type original passed through ordinary unittest invocation on stock and public native O0/O3. |
 | `warnings` | 181 | 187 | The intact default suite paired 177/187. Four additional async originals passed with `-X context_aware_warnings=1` on pinned stock and public O0 and O3. Each flag-enabled run registered all 187 originals and completed teardown. |
 | `weakref` | 169 | 183 | All 46 WeakSet originals and 123 weakref originals passed. Seven [CPython-specific tests](docs/stdlib-omissions.md#weakref) have individual omission decisions. Seven other originals remain unpaired. |
-| **Measured total (9 of 9 families)** | **828** | **1,405** |  |
+| **Measured total (9 of 9 families)** | **871** | **1,405** |  |
 
 ## Design
 
