@@ -2419,6 +2419,9 @@ pub(super) fn call(
     if name == "_socket.inet_pton" {
         return socket::inet_pton(ctx, args, kwargs);
     }
+    if matches!(name, "_socket.inet_ntoa" | "_socket.inet_ntop") {
+        return socket::format_packed_address(ctx, name, args, kwargs);
+    }
     if name == "_socket.socketpair" {
         return socket::socketpair(ctx, args, kwargs);
     }
