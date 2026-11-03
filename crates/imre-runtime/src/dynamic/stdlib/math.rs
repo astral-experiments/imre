@@ -2,7 +2,7 @@
 
 use num_bigint::BigInt;
 use num_integer::Integer;
-use num_traits::One;
+use num_traits::{One, ToPrimitive};
 
 use super::{Context, Error, Id, Result, Value};
 use crate::dynamic::builtins;
@@ -41,6 +41,33 @@ pub(super) fn call(
         let y = as_double(ctx, y)?;
         return Ok(ctx.alloc(Value::Float(x.copysign(y))));
     }
+    if operation == "log" {
+        let (value, base) = match args {
+            [value] => (value, None),
+            [value, base] => (value, Some(base)),
+            [] => {
+                return Err(Error::new(
+                    "TypeError",
+                    "log expected at least 1 argument, got 0",
+                ));
+            }
+            _ => {
+                return Err(Error::new(
+                    "TypeError",
+                    format!("log expected at most 2 arguments, got {}", args.len()),
+                ));
+            }
+        };
+        let mut result = natural_log(ctx, *value)?;
+        if let Some(base) = base {
+            let denominator = natural_log(ctx, *base)?;
+            if denominator == 0.0 {
+                return Err(Error::new("ZeroDivisionError", "division by zero"));
+            }
+            result /= denominator;
+        }
+        return Ok(ctx.alloc(Value::Float(result)));
+    }
     let &[value] = args else {
         return Err(Error::new(
             "TypeError",
@@ -59,6 +86,16 @@ pub(super) fn call(
             ));
         }
         return Ok(ctx.alloc(Value::Int(crate::Int::new(n.big().sqrt()))));
+    }
+    if operation == "cos" {
+        let x = as_double(ctx, value)?;
+        if x.is_infinite() {
+            return Err(Error::new(
+                "ValueError",
+                format!("expected a finite input, got {}", crate::floats::render(x)),
+            ));
+        }
+        return Ok(ctx.alloc(Value::Float(x.cos())));
     }
     if operation == "isinf" {
         return Ok(builtins::boolean(as_double(ctx, value)?.is_infinite()));
@@ -114,6 +151,49 @@ pub(super) fn call(
     Ok(ctx.alloc(Value::Int(crate::Int::new(
         crate::floats::float_to_integer(rounded)?,
     ))))
+}
+
+/// Take the log of an int's stored value, including those too large for a double.
+/// Other numbers go through the same real conversion as the unary math functions.
+fn natural_log(ctx: &mut Context, value: Id) -> Result<f64> {
+    match ctx.heap.get(ctx.scalar_value(value)) {
+        Value::Bool(true) => return Ok(0.0),
+        Value::Bool(false) => return Err(Error::new("ValueError", "expected a positive input")),
+        Value::Int(integer) => {
+            let n = integer.big();
+            if n.sign() != num_bigint::Sign::Plus {
+                return Err(Error::new("ValueError", "expected a positive input"));
+            }
+            if let Ok(x) = crate::floats::int_to_float(integer) {
+                return Ok(x.ln());
+            }
+            // CPython's loghelper uses a rounded mantissa and a separate exponent
+            // on overflow. Keep one sticky bit so the cast rounds ties correctly.
+            let magnitude = n.magnitude();
+            let mut exponent = magnitude.bits();
+            let shift = exponent - u64::from(u64::BITS);
+            let high = (magnitude >> shift).to_u64().unwrap();
+            let sticky = magnitude.trailing_zeros().unwrap() < shift;
+            let mut mantissa = (high | u64::from(sticky)) as f64 * 2.0_f64.powi(-64);
+            if mantissa == 1.0 {
+                mantissa = 0.5;
+                exponent += 1;
+            }
+            return Ok(mantissa.ln() + std::f64::consts::LN_2 * exponent as f64);
+        }
+        _ => {}
+    }
+    let x = as_double(ctx, value)?;
+    if x <= 0.0 {
+        return Err(Error::new(
+            "ValueError",
+            format!(
+                "expected a positive input, got {}",
+                crate::floats::render(x)
+            ),
+        ));
+    }
+    Ok(x.ln())
 }
 
 /// Read a float subclass's stored double before trying the numeric conversion protocol.

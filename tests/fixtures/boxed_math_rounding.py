@@ -1,7 +1,8 @@
 """Rounding function objects and the original operands they dispatch on."""
 
 import math
-from math import ceil, copysign, floor, isinf, isnan, modf, trunc
+from fractions import Fraction
+from math import ceil, copysign, cos, floor, isinf, isnan, log, modf, trunc
 
 
 class Hooks:
@@ -82,6 +83,33 @@ def current():
     assert isnan(FloatOverride("nan")) is True
     for value in (float("inf"), -0.0, FloatOnly(), IndexOnly()):
         assert isnan(value) is False
+
+    assert cos is math.cos and log is math.log
+    assert cos(Fraction(1, 2)) == cos(0.5)
+    assert cos(FloatOverride(-0.0)) == 1.0 and isnan(cos(float("nan")))
+    assert cos(IndexOnly()) == cos(5)
+    assert log(Fraction(1, 4), FloatOverride(2)) == -2.0
+    assert log(IndexOnly()) == log(5) and log(True) == 0.0
+    assert log(10**1000, 10**500) == 2.0
+    assert abs(log(10**1000) - 2302.5850929940457) < 1e-12
+    assert log(float("inf")) == float("inf") and isnan(log(float("nan")))
+    for call, error_type, message in (
+        (lambda: cos(float("inf")), ValueError, "expected a finite input, got inf"),
+        (lambda: cos(10**1000), OverflowError, "int too large to convert to float"),
+        (lambda: cos("1"), TypeError, "must be real number, not str"),
+        (lambda: log(-10**1000, 0), ValueError, "expected a positive input"),
+        (lambda: log(1, -0.0), ValueError, "expected a positive input, got -0.0"),
+        (lambda: log(8, 1), ZeroDivisionError, "division by zero"),
+        (lambda: log(), TypeError, "log expected at least 1 argument, got 0"),
+        (lambda: log(1, 2, 3), TypeError, "log expected at most 2 arguments, got 3"),
+        (lambda: log(2, base=2), TypeError, "math.log() takes no keyword arguments"),
+    ):
+        try:
+            call()
+        except error_type as error:
+            assert str(error) == message
+        else:
+            raise AssertionError(message)
 
     assert copysign is math.copysign
     assert copysign(FloatOnly(), IndexOnly()) == 1.25
