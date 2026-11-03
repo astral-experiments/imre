@@ -2,6 +2,7 @@
 //! The compiler lowers statements, branches, loops and function bodies to LLVM.
 
 mod abstract_class;
+mod allocation_traces;
 mod array;
 mod async_generator;
 mod atexit;
@@ -3288,6 +3289,7 @@ impl Context {
             }
             "_locale" => stdlib::locale::install(self, module, scope)?,
             "_warnings" => stdlib::warnings_accel::install(self, module, scope)?,
+            "_tracemalloc" => stdlib::tracemalloc::install(self, module, scope),
             "time" => stdlib::time::install_timezone(self, scope)?,
             "struct" => stdlib::structure::install(self, scope)?,
             "pickle" => stdlib::pickle::install(self, scope)?,

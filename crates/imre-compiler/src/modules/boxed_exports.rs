@@ -104,6 +104,15 @@ pub(super) fn symbol(module: M, name: &str) -> Option<Binding> {
             "error",
             "start_new_thread"
         ),
+        M::TracemallocNative => exports!(
+            "_tracemalloc",
+            "_get_object_traceback",
+            "clear_traces",
+            "get_traceback_limit",
+            "is_tracing",
+            "start",
+            "stop"
+        ),
         M::WarningsNative => exports!(
             "_warnings",
             "_acquire_lock",
@@ -536,6 +545,17 @@ pub(super) fn symbol(module: M, name: &str) -> Option<Binding> {
             "urlparse",
             "uses_netloc",
             "uses_relative"
+        ),
+        M::Tracemalloc => exports!(
+            "tracemalloc",
+            "Frame",
+            "Traceback",
+            "clear_traces",
+            "get_object_traceback",
+            "get_traceback_limit",
+            "is_tracing",
+            "start",
+            "stop"
         ),
         M::Warnings => exports!(
             "warnings",

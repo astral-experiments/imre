@@ -56,6 +56,7 @@ fn is_builtin(name: &str) -> bool {
             | "json"
             | "subprocess"
             | "warnings"
+            | "_tracemalloc"
             | "_warnings"
     ) || (cfg!(unix) && matches!(name, "_signal" | "_imre_signal" | "zipimport"))
         || (cfg!(any(target_os = "linux", target_os = "macos")) && matches!(name, "grp" | "pwd"))

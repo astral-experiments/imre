@@ -171,7 +171,7 @@ pub(in crate::dynamic) fn encode_text_object(
             return raw_unicode_escape::encode(ctx, input);
         }
         let data = encode_text(ctx, input, encoding, errors)?;
-        return Ok(ctx.alloc(Value::Bytes(data)));
+        return Ok(ctx.heap.bytes_from_data(data));
     };
     let result = apply(ctx, entry, "encode", input, &name, errors, true)?;
     match ctx.heap.get(ctx.scalar_value(result)) {

@@ -551,7 +551,7 @@ fn unsupported(what: impl std::fmt::Display) -> Error {
 struct SharedConstants<'a> {
     text: HashMap<Cow<'a, str>, Id>,
     surrogate_text: HashMap<Vec<u32>, Id>,
-    string_tuples: HashMap<Vec<Id>, Id>,
+    literal_tuples: HashMap<Vec<Id>, Id>,
 }
 
 /// One literal segment can span multiple adjacent template tokens, including raw ones.
@@ -645,13 +645,13 @@ impl<'a> CompiledStrings<'a, '_> {
         Ok(id)
     }
 
-    /// Template strings and equivalent tuple displays load the same code constant.
-    fn string_tuple(&mut self, range: ruff_text_size::TextRange, items: Vec<Id>) -> Result<()> {
-        let id = if let Some(&id) = self.shared.string_tuples.get(&items) {
+    /// Template strings and immutable tuple displays share the same code constant.
+    fn tuple_constant(&mut self, items: Vec<Id>) -> Result<Id> {
+        let id = if let Some(&id) = self.shared.literal_tuples.get(&items) {
             id
         } else {
             self.shared
-                .string_tuples
+                .literal_tuples
                 .try_reserve(1)
                 .map_err(|_| crate::Error::allocation())?;
             let mut tuple = Vec::new();
@@ -660,10 +660,49 @@ impl<'a> CompiledStrings<'a, '_> {
                 .map_err(|_| crate::Error::allocation())?;
             tuple.extend_from_slice(&items);
             let id = self.heap.packed_tuple(tuple, true);
-            self.shared.string_tuples.insert(items, id);
+            self.shared.literal_tuples.insert(items, id);
             id
         };
-        self.constant(range, id)
+        Ok(id)
+    }
+
+    /// Build constants at compilation, including nested tuples whose first evaluation may be later.
+    fn literal(&mut self, expr: &'a ast::Expr) -> Result<Id> {
+        match expr {
+            ast::Expr::NoneLiteral(_) => Ok(NONE),
+            ast::Expr::EllipsisLiteral(_) => Ok(value::ELLIPSIS),
+            ast::Expr::BooleanLiteral(v) => Ok(if v.value { TRUE } else { FALSE }),
+            ast::Expr::StringLiteral(v) => self.literal_text(v),
+            ast::Expr::BytesLiteral(v) => Ok(self.heap.bytes_from_data(v.value.bytes().collect())),
+            ast::Expr::NumberLiteral(v) => {
+                let number = match &v.value {
+                    ast::Number::Float(n) => Value::Float(*n),
+                    ast::Number::Complex { real, imag } => {
+                        Value::Complex(super::complex::Complex {
+                            real: *real,
+                            imag: *imag,
+                        })
+                    }
+                    ast::Number::Int(n) => {
+                        let n = crate::parse_integer_literal(&n.to_string())
+                            .ok_or_else(|| Error::new("ValueError", "invalid integer"))?;
+                        Value::Int(crate::Int::new(n))
+                    }
+                };
+                Ok(self.heap.alloc(number))
+            }
+            ast::Expr::Tuple(tuple) => {
+                let mut items = Vec::new();
+                items
+                    .try_reserve_exact(tuple.elts.len())
+                    .map_err(|_| crate::Error::allocation())?;
+                for item in &tuple.elts {
+                    items.push(self.literal(item)?);
+                }
+                self.tuple_constant(items)
+            }
+            _ => unreachable!("only immutable literal elements form code constants"),
+        }
     }
 
     /// Pool template text by its original Python code points.
@@ -755,7 +794,8 @@ impl<'a> CompiledStrings<'a, '_> {
             .try_reserve(1)
             .map_err(|_| crate::Error::allocation())?;
         items.push(self.template_text(segment)?);
-        self.string_tuple(template.range(), items)
+        let id = self.tuple_constant(items)?;
+        self.constant(template.range(), id)
     }
 
     /// Root a literal for later evaluation at its source position.
@@ -889,10 +929,6 @@ impl<'a> CompiledStrings<'a, '_> {
                     self.visit_expr(elt);
                     continue;
                 }
-                ast::Expr::StringLiteral(literal) => {
-                    let id = self.literal_text(literal)?;
-                    self.constant(literal.range(), id)?;
-                }
                 ast::Expr::FString(formatted) => {
                     for part in formatted.value.iter() {
                         match part {
@@ -906,29 +942,13 @@ impl<'a> CompiledStrings<'a, '_> {
                     }
                 }
                 ast::Expr::TString(template) => self.template_strings(template)?,
-                ast::Expr::Tuple(tuple)
-                    if !tuple.elts.is_empty()
-                        && tuple.elts.iter().all(ast::Expr::is_string_literal_expr) =>
-                {
-                    let mut items = Vec::new();
-                    items
-                        .try_reserve_exact(tuple.elts.len())
-                        .map_err(|_| crate::Error::allocation())?;
-                    for literal in tuple
-                        .elts
-                        .iter()
-                        .filter_map(ast::Expr::as_string_literal_expr)
-                    {
-                        items.push(self.literal_text(literal)?);
-                    }
-                    self.string_tuple(tuple.range(), items)?;
+                ast::Expr::NoneLiteral(_)
+                | ast::Expr::BooleanLiteral(_)
+                | ast::Expr::EllipsisLiteral(_) => {}
+                _ if imre_ast::literal_tuple_element(expr) => {
+                    let id = self.literal(expr)?;
+                    self.constant(expr.range(), id)?;
                     continue;
-                }
-                ast::Expr::BytesLiteral(literal) => {
-                    let id = self
-                        .heap
-                        .alloc(Value::Bytes(literal.value.bytes().collect()));
-                    self.constant(literal.range(), id)?;
                 }
                 _ => {}
             }
@@ -5635,7 +5655,9 @@ impl Context {
                 }
                 Ok(value)
             }
-            Expr::StringLiteral(_) | Expr::BytesLiteral(_) => Ok(code.literals[&expr.range()]),
+            Expr::StringLiteral(_) | Expr::BytesLiteral(_) | Expr::NumberLiteral(_) => {
+                Ok(code.literals[&expr.range()])
+            }
             Expr::FString(fstring) => {
                 let mark = self.heap.temporary_mark();
                 let mut parts = Vec::new();
@@ -5685,23 +5707,6 @@ impl Context {
             Expr::NoneLiteral(_) => Ok(NONE),
             Expr::EllipsisLiteral(_) => Ok(value::ELLIPSIS),
             Expr::BooleanLiteral(v) => Ok(if v.value { TRUE } else { FALSE }),
-            Expr::NumberLiteral(v) => {
-                let value = match &v.value {
-                    ast::Number::Float(value) => Value::Float(*value),
-                    ast::Number::Complex { real, imag } => {
-                        Value::Complex(super::complex::Complex {
-                            real: *real,
-                            imag: *imag,
-                        })
-                    }
-                    ast::Number::Int(n) => {
-                        let n = crate::parse_integer_literal(&n.to_string())
-                            .ok_or_else(|| Error::new("ValueError", "invalid integer"))?;
-                        Value::Int(crate::Int::new(n))
-                    }
-                };
-                Ok(self.alloc(value))
-            }
             Expr::List(v) => {
                 let items = self.source_sequence_items(code, scope, &v.elts)?;
                 Ok(self.alloc(Value::List(items)))

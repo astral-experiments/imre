@@ -33,6 +33,7 @@ pub(super) struct Callback {
     receiver: Option<(String, Argument)>,
     config: serde_json::Value,
     gc_settings: Arc<super::gc_schedule::GcSettings>,
+    allocation_traces: super::allocation_traces::AllocationTraces,
     finalizing: Arc<std::sync::atomic::AtomicBool>,
 }
 
@@ -349,6 +350,7 @@ impl Callback {
             receiver: None,
             config: ctx.config.clone(),
             gc_settings: ctx.heap.gc_settings.clone(),
+            allocation_traces: ctx.heap.allocation_traces.worker(),
             finalizing: ctx.finalizing.clone(),
         })
     }
@@ -358,7 +360,9 @@ impl Callback {
     }
 
     pub(super) fn load(self) -> Result<(Context, Id, Vec<Id>)> {
-        let mut ctx = ffi::new_context(self.config, std::iter::empty::<String>());
+        let mut heap = super::Heap::new();
+        heap.allocation_traces = self.allocation_traces;
+        let mut ctx = ffi::new_context_with_heap(self.config, std::iter::empty::<String>(), heap);
         ctx.heap.gc_settings = self.gc_settings;
         ctx.finalizing = self.finalizing;
         let globals = ctx.scope(&self.module, None);

@@ -1836,8 +1836,10 @@ pub(super) fn call(
                     return Ok(receiver);
                 }
                 let value = match ctx.heap.get(storage) {
-                    Value::Bytes(bytes) if bytes.len() <= 1 => return Ok(storage),
-                    Value::Bytes(bytes) => Value::Bytes(super::copy_ids(bytes)?),
+                    Value::Bytes(bytes) => {
+                        let bytes = super::copy_ids(bytes)?;
+                        return Ok(ctx.heap.bytes_from_data(bytes));
+                    }
                     Value::Complex(number) => Value::Complex(*number),
                     _ => unreachable!("descriptor receiver has checked native layout"),
                 };
