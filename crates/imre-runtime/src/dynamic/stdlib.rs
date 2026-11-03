@@ -450,7 +450,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             "_frame_locals" | "_tb_position" | "clear_frames" | "format_exc" | "format_exception"
             | "print_exc" | "print_exception",
         ) => ctx.builtin(&format!("traceback.{name}")),
-        ("struct", "Struct") | ("hmac", "HMAC") | ("functools", "partial") => {
+        ("struct", "Struct") | ("functools", "partial") => {
             ctx.builtin(&format!("{module}.{name}"))
         }
         ("types", "MappingProxyType") => ctx.builtin("mappingproxy"),
@@ -738,7 +738,6 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         | ("marshal", "loads")
         | ("pickle", "dumps")
         | ("hashlib", "file_digest")
-        | ("hmac", "new")
         | (
             "re",
             "match" | "fullmatch" | "search" | "compile" | "_compile_scanner" | "split" | "findall"

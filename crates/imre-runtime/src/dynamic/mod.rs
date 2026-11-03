@@ -3152,10 +3152,10 @@ impl Context {
                 };
                 let compare = self.lookup_attr(module, attr)?;
                 self.bind(scope, "compare_digest", compare);
-                for member in ["new", "HMAC"] {
-                    let value = stdlib::attribute(self, name, member)?;
-                    self.bind(scope, member, value);
-                }
+                let new = self.alloc(Value::Native("hmac.new".into()));
+                self.bind(scope, "new", new);
+                let hmac = self.builtin("hmac.HMAC");
+                self.bind(scope, "HMAC", hmac);
                 let digest = self.builtin("hmac._digest_native");
                 self.bind(scope, "_digest_native", digest);
             }
