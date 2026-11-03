@@ -1089,6 +1089,71 @@ pub(super) fn line_starts(offsets: impl Iterator<Item = usize> + Clone) -> Resul
     Ok(starts)
 }
 
+pub(super) const MAX_INDENT_LEVELS: usize = 99;
+
+pub(super) struct IndentationLimit {
+    row: i64,
+    text: String,
+}
+
+impl IndentationLimit {
+    /// Locate the first excess logical indent, unless parsing already failed earlier.
+    pub(super) fn find<T>(
+        parsed: &ruff_python_parser::Parsed<T>,
+        source: &str,
+        file_input: bool,
+        first_statement_end: Option<ruff_text_size::TextSize>,
+    ) -> Option<Self> {
+        use ast::token::TokenKind::{Dedent, Indent};
+        let mut depth = 0usize;
+        for token in parsed.tokens() {
+            match token.kind() {
+                Indent if depth == MAX_INDENT_LEVELS => {
+                    if first_statement_end.is_some_and(|end| token.start() >= end)
+                        || parsed
+                            .errors()
+                            .first()
+                            .is_some_and(|e| e.location.start() < token.start())
+                    {
+                        return None;
+                    }
+                    // An indent can span an explicit continuation. Report the physical
+                    // line containing the first non-whitespace character.
+                    let prefix = &source[..token.end().to_usize()];
+                    let start = prefix.rfind('\n').map_or(0, |i| i + 1);
+                    let row = 1 + prefix.bytes().filter(|&b| b == b'\n').count() as i64;
+                    let mut text = source[start..].split_inclusive('\n').next()?.to_owned();
+                    if file_input && !text.ends_with('\n') {
+                        text.push('\n');
+                    }
+                    return Some(Self { row, text });
+                }
+                Indent => depth += 1,
+                Dedent => depth = depth.saturating_sub(1),
+                _ => {}
+            }
+        }
+        None
+    }
+
+    pub(super) fn raise(self, ctx: &mut Context, filename: Id) -> Result<Id> {
+        let message = "too many levels of indentation";
+        let msg = ctx.text(message);
+        let row = ctx.int(self.row);
+        let column = ctx.int(1);
+        let end_column = ctx.int(0);
+        let text = ctx.text(self.text);
+        let details = ctx.alloc(Value::Tuple(vec![
+            filename, row, column, text, row, end_column,
+        ]));
+        let args = [msg, details];
+        let mut error = ctx.exception("IndentationError", &args);
+        error.message = format!("{message}{}", ctx.syntax_suffix(filename, row)?);
+        ctx.retain_syntax_fields(&mut error, ctx.syntax_fields(&args))?;
+        Err(error)
+    }
+}
+
 /// Interactive input accepts one compound statement or one logical line of simple statements.
 fn check_single_input(body: &[ast::Stmt], tokens: &ast::token::Tokens) -> Result<()> {
     use ast::token::TokenKind::{Dedent, Newline};
@@ -2926,8 +2991,20 @@ impl Context {
         } else {
             source
         };
-        let parsed = ruff_python_parser::parse(source, parser_mode.into())
-            .map_err(|error| Error::new("SyntaxError", format!("{filename}: {error}")))?;
+        let parsed = ruff_python_parser::parse_unchecked(source, parser_mode.into());
+        // In single mode, a second statement is an error before its suite is read.
+        let first_statement_end = match (interactive, parsed.syntax()) {
+            (true, ast::Mod::Module(module)) => module.body.first().map(Ranged::end),
+            _ => None,
+        };
+        if let Some(limit) =
+            IndentationLimit::find(&parsed, source, mode == "exec", first_statement_end)
+        {
+            return limit.raise(self, filename_id);
+        }
+        if let Some(error) = parsed.errors().first() {
+            return Err(Error::new("SyntaxError", format!("{filename}: {error}")));
+        }
         if interactive && let ast::Mod::Module(module) = parsed.syntax() {
             check_single_input(&module.body, parsed.tokens())?;
         }
