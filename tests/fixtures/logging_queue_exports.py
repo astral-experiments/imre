@@ -2,12 +2,19 @@ import io
 import logging.handlers
 import logging.handlers as handlers
 import queue
+from logging import getHandlerNames
 from logging.handlers import QueueHandler as Producer, QueueListener as Listener
 
 assert Producer is handlers.QueueHandler is logging.handlers.QueueHandler
 assert Listener is handlers.QueueListener is logging.handlers.QueueListener
 items = queue.Queue()
 producer = Producer(items)
+producer.name = 'producer'
+names = getHandlerNames()
+assert getHandlerNames is logging.getHandlerNames and type(names) is frozenset
+producer.name = 'renamed'
+assert 'producer' in names and 'producer' not in getHandlerNames()
+assert 'renamed' not in names and 'renamed' in getHandlerNames()
 stream = io.StringIO()
 sink = logging.StreamHandler(stream)
 sink.setLevel(logging.WARNING)
@@ -28,4 +35,6 @@ assert listener.dequeue(False) is None
 items.task_done()
 items.join()
 assert stream.getvalue() == 'item warning\n'
+producer.close()
+assert 'renamed' not in getHandlerNames()
 print(stream.getvalue(), end='')

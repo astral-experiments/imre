@@ -5,7 +5,8 @@ use std::rc::Rc;
 
 use super::super::records::weak::WeakRecord;
 use super::super::{exceptions::imre_error_pending, records::imre_record_release};
-use super::Str;
+use super::{Object, Str};
+use crate::objects::mappings::Set;
 
 struct Entry {
     handler: WeakRecord,
@@ -124,6 +125,19 @@ pub unsafe extern "C" fn imre_log_handler_lookup(name: *const Str) -> usize {
             .and_then(|entry| entry.handler.upgrade())
             .map_or(0, |record| record as usize)
     })
+}
+
+/// Return a frozen snapshot of the names of live handlers.
+#[unsafe(no_mangle)]
+pub extern "C" fn imre_log_handler_names() -> *const Object {
+    let result = HANDLERS.with_borrow(|names| {
+        let live = names
+            .iter()
+            .filter(|(_, entry)| entry.handler.is_live())
+            .map(|(name, _)| name.as_ref());
+        Set::names(live, true)
+    });
+    crate::finish(result.map(crate::ObjectOwner::into_raw), std::ptr::null())
 }
 
 #[cfg(test)]
