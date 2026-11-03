@@ -198,8 +198,28 @@ def check_text_base():
         print(error.args, stream.closed)
 
 
+def check_typed_raw_readinto():
+    class Raw(RawIOBase):
+        def readable(self):
+            return True
+
+        def readinto(self, buffer):
+            words = buffer[1:].cast("I")
+            buffer[0] = ord("!")
+            words[0] = 0x41414141
+            assert io.BytesIO(b"1234").readinto(words[1:]) == 4
+            assert words[0] == 0x41414141 and words[1:].tobytes() == b"1234"
+            return len(buffer)
+
+    target = bytearray(b"." * 13)
+    with io.BufferedReader(Raw(), 2) as reader:
+        assert reader.readinto(memoryview(target)[2:-2]) == 9
+    assert target == b"..!AAAA1234.."
+
+
 def exercise(path):
     check_exported_writes()
+    check_typed_raw_readinto()
     check_base_writes()
     check_text_base()
     events = []

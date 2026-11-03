@@ -3004,9 +3004,6 @@ impl Context {
         result
     }
     pub(super) fn get_item(&mut self, obj: Id, key: Id) -> Result<Id> {
-        if self.raw_read_window(obj).is_some() && !self.view_is_readonly(obj)? {
-            return self.raw_view_get(obj, key);
-        }
         if matches!(self.heap.get(obj), Value::MemoryView { .. }) {
             return self.memoryview_get(obj, key);
         }
@@ -3238,10 +3235,13 @@ impl Context {
     }
 
     pub(super) fn put_item(&mut self, obj: Id, key: Id, val: Id) -> Result<()> {
-        if self.raw_read_window(obj).is_some() {
-            return self.raw_view_set(obj, key, val);
-        }
         if matches!(self.heap.get(obj), Value::MemoryView { .. }) {
+            if let Some(window) = self.raw_read_window(obj) {
+                self.window_bytes(window)?;
+                // An index or value conversion can try to resize the unpinned backing.
+                return self
+                    .with_buffer_export(window.backing, |ctx| ctx.memoryview_set(obj, key, val));
+            }
             return self.memoryview_set(obj, key, val);
         }
         let target = self.weak_proxy_target(obj)?;

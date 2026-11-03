@@ -826,14 +826,6 @@ fn registered_utf8(ctx: &mut Context, input: Id, name: &str, signature: bool) ->
     stateful_utf8(ctx, input, name, signature, true).map(|(text, _)| text)
 }
 
-fn utf8_input(ctx: &Context, input: Id) -> Result<&[u8]> {
-    if let Value::Array(array) = ctx.buffer_storage(input)? {
-        Ok(array.as_bytes())
-    } else {
-        ctx.bytes_like(input)
-    }
-}
-
 /// Consume complete sequences and leave a trailing partial character for the next call.
 fn stateful_utf8(
     ctx: &mut Context,
@@ -842,7 +834,7 @@ fn stateful_utf8(
     signature: bool,
     final_input: bool,
 ) -> Result<(Id, usize)> {
-    let data = utf8_input(ctx, input)?;
+    let data = ctx.native_buffer_bytes(input)?;
     // The utf-8-sig codec passes the slice after the BOM to utf_8_decode.
     let data = if signature {
         data.strip_prefix(b"\xef\xbb\xbf").unwrap_or(data)
@@ -1006,7 +998,7 @@ pub(super) fn utf8_decode(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)
         )));
     }
     ctx.with_buffer_export(input, |ctx| {
-        utf8_input(ctx, input)?;
+        ctx.native_buffer_bytes(input)?;
         let errors = entry_error_policy(ctx, "utf_8_decode", args.get(1).copied())?;
         let final_input = args
             .get(2)
