@@ -424,7 +424,9 @@ pub(super) fn symbol(module: M, name: &str) -> Option<Binding> {
         M::Traceback => exports!("traceback", "extract_tb", "print_stack"),
         M::Types => exports!(
             "types",
+            "BuiltinMethodType",
             "CellType",
+            "ClassMethodDescriptorType",
             "DynamicClassAttribute",
             "MappingProxyType",
             "get_original_bases",
