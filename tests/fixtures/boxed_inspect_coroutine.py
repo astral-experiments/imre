@@ -1,7 +1,7 @@
 import inspect
 from functools import partial, update_wrapper
 from inspect import CO_ASYNC_GENERATOR, CO_COROUTINE, CO_GENERATOR
-from inspect import cleandoc, iscoroutinefunction, markcoroutinefunction
+from inspect import cleandoc, isawaitable, iscoroutinefunction, markcoroutinefunction
 
 
 assert inspect.cleandoc is cleandoc
@@ -86,3 +86,19 @@ plain.__code__ = view.__code__
 print(iscoroutinefunction(plain), iscoroutinefunction(alias))
 plain.__code__ = saved
 print(iscoroutinefunction(plain), iscoroutinefunction(alias))
+
+
+# Runner.close() awaits the operation returned by aclose().
+namespace = {}
+exec("async def values(): yield 1", namespace)
+agen = namespace["values"]()
+step = agen.__anext__()
+closer = agen.aclose()
+coro = view()
+assert isawaitable is inspect.isawaitable
+assert isawaitable(coro) and isawaitable(closer)
+assert not isawaitable(agen)
+assert isawaitable(step)
+step.close()
+closer.close()
+coro.close()
