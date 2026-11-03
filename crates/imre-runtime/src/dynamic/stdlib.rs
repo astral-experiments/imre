@@ -2475,7 +2475,9 @@ pub(super) fn call(
         return Ok(NONE);
     }
     if name == "gc.collect" {
-        if !args.is_empty() || !kwargs.is_empty() {
+        let generation = if args.is_empty() && kwargs.is_empty() {
+            2
+        } else {
             let value = single_argument("collect", "generation", args, kwargs)?;
             let generation = ctx
                 .index_integer(value)?
@@ -2484,18 +2486,12 @@ pub(super) fn call(
                 .ok_or_else(|| {
                     Error::new("OverflowError", "Python int too large to convert to C int")
                 })?;
-            match generation {
-                2 => {}
-                0 | 1 => {
-                    return Err(Error::new(
-                        "NotImplementedError",
-                        "the native heap supports full collections only",
-                    ));
-                }
-                _ => return Err(Error::new("ValueError", "invalid generation")),
+            if !(0..=2).contains(&generation) {
+                return Err(Error::new("ValueError", "invalid generation"));
             }
-        }
-        let reclaimed = ctx.collect_full()?;
+            generation as u8
+        };
+        let reclaimed = ctx.collect_generation(generation)?;
         return Ok(ctx.int(reclaimed as i64));
     }
     if name == "marshal.loads" {
