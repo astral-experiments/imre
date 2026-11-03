@@ -1585,12 +1585,16 @@ fn decode_index(value: &Int) -> Result<isize> {
 
 /// Subscription reports an unrepresentable Python index before checking bounds.
 fn list_subscript_index(value: &Int) -> Result<isize> {
-    signed_index(value).ok_or_else(|| {
-        Error::new(
-            Kind::IndexError,
-            "cannot fit 'int' into an index-sized integer",
-        )
-    })
+    signed_index(value).ok_or_else(unrepresentable_subscript)
+}
+
+/// Build the shared list and tuple IndexError for an unrepresentable Python index.
+#[cold]
+fn unrepresentable_subscript() -> Error {
+    Error::new(
+        Kind::IndexError,
+        "cannot fit 'int' into an index-sized integer",
+    )
 }
 
 #[inline]
@@ -1619,11 +1623,7 @@ pub unsafe extern "C" fn imre_tuple_index(word: usize, length: usize) -> usize {
     // SAFETY: the generated call preserves the exact integer for this conversion.
     let value = unsafe { Int::borrow(word) };
     let Some(raw) = signed_index(&value) else {
-        return Error::new(
-            Kind::IndexError,
-            "cannot fit 'int' into an index-sized integer",
-        )
-        .returning(0);
+        return unrepresentable_subscript().returning(0);
     };
     normalized_index(raw, length)
         .unwrap_or_else(|| Error::new(Kind::IndexError, "tuple index out of range").returning(0))
@@ -1675,17 +1675,16 @@ pub unsafe extern "C" fn imre_list_reverse(list: *const List) {
 pub unsafe extern "C" fn imre_list_get(list: *const List, at: usize) -> usize {
     // SAFETY: the caller roots the index; conversion cannot call user code.
     let at = unsafe { Int::borrow(at) };
-    let at = match list_subscript_index(&at) {
-        Ok(at) => at,
-        Err(error) => return error.returning(0),
+    let Some(at) = signed_index(&at) else {
+        return unrepresentable_subscript().returning(0);
     };
     // SAFETY: this rooted list is accessed only for the nonreentrant clone.
     let owned = unsafe {
         (&*list)
             .0
-            .with(|list| Ok(list[index(at, list.len())?].clone()))
+            .with(|list| normalized_index(at, list.len()).map(|index| list[index].clone()))
     };
-    finish(owned.map(Int::into_raw), 0)
+    owned.map_or_else(|| Error::index().returning(0), Int::into_raw)
 }
 
 /// Reads an element using a compiler-proven nonnegative, decoded index.
