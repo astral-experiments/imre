@@ -382,7 +382,7 @@ pub(super) const DICT_METHODS: &[&str] = &[
 ];
 
 pub(super) const LIST_METHODS: &[&str] = &[
-    "__add__", "__getitem__", "__iadd__", "__init__", "__len__", "__repr__", "append", "clear",
+    "__add__", "__getitem__", "__iadd__", "__init__", "__iter__", "__len__", "__repr__", "append", "clear",
     "copy", "count", "extend", "index", "insert", "pop", "remove", "reverse", "sort",
 ];
 
