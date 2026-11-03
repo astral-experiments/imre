@@ -464,7 +464,10 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("types", "MethodDescriptorType") => ctx.builtin("method_descriptor"),
         ("types", "FrameType") => ctx.builtin("frame"),
         ("types", "FunctionType") => ctx.builtin("function"),
-        ("types", "BuiltinFunctionType") => ctx.builtin("builtin_function_or_method"),
+        ("types", "BuiltinFunctionType" | "BuiltinMethodType") => {
+            ctx.builtin("builtin_function_or_method")
+        }
+        ("types", "ClassMethodDescriptorType") => ctx.builtin("classmethod_descriptor"),
         ("types", "EllipsisType") => ctx.builtin("ellipsis"),
         ("types", "NoneType" | "NotImplementedType") => ctx.builtin(name),
         ("types", "CodeType") => ctx.builtin("code"),

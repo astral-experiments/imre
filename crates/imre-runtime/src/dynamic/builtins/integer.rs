@@ -109,7 +109,8 @@ fn byte_options(
 pub(super) fn from_bytes(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
     let (&class, args) = args
         .split_first()
-        .ok_or_else(|| type_error("from_bytes needs a class"))?;
+        .ok_or_else(|| type_error("descriptor 'from_bytes' of 'int' object needs an argument"))?;
+    super::super::stdlib::datetime::validate_classmethod_receiver(ctx, "int", "from_bytes", class)?;
     let [source, order, signed] = bind_method_arguments(
         "from_bytes",
         args,

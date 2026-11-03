@@ -2370,6 +2370,22 @@ impl Context {
         {
             self.builtin(&format!("{name}.{method}"));
         }
+        if name == "int" {
+            // A type dictionary exposes the declaring descriptors before binding.
+            let members = methods
+                .iter()
+                .chain(builtins::real_methods(name))
+                .copied()
+                .chain(["__new__", "__sizeof__", "numerator", "denominator"]);
+            let entries = members
+                .map(|member| {
+                    let key = self.heap.code_name(member);
+                    (key, self.builtin(&format!("int.{member}")))
+                })
+                .collect();
+            let dictionary = self.dict(entries);
+            self.native_type_dicts.insert(value, dictionary);
+        }
         value
     }
     fn execute(&mut self, code: Id, scope: Id, owner: FrameOwner) -> Result<Id> {

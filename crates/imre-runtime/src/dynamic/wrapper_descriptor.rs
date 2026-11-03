@@ -236,6 +236,7 @@ impl BuiltinDescriptor {
             "object.__reduce_ex__" => ("object", "__reduce_ex__"),
             "int.__add__" => ("int", "__add__"),
             "int.__index__" => ("int", "__index__"),
+            "int.from_bytes" => ("int", "from_bytes"),
             "bool.__repr__" => ("bool", "__repr__"),
             "int.__repr__" => ("int", "__repr__"),
             "float.__repr__" => ("float", "__repr__"),
@@ -243,6 +244,7 @@ impl BuiltinDescriptor {
             "str.__format__" => ("str", "__format__"),
             "str.__mod__" => ("str", "__mod__"),
             "str.__rmod__" => ("str", "__rmod__"),
+            "str.join" => ("str", "join"),
             "str.isascii" => ("str", "isascii"),
             "str.isalpha" => ("str", "isalpha"),
             "str.isdigit" => ("str", "isdigit"),
@@ -320,6 +322,8 @@ impl BuiltinDescriptor {
                     | "__reversed__"
                     | "count"
                     | "index"
+                    | "join"
+                    | "from_bytes"
                     | "isascii"
                     | "isalpha"
                     | "isdigit"
@@ -339,7 +343,10 @@ impl BuiltinDescriptor {
 
     /// Report the descriptor type exposed by type() and explicit __get__.
     pub(super) fn class(self) -> &'static str {
-        if self.owner == "object" && matches!(self.name, "__subclasshook__" | "__init_subclass__") {
+        if matches!(
+            (self.owner, self.name),
+            ("object", "__subclasshook__" | "__init_subclass__") | ("int", "from_bytes")
+        ) {
             "classmethod_descriptor"
         } else if self.method {
             "method_descriptor"
@@ -511,7 +518,7 @@ impl BuiltinDescriptor {
                     && let Some(receiver) = receiver
                 {
                     match ctx.heap.get(receiver) {
-                        _ if self.owner == "type" => ctx.class_qualname(receiver),
+                        _ if self.owner == "type" || self.class() == "classmethod_descriptor" => ctx.class_qualname(receiver),
                         _ if matches!(self.owner, value::REGEX_PATTERN_TYPE | value::REGEX_MATCH_TYPE) => self.owner.rsplit('.').next()?,
                         _ if matches!(self.owner, "builtin_function_or_method" | "method") => self.owner,
                         Value::Deque(_) if self.owner == deque::CLASS => "deque",
@@ -747,6 +754,10 @@ impl BuiltinDescriptor {
                     ("mro", _) => "($self, /)",
                     ("__getitem__", "__doc__") if self.owner == "list" => "Return self[index].",
                     ("__getitem__", _) if self.owner == "list" => "($self, index, /)",
+                    ("join", "__doc__") => "Concatenate any number of strings.\n\nThe string whose method is called is inserted in between each given string.\nThe result is returned as a new string.\n\nExample: '.'.join(['ab', 'pq', 'rs']) -> 'ab.pq.rs'",
+                    ("join", _) => "($self, iterable, /)",
+                    ("from_bytes", "__doc__") => "Return the integer represented by the given array of bytes.\n\n  bytes\n    Holds the array of bytes to convert.  The argument must either\n    support the buffer protocol or be an iterable object producing bytes.\n    Bytes and bytearray are examples of built-in objects that support the\n    buffer protocol.\n  byteorder\n    The byte order used to represent the integer.  If byteorder is 'big',\n    the most significant byte is at the beginning of the byte array.  If\n    byteorder is 'little', the most significant byte is at the end of the\n    byte array.  To request the native byte order of the host system, use\n    sys.byteorder as the byte order value.  Default is to use 'big'.\n  signed\n    Indicates whether two's complement is used to represent the integer.",
+                    ("from_bytes", _) => "($type, /, bytes, byteorder='big', *, signed=False)",
                     ("append", "__doc__") => "Append object to the end of the list.",
                     ("pop", "__doc__") => {
                         "Remove and return item at index (default last).\n\nRaises IndexError if list is empty or index is out of range."
