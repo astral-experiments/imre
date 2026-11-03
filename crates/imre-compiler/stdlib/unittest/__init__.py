@@ -12,6 +12,8 @@ from typing import TYPE_CHECKING, Callable, overload
 import sys
 import time
 
+__unittest = True
+
 
 class SkipTest(Exception):
     pass

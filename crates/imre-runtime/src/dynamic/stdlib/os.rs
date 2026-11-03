@@ -8,7 +8,11 @@ pub(in crate::dynamic) mod scandir;
 #[cfg(target_os = "linux")]
 mod spawn_child;
 #[cfg(target_os = "linux")]
+mod timerfd;
+#[cfg(target_os = "linux")]
 mod vectored;
+#[cfg(target_os = "linux")]
+pub(in crate::dynamic) use spawn_child::available as fork_available;
 #[cfg(target_os = "linux")]
 pub(super) use spawn_child::fork_for_child_callbacks;
 #[cfg(target_os = "linux")]
@@ -213,6 +217,26 @@ pub(super) fn is_process_function(name: &str) -> bool {
     cfg!(unix) && matches!(name, "execv" | "times" | "WIFSTOPPED")
 }
 
+/// Audit after signature validation and before any Python fork handlers run.
+#[cfg(target_os = "linux")]
+fn audit_fork(ctx: &mut Context) -> Result<()> {
+    if ctx.finalizing.load(std::sync::atomic::Ordering::Acquire) {
+        return Err(Error::new(
+            "PythonFinalizationError",
+            "can't fork at interpreter shutdown",
+        ));
+    }
+    super::audit::event(ctx, "os.fork", &[])
+}
+
+#[cfg(target_os = "linux")]
+pub(super) fn fork(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    builtins::bind_builtin_arguments("fork", args, kwargs, [], 0)?;
+    audit_fork(ctx)?;
+    let pid = fork_for_child_callbacks(ctx)?;
+    Ok(ctx.int(i64::from(pid)))
+}
+
 /// Spawn directly for plain arguments, or let the child run the captured Python callable.
 #[cfg(target_os = "linux")]
 pub(super) fn spawn_exec(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
@@ -221,17 +245,24 @@ pub(super) fn spawn_exec(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]
     else {
         unreachable!("all three arguments are required")
     };
-    if ctx.finalizing.load(std::sync::atomic::Ordering::Acquire) {
-        return Err(Error::new(
-            "PythonFinalizationError",
-            "can't fork at interpreter shutdown",
-        ));
+    use crate::dynamic::at_fork::{self, Phase};
+
+    audit_fork(ctx)?;
+    let mut warn = false;
+    let result = at_fork::around(ctx, |ctx| {
+        // A before-handler can add child handlers or mutate the argument list.
+        if ctx.fork_hooks[Phase::Child as usize].is_empty()
+            && let Some(result) = spawn_plain::try_spawn(ctx, path, argv, exec)
+        {
+            warn = spawn_plain::multiple_threads(ctx);
+            return result;
+        }
+        spawn_child::fork_current(ctx)
+    });
+    if warn {
+        spawn_plain::warn_about_threads(ctx);
     }
-    super::audit::event(ctx, "os.fork", &[])?;
-    let pid = match spawn_plain::try_spawn(ctx, path, argv, exec)? {
-        Some(pid) => pid,
-        None => fork_for_child_callbacks(ctx)?,
-    };
+    let pid = result?;
     Ok(ctx.int(i64::from(pid)))
 }
 
@@ -531,9 +562,58 @@ mod utime;
 #[cfg(target_os = "linux")]
 pub(in crate::dynamic) mod xattr;
 
+fn is_sequence(ctx: &Context, id: Id) -> bool {
+    // PySequence_Check excludes dict subclasses even if they override __getitem__.
+    ctx.dict_storage(id).is_none()
+        && (matches!(
+            ctx.heap.get(ctx.scalar_value(id)),
+            Value::List(_)
+                | Value::Tuple(_)
+                | Value::NamedTuple { .. }
+                | Value::Range(_)
+                | Value::Deque(_)
+                | Value::Str(_)
+                | Value::SurrogateStr(_)
+                | Value::Bytes(_)
+                | Value::ByteArray(_)
+                | Value::Array(_)
+                | Value::MemoryView { .. }
+        ) || ctx.slot(id, "__getitem__").is_some())
+}
+
+#[cfg(unix)]
+fn setgroups(ctx: &mut Context, groups: Id) -> Result<Id> {
+    if !is_sequence(ctx, groups) {
+        return Err(Error::new(
+            "TypeError",
+            "setgroups argument must be a sequence",
+        ));
+    }
+    let count = ctx.sequence_len(groups)?;
+    if count > native::max_groups() {
+        return Err(Error::new("ValueError", "too many groups"));
+    }
+    let mut ids = Vec::new();
+    ids.try_reserve_exact(count)
+        .map_err(|_| Error::new("MemoryError", ""))?;
+    for i in 0..count {
+        let key = ctx.int(i as i64);
+        let value = ctx.get_item(groups, key)?;
+        if !ctx.builtin_slot_accepts(value, "int") && ctx.slot(value, "__index__").is_none() {
+            return Err(Error::new("TypeError", "groups must be integers"));
+        }
+        ids.push(chown::owner_id(ctx, value, true)? as libc::gid_t);
+    }
+    native::setgroups(&ids)?;
+    Ok(NONE)
+}
+
 /// POSIX functions exported as the same builtins by both os and posix.
 pub(super) fn is_descriptor_function(name: &str) -> bool {
-    if matches!(name, "getpgid" | "setpgid") {
+    if matches!(
+        name,
+        "getpgid" | "setpgid" | "setgroups" | "setregid" | "setreuid"
+    ) {
         return cfg!(unix);
     }
     if name == "_exit" {
@@ -593,6 +673,12 @@ pub(super) fn is_descriptor_function(name: &str) -> bool {
                 "copy_file_range"
                     | "get_terminal_size"
                     | "tcgetpgrp"
+                    | "tcsetpgrp"
+                    | "timerfd_create"
+                    | "timerfd_gettime"
+                    | "timerfd_gettime_ns"
+                    | "timerfd_settime"
+                    | "timerfd_settime_ns"
                     | "ttyname"
                     | "preadv"
                     | "pwritev"
@@ -1004,6 +1090,10 @@ pub(super) fn descriptor(
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
+    #[cfg(target_os = "linux")]
+    if name.starts_with("timerfd_") {
+        return timerfd::call(ctx, name, args, kwargs);
+    }
     if name == "device_encoding" {
         let [Some(fd)] = builtins::bind_builtin_arguments(name, args, kwargs, ["fd"], 1)? else {
             unreachable!("device_encoding requires a descriptor");
@@ -1103,6 +1193,11 @@ pub(super) fn descriptor(
         return Ok(ctx.int(i64::from(group)));
     }
     #[cfg(unix)]
+    if name == "setgroups" {
+        let groups = builtins::one_positional_arg("posix.setgroups", args, kwargs)?;
+        return setgroups(ctx, groups);
+    }
+    #[cfg(unix)]
     if name == "getpgid" {
         let [Some(pid)] = builtins::bind_builtin_arguments(name, args, kwargs, ["pid"], 1)? else {
             unreachable!("pid is required")
@@ -1111,20 +1206,31 @@ pub(super) fn descriptor(
         return Ok(ctx.int(i64::from(group)));
     }
     #[cfg(unix)]
-    if name == "setpgid" {
+    if matches!(name, "setpgid" | "setregid" | "setreuid") {
         if !kwargs.is_empty() {
             return Err(Error::new(
                 "TypeError",
-                "posix.setpgid() takes no keyword arguments",
+                format!("posix.{name}() takes no keyword arguments"),
             ));
         }
-        let [pid, group] = args else {
+        let [first, second] = args else {
             return Err(Error::new(
                 "TypeError",
-                format!("setpgid expected 2 arguments, got {}", args.len()),
+                format!("{name} expected 2 arguments, got {}", args.len()),
             ));
         };
-        native::setpgid(c_int(ctx, *pid)?, c_int(ctx, *group)?)?;
+        if name == "setpgid" {
+            native::setpgid(c_int(ctx, *first)?, c_int(ctx, *second)?)?;
+        } else {
+            let is_group = name == "setregid";
+            let real = chown::owner_id(ctx, *first, is_group)?;
+            let effective = chown::owner_id(ctx, *second, is_group)?;
+            if is_group {
+                native::setregid(real as libc::gid_t, effective as libc::gid_t)?;
+            } else {
+                native::setreuid(real as libc::uid_t, effective as libc::uid_t)?;
+            }
+        }
         return Ok(NONE);
     }
     if name == "open" {
@@ -1306,6 +1412,17 @@ pub(super) fn descriptor(
             "TypeError",
             format!("posix.{name}() takes no keyword arguments"),
         ));
+    }
+    #[cfg(target_os = "linux")]
+    if name == "tcsetpgrp" {
+        let [fd, pgid] = args else {
+            return Err(Error::new(
+                "TypeError",
+                format!("tcsetpgrp expected 2 arguments, got {}", args.len()),
+            ));
+        };
+        native::tcsetpgrp(c_int(ctx, *fd)?, c_int(ctx, *pgid)?)?;
+        return Ok(NONE);
     }
     #[cfg(target_os = "linux")]
     if name == "get_terminal_size" {

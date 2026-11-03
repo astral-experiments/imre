@@ -1,6 +1,6 @@
 from inspect import signature
 from unittest import TestCase
-from unittest.mock import NonCallableMagicMock, create_autospec, seal
+from unittest.mock import InvalidSpecError, NonCallableMagicMock, call, create_autospec, seal
 
 
 class Version:
@@ -11,11 +11,17 @@ class Version:
         raise AttributeError
 
 
+class Sink:
+    def write(self, value):
+        pass
+
+
 class Client:
     version = Version()
+    sink = Sink()
 
     def __init__(self, host):
-        pass
+        self.host = host
 
     def send(self, value, /, *, retry=False):
         pass
@@ -39,6 +45,18 @@ instance = factory("localhost")
 assert isinstance(instance, NonCallableMagicMock) and not callable(instance)
 with check.assertRaises(AttributeError):
     instance.extra = 1
+
+live = create_autospec(Client("localhost"), spec_set=True)
+assert isinstance(live, Client) and not callable(live)
+assert isinstance(live.host, str)
+with check.assertRaises(AttributeError):
+    live.extra = 1
+live.send("payload", retry=True)
+with check.assertRaises(TypeError):
+    live.send(value="payload")
+live.send.assert_called_once_with("payload", retry=True)
+with check.assertRaises(InvalidSpecError):
+    create_autospec(live)
 
 client = create_autospec(Client, instance=True)
 assert isinstance(client, NonCallableMagicMock) and not callable(client)
@@ -64,8 +82,48 @@ for method in (client.Codec.encode, client.Codec.decode):
     method.return_value = "encoded"
     assert method("data") == "encoded"
 
+for name in ("encode", "decode"):
+    descriptor = Client.Codec.__dict__[name]
+    descriptor.label = name
+    assert ("__call__" in dir(descriptor)) == isinstance(descriptor, staticmethod)
+    method = create_autospec(descriptor, spec_set=True)
+    method.label = "updated"
+    with check.assertRaises(AttributeError):
+        method.__code__ = None
+    assert method.__class__ is type(descriptor)
+    assert signature(method) == signature(getattr(Client.Codec, name))
+    with check.assertRaises(TypeError):
+        method()
+    with check.assertRaises(TypeError):
+        method(None, "data")
+    method.assert_not_called()
+    method("data")
+    method.assert_called_once_with(value="data")
+
 seal(client)
 assert client.extra == 1 and client.Codec.encode("more") == "encoded"
 with check.assertRaises(AttributeError):
     client.Codec.missing = 1
+write = instance.sink.write
+write("one")
+write.assert_called_once_with(value="one")
+write(value="two")
+write.assert_called_with("two")
+write.assert_any_call(value="one")
+write.assert_has_calls([call(value="one"), call("two")])
+instance.assert_has_calls([call.sink.write(value="one"), call.sink.write("two")])
+assert write.call_args_list == [call("one"), call(value="two")]
+with check.assertRaises(AssertionError):
+    write.assert_has_calls([call("two"), call("one")])
+with check.assertRaises(AssertionError) as invalid:
+    write.assert_called_with(unknown="two")
+assert isinstance(invalid.exception.__cause__, TypeError)
+
+source = Client("localhost")
+source.receive = lambda data: None
+receive = create_autospec(source).receive
+with check.assertRaises(TypeError):
+    receive()
+receive("packet")
+receive.assert_called_once_with(data="packet")
 print("autospec checked")

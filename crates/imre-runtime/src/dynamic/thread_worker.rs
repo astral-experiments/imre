@@ -462,11 +462,12 @@ fn launch(ctx: &Context, operation: Operation, detached_label: Option<String>) -
                         if error.kind != "SystemExit" {
                             let _ = writeln!(
                                 crate::sys::stderr_writer(),
-                                "Exception ignored in thread started by {label}:\n{error}"
+                                "Exception ignored in thread started by {label}:\n{}",
+                                error.report(&worker.heap)
                             );
                         }
                     } else {
-                        return Err(error.to_string());
+                        return Err(error.report(&worker.heap).to_string());
                     }
                 }
             } else if let Some(lock) = acquire {

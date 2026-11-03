@@ -433,6 +433,7 @@ impl Pickler {
                         self.remember(ctx, obj)?;
                     }
                     Value::Bytes(_) => self.save_legacy_bytes(ctx, obj)?,
+                    Value::ByteArray(_) => self.save_bytearray(ctx, obj)?,
                     Value::List(items) => {
                         let length = items.len();
                         self.save_list(ctx, obj, length)?;
@@ -466,6 +467,31 @@ impl Pickler {
         };
         let args = ctx.alloc(Value::Tuple(args));
         self.save_reduce(ctx, obj, func, args, NONE, [NONE; 2])
+    }
+
+    /// Older protocols reconstruct bytearray from bytes; protocol 5 stores its mutable payload directly.
+    fn save_bytearray(&mut self, ctx: &mut Context, obj: Id) -> Result<()> {
+        let Value::ByteArray(data) = ctx.heap.get(obj) else {
+            unreachable!()
+        };
+        if self.protocol >= 5 {
+            self.out
+                .try_reserve(9 + data.len())
+                .map_err(|_| crate::Error::allocation())?;
+            self.out.push(0x96); // BYTEARRAY8
+            self.out.extend((data.len() as u64).to_le_bytes());
+            self.out.extend_from_slice(data);
+            return self.remember(ctx, obj);
+        }
+        let args = if data.is_empty() {
+            Vec::new()
+        } else {
+            let bytes = super::super::copy_ids(data)?;
+            vec![ctx.alloc(Value::Bytes(bytes))]
+        };
+        let args = ctx.alloc(Value::Tuple(args));
+        let constructor = ctx.builtin("bytearray");
+        self.save_reduce(ctx, obj, constructor, args, NONE, [NONE; 2])
     }
 
     fn save_list(&mut self, ctx: &mut Context, obj: Id, length: usize) -> Result<()> {
@@ -645,7 +671,7 @@ impl Pickler {
         // The accelerated pickler owns these exact types even when this runtime
         // cannot yet encode their payloads. A registration cannot replace them.
         let reducer = match ctx.heap.get(obj) {
-            Value::Set { .. } | Value::ByteArray(_) | Value::SurrogateStr(_) => None,
+            Value::Set { .. } | Value::SurrogateStr(_) => None,
             _ => {
                 let table = self.dispatch_table;
                 let (_, index) = ctx.find_dictionary_key(table, class, None)?;

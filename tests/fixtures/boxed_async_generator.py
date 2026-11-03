@@ -1,6 +1,7 @@
 import gc
 import weakref
 from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Iterator
+from inspect import AGEN_CLOSED, AGEN_CREATED, AGEN_RUNNING, AGEN_SUSPENDED, getasyncgenstate
 
 
 class Pause:
@@ -44,12 +45,17 @@ def current():
     events = []
     stream = make_stream(events)
     gen = stream("first")
+    assert getasyncgenstate(gen) == AGEN_CREATED
+    frame = gen.ag_frame
+    assert frame.f_code is gen.ag_code
     assert isinstance(gen, AsyncIterator) and issubclass(type(gen), AsyncGenerator)
     assert isinstance(gen, AsyncGenerator) and not isinstance(gen, (Awaitable, Iterator))
     assert gen.__aiter__() is gen and events == []
     assert finish(anext(gen)) == "first" and events == ["started"]
+    assert getasyncgenstate(gen) == AGEN_SUSPENDED and gen.ag_frame is frame
     pending = gen.asend("sent")
     assert isinstance(pending, Awaitable) and pending.send(None) == "paused"
+    assert gen.ag_suspended and getasyncgenstate(gen) == AGEN_RUNNING
     try:
         gen.aclose().send(None)
     except RuntimeError as exc:
@@ -64,6 +70,7 @@ def current():
     gc.collect()
     assert owner() is not None
     assert finish(close) is None and events == ["started", "closed"]
+    assert owner().ag_frame is None and getasyncgenstate(owner()) == AGEN_CLOSED
     del close
     gc.collect()
     assert owner() is None

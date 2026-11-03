@@ -178,55 +178,6 @@ def _callTest(self, *args, **kwargs):
     return self.run(*args, **kwargs)
 
 
-def _suiteInit(self, tests=()):
-    self._tests = []
-    self._removed_tests = 0
-    self.addTests(tests)
-
-
-def _suiteIter(self):
-    return iter(self._tests)
-
-
-def _suiteEqual(self, other):
-    if not isinstance(other, type(self)):
-        return NotImplemented
-    return list(self) == list(other)
-
-
-def _suiteCount(self):
-    count = self._removed_tests
-    for test in self:
-        if test:
-            count += test.countTestCases()
-    return count
-
-
-def _suiteAddTest(self, test):
-    if not callable(test):
-        raise TypeError(repr(test) + " is not callable")
-    if isinstance(test, type) and issubclass(test, (TestCase, TestSuite)):
-        raise TypeError("TestCases and TestSuites must be instantiated before passing them to addTest()")
-    self._tests.append(test)
-
-
-def _suiteAddTests(self, tests):
-    if isinstance(tests, str):
-        raise TypeError("tests must be an iterable of tests, not a string")
-    for test in tests:
-        self.addTest(test)
-
-
-def _suiteRemoveTest(self, index):
-    try:
-        test = self._tests[index]
-    except TypeError:
-        return
-    if hasattr(test, "countTestCases"):
-        self._removed_tests += test.countTestCases()
-    self._tests[index] = None
-
-
 def _initCaseSubclass(cls, *args, **kwargs):
     cls._classSetupFailed = False
     cls._class_cleanups = []
@@ -468,15 +419,8 @@ TestCase._callTearDown = _caseCallTearDown
 TestCase.debug = _caseDebug
 TestCase.run = _caseRun
 TestCase.__call__ = _callTest
-TestSuite._cleanup = True
-TestSuite.__init__ = _suiteInit
-TestSuite.__iter__ = _suiteIter
-TestSuite.__eq__ = _suiteEqual
-TestSuite.__hash__ = None
-TestSuite.countTestCases = _suiteCount
-TestSuite.addTest = _suiteAddTest
-TestSuite.addTests = _suiteAddTests
-TestSuite._removeTestAtIndex = _suiteRemoveTest
-TestSuite.debug = _suiteDebug
-TestSuite.run = _suiteRun
-TestSuite.__call__ = _callTest
+
+# The fixed-layout loader was defined before the boxed suite classes.
+from unittest import suite
+from unittest.suite import BaseTestSuite, TestSuite
+TestLoader.suiteClass = TestSuite

@@ -767,7 +767,7 @@ impl Checker<'_> {
         expression: &ast::Expr,
         element: Option<Type>,
     ) -> Result<Iteration, String> {
-        if let Some(input) = self.pipeline_input(expression, element)? {
+        if let Some(input) = self.pipeline_input(expression, element, None)? {
             if let Iteration::Prepared(prepared) = &input {
                 self.hint_empty_iteration(prepared, element);
             }
@@ -782,7 +782,7 @@ impl Checker<'_> {
                 });
             }
             if matches!(&*call.func, ast::Expr::Name(name) if name.id == "range") {
-                return self.iteration_input(expression);
+                return self.iteration_input(expression, None);
             }
             if let ast::Expr::Attribute(attribute) = &*call.func
                 && attribute.attr.as_str() == "items"

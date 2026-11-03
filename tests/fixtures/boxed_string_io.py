@@ -1,4 +1,5 @@
 import io
+import pickle
 import sys
 
 sys.path  # Exercise the boxed native path.
@@ -6,6 +7,50 @@ sys.path  # Exercise the boxed native path.
 
 class Sink(io.StringIO):
     pass
+
+
+def check_pickle():
+    class Slotted(io.StringIO):
+        __slots__ = ("slot",)
+
+    slotted = Slotted()
+    slotted.slot = 1
+    for _ in range(2):
+        assert slotted.__getstate__()[3] is None
+    slotted.extra = 2
+    del slotted.extra
+    assert slotted.__getstate__()[3] == {}
+    assert slotted.slot == 1
+
+    for cls in (io.StringIO, Sink):
+        stream = cls("π🌍\nx", newline="\r\n")
+        stream.seek(1)
+        stream.tag = "original"
+        state = stream.__getstate__()
+        assert state == ("π🌍\r\nx", "\r\n", 1, {"tag": "original"})
+        state[3]["tag"] = "snapshot"
+        assert stream.tag == "original"
+        for protocol in range(2, pickle.HIGHEST_PROTOCOL + 1):
+            restored = pickle.loads(pickle.dumps(stream, protocol))
+            assert type(restored) is cls and restored.tag == "original"
+            assert restored.getvalue() == "π🌍\r\nx"
+            assert restored.tell() == 1 and restored.read(1) == "🌍"
+            restored.seek(0, 2)
+            restored.write("\n")
+            assert restored.getvalue() == "π🌍\r\nx\r\n"
+        try:
+            stream.__setstate__(("", "\n", -1, None))
+        except ValueError as exc:
+            assert str(exc) == "position value cannot be negative"
+        else:
+            raise AssertionError("StringIO restored a negative position")
+        stream.close()
+        try:
+            pickle.dumps(stream)
+        except ValueError as exc:
+            assert str(exc) == "I/O operation on closed file"
+        else:
+            raise AssertionError("pickled a closed StringIO")
 
 
 def main():
@@ -93,6 +138,7 @@ def main():
         else:
             raise AssertionError("wrote to a read-only property")
     assert io.TextIOBase().newlines is None
+    check_pickle()
     print("StringIO reads, writes, snapshots and closes")
 
 

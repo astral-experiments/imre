@@ -75,6 +75,17 @@ def current():
     assert issubclass(os.stat_result, tuple)
     result = os.stat(path=__file__)
     check_reduction(result)
+    assert os.stat_result.__getitem__ is tuple.__getitem__
+    getitem = result.__getitem__
+    assert getitem.__self__ is result
+    assert getitem(0) == result.st_mode
+    assert getitem(slice(None, None, -1)) == tuple(result)[::-1]
+    try:
+        getitem(len(result))
+    except IndexError:
+        pass
+    else:
+        raise AssertionError("out-of-range stat_result index")
     check_bool_fd_warning()
     assert type(result) is result.__class__ is os.stat_result
     assert len(result) == result.n_sequence_fields == 10

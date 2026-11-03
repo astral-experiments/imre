@@ -17,7 +17,10 @@ pub(super) fn maketrans(
             args.len()
         )));
     };
-    let (from, to) = (ctx.bytes_like(*from)?, ctx.bytes_like(*to)?);
+    let (from, to) = (
+        ctx.native_buffer_bytes(*from)?,
+        ctx.native_buffer_bytes(*to)?,
+    );
     if from.len() != to.len() {
         return Err(Error::new(
             "ValueError",

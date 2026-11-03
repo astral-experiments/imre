@@ -1,7 +1,10 @@
 //! Runtime type parameters and class-base aliases used by imported Python modules.
 
+mod builtin_substitution;
+
 use std::collections::{HashMap, HashSet};
 
+use super::value::EMPTY_TUPLE;
 use super::{Context, Error, FALSE, Id, NONE, Result, TRUE, Value};
 
 /// Namespace type calls validate native layouts before using ordinary member slots.
@@ -15,15 +18,8 @@ pub(super) enum ClassLayout {
 /// Statements retain a callable evaluator. The constructor receives an already evaluated value.
 #[derive(Clone, Copy)]
 pub(super) enum AliasDefinition {
-    Lazy {
-        parameters: Id,
-        evaluator: Id,
-        cached: Option<Id>,
-    },
-    Eager {
-        value: Id,
-        module: Id,
-    },
+    Lazy { evaluator: Id, cached: Option<Id> },
+    Eager { value: Id, module: Id },
 }
 
 #[derive(Clone)]
@@ -288,6 +284,81 @@ pub(super) fn unpack_parameter(ctx: &mut Context, pack: Id) -> Result<Id> {
     ctx.get_item(unpack, pack)
 }
 
+/// Check the constructor's declared parameters without invoking tuple subclass overrides.
+fn check_type_alias_params(ctx: &mut Context, parameters: Id) -> Result<Id> {
+    let items = ctx
+        .tuple_items(parameters)?
+        .ok_or_else(|| Error::new("TypeError", "type_params must be a tuple"))?;
+    if items.is_empty() {
+        return Ok(EMPTY_TUPLE);
+    }
+    let mut default_seen = false;
+    for param in items {
+        let default = match ctx.heap.get(param) {
+            Value::TypeVar(var) => var.default,
+            Value::ParamSpec(spec) => spec.default,
+            Value::TypeVarTuple { default, .. } => *default,
+            _ => {
+                let repr = ctx.checked_format(param, true)?;
+                return Err(Error::new(
+                    "TypeError",
+                    format!("Expected a type param, got {repr}"),
+                ));
+            }
+        };
+        if matches!(ctx.heap.get(default), Value::NoDefault) {
+            if default_seen {
+                let repr = ctx.checked_format(param, true)?;
+                return Err(Error::new(
+                    "TypeError",
+                    format!("non-default type parameter '{repr}' follows default type parameter"),
+                ));
+            }
+        } else {
+            default_seen = true;
+        }
+    }
+    Ok(parameters)
+}
+
+/// Wrap each pack in Unpack for __parameters__ and implicit Generic bases.
+fn unpack_typevar_tuples(ctx: &mut Context, params: &mut [Id]) -> Result<bool> {
+    let mut unpacked = false;
+    for param in params {
+        if matches!(ctx.heap.get(*param), Value::TypeVarTuple { .. }) {
+            let item = unpack_parameter(ctx, *param)?;
+            ctx.heap.reserve_temporaries(1)?;
+            ctx.heap.keep(item);
+            *param = item;
+            unpacked = true;
+        }
+    }
+    Ok(unpacked)
+}
+
+/// Return the declared tuple itself unless a pack requires an unpacked copy.
+fn type_alias_parameters(ctx: &mut Context, parameters: Id) -> Result<Id> {
+    if let Value::Tuple(items) | Value::NamedTuple { values: items, .. } =
+        ctx.heap.get(ctx.scalar_value(parameters))
+        && !items
+            .iter()
+            .any(|&item| matches!(ctx.heap.get(item), Value::TypeVarTuple { .. }))
+    {
+        return Ok(parameters);
+    }
+    // A custom typing.Unpack can run Python while expanding a pack.
+    ctx.heap.reserve_temporaries(1)?;
+    ctx.heap.keep(parameters);
+    let mut items = ctx
+        .tuple_items(parameters)?
+        .expect("type alias parameter tuple");
+    if unpack_typevar_tuples(ctx, &mut items)? {
+        Ok(ctx.alloc(Value::Tuple(items)))
+    } else {
+        Ok(parameters)
+    }
+}
+
 pub(super) fn named_class(ctx: &mut Context, module: &str, name: &str) -> Id {
     let key = format!("{module}.{name}");
     if let Some(&class) = ctx.classes.get(&key) {
@@ -504,6 +575,18 @@ fn allocate_alias(
     }))
 }
 
+/// Snapshot an unnamed typing alias's origin module after collecting its parameters.
+fn capture_alias_module(ctx: &mut Context, alias: Id, origin: Id) -> Result<()> {
+    let module = ctx.lookup_attr(origin, "__module__")?;
+    let key = ctx.text("__module__");
+    let fields = ctx.dict(vec![(key, module)]);
+    let Value::GenericAlias(alias) = ctx.heap.get_mut(alias) else {
+        unreachable!()
+    };
+    alias.naming_fields = Some(fields);
+    Ok(())
+}
+
 /// Return the single declared argument of a typing.Unpack alias.
 fn unpack_arg(ctx: &Context, alias: &Alias) -> Option<Id> {
     if alias.kind != AliasKind::Unpack {
@@ -609,7 +692,7 @@ fn literal_alias(ctx: &mut Context, origin: Id, parameters: Id) -> Result<Id> {
     };
     let args = ctx.alloc(Value::Tuple(flat));
     let variables = collect_type_parameters(ctx, args, false)?;
-    Ok(allocate_alias(
+    let alias = allocate_alias(
         ctx,
         AliasKind::Literal(members),
         origin,
@@ -617,7 +700,9 @@ fn literal_alias(ctx: &mut Context, origin: Id, parameters: Id) -> Result<Id> {
         variables,
         None,
         true,
-    ))
+    );
+    capture_alias_module(ctx, alias, origin)?;
+    Ok(alias)
 }
 
 /// PEP 585 keeps a tuple supplied to the constructor as the alias's actual arguments.
@@ -775,10 +860,8 @@ fn helper_method(ctx: &mut Context, receiver: Id, helper: &str) -> Option<Id> {
 /// Apply the subscription protocol for a supported type. Ordinary instance indexing
 /// continues through the object runtime.
 pub(super) fn subscribe(ctx: &mut Context, target: Id, index: Id) -> Option<Result<Id>> {
-    if let Value::TypeAlias { definition, .. } = ctx.heap.get(target) {
-        if let AliasDefinition::Lazy { parameters, .. } = definition
-            && matches!(ctx.heap.get(*parameters), Value::Tuple(items) if !items.is_empty())
-        {
+    if let Value::TypeAlias { parameters, .. } = ctx.heap.get(target) {
+        if *parameters != EMPTY_TUPLE {
             return Some(Ok(builtin_alias(ctx, target, index)));
         }
         return Some(Err(Error::new(
@@ -789,9 +872,8 @@ pub(super) fn subscribe(ctx: &mut Context, target: Id, index: Id) -> Option<Resu
     if let Value::GenericAlias(alias) = ctx.heap.get(target)
         && alias.kind == AliasKind::Builtin
     {
-        return Some(ctx.module("typing").and_then(|_| {
-            ctx.call_typing_helper("_specialize_generic_alias_uncached", vec![target, index])
-        }));
+        let alias = alias.clone();
+        return Some(builtin_substitution::specialize(ctx, target, &alias, index));
     }
     if is_unpacked_pack(ctx, target) {
         return Some(Ok(index));
@@ -1476,11 +1558,16 @@ pub(super) fn attribute(ctx: &mut Context, value: Id, name: &str) -> Option<Resu
                 explicit: false,
             })
         }
+        Value::Native(class)
+            if matches!(
+                class.as_str(),
+                "typing._LiteralGenericAlias" | "typing._ConcatenateGenericAlias"
+            ) && name == "__reduce__" =>
+        {
+            let base = ctx.builtin("typing._GenericAlias");
+            return Some(ctx.lookup_attr(base, name));
+        }
         Value::Native(class) if class == "typing._ConcatenateGenericAlias" => match name {
-            "__reduce__" => {
-                let base = ctx.builtin("typing._GenericAlias");
-                return Some(ctx.lookup_attr(base, name));
-            }
             "__base__" => ctx.builtin("typing._GenericAlias"),
             "__bases__" => {
                 let parent = ctx.builtin("typing._GenericAlias");
@@ -1559,10 +1646,7 @@ pub(super) fn attribute(ctx: &mut Context, value: Id, name: &str) -> Option<Resu
         Value::Native(class) if name == "__reduce__" && class == "typing._CallableGenericAlias" => {
             ctx.module_value("typing", "_reduce_callable_alias")?
         }
-        Value::GenericAlias(alias)
-            if name == "__reduce__"
-                && (alias.kind.is_typing_alias() || alias.is_builtin_alias()) =>
-        {
+        Value::GenericAlias(alias) if name == "__reduce__" => {
             let class = ctx.builtin(alias.kind.class());
             return Some(
                 ctx.lookup_attr(class, name)
@@ -1607,15 +1691,12 @@ pub(super) fn attribute(ctx: &mut Context, value: Id, name: &str) -> Option<Resu
         },
         Value::TypeAlias {
             name: label,
+            parameters,
             definition,
         } => match (name, *definition) {
             ("__name__", _) => *label,
-            ("__parameters__" | "__type_params__", AliasDefinition::Lazy { parameters, .. }) => {
-                parameters
-            }
-            ("__parameters__" | "__type_params__", AliasDefinition::Eager { .. }) => {
-                ctx.heap.packed_tuple(Vec::new(), false)
-            }
+            ("__type_params__", _) => *parameters,
+            ("__parameters__", _) => return Some(type_alias_parameters(ctx, *parameters)),
             ("__module__", AliasDefinition::Eager { module, .. }) => module,
             ("__module__", AliasDefinition::Lazy { evaluator, .. }) => {
                 return Some(ctx.lookup_attr(evaluator, "__module__"));
@@ -1697,6 +1778,24 @@ pub(super) fn attribute(ctx: &mut Context, value: Id, name: &str) -> Option<Resu
             }
             _ => return None,
         },
+        Value::GenericAlias(a)
+            if matches!(name, "__module__" | "__name__" | "__qualname__")
+                && let Some(fields) = a.naming_fields =>
+        {
+            if let Some(local) = ctx.dict_named_item(fields, name) {
+                local
+            } else if name == "__module__" {
+                let class = ctx.builtin(a.kind.class());
+                return Some(ctx.lookup_attr(class, name));
+            } else {
+                let origin = a.origin;
+                return Some(
+                    ctx.with_slot_depth("maximum recursion depth exceeded", |ctx| {
+                        ctx.lookup_attr(origin, "__name__")
+                    }),
+                );
+            }
+        }
         Value::GenericAlias(a) if matches!(a.kind, AliasKind::Literal(_)) => {
             if let Some((_, field)) = a
                 .instance_fields()
@@ -1753,26 +1852,8 @@ pub(super) fn attribute(ctx: &mut Context, value: Id, name: &str) -> Option<Resu
             "__name__" | "__qualname__" | "__module__" if a.kind == AliasKind::Unpack => {
                 return Some(ctx.lookup_attr(a.origin, name));
             }
-            "__module__" | "__name__" | "__qualname__" if let Some(fields) = a.naming_fields => {
-                if let Some(local) = ctx.dict_named_item(fields, name) {
-                    local
-                } else if name == "__module__" {
-                    let class = ctx.builtin(a.kind.class());
-                    return Some(ctx.lookup_attr(class, name));
-                } else {
-                    let origin = a.origin;
-                    return Some(
-                        ctx.with_slot_depth("maximum recursion depth exceeded", |ctx| {
-                            ctx.lookup_attr(origin, "__name__")
-                        }),
-                    );
-                }
-            }
             "__name__" | "__qualname__" | "_name" if let Some(label) = a.name => label,
             "__module__" if a.name.is_some() => ctx.text("typing"),
-            "__name__" | "__qualname__" if a.kind == AliasKind::Concatenate => {
-                return Some(ctx.lookup_attr(a.origin, "__name__"));
-            }
             "copy_with" if a.kind == AliasKind::Concatenate => {
                 helper_method(ctx, value, "_concatenate_copy_with")?
             }
@@ -1869,11 +1950,7 @@ pub(super) fn parameter_scope(ctx: &mut Context, outer: Id, names: Id, class: bo
     ctx.bind(scope, ".type_params", declared);
     if class {
         // __type_params__ retains the pack itself; the implicit base is Generic[*Ts].
-        for param in &mut params {
-            if matches!(ctx.heap.get(*param), Value::TypeVarTuple { .. }) {
-                *param = unpack_parameter(ctx, *param)?;
-            }
-        }
+        unpack_typevar_tuples(ctx, &mut params)?;
         let generic = named_class(ctx, "typing", "Generic");
         let base = alias(ctx, AliasKind::Generic, generic, params)?;
         ctx.bind(scope, ".generic_base", base);
@@ -2377,18 +2454,11 @@ pub(super) fn call(
             .iter()
             .any(|key| ctx.classes.get(*key) == Some(&origin));
         let parameters = collect_type_parameters(ctx, args, enforce_order)?;
-        let naming_fields = if kind == AliasKind::Generic
+        let result = allocate_alias(ctx, kind, origin, args, parameters, name, instantiable);
+        if matches!(kind, AliasKind::Generic | AliasKind::Concatenate)
             && name.is_none_or(|name| ctx.str_value(name).is_ok_and(str::is_empty))
         {
-            let module = ctx.lookup_attr(origin, "__module__")?;
-            let key = ctx.text("__module__");
-            Some(ctx.dict(vec![(key, module)]))
-        } else {
-            None
-        };
-        let result = allocate_alias(ctx, kind, origin, args, parameters, name, instantiable);
-        if let Value::GenericAlias(alias) = ctx.heap.get_mut(result) {
-            alias.naming_fields = naming_fields;
+            capture_alias_module(ctx, result, origin)?;
         }
         return Ok(result);
     }
@@ -2424,20 +2494,11 @@ pub(super) fn call(
                 format!("typealias() argument 'name' must be str, not {kind}"),
             ));
         }
-        if let Some(params) = params {
-            let Value::Tuple(items) = ctx.heap.get(ctx.scalar_value(params)) else {
-                return Err(Error::new("TypeError", "type_params must be a tuple"));
-            };
-            if !items.is_empty() {
-                return Err(Error::new(
-                    "NotImplementedError",
-                    "generic TypeAliasType construction",
-                ));
-            }
-        }
+        let parameters = check_type_alias_params(ctx, params.unwrap_or(EMPTY_TUPLE))?;
         let module = ctx.heap.caller_module();
         return Ok(ctx.alloc(Value::TypeAlias {
             name,
+            parameters,
             definition: AliasDefinition::Eager { value, module },
         }));
     }

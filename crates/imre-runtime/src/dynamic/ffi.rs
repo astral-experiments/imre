@@ -192,8 +192,8 @@ impl Context {
                 };
                 Ok(self.alloc(Value::TypeAlias {
                     name: a,
+                    parameters,
                     definition: typing::AliasDefinition::Lazy {
-                        parameters,
                         evaluator: b,
                         cached: None,
                     },
@@ -380,30 +380,9 @@ impl Context {
                 }
                 Ok(a)
             }
-            "update" | "keywords" => {
-                use super::calls::MappingOperation;
-                let operation = if op == "keywords" {
-                    MappingOperation::Keywords(c)
-                } else {
-                    MappingOperation::Unpack
-                };
-                let mapping =
-                    self.for_each_mapping_item(b, a, operation, |ctx, key, val, hash| {
-                        ctx.set_dictionary_key(a, key, val, hash, true).map(|_| ())
-                    })?;
-                if !mapping {
-                    let message = if op == "keywords" {
-                        format!(
-                            "{} argument after ** must be a mapping, not {}",
-                            self.keyword_callable(c)?,
-                            self.type_name(b)
-                        )
-                    } else {
-                        "expected a mapping".into()
-                    };
-                    return Err(Error::new("TypeError", message));
-                }
-                Ok(a)
+            "update" => self.merge_mapping(a, b, super::calls::MappingOperation::Unpack),
+            "keywords" => {
+                self.merge_mapping(a, b, super::calls::MappingOperation::Keywords(Some(c)))
             }
             "unpack" => {
                 let count = usize::try_from(self.as_integer(b)?)
@@ -789,6 +768,7 @@ pub(super) fn new_context_with_heap<S: Into<String>>(
         sys_path: NONE,
         default_encoding: NONE,
         audit_hooks: Vec::new(),
+        fork_hooks: Default::default(),
         fault_file: None,
         exit_callbacks: Vec::new(),
         finalizing: Default::default(),
@@ -967,7 +947,7 @@ pub(super) unsafe extern "C" fn imre_dyn_finish(ctx: *mut Context) -> i32 {
             if current.args.is_some() {
                 error.message = ctx.exception_message(current);
             }
-            eprintln!("{error}");
+            eprintln!("{}", error.report(&ctx.heap));
             1
         }
     };
@@ -1732,6 +1712,7 @@ impl Context {
                 .chain(self.warning_state.iter().flat_map(|state| state.roots()))
                 .chain(self.codec_entries.roots())
                 .chain(&self.audit_hooks)
+                .chain(self.fork_hooks.iter().flatten())
                 .chain(&self.exit_callbacks)
                 .copied()
                 .chain(self.workers.roots().copied())
@@ -1824,11 +1805,17 @@ impl Context {
         }
     }
 
-    /// A rooted standard input chain keeps its finalizers alive across operand releases.
+    /// Skip the sweep only while surviving roots keep every finalizer and weak edge alive.
     fn can_skip_finalizer_sweep(&self) -> bool {
-        self.heap.tracked_finalizer_count() <= 3
-            && !self.heap.has_weak_values
+        use super::stdlib::datetime::isocalendar::MODULE_REF;
+        // Each text stream has at most three owners: the wrapper, buffer and raw file.
+        self.heap.tracked_finalizer_count() <= 6
             && !self.heap.full_collection_active()
+            && (!self.heap.has_weak_values
+                || self.heap.weak_module_kept_by(
+                    self.modules,
+                    self.builtins.get(MODULE_REF).copied().unwrap_or(NONE),
+                ))
             && super::stdlib::io::rooted_input_chain(self)
                 .is_some_and(|input| self.heap.finalizers_kept_by(&input))
     }

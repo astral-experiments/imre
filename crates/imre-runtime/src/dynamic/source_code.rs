@@ -239,13 +239,14 @@ struct Definition {
 }
 
 enum DefinitionKind {
-    TypeAlias(Vec<String>),
+    TypeAlias(Option<Box<ast::TypeParams>>),
     Function(Box<ast::Parameters>),
     Class {
         arguments: Option<Box<ast::Arguments>>,
         parameterized: bool,
+        needs_enclosing_frame: bool,
     },
-    ClassParameters(Vec<ast::Identifier>),
+    ClassParameters(Box<ast::TypeParams>),
 }
 
 struct EagerComprehension<'a> {
@@ -1297,16 +1298,22 @@ impl Program {
                         Rc::get_mut(&mut definition.body).expect("newly lowered child code");
                     strings.heap.code_name(&definition.binding);
                     if let DefinitionKind::ClassParameters(params) = &definition.kind {
-                        child.locals.extend(params.iter().map(ToString::to_string));
+                        child
+                            .locals
+                            .extend(params.iter().map(|p| p.name().to_string()));
                     }
                     let (roots, reads) =
                         child.prepare_strings(strings.heap, strings.shared, spellings, line_at)?;
-                    if let DefinitionKind::ClassParameters(params) = &definition.kind {
+                    if let DefinitionKind::ClassParameters(params)
+                    | DefinitionKind::TypeAlias(Some(params)) = &definition.kind
+                    {
                         nested_reads.extend(
                             reads
                                 .iter()
                                 .filter(|name| {
-                                    !params.iter().any(|param| param.as_str() == name.as_str())
+                                    !params
+                                        .iter()
+                                        .any(|param| param.name().as_str() == name.as_str())
                                 })
                                 .cloned(),
                         );
@@ -1635,7 +1642,7 @@ impl Program {
                 if let DefinitionKind::ClassParameters(params) = &definition.kind {
                     child.resolve_directives(
                         &|name| {
-                            if params.iter().any(|p| p.as_str() == name) {
+                            if params.iter().any(|p| p.name().as_str() == name) {
                                 Some(EnclosingBinding::TypeParameter)
                             } else {
                                 bound(name)
@@ -2040,6 +2047,7 @@ impl Program {
                 Stmt::AnnAssign(s)
                     if function
                         || s.simple
+                        || s.value.is_some()
                         || (self.class_attributes.is_none() && s.target.is_name_expr()) =>
                 {
                     let name = s.target.as_name_expr().map(|name| name.id.to_string());
@@ -2165,20 +2173,17 @@ impl Program {
                     }
                     Instruction::From(module.to_owned(), s.level, names)
                 }
-                Stmt::TypeAlias(s) if !function && self.class_attributes.is_none() => {
-                    let mut parameters = Vec::new();
-                    if let Some(params) = s.type_params {
-                        for param in &*params {
-                            let ast::TypeParam::TypeVar(var) = param else {
-                                return Err(unsupported("variadic type alias parameters"));
-                            };
-                            if var.bound.is_some() || var.default.is_some() {
-                                return Err(unsupported(
-                                    "type alias parameter bounds and defaults",
-                                ));
-                            }
-                            parameters.push(var.name.to_string());
-                        }
+                Stmt::TypeAlias(s)
+                    if self.class_attributes.is_none()
+                        && (!function || s.type_params.is_some()) =>
+                {
+                    if s.type_params.as_deref().is_some_and(|params| {
+                        params.iter().any(|param| {
+                            param.default().is_some()
+                                || matches!(param, ast::TypeParam::TypeVar(var) if var.bound.is_some())
+                        })
+                    }) {
+                        return Err(unsupported("type alias parameter bounds and defaults"));
                     }
                     let ast::Expr::Name(name) = *s.name else {
                         return Err(unsupported("type alias target"));
@@ -2199,7 +2204,7 @@ impl Program {
                         binding: name.to_string(),
                         decorators: Vec::new(),
                         body: Rc::new(child),
-                        kind: DefinitionKind::TypeAlias(parameters),
+                        kind: DefinitionKind::TypeAlias(s.type_params),
                         annotate: None,
                     })
                 }
@@ -2234,12 +2239,6 @@ impl Program {
                     })
                 }
                 Stmt::ClassDef(mut s) => {
-                    if let Some(args) = &s.arguments
-                        && (args.keywords.iter().any(|kw| kw.arg.is_none())
-                            || args.args.iter().any(|a| matches!(a, ast::Expr::Starred(_))))
-                    {
-                        return Err(unsupported("expanded class arguments"));
-                    }
                     let mut child = self.definition_body(&s.name, &s.decorator_list, line, lines);
                     if let Some(names) = &class_names {
                         child.private_names = Some(Rc::clone(names));
@@ -2258,6 +2257,12 @@ impl Program {
                     child.class_attributes = Some(imre_ast::class_attributes::static_attributes(
                         &s.body, spellings,
                     ));
+                    // Method-only classes can use the lexical reads collected for their methods.
+                    let needs_enclosing_frame = s.type_params.is_some()
+                        || !s
+                            .body
+                            .iter()
+                            .all(|stmt| matches!(stmt, Stmt::Pass(_) | Stmt::FunctionDef(_)));
                     child.instructions.push((line, Instruction::ClassStart));
                     child.lower_namespace(s.body, lines, false)?;
                     child.instructions.push((line, Instruction::ClassEnd));
@@ -2269,16 +2274,15 @@ impl Program {
                         kind: DefinitionKind::Class {
                             arguments: s.arguments,
                             parameterized: s.type_params.is_some(),
+                            needs_enclosing_frame,
                         },
                         annotate: None,
                     };
                     if let Some(params) = s.type_params {
-                        let mut parameters = Vec::new();
+                        let mut names = HashSet::new();
                         for param in &*params {
-                            let ast::TypeParam::TypeVar(var) = param else {
-                                return Err(unsupported("variadic class type parameters"));
-                            };
-                            match var.name.as_str() {
+                            let name = param.name();
+                            match name.as_str() {
                                 "__classdict__" => {
                                     return Err(Error::new(
                                         "SyntaxError",
@@ -2293,24 +2297,22 @@ impl Program {
                                 }
                                 _ => {}
                             }
-                            if var.bound.is_some() || var.default.is_some() {
+                            if param.default().is_some()
+                                || matches!(param, ast::TypeParam::TypeVar(var) if var.bound.is_some())
+                            {
                                 return Err(unsupported(
                                     "class type parameter bounds and defaults",
                                 ));
                             }
-                            if parameters
-                                .iter()
-                                .any(|p: &ast::Identifier| p.id == var.name.id)
-                            {
+                            if !names.insert(name.as_str()) {
                                 return Err(Error::new(
                                     "SyntaxError",
                                     format!(
                                         "duplicate type parameter '{}'",
-                                        definition.body.definition_spelling(&var.name)
+                                        definition.body.definition_spelling(name)
                                     ),
                                 ));
                             }
-                            parameters.push(var.name.clone());
                         }
                         // Bases and keywords run in the implicit type-parameter function.
                         // Decorators are evaluated and applied in the enclosing scope.
@@ -2332,7 +2334,7 @@ impl Program {
                             binding: s.name.to_string(),
                             decorators,
                             body: Rc::new(header),
-                            kind: DefinitionKind::ClassParameters(parameters),
+                            kind: DefinitionKind::ClassParameters(params),
                             annotate: None,
                         };
                     }
@@ -2977,15 +2979,15 @@ impl Context {
             return Err(error);
         }
         if let ast::Mod::Module(module) = parsed.syntax()
-            && let Some((expr, message)) = imre_ast::type_alias_error(&module.body)
+            && let Some((range, message)) = imre_ast::type_alias_error(&module.body)
         {
             let position = |offset: ruff_text_size::TextSize| {
                 let offset = offset.to_usize();
                 let line = lines.partition_point(|start| *start <= offset);
                 (line as i64, (offset - lines[line - 1] + 1) as i64)
             };
-            let (line, column) = position(expr.start());
-            let (end_line, end_column) = position(expr.end());
+            let (line, column) = position(range.start());
+            let (end_line, end_column) = position(range.end());
             let msg = self.text(message);
             let line = self.int(line);
             let mut fields = self.syntax_fields(&[msg]);
@@ -5053,13 +5055,23 @@ impl Context {
         let mut alias_parameters = NONE;
         let mut bases = None;
         let sig = match &definition.kind {
-            DefinitionKind::TypeAlias(names) => {
-                if !names.is_empty() {
-                    let entries = names
+            DefinitionKind::TypeAlias(params) => {
+                if let Some(params) = params {
+                    let entries = params
                         .iter()
-                        .map(|name| {
-                            let id = self.heap.code_name(name);
-                            (id, id)
+                        .map(|param| {
+                            let binding = self.heap.code_name(param.name().as_str());
+                            let name = self.heap.code_name(child.definition_spelling(param.name()));
+                            let declaration = match param {
+                                ast::TypeParam::TypeVar(_) => name,
+                                ast::TypeParam::TypeVarTuple(_) => {
+                                    super::typing::declared_pack(self, name)
+                                }
+                                ast::TypeParam::ParamSpec(_) => {
+                                    super::paramspec::declared(self, name)
+                                }
+                            };
+                            (binding, declaration)
                         })
                         .collect();
                     let names = self.dict(entries);
@@ -5080,20 +5092,16 @@ impl Context {
             DefinitionKind::Class {
                 arguments: args,
                 parameterized,
+                ..
             } => {
                 let mut values = Vec::new();
                 let mut keywords = Vec::new();
                 if let Some(args) = args {
-                    for expression in &args.args {
-                        let base = eval(self, expression)?;
-                        self.heap.keep(base);
-                        values.push(base);
-                    }
-                    for keyword in &args.keywords {
-                        let name = keyword.arg.as_ref().expect("validated class keyword");
-                        let value = eval(self, &keyword.value)?;
-                        self.heap.keep(value);
-                        keywords.push((name.to_string(), value));
+                    values = self.source_sequence_items(code, scope, &args.args)?;
+                    if !args.keywords.is_empty() {
+                        let mapping =
+                            self.source_keyword_mapping(code, scope, None, &args.keywords)?;
+                        keywords = self.keyword_args(mapping)?;
                     }
                 }
                 if *parameterized {
@@ -5151,7 +5159,13 @@ impl Context {
             let freevars = if alias_parameters != NONE {
                 self.enclosing_freevars(defining_scope, child.reads.iter().map(String::as_str))
             } else if (code.name != "<module>" || self.scope_data(scope).comprehension.is_some())
-                && child.class_attributes.is_none()
+                && !matches!(
+                    definition.kind,
+                    DefinitionKind::Class {
+                        needs_enclosing_frame: true,
+                        ..
+                    }
+                )
                 && !child.class_cell
             {
                 // A function defined in a class captures an enclosing function's cells.
@@ -5186,11 +5200,14 @@ impl Context {
             let entries = params
                 .iter()
                 .map(|param| {
-                    let name = child.definition_spelling(param);
-                    (
-                        self.heap.code_name(param.as_str()),
-                        self.heap.code_name(name),
-                    )
+                    let binding = self.heap.code_name(param.name().as_str());
+                    let name = self.heap.code_name(child.definition_spelling(param.name()));
+                    let declaration = match param {
+                        ast::TypeParam::TypeVar(_) => name,
+                        ast::TypeParam::TypeVarTuple(_) => super::typing::declared_pack(self, name),
+                        ast::TypeParam::ParamSpec(_) => super::paramspec::declared(self, name),
+                    };
+                    (binding, declaration)
                 })
                 .collect();
             let names = self.dict(entries);
@@ -5468,7 +5485,7 @@ impl Context {
         &mut self,
         code: &Program,
         scope: Id,
-        callable: Id,
+        callable: Option<Id>,
         keywords: &[ast::Keyword],
     ) -> Result<Id> {
         let merged = self.dict(Vec::new());
@@ -5489,7 +5506,11 @@ impl Context {
                 }
                 named
             };
-            self.op("keywords", merged, mapping, callable)?;
+            self.merge_mapping(
+                merged,
+                mapping,
+                super::calls::MappingOperation::Keywords(callable),
+            )?;
         }
         Ok(merged)
     }
@@ -5598,7 +5619,10 @@ impl Context {
                     && self.slot(iterable, "__getitem__").is_none() =>
             {
                 let prefix = if let Some(callable) = sole_star_callable {
-                    format!("{} argument after *", self.keyword_callable(callable)?)
+                    format!(
+                        "{} argument after *",
+                        self.keyword_callable(Some(callable))?
+                    )
                 } else {
                     "Value after *".into()
                 };
@@ -5936,7 +5960,7 @@ impl Context {
                 let keywords = &v.arguments.keywords;
                 let mut kwargs = Vec::new();
                 let mapping = if keywords.iter().any(|item| item.arg.is_none()) {
-                    Some(self.source_keyword_mapping(code, scope, f, keywords)?)
+                    Some(self.source_keyword_mapping(code, scope, Some(f), keywords)?)
                 } else {
                     for item in keywords {
                         let key = item.arg.as_ref().expect("named keyword");

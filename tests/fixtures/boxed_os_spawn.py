@@ -24,6 +24,23 @@ def current(child_callbacks=True):
 
     if not child_callbacks:
         return
+    # Exercise the PATH and explicit-environment calls before installing an audit hook.
+    assert os.spawnlp(os.P_WAIT, "sh", "sh", "-c", "exit 23") == 23
+    environment = {b"PATH": b"/bin", b"SPAWN_VALUE": b"left=right"}
+    probe = b'test "$SPAWN_VALUE" = left=right'
+    assert os.spawnle(os.P_WAIT, shell, b"sh", b"-c", probe, environment) == 0
+    child = os.spawnlpe(os.P_NOWAIT, b"sh", b"sh", b"-c", probe, environment)
+    pid, status = os.waitpid(child, 0)
+    assert pid == child and os.waitstatus_to_exitcode(status) == 0
+
+    # With an explicit environment, even a rebound execv must receive all three arguments.
+    saved_execve = os.execve
+    try:
+        os.execve = os.execv
+        assert os.spawnve(os.P_WAIT, shell, ["sh", "-c", "exit 23"], {}) == 127
+    finally:
+        os.execve = saved_execve
+
     parent = os.getpid()
     events = []
 

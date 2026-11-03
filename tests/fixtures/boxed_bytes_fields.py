@@ -99,6 +99,9 @@ def current():
     assert b"%(x)s:%(x).2b:%%" % {b"x": b"xyz"} == b"xyz:xy:%"
     assert b"%((\xff))s" % Mapping() == b"value"
     assert b"%03o|%s|%b" % (9, b"x", b"y") == b"011|x|y"
+    assert b"%c-%c" % tuple(b"*$") == b"*-$"
+    assert b"%#03c|%*.*c|%c" % (Child(b"\xff"), -3, 0, bytearray(b"\x00"), IndexOnly()) == b"  \xff|\x00  |\x02"
+    assert b"%(symbol)c" % {b"symbol": 255} == b"\xff"
     assert bytes.__mod__(b"%b", b"x") == b"x"
     assert b"%s".__mod__(operand) == b"a\x00\xff"
     try:
@@ -108,6 +111,11 @@ def current():
     else:
         raise AssertionError("keyword argument was accepted")
     errors = (
+        (b"%c", -1, OverflowError, "%c arg not in range(256)"),
+        (b"%c", 2**100, OverflowError, "%c arg not in range(256)"),
+        (b"%c", b"ab", TypeError, "%c requires an integer in range(256) or a single byte, not a bytes object of length 2"),
+        (b"%c", bytearray(), TypeError, "%c requires an integer in range(256) or a single byte, not a bytearray object of length 0"),
+        (b"%c", memoryview(b"x"), TypeError, "%c requires an integer in range(256) or a single byte, not memoryview"),
         (b"%s", "hi", TypeError, "%b requires a bytes-like object, or an object that implements __bytes__, not 'str'"),
         (b"%b", [1], TypeError, "%b requires a bytes-like object, or an object that implements __bytes__, not 'list'"),
         (b"%b", Wrong(), TypeError, "__bytes__ returned non-bytes (type bytearray)"),

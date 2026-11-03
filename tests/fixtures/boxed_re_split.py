@@ -45,3 +45,19 @@ def current():
     assert re.compile(b"(.)").sub(b"\xff", bytearray(b"ab"), 1) == b"\xffb"
     assert re.compile("(?P<name>x)").sub("$1", "xx") == "$1$1"
     assert re.compile(b"x").sub(memoryview(b"z"), b"xx") == b"zz"
+
+    empty = re.compile(b"")
+    view = memoryview(b"\x80\xffA")
+    released = view[:]
+    released.release()
+    for invalid in (view[::2], view[::-1], view[:0:2], released):
+        for operation in (empty.finditer, empty.split, lambda v: empty.sub(b"!", v),
+                          re.compile("").search):
+            try:
+                operation(invalid)
+            except TypeError as error:
+                assert str(error) == "expected string or bytes-like object, got 'memoryview'"
+            else:
+                raise AssertionError("regex accepted an unavailable or noncontiguous buffer")
+    # A one-element view is contiguous even if its reported stride is two.
+    assert empty.split(view[1::2]) == [b"", b"\xff", b""]

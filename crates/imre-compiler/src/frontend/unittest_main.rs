@@ -8,11 +8,7 @@ impl Checker<'_> {
         module: ModuleId,
     ) -> Result<Expr, String> {
         if !call.arguments.is_empty() {
-            return Err(error(
-                self.source,
-                call,
-                "unittest.main currently takes no explicit arguments",
-            ));
+            return Err(self.object_runtime_export("configured unittest.main", call));
         }
         let unit = &self.graph.modules[module];
         let class_id = |name: &str| match unit.bindings.get(name) {

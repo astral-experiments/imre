@@ -30,6 +30,23 @@ def current():
     else:
         raise AssertionError("shortDescription returned a non-string")
 
+    inits = []
+
+    class RecordingResult(unittest.TestResult):
+        def __init__(self, stream, descriptions, verbosity):
+            inits.append((stream, descriptions, verbosity))
+            super().__init__(stream, descriptions, verbosity)
+
+    class TextResult(unittest.TextTestResult, RecordingResult):
+        pass
+
+    for stream, descriptions, verbosity in ((io.StringIO(), object(), 2), (None, None, 1)):
+        result = TextResult(stream, descriptions, verbosity, durations=3)
+        assert inits == [(stream, descriptions, verbosity)]
+        assert result.descriptions is descriptions
+        assert result.testsRun == 0 and result.durations == 3
+        inits.clear()
+
     class Case(unittest.TestCase):
         def test_failure(self):
             self.fail("failure")

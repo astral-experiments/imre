@@ -15,8 +15,8 @@ FIXTURES = Path(__file__).resolve().parent / "fixtures/unittest_main"
 DURATION = re.compile(r"(Ran \d+ tests? in )\d+\.\d+s")
 
 
-def invoke(command):
-    return subprocess.run(command, text=True, capture_output=True, timeout=180)
+def invoke(command, *, timeout=180):
+    return subprocess.run(command, text=True, capture_output=True, timeout=timeout)
 
 
 def report(stderr, failed_fixture):
@@ -73,7 +73,9 @@ def compare(a, source, work, *, upstream=False):
                 cmd.append("--reachable-only")
             if a.sanitize:
                 cmd.append("--sanitize")
-            built = invoke(cmd)
+            # The computed skip condition pulls the boxed unittest library into the O3 build.
+            build_timeout = 600 if level == 3 and source == FIXTURES / "computed_skip.py" else 180
+            built = invoke(cmd, timeout=build_timeout)
             if built.returncode:
                 raise RuntimeError(built.stderr)
             for opt, reference in refs:
@@ -187,7 +189,7 @@ def main():
         sources = [
             FIXTURES / name
             for name in (
-                "method_skips.py",
+                "method_skips.py", "computed_skip.py",
                 "discover.py", "lifecycle.py", "setup_fields.py", "identity.py",
                 "assert_identity.py", "optional_text.py", "empty.py", "module_loader.py", "main_hook.py",
                 "class_skips.py", "text_runner.py", "subtests.py", "loaded_init.py",
@@ -220,18 +222,13 @@ def main():
             for definition, message in (
                 ("def load_tests():\n    pass", "module hooks"),
                 (
-                    "import os\nimport unittest\nclass Credential(TestCase):\n"
-                    "    @unittest.skipUnless((print('callee') or hasattr)(os, 'getuid'), 'requires getuid')\n"
-                    "    def test_uid(self):\n        pass",
-                    "unsupported method decorator",
-                ),
-                (
                     "class Custom(TestCase):\n    def run(self) -> None:\n        pass",
                     "custom result hooks",
                 ),
+                # Discovery passes the method name to the TestCase initializer.
                 (
                     "class Custom(TestCase):\n    def __init__(self) -> None:\n        super().__init__()",
-                    "inherited TestCase initializer",
+                    "too many positional arguments",
                 ),
             ):
                 if definition.startswith("class "):

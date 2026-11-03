@@ -54,7 +54,7 @@ pub(super) const FALSE: Id = 1;
 pub(super) const TRUE: Id = 2;
 pub(super) const ELLIPSIS: Id = 3;
 pub(super) const NOT_IMPLEMENTED: Id = 4;
-const EMPTY_TUPLE: Id = 5;
+pub(super) const EMPTY_TUPLE: Id = 5;
 
 pub(super) const SSL_ERROR_TYPE: &str = "ssl.SSLError";
 
@@ -75,7 +75,8 @@ pub(super) struct Location {
 
 #[derive(Clone, Debug, Default)]
 pub(super) struct Trace {
-    pub frames: Vec<(Location, Id)>,
+    // Pending activations precede the already exposed, mutable Python traceback.
+    pending_frames: Vec<(Location, Id)>,
     pub instance: Option<Id>,
     pub cause: Option<Id>,
     pub import_message: Option<Id>,
@@ -85,7 +86,7 @@ pub(super) struct Trace {
     pub name_error_name: Option<Id>,
     pub dictionary: Option<Id>,
     stop_value: Id,
-    cached: Option<(usize, Id)>,
+    head: Id,
 }
 
 #[derive(Debug)]
@@ -211,7 +212,7 @@ impl Error {
             .chain(self.os_args.iter().flat_map(|args| args.roots()))
             .chain(self.trace.iter().flat_map(|trace| {
                 trace
-                    .frames
+                    .pending_frames
                     .iter()
                     .map(|&(_, frame)| frame)
                     .chain((trace.stop_value != NONE).then_some(trace.stop_value))
@@ -227,7 +228,7 @@ impl Error {
                     .chain(trace.import_names.into_iter().flatten())
                     .chain(trace.name_error_name)
                     .chain(trace.dictionary)
-                    .chain(trace.cached.map(|(_, head)| head))
+                    .chain((trace.head != NONE).then_some(trace.head))
             }))
     }
 
@@ -241,8 +242,8 @@ impl Error {
 
     pub(super) fn clear_traceback(&mut self) {
         if let Some(trace) = self.trace.as_mut() {
-            trace.frames.clear();
-            trace.cached = None;
+            trace.pending_frames.clear();
+            trace.head = NONE;
         }
     }
 
@@ -458,15 +459,17 @@ impl Context {
                 if error.context == NONE
                     && active != NONE
                     && error.trace.as_ref().is_none_or(|trace| {
-                        trace.frames.is_empty() && trace.instance != Some(active)
+                        trace.head == NONE
+                            && trace.pending_frames.is_empty()
+                            && trace.instance != Some(active)
                     })
                 {
                     error.context = active;
                 }
                 if let Some(trace) = error.try_tracing()
-                    && trace.frames.try_reserve(1).is_ok()
+                    && trace.pending_frames.try_reserve(1).is_ok()
                 {
-                    trace.frames.push((loc, frame));
+                    trace.pending_frames.push((loc, frame));
                     return;
                 }
                 Error::new("MemoryError", "")
@@ -478,17 +481,15 @@ impl Context {
 
     /// Preserve identity of an observed traceback head and reuse its tail on a later raise.
     pub(super) fn exception_traceback(&mut self, exception: Id) -> Result<Id> {
-        let Value::Raised(error) = self.heap.get(exception) else {
+        let Value::Raised(error) = self.heap.get_mut(exception) else {
             return Err(Error::new("TypeError", "expected exception"));
         };
-        let Some(trace) = &error.trace else {
+        let Some(trace) = error.trace.as_mut() else {
             return Ok(NONE);
         };
-        let (count, mut head) = trace.cached.unwrap_or((0, NONE));
-        let length = trace.frames.len();
-        if length != count {
-            let missing = trace.frames[count..].to_vec();
-            for (at, frame) in missing {
+        let mut head = trace.head;
+        if !trace.pending_frames.is_empty() {
+            for (at, frame) in std::mem::take(&mut trace.pending_frames) {
                 head = self.alloc(Value::Traceback {
                     frame,
                     next: head,
@@ -499,64 +500,75 @@ impl Context {
             let Value::Raised(error) = self.heap.get_mut(exception) else {
                 unreachable!()
             };
-            error.tracing().cached = Some((length, head));
+            error.tracing().head = head;
         }
         Ok(head)
     }
 
+    /// Store an explicit cause, including None, using the same state as raise-from.
+    pub(super) fn set_exception_cause(&mut self, exception: Id, cause: Id) -> Result<()> {
+        if cause != NONE && !matches!(self.heap.get(cause), Value::Raised(_)) {
+            return Err(Error::new(
+                "TypeError",
+                "exception cause must be None or derive from BaseException",
+            ));
+        }
+        let Value::Raised(error) = self.heap.get_mut(exception) else {
+            unreachable!("cause assignment requires an exception instance")
+        };
+        if let Some(old) = error.tracing().cause.replace(cause)
+            && old != NONE
+            && old != cause
+        {
+            self.heap.collect_next_statement = true;
+        }
+        Ok(())
+    }
+
     /// Adopt the exact Python traceback chain and replace any previously retained frames.
     pub(super) fn set_traceback(&mut self, exception: Id, tb: Id) -> Result<()> {
-        let Value::Raised(error) = self.heap.get_mut(exception) else {
+        if !matches!(self.heap.get(exception), Value::Raised(_)) {
             return Err(Error::new("TypeError", "expected a BaseException instance"));
-        };
-        if tb == NONE {
-            error.clear_traceback();
-            self.heap.collect_next_statement = true;
-            return Ok(());
         }
-        let mut frames = Vec::new();
-        let mut node = tb;
-        while node != NONE {
-            let Value::Traceback {
-                frame,
-                next,
-                lineno,
-                span,
-            } = *self.heap.get(node)
-            else {
-                return Err(Error::new(
-                    "TypeError",
-                    "__traceback__ must be a traceback or None",
-                ));
-            };
-            let Value::PythonFrame { code, .. } = *self.heap.get(frame) else {
-                unreachable!("traceback retains a frame")
-            };
-            let Value::Code(code) = self.heap.get(code) else {
-                unreachable!("frame retains its code object")
-            };
-            let file = self.str_value(code.filename)?.to_owned().into();
-            frames
-                .try_reserve(1)
-                .map_err(|_| Error::new("MemoryError", ""))?;
-            frames.push((
-                Location {
-                    file,
-                    line: lineno as u32,
-                    span,
-                },
-                frame,
+        if tb != NONE && !matches!(self.heap.get(tb), Value::Traceback { .. }) {
+            return Err(Error::new(
+                "TypeError",
+                "__traceback__ must be a traceback or None",
             ));
-            node = next;
         }
-        frames.reverse();
         let Value::Raised(error) = self.heap.get_mut(exception) else {
             unreachable!()
         };
-        let trace = error.tracing();
-        trace.cached = Some((frames.len(), tb));
-        trace.frames = frames;
+        error.clear_traceback();
+        if tb != NONE {
+            error.tracing().head = tb;
+        }
         self.heap.collect_next_statement = true;
+        Ok(())
+    }
+
+    /// Link traceback nodes without introducing a cycle in their shared tail.
+    pub(super) fn set_traceback_next(&mut self, tb: Id, next: Id) -> Result<()> {
+        let mut node = next;
+        while node != NONE {
+            if node == tb {
+                return Err(Error::new("ValueError", "traceback loop detected"));
+            }
+            let Value::Traceback { next, .. } = self.heap.get(node) else {
+                return Err(Error::new(
+                    "TypeError",
+                    format!("expected traceback object, got '{}'", self.type_name(node)),
+                ));
+            };
+            node = *next;
+        }
+        let Value::Traceback { next: link, .. } = self.heap.get_mut(tb) else {
+            unreachable!("traceback instance")
+        };
+        let previous = std::mem::replace(link, next);
+        if previous != NONE && previous != next {
+            self.heap.collect_next_statement = true;
+        }
         Ok(())
     }
 
@@ -740,14 +752,41 @@ impl From<crate::Error> for Error {
     }
 }
 
-impl fmt::Display for Error {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl Error {
+    /// Format a native fallback diagnostic using the current Python traceback links.
+    pub(super) fn report<'a>(&'a self, heap: &'a Heap) -> impl fmt::Display + 'a {
+        fmt::from_fn(move |f| self.fmt_trace(f, Some(heap)))
+    }
+
+    fn fmt_trace(&self, f: &mut fmt::Formatter<'_>, heap: Option<&Heap>) -> fmt::Result {
         if let Some(trace) = &self.trace
-            && !trace.frames.is_empty()
+            && (!trace.pending_frames.is_empty() || (heap.is_some() && trace.head != NONE))
         {
             writeln!(f, "Traceback (most recent call last):")?;
-            for (loc, _) in trace.frames.iter().rev() {
+            for (loc, _) in trace.pending_frames.iter().rev() {
                 writeln!(f, "  File {:?}, line {}", loc.file, loc.line)?;
+            }
+            if let Some(heap) = heap {
+                let mut current = trace.head;
+                while let Value::Traceback {
+                    frame,
+                    lineno,
+                    next,
+                    ..
+                } = heap.get(current)
+                {
+                    let Value::PythonFrame { code, .. } = heap.get(*frame) else {
+                        unreachable!()
+                    };
+                    let Value::Code(code) = heap.get(*code) else {
+                        unreachable!()
+                    };
+                    let Value::Str(file) = heap.get(code.filename) else {
+                        unreachable!()
+                    };
+                    writeln!(f, "  File {file:?}, line {lineno}")?;
+                    current = *next;
+                }
             }
         }
         if self.message.is_empty() {
@@ -755,6 +794,12 @@ impl fmt::Display for Error {
         } else {
             write!(f, "{}: {}", self.kind, self.message)
         }
+    }
+}
+
+impl fmt::Display for Error {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.fmt_trace(f, None)
     }
 }
 
@@ -946,9 +991,16 @@ pub(super) enum Value {
         stream: Id,
         storage: Id,
     },
-    /// A contiguous view retains its original exporter until release.
+    /// An opaque Python buffer acquisition shared by the views derived from it.
+    PythonBufferLease {
+        exporter: Id,
+        view: Id,
+        wrapper: Id,
+    },
+    BufferWrapper,
     MemoryView {
         owner: Option<Id>,
+        lease: Option<Id>,
         // An ownerless C buffer has private backing storage but exposes obj as None.
         anonymous: bool,
         layout: Option<super::memoryview::ViewLayout>,
@@ -1097,6 +1149,7 @@ pub(super) enum Value {
     ConstEvaluator(Id),
     TypeAlias {
         name: Id,
+        parameters: Id,
         definition: super::typing::AliasDefinition,
     },
     TypeVar(super::typing::TypeVariable),
@@ -1378,6 +1431,7 @@ impl Value {
             Self::Bytes(_) => "bytes",
             Self::BytesIoStorage(_) => "_imre_bytesio_storage",
             Self::BytesIoBuffer { .. } => "_io._BytesIOBuffer",
+            Self::BufferWrapper => "_buffer_wrapper",
             Self::RawReadWindow(_) => "_imre_raw_read_window",
             Self::MemoryView { .. } => "memoryview",
             Self::ByteArray(_) => "bytearray",
@@ -1520,6 +1574,7 @@ impl Value {
             | Self::Native(_)
             | Self::Scope(_)
             | Self::LoopIterator { .. }
+            | Self::PythonBufferLease { .. }
             | Self::ProcessPreparation(_)
             | Self::ProcessHandle { .. }
             | Self::Yielded(_) => false,
@@ -1642,10 +1697,18 @@ impl Value {
             }
             Self::Yielded(item) => visit.push(*item),
             Self::Slice(parts) => visit.extend(parts),
-            Self::BytesIoStorage(_) => {}
+            Self::BytesIoStorage(_) | Self::BufferWrapper => {}
             Self::BytesIoBuffer { stream, storage } => visit.extend([*stream, *storage]),
             Self::RawReadWindow(window) => visit.push(window.backing),
-            Self::MemoryView { owner, .. } => visit.extend(owner),
+            Self::PythonBufferLease {
+                exporter,
+                view,
+                wrapper,
+            } => visit.extend([*exporter, *view, *wrapper]),
+            Self::MemoryView { owner, lease, .. } => {
+                visit.extend(owner);
+                visit.extend(lease);
+            }
             Self::Template {
                 strings,
                 interpolations,
@@ -1817,15 +1880,15 @@ impl Value {
             } => visit.extend([*name, *module, *default]),
             Self::ParamSpec(p) => visit.extend([p.name, p.bound, p.default, p.namespace]),
             Self::ParamSpecMarker(_, origin) | Self::ConstEvaluator(origin) => visit.push(*origin),
-            Self::TypeAlias { name, definition } => {
-                visit.push(*name);
+            Self::TypeAlias {
+                name,
+                parameters,
+                definition,
+            } => {
+                visit.extend([*name, *parameters]);
                 match *definition {
-                    super::typing::AliasDefinition::Lazy {
-                        parameters,
-                        evaluator,
-                        cached,
-                    } => {
-                        visit.extend([parameters, evaluator]);
+                    super::typing::AliasDefinition::Lazy { evaluator, cached } => {
+                        visit.push(evaluator);
                         visit.extend(cached);
                     }
                     super::typing::AliasDefinition::Eager { value, module } => {
@@ -3740,25 +3803,54 @@ impl Heap {
 
     /// A view can be unreachable before the next sweep. Check its actual lifetime
     /// before resizing a previously exported buffer, without running Python callbacks.
-    pub(super) fn has_live_buffer_view(
+    pub(super) fn live_buffer_export_count(
         &mut self,
         storage: Id,
         roots: impl Iterator<Item = Id>,
-    ) -> Result<bool> {
+    ) -> Result<usize> {
+        if !self.may_have_buffer_views(storage) {
+            return Ok(0);
+        }
         let mut cycles = CycleSet::new(self.slots.len())?;
         self.mark_reference_survivors(roots, &mut cycles, None);
-        let live = self.slots.iter().enumerate().any(|(id, slot)| {
-            self.traces[id].get() != UNMARKED
-                && matches!(slot.value, Some(Value::MemoryView { owner: Some(owner), .. })
-                    if owner == storage || matches!(self.get(owner),
-                        Value::Instance { scalar: Some(payload), .. } if *payload == storage)
-                        || matches!(self.get(owner), Value::BytesIoBuffer {storage: backing, ..} if *backing == storage))
-        });
+        let exports = |slot: &Slot| match slot.value {
+            Some(Value::MemoryView {
+                owner: Some(owner), ..
+            }) => {
+                owner == storage
+                    || matches!(self.get(owner),
+                    Value::Instance { scalar: Some(backing), .. } | Value::BytesIoBuffer { storage: backing, .. }
+                        if *backing == storage)
+            }
+            // Derived views share one acquisition of the returned memoryview.
+            Some(Value::PythonBufferLease { view, .. }) => view == storage,
+            _ => false,
+        };
+        let live = self
+            .slots
+            .iter()
+            .zip(&self.traces)
+            .filter(|(slot, trace)| trace.get() != UNMARKED && exports(slot))
+            .count();
         for trace in &self.traces {
             trace.set(UNMARKED);
         }
-        self.slots[storage as usize].may_have_buffer_views = live;
+        self.slots[storage as usize].may_have_buffer_views = live != 0;
         Ok(live)
+    }
+
+    /// Every live descendant, including unbound local classes, with parents before children.
+    pub(super) fn class_hierarchy(&self, class: Id) -> Vec<Id> {
+        let mut affected = Vec::new();
+        for (index, slot) in self.slots.iter().enumerate() {
+            if let Some(Value::Class { ancestors, .. }) = slot.value.as_ref()
+                && (index as Id == class || ancestors.contains(&class))
+            {
+                affected.push((ancestors.len(), index as Id));
+            }
+        }
+        affected.sort_unstable();
+        affected.into_iter().map(|(_, class)| class).collect()
     }
 
     pub(super) fn slot_count(&self) -> usize {
@@ -3867,6 +3959,24 @@ impl Heap {
         })
     }
 
+    /// Check the current frame binding and native edges from a text wrapper to its raw file.
+    fn frame_keeps_stream_finalizers(&self, stdin: Option<&[Id; 3]>, writers: &[Id]) -> bool {
+        self.ordinary_finalizers.iter().any(|&owner| {
+            !stdin.is_some_and(|input| input.contains(&owner))
+                && super::stdlib::io::text_descriptor_chain(self, owner).is_some_and(|chain| {
+                    self.ordinary_finalizers.iter().chain(writers).all(|id| {
+                        chain.contains(id) || stdin.is_some_and(|input| input.contains(id))
+                    }) && (self.bound_in_active_frame(owner)
+                        || self.frames.iter().any(|frame| {
+                            // Materialized scopes can retain additional native local names.
+                            matches!(self.get(frame.scope), Value::Scope(scope)
+                                    if scope.namespace.is_some()
+                                        && scope.names.values().any(|&bound| bound == owner))
+                        }))
+                })
+        })
+    }
+
     pub(super) fn acyclic_finalizer(
         &self,
         roots: impl Iterator<Item = Id>,
@@ -3886,24 +3996,7 @@ impl Heap {
         if remaining == 0 {
             return Ok(None);
         }
-        // Closing a bound text stream can leave its wrapper, buffer and raw file alive.
-        // Re-read both native edges and the frame binding before ruling out finalization.
-        if remaining <= 3
-            && self.ordinary_finalizers.iter().any(|&owner| {
-                !stdin.is_some_and(|input| input.contains(&owner))
-                    && super::stdlib::io::text_descriptor_chain(self, owner).is_some_and(|chain| {
-                        self.ordinary_finalizers.iter().all(|id| {
-                            chain.contains(id) || stdin.is_some_and(|input| input.contains(id))
-                        }) && (self.bound_in_active_frame(owner)
-                            || self.frames.iter().any(|frame| {
-                                // Materialized scopes can retain additional native local names.
-                                matches!(self.get(frame.scope), Value::Scope(scope)
-                                    if scope.namespace.is_some()
-                                        && scope.names.values().any(|&bound| bound == owner))
-                            }))
-                    })
-            })
-        {
+        if remaining <= 3 && self.frame_keeps_stream_finalizers(stdin, &[]) {
             return Ok(None);
         }
         // A suspended caller keeps earlier operands live across a nested call.
@@ -4029,13 +4122,30 @@ impl Heap {
             .any(|&id| id != retained && !self.bound_in_active_frame(id))
     }
 
-    /// Return whether a buffered file could need collecting at a target boundary.
-    /// A strong path to every tracked owner makes an operand-release sweep unnecessary.
-    pub(super) fn finalizers_kept_by(&self, roots: &[Id]) -> bool {
+    /// A global input stream and a frame-owned stream can keep all registered owners alive.
+    pub(super) fn finalizers_kept_by(&self, input: &[Id; 3]) -> bool {
         self.file_writers
             .iter()
             .chain(&self.ordinary_finalizers)
-            .all(|owner| roots.contains(owner))
+            .all(|owner| input.contains(owner))
+            || self.frame_keeps_stream_finalizers(Some(input), &self.file_writers)
+    }
+
+    /// A single interpreter-owned weak reference and its registered module both survive.
+    /// A user-owned reference can itself disappear even while its target stays alive.
+    pub(super) fn weak_module_kept_by(&self, modules: Id, reference: Id) -> bool {
+        if self.weak.len() != 1 {
+            return self.weak.is_empty();
+        }
+        let Value::Weak(weak) = self.get(reference) else {
+            return false;
+        };
+        weak.target.is_some_and(|target| {
+            self.weak_references(target) == [reference]
+                && self
+                    .dict_entries(modules)
+                    .is_some_and(|entries| entries.iter().any(|&(_, module)| module == target))
+        })
     }
 
     pub(super) fn tracks_finalizers(&self) -> bool {

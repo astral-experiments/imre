@@ -107,6 +107,7 @@ def bars(
     engines=ENGINES,
     label_width=83,
     value_format="{:.2f} ms",
+    unavailable=(),
 ):
     row_step, bar_height = 29, 10
     plot_x = x + label_width
@@ -130,9 +131,12 @@ def bars(
         )
     for i, (engine, name) in enumerate(engines.items()):
         row_y = y + row_step * i
+        label(ax, x, row_y, name, 14, color=MUTED)
+        if engine in unavailable:
+            label(ax, x + width, row_y, "unsupported", 13, color=MUTED, align="right")
+            continue
         value = medians[engine]
         color = ACCENT if engine == "imre" else BAR
-        label(ax, x, row_y, name, 14, color=MUTED)
         ax.add_patch(
             Rectangle(
                 (plot_x, row_y - bar_height / 2),
@@ -155,18 +159,20 @@ def bars(
         )
 
 
-def workload_panels(rows, path):
+def workload_panels(rows, path, *, applications=False):
     row_count = (len(rows) + 1) // 2
     panel_top = 144
-    height = panel_top + 180 * row_count + 27
-    runs = len(rows[0][0]["samples_ns"])
+    row_height = 180 + 29 * (max(len(medians) for _, medians in rows) - 3)
+    height = panel_top + row_height * row_count + 27
+    counts = sorted({len(case["samples_ns"]) for case, _ in rows})
+    runs = str(counts[0]) if len(counts) == 1 else f"{counts[0]}–{counts[-1]}"
     fig, ax = benchmark_card(
         height,
         "Comparing Imre, Rust, and CPython",
         f"{runs} runs per engine",
     )
     for i, (case, medians) in enumerate(rows):
-        x, y = 48 + i % 2 * 423, panel_top + i // 2 * 180
+        x, y = 48 + i % 2 * 423, panel_top + i // 2 * row_height
         if i >= 2:
             rule(ax, x, y, x + 401, y)
         label(
@@ -177,38 +183,62 @@ def workload_panels(rows, path):
             17,
         )
         label(ax, x + 4, y + 47, case["input"], 13, color=MUTED)
-        bars(ax, medians, x + 4, y + 74, 393)
+        if applications:
+            engines = ENGINES.copy()
+            if "original_cpython" in medians:
+                engines.update(
+                    cpython="CPython · typed", original_cpython="CPython · uv"
+                )
+            bars(
+                ax,
+                medians,
+                x + 4,
+                y + 74,
+                393,
+                engines=engines,
+                label_width=116,
+                unavailable=case.get("unavailable", ()),
+            )
+        else:
+            bars(ax, medians, x + 4, y + 74, 393)
     save(fig, path, "Median runtime by workload")
 
 
 def frozen_flask_panel(report, path):
     engines = {
         "imre": "Frozen Flask on Imre",
-        "node": "Node.js",
-        "bun": "Bun",
         "rust": "Rust / Hyper",
     }
+    if any(
+        row["server"] == "cpython" and row["profile"] == "mixed"
+        for row in report["trials"]
+    ):
+        engines["cpython"] = "Stock Flask / CPython"
     settings = report["settings"]
     concurrency = settings["concurrency"]
     first, rounds = settings["first_round"], settings["rounds"]
     expected_rounds = list(range(first, first + rounds))
+    runs = [report, *report.get("additional_runs", ())]
     medians = {}
     for engine in engines:
-        trials = [
-            row
-            for row in report["trials"]
-            if row["server"] == engine
-            and row["profile"] == "mixed"
-            and row["concurrency"] == concurrency
-        ]
-        if sorted(row["round"] for row in trials) != expected_rounds:
-            raise ValueError(f"Incomplete mixed HTTP trials for {engine}")
-        medians[engine] = statistics.median(row["RPS"] for row in trials)
+        rates = []
+        for run in runs:
+            trials = [
+                row
+                for row in run["trials"]
+                if row["server"] == engine
+                and row["profile"] == "mixed"
+                and row["concurrency"] == concurrency
+            ]
+            if sorted(row["round"] for row in trials) != expected_rounds:
+                raise ValueError(f"Incomplete mixed HTTP trials for {engine}")
+            rates.extend(row["RPS"] for row in trials)
+        medians[engine] = statistics.median(rates)
 
     fig, ax = benchmark_card(
-        408,
+        408 + 29 * (len(engines) - 4),
         "Frozen Flask throughput",
-        f"{rounds} rounds · {concurrency} clients",
+        f"{rounds * len(runs)} rounds · {concurrency} clients",
     )
     label(
         ax,
@@ -242,7 +272,11 @@ def main():
         "--flask-results", type=Path, help="also chart a mixed HTTP comparison receipt"
     )
     args = parser.parse_args()
-    cases = json.loads(args.results.read_bytes())["cases"]
+    report = json.loads(args.results.read_bytes())
+    if not report.get("complete", True):
+        parser.error("the measurement is incomplete")
+    cases = report["cases"]
+    applications = report.get("suite") == "applications" or "runner_sha256" in report
     args.output_dir.mkdir(parents=True, exist_ok=True)
     mpl.rcParams.update(
         {
@@ -252,31 +286,45 @@ def main():
             "svg.hashsalt": "imre-runtime-suite",
         }
     )
+    engines = {"rust": "Rust", "cpython": "CPython", "imre": "Imre"}
+    if applications:
+        engines = {
+            "rust": "Rust",
+            "imre": "Imre",
+            "cpython": "CPython",
+            "original_cpython": "CPython (original uv)",
+        }
+    title = " | ".join(f"{name} (ms)" for name in engines.values())
+    right = " | ".join(["---:"] * len(engines))
     times = [
-        "| Workload | Input per process | Rust (ms) | CPython (ms) | Imre (ms) | CPython / Imre |",
-        "| --- | --- | ---: | ---: | ---: | ---: |",
+        f"| Workload | Input per process | {title} | CPython / Imre |",
+        f"| --- | --- | {right} | ---: |",
     ]
-    spreads = [
-        "| Workload | Rust (ms) | CPython (ms) | Imre (ms) | Output file (bytes) |",
-        "| --- | ---: | ---: | ---: | ---: |",
-    ]
+    spreads = [f"| Workload | {title} | Output (bytes) |", f"| --- | {right} | ---: |"]
     rows = []
     for case in cases:
-        medians, intervals = {}, []
-        for engine in ("rust", "cpython", "imre"):
+        medians, values, intervals = {}, [], []
+        for engine in engines:
+            if engine not in case["samples_ns"][0]:
+                values.append("—")
+                intervals.append("—")
+                continue
             samples = [r[engine] / 1e6 for r in case["samples_ns"]]
             low, mid, high = statistics.quantiles(samples, n=4, method="inclusive")
             medians[engine] = mid
+            values.append(f"{mid:.2f}")
             intervals.append(f"{low:.2f}–{high:.2f}")
-        cells = " | ".join(f"{mid:.2f}" for mid in medians.values())
-        speedup = medians["cpython"] / medians["imre"]
-        times.append(f"| {case['name']} | {case['input']} | {cells} | {speedup:.2f}× |")
+        cells = " | ".join(values)
+        speedup = (
+            f"{medians['cpython'] / medians['imre']:.2f}×" if "imre" in medians else "—"
+        )
+        times.append(f"| {case['name']} | {case['input']} | {cells} | {speedup} |")
         spreads.append(
             f"| {case['name']} | {' | '.join(intervals)} | {case['report_bytes']:,} |"
         )
         rows.append((case, medians))
-
-    workload_panels(rows, args.output_dir / "runtime-suite.svg")
+    filename = "applications.svg" if applications else "runtime-suite.svg"
+    workload_panels(rows, args.output_dir / filename, applications=applications)
     if args.flask_results:
         opener = gzip.open if args.flask_results.suffix == ".gz" else open
         with opener(args.flask_results, "rt") as stream:

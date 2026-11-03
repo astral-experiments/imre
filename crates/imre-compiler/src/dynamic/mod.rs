@@ -25,6 +25,7 @@ struct Imports {
     runtime_imports: bool,
     private_names: imre_ast::Names,
     uses_import_builtin: bool,
+    uses_exec: bool,
     imports_logging: bool,
     sys_names: HashSet<String>,
     operator_names: HashSet<String>,
@@ -136,6 +137,8 @@ impl Imports {
                     | "tomllib._types"
                     | "traceback"
                     | "unittest.case"
+                    | "unittest.result"
+                    | "unittest.suite"
                     | "string.templatelib"
                     | "runpy"
             )
@@ -190,10 +193,16 @@ fn boxed_hashlib_kdf(name: &str) -> bool {
     matches!(name, "pbkdf2_hmac" | "scrypt")
 }
 
-fn boxed_unittest_cleanup(name: &str) -> bool {
+fn boxed_unittest_export(name: &str) -> bool {
     matches!(
         name,
-        "case" | "addModuleCleanup" | "doModuleCleanups" | "enterModuleContext"
+        "BaseTestSuite"
+            | "case"
+            | "result"
+            | "suite"
+            | "addModuleCleanup"
+            | "doModuleCleanups"
+            | "enterModuleContext"
     )
 }
 
@@ -251,7 +260,7 @@ impl<'a> Visitor<'a> for Imports {
                     let suffix = a.name.as_str();
                     if imp.level == 0
                         && (name == "_operator"
-                            || name == "unittest" && boxed_unittest_cleanup(suffix)
+                            || name == "unittest" && boxed_unittest_export(suffix)
                             || name == "hashlib" && (boxed_hashlib_kdf(suffix) || suffix == "*")
                             || name == "weakref" && suffix == "finalize"
                             || boxed_signal_export(name, suffix))
@@ -332,6 +341,9 @@ impl<'a> Visitor<'a> for Imports {
                 self.uses_import_builtin = true;
                 self.add(0, "importlib");
             }
+            if name.id == "exec" {
+                self.uses_exec = true;
+            }
             if self.boxed_mock_names.contains(name.id.as_str()) {
                 self.runtime_imports = true;
             }
@@ -383,7 +395,7 @@ impl<'a> Visitor<'a> for Imports {
                     .signal_names
                     .get(module.id.as_str())
                     .is_some_and(|name| boxed_signal_export(name, attr.attr.as_str()))
-                || (boxed_unittest_cleanup(attr.attr.as_str())
+                || (boxed_unittest_export(attr.attr.as_str())
                     && self.unittest_names.contains(module.id.as_str())))
         {
             self.runtime_imports = true;
@@ -481,7 +493,11 @@ pub(crate) fn function_type_params<'a>(
     (!body.unsupported).then_some(params)
 }
 
-fn imports(source: &str, kind: SourceKind) -> Result<Imports, String> {
+fn scan_imports(
+    source: &str,
+    kind: SourceKind,
+    getter: Option<&mut Imports>,
+) -> Result<Imports, String> {
     let normalized = crate::normalize_source(source, kind)?;
     crate::analysis::check_source_complexity(&normalized).map_err(str::to_owned)?;
     let parsed = ruff_python_parser::parse_module(&normalized).map_err(|e| e.to_string())?;
@@ -492,7 +508,27 @@ fn imports(source: &str, kind: SourceKind) -> Result<Imports, String> {
     imports.runtime_imports = body.iter().any(|stmt| {
         matches!(stmt, Stmt::FunctionDef(function) if function_type_params(function, imports.private_names.string_annotations, false, Some(&imports.private_names)).is_some())
     });
+    let mut getter_body = Vec::new();
+    if getter.is_some() {
+        for stmt in &mut body {
+            if let Stmt::FunctionDef(function) = stmt
+                && function.name.as_str() == "__getattr__"
+            {
+                getter_body.extend(std::mem::take(&mut function.body));
+            }
+        }
+    }
     imports.visit_body(&body);
+    if let Some(getter) = getter
+        && !getter_body.is_empty()
+    {
+        // sys.path and pkgutil.get_data can add source hints through module aliases.
+        getter.sys_names = std::mem::take(&mut imports.sys_names);
+        getter.pkgutil_names = std::mem::take(&mut imports.pkgutil_names);
+        getter.get_data_names = std::mem::take(&mut imports.get_data_names);
+        getter.machinery_names.clone_from(&imports.machinery_names);
+        getter.visit_body(&getter_body);
+    }
     Ok(imports)
 }
 
@@ -597,18 +633,23 @@ pub(crate) fn compile(
     // Python normalizes non-ASCII identifiers, including imported module names.
     let provider_hint = startup.is_some()
         && !options.runtime_imports
-        && (src.contains("logging") || src.contains("tokenize") || !src.is_ascii());
+        && (src.contains("logging")
+            || src.contains("tokenize")
+            || src.contains("configparser")
+            || src.contains("_pyio")
+            || !src.is_ascii());
     let ordered_command = matches!(operation, Some(ObjectOperation::OrderedCommandImport));
     if !object_hint && !provider_hint && !ordered_command {
         return Ok(None);
     }
-    let Ok(mut first) = imports(
+    let Ok(mut first) = scan_imports(
         &src,
         if command.is_some() {
             SourceKind::Command
         } else {
             SourceKind::File
         },
+        None,
     ) else {
         return Ok(None);
     };
@@ -636,7 +677,10 @@ pub(crate) fn compile(
     // startup fallback needs to verify that the imported provider is bundled.
     let logging_script = !object_entry && provider_hint && first.imports_logging;
     let tokenize_script = !object_entry && imports_provider("tokenize");
-    let ordered_only = !object_entry && !logging_script && !tokenize_script;
+    let configparser_script = !object_entry && imports_provider("configparser");
+    let pyio_script = !object_entry && imports_provider("_pyio");
+    let fallback_script = logging_script || tokenize_script || configparser_script || pyio_script;
+    let ordered_only = !object_entry && !fallback_script;
     if ordered_only
         && (!ordered_command
             || first.uses_import_builtin
@@ -647,7 +691,7 @@ pub(crate) fn compile(
     {
         return Ok(None);
     }
-    let provider_script = provider_script || logging_script || tokenize_script;
+    let provider_script = provider_script || fallback_script;
     if let Some(name) = module_entry {
         first.add(0, "runpy");
         // Register source candidates without interpreting a module operand as a filesystem path.
@@ -738,11 +782,20 @@ pub(crate) fn compile(
     let mut frozen_imports = Imports::default();
     let mut work = VecDeque::from([("__main__".to_owned(), false, first)]);
     let mut uses_import_builtin = false;
+    let mut uses_exec = false;
     let mut bundled_only = false;
+    let mut getters = VecDeque::new();
+    let mut through_getter = false;
     loop {
         let (owner, package, imports) = if let Some(next) = work.pop_front() {
             next
+        } else if let Some(next) = getters.pop_front() {
+            // Keep project shadows for a bundled module's lazy attributes. The
+            // ordinary graph has already checked any modules the user imported.
+            through_getter = true;
+            next
         } else {
+            through_getter = false;
             // Collect late imports and their bundled dependencies after the explicit
             // file graph, without parsing unrelated modules in project directories.
             let mut imports = Imports::default();
@@ -753,12 +806,19 @@ pub(crate) fn compile(
             if uses_import_builtin && seen.contains("http") && !seen.contains("http.server") {
                 imports.names.push((0, "http.server".to_owned()));
             }
+            // Computed imports can select a urllib child without naming it in source.
+            if (uses_exec || uses_import_builtin || seen.contains("importlib"))
+                && seen.contains("urllib")
+                && !seen.contains("urllib.robotparser")
+            {
+                imports.add(0, "urllib.robotparser");
+            }
             // Register the mock provider for imports from source-loaded modules.
             if uses_import_builtin && seen.contains("unittest") && !seen.contains("unittest.mock") {
                 imports.add(0, "unittest.mock");
             }
             if uses_import_builtin || seen.contains("importlib") {
-                for name in ["py_compile", "sysconfig"] {
+                for name in ["_pyio", "configparser", "py_compile", "sysconfig", "uuid"] {
                     if !seen.contains(name) {
                         imports.names.push((0, name.to_owned()));
                     }
@@ -787,6 +847,7 @@ pub(crate) fn compile(
             && !options.runtime_imports
             && !registered_imports.called
             && (!provider_script || owner == "__main__")
+            && !through_getter
             && imports.needs_typed_machinery()
             && !matches!(operation, Some(ObjectOperation::TracedEntry))
             // Enforce the checked-file machinery contract on the original graph.
@@ -799,6 +860,7 @@ pub(crate) fn compile(
         {
             return Ok(None);
         }
+        uses_exec |= imports.uses_exec;
         let mut names = imports.names;
         if owner == "importlib" {
             // Filesystem modules can import the loader protocols through either public module.
@@ -864,7 +926,12 @@ pub(crate) fn compile(
                 if let Some((filename, source)) = bundled {
                     let path = Path::new(bundled_root).join(filename);
                     let package = path.ends_with("__init__.py");
-                    let imports = imports_for_module(&path, &source)?;
+                    let mut getter = Imports::default();
+                    let imports = scan_imports(&source, SourceKind::File, Some(&mut getter))
+                        .map_err(|e| format!("{}: {e}", path.display()))?;
+                    if !getter.names.is_empty() || getter.uses_exec {
+                        getters.push_back((prefix.clone(), package, getter));
+                    }
                     sources.push((prefix.clone(), path, source.into_owned()));
                     work.push_back((prefix.clone(), package, imports));
                 }
@@ -940,7 +1007,9 @@ pub(crate) fn compile(
                             || (ftp_script && prefix == "ftplib")
                             || (argparse_script && prefix == "argparse")
                             || (logging_script && prefix == "logging")
-                            || (tokenize_script && prefix == "tokenize"))
+                            || (tokenize_script && prefix == "tokenize")
+                            || (configparser_script && prefix == "configparser")
+                            || (pyio_script && prefix == "_pyio"))
                     {
                         return Ok(None);
                     }
@@ -1089,6 +1158,7 @@ const RUNTIME_PROVIDERS: &[&str] = &[
     "encodings.cp424",
     "encodings.cp437",
     "enum",
+    "fractions",
     "functools",
     "genericpath",
     "hashlib",
@@ -1098,6 +1168,7 @@ const RUNTIME_PROVIDERS: &[&str] = &[
     "json.encoder",
     "json.scanner",
     "linecache",
+    "numbers",
     "opcode",
     "platform",
     "re",
@@ -1145,5 +1216,5 @@ fn bundled_module_source(name: &str) -> Option<(&'static str, std::borrow::Cow<'
 }
 
 fn imports_for_module(path: &Path, src: &str) -> Result<Imports, String> {
-    imports(src, SourceKind::File).map_err(|e| format!("{}: {e}", path.display()))
+    scan_imports(src, SourceKind::File, None).map_err(|e| format!("{}: {e}", path.display()))
 }

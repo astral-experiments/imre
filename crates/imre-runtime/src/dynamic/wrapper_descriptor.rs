@@ -83,6 +83,11 @@ impl BuiltinDescriptor {
             Some(("frozenset", attr)) if builtins::set_operators("frozenset").contains(&attr) => {
                 Some(("frozenset", attr, builtins::set_operators("frozenset")))
             }
+            Some((stdlib::functools::LRU_CACHE_CLASS, attr)) => Some((
+                stdlib::functools::LRU_CACHE_CLASS,
+                attr,
+                stdlib::functools::COPY_METHODS,
+            )),
             Some(("functools.KeyWrapper", attr)) => Some((
                 "functools.KeyWrapper",
                 attr,
@@ -166,7 +171,7 @@ impl BuiltinDescriptor {
                 &["__reduce__", "__replace__"][..],
             )),
             Some((class, attr)) if let Some(layout) = stdlib::os::stat::layout(class) => {
-                Some((layout.class, attr, &["__reduce__"][..]))
+                Some((layout.class, attr, layout.methods()))
             }
             Some((namespace::CLASS, attr)) => {
                 Some((namespace::CLASS, attr, &["__reduce__", "__replace__"][..]))
@@ -280,6 +285,7 @@ impl BuiltinDescriptor {
             "object.__str__" => ("object", "__str__"),
             "function.__call__" => ("function", "__call__"),
             "classmethod.__get__" => ("classmethod", "__get__"),
+            "functools.partial.__get__" => ("functools.partial", "__get__"),
             "method_descriptor.__get__" => ("method_descriptor", "__get__"),
             "wrapper_descriptor.__get__" => ("wrapper_descriptor", "__get__"),
             "str.__str__" => ("str", "__str__"),
@@ -411,6 +417,7 @@ impl BuiltinDescriptor {
             "type" => ctx.is_type_object(receiver),
             "function" => matches!(ctx.heap.get(receiver), Value::Function { .. }),
             "classmethod" => matches!(ctx.heap.get(receiver), Value::ClassMethod { .. }),
+            "functools.partial" => matches!(ctx.heap.get(receiver), Value::Partial { .. }),
             "functools.KeyWrapper" => matches!(ctx.heap.get(receiver), Value::KeyWrapper { .. }),
             super::namespace::CLASS => namespace::instance_class(ctx, receiver).is_some(),
             "frame" => matches!(ctx.heap.get(receiver), Value::PythonFrame { .. }),
@@ -469,6 +476,8 @@ impl BuiltinDescriptor {
         receiver: Option<Id>,
     ) -> Option<Id> {
         Some(match name {
+            "__text_signature__" if self.owner == stdlib::functools::LRU_CACHE_CLASS && self.name == "__reduce__" => ctx.text("($self, /)"),
+            "__doc__" | "__text_signature__" if self.owner == stdlib::functools::LRU_CACHE_CLASS => NONE,
             "__doc__" if self.owner == weakref::PROXY_TYPE && self.name != "__repr__" => NONE,
             "__text_signature__" if self.owner == weakref::PROXY_TYPE => ctx.text("($self, /)"),
             "__doc__" | "__text_signature__" if self.owner == deque::CLASS => {
@@ -686,6 +695,8 @@ impl BuiltinDescriptor {
                     ("__getstate__" | "__reduce__" | "__reduce_ex__", "__doc__") if self.owner == "object" => "Helper for pickle.",
                     ("__getstate__" | "__reduce__", _) if self.owner == "object" => "($self, /)",
                     ("__reduce_ex__", _) if self.owner == "object" => "($self, protocol, /)",
+                    ("__replace__", "__doc__") if self.owner == stdlib::os::stat::CLASS => "Return a copy of the structure with new values for the specified fields.",
+                    ("__replace__", _) if self.owner == stdlib::os::stat::CLASS => "($self, /, **changes)",
                     ("__reduce__", "__doc__") if stdlib::os::stat::layout(self.owner).is_some() => return Some(NONE),
                     ("__reduce__", _) if stdlib::os::stat::layout(self.owner).is_some() => "($self, /)",
                     ("count", "__doc__") if self.owner == "tuple" => "Return number of occurrences of value.",
@@ -743,6 +754,10 @@ impl BuiltinDescriptor {
                         "Pad a numeric string with zeros on the left, to fill a field of the given width.\n\nThe string is never truncated."
                     }
                     ("zfill", _) => "($self, width, /)",
+                    ("upper", "__doc__") if matches!(self.owner, "bytes" | "bytearray") => {
+                        "B.upper() -> copy of B\n\nReturn a copy of B with all ASCII characters converted to uppercase."
+                    }
+                    ("upper", _) if matches!(self.owner, "bytes" | "bytearray") => return Some(NONE),
                     ("lower", "__doc__") if self.owner == "bytes" => {
                         "B.lower() -> copy of B\n\nReturn a copy of B with all ASCII characters converted to lowercase."
                     }
@@ -811,6 +826,7 @@ pub(super) fn descriptor_get(
     let slot = match ctx.heap.get(payload) {
         Value::Super { .. } if class == "super" => None,
         Value::ClassMethod { .. } if class == "classmethod" => None,
+        Value::Partial { .. } if class == "functools.partial" => None,
         Value::HeapTypeMethod { name, .. }
             if class
                 == if matches!(*name, "__repr__" | "__str__") {

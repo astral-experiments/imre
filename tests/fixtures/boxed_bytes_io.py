@@ -2,9 +2,54 @@ import _io
 import io
 import gc
 import os
+import pickle
+
+
+def check_state():
+    stream = io.BytesIO(b"part one")
+    stream.seek(5)
+    stream.tag = "saved"
+    state = stream.__getstate__()
+    assert state == (b"part one", 5, {"tag": "saved"})
+    state[2].clear()
+    restored = pickle.loads(pickle.dumps(stream))
+    assert restored.tag == "saved" and restored.read() == b"one"
+
+    attrs = restored.__dict__
+    with restored.getbuffer():
+        try:
+            restored.__setstate__((b"", 0, None))
+        except BufferError:
+            assert restored.getvalue() == b"part one" and restored.tell() == 8
+        else:
+            raise AssertionError("restored BytesIO state with a live export")
+    restored.__setstate__((bytearray(b"next"), 7, {"part": 2}, None))
+    assert restored.__dict__ is attrs and attrs == {"tag": "saved", "part": 2}
+    assert restored.tell() == 7
+    try:
+        restored.__setstate__((b"new", -1, None))
+    except ValueError:
+        assert restored.getvalue() == b"new" and restored.tell() == 3
+    else:
+        raise AssertionError("accepted a negative BytesIO position")
+
+    class Attributes(dict):
+        def __iter__(self):
+            return super().__iter__()
+
+        def keys(self):
+            stream.seek(1)
+            stream.write(b"AB")
+            stream.close()
+            return super().keys()
+
+    stream = io.BytesIO()
+    stream.__setstate__((b"contents", 0, Attributes(tag="saved")))
+    assert stream.__getstate__() == (b"contents", 3, {"tag": "saved"})
 
 
 def current():
+    check_state()
     assert _io.BytesIO is io.BytesIO
     assert _io.StringIO is io.StringIO
     assert (io.BytesIO.__module__, io.BytesIO.__name__) == ("_io", "BytesIO")

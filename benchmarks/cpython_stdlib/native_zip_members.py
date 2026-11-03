@@ -263,6 +263,10 @@ def main():
             writer.writestr("subdir/", b"")
             writer.writestr("lines", b"abc\nxy\nz")
             writer.writestr("final-line", b"a\n", compress_type=zipfile.ZIP_DEFLATED)
+            # Split the next local header across the disk read-ahead boundary.
+            padding = 128 * 1024 - writer.fp.tell() - 30 - len("padding") - 4
+            writer.writestr("padding", bytes(padding), compress_type=zipfile.ZIP_STORED)
+            writer.writestr("across-buffer", b"after padding")
         for cmd in ([sys.executable, control], [binary]):
             result = subprocess.run([*cmd, fixture], capture_output=True, timeout=30)
             if len(cmd) == 2:

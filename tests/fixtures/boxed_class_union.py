@@ -83,6 +83,19 @@ def current():
             result = pickle.loads(pickle.dumps(original, protocol))
             assert result == original and result.__parameters__ == (T,)
 
+    from typing import _UnionGenericAlias
+    from warnings import catch_warnings, simplefilter
+
+    with catch_warnings(record=True) as caught:
+        simplefilter("always", DeprecationWarning)
+        legacy = _UnionGenericAlias(Union, (int, None), name="Optional")
+        assert legacy == (int | None)
+        assert isinstance(legacy, _UnionGenericAlias)
+        assert issubclass(Union, _UnionGenericAlias)
+        assert _UnionGenericAlias == Union
+    assert [w.category for w in caught] == [DeprecationWarning] * 4
+    assert hash(_UnionGenericAlias) == hash(Union)
+
     variable = TypeVar('Variable')
     assert (variable | int)[int] is int
     assert (list[variable] | int)[str].__args__ == (list[str], int)

@@ -8,8 +8,9 @@ use icu_properties::{CodePointMapData, props::EastAsianWidth};
 use super::{Context, Error, Id, NONE, Result, Value, argument, option};
 
 struct FrameLine<'a> {
+    locals: &'a str,
     file: &'a str,
-    command_source: Option<&'a str>,
+    embedded_source: Option<&'a str>,
     name: &'a str,
     line: i64,
     span: Option<[u32; 3]>,
@@ -28,7 +29,44 @@ fn display_width(text: &str) -> usize {
         .sum()
 }
 
-impl FrameLine<'_> {
+impl<'a> FrameLine<'a> {
+    fn new(
+        ctx: &'a Context,
+        code: Id,
+        line: i64,
+        span: Option<[u32; 3]>,
+        locals: &'a str,
+    ) -> Result<Self> {
+        let code = ctx.code_object(code);
+        let file = ctx.str_value(code.filename)?;
+        // Only native code has the original embedded source at this position.
+        let embedded_source = if !matches!(code.body, crate::dynamic::value::Body::Native(_)) {
+            None
+        } else if file == "<string>" {
+            ctx.config["command_source"].as_str()
+        } else if ctx.config["bundled_root"]
+            .as_str()
+            .is_some_and(|root| std::path::Path::new(file).starts_with(root))
+        {
+            ctx.sources
+                .values()
+                .flatten()
+                .find(|module| module.path == std::path::Path::new(file))
+                .and_then(|module| module.bundled_text)
+                .map(|text| std::str::from_utf8(text).expect("compiler-emitted Python is UTF-8"))
+        } else {
+            None
+        };
+        Ok(Self {
+            locals,
+            file,
+            embedded_source,
+            name: ctx.str_value(code.name)?,
+            line,
+            span,
+        })
+    }
+
     fn format(&self, source: Option<&str>) -> String {
         let mut out = format!(
             "  File \"{}\", line {}, in {}\n",
@@ -37,8 +75,8 @@ impl FrameLine<'_> {
         let Some(raw) = usize::try_from(self.line)
             .ok()
             .and_then(|line| line.checked_sub(1))
-            .and_then(|i| match self.command_source {
-                Some(command) => crate::objects::line_field(command, i),
+            .and_then(|i| match self.embedded_source {
+                Some(text) => crate::objects::line_field(text, i),
                 None => source?.lines().nth(i),
             })
         else {
@@ -301,7 +339,16 @@ fn render(
             ));
         }
     };
-    let limit = match option(args, 3, kwargs, "limit")?.filter(|&l| l != NONE) {
+    let limit = traceback_limit(ctx, option(args, 3, kwargs, "limit")?)?;
+    let chain = option(args, chain_index, kwargs, "chain")?
+        .map(|v| ctx.truth(v))
+        .transpose()?
+        .unwrap_or(true);
+    render_chain(ctx, value, tb, limit, chain, None)
+}
+
+fn traceback_limit(ctx: &mut Context, limit: Option<Id>) -> Result<Option<i64>> {
+    Ok(match limit.filter(|&l| l != NONE) {
         Some(l) => Some(ctx.as_integer(l)?),
         None => {
             let sys = ctx.module("sys")?;
@@ -312,11 +359,32 @@ fn render(
                 Err(error) => return Err(error),
             }
         }
-    };
-    let chain = option(args, chain_index, kwargs, "chain")?
-        .map(|v| ctx.truth(v))
-        .transpose()?
-        .unwrap_or(true);
+    })
+}
+
+/// Render one boxed TestResult report from its supplied exception tuple.
+pub(super) fn format_result(
+    ctx: &mut Context,
+    kind: Id,
+    value: Id,
+    tb: Id,
+    locals: Id,
+) -> Result<Id> {
+    let limit = traceback_limit(ctx, None)?;
+    let lines = render_chain(ctx, value, tb, limit, true, Some((kind, locals)))?;
+    let values = lines.into_iter().map(|line| ctx.text(line)).collect();
+    Ok(ctx.alloc(Value::List(values)))
+}
+
+fn render_chain(
+    ctx: &mut Context,
+    value: Id,
+    tb: Id,
+    limit: Option<i64>,
+    chain: bool,
+    report: Option<(Id, Id)>,
+) -> Result<Vec<String>> {
+    let mut kind = report.map(|(kind, _)| kind);
     let mut sections = Vec::new();
     let mut seen = std::collections::HashSet::from([value]);
     let (mut current, mut current_tb) = (value, tb);
@@ -326,7 +394,14 @@ fn render(
         // change the cause, drop references, and run Python's garbage collector.
         ctx.heap.keep(current);
         let mut lines = Vec::new();
-        format_exception(ctx, current, current_tb, limit, &mut lines)?;
+        if let Some((_, locals)) = report
+            && locals != NONE
+        {
+            format_result_frames(ctx, current_tb, limit, locals, &mut lines)?;
+        } else {
+            format_frames(ctx, current_tb, limit, &mut lines)?;
+        }
+        format_exception_line(ctx, current, kind.take(), &mut lines)?;
         if let Some(separator) = separator {
             lines.push(separator.to_owned());
         }
@@ -426,23 +501,7 @@ pub(in crate::dynamic) fn format_frames(
         let Value::PythonFrame { code, .. } = *ctx.heap.get(frame) else {
             unreachable!()
         };
-        let code = ctx.code_object(code);
-        let file = ctx.str_value(code.filename)?;
-        // Dynamic exec/compile can use the same filename as the boxed -c entry.
-        // Only the native definitions emitted from that entry share its source.
-        let command_source =
-            if file == "<string>" && matches!(code.body, crate::dynamic::value::Body::Native(_)) {
-                ctx.config["command_source"].as_str()
-            } else {
-                None
-            };
-        stack.push(FrameLine {
-            file,
-            command_source,
-            name: ctx.str_value(code.name)?,
-            line: lineno,
-            span,
-        });
+        stack.push(FrameLine::new(ctx, code, lineno, span, "")?);
         tb = next;
     }
     if let Some(n) = limit {
@@ -455,6 +514,59 @@ pub(in crate::dynamic) fn format_frames(
             stack.drain(..skip);
         }
     }
+    render_frame_lines(&stack, lines);
+    Ok(())
+}
+
+/// Capture each selected frame's locals before advancing its mutable traceback link.
+fn format_result_frames(
+    ctx: &mut Context,
+    mut tb: Id,
+    limit: Option<i64>,
+    locals: Id,
+    lines: &mut Vec<String>,
+) -> Result<()> {
+    // TestResult uses sys.tracebacklimit, which traceback_limit clamps to zero or above.
+    debug_assert!(limit.is_none_or(|n| n >= 0));
+    let limit = limit
+        .and_then(|n| usize::try_from(n).ok())
+        .unwrap_or(usize::MAX);
+    let mut captured = Vec::new();
+    while tb != NONE && captured.len() < limit {
+        let Value::Traceback {
+            frame,
+            lineno,
+            span,
+            ..
+        } = *ctx.heap.get(tb)
+        else {
+            return Err(Error::new("TypeError", "expected a traceback"));
+        };
+        let Value::PythonFrame { code, .. } = *ctx.heap.get(frame) else {
+            unreachable!()
+        };
+        ctx.heap.reserve_temporaries(1)?;
+        let mark = ctx.heap.temporary_mark();
+        ctx.heap.keep(tb);
+        let text = ctx.call(locals, vec![frame], Vec::new())?;
+        let text = ctx.str_value(text)?.to_owned();
+        // A repr can detach the rest of the stack or replace it and run gc.collect().
+        let Value::Traceback { next, .. } = *ctx.heap.get(tb) else {
+            unreachable!()
+        };
+        tb = next;
+        ctx.heap.keep_call_result(mark, code);
+        captured.push((code, lineno, span, text));
+    }
+    let stack = captured
+        .iter()
+        .map(|(code, line, span, text)| FrameLine::new(ctx, *code, *line, *span, text))
+        .collect::<Result<Vec<_>>>()?;
+    render_frame_lines(&stack, lines);
+    Ok(())
+}
+
+fn render_frame_lines(stack: &[FrameLine<'_>], lines: &mut Vec<String>) {
     if !stack.is_empty() {
         lines.push("Traceback (most recent call last):\n".to_owned());
         let mut sources = HashMap::new();
@@ -467,13 +579,15 @@ pub(in crate::dynamic) fn format_frames(
                 })
                 .count();
             for frame in &stack[i..i + same.min(3)] {
-                let source = frame.command_source.or_else(|| {
+                let source = frame.embedded_source.or_else(|| {
                     sources
                         .entry(frame.file)
                         .or_insert_with(|| std::fs::read_to_string(frame.file).ok())
                         .as_deref()
                 });
-                lines.push(frame.format(source));
+                let mut line = frame.format(source);
+                line.push_str(frame.locals);
+                lines.push(line);
             }
             if same > 3 {
                 let count = same - 3;
@@ -485,23 +599,29 @@ pub(in crate::dynamic) fn format_frames(
             i += same;
         }
     }
-    Ok(())
 }
 
-fn format_exception(
+fn format_exception_line(
     ctx: &mut Context,
     value: Id,
-    tb: Id,
-    limit: Option<i64>,
+    kind: Option<Id>,
     lines: &mut Vec<String>,
 ) -> Result<()> {
-    format_frames(ctx, tb, limit, lines)?;
     let convert = ctx.builtin("str");
     let text = match ctx.call(convert, vec![value], Vec::new()) {
         Ok(result) => ctx.str_value(result)?.to_owned(),
         Err(_) => "<exception str() failed>".to_owned(),
     };
-    let (module, dot, name) = exception_label(ctx, value)?;
+    let (module, dot, name) = match kind {
+        Some(NONE) => ("", "", "None"),
+        Some(kind) => {
+            let name = ctx.lookup_attr(kind, "__qualname__")?;
+            ctx.heap.keep(name);
+            let module = ctx.lookup_attr(kind, "__module__")?;
+            label_parts(ctx, module, name)?
+        }
+        None => exception_label(ctx, value)?,
+    };
     let separator = if text.is_empty() { "" } else { ": " };
     lines.push(format!("{module}{dot}{name}{separator}{text}\n"));
     Ok(())
@@ -522,6 +642,10 @@ fn exception_label(ctx: &mut Context, value: Id) -> Result<(&str, &str, &str)> {
     let Some(module) = ctx.own_class_attr(class, "__module__") else {
         return Ok(("", "", ctx.str_value(name)?));
     };
+    label_parts(ctx, module, name)
+}
+
+fn label_parts(ctx: &mut Context, module: Id, name: Id) -> Result<(&str, &str, &str)> {
     if matches!(ctx.heap.get(module), Value::Str(_)) && matches!(ctx.heap.get(name), Value::Str(_))
     {
         let (prefix, dot) = match ctx.str_value(module)? {

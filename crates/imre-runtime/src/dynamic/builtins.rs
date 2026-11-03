@@ -553,6 +553,7 @@ pub(super) const BYTEARRAY_METHODS: &[&str] = &[
     "splitlines",
     "startswith",
     "strip",
+    "upper",
 ];
 
 pub(super) const BYTES_METHODS: &[&str] = &[
@@ -578,6 +579,7 @@ pub(super) const BYTES_METHODS: &[&str] = &[
     "startswith",
     "strip",
     "translate",
+    "upper",
 ];
 
 pub(super) const STR_METHODS: &[&str] = &[
@@ -686,10 +688,12 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         }
         Value::ItemGetter(_) if attr == "__reduce__" => "operator.itemgetter",
         Value::NamedTuple {
-            class:
-                Some(owner @ (super::stdlib::os::stat::CLASS | super::stdlib::os::stat::VFS_CLASS)),
-            ..
-        } if attr == "__reduce__" => owner,
+            class: Some(owner), ..
+        } if let Some(layout) = super::stdlib::os::stat::layout(owner)
+            && layout.methods().contains(&attr) =>
+        {
+            owner
+        }
         Value::Property(_) if super::property::METHODS.contains(&attr) => "property",
         Value::ClassMethod { .. } | Value::StaticMethod { .. }
             if matches!(attr, "__reduce__" | "__reduce_ex__") =>
@@ -792,11 +796,11 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         }
         Value::List(_) if LIST_METHODS.contains(&attr) => "list",
         Value::Tuple(_) | Value::NamedTuple { .. }
-            if matches!(attr, "__len__" | "count" | "index") =>
+            if matches!(attr, "__getitem__" | "__len__" | "count" | "index") =>
         {
             "tuple"
         }
-        Value::Tuple(_) if matches!(attr, "__getitem__" | "__repr__") => "tuple",
+        Value::Tuple(_) if attr == "__repr__" => "tuple",
         Value::Set { frozen, .. } => {
             let owner = if *frozen { "frozenset" } else { "set" };
             if !(set_methods(owner).contains(&attr) || set_operators(owner).contains(&attr)) {
@@ -866,11 +870,8 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         Value::Repeat(_) if matches!(attr, "__iter__" | "__next__" | "__length_hint__") => {
             "itertools.repeat"
         }
-        Value::Function { .. } | Value::Cached { .. } | Value::Partial { .. }
-            if attr == "__get__" =>
-        {
-            "function"
-        }
+        Value::Function { .. } | Value::Cached { .. } if attr == "__get__" => "function",
+        Value::Partial { .. } if attr == "__get__" => "functools.partial",
         Value::ContextVar { .. } if matches!(attr, "get" | "set" | "reset") => {
             "_contextvars.ContextVar"
         }
@@ -1868,7 +1869,9 @@ pub(super) fn call(
                 {
                     ctx.check_heap_method_receiver(class, field, values[0])?;
                     true
-                } else if owner == "int" || Context::dict_view_owner(owner).is_some() {
+                } else if matches!(owner, "int" | "float")
+                    || Context::dict_view_owner(owner).is_some()
+                {
                     ctx.builtin_slot_accepts(values[0], owner)
                 } else if owner == "typing.Union" {
                     matches!(ctx.heap.get(values[0]), Value::Union(_))
@@ -1898,6 +1901,7 @@ pub(super) fn call(
                 Ok(ctx.alloc(Value::MappingProxy(dict)))
             }
             "_int_getset" => integer::rational_field(ctx, method, args),
+            "_float_getset" => float::component(ctx, method, args, kwargs),
             "int" if method == "bit_length" => integer::bit_length(ctx, args, kwargs),
             "int" if method == "from_bytes" => integer::from_bytes(ctx, args, kwargs),
             "int" if method == "to_bytes" => integer::to_bytes(ctx, args, kwargs),
@@ -1937,16 +1941,24 @@ pub(super) fn call(
             "bool" | "int" | "float" | "str" | "bytes" | "bytearray" if method == "__repr__" => {
                 collections::builtin_slot(ctx, name, args, kwargs)
             }
-            "bytes" if method == "lower" => {
+            _ if matches!(name, "bytes.lower" | "bytes.upper" | "bytearray.upper") => {
                 let receiver = noargs_method_receiver(ctx, owner, method, args, kwargs)?;
                 let storage = ctx.scalar_value(receiver);
                 let bytes = ctx.bytes_like(storage)?;
-                if bytes.is_empty() {
+                if owner == "bytes" && bytes.is_empty() {
                     return Ok(storage);
                 }
                 let mut result = super::copy_ids(bytes)?;
-                result.make_ascii_lowercase();
-                Ok(ctx.alloc(Value::Bytes(result)))
+                if method == "lower" {
+                    result.make_ascii_lowercase();
+                } else {
+                    result.make_ascii_uppercase();
+                }
+                Ok(ctx.alloc(if owner == "bytes" {
+                    Value::Bytes(result)
+                } else {
+                    Value::ByteArray(result)
+                }))
             }
             "bytes" | "bytearray" if method == "hex" => text::bytes_hex(ctx, owner, args, kwargs),
             "bytes" | "bytearray" if method == "fromhex" => text::fromhex(ctx, name, args, kwargs),
@@ -2049,18 +2061,22 @@ pub(super) fn call(
                     }
                     return Ok(child);
                 }
-                let Value::MemoryView { owner, .. } = ctx.heap.get_mut(args[0]) else {
+                let Value::MemoryView { owner, .. } = *ctx.heap.get(args[0]) else {
                     return Err(type_error("expected memoryview"));
                 };
                 if method == "__enter__" {
-                    Context::memoryview_owner(*owner)?;
+                    Context::memoryview_owner(owner)?;
                     return Ok(args[0]);
                 }
-                let exports = ctx
+                let mut exports = ctx
                     .buffer_exports
                     .iter()
                     .filter(|&&view| view == args[0])
                     .count();
+                if ctx.heap.may_have_buffer_views(args[0]) {
+                    let (heap, roots) = ctx.heap_and_roots();
+                    exports += heap.live_buffer_export_count(args[0], roots)?;
+                }
                 if exports != 0 {
                     let unit = if exports == 1 { "buffer" } else { "buffers" };
                     return Err(Error::new(
@@ -2068,7 +2084,20 @@ pub(super) fn call(
                         format!("memoryview has {exports} exported {unit}"),
                     ));
                 }
-                *owner = None;
+                let Value::MemoryView { owner, lease, .. } = ctx.heap.get_mut(args[0]) else {
+                    unreachable!()
+                };
+                let owner = owner.take();
+                let lease = lease.take();
+                if let Some(owner) = owner {
+                    ctx.heap.weak_edge_removed(owner);
+                }
+                if let Some(lease) = lease
+                    && let Value::PythonBufferLease { exporter, view, .. } = *ctx.heap.get(lease)
+                {
+                    ctx.heap.weak_edge_removed(exporter);
+                    ctx.heap.weak_edge_removed(view);
+                }
                 Ok(NONE)
             }
             "slice" => super::slice::method(ctx, method, args, kwargs),

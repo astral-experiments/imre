@@ -323,6 +323,14 @@ fn compiler_version(ctx: &Context) -> String {
         .to_owned()
 }
 
+pub(super) fn sys_version(ctx: &mut Context) -> Result<Id> {
+    Ok(ctx.text(format!(
+        "{} (Imre {})",
+        full_version(ctx)?,
+        compiler_version(ctx)
+    )))
+}
+
 fn path_text(ctx: &mut Context, path: &Path) -> Result<Id> {
     path.to_str()
         .map(|value| ctx.text(value))
@@ -370,9 +378,10 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("_codecs", "_imre_codec_functions") => ctx.builtin("_codecs._imre_codec_functions"),
         ("_codecs", "_imre_native_search") => ctx.builtin("encodings.search_function"),
         ("_io", "open_code") => ctx.builtin("io.open_code"),
-        ("math", "trunc" | "floor" | "ceil" | "modf" | "copysign" | "gcd" | "isnan" | "isqrt") => {
-            ctx.builtin(&format!("math.{name}"))
-        }
+        (
+            "math",
+            "trunc" | "floor" | "ceil" | "modf" | "copysign" | "gcd" | "isinf" | "isnan" | "isqrt",
+        ) => ctx.builtin(&format!("math.{name}")),
         ("enum", "auto") => ctx.enum_auto_class()?,
         ("enum", "Enum" | "Flag" | "IntEnum" | "IntFlag" | "StrEnum") => {
             ctx.builtin("enum.Enum.__copy__");
@@ -430,8 +439,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         )
         | (
             "_imre_dataclasses",
-            "make_type"
-            | "is_defaultdict"
+            "is_defaultdict"
             | "loaded_module"
             | "members"
             | "native_iterator"
@@ -545,11 +553,15 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             | "_LiteralGenericAlias",
         ) => ctx.builtin(&format!("typing.{name}")),
         ("inspect", "_is_coroutine_mark") => inspect::marker(ctx),
+        #[cfg(target_os = "linux")]
+        ("time", "CLOCK_REALTIME") => ctx.int(i64::from(libc::CLOCK_REALTIME)),
+        #[cfg(target_os = "linux")]
+        ("time", "clock_gettime" | "clock_gettime_ns") => ctx.builtin(&format!("time.{name}")),
         (
             "time",
             "get_clock_info" | "time" | "time_ns" | "monotonic" | "monotonic_ns" | "perf_counter"
-            | "sleep" | "gmtime" | "localtime" | "mktime" | "strftime" | "ctime" | "struct_time"
-            | "tzset",
+            | "perf_counter_ns" | "sleep" | "gmtime" | "localtime" | "mktime" | "strftime"
+            | "ctime" | "struct_time" | "tzset",
         ) => ctx.builtin(&format!("time.{name}")),
         ("socket", name) => return socket::attribute(ctx, name),
         ("hashlib", name)
@@ -611,11 +623,6 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         } else {
             std::env::consts::OS
         }),
-        ("sys", "version") => ctx.text(format!(
-            "{} (Imre {})",
-            full_version(ctx)?,
-            compiler_version(ctx)
-        )),
         ("sys", "hash_info") => fixed_structseq::current_hash_info(ctx),
         ("sys", "version_info") => version_info(ctx, &full_version(ctx)?)?,
         ("sys", "implementation") => {
@@ -670,6 +677,10 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("os" | "posix", "fspath") => ctx.builtin("posix.fspath"),
         #[cfg(target_os = "linux")]
         ("posix", "_spawn_exec") => ctx.builtin("posix._spawn_exec"),
+        #[cfg(target_os = "linux")]
+        ("os" | "posix", name @ ("fork" | "register_at_fork")) if os::fork_available() => {
+            ctx.builtin(&format!("posix.{name}"))
+        }
         ("os" | "posix", name)
             if os::is_descriptor_function(name) || os::is_process_function(name) =>
         {
@@ -733,6 +744,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             | "encoder_call",
         )
         | ("_imre_linecache", "source_lines")
+        | ("_imre_unittest", "format_exception")
         | ("_imre_metadata", "filenames" | "dedent" | "zip_names" | "zip_open" | "zip_read")
         | (
             "_imre_posixpath",
@@ -764,6 +776,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             "inspect",
             "iscoroutinefunction"
             | "_frame_position"
+            | "_abstract_flags"
             | "markcoroutinefunction"
             | "_native_data_descriptor"
             | "_static_member"
@@ -1116,6 +1129,15 @@ pub(super) fn call(
         }
         ctx.heap.clear_frame(frame)?;
         return Ok(NONE);
+    }
+    if name == "_imre_unittest.format_exception" {
+        let ([kind, value, tb, locals], []) = (args, kwargs) else {
+            return Err(Error::new(
+                "TypeError",
+                "_format_exception() expects four positional arguments",
+            ));
+        };
+        return traceback::format_result(ctx, *kind, *value, *tb, *locals);
     }
     if name == "traceback._frame_locals" {
         let frame = single_argument("_frame_locals", "frame", args, kwargs)?;
@@ -1719,8 +1741,11 @@ pub(super) fn call(
     if let Some(operation) = name.strip_prefix("_imre_metadata.") {
         return metadata::call(ctx, operation, args, kwargs);
     }
-    if let Some(layout) = name.strip_suffix(".__reduce__").and_then(os::stat::layout) {
-        return os::stat::reduce(ctx, layout, args, kwargs);
+    if let Some((class, method)) = name.rsplit_once('.')
+        && let Some(layout) = os::stat::layout(class)
+        && layout.methods().contains(&method)
+    {
+        return os::stat::method(ctx, layout, method, args, kwargs);
     }
     if let Some(layout) = os::stat::layout(name) {
         return os::stat::construct(ctx, layout, args, kwargs);
@@ -1741,6 +1766,14 @@ pub(super) fn call(
     #[cfg(target_os = "linux")]
     if name == "posix.execve" {
         return os::execve::call(ctx, args, kwargs);
+    }
+    #[cfg(target_os = "linux")]
+    if name == "posix.fork" {
+        return os::fork(ctx, args, kwargs);
+    }
+    #[cfg(target_os = "linux")]
+    if name == "posix.register_at_fork" {
+        return super::at_fork::register(ctx, args, kwargs);
     }
     #[cfg(target_os = "linux")]
     if name == "posix._spawn_exec" {
@@ -2151,19 +2184,6 @@ pub(super) fn call(
     }
     if let Some(method) = name.strip_prefix("_imre_dataclasses.") {
         match (method, args, kwargs) {
-            ("make_type", [name, bases, members], []) => {
-                let name = ctx.str_value(*name)?.to_owned();
-                if name.contains('\0') {
-                    return Err(Error::new(
-                        "ValueError",
-                        "type name must not contain null characters",
-                    ));
-                }
-                let bases = ctx
-                    .tuple_items(*bases)?
-                    .ok_or_else(|| Error::new("TypeError", "expected a tuple of bases"))?;
-                return ctx.make_dataclass_type(name, bases, *members);
-            }
             ("is_defaultdict", [obj], []) => {
                 // Boxed defaultdict exposes its factory on instances, including derived instances.
                 return Ok(if ctx.defaultdict_factory(*obj).is_some() {
@@ -2612,6 +2632,23 @@ pub(super) fn call(
         }
         return Ok(receiver);
     }
+    if let Some((functools::LRU_CACHE_CLASS, method)) = name.rsplit_once('.')
+        && functools::COPY_METHODS.contains(&method)
+    {
+        if method == "__reduce__" {
+            let wrapper = builtins::noargs_method_receiver(
+                ctx,
+                functools::LRU_CACHE_CLASS,
+                method,
+                args,
+                kwargs,
+            )?;
+            return ctx.lookup_attr(wrapper, "__qualname__");
+        }
+        let (wrapper, _) =
+            builtins::method_receiver_args(ctx, functools::LRU_CACHE_CLASS, method, args, kwargs)?;
+        return Ok(wrapper);
+    }
     if name == "pattern.split" {
         return regex::pattern_split(ctx, args, kwargs);
     }
@@ -2719,26 +2756,33 @@ pub(super) fn call(
             } else {
                 (id, true)
             };
+            let gathered;
             let bytes = match ctx.heap.get(id) {
-                Value::Bytes(bytes) | Value::ByteArray(bytes) => bytes.as_slice(),
-                Value::Str(text) if decode && text.is_ascii() => text.as_bytes(),
-                Value::Str(_) if decode => {
+                _ if !decode => ctx.native_buffer_bytes(id)?,
+                Value::MemoryView { .. } => {
+                    gathered = ctx.memoryview_bytes(id)?;
+                    gathered.as_slice()
+                }
+                Value::Str(text) if text.is_ascii() => text.as_bytes(),
+                Value::Str(_) => {
                     return Err(Error::new(
                         "ValueError",
                         "string argument should contain only ASCII characters",
                     ));
                 }
-                _ => {
-                    let ty = ctx.type_name(id);
-                    let message = if decode {
-                        format!(
-                            "argument should be a bytes-like object or ASCII string, not '{ty}'"
+                _ => ctx.native_buffer_bytes(id).map_err(|error| {
+                    if error.kind == "TypeError" {
+                        let ty = ctx.type_name(id);
+                        Error::new(
+                            "TypeError",
+                            format!(
+                                "argument should be a bytes-like object or ASCII string, not '{ty}'"
+                            ),
                         )
                     } else {
-                        format!("a bytes-like object is required, not '{ty}'")
-                    };
-                    return Err(Error::new("TypeError", message));
-                }
+                        error
+                    }
+                })?,
             };
             let result = if decode {
                 crate::objects::base64_decode(bytes, urlsafe)?

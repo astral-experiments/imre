@@ -6,7 +6,7 @@ use crate::dynamic::{builtins, weakref};
 
 pub(in crate::dynamic) const CLASS: &str = "datetime.IsoCalendarDate";
 const NAME: &str = "IsoCalendarDate";
-const MODULE_REF: &str = "_datetime.current_module_ref";
+pub(in crate::dynamic) const MODULE_REF: &str = "_datetime.current_module_ref";
 const FIELDS: [&str; 3] = ["year", "week", "weekday"];
 const DOC: &str = "The result of date.isocalendar() or datetime.isocalendar()\n\nThis object may be accessed either as a tuple of\n  ((year, week, weekday)\nor via the object attributes as named in the above tuple.";
 

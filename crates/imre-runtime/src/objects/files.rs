@@ -513,7 +513,7 @@ fn decode_text(bytes: Vec<u8>, preserve_newlines: bool) -> Result<Str> {
             Err(_) => Error::memory_error(),
         }
     })?;
-    if preserve_newlines || !text.contains('\r') {
+    if preserve_newlines || memchr::memchr(b'\r', text.as_bytes()).is_none() {
         return Ok(Str::from(text));
     }
     let mut normalized = Str::with_capacity(text.len());
@@ -797,6 +797,9 @@ fn open_state_with_capacity(
         0 if gzip => Stream::UnreadGzip { file, capacity },
         0 | 4 => {
             let mut input = Input::new(file, gzip, binary, capacity);
+            if !binary && !gzip && metadata.is_file() {
+                input.read_size_hint = metadata.len().min(1024 * 1024) as usize;
+            }
             if mode == 4 {
                 input.preserve_newlines();
             }
@@ -1049,6 +1052,82 @@ pub unsafe extern "C" fn imre_text_readline(value: *const Object) -> *const Str 
         result.map(|text| StrOwner::into_raw(StrOwner::new(text))),
         std::ptr::null(),
     )
+}
+
+#[repr(C)]
+union LinePayload {
+    bytes: [u8; 24],
+    spilled: *const u8,
+}
+
+/// A value copy of a short UTF-8 line. Longer lines keep a normal owning
+/// string handle and store its stable byte pointer in the first payload word.
+#[repr(C)]
+pub struct InlineLine {
+    len: usize,
+    payload: LinePayload,
+}
+
+// The LLVM slot is four eight-byte words with the payload starting at word one.
+const _: () =
+    assert!(size_of::<InlineLine>() == 32 && std::mem::offset_of!(InlineLine, payload) == 8);
+
+/// # Safety
+/// The caller roots the text file and supplies an aligned, writable InlineLine.
+/// On success the returned handle owns any spilled bytes; null denotes inline
+/// data. A failing read leaves the old line slot untouched.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_text_readline_inline(
+    file: *const Object,
+    out: *mut InlineLine,
+) -> *const Str {
+    use std::borrow::Cow;
+    fn capture(text: Cow<'_, str>, out: *mut InlineLine) -> *const Str {
+        let len = text.len();
+        let mut payload = LinePayload { bytes: [0; 24] };
+        let owner = if len <= 24 {
+            // SAFETY: the byte member is initialized and covers the source length.
+            unsafe {
+                payload.bytes[..len].copy_from_slice(text.as_bytes());
+            }
+            std::ptr::null()
+        } else {
+            let text = match text {
+                Cow::Borrowed(s) => Str::new(s),
+                Cow::Owned(s) => Str::from(s),
+            };
+            let owner = StrOwner::new(text);
+            payload.spilled = owner.as_str().as_ptr();
+            StrOwner::into_raw(owner)
+        };
+        // SAFETY: the destination is the compiler's aligned value slot.
+        unsafe {
+            out.write(InlineLine { len, payload });
+        }
+        owner
+    }
+    // SAFETY: capture consumes the decoded bytes during this borrow. A
+    // failed read never changes the destination or its previous string owner.
+    let result = unsafe {
+        object(file).0.with_mut(|s| {
+            let file = s.file_mut();
+            if file.kind == FileKind::TextMemory {
+                return file
+                    .readline()
+                    .map(|line| capture(Cow::Borrowed(&line), out));
+            }
+            let input = file.input()?;
+            if let Some((len, window)) = input.short_line() {
+                out.write(InlineLine {
+                    len,
+                    payload: LinePayload { bytes: *window },
+                });
+                return Ok(std::ptr::null());
+            }
+            input.map_text_line(|text| capture(text, out))
+        })
+    };
+    finish(result, std::ptr::null())
 }
 
 /// Writes UTF-8 bytes and returns a canonical Int count of Unicode characters.

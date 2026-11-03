@@ -118,11 +118,17 @@ impl Context {
             super::stdlib::os::scandir::finalize(self, owner, &scan);
         } else if async_generator {
             if let Err(error) = self.finalize_async_generator(owner) {
-                eprintln!("Exception ignored while finalizing asynchronous generator: {error}");
+                eprintln!(
+                    "Exception ignored while finalizing asynchronous generator: {}",
+                    error.report(&self.heap)
+                );
             }
         } else if generator {
             if let Err(error) = self.generator_close(owner) {
-                eprintln!("Exception ignored while calling __del__: {error}");
+                eprintln!(
+                    "Exception ignored while calling __del__: {}",
+                    error.report(&self.heap)
+                );
             }
         } else if let Some(slot) = self.slot(owner, "__del__") {
             self.heap.keep(slot);

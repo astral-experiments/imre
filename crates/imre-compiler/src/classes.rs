@@ -482,10 +482,11 @@ fn collect_class(
     definition: DefinitionId,
     node: &ast::StmtClassDef,
     parents: [Option<(usize, &Class)>; 2],
-    exception_layout: bool,
-    exceptions: &HashMap<DefinitionId, u32>,
+    declarations: &exceptions::Declarations,
     decorators: &mut DeferredMethodDecorators,
 ) -> Result<Class, String> {
+    let exception_layout = declarations.layouts.contains(&definition);
+    let exceptions = &declarations.ids;
     let base = parents[0];
     if defines_pickle_reducer(node) {
         graph.needs_object_runtime.set(true);

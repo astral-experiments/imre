@@ -32,25 +32,34 @@ pub(crate) struct PendingExchange {
     select: bool,
 }
 
+/// Typed input is saved between calls. The boxed caller supplies a fresh
+/// borrow of its live Python buffer for each exchange.
+#[derive(Clone, Copy)]
+pub(super) enum Input<'a> {
+    Save(&'a [u8]),
+    Live(&'a [u8]),
+}
+
 impl PendingExchange {
-    pub(super) fn drain<E: From<Error>>(
-        self,
-        mut resume: impl FnMut(Option<f64>, bool) -> Result<PipeProgress>,
-        mut check: impl FnMut() -> std::result::Result<(), E>,
-    ) -> std::result::Result<Exchange, E> {
-        let remaining = || self.timeout.map(|t| t - self.start.elapsed().as_secs_f64());
-        let mut progress = self.progress;
-        let streams = loop {
-            match progress {
-                PipeProgress::Drained(streams) => break streams,
-                PipeProgress::Timeout(streams) => return Ok(Exchange::Timeout(streams, None)),
-                PipeProgress::Interrupted => {
-                    check()?;
-                    progress = resume(remaining(), self.select)?;
-                }
-            }
-        };
-        Ok(Exchange::Done(streams))
+    pub(crate) fn interrupted(&self) -> bool {
+        matches!(self.progress, PipeProgress::Interrupted)
+    }
+
+    fn remaining(&self) -> Option<f64> {
+        self.timeout.map(|t| t - self.start.elapsed().as_secs_f64())
+    }
+
+    pub(super) fn resume(&mut self, process: &mut Popen, input: Input<'_>) -> Result<()> {
+        self.progress = process.exchange_pipes(input, self.remaining(), false, self.select)?;
+        Ok(())
+    }
+
+    pub(super) fn finish(self) -> Exchange {
+        match self.progress {
+            PipeProgress::Drained(streams) => Exchange::Done(streams),
+            PipeProgress::Timeout(streams) => Exchange::Timeout(streams, None),
+            PipeProgress::Interrupted => unreachable!("resume interrupted pipe exchange first"),
+        }
     }
 }
 
@@ -222,15 +231,14 @@ impl Popen {
         text: bool,
         select: bool,
     ) -> Result<Exchange> {
-        let pending = self.begin_exchange(input, deadline, text, select)?;
-        let start = pending.start;
-        let timeout = pending.timeout;
-        let exchange = pending.drain(
-            |timeout, select| self.exchange_pipes(&[], timeout, false, select),
-            crate::objects::stdlib::check_interrupt,
-        )?;
+        let mut pending = self.begin_exchange(Input::Save(input), deadline, text, select)?;
+        while pending.interrupted() {
+            crate::objects::stdlib::check_interrupt()?;
+            pending.resume(self, Input::Save(&[]))?;
+        }
+        let budget = pending.remaining();
+        let exchange = pending.finish();
         if matches!(exchange, Exchange::Done(_)) {
-            let budget = timeout.map(|t| t - start.elapsed().as_secs_f64());
             if self
                 .control
                 .wait_with(
@@ -247,12 +255,12 @@ impl Popen {
 
     pub(super) fn begin_exchange(
         &mut self,
-        input: &[u8],
+        input: Input<'_>,
         deadline: Option<&Deadline>,
         text: bool,
         select: bool,
     ) -> Result<PendingExchange> {
-        if self.communication.started && !input.is_empty() {
+        if self.communication.started && matches!(input, Input::Save(bytes) if !bytes.is_empty()) {
             return Err(Error::new(
                 Kind::ValueError,
                 "Cannot send input after starting communication",
@@ -270,16 +278,19 @@ impl Popen {
 
     pub(super) fn exchange_pipes(
         &mut self,
-        input: &[u8],
+        input: Input<'_>,
         timeout: Option<f64>,
         text: bool,
         select: bool,
     ) -> Result<PipeProgress> {
+        let bytes = match input {
+            Input::Save(bytes) | Input::Live(bytes) => bytes,
+        };
         let data = &mut self.communication;
         let mut out = [Vec::new(), Vec::new()];
         if timeout.is_none() && !data.started && self.pipes.iter().flatten().count() <= 1 {
             if let Some(stdin) = &self.pipes[0] {
-                file(stdin, |f| f.communicate_stdin(input, true))?;
+                file(stdin, |f| f.communicate_stdin(bytes, true))?;
             } else {
                 for (stream, output) in self.pipes[1..].iter().zip(&mut out) {
                     if let Some(stream) = stream {
@@ -302,11 +313,17 @@ impl Popen {
         if !data.started {
             data.started = true;
             if let Some(stdin) = &self.pipes[0] {
-                file(stdin, |f| f.communicate_stdin(&[], input.is_empty()))?;
-                data.input = copy(input)?;
+                file(stdin, |f| f.communicate_stdin(&[], bytes.is_empty()))?;
+                if let Input::Save(bytes) = input {
+                    data.input = copy(bytes)?;
+                }
             }
         }
 
+        let input = match input {
+            Input::Save(_) => &data.input[..],
+            Input::Live(bytes) => bytes,
+        };
         let mut pollfds = [libc::pollfd {
             fd: -1,
             events: 0,
@@ -314,7 +331,7 @@ impl Popen {
         }; 3];
         for (index, (stream, poll)) in self.pipes.iter().zip(&mut pollfds).enumerate() {
             if let Some(stream) = stream
-                && (index != 0 || data.offset < data.input.len())
+                && (index != 0 || !input.is_empty())
             {
                 poll.fd = file(stream, |f| if f.closed() { Ok(-1) } else { f.fileno() })?;
                 poll.events = if index == 0 {
@@ -343,7 +360,9 @@ impl Popen {
                     continue;
                 }
                 let finish = if index == 0 {
-                    let pending = &data.input[data.offset..];
+                    // A live exporter may have shrunk between calls. CPython then
+                    // writes an empty slice before closing the still-open pipe.
+                    let pending = input.get(data.offset..).unwrap_or_default();
                     let length = pending.len().min(libc::PIPE_BUF);
                     // SAFETY: the slice is live; a write of at most PIPE_BUF after
                     // readiness cannot deadlock behind the child's full output pipes.
@@ -358,7 +377,7 @@ impl Popen {
                         }
                     } else {
                         data.offset += n as usize;
-                        data.offset == data.input.len()
+                        data.offset >= input.len()
                     }
                 } else {
                     let mut bytes = [0u8; 32768];

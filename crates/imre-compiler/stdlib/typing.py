@@ -575,6 +575,17 @@ class TextIO(IO[str]):
 
 # TypedDict creation and nominal recognition from CPython 3.14.5 Lib/typing.py.
 class _TypedDictMeta(type):
+    def __new__(cls, name, bases, ns, total=True):
+        for base in bases:
+            if type(base) is not _TypedDictMeta and base is not Generic:
+                raise TypeError("cannot inherit from both a TypedDict type and a non-TypedDict base class")
+
+        actual_bases = (Generic, dict) if any(issubclass(base, Generic) for base in bases) else (dict,)
+        fields = ns.pop("__annotations__", None)
+        td = type.__new__(_TypedDictMeta, name, actual_bases, ns)
+        _configure_typeddict(td, fields, total, bases=bases, namespace=ns)
+        return td
+
     __call__ = dict
 
     def __subclasscheck__(cls, other):
@@ -1008,12 +1019,17 @@ def _namedtuple_annotate(original):
     return annotate
 
 
-def _configure_typeddict(cls, fields, total, own_annotate=None, bases=()):
+def _configure_typeddict(cls, fields, total, own_annotate=None, bases=(), *, namespace=None):
     if not hasattr(cls, "__orig_bases__"):
         cls.__orig_bases__ = bases
 
+    if fields is None and namespace is not None:
+        from annotationlib import get_annotate_from_class_namespace
+        own_annotate = get_annotate_from_class_namespace(namespace)
+        fields = {}
     if own_annotate is not None:
-        fields = _call_annotate(own_annotate, 3, cls)
+        from annotationlib import Format
+        fields = _call_annotate(own_annotate, Format.FORWARDREF, cls)
     annotations = {key: _typeddict_field(tp, cls.__module__, cls)
                    for key, tp in fields.items()}
 
@@ -2021,6 +2037,43 @@ class _GenericAlias:
 
     def __getitem__(self, args):
         return _specialize_generic_alias(self, args)
+
+
+class _UnionGenericAliasMeta(type):
+    def __instancecheck__(self, inst: object) -> bool:
+        import warnings
+        warnings._deprecated("_UnionGenericAlias", remove=(3, 17))
+        return isinstance(inst, Union)
+
+    def __subclasscheck__(self, inst: type) -> bool:
+        import warnings
+        warnings._deprecated("_UnionGenericAlias", remove=(3, 17))
+        return issubclass(inst, Union)
+
+    def __eq__(self, other):
+        import warnings
+        warnings._deprecated("_UnionGenericAlias", remove=(3, 17))
+        if other is _UnionGenericAlias or other is Union:
+            return True
+        return NotImplemented
+
+    def __hash__(self):
+        return hash(Union)
+
+
+class _UnionGenericAlias(metaclass=_UnionGenericAliasMeta):
+    """Compatibility hack.
+
+    A class named _UnionGenericAlias used to be used to implement
+    typing.Union. This class exists to serve as a shim to preserve
+    the meaning of some code that used to use _UnionGenericAlias
+    directly.
+
+    """
+    def __new__(cls, self_cls, parameters, /, *, name=None):
+        import warnings
+        warnings._deprecated("_UnionGenericAlias", remove=(3, 17))
+        return Union[parameters]
 
 
 def _concatenate_copy_with(self, params):

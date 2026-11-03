@@ -18,6 +18,10 @@ def annotated(value: "Element") -> "Element":
     return value
 
 
+def deferred(value: MissingAnnotation) -> int:
+    pass
+
+
 def with_options(a, b, *args, flag=False):
     return a, b, args, flag
 
@@ -127,6 +131,18 @@ class DescriptorInit:
     __init__ = InitDescriptor()
 
 
+class JoinMeta(type):
+    def __call__(cls, *args, **kwargs):
+        return ":".join(*args, **kwargs)
+
+    __call__.__wrapped__ = ":".join
+
+
+class Joined(metaclass=JoinMeta):
+    def __init__(self, parts):
+        pass
+
+
 def documented(*args, **kwargs):
     pass
 
@@ -145,6 +161,13 @@ proxy.__annotations__ = {}
 assert str(inspect.signature(proxy)) == "()"
 del proxy.__defaults__
 assert str(inspect.signature(proxy)) == "(*args, **kwargs)"
+
+string_sig = inspect.signature(deferred, annotation_format=Format.STRING)
+assert string_sig.parameters["value"].annotation == "MissingAnnotation"
+assert string_sig.return_annotation == "int"
+forward_sig = Signature.from_callable(deferred, annotation_format=Format.FORWARDREF)
+assert forward_sig.parameters["value"].annotation.__forward_arg__ == "MissingAnnotation"
+assert forward_sig.return_annotation is int
 
 assert inspect.signature(annotated).parameters["value"].annotation == "Element"
 resolved = Signature.from_callable(
@@ -167,6 +190,10 @@ else:
 
 target = CallableInstance()
 target.__call__ = lambda shadow: None
+assert str(inspect.signature(target)) == "(item, /, *, count=1)"
+target.__text_signature__ = "(value, /, *, width=80)"
+assert str(inspect.signature(target)) == "(value, /, *, width=80)"
+target.__text_signature__ = ""
 assert str(inspect.signature(target)) == "(item, /, *, count=1)"
 assert str(inspect.signature(StaticCall())) == "(first, second)"
 assert str(inspect.signature(ClassCall())) == "(item)"
@@ -252,6 +279,15 @@ assert str(inspect.signature(DeprecatedChild)) == "(*, published)"
 
 assert str(inspect.signature(DescriptorInit)) == "(selected)"
 
+assert str(inspect.signature(Joined)) == "(parts)"
+assert str(inspect.signature(Joined, follow_wrapped=False)) == "(*args, **kwargs)"
+JoinMeta.__call__.__signature__ = Signature([
+    Parameter("cls", Parameter.POSITIONAL_ONLY), Parameter("items", Parameter.KEYWORD_ONLY),
+])
+assert str(inspect.signature(Joined)) == "(*, items)"
+JoinMeta.__call__ = ":".join
+assert str(inspect.signature(Joined, follow_wrapped=False)) == "(parts)"
+
 
 assert str(inspect.signature(partial(with_options, 1))) == "(b, *args, flag=False)"
 assert str(inspect.signature(partial(with_options, b=2))) == "(a, *, b=2, flag=False)"
@@ -275,6 +311,17 @@ assert sig.parameters["instance"].kind is Parameter.POSITIONAL_ONLY
 
 assert str(inspect.signature(object.__init__)) == "(self, /, *args, **kwargs)"
 assert str(inspect.signature(object().__init__)) == "(*args, **kwargs)"
+
+assert str(inspect.signature(object.__new__, follow_wrapped=False)) == "(*args, **kwargs)"
+assert getfullargspec(object.__new__).args == ["type"]
+assert str(inspect.signature("|".join)) == "(iterable, /)"
+assert str(inspect.signature(partial("|".join, ("a", "b")))) == "()"
+try:
+    inspect.signature(min)
+except ValueError as exc:
+    assert str(exc) == f"no signature found for builtin {min!r}"
+else:
+    raise AssertionError("min has no text signature")
 
 documented.__self__ = object()
 documented.__text_signature__ = "($self, /, value, *, retries=1)"

@@ -29,6 +29,28 @@ impl TextFile {
         }
     }
 
+    pub(crate) fn replace_memory_value(&self, text: &str) -> Result<()> {
+        // SAFETY: decoding borrowed UTF-8 does not call Python code.
+        unsafe {
+            self.0.0.with_mut(|storage| {
+                storage
+                    .file_mut()
+                    .replace_string_io_points(text.chars().map(u32::from))
+            })
+        }
+    }
+
+    pub(crate) fn replace_memory_points(&self, points: &[u32]) -> Result<()> {
+        // SAFETY: copying borrowed code points does not call Python code.
+        unsafe {
+            self.0.0.with_mut(|storage| {
+                storage
+                    .file_mut()
+                    .replace_string_io_points(points.iter().copied())
+            })
+        }
+    }
+
     pub(crate) fn read_memory(&self, size: Option<usize>, line: bool) -> Result<MemoryText> {
         // SAFETY: the stream remains owned and reading characters runs no Python callbacks.
         unsafe {
@@ -59,6 +81,11 @@ impl TextFile {
     pub(crate) fn truncate_memory(&self, size: Option<isize>) -> Result<usize> {
         // SAFETY: the stream remains owned and changing its length cannot reenter Python.
         unsafe { self.0.0.with_mut(|s| s.file_mut().truncate_string_io(size)) }
+    }
+
+    pub(crate) fn memory_newline(&self) -> Result<Option<&'static str>> {
+        // SAFETY: only a static spelling of the configured newline escapes the borrow.
+        unsafe { self.0.0.with_mut(|s| s.file_mut().string_io_newline()) }
     }
 
     pub(crate) fn memory_newlines(&self) -> Result<u8> {
