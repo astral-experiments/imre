@@ -7059,7 +7059,6 @@ impl Emitter<'_, '_> {
                     small_integer: false,
                 }
             }
-            Builtin::BytesIter => self.call("imre_bytes_iter", Type::Iterator, &[&args[0].value]),
             Builtin::StringIter => self.call("imre_str_iter", Type::Iterator, &[&args[0].value]),
             Builtin::SplitLinesIter => self.call(
                 "imre_str_splitlines_iter",
@@ -9003,7 +9002,6 @@ declare void @imre_byte_output_reserve_range(ptr, i64, i64, i64, i64)
 declare ptr @imre_byte_output_finish(ptr)
 declare ptr @imre_bytes_concat(ptr, ptr)
 declare ptr @imre_bytes_repeat(ptr, i64)
-declare ptr @imre_bytes_iter(ptr)
 declare ptr @imre_str_encode(ptr)
 declare ptr @imre_str_encode_options(ptr, ptr, ptr)
 declare ptr @imre_bytes_decode_splitlines(ptr)

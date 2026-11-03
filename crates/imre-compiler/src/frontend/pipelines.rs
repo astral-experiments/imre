@@ -1398,7 +1398,7 @@ impl Checker<'_> {
         let indexed = self.types.element(ty).is_some()
             || self.types.var_tuple_element(ty).is_some()
             || fields.is_some()
-            || (reverse && ty == Type::Bytes);
+            || ty == Type::Bytes;
         if indexed {
             let cursor = self.hidden(Type::Int);
             clear.push(cursor);
@@ -1514,8 +1514,6 @@ impl Checker<'_> {
                 } else {
                     Builtin::StringIter
                 }
-            } else if ty == Type::Bytes {
-                Builtin::BytesIter
             } else if self.types.deque_element(ty).is_some() {
                 Builtin::DequeIter { reverse }
             } else if set_element.is_some() {

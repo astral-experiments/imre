@@ -4203,7 +4203,6 @@ impl<'a> Checker<'a> {
             && set_element.is_none()
             && self.types.deque_element(iterable.ty).is_none()
             && !string
-            && !bytes
         {
             Some(self.hidden(Type::Int))
         } else {
@@ -4227,7 +4226,9 @@ impl<'a> Checker<'a> {
                 Expr {
                     ty: element,
                     kind: ExprKind::Builtin(
-                        if matches!(self.locals[captured], Type::VarTuple(_)) {
+                        if bytes {
+                            Builtin::BytesGet
+                        } else if matches!(self.locals[captured], Type::VarTuple(_)) {
                             Builtin::TupleIndex
                         } else if matches!(self.locals[captured], Type::List(_)) {
                             Builtin::SequenceGetInBounds
@@ -4263,8 +4264,6 @@ impl<'a> Checker<'a> {
                     kind: ExprKind::Builtin(
                         if string {
                             Builtin::StringIter
-                        } else if bytes {
-                            Builtin::BytesIter
                         } else if self.types.deque_element(self.locals[captured]).is_some() {
                             Builtin::DequeIter { reverse: false }
                         } else if set_element.is_some() {
