@@ -690,6 +690,10 @@ pub(super) fn builtin_format(
             .ok_or_else(|| type_error(format!("unsupported format string {spec:?}")))?;
         return Ok(ctx.text(field.render(number)?));
     }
+    if let Value::Float(number) = ctx.heap.get(ctx.scalar_value(value)) {
+        let text = crate::objects::brace_float_field(spec, *number, ctx.type_name(value))?;
+        return Ok(ctx.text(text));
+    }
     if matches!(
         ctx.heap.get(ctx.scalar_value(value)),
         Value::Bool(_) | Value::Int(_)
