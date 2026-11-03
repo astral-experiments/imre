@@ -601,7 +601,10 @@ pub(crate) fn compile(
     // Python normalizes non-ASCII identifiers, including imported module names.
     let provider_hint = startup.is_some()
         && !options.runtime_imports
-        && (src.contains("logging") || src.contains("tokenize") || !src.is_ascii());
+        && (src.contains("logging")
+            || src.contains("tokenize")
+            || src.contains("configparser")
+            || !src.is_ascii());
     let ordered_command = matches!(operation, Some(ObjectOperation::OrderedCommandImport));
     if !object_hint && !provider_hint && !ordered_command {
         return Ok(None);
@@ -640,7 +643,8 @@ pub(crate) fn compile(
     // startup fallback needs to verify that the imported provider is bundled.
     let logging_script = !object_entry && provider_hint && first.imports_logging;
     let tokenize_script = !object_entry && imports_provider("tokenize");
-    let ordered_only = !object_entry && !logging_script && !tokenize_script;
+    let configparser_script = !object_entry && imports_provider("configparser");
+    let ordered_only = !object_entry && !logging_script && !tokenize_script && !configparser_script;
     if ordered_only
         && (!ordered_command
             || first.uses_import_builtin
@@ -651,7 +655,8 @@ pub(crate) fn compile(
     {
         return Ok(None);
     }
-    let provider_script = provider_script || logging_script || tokenize_script;
+    let provider_script =
+        provider_script || logging_script || tokenize_script || configparser_script;
     if let Some(name) = module_entry {
         first.add(0, "runpy");
         // Register source candidates without interpreting a module operand as a filesystem path.
@@ -770,7 +775,7 @@ pub(crate) fn compile(
                 imports.add(0, "unittest.mock");
             }
             if uses_import_builtin || seen.contains("importlib") {
-                for name in ["py_compile", "sysconfig"] {
+                for name in ["configparser", "py_compile", "sysconfig"] {
                     if !seen.contains(name) {
                         imports.names.push((0, name.to_owned()));
                     }
@@ -953,7 +958,8 @@ pub(crate) fn compile(
                             || (ftp_script && prefix == "ftplib")
                             || (argparse_script && prefix == "argparse")
                             || (logging_script && prefix == "logging")
-                            || (tokenize_script && prefix == "tokenize"))
+                            || (tokenize_script && prefix == "tokenize")
+                            || (configparser_script && prefix == "configparser"))
                     {
                         return Ok(None);
                     }
