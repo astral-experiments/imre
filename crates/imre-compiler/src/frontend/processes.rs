@@ -305,6 +305,13 @@ fn stream_mode(graph: &SourceGraph, module: ModuleId, value: &ast::Expr) -> u32 
     }
 }
 
+/// Typed process pipes accept the default encoding or an explicit UTF-8 spelling.
+fn typed_pipe_encoding(value: &ast::Expr) -> bool {
+    matches!(value, ast::Expr::NoneLiteral(_))
+        || matches!(value, ast::Expr::StringLiteral(s)
+            if matches!(s.value.to_str().to_ascii_lowercase().as_str(), "utf8" | "utf-8" | "utf_8"))
+}
+
 /// Capture determines the returned layout. Ordinary stream expressions are
 /// evaluated in source order, including ones rejected by run/check_output.
 fn stream_plan(
@@ -354,8 +361,7 @@ fn stream_plan(
                 text = true;
             }
             Some("encoding") if !matches!(value, ast::Expr::NoneLiteral(_)) => {
-                if !matches!(value, ast::Expr::StringLiteral(v) if matches!(v.value.to_string().to_ascii_lowercase().replace('_', "-").as_str(), "utf8" | "utf-8"))
-                {
+                if !typed_pipe_encoding(value) {
                     return Err("process encoding requires literal 'utf-8'");
                 }
                 text = true;
@@ -896,6 +902,19 @@ impl Checker<'_> {
     }
 
     fn launch_process(&mut self, call: &ast::ExprCall, api: LaunchApi) -> Result<Expr, String> {
+        if self.graph.command_startup.is_some()
+            && matches!(api, LaunchApi::Run { .. } | LaunchApi::CheckOutput)
+            && call
+                .arguments
+                .find_keyword("encoding")
+                .is_some_and(|kw| !typed_pipe_encoding(&kw.value))
+        {
+            // A discarded call still supplies the streams inspected in its exception handler.
+            self.graph
+                .check_fallback_calls
+                .set(crate::analysis::FallbackCalls::FunctionBodies);
+            return Err(self.object_builtin_error("subprocess pipe encoding", call));
+        }
         let directory = self.types.optional(Type::Str);
         let environment = self.types.optional(self.types.dict(Type::Str, Type::Str));
         let (streams, capture) = stream_plan(self.graph, self.module, call)

@@ -20,6 +20,15 @@ def current():
         assert child.communicate("é\r") == ("?\n", "\ufffd\n")
         assert child.universal_newlines == child.text_mode == "ascii"
 
+    cmd = ["/bin/sh", "-c", r"printf '\200\r\n'; printf '\223err\224' >&2; exit 7"]
+    try:
+        subprocess.check_output(cmd, encoding="windows-1252", stderr=pipe)
+    except subprocess.CalledProcessError as exc:
+        assert exc.cmd is cmd and exc.returncode == 7
+        assert exc.output == "€\n" and exc.stderr == "“err”"
+    else:
+        raise AssertionError("check_output accepted exit status 7")
+
     with subprocess.Popen(["/bin/true"], stdin=pipe, text=2, universal_newlines=1) as child:
         try:
             child.stdin.write(b"x")
