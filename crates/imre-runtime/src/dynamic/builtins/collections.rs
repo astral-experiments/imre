@@ -741,6 +741,7 @@ pub(super) fn method(
         "list.__add__"
             | "list.__iadd__"
             | "list.__init__"
+            | "list.__iter__"
             | "list.__repr__"
             | "tuple.__repr__"
             | "list.__len__"
@@ -1506,6 +1507,9 @@ pub(super) fn builtin_slot(
             )));
         }
         if method == "__iter__" {
+            if owner == "list" {
+                return Ok(ctx.forward_iterator(object, "list_iterator"));
+            }
             return ctx.iterator(storage);
         }
         if method == "__len__" {

@@ -3125,6 +3125,7 @@ for name in ("md4", "ripemd160"):
             "boxed_selector_modify_data.py",
             "boxed_structural_hooks.py",
             "boxed_list_pop.py",
+            "boxed_list_iter_descriptor.py",
             "boxed_sequence_repeat.py",
             "boxed_sequence_order.py",
             "boxed_tuple_index.py",

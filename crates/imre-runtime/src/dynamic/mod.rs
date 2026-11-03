@@ -779,13 +779,17 @@ impl Context {
                 (self.alloc(Value::Tuple(values)), "iterator")
             }
         };
-        Ok(self.alloc(Value::Iterator {
+        Ok(self.forward_iterator(sequence, kind))
+    }
+
+    fn forward_iterator(&mut self, sequence: Id, kind: &'static str) -> Id {
+        self.alloc(Value::Iterator {
             sequence: Some(sequence),
             offset: 0,
             reverse: false,
             kind,
             context: None,
-        }))
+        })
     }
 
     /// Start a cursor at the first entry without copying keys or values.
