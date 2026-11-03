@@ -28,6 +28,10 @@ impl Memory {
         }
     }
 
+    pub(crate) fn position(&self) -> u64 {
+        self.position
+    }
+
     pub(crate) fn bytes(&self) -> &[u8] {
         &self.data[..self.size]
     }

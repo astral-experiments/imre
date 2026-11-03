@@ -5106,8 +5106,9 @@ impl Context {
             else {
                 continue;
             };
-            // StringIO's pickle state distinguishes a missing dictionary from an emptied one.
-            layout.materialize_dictionary_on_write |= base.io_kind() == Some("StringIO");
+            // In-memory I/O pickle state distinguishes a missing dictionary from an emptied one.
+            layout.materialize_dictionary_on_write |=
+                matches!(base.io_kind(), Some("BytesIO" | "StringIO"));
             let frame = self.scope_data(*scope);
             shadowed |= self.namespace_binding(frame, name).is_some();
             let Some(slots) = frame
