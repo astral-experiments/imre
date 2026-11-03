@@ -542,6 +542,28 @@ impl Session {
         })
     }
 
+    /// Check the class definition at the use site, including aliases and local shadowing.
+    pub(crate) fn is_stdlib_class(
+        &self,
+        module: usize,
+        expr: &Expr,
+        owner: &str,
+        name: &str,
+    ) -> bool {
+        use ty_python_semantic::types::{Type, TypeDefinition};
+        self.hint_reads.set(self.hint_reads.get() + 1);
+        let model = SemanticModel::new(&self.db, self.db.program_file(self.files[module]));
+        let Some(ty @ Type::ClassLiteral(_)) = expr.inferred_type(&model) else {
+            return false;
+        };
+        matches!(ty.definition(&self.db, &model.program_environment()),
+            Some(TypeDefinition::StaticClass(class))
+                if class.name(&self.db).as_deref() == Some(name)
+                    && class.file(&self.db).path(&self.db).is_vendored_path()
+                    && model.resolve_module(Some(owner), 0).and_then(|m| m.file(&self.db))
+                        == Some(class.file(&self.db)))
+    }
+
     /// Identify exact OrderedDict and deque class objects even when imported under another name.
     pub(crate) fn is_collections_storage_base(&self, module: usize, base: &Expr) -> bool {
         use ty_python_semantic::types::{KnownClass, ProgramEnvironment, Type as Ty};
