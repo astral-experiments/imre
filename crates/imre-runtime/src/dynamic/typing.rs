@@ -1674,7 +1674,7 @@ pub(super) fn attribute(ctx: &mut Context, value: Id, name: &str) -> Option<Resu
             if name == "__mro__" {
                 class.mro
             } else {
-                class.bases
+                class.supplied_bases.unwrap_or(class.bases)
             }
         }
         _ => return None,
@@ -3220,7 +3220,16 @@ impl Context {
             ancestors,
         });
         mro[0] = class;
-        let bases = self.alloc(Value::Tuple(bases));
+        let supplied_bases = self
+            .scope_data(scope)
+            .class_namespace
+            .as_ref()
+            .and_then(|ns| ns.supplied_bases);
+        // Layout operations use raw positions without dispatching to a tuple subclass.
+        let bases = supplied_bases
+            .map(|tuple| self.scalar_value(tuple))
+            .filter(|&storage| matches!(self.heap.get(storage), Value::Tuple(_)))
+            .unwrap_or_else(|| self.alloc(Value::Tuple(bases)));
         let mro = self.alloc(Value::Tuple(mro));
         // A class-body __eq__ suppresses inherited hashing at type creation.
         if self
@@ -3239,6 +3248,7 @@ impl Context {
         namespace.member_slots = member_slots;
         namespace.slot_names = slot_names;
         namespace.bases = bases;
+        namespace.supplied_bases = supplied_bases.filter(|&tuple| tuple != bases);
         namespace.mro = mro;
         for field in members {
             let name = self.text(&field);
