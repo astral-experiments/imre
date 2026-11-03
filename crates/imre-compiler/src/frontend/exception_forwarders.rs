@@ -414,7 +414,7 @@ impl Checker<'_> {
                 .iter()
                 .map(|(name, source)| (name.clone(), bound.names[source].clone()))
                 .collect();
-            if let Some(&base) = decl.bases.first() {
+            if let Some(base) = decl.storage_base {
                 // The recognized constructor body contains exactly one call statement.
                 source_call = decl.methods[decl.initializer.expect("forwarding initializer")]
                     .body

@@ -302,7 +302,7 @@ impl ClassInfo {
             if class.abstract_methods.is_empty() && !class.bases.is_empty() {
                 types.add_concrete_subclass(id, &class.bases);
             }
-            if let Some(&base) = class.bases.first()
+            if let Some(base) = class.storage_base
                 && !fields[id].starts_with(&fields[base])
             {
                 return Err(graph.modules[class.definition.module].error(
@@ -2396,7 +2396,7 @@ struct Checker<'a> {
     class_receiver: Option<String>,
     /// Earlier assignments in the executing class body shadow module definitions.
     class_lexical: HashSet<String>,
-    super_method_base: Option<usize>,
+    super_method_owner: Option<usize>,
     iterator_source: Option<TextRange>,
     super_initializer: Option<records::BaseInitializer>,
     exception_formatter: Option<bool>,
@@ -2468,7 +2468,7 @@ impl<'a> Checker<'a> {
             class: None,
             class_receiver: None,
             class_lexical: HashSet::new(),
-            super_method_base: None,
+            super_method_owner: None,
             iterator_source: None,
             super_initializer: None,
             exception_formatter: None,
@@ -8948,7 +8948,15 @@ impl<'a> Checker<'a> {
             if method.attr.as_str() == "__init__" {
                 return self.call_super_initializer(call);
             }
-            if let Some(base) = self.super_method_base {
+            if let Some(owner) = self.super_method_owner
+                && let Some(storage) = self.classes.declarations.definitions[owner].storage_base
+            {
+                let first = self.classes.declarations.definitions[owner].bases[0];
+                let base = if self.classes.methods[first].contains_key(method.attr.as_str()) {
+                    first
+                } else {
+                    storage
+                };
                 return self.call_super_method(call, method, base);
             }
         }

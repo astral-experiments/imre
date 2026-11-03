@@ -29,6 +29,7 @@ pub(super) fn resolve(
         path.push(id);
         let mut base: Option<usize> = None;
         let mut mixin = None;
+        let mut leading_mixin = false;
         if let Some(args) = &node.arguments {
             for argument in &args.args {
                 if graph.is_protocol_base(definition.module, argument) {
@@ -122,19 +123,28 @@ pub(super) fn resolve(
                         build(next, graph, nodes, ids, exceptions, classes, path)?;
                         if let Some(first) = base {
                             let parent: &Class = classes[first].as_ref().unwrap();
-                            if !parent.bases.contains(&next) {
-                                let donor = classes[next].as_ref().unwrap();
-                                if args.args.len() != 2
-                                    || first == next
-                                    || !method_only_mixin(graph, donor)
-                                {
-                                    return Err(module.error(
-                                        argument,
-                                        "multiple independent base classes are unsupported",
-                                    ));
-                                }
-                                mixin = Some(next);
+                            if parent.bases.contains(&next) {
+                                continue;
                             }
+                            if args.args.len() == 2 && first != next {
+                                let second = classes[next].as_ref().unwrap();
+                                if method_only_mixin(graph, second) {
+                                    mixin = Some(next);
+                                    continue;
+                                }
+                                if !second.bases.contains(&first)
+                                    && independent_leading_mixin(graph, parent, second)
+                                {
+                                    base = Some(next);
+                                    mixin = Some(first);
+                                    leading_mixin = true;
+                                    continue;
+                                }
+                            }
+                            return Err(module.error(
+                                argument,
+                                "multiple independent base classes are unsupported",
+                            ));
                         } else {
                             base = Some(next);
                         }
@@ -188,6 +198,10 @@ pub(super) fn resolve(
             return Err(error);
         }
         let mut class = class?;
+        if leading_mixin {
+            // The independent root has no ancestors. It precedes the entire storage lineage.
+            class.bases.rotate_right(1);
+        }
         if exceptions.layouts.contains(&definition) {
             let index = (exceptions.ids[&definition] - exceptions::FIRST_USER_EXCEPTION) as usize;
             let mro = &exceptions.named[index].ancestors;
@@ -220,7 +234,7 @@ pub(super) fn resolve(
     Ok(classes.into_iter().map(Option::unwrap).collect())
 }
 
-/// A trailing root mixin supplies ordinary methods without changing the receiver layout.
+/// A root mixin supplies ordinary methods without declaring receiver storage.
 fn method_only_mixin(graph: &SourceGraph, class: &Class) -> bool {
     let node = &class.node;
     node.decorator_list.is_empty()
@@ -237,6 +251,30 @@ fn method_only_mixin(graph: &SourceGraph, class: &Class) -> bool {
             ast::Stmt::Pass(_) => true,
             _ => false,
         })
+}
+
+/// The fixed layout can reuse disjoint methods, but cannot run a cooperative
+/// mixin method against different next bases depending on the receiver.
+fn independent_leading_mixin(graph: &SourceGraph, mixin: &Class, storage: &Class) -> bool {
+    method_only_mixin(graph, mixin)
+        && !ast::helpers::any_over_body(
+            &mixin.node.body,
+            |expr| matches!(expr, ast::Expr::Name(name) if name.id == "super"),
+        )
+        && mixin
+            .methods
+            .iter()
+            .filter(|method| method.name.as_str() != "__init__")
+            .all(|method| {
+                let name = method.name.as_str();
+                !storage
+                    .methods
+                    .iter()
+                    .any(|other| other.name.as_str() == name)
+                    && !storage.fields.iter().any(|field| field.name == name)
+                    && !storage.static_bindings.contains_key(name)
+                    && !storage.exception_aliases.contains_key(name)
+            })
 }
 
 /// Return the member and the name whose binding must be the builtin `super`.
