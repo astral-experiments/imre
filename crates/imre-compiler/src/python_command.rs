@@ -224,6 +224,7 @@ pub(super) fn parse(
         unbuffered: unbuffered || env_flag("PYTHONUNBUFFERED") != 0,
         utf8_mode,
         warn_default_encoding: warn_default_encoding || env_present("PYTHONWARNDEFAULTENCODING"),
+        has_warning_options: !warnoptions.is_empty() || env_present("PYTHONWARNINGS"),
         warnoptions,
         xoptions,
         faulthandler: faulthandler || env_present("PYTHONFAULTHANDLER"),

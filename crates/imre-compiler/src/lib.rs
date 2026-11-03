@@ -66,6 +66,8 @@ pub struct CommandFlags {
     /// A missing override lets the runtime select the mode from the startup locale.
     pub utf8_mode: Option<bool>,
     pub warn_default_encoding: bool,
+    /// Command-line or environment warning options make file finalization observable.
+    pub has_warning_options: bool,
     /// Warning options supplied on the command line.
     pub warnoptions: Vec<String>,
     /// Ordered command-line operands used to construct sys._xoptions.

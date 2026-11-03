@@ -11504,6 +11504,17 @@ impl<'a> Checker<'a> {
     /// Text uses UTF-8 and defaults to reading; explicit modes stay literal.
     fn open(&mut self, call: &ast::ExprCall, gzip: bool) -> Result<Expr, String> {
         let args = &call.arguments;
+        // Sealed file handles close on drop without running Python's warning machinery.
+        if !gzip
+            && self
+                .graph
+                .command_startup
+                .as_ref()
+                .is_some_and(|(flags, _)| flags.has_warning_options)
+            && self.unshadowed_builtin(&call.func, "open")
+        {
+            return Err(self.object_builtin_error("open with startup warning filters", call));
+        }
         if !gzip
             && self.unshadowed_builtin(&call.func, "open")
             && args.find_argument_value("opener", 7).is_some()

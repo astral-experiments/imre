@@ -395,13 +395,17 @@ pub(in crate::dynamic) fn open(
             1,
         )?;
     }
+    // Sealed binary handles do not dispatch ResourceWarning from a Python finalizer.
+    let warning_options = ctx.config["warnoptions"]
+        .as_array()
+        .is_some_and(|options| !options.is_empty());
     let fd = descriptor_from_argument(ctx, raw_arg);
     if opener.is_some()
         || fd.is_some()
         || text_output
         || text_input
         || update
-        || (binary && buffering == 1)
+        || (binary && (buffering == 1 || warning_options))
         || (binary && !numeric && needs_encoded_path(ctx, raw_arg)?)
     {
         if fd.is_some_and(|fd| fd < 0) {
@@ -428,6 +432,19 @@ pub(in crate::dynamic) fn open(
         } else {
             crate::text_output::binary_capacity(handle.blksize.get().into())
         };
+        if binary && warning_options {
+            let class = if update {
+                "_io.BufferedRandom"
+            } else if reading {
+                "_io.BufferedReader"
+            } else {
+                "_io.BufferedWriter"
+            };
+            let size = ctx.int(capacity as i64);
+            return ctx
+                .call(ctx.builtins[class], vec![raw, size], Vec::new())
+                .map_err(|error| close_on_error(ctx, raw, error));
+        }
         let line_buffering =
             buffering == 1 || (!binary && buffering < 0 && handle.fd.get().is_some_and(os::isatty));
         let buffer = if update {

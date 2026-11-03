@@ -190,9 +190,7 @@ pub(super) fn call(
                 ctx.call(truncate, args.to_vec(), Vec::new())
             }
             "close" if buffer != receiver && !fd.closed() => {
-                if owner == "BufferedWriter" {
-                    fd.warn_on_close(ctx, receiver)?;
-                }
+                fd.warn_on_close(ctx, receiver)?;
                 let flushed = ctx
                     .lookup_attr(receiver, "flush")
                     .and_then(|flush| ctx.call(flush, vec![], Vec::new()));
