@@ -58,6 +58,15 @@ REJECTED = {
             "class Both(Left, Right): pass\n"
         ),
     }, "multiple independent base classes"),
+    "custom_dir_preserves_typed_call": ({
+        "main.py": (
+            "class Subject:\n"
+            "    def __dir__(self): return ['value']\n"
+            "def typed(n: int) -> int: return n\n"
+            "dir(Subject())\n"
+            "typed('wrong')\n"
+        ),
+    }, "invalid-argument-type"),
     "inspect_isdatadescriptor_preserves_typed_call": ({
         "main.py": (
             "from inspect import isdatadescriptor\n"

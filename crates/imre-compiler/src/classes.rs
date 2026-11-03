@@ -827,6 +827,19 @@ fn collect_class(
                         "StrEnum methods cannot override member metadata or special behavior",
                     ));
                 }
+                if name == "__dir__" {
+                    // The object runtime binds the class's directory hook. Continue validating
+                    // the other class members before switching to that provider.
+                    let error =
+                        module.error(method, "custom __dir__ requires native class construction");
+                    graph
+                        .object_builtin_errors
+                        .borrow_mut()
+                        .insert(error.clone());
+                    graph.class_body_error.borrow_mut().get_or_insert(error);
+                    class_bindings.insert(name.to_owned());
+                    continue;
+                }
                 if name == "__del__" && graph.command_startup.is_some() {
                     let error = module.error(method, "class finalizers require the object runtime");
                     graph.class_body_error.replace(Some(error.clone()));
