@@ -178,9 +178,14 @@ def check_awaited_argument():
     async def stream():
         result = await double(await Pause())
         yield result
+        result = str(await Pause())
+        yield result
 
     gen = stream()
     op = gen.__anext__()
     assert next(op) == "paused"
     assert raised(StopIteration, op.send, 21).value == 42
+    op = gen.__anext__()
+    assert next(op) == "paused"
+    assert raised(StopIteration, op.send, 37).value == "37"
     assert raised(StopAsyncIteration, next, gen.__anext__())

@@ -1740,8 +1740,7 @@ impl Program {
                 return Ok(None);
             }
             ast::Expr::Call(call)
-                if self.kind == FunctionKind::Coroutine
-                    && Self::has_awaited_call_arguments(&call) =>
+                if self.kind.is_async() && Self::has_awaited_call_arguments(&call) =>
             {
                 self.lower_awaited_call(call, line);
                 return Ok(None);
