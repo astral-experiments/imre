@@ -834,12 +834,8 @@ pub(crate) fn compile(
             if uses_import_builtin && !seen.contains("pprint") {
                 imports.names.push((0, "pprint".to_owned()));
             }
-            if computed_import {
-                for name in ["zoneinfo", "xml.etree.ElementTree"] {
-                    if !seen.contains(name) {
-                        imports.names.push((0, name.to_owned()));
-                    }
-                }
+            if computed_import && !seen.contains("zoneinfo") {
+                imports.names.push((0, "zoneinfo".to_owned()));
             }
             // A runtime-selected HTTP child needs its server and transitive providers.
             if uses_import_builtin && seen.contains("http") && !seen.contains("http.server") {

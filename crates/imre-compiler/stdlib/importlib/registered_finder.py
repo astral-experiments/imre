@@ -7,6 +7,21 @@ _registered_path_finder = PathFinder
 _registered_find_spec = PathFinder.__dict__['find_spec']
 
 
+def _installed_source_spec(fullname, registry_path, target):
+    # A compiled package can have children in the installed archive. Only search
+    # those children from their own virtual parent, preserving application shadows.
+    parts = fullname.split('.')
+    if parts[0] != 'xml' or not all(part.isidentifier() for part in parts):
+        return None
+    parent = parts[:-1]
+    if registry_path != _path_join('<imre stdlib>', *parent):
+        return None
+    if _installed_stdlib is not None and _path_isfile(_installed_stdlib):
+        entry = _path_join(_installed_stdlib, *parent)
+        return _registered_path_finder.find_spec(fullname, [entry], target)
+    return None
+
+
 class _RegisteredFileFinder(FileFinder):
     def __init__(self, path, registry_path):
         super().__init__(path, *_file_loader_defaults())
@@ -17,6 +32,8 @@ class _RegisteredFileFinder(FileFinder):
         registered = registered_path_spec(fullname, self._registry_path)
         # Relative registry roots live inside the executable, independent of the working directory.
         if not _path_isabs(self._registry_path):
+            if registered is None:
+                return _installed_source_spec(fullname, self._registry_path, target)
             return registered
         if (registered is not None and registered.loader is not None
                 and registered.submodule_search_locations is not None):

@@ -3151,6 +3151,14 @@ impl Context {
                     self.finder_external
                 };
                 self.bind(scope, "_finder_external", finder);
+                // The Python launcher (or standalone program) owns its installed sources.
+                let archive = self.executable.with_file_name("imre-stdlib.zip");
+                let archive = if archive.is_absolute() {
+                    archive.to_str().map_or(NONE, |path| self.text(path))
+                } else {
+                    NONE
+                };
+                self.bind(scope, "_installed_stdlib", archive);
             }
             "_imre_importlib" => {
                 // All bootstrap instances invalidate the finders used by the native path search.

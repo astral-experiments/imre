@@ -5897,12 +5897,14 @@ impl Context {
             Expr::Dict(v) => {
                 let result = self.dict(vec![]);
                 for item in &v.items {
-                    let Some(key) = &item.key else {
-                        return Err(unsupported("dict unpack"));
-                    };
-                    let k = eval(self, key)?;
-                    let val = eval(self, &item.value)?;
-                    self.put_item(result, k, val)?;
+                    if let Some(key) = &item.key {
+                        let key = eval(self, key)?;
+                        let value = eval(self, &item.value)?;
+                        self.put_item(result, key, value)?;
+                    } else {
+                        let mapping = eval(self, &item.value)?;
+                        self.merge_mapping(result, mapping, calls::MappingOperation::Unpack)?;
+                    }
                 }
                 Ok(result)
             }

@@ -82,7 +82,7 @@ def check_installed_site(imre, root, run):
     install = prefix / "bin"
     install.mkdir(parents=True)
     launcher = Path(shutil.copy2(imre, install / "imre"))
-    for name in ("libimre_runtime.a", "imre-toolchain"):
+    for name in ("libimre_runtime.a", "imre-toolchain", "imre-stdlib.zip"):
         companion = imre.with_name(name)
         if companion.exists():
             (install / name).symlink_to(companion, target_is_directory=companion.is_dir())
@@ -2862,6 +2862,24 @@ def report(text):
         shutil.copyfile(fixtures / "boxed_xml_etree.py", root / "element_helper.py")
         element_user.write_text("import element_helper\n")
         compare("-B", element_user, native_args=("run", element_user, "--quiet"), native_timeout=300)
+        compare(
+            "-B", "-c", "import importlib, sys\nmodule = importlib.import_module(sys.argv[1])\nprint(module.__name__)",
+            "xml.etree.ElementTree", native_timeout=300,
+        )
+        # A computed import must not register ElementTree in the caller's native image.
+        registry = run(
+            imre, "-B", "-c",
+            "import sys\n"
+            "from _imre_importlib import registered_path_spec\n"
+            "assert __import__(sys.argv[1]).__name__ == sys.argv[1]\n"
+            "root = '<imre stdlib>'\n"
+            "assert registered_path_spec('importlib', root) is not None\n"
+            "for name in sys.argv[2:]:\n"
+            "    path = '/'.join([root] + name.split('.')[:-1])\n"
+            "    assert registered_path_spec(name, path) is None, name",
+            "sys", "xml", "xml.etree", "xml.etree.ElementTree", "xml.etree.ElementPath", timeout=300,
+        )
+        assert (registry.returncode, registry.stdout, registry.stderr) == (0, b"", b""), registry
         if Path("/usr/share/zoneinfo/America/New_York").is_file():
             compare("-IB", fixtures / "boxed_zoneinfo.py", native_timeout=300)
         compare("-IB", fixtures / "boxed_pickle_writer.py")

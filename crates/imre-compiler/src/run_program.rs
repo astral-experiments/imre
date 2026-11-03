@@ -110,6 +110,12 @@ pub(super) fn launch(
     };
     let executable = directory.path().join(&name);
     std::fs::rename(output, &executable)?;
+    if python.is_none() {
+        // Native run shares its image with build, which resolves installed sources
+        // beside the program. Make the launcher's archive visible at that location.
+        let archive = std::env::current_exe()?.with_file_name("imre-stdlib.zip");
+        std::os::unix::fs::symlink(archive, directory.path().join("imre-stdlib.zip"))?;
+    }
 
     let mut program = Command::new(executable);
     program.arg0(source).args(args);
