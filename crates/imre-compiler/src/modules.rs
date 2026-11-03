@@ -2075,6 +2075,9 @@ impl IntrinsicModule {
             (Self::LoggingHandlers, "QueueListener") => {
                 Intrinsic::ScopedObjectExport("logging.handlers.QueueListener")
             }
+            (Self::LoggingHandlers, "SysLogHandler") => {
+                Intrinsic::ScopedObjectExport("logging.handlers.SysLogHandler")
+            }
             (Self::Datetime, "time") => Intrinsic::ClockTime,
             (Self::Datetime, "date") => Intrinsic::Calendar(crate::ir::CalendarType::Date),
             (Self::Datetime, "datetime") => Intrinsic::Calendar(crate::ir::CalendarType::DateTime),
