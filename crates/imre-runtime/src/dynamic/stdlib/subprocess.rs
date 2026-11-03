@@ -1,6 +1,9 @@
 //! Bind binary subprocess operations to the same child and files as typed Popen.
 use super::{Context, Error, FALSE, Id, NONE, Result, Value, builtins, io, os, posixpath};
+use crate::dynamic::gc_schedule::GcSettings;
 use crate::objects::{BoxedPopen, BoxedPreparation};
+use std::sync::Arc;
+use std::sync::atomic::Ordering;
 
 pub(super) fn function(name: &str) -> bool {
     matches!(
@@ -176,6 +179,45 @@ fn extra_group_ids(ctx: &mut Context, gids: Id) -> Result<Option<Vec<libc::gid_t
     Ok(Some(groups))
 }
 
+/// Re-enable automatic collection on parent paths where fork_exec disabled it.
+struct ReenableGc(Arc<GcSettings>);
+
+impl Drop for ReenableGc {
+    fn drop(&mut self) {
+        self.0.enabled.store(true, Ordering::Relaxed);
+    }
+}
+
+struct GuestPreExec<'a> {
+    ctx: &'a mut Context,
+    callback: Id,
+    reenable_gc: Option<ReenableGc>,
+}
+
+impl crate::objects::PreExec for GuestPreExec<'_> {
+    fn fork(&mut self) -> crate::objects::exceptions::Result<libc::pid_t> {
+        #[cfg(target_os = "linux")]
+        {
+            let pid = os::fork_for_child_callbacks(self.ctx)?;
+            if pid != 0 {
+                drop(self.reenable_gc.take());
+            }
+            Ok(pid)
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            Err(crate::Error::new(
+                crate::objects::exceptions::Kind::NotImplementedError,
+                "preexec_fn requires a provably single-threaded glibc process",
+            ))
+        }
+    }
+
+    fn invoke(&mut self) -> bool {
+        self.ctx.call(self.callback, Vec::new(), Vec::new()).is_ok()
+    }
+}
+
 fn launch(ctx: &mut Context, values: &[Id]) -> Result<Id> {
     let &[
         owner,
@@ -191,6 +233,7 @@ fn launch(ctx: &mut Context, values: &[Id]) -> Result<Id> {
         umask,
         pass_fds,
         gids,
+        preexec_fn,
     ] = values
     else {
         return Err(Error::new("TypeError", "invalid Popen launch operands"));
@@ -216,6 +259,7 @@ fn launch(ctx: &mut Context, values: &[Id]) -> Result<Id> {
         || start_new_session != FALSE
         || !default_group
         || gids != NONE
+        || preexec_fn != NONE
         || !default_umask
         || !default_fds
         || (streams.iter().any(|(mode, _)| *mode == 1) && bufsize.as_small() != Some(-1));
@@ -278,7 +322,7 @@ fn launch(ctx: &mut Context, values: &[Id]) -> Result<Id> {
         false
     };
     let mut direct = match probe.then_some(&handles) {
-        Some(handles) if probed_directory => {
+        Some(handles) if probed_directory && preexec_fn == NONE => {
             let close_fds = ctx.truth(close_fds)?;
             // CPython tests pass_fds before cwd, redirected handles and session settings.
             let passing_fds = !default_fds
@@ -360,6 +404,12 @@ fn launch(ctx: &mut Context, values: &[Id]) -> Result<Id> {
     } else {
         os::c_int(ctx, umask)?
     };
+    if preexec_fn != NONE && ctx.finalizing.load(Ordering::Acquire) {
+        return Err(Error::new(
+            "PythonFinalizationError",
+            "preexec_fn not supported at interpreter shutdown",
+        ));
+    }
     // fork_exec parses process_group and umask before checking the normalized descriptors.
     let mut keep = Vec::new();
     if let Some(fds) = normalized {
@@ -367,8 +417,14 @@ fn launch(ctx: &mut Context, values: &[Id]) -> Result<Id> {
             BoxedPopen::push_pass_fd(&mut keep, &ctx.as_int(fd)?)?;
         }
     }
-    // A supplementary-group launch must validate executable candidates before argv and gids.
-    if gids != NONE
+    // CPython disables automatic GC before converting argv and cwd. A path hook
+    // can re-enable it, and the fork child must inherit that choice.
+    let reenable_gc = (preexec_fn != NONE
+        && ctx.heap.gc_settings.enabled.swap(false, Ordering::Relaxed))
+    .then(|| ReenableGc(ctx.heap.gc_settings.clone()));
+    // Fork-only child settings must be validated after the executable candidates and argv.
+    let has_child_settings = gids != NONE || preexec_fn != NONE;
+    if has_child_settings
         && (program_bytes.contains(&0)
             || search_path.as_ref().is_some_and(|path| path.contains(&0)))
     {
@@ -386,7 +442,7 @@ fn launch(ctx: &mut Context, values: &[Id]) -> Result<Id> {
     }
     if direct == Some(true) {
         child_env = environment(ctx, env, false)?;
-    } else if gids != NONE
+    } else if has_child_settings
         && child_env.as_ref().is_some_and(|entries| {
             entries
                 .iter()
@@ -398,6 +454,11 @@ fn launch(ctx: &mut Context, values: &[Id]) -> Result<Id> {
     }
     let directory = (cwd != NONE).then(|| path(ctx, cwd, false)).transpose()?;
     let groups = extra_group_ids(ctx, gids)?;
+    let mut guest = GuestPreExec {
+        ctx,
+        callback: preexec_fn,
+        reenable_gc,
+    };
     let child = BoxedPopen::launch(
         argv,
         alternate,
@@ -415,14 +476,20 @@ fn launch(ctx: &mut Context, values: &[Id]) -> Result<Id> {
         umask,
         keep,
         groups,
+        (preexec_fn != NONE).then_some(&mut guest as &mut dyn crate::objects::PreExec),
     );
+    drop(guest);
     match child {
         Ok(child) => Ok(ctx.alloc(Value::ProcessHandle {
             child,
             reported: false,
         })),
         Err(failure) => {
-            let error = failure.error.into();
+            let mut error: Error = failure.error.into();
+            if error.kind == "SubprocessError" {
+                let module = ctx.module("subprocess")?;
+                error.class = ctx.lookup_attr(module, "SubprocessError")?;
+            }
             match failure.directory {
                 Some(true) => Err(ctx.with_errno_filename(error, cwd)?),
                 Some(false) => {

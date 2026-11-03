@@ -47,14 +47,8 @@ impl BoxedPreparation {
                 child[1].clone()
             };
         }
-        let mut parent = [-1; 3];
-        for (index, file) in handles.pipes.iter().enumerate() {
-            if let Some(file) = file {
-                parent[index] = BoxedPipe(file.clone()).fileno()?;
-            }
-        }
         let [stdin, stdout, stderr] = child;
-        let [write, read, err] = parent.map(|fd| Int::from(i64::from(fd)));
+        let [write, read, err] = handles.parent_fds.map(|fd| Int::from(i64::from(fd)));
         let fds = [stdin, write, read, stdout, err, stderr];
         let pipes = handles.pipes.clone();
         let launch = Some(BoxedLaunch {
@@ -182,6 +176,7 @@ impl BoxedPopen {
         umask: i32,
         keep: Vec<RawFd>,
         extra_groups: Option<Vec<libc::gid_t>>,
+        preexec: Option<&mut dyn PreExec>,
     ) -> std::result::Result<Self, BoxedLaunchError> {
         let mut words = Words::new(8);
         words
@@ -224,6 +219,7 @@ impl BoxedPopen {
         }
         let mut site = None;
         let mut extras = LaunchExtras {
+            preexec,
             prepared: Some(handles),
             failure_site: Some(&mut site),
             direct,

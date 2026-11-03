@@ -1,8 +1,8 @@
 //! Sealed synchronous Unix processes with inherited, redirected, or captured streams.
 //!
-//! Native launch data owns its bytes before fork. The child performs only
-//! async-signal-safe descriptor, signal, and exec operations; language owners
-//! remain in the parent. All requested pipes are drained before decoding or check.
+//! Native launch data owns its bytes before fork. The ordinary launch uses only
+//! async-signal-safe operations in the child. Boxed preexec callbacks require a
+//! separate fork with the interpreter's single-threaded witness.
 
 use crate::StrOwner;
 use std::ffi::{CStr, CString, OsStr};
@@ -31,9 +31,10 @@ mod launch_error;
 mod pass_fds;
 mod pipe_size;
 mod popen;
+mod preexec;
 mod shell_output;
 pub(super) use asynchronous::AsyncProcess;
-pub(crate) use popen::{BoxedPipe, BoxedPopen, BoxedPreparation};
+pub(crate) use popen::{BoxedPipe, BoxedPopen, BoxedPreparation, PreExec};
 pub(super) use popen::{Popen, retain_live_owner};
 
 #[cfg(target_os = "linux")]
@@ -623,17 +624,14 @@ impl Launch {
         })
     }
 
-    /// Performs CPython's direct exec search, never libc execvp's shell fallback.
-    /// Returning an error lets Command report errno through its private pipe.
+    /// Apply the pre-exec child settings before invoking any language callback.
     ///
     /// # Safety
-    /// Call only from Command::pre_exec after stdio and cwd setup. Every referenced
-    /// buffer was allocated in the parent; only async-signal-safe libc operations
-    /// and allocation-free OS-error construction are allowed until exec or _exit.
-    unsafe fn exec_child(
-        &mut self,
-        close_fds: bool,
+    /// Call only in the child after fork. The parent owns the validated input
+    /// buffers, and this code must stay async-signal-safe for the Command path.
+    unsafe fn configure_child(
         attributes: &ChildAttributes,
+        restore_signals: bool,
         inherited_pipe: Option<&libc::sigaction>,
     ) -> io::Result<()> {
         if let Some(mask) = attributes.mask {
@@ -647,7 +645,7 @@ impl Launch {
             if unsafe { libc::sigaction(libc::SIGPIPE, action, std::ptr::null_mut()) } < 0 {
                 return Err(io::Error::last_os_error());
             }
-        } else {
+        } else if restore_signals {
             for signal in [libc::SIGPIPE, libc::SIGXFSZ] {
                 // SAFETY: signal is async-signal-safe and both constants are valid.
                 if unsafe { libc::signal(signal, libc::SIG_DFL) } == libc::SIG_ERR {
@@ -678,6 +676,24 @@ impl Launch {
                 return Err(io::Error::last_os_error());
             }
         }
+        Ok(())
+    }
+
+    /// Performs CPython's direct exec search, never libc execvp's shell fallback.
+    /// Returning an error lets Command report errno through its private pipe.
+    ///
+    /// # Safety
+    /// Call only from Command::pre_exec after stdio and cwd setup. Every referenced
+    /// buffer was allocated in the parent; only async-signal-safe libc operations
+    /// and allocation-free OS-error construction are allowed until exec or _exit.
+    unsafe fn exec_child(
+        &mut self,
+        close_fds: bool,
+        attributes: &ChildAttributes,
+        inherited_pipe: Option<&libc::sigaction>,
+    ) -> io::Result<()> {
+        // SAFETY: the caller runs this routine only in Command's pre_exec child.
+        unsafe { Self::configure_child(attributes, inherited_pipe.is_none(), inherited_pipe)? };
         if close_fds {
             // SAFETY: the forked child owns its descriptor table.
             unsafe { self.descriptors.apply()? };
@@ -685,6 +701,14 @@ impl Launch {
         // A false-valued pass_fds iterable on the fork path can still yield descriptors.
         // SAFETY: this runs only after fork. No allocator or callback is used.
         unsafe { pass_fds::inherit(&attributes.keep)? };
+        // SAFETY: all child settings have been applied.
+        Err(unsafe { self.exec_image() })
+    }
+
+    /// # Safety
+    /// The caller is in the child after stdio, attributes and descriptor setup.
+    /// Only exec and allocation-free error reporting may follow.
+    unsafe fn exec_image(&mut self) -> io::Error {
         let mut saved_error = None;
         let mut last_error = libc::ENOENT;
         let mut attempt = |executable| {
@@ -717,10 +741,10 @@ impl Launch {
         } else {
             attempt(program.as_ptr());
         }
-        Err(launch_error::child_errno(
+        launch_error::child_errno(
             launch_error::Site::Executable,
             saved_error.unwrap_or(last_error),
-        ))
+        )
     }
 
     fn spawn(self, cwd: Option<&CString>, streams: u32) -> io::Result<Child> {

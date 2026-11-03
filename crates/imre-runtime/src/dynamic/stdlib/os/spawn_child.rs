@@ -1,11 +1,12 @@
 //! Private child continuation for spawn when exec may run Python callbacks.
 
-use super::{Context, Error, Result};
+use super::Context;
+use crate::objects::exceptions::{Error, Kind, Result};
 use std::{io, mem::MaybeUninit, ptr};
 
 fn unsupported() -> Error {
     Error::new(
-        "NotImplementedError",
+        Kind::NotImplementedError,
         "spawn with child-side Python requires a provably single-threaded glibc process",
     )
 }
@@ -28,7 +29,9 @@ pub(super) fn glibc_proves_single_threaded() -> bool {
 /// __libc_single_threaded as proof that no other thread shares the process
 /// image. A zero marker, including after a joined worker, supplies no proof.
 /// Raw clone users bypassing the libc threading contract are unsupported.
-pub(super) fn fork_for_child_callbacks(ctx: &mut Context) -> Result<libc::pid_t> {
+pub(in crate::dynamic::stdlib) fn fork_for_child_callbacks(
+    ctx: &mut Context,
+) -> Result<libc::pid_t> {
     if ctx.threads.private_context
         || !crate::signals::is_main()
         || crate::objects::locks::native_thread_id() != u64::from(std::process::id())
@@ -44,7 +47,7 @@ pub(super) fn fork_for_child_callbacks(ctx: &mut Context) -> Result<libc::pid_t>
         libc::pthread_sigmask(libc::SIG_SETMASK, all.as_ptr(), previous.as_mut_ptr())
     };
     if blocked != 0 {
-        return Err(super::super::os_error(io::Error::from_raw_os_error(
+        return Err(crate::objects::errno_error(io::Error::from_raw_os_error(
             blocked,
         )));
     }
@@ -56,7 +59,7 @@ pub(super) fn fork_for_child_callbacks(ctx: &mut Context) -> Result<libc::pid_t>
             Err(unsupported())
         } else {
             match libc::fork() {
-                -1 => Err(super::super::os_error(io::Error::last_os_error())),
+                -1 => Err(crate::objects::errno_error(io::Error::last_os_error())),
                 0 => {
                     crate::signals::clear_pending_after_fork();
                     Ok(0)

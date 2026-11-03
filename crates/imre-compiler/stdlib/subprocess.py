@@ -213,7 +213,7 @@ class Popen:
     _handle = None
 
     def __init__(self, args, bufsize=-1, executable=None, stdin=None, stdout=None,
-                 stderr=None, *, close_fds=True, shell=False, cwd=None, env=None, restore_signals=True, pass_fds=(),
+                 stderr=None, preexec_fn=None, *, close_fds=True, shell=False, cwd=None, env=None, restore_signals=True, pass_fds=(),
                  universal_newlines=None, encoding=None, errors=None, text=None, start_new_session=False,
                  umask=-1, pipesize=-1, process_group=None, startupinfo=None, creationflags=0, extra_groups=None):
         if bufsize is None:
@@ -273,7 +273,7 @@ class Popen:
                     self.stderr = io.TextIOWrapper(self.stderr, encoding=self.encoding, errors=errors)
             self._stdin_ref = None if self.stdin is None else _ref(self.stdin)
             self._replacement_output = None
-            self._execute_child(args, executable, None, close_fds, pass_fds, cwd, env,
+            self._execute_child(args, executable, preexec_fn, close_fds, pass_fds, cwd, env,
                                 startupinfo, creationflags, shell, *fds, restore_signals,
                                 None, gids, None, umask, start_new_session,
                                 -1 if process_group is None else process_group)
@@ -295,10 +295,10 @@ class Popen:
                        start_new_session, process_group):
         if (p2cread, p2cwrite, c2pread, c2pwrite, errread, errwrite) != self._pipe_fds:
             raise NotImplementedError("replacing prepared subprocess descriptors is unsupported")
-        if preexec_fn is not None or gid is not None or uid is not None:
+        if gid is not None or uid is not None:
             raise NotImplementedError("unsupported subprocess child settings")
         self._handle = _process.launch(self._prepared, args, executable, close_fds, restore_signals,
-                                       cwd, env, shell, start_new_session, process_group, umask, pass_fds, gids)
+                                       cwd, env, shell, start_new_session, process_group, umask, pass_fds, gids, preexec_fn)
 
     def __repr__(self):
         result = f"<{self.__class__.__name__}: returncode: {self.returncode} args: {self.args!r}>"

@@ -20,15 +20,15 @@ enum LaunchApi {
     Run { discarded: bool },
 }
 
-/// Platform options and supplementary groups need boxed argument handling. Forwarded
-/// mappings can supply these options; closed keyword displays have already been expanded.
+/// A child callback or platform-specific setting needs the boxed Popen constructor.
 pub(super) fn boxed_launch_keywords(call: &ast::ExprCall) -> bool {
-    call.arguments.keywords.iter().any(|kw| {
-        matches!(
-            kw.arg.as_deref(),
-            None | Some("startupinfo" | "creationflags" | "extra_groups")
-        )
-    })
+    call.arguments.args.len() >= 7
+        || call.arguments.keywords.iter().any(|kw| {
+            matches!(
+                kw.arg.as_deref(),
+                None | Some("preexec_fn" | "startupinfo" | "creationflags" | "extra_groups")
+            )
+        })
 }
 
 fn integer_deadline(value: &ast::Expr) -> bool {
