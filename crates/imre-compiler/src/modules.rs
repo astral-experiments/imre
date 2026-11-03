@@ -328,7 +328,9 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
                 "\n",
                 include_str!("../stdlib/contextlib_contextmanager.py"),
                 "\n",
-                include_str!("../stdlib/contextlib_suppress.py")
+                include_str!("../stdlib/contextlib_suppress.py"),
+                "\n",
+                include_str!("../stdlib/contextlib_exports.py")
             ),
         )),
         "_imre_socketserver_poll" => Some((
@@ -1731,6 +1733,7 @@ impl IntrinsicModule {
             (Self::Inspect, "iscoroutinefunction") => Intrinsic::InspectCoroutine { mark: false },
             (Self::Inspect, "markcoroutinefunction") => Intrinsic::InspectCoroutine { mark: true },
             (Self::Inspect, "_sentinel") => Intrinsic::InspectSentinel,
+            (Self::Contextlib, "__all__") => Intrinsic::ObjectRuntimeExport("contextlib.__all__"),
             (Self::Contextlib, "contextmanager") => Intrinsic::ContextManager,
             (Self::Contextlib, "asynccontextmanager") => {
                 Intrinsic::ObjectRuntimeExport("contextlib.asynccontextmanager")
