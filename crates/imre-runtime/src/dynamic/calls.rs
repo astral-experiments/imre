@@ -5127,6 +5127,17 @@ impl Context {
         }
     }
 
+    /// A native class can publish ordinary Python instance storage in its own namespace.
+    pub(super) fn native_owns_layout_descriptor(&self, class: Id, name: &str) -> bool {
+        self.native_type_dicts
+            .get(&class)
+            .and_then(|&dict| self.dict_named_item(dict, name))
+            .is_some_and(|member| {
+                matches!(self.heap.get(member),
+                Value::LayoutDescriptor(owner, field) if *owner == class && *field == name)
+            })
+    }
+
     pub(super) fn class_instances_have_dict(&self, class: Id) -> bool {
         self.instance_layout(class, "").dictionary
     }
@@ -5139,16 +5150,19 @@ impl Context {
     /// Whether instances have a dictionary and whether this particular name addresses a slot.
     fn instance_layout(&self, class: Id, name: &str) -> InstanceLayout {
         let mut layout = InstanceLayout::default();
-        let Value::Class { ancestors, .. } = self.heap.get(class) else {
-            return layout;
+        let ancestors = match self.heap.get(class) {
+            Value::Class { ancestors, .. } => ancestors.as_slice(),
+            _ => &[],
         };
         let mut shadowed = false;
-        for &base in std::iter::once(&class).chain(ancestors) {
-            let base = self.heap.get(base);
+        for &owner_id in std::iter::once(&class).chain(ancestors) {
+            let base = self.heap.get(owner_id);
             let Value::Class {
                 scope, name: owner, ..
             } = base
             else {
+                layout.dictionary =
+                    layout.dictionary || self.native_owns_layout_descriptor(owner_id, "__dict__");
                 continue;
             };
             // In-memory I/O pickle state distinguishes a missing dictionary from an emptied one.
@@ -5364,7 +5378,14 @@ impl Context {
         self.bind(scope, "__dict__", descriptor);
     }
 
-    fn dictionary_receiver_class(&mut self, owner: Id, receiver: Id) -> Result<Id> {
+    fn layout_owner_name(&self, owner: Id) -> &str {
+        match self.heap.get(owner) {
+            Value::Native(_) => self.class_qualname(owner),
+            _ => self.class_name(owner),
+        }
+    }
+
+    fn layout_receiver_class(&mut self, owner: Id, field: &str, receiver: Id) -> Result<Id> {
         let class = self.exact_type(receiver)?;
         if self.direct_subclass(class, owner) {
             return Ok(class);
@@ -5372,8 +5393,8 @@ impl Context {
         Err(Error::new(
             "TypeError",
             format!(
-                "descriptor '__dict__' for '{}' objects doesn't apply to a '{}' object",
-                self.class_name(owner),
+                "descriptor '{field}' for '{}' objects doesn't apply to a '{}' object",
+                self.layout_owner_name(owner),
                 self.type_name(receiver)
             ),
         ))
@@ -5397,9 +5418,17 @@ impl Context {
     ) -> Result<Id> {
         match name {
             "__class__" => self.exact_type(receiver),
-            "__weakref__" => self.weakref_list(owner, receiver),
+            "__weakref__" => {
+                self.layout_receiver_class(owner, name, receiver)?;
+                Ok(self
+                    .heap
+                    .weak_references(receiver)
+                    .first()
+                    .copied()
+                    .unwrap_or(NONE))
+            }
             "__dict__" => {
-                let class = self.dictionary_receiver_class(owner, receiver)?;
+                let class = self.layout_receiver_class(owner, name, receiver)?;
                 if let Some((get, _)) = self.native_dictionary_getset(class) {
                     return self.call(get, vec![receiver], Vec::new());
                 }
@@ -5424,7 +5453,7 @@ impl Context {
     ) -> Result<()> {
         match name {
             "__dict__" => {
-                let class = self.dictionary_receiver_class(owner, receiver)?;
+                let class = self.layout_receiver_class(owner, name, receiver)?;
                 if let Some((_, set)) = self.native_dictionary_getset(class) {
                     let set =
                         set.ok_or_else(|| Error::new("AttributeError", "readonly attribute"))?;
@@ -5471,8 +5500,14 @@ impl Context {
                 Ok(())
             }
             "__weakref__" => {
-                self.weakref_list(owner, receiver)?;
-                Err(self.readonly_weakref(owner))
+                self.layout_receiver_class(owner, name, receiver)?;
+                Err(Error::new(
+                    "AttributeError",
+                    format!(
+                        "attribute '__weakref__' of '{}' objects is not writable",
+                        self.layout_owner_name(owner)
+                    ),
+                ))
             }
             "__class__" => self.assign_instance_class(receiver, value),
             _ => unreachable!(),
