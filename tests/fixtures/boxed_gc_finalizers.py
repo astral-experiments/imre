@@ -147,7 +147,23 @@ def check_replacement_line():
     assert observed == [("release", line) for line in expected], observed
 
 
+def check_stream_layers():
+    stream = Owner()
+    stream._buffer = Owner()
+    stream._buffer._raw = Owner()
+    assert events == []
+    del stream._buffer.__dict__["_raw"]
+    assert events == ["finalize"]
+    del stream._buffer
+    assert events == ["finalize"] * 2
+    del stream
+    assert events == ["finalize"] * 3
+    saved.clear()
+    events.clear()
+
+
 def current():
+    check_stream_layers()
     check_replacement_line()
     check_unraisable()
     # Keep another pending finalizer reachable while cyclic and acyclic owners die.
