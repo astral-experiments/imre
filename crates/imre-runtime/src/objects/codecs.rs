@@ -691,6 +691,22 @@ impl Codec {
         }
     }
 
+    /// Text substituted for one unencodable Python code point by a built-in error handler.
+    pub(crate) fn error_replacement(name: &str, code: u32) -> Str {
+        match name {
+            "replace" => Str::const_new("?"),
+            "backslashreplace" => escaped(code),
+            "xmlcharrefreplace" => compact_str::format_compact!("&#{code};"),
+            "namereplace" => char::from_u32(code)
+                .and_then(unicode_names2::name)
+                .map_or_else(
+                    || escaped(code),
+                    |name| compact_str::format_compact!("\\N{{{name}}}"),
+                ),
+            _ => unreachable!("text replacement policy"),
+        }
+    }
+
     pub(crate) fn encoding_error_reason(self) -> (&'static str, &'static str) {
         match self {
             Self::Ascii => ("ascii", "ordinal not in range(128)"),
@@ -732,13 +748,9 @@ impl Codec {
             }
             let replacement = match errors.unwrap_or("strict") {
                 "ignore" => continue,
-                "replace" => Str::const_new("?"),
-                "backslashreplace" => escaped(ch),
-                "xmlcharrefreplace" => compact_str::format_compact!("&#{};", u32::from(ch)),
-                "namereplace" => unicode_names2::name(ch).map_or_else(
-                    || escaped(ch),
-                    |name| compact_str::format_compact!("\\N{{{name}}}"),
-                ),
+                name @ ("replace" | "backslashreplace" | "xmlcharrefreplace" | "namereplace") => {
+                    Self::error_replacement(name, u32::from(ch))
+                }
                 "strict" | "surrogatepass" | "surrogateescape" => {
                     let mut end = start;
                     if !matches!(self, Self::ShiftJis) {
@@ -789,7 +801,7 @@ fn encoding_error(
     ch: char,
 ) -> Error {
     let at = if start == end {
-        format!("character '{}' in position {start}", escaped(ch))
+        format!("character '{}' in position {start}", escaped(u32::from(ch)))
     } else {
         format!("characters in position {start}-{end}")
     };
@@ -827,8 +839,7 @@ pub(super) fn normalize_newlines(bytes: &mut Vec<u8>) {
     bytes.truncate(written);
 }
 
-fn escaped(ch: char) -> Str {
-    let code = u32::from(ch);
+fn escaped(code: u32) -> Str {
     match code {
         0..=255 => compact_str::format_compact!("\\x{code:02x}"),
         256..=65535 => compact_str::format_compact!("\\u{code:04x}"),

@@ -74,6 +74,17 @@ def check_shift_jis():
     assert len(errors) == 2
     assert all(error.object is source and (error.start, error.end) == (1, 2) for error in errors)
 
+    def second_handler(error):
+        codecs.register_error("test.sjis_switch", codecs.replace_errors)
+        return b"B", error.end
+
+    def switch_handler(error):
+        codecs.register_error("test.sjis_switch", second_handler)
+        return b"A", error.end
+
+    codecs.register_error("test.sjis_switch", switch_handler)
+    assert "☃😀☃".encode("shift_jis", "test.sjis_switch") == b"AB?"
+
 
 def check_raw_unicode_escape():
     source = "\0\n\\u1234\x1aÿĀ€\ud800\udfff😀"

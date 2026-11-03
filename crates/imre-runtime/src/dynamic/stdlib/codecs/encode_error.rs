@@ -2,6 +2,8 @@
 use super::{Codec, Context, Error, Id, NONE, Result, Value, handler_builtin, type_error};
 use crate::dynamic::value::DecodeState;
 
+mod multibyte;
+
 pub(super) enum Handler {
     Builtin(&'static str),
     Python(Id),
@@ -70,7 +72,7 @@ pub(super) fn encode(
     input: Id,
     codec: Codec,
     callback: Id,
-    escape_prefix: bool,
+    name: &str,
 ) -> Result<Vec<u8>> {
     let source = ctx.string_codepoints(input)?.into_owned();
     let mut output = Vec::new();
@@ -84,9 +86,10 @@ pub(super) fn encode(
     };
     let mark = ctx.heap.temporary_mark();
     ctx.heap.reserve_temporaries(3)?;
-    ctx.heap.keep(callback);
-    // A Python return and each allocated error detail are rooted in the native caller.
-    // Keep only the callback and its reusable exception between iterations.
+    if !matches!(codec, Codec::ShiftJis) {
+        ctx.heap.keep(callback);
+    }
+    // Multibyte encoders retain only the reusable exception between errors.
     let iteration_mark = ctx.heap.temporary_mark();
     let mut exception = None;
     let result = (|| {
@@ -103,7 +106,7 @@ pub(super) fn encode(
             {
                 end += 1;
             }
-            if escape_prefix && !matches!(codec, Codec::CodePage(_) | Codec::ShiftJis) {
+            if name == "surrogateescape" && !matches!(codec, Codec::CodePage(_) | Codec::ShiftJis) {
                 while pos < end && (0xdc80..=0xdcff).contains(&source[pos]) {
                     append(&mut output, &[source[pos] as u8])?;
                     pos += 1;
@@ -140,7 +143,24 @@ pub(super) fn encode(
                 exception = Some(exc);
                 exc
             };
-            let response = ctx.call(callback, vec![exc], Vec::new())?;
+            let response = if matches!(codec, Codec::ShiftJis) {
+                // Multibyte codecs look up the name separately for each error.
+                match registered(ctx, codec, name) {
+                    Some(Handler::Builtin(policy)) => {
+                        multibyte::replacement(ctx, policy, exc, input, &source, pos, end)?
+                    }
+                    Some(Handler::Python(current)) => {
+                        let call_mark = ctx.heap.temporary_mark();
+                        ctx.heap.keep(current);
+                        let response = ctx.call(current, vec![exc], Vec::new())?;
+                        ctx.heap.release_temporaries_since(call_mark);
+                        response
+                    }
+                    None => return Err(crate::objects::unknown_handler(name).into()),
+                }
+            } else {
+                ctx.call(callback, vec![exc], Vec::new())?
+            };
             ctx.heap.keep(response);
             let invalid =
                 || type_error("encoding error handler must return (str/bytes, int) tuple");
