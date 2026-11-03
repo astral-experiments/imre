@@ -3975,7 +3975,10 @@ impl Context {
                 return Ok(self.builtin_hierarchy_tuple(obj, name));
             }
             Value::Native(ref builtin)
-                if name == "__name__" && self.builtins.get(builtin) == Some(&obj) =>
+                if (name == "__name__"
+                    || (name == "__qualname__"
+                        && typing::ParameterClass::lookup(builtin).is_some()))
+                    && self.builtins.get(builtin) == Some(&obj) =>
             {
                 return Ok(self.text(builtin.rsplit('.').next().unwrap_or(builtin).to_owned()));
             }

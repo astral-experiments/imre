@@ -119,6 +119,12 @@ def check_paramspec_markers(protocol):
             restored = loads(dumps(marker, protocol))
             assert type(restored) is cls and restored.__origin__ is Params
             assert restored == marker and restored != wrong_kind and restored != cls(other)
+            try:
+                dumps(cls(other), protocol)
+            except pickle.PicklingError:
+                pass
+            else:
+                raise AssertionError("pickled an unbound ParamSpec origin")
 
 
 def check_method_descriptors():

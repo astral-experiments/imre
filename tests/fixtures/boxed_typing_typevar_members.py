@@ -93,11 +93,12 @@ def current():
     from typing import NoDefault, ParamSpec, ParamSpecArgs, ParamSpecKwargs, TypeVarTuple
 
     P = ParamSpec("P")
-    parameters = (P, P.args, P.kwargs, TypeVarTuple("Ts"))
+    parameters = (variable, P, P.args, P.kwargs, TypeVarTuple("Ts"))
     for parameter in parameters:
         cls = type(parameter)
         members = vars(cls)
         assert type(members) is MappingProxyType
+        assert cls.__qualname__ == cls.__name__ and "__qualname__" not in members
         assert members["__doc__"] == cls.__doc__ and cls.__doc__
         assert members["__module__"] == cls.__module__ == "typing"
     for cls, marker in ((ParamSpecArgs, P.args), (ParamSpecKwargs, P.kwargs)):
