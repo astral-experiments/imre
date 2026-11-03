@@ -5616,6 +5616,9 @@ impl<'a> Checker<'a> {
             Some(Binding::Intrinsic(Intrinsic::BadGzipFile)) => Some(28),
             Some(Binding::Intrinsic(Intrinsic::BadZipFile)) => Some(36),
             Some(Binding::Intrinsic(Intrinsic::CsvError)) => Some(67),
+            Some(Binding::Intrinsic(Intrinsic::ScopedObjectExport(
+                "socket.timeout" | "_socket.timeout",
+            ))) => exception_kind("TimeoutError"),
             Some(Binding::Intrinsic(Intrinsic::GaiError)) => Some(68),
             Some(Binding::Intrinsic(Intrinsic::HError)) => Some(72),
             Some(Binding::Intrinsic(Intrinsic::BinasciiError)) => Some(69),
@@ -6550,6 +6553,9 @@ impl<'a> Checker<'a> {
                 }
                 Intrinsic::ScopedObjectExport(name) => {
                     return Err(self.scoped_builtin_error(name, expression));
+                }
+                Intrinsic::Fd(ir::FdOperation::TcGetPgrp) => {
+                    return Err(self.object_runtime_export("posix.tcgetpgrp", expression));
                 }
                 Intrinsic::ObjectRuntimeExport(name) => {
                     return Err(self.object_runtime_export(name, expression));
@@ -9082,6 +9088,7 @@ impl<'a> Checker<'a> {
         }
         match self.resolve(&call.func) {
             Some(Binding::Intrinsic(Intrinsic::Partial)) => return self.partial(call),
+            Some(Binding::Intrinsic(Intrinsic::LoggingShutdown)) => return self.logging_shutdown(call),
             Some(Binding::Intrinsic(Intrinsic::FileConfig)) if calls::has_unpacking(call) => {
                 return self.logging_file_config(call);
             }
@@ -9094,6 +9101,7 @@ impl<'a> Checker<'a> {
                 }
                 Some(Binding::Intrinsic(Intrinsic::Fd(
                     op @ (ir::FdOperation::Pipe2
+                    | ir::FdOperation::TcGetPgrp
                     | ir::FdOperation::Read
                     | ir::FdOperation::Write
                     | ir::FdOperation::CopyFileRange),
@@ -9588,6 +9596,7 @@ impl<'a> Checker<'a> {
             Some(Binding::Intrinsic(
                 op @ (Intrinsic::HandlerRename
                 | Intrinsic::HandlerLookup
+                | Intrinsic::HandlerNames
                 | Intrinsic::FileEncodingUsesUtf8
                 | Intrinsic::HandlerFallback
                 | Intrinsic::PrintActiveException),

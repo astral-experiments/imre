@@ -51,6 +51,7 @@ def check_generations():
     class Resurrect:
         def __del__(self):
             events.append("finalize")
+            self.child = None
             saved.append(self)
 
     def on_weak(w):
@@ -61,11 +62,18 @@ def check_generations():
         new_refs.append(ref(fresh))
         assert gc.collect(1) == 0
 
+    older = Node()
+    released = []
+    old_ref = ref(older, lambda w: released.append(w() is None))
+    gc.collect(2)
     node = Resurrect()
     node.link = node
+    node.child = Node()
+    node.child.older = older
     witness = ref(node, on_weak)
-    del node
-    assert gc.collect(0) == 0
+    del node, older
+    # Observe the older target before the next statement's prompt sweep.
+    assert (gc.collect(0), old_ref() is None, released.copy()) == (0, True, [True])
     assert witness() is None and events[-2:] == ["weak", "finalize"]
     again = ref(saved[0])
     saved.clear()

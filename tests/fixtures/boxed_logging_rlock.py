@@ -36,5 +36,24 @@ def current():
         start_new_thread(acquire_on_worker, (handler.lock, handler.lock, started, finished))
         assert started.acquire(timeout=5) and handler.lock._is_owned()
     assert finished.acquire(timeout=5) and not handler.lock.locked()
+
+    lock = handler.lock
+
+    class ReplacingLock:
+        def __init__(self, truth):
+            self.truth = truth
+
+        def __bool__(self):
+            handler.lock = lock
+            return self.truth
+
+    for truth in (False, True):
+        handler.lock = ReplacingLock(truth)
+        handler.acquire()
+        assert lock._is_owned() is truth
+        handler.lock = ReplacingLock(truth)
+        handler.release()
+        assert not lock._is_owned()
+
     handler.close()
     assert logging.getHandlerByName("locked-handler") is None

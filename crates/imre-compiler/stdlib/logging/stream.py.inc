@@ -2,16 +2,6 @@
     def createLock(self) -> None:
         self.lock = _Lock()
 
-    def acquire(self) -> None:
-        lock = self.lock
-        if lock is not None:
-            lock.acquire()
-
-    def release(self) -> None:
-        lock = self.lock
-        if lock is not None:
-            lock.release()
-
     def _at_fork_reinit(self) -> None:
         lock = self.lock
         if lock is None:
@@ -96,8 +86,8 @@ class StreamHandler(Handler):
     def setStream(self, stream: _TextOutput | None) -> _TextOutput | None:
         if stream is self.stream:
             return None
+        old = self.stream
         with self.lock:
             self.flush()
-            old = self.stream
             self.stream = stream
         return old

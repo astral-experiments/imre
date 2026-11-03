@@ -15,7 +15,24 @@ def constant_factory():
     return constant
 
 
+def keep_function(_):
+    return lambda func: func
+
+
+def decorated_factory(value):
+    @keep_function(captured := value)
+    def read():
+        return str(captured)
+
+    return read
+
+
 def current():
+    decorated = decorated_factory(7)
+    assert decorated.__code__.co_freevars == ("captured",)
+    assert decorated.__closure__[0].cell_contents == 7
+    assert decorated() == "7"
+
     name = "enclosing"
 
     class Owner:

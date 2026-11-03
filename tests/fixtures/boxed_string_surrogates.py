@@ -63,6 +63,15 @@ def current():
     assert (low * 5).rsplit(low * 2, 1) == [low * 3, ""]
     assert (high + "\x1c" + low).split(None, 1) == [high, low]
     assert str.split(Text(path), low) == ["dir/", ""]
+    for ending in ("\n", "\r", "\r\n", "\v", "\f", "\x1c", "\x1d", "\x1e", "\x85", "\u2028", "\u2029"):
+        lines = Text(low + ending + ending + high + ending)
+        assert str.splitlines(lines) == [low, "", high]
+        assert lines.splitlines(keepends=True) == [low + ending, ending, high + ending]
+    assert (low + "\r\r\n" + high).splitlines(True) == [low + "\r", "\r\n", high]
+    assert path.splitlines()[0] is path
+    for whole in (path, path + "\r\n", "a scalar line", "a scalar line\r\n"):
+        assert whole.splitlines(keepends=True)[0] is whole
+        assert type(Text(whole).splitlines(keepends=True)[0]) is str
     field = Text("field" + low)
     assert field.split("/")[0] is not field.split("/")[0]
     assert field.rsplit("separator longer than field")[0] is field

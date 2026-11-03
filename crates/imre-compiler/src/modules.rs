@@ -679,11 +679,13 @@ pub(crate) enum Intrinsic {
     GetLogger,
     GetLevelName,
     LoggingDisable,
+    LoggingShutdown,
     AddLevelName,
     LevelNamesMapping,
     HandlerRename,
     HandlerLock,
     HandlerLookup,
+    HandlerNames,
     FileEncodingUsesUtf8,
     PrintActiveException,
     TracebackPrintExc,
@@ -1323,7 +1325,9 @@ impl IntrinsicModule {
             (Self::Gc, "collect") => Intrinsic::ObjectRuntimeExport("gc.collect"),
             (Self::Gc, "disable") => Intrinsic::ObjectRuntimeExport("gc.disable"),
             (Self::Gc, "enable") => Intrinsic::ObjectRuntimeExport("gc.enable"),
+            (Self::Gc, "get_threshold") => Intrinsic::ObjectRuntimeExport("gc.get_threshold"),
             (Self::Gc, "isenabled") => Intrinsic::ObjectRuntimeExport("gc.isenabled"),
+            (Self::Gc, "set_threshold") => Intrinsic::ObjectRuntimeExport("gc.set_threshold"),
             (Self::Marshal, "loads") => Intrinsic::ObjectRuntimeExport("marshal.loads"),
             (Self::Codecs, "utf_16_ex_decode") => {
                 Intrinsic::ObjectRuntimeExport("codecs.utf_16_ex_decode")
@@ -1665,6 +1669,7 @@ impl IntrinsicModule {
             (Self::Logging, "makeLogRecord") => Intrinsic::MakeLogRecord,
             (Self::Logging, "getLogger") => Intrinsic::GetLogger,
             (Self::Logging, "disable") => Intrinsic::LoggingDisable,
+            (Self::Logging, "shutdown") => Intrinsic::LoggingShutdown,
             (Self::Logging, "getLevelName") => Intrinsic::GetLevelName,
             (Self::Logging, "addLevelName") => Intrinsic::AddLevelName,
             (Self::Logging, "getLevelNamesMapping") => Intrinsic::LevelNamesMapping,
@@ -1732,6 +1737,12 @@ impl IntrinsicModule {
             (Self::Inspect, "markcoroutinefunction") => Intrinsic::InspectCoroutine { mark: true },
             (Self::Inspect, "_sentinel") => Intrinsic::InspectSentinel,
             (Self::Contextlib, "contextmanager") => Intrinsic::ContextManager,
+            (Self::Contextlib, "asynccontextmanager") => {
+                Intrinsic::ObjectRuntimeExport("contextlib.asynccontextmanager")
+            }
+            (Self::Contextlib, "AsyncContextDecorator") => {
+                Intrinsic::ObjectRuntimeExport("contextlib.AsyncContextDecorator")
+            }
             (Self::Contextlib, "ContextDecorator") => {
                 Intrinsic::ObjectRuntimeExport("contextlib.ContextDecorator")
             }
@@ -1782,6 +1793,9 @@ impl IntrinsicModule {
                 Intrinsic::ObjectRuntimeExport("warnings.warn_explicit")
             }
             (Self::Warnings, "deprecated") => Intrinsic::ObjectRuntimeExport("warnings.deprecated"),
+            (Self::Warnings, "_get_filters") => {
+                Intrinsic::ObjectRuntimeExport("warnings._get_filters")
+            }
             (Self::Warnings, "simplefilter") => Intrinsic::WarningFilter { simple: true },
             (Self::Warnings, "filterwarnings") => Intrinsic::WarningFilter { simple: false },
             (Self::Warnings, "catch_warnings") => Intrinsic::CatchWarnings,
@@ -2070,6 +2084,9 @@ impl IntrinsicModule {
             }
             (Self::LoggingHandlers, "QueueListener") => {
                 Intrinsic::ScopedObjectExport("logging.handlers.QueueListener")
+            }
+            (Self::LoggingHandlers, "SysLogHandler") => {
+                Intrinsic::ScopedObjectExport("logging.handlers.SysLogHandler")
             }
             (Self::Datetime, "time") => Intrinsic::ClockTime,
             (Self::Datetime, "date") => Intrinsic::Calendar(crate::ir::CalendarType::Date),
@@ -2368,6 +2385,8 @@ impl IntrinsicModule {
             (Self::Codecs, "BOM_UTF32_LE") => Intrinsic::CodecBom(b"\xff\xfe\0\0"),
             (Self::Codecs, "BOM_UTF32_BE") => Intrinsic::CodecBom(b"\0\0\xfe\xff"),
             (Self::Socket | Self::SocketNative, "herror") => Intrinsic::HError,
+            (Self::Socket, "timeout") => Intrinsic::ScopedObjectExport("socket.timeout"),
+            (Self::SocketNative, "timeout") => Intrinsic::ScopedObjectExport("_socket.timeout"),
             (Self::SocketNative, name) => Intrinsic::ObjectRuntimeExport(match name {
                 "gaierror" => "_socket.gaierror",
                 "getnameinfo" => "_socket.getnameinfo",
@@ -5055,6 +5074,7 @@ impl<'a> Loader<'a> {
                             "_rename_handler" => Intrinsic::HandlerRename,
                             "_Lock" => Intrinsic::HandlerLock,
                             "_lookup_handler" => Intrinsic::HandlerLookup,
+                            "_handler_names" => Intrinsic::HandlerNames,
                             "_file_encoding_uses_utf8" => Intrinsic::FileEncodingUsesUtf8,
                             "_print_active_exception" => Intrinsic::PrintActiveException,
                             "_Level" => Intrinsic::HandlerLevelType,
@@ -5279,13 +5299,14 @@ impl<'a> Loader<'a> {
                     | IntrinsicModule::Sha3
                     | IntrinsicModule::Md5
                     | IntrinsicModule::Atexit
-                    | IntrinsicModule::SocketNative
                     | IntrinsicModule::Imp
                     | IntrinsicModule::ImportlibAbc
                     | IntrinsicModule::ImportlibLoaderAbc
                     | IntrinsicModule::ImportlibBootstrapExternal
                     | IntrinsicModule::ImportlibResourcesAbc
-            );
+            ) || module == IntrinsicModule::SocketNative
+                && imports
+                    .is_none_or(|names| names.iter().any(|alias| alias.name.as_str() != "timeout"));
         }
         if module == Some(IntrinsicModule::Dataclasses)
             && imports.is_none_or(|names| {

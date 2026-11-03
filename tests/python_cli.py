@@ -1448,6 +1448,8 @@ def main():
         bytecode.write_bytes(b"")
         compare(bytecode, status=1, stderr=b"EOFError: EOF read where not expected\n")
         if sys.version_info[:2] == (3, 14):
+            compare("-I", "-c", "import warnings; [print(f) for f in warnings._get_filters()]",
+                    native_timeout=600)
             renamed = root / "bad_bytecode"
             renamed.write_bytes(importlib.util.MAGIC_NUMBER[:2] + b"xx")
             compare(renamed, status=1, stderr=b"RuntimeError: Bad magic number in .pyc file\n")
@@ -2534,6 +2536,8 @@ def report(text):
         compare("-IB", pair_fixture, native_args=("run", pair_fixture, "--quiet"))
         writer_fixture = fixtures / "io_buffered_writer_type.py"
         compare("-IB", writer_fixture, native_args=("run", writer_fixture, "--quiet"))
+        syslog = fixtures / "logging_syslog_datagram.py"
+        compare("-IB", syslog, native_args=("run", syslog, "--quiet"), native_timeout=600)
         queue_exports = fixtures / "logging_queue_exports.py"
         compare("-IB", queue_exports, native_args=("run", queue_exports, "--quiet"), native_timeout=600)
         # A from-import elsewhere in the same program would already select the boxed runtime.
@@ -2543,6 +2547,15 @@ def report(text):
             queue_lookup.write_text(f"{statement}\nprint({name}.QueueListener.__name__)\n")
             checked = run(imre, "check", queue_lookup)
             assert checked.returncode == 0, checked.stderr
+        socket_alias = root / "socket_timeout_alias.py"
+        socket_alias.write_text(
+            "from _socket import timeout as low_timeout\nfrom socket import timeout\n"
+            "try:\n    raise low_timeout('expired')\nexcept timeout as exc:\n    print(str(exc))\n"
+        )
+        compare("-IB", socket_alias, native_args=("run", socket_alias, "--quiet"))
+        socket_alias.write_text("from _socket import timeout\nvalue: int = 'wrong'\nprint(value)\n")
+        bad_alias = run(imre, "check", socket_alias)
+        assert bad_alias.returncode != 0 and b"expected int" in bad_alias.stderr, bad_alias.stderr
         io_fixture = fixtures / "boxed_io_indirect_import.py"
         compare("-IB", io_fixture, native_args=("run", io_fixture, "--runtime-imports", "--quiet"))
         for name in ("boxed_prelinked_coroutine.py", "boxed_coroutine_origin.py"):
@@ -2836,6 +2849,7 @@ for name in ("md4", "ripemd160"):
             "boxed_functools_reduce.py",
             "boxed_functools_singledispatch.py",
             "boxed_functools_partialmethod.py",
+            "boxed_asynccontextmanager_protocol.py",
             "boxed_contextmanager.py",
             "boxed_contextlib_aclosing.py",
             "boxed_total_ordering.py",
@@ -3321,6 +3335,8 @@ else:
             plugin.write_bytes((fixtures / "boxed_fcntl.py").read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")
             plugin.write_bytes((fixtures / "boxed_posix_rtld_flags.py").read_bytes())
+            compare("-IB", "-c", imports + "arithmetic.current()")
+            plugin.write_bytes((fixtures / "boxed_posix_confstr.py").read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")
             plugin.write_bytes((fixtures / "boxed_posix_sysconf.py").read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")

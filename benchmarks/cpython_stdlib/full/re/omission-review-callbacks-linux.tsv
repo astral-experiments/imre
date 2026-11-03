@@ -1,0 +1,59 @@
+selection	lane	owner_exit	stdout_line	record	callback	parent_id	occurrence	case_id	detail
+proposed	stock	0	11	EVENT	addSuccess	'test.test_re.DebugTests.test_atomic_group'	1	'test.test_re.DebugTests.test_atomic_group'	''
+proposed	stock	0	14	EVENT	addSuccess	'test.test_re.DebugTests.test_possesive_repeat'	1	'test.test_re.DebugTests.test_possesive_repeat'	''
+proposed	stock	0	17	EVENT	addSuccess	'test.test_re.DebugTests.test_possesive_repeat_one'	1	'test.test_re.DebugTests.test_possesive_repeat_one'	''
+proposed	stock	0	20	EVENT	addSuccess	'test.test_re.ImplementationTest.test_case_helpers'	1	'test.test_re.ImplementationTest.test_case_helpers'	''
+proposed	stock	0	23	EVENT	addSuccess	'test.test_re.ImplementationTest.test_overlap_table'	1	'test.test_re.ImplementationTest.test_overlap_table'	''
+proposed	stock	0	26	EVENT	addSuccess	'test.test_re.ImplementationTest.test_signedness'	1	'test.test_re.ImplementationTest.test_signedness'	''
+proposed	stock	0	29	EVENT	addSuccess	'test.test_re.ImplementationTest.test_sre_template_invalid_group_index'	1	'test.test_re.ImplementationTest.test_sre_template_invalid_group_index'	''
+proposed	O0	1	11	EVENT	addSkip	'test.test_re.DebugTests.test_atomic_group'	1	'test.test_re.DebugTests.test_atomic_group'	'implementation detail specific to cpython'
+proposed	O0	1	14	EVENT	addSkip	'test.test_re.DebugTests.test_possesive_repeat'	1	'test.test_re.DebugTests.test_possesive_repeat'	'implementation detail specific to cpython'
+proposed	O0	1	17	EVENT	addSkip	'test.test_re.DebugTests.test_possesive_repeat_one'	1	'test.test_re.DebugTests.test_possesive_repeat_one'	'implementation detail specific to cpython'
+proposed	O0	1	20	EVENT	addSkip	'test.test_re.ImplementationTest.test_case_helpers'	1	'test.test_re.ImplementationTest.test_case_helpers'	'implementation detail specific to cpython'
+proposed	O0	1	23	EVENT	addError	'test.test_re.ImplementationTest.test_overlap_table'	1	'test.test_re.ImplementationTest.test_overlap_table'	"module 're' has no attribute '_compiler'"
+proposed	O0	1	26	EVENT	addError	'test.test_re.ImplementationTest.test_signedness'	1	'test.test_re.ImplementationTest.test_signedness'	"module 're' has no attribute '_compiler'"
+proposed	O0	1	29	EVENT	addSkip	'test.test_re.ImplementationTest.test_sre_template_invalid_group_index'	1	'test.test_re.ImplementationTest.test_sre_template_invalid_group_index'	'implementation detail specific to cpython'
+proposed	O3	1	11	EVENT	addSkip	'test.test_re.DebugTests.test_atomic_group'	1	'test.test_re.DebugTests.test_atomic_group'	'implementation detail specific to cpython'
+proposed	O3	1	14	EVENT	addSkip	'test.test_re.DebugTests.test_possesive_repeat'	1	'test.test_re.DebugTests.test_possesive_repeat'	'implementation detail specific to cpython'
+proposed	O3	1	17	EVENT	addSkip	'test.test_re.DebugTests.test_possesive_repeat_one'	1	'test.test_re.DebugTests.test_possesive_repeat_one'	'implementation detail specific to cpython'
+proposed	O3	1	20	EVENT	addSkip	'test.test_re.ImplementationTest.test_case_helpers'	1	'test.test_re.ImplementationTest.test_case_helpers'	'implementation detail specific to cpython'
+proposed	O3	1	23	EVENT	addError	'test.test_re.ImplementationTest.test_overlap_table'	1	'test.test_re.ImplementationTest.test_overlap_table'	"module 're' has no attribute '_compiler'"
+proposed	O3	1	26	EVENT	addError	'test.test_re.ImplementationTest.test_signedness'	1	'test.test_re.ImplementationTest.test_signedness'	"module 're' has no attribute '_compiler'"
+proposed	O3	1	29	EVENT	addSkip	'test.test_re.ImplementationTest.test_sre_template_invalid_group_index'	1	'test.test_re.ImplementationTest.test_sre_template_invalid_group_index'	'implementation detail specific to cpython'
+deprecated	stock	0	5	EVENT	addSubTest:success	'test.test_re.ImplementationTest.test_deprecated_modules'	1	"test.test_re.ImplementationTest.test_deprecated_modules (module='sre_compile')"	''
+deprecated	stock	0	6	EVENT	addSubTest:success	'test.test_re.ImplementationTest.test_deprecated_modules'	1	"test.test_re.ImplementationTest.test_deprecated_modules (module='sre_constants')"	''
+deprecated	stock	0	7	EVENT	addSubTest:success	'test.test_re.ImplementationTest.test_deprecated_modules'	1	"test.test_re.ImplementationTest.test_deprecated_modules (module='sre_parse')"	''
+deprecated	stock	0	8	EVENT	addSuccess	'test.test_re.ImplementationTest.test_deprecated_modules'	1	'test.test_re.ImplementationTest.test_deprecated_modules'	''
+deprecated	O0	1	5	EVENT	addSubTest:error	'test.test_re.ImplementationTest.test_deprecated_modules'	1	"test.test_re.ImplementationTest.test_deprecated_modules (module='sre_compile')"	"No module named 'sre_compile'"
+deprecated	O0	1	6	EVENT	addSubTest:error	'test.test_re.ImplementationTest.test_deprecated_modules'	1	"test.test_re.ImplementationTest.test_deprecated_modules (module='sre_constants')"	"No module named 'sre_constants'"
+deprecated	O0	1	7	EVENT	addSubTest:error	'test.test_re.ImplementationTest.test_deprecated_modules'	1	"test.test_re.ImplementationTest.test_deprecated_modules (module='sre_parse')"	"No module named 'sre_parse'"
+deprecated	O3	1	5	EVENT	addSubTest:error	'test.test_re.ImplementationTest.test_deprecated_modules'	1	"test.test_re.ImplementationTest.test_deprecated_modules (module='sre_compile')"	"No module named 'sre_compile'"
+deprecated	O3	1	6	EVENT	addSubTest:error	'test.test_re.ImplementationTest.test_deprecated_modules'	1	"test.test_re.ImplementationTest.test_deprecated_modules (module='sre_constants')"	"No module named 'sre_constants'"
+deprecated	O3	1	7	EVENT	addSubTest:error	'test.test_re.ImplementationTest.test_deprecated_modules'	1	"test.test_re.ImplementationTest.test_deprecated_modules (module='sre_parse')"	"No module named 'sre_parse'"
+counterparts	stock	0	11	EVENT	addSuccess	'test.test_re.ReTests.test_atomic_grouping'	1	'test.test_re.ReTests.test_atomic_grouping'	''
+counterparts	stock	0	14	EVENT	addSuccess	'test.test_re.ReTests.test_fullmatch_possessive_quantifiers'	1	'test.test_re.ReTests.test_fullmatch_possessive_quantifiers'	''
+counterparts	stock	0	17	EVENT	addSuccess	'test.test_re.ReTests.test_findall_possessive_quantifiers'	1	'test.test_re.ReTests.test_findall_possessive_quantifiers'	''
+counterparts	stock	0	20	EVENT	addSuccess	'test.test_re.ReTests.test_ignore_case_set'	1	'test.test_re.ReTests.test_ignore_case_set'	''
+counterparts	stock	0	24	EVENT	addSuccess	'test.test_re.ReTests.test_repeat_minmax'	1	'test.test_re.ReTests.test_repeat_minmax'	''
+counterparts	stock	0	27	EVENT	addSuccess	'test.test_re.ReTests.test_expand'	1	'test.test_re.ReTests.test_expand'	''
+counterparts	stock	0	45	EVENT	addSuccess	'test.test_re.ReTests.test_sub_template_numeric_escape'	1	'test.test_re.ReTests.test_sub_template_numeric_escape'	''
+counterparts	O0	1	11	EVENT	addSuccess	'test.test_re.ReTests.test_atomic_grouping'	1	'test.test_re.ReTests.test_atomic_grouping'	''
+counterparts	O0	1	14	EVENT	addSuccess	'test.test_re.ReTests.test_fullmatch_possessive_quantifiers'	1	'test.test_re.ReTests.test_fullmatch_possessive_quantifiers'	''
+counterparts	O0	1	17	EVENT	addSuccess	'test.test_re.ReTests.test_findall_possessive_quantifiers'	1	'test.test_re.ReTests.test_findall_possessive_quantifiers'	''
+counterparts	O0	1	20	EVENT	addSuccess	'test.test_re.ReTests.test_ignore_case_set'	1	'test.test_re.ReTests.test_ignore_case_set'	''
+counterparts	O0	1	23	EVENT	addSubTest:failure	'test.test_re.ReTests.test_repeat_minmax'	1	"test.test_re.ReTests.test_repeat_minmax (pattern='x{2,1}')"	"'error parsing pattern 0' != 'min repeat greater than max repeat'\n- error parsing pattern 0\n+ min repeat greater than max repeat\n"
+counterparts	O0	1	26	EVENT	addSuccess	'test.test_re.ReTests.test_expand'	1	'test.test_re.ReTests.test_expand'	''
+counterparts	O0	1	44	EVENT	addSuccess	'test.test_re.ReTests.test_sub_template_numeric_escape'	1	'test.test_re.ReTests.test_sub_template_numeric_escape'	''
+counterparts	O3	1	11	EVENT	addSuccess	'test.test_re.ReTests.test_atomic_grouping'	1	'test.test_re.ReTests.test_atomic_grouping'	''
+counterparts	O3	1	14	EVENT	addSuccess	'test.test_re.ReTests.test_fullmatch_possessive_quantifiers'	1	'test.test_re.ReTests.test_fullmatch_possessive_quantifiers'	''
+counterparts	O3	1	17	EVENT	addSuccess	'test.test_re.ReTests.test_findall_possessive_quantifiers'	1	'test.test_re.ReTests.test_findall_possessive_quantifiers'	''
+counterparts	O3	1	20	EVENT	addSuccess	'test.test_re.ReTests.test_ignore_case_set'	1	'test.test_re.ReTests.test_ignore_case_set'	''
+counterparts	O3	1	23	EVENT	addSubTest:failure	'test.test_re.ReTests.test_repeat_minmax'	1	"test.test_re.ReTests.test_repeat_minmax (pattern='x{2,1}')"	"'error parsing pattern 0' != 'min repeat greater than max repeat'\n- error parsing pattern 0\n+ min repeat greater than max repeat\n"
+counterparts	O3	1	26	EVENT	addSuccess	'test.test_re.ReTests.test_expand'	1	'test.test_re.ReTests.test_expand'	''
+counterparts	O3	1	44	EVENT	addSuccess	'test.test_re.ReTests.test_sub_template_numeric_escape'	1	'test.test_re.ReTests.test_sub_template_numeric_escape'	''
+group-limits	stock	0	8	EVENT	addSuccess	'test.test_re.ReTests.test_re_groupref_overflow'	1	'test.test_re.ReTests.test_re_groupref_overflow'	''
+group-limits	stock	0	11	EVENT	addSuccess	'test.test_re.ReTests.test_symbolic_groups'	1	'test.test_re.ReTests.test_symbolic_groups'	''
+group-limits	O0	0	8	EVENT	addSuccess	'test.test_re.ReTests.test_re_groupref_overflow'	1	'test.test_re.ReTests.test_re_groupref_overflow'	''
+group-limits	O0	0	11	EVENT	addSuccess	'test.test_re.ReTests.test_symbolic_groups'	1	'test.test_re.ReTests.test_symbolic_groups'	''
+group-limits	O3	0	8	EVENT	addSuccess	'test.test_re.ReTests.test_re_groupref_overflow'	1	'test.test_re.ReTests.test_re_groupref_overflow'	''
+group-limits	O3	0	11	EVENT	addSuccess	'test.test_re.ReTests.test_symbolic_groups'	1	'test.test_re.ReTests.test_symbolic_groups'	''
