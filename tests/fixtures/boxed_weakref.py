@@ -63,7 +63,26 @@ def proxy_index():
         raise AssertionError("dead proxy supplied an index")
 
 
+def proxy_repr():
+    from gc import collect
+
+    for cls in (Item, CallableItem):
+        owner = cls()
+        handle = proxy(owner)
+        bound_repr = type(handle).__repr__.__get__(handle, type(handle))
+        prefix = f"<weakproxy at {hex(id(handle))}; "
+        live = repr(handle)
+        assert live.startswith(prefix + "to '")
+        assert live.endswith(f"{cls.__name__}' at {hex(id(owner))}>")
+        assert bound_repr() == live
+        assert repr([handle]) == "[" + live + "]"
+        del owner
+        collect()
+        assert repr(handle) == bound_repr() == prefix + "dead>"
+
+
 def current():
+    proxy_repr()
     proxy_length()
     iterate_proxy()
     saved_bound_method()
