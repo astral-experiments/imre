@@ -1820,6 +1820,10 @@ pub(super) fn call(
         return os::descriptor(ctx, op, args, kwargs);
     }
     #[cfg(target_os = "linux")]
+    if matches!(name, "posix.pathconf" | "posix.fpathconf") {
+        return os::sysconf::pathconf(ctx, name, args, kwargs);
+    }
+    #[cfg(target_os = "linux")]
     if name == "posix.sysconf" {
         return os::sysconf::call(ctx, args, kwargs);
     }

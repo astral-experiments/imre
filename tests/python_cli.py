@@ -2915,6 +2915,8 @@ for name in ("md4", "ripemd160"):
             "boxed_os_ftruncate.py",
             "boxed_os_lockf.py",
             "boxed_os_mknod.py",
+            "boxed_os_pathconf.py",
+            "boxed_os_pathconf_aliases.py",
             "boxed_os_pread.py",
             "boxed_os_pwrite.py",
             "boxed_os_readinto.py",
