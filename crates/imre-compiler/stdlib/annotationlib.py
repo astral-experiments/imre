@@ -409,9 +409,12 @@ def _get_dunder_annotations(obj):
     # from __future__ import annotations, where accessing the __annotations__
     # attribute directly might return annotations for the wrong class.
     if isinstance(obj, type):
-        from typing import _get_type_annotations
         try:
-            ann = _get_type_annotations(obj)
+            if type(obj) is type:
+                ann = obj.__annotations__
+            else:
+                from typing import _get_type_annotations
+                ann = _get_type_annotations(obj)
         except AttributeError:
             # For static types, the descriptor raises AttributeError.
             return None

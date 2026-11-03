@@ -1,3 +1,4 @@
+from annotationlib import Format, ForwardRef, get_annotations
 from dataclasses import InitVar, dataclass, field
 from typing import ClassVar
 
@@ -49,6 +50,17 @@ class SelfField:
 
 
 def current():
+    @dataclass
+    class Deferred:
+        value: Later
+        category: ClassVar[Later]
+
+    init = Deferred.__init__
+    assert isinstance(get_annotations(init, format=Format.FORWARDREF)["value"], ForwardRef)
+    assert get_annotations(init, format=Format.STRING) == {"value": "Later", "return": "None"}
+    Later = int
+    assert get_annotations(init) == {"value": int, "return": None}
+
     obj = Target()
     instance = Model(required=obj)
     assert instance.inherited == 1 and instance.flag and instance.seed_value == 4
