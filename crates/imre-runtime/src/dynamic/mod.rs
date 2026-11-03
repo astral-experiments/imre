@@ -2424,7 +2424,7 @@ impl Context {
                 "as_integer_ratio",
                 "__repr__",
             ],
-            "complex" => &["__complex__"],
+            "complex" => complex::METHODS,
             "bytes" => {
                 self.builtin("bytes.fromhex");
                 builtins::BYTES_METHODS

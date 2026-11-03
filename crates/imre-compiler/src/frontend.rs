@@ -6748,6 +6748,9 @@ impl<'a> Checker<'a> {
             ast::Expr::NumberLiteral(value) => match &value.value {
                 ast::Number::Int(value) => (Type::Int, ExprKind::Int(value.to_string())),
                 ast::Number::Float(value) => (Type::Float, ExprKind::Float(*value)),
+                _ if self.graph.command_startup.is_some() => {
+                    return Err(self.scoped_builtin_error("complex literal", expression));
+                }
                 _ => {
                     return Err(error(
                         self.source,
@@ -11619,6 +11622,12 @@ impl<'a> Checker<'a> {
                     ) =>
             {
                 (Builtin::Print, Type::None)
+            }
+            "complex"
+                if self.graph.command_startup.is_some()
+                    && self.unshadowed_builtin(&call.func, "complex") =>
+            {
+                return Err(self.scoped_builtin_error("complex constructor", call));
             }
             "set" | "frozenset" if self.unshadowed_builtin(&call.func, name.id.as_str()) => {
                 return Err(self.object_builtin_error(name.id.as_str(), call));

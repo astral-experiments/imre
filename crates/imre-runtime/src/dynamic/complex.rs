@@ -4,6 +4,14 @@ use super::Context;
 use super::builtins::bind;
 use super::value::{Error, Id, Result, Value};
 
+pub(super) const METHODS: &[&str] = &[
+    "__complex__",
+    "__mul__",
+    "__rmul__",
+    "__truediv__",
+    "__rtruediv__",
+];
+
 #[derive(Clone, Copy, PartialEq)]
 pub(super) struct Complex {
     pub real: f64,
@@ -73,6 +81,112 @@ impl Complex {
             }
         }
         false
+    }
+
+    fn is_infinite(self) -> bool {
+        self.real.is_infinite() || self.imag.is_infinite()
+    }
+
+    /// Replace infinite components with signed ones and all other components with signed zeros.
+    fn infinity_direction(self) -> Self {
+        let component = |x: f64| (if x.is_infinite() { 1.0_f64 } else { 0.0 }).copysign(x);
+        Self {
+            real: component(self.real),
+            imag: component(self.imag),
+        }
+    }
+
+    fn product(self, other: Self) -> Self {
+        let ac = self.real * other.real;
+        let bd = self.imag * other.imag;
+        let ad = self.real * other.imag;
+        let bc = self.imag * other.real;
+        let result = Self {
+            real: ac - bd,
+            imag: ad + bc,
+        };
+        if result.real.is_nan()
+            && result.imag.is_nan()
+            && (self.is_infinite()
+                || other.is_infinite()
+                || [ac, bd, ad, bc].into_iter().any(f64::is_infinite))
+        {
+            // Recover infinities lost to NaNs or intermediate overflow (C11 Annex G.5.1).
+            let factor = |z: Self| {
+                if z.is_infinite() {
+                    return z.infinity_direction();
+                }
+                let component = |x: f64| if x.is_nan() { 0.0_f64.copysign(x) } else { x };
+                Self {
+                    real: component(z.real),
+                    imag: component(z.imag),
+                }
+            };
+            let a = factor(self);
+            let b = factor(other);
+            return Self {
+                real: f64::INFINITY * (a.real * b.real - a.imag * b.imag),
+                imag: f64::INFINITY * (a.real * b.imag + a.imag * b.real),
+            };
+        }
+        result
+    }
+
+    /// Divide by the larger denominator component to avoid squaring large or small values.
+    /// A real dividend has no imaginary term, which matters for signed zeros and infinities.
+    fn quotient(real: f64, imag: Option<f64>, denominator: Self) -> Result<Self> {
+        let c = denominator.real;
+        let d = denominator.imag;
+        let (x, y, scale) = if c.abs() >= d.abs() {
+            if c == 0.0 {
+                return Err(Error::new("ZeroDivisionError", "division by zero"));
+            }
+            let ratio = d / c;
+            let (x, y) = match imag {
+                Some(b) => (real + b * ratio, b - real * ratio),
+                None => (real, -real * ratio),
+            };
+            (x, y, c + d * ratio)
+        } else if d.abs() >= c.abs() {
+            let ratio = c / d;
+            let (x, y) = match imag {
+                Some(b) => (real * ratio + b, b * ratio - real),
+                None => (real * ratio, -real),
+            };
+            (x, y, c * ratio + d)
+        } else {
+            // A denominator component is NaN, but the other may still be infinite.
+            (f64::NAN, f64::NAN, f64::NAN)
+        };
+        let result = Self {
+            real: x / scale,
+            imag: y / scale,
+        };
+        if result.real.is_nan() && result.imag.is_nan() {
+            // Recover infinities in a complex dividend and signed zeros for an infinite divisor.
+            if let Some(b) = imag {
+                let numerator = Self { real, imag: b };
+                if numerator.is_infinite() && c.is_finite() && d.is_finite() {
+                    let a = numerator.infinity_direction();
+                    return Ok(Self {
+                        real: f64::INFINITY * (a.real * c + a.imag * d),
+                        imag: f64::INFINITY * (a.imag * c - a.real * d),
+                    });
+                }
+            }
+            if denominator.is_infinite() && real.is_finite() && imag.is_none_or(f64::is_finite) {
+                let b = denominator.infinity_direction();
+                let (x, y) = match imag {
+                    Some(a) => (real * b.real + a * b.imag, a * b.real - real * b.imag),
+                    None => (real * b.real, -real * b.imag),
+                };
+                return Ok(Self {
+                    real: 0.0 * x,
+                    imag: 0.0 * y,
+                });
+            }
+        }
+        Ok(result)
     }
 
     pub(super) fn repr(self) -> String {
@@ -230,6 +344,53 @@ impl Context {
             }
             _ => false,
         }
+    }
+
+    /// Keep real operands real during complex arithmetic, preserving signed zeros and infinities.
+    pub(super) fn complex_product_or_quotient(
+        &mut self,
+        op: &str,
+        left: Id,
+        right: Id,
+    ) -> Result<Option<Id>> {
+        debug_assert!(matches!(op, "*" | "/"));
+        let left = self.scalar_value(left);
+        let right = self.scalar_value(right);
+        let scale = |z: Complex, n| Complex {
+            real: z.real * n,
+            imag: z.imag * n,
+        };
+        let number = match (self.heap.get(left), self.heap.get(right)) {
+            (Value::Complex(a), Value::Complex(b)) => {
+                if op == "*" {
+                    a.product(*b)
+                } else {
+                    Complex::quotient(a.real, Some(a.imag), *b)?
+                }
+            }
+            (Value::Complex(a), _) if let Some(b) = self.real_component(right)? => {
+                if op == "*" {
+                    scale(*a, b)
+                } else {
+                    if b == 0.0 {
+                        return Err(Error::new("ZeroDivisionError", "division by zero"));
+                    }
+                    Complex {
+                        real: a.real / b,
+                        imag: a.imag / b,
+                    }
+                }
+            }
+            (_, Value::Complex(b)) if let Some(a) = self.real_component(left)? => {
+                if op == "*" {
+                    scale(*b, a)
+                } else {
+                    Complex::quotient(a, None, *b)?
+                }
+            }
+            _ => return Ok(None),
+        };
+        Ok(Some(self.alloc(Value::Complex(number))))
     }
 
     /// Real operands contribute only on the real axis, preserving signed imaginary zero.

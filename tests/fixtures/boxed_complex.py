@@ -15,6 +15,51 @@ def current():
     assert type(converted) is complex and converted == saved
     assert converted is not complex.__complex__(child)
 
+    class Reflected(complex):
+        def __rmul__(self, other):
+            return ("reflected", other)
+
+    class Declines(complex):
+        def __truediv__(self, other):
+            return NotImplemented
+
+    def reflect(other):
+        return "reflected"
+
+    class Parent(complex):
+        def __mul__(self, other):
+            return "forward"
+
+        __rmul__ = staticmethod(reflect)
+
+        def __truediv__(self, other):
+            return "forward"
+
+        @classmethod
+        def __rtruediv__(cls, other):
+            return cls
+
+    class Derived(Parent):
+        __rmul__ = staticmethod(reflect)
+
+    assert Parent(1) * Derived(2) == "forward"
+    assert Parent(1) / Derived(2) is Derived
+    assert saved * Reflected(2) == ("reflected", saved)
+    assert complex.__mul__(Reflected(2), 3) == 6 + 0j
+    assert complex.__rtruediv__(3 + 4j, 2) == 0.24 - 0.32j
+    assert complex.__truediv__(saved, object()) is NotImplemented
+    assert repr(complex(-0.0, -0.0) * 2) == "(-0-0j)"
+    assert repr(complex(-0.0, 0.0) / -2) == "-0j"
+    inf = float("inf")
+    assert complex(inf, 1.0) * 2 == complex(inf, 2.0)
+    assert (1e300 + 1e300j) / (1e300 + 1e300j) == 1 + 0j
+    try:
+        Declines(2) / 3
+    except TypeError:
+        pass
+    else:
+        raise AssertionError("ignored a declined complex division")
+
     namespace = {}
     exec(compile("z = 2 + 1j; scaled = 2.5e1J", "<complex>", "exec"), namespace)
     assert namespace["z"] == complex(2, 1)

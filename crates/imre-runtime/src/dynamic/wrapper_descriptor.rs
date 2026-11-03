@@ -147,7 +147,7 @@ impl BuiltinDescriptor {
             }
             Some(("float", attr)) => Some(("float", attr, builtins::real_methods("float"))),
             Some(("bytes", attr)) => Some(("bytes", attr, builtins::BYTES_METHODS)),
-            Some(("complex", attr)) => Some(("complex", attr, &["__complex__"][..])),
+            Some(("complex", attr)) => Some(("complex", attr, super::complex::METHODS)),
             Some(("bytearray", attr)) => Some(("bytearray", attr, builtins::BYTEARRAY_METHODS)),
             Some(("memoryview", attr)) => Some(("memoryview", attr, builtins::MEMORYVIEW_METHODS)),
             Some(("BaseException", attr)) => {

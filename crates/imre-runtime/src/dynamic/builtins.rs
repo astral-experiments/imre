@@ -728,7 +728,7 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         }
         Value::MemoryView { .. } if MEMORYVIEW_METHODS.contains(&attr) => "memoryview",
         Value::Bytes(_) if BYTES_METHODS.contains(&attr) => "bytes",
-        Value::Complex(_) if attr == "__complex__" => "complex",
+        Value::Complex(_) if super::complex::METHODS.contains(&attr) => "complex",
         Value::ByteArray(_)
             if BYTEARRAY_METHODS.contains(&attr) || matches!(attr, "decode" | "translate") =>
         {
@@ -1463,6 +1463,13 @@ pub(super) fn call(
     {
         return exceptions::initialize(ctx, owner, args, kwargs);
     }
+    let complex_op = match name {
+        "complex.__mul__" => Some(("*", false)),
+        "complex.__rmul__" => Some(("*", true)),
+        "complex.__truediv__" => Some(("/", false)),
+        "complex.__rtruediv__" => Some(("/", true)),
+        _ => None,
+    };
     if matches!(
         name,
         "object.__hash__"
@@ -1489,7 +1496,8 @@ pub(super) fn call(
             | "mappingproxy.__ror__"
             | "mappingproxy.__ior__"
             | "super.__repr__"
-    ) {
+    ) || complex_op.is_some()
+    {
         let (owner, method) = name.split_once('.').unwrap();
         let Some((&receiver, rest)) = args.split_first() else {
             return Err(type_error(format!(
@@ -1497,7 +1505,7 @@ pub(super) fn call(
             )));
         };
         if (owner == "mappingproxy" && !matches!(ctx.heap.get(receiver), Value::MappingProxy(_)))
-            || (owner == "super" && !ctx.builtin_slot_accepts(receiver, owner))
+            || (matches!(owner, "super" | "complex") && !ctx.builtin_slot_accepts(receiver, owner))
         {
             return Err(type_error(format!(
                 "descriptor '{method}' requires a '{owner}' object but received a '{}'",
@@ -1510,13 +1518,26 @@ pub(super) fn call(
             )));
         }
         let comparison = super::operators::comparison_op(method);
-        if comparison.is_some() || matches!(method, "__or__" | "__ror__" | "__ior__") {
+        if complex_op.is_some()
+            || comparison.is_some()
+            || matches!(method, "__or__" | "__ror__" | "__ior__")
+        {
             let [other] = rest else {
                 return Err(type_error(format!(
                     "expected 1 argument, got {}",
                     rest.len()
                 )));
             };
+            if let Some((op, reflected)) = complex_op {
+                let (a, b) = if reflected {
+                    (*other, receiver)
+                } else {
+                    (receiver, *other)
+                };
+                return Ok(ctx
+                    .complex_product_or_quotient(op, a, b)?
+                    .unwrap_or(NOT_IMPLEMENTED));
+            }
             if owner == "object" {
                 if method != "__ne__" {
                     return Ok(if method == "__eq__" && receiver == *other {

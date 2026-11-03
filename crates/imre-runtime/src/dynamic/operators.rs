@@ -4714,6 +4714,20 @@ impl Context {
             ));
         }
         let (left, right) = (self.scalar_value(a), self.scalar_value(b));
+        if matches!(op, "*" | "/" | "//" | "%")
+            && (matches!(self.heap.get(left), Value::Complex(_))
+                || matches!(self.heap.get(right), Value::Complex(_)))
+        {
+            return Err(Error::new(
+                "TypeError",
+                format!(
+                    "unsupported operand type(s) for {op}{}: '{}' and '{}'",
+                    if inplace { "=" } else { "" },
+                    self.type_name(a),
+                    self.type_name(b)
+                ),
+            ));
+        }
         if matches!(self.heap.get(left), Value::Float(_))
             || matches!(self.heap.get(right), Value::Float(_))
         {
@@ -4983,7 +4997,10 @@ impl Context {
         }
         let method = if matches!(
             (name, self.heap.get(obj)),
-            ("__lt__" | "__le__" | "__gt__" | "__ge__", Value::Deque(_))
+            (
+                "__mul__" | "__rmul__" | "__truediv__" | "__rtruediv__",
+                Value::Complex(_)
+            ) | ("__lt__" | "__le__" | "__gt__" | "__ge__", Value::Deque(_))
                 | ("__xor__" | "__rxor__", Value::Set { .. })
                 | (
                     "__or__" | "__ror__",
@@ -5147,9 +5164,9 @@ impl Context {
         ))
     }
 
-    /// Python-defined union slots compare the reflected methods after binding them to each class.
-    fn has_python_union_slot(&self, obj: Id) -> bool {
-        ["__or__", "__ror__"].iter().any(|name| {
+    /// A Python implementation of either method installs a shared forward/reflected slot.
+    fn has_python_binary_slot(&self, obj: Id, forward: &str, reflected: &str) -> bool {
+        [forward, reflected].iter().any(|name| {
             self.slot(obj, name)
                 .is_some_and(|slot| !matches!(self.heap.get(slot), Value::Native(_)))
         })
@@ -5381,11 +5398,13 @@ impl Context {
                 .into_iter()
                 .any(|id| matches!(self.heap.get(self.scalar_value(id)), Value::Set { .. }));
         let dict_union = op == "|" && [a, b].into_iter().any(|id| self.dict_storage(id).is_some());
-        if set_xor || dict_union {
+        if set_xor || dict_union || matches!(op, "*" | "/") {
             for (value, class) in [(a, &mut ac), (b, &mut bc)] {
                 if matches!(
                     (op, self.heap.get(value)),
-                    ("^", Value::Set { .. }) | ("|", Value::Dict(_) | Value::DefaultDict { .. })
+                    ("*" | "/", Value::Complex(_))
+                        | ("^", Value::Set { .. })
+                        | ("|", Value::Dict(_) | Value::DefaultDict { .. })
                 ) {
                     *class = Some(self.exact_type(value)?);
                 }
@@ -5442,14 +5461,21 @@ impl Context {
             ));
         }
         let reflected_first = if let (Some(ac), Some(bc)) = (ac, bc) {
+            let complex_pair = matches!(op, "*" | "/")
+                && [a, b]
+                    .into_iter()
+                    .all(|id| matches!(self.heap.get(self.scalar_value(id)), Value::Complex(_)));
             let strict_subclass = ac != bc
-                && if set_xor || dict_union {
+                && if set_xor || dict_union || complex_pair {
                     self.direct_subclass(bc, ac)
                 } else {
                     self.subclass(bc, ac)
                 };
             strict_subclass
-                && if dict_union && self.has_python_union_slot(a) && self.has_python_union_slot(b) {
+                && if (dict_union || complex_pair)
+                    && self.has_python_binary_slot(a, left, right)
+                    && self.has_python_binary_slot(b, left, right)
+                {
                     self.reflected_slot_overridden(ac, bc, right)?
                 } else {
                     inplace.is_empty() || self.class_attr(bc, right) != self.class_attr(ac, right)

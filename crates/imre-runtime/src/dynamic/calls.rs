@@ -4359,7 +4359,7 @@ impl Context {
                         ))
                     || (class == "memoryview" && builtins::MEMORYVIEW_METHODS.contains(&name))
                     || (class == "bytes" && builtins::BYTES_METHODS.contains(&name))
-                    || (class == "complex" && name == "__complex__")
+                    || (class == "complex" && super::complex::METHODS.contains(&name))
                     || (class == "bytearray" && builtins::BYTEARRAY_METHODS.contains(&name))
                     || (name == "__repr__"
                         && matches!(class.as_str(), "bool" | "int" | "float"))
@@ -6798,7 +6798,6 @@ impl Context {
                             | "OSError.__init__"
                             | "StopIteration.__init__"
                             | "SystemExit.__init__"
-                            | "complex.__complex__"
                             | "float.__format__"
                             | "float.__getformat__"
                             | "bool.__repr__"
@@ -6807,6 +6806,9 @@ impl Context {
                             | "getset_descriptor.__set__"
                             | "getset_descriptor.__delete__"
                     )
+                    || name
+                        .strip_prefix("complex.")
+                        .is_some_and(|method| super::complex::METHODS.contains(&method))
                     || name.strip_prefix("float.").is_some_and(|method| {
                         builtins::real_methods("float").contains(&method)
                     })
