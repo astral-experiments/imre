@@ -724,7 +724,8 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("contextvars" | "_contextvars", "ContextVar" | "Context" | "Token" | "copy_context") => {
             ctx.builtin(&format!("_contextvars.{name}"))
         }
-        ("functools", "Placeholder") => ctx.alloc(Value::PartialPlaceholder),
+        ("functools", "Placeholder") => functools::placeholder(ctx),
+        ("functools", "_PlaceholderType") => ctx.builtin("functools._PlaceholderType"),
         (
             "sys",
             "exit"
@@ -2579,6 +2580,15 @@ pub(super) fn call(
     }
     if name == "_pickle.dumps" {
         return pickle::dumps(ctx, args, kwargs);
+    }
+    if name == "functools._PlaceholderType" {
+        if !args.is_empty() || !kwargs.is_empty() {
+            return Err(Error::new(
+                "TypeError",
+                "PlaceholderType takes no arguments",
+            ));
+        }
+        return Ok(functools::placeholder(ctx));
     }
     if name == "functools.partial.__setstate__" {
         return functools::partial_setstate(ctx, args, kwargs);

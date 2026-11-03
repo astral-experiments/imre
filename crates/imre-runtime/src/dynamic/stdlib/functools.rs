@@ -8,6 +8,16 @@ pub(in crate::dynamic) const PARTIAL_CLASS: &str = "functools.partial";
 pub(in crate::dynamic) const LRU_CACHE_CLASS: &str = "functools._lru_cache_wrapper";
 pub(in crate::dynamic) const COPY_METHODS: &[&str] = &["__reduce__", "__copy__", "__deepcopy__"];
 
+pub(super) fn placeholder(ctx: &mut Context) -> Id {
+    let key = "functools.Placeholder";
+    if let Some(&value) = ctx.builtins.get(key) {
+        return value;
+    }
+    let value = ctx.alloc(Value::PartialPlaceholder);
+    ctx.builtins.insert(key.to_owned(), value);
+    value
+}
+
 pub(super) fn partial_setstate(
     ctx: &mut Context,
     args: &[Id],
