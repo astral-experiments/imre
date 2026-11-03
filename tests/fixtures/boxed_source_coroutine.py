@@ -120,3 +120,86 @@ async def forward(awaitable):
         raise AssertionError("decoration made an existing generator awaitable")
     finally:
         old.close()
+
+    awaited_call_arguments()
+
+
+def awaited_call_arguments():
+    events = []
+
+    def mark(value):
+        events.append(value)
+        return value
+
+    class Receiver:
+        def collect(self, left, first, middle, *, second, last):
+            events.append('call')
+            return left, first, middle, second, last
+
+    receiver = Receiver()
+
+    def get_receiver():
+        events.append('receiver')
+        return receiver
+
+    scope = {'get_receiver': get_receiver, 'mark': mark, 'pause': Pause()}
+    exec("""\
+async def ordered():
+    return get_receiver().collect(mark('left'), await pause, mark('middle'),
+                                  second=await pause, last=mark('right'))
+
+async def first():
+    try:
+        mark(await pause)
+    finally:
+        mark('finally')
+
+async def forward(value):
+    return value
+
+async def outer():
+    return await forward(await pause)
+""", scope)
+
+    coro = scope['ordered']()
+    assert coro.send(None) == 'paused'
+    assert events == ['receiver', 'left']
+    # The original bound method must survive until both arguments have resumed.
+    receiver.collect = None
+    assert coro.send(1) == 'paused'
+    assert events == ['receiver', 'left', 'middle']
+    try:
+        coro.send(2)
+    except StopIteration as done:
+        assert done.value == ('left', 1, 'middle', 2, 'right')
+    else:
+        raise AssertionError("awaited call did not return")
+    assert events == ['receiver', 'left', 'middle', 'right', 'call']
+
+    del receiver.collect
+    events.clear()
+    interrupted = scope['ordered']()
+    assert interrupted.send(None) == 'paused'
+    error = ValueError('interrupt')
+    try:
+        interrupted.throw(error)
+    except ValueError as caught:
+        assert caught is error
+    else:
+        raise AssertionError("throw was lost")
+    assert events == ['receiver', 'left']
+
+    events.clear()
+    first = scope['first']()
+    assert first.send(None) == 'paused'
+    first.close()
+    assert events == ['finally']
+
+    outer = scope['outer']()
+    assert outer.send(None) == 'paused'
+    try:
+        outer.send(receiver)
+    except StopIteration as done:
+        assert done.value is receiver
+    else:
+        raise AssertionError("outer await did not return")

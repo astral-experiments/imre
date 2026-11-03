@@ -104,7 +104,7 @@ with Rust-competitive performance.
 
 ## Standard library test results
 
-As of November 3, 2026, Imre has a paired pass for **8,203 of 13,328 tests (61.5%)** in the original 25 standard library module families.
+As of November 3, 2026, Imre has a paired pass for **8,301 of 13,328 tests (62.3%)** in the original 25 standard library module families.
 A **paired pass** means that CPython 3.14.5 passed the original test and Imre passed it at both
 `-O0` and `-O3`. The total combines focused and intact suite runs across revisions, including
 development branches. Each original test occurrence counts once. Skipped and omitted tests remain
@@ -116,7 +116,7 @@ in the denominator. The [omission decisions](docs/stdlib-omissions.md) explain e
 | `collections` | 640 | 659 | 8 | [ChainMap lookup and Counter copying](benchmarks/cpython_stdlib/full/collections/receipts/2026-11-02/chainmap-counter/) passed on stock and boxed native O0/O3, including all six Counter pickle subtests. Earlier focused and intact runs contribute to the total. |
 | `csv` | 122 | 128 | 0 | Complete suite on `main`, 122 passed and six matched upstream skips. |
 | `dataclasses` | 247 | 276 | 0 | The latest intact public run passed 206, and the retained intact run passed 207. Thirteen more TestDocString originals pass on a sealed development tree after all 276 register. Their public replay needs annotationlib.get_annotations for #3578. |
-| `datetime` | 868 | 1,098 | 0 | Twenty more date and datetime originals matched stock, including all 99 subtests at each native level. Six previously credited leap-year tests passed on the feature branch in #4492. |
+| `datetime` | 966 | 1,098 | 0 | Ninety-eight more date, arithmetic and time-zone originals passed on stock and public native O0/O3. Each lane also passed the same 153 child subtests. Six earlier leap-year tests retain their feature-branch results from #4492. |
 | `fnmatch` | 24 | 24 | 0 | Complete suite on `main`, all 24 passed. |
 | `functools` | 91 | 329 | 0 | The intact 325-case primary module passed 89 in all four modes. Two more original cases passed in separate runs. |
 | `hashlib` | 77 | 82 | 0 | The cumulative resource-enabled inventory includes 77 distinct pairs. Under the default stock resource policy, intact ordinary O0 and O3 each record 67 passes, one threaded-hashing error and 14 skips. The real builtin MD5 factory is verified at both native levels. |
@@ -137,7 +137,7 @@ in the denominator. The [omission decisions](docs/stdlib-omissions.md) explain e
 | `typing` | 449 | 712 | 0 | Sixty-one more originals passed from the pinned `test_typing.py`. Stock and ordinary native O0/O3 recorded identical parent callbacks and all 50 successful subtests. The total includes earlier selected and class runs. |
 | `unittest` | 275 | 1,090 | 0 | The intact package passed 160 cases. On public #3601, the unchanged test_assertions and test_case files ran all 150 originals with runtime imports. Their 109 paired passes added 81 distinct cases. Another 34 original mock methods passed in focused runs. |
 | `urllib` | 173 | 178 | 0 | Both unchanged scripts compiled and exited 0 in ordinary and runtime-import modes at both native levels. Four HTTP tests now pass with SSL enabled. Three originals matched only in child callbacks, and two Windows cases skipped on stock Linux. |
-| **Total** | **8,203** | **13,328** | **20** | **3 complete suites match stock on `main`** |
+| **Total** | **8,301** | **13,328** | **20** | **3 complete suites match stock on `main`** |
 
 See the [standard library coverage report](docs/stdlib.md) for the Linux test
 results and import coverage recorded in this repository.
@@ -153,8 +153,8 @@ CPython 3.14.5 discovers **1,217 test occurrences** in these six families on Lin
 | `ssl` | — | 195 | SSL contexts, certificates, and loopback TLS connections |
 | `types` | 111 | 141 | On public `ce052eab`, the intact `test_types` runs recorded 100 paired passes and exited 1. `test_dynamicclassattribute` recorded 11 paired passes and exited 0 at both native levels. Two stock skips remain in the denominator. |
 | `warnings` | 155 | 187 | The [intact suite](benchmarks/cpython_stdlib/full/warnings/receipts/dfe0f18e/) ran all 187 originals on public revision `dfe0f18e`. Stock skipped six. The 19 tests that invoke a child interpreter await separate native verification. |
-| `weakref` | 160 | 183 | On one public revision, 116 weakref and 44 WeakSet originals passed on stock and at both native optimization levels. All six selected runs completed with exit 0. |
-| **Measured total (3 of 6 families)** | **426** | **511** | |
+| `weakref` | 163 | 183 | Selected stock and native O0/O3 runs each passed 118 weakref and 45 WeakSet originals, and all six processes exited 0. The separate intact native module runs still exit 1. |
+| **Measured total (3 of 6 families)** | **429** | **511** | |
 
 ## Design
 

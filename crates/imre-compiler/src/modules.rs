@@ -1788,6 +1788,9 @@ impl IntrinsicModule {
                 Intrinsic::ObjectRuntimeExport("warnings.warn_explicit")
             }
             (Self::Warnings, "deprecated") => Intrinsic::ObjectRuntimeExport("warnings.deprecated"),
+            (Self::Warnings, "_get_filters") => {
+                Intrinsic::ObjectRuntimeExport("warnings._get_filters")
+            }
             (Self::Warnings, "simplefilter") => Intrinsic::WarningFilter { simple: true },
             (Self::Warnings, "filterwarnings") => Intrinsic::WarningFilter { simple: false },
             (Self::Warnings, "catch_warnings") => Intrinsic::CatchWarnings,
