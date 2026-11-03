@@ -4039,20 +4039,47 @@ impl Heap {
     /// A prompt collection models a reference decrement. Preserve cycles until
     /// an automatic or explicit full collection, including cycles created in callbacks.
     pub(super) fn collect(&mut self, globals: impl Iterator<Item = Id>) -> Option<WeakCallbacks> {
-        let Ok(mut cycles) = CycleSet::new(self.slots.len()) else {
+        self.mark_reference_roots(globals, None);
+        let small = self.small_unreachable();
+        let size = small.as_ref().map_or(self.slots.len(), |slots| slots.len());
+        let Ok(mut cycles) = CycleSet::new(size) else {
+            for trace in &self.traces {
+                trace.set(UNMARKED);
+            }
             self.collect_next_statement = true;
             return None;
         };
-        self.mark_reference_survivors(globals, &mut cycles, None);
+        if let Some(slots) = small {
+            self.mark_cycles(
+                &mut cycles,
+                |index| slots[index],
+                |slot| {
+                    slots
+                        .binary_search(&slot)
+                        .expect("unmarked child is a candidate")
+                },
+            );
+        } else {
+            self.mark_cycles(&mut cycles, std::convert::identity, std::convert::identity);
+        }
         self.sweep()
     }
 
-    fn mark_reference_survivors(
-        &self,
-        globals: impl Iterator<Item = Id>,
-        cycles: &mut CycleSet,
-        releasing: Option<Id>,
-    ) {
+    /// Keep cycle scratch proportional to the garbage when most occupied slots are reachable.
+    fn small_unreachable(&self) -> Option<smallvec::SmallVec<[usize; 256]>> {
+        let mut slots = smallvec::SmallVec::new();
+        for (id, trace) in self.traces.iter().enumerate() {
+            if trace.get() == UNMARKED && self.slots[id].value.is_some() {
+                if slots.len() == 256 {
+                    return None;
+                }
+                slots.push(id);
+            }
+        }
+        Some(slots)
+    }
+
+    fn mark_reference_roots(&self, globals: impl Iterator<Item = Id>, releasing: Option<Id>) {
         // A weakref callback can drop an unrelated owner. Keep its graph intact
         // for Python dispatch when this sweep releases temporary callback roots.
         self.mark(
@@ -4063,11 +4090,29 @@ impl Heap {
                     .filter(|id| Some(*id) != releasing),
             ),
         );
-        self.identify_cycles(cycles);
+    }
+
+    fn mark_reference_survivors(
+        &self,
+        globals: impl Iterator<Item = Id>,
+        cycles: &mut CycleSet,
+        releasing: Option<Id>,
+    ) {
+        self.mark_reference_roots(globals, releasing);
+        self.mark_cycles(cycles, std::convert::identity, std::convert::identity);
+    }
+
+    fn mark_cycles(
+        &self,
+        cycles: &mut CycleSet,
+        slot_at: impl Fn(usize) -> usize,
+        index_of: impl Fn(usize) -> usize,
+    ) {
+        self.identify_indexed_cycles(cycles, &slot_at, index_of);
         // Peeling leaves both cycles and their unreachable descendants. Every
         // strong child of a member is therefore already live or itself a member.
-        for id in cycles.members() {
-            self.traces[id as usize].set(END);
+        for index in cycles.members() {
+            self.traces[slot_at(index as usize)].set(END);
         }
     }
 
@@ -4175,6 +4220,15 @@ impl Heap {
     /// dead objects that refcounting alone would release from the Python GC count.
     /// The incoming counts must start at zero.
     fn identify_cycles(&self, cycles: &mut CycleSet) -> Option<Id> {
+        self.identify_indexed_cycles(cycles, std::convert::identity, std::convert::identity)
+    }
+
+    fn identify_indexed_cycles(
+        &self,
+        cycles: &mut CycleSet,
+        slot_at: impl Fn(usize) -> usize,
+        index_of: impl Fn(usize) -> usize,
+    ) -> Option<Id> {
         let mut first_finalizer = None;
         let CycleSet {
             incoming,
@@ -4182,13 +4236,14 @@ impl Heap {
             ..
         } = cycles;
         unowned.clear();
-        for (id, slot) in self.slots.iter().enumerate() {
+        for index in 0..incoming.len() {
+            let id = slot_at(index);
             if self.traces[id].get() == UNMARKED
-                && let Some(value) = &slot.value
+                && let Some(value) = &self.slots[id].value
             {
                 // Count the candidate itself so that zero denotes a vacant or reachable slot.
-                incoming[id] += 1;
-                self.unreachable_children(value, |child| incoming[child] += 1);
+                incoming[index] += 1;
+                self.unreachable_children(value, |child| incoming[index_of(child)] += 1);
             }
         }
         for (id, count) in incoming.iter_mut().enumerate() {
@@ -4199,11 +4254,13 @@ impl Heap {
                 }
             }
         }
-        while let Some(id) = unowned.pop() {
+        while let Some(index) = unowned.pop() {
+            let id = slot_at(index);
             if first_finalizer.is_none() && self.slots[id].finalization == Finalization::Pending {
                 first_finalizer = Some(id as Id);
             }
             self.unreachable_children(self.slots[id].value.as_ref().unwrap(), |child| {
+                let child = index_of(child);
                 incoming[child] -= 1;
                 if incoming[child] == 0 {
                     unowned.push(child);
@@ -4886,6 +4943,47 @@ mod reachability_tests {
         }
         heap.begin_collection(std::iter::empty(), 2).unwrap();
         assert_eq!(heap.finish_full_collection(std::iter::empty()).0, 3);
+    }
+
+    #[test]
+    fn prompt_cycles_preserve_descendants_and_release_acyclic_peers_at_both_sizes() {
+        for garbage in [4, 256, 257] {
+            let mut heap = Heap::new();
+            let mark = heap.temporary_mark();
+            let dead: Vec<_> = (0..garbage)
+                .map(|_| heap.alloc(Value::List(Vec::new())))
+                .collect();
+            let cycle = dead[0];
+            let child = dead[1];
+            let root = dead[2];
+            let peer = dead[3];
+            let Value::List(edges) = heap.get_mut(cycle) else {
+                unreachable!()
+            };
+            edges.extend([cycle, child, child]);
+            let Value::List(edges) = heap.get_mut(peer) else {
+                unreachable!()
+            };
+            edges.extend([root, root]);
+            heap.release_temporaries_since(mark);
+            heap.collect(std::iter::empty());
+            assert!(heap.slots[cycle as usize].value.is_some());
+            assert!(heap.slots[child as usize].value.is_some());
+            assert!(
+                dead[2..]
+                    .iter()
+                    .all(|&slot| heap.slots[slot as usize].value.is_none())
+            );
+
+            // A former cycle may lose its last back edge between prompt collections.
+            let Value::List(edges) = heap.get_mut(cycle) else {
+                unreachable!()
+            };
+            edges.clear();
+            heap.collect(std::iter::empty());
+            assert!(heap.slots[cycle as usize].value.is_none());
+            assert!(heap.slots[child as usize].value.is_none());
+        }
     }
 
     #[test]
