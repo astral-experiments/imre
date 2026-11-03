@@ -1673,6 +1673,22 @@ def main() -> None:
             assert result.returncode != 0 and expected in result.stderr, (name, result.stdout, result.stderr)
             checks += 1
 
+        # Check even uncalled functions when a different function requires boxed operations.
+        setup = "from unittest.mock import patch\nclass Owner:\n    value = 0\n" + HELPER
+        invalid = "def uncalled() -> int:\n    return f('wrong')\n"
+        for patcher in (
+            "def helper() -> None:\n    patch.object(Owner, 'value', 1)\n",
+            "def helper() -> object:\n    return patch.object(Owner, 'value', 1)\n",
+        ):
+            for before, after in ((invalid, patcher), (patcher, invalid)):
+                source = temporary / "boxed_call_order.py"
+                source.write_text(setup + before + after)
+                result = run([compiler, "check", str(source)], temporary)
+                assert result.returncode != 0 and (
+                    "expected int, got str" in result.stderr or "invalid-argument-type" in result.stderr
+                ), (source.read_text(), result.stderr)
+                checks += 1
+
         # The imported object operation precedes the call that supplies flag's type.
         for name, function, diagnostic in [
             ("annotated", "def choose(flag: bool) -> int:\n    return flag\n", "expected int, got bool"),
