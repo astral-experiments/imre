@@ -1241,7 +1241,10 @@ impl Context {
             "collections.abc._CallableGenericAlias" => "types.GenericAlias",
             "datetime.datetime" => "datetime.date",
             "datetime.timezone" => stdlib::datetime::TZINFO,
-            stdlib::flags::TYPE | stdlib::os::stat::CLASS | stdlib::os::stat::VFS_CLASS => "tuple",
+            "time.struct_time"
+            | stdlib::flags::TYPE
+            | stdlib::os::stat::CLASS
+            | stdlib::os::stat::VFS_CLASS => "tuple",
             class if stdlib::fixed_structseq::fixed_type(class).is_some() => "tuple",
             "typing._LiteralGenericAlias"
             | "typing._UnpackGenericAlias"
@@ -3303,6 +3306,11 @@ impl Context {
                     "AttributeError",
                     format!("'datetime.{kind}' object has no attribute '{name}'"),
                 ));
+            }
+            Value::Native(ref class)
+                if name == "__getitem__" && Self::native_base(class) == Some("tuple") =>
+            {
+                return Ok(self.builtin("tuple.__getitem__"));
             }
             Value::Native(ref class) if let Some(layout) = stdlib::os::stat::layout(class) => {
                 match name {
