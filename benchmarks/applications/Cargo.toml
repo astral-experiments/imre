@@ -1,0 +1,30 @@
+[package]
+name = "imre-runtime-controls"
+version = "0.1.0"
+edition = "2024"
+publish = false
+license = "MIT OR Apache-2.0"
+
+[workspace]
+
+[dependencies]
+base64 = "0.22.1"
+csv = "1.4.0"
+# Enable SIMD detection in the ZIP reader's DEFLATE backend.
+flate2 = { version = "1", default-features = false, features = ["runtime_detection"] }
+memchr = "2"
+sha2 = "0.10.9"
+smallvec = { version = "1", features = ["union"] }
+zip = { version = "8.6.0", default-features = false, features = ["deflate-flate2-zlib-rs"] }
+
+[[bin]]
+name = "verify-wheel"
+path = "wheel.rs"
+
+[[bin]]
+name = "road-routing"
+path = "roads.rs"
+
+[[bin]]
+name = "source-search"
+path = "search.rs"

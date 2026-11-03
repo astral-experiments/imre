@@ -253,12 +253,6 @@ impl Function<'_, '_> {
                 {
                     let outer = self.scope.clone();
                     let params = if let Some(params) = v.type_params.as_deref() {
-                        if params
-                            .iter()
-                            .any(|param| !matches!(param, ast::TypeParam::TypeVar(_)))
-                        {
-                            self.unsupported("variadic type alias parameters");
-                        }
                         self.scope = self.parameter_scope(&outer, params, false);
                         let key = self.code_name(".type_params");
                         self.op("lookup", &[&self.scope.clone(), &key])
@@ -433,7 +427,7 @@ impl Function<'_, '_> {
                         None,
                         None,
                         None,
-                        Body::Namespace(&v.body),
+                        Body::Namespace(&v.body, v.type_params.is_some()),
                     );
                     if parameter_scope.is_some() {
                         self.scope = outer;
@@ -661,7 +655,7 @@ impl Function<'_, '_> {
         } else {
             format!("{}{name}", self.prefix)
         };
-        let prefix = if matches!(body, Body::Namespace(_)) {
+        let prefix = if matches!(body, Body::Namespace(..)) {
             format!("{qualname}.")
         } else {
             format!("{qualname}.<locals>.")
@@ -675,7 +669,7 @@ impl Function<'_, '_> {
             _ => None,
         };
         let flags = match &body {
-            Body::Namespace(_) => None,
+            Body::Namespace(..) => None,
             _ => {
                 use imre_ast::code_flags::*;
                 let mut flags = OPTIMIZED | NEWLOCALS;
@@ -778,7 +772,7 @@ impl Function<'_, '_> {
             // generator() binds the implicit .0 argument without calling the step function.
             signature["co_argcount"] = json!(1);
         }
-        if let Body::Namespace(stmts) = &body {
+        if let Body::Namespace(stmts, _) = &body {
             signature["postponed_annotations"] = json!(
                 self.source.string_annotations
                     && imre_ast::annotations::has_variable_annotation(stmts)
@@ -846,7 +840,7 @@ impl Function<'_, '_> {
             Body::Statements(stmts) | Body::GeneratorFunction(stmts, _) => {
                 closure_names.visit_body(stmts)
             }
-            Body::Namespace(stmts) => {
+            Body::Namespace(stmts, generic) => {
                 let mut bindings = ClosureNames::default();
                 bindings.visit_body(stmts);
                 class_metadata::capture(&mut bindings, stmts, self.source.string_annotations);
@@ -854,8 +848,14 @@ impl Function<'_, '_> {
                     signature["class_globals"] = json!(bindings.globals);
                 }
                 closure_names.nonlocals = bindings.nonlocals;
-                // Methods and nested classes can still capture the enclosing frame.
-                closure_names.incomplete = true;
+                if !generic
+                    && let Some(reads) =
+                        class_metadata::method_class_reads(stmts, self.source.string_annotations)
+                {
+                    closure_names.reads = reads;
+                } else {
+                    closure_names.incomplete = true;
+                }
             }
             Body::Expression(expr) | Body::YieldingLambda(expr) | Body::TypeAlias(expr) => {
                 closure_names.visit_expr(expr)
@@ -881,7 +881,7 @@ impl Function<'_, '_> {
             let value_format = self.integer(1);
             self.op("put", &[&defaults, &format, &value_format]);
         }
-        let in_function = self.in_function || !matches!(body, Body::Namespace(_));
+        let in_function = self.in_function || !matches!(body, Body::Namespace(..));
         signature["types"] = json!({});
         // A generator call returns a suspended frame, before it yields or returns a value.
         let scalar = |expr: &ast::Expr| {

@@ -44,6 +44,7 @@ impl Context {
         }));
         Ok(self.alloc(Value::MemoryView {
             owner: Some(owner),
+            lease: None,
             anonymous: true,
             layout: None,
             readonly,
@@ -168,7 +169,15 @@ impl Context {
             let parent = self.view_layout(id)?;
             let child =
                 self.ownerless_byte_view(w.backing, w.start + range.start, range.len(), false)?;
-            if let Value::MemoryView { layout, .. } = self.heap.get_mut(child) {
+            let Value::MemoryView {
+                lease: parent_lease,
+                ..
+            } = *self.heap.get(id)
+            else {
+                unreachable!()
+            };
+            if let Value::MemoryView { layout, lease, .. } = self.heap.get_mut(child) {
+                *lease = parent_lease;
                 *layout = Some(super::memoryview::ViewLayout {
                     start: 0,
                     len: range.len(),

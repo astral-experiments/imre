@@ -125,6 +125,7 @@ impl RawWriter<'_> {
         let bytes = ctx.alloc(Value::Bytes(copy_bytes(data)?));
         let view = ctx.alloc(Value::MemoryView {
             owner: Some(bytes),
+            lease: None,
             anonymous: true,
             layout: None,
             readonly: false,

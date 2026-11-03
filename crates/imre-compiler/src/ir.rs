@@ -946,8 +946,23 @@ pub(crate) enum Combinatorial {
     CombinationsWithReplacement,
 }
 
+#[derive(Clone, Copy)]
+pub(crate) enum PairTableOp {
+    New,
+    AddRow,
+    Index,
+    Push,
+    Len,
+    RowLen,
+    Field(usize),
+    Snapshot(usize),
+    ViewLen(usize),
+    ViewField(usize, usize),
+}
+
 #[derive(Clone)]
 pub(crate) enum Builtin {
+    PairTable(PairTableOp),
     Combinatorial(Combinatorial),
     DecimalIntegerText,
     Random(RandomOperation),
@@ -1262,6 +1277,7 @@ pub(crate) enum Builtin {
     StringIter,
     /// Iterates Python line boundaries on a rooted immutable string.
     SplitLinesIter,
+    MatchingSplitIter(u8),
     /// Linear Unicode iteration from the final code point toward the first.
     StringReverseIter,
     /// Private, initially zeroed tuple storage for iterator result caching.
@@ -1358,6 +1374,11 @@ pub(crate) enum Builtin {
     IsInstance(Vec<InstanceType>),
     IsBuiltinSubclass,
     Split,
+    /// Parse a single field of an exact no-separator str.split() as a decimal integer.
+    SplitIntField(u32),
+    /// Prepare small decimal fields from one private immutable split source.
+    SplitIntSource(u8),
+    SplitIntCached(u32),
     SplitLines,
     /// Only the first line and a joined remainder can be observed.
     JoinedSplitLines,
@@ -2180,6 +2201,7 @@ pub(crate) enum FdOperation {
     DeviceEncoding,
     PtsName,
     TcGetPgrp,
+    TcSetPgrp,
     GetBlocking,
     SetBlocking,
     GetInheritable,
@@ -2635,6 +2657,13 @@ pub(crate) fn walk_writes(body: &[Statement], mut visit: impl FnMut(usize, Optio
 /// Visits writes during operand evaluation, including assignments in eager scopes.
 pub(crate) fn walk_expression_writes(value: &Expr, mut visit: impl FnMut(usize, Option<&Expr>)) {
     walk_expression(value, &mut |node| node_writes(node, &mut visit));
+}
+
+/// Whether evaluating an operand leaves the previously loaded local in place.
+pub(crate) fn expression_preserves_local(expression: &Expr, slot: usize) -> bool {
+    let mut preserved = true;
+    walk_expression_writes(expression, |written, _| preserved &= written != slot);
+    preserved
 }
 
 fn node_writes(node: Node<'_>, visit: &mut impl FnMut(usize, Option<&Expr>)) {

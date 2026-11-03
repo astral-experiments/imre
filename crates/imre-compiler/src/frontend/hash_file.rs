@@ -43,9 +43,10 @@ impl Checker<'_> {
             Some(Binding::Intrinsic(Intrinsic::Sha256)) => {
                 ExprKind::Builtin(Builtin::Sha256New, vec![empty])
             }
-            Some(Binding::Intrinsic(Intrinsic::NamedHash(algorithm))) => {
-                ExprKind::Builtin(Builtin::HashNew, vec![unpacking::string(algorithm), empty])
-            }
+            Some(Binding::Intrinsic(Intrinsic::NamedHash(algorithm))) => ExprKind::Builtin(
+                Builtin::HashNew,
+                vec![unpacking::string(algorithm), empty, Expr::boolean(true)],
+            ),
             _ => {
                 let name = self.expr(digest)?;
                 if !matches!(name.ty, Type::Str | Type::StrLiteral(_)) {
@@ -58,7 +59,10 @@ impl Checker<'_> {
                 let slot = self.hidden(name.ty);
                 body.push(Statement::Assign(slot, name));
                 clear.push(slot);
-                ExprKind::Builtin(Builtin::HashNew, vec![self.local(slot), empty])
+                ExprKind::Builtin(
+                    Builtin::HashNew,
+                    vec![self.local(slot), empty, Expr::boolean(true)],
+                )
             }
         };
         let size = match call.arguments.keywords.as_ref() {

@@ -21,6 +21,23 @@ def current():
         def __add__(self, other): raise AssertionError("unexpected addition")
         def __radd__(self, other): raise AssertionError("unexpected reflected addition")
 
+    assert f"{'NAME':10} {'x'!r:13}" == "NAME       'x'          "
+    assert format("é", "٣s") == "é  "
+    assert format("\ud800", "04") == "\ud800000"
+    assert format("x", "０３") == "x  "
+    value = Text("abc")
+    assert format(value, "0") is value and format(value, "3s") is value
+    assert type(format(value, "4")) is str
+    empty = Text("")
+    for spec in ("s", "0", "0s", "０"):
+        assert type(format(empty, spec)) is str and format(value, spec) is value
+    try:
+        format("x", "9" * 80)
+    except ValueError as error:
+        assert str(error) == "Too many decimal digits in format string"
+    else:
+        raise AssertionError("overflowing string width")
+
     class Field:
         def __format__(self, spec):
             specs.append(spec)

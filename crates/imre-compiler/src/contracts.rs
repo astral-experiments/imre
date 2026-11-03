@@ -60,7 +60,16 @@ impl Builtin {
                 args.first().is_some_and(|e| matches!(e.ty, Type::List(_))),
                 PreservesLists,
             ),
-            Self::StringListNonempty | Self::StringListContains | Self::StringListFilter(_) => {
+            Self::PairTable(op) => {
+                use crate::ir::PairTableOp::*;
+                match op {
+                    New | Index | Snapshot(_) | Field(_) => Contract::new(true, PreservesLists),
+                    AddRow | Push => Contract::new(true, Unknown),
+                    Len | RowLen | ViewLen(_) | ViewField(..) => Contract::new(false, PreservesLists),
+                }
+            }
+            Self::SplitIntSource(_) => Contract::new(false, PreservesLists),
+            Self::SplitIntField(_) | Self::SplitIntCached(_) | Self::StringListNonempty | Self::StringListContains | Self::StringListFilter(_) => {
                 Contract::new(true, PreservesLists)
             }
             Self::Random(crate::ir::RandomOperation::Shuffle) => Contract::new(true, Unknown),
@@ -437,6 +446,7 @@ impl Builtin {
             | Self::CodecWriter(_)
             | Self::HashNew
             | Self::HashAlgorithms { .. }
+            | Self::HashUpdate
             | Self::HashUpdateFile
             | Self::Sha1Hex
             | Self::Sha1New
@@ -529,7 +539,6 @@ impl Builtin {
             | Self::JsonDecoderNew
             | Self::JsonEncoderNew
             | Self::JsonDecoderMemo
-            | Self::HashUpdate
             | Self::HashDigestSize
             | Self::HashIdentity
             | Self::HashBlockSize
@@ -764,6 +773,7 @@ impl Builtin {
             | Self::DequeClear
             | Self::DequeReverse
             | Self::SetIter
+            | Self::MatchingSplitIter(_)
             | Self::SplitLinesIter
             | Self::StringIter
             | Self::StringReverseIter
@@ -859,6 +869,51 @@ impl Builtin {
                 if types.element(left.ty).is_some() && types.element(right.ty).is_some() && result == Type::Bool),
             Self::ListSum => signature(&[Type::ListInt, Type::Int], Type::Int),
             Self::IntSignAsFloat => signature(&[Type::Int], Type::Float),
+            Self::PairTable(op) => {
+                use crate::ir::PairTableOp::*;
+                let table = if matches!(op, New) {
+                    result
+                } else if let Some(arg) = args.first() {
+                    arg.ty
+                } else {
+                    return Err("pair table receiver is missing");
+                };
+                let shape = types
+                    .element(table)
+                    .and_then(|row| types.element(row))
+                    .and_then(|pair| types.fields(pair));
+                shape.as_deref() == Some(&[Type::Int, Type::Int])
+                    && match op {
+                        New => signature(&[], table),
+                        AddRow => signature(&[table], Type::None),
+                        Index | Snapshot(_) | RowLen | ViewLen(_) => {
+                            signature(&[table, Type::Int], Type::Int)
+                        }
+                        Push => signature(&[table, Type::Int, Type::Int, Type::Int], Type::None),
+                        Len => signature(&[table], Type::Int),
+                        Field(field) | ViewField(_, field) => {
+                            *field < 2 && signature(&[table, Type::Int, Type::Int], Type::Int)
+                        }
+                    }
+            }
+            Self::SplitIntSource(mask) => {
+                mask.count_ones() >= 2 && signature(&[Type::Str], Type::Str)
+            }
+            Self::SplitIntCached(index) => {
+                *index < 8
+                    && matches!(
+                        args,
+                        [Expr {
+                            kind: ExprKind::Local(_),
+                            ..
+                        }]
+                    )
+                    && signature(&[Type::Str], Type::Int)
+            }
+            Self::SplitIntField(_) => signature(&[Type::Str], Type::Int),
+            Self::MatchingSplitIter(_) => {
+                signature(&[Type::Str, Type::Str, Type::Int], Type::Iterator)
+            }
             Self::SplitLinesIter => signature(&[Type::Str], Type::Iterator),
             Self::FunctionWrappedSet => {
                 matches!(result, Type::Callable(_)) && signature(&[result, result], result)
@@ -1236,6 +1291,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_codec_writer_control"
                 | "imre_hash_type"
                 | "imre_hash_new"
+                | "imre_hash_update"
                 | "imre_hash_update_file"
                 | "imre_sha1_new"
                 | "imre_sha256_new"

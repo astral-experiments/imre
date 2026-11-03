@@ -1,5 +1,16 @@
 from unittest import TestCase
-from unittest.mock import DEFAULT, Mock
+from unittest.mock import CallableMixin, DEFAULT, Mock, NonCallableMock
+
+class Composed(CallableMixin, NonCallableMock):
+    pass
+
+
+assert Mock.__call__ is CallableMixin.__call__
+assert not issubclass(NonCallableMock, CallableMixin)
+composed = Composed(side_effect=[7])
+assert composed(3) == 7
+composed.assert_called_once_with(3)
+assert isinstance(composed.child, Composed) and isinstance(composed.return_value, Composed)
 
 check = TestCase()
 error = ValueError("from iterator")

@@ -69,3 +69,11 @@ def factory_bases():
     assert cls.__bases__ == (Base, Other)
     assert cls.__mro__ == (cls, Base, Other, object)
     assert isinstance(cls(3), Base) and cls(3).n == 3
+
+    class Alias:
+        def __mro_entries__(self, bases):
+            return (Other,)
+
+    alias = Alias()
+    child = make_dataclass("Child", [], bases=(alias,))
+    assert child.__orig_bases__ == (alias,) and isinstance(child(), Other)

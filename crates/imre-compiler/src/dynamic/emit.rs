@@ -191,8 +191,8 @@ impl Output {
             statements::type_parameters::check_nonlocals(source, &body)
                 .map_err(|error| format!("{}:{error}", path.display()))?;
         }
-        if let Some((expr, reason)) = imre_ast::type_alias_error(&body) {
-            let error = crate::frontend::error(source, expr, &format!("SyntaxError: {reason}"));
+        if let Some((range, reason)) = imre_ast::type_alias_error(&body) {
+            let error = crate::frontend::error(source, &range, &format!("SyntaxError: {reason}"));
             return Err(format!("{}:{error}", path.display()));
         }
         if let Some(param) = &private_names.duplicate_type_parameter {
@@ -235,7 +235,12 @@ impl Output {
                 .map(|(offset, _)| offset)
                 .collect(),
         };
-        Ok(self.code(&location, String::new(), Body::Namespace(&body), false))
+        Ok(self.code(
+            &location,
+            String::new(),
+            Body::Namespace(&body, false),
+            false,
+        ))
     }
 }
 
@@ -245,7 +250,7 @@ enum DefinitionName<'a> {
 }
 
 enum Body<'a> {
-    Namespace(&'a [ast::Stmt]),
+    Namespace(&'a [ast::Stmt], bool),
     Statements(&'a [ast::Stmt]),
     /// A suspended suite and its generator, coroutine, or async generator code flag.
     GeneratorFunction(&'a [ast::Stmt], u32),
@@ -393,7 +398,7 @@ impl Output {
     ) -> String {
         let name = format!("@code{}", self.count);
         self.count += 1;
-        let module = matches!(body, Body::Namespace(_)) && prefix.is_empty();
+        let module = matches!(body, Body::Namespace(..)) && prefix.is_empty();
         let mut f = Function {
             output: self,
             source,
@@ -404,7 +409,7 @@ impl Output {
             declared_globals: Default::default(),
             annotation_lookup: false,
             class_locals: match &body {
-                Body::Namespace(stmts) if !prefix.is_empty() => {
+                Body::Namespace(stmts, _) if !prefix.is_empty() => {
                     Some(statements::class_locals(stmts))
                 }
                 _ => None,
@@ -425,7 +430,7 @@ impl Output {
             expression_line: 0,
         };
         match body {
-            Body::Namespace(stmts) => {
+            Body::Namespace(stmts, _) => {
                 if module && imre_ast::annotations::has_variable_annotation(stmts) {
                     if source.string_annotations {
                         f.op("setup_module_string_annotations", &[&f.scope.clone()]);

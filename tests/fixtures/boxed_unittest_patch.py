@@ -1,5 +1,6 @@
 import sys
-from unittest.mock import DEFAULT, Mock, patch, sentinel
+from unittest import TestCase
+from unittest.mock import DEFAULT, InvalidSpecError, Mock, call, patch, sentinel
 
 assert DEFAULT is sentinel.DEFAULT
 assert sentinel.value is sentinel.value and sentinel.value is not DEFAULT
@@ -184,5 +185,100 @@ try:
     assert CustomPrefix().test_inherited() is original_stdout
 finally:
     patch.TEST_PREFIX = "test"
+
+class Service:
+    resource = Owner
+
+
+check = TestCase()
+class AlreadyMocked(Mock):
+    @property
+    def __func__(self):
+        raise AssertionError("patch inspected an existing mock as a function")
+
+
+with patch.object(Service, "resource", AlreadyMocked()):
+    with check.assertRaises(InvalidSpecError):
+        with patch.object(Service, "resource", spec=True):
+            pass
+
+with patch.object(Service, "resource", spec_set=True, new_callable=dict, label="service") as options:
+    assert options == {"spec_set": Owner, "label": "service"}
+with patch.object(Service, "resource", spec=Owner, spec_set=1, new_callable=dict) as options:
+    assert options == {"spec": Owner, "spec_set": 1}
+assert Service.resource is Owner
+
+
+class CallableResource:
+    def __call__(self, code):
+        pass
+
+
+labels = []
+
+
+class LabeledMock(Mock):
+    def __init__(self, *, label, **kwargs):
+        labels.append(label)
+        kwargs.setdefault("name", "named-instance")
+        super().__init__(**kwargs)
+
+
+Service.resource = CallableResource
+with patch.object(Service, "resource", spec=True, new_callable=LabeledMock, label="resource") as factory:
+    instance = factory()
+    instance.return_value = "done"
+    assert instance(7) == "done"
+    assert factory.mock_calls == [call(), call()(7)]
+assert labels == ["resource", "resource"]
+assert Service.resource is CallableResource
+Service.resource = Owner
+
+named = Mock(name="independent")
+parent = Mock(return_value=named)
+assert parent() is named
+named(3)
+assert parent.mock_calls == [call()]
+
+manual = patch.object(Service, "resource", spec_set=True)
+with manual as factory:
+    assert manual.stop() is None and Service.resource is factory
+    with check.assertRaises(RuntimeError):
+        manual.start()
+assert Service.resource is Owner
+
+factory = manual.start()
+handle = factory()
+assert not callable(handle)
+handle.value(3)
+assert factory.mock_calls == [call(), call().value(3)]
+with check.assertRaises(AttributeError):
+    handle.extra = 4
+assert manual.stop() is False and Service.resource is Owner
+assert manual.stop() is None
+
+missing = patch.object(Service, "missing", create=True, spec=True)
+with check.assertRaises(TypeError):
+    missing.start()
+assert missing.stop() is None and not hasattr(Service, "missing")
+
+with patch.object(Service, "resource", None, spec=True) as explicit:
+    assert explicit is None
+with patch.object(Service, "resource", spec=False) as unrestricted:
+    unrestricted.extra()
+with patch.object(Service, "resource", spec=["read", "__call__"]) as reader:
+    reader().read()
+    assert reader.mock_calls == [call(), call().read()]
+
+@patch.object(Service, "resource", spec_set=["read"])
+class ReaderTests:
+    def test_spec(self, reader):
+        assert not callable(reader)
+        reader.read()
+        with check.assertRaises(AttributeError):
+            reader.extra = True
+
+ReaderTests().test_spec()
+assert Service.resource is Owner
 
 print("patch restored")

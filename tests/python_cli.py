@@ -1124,7 +1124,7 @@ def check_pickle_reductions(imre, root, run):
 
         obj = LabeledTuple((3, 4))
         obj.label = {"back": obj}
-        streams = [pickle.dumps((obj, obj.label), protocol) for protocol in range(6)]
+        streams = [pickle.dumps((obj, obj.label, bytearray(b"\0\xff")), protocol) for protocol in range(6)]
         entry.write_text(
             "from boxed_pickle_reduction import consume, produce\n"
             f"consume({streams!r})\nproduce()\n"
@@ -1149,6 +1149,10 @@ def check_pickle_reductions(imre, root, run):
                 payload = bytes(range(256))
                 assert value[7] == (b"", payload[:-1], payload, payload, ("rebuilt", protocol))
                 assert value[7][2] is value[7][3]
+                empty, mutable, alias, reduced = value[10]
+                assert type(empty) is bytearray and not empty
+                assert type(mutable) is bytearray and mutable == payload and mutable is alias
+                assert reduced == ("rebuilt", protocol)
                 mapping = value[9]
                 assert list(mapping) == ["z", "a", "m"] and mapping["m"] == 42
                 assert mapping["z"] is mapping and mapping.state is mapping["a"]
@@ -1229,9 +1233,12 @@ def check_unittest_module_main(imre, root, run):
     (package / "sample.py").write_text(
         "import unittest\n"
         "import os, sys\n"
+        "from fractions import Fraction\n"
         "class Passing(unittest.TestCase):\n"
         "    def test_one(self):\n"
         "        self.assertEqual(sys.argv[0], os.path.basename(sys.executable) + ' -m unittest')\n"
+        "        self.assertEqual((Fraction('6/8') + Fraction(1, 6)).as_integer_ratio(), (11, 12))\n"
+        "        self.assertRaises(ZeroDivisionError, Fraction, '1/0')\n"
         "        print(self.id())\n"
         "class Failing(unittest.TestCase):\n"
         "    def test_one(self): self.fail('deliberate failure')\n"
@@ -1620,6 +1627,21 @@ def main():
             for prefix in ("", "sub/"):
                 app.writestr(prefix + "__main__.py", (entry / "__main__.py").read_text())
                 app.writestr(prefix + "sibling.py", f"marker = {prefix!r}\n")
+        malformed = root / "malformed.py"
+        for source, line, diagnostic in (
+            (b"# header\r\n\r\ns='\xff'\n", 3, b"Non-UTF-8 code starting with '\\xff'"),
+            (b"# comment\r# coding: utf-8\rs='\xe9x'\r", 3,
+             b"(unicode error) 'utf-8' codec can't decode byte 0xe9 in position 3"),
+            (b"# ok\r\n# coding: utf-8 \xff\n", 2,
+             b"(unicode error) 'utf-8' codec can't decode byte 0xff in position 21"),
+        ):
+            malformed.write_bytes(source)
+            for exe in (sys.executable, imre):
+                failed = run(exe, "-B", malformed)
+                assert (failed.returncode, failed.stdout) == (1, b""), failed
+                assert f'File "{malformed}", line {line}'.encode() in failed.stderr, failed
+                assert b"SyntaxError: " + diagnostic in failed.stderr, failed
+
         # A .pyc operand is never Python source, even when its bytes form a valid script.
         bytecode = root / "not_source.pyc"
         bytecode.write_text("print('executed as source')\n")
@@ -1691,6 +1713,41 @@ def main():
             "    print(t.string, t.exact_type)\n"
         )
         compare("-B", tokenize_script)
+
+        pyio_script = root / "pyio_entry.py"
+        pyio_script.write_text(
+            "import io, _pyio\n"
+            "assert io.BytesIO is not _pyio.BytesIO\n"
+            "for stream in (io.BytesIO, _pyio.BytesIO):\n"
+            "    with stream(b'abc') as buf:\n"
+            "        print(stream.__module__, buf.read())\n"
+        )
+        compare("-I", pyio_script, native_timeout=600)
+        compare(
+            "-I", "-c", "import sys; print(__import__(sys.argv[1]).BytesIO(b'abc').read())",
+            "_pyio", native_timeout=600,
+        )
+
+        pyio_project = root / "pyio_project"
+        pyio_project.mkdir()
+        (pyio_project / "_pyio.py").write_text("marker = 'local provider'\n")
+        local_script = pyio_project / "entry.py"
+        local_script.write_text("import _pyio\nprint(_pyio.marker)\n")
+        compare("-B", local_script)
+
+        config_script = root / "config_entry.py"
+        config_script.write_text(
+            "from configparser import ConfigParser\n"
+            "config = ConfigParser()\n"
+            "config.read_string('[DEFAULT]\\nroot=/opt\\n[app]\\npath=%(root)s/bin')\n"
+            "print(config['app']['path'])\n"
+        )
+        config_env = {"IMREFLAGS": "--opt-level 0"}
+        compare("-B", config_script, extra=config_env, native_timeout=600)
+        compare(
+            "-B", "-c", "import sys; print(__import__(sys.argv[1]).ConfigParser.__name__)",
+            "configparser", extra=config_env, native_timeout=600,
+        )
 
         ftp_script = root / "ftp_entry.py"
         ftp_script.write_text("import ftplib\nprint(ftplib.FTP().encoding, ftplib.parse257('257 \"home\"'))\n")
@@ -1966,6 +2023,13 @@ def main():
             "from io import text_encoding\n__name__ = None\nprint(text_encoding(None, 1))",
         )
 
+        for statement, error in (
+            ("del (0.0).imag", "AttributeError"),
+            ("float.real = 1", "TypeError"),
+            ("del float.imag", "TypeError"),
+        ):
+            compare("-c", f"try:\n    {statement}\nexcept {error} as exc:\n    print(exc)")
+
         subset_method = root / "set_issubset.py"
         for statement in (
             "print({1, 2}.issubset([2, 1]))",
@@ -2124,6 +2188,21 @@ def main():
             "print(textwrap.wrap('one two three', width=5), textwrap.shorten('one two three', 9))",
         )
 
+        compare(
+            "-IB", "-c",
+            "from copy import copy, deepcopy\n"
+            "from functools import lru_cache\n"
+            "class C:\n"
+            "    @lru_cache()\n"
+            "    def f(self): pass\n"
+            "wrapped = C.f\n"
+            "assert copy(wrapped) is deepcopy(wrapped) is wrapped\n"
+            "assert wrapped.__reduce__() == 'C.f'\n"
+            "for owner in (type(wrapped), wrapped):\n"
+            "    assert owner.__reduce__.__text_signature__ == '($self, /)'\n"
+            "    assert owner.__copy__.__text_signature__ is owner.__deepcopy__.__text_signature__ is None\n",
+            native_timeout=300,
+        )
         getters = Path(__file__).with_name("fixtures") / "typed_attrgetter"
         compare("-IB", getters / "fields.py")
         compare("-B", getters / "main.py")
@@ -2142,6 +2221,7 @@ def main():
         compare("-IB", Path(__file__).with_name("fixtures") / "boxed_update_wrapper.py")
         compare("-IB", Path(__file__).with_name("fixtures") / "boxed_tracebacks.py")
         compare("-IB", Path(__file__).with_name("fixtures") / "inspect_trace.py")
+        compare("-IB", Path(__file__).with_name("fixtures") / "boxed_traceback_links.py")
         compare("-IB", Path(__file__).with_name("fixtures") / "boxed_print_traceback.py")
         compare("-IB", "-c", "import operator as op\nprint(op.attrgetter('upper')('method')())")
 
@@ -2592,6 +2672,30 @@ def report(text):
         compare("-IB", "-c", uuid_import + "print(hasattr(uuid, '__path__'), str(uuid.UUID(int=0)))")
         (helpers / "uuid.py").write_text("marker = 'explicit search path'\n")
         compare("-IB", "-c", uuid_import + "print(uuid.marker)")
+        compare(
+            "-B", "-c",
+            "import importlib, os, sys\n"
+            "name = sys.argv[1]\n"
+            "module = importlib.import_module(name)\n"
+            "value = module.uuid4()\n"
+            "assert value.version == 4 and value.variant == module.RFC_4122\n"
+            "assert value.bytes == value.int.to_bytes(16, 'big')\n"
+            "def entropy(n):\n"
+            "    assert n == 16\n"
+            "    return bytes.fromhex('0123456789abbdef4123456789abcdef')\n"
+            "original = os.urandom\n"
+            "os.urandom = entropy\n"
+            "try:\n"
+            "    assert str(module.uuid4()) == '01234567-89ab-4def-8123-456789abcdef'\n"
+            "finally:\n"
+            "    os.urandom = original\n"
+            "del sys.modules[name]\n"
+            f"sys.path.insert(0, {str(helpers)!r})\n"
+            "print(importlib.import_module(name).marker)\n",
+            "uuid",
+            extra={"IMREFLAGS": "--opt-level 0"},
+            native_timeout=300,
+        )
 
         (helpers / "pprint.py").write_text("def incomplete(:\n")
         compare("-IB", "-c", f"import sys\nsys.path.insert(0, {str(helpers)!r})\nprint(__import__('sys').__name__)")
@@ -2796,6 +2900,8 @@ def report(text):
             else:
                 stats = fixtures / "ssl_session_stats.py"
                 compare("-IB", stats, native_args=("run", stats, "--quiet"), native_timeout=600)
+                wrappers = fixtures / "ssl_context_wrappers.py"
+                compare("-IB", wrappers, native_args=("run", wrappers, "--quiet"), native_timeout=600)
                 ciphers = fixtures / "ssl_context_ciphers.py"
                 compare("-IB", ciphers, native_args=("run", ciphers, "--quiet"), native_timeout=600)
                 bio = fixtures / "ssl_memory_bio.py"
@@ -2805,6 +2911,11 @@ def report(text):
                 flags = fixtures / "ssl_verify_flags.py"
                 compare("-IB", flags, native_args=("run", flags, "--quiet"), native_timeout=600)
                 certdata = fixtures.parents[1] / "benchmarks/cpython_stdlib/full/shared/upstream/Lib/test/certdata"
+                object_io = fixtures / "ssl_object_io.py"
+                compare(
+                    "-IB", object_io, certdata,
+                    native_args=("run", object_io, "--quiet", "--", certdata), native_timeout=600,
+                )
                 unwrap = fixtures / "ssl_object_unwrap.py"
                 compare(
                     "-IB", unwrap, certdata,
@@ -2877,7 +2988,8 @@ def report(text):
             "boxed_threading_deprecated_accessors.py",
             "boxed_lowlevel_thread.py", "boxed_lowlevel_thread_roots.py",
             "boxed_thread_dangling.py", "boxed_threading_rlock.py", "boxed_indirect_threading_rlock.py",
-            "boxed_threading_condition_event.py", "boxed_thread_captured_lock.py",
+            "boxed_threading_condition_event.py", "boxed_threading_timer.py",
+            "boxed_thread_captured_lock.py",
             "boxed_thread_bound_lock.py", "boxed_thread_argument_lifetime.py",
             "boxed_thread_captured_acquire.py",
             "boxed_thread_finalization.py",
@@ -3085,6 +3197,7 @@ for name in ("md4", "ripemd160"):
             "boxed_inspect_stack.py",
             "boxed_inspect_unwrap.py",
             "boxed_inspect_isroutine.py",
+            "boxed_inspect_isabstract.py",
             "boxed_numeric_repr.py",
             "boxed_decimal_hash.py",
             "boxed_recursive_repr.py",
@@ -3263,6 +3376,7 @@ for name in ("md4", "ripemd160"):
             "boxed_binary_bytes_paths.py",
             "boxed_buffered_readlines.py",
             "boxed_os_eventfd.py",
+            "boxed_os_timerfd.py",
             "boxed_os_descriptor_io.py",
             "boxed_os_ftruncate.py",
             "boxed_os_lockf.py",
@@ -3405,6 +3519,7 @@ for name in ("md4", "ripemd160"):
             "boxed_unittest_return_warning.py",
             "boxed_unittest_runner_warnings.py",
             "boxed_unittest_runner_durations.py",
+            "boxed_unittest_base_suite.py",
             "boxed_unittest_class_cleanup.py",
             "boxed_pathlib.py",
             "boxed_posixpath.py",
@@ -3648,6 +3763,9 @@ else:
             child_callbacks = libc == "glibc" and tuple(map(int, version.split(".")[:2])) >= (2, 32)
             compare("-IB", "-c", imports + f"arithmetic.current({child_callbacks})")
             if child_callbacks:
+                plugin.write_bytes((fixtures / "boxed_os_fork.py").read_bytes())
+                compare("-IB", "-c", imports + "arithmetic.current()")
+                compare("-IB", "-c", imports + "arithmetic.threaded_spawn()")
                 plugin.write_bytes((fixtures / "boxed_subprocess_preexec.py").read_bytes())
                 compare("-IB", "-c", imports + "arithmetic.current()")
             plugin.write_bytes((fixtures / "boxed_posix_fadvise.py").read_bytes())

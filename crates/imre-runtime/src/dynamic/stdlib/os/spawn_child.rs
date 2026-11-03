@@ -1,14 +1,27 @@
-//! Private child continuation for spawn when exec may run Python callbacks.
+//! Fork with a verified single surviving interpreter thread.
 
 use super::Context;
+use crate::dynamic::at_fork;
 use crate::objects::exceptions::{Error, Kind, Result};
 use std::{io, mem::MaybeUninit, ptr};
 
 fn unsupported() -> Error {
     Error::new(
         Kind::NotImplementedError,
-        "spawn with child-side Python requires a provably single-threaded glibc process",
+        "fork with child-side Python requires a provably single-threaded glibc process",
     )
+}
+
+fn single_thread_marker() -> *const libc::c_char {
+    // SAFETY: the optional glibc marker has static storage duration.
+    unsafe { libc::dlsym(libc::RTLD_DEFAULT, c"__libc_single_threaded".as_ptr()).cast() }
+}
+
+/// Older glibc and other Linux libcs lack the witness the interpreter requires.
+pub(in crate::dynamic) fn available() -> bool {
+    cfg!(target_env = "gnu")
+        && crate::objects::locks::native_thread_id() == u64::from(std::process::id())
+        && !single_thread_marker().is_null()
 }
 
 /// A positive glibc witness proves the process has never needed pthread locking
@@ -18,8 +31,8 @@ pub(super) fn glibc_proves_single_threaded() -> bool {
     // Resolve dynamically to keep runtimes usable with pre-2.32 glibc.
     cfg!(target_env = "gnu")
         && unsafe {
-            let marker = libc::dlsym(libc::RTLD_DEFAULT, c"__libc_single_threaded".as_ptr());
-            !marker.is_null() && *marker.cast::<libc::c_char>() != 0
+            let marker = single_thread_marker();
+            !marker.is_null() && *marker != 0
         }
 }
 
@@ -32,6 +45,11 @@ pub(super) fn glibc_proves_single_threaded() -> bool {
 pub(in crate::dynamic::stdlib) fn fork_for_child_callbacks(
     ctx: &mut Context,
 ) -> Result<libc::pid_t> {
+    at_fork::around(ctx, fork_current)
+}
+
+/// Recheck after Python before-handlers, which can start new workers.
+pub(super) fn fork_current(ctx: &mut Context) -> Result<libc::pid_t> {
     if ctx.threads.private_context
         || !crate::signals::is_main()
         || crate::objects::locks::native_thread_id() != u64::from(std::process::id())

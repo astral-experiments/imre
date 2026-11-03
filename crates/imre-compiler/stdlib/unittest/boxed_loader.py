@@ -152,96 +152,6 @@ del getTestCaseNames, loadTestsFromTestCase, loadTestsFromModule
 defaultTestLoader = TestLoader()
 
 
-import os
-
-
-# From CPython 3.14.5 Lib/unittest/main.py. See ../docstrings/LICENSE.
-def _convert_name(name):
-    # on Linux / Mac OS X 'foo.PY' is not importable, but on
-    # Windows it is. Simpler to do a case insensitive match
-    # a better check would be to check that the name is a
-    # valid Python module name.
-    if os.path.isfile(name) and name.lower().endswith('.py'):
-        if os.path.isabs(name):
-            rel_path = os.path.relpath(name, os.getcwd())
-            if os.path.isabs(rel_path) or rel_path.startswith(os.pardir):
-                return name
-            name = rel_path
-        # on Windows both '\' and '/' are used as path
-        # separators. Better to replace both than rely on os.path.sep
-        return os.path.normpath(name)[:-3].replace('\\', '.').replace('/', '.')
-    return name
-
-
-def _main_option(arg):
-    # argparse recognizes a known option before treating strings with spaces as names.
-    if arg[:2] in ("-k", "-v", "-q", "-f"):
-        return True
-    if "=" in arg and arg.partition("=")[0] in ("--verbose", "--quiet", "--failfast"):
-        return True
-    return (arg.startswith("-") and arg != "-" and " " not in arg
-            and not re.match(r"-\.?\d", arg))
-
-
-def main(module="__main__"):
-    runner = _MainRunner()
-    names = []
-    patterns = []
-    extras = []
-    names_finished = False
-    args = iter(sys.argv[1:])
-    for arg in args:
-        if arg == "--":
-            if names_finished:
-                extras.append(arg)
-                extras.extend(args)
-            else:
-                names.extend(args)
-            break
-        if not _main_option(arg):
-            (extras if names_finished else names).append(arg)
-            continue
-        # The positional `tests` argument is a single group. Options may precede or follow it.
-        names_finished = bool(names)
-        if arg.startswith("--"):
-            runner._setOption(next((flag for flag in ("--verbose", "--quiet", "--failfast")
-                                    if flag.startswith(arg)), arg))
-            continue
-        for i, flag in enumerate(arg[1:], 2):
-            if flag != "k":
-                runner._setOption("-" + flag)
-                continue
-            pattern = arg[i:]
-            if pattern:
-                pattern = pattern.removeprefix("=")
-            else:
-                pattern = next(args, None)
-                if pattern is None or _main_option(pattern):
-                    print("argument -k: expected one argument", file=sys.stderr)
-                    sys.exit(2)
-            patterns.append(pattern if "*" in pattern else "*" + pattern + "*")
-            break
-    if extras:
-        print("unrecognized arguments: " + " ".join(extras), file=sys.stderr)
-        sys.exit(2)
-    if patterns:
-        defaultTestLoader.testNamePatterns = patterns
-    if isinstance(module, str):
-        module = __import__(module, fromlist=["__name__"])
-    if names:
-        suite = defaultTestLoader.loadTestsFromNames([_convert_name(name) for name in names], module)
-    elif module is None:
-        suite = defaultTestLoader.discover(".")
-    else:
-        suite = defaultTestLoader.loadTestsFromModule(module)
-    result = TextTestRunner(verbosity=runner.verbose, failfast=runner.failfast).run(suite)
-    if not result.wasSuccessful():
-        sys.exit(1)
-    if not result.testsRun and not result.skipped:
-        sys.exit(5)
-    sys.exit(0)
-
-
 import unittest.case as case
 from unittest.case import addModuleCleanup, doModuleCleanups, enterModuleContext, expectedFailure
 
@@ -249,6 +159,7 @@ TestCase._addExpectedFailure = case._addExpectedFailure
 TestCase._addUnexpectedSuccess = case._addUnexpectedSuccess
 
 from unittest import loader, signals, util
+from unittest.main import TestProgram, main
 from unittest.signals import registerResult, removeResult
 
 

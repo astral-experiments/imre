@@ -965,6 +965,15 @@ ACCEPTED = {
         "orchard/leaf.py": "print('leaf init')\nmarker = 47\n",
         "unrelated.py": "invalid syntax for an unrelated source file!\n",
     },
+    "boxed_unittest_lazy_import": {
+        "main.py": (
+            "import sys\nimport unittest\n\n"
+            "print(unittest.TestCase.__name__, 'unittest.async_case' in sys.modules)\n"
+        ),
+        # A multiprocessing cleanup helper behind unittest's lazy getter imports test.support.
+        "test/__init__.py": "",
+        "test/support/__init__.py": "from importlib.machinery import ModuleSpec\n",
+    },
     "boxed_unittest_package": {
         "main.py": (
             "from importlib import import_module\nimport sys\nimport unittest\n"
@@ -1476,6 +1485,7 @@ def main() -> None:
                     command.append("--sanitize")
                 # Optimizing these bundled-module integration cases can take several minutes.
                 slow_optimized = name in {
+                    "boxed_unittest_lazy_import",
                     "email_address_parsers", "filesystem_resources", "fractions_indirect",
                     "optional_stdlib_probe_in_dependency", "platform_iot_indirect", "record_warnings",
                     "warn_named_helper", "zip_source_spec",

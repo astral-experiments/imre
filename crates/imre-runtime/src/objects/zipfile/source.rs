@@ -2,34 +2,69 @@
 //! descriptor; caller-supplied streams are retained without taking close ownership.
 
 use crate::ObjectOwner;
+use std::cell::RefCell;
 use std::fs::File;
-use std::io::{self, Read, Seek, SeekFrom};
-use std::os::unix::fs::FileExt;
+use std::io::{self, BufReader, Read, Seek, SeekFrom};
+use std::os::unix::fs::MetadataExt;
 
 use super::{Error, Info, Object, Result, directory, files};
 use crate::objects::exceptions::Kind;
 
+/// Member handles share one buffered file. Each handle supplies its own absolute offset.
+pub(super) struct Disk {
+    reader: BufReader<File>,
+    // Directory reads and failed I/O leave the next offset unknown.
+    next: Option<u64>,
+}
+
+impl Disk {
+    fn read_at(&mut self, at: u64, mut buf: &mut [u8]) -> io::Result<usize> {
+        let previous = self.next.take();
+        if let Some(delta) = previous.and_then(|p| at.checked_signed_diff(p)) {
+            self.reader.seek_relative(delta)?;
+        } else {
+            self.reader.seek(SeekFrom::Start(at))?;
+        }
+        let mut n = 0;
+        while !buf.is_empty() {
+            match self.reader.read(buf) {
+                Ok(0) => break,
+                Ok(read) => {
+                    n += read;
+                    buf = &mut buf[read..];
+                }
+                Err(err) if err.kind() == io::ErrorKind::Interrupted => continue,
+                Err(err) => return Err(err),
+            }
+        }
+        self.next = Some(at + n as u64);
+        Ok(n)
+    }
+}
+
 #[derive(Clone)]
 pub(super) enum Source {
-    Owned(crate::Shared<File>),
+    Owned(crate::Shared<RefCell<Disk>>),
     Borrowed(ObjectOwner),
 }
 
 impl Source {
     /// Open a path-backed archive independently of any cached directory.
     pub(super) fn open(path: &str) -> Result<Self> {
-        let (file, _) = files::open_file(path, 0)?;
-        crate::Shared::try_new(file)
-            .map(Self::Owned)
-            .map_err(|_| Error::allocation())
+        let (file, metadata) = files::open_file(path, 0)?;
+        let size = crate::text_output::binary_capacity(metadata.blksize().into());
+        crate::Shared::try_new(RefCell::new(Disk {
+            reader: BufReader::with_capacity(size, file),
+            next: None,
+        }))
+        .map(Self::Owned)
+        .map_err(|_| Error::allocation())
     }
 
     /// Resolve an absolute archive position using the backing stream's seek rules.
     pub(super) fn absolute_offset(&self, offset: i128) -> Result<u64> {
         match self {
-            Self::Owned(file) => (&**file)
-                .seek(SeekFrom::Start(files::disk_offset(offset)?))
-                .map_err(files::errno_error),
+            Self::Owned(_) => files::disk_offset(offset),
             Self::Borrowed(object) => {
                 // SAFETY: the archive retains the binary stream during validation.
                 unsafe { object.0.with_mut(|s| s.file_mut().absolute_offset(offset)) }
@@ -39,7 +74,11 @@ impl Source {
 
     pub(super) fn directory(&self) -> Result<Vec<Info>> {
         match self {
-            Self::Owned(file) => directory::entries(&mut &**file),
+            Self::Owned(disk) => {
+                let mut disk = disk.borrow_mut();
+                disk.next = None;
+                directory::entries(&mut disk.reader)
+            }
             Self::Borrowed(object) => {
                 let mut cursor = BorrowedCursor {
                     object,
@@ -72,12 +111,10 @@ impl Source {
 
     pub(super) fn read(&self, at: u64, buf: &mut [u8]) -> Result<usize> {
         match self {
-            Self::Owned(file) => loop {
-                match file.read_at(buf, at) {
-                    Err(err) if err.kind() == io::ErrorKind::Interrupted => continue,
-                    result => return result.map_err(files::errno_error),
-                }
-            },
+            Self::Owned(disk) => disk
+                .borrow_mut()
+                .read_at(at, buf)
+                .map_err(files::errno_error),
             Self::Borrowed(object) => {
                 // SAFETY: the archive owns the input object and no callbacks run.
                 unsafe {

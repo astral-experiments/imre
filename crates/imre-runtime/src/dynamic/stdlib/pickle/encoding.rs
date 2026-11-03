@@ -220,9 +220,9 @@ fn legacy_global<'a>(module: &'a str, name: &'a str) -> Result<(&'a str, &'a str
             "zip" => ("itertools", "izip"),
             "map" => ("itertools", "imap"),
             "filter" => ("itertools", "ifilter"),
-            "bool" | "bytes" | "complex" | "dict" | "float" | "frozenset" | "getattr" | "iter"
-            | "list" | "object" | "set" | "slice" | "super" | "tuple" | "type" | "Ellipsis"
-            | "NotImplemented" => ("__builtin__", name),
+            "bool" | "bytearray" | "bytes" | "complex" | "dict" | "float" | "frozenset"
+            | "getattr" | "iter" | "list" | "object" | "set" | "slice" | "super" | "tuple"
+            | "type" | "Ellipsis" | "NotImplemented" => ("__builtin__", name),
             _ if builtins::is_builtin_function(name) => ("__builtin__", name),
             _ => return Err(unsupported()),
         });

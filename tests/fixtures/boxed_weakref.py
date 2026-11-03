@@ -82,6 +82,12 @@ def proxy_repr():
 
 
 def current():
+    import _datetime
+
+    # A registered module survives when its last user-owned weak reference goes away.
+    before = getweakrefcount(_datetime)
+    assert [ref(_datetime, lambda unused: None)] and getweakrefcount(_datetime) == before
+
     proxy_repr()
     proxy_length()
     iterate_proxy()

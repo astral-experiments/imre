@@ -14,7 +14,7 @@ except ImportError:
     from collections import deque as _deque
 
 
-__all__ = ["Thread", "ThreadError", "Lock", "RLock", "Condition", "Event", "Semaphore", "BoundedSemaphore",
+__all__ = ["Thread", "ThreadError", "Lock", "RLock", "Condition", "Event", "Timer", "Semaphore", "BoundedSemaphore",
            "Barrier", "BrokenBarrierError", "TIMEOUT_MAX", "local", "get_ident",
            "ExceptHookArgs", "excepthook", "main_thread", "current_thread", "enumerate", "active_count"]
 try:
@@ -962,6 +962,35 @@ except ImportError:
 
 # Original value of threading.excepthook
 __excepthook__ = excepthook
+
+
+# CPython 3.14.5, Lib/threading.py. See stdlib/docstrings/LICENSE.
+class Timer(Thread):
+    """Call a function after a specified number of seconds:
+
+            t = Timer(30.0, f, args=None, kwargs=None)
+            t.start()
+            t.cancel()     # stop the timer's action if it's still waiting
+
+    """
+
+    def __init__(self, interval, function, args=None, kwargs=None):
+        Thread.__init__(self)
+        self.interval = interval
+        self.function = function
+        self.args = args if args is not None else []
+        self.kwargs = kwargs if kwargs is not None else {}
+        self.finished = Event()
+
+    def cancel(self):
+        """Stop the timer if it hasn't finished yet."""
+        self.finished.set()
+
+    def run(self):
+        self.finished.wait(self.interval)
+        if not self.finished.is_set():
+            self.function(*self.args, **self.kwargs)
+        self.finished.set()
 
 
 class _MainThread(Thread):

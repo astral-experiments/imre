@@ -2,7 +2,7 @@
 
 Imre checks every name in the [CPython 3.14.5](https://github.com/python/cpython/tree/5607950ef232dad16d75c0cf53101d9649d89115/Lib) top-level module registry (`sys.stdlib_module_names`) on Linux. The first tables cover 194 names without a leading underscore; [the appendix](#names-beginning-with-an-underscore) covers the other 103. Dotted APIs such as `os.path` appear under their parent.
 
-**At a glance:** 124 of 297 modules accept an ordinary import; 1 more accept it only with `--reachable-only`. Across 44 modules with recorded suites, 295 complete test executions pass natively at both optimization levels; 15,152 of 15,426 upstream executions have a classification.
+**At a glance:** 134 of 297 modules accept an ordinary import; 1 more accept it only with `--reachable-only`. Across 44 modules with recorded suites, 295 complete test executions pass natively at both optimization levels; 15,152 of 15,426 upstream executions have a classification.
 
 **Import** checks an otherwise empty file containing `import module`, in ordinary and reachable-only compilation. A successful import does not establish that any function works. Follow the evidence links for the supported operations and their limits.
 
@@ -48,10 +48,12 @@ The last two columns show where CPython still helps at O3. **CPython fixture**: 
 | `faulthandler` | Yes | No API example recorded. | — | — | — |
 | `fcntl` | Yes | No API example recorded. | — | — | — |
 | `fnmatch` | Yes | `fnmatch`, `fnmatchcase`, `filter`, `filterfalse` and `translate`. [Evidence](../benchmarks/cpython_stdlib/full/fnmatch/README.md) | [24 / 24](../benchmarks/cpython_stdlib/full/fnmatch/) | 0 | 0 |
+| `fractions` | Yes | No API example recorded. | — | — | — |
 | `functools` | Yes | Selected `partial`, caching decorators and dispatch operations. [Evidence](../benchmarks/cpython_stdlib/full/functools/EVIDENCE.md) | [0 / 329](../benchmarks/cpython_stdlib/full/functools/) | 18 | 17 |
 | `gc` | Yes | `collect()` and `collect(2)` reclaim unreachable native cycles and dispatch weak-reference callbacks. [Evidence](../tests/fixtures/boxed_gc_collect.py) | — | — | — |
 | `genericpath` | Yes | The genericpath companion suite is counted under `os`. [Evidence](../benchmarks/cpython_stdlib/full/os/README.md) | — | — | — |
 | `gettext` | Yes | Translate singular, plural and contextual messages from GNU MO catalogs selected by domain and language, with source-text fallback. [Evidence](../tests/fixtures/text/gettext_catalog.py) | [18 / 73](../benchmarks/cpython_stdlib/full/gettext/) | 6 | 0 |
+| `grp` | Yes | No API example recorded. | — | — | — |
 | `gzip` | Yes | Read text lines and binary chunks from gzip files. [Evidence](../tests/fixtures/files/stream_reads.py) | — | — | — |
 | `hashlib` | Yes | SHAKE-128 and SHAKE-256 extendable-output digests. MD5, SHA-1, SHA-2 and SHA-3 (224, 256, 384 and 512) construction, incremental updates, copy, digest and hexdigest. [BLAKE2b and BLAKE2s](../tests/fixtures/bytes/hashlib_blake2.py) support keyed hashing, configurable digest sizes and tree parameters. [Evidence](../benchmarks/cpython_stdlib/full/hashlib/README.md) | [0 / 82](../benchmarks/cpython_stdlib/full/hashlib/) | 2 | 0 |
 | `heapq` | Rejected | Runtime-imported min and max heaps and stable top-N selection by key. [Evidence](../tests/fixtures/boxed_heapq.py) | [— / 69 (0 assessed)](../benchmarks/cpython_stdlib/full/heapq/) | — | — |
@@ -69,6 +71,7 @@ The last two columns show where CPython still helps at O3. **CPython fixture**: 
 | `marshal` | Yes | Decode integer, bytes, boolean, and None records with `loads`. [Evidence](../tests/fixtures/boxed_bytecache.py) | — | — | — |
 | `math` | Yes | `prod` multiplies integer factors from iterables with an optional integer start. [Evidence](../tests/fixtures/iterables/math_product.py) | — | — | — |
 | `mimetypes` | Yes | Guess the MIME type and encoding of a filename or URL with POSIX host tables or a custom database. [Evidence](../benchmarks/cpython_stdlib/full/mimetypes/README.md) | [0 / 29](../benchmarks/cpython_stdlib/full/mimetypes/) | 7 | 10 |
+| `ntpath` | Yes | No API example recorded. | — | — | — |
 | `numbers` | Yes | Check typed numeric values and builtin classes against `Number` with `isinstance` and `issubclass`. [Evidence](../tests/fixtures/unions/numeric_membership.py) | — | — | — |
 | `opcode` | Yes | No API example recorded. | — | — | — |
 | `operator` | Yes | `length_hint` for supported iterators. [Evidence](../benchmarks/cpython_stdlib/full/itertools/repeat.py) | — | — | — |
@@ -79,6 +82,7 @@ The last two columns show where CPython still helps at O3. **CPython fixture**: 
 | `platform` | Yes | Read `system()`, `machine()`, and the running Python version from `python_version()`. [Evidence](../benchmarks/cpython_stdlib/interpreter_info.py) | — | — | — |
 | `posix` | Yes | Read and set supported POSIX user and group IDs; the companion suite is counted under `os`. [Evidence](../benchmarks/cpython_stdlib/full/os/CREDENTIALS.md) | — | — | — |
 | `posixpath` | Yes | POSIX `os.path` operations on strings and bytes; path tests are counted under `os`. [Evidence](../tests/fixtures/paths/os_path.py) | — | — | — |
+| `pwd` | Yes | No API example recorded. | — | — | — |
 | `py_compile` | Yes | No API example recorded. | — | — | — |
 | `queue` | Yes | No API example recorded. | — | — | — |
 | `random` | Yes | Seed the shared generator and draw floats, bits, integer ranges, and choices from supported sequences. [Evidence](../benchmarks/cpython_stdlib/full/shutil/random.md) | — | — | — |
@@ -94,6 +98,7 @@ The last two columns show where CPython still helps at O3. **CPython fixture**: 
 | `site` | Yes | `getsitepackages()` returns the site-packages directory under the interpreter’s prefix. [Evidence](../benchmarks/cpython_stdlib/interpreter_info.py) | — | — | — |
 | `socket` | Yes | Listen, connect, accept, and exchange bytes over IPv4 and IPv6 TCP. Runtime-imported IPv6 sockets accept numeric addresses and ASCII hostnames and return four-field endpoints. `has_dualstack_ipv6()` probes the kernel with a fresh IPv6 TCP socket. [Evidence](../tests/fixtures/socket/boxed/ipv6_stream.py) | [0 / 746](../benchmarks/cpython_stdlib/full/socket/) | 7 | 2 |
 | `socketserver` | Yes | Serve consecutive TCP clients with a polled listener and buffered request streams. [Evidence](../tests/fixtures/socketserver/boxed_stream.py) | [0 / 27](../benchmarks/cpython_stdlib/full/socketserver/) | 2 | 1 |
+| `ssl` | Yes | No API example recorded. | — | — | — |
 | `stat` | Yes | POSIX mode constants and predicates, permission masks and `filemode`. [Evidence](../benchmarks/cpython_stdlib/full/stat/README.md) | [0 / 22](../benchmarks/cpython_stdlib/full/stat/) | 0 | 18 |
 | `string` | Yes | Selected `Template` substitution, validation and identifier operations. [Evidence](../benchmarks/cpython_stdlib/full/string/README.md) | [15 / 54](../benchmarks/cpython_stdlib/full/string/) | 0 | 0 |
 | `struct` | Yes | Pack and unpack signed C longs (`l`) and counted pad bytes (`x`) in native or standard layouts. Pack and unpack unsigned timestamps with bound methods of `Struct(">Q")`, or read them with `unpack(">Q", data)`. [Evidence](../tests/fixtures/boxed_struct.py) | — | — | — |
@@ -107,6 +112,7 @@ The last two columns show where CPython still helps at O3. **CPython fixture**: 
 | `token` | Yes | No API example recorded. | — | — | — |
 | `tomllib` | Yes | Parse nested TOML tables and arrays from a binary stream with `load` or from a string with `loads`. [Evidence](../tests/fixtures/paths/toml_document.py) | — | — | — |
 | `traceback` | Yes | No API example recorded. | — | — | — |
+| `tracemalloc` | Yes | No API example recorded. | — | — | — |
 | `types` | Yes | Fixed-layout `SimpleNamespace` construction and attributes. [Evidence](../benchmarks/cpython_stdlib/full/types/README.md) | [0 / 129](../benchmarks/cpython_stdlib/full/types/) | 3 | 0 |
 | `typing` | Yes | Use selected annotations and aliases; register, look up and clear overloads for supported named functions. [Evidence](../benchmarks/cpython_stdlib/full/typing/README.md) | [0 / 712](../benchmarks/cpython_stdlib/full/typing/) | 3 | 2 |
 | `unicodedata` | Yes | Normalize Unicode scalar strings in NFC, NFD, NFKC and NFKD, and check whether they are normalized using Unicode 16. [Evidence](../tests/fixtures/text/unicodedata_normalize.py) | — | — | — |
@@ -141,13 +147,11 @@ Both import probes reject these names. No native API example or full-suite ledge
 | `ensurepip` |
 | `filecmp` |
 | `fileinput` |
-| `fractions` |
 | `ftplib` |
 | `getopt` |
 | `getpass` |
 | `glob` |
 | `graphlib` |
-| `grp` |
 | `html` |
 | `imaplib` |
 | `ipaddress` |
@@ -159,7 +163,6 @@ Both import probes reject these names. No native API example or full-suite ledge
 | `multiprocessing` |
 | `netrc` |
 | `nt` |
-| `ntpath` |
 | `nturl2path` |
 | `optparse` |
 | `pdb` |
@@ -170,7 +173,6 @@ Both import probes reject these names. No native API example or full-suite ledge
 | `profile` |
 | `pstats` |
 | `pty` |
-| `pwd` |
 | `pyclbr` |
 | `pydoc` |
 | `pydoc_data` |
@@ -186,7 +188,6 @@ Both import probes reject these names. No native API example or full-suite ledge
 | `sre_compile` |
 | `sre_constants` |
 | `sre_parse` |
-| `ssl` |
 | `statistics` |
 | `stringprep` |
 | `symtable` |
@@ -197,7 +198,6 @@ Both import probes reject these names. No native API example or full-suite ledge
 | `timeit` |
 | `tokenize` |
 | `trace` |
-| `tracemalloc` |
 | `tty` |
 | `venv` |
 | `wave` |
@@ -249,11 +249,15 @@ These include documented interfaces such as `__future__` and `_thread`, as well 
 | `_opcode` | Yes | `ENABLE_SPECIALIZATION` and `ENABLE_SPECIALIZATION_FT` are both zero for Imre’s native executables. [Evidence](../tests/fixtures/imports/opcode_flags.py) | — | — | — |
 | `_opcode_metadata` | Yes | No API example recorded. | — | — | — |
 | `_operator` | Yes | No API example recorded. | — | — | — |
+| `_pickle` | Yes | No API example recorded. | — | — | — |
 | `_sha3` | Yes | No API example recorded. | — | — | — |
 | `_signal` | Yes | No API example recorded. | — | — | — |
 | `_socket` | Yes | No API example recorded. | — | — | — |
+| `_ssl` | Yes | No API example recorded. | — | — | — |
 | `_string` | Yes | `formatter_parser` and `formatter_field_name_split` iterate format fields and their components. [Evidence](../tests/fixtures/text/formatter_ownership.py) | — | — | — |
 | `_thread` | Yes | No API example recorded. | — | — | — |
+| `_tracemalloc` | Yes | No API example recorded. | — | — | — |
+| `_warnings` | Yes | No API example recorded. | — | — | — |
 
 Both import modes reject the following names. They have no recorded API example or suite measurement.
 
@@ -299,7 +303,6 @@ Both import modes reject the following names. They have no recorded API example 
 | `_multiprocessing` |
 | `_osx_support` |
 | `_overlapped` |
-| `_pickle` |
 | `_posixshmem` |
 | `_posixsubprocess` |
 | `_py_abc` |
@@ -318,7 +321,6 @@ Both import modes reject the following names. They have no recorded API example 
 | `_sitebuiltins` |
 | `_sqlite3` |
 | `_sre` |
-| `_ssl` |
 | `_stat` |
 | `_statistics` |
 | `_strptime` |
@@ -329,11 +331,9 @@ Both import modes reject the following names. They have no recorded API example 
 | `_threading_local` |
 | `_tkinter` |
 | `_tokenize` |
-| `_tracemalloc` |
 | `_types` |
 | `_typing` |
 | `_uuid` |
-| `_warnings` |
 | `_weakref` |
 | `_weakrefset` |
 | `_winapi` |

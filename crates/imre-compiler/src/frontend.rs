@@ -2674,6 +2674,11 @@ impl<'a> Checker<'a> {
         None
     }
 
+    fn boxed_float_component(&self, attribute: &ast::ExprAttribute, receiver: Type) -> bool {
+        matches!(attribute.attr.as_str(), "real" | "imag")
+            && (receiver == Type::Float || self.unshadowed_builtin(&attribute.value, "float"))
+    }
+
     fn field_value(
         &self,
         attribute: &ast::ExprAttribute,
@@ -2692,6 +2697,9 @@ impl<'a> Checker<'a> {
         }
         if matches!(receiver.ty, Type::Coroutine(_)) && attribute.attr.as_str() == "cr_origin" {
             return Err(self.object_builtin_error("coroutine.cr_origin", attribute));
+        }
+        if self.boxed_float_component(attribute, receiver.ty) {
+            return Err(self.scoped_builtin_error("float components", attribute));
         }
         if receiver.ty == Type::BinaryIO && matches!(attribute.attr.as_str(), "name" | "mode") {
             return Err(self.object_builtin_error("binary file metadata", attribute));
@@ -3864,8 +3872,12 @@ impl<'a> Checker<'a> {
     }
 
     /// Checks an iterable in its current lexical scope, before target binding.
-    fn iteration_input(&mut self, expression: &ast::Expr) -> Result<Iteration, String> {
-        if let Some(input) = self.pipeline_input(expression, None)? {
+    fn iteration_input(
+        &mut self,
+        expression: &ast::Expr,
+        split_needle: Option<&str>,
+    ) -> Result<Iteration, String> {
+        if let Some(input) = self.pipeline_input(expression, None, split_needle)? {
             return Ok(input);
         }
         if let ast::Expr::Call(call) = expression
@@ -3919,7 +3931,7 @@ impl<'a> Checker<'a> {
         } else if let Some(input) = self.unpacked_list_enumeration(loop_)? {
             input
         } else {
-            self.iteration_input(&loop_.iter)?
+            self.iteration_input(&loop_.iter, self.split_guard(loop_))?
         };
         input = self.fuse_splitlines(input);
         if let Iteration::Container {
@@ -4930,6 +4942,9 @@ impl<'a> Checker<'a> {
                     }
                     if let ast::Expr::Attribute(attr) = target {
                         let receiver = self.expr(&attr.value)?;
+                        if self.boxed_float_component(attr, receiver.ty) {
+                            return Err(self.scoped_builtin_error("float components", attr));
+                        }
                         if matches!(receiver.ty, Type::Coroutine(_))
                             && attr.attr.as_str() == "cr_origin"
                         {
@@ -6571,11 +6586,17 @@ impl<'a> Checker<'a> {
                 Intrinsic::CachedProperty => {
                     return Err(self.object_runtime_export("functools.cached_property", expression));
                 }
+                Intrinsic::Base64Decode => {
+                    return Err(self.scoped_builtin_error("base64.b64decode", expression));
+                }
                 Intrinsic::ScopedObjectExport(name) => {
                     return Err(self.scoped_builtin_error(name, expression));
                 }
                 Intrinsic::Fd(ir::FdOperation::TcGetPgrp) => {
                     return Err(self.object_runtime_export("posix.tcgetpgrp", expression));
+                }
+                Intrinsic::Fd(ir::FdOperation::TcSetPgrp) => {
+                    return Err(self.object_runtime_export("posix.tcsetpgrp", expression));
                 }
                 Intrinsic::ObjectRuntimeExport(name) => {
                     return Err(self.object_runtime_export(name, expression));
@@ -9141,6 +9162,7 @@ impl<'a> Checker<'a> {
                 Some(Binding::Intrinsic(Intrinsic::Fd(
                     op @ (ir::FdOperation::Pipe2
                     | ir::FdOperation::TcGetPgrp
+                    | ir::FdOperation::TcSetPgrp
                     | ir::FdOperation::Read
                     | ir::FdOperation::Write
                     | ir::FdOperation::CopyFileRange),
@@ -11796,6 +11818,20 @@ mod tests {
             &crate::CompileOptions::default(),
         )
         .unwrap();
+    }
+
+    #[test]
+    fn literal_membership_filters_only_the_guarded_split() {
+        let llvm = crate::compile(
+            include_str!("../../../tests/fixtures/iterator_pipelines/split_matches.py"),
+            &crate::CompileOptions::default(),
+        )
+        .unwrap();
+        assert_eq!(
+            llvm.matches("call ptr @imre_str_matching_split_iter(")
+                .count(),
+            1
+        );
     }
 
     #[test]

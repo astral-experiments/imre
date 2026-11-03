@@ -1,5 +1,5 @@
 from unittest import TestCase
-from unittest.mock import InvalidSpecError, MagicMock, Mock, call, mock_open, seal
+from unittest.mock import InvalidSpecError, MagicMock, Mock, PropertyMock, call, mock_open, patch, seal
 
 check = TestCase()
 names = ["close", "assert_worker", "_private", "__enter__", "__exit__", "__iter__", "__next__"]
@@ -34,6 +34,26 @@ class Reader(Readable):
     def __iter__(self): return self
     def __next__(self): raise StopIteration
 
+
+original = Readable.read
+property_patch = patch("__main__.Readable.read", new_callable=PropertyMock, return_value=7)
+recorded = property_patch.start()
+try:
+    reader = Readable()
+    assert reader.read == 7
+    reader.read = 9
+    assert recorded.mock_calls == [call(), call(9)]
+finally:
+    property_patch.stop()
+assert Readable.read is original and property_patch.stop() is None
+
+factory_patch = patch.object(Readable, "read", new_callable=dict, contents=7)
+with factory_patch as replacement:
+    assert replacement == {"contents": 7}
+    assert factory_patch.stop() is None and Readable.read is replacement
+assert Readable.read is original
+with check.assertRaises(ValueError):
+    patch.object(Readable, "read", None, new_callable=PropertyMock)
 
 specified = MagicMock(Reader)
 assert specified.__class__ is Reader
@@ -90,6 +110,11 @@ assert items[1:3].value == 42
 items.__getitem__.assert_called_with(slice(1, 3))
 assert not hasattr(items["key"], "missing")
 assert not hasattr(other, "__getitem__")
+
+writer = MagicMock()
+writer.open()["key"] = 42
+assert writer.mock_calls == [call.open(), call.open().__setitem__("key", 42)]
+assert not hasattr(other, "__setitem__")
 
 locked = MagicMock(spec=["__iter__"])
 seal(locked)

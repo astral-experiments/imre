@@ -1,7 +1,7 @@
 //! Bind binary subprocess operations to the same child and files as typed Popen.
 use super::{Context, Error, FALSE, Id, NONE, Result, TRUE, Value, builtins, io, os, posixpath};
 use crate::dynamic::gc_schedule::GcSettings;
-use crate::objects::{BoxedPopen, BoxedPreparation};
+use crate::objects::{BoxedPopen, BoxedPreparation, ForkExec};
 use std::io::{PipeReader, Read};
 use std::os::fd::AsRawFd;
 use std::sync::Arc;
@@ -159,11 +159,7 @@ fn extra_group_ids(ctx: &mut Context, gids: Id) -> Result<Option<Vec<libc::gid_t
         return Err(Error::new("TypeError", "setgroups argument must be a list"));
     }
     let count = ctx.sequence_len(gids)?;
-    unsafe extern "C" {
-        fn imre_platform_max_groups() -> usize;
-    }
-    // SAFETY: this function returns the limit from the target's C headers.
-    if count > unsafe { imre_platform_max_groups() } {
+    if count > crate::objects::os::max_groups() {
         return Err(Error::new("ValueError", "too many extra_groups"));
     }
     let mut groups = Vec::new();
@@ -196,7 +192,6 @@ struct GuestPreExec<'a> {
     ctx: &'a mut Context,
     callback: Id,
     reenable_gc: Option<ReenableGc>,
-    reader: Option<PipeReader>,
 }
 
 impl crate::objects::PreExec for GuestPreExec<'_> {
@@ -218,16 +213,12 @@ impl crate::objects::PreExec for GuestPreExec<'_> {
         }
     }
 
-    fn parent_reader(&mut self, reader: PipeReader) {
-        self.reader = Some(reader);
-    }
-
     fn invoke(&mut self) -> bool {
         self.ctx.call(self.callback, Vec::new(), Vec::new()).is_ok()
     }
 }
 
-/// Read the guarded child's four-byte error record or close-on-exec EOF. A handler
+/// Read the child's four-byte error record or close-on-exec EOF. A handler
 /// may need to release the child before exec, including when its signal arrived just
 /// before poll. Bound that window without imposing a deadline on the callback.
 fn read_exec_error(ctx: &mut Context, mut reader: PipeReader) -> Result<Option<i32>> {
@@ -283,7 +274,9 @@ fn launch(ctx: &mut Context, values: &[Id]) -> Result<Id> {
         process_group,
         umask,
         pass_fds,
+        gid,
         gids,
+        uid,
         preexec_fn,
         slot,
         public_owner,
@@ -308,11 +301,12 @@ fn launch(ctx: &mut Context, values: &[Id]) -> Result<Id> {
     let default_group = process_group == NONE || minus_one(process_group);
     let default_umask = minus_one(umask);
     // Retain the existing conversion order on the native default-argument path.
+    let has_credentials = gid != NONE || gids != NONE || uid != NONE;
+    let has_child_settings = has_credentials || preexec_fn != NONE;
     let probe = executable != NONE
         || start_new_session != FALSE
         || !default_group
-        || gids != NONE
-        || preexec_fn != NONE
+        || has_child_settings
         || !default_umask
         || !default_fds
         || (streams.iter().any(|(mode, _)| *mode == 1) && bufsize.as_small() != Some(-1));
@@ -394,7 +388,7 @@ fn launch(ctx: &mut Context, values: &[Id]) -> Result<Id> {
         let inherited = ctx.int(-1);
         direct = Some(ctx.checked_equal(process_group, inherited)?);
     }
-    if direct == Some(true) && gids != NONE {
+    if direct == Some(true) && has_credentials {
         direct = Some(false);
     }
     if direct == Some(true) && !default_umask {
@@ -476,7 +470,6 @@ fn launch(ctx: &mut Context, values: &[Id]) -> Result<Id> {
         && ctx.heap.gc_settings.enabled.swap(false, Ordering::Relaxed))
     .then(|| ReenableGc(ctx.heap.gc_settings.clone()));
     // Fork-only child settings must be validated after the executable candidates and argv.
-    let has_child_settings = gids != NONE || preexec_fn != NONE;
     if has_child_settings
         && (program_bytes.contains(&0)
             || search_path.as_ref().is_some_and(|path| path.contains(&0)))
@@ -507,7 +500,17 @@ fn launch(ctx: &mut Context, values: &[Id]) -> Result<Id> {
     }
     let directory = (cwd != NONE).then(|| path(ctx, cwd, false)).transpose()?;
     let groups = extra_group_ids(ctx, gids)?;
-    if preexec_fn != NONE && !matches!(ctx.heap.get(slot), Value::ProcessHandle { child: None, .. })
+    let gid = if gid == NONE {
+        libc::gid_t::MAX
+    } else {
+        os::owner_id(ctx, gid, true)? as libc::gid_t
+    };
+    let uid = if uid == NONE {
+        libc::uid_t::MAX
+    } else {
+        os::owner_id(ctx, uid, false)? as libc::uid_t
+    };
+    if has_child_settings && !matches!(ctx.heap.get(slot), Value::ProcessHandle { child: None, .. })
     {
         return Err(Error::new(
             "TypeError",
@@ -518,8 +521,12 @@ fn launch(ctx: &mut Context, values: &[Id]) -> Result<Id> {
         ctx,
         callback: preexec_fn,
         reenable_gc,
-        reader: None,
     };
+    let mut reader = None;
+    let fork = has_child_settings.then_some(ForkExec {
+        callback: (preexec_fn != NONE).then_some(&mut guest as &mut dyn crate::objects::PreExec),
+        reader: &mut reader,
+    });
     let child = BoxedPopen::launch(
         argv,
         alternate,
@@ -536,14 +543,15 @@ fn launch(ctx: &mut Context, values: &[Id]) -> Result<Id> {
         group,
         umask,
         keep,
+        gid,
         groups,
-        (preexec_fn != NONE).then_some(&mut guest as &mut dyn crate::objects::PreExec),
+        uid,
+        fork,
     );
-    let reader = guest.reader.take();
     drop(guest);
     let failure = match (child, reader) {
         (Ok(child), Some(reader)) => {
-            // No Python call or safepoint between the guarded fork and binding its
+            // No Python call or safepoint between the fork and binding its
             // sole control. A handler can now operate on the actual partial Popen.
             let Value::ProcessHandle {
                 child: reserved, ..
@@ -624,14 +632,11 @@ fn report_status(ctx: &mut Context, handle: Id, status: Option<i32>) -> Id {
     ctx.int(i64::from(code))
 }
 
-enum StopWait {
-    Assigned,
-    Raised(Error),
-}
-
-impl From<crate::Error> for StopWait {
-    fn from(error: crate::Error) -> Self {
-        Self::Raised(error.into())
+fn communication_input(ctx: &Context, input: Id) -> Result<&[u8]> {
+    if input == NONE {
+        Ok(&[])
+    } else {
+        ctx.bytes_like(input)
     }
 }
 
@@ -705,28 +710,11 @@ pub(super) fn call(
         ("pid", []) => Ok(ctx.int(i64::from(child.pid()))),
         // Python asks again only after its public status was cleared. A real
         // second wait would get ECHILD, which Popen reports as zero.
-        ("poll", []) | ("wait", [_, _]) if reported => Ok(ctx.int(0)),
+        ("poll" | "wait", []) if reported => Ok(ctx.int(0)),
         ("poll", []) => Ok(report_status(ctx, handle, child.poll()?)),
-        ("wait", &[seconds, owner]) => {
-            let seconds = timeout(ctx, seconds)?;
-            match child.wait(seconds, || {
-                ctx.dispatch_signals().map_err(StopWait::Raised)?;
-                // A timed wait checks public status between polls. A blocking
-                // waitpid resumes after a returning handler and reports its reap.
-                if seconds.is_some() {
-                    let status = ctx
-                        .lookup_attr(owner, "returncode")
-                        .map_err(StopWait::Raised)?;
-                    if status != NONE {
-                        return Err(StopWait::Assigned);
-                    }
-                }
-                Ok(())
-            }) {
-                Ok(code) => Ok(report_status(ctx, handle, code)),
-                Err(StopWait::Assigned) => Ok(NONE),
-                Err(StopWait::Raised(error)) => Err(error),
-            }
+        ("wait", []) => {
+            let code = child.wait(|| ctx.dispatch_signals())?;
+            Ok(report_status(ctx, handle, code))
         }
         ("signal", &[number]) => {
             // os.kill converts its signal to Py_ssize_t before narrowing for POSIX.
@@ -737,13 +725,13 @@ pub(super) fn call(
         ("communicate", &[input, seconds, use_select]) => {
             let seconds = timeout(ctx, seconds)?;
             let use_select = ctx.truth(use_select)?;
-            let input = if input == NONE {
-                &[][..]
-            } else {
-                ctx.bytes_like(input)?
-            };
-            let pending = child.begin_communication(input, seconds, use_select)?;
-            let exchange = child.finish_communication(pending, || ctx.dispatch_signals())?;
+            let mut pending =
+                child.begin_communication(communication_input(ctx, input)?, seconds, use_select)?;
+            while pending.interrupted() {
+                ctx.dispatch_signals()?;
+                child.resume_communication(&mut pending, communication_input(ctx, input)?)?;
+            }
+            let exchange = child.finish_communication(pending);
             let [stdout, stderr] = exchange
                 .streams
                 .map(|stream| stream.map_or(NONE, |data| ctx.alloc(Value::Bytes(data))));

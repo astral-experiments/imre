@@ -46,6 +46,17 @@ def exchange(server, version, cafile, hostname, expected, mode="serve"):
                         peer.sendall(b"LOCAL TLS\n")
                         with peer.makefile("rb") as reply:
                             assert reply.readline(11) == b"local tls\n"
+                        if mode == "unwrap":
+                            assert peer.unwrap() is peer
+                            peer.sendall(b"R")
+                            assert peer.recv(1) == b"S"
+                        if mode == "shutdown":
+                            with socket.fromfd(peer.fileno(), peer.family, peer.type) as transport:
+                                transport.settimeout(10)
+                                transport.sendall(b"RT")
+                                transport.shutdown(socket.SHUT_WR)
+                                assert transport.recv(1) == b"S"
+                                assert transport.recv(1) == b""
         finally:
             try:
                 tail, errors = child.communicate(timeout=10)
@@ -80,6 +91,8 @@ def main():
     for version in (ssl.TLSVersion.TLSv1_2, ssl.TLSVersion.TLSv1_3):
         exchange(server, version, fixture.SIGNING_CA, host, 0)
     exchange(server, ssl.TLSVersion.TLSv1_3, fixture.SIGNING_CA, host, 0, mode="listen")
+    for mode in ("shutdown", "unwrap", "ragged"):
+        exchange(server, ssl.TLSVersion.TLSv1_3, fixture.SIGNING_CA, host, 0, mode=mode)
     exchange(server, ssl.TLSVersion.TLSv1_3, fixture.SIGNING_CA, "wrong.example", 62)
     exchange(server, ssl.TLSVersion.TLSv1_2, fixture.CAFILE_NEURONIO, host, 20)
 

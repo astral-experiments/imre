@@ -18,6 +18,8 @@ def _invalid() -> str:
 
 
 def _digits(text: str) -> str:
+    if type(text) is str and text.isascii() and text.isdigit():
+        return text
     digits: list[str] = []
     for char in text:
         try:
@@ -80,6 +82,20 @@ def _canonical(value: str) -> str:
     return result + "E" + str(adjusted)
 
 
+def _parts(text: str) -> tuple[str, int]:
+    """Return the signed coefficient and power of ten of a finite canonical value."""
+    significand, marker, exponent = text.partition("E")
+    whole, dot, fraction = significand.lstrip("-").partition(".")
+    digits = (whole + fraction).lstrip("0")
+    if not digits:
+        return "0", 0
+    coefficient = digits.rstrip("0")
+    power = (int(exponent) if marker else 0) - len(fraction) + len(digits) - len(coefficient)
+    if text.startswith("-"):
+        coefficient = "-" + coefficient
+    return coefficient, power
+
+
 class Decimal:
     _text: str
 
@@ -88,6 +104,32 @@ class Decimal:
 
     def is_nan(self) -> bool:
         return self._text.lstrip("-").startswith(("NaN", "sNaN"))
+
+    def as_integer_ratio(self) -> tuple[int, int]:
+        """Return the exact reduced numerator and positive denominator."""
+        text = self._text
+        if text.lstrip("-").startswith(("NaN", "sNaN")):
+            raise ValueError("cannot convert NaN to integer ratio")
+        if text.endswith("Infinity"):
+            raise OverflowError("cannot convert Infinity to integer ratio")
+
+        coefficient, exponent = _parts(text)
+        digits = coefficient.lstrip("-")
+        # A Decimal coefficient can exceed the limit for int(string).
+        first = len(digits) % 18 or 18
+        numerator = int(digits[:first])
+        for start in range(first, len(digits), 18):
+            numerator = numerator * 10**18 + int(digits[start:start + 18])
+        if coefficient.startswith("-"):
+            numerator = -numerator
+        scale = 10**abs(exponent)
+        if exponent >= 0:
+            return numerator * scale, 1
+
+        divisor, remainder = scale, abs(numerator)
+        while remainder:
+            divisor, remainder = remainder, divisor % remainder
+        return numerator // divisor, scale // divisor
 
     def __bool__(self) -> bool:
         mantissa, marker, exponent = self._text.lstrip("-").partition("E")
@@ -137,17 +179,3 @@ class Decimal:
         if coefficient.startswith("-"):
             result = -result
         return -2 if result == -1 else result
-
-
-def _parts(text: str) -> tuple[str, int]:
-    """Return the signed coefficient and power of ten of a finite canonical value."""
-    significand, marker, exponent = text.partition("E")
-    whole, dot, fraction = significand.lstrip("-").partition(".")
-    digits = (whole + fraction).lstrip("0")
-    if not digits:
-        return "0", 0
-    coefficient = digits.rstrip("0")
-    power = (int(exponent) if marker else 0) - len(fraction) + len(digits) - len(coefficient)
-    if text.startswith("-"):
-        coefficient = "-" + coefficient
-    return coefficient, power

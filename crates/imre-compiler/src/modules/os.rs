@@ -177,6 +177,12 @@ pub(super) fn symbol(name: &str) -> Option<Intrinsic> {
         "copy_file_range" if cfg!(target_os = "linux") => Intrinsic::Fd(FdOperation::CopyFileRange),
         "sendfile" if cfg!(target_os = "linux") => Intrinsic::ObjectRuntimeExport("posix.sendfile"),
         "readlink" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.readlink"),
+        "fork" if cfg!(all(target_os = "linux", target_env = "gnu")) => {
+            Intrinsic::ObjectRuntimeExport("posix.fork")
+        }
+        "register_at_fork" if cfg!(all(target_os = "linux", target_env = "gnu")) => {
+            Intrinsic::ObjectRuntimeExport("posix.register_at_fork")
+        }
         "_exit" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix._exit"),
         "getppid" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.getppid"),
         "WIFSTOPPED" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.WIFSTOPPED"),
@@ -196,6 +202,7 @@ pub(super) fn symbol(name: &str) -> Option<Intrinsic> {
             Intrinsic::ObjectRuntimeExport("posix.getgrouplist")
         }
         "getgroups" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.getgroups"),
+        "setgroups" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.setgroups"),
         "cpu_count" if cfg!(target_os = "linux") => {
             Intrinsic::ObjectRuntimeExport("posix.cpu_count")
         }
@@ -209,6 +216,31 @@ pub(super) fn symbol(name: &str) -> Option<Intrinsic> {
         "major" if cfg!(target_os = "linux") => Intrinsic::ObjectRuntimeExport("posix.major"),
         "minor" if cfg!(target_os = "linux") => Intrinsic::ObjectRuntimeExport("posix.minor"),
         "makedev" if cfg!(target_os = "linux") => Intrinsic::ObjectRuntimeExport("posix.makedev"),
+        #[cfg(target_os = "linux")]
+        "TFD_CLOEXEC" => Intrinsic::IntConstant(i64::from(libc::TFD_CLOEXEC)),
+        #[cfg(target_os = "linux")]
+        "TFD_NONBLOCK" => Intrinsic::IntConstant(i64::from(libc::TFD_NONBLOCK)),
+        #[cfg(target_os = "linux")]
+        "TFD_TIMER_ABSTIME" => Intrinsic::IntConstant(i64::from(libc::TFD_TIMER_ABSTIME)),
+        #[cfg(target_os = "linux")]
+        "TFD_TIMER_CANCEL_ON_SET" => {
+            Intrinsic::IntConstant(i64::from(libc::TFD_TIMER_CANCEL_ON_SET))
+        }
+        "timerfd_create" if cfg!(target_os = "linux") => {
+            Intrinsic::ObjectRuntimeExport("posix.timerfd_create")
+        }
+        "timerfd_gettime" if cfg!(target_os = "linux") => {
+            Intrinsic::ObjectRuntimeExport("posix.timerfd_gettime")
+        }
+        "timerfd_gettime_ns" if cfg!(target_os = "linux") => {
+            Intrinsic::ObjectRuntimeExport("posix.timerfd_gettime_ns")
+        }
+        "timerfd_settime" if cfg!(target_os = "linux") => {
+            Intrinsic::ObjectRuntimeExport("posix.timerfd_settime")
+        }
+        "timerfd_settime_ns" if cfg!(target_os = "linux") => {
+            Intrinsic::ObjectRuntimeExport("posix.timerfd_settime_ns")
+        }
         #[cfg(target_os = "linux")]
         "EFD_CLOEXEC" => Intrinsic::IntConstant(i64::from(libc::EFD_CLOEXEC)),
         #[cfg(target_os = "linux")]
@@ -300,6 +332,7 @@ pub(super) fn symbol(name: &str) -> Option<Intrinsic> {
         "unlockpt" if cfg!(target_os = "linux") => Intrinsic::ObjectRuntimeExport("posix.unlockpt"),
         "ptsname" if cfg!(target_os = "linux") => Intrinsic::Fd(FdOperation::PtsName),
         "tcgetpgrp" if cfg!(target_os = "linux") => Intrinsic::Fd(FdOperation::TcGetPgrp),
+        "tcsetpgrp" if cfg!(target_os = "linux") => Intrinsic::Fd(FdOperation::TcSetPgrp),
         "ttyname" if cfg!(target_os = "linux") => Intrinsic::ObjectRuntimeExport("posix.ttyname"),
         "O_NOCTTY" if cfg!(target_os = "linux") => Intrinsic::DescriptorConstant("o_noctty"),
         "get_terminal_size" if cfg!(target_os = "linux") => {

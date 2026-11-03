@@ -385,6 +385,25 @@ print(repr(bound.__bound__), repr(t.Callable[[int, str], bytes]))
 print(t.get_args(t.Callable[[int, str], bytes]) == ([int, str], bytes))
 print(dict[K,V]() == {}, Accessor[int]().__orig_class__ is Accessor[int])
 
+
+class Factory(t.Generic[K]):
+    def __new__(cls, result):
+        return result
+
+
+class Product:
+    pass
+
+
+def decode(value):
+    return int(value)
+
+
+for alias in (Factory[int], GenericAlias(Factory, int)):
+    for product in (decode, Product):
+        assert alias(product) is product
+        assert product.__orig_class__ is alias
+
 inferred = t.TypeVar("Inferred", infer_variance=True)
 print(K.__infer_variance__, inferred.__infer_variance__, repr(inferred))
 for invalid in (

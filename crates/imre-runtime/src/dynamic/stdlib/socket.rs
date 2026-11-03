@@ -35,6 +35,7 @@ const IMPORTED_CONSTANTS: &[(&str, i32)] = &[
     ("NI_NUMERICSERV", libc::NI_NUMERICSERV),
     ("IPPROTO_UDP", libc::IPPROTO_UDP),
     ("SOL_SOCKET", libc::SOL_SOCKET),
+    ("SO_TYPE", libc::SO_TYPE),
     ("SO_REUSEADDR", libc::SO_REUSEADDR),
     ("SO_REUSEPORT", libc::SO_REUSEPORT),
     ("SOCK_DGRAM", libc::SOCK_DGRAM),

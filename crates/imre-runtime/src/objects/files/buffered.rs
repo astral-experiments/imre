@@ -1,5 +1,6 @@
 //! Buffered binary and UTF-8 streams with Python's read and write boundaries.
 
+use std::borrow::Cow;
 use std::fs::File;
 use std::io::{self, BufRead, BufReader, IsTerminal, Read, Seek, SeekFrom, Write};
 use std::mem::MaybeUninit;
@@ -300,6 +301,7 @@ pub(super) struct Input {
     raw: ReadBuffer,
     text: TextBuffer,
     unbuffered: bool,
+    pub(super) read_size_hint: usize,
 }
 
 impl Input {
@@ -317,6 +319,7 @@ impl Input {
                 source.take(u64::MAX),
             )),
             text: TextBuffer::default(),
+            read_size_hint: 0,
             unbuffered: false,
         }
     }
@@ -335,6 +338,7 @@ impl Input {
                 window,
             },
             text: TextBuffer::default(),
+            read_size_hint: 0,
             unbuffered: binary && capacity == 0,
         })
     }
@@ -519,7 +523,17 @@ impl Input {
 
     pub(super) fn read_text(&mut self) -> Result<Str> {
         let mut bytes = self.text.carry.to_vec();
-        self.raw.read_to_end(&mut bytes).map_err(errno_error)?;
+        // The file can grow or shrink after open. Its size only guides allocation.
+        let hint = std::mem::take(&mut self.read_size_hint);
+        let _ = bytes.try_reserve_exact(hint);
+        match &mut self.raw {
+            ReadBuffer::File(file) => file.read_to_end(&mut bytes),
+            pipe => pipe.read_to_end(&mut bytes),
+        }
+        .map_err(errno_error)?;
+        if bytes.len() < hint / 2 {
+            bytes.shrink_to_fit();
+        }
         let remaining = decode_text(bytes, self.text.preserve_newlines)?;
         self.text.carry.clear();
         let prefix = &self.text.decoded[self.text.pos..];
@@ -534,7 +548,47 @@ impl Input {
         Ok(result)
     }
 
+    /// Return the next short normalized line and a full in-bounds copy window.
+    /// Bytes beyond the newline are padding; the caller exposes only its length.
+    #[inline]
+    pub(super) fn short_line(&mut self) -> Option<(usize, &[u8; 24])> {
+        if self.text.preserve_newlines {
+            return None;
+        }
+        let window = self.text.decoded.as_bytes()[self.text.pos..].first_chunk::<24>()?;
+        #[inline]
+        fn newline(bytes: &[u8; 8]) -> u64 {
+            let word = u64::from_le_bytes(*bytes) ^ 0x0a0a_0a0a_0a0a_0a0a;
+            word.wrapping_sub(0x0101_0101_0101_0101) & !word & 0x8080_8080_8080_8080
+        }
+        let (chunks, _) = window.as_chunks::<8>();
+        let end = chunks.iter().enumerate().find_map(|(i, chunk)| {
+            let matches = newline(chunk);
+            (matches != 0).then(|| 8 * i + (matches.trailing_zeros() / 8) as usize + 1)
+        })?;
+        self.text.pos += end;
+        Some((end, window))
+    }
+
     pub(super) fn text_line(&mut self) -> Result<Str> {
+        if let Some((len, window)) = self.short_line() {
+            // SAFETY: the decoded UTF-8 prefix ends just after an ASCII newline.
+            return Ok(Str::new(unsafe {
+                str::from_utf8_unchecked(&window[..len])
+            }));
+        }
+        self.map_text_line(|text| match text {
+            Cow::Borrowed(line) => Str::new(line),
+            Cow::Owned(line) => Str::from(line),
+        })
+    }
+
+    /// Consume the decoded line before its buffer advances. A long line
+    /// crossing multiple decoder windows can transfer its allocation.
+    pub(super) fn map_text_line<T>(
+        &mut self,
+        consume: impl FnOnce(Cow<'_, str>) -> T,
+    ) -> Result<T> {
         let mut line = std::mem::take(&mut self.text.line_scratch);
         line.clear();
         loop {
@@ -553,7 +607,7 @@ impl Input {
                 self.text.pos += len;
                 if line.is_empty() {
                     self.text.line_scratch = line;
-                    return Ok(Str::new(&available[..len]));
+                    return Ok(consume(Cow::Borrowed(&available[..len])));
                 }
                 line.push_str(&available[..len]);
                 break;
@@ -572,9 +626,9 @@ impl Input {
         // Keep a bounded buffer for lines that span multiple decoder chunks.
         // An unusually long line transfers its allocation to the caller.
         if line.capacity() > 128 * 1024 {
-            Ok(Str::from(line))
+            Ok(consume(Cow::Owned(line)))
         } else {
-            let result = Str::new(&line);
+            let result = consume(Cow::Borrowed(&line));
             self.text.line_scratch = line;
             Ok(result)
         }

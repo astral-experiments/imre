@@ -182,15 +182,18 @@ class Mock:
         for ancestor in self._node._ancestors:
             child._ancestors.append(_Ancestor(ancestor.prefix + suffix, ancestor.calls))
 
-    @property
-    def return_value(self) -> Mock:
+    def _return_index(self) -> int:
         node = self._node
         if node._result == -1:
             result = _Node()
             self._attach(result, "()")
             node._result = len(self._nodes)
             self._nodes.append(result)
-        return self._at(node._result)
+        return node._result
+
+    @property
+    def return_value(self) -> Mock:
+        return self._at(self._return_index())
 
     def _record(self, args: list[_Arg], kwargs: dict[str, _Arg]) -> Mock:
         received = _new_call(args, kwargs)

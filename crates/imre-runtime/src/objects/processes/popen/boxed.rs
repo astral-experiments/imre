@@ -175,8 +175,10 @@ impl BoxedPopen {
         process_group: i32,
         umask: i32,
         keep: Vec<RawFd>,
+        gid: libc::gid_t,
         extra_groups: Option<Vec<libc::gid_t>>,
-        preexec: Option<&mut dyn PreExec>,
+        uid: libc::uid_t,
+        fork_exec: Option<ForkExec<'_>>,
     ) -> std::result::Result<Self, BoxedLaunchError> {
         let mut words = Words::new(8);
         words
@@ -219,7 +221,7 @@ impl BoxedPopen {
         }
         let mut site = None;
         let mut extras = LaunchExtras {
-            preexec,
+            fork_exec,
             prepared: Some(handles),
             failure_site: Some(&mut site),
             direct,
@@ -228,7 +230,9 @@ impl BoxedPopen {
             boxed_child: Some(ChildAttributes {
                 new_session: start_new_session,
                 group: process_group,
+                gid,
                 extra_groups,
+                uid,
                 mask: (umask >= 0).then_some(umask as libc::mode_t),
                 keep,
             }),
@@ -289,13 +293,10 @@ impl BoxedPopen {
 
     pub(crate) fn wait<E: From<Error>>(
         &self,
-        seconds: Option<f64>,
         check: impl FnMut() -> std::result::Result<(), E>,
     ) -> std::result::Result<Option<i32>, E> {
         let control = self.0.borrow().control.clone();
-        Ok(control
-            .wait_with(seconds.map(Deadline::Float).as_ref(), check)?
-            .map(ReturnCode::kernel))
+        Ok(control.wait_with(None, check)?.map(ReturnCode::kernel))
     }
 
     /// Only an observed child status updates returncode when the constructor raises.
@@ -331,26 +332,26 @@ impl BoxedPopen {
         select: bool,
     ) -> Result<communicate::PendingExchange> {
         self.0.borrow_mut().begin_exchange(
-            input,
+            communicate::Input::Live(input),
             seconds.map(Deadline::Float).as_ref(),
             false,
             select,
         )
     }
 
-    pub(crate) fn finish_communication<E: From<Error>>(
+    pub(crate) fn resume_communication(
+        &self,
+        pending: &mut communicate::PendingExchange,
+        input: &[u8],
+    ) -> Result<()> {
+        pending.resume(&mut self.0.borrow_mut(), communicate::Input::Live(input))
+    }
+
+    pub(crate) fn finish_communication(
         &self,
         pending: communicate::PendingExchange,
-        check: impl FnMut() -> std::result::Result<(), E>,
-    ) -> std::result::Result<BoxedCommunication, E> {
-        let exchange = pending.drain(
-            |timeout, select| {
-                self.0
-                    .borrow_mut()
-                    .exchange_pipes(&[], timeout, false, select)
-            },
-            check,
-        )?;
+    ) -> BoxedCommunication {
+        let exchange = pending.finish();
         let process = self.0.borrow();
         let (streams, timed_out) = match exchange {
             communicate::Exchange::Done([out, err]) => (
@@ -362,7 +363,7 @@ impl BoxedPopen {
             ),
             communicate::Exchange::Timeout(streams, _) => (streams, true),
         };
-        Ok(BoxedCommunication { streams, timed_out })
+        BoxedCommunication { streams, timed_out }
     }
 }
 

@@ -28,12 +28,16 @@ pub(crate) trait PreExec {
     fn fork(&mut self) -> Result<libc::pid_t>;
     /// Run the callback in the child. False reports a Python exception to the parent.
     fn invoke(&mut self) -> bool;
-    /// Transfer the guarded child's error reader to its parent-side boxed launch.
-    fn parent_reader(&mut self, reader: io::PipeReader);
 }
 
-pub(super) struct CallbackLaunch<'a> {
-    pub(super) callback: &'a mut dyn PreExec,
+/// Return the child's setup-error pipe to its owner before waiting for exec.
+pub(crate) struct ForkExec<'a> {
+    pub(crate) callback: Option<&'a mut dyn PreExec>,
+    pub(crate) reader: &'a mut Option<io::PipeReader>,
+}
+
+pub(super) struct ForkLaunch<'a> {
+    pub(super) fork_exec: ForkExec<'a>,
     pub(super) child_fds: [RawFd; 3],
     pub(super) parent_fds: [RawFd; 3],
 }
@@ -285,7 +289,7 @@ struct SizedPipeConfig {
 
 #[derive(Default)]
 struct LaunchExtras<'a, 'hook> {
-    preexec: Option<&'hook mut dyn PreExec>,
+    fork_exec: Option<ForkExec<'hook>>,
     prepared: Option<PreparedHandles>,
     redirects: [usize; 3],
     child: Option<(usize, usize, bool)>,
@@ -552,19 +556,21 @@ unsafe fn spawn(config: &LaunchConfig, mut extras: LaunchExtras<'_, '_>) -> Resu
             new_session,
             group,
             mask: (mask >= 0).then_some(mask as libc::mode_t),
+            gid: libc::gid_t::MAX,
             extra_groups: None,
+            uid: libc::uid_t::MAX,
             keep,
         })
     };
     let text = streams & (1 << 16) != 0;
     handles.wrap_parents(text, bufsize)?;
-    let preexec = extras.preexec.map(|callback| {
+    let fork_launch = extras.fork_exec.map(|fork_exec| {
         let mut child_fds = handles.child_fds;
         if modes[2] == 5 {
             child_fds[2] = if child_fds[1] == -1 { 1 } else { child_fds[1] };
         }
-        CallbackLaunch {
-            callback,
+        ForkLaunch {
+            fork_exec,
             child_fds,
             parent_fds: handles.parent_fds,
         }
@@ -591,7 +597,7 @@ unsafe fn spawn(config: &LaunchConfig, mut extras: LaunchExtras<'_, '_>) -> Resu
             streams,
             redirects,
             allow_spawn,
-            preexec,
+            fork_launch,
             child,
         )
     }?;

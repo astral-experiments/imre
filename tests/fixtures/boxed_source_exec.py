@@ -164,6 +164,53 @@ class Case(Base):
     assert case().label() == ("base", "global")
     assert case.describe() == "Case"
     assert case.__firstlineno__ == 5
+
+    exec("""class Entry:
+    def __mro_entries__(self, original):
+        events.append(('resolve', original))
+        return (list,)
+entry = Entry()
+def pack():
+    events.append('unpack')
+    yield entry
+    yield Base
+def record(label, value):
+    events.append(label)
+    return value
+class Meta(type):
+    @classmethod
+    def __prepare__(mcls, name, bases, **kw):
+        events.append(('prepare', bases, kw))
+        return {}
+    def __new__(mcls, name, bases, ns, **kw):
+        events.append(('new', kw))
+        return type.__new__(mcls, name, bases, ns)
+class Expanded(tag=record('named', 1), *pack(), **record('mapping', {'metaclass': Meta, 'extra': 2})):
+    events.append('body')
+""", namespace)
+    expanded = namespace["Expanded"]
+    orig = (namespace["entry"], namespace["Base"])
+    resolved = (list, namespace["Base"])
+    kw = {"tag": 1, "extra": 2}
+    assert events[-7:] == ["unpack", "named", "mapping", ("resolve", orig),
+                           ("prepare", resolved, kw), "body", ("new", kw)]
+    assert expanded.__bases__ == resolved and expanded.__orig_bases__ == orig
+    assert type(expanded) is namespace["Meta"]
+
+    for header, message in [
+        ("*42", "Value after * must be an iterable, not int"),
+        ("**42", "__build_class__() argument after ** must be a mapping, not int"),
+        ("metaclass=type, **{'metaclass': type}, later=record('late', 1)",
+         "__build_class__() got multiple values for keyword argument 'metaclass'"),
+        ("**{1: 2}", "keywords must be strings"),
+    ]:
+        try:
+            exec(f"class Invalid({header}): events.append('invalid body')", namespace)
+        except TypeError as error:
+            assert str(error) == message
+        else:
+            raise AssertionError(f"accepted invalid class header {header}")
+        assert "Invalid" not in namespace and events[-1] == ("new", kw)
     try:
         deep_code = compile("class Deep:\n    total = 1" + "+1" * 8192, "deep_class.py", "exec")
     except RecursionError:
@@ -197,7 +244,7 @@ class Case(Base):
 
 
 def source_generic_classes():
-    from typing import Generic, TypedDict, get_args, get_type_hints
+    from typing import Generic, ParamSpec, TypedDict, TypeVarTuple, Unpack, get_args, get_origin, get_type_hints
 
     for name, message in [
         ("__classdict__", "reserved name '__classdict__' cannot be used for type parameter"),
@@ -231,11 +278,49 @@ def source_generic_classes():
     exec(code, ns)
     assert ns["Box"].__type_params__[0] is not param
 
+    code = compile("""class Variadic[T, *Ts, **P]:
+    def parameters(self):
+        return T, Ts, P
+""", "source_variadic.py", "exec")
+    exec(code, ns)
+    variadic = ns["Variadic"]
+    item, pack, signature = variadic.__type_params__
+    assert type(pack) is TypeVarTuple and type(signature) is ParamSpec
+    assert variadic().parameters() == variadic.__parameters__ == (item, pack, signature)
+    base, = variadic.__orig_bases__
+    first, unpacked, last = get_args(base)
+    assert get_origin(base) is Generic and first is item and last is signature
+    assert get_origin(unpacked) is Unpack and get_args(unpacked) == (pack,)
+    exec(code, ns)
+    assert all(a is not b for a, b in zip(variadic.__type_params__, ns["Variadic"].__type_params__))
+
     exec("from __future__ import annotations\nclass Row[T](TypedDict):\n    item: T", ns)
     row = ns["Row"]
     ref = row.__annotations__["item"]
     assert ref.__owner__ is row and ref.__forward_module__ == row.__module__
     assert get_type_hints(row)["item"] is row.__type_params__[0]
+
+
+def source_annotated_targets():
+    events = []
+
+    def mark(label, value):
+        events.append(label)
+        return value
+
+    class Box:
+        pass
+
+    target = Box()
+    items = {}
+    namespace = {"mark": mark, "target": target, "items": items}
+    exec("""mark("object", target).value: mark("annotation", int) = mark("value", 3)
+class C:
+    mark("items", items)[mark("key", "x")]: mark("annotation", int) = mark("item", 4)
+""", namespace)
+    assert events == ["value", "object", "item", "items", "key"]
+    assert target.value == 3 and items == {"x": 4}
+    assert not namespace["C"].__annotations__
 
 
 def module_annotations():
@@ -1033,6 +1118,7 @@ def current():
     method_argument_lifetime()
     named_bindings()
     source_annotations()
+    source_annotated_targets()
     module_annotations()
     source_genexpr()
     source_listcomp()
