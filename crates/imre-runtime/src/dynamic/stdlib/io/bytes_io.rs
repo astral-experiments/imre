@@ -164,11 +164,9 @@ impl BytesIo {
             return self.write_buffer(ctx, input);
         };
         // PyBUF_CONTIG_RO requests shape without strides. Acquisition may change this stream.
-        let view = ctx.acquire_python_buffer(input, method, 0x0008)?;
-        ctx.view_bytes(view)?;
-        let result = self.write_buffer(ctx, view);
-        ctx.release_python_buffer(input, view);
-        result
+        ctx.with_contiguous_python_buffer(input, method, 0x0008, |ctx, view| {
+            self.write_buffer(ctx, view)
+        })
     }
 
     fn write_buffer(&self, ctx: &mut Context, input: Id) -> Result<usize> {

@@ -1005,6 +1005,18 @@ pub(super) fn call(
             format!("invalid arguments to FileIO.{name}"),
         ));
     }
+    if name == "write"
+        && let Some(method) = ctx.python_buffer_method(args[0], true)?
+    {
+        // FileIO requests PyBUF_SIMPLE. Acquisition can close or replace its descriptor.
+        return ctx.with_contiguous_python_buffer(args[0], method, 0, |ctx, view| {
+            call_method(ctx, receiver, name, &[view])
+        });
+    }
+    call_method(ctx, receiver, name, args)
+}
+
+fn call_method(ctx: &mut Context, receiver: Id, name: &str, args: &[Id]) -> Result<Id> {
     let raw = state(ctx, receiver);
     let is_closed = raw.as_ref().is_none_or(|raw| raw.live_fd().is_none());
     match name {

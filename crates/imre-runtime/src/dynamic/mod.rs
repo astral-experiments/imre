@@ -437,6 +437,27 @@ impl Context {
         Ok(view)
     }
 
+    /// Consume a contiguous view returned by a Python buffer provider.
+    fn with_contiguous_python_buffer<T>(
+        &mut self,
+        object: Id,
+        method: Id,
+        flags: i64,
+        consume: impl FnOnce(&mut Self, Id) -> Result<T>,
+    ) -> Result<T> {
+        let view = self.acquire_python_buffer(object, method, flags)?;
+        // A failed export of the returned view does not call the provider's release hook.
+        self.view_bytes(view)?;
+        let result = self.with_buffer_export(view, |ctx| consume(ctx, view));
+        if let Err(error) = &result {
+            for id in error.roots() {
+                self.heap.keep(id);
+            }
+        }
+        self.release_python_buffer(object, view);
+        result
+    }
+
     /// Release a synchronous Python export after its consumer has dropped the view's export.
     fn release_python_buffer(&mut self, object: Id, view: Id) {
         if matches!(self.heap.get(view), Value::MemoryView { owner: Some(owner), lease: None, .. } if *owner == object)
