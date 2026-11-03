@@ -152,9 +152,9 @@ CPython 3.14.5 discovers **1,217 test occurrences** in these six families on Lin
 | `inspect` | 0 | 362 | Stock ran 362 originals, with 361 passes and one skip. On public revision `00755c8c`, native compilation stopped before discovery, and a compiled import stopped at `_pickle`. Separate replays passed 44 tests in renamed modules. |
 | `ssl` | 5 | 195 | Each public MemoryBIO replay discovered all 195 originals before selecting one. The five selected originals passed on stock and native O0/O3, with teardown and successful exits in all 15 owning processes. |
 | `types` | 111 | 141 | On public `ce052eab`, the intact `test_types` runs recorded 100 paired passes and exited 1. `test_dynamicclassattribute` recorded 11 paired passes and exited 0 at both native levels. Two stock skips remain in the denominator. |
-| `warnings` | 176 | 187 | The [parent ledger](benchmarks/cpython_stdlib/full/warnings/receipts/) records 158 in-process passes and 18 passes with native interpreter children at O0 and O3. The allocation-traceback parent remains unpaired. Six parents skipped on stock and four skipped only on Imre. |
+| `warnings` | 177 | 187 | The [parent ledger](benchmarks/cpython_stdlib/full/warnings/receipts/) records 158 in-process passes and 19 passes with native interpreter children at O0 and O3. Six parents skipped on stock. The other four passed on stock and skipped on Imre under CPython-only decorators. No warnings omissions. |
 | `weakref` | 168 | 183 | Selected stock and native O0/O3 runs passed 122 of 137 weakref originals. The intact 46-test WeakSet suite passed on all three. The separate intact native weakref suite still exits 1. |
-| **Measured total (6 of 6 families)** | **534** | **1,217** |  |
+| **Measured total (6 of 6 families)** | **535** | **1,217** | |
 
 ## Design
 
