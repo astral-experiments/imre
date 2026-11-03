@@ -704,6 +704,10 @@ pub(crate) fn compile(
             if uses_import_builtin && !seen.contains("pprint") {
                 imports.names.push((0, "pprint".to_owned()));
             }
+            // A runtime-selected HTTP child needs its server and transitive providers.
+            if uses_import_builtin && seen.contains("http") && !seen.contains("http.server") {
+                imports.names.push((0, "http.server".to_owned()));
+            }
             if uses_import_builtin || seen.contains("importlib") {
                 for name in ["py_compile", "sysconfig"] {
                     if !seen.contains(name) {

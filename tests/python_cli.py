@@ -2412,6 +2412,14 @@ def report(text):
         (resource_package / "__init__.py").write_text("print('resource package initialized')\n")
         (resource_package / "payload.bin").write_bytes(b"\x00\xff\r\n")
         fixtures = Path(__file__).with_name("fixtures")
+
+        served = root / "served"
+        served.mkdir()
+        (served / "a&b").touch()
+        (root / "http_files.py").write_bytes((fixtures / "boxed_http_files.py").read_bytes())
+        compare("-B", "-m", "http_files", "http.server", str(root),
+                extra={"IMRE_ENCODED_FLAGS": "--opt-level\x1f0"}, native_timeout=180)
+
         compare("-B", "-c", "from typing import Protocol as P; print(P.__name__)")
         compare("-B", fixtures / "typing_protocol_import.py")
         compare(
