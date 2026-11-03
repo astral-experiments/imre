@@ -519,6 +519,7 @@ _BIO_ERRORS = {
     "ZERO_RETURN": (SSLZeroReturnError, SSL_ERROR_ZERO_RETURN, "TLS/SSL connection has been closed (EOF)", None),
     "EOF": (SSLEOFError, SSL_ERROR_EOF, "EOF occurred in violation of protocol", None),
     "UNEXPECTED_EOF_WHILE_READING": (SSLEOFError, SSL_ERROR_EOF, "EOF occurred in violation of protocol", "SSL"),
+    "PROTOCOL_IS_SHUTDOWN": (SSLError, SSL_ERROR_SSL, "protocol is shutdown", "SSL"),
     "SHUTDOWN_WHILE_IN_INIT": (SSLError, SSL_ERROR_SSL, "shutdown while in init", "SSL"),
 }
 
@@ -558,19 +559,37 @@ class SSLObject:
     def server_hostname(self):
         return self._server_hostname
 
-    def _bio_call(self, operation):
-        result = _call(operation, self._sslobj)
-        if result is None:
-            return
+    def _bio_call(self, operation, *args):
+        result = _call(operation, self._sslobj, *args)
         if isinstance(result, tuple):
-            _raise_verify_error(self.server_hostname, *result)
-        kind, code, message, library = _BIO_ERRORS[result]
+            # Certificate errors carry a numeric verification code, record errors a reason name.
+            reason, message = result
+            if isinstance(reason, int):
+                _raise_verify_error(self.server_hostname, reason, message)
+            kind, code, library = SSLError, SSL_ERROR_SSL, "SSL"
+        elif isinstance(result, str):
+            reason = result
+            kind, code, message, library = _BIO_ERRORS[reason]
+        else:
+            return result
         if library:
-            message = f"[{library}: {result}] {message}"
+            message = f"[{library}: {reason}] {message}"
         error = kind(code, message)
         error.library = library
-        error.reason = result if library else None
+        error.reason = reason if library else None
         raise error
+
+    def read(self, len=1024, buffer=None):
+        """Read up to len decrypted bytes, or return the number read into buffer."""
+        return self._bio_call(_imre_ssl.bio_read, len, buffer)
+
+    def write(self, data):
+        """Write bytes-like data and return the number of plaintext bytes accepted."""
+        return self._bio_call(_imre_ssl.bio_write, data)
+
+    def pending(self):
+        """Return the number of already decrypted bytes available to read."""
+        return self._bio_call(_imre_ssl.bio_pending)
 
     def getpeercert(self, binary_form=False):
         """Return the peer certificate as a dictionary or DER bytes, or None if absent."""
