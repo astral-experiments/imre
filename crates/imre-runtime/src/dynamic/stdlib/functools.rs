@@ -95,6 +95,106 @@ pub(super) fn partial_setstate(
     Ok(NONE)
 }
 
+/// Keep the original fields live while calling user formatting hooks, as in CPython's partial_repr.
+pub(super) fn partial_repr(ctx: &mut Context, object: Id) -> Result<Id> {
+    if ctx.repr_ancestors.contains(&object) {
+        return Ok(ctx.text("..."));
+    }
+    let Value::Partial {
+        function,
+        args,
+        keywords,
+        ..
+    } = *ctx.heap.get(ctx.scalar_value(object))
+    else {
+        return Err(Error::new("TypeError", "expected a partial object"));
+    };
+    ctx.repr_ancestors
+        .try_reserve(1)
+        .map_err(|_| Error::new("MemoryError", ""))?;
+    ctx.heap.reserve_temporaries(4)?;
+    let roots = ctx.heap.temporary_mark();
+    for value in [object, function, args, keywords] {
+        ctx.heap.keep(value);
+    }
+    ctx.repr_ancestors.push(object);
+    let result = ctx.with_slot_depth(
+        "maximum recursion depth exceeded while getting the repr of an object",
+        |ctx| partial_repr_fields(ctx, object, function, args, keywords),
+    );
+    ctx.repr_ancestors.pop();
+    ctx.heap.release_temporaries_since(roots);
+    match &result {
+        Ok(value) => ctx.heap.keep(*value),
+        Err(error) => {
+            for value in error.roots() {
+                ctx.heap.keep(value);
+            }
+        }
+    }
+    result
+}
+
+fn partial_repr_fields(
+    ctx: &mut Context,
+    object: Id,
+    function: Id,
+    args: Id,
+    keywords: Id,
+) -> Result<Id> {
+    fn append(ctx: &mut Context, buffer: &mut Vec<u32>, op: &str, value: Id) -> Result<()> {
+        let text = super::builtins::call(ctx, op, &[value], &[])?;
+        let chars = ctx.string_codepoints(text)?;
+        buffer
+            .try_reserve(chars.len())
+            .map_err(|_| Error::new("MemoryError", ""))?;
+        buffer.extend_from_slice(&chars);
+        Ok(())
+    }
+
+    let mut suffix = Vec::new();
+    let step = ctx.heap.temporary_mark();
+    let invalid = || Error::new("TypeError", "invalid partial state");
+    let args = ctx.tuple_items(args)?.ok_or_else(invalid)?;
+    let keywords = ctx.dict_storage(keywords).ok_or_else(invalid)?;
+    for arg in args {
+        suffix.extend([u32::from(','), u32::from(' ')]);
+        append(ctx, &mut suffix, "repr", arg)?;
+        ctx.heap.release_temporaries_since(step);
+    }
+    let mut position = 0;
+    while let Some((index, key, value)) = ctx.stored_entries(keywords).at(position) {
+        position = index + 1;
+        // The key's __str__ may remove the value from the dictionary.
+        ctx.heap.keep(value);
+        suffix.extend([u32::from(','), u32::from(' ')]);
+        append(ctx, &mut suffix, "str", key)?;
+        suffix.push(u32::from('='));
+        append(ctx, &mut suffix, "repr", value)?;
+        ctx.heap.release_temporaries_since(step);
+    }
+    let class = ctx.exact_type(object)?;
+    let module = ctx
+        .own_class_attr(class, "__module__")
+        .ok_or_else(|| Error::new("AttributeError", "__module__"))?;
+    let qualname = match ctx.own_class_attr(class, "__qualname__") {
+        Some(name) => name,
+        None => ctx.text(ctx.class_qualname(class).to_owned()),
+    };
+    // Formatting either name can replace both attributes on the class.
+    ctx.heap.keep(module);
+    ctx.heap.keep(qualname);
+    let mut output = Vec::new();
+    append(ctx, &mut output, "str", module)?;
+    output.push(u32::from('.'));
+    append(ctx, &mut output, "str", qualname)?;
+    output.push(u32::from('('));
+    append(ctx, &mut output, "repr", function)?;
+    output.extend(suffix);
+    output.push(u32::from(')'));
+    Ok(ctx.text_codepoints(output))
+}
+
 /// Argument Clinic accepts either one positional argument or its named equivalent.
 pub(in crate::dynamic) fn key_argument(
     name: &str,

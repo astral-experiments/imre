@@ -1355,6 +1355,9 @@ impl Context {
             Value::Instance { class, .. } | Value::FrameLocalsProxy { class, .. } => *class,
             Value::Raised(error) => error.class()?,
             Value::Weak(wr) if name == "__repr__" => *self.builtins.get(wr.kind.class())?,
+            Value::Partial { .. } if name == "__repr__" => {
+                *self.builtins.get(stdlib::functools::PARTIAL_CLASS)?
+            }
             value if name == "__repr__" => match value.native_io_class_name()? {
                 class @ ("_io.BufferedReader" | "_io.BufferedWriter" | "_io.TextIOWrapper") => {
                     *self.builtins.get(class)?
