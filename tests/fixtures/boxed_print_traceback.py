@@ -214,7 +214,7 @@ assert summary[0].locals == {'binding': '17', 'value': '17'}
 saved.clear()
 assert StackSummary.extract([(saved, 1)], capture_locals=True)[0].locals is None
 
-from traceback import extract_tb
+from traceback import extract_tb, walk_tb
 
 
 def divide_by_zero():
@@ -239,3 +239,12 @@ assert extract_tb(tb, limit=1) == summary[:1]
 assert extract_tb(tb, limit=-1) == summary[-1:]
 assert extract_tb(tb, limit=0) == extract_tb(None) == []
 assert summary[-1].lineno == tb.tb_next.tb_lineno
+
+assert list(walk_tb(None)) == []
+assert list(walk_tb(tb)) == [(tb.tb_frame, tb.tb_lineno),
+                             (tb.tb_next.tb_frame, tb.tb_next.tb_lineno)]
+view = tb.tb_next.tb_frame.f_locals
+view["request_id"] = 17
+captured = StackSummary.extract(walk_tb(tb), capture_locals=True)
+view["request_id"] = 42
+assert captured[-1].locals == {"request_id": "17"}

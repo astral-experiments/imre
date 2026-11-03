@@ -198,6 +198,17 @@ def walk_stack(f):
     return walk_stack_generator(f)
 
 
+def walk_tb(tb):
+    """Walk a traceback yielding the frame and line number for each frame.
+
+    This will follow tb.tb_next (and thus is in the opposite order to
+    walk_stack). Usually used with StackSummary.extract.
+    """
+    while tb is not None:
+        yield tb.tb_frame, tb.tb_lineno
+        tb = tb.tb_next
+
+
 _RECURSIVE_CUTOFF = 3 # Also hardcoded in traceback.c.
 
 
@@ -256,11 +267,7 @@ class StackSummary(list):
             fnames.add(filename)
             linecache.lazycache(filename, f.f_globals)
             # Must defer line lookups until we have called checkcache.
-            if capture_locals:
-                from traceback import _frame_locals
-                f_locals = _frame_locals(f)
-            else:
-                f_locals = None
+            f_locals = f.f_locals if capture_locals else None
             result.append(
                 FrameSummary(filename, lineno, name,
                     lookup_line=False, locals=f_locals,
