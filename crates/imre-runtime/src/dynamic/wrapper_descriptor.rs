@@ -547,6 +547,12 @@ impl BuiltinDescriptor {
                     ctx.text("($self, value, /)")
                 }
             }
+            "__doc__" if self.name == "__get__" => {
+                ctx.text("Return an attribute of instance, which is of type owner.")
+            }
+            "__text_signature__" if self.name == "__get__" => {
+                ctx.text("($self, instance, owner=None, /)")
+            }
             "__doc__" if self.name == "__lt__" => ctx.text("Return self<value."),
             "__text_signature__" if self.name == "__lt__" => ctx.text("($self, value, /)"),
             "__doc__" if self.owner == "object" && self.name == "__init__" => {

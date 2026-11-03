@@ -137,6 +137,11 @@ def _signature_from_callable(obj, *, sigcls, follow_wrapper_chains=True,
         return _signature_get_partial(wrapped, obj)
     if isinstance(obj, types.FunctionType) or _signature_is_functionlike(obj):
         return _signature_from_function(obj, sigcls, globals, locals, eval_str, annotation_format)
+    kind = type(obj)
+    if kind is types.WrapperDescriptorType or kind is types.MethodWrapperType:
+        text_signature = getattr(obj, "__text_signature__", None)
+        if text_signature:
+            return _signature_fromstr(sigcls, obj, text_signature)
     if isinstance(obj, type):
         method, drop_first = _constructor(obj, follow_wrapper_chains)
         if method is None:
