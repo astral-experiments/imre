@@ -214,6 +214,7 @@ def current():
     assert linesep is os.linesep and linesep == "\n"
     assert not hasattr(posixpath, "linesep")
     assert os.extsep == os.path.extsep == posixpath.extsep == "."
+    assert os.pardir == os.path.pardir == posixpath.pardir == ".."
     assert pathsep == ":"
     assert os.defpath is posixpath.defpath and os.defpath == "/bin:/usr/bin"
     assert os.get_exec_path({}) == ["/bin", "/usr/bin"]
